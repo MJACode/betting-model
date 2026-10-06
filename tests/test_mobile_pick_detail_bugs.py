@@ -390,7 +390,7 @@ def test_close_label_and_footer_copy(tmp_path):
     script = PRELUDE + """
 import { historyTimeLabel, movementHeadline, movementVerdict, changesFooter } from './lineHistory.ts';
 eq(historyTimeLabel('3:10 PM', { atCloseLast: true, bounded: false }), 'Close', 'close row');
-eq(historyTimeLabel('8:21 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final', 'game final');
+eq(historyTimeLabel('8:21 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final price', 'game final');
 eq(historyTimeLabel('8:21 PM', { atCloseLast: false, atLatestLast: true, bounded: false }), 'Latest', 'in progress');
 eq(historyTimeLabel('3:10 PM', { atCloseLast: false, bounded: true }), 'by 3:10 PM', 'upper bound');
 eq(historyTimeLabel('3:10 PM', { atCloseLast: false, bounded: false }), '3:10 PM', 'real time');
@@ -478,6 +478,9 @@ def test_the_card_uses_the_close_copy():
     assert "formatSideLine(" not in card
     assert "accessibilityLabel={movementHeadlineLabel(" in card
     assert "historyRowAccessibilityLabel(" in card
+    assert "opening: r.opening" in card
+    assert "closeAt: historyWindow.until" in card
+    assert "inPlay," in card
     history = _read(HISTORY)
     assert "against your pick" in history
     assert "against your ${" not in history
@@ -791,20 +794,20 @@ eq(live.rows[live.rows.length - 1].home_price, 1400, 'live may pass the start');
 if (live.rows.some((r) => Date.parse(r.snapshot_at) < Date.parse(CREATED))) {
   throw new Error('live read started before the lock');
 }
-eq(historyTimeLabel('9:20 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final', 'final row');
+eq(historyTimeLabel('9:20 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final price', 'final row');
 eq(historyTimeLabel('9:20 PM', { atCloseLast: false, atLatestLast: true, bounded: false }), 'Latest', 'in progress row');
 eq(
   historyRowAccessibilityLabel({
-    marker: 'Final', at: '2026-10-05T04:00:00.000Z', line: 4, price: -113, showLine: true, signedLine: true,
+    marker: 'Final price', at: '2026-10-04T03:06:00.000Z', line: 4, price: -113, showLine: true, signedLine: true,
   }),
-  'Final: line plus 4, price minus 113',
+  'Final, 11:06 PM Eastern, October 3: line plus 4, price minus 113',
   'final spoken',
 );
 eq(
   historyRowAccessibilityLabel({
-    marker: 'Latest', at: '2026-10-05T04:00:00.000Z', line: 4, price: -113, showLine: true, signedLine: true,
+    marker: 'Latest', at: '2026-10-04T03:06:00.000Z', line: 4, price: -113, showLine: true, signedLine: true,
   }),
-  'Latest: line plus 4, price minus 113',
+  'Latest, 11:06 PM Eastern, October 3: line plus 4, price minus 113',
   'latest spoken',
 );
 eq(inPlayMovementLabel(), 'In-play prices since your pick', 'neutral verdict');
@@ -816,35 +819,94 @@ const span = collapseLineHistory([
   { at: '2026-10-05T00:21:00.000Z', line: 3.5, price: -112 },
   { at: '2026-10-05T04:00:00.000Z', line: 4, price: -113 },
 ]);
-eq(span.map((r) => r.label), ['10/4 8:21 PM', '10/5 12:00 AM'], 'date when the series crosses midnight');
+const nb = '\u00A0';
+eq(span.map((r) => r.label), ['10/4 8:21' + nb + 'PM', '10/5 12:00' + nb + 'AM'], 'date when the series crosses midnight');
 eq(
   historyRowAccessibilityLabel({
     marker: span[0].label, at: span[0].at, line: 3.5, price: -112, showLine: true, signedLine: true,
   }),
-  'Changed by October 4 at 8:21 PM: line plus 3.5, price minus 112',
+  'Changed at 8:21 PM Eastern, October 4: line plus 3.5, price minus 112',
   'row label',
 );
 eq(
   historyRowAccessibilityLabel({
-    marker: 'by 10/4 8:21 PM', at: span[0].at, line: 3.5, price: -112, showLine: true, signedLine: true,
+    marker: 'by 10/4 8:21 PM', at: '2026-10-04T15:33:00.000Z', line: 3.5, price: -112, showLine: true, signedLine: true,
   }),
-  'No later than October 4 at 8:21 PM: line plus 3.5, price minus 112',
+  'Changed sometime before 11:33 AM Eastern, October 4: line plus 3.5, price minus 112',
   'upper bound spoken',
+);
+eq(
+  historyRowAccessibilityLabel({
+    marker: 'by 11:33 AM',
+    at: '2026-10-04T15:33:00.000Z',
+    opening: true,
+    inPlay: true,
+    line: 3,
+    price: -110,
+    showLine: true,
+    signedLine: true,
+  }),
+  'Changed sometime before 11:33 AM Eastern, October 4: line plus 3, price minus 110',
+  'a by cell stays an upper bound on the first row',
 );
 eq(
   historyRowAccessibilityLabel({
     marker: '8:21:12 PM', at: '2026-10-05T00:21:12.000Z', line: 8.5, price: -110, showLine: true, signedLine: false,
   }),
-  'Changed by October 4 at 8:21:12 PM: line 8.5, price minus 110',
+  'Changed at 8:21:12 PM Eastern, October 4: line 8.5, price minus 110',
   'seconds and unsigned line',
 );
 eq(
   historyRowAccessibilityLabel({
-    marker: 'Close', at: span[1].at, line: 4, price: -113, showLine: true, signedLine: true,
+    marker: 'Close',
+    at: '2026-10-04T16:17:00.000Z',
+    closeAt: '2026-10-04T17:00:00.000Z',
+    line: 4,
+    price: -113,
+    showLine: true,
+    signedLine: true,
   }),
-  'Close: line plus 4, price minus 113',
-  'close label spoken',
+  'Close, 1:00 PM Eastern: line plus 4, price minus 113',
+  'close speaks commence, not the row',
 );
+eq(
+  historyRowAccessibilityLabel({
+    marker: '9:00 AM',
+    at: '2026-10-02T13:00:00.000Z',
+    opening: true,
+    line: 3,
+    price: -110,
+    showLine: true,
+    signedLine: true,
+  }),
+  'Opened at 9:00 AM Eastern, October 2: line plus 3, price minus 110',
+  'opening row',
+);
+eq(
+  historyRowAccessibilityLabel({
+    marker: '10:52 PM',
+    at: '2026-10-04T02:52:00.000Z',
+    opening: true,
+    inPlay: true,
+    line: 3,
+    price: -110,
+    showLine: true,
+    signedLine: true,
+  }),
+  'First price after your pick, 10:52 PM Eastern, October 3: line plus 3, price minus 110',
+  'first live row',
+);
+const earlier = collapseLineHistory([
+  { at: '2026-10-04T16:17:00.000Z', line: 3, price: -110 },
+  { at: '2026-10-04T22:00:00.000Z', line: 3.5, price: -112 },
+], new Date('2026-10-06T15:00:00.000Z'));
+eq(earlier.map((r) => r.label), ['10/4 12:17' + nb + 'PM', '10/4 6:00' + nb + 'PM'], 'date when the series is not today');
+const sameDay = collapseLineHistory([
+  { at: '2026-10-04T16:17:00.000Z', line: 3, price: -110 },
+  { at: '2026-10-04T22:00:00.000Z', line: 3.5, price: -112 },
+], new Date('2026-10-04T18:00:00.000Z'));
+eq(sameDay.map((r) => r.label), ['12:17' + nb + 'PM', '6:00' + nb + 'PM'], 'today omits the date');
+if (sameDay.some((r) => / (AM|PM)$/.test(r.label))) throw new Error('AM/PM can wrap: ' + sameDay.map((r) => r.label).join(' | '));
 eq(
   movementHeadlineLabel({ kind: 'price', lock: 100, end: 1400, atClose: false }),
   'Price plus 100 to plus 1400',
@@ -960,8 +1022,15 @@ eq(
   teamCellAccessibilityLabel({
     window: 5, games: 4, winPct: 0.5, avg: 3.2, spokenUnit: 'goals', seasonGames: 2,
   }),
-  'Last 5 games, including earlier seasons: won 50 percent, 3.2 goals a game',
-  'short count is not in the cell label',
+  'Last 5 games, only 4 played, including earlier seasons: won 50 percent, 3.2 goals a game',
+  'short count stays in the spoken label',
+);
+eq(
+  teamCellAccessibilityLabel({
+    window: 25, games: 4, winPct: 0.5, avg: 3.2, spokenUnit: 'goals',
+  }),
+  'Last 25 games, only 4 played: won 50 percent, 3.2 goals a game',
+  'a short window names how many were played',
 );
 eq(
   teamCellAccessibilityLabel({

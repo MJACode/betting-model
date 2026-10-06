@@ -38,8 +38,9 @@ export interface HistoryRow extends HistoryPoint {
   key: string;
   /**
    * "8:21 PM", or "8:21:12 PM" when another row shares its minute.
-   * The header carries ET. A series that crosses midnight also carries
-   * the date: "10/4 8:21 PM".
+   * AM/PM is joined with a no-break space. The header carries ET.
+   * A series that crosses midnight, or that is not today in ET, also
+   * carries the date: "10/4 8:21 PM".
    */
   label: string;
 }
@@ -75,7 +76,7 @@ const spokenDateFmt = new Intl.DateTimeFormat('en-US', {
 function stamp(at: string, seconds: boolean, withDate: boolean): string {
   const d = new Date(at);
   if (Number.isNaN(d.getTime())) return '—';
-  const time = (seconds ? secondFmt : minuteFmt).format(d);
+  const time = (seconds ? secondFmt : minuteFmt).format(d).replace(/ (AM|PM)$/, '\u00A0$1');
   if (!withDate) return time;
   return `${monthDayFmt.format(d)} ${time}`;
 }
@@ -86,8 +87,11 @@ function etDay(at: string): string {
   return dayKeyFmt.format(d);
 }
 
-/** Collapse runs of the same line + price; returns oldest → newest. */
-export function collapseLineHistory(points: HistoryPoint[]): HistoryRow[] {
+/**
+ * Collapse runs of the same line + price; returns oldest → newest.
+ * `now` is the clock the "today" date rule uses. Tests pass a fixed one.
+ */
+export function collapseLineHistory(points: HistoryPoint[], now: Date = new Date()): HistoryRow[] {
   const tracksLine = points.some((p) => p.line != null);
   const tracksPrice = points.some((p) => p.price != null);
   const runs: Array<HistoryPoint & { count: number }> = [];
@@ -107,7 +111,12 @@ export function collapseLineHistory(points: HistoryPoint[]): HistoryRow[] {
     if (last && last.line === p.line && last.price === p.price) last.count += 1;
     else runs.push({ ...p, count: 1 });
   }
-  const withDate = new Set(runs.map((r) => etDay(r.at))).size > 1;
+  // A one-day series from an earlier date reads as today when the cell is
+  // only a clock time. Show the date when the rows span more than one ET
+  // day, or when any row is not today in ET.
+  const today = etDay(now.toISOString());
+  const days = new Set(runs.map((r) => etDay(r.at)));
+  const withDate = days.size > 1 || [...days].some((day) => day !== today);
   const minutes = runs.map((r) => stamp(r.at, false, withDate));
   const clash = new Set(minutes.filter((m, i) => minutes.indexOf(m) !== i));
   return runs.map((r, i) => ({
@@ -227,10 +236,10 @@ export function movementVerdict(opts: {
 
 /**
  * Time cell. The last pregame row is the close once the game has started.
- * A live pick ends on Final only once the game is final. While it is still
- * on, that row is Latest. A gap row the bisect did not pin is an upper
- * bound, so it says "by 8:21 PM" (or "by 10/4 8:21 PM"). ET is the column
- * header, not the cell.
+ * A live pick ends on "Final price" only once the game is final, so the
+ * number does not read as a score. While it is still on, that row is
+ * Latest. A gap row the bisect did not pin is an upper bound, so it says
+ * "by 8:21 PM" (or "by 10/4 8:21 PM"). ET is the column header, not the cell.
  */
 export function historyTimeLabel(
   label: string,
@@ -241,7 +250,7 @@ export function historyTimeLabel(
     bounded: boolean;
   },
 ): string {
-  if (opts.atFinalLast) return 'Final';
+  if (opts.atFinalLast) return 'Final price';
   if (opts.atLatestLast) return 'Latest';
   if (opts.atCloseLast) return 'Close';
   if (opts.bounded) return `by ${label}`;
@@ -261,18 +270,26 @@ function speakMagnitude(n: number, signed: boolean): string {
   return body;
 }
 
-/** "October 4 at 11:33 AM" in Eastern time. Seconds when the cell shows them. */
+/** "11:33 AM Eastern, October 4". Seconds when the cell shows them. */
 export function historySpokenWhen(at: string, seconds = false): string {
   const d = new Date(at);
   if (Number.isNaN(d.getTime())) return 'time not available';
   const time = (seconds ? secondFmt : minuteFmt).format(d);
-  return `${spokenDateFmt.format(d)} at ${time}`;
+  return `${time} Eastern, ${spokenDateFmt.format(d)}`;
+}
+
+/** "1:00 PM Eastern". Close has no date. */
+function spokenEasternClock(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return 'time not available';
+  return `${minuteFmt.format(d)} Eastern`;
 }
 
 /**
- * One VoiceOver label for a history row. Close, Final and Latest name
- * the row. A pinned minute says when it changed. A "by" cell is an upper
- * bound. A line is "plus" or "minus" only when the cell shows a sign.
+ * One VoiceOver label for a history row. Time first, then Eastern, then
+ * the date. Close speaks commence_time and omits the date. Final and
+ * Latest keep those words; the visible Final cell says "Final price".
+ * A line is "plus" or "minus" only when the cell shows a sign.
  */
 export function historyRowAccessibilityLabel(opts: {
   marker: string;
@@ -281,15 +298,36 @@ export function historyRowAccessibilityLabel(opts: {
   price: number | null;
   showLine: boolean;
   signedLine?: boolean;
+  /** First row of the series. */
+  opening?: boolean;
+  /** commence_time. Close speaks this, not when the number first appeared. */
+  closeAt?: string | null;
+  /** A live pick. Its first row is the first price after the pick. */
+  inPlay?: boolean;
 }): string {
   const seconds = /\d:\d{2}:\d{2}/.test(opts.marker);
-  const spoken = historySpokenWhen(opts.at, seconds);
-  const when =
-    opts.marker === 'Close' || opts.marker === 'Final' || opts.marker === 'Latest'
-      ? opts.marker
-      : opts.marker.startsWith('by ')
-        ? `No later than ${spoken}`
-        : `Changed by ${spoken}`;
+  const finalRow = opts.marker === 'Final' || opts.marker === 'Final price';
+  const latestRow = opts.marker === 'Latest';
+  const closeRow = opts.marker === 'Close';
+  const whenAt = closeRow ? (opts.closeAt ?? '') : opts.at;
+  const spoken = closeRow ? spokenEasternClock(whenAt) : historySpokenWhen(whenAt, seconds);
+  // A "by" cell is an upper bound even when it is the first row. The
+  // clock cell of a first row is the open, or the first price after a
+  // live pick.
+  const bounded = opts.marker.startsWith('by ');
+  const when = finalRow
+    ? `Final, ${spoken}`
+    : latestRow
+      ? `Latest, ${spoken}`
+      : closeRow
+        ? `Close, ${spoken}`
+        : bounded
+          ? `Changed sometime before ${spoken}`
+          : opts.opening && opts.inPlay
+            ? `First price after your pick, ${spoken}`
+            : opts.opening
+              ? `Opened at ${spoken}`
+              : `Changed at ${spoken}`;
   const parts: string[] = [];
   if (opts.showLine) {
     parts.push(opts.line == null ? 'line not available' : `line ${speakMagnitude(opts.line, opts.signedLine === true)}`);

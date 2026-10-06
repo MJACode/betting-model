@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: VoiceOver says Eastern with the time first. A short form window says how many games were played. The visible final cell is Final price |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a non-live lock after the stored start shows only the pick's own number. No arrow, no close, no new copy |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: non-live history is capped at stored commence_time again. A row between kickoff and a later lock is not Close. The max(commence, lock) cap is reverted |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a live history row is Final only when the game is final, otherwise Latest. A lock after the stored start has no colored verdict. A cross-season short window says "available" |

@@ -138,7 +138,8 @@ export function teamCellAccessibilityLabel(opts: {
 }): string {
   const n = opts.window;
   let head = `Last ${n} ${n === 1 ? 'game' : 'games'}`;
-  // The short count lives in the note under the strip, not in the cell.
+  // The visible cell stays L25. VoiceOver names the short count.
+  if (opts.games > 0 && opts.games < n) head += `, only ${opts.games} played`;
   if (opts.seasonGames != null && opts.games > opts.seasonGames) {
     head += ', including earlier seasons';
   }

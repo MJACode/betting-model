@@ -242,6 +242,9 @@ export function LineMovementCard({
             accessibilityLabel={historyRowAccessibilityLabel({
               marker: timeLabel,
               at: r.at,
+              opening: r.opening,
+              closeAt: historyWindow.until,
+              inPlay,
               line: showLineCol ? r.line : null,
               price: r.price,
               showLine: showLineCol,
