@@ -19,10 +19,12 @@ import { dayLabelET, dayLabelSpokenET, formatPct } from '@/lib/format';
 import type { HitDirection } from '@/lib/hitRate';
 import {
   groupPlural,
+  groupShort,
   groupSingular,
+  opponentNoun,
   positionVsOpponent,
   roleCutText,
-  type NflPositionGroup,
+  type PositionGroup,
   type SeasonChoice,
 } from '@/lib/positionVsOpponent';
 import { ordinal } from '@/lib/teamDetail';
@@ -31,6 +33,14 @@ import type { PositionVsOpponentRow } from '@/types';
 
 /** Rows before "Show all". A full season vs one defence is ~45 WR games. */
 const ROWS_SHOWN = 6;
+
+/** "Wk 5 · " in the NFL, "Batting 2nd · " for an MLB hitter, else nothing. */
+function metaPrefix(e: { week: number | null; pos: string | null }): string {
+  if (e.week != null) return `Wk ${e.week} · `;
+  const spot = Number(e.pos);
+  if (e.pos != null && Number.isInteger(spot) && spot >= 1 && spot <= 9) return `Batting ${ordinal(spot)} · `;
+  return '';
+}
 
 function fmt(v: number): string {
   return String(Math.round(v * 10) / 10);
@@ -49,7 +59,7 @@ export function PositionVsOpponentCard({
   selection,
 }: {
   opponent: string;
-  group: NflPositionGroup;
+  group: PositionGroup;
   /** The season label in progress; "Last season" is the one before it. */
   seasonThis: number;
   rows: PositionVsOpponentRow[];
@@ -79,6 +89,7 @@ export function PositionVsOpponentCard({
     [rows, opponent, group, season, playerId, selection.line, selection.side],
   );
   const plural = groupPlural(group);
+  const short = groupShort(group);
   const shown = showAll ? card.entries : card.entries.slice(0, ROWS_SHOWN);
   const seasonText = choice === 'this' ? 'this season' : 'last season';
   const pick = (c: SeasonChoice) => {
@@ -96,7 +107,8 @@ export function PositionVsOpponentCard({
             `Every game ${groupSingular(group)} with a real role played against ${opponent} ${seasonText}, ` +
             `and how often they reached ${betLabel} ${statLabel} — this player's line, applied to each of ` +
             `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group)} in that game. ` +
-            `The rank compares ${opponent} with every defence on the average ${statLabel} per ${group}: ` +
+            `The rank compares ${opponent} with the other ${opponentNoun(group)} on the average ` +
+            `${statLabel} per ${short}: ` +
             '1st = allows the most.',
         }}
       />
@@ -133,7 +145,7 @@ export function PositionVsOpponentCard({
       ) : card.total === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>
-            No {group} games vs {opponent} {seasonText}
+            No {short} games vs {opponent} {seasonText}
             {choice === 'this' ? ' yet.' : '.'}
           </Text>
           {choice === 'this' ? (
@@ -160,14 +172,14 @@ export function PositionVsOpponentCard({
             <StatTile
               label={`${betLabel} ${statLabel}`}
               value={card.hitRate == null ? '—' : formatPct(card.hitRate, 0)}
-              caption={`${card.hits} of ${card.total} ${group} games at this line`}
+              caption={`${card.hits} of ${card.total} ${short} games at this line`}
             />
             <StatTile
-              label={`Avg ${statLabel} per ${group}`}
+              label={`Avg ${statLabel} per ${short}`}
               value={card.avgAllowed == null ? '—' : fmt(card.avgAllowed)}
               caption={
                 card.rankMostAllowed != null && card.teamsRanked != null
-                  ? `${ordinal(card.rankMostAllowed)}-most of ${card.teamsRanked} defenses`
+                  ? `${ordinal(card.rankMostAllowed)}-most of ${card.teamsRanked} ${opponentNoun(group)}`
                   : undefined
               }
             />
@@ -179,7 +191,7 @@ export function PositionVsOpponentCard({
               style={styles.row}
               accessible
               accessibilityLabel={
-                `${e.playerName}, ${e.team}, ${e.week != null ? `week ${e.week}, ` : ''}` +
+                `${e.playerName}, ${e.team}, ${metaPrefix(e).replace(' · ', ', ').replace('Wk', 'week')}` +
                 `${dayLabelSpokenET(e.date)}: ${fmt(e.value)} ${statLabel}, ` +
                 (e.hit ? 'hit' : 'missed')
               }
@@ -195,7 +207,7 @@ export function PositionVsOpponentCard({
                   {e.playerName}
                 </Text>
                 <Text style={styles.meta}>
-                  {e.week != null ? `Wk ${e.week} · ` : ''}
+                  {metaPrefix(e)}
                   {e.team} · {dayLabelET(e.date)}
                 </Text>
               </View>

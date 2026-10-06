@@ -8,14 +8,19 @@
  * that season. Everything that depends on the page's line (the hit rate, each
  * row's ✓/✗) is computed here, so moving the ruler never refetches.
  *
- * Phase 1 is NFL only: it is the one log with both `pos` and `opponent` on
- * every row. MLB (lineup spot / starter) and NBA, WNBA, NCAAF (position ingest
- * first) are the next two phases, and return null here until they land.
+ * NFL groups by position (the log carries `pos`). MLB groups batters by
+ * lineup spot — 1-3, 4-6, 7-9 — and pitchers as starters (Matt, 2026-10-05:
+ * "line up spot and starter"). NBA, WNBA and NCAAF need a position ingest
+ * first and return null here until it lands.
  */
 import { computeHitRate, isHit, type HitDirection } from '@/lib/hitRate';
 import type { PositionVsOpponentRow } from '@/types';
 
 export type NflPositionGroup = 'QB' | 'RB' | 'WR' | 'TE' | 'DL' | 'LB' | 'DB';
+/** MLB: batters by lineup spot, pitchers as the game's starter. Mirrors the
+ *  CASE in add_position_vs_opponent_mlb.sql. */
+export type MlbGroup = 'TOP' | 'MID' | 'BOT' | 'SP';
+export type PositionGroup = NflPositionGroup | MlbGroup;
 
 /** Mirrors the CASE in the migration — the two must agree or the card asks
  *  for a group the server never fills. Pinned by
@@ -36,8 +41,41 @@ export function nflPositionGroup(pos: string | null | undefined): NflPositionGro
   return NFL_GROUP_OF[pos.toUpperCase()] ?? null;
 }
 
+/**
+ * The MLB group for a player: a starting pitcher is SP (a reliever has no
+ * card), a batter is bucketed by his lineup spot — tonight's posted slot when
+ * the lineup is out, else the spot he last started in.
+ */
+export function mlbGroup(args: {
+  playerType: 'batter' | 'pitcher' | null | undefined;
+  /** Tonight's posted slot, when the lineup is out. */
+  lineupSlot: number | null | undefined;
+  /** The log, newest first. */
+  games: ReadonlyArray<Record<string, unknown>>;
+}): MlbGroup | null {
+  if (args.playerType === 'pitcher') {
+    // player_game_log.is_starter is a boolean column; PostgREST sends it as
+    // JSON true/false. His most recent outing decides: a starter who made one
+    // relief appearance last time out has no card until he starts again.
+    const s = args.games[0]?.is_starter;
+    return s === true || s === 'true' || s === 1 ? 'SP' : null;
+  }
+  let slot = args.lineupSlot ?? null;
+  if (slot == null) {
+    for (const g of args.games) {
+      const b = Number(g.batting_order);
+      if (g.batting_order != null && Number.isFinite(b)) {
+        slot = b;
+        break;
+      }
+    }
+  }
+  if (slot == null || slot < 1 || slot > 9) return null;
+  return slot <= 3 ? 'TOP' : slot <= 6 ? 'MID' : 'BOT';
+}
+
 /** Plural for the title: "WRs vs ATL", "Defensive backs vs ATL". */
-const GROUP_PLURAL: Record<NflPositionGroup, string> = {
+const GROUP_PLURAL: Record<PositionGroup, string> = {
   QB: 'QBs',
   RB: 'RBs',
   WR: 'WRs',
@@ -45,10 +83,31 @@ const GROUP_PLURAL: Record<NflPositionGroup, string> = {
   DL: 'Defensive linemen',
   LB: 'Linebackers',
   DB: 'Defensive backs',
+  TOP: '1–3 hitters',
+  MID: '4–6 hitters',
+  BOT: '7–9 hitters',
+  SP: 'Starting pitchers',
+};
+
+/** Short form for captions: "6 of 10 WR games", "Avg hits per 1–3 hitter". */
+const GROUP_SHORT: Record<PositionGroup, string> = {
+  QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', DL: 'DL', LB: 'LB', DB: 'DB',
+  TOP: '1–3 hitter',
+  MID: '4–6 hitter',
+  BOT: '7–9 hitter',
+  SP: 'starter',
+};
+
+/** What the opponent IS to this group, for the rank caption. */
+const OPPONENT_NOUN: Record<PositionGroup, string> = {
+  QB: 'defenses', RB: 'defenses', WR: 'defenses', TE: 'defenses',
+  DL: 'offenses', LB: 'offenses', DB: 'offenses',
+  TOP: 'pitching staffs', MID: 'pitching staffs', BOT: 'pitching staffs',
+  SP: 'lineups',
 };
 
 /** The role cut, in words, for the card's footnote. Same numbers as the SQL. */
-const ROLE_CUT: Record<NflPositionGroup, string> = {
+const ROLE_CUT: Record<PositionGroup, string> = {
   QB: '10+ pass attempts',
   RB: '6+ carries and targets',
   WR: '3+ targets',
@@ -56,10 +115,14 @@ const ROLE_CUT: Record<NflPositionGroup, string> = {
   DL: '2+ tackles, sacks or QB hits',
   LB: '2+ tackles, sacks or QB hits',
   DB: '2+ tackles, sacks or QB hits',
+  TOP: 'a start batting 1st–3rd',
+  MID: 'a start batting 4th–6th',
+  BOT: 'a start batting 7th–9th',
+  SP: 'the start on the mound',
 };
 
 /** With its article, for prose: "an RB", "a WR", "a defensive back". */
-const GROUP_SINGULAR: Record<NflPositionGroup, string> = {
+const GROUP_SINGULAR: Record<PositionGroup, string> = {
   QB: 'a QB',
   RB: 'an RB',
   WR: 'a WR',
@@ -67,17 +130,29 @@ const GROUP_SINGULAR: Record<NflPositionGroup, string> = {
   DL: 'a defensive lineman',
   LB: 'a linebacker',
   DB: 'a defensive back',
+  TOP: 'a 1–3 hitter',
+  MID: 'a 4–6 hitter',
+  BOT: 'a 7–9 hitter',
+  SP: 'a starting pitcher',
 };
 
-export function groupSingular(g: NflPositionGroup): string {
+export function groupShort(g: PositionGroup): string {
+  return GROUP_SHORT[g];
+}
+
+export function opponentNoun(g: PositionGroup): string {
+  return OPPONENT_NOUN[g];
+}
+
+export function groupSingular(g: PositionGroup): string {
   return GROUP_SINGULAR[g];
 }
 
-export function groupPlural(g: NflPositionGroup): string {
+export function groupPlural(g: PositionGroup): string {
   return GROUP_PLURAL[g];
 }
 
-export function roleCutText(g: NflPositionGroup): string {
+export function roleCutText(g: PositionGroup): string {
   return ROLE_CUT[g];
 }
 
@@ -93,6 +168,16 @@ export function nflSeasonInProgress(todayIso: string): number {
   return month <= 2 ? year - 1 : year;
 }
 
+/**
+ * The MLB season label in progress — the YEAR OF PLAY (CLAUDE.md §4). January
+ * and February have no games, so they show the season just finished.
+ */
+export function mlbSeasonInProgress(todayIso: string): number {
+  const year = Number(todayIso.slice(0, 4));
+  const month = Number(todayIso.slice(5, 7));
+  return month <= 2 ? year - 1 : year;
+}
+
 export type SeasonChoice = 'this' | 'last';
 
 export interface PositionVsOpponentEntry {
@@ -102,13 +187,15 @@ export interface PositionVsOpponentEntry {
   date: string;
   /** NFL week, when the log carries it. */
   week: number | null;
+  /** MLB batting spot that game ("2"), or 'SP'; the NFL position otherwise. */
+  pos: string | null;
   value: number;
   hit: boolean;
 }
 
 export interface PositionVsOpponent {
   opponent: string;
-  group: NflPositionGroup;
+  group: PositionGroup;
   season: number;
   /** Newest first. */
   entries: PositionVsOpponentEntry[];
@@ -133,7 +220,7 @@ export function positionVsOpponent(
   rows: readonly PositionVsOpponentRow[],
   opts: {
     opponent: string;
-    group: NflPositionGroup;
+    group: PositionGroup;
     season: number;
     excludePlayerId: string | null;
     line: number;
@@ -156,6 +243,7 @@ export function positionVsOpponent(
       team: r.team,
       date: r.game_date,
       week: r.week == null ? null : Number(r.week),
+      pos: r.pos ?? null,
       value: v,
       hit: isHit(v, opts.line, opts.side),
     });

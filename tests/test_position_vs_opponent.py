@@ -105,14 +105,20 @@ def test_every_nfl_stat_chip_has_a_branch():
         assert f"WHEN '{k}'" in SQL_ONLY, f"NFL chip {k} has no branch in position_vs_opponent_nfl"
 
 
-def test_the_client_reads_the_rpc_by_name_and_only_for_the_nfl():
+def test_the_client_reads_each_rpc_by_name_for_its_own_sport():
     q = QUERIES.read_text(encoding="utf-8")
     m = re.search(r"export async function fetchPositionVsOpponent\(.*?\n\}\n", q, re.S)
     assert m
     body = m.group(0)
-    assert ".rpc('position_vs_opponent_nfl'" in body
-    assert "if (sport !== 'NFL') return [];" in body
-    assert "fetchAllPages" in body and ".range(from, to)" in body
+    # Literal names, each behind its own sport check, so the read-surface
+    # tripwire sees both and neither sport can reach the other's function.
+    nfl = body.index("if (sport === 'NFL')")
+    mlb = body.index("if (sport === 'MLB')")
+    assert body.index(".rpc('position_vs_opponent_nfl'") > nfl
+    assert mlb > body.index(".rpc('position_vs_opponent_nfl'")
+    assert body.index(".rpc('position_vs_opponent_mlb'") > mlb
+    assert body.rstrip().endswith("return [];\n}") or "  return [];\n}" in body
+    assert body.count("fetchAllPages") == 2 and body.count(".range(from, to)") == 2
 
 
 def test_the_card_is_about_other_players_and_is_mounted():
@@ -144,3 +150,49 @@ def test_a_failed_read_is_not_held_on_the_spinner():
     # The error line is reachable once loading is false: spinner, then error.
     assert "{loading && rows.length === 0 ? (" in card
     assert "Couldn't load" in card
+
+
+# ── MLB (phase 2, 2026-10-06) ──────────────────────────────────────────────
+MLB_MIG = ROOT / "data/migrations/add_position_vs_opponent_mlb.sql"
+MLB_CODE = MLB_MIG.read_text(encoding="utf-8")
+MLB_SQL = "\n".join(ln for ln in MLB_CODE.splitlines() if not ln.lstrip().startswith("--"))
+
+
+def test_mlb_is_applied_guarded_and_granted():
+    from data.anon_readable import RPC_ANON_CALLABLE
+    from data.view_migrations import ACTIVE_MIGRATIONS
+
+    assert MLB_MIG.name in ACTIVE_MIGRATIONS
+    assert "position_vs_opponent_mlb" in RPC_ANON_CALLABLE
+    assert MLB_SQL.strip().startswith("DO $mig$") and MLB_SQL.strip().endswith("$mig$;")
+    assert MLB_SQL.count("$mig$") == 2
+    assert "p.proname = 'position_vs_opponent_mlb') THEN" in MLB_CODE
+    assert "REVOKE ALL ON FUNCTION public.position_vs_opponent_mlb(integer[], text, text, text) FROM PUBLIC" in MLB_CODE
+
+
+def test_mlb_lineup_buckets_agree_between_app_and_server():
+    """The SQL buckets batting_order 1-3/4-6/7-9 into TOP/MID/BOT; the app
+    picks the bucket to ask for with the same edges."""
+    for lo, hi, grp in re.findall(r"batting_order BETWEEN (\d) AND (\d) THEN '(\w+)'", MLB_SQL):
+        assert (lo, hi, grp) in {("1", "3", "TOP"), ("4", "6", "MID"), ("7", "9", "BOT")}
+    assert len(re.findall(r"batting_order BETWEEN", MLB_SQL)) == 3
+    assert "return slot <= 3 ? 'TOP' : slot <= 6 ? 'MID' : 'BOT';" in TS
+    assert "pgl.player_type = 'pitcher' AND pgl.is_starter THEN 'SP'" in MLB_SQL
+    # The app can only tell a starter if the log read carries the column.
+    log = (ROOT / "mobile/src/lib/playerLog.ts").read_text(encoding="utf-8")
+    assert "batting_order, is_starter';" in log
+
+
+def test_every_mlb_stat_chip_has_a_branch():
+    catalog = CATALOG.read_text(encoding="utf-8")
+    keys = set(re.findall(r"\{ key: '(\w+)', label: '[^']*', sport: 'MLB'", catalog))
+    assert keys, "could not parse the MLB stat chips"
+    for k in keys:
+        assert f"WHEN '{k}'" in MLB_SQL, f"MLB chip {k} has no branch in position_vs_opponent_mlb"
+
+
+def test_mlb_opponent_comes_from_games():
+    """player_game_log has no opponent column; the opponent is the other side
+    of the row's own MLB game."""
+    assert "JOIN games g ON g.game_id = pgl.game_id AND g.sport = 'MLB'" in MLB_SQL
+    assert "CASE WHEN g.home_team = pgl.team THEN g.away_team ELSE g.home_team END AS opp" in MLB_SQL

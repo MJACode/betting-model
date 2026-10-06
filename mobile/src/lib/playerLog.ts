@@ -64,7 +64,7 @@ const MLB_COLUMNS =
   'player_id, player_name, team, player_type, game_id, game_date, season, ' +
   'innings_pitched, pitches, p_strikeouts, p_walks, p_hits_allowed, p_earned_runs, ' +
   'p_home_runs, at_bats, hits, doubles, triples, home_runs, rbi, runs, walks, ' +
-  'strikeouts, stolen_bases, total_bases, batting_order';
+  'strikeouts, stolen_bases, total_bases, batting_order, is_starter';
 
 const BASKETBALL_COLUMNS =
   'player_id, player_name, team, game_id, game_date, season, minutes, is_starter, ' +
