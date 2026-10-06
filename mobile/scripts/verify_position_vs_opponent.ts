@@ -10,7 +10,14 @@
  * games -> hit rate -> name; the card drops the page's own player; and
  * doubleheader games are numbered.
  */
-import { playerSummaries, positionVsOpponent } from '../src/lib/positionVsOpponent';
+import {
+  footnoteText,
+  playerSummaries,
+  positionVsOpponent,
+  roleCutText,
+  rosterGroup,
+  rosterSeasonInProgress,
+} from '../src/lib/positionVsOpponent';
 import type { PositionVsOpponentRow } from '../src/types';
 
 let failed = 0;
@@ -73,6 +80,24 @@ const under = positionVsOpponent(rows, {
   opponent: 'NYY', group: 'TOP', season: 2026, excludePlayerId: 'me', line: 0.5, side: 'under',
 });
 check('summary follows the side via the rows\' hit', playerSummaries(under.entries).find((p) => p.playerId === 'a')!.hits === 1);
+
+// ── roster sports (phase 3) ──────────────────────────────────────────────
+// Season labels (CLAUDE.md §4): NBA ending year, WNBA year of play, NCAAF
+// starting year — measured on production in queries.ts h2hSeasonCandidates.
+check('NBA Oct 2026 is the 2027 season', rosterSeasonInProgress('NBA', '2026-10-06') === 2027);
+check('NBA Apr 2026 is the 2026 season', rosterSeasonInProgress('NBA', '2026-04-12') === 2026);
+check('WNBA Mar 2027 shows 2026', rosterSeasonInProgress('WNBA', '2027-03-01') === 2026);
+check('WNBA Jul 2026 is 2026', rosterSeasonInProgress('WNBA', '2026-07-01') === 2026);
+check('NCAAF Jan 2027 is 2026', rosterSeasonInProgress('NCAAF', '2027-01-10') === 2026);
+check('NCAAF Sep 2026 is 2026', rosterSeasonInProgress('NCAAF', '2026-09-20') === 2026);
+check('basketball groups G/F/C', rosterGroup('NBA', 'g') === 'G' && rosterGroup('WNBA', 'C') === 'C');
+check('a football group is not a basketball group', rosterGroup('NBA', 'WR') === null);
+check('NCAAF groups are the NFL buckets', rosterGroup('NCAAF', 'DB') === 'DB' && rosterGroup('NCAAF', 'OL') === null);
+check('no position, no group', rosterGroup('NCAAF', null) === null);
+check('NCAAF receiver cut is a catch', roleCutText('WR', 'NCAAF') === '1+ catch' && roleCutText('WR', 'NFL') === '3+ targets');
+check('NCAAF QB falls back to the shared cut', roleCutText('QB', 'NCAAF') === '10+ pass attempts');
+check('NCAAF receiver footnote names the missing targets', /no targets/.test(footnoteText('WR', 'NCAAF')));
+check('NFL receiver footnote does not', !/no targets/.test(footnoteText('WR', 'NFL')));
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
 process.exit(failed ? 1 : 0);

@@ -20,7 +20,12 @@ export type NflPositionGroup = 'QB' | 'RB' | 'WR' | 'TE' | 'DL' | 'LB' | 'DB';
 /** MLB: batters by lineup spot, pitchers as the game's starter. Mirrors the
  *  CASE in add_position_vs_opponent_mlb.sql. */
 export type MlbGroup = 'TOP' | 'MID' | 'BOT' | 'SP';
-export type PositionGroup = NflPositionGroup | MlbGroup;
+/** Basketball: guard / forward / center (Matt, 2026-10-05). */
+export type BasketballGroup = 'G' | 'F' | 'C';
+export type PositionGroup = NflPositionGroup | MlbGroup | BasketballGroup;
+
+/** Sports whose card reads its group from `player_positions`. */
+export type RosterSport = 'NBA' | 'WNBA' | 'NCAAF';
 
 /** Mirrors the CASE in the migration — the two must agree or the card asks
  *  for a group the server never fills. Pinned by
@@ -74,6 +79,14 @@ export function mlbGroup(args: {
   return slot <= 3 ? 'TOP' : slot <= 6 ? 'MID' : 'BOT';
 }
 
+/** The card's group for a NBA / WNBA / NCAAF player, from `player_positions.pos_group`. */
+export function rosterGroup(sport: RosterSport, posGroup: string | null | undefined): PositionGroup | null {
+  if (!posGroup) return null;
+  const g = posGroup.toUpperCase();
+  if (sport === 'NCAAF') return (['QB', 'RB', 'WR', 'TE', 'DL', 'LB', 'DB'] as const).find((x) => x === g) ?? null;
+  return (['G', 'F', 'C'] as const).find((x) => x === g) ?? null;
+}
+
 /** Plural for the title: "WRs vs ATL", "Defensive backs vs ATL". */
 const GROUP_PLURAL: Record<PositionGroup, string> = {
   QB: 'QBs',
@@ -87,6 +100,9 @@ const GROUP_PLURAL: Record<PositionGroup, string> = {
   MID: '4–6 hitters',
   BOT: '7–9 hitters',
   SP: 'Starting pitchers',
+  G: 'Guards',
+  F: 'Forwards',
+  C: 'Centers',
 };
 
 /** Short form for captions: "6 of 10 WR games", "Avg hits per 1–3 hitter". */
@@ -96,6 +112,9 @@ const GROUP_SHORT: Record<PositionGroup, string> = {
   MID: '4–6 hitter',
   BOT: '7–9 hitter',
   SP: 'starter',
+  G: 'guard',
+  F: 'forward',
+  C: 'center',
 };
 
 /** What the opponent IS to this group, for the rank caption. */
@@ -104,6 +123,7 @@ const OPPONENT_NOUN: Record<PositionGroup, string> = {
   DL: 'offenses', LB: 'offenses', DB: 'offenses',
   TOP: 'pitching staffs', MID: 'pitching staffs', BOT: 'pitching staffs',
   SP: 'lineups',
+  G: 'defenses', F: 'defenses', C: 'defenses',
 };
 
 /** The role cut, in words, for the card's footnote. Same numbers as the SQL. */
@@ -119,12 +139,30 @@ const ROLE_CUT: Record<PositionGroup, string> = {
   MID: 'starting the game batting 4th–6th',
   BOT: 'starting the game batting 7th–9th',
   SP: 'starting the game',
+  G: '15+ minutes',
+  F: '15+ minutes',
+  C: '15+ minutes',
+};
+
+/**
+ * NCAAF's role cut where it differs from the NFL's. The college log has no
+ * targets column (CFBD box scores do not carry it), so a receiver's role is
+ * seen only through a catch. Mirrors add_position_vs_opponent_bball_ncaaf.sql;
+ * pinned by tests/test_position_vs_opponent.py.
+ */
+const NCAAF_ROLE_CUT: Partial<Record<PositionGroup, string>> = {
+  RB: '6+ carries and catches',
+  WR: '1+ catch',
+  TE: '1+ catch',
+  DL: '2+ tackles or sacks',
+  LB: '2+ tackles or sacks',
+  DB: '2+ tackles or sacks',
 };
 
 /** The footnote under the list: the cut, in a sentence the reader did not
  *  already know (UX review, 2026-10-06 — "a start batting 1st–3rd" restated
  *  the title). */
-export function footnoteText(g: PositionGroup): string {
+export function footnoteText(g: PositionGroup, sport?: string): string {
   switch (g) {
     case 'TOP':
     case 'MID':
@@ -132,8 +170,13 @@ export function footnoteText(g: PositionGroup): string {
       return `Counts lineup starters in that spot only; pinch hitters and late subs don't count.`;
     case 'SP':
       return `Counts starts only; relief outings don't count.`;
-    default:
-      return `Counts ${GROUP_PLURAL[g].toLowerCase()} with ${ROLE_CUT[g]} in the game.`;
+    default: {
+      const base = `Counts ${GROUP_PLURAL[g].toLowerCase()} with ${roleCutText(g, sport)} in the game.`;
+      // Said out loud: a 0-catch college game cannot be seen as a role.
+      return sport === 'NCAAF' && (g === 'WR' || g === 'TE')
+        ? `${base} College box scores carry no targets, so a game with no catch can't be counted.`
+        : base;
+    }
   }
 }
 
@@ -155,6 +198,9 @@ const GROUP_SINGULAR: Record<PositionGroup, string> = {
   MID: 'a 4–6 hitter',
   BOT: 'a 7–9 hitter',
   SP: 'a starting pitcher',
+  G: 'a guard',
+  F: 'a forward',
+  C: 'a center',
 };
 
 export function groupShort(g: PositionGroup): string {
@@ -173,8 +219,8 @@ export function groupPlural(g: PositionGroup): string {
   return GROUP_PLURAL[g];
 }
 
-export function roleCutText(g: PositionGroup): string {
-  return ROLE_CUT[g];
+export function roleCutText(g: PositionGroup, sport?: string): string {
+  return (sport === 'NCAAF' && NCAAF_ROLE_CUT[g]) || ROLE_CUT[g];
 }
 
 /**
@@ -196,6 +242,20 @@ export function nflSeasonInProgress(todayIso: string): number {
 export function mlbSeasonInProgress(todayIso: string): number {
   const year = Number(todayIso.slice(0, 4));
   const month = Number(todayIso.slice(5, 7));
+  return month <= 2 ? year - 1 : year;
+}
+
+/**
+ * The season label in progress for the roster sports (CLAUDE.md §4):
+ *   NBA    ENDING year — from October the label is next year's (2026-27 = 2027).
+ *   WNBA   year of play — January to April show the season just finished.
+ *   NCAAF  starting year, like the NFL — January and February are last year's.
+ */
+export function rosterSeasonInProgress(sport: RosterSport, todayIso: string): number {
+  const year = Number(todayIso.slice(0, 4));
+  const month = Number(todayIso.slice(5, 7));
+  if (sport === 'NBA') return month >= 10 ? year + 1 : year;
+  if (sport === 'WNBA') return month <= 4 ? year - 1 : year;
   return month <= 2 ? year - 1 : year;
 }
 

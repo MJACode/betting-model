@@ -558,7 +558,7 @@ export async function fetchH2HStatValues(
  * because the 1,000-row cap is a property of every read
  * (.claude/rules/frontend.md), on an order the REQUEST names.
  *
- * NFL and MLB; other sports return [] without a request.
+ * NFL, MLB, NBA, WNBA and NCAAF; other sports return [] without a request.
  */
 export async function fetchPositionVsOpponent(
   sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
@@ -585,7 +585,47 @@ export async function fetchPositionVsOpponent(
       key,
     );
   }
+  if (sport === 'NBA') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_nba', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'WNBA') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_wnba', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'NCAAF') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_ncaaf', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
   return [];
+}
+
+/**
+ * One player's position, for the sports whose game log carries none
+ * (NBA, WNBA, NCAAF — data/migrations/add_player_positions.sql). One row by
+ * primary key, or null when the roster pull has not placed him.
+ */
+export async function fetchPlayerPositionGroup(
+  sport: 'NBA' | 'WNBA' | 'NCAAF',
+  playerId: string,
+): Promise<{ position: string; pos_group: string | null } | null> {
+  const { data, error } = await supabase
+    .from('player_positions')
+    .select('position, pos_group')
+    .eq('sport', sport)
+    .eq('player_id', playerId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { position: string; pos_group: string | null } | null) ?? null;
 }
 
 const PICK_COLUMNS =

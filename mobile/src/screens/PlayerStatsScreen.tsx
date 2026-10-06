@@ -874,6 +874,7 @@ export function PlayerStatsScreen() {
                 betLabel={modeLineLabel(selection.line, selection.side, mode)}
                 selection={selection}
                 groupBasis={detail.positionVsOpponent.groupBasis}
+                sport={detail.positionVsOpponent.sport}
               />
             ) : null}
 

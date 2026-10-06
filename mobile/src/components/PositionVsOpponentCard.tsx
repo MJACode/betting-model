@@ -67,6 +67,7 @@ export function PositionVsOpponentCard({
   betLabel,
   selection,
   groupBasis,
+  sport,
 }: {
   opponent: string;
   group: PositionGroup;
@@ -81,6 +82,8 @@ export function PositionVsOpponentCard({
    * when the lineup posts (UX review, 2026-10-06). null elsewhere.
    */
   groupBasis?: { source: 'tonight' | 'last_start'; slot: number } | null;
+  /** The sport, where a role cut differs by sport (NCAAF receivers). */
+  sport?: string;
   /** The page's own player — left out: the card is about the OTHERS. */
   playerId: string | null;
   statLabel: string;
@@ -132,7 +135,7 @@ export function PositionVsOpponentCard({
           body:
             `Every game ${groupSingular(group)} with a real role played against ${opponent} ${seasonText}, ` +
             `and how often they reached ${betLabel} ${statLabel} — this player's line, applied to each of ` +
-            `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group)} in that game. ` +
+            `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group, sport)} in that game. ` +
             `The rank compares ${opponent} with the other ${opponentNoun(group)} on the average ` +
             `${statLabel} per ${short}: ` +
             `${rankPhrase(group)}.` +
@@ -304,7 +307,7 @@ export function PositionVsOpponentCard({
           ) : null}
 
           <Text style={styles.footnote}>
-            {footnoteText(group)}
+            {footnoteText(group, sport)}
             {groupBasis
               ? groupBasis.source === 'tonight'
                 ? ` Grouped by tonight's lineup: batting ${ordinal(groupBasis.slot)}.`

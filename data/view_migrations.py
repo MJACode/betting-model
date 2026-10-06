@@ -178,6 +178,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # written by data/ingestors/player_positions_ingestor.py. Guards on the
     # table existing.
     "add_player_positions.sql",
+    # 2026-10-06 (Matt, phase 3): the card's NBA / WNBA / NCAAF functions,
+    # joining player_positions. MUST run after add_player_positions.sql.
+    "add_position_vs_opponent_bball_ncaaf.sql",
     # 2026-09-14 (mike): leftover nfl_wind_totals opening_signals rows whose
     # picks were VOIDED 09-07 / DELETED 09-11 after MAX_FIRE_LEAD. Capture
     # stayed (ON CONFLICT DO NOTHING). Deletes captures with no standing
