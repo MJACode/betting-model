@@ -1,4 +1,5 @@
 import { fetchAllPages } from '@/lib/paging';
+import { sampleOpenToNow, type HistoryProbe } from './lineHistory';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -1962,6 +1963,13 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }
 
+/**
+ * Recent finished games for a team with no sport filter.
+ *
+ * Do not use this for a form strip. 'PHI' is the Phillies, the Eagles and the
+ * Flyers, and the newest rows mix all three. The pick-detail strip uses
+ * fetchTeamRecentGamesForSport.
+ */
 export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
   const { data, error } = await supabase
     .from('games')
@@ -2198,30 +2206,48 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
 
 // ── Line movement ───────────────────────────────────────────────────────────
 
-/** Snapshots for one game+market at one book, oldest first (line movement history). */
+const ODDS_HISTORY_COLUMNS =
+  'market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price';
+
+/**
+ * One page of a game-line history. Bounds default wide open so the open read
+ * and the latest read share this shape with the gap probes.
+ */
+async function readOddsHistoryPage(
+  gameId: string,
+  market: string,
+  bookmaker: string,
+  probe: HistoryProbe,
+): Promise<OddsSnapshotRow[]> {
+  const { data, error } = await supabase
+    .from('odds')
+    .select(ODDS_HISTORY_COLUMNS)
+    .eq('game_id', gameId)
+    .eq('market', market)
+    .eq('bookmaker', bookmaker)
+    .gte('snapshot_at', probe.gte ?? '1970-01-01T00:00:00.000Z')
+    .lt('snapshot_at', probe.lt ?? '9999-01-01T00:00:00.000Z')
+    .order('snapshot_at', { ascending: probe.ascending })
+    .limit(probe.limit);
+  if (error) throw error;
+  return (data ?? []) as unknown as OddsSnapshotRow[];
+}
+
+/** Snapshots for one game+market at one book, oldest first, open through the latest. */
 export async function fetchOddsHistory(
   gameId: string,
   market: string,
   bookmaker: string,
 ): Promise<OddsSnapshotRow[]> {
-  const { data, error } = await supabase
-    .from('odds')
-    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
-    .eq('game_id', gameId)
-    .eq('market', market)
-    .eq('bookmaker', bookmaker)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
-  if (error) throw error;
-  return (data ?? []) as OddsSnapshotRow[];
+  return sampleOpenToNow((probe) => readOddsHistoryPage(gameId, market, bookmaker, probe));
 }
 
-/** Prop-line snapshots for one player+market in a game at one book, oldest first. */
-export async function fetchPropOddsHistory(
+async function readPropOddsHistoryPage(
   gameId: string,
   market: string,
   playerName: string,
   bookmaker: string,
+  probe: HistoryProbe,
 ): Promise<PropOddsSnapshotRow[]> {
   const { data, error } = await supabase
     .from('player_prop_odds')
@@ -2230,10 +2256,24 @@ export async function fetchPropOddsHistory(
     .eq('market', market)
     .eq('bookmaker', bookmaker)
     .eq('player_name', playerName)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
+    .gte('snapshot_at', probe.gte ?? '1970-01-01T00:00:00.000Z')
+    .lt('snapshot_at', probe.lt ?? '9999-01-01T00:00:00.000Z')
+    .order('snapshot_at', { ascending: probe.ascending })
+    .limit(probe.limit);
   if (error) throw error;
-  return (data ?? []) as PropOddsSnapshotRow[];
+  return (data ?? []) as unknown as PropOddsSnapshotRow[];
+}
+
+/** Prop-line snapshots for one player+market in a game at one book, oldest first, open through the latest. */
+export async function fetchPropOddsHistory(
+  gameId: string,
+  market: string,
+  playerName: string,
+  bookmaker: string,
+): Promise<PropOddsSnapshotRow[]> {
+  return sampleOpenToNow((probe) =>
+    readPropOddsHistoryPage(gameId, market, playerName, bookmaker, probe),
+  );
 }
 
 // ── Prop matchup context ────────────────────────────────────────────────────

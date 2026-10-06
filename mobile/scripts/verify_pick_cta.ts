@@ -313,7 +313,7 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, postponed, in-play tag)',
   /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
 check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
-check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length\)/.test(read('src/components/LineMovementCard.tsx')));
+check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length, partial\)/.test(read('src/components/LineMovementCard.tsx')));
 check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
 check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
   /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));

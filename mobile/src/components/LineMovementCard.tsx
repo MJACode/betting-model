@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican } from '@/lib/format';
-import { changesFooter, recentChanges } from '@/lib/lineHistory';
+import { changesFooter, LINE_HISTORY_PAGE, recentChanges } from '@/lib/lineHistory';
 import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -101,6 +101,9 @@ export function LineMovementCard({ pick, playerName }: Props) {
   })();
 
   const showLineCol = market.startsWith('totals') || market.startsWith('spreads') || isProp;
+  // A full latest page means the table holds more rows than this series.
+  // The footer must not quote the sample length as the book's whole history.
+  const partial = snaps.length > LINE_HISTORY_PAGE;
   // M13: a row is a CHANGE, not a raw snapshot — runs at the same line and
   // price collapse, and rows sharing a minute get seconds (lib/lineHistory).
   const { rows: recent, changes, shownChanges, hidden } = recentChanges(
@@ -142,19 +145,23 @@ export function LineMovementCard({ pick, playerName }: Props) {
       ))}
       {hidden > 0 || snaps.length > recent.length ? (
         <Text style={styles.more}>
-          {changesFooter({ changes, shownChanges, hidden }, snaps.length)}
+          {changesFooter({ changes, shownChanges, hidden }, snaps.length, partial)}
         </Text>
       ) : null}
       <Text style={styles.note}>
         {lineOnly
           ? `Your pick is locked at the number the card took — ` +
             `${formatSideLine(pick.scored_line, pick.pick_side, market)} at ` +
-            `${formatAmerican(lockedPrice)} (the book is named in the pick). The table shows ` +
-            `${bookName(historyBook ?? storedQuoteBook(pick))}'s line since. It doesn't change the pick or how ` +
-            `it settles.`
+            `${formatAmerican(lockedPrice)} (the book is named in the pick). ` +
+            (partial
+              ? `The table samples ${bookName(historyBook ?? storedQuoteBook(pick))}'s line from the open through the latest snapshots, not every tick. `
+              : `The table shows ${bookName(historyBook ?? storedQuoteBook(pick))}'s line since. `) +
+            `It doesn't change the pick or how it settles.`
           : `Your pick was decided at ${bookName(historyBook ?? storedQuoteBook(pick))} ${formatAmerican(lockedPrice)}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
-            `This just shows how that book's line has moved since, for or against you. It doesn't ` +
+            (partial
+              ? `This samples how that book's line has moved since, not every tick. It doesn't `
+              : `This just shows how that book's line has moved since, for or against you. It doesn't `) +
             `change the pick or how it settles.`}
       </Text>
     </View>

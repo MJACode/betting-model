@@ -109,15 +109,34 @@ export function recentChanges(
 }
 
 /**
+ * How many snapshots one read is allowed to bring back.
+ *
+ * PostgREST returns at most this many rows and does not say when the table
+ * holds more. An oldest-first page of this size is the early line, not the
+ * current one: JAX/PHI DraftKings spreads on 2026-10-06 were 3,939 rows, the
+ * 50th was still −3 on Oct 2, and the latest was −7.
+ */
+export const LINE_HISTORY_PAGE = 50;
+
+/**
  * The table's footer. "Last 8 of 19 changes" only when changes are really cut;
  * when the one row off the top is the OPENING, every change is on screen and
  * "Last 8 of 8 changes" read as a cut that wasn't (Reviewer #847) — it says
  * "8 changes · opening not shown" instead.
+ *
+ * A partial series is the open, a sample of the gap, and the latest page.
+ * Quoting that length as the snapshot population says the book only moved
+ * as often as we sampled.
  */
 export function changesFooter(
   r: { changes: number; shownChanges: number; hidden: number },
   snapshots: number,
+  /** The series is the open, a sample of the gap, and the latest page — not every row. */
+  partial = false,
 ): string {
+  if (partial) {
+    return `Sampled from the open through the latest ${LINE_HISTORY_PAGE} snapshots`;
+  }
   const noun = (n: number) => `${n} ${n === 1 ? 'change' : 'changes'}`;
   const head =
     r.shownChanges < r.changes
@@ -126,4 +145,75 @@ export function changesFooter(
         ? `${noun(r.changes)} · opening not shown`
         : noun(r.changes);
   return `${head} · ${snapshots} snapshots`;
+}
+
+/**
+ * Samples across the span from the open to the start of the latest page,
+ * counting the two ends the caller already holds. Interior probes are one
+ * row each.
+ */
+export const LINE_HISTORY_BUCKETS = 12;
+
+export interface HistoryProbe {
+  ascending: boolean;
+  limit: number;
+  /** Inclusive lower bound on snapshot_at. */
+  gte?: string;
+  /** Exclusive upper bound on snapshot_at. */
+  lt?: string;
+}
+
+/**
+ * Instants strictly between `startIso` and `endIso`. `buckets` counts the
+ * whole span, so the result length is `buckets - 2`.
+ */
+export function historyBucketInstants(startIso: string, endIso: string, buckets: number): string[] {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  const interior = buckets - 2;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || interior < 1) return [];
+  const out: string[] = [];
+  for (let i = 1; i <= interior; i++) {
+    out.push(new Date(start + ((end - start) * i) / (interior + 1)).toISOString());
+  }
+  return out;
+}
+
+/**
+ * Oldest-first snapshots from the open through the latest row.
+ *
+ * A history that fits in one page comes back whole (latest page, reversed).
+ * A full page has not reached the open, so the open is kept and the gap
+ * before that page is sampled. The latest page is kept row for row — two
+ * snapshots can share a timestamp — and the series always ends on it.
+ */
+export async function sampleOpenToNow<T extends { snapshot_at: string }>(
+  read: (probe: HistoryProbe) => Promise<T[]>,
+): Promise<T[]> {
+  const [latestDesc, openRows] = await Promise.all([
+    read({ ascending: false, limit: LINE_HISTORY_PAGE }),
+    read({ ascending: true, limit: 1 }),
+  ]);
+  const latest = latestDesc.slice().reverse();
+  if (latest.length < LINE_HISTORY_PAGE) return latest;
+
+  const open = openRows[0];
+  const pageStart = latest[0]?.snapshot_at;
+  if (!open?.snapshot_at || !pageStart || Date.parse(open.snapshot_at) >= Date.parse(pageStart)) {
+    return latest;
+  }
+
+  const instants = historyBucketInstants(open.snapshot_at, pageStart, LINE_HISTORY_BUCKETS);
+  const probed = await Promise.all(
+    instants.map((gte) => read({ ascending: true, limit: 1, gte, lt: pageStart })),
+  );
+  const seen = new Set(latest.map((r) => r.snapshot_at));
+  const head: T[] = [];
+  for (const row of [open, ...probed.flat()]) {
+    if (!row?.snapshot_at || seen.has(row.snapshot_at)) continue;
+    seen.add(row.snapshot_at);
+    head.push(row);
+  }
+  head.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+  return [...head, ...latest];
 }

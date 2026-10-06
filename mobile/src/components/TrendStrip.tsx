@@ -7,7 +7,8 @@ interface Props {
   title: string;
   trends: TrendBuckets;
   mode: 'team' | 'player';
-  unit?: string; // e.g. "Ks", "Hits"
+  /** Team strip: "R", "pts" or "goals". Player strip: the stat name ("Ks", "Hits"). */
+  unit?: string;
 }
 
 const KEYS: Array<{ key: keyof TrendBuckets; label: string }> = [
@@ -25,6 +26,10 @@ export function TrendStrip({ title, trends, mode, unit }: Props) {
       <View style={styles.row}>
         {KEYS.map((k) => {
           const t = trends[k.key];
+          // Team "season" is the last 25 finished games in that sport, and it
+          // crosses into the previous season once that window is full. The
+          // player strip keeps "Season": its window is 25 or 50 by sport.
+          const label = mode === 'team' && k.key === 'season' ? 'L25' : k.label;
           const primary =
             mode === 'team'
               ? t.winPct != null
@@ -36,12 +41,14 @@ export function TrendStrip({ title, trends, mode, unit }: Props) {
           const secondary =
             mode === 'team'
               ? t.avg != null
-                ? `${t.avg.toFixed(1)} R`
+                ? unit
+                  ? `${t.avg.toFixed(1)} ${unit}`
+                  : t.avg.toFixed(1)
                 : '—'
               : unit ?? '';
           return (
             <View key={k.key} style={styles.cell}>
-              <Text style={styles.cellLabel}>{k.label}</Text>
+              <Text style={styles.cellLabel}>{label}</Text>
               <Text style={styles.cellValue}>{primary}</Text>
               <Text style={styles.cellSecondary}>{secondary}</Text>
               <Text style={styles.cellGames}>{t.games} G</Text>
