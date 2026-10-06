@@ -1,17 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { formatAmerican } from '@/lib/format';
 import {
   changesFooter,
+  formatHistoryAmerican,
+  formatHistoryLine,
+  historyRowAccessibilityLabel,
   historyTimeLabel,
+  inPlayMovementLabel,
   LINE_HISTORY_PAGE,
   lineHistoryWindow,
   movementHeadline,
+  movementHeadlineLabel,
   movementVerdict,
   recentChanges,
   type MovementVerdictKind,
 } from '@/lib/lineHistory';
-import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
+import { canShowLineMovementHistory, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -52,9 +56,10 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
       }),
     [commenceTime, pick.created_at, pick.is_live],
   );
-  // Capped series: the last row is the last pregame snapshot. A live pick's
-  // last row is in-play, so it stays unlabeled.
-  const atClose = gameStarted && historyWindow.until != null;
+  // Capped series: the last row is the last pregame snapshot. A true live
+  // pick (is_live only) ends on Final, not Close.
+  const inPlay = pick.is_live === true;
+  const atClose = gameStarted && historyWindow.until != null && !inPlay;
 
   useEffect(() => {
     let mounted = true;
@@ -120,23 +125,33 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
         : movement.severity === 'caution'
           ? 'steamed'
           : 'eased';
-  const verdict = {
-    label: movementVerdict({
-      kind: verdictKind,
-      atClose,
-      lock: formatSideLine(movement?.scoredLine ?? pick.scored_line, pick.pick_side, market),
-      end: formatSideLine(movement?.currentLine ?? currentLine, pick.pick_side, market),
-      pp: movement?.priceShiftPp,
-    }),
-    color:
-      verdictKind === 'against' || verdictKind === 'steamed'
-        ? colors.avoidInk
-        : verdictKind === 'favor' || verdictKind === 'eased'
-          ? colors.betInk
-          : colors.textSecondary,
-  };
+  // Spreads show a sign. The verdict uses the same minus as the headline
+  // on this card (U+2212), so a negative number does not switch glyphs.
+  const signLine = market.startsWith('spreads');
+  const verdictLine = (line: number | null) =>
+    formatHistoryLine(lineForSide(line, pick.pick_side, market), signLine);
+  // A green "in your favor" on an in-play price read a loss as a win.
+  // Live picks get one neutral sentence. Pregame keeps the colored verdict.
+  const verdict = inPlay
+    ? { label: inPlayMovementLabel(), color: colors.textSecondary }
+    : {
+        label: movementVerdict({
+          kind: verdictKind,
+          atClose,
+          lock: verdictLine(movement?.scoredLine ?? pick.scored_line),
+          end: verdictLine(movement?.currentLine ?? currentLine),
+          pp: movement?.priceShiftPp,
+        }),
+        color:
+          verdictKind === 'against' || verdictKind === 'steamed'
+            ? colors.avoidInk
+            : verdictKind === 'favor' || verdictKind === 'eased'
+              ? colors.betInk
+              : colors.textSecondary,
+      };
 
   const showLineCol = market.startsWith('totals') || market.startsWith('spreads') || isProp;
+  const book = bookName(historyBook ?? storedQuoteBook(pick));
   // A full latest page means the table holds more rows than this series.
   // The footer must not quote the sample length as the book's whole history.
   const partial = snaps.length > LINE_HISTORY_PAGE;
@@ -154,12 +169,23 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
     <View style={styles.card}>
       <Text style={styles.heading}>Line Movement</Text>
       <View style={styles.headRow}>
-        <Text style={styles.prices}>
+        <Text
+          style={styles.prices}
+          accessibilityLabel={movementHeadlineLabel({
+            kind: lineOnly ? 'line' : 'price',
+            lock: lineOnly ? lineForSide(pick.scored_line, pick.pick_side, market) : lockedPrice,
+            end: lineOnly ? lineForSide(currentLine, pick.pick_side, market) : currentPrice,
+            atClose,
+            signedLine: signLine,
+          })}
+        >
           {movementHeadline(
             lineOnly
-              ? formatSideLine(pick.scored_line, pick.pick_side, market)
-              : formatAmerican(lockedPrice),
-            lineOnly ? formatSideLine(currentLine, pick.pick_side, market) : formatAmerican(currentPrice),
+              ? formatHistoryLine(lineForSide(pick.scored_line, pick.pick_side, market), signLine)
+              : formatHistoryAmerican(lockedPrice),
+            lineOnly
+              ? formatHistoryLine(lineForSide(currentLine, pick.pick_side, market), signLine)
+              : formatHistoryAmerican(currentPrice),
             atClose,
           )}
         </Text>
@@ -167,22 +193,36 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
       </View>
 
       <View style={styles.tableHead}>
-        <Text style={[styles.cell, styles.cellTime, styles.headText]}>Changed at</Text>
+        <Text style={[styles.cell, styles.cellTime, styles.headText]}>Changed at (ET)</Text>
         {showLineCol ? <Text style={[styles.cell, styles.headText]}>Line</Text> : null}
         <Text style={[styles.cell, styles.headText]}>Price</Text>
       </View>
-      {recent.map((r, i) => (
-        <View key={r.key} style={styles.row}>
-          <Text style={[styles.cell, styles.cellTime]}>
-            {historyTimeLabel(r.label, {
-              atCloseLast: atClose && i === recent.length - 1,
-              bounded: moveByAt.has(r.at),
+      {recent.map((r, i) => {
+        const timeLabel = historyTimeLabel(r.label, {
+          atCloseLast: atClose && i === recent.length - 1,
+          atFinalLast: inPlay && i === recent.length - 1,
+          bounded: moveByAt.has(r.at),
+        });
+        return (
+          <View
+            key={r.key}
+            style={styles.row}
+            accessible
+            accessibilityLabel={historyRowAccessibilityLabel({
+              marker: timeLabel,
+              at: r.at,
+              line: showLineCol ? r.line : null,
+              price: r.price,
+              showLine: showLineCol,
+              signedLine: signLine,
             })}
-          </Text>
-          {showLineCol ? <Text style={styles.cell}>{r.line ?? '—'}</Text> : null}
-          <Text style={styles.cell}>{formatAmerican(r.price)}</Text>
-        </View>
-      ))}
+          >
+            <Text style={[styles.cell, styles.cellTime]}>{timeLabel}</Text>
+            {showLineCol ? <Text style={styles.cell}>{formatHistoryLine(r.line, signLine)}</Text> : null}
+            <Text style={styles.cell}>{formatHistoryAmerican(r.price)}</Text>
+          </View>
+        );
+      })}
       {hidden > 0 || snaps.length > recent.length ? (
         <Text style={styles.more}>
           {changesFooter({ changes, shownChanges, hidden }, snaps.length, partial)}
@@ -191,20 +231,20 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
       <Text style={styles.note}>
         {lineOnly
           ? `Your pick is locked at the number the card took — ` +
-            `${formatSideLine(pick.scored_line, pick.pick_side, market)} at ` +
-            `${formatAmerican(lockedPrice)} (the book is named in the pick). ` +
+            `${formatHistoryLine(lineForSide(pick.scored_line, pick.pick_side, market), signLine)} at ` +
+            `${formatHistoryAmerican(lockedPrice)} (the book is named in the pick). ` +
             (partial
-              ? `The table samples ${bookName(historyBook ?? storedQuoteBook(pick))}'s line from the open through the ${atClose ? 'close' : 'latest snapshots'}, not every tick. `
-              : `The table shows ${bookName(historyBook ?? storedQuoteBook(pick))}'s line ${atClose ? 'through the close' : 'since'}. `) +
+              ? `The table samples the line at ${book} ${inPlay ? 'since your pick' : atClose ? 'from the open through the close' : 'since the open'}, not every tick. `
+              : `The table shows the line at ${book} ${atClose ? 'through the close' : inPlay ? 'since your pick' : 'since the open'}. `) +
             `It doesn't change the pick or how it settles.`
-          : `Your pick was decided at ${bookName(historyBook ?? storedQuoteBook(pick))} ${formatAmerican(lockedPrice)}` +
-            `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
+          : `Your pick was decided at ${book} ${formatHistoryAmerican(lockedPrice)}` +
+            `${showLineCol && movement?.scoredLine != null ? ` (${formatHistoryLine(lineForSide(movement.scoredLine, pick.pick_side, market), signLine)})` : ''}. ` +
             (atClose
               ? `The second number is the closing line, the last price before the game started. `
               : '') +
             (partial
-              ? `This samples how that book's line has moved ${atClose ? 'up to the close' : 'since'}, not every tick. It doesn't `
-              : `This just shows how that book's line has moved ${atClose ? 'up to the close' : 'since'}, for or against you. It doesn't `) +
+              ? `This samples the line at ${book} ${atClose ? 'up to the close' : inPlay ? 'since your pick' : 'since the open'}, not every tick. It doesn't `
+              : `This just shows the line at ${book} ${atClose ? 'up to the close' : inPlay ? 'since your pick' : 'since the open'}${inPlay ? '' : ', for or against you'}. It doesn't `) +
             `change the pick or how it settles.`}
       </Text>
     </View>
@@ -263,7 +303,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   cellTime: {
-    flex: 1.6,
+    flex: 2.2,
     textAlign: 'left',
     color: colors.textSecondary,
   },

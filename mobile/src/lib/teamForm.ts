@@ -3,8 +3,8 @@
  *
  * The strip used to print "R" for every sport. That is runs, and it is right
  * for baseball only. NFL and NCAAF averages are points (a college total near
- * 48 was showing as "48.0 R"); hockey is goals. The short-window count under
- * the average says "games", not "G" — in hockey "G" is goals.
+ * 48 was showing as "48.0 R"); hockey is goals. A short fetch is named once
+ * under the strip, not as a count inside the cell.
  */
 export function teamScoringUnit(sport: string | null | undefined): string {
   switch (sport) {
@@ -49,13 +49,34 @@ export const TEAM_WINDOW_SIZE: Record<string, number> = {
 };
 
 /**
- * The games line under a team cell. A full window already says L5 / L25, so
- * the count is only there when the window is short. Zero is a missing fetch,
- * not "0 games".
+ * One line under the strip when the fetch is shorter than a column.
+ * The count used to sit in the cell, and at large text "4 games" ran into
+ * the next column. Zero is a missing fetch, not "0 games". A full L25
+ * already names every column.
  */
-export function teamGamesRow(games: number, windowSize: number): string | null {
-  if (games <= 0 || games >= windowSize) return null;
-  return `${games} ${games === 1 ? 'game' : 'games'}`;
+export function teamShortWindowNote(counts: {
+  l3: number;
+  l5: number;
+  l10: number;
+  l20: number;
+  l25: number;
+}): string | null {
+  const n = Math.max(counts.l3, counts.l5, counts.l10, counts.l20, counts.l25);
+  if (n <= 0 || n >= TEAM_WINDOW_SIZE.season) return null;
+  const windows = [
+    { label: 'L3', size: TEAM_WINDOW_SIZE.l3 },
+    { label: 'L5', size: TEAM_WINDOW_SIZE.l5 },
+    { label: 'L10', size: TEAM_WINDOW_SIZE.l10 },
+    { label: 'L20', size: TEAM_WINDOW_SIZE.l20 },
+    { label: 'L25', size: TEAM_WINDOW_SIZE.season },
+  ];
+  const first = windows.find((w) => n < w.size);
+  if (!first) return null;
+  const gamesWord = n === 1 ? 'game' : 'games';
+  const those = n === 1 ? 'that 1' : `those ${n}`;
+  const span = first.label === 'L25' ? 'L25' : `${first.label}–L25`;
+  const use = first.label === 'L25' ? 'uses' : 'all use';
+  return `Only ${n} ${gamesWord} so far. ${span} ${use} ${those}.`;
 }
 
 /** How many of the fetched games belong to the pick's season. Null if we don't know the season. */
@@ -110,14 +131,12 @@ export function teamCellAccessibilityLabel(opts: {
 }): string {
   const n = opts.window;
   let head = `Last ${n} ${n === 1 ? 'game' : 'games'}`;
-  if (opts.games > 0 && opts.games < n) {
-    head += `, ${opts.games} ${opts.games === 1 ? 'game' : 'games'} played`;
-  }
+  // The short count lives in the note under the strip, not in the cell.
   if (opts.seasonGames != null && opts.games > opts.seasonGames) {
     head += ', including earlier seasons';
   }
   const won =
-    opts.winPct != null ? `won ${Math.round(opts.winPct * 100)} percent` : 'won not available';
+    opts.winPct != null ? `won ${Math.round(opts.winPct * 100)} percent` : 'win rate not available';
   const avg =
     opts.avg == null
       ? 'average not available'

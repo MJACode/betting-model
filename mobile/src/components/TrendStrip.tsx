@@ -3,8 +3,8 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
   TEAM_WINDOW_SIZE,
   teamCellAccessibilityLabel,
-  teamGamesRow,
   teamSeasonNote,
+  teamShortWindowNote,
 } from '@/lib/teamForm';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { TrendBuckets } from '@/types';
@@ -30,15 +30,16 @@ const KEYS: Array<{ key: keyof TrendBuckets; label: string }> = [
 ];
 
 export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames }: Props) {
+  const counts = {
+    l3: trends.l3.games,
+    l5: trends.l5.games,
+    l10: trends.l10.games,
+    l20: trends.l20.games,
+    l25: trends.season.games,
+  };
   const note =
     mode === 'team'
-      ? teamSeasonNote(seasonGames, {
-          l3: trends.l3.games,
-          l5: trends.l5.games,
-          l10: trends.l10.games,
-          l20: trends.l20.games,
-          l25: trends.season.games,
-        })
+      ? [teamShortWindowNote(counts), teamSeasonNote(seasonGames, counts)].filter((s) => s != null).join(' ')
       : null;
   return (
     <View style={styles.container}>
@@ -67,15 +68,10 @@ export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames 
                 : '—'
               : unit ?? '';
           const windowSize = TEAM_WINDOW_SIZE[k.key] ?? t.games;
-          // Team: "4 games" only when the window is short. "G" in hockey is
-          // goals, and a failed fetch must not print "0 G". Player keeps "G"
-          // — that window is not 3/5/10/20/25 — and still hides a zero.
-          const gamesLabel =
-            mode === 'team'
-              ? teamGamesRow(t.games, windowSize)
-              : t.games > 0
-                ? `${t.games} G`
-                : null;
+          // Team cells do not print a games count. At large text it ran into
+          // the next column; the note under the strip says how many games
+          // the short windows share. Player keeps "G" and still hides a zero.
+          const gamesLabel = mode === 'player' && t.games > 0 ? `${t.games} G` : null;
           return (
             <View
               key={k.key}

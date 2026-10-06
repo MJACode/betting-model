@@ -135,11 +135,11 @@ const runs = collapseLineHistory([
   { at: t(20, 5), line: 8.5, price: -115 }, { at: t(20, 30), line: 9, price: -105 },
 ]);
 eq(runs.map((r) => r.count), [2, 1, 1], 'collapse');
-eq(runs.map((r) => r.label), ['3:50 PM ET', '4:05 PM ET', '4:30 PM ET'], 'minute labels');
+eq(runs.map((r) => r.label), ['3:50 PM', '4:05 PM', '4:30 PM'], 'minute labels');
 const flick = collapseLineHistory([
   { at: t(19, 50, 5), line: null, price: -105 }, { at: t(19, 50, 25), line: null, price: -115 },
 ]);
-if (!flick.every((r) => /^3:50:\\d\\d PM ET$/.test(r.label))) throw new Error(flick.map((r) => r.label).join('|'));
+if (!flick.every((r) => /^3:50:\\d\\d PM$/.test(r.label))) throw new Error(flick.map((r) => r.label).join('|'));
 const rc = recentChanges(Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
 eq([rc.rows.length, rc.changes, rc.shownChanges, rc.hidden], [8, 19, 8, 12], 'recent');
 // Reviewer #847 lows: the opening row is not a change; a mid-run null joins

@@ -286,9 +286,11 @@ eq(lineHistoryWindow({ commenceTime: null, createdAt: '2026-10-04T18:00:00.000Z'
 const openEnded = await sampleOpenToNow(readFactory().read);
 eq(openEnded.rows[openEnded.rows.length - 1].spread_home, 21.5, 'uncapped still sees the in-game line');
 
-const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: LOCK, isLive: false });
-eq(liveWindow, { from: LOCK }, 'created at or after the start');
-eq(lineHistoryWindow({ commenceTime: KICK, createdAt: '2026-10-04T18:00:00.000Z', isLive: true }), { from: '2026-10-04T18:00:00.000Z' }, 'is_live starts at the lock');
+const latePregame = lineHistoryWindow({ commenceTime: KICK, createdAt: LOCK, isLive: false });
+eq(latePregame, { until: KICK }, 'written after the start is still pregame');
+const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: LOCK, isLive: true });
+eq(liveWindow, { from: LOCK }, 'is_live starts at the lock');
+eq(lineHistoryWindow({ commenceTime: KICK, createdAt: '2026-10-04T18:00:00.000Z', isLive: true }), { from: '2026-10-04T18:00:00.000Z' }, 'is_live before the start still starts at the lock');
 const live = readFactory();
 const after = await sampleOpenToNow(live.read, liveWindow);
 if (after.rows.some((r) => Date.parse(r.snapshot_at) < Date.parse(LOCK))) {
@@ -386,9 +388,10 @@ def test_close_label_and_footer_copy(tmp_path):
     close, and the last row is labelled Close. Unstarted copy stays put."""
     script = PRELUDE + """
 import { historyTimeLabel, movementHeadline, movementVerdict, changesFooter } from './lineHistory.ts';
-eq(historyTimeLabel('3:10 PM ET', { atCloseLast: true, bounded: false }), 'Close', 'close row');
-eq(historyTimeLabel('3:10 PM ET', { atCloseLast: false, bounded: true }), 'by 3:10 PM ET', 'upper bound');
-eq(historyTimeLabel('3:10 PM ET', { atCloseLast: false, bounded: false }), '3:10 PM ET', 'real time');
+eq(historyTimeLabel('3:10 PM', { atCloseLast: true, bounded: false }), 'Close', 'close row');
+eq(historyTimeLabel('8:21 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final', 'live end');
+eq(historyTimeLabel('3:10 PM', { atCloseLast: false, bounded: true }), 'by 3:10 PM', 'upper bound');
+eq(historyTimeLabel('3:10 PM', { atCloseLast: false, bounded: false }), '3:10 PM', 'real time');
 eq(movementHeadline('+6', '+3', false), '+6 → +3', 'unstarted headline');
 eq(movementHeadline('+6', '+3', true), '+6 → +3 at the close', 'close headline');
 eq(movementHeadline('-110', '-105', true), '-110 → -105 at the close', 'close price headline');
@@ -441,7 +444,7 @@ eq(
   'unstarted eased',
 );
 const footer = changesFooter({ changes: 11, shownChanges: 8, hidden: 3 }, 62, true);
-eq(footer, "Last 8 changes shown · some intermediate moves aren't listed", 'footer');
+eq(footer, "Last 8 changes shown · brief moves between samples may be missing", 'footer');
 if (footer.includes('62')) throw new Error(footer);
 """
     proc = _run(tmp_path, ["lineHistory.ts"], script)
@@ -454,7 +457,16 @@ def test_the_card_uses_the_close_copy():
     assert "movementVerdict(" in card
     assert "historyTimeLabel(" in card
     assert "historyWindow, sideQuote)" in card
-    assert "gameStarted && historyWindow.until != null" in card
+    assert "gameStarted && historyWindow.until != null && !inPlay" in card
+    assert "inPlayMovementLabel()" in card
+    assert "atFinalLast: inPlay && i === recent.length - 1" in card
+    assert "Changed at (ET)" in card
+    assert "the line at ${book}" in card
+    assert "formatHistoryAmerican(" in card
+    assert "formatHistoryLine(lineForSide(" in card
+    assert "formatSideLine(" not in card
+    assert "accessibilityLabel={movementHeadlineLabel(" in card
+    assert "historyRowAccessibilityLabel(" in card
     history = _read(HISTORY)
     assert "against your pick" in history
     assert "against your ${" not in history
@@ -478,8 +490,10 @@ eq(formatBoundLike('2026-10-04T22:00:00-05:00', Date.parse('2026-10-04T22:00:00-
 const lock = normalizeTimestamp('2026-10-05 01:00:00.123+00');
 eq(lock, '2026-10-05T01:00:00.123+00:00', 'space form');
 if (Date.parse(lock) !== Date.parse('2026-10-05T01:00:00.123Z')) throw new Error('normalized lock drifted');
-eq(lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: false }), { from: lock }, 'post-start space lock');
-eq(lineHistoryWindow({ createdAt: 'not-a-timestamp', commenceTime: KICK, isLive: false }), {}, 'unparseable lock is unknown');
+eq(lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: false }), { until: KICK }, 'late pregame space lock is capped');
+eq(lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: true }), { from: lock }, 'live space lock is normalized');
+eq(lineHistoryWindow({ createdAt: 'not-a-timestamp', commenceTime: KICK, isLive: false }), { until: KICK }, 'unparseable pregame lock is still capped');
+eq(lineHistoryWindow({ createdAt: 'not-a-timestamp', commenceTime: KICK, isLive: true }), {}, 'unparseable live lock is unknown');
 
 function textRead(rows, probes) {
   return async (probe) => {
@@ -562,7 +576,10 @@ const liveRows = [
   { snapshot_at: '2026-10-05T00:30:00.000Z', spread_home: -3 },
   { snapshot_at: '2026-10-05T01:30:00.000Z', spread_home: -7 },
 ];
-const liveSampled = await sampleOpenToNow(textRead(liveRows, liveProbes), { from: lock });
+const liveSampled = await sampleOpenToNow(
+  textRead(liveRows, liveProbes),
+  lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: true }),
+);
 if (liveSampled.rows.some((r) => Date.parse(r.snapshot_at) < Date.parse(lock))) {
   throw new Error('space-form lock leaked a row from before the lock');
 }
@@ -682,6 +699,113 @@ if (firstSeven.snapshot_at === new Date(otherTick).toISOString()) {
     assert proc.returncode == 0, proc.stderr or proc.stdout
 
 
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_a_late_pregame_pick_stops_at_the_close_and_a_live_pick_ends_on_final(tmp_path):
+    """Pick 3218758 (UTA moneyline, is_live false) was written six minutes
+    after puck drop. The card must not read the in-play +1400. A true live
+    pick may, and its last row is Final, not a green verdict."""
+    script = PRELUDE + r"""
+import {
+  sampleOpenToNow, lineHistoryWindow, historyTimeLabel, inPlayMovementLabel,
+  collapseLineHistory, historyRowAccessibilityLabel, movementHeadlineLabel,
+  formatHistoryAmerican, formatHistoryLine,
+} from './lineHistory.ts';
+
+const KICK = '2026-10-06T00:00:00.000Z';
+const CREATED = '2026-10-06T00:06:00.000Z';
+const late = lineHistoryWindow({ commenceTime: KICK, createdAt: CREATED, isLive: false });
+eq(late, { until: KICK }, '3218758 is capped');
+const rows = [
+  { snapshot_at: '2026-10-05T23:40:00.000Z', home_price: 100, away_price: -120 },
+  { snapshot_at: '2026-10-05T23:59:00.000Z', home_price: 105, away_price: -125 },
+  { snapshot_at: '2026-10-06T00:06:30.000Z', home_price: 400, away_price: -500 },
+  { snapshot_at: '2026-10-06T01:20:00.000Z', home_price: 1400, away_price: -2500 },
+];
+const read = async (probe) => {
+  let xs = rows.filter((r) => {
+    if (probe.unbounded) return true;
+    const t = Date.parse(r.snapshot_at);
+    if (probe.gte && t < Date.parse(probe.gte)) return false;
+    if (probe.lt && t >= Date.parse(probe.lt)) return false;
+    if (probe.lte && t > Date.parse(probe.lte)) return false;
+    return true;
+  });
+  xs.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+  if (!probe.ascending) xs.reverse();
+  return xs.slice(0, probe.limit);
+};
+const capped = await sampleOpenToNow(read, late);
+if (capped.rows.some((r) => Date.parse(r.snapshot_at) > Date.parse(KICK))) {
+  throw new Error('late pregame read returned an in-play row');
+}
+if (capped.rows.some((r) => r.home_price === 1400 || r.home_price === 400)) {
+  throw new Error('in-play price reached the card');
+}
+eq(capped.rows[capped.rows.length - 1].home_price, 105, 'close price');
+eq(historyTimeLabel('8:00 PM', { atCloseLast: true, bounded: false }), 'Close', 'close label');
+
+const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: CREATED, isLive: true });
+eq(liveWindow, { from: CREATED }, 'true live');
+const live = await sampleOpenToNow(read, liveWindow);
+eq(live.rows[live.rows.length - 1].home_price, 1400, 'live may pass the start');
+if (live.rows.some((r) => Date.parse(r.snapshot_at) < Date.parse(CREATED))) {
+  throw new Error('live read started before the lock');
+}
+eq(historyTimeLabel('9:20 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final', 'final row');
+eq(inPlayMovementLabel(), 'In-play prices since your pick', 'neutral verdict');
+
+const span = collapseLineHistory([
+  { at: '2026-10-05T00:21:00.000Z', line: 3.5, price: -112 },
+  { at: '2026-10-05T04:00:00.000Z', line: 4, price: -113 },
+]);
+eq(span.map((r) => r.label), ['10/4 8:21 PM', '10/5 12:00 AM'], 'date when the series crosses midnight');
+eq(
+  historyRowAccessibilityLabel({
+    marker: span[0].label, at: span[0].at, line: 3.5, price: -112, showLine: true, signedLine: true,
+  }),
+  'Changed by October 4 at 8:21 PM: line plus 3.5, price minus 112',
+  'row label',
+);
+eq(
+  historyRowAccessibilityLabel({
+    marker: 'by 10/4 8:21 PM', at: span[0].at, line: 3.5, price: -112, showLine: true, signedLine: true,
+  }),
+  'No later than October 4 at 8:21 PM: line plus 3.5, price minus 112',
+  'upper bound spoken',
+);
+eq(
+  historyRowAccessibilityLabel({
+    marker: '8:21:12 PM', at: '2026-10-05T00:21:12.000Z', line: 8.5, price: -110, showLine: true, signedLine: false,
+  }),
+  'Changed by October 4 at 8:21:12 PM: line 8.5, price minus 110',
+  'seconds and unsigned line',
+);
+eq(
+  historyRowAccessibilityLabel({
+    marker: 'Close', at: span[1].at, line: 4, price: -113, showLine: true, signedLine: true,
+  }),
+  'Close: line plus 4, price minus 113',
+  'close label spoken',
+);
+eq(
+  movementHeadlineLabel({ kind: 'price', lock: 100, end: 1400, atClose: false }),
+  'Price plus 100 to plus 1400',
+  'headline spoken',
+);
+eq(
+  movementHeadlineLabel({ kind: 'line', lock: 47.5, end: 48, atClose: false, signedLine: false }),
+  'Line 47.5 to 48',
+  'unsigned total',
+);
+eq(formatHistoryAmerican(-110), '\u2212' + '110', 'minus price');
+eq(formatHistoryAmerican(null), '\u2014', 'missing price');
+eq(formatHistoryLine(3.5, true), '+3.5', 'signed line');
+eq(formatHistoryLine(-4, true), '\u2212' + '4', 'negative line');
+"""
+    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
 # ── form strip ─────────────────────────────────────────────────────────────
 
 
@@ -704,7 +828,8 @@ def test_team_form_reads_one_sport_and_does_not_say_runs_for_football():
     assert "mode === 'team' && k.key === 'season' ? 'L25'" in strip
     assert "label: 'Season'" in strip
     assert "teamCellAccessibilityLabel(" in strip
-    assert "teamGamesRow(" in strip
+    assert "teamGamesRow(" not in strip
+    assert "teamShortWindowNote(" in strip
     assert "teamSeasonNote(" in strip
     assert "accessible={mode === 'team'}" in strip
     assert strip.count("textAlign: 'center'") >= 4
@@ -714,7 +839,7 @@ def test_team_form_reads_one_sport_and_does_not_say_runs_for_football():
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_scoring_unit_is_points_for_football_and_runs_for_baseball(tmp_path):
     script = PRELUDE + """
-import { teamScoringUnit, teamScoringUnitSpoken, teamGamesRow, teamSeasonNote, teamCellAccessibilityLabel, countThisSeason } from './teamForm.ts';
+import { teamScoringUnit, teamScoringUnitSpoken, teamShortWindowNote, teamSeasonNote, teamCellAccessibilityLabel, countThisSeason } from './teamForm.ts';
 eq(teamScoringUnit('MLB'), 'R', 'mlb');
 eq(teamScoringUnit('NFL'), 'pts', 'nfl');
 eq(teamScoringUnit('NCAAF'), 'pts', 'ncaaf');
@@ -729,11 +854,11 @@ eq(teamScoringUnitSpoken('NBA'), 'points', 'spoken nba');
 eq(teamScoringUnitSpoken('WNBA'), 'points', 'spoken wnba');
 eq(teamScoringUnitSpoken('NHL'), 'goals', 'spoken nhl');
 eq(teamScoringUnitSpoken(null), '', 'spoken unknown');
-eq(teamGamesRow(0, 5), null, 'no data is not 0 games');
-eq(teamGamesRow(5, 5), null, 'a full window hides the count');
-eq(teamGamesRow(4, 5), '4 games', 'short window');
-eq(teamGamesRow(1, 3), '1 game', 'one game');
-eq(teamGamesRow(25, 25), null, 'L25 full');
+eq(teamShortWindowNote({ l3: 0, l5: 0, l10: 0, l20: 0, l25: 0 }), null, 'no data is not 0 games');
+eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }), null, 'a full window hides the count');
+eq(teamShortWindowNote({ l3: 3, l5: 4, l10: 4, l20: 4, l25: 4 }), 'Only 4 games so far. L5–L25 all use those 4.', 'short window');
+eq(teamShortWindowNote({ l3: 1, l5: 1, l10: 1, l20: 1, l25: 1 }), 'Only 1 game so far. L3–L25 all use that 1.', 'one game');
+eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }), 'Only 20 games so far. L25 uses those 20.', 'only L25 is short');
 eq(
   teamSeasonNote(4, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }),
   'This season: 4 games. L5–L25 include earlier seasons.',
@@ -775,14 +900,14 @@ eq(
   teamCellAccessibilityLabel({
     window: 5, games: 4, winPct: 0.5, avg: 3.2, spokenUnit: 'goals', seasonGames: 2,
   }),
-  'Last 5 games, 4 games played, including earlier seasons: won 50 percent, 3.2 goals a game',
-  'short window is in the label',
+  'Last 5 games, including earlier seasons: won 50 percent, 3.2 goals a game',
+  'short count is not in the cell label',
 );
 eq(
   teamCellAccessibilityLabel({
     window: 3, games: 0, winPct: null, avg: null, spokenUnit: 'runs', seasonGames: 0,
   }),
-  'Last 3 games: won not available, average not available',
+  'Last 3 games: win rate not available, average not available',
   'empty cell does not say 0 games',
 );
 eq(countThisSeason([{ season: 2027 }, { season: 2027 }, { season: 2026 }], 2027), 2, 'this season');
@@ -800,10 +925,10 @@ def test_a_partial_history_footer_does_not_quote_the_sample_as_the_book(tmp_path
 import { changesFooter } from './lineHistory.ts';
 const partial = changesFooter({ changes: 11, shownChanges: 8, hidden: 3 }, 62, true);
 if (partial.includes('62')) throw new Error('partial footer quotes the sample size: ' + partial);
-eq(partial, "Last 8 changes shown · some intermediate moves aren't listed", 'partial cut');
+eq(partial, "Last 8 changes shown · brief moves between samples may be missing", 'partial cut');
 const partialAllShown = changesFooter({ changes: 8, shownChanges: 8, hidden: 1 }, 62, true);
 if (partialAllShown.includes('62')) throw new Error(partialAllShown);
-eq(partialAllShown, "8 changes · some intermediate moves aren't listed", 'partial, table not cut');
+eq(partialAllShown, "8 changes · brief moves between samples may be missing", 'partial, table not cut');
 eq(changesFooter({ changes: 19, shownChanges: 8, hidden: 12 }, 20), 'Last 8 of 19 changes · 20 snapshots', 'complete');
 """
     proc = _run(tmp_path, ["lineHistory.ts"], script)

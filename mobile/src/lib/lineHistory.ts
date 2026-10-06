@@ -36,7 +36,11 @@ export interface HistoryRow extends HistoryPoint {
   opening: boolean;
   /** Unique React key (timestamps can repeat). */
   key: string;
-  /** "3:50 PM ET", or "3:50:12 PM ET" when another row shares its minute. */
+  /**
+   * "8:21 PM", or "8:21:12 PM" when another row shares its minute.
+   * The header carries ET. A series that crosses midnight also carries
+   * the date: "10/4 8:21 PM".
+   */
   label: string;
 }
 
@@ -51,11 +55,35 @@ const secondFmt = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
   second: '2-digit',
 });
+const dayKeyFmt = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+const monthDayFmt = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  month: 'numeric',
+  day: 'numeric',
+});
+const spokenDateFmt = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  month: 'long',
+  day: 'numeric',
+});
 
-function stamp(at: string, seconds: boolean): string {
+function stamp(at: string, seconds: boolean, withDate: boolean): string {
   const d = new Date(at);
   if (Number.isNaN(d.getTime())) return '—';
-  return `${(seconds ? secondFmt : minuteFmt).format(d)} ET`;
+  const time = (seconds ? secondFmt : minuteFmt).format(d);
+  if (!withDate) return time;
+  return `${monthDayFmt.format(d)} ${time}`;
+}
+
+function etDay(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return '';
+  return dayKeyFmt.format(d);
 }
 
 /** Collapse runs of the same line + price; returns oldest → newest. */
@@ -79,13 +107,14 @@ export function collapseLineHistory(points: HistoryPoint[]): HistoryRow[] {
     if (last && last.line === p.line && last.price === p.price) last.count += 1;
     else runs.push({ ...p, count: 1 });
   }
-  const minutes = runs.map((r) => stamp(r.at, false));
+  const withDate = new Set(runs.map((r) => etDay(r.at))).size > 1;
+  const minutes = runs.map((r) => stamp(r.at, false, withDate));
   const clash = new Set(minutes.filter((m, i) => minutes.indexOf(m) !== i));
   return runs.map((r, i) => ({
     ...r,
     opening: i === 0,
     key: `${r.at}#${i}`,
-    label: clash.has(minutes[i]) ? stamp(r.at, true) : minutes[i],
+    label: clash.has(minutes[i]) ? stamp(r.at, true, withDate) : minutes[i],
   }));
 }
 
@@ -143,7 +172,7 @@ export function changesFooter(
       r.shownChanges < r.changes
         ? `Last ${r.shownChanges} ${r.shownChanges === 1 ? 'change' : 'changes'} shown`
         : noun(r.changes);
-    return `${head} · some intermediate moves aren't listed`;
+    return `${head} · brief moves between samples may be missing`;
   }
   const head =
     r.shownChanges < r.changes
@@ -193,15 +222,107 @@ export function movementVerdict(opts: {
 
 /**
  * Time cell. The last pregame row is the close once the game has started.
- * A gap row the bisect did not pin is an upper bound, so it says "by 3:10 PM ET".
+ * A true live pick ends on Final. A gap row the bisect did not pin is an
+ * upper bound, so it says "by 8:21 PM" (or "by 10/4 8:21 PM"). ET is the
+ * column header, not the cell.
  */
 export function historyTimeLabel(
   label: string,
-  opts: { atCloseLast: boolean; bounded: boolean },
+  opts: { atCloseLast: boolean; atFinalLast?: boolean; bounded: boolean },
 ): string {
+  if (opts.atFinalLast) return 'Final';
   if (opts.atCloseLast) return 'Close';
   if (opts.bounded) return `by ${label}`;
   return label;
+}
+
+/** The sentence under a live pick's headline. Not green, not red. */
+export function inPlayMovementLabel(): string {
+  return 'In-play prices since your pick';
+}
+
+function speakMagnitude(n: number, signed: boolean): string {
+  const abs = Math.abs(n);
+  const body = Number.isInteger(abs) ? String(abs) : String(abs);
+  if (n < 0) return `minus ${body}`;
+  if (n > 0 && signed) return `plus ${body}`;
+  return body;
+}
+
+/** "October 4 at 11:33 AM" in Eastern time. Seconds when the cell shows them. */
+export function historySpokenWhen(at: string, seconds = false): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return 'time not available';
+  const time = (seconds ? secondFmt : minuteFmt).format(d);
+  return `${spokenDateFmt.format(d)} at ${time}`;
+}
+
+/**
+ * One VoiceOver label for a history row. Close and Final name the row.
+ * A pinned minute says when it changed. A "by" cell is an upper bound.
+ * A line is "plus" or "minus" only when the cell shows a sign.
+ */
+export function historyRowAccessibilityLabel(opts: {
+  marker: string;
+  at: string;
+  line: number | null;
+  price: number | null;
+  showLine: boolean;
+  signedLine?: boolean;
+}): string {
+  const seconds = /\d:\d{2}:\d{2}/.test(opts.marker);
+  const spoken = historySpokenWhen(opts.at, seconds);
+  const when =
+    opts.marker === 'Close' || opts.marker === 'Final'
+      ? opts.marker
+      : opts.marker.startsWith('by ')
+        ? `No later than ${spoken}`
+        : `Changed by ${spoken}`;
+  const parts: string[] = [];
+  if (opts.showLine) {
+    parts.push(opts.line == null ? 'line not available' : `line ${speakMagnitude(opts.line, opts.signedLine === true)}`);
+  }
+  parts.push(opts.price == null ? 'price not available' : `price ${speakMagnitude(opts.price, true)}`);
+  return `${when}: ${parts.join(', ')}`;
+}
+
+/** VoiceOver for the headline numbers. Minus is the word, not a hyphen. */
+export function movementHeadlineLabel(opts: {
+  kind: 'line' | 'price';
+  lock: number | null;
+  end: number | null;
+  atClose: boolean;
+  /** Spreads show a sign. Totals and props do not say "plus". */
+  signedLine?: boolean;
+}): string {
+  const signed = opts.kind === 'price' || opts.signedLine === true;
+  const speak = (n: number | null) => (n == null || Number.isNaN(n) ? 'not available' : speakMagnitude(n, signed));
+  const noun = opts.kind === 'line' ? 'Line ' : 'Price ';
+  const tail = opts.atClose ? ' at the close' : '';
+  return `${noun}${speak(opts.lock)} to ${speak(opts.end)}${tail}`;
+}
+
+/** American price on this card. Minus is U+2212. A missing price is an em dash. */
+export function formatHistoryAmerican(odds: number | null | undefined): string {
+  if (odds == null || Number.isNaN(Number(odds))) return '—';
+  const rounded = Math.round(Number(odds));
+  if (rounded > 0) return `+${rounded}`;
+  if (rounded < 0) return `\u2212${Math.abs(rounded)}`;
+  return '0';
+}
+
+/**
+ * A line on this card. Spreads always show a sign. A negative uses U+2212.
+ * Null is an em dash, not "N/A".
+ */
+export function formatHistoryLine(line: number | null | undefined, explicitSign: boolean): string {
+  if (line == null || Number.isNaN(Number(line))) return '—';
+  const n = Number(line);
+  const abs = Math.abs(n);
+  const body = Number.isInteger(abs) ? String(abs) : String(abs);
+  if (n < 0) return `\u2212${body}`;
+  if (n > 0 && explicitSign) return `+${body}`;
+  return body;
 }
 
 /**
@@ -345,13 +466,15 @@ export function formatBoundLike(sampleTs: string, instant: number | Date): strin
  * odds after commence_time, mostly still tagged snapshot_type 'open', so the
  * cap is the timestamp.
  *
- * A live pick — `is_live`, or created at/after the start — reads from its
- * lock and may continue past the start. A pick scored after the start with
- * `is_live` unset is still live: `created_at` is the lock.
+ * A live pick is `is_live === true` only. It reads from its lock and may
+ * continue past the start. A pick written after the start with `is_live`
+ * unset is still pregame: the read stops at commence_time and the last
+ * row is the close. Treating that pick as live priced the card off
+ * in-play odds and painted a loss green.
  *
- * Both instants come back normalized. An unparseable lock is unknown, not
- * pregame: capping it at the start would hide the in-play rows it was
- * written on.
+ * Both instants come back normalized. An unparseable lock on a live pick
+ * is unknown, not a pregame cap: capping it would hide the in-play rows
+ * it was written on. An unparseable lock on any other pick still caps.
  */
 export function lineHistoryWindow(input: {
   commenceTime: string | null | undefined;
@@ -365,16 +488,13 @@ export function lineHistoryWindow(input: {
     // No start time on the game or the pick, so this read is not capped.
     return {};
   }
-  const createdRaw = input.createdAt ?? '';
-  const created = createdRaw ? normalizeTimestamp(createdRaw) : null;
-  if (createdRaw && !created) {
-    // The lock did not parse. Unknown, not pregame.
-    return {};
-  }
-  const locked = created ? Date.parse(created) : Number.NaN;
-  const live = input.isLive === true || (Number.isFinite(locked) && locked >= kick);
-  if (live) {
-    if (!created || !Number.isFinite(locked)) return {};
+  if (input.isLive === true) {
+    const createdRaw = input.createdAt ?? '';
+    const created = createdRaw ? normalizeTimestamp(createdRaw) : null;
+    if (!created || Number.isNaN(Date.parse(created))) {
+      // The lock did not parse. Unknown, not pregame.
+      return {};
+    }
     return { from: created };
   }
   return { until: start };

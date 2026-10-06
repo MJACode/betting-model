@@ -251,13 +251,13 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
     { at: t(20, 30), line: 9, price: -105 },
   ]);
   check('repeated line + price collapse into one row', runs.length === 3 && runs[0].count === 3, JSON.stringify(runs.map((r) => r.count)));
-  check('distinct minutes print minute precision in ET', runs[0].label === '3:50 PM ET' && runs[1].label === '4:05 PM ET', runs.map((r) => r.label).join(' | '));
+  check('distinct minutes print minute precision in ET', runs[0].label === '3:50 PM' && runs[1].label === '4:05 PM', runs.map((r) => r.label).join(' | '));
   const flicker = collapseLineHistory([
     { at: t(19, 50, 5), line: null, price: -105 },
     { at: t(19, 50, 25), line: null, price: -115 },
     { at: t(19, 50, 45), line: null, price: -105 },
   ]);
-  check('rows sharing a minute get seconds', flicker.every((r) => /^3:50:\d\d PM ET$/.test(r.label)), flicker.map((r) => r.label).join(' | '));
+  check('rows sharing a minute get seconds', flicker.every((r) => /^3:50:\d\d PM$/.test(r.label)), flicker.map((r) => r.label).join(' | '));
   const many = Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 }));
   const rc = recentChanges(many, 8);
   check('the card shows the last 8 rows and counts every CHANGE (the opening row is not one)',
