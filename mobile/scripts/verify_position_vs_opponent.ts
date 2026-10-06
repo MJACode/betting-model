@@ -99,5 +99,10 @@ check('NCAAF QB falls back to the shared cut', roleCutText('QB', 'NCAAF') === '1
 check('NCAAF receiver footnote names the missing targets', /no targets/.test(footnoteText('WR', 'NCAAF')));
 check('NFL receiver footnote does not', !/no targets/.test(footnoteText('WR', 'NFL')));
 
+check('footnote keeps abbreviations upper case', footnoteText('WR', 'NCAAF').startsWith('Counts WRs '),
+  footnoteText('WR', 'NCAAF'));
+check('footnote lower-cases words', footnoteText('G', 'NBA') === 'Counts guards with 15+ minutes in the game.',
+  footnoteText('G', 'NBA'));
+
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
 process.exit(failed ? 1 : 0);

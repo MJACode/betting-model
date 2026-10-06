@@ -17,6 +17,8 @@
 --               receiver's role can only be seen through a catch — a 0-catch
 --               game is excluded, which leans the receiving hit rate UP. Said
 --               on the card's footnote.
+--   NCAAF rank   only among opponents with 3+ games that season (measured
+--               2026-10-06: 245 opponents in the 2026 log, 74 with one game).
 --
 -- OPPONENT. Basketball logs have no opponent column, so it comes from `games`
 -- (as in player_h2h_stat_values_*); NCAAF stores it on the row.
@@ -219,13 +221,22 @@ BEGIN
     ok AS (SELECT * FROM q WHERE has_role AND val IS NOT NULL),
     defense AS (
         SELECT ok.season, ok.opp AS defense, avg(ok.val) AS avg_allowed,
-               count(*)::int AS player_games
+               count(*)::int AS player_games,
+               count(DISTINCT ok.game_id)::int AS games
         FROM ok GROUP BY ok.season, ok.opp
     ),
+    -- Ranked only among opponents with 3+ games that season: measured
+    -- 2026-10-06, 245 opponents appear in the 2026 college log and 74 of them
+    -- (mostly FCS) have one game, so "Nth of 245" would rank one-game
+    -- samples. An opponent under the bar keeps its average and gets no rank.
     ranked AS (
-        SELECT d.*,
-               rank() OVER (PARTITION BY d.season ORDER BY d.avg_allowed DESC)::int AS rank_most_allowed,
-               count(*) OVER (PARTITION BY d.season)::int AS teams_ranked
+        SELECT d.season, d.defense, d.avg_allowed, d.player_games,
+               CASE WHEN d.games >= 3 THEN
+                   rank() OVER (PARTITION BY d.season, d.games >= 3 ORDER BY d.avg_allowed DESC)::int
+               END AS rank_most_allowed,
+               CASE WHEN d.games >= 3 THEN
+                   count(*) OVER (PARTITION BY d.season, d.games >= 3)::int
+               END AS teams_ranked
         FROM defense d
     )
     SELECT ok.season::int, ok.player_id::text, ok.player_name::text, ok.team::text,

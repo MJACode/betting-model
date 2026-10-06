@@ -310,3 +310,35 @@ def test_the_player_page_reads_its_own_position_by_key():
     assert ".maybeSingle()" in body
     for s in ("nba", "wnba", "ncaaf"):
         assert f".rpc('position_vs_opponent_{s}'" in q
+
+
+def test_ncaaf_ranks_only_opponents_with_three_games():
+    """Measured 2026-10-06: 245 opponents in the 2026 college log, 74 with one
+    game. A one-game sample keeps its average and gets no rank."""
+    b = _bn_body("ncaaf")
+    assert "count(DISTINCT ok.game_id)::int AS games" in b
+    assert "CASE WHEN d.games >= 3 THEN" in b
+    assert "PARTITION BY d.season, d.games >= 3" in b
+    for s in ("nba", "wnba"):
+        assert "d.games >= 3" not in _bn_body(s)
+
+
+def test_a_failed_position_read_is_said_not_hidden():
+    """No row = no card (the roster pull has not placed him). A failed read
+    renders the section with an error line instead (UX_REVIEW §3)."""
+    hook = HOOK.read_text(encoding="utf-8")
+    assert ("isRosterSport && opponent && stat && !posGroup && (rosterPos.loading || rosterPos.error)"
+            in hook)
+    screen = SCREEN.read_text(encoding="utf-8")
+    assert "<PositionVsOpponentPending" in screen
+    card = CARD.read_text(encoding="utf-8")
+    assert "Couldn't load this player's position. Pull down to retry." in card
+
+
+def test_the_card_opens_on_last_season_when_this_one_is_empty():
+    card = CARD.read_text(encoding="utf-8")
+    assert "if (!hasThis && hasLast) setChoice('last');" in card
+    # Once only, and never over the reader's own choice.
+    assert "if (picked.current || loading || rows.length === 0) return;" in card
+    assert "const pick = (c: SeasonChoice) => {\n    picked.current = true;" in card
+    assert "toLowerCase()" not in card

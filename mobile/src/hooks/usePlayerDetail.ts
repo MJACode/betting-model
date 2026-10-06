@@ -341,6 +341,12 @@ export function usePlayerDetail(args: {
     nextGame,
     h2h,
     h2hLoading: h2hRow.loading,
+    // The card's place while a roster sport's position is read, or why it
+    // failed; null once the read succeeds (row or no row) and elsewhere.
+    positionVsOpponentPending:
+      isRosterSport && opponent && stat && !posGroup && (rosterPos.loading || rosterPos.error)
+        ? { opponent, loading: rosterPos.loading, error: rosterPos.error }
+        : null,
     positionVsOpponent:
       opponent && posGroup && pvoSeason != null
         ? {

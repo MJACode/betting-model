@@ -105,6 +105,20 @@ const GROUP_PLURAL: Record<PositionGroup, string> = {
   C: 'Centers',
 };
 
+/** Mid-sentence form: abbreviations keep their capitals ("WRs", never
+ *  "wrs" — VoiceOver spells that out), words go lower case (UX review,
+ *  2026-10-06). */
+const GROUP_PROSE: Record<PositionGroup, string> = {
+  QB: 'QBs', RB: 'RBs', WR: 'WRs', TE: 'TEs',
+  DL: 'defensive linemen', LB: 'linebackers', DB: 'defensive backs',
+  TOP: '1–3 hitters', MID: '4–6 hitters', BOT: '7–9 hitters', SP: 'starting pitchers',
+  G: 'guards', F: 'forwards', C: 'centers',
+};
+
+export function groupProse(g: PositionGroup): string {
+  return GROUP_PROSE[g];
+}
+
 /** Short form for captions: "6 of 10 WR games", "Avg hits per 1–3 hitter". */
 const GROUP_SHORT: Record<PositionGroup, string> = {
   QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', DL: 'DL', LB: 'LB', DB: 'DB',
@@ -171,7 +185,7 @@ export function footnoteText(g: PositionGroup, sport?: string): string {
     case 'SP':
       return `Counts starts only; relief outings don't count.`;
     default: {
-      const base = `Counts ${GROUP_PLURAL[g].toLowerCase()} with ${roleCutText(g, sport)} in the game.`;
+      const base = `Counts ${GROUP_PROSE[g]} with ${roleCutText(g, sport)} in the game.`;
       // Said out loud: a 0-catch college game cannot be seen as a role.
       return sport === 'NCAAF' && (g === 'WR' || g === 'TE')
         ? `${base} College box scores carry no targets, so a game with no catch can't be counted.`
