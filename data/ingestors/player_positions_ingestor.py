@@ -38,8 +38,15 @@ nothing here raises on a single bad athlete.
   ESPN team list   /v2/sports/basketball/leagues/{league}/teams?limit=50
                    -> items[].$ref (.../teams/{id}?...)
   ESPN team doc    {id, abbreviation, displayName}
-  ESPN roster      /v2/sports/basketball/leagues/{league}/teams/{id}/athletes?limit=200
+  ESPN roster      /v2/sports/basketball/leagues/{league}/seasons/{year}/teams/{id}/athletes?limit=200
                    -> items[].$ref (.../athletes/{id}?...)
+                   MEASURED on the worker 2026-10-06 (dry run, job 405765): the
+                   season-less /teams/{id}/athletes answers 404 for every NBA and
+                   WNBA team, while /teams?limit=50 lists 30 and 17. Which season
+                   LABEL ESPN files the current roster under is not measured yet
+                   (the NBA season starting this month may be 2026 or 2027), so
+                   roster_candidates() tries the likely years in order and the
+                   run summary records the one that answered.
   ESPN athlete     {id, displayName, fullName, position{abbreviation | $ref}}
   CFBD /roster     [{id, firstName, lastName, team, position, year?}]
 
@@ -257,6 +264,18 @@ def _upsert(conn, rows: list[dict]) -> int:
 
 # ── basketball ───────────────────────────────────────────────────────────────
 
+def roster_candidates(league: str, team_id: str, today: datetime | None = None) -> list[str]:
+    """Season-scoped roster URLs to try, most likely first.
+
+    NBA seasons straddle two years (ending-year label in this repo, CLAUDE.md
+    §4); WNBA is the year of play. Both orders end with the neighbouring years
+    so a label convention we have not measured still finds the roster.
+    """
+    year = (today or datetime.now(timezone.utc)).year
+    years = [year + 1, year, year - 1] if league == "nba" else [year, year + 1, year - 1]
+    return [f"{CORE}/{league}/seasons/{y}/teams/{team_id}/athletes?limit=200" for y in years]
+
+
 def _basketball(conn, sport: str, dry_run: bool) -> dict:
     league = LEAGUE_OF[sport]
     teams = _refs(_get_json(f"{CORE}/{league}/teams?limit=50"))
@@ -264,7 +283,7 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
     fresh = set() if dry_run else _fresh_source_ids(conn, sport)
     stats = {"teams": len(teams), "athletes_listed": 0, "athletes_fetched": 0,
              "skipped_fresh": 0, "unparsed": 0, "matched": 0, "unmatched": 0,
-             "match_method": {}, "tiebreak_sample": [],
+             "match_method": {}, "tiebreak_sample": [], "roster_season_used": {},
              "no_group": 0, "positions": {}, "sample": [], "unmatched_sample": []}
     out: list[dict] = []
     for tref in teams:
@@ -273,7 +292,13 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
         m = _TEAM_ID.search(tref)
         if not m:
             continue
-        roster = _refs(_get_json(f"{CORE}/{league}/teams/{m.group(1)}/athletes?limit=200"))
+        roster: list[str] = []
+        for url in roster_candidates(league, m.group(1)):
+            roster = _refs(_get_json(url))
+            if roster:
+                used = url.split("/seasons/")[1].split("/")[0]
+                stats["roster_season_used"][used] = stats["roster_season_used"].get(used, 0) + 1
+                break
         for aref in roster:
             stats["athletes_listed"] += 1
             am = _ATHLETE_ID.search(aref)
@@ -373,6 +398,13 @@ def ingest_player_positions(sports=None, season: int | None = None,
     season = season or datetime.now().year
     conn = get_connection()
     summary: dict = {"dry_run": dry_run}
+    if not dry_run and conn.execute(
+            "SELECT to_regclass('public.player_positions')").fetchone()[0] is None:
+        conn.close()
+        # Raised, not reported: a job that "succeeds" with a per-sport error
+        # inside is never retried, and the table lands on the next refresh
+        # pass (add_player_positions.sql), so a retry is what fixes it.
+        raise RuntimeError("player_positions does not exist yet (migration pending)")
     try:
         for sport in sports:
             try:
