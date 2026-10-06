@@ -449,6 +449,7 @@ export function TeamsBoard({
             numberOfLines={teamStatHeaderLines(fontScale)}
             adjustsFontSizeToFit
             minimumFontScale={0.75}
+            maxFontSizeMultiplier={1.6}
             accessibilityLabel={stat.spoken ?? stat.header ?? stat.label}
           >
             {teamStatHeaderText(stat.header ?? stat.label, fontScale)}
