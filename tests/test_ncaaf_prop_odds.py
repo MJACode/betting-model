@@ -20,12 +20,15 @@ The invariants pinned here are the ones that cost money or corrupt the table:
 """
 
 import io
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 import config
 from data.ingestors import ncaaf_prop_odds_ingestor as m
+from data.ingestors import odds_ingestor as oi
 
 ROOT = Path(__file__).parent.parent
 
@@ -95,14 +98,35 @@ def test_alternates_never_share_a_chunk_with_a_standard_market():
 
 # ── scope ────────────────────────────────────────────────────────────────────
 
+def _game_row(game_id: str):
+    """(game_id, game_date, home, away) from NCAAF_{date}_{away}_{home}.
+
+    The stored names are the slugs. ncaaf_slug is idempotent on those, so
+    the shared resolver matches them to the resolved school names.
+    """
+    date, away, home = game_id[len("NCAAF_"):].split("_", 2)
+    return (game_id, date, home, away)
+
+
 class _Conn:
-    """games / odds for one Saturday, in the shape scope_events queries."""
+    """games / odds in the shape the prop scope queries.
+
+    The games load is the shared resolver's window (id, date, home, away).
+    The DK query is still one game_id per lined game.
+    """
 
     def __init__(self, known, lined):
         self.known, self.lined = known, lined
+        self.queries = []
 
     def execute(self, sql, params=None):
-        rows = [(g,) for g in (self.lined if "o.bookmaker" in sql else self.known)]
+        self.queries.append((sql, params))
+        if "o.bookmaker" in sql:
+            rows = [(g,) for g in self.lined]
+        elif "home_team" in sql:
+            rows = [_game_row(g) for g in self.known]
+        else:
+            rows = [(g,) for g in self.known]
         return type("R", (), {"fetchall": lambda _self: rows})()
 
 
@@ -125,6 +149,8 @@ def resolver(monkeypatch):
         "Fresno State Bulldogs": "Fresno State",
         "Carthage Red Men": "Carthage",
         "Lakeland Muskies": "Lakeland",
+        "UNLV Rebels": "UNLV",
+        "Memphis Tigers": "Memphis",
     }
     monkeypatch.setattr(m, "resolve_odds_api_school",
                         lambda n, conn=None: names.get(n, n))
@@ -174,6 +200,143 @@ def scope(conn, **kw):
     kw.setdefault("require_dk_line", True)
     kw.setdefault("max_events", 80)
     return m.scope_events(conn, EVENTS, DATE, **kw)
+
+
+# Memphis @ UNLV, 10:19pm ET 2026-08-29. The games row is the UTC id.
+MEMPHIS_UTC = "NCAAF_2026-08-30_memphis_unlv"
+MEMPHIS_ET = "NCAAF_2026-08-29_memphis_unlv"
+MEMPHIS_ET_DATE = "2026-08-29"
+MEMPHIS_EVENT = {"id": "memphis", "home_team": "UNLV Rebels",
+                 "away_team": "Memphis Tigers",
+                 "commence_time": "2026-08-30T02:19:00Z"}
+
+
+def test_a_late_kickoff_on_a_utc_row_stays_in_scope_on_that_id(resolver):
+    """The game-line ingest reused the UTC id. Props must land on it, not
+    on an ET id that was never written."""
+    conn = _Conn(known=[MEMPHIS_UTC], lined=[MEMPHIS_UTC])
+    kept, dropped = m.scope_events(
+        conn, [MEMPHIS_EVENT], MEMPHIS_ET_DATE,
+        require_dk_line=True, max_events=80)
+    assert [(ev["id"], gid) for ev, gid in kept] == [("memphis", MEMPHIS_UTC)]
+    assert dropped["unresolved"] == 0
+    assert dropped["no_dk_line"] == 0
+
+
+def test_the_dk_filter_accepts_a_line_on_the_utc_row(resolver):
+    """The line is stored on the UTC game_id. Asking for the ET slate date
+    still sees it: the filter uses the resolver's ±1 day, not that date."""
+    conn = _Conn(known=[MEMPHIS_UTC], lined=[MEMPHIS_UTC])
+    assert m._dk_lined_game_ids(conn, MEMPHIS_ET_DATE) == {MEMPHIS_UTC}
+    _sql, params = conn.queries[-1]
+    assert params[0] == "2026-08-28"
+    assert params[1] == "2026-08-30"
+    assert "BETWEEN" in _sql
+    kept, dropped = m.scope_events(
+        conn, [MEMPHIS_EVENT], MEMPHIS_ET_DATE,
+        require_dk_line=True, max_events=80)
+    assert [gid for _ev, gid in kept] == [MEMPHIS_UTC]
+    assert dropped["no_dk_line"] == 0
+
+
+def test_the_historical_prop_path_resolves_a_utc_row(monkeypatch, resolver):
+    conn = _Conn(known=[MEMPHIS_UTC], lined=[MEMPHIS_UTC])
+    monkeypatch.setattr(m, "list_historical_ncaaf_events",
+                        lambda ts: ([MEMPHIS_EVENT], None))
+    monkeypatch.setattr(m, "_historical_event_props",
+                        lambda *a, **k: ([{"key": "draftkings", "markets": [{}]}],
+                                         "2026-08-29T12:00:00Z", 1))
+    seen = []
+
+    def parse(markets, game_id, game_date, *a, **k):
+        seen.append((game_id, game_date))
+        return [{"game_id": game_id}]
+
+    monkeypatch.setattr(m, "_parse_prop_markets", parse)
+    monkeypatch.setattr(m, "_insert_prop_odds", lambda c, rows: len(rows))
+    monkeypatch.setattr(m.time, "sleep", lambda s: None)
+    total = {"rows": 0, "events": 0, "skipped": 0, "credits": 0, "dates": 0}
+    n = m._backfill_ncaaf_one_date(
+        conn, MEMPHIS_ET_DATE, 1, ["player_pass_yds"], ["draftkings"],
+        None, "open", total)
+    assert n == 1
+    assert seen == [(MEMPHIS_UTC, MEMPHIS_ET_DATE)]
+    assert total["skipped"] == 0
+    assert total["events"] == 1
+
+
+def test_a_fresh_late_kickoff_with_only_an_et_row_still_resolves(resolver):
+    """Nothing was preloaded on the UTC date. The ET row is the one both
+    ingestors write, and props stay on it."""
+    conn = _Conn(known=[MEMPHIS_ET], lined=[MEMPHIS_ET])
+    kept, dropped = m.scope_events(
+        conn, [MEMPHIS_EVENT], MEMPHIS_ET_DATE,
+        require_dk_line=True, max_events=80)
+    assert [gid for _ev, gid in kept] == [MEMPHIS_ET]
+    assert dropped["unresolved"] == 0
+
+
+def test_a_failed_games_lookup_skips_the_slate_and_says_so(monkeypatch, resolver):
+    """The line ingest would mint. Props drop every event, and the warning
+    says that, with the count. It does not say it is minting ids."""
+    def boom(conn, start, end):
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(oi, "_load_ncaaf_games", boom)
+    other = {"id": "2", "home_team": "USC Trojans", "away_team": "Fresno State Bulldogs"}
+    seen = []
+    sink = logger.add(lambda msg: seen.append(msg.record["message"]),
+                      level="WARNING", format="{message}")
+    try:
+        kept, dropped = m.scope_events(
+            _Conn(known=[MEMPHIS_UTC], lined=[MEMPHIS_UTC]),
+            [MEMPHIS_EVENT, other], MEMPHIS_ET_DATE,
+            require_dk_line=False, max_events=80)
+    finally:
+        logger.remove(sink)
+    assert kept == []
+    assert dropped["unresolved"] == 2
+    assert any(
+        "skipped 2 event(s) because the games lookup failed" in msg
+        and MEMPHIS_ET_DATE in msg for msg in seen)
+    assert not any("minting ids" in msg for msg in seen)
+
+
+def test_the_prop_backfill_loads_the_games_window_once(monkeypatch):
+    """Three dates used to each load [day-2, day+200]. One range loads once,
+    from two days before the first date through 200 days after the last."""
+    loads = []
+
+    class _RangeConn:
+        def execute(self, sql, params=None):
+            if "FROM games" in sql and "home_team" in sql:
+                loads.append(params)
+
+            class _Cur:
+                def fetchall(self):
+                    return []
+
+            return _Cur()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(m, "get_connection", lambda: _RangeConn())
+    monkeypatch.setattr(m, "persist_quota", lambda c: None)
+    monkeypatch.setattr(m, "ODDS_API_KEY", "test")
+    monkeypatch.setattr(m, "list_historical_ncaaf_events", lambda ts: ([], None))
+    m.backfill_ncaaf_prop_odds(
+        ["2026-09-01", "2026-09-02", "2026-09-03"],
+        markets=["player_pass_yds"], books="draftkings", skip_existing=False)
+    start = (date(2026, 9, 1) - timedelta(days=oi._NCAAF_REUSE_LOOKBACK_DAYS)).isoformat()
+    end = (date(2026, 9, 3) + timedelta(days=oi._NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat()
+    assert loads == [(start, end)]
 
 
 # ── the event call ───────────────────────────────────────────────────────────

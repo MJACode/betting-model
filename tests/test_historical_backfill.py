@@ -193,6 +193,54 @@ def test_a_rerun_can_be_told_to_ignore_the_pull_ledger():
     assert "_ledger_entry_is_resumable" in src
 
 
+def test_a_ncaaf_range_loads_the_games_window_once(monkeypatch):
+    """Three days used to each load [day-2, day+200]. One range loads once,
+    from two days before the first date through 200 days after the last."""
+    from datetime import date as _date, timedelta as _td
+
+    import data.ingestors.odds_ingestor as oi
+
+    loads = []
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            if "FROM games" in sql and "NCAAF" in sql:
+                loads.append(params)
+
+            class _Cur:
+                def fetchone(self):
+                    return None
+
+                def fetchall(self):
+                    return []
+
+            return _Cur()
+
+        def executemany(self, sql, rows):
+            pass
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(oi, "get_connection", lambda: _Conn())
+    monkeypatch.setattr(oi, "lock_down", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "_get_historical_odds", lambda *a, **k: [])
+    monkeypatch.setattr(oi.time, "sleep", lambda *a, **k: None)
+    oi.run_historical_odds_range(
+        "NCAAF", "2026-09-01", "2026-09-03",
+        hours_utc=[12], credit_cap=10_000,
+    )
+    start = (_date(2026, 9, 1) - _td(days=oi._NCAAF_REUSE_LOOKBACK_DAYS)).isoformat()
+    end = (_date(2026, 9, 3) + _td(days=oi._NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat()
+    assert loads == [(start, end)]
+
+
 def test_ignore_ledger_still_resumes_its_own_pulls():
     """The first version of ignore_ledger ignored EVERY ledger row -- including
     the ones the re-buy itself had just written. Four worker redeploys in

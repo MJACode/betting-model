@@ -115,8 +115,8 @@ def test_parse_games_leaves_home_win_null_on_a_tie():
 #
 # The odds ingestor dates by America/New_York. Taking CFBD's UTC startDate[:10]
 # filed a ~8pm-ET kick on the next calendar day and twinned the odds row.
-# parse_games now uses the same ET conversion. Historical UTC ids are retained
-# at ingest time, not rewritten here.
+# parse_games now uses the same ET conversion. A historical UTC id is retained
+# at ingest time only when that row already has team logs, not rewritten here.
 
 
 def test_eastern_game_date_matches_the_odds_ingestor_for_a_night_kick():
@@ -166,6 +166,8 @@ def test_parse_lines_dates_a_night_kick_by_et_not_utc():
 
 
 def test_retain_keeps_the_historical_utc_id_when_that_row_already_exists():
+    """Memphis @ UNLV, 10:19pm ET 2026-08-29. The UTC row is already in
+    `games`, played or not. Re-dating it would insert an ET twin."""
     rows = parse_games([{
         "id": 99, "season": 2026,
         "startDate": "2026-08-30T02:19:00.000Z",
@@ -233,7 +235,8 @@ class _GamesConn:
 
 def test_ingest_games_retains_a_historical_utc_id_and_uses_et_for_a_new_row(
         monkeypatch):
-    """The writer — not just the helper — is what would orphan the FKs."""
+    """The writer — not just the helper — is what would orphan the FKs.
+    The set is ids already in `games`, including an unplayed UTC preload."""
     from data.ingestors import cfbd_ingestor as cf
 
     night = {
@@ -818,6 +821,7 @@ def fbs_registry(monkeypatch):
         {"school": "Tennessee",      "mascot": "Volunteers",       "alt": []},
         {"school": "Northwestern",   "mascot": "Wildcats",         "alt": []},
         {"school": "Arkansas",       "mascot": "Razorbacks",       "alt": []},
+        {"school": "Idaho",          "mascot": "Vandals",          "alt": []},
         {"school": "Hawai'i",        "mascot": "Rainbow Warriors", "alt": []},
         {"school": "Ohio",           "mascot": "Bobcats",          "alt": []},
         {"school": "Ohio State",     "mascot": "Buckeyes",         "alt": []},
@@ -834,6 +838,7 @@ def fbs_registry(monkeypatch):
     "Northwestern State Demons",        # Louisiana Tech
     "Utah Tech Trailblazers",           # BYU
     "Arkansas-Pine Bluff Golden Lions", # Missouri, 2026-09-03
+    "Idaho State Bengals",              # Utah, 2026-09-03 — the eighth measured case
 ])
 def test_an_fcs_name_that_extends_an_fbs_school_passes_through_unresolved(
         fbs_registry, fcs_name):

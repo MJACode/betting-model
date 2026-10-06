@@ -180,6 +180,11 @@ def retain_existing_cfbd_ids(rows: list[dict], existing_ids: set[str]) -> list[d
     second row and orphan ncaaf_team_game_log / ncaaf_qb_game FKs. If the
     UTC id is already in `games`, put the row back on it. New rows (UTC id
     absent) keep the ET id. In-place; returns the same list.
+
+    This stays until Night Watch Part B rekeys the unplayed 2026 UTC rows.
+    Gating it on team logs re-dates a preload that has no logs yet, and the
+    results upsert then inserts a scored ET row beside the UTC row odds
+    already reused. The odds lookup is what stops a new ET twin.
     """
     for r in rows:
         utc_id = r.get("_utc_game_id")
@@ -197,6 +202,11 @@ def retain_existing_cfbd_ids(rows: list[dict], existing_ids: set[str]) -> list[d
 
 
 def _existing_ncaaf_ids(conn, rows: list[dict]) -> set[str]:
+    """UTC game ids in `rows` that already have a `games` row.
+
+    Existence is the whole check. An unplayed 2026 preload has no team logs
+    yet; dropping it here is what inserts the ET twin on results day.
+    """
     ids = [r["_utc_game_id"] for r in rows if r.get("_utc_game_id")]
     if not ids:
         return set()
@@ -1147,7 +1157,9 @@ def ingest_ncaaf_games(season: int, conn=None) -> tuple[int, dict, dict]:
                 if "fbs" in {str(g.get("_home_classification") or "fbs").lower(),
                              str(g.get("_away_classification") or "fbs").lower()}]
         # New rows get the ET id parse_games just built. A UTC id that already
-        # exists stays — rewriting it would orphan the 2015–2025 box-score FKs.
+        # exists stays — rewriting it would orphan the 2015–2025 box-score FKs
+        # and, for an unplayed 2026 preload, insert an ET twin beside the row
+        # the odds ingestor reuses. Rekey is Night Watch Part B, not this.
         retain_existing_cfbd_ids(keep, _existing_ncaaf_ids(conn, keep))
 
         conn.executemany(_GAME_UPSERT, _norm(keep, _GAME_FIELDS))
@@ -1566,8 +1578,9 @@ def _day_before(date_str: str) -> str:
 # Night games ingested BEFORE the 2026-09-13 ET dating policy have TWO games
 # rows under two ids — e.g. a 10:19pm ET kick is NCAAF_2026-08-29_memphis_unlv
 # (odds, Eastern date) and NCAAF_2026-08-30_memphis_unlv (CFBD, UTC prefix).
-# New CFBD rows date by ET and share the odds id; those historical twins stay.
-# Re-keying them would orphan ncaaf_team_game_log / ncaaf_qb_game FKs 2015–2025.
+# New rows date by ET. A UTC id is kept whenever that games row already
+# exists, whether or not it has team logs, until Night Watch Part B rekeys
+# the unplayed 2026 UTC rows.
 #
 # Picks always attach to the ODDS row: it is the one that exists when the board
 # is priced. CFBD wrote the final to its OWN row. So without this the generic

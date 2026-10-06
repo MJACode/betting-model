@@ -19,6 +19,12 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, a failed games lookup on the prop path logs how many events were skipped. The prop backfill loads the games window once per range |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, NCAAF props use the game-line resolver (±1 day, either order) so a late kickoff on a UTC games row is not skipped. Props are not flipped. DK line window is that same ±1 day |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, comment above the NCAAF score mirror now matches retain: a UTC id stays if the games row exists, with or without team logs, until Part B. New rows date by ET. No code change |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, NCAAF UTC id is kept whenever the games row exists (the team-log gate re-dated unplayed preloads). Ambiguity warned once per run. A non-numeric spread skips that event. Historical NCAAF window loaded once per range |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, swapped-only NCAAF reuse flips side-specific odds onto the stored home team (spread sign included). One warning per run with the count. Exact-orientation reuse unchanged |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, NCAAF ingest reuses an existing games row (same two schools, either order, ±1 day of the ET date) instead of minting an ET/UTC twin. UTC CFBD ids kept only when ncaaf_team_game_log already has them. No data fix, no feature-engine change |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions: shared names settled by most recent game (never skipped); MLB position card becomes a per-player summary |
