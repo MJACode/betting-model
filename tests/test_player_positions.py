@@ -156,3 +156,46 @@ def test_the_first_run_declared_for_the_worker_is_a_dry_run():
     ours = [j for j in jobs if j["job_type"] == "player_positions"]
     assert ours, "declare the dry run so the worker runs it"
     assert all(j["args"].get("dry_run") is True for j in ours[:1])
+
+
+def test_rosters_are_read_under_a_season():
+    """The season-less roster URL answered 404 for every team on the worker
+    (job 405765, 2026-10-06); the season-scoped one is tried, likeliest year
+    first, with the neighbours as fallbacks."""
+    from datetime import datetime, timezone
+
+    from data.ingestors.player_positions_ingestor import roster_candidates
+
+    oct_2026 = datetime(2026, 10, 6, tzinfo=timezone.utc)
+    nba = roster_candidates("nba", "13", oct_2026)
+    assert [u.split("/seasons/")[1].split("/")[0] for u in nba] == ["2027", "2026", "2025"]
+    assert all("/teams/13/athletes?limit=200" in u for u in nba)
+    wnba = roster_candidates("wnba", "3", oct_2026)
+    assert [u.split("/seasons/")[1].split("/")[0] for u in wnba] == ["2026", "2027", "2025"]
+    assert not any("/leagues/nba/teams/" in u for u in nba)
+
+
+def test_a_real_run_before_the_table_exists_fails_so_it_is_retried(monkeypatch):
+    """A job that returns a per-sport error inside a 'done' result is never
+    retried; a missing table must raise instead."""
+    import data.db as db
+    from data.ingestors import player_positions_ingestor as ppi
+
+    class _Cur:
+        def fetchone(self):
+            return (None,)
+
+    class _Conn:
+        closed = False
+
+        def execute(self, *a, **k):
+            return _Cur()
+
+        def close(self):
+            self.closed = True
+
+    conn = _Conn()
+    monkeypatch.setattr(db, "get_connection", lambda: conn)
+    with pytest.raises(RuntimeError, match="does not exist yet"):
+        ppi.ingest_player_positions(sports=["NCAAF"], dry_run=False)
+    assert conn.closed
