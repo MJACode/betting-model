@@ -661,25 +661,26 @@ class TestOneNhlPropBetAGame:
         assert "do_publish=not dry_run" not in body
 
 
-class TestTwoNhlPropBetsANight:
-    """mike, 2026-10-03: "Too many fucking unders nhl props." At most two a night."""
+class TestFourNhlPropBetsANight:
+    """At most four a night (mike, 2026-10-08; two from 10-03, "Too many fucking unders nhl props.")."""
 
     @staticmethod
     def _r(gid: str, date: str, ev: float) -> dict:
         return {"game_id": gid, "game_date": date, "model_id": "nhl_prop_saves", "player_id": gid, "_ev": ev}
 
-    def test_the_two_best_of_the_night_are_kept(self):
+    def test_the_four_best_of_the_night_are_kept(self):
         rows = [self._r("A", "2026-10-04", 0.19), self._r("B", "2026-10-04", 0.40),
-                self._r("C", "2026-10-04", 0.25), self._r("D", "2026-10-05", 0.18)]
+                self._r("C", "2026-10-04", 0.25), self._r("E", "2026-10-04", 0.21),
+                self._r("F", "2026-10-04", 0.30), self._r("D", "2026-10-05", 0.18)]
         kept = card.per_night(rows)
-        assert sorted(r["game_id"] for r in kept) == ["B", "C", "D"]
+        assert sorted(r["game_id"] for r in kept) == ["B", "C", "D", "E", "F"]
 
     def test_picks_already_written_that_night_count(self):
         rows = [self._r("A", "2026-10-04", 0.50), self._r("B", "2026-10-04", 0.30)]
-        assert [r["game_id"] for r in card.per_night(rows, {"2026-10-04": 1})] == ["A"]
+        assert [r["game_id"] for r in card.per_night(rows, {"2026-10-04": 3})] == ["A"]
         assert card.per_night(rows, {"2026-10-04": 21}) == []
 
-    def test_the_limit_is_two_and_the_writer_applies_it(self):
-        assert card.MAX_PROP_BETS_PER_NIGHT == 2
+    def test_the_limit_is_four_and_the_writer_applies_it(self):
+        assert card.MAX_PROP_BETS_PER_NIGHT == 4
         src = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
         assert "chosen = per_night(one_per_game(rows, taken), written)" in src

@@ -21,6 +21,74 @@
 
 ---
 
+## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
+
+Two a night became four (`scripts/nhl_props_card.MAX_PROP_BETS_PER_NIGHT`),
+`Updated-By: mike`. What remains open is the first-come ordering, below.
+
+## [ ] NHL props: first-come slots (2026-10-08 assessment)
+
+Full numbers: `docs/nhl_clv_ev_assessment.md`. Two caps apply across the four
+NHL prop models: one bet a game, and two a night. The nightly cap costs units
+a season against every looser rule, in every season, and the intervals clear
+zero (corrected for the name defect below).
+
+The caps also fill first-come. The 00:18 ET pass sees only Hard Rock, for
+shots on goal and assists. It can take both nightly slots before saves and
+blocked shots are posted, about 70 minutes before puck drop. Choosing the
+night's best two instead is +5.1 pp in the backtest at 0.18, but its interval
+is -0.5..+10.7, so that size is not established. The size of either cap is
+mike's call (10-02 "best of the best", 10-03 "too many unders").
+
+## [x] NHL props: a CLV-only closing snapshot — DECIDED 2026-10-08 (mike): added
+
+Built as the FINAL in `data/ingestors/nhl_prop_odds_ingestor.py`: between 25
+and 12 minutes before the feed's start time, filed as snapshot_type 'close'
+so no card decides on it. Read the first week of prop CLV once it exists.
+The original item:
+
+The prop ingestor buys an open and a 70-minute close. Saves and blocked shots
+appear only in the close, so they are bet on it, and their CLV is zero (or a
+same-instant gap) by construction. One more snapshot per game makes CLV
+measurable. Measured cost: 5 credits a game per snapshot, about 6,600 credits
+over a 1,312-game season. It spends credits, so it needs mike's OK.
+
+## [ ] [needs-decision] CLV is graded at DraftKings' price, not the price taken
+
+`tracking/paper_tracker._capture_clv` grades `dk_odds` against a DraftKings
+lock snapshot whenever DraftKings hung the line, even when the pick was
+decided and settled at another book. 17 of 23 regulation bets and 15 of 30
+measured shots-on-goal bets. Grading `decision_odds` at `decision_book` changes
+the published CLV of every model that shops books, so it is a decision.
+(Picks with no DraftKings price at all were fixed on 2026-10-08.)
+
+## [ ] Two smaller CLV-capture defects (found 2026-10-08)
+
+- The prop close lookup matches names exactly: Pinnacle's "Lafreniere" missed
+  DraftKings' "Lafrenière" and fell back to a structural 0.0
+  (`paper_tracker.py`, the `player_name = %s` lookup).
+- Before a game `games.commence_time` carries the feed's :10 time; after
+  settlement it carries the NHL's :00. A close read before settlement can take
+  a quote from the first ten minutes after the scheduled start. Whether those
+  quotes are in-play prices is not measured.
+
+## [ ] NHL derivative totals: the grade has two defects
+
+Found 2026-10-08. Team totals were graded on regulation goals, but every book
+prices full-game goals; on full-game goals the same unders lose (-1.78% at EV
+≥ 0.10). The alternate and first-period grades paid a push as an under win on
+whole-number lines. Fix both in `scripts/nhl_derivative_totals_backtest.py`
+and re-grade (it is on the `nhl_research` allowlist). The purchase itself is
+done: all 4,192 priced games.
+
+## [ ] A best-price quote far from every other book is taken as real
+
+"FLA ML" was decided on BetMGM +154 while DraftKings had FLA -125 in the same
+fetch, and Pinnacle closed FLA at -138. `_fresh_quotes` (models/scorer.py)
+checks a quote's age, not how far it sits from the other books. Measured across
+all models since 2026-09-09: a gap of 10+ points appears on 10 rows and 1 BET.
+A guard changes which bets fire, so it is a model update.
+
 ## [ ] [needs-decision] A BET the scorer writes on the corrected probability can fail the publishers' cut on the model's own
 
 Found 2026-10-01 through the NHL picks. The scorer decides on the corrected

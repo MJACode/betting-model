@@ -4,6 +4,11 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+> **2026-10-08: `docs/nhl_clv_ev_assessment.md` is the current grade of every
+> NHL model for closing-line value and expected value.** The prop backtest
+> figures quoted below before that date are inflated by a shared-name defect
+> (#895). The nightly prop limit is four (mike).
+
 > **Read `docs/nhl_market_research.md` first (2026-09-20).** The 2026-06-21
 > holdout numbers in the table below were produced on season-final inputs. On
 > the rebuilt inputs `nhl_moneyline` walks forward at AUC 0.585 and a log loss

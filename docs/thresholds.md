@@ -343,6 +343,26 @@ first. Every floor 0.18 (mike, 2026-10-02: "1 max ... the best of the best").
 
 Every season positive across 0.14-0.22. Chosen on the seasons it is graded on.
 
+> **CORRECTED 2026-10-08 — the table above is inflated.** The backtest matched
+> prices to players by name only. The two Elias Petterssons (both Vancouver)
+> and the two Sebastian Ahos shared one price, and it graded the forward's
+> shots-on-goal under on the defenceman's count: 124 bets, +89.8 units at a
+> 90% win rate. The live card never placed these bets, because it refuses a
+> shared name. With them refused (#895; worker job 444467,
+> `scripts/nhl_prop_ev_lab.py`), at one a game:
+>
+> | EV floor | bets | return per bet | units a season |
+> |---|---|---|---|
+> | 0.10 | 3,243 | +6.9% | +74.1 |
+> | 0.15 | 2,204 | +11.7% | +86.0 |
+> | 0.18 (live) | 1,615 | +12.2% | +65.6 |
+> | 0.20 | 1,240 | +15.4% | +63.6 |
+>
+> With the live nightly limit, four a night from 2026-10-08 (mike; it was two
+> from 10-03): +54.6 units a season (+12.9%), against +38.8 (+14.4%) for two.
+> Every season positive at both. Full grid and caveats:
+> `docs/nhl_clv_ev_assessment.md`.
+
 **Team models** (`scripts/nhl_live_artifact_grade.py`, the live artifacts on
 2025-26, the one season neither saw, 1,352 games). Neither makes money at any
 cut. `nhl_moneyline` as it runs (corrected probability, 0.55 / 0.05, EV 0.20):
