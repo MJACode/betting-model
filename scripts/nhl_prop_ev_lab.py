@@ -224,6 +224,7 @@ def live_season() -> None:
         frame = np_.build_frame(spec, players[spec.kind], teams)
         fitted = np_.fit(spec, frame, LIVE_SEASON - 1)
         te = np_.usable(spec, frame[(frame.season == LIVE_SEASON) & ~frame.upcoming]).dropna(subset=[spec.stat]).copy()
+        te = te[~bt.namesakes(te, frame, LIVE_SEASON)]
         if te.empty:
             print(f"{spec.model_id}: no scored 2026-27 rows yet")
             continue

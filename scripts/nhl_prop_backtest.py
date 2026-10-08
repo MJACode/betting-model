@@ -101,11 +101,36 @@ def prices(data: dict, spec: np_.Spec) -> pd.DataFrame:
 
 # ── bets ─────────────────────────────────────────────────────────────────────
 
+def namesakes(te: pd.DataFrame, frame: pd.DataFrame, season: int) -> pd.Series:
+    """True for a row the live card could never bet: the name is shared.
+
+    Prices find their player by NAME (`name_key`), so where two players share
+    one, a price is attached to both and the backtest bets the one with the
+    better EV -- grading, say, Elias Pettersson the forward's shots under on
+    Elias Pettersson the defenceman's count. The card refuses such a name: it
+    skips any price whose name matches more than one player who has played for
+    either team this season or last (scripts/nhl_props_card.upcoming_rows). The
+    same test here. Found 2026-10-08: 124 such bets, +89.8 units at a 90% win
+    rate, 35% of the units the one-a-game, two-a-night rule was justified on.
+    """
+    seen = frame[frame.season.isin([season - 1, season]) & ~frame.upcoming]
+    roster = seen.groupby(["team", "pkey"]).player_id.agg(lambda s: frozenset(s.dropna()))
+    pairs = te[["team", "opponent", "pkey"]].drop_duplicates()
+    shared = {(t, o, k) for t, o, k in pairs.itertuples(index=False)
+              if len(roster.get((t, k), frozenset()) | roster.get((o, k), frozenset())) > 1}
+    return pd.Series([(t, o, k) in shared for t, o, k in zip(te.team, te.opponent, te.pkey)], index=te.index)
+
+
 def predictions(spec: np_.Spec, frame: pd.DataFrame) -> pd.DataFrame:
     parts = []
     for season in SEASONS:
         fitted = np_.fit(spec, frame, season - 1)
         te = np_.usable(spec, frame[(frame.season == season) & ~frame.upcoming]).dropna(subset=[spec.stat]).copy()
+        shared = namesakes(te, frame, season)
+        if shared.any():
+            print(f"  {season - 1}-{str(season)[2:]}: {int(shared.sum()):,} player-games dropped, a name shared "
+                  f"with another player on either team ({sorted(te[shared].pkey.unique())[:6]})")
+        te = te[~shared]
         te["mu"] = np_.predict_mean(spec, fitted, te)
         te["alpha"] = fitted["dispersion"]
         print(f"  {season - 1}-{str(season)[2:]}: fit on {fitted['n_train']:,} rows, excess variance "
