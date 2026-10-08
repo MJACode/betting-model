@@ -37,6 +37,8 @@ import {
   inHitRateBand,
   isOnSlate,
   isStatParticipant,
+  needsTouchSet,
+  touchedPlayerIds,
   slateGameFor,
   slateSubline,
   type SortableRow,
@@ -195,6 +197,33 @@ check('MLB all-zero player stays (cold streaks are real outcomes)',
   isStatParticipant('MLB', [0, 0, 0]));
 check('empty value list: football drops, others keep',
   !isStatParticipant('NFL', []) && !isStatParticipant('NCAAF', []) && isStatParticipant('WNBA', []));
+
+// Anytime TD: zero is the usual answer, so a ball-carrier with no TD stays
+// (Matt, 2026-10-08 — Pickens was missing from the TB @ DAL board), while a
+// lineman with no touches still drops.
+const TD = { statKey: 'rush_rec_tds' };
+check('Anytime TD: a receiver with targets and no TD stays',
+  isStatParticipant('NFL', [0, 0, 0], { ...TD, rows: [{ carries: 0, receptions: 5, targets: 7 }] }));
+check('Anytime TD: a back with carries and no TD stays (NCAAF too)',
+  isStatParticipant('NCAAF', [0], { ...TD, rows: [{ carries: 12, receptions: null, targets: null }] }));
+check('Anytime TD: a player with no touches still drops',
+  !isStatParticipant('NFL', [0, 0], { ...TD, rows: [{ carries: 0, receptions: 0, targets: 0 }] }));
+check('Anytime TD on a read with no usage columns (Season/H2H): anyone with games stays',
+  isStatParticipant('NFL', [0, 0], TD) && !isStatParticipant('NFL', [], TD));
+check('Season/H2H: the touch set decides — a lineman with games drops, a receiver stays',
+  !isStatParticipant('NFL', [0, 0], { ...TD, touched: false }) &&
+  isStatParticipant('NFL', [0, 0], { ...TD, touched: true }));
+check('touchedPlayerIds keeps only ball-carriers',
+  [...touchedPlayerIds([
+    { player_id: 'wr', carries: 0, receptions: 3, targets: 5 },
+    { player_id: 'ol', carries: 0, receptions: 0, targets: 0 },
+    { player_id: 'k', carries: null, receptions: null, targets: null },
+  ])].join() === 'wr');
+check('needsTouchSet: Anytime TD on football only',
+  needsTouchSet('NFL', 'rush_rec_tds') && needsTouchSet('NCAAF', 'rush_rec_tds') &&
+  !needsTouchSet('NFL', 'receptions') && !needsTouchSet('MLB', 'rush_rec_tds'));
+check('the TD exemption does not leak to other stats',
+  !isStatParticipant('NFL', [0, 0], { statKey: 'passing_yards', rows: [{ carries: 9 }] }));
 
 // ── The row subline: when the game starts, and against whom ────────────────
 // Matt, 2026-09-05: "add the time of the game and who they are playing under

@@ -109,12 +109,61 @@ export const HIT_RATE_STEP = 5;
  */
 const MULTI_ROLE_SPORTS = new Set(['NFL', 'NCAAF']);
 
+/**
+ * Stats where ZERO is the usual answer, not a sign of a non-participant. A
+ * receiver with no touchdown this season is still in the Anytime TD market —
+ * the book prices him tonight — and dropping him hid George Pickens, Chris
+ * Godwin and fourteen other ball-carriers off the TB @ DAL board (Matt,
+ * 2026-10-08: "It should show everyone regardless if they have scored this
+ * year"). For these, taking part means TOUCHING THE BALL, read off the usage
+ * columns, not scoring.
+ */
+const ZERO_IS_AN_ANSWER_KEYS: ReadonlySet<string> = new Set(['rush_rec_tds']);
+
+/** Does this stat's football board need to know who touched the ball? */
+export function needsTouchSet(sport: string, statKey: string | null | undefined): boolean {
+  return MULTI_ROLE_SPORTS.has(sport) && statKey != null && ZERO_IS_AN_ANSWER_KEYS.has(statKey);
+}
+
+/** The player_ids with any carry, reception or target on a totals read. */
+export function touchedPlayerIds(rows: ReadonlyArray<object>): Set<string> {
+  const out = new Set<string>();
+  for (const r of rows as ReadonlyArray<Record<string, unknown>>) {
+    if (TOUCH_KEYS.some((k) => Number(r[k] ?? 0) > 0) && typeof r.player_id === 'string') {
+      out.add(r.player_id);
+    }
+  }
+  return out;
+}
+const TOUCH_KEYS = ['carries', 'receptions', 'targets'] as const;
+
 export function isStatParticipant(
   sport: string,
   values: Array<number | null | undefined>,
+  opts?: {
+    statKey?: string;
+    /** The rows the values came from, when the read carries usage columns
+     *  (the Averages and last-N reads do; Season and H2H do not). */
+    rows?: ReadonlyArray<object>;
+    /** Whether the player touched the ball this season, from a separate
+     *  totals read — what Season and H2H use, having no usage columns of
+     *  their own. Undefined = not known. */
+    touched?: boolean;
+  },
 ): boolean {
   if (!MULTI_ROLE_SPORTS.has(sport)) return true;
-  return values.some((v) => (v ?? 0) !== 0);
+  if (values.some((v) => (v ?? 0) !== 0)) return true;
+  if (!opts?.statKey || !ZERO_IS_AN_ANSWER_KEYS.has(opts.statKey)) return false;
+  if (opts.touched !== undefined) return opts.touched;
+  const rows = (opts.rows ?? []) as ReadonlyArray<Record<string, unknown>>;
+  const hasUsage = rows.some((r) => TOUCH_KEYS.some((k) => r[k] != null));
+  // No usage columns and no touch set: a player with games in the window is
+  // kept — hiding the receiver is the bug this replaced. The board passes
+  // `touched` on the reads that land here, so this is the fallback while the
+  // touch read is in flight or failed (1,327 Season rows, 897 never touched
+  // the ball — measured 2026-10-08).
+  if (!hasUsage) return values.length > 0;
+  return rows.some((r) => TOUCH_KEYS.some((k) => Number(r[k] ?? 0) > 0));
 }
 
 // ── 3. Tonight's slate ──

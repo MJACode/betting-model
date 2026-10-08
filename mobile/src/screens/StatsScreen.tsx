@@ -112,6 +112,8 @@ import {
   inHitRateBand,
   isOnSlate,
   isStatParticipant,
+  needsTouchSet,
+  touchedPlayerIds,
   slateGameFor,
   slateSubline,
   slateTeams,
@@ -397,6 +399,10 @@ export function StatsScreen() {
   const [hitHigh, setHitHigh] = useState<number>(HIT_RATE_MAX);
 
   const [rows, setRows] = useState<SeasonTotalsRow[]>([]); // totals mode
+  // Who touched the ball this season, for the Anytime TD board on Season and
+  // H2H, whose reads carry the one stat and no usage columns. Without it a
+  // receiver with no TD is indistinguishable from a lineman (Matt, 2026-10-08).
+  const [touchSet, setTouchSet] = useState<{ key: string; ids: Set<string> } | null>(null);
   const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode, last-N
   // Hit-rate mode, Season window. The rows are ONE stat's value arrays, so they
   // carry the stat key they were fetched for — the memo below ignores them
@@ -713,6 +719,18 @@ export function StatsScreen() {
       }
       const teams = readTeams;
       if (effectiveMode === 'hitRate') {
+        // Fired alongside the read below, not after it; a failure leaves the
+        // board on its no-usage fallback rather than costing the board.
+        const touchKey = `${sport}|${playerType ?? ''}`;
+        if (
+          (timeWindow === 'h2h' || timeWindow === 'season') &&
+          needsTouchSet(sport, String(stat.key)) &&
+          touchSet?.key !== touchKey
+        ) {
+          fetchWindowTotals(sport, SEASON, null, playerType)
+            .then((t) => setTouchSet({ key: touchKey, ids: touchedPlayerIds(t) }))
+            .catch(() => undefined);
+        }
         if (timeWindow === 'h2h') {
           const key = String(stat.key);
           // No fixtures means no opponent to ask about, so the read is skipped
@@ -1430,7 +1448,7 @@ export function StatsScreen() {
     if (!stat || effectiveMode !== 'totals') return [];
     const q = query.trim().toLowerCase();
     return rows
-      .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
+      .filter((r) => isStatParticipant(sport, [statValue(r, stat)], { statKey: String(stat.key), rows: [r] }))
       .filter((r) => !tonightActive || gamesPicked || isOnSlate(r, slate))
       .filter((r) => !gameTeams || (!!r.team && gameTeams.includes(r.team)))
       .filter((r) => !minGrade || meetsGradeFloor(matchupFor(r)?.grade, minGrade, includeUngraded))
@@ -1536,7 +1554,13 @@ export function StatsScreen() {
     }
     const q = query.trim().toLowerCase();
     return out
-      .filter((p) => isStatParticipant(sport, p.values))
+      .filter((p) => isStatParticipant(sport, p.values, {
+        statKey: String(stat.key),
+        rows: p.games,
+        touched: p.games.length === 0 && touchSet?.key === `${sport}|${playerType ?? ''}`
+          ? touchSet.ids.has(p.player_id)
+          : undefined,
+      }))
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
       .filter((p) => !minGrade || meetsGradeFloor(matchupFor(p)?.grade, minGrade, includeUngraded))
@@ -1544,7 +1568,7 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, h2hValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
 
   // The position cut, last and separate for the same reason as `ranked`.
   const hitRateBase = useMemo<HitRatePlayer[]>(
