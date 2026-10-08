@@ -910,5 +910,14 @@
     "args": {
       "script": "nhl_live_artifact_grade"
     }
+  },
+  {
+    "key": "nhl-prop-ev-lab-namesakes-fixed-2026-10-08",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-08: the same prop grid as nhl-prop-ev-lab-2026-10-08, re-run with shared player names refused the way the live card refuses them (scripts/nhl_prop_backtest.namesakes). The first run reproduces the published numbers; this one is the corrected grade. Read-only.",
+    "args": {
+      "script": "nhl_prop_ev_lab"
+    }
   }
 ]
