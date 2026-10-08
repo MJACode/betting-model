@@ -3644,6 +3644,19 @@ PROP_MARKETS_NHL = [
 # minutes of puck drop. 70, not less: the afternoon passes are hourly, and a
 # narrower window can fall between two of them and buy no close at all.
 NHL_PROP_CLOSE_WINDOW_MIN = int(os.environ.get("NHL_PROP_CLOSE_WINDOW_MIN", "70"))
+# A THIRD snapshot, for closing-line value only (mike, 2026-10-08: "yes, add
+# it"). Saves and blocked shots are posted only in the 70-minute snapshot, so
+# they are decided on it, and their CLV measured against that same quote is
+# zero by construction. One more fetch, taken by the first pass between these
+# many minutes before the feed's start time, is filed as snapshot_type='close'.
+# The prop cards read 'open' only, so it never decides a bet; the CLV capture
+# reads either type and takes it as the close. It ends 12 minutes before the
+# feed's time: the feed lists NHL starts at :10, ten minutes after the
+# scheduled puck drop, so a later fetch could hold in-play prices. Thirteen
+# minutes wide, so the ten-minute evening passes always land one inside it.
+# Measured cost: 5 credits a game, about 6,600 credits a season.
+NHL_PROP_FINAL_OPENS_MIN = int(os.environ.get("NHL_PROP_FINAL_OPENS_MIN", "25"))
+NHL_PROP_FINAL_CLOSES_MIN = int(os.environ.get("NHL_PROP_FINAL_CLOSES_MIN", "12"))
 # One run's ceiling. Measured 2026-10-01 on the live endpoint; see
 # data/ingestors/nhl_prop_odds_ingestor.py. A full 16-game slate fits; a gate
 # that broke and fetched every game on every pass would stop here, not at the

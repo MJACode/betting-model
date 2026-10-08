@@ -897,7 +897,7 @@ def step_nba_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:
 
 
 def step_nhl_prop_odds() -> bool:
-    """NHL player prop prices: an opening and a closing snapshot per game.
+    """NHL player prop prices: an open, a close and a CLV-only final snapshot per game.
 
     Safe on every refresh pass — the ingestor buys only what is due and a pass
     with nothing due costs no credits (data/ingestors/nhl_prop_odds_ingestor.py).
