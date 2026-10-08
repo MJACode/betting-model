@@ -72,6 +72,17 @@ the published CLV of every model that shops books, so it is a decision.
   a quote from the first ten minutes after the scheduled start. Whether those
   quotes are in-play prices is not measured.
 
+## [ ] The NHL prop lab still pairs a shared name's prices
+
+Found 2026-10-08 by the anytime-scorer check. `scripts/nhl_prop_lab_priced.py`
+folds names to letters only. That turns "Elias Pettersson (2004)", the
+defenceman, into the forward's key. The two-way markets are hit too: the
+forward's line was graded on the defenceman's result (2025-26 DraftKings
+exposure: assists +24.2, points +46.9, shots on goal +46.1 units). The
+production backtests were fixed in #895 (`scripts/nhl_prop_backtest.namesakes`).
+The lab was not. Apply the same drop before its merge, then treat every lab
+table in `docs/nhl_market_lab.md` dated before 2026-10-08 as unconfirmed.
+
 ## [ ] NHL derivative totals: the grade has two defects
 
 Found 2026-10-08. Team totals were graded on regulation goals, but every book
