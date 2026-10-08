@@ -446,6 +446,49 @@ export function roundLineToStep(median: number, step: number): number {
   return Math.max(step, Math.round(median / step) * step);
 }
 
+/**
+ * One tap of the ± stepper from `prev`.
+ *
+ * The ruler opens on the book's line EXACTLY (a 50.5 line is "51+"), which is
+ * off a step-5 grid, and adding ±5 to it walked 46 → 51 → 56: 50 was
+ * unreachable (Matt, 2026-10-08). So a line off the grid lands on the
+ * neighbouring grid stop in the tapped direction first — 51 → 50 on minus,
+ * 55 on plus — and steps by `step` from there. Never below 0; never above
+ * `ceiling` when stepping up.
+ */
+export function stepLineFrom(prev: number, deltaSteps: number, step: number, ceiling = Infinity): number {
+  if (deltaSteps === 0) return prev;
+  const onGrid = Math.abs(prev / step - Math.round(prev / step)) < 1e-9;
+  let next: number;
+  if (onGrid) next = prev + deltaSteps * step;
+  else {
+    const first = deltaSteps > 0 ? Math.ceil(prev / step) * step : Math.floor(prev / step) * step;
+    next = first + (deltaSteps - Math.sign(deltaSteps)) * step;
+  }
+  // The ceiling caps STEPPING UP only: a typed line above it is the reader's
+  // own, and a − from 300 goes to 295, not back down to the cap.
+  if (deltaSteps > 0) next = Math.min(next, Math.max(prev, ceiling));
+  return Math.max(0, next);
+}
+
+/**
+ * A line the reader typed, as the whole-number threshold the card uses, or
+ * null when it is not one. Read in the face's own idiom:
+ *  - At Least: "50" or "50+" is 50+; a half-line "50.5" is the threshold that
+ *    clears it, 51+.
+ *  - Over / Under: the face prints the book line ("50.5"), so a typed "50.5"
+ *    is that line (51+ / 50 or fewer), and a whole "50" is the half-point
+ *    above it — the card only prices half-lines, which cannot push.
+ */
+export function parseTypedLine(text: string, mode: 'atLeast' | 'over' | 'under' = 'atLeast'): number | null {
+  const t = text.trim().replace(/\+$/, '');
+  if (!/^\d{1,4}(\.\d+)?$/.test(t)) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  if (mode === 'atLeast') return Number.isInteger(n) ? n : Math.ceil(n);
+  return Math.floor(n) + 1;
+}
+
 // ── Reading a stat off a row ────────────────────────────────────────────────
 
 /**

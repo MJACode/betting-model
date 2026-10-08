@@ -16,6 +16,8 @@
  */
 
 import {
+  parseTypedLine,
+  stepLineFrom,
   chipKey,
   chipsForLoadedPlayer,
   chipsForPlayer,
@@ -260,6 +262,27 @@ check('a log of nothing but zeroes and no position keeps every chip',
   chipsForLoadedPlayer(ncaafChips, [normalizeLogRow('NCAAF', {
     player_id: 'c', player_name: 'A Player', team: 'Georgia', game_id: 'g', game_date: '2026-09-13', season: 2026,
   } as unknown as Record<string, unknown>)]).length === ncaafChips.length);
+
+// ── The ± stepper and the typed line (Matt, 2026-10-08) ─────────────────────
+// A 50.5 book line opens the ruler on 51+; stepping by 5 from there walked
+// 46/51/56 and 50 was unreachable. Off-grid lines land on the grid first.
+check('51 minus one step of 5 lands on 50', stepLineFrom(51, -1, 5) === 50);
+check('51 plus one step of 5 lands on 55', stepLineFrom(51, 1, 5) === 55);
+check('on the grid, steps move by the step', stepLineFrom(50, 1, 5) === 55 && stepLineFrom(50, -1, 5) === 45);
+check('two steps from off-grid: 51 -> 60 / 45', stepLineFrom(51, 2, 5) === 60 && stepLineFrom(51, -2, 5) === 45);
+check('step of 1 is unchanged', stepLineFrom(3, 1, 1) === 4 && stepLineFrom(3, -1, 1) === 2);
+check('never below 0', stepLineFrom(3, -1, 5) === 0 && stepLineFrom(0, -1, 5) === 0);
+check('step of 25 from 237 lands on 225 / 250', stepLineFrom(237, -1, 25) === 225 && stepLineFrom(237, 1, 25) === 250);
+check('a typed line above the ceiling steps down once, not to the ceiling',
+  stepLineFrom(300, -1, 5, 85) === 295);
+check('stepping up stops at the ceiling', stepLineFrom(80, 2, 5, 85) === 85);
+check('stepping up from above the ceiling does not drop to it', stepLineFrom(300, 1, 5, 85) === 300);
+check('typed "50" in At Least is 50+', parseTypedLine('50') === 50);
+check('typed "50+" in At Least is 50+', parseTypedLine('50+') === 50);
+check('typed "50.5" in At Least clears the half-line: 51+', parseTypedLine('50.5') === 51);
+check('typed "50.5" in Over is that line: 51+', parseTypedLine('50.5', 'over') === 51);
+check('typed "50" in Under is Under 50.5: threshold 51', parseTypedLine('50', 'under') === 51);
+check('junk is refused', parseTypedLine('') === null && parseTypedLine('abc') === null && parseTypedLine('-5') === null);
 
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

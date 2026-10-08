@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  InputAccessoryView,
+  Keyboard,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,9 +44,11 @@ import {
   lineStepFor,
   logStatValue,
   openingChip,
+  parseTypedLine,
   playerSubtitle,
   requestedChip,
   roundLineToStep,
+  stepLineFrom,
   windowOptionsFor,
   type GameWindow,
   type PlayerLogEntry,
@@ -97,6 +103,9 @@ import { ordinal } from '@/lib/teamDetail';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
+
+/** The keyboard bar under the typed line field. */
+const LINE_ACCESSORY_ID = 'player-line-input';
 
 export function PlayerStatsScreen() {
   const route = useRoute<Route>();
@@ -442,8 +451,21 @@ export function PlayerStatsScreen() {
     setLineFromBoard(false);
     setLine((prev) => {
       const base = prev ?? roundLineToStep(median ?? step, step);
-      return Math.min(Math.max(0, base + deltaSteps * step), Math.ceil(maxValue) + step * 5);
+      return stepLineFrom(base, deltaSteps, step, Math.ceil(maxValue) + step * 5);
     });
+  };
+
+  // The number between − and + is also a field: tap it and type any line
+  // (Matt, 2026-10-08: "allow a user to manually enter in the line"). The
+  // stepper's ceiling does not apply — a typed line is a deliberate question.
+  const [lineDraft, setLineDraft] = useState<string | null>(null);
+  const commitLineDraft = () => {
+    const typed = lineDraft == null ? null : parseTypedLine(lineDraft, mode);
+    setLineDraft(null);
+    if (typed == null || typed === line) return;
+    setLineTouched(true);
+    setLineFromBoard(false);
+    setLine(typed);
   };
 
   const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
@@ -472,6 +494,7 @@ export function PlayerStatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.list}
+        keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl
             refreshing={pulled && detail.loading}
@@ -718,7 +741,23 @@ export function PlayerStatsScreen() {
                   >
                     <Ionicons name="remove" size={18} color={colors.tint} />
                   </Pressable>
-                  <Text style={styles.stepValue}>{rulerValueLabel(effLine, mode)}</Text>
+                  <TextInput
+                    value={lineDraft ?? rulerValueLabel(effLine, mode)}
+                    onFocus={() => setLineDraft('')}
+                    onChangeText={setLineDraft}
+                    onEndEditing={commitLineDraft}
+                    onSubmitEditing={commitLineDraft}
+                    placeholder={rulerValueLabel(effLine, mode)}
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="decimal-pad"
+                    returnKeyType="done"
+                    selectTextOnFocus
+                    maxLength={6}
+                    inputAccessoryViewID={Platform.OS === 'ios' ? LINE_ACCESSORY_ID : undefined}
+                    style={[styles.stepValue, styles.stepInput]}
+                    accessibilityLabel={`Line, ${headline}`}
+                    accessibilityHint="Type a line"
+                  />
                   <Pressable
                     onPress={() => stepLine(1)}
                     hitSlop={8}
@@ -958,6 +997,23 @@ export function PlayerStatsScreen() {
         onClose={() => setLineSheet(null)}
         onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
       />
+      {/* decimal-pad has no return key on iOS; this is how the typed line is
+          committed (same bar as Settings' bankroll field). */}
+      {Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={LINE_ACCESSORY_ID}>
+          <View style={styles.doneBar}>
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              hitSlop={8}
+              style={({ pressed }) => [styles.doneBtn, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1752,6 +1808,34 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  // Filled like the − and + beside it, so the three read as one control and
+  // the number reads as something to tap; the 44pt height is the target.
+  stepInput: {
+    minWidth: 48,
+    minHeight: 44,
+    paddingVertical: 0,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+  },
+  doneBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    backgroundColor: colors.bgGrouped,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  doneBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  doneText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   legendRow: {
     flexDirection: 'row',
