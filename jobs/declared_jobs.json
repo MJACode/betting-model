@@ -892,5 +892,23 @@
       "sports": ["NBA", "WNBA"],
       "dry_run": false
     }
+  },
+  {
+    "key": "nhl-prop-ev-lab-2026-10-08",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-08: assess all NHL models and optimise for CLV and expected value. The four prop models graded together on three priced seasons in UNITS A SEASON for every EV floor x per-game cap x per-night cap; FanDuel in vs out; assists both sides; and 2026-27 so far, every candidate at a game's first stored price vs its last. Read-only. Result: worker_jobs.result->>'stdout'.",
+    "args": {
+      "script": "nhl_prop_ev_lab"
+    }
+  },
+  {
+    "key": "nhl-live-artifact-grade-2026-10-08",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-08, same assessment: the two live NHL game artifacts (nhl_moneyline, nhl_moneyline_regulation) re-graded at real 2025-26 prices with the corrections promoted today. Read-only. Result: worker_jobs.result->>'stdout'.",
+    "args": {
+      "script": "nhl_live_artifact_grade"
+    }
   }
 ]
