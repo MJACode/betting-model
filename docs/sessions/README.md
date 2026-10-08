@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, every NHL model assessed for CLV and expected value: a name defect inflated the prop backtests (35% of the two-a-night case); game models clear no cut; four NHL prop bets a night (mike); a CLV-only final prop snapshot; CLV for picks at a line DraftKings never hung; `nhl_research` worker job |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, Anytime TD board keeps every ball-carrier (16 hidden on TB@DAL); player stepper snaps 51→50, typed line entry |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card for NBA/WNBA (G/F/C, 15+ min) and NCAAF; daily position refresh; basketball dry run 2: 496/609 NBA, 213/243 WNBA matched |

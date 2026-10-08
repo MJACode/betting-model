@@ -291,15 +291,25 @@ def limit_per_game(spec: np_.Spec, rows: list[dict], existing: dict[str, set[str
 # Every NHL prop model. One bet a game is shared among all of them.
 PROP_MODEL_IDS = ("nhl_prop_blocked_shots", "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists")
 MAX_PROP_BETS_PER_GAME = 1
-# mike, 2026-10-03: "Too many fucking unders nhl props." At most two NHL prop
-# bets a night (one game_date), best EV first, the picks already written that
-# night included. Three priced seasons at EV >= 0.18, one a game
-# (scripts/nhl_prop_combined_cap.py cache): no nightly limit 1,659 bets +16.2%
-# (3.6 a night, at most 14); 3 a night 1,103 +18.2%; 2 a night 832 bets
-# +20.9% (+173.8 units; every season +12% or better); 1 a night 464 +26.0%.
+# At most FOUR NHL prop bets a night (one game_date), best EV first, the picks
+# already written that night included (mike, 2026-10-08: "4 a night"; it was
+# two from 2026-10-03, mike: "Too many fucking unders nhl props.").
+#
+# WHY FOUR. The two-a-night figures (832 bets, +20.9%, +173.8 units) were
+# inflated by a backtest defect: a shared player name (two Elias Petterssons)
+# priced the forward's shots-on-goal under at the defenceman's count, +60.9 of
+# those units. With shared names refused as the card refuses them
+# (scripts/nhl_prop_backtest.namesakes, #895), the four models together at EV
+# >= 0.18, one a game, three priced seasons (worker job 444467,
+# scripts/nhl_prop_ev_lab.py), in units a season:
+#   2 a night +38.8 (+14.4%) | 3 +46.1 | 4 +54.6 (+12.9%) | 6 +56.8 | none +65.6
+# Every season is positive at every level. On the books that post these
+# markets live, four a night (+56.8) matches no limit (+56.5) against +35.5
+# for two: the gain with a hard ceiling. About 2.8 bets a night on average.
 # The backtest keeps each night's best; live, a pass writes what has cleared
 # by then, and a later better bet does not replace an earlier one.
-MAX_PROP_BETS_PER_NIGHT = 2
+# docs/nhl_clv_ev_assessment.md.
+MAX_PROP_BETS_PER_NIGHT = 4
 
 
 def games_with_a_prop_bet(conn, game_ids: list[str]) -> set[str]:

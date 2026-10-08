@@ -106,6 +106,16 @@ def decide(model_id, p_raw, price, *, calibrated):
             and price >= MIN_ODDS[model_id])
 
 
+def _labels(model_id):
+    """Which of the two rows is the rule production runs. A model in
+    config.MODELS_ON_OWN_PROBABILITY decides on its own number (the regulation
+    model since PR #876, 2026-10-03); until 2026-10-08 this script still called
+    the corrected-probability row 'AS IT RUNS TODAY' for it."""
+    own = model_id in config.MODELS_ON_OWN_PROBABILITY
+    return (("corrected probability" + ("" if own else " (AS IT RUNS TODAY)")),
+            ("model's OWN probability" + (" (AS IT RUNS TODAY)" if own else "")))
+
+
 def halves(profit, dates):
     order = np.argsort(np.asarray(dates), kind="stable")
     h = len(order) // 2
@@ -216,10 +226,11 @@ def moneyline(conn):
     rows = []
     live = bets(lambda p, pr: decide(mid, p, pr, calibrated=True))
     raw = bets(lambda p, pr: decide(mid, p, pr, calibrated=False))
+    tag_cal, tag_raw = _labels(mid)
     for at in ("dk", "best"):
-        rows.append(line("AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)", live, at))
+        rows.append(line(tag_cal, live, at))
     for at in ("dk", "best"):
-        rows.append(line("same cuts on the model's OWN probability", raw, at))
+        rows.append(line(tag_raw, raw, at))
     print("\n### The production rule on the holdout season\n")
     print(pd.DataFrame(rows).to_string(index=False))
     if len(live):
@@ -319,10 +330,11 @@ def regulation(conn):
                 "home/draw/away": f"{mix.get('home', 0)}/{mix.get('draw', 0)}/{mix.get('away', 0)}"}
 
     live, raw = bets(px, True), bets(px, False)
-    rows = [line("AS IT RUNS TODAY @ DraftKings", live, False),
-            line("AS IT RUNS TODAY @ best bettable book", live, True),
-            line("same cuts, model's OWN probability @ DraftKings", raw, False),
-            line("same cuts, model's OWN probability @ best bettable", raw, True)]
+    tag_cal, tag_raw = _labels(mid)
+    rows = [line(f"{tag_cal} @ DraftKings", live, False),
+            line(f"{tag_cal} @ best bettable book", live, True),
+            line(f"{tag_raw} @ DraftKings", raw, False),
+            line(f"{tag_raw} @ best bettable", raw, True)]
     print("\n### The production rule on the holdout season\n")
     print(pd.DataFrame(rows).to_string(index=False))
     rows = []

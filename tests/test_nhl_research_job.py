@@ -110,3 +110,15 @@ def test_the_job_passes_flags_and_restores_the_timeout(monkeypatch):
     assert out["stdout"] == "table\nlast line"
     assert out["summary"].endswith("last line")
     assert out["truncated"] is False
+
+
+def test_the_artifact_grade_names_the_rule_production_runs():
+    """The regulation model decides on its own probability (config.MODELS_ON_OWN_PROBABILITY,
+    PR #876); the grade called its corrected-probability row 'AS IT RUNS TODAY' until 2026-10-08."""
+    import config
+    import scripts.nhl_live_artifact_grade as g
+    for mid in ("nhl_moneyline", "nhl_moneyline_regulation"):
+        cal, raw = g._labels(mid)
+        today = raw if mid in config.MODELS_ON_OWN_PROBABILITY else cal
+        assert "AS IT RUNS TODAY" in today
+        assert "AS IT RUNS TODAY" not in (cal if today is raw else raw)
