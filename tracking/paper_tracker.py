@@ -1506,7 +1506,7 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
         FROM picks p
         JOIN games g ON g.game_id = p.game_id
         WHERE p.signal_type = 'BET'
-          AND p.dk_odds IS NOT NULL
+          AND COALESCE(p.dk_odds, p.decision_odds) IS NOT NULL
           AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
           AND g.commence_time IS NOT NULL
@@ -1667,12 +1667,12 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     rows = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.dk_odds,
                g.commence_time, p.pick_label, p.scored_line, p.created_at,
-               p.prop_market, p.clv_method
+               p.prop_market, p.clv_method, p.decision_odds, p.decision_book
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
           AND p.signal_type = 'BET'
-          AND p.dk_odds IS NOT NULL
+          AND COALESCE(p.dk_odds, p.decision_odds) IS NOT NULL
           AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
           AND (p.clv_captured_at IS NULL
@@ -1687,7 +1687,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     updated = 0
     for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
          pick_label, scored_line, created_at, row_prop_market,
-         _row_clv_method) in rows:
+         _row_clv_method, decision_odds, decision_book) in rows:
         # The game must have STARTED. The close is the newest snapshot at or
         # before kickoff, so capturing while a game is still hours away
         # records that hour's price as "the close" — and since the fill is
@@ -1745,6 +1745,18 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             bookmaker = _book_from_label(pick_label)
             if not prop_market:
                 continue                 # no market on the row, nothing to close
+        # A LINE DRAFTKINGS NEVER HUNG (scorer _fallback_line_quote,
+        # 2026-09-12): dk_odds is NULL by design and the bet is decision_odds
+        # at decision_book. Close it Pinnacle-then-THAT-book (docs/clv.md) and
+        # read its lock two-way there. Until this the dk_odds filter dropped
+        # every one in silence: 30 NHL prop BETs, 2026-10-01..08, Hard Rock.
+        # Rows that carry dk_odds keep exactly the meaning they had.
+        bet_price = dk_odds
+        if bet_price is None:
+            bet_price = decision_odds
+            bookmaker = (decision_book or "").strip().lower()
+            if bet_price is None or not bookmaker:
+                continue
         if prop_market:
             # player_prop_odds keys on the book's name string, so the name is
             # recovered from the pick label the same way settlement does.
@@ -1808,14 +1820,14 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
                 bet_snap = _closing_odds(
                     conn, game_id, market, created_at, bookmaker)
             clv_pct, clv_method = price_clv_pct(
-                dk_odds, closing_price, close_others,
+                bet_price, closing_price, close_others,
                 book=close_book,
                 bet_other_prices=_locked_other_prices(
-                    bet_snap, pick_side, dk_odds),
+                    bet_snap, pick_side, bet_price),
                 bet_book=bookmaker)
         else:
             _, clv_method = price_clv_pct(
-                dk_odds, closing_price, close_others, book=close_book)
+                bet_price, closing_price, close_others, book=close_book)
 
         # One verdict, from whichever measure applies. A moved number is the
         # stronger evidence and wins: the price attached to a line we no longer
