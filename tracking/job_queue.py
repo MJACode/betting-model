@@ -543,6 +543,108 @@ def _validate_nhl_derivative_odds_history(args: dict) -> dict:
     return {"apply": apply, "probe": probe, "seasons": cleaned}
 
 
+# ── NHL research scripts, run where the database is ─────────────────────────
+#
+# 2026-10-08. The NHL backtests and labs read production through
+# get_connection(), and a dev session's machine may hold no DATABASE_URL (the
+# one that asked for this did not: "DATABASE_URL is not set"). Asked how to
+# run them, the person directing chose the worker. The worker already holds the
+# connection string, so a re-grade is a declared job, not a handover.
+#
+# READ-ONLY BY CONSTRUCTION. Every module below prints tables and writes
+# nothing: tests/test_nhl_research_job.py reads each one's source on every run
+# and fails on an INSERT, UPDATE, DELETE, TRUNCATE or commit(). A script's
+# file-writing flags (--dump, --cache) are not arguments here, so the job
+# cannot write outside its own worker_jobs row.
+#
+# An allowlist of modules and typed arguments, never an argv string -- the
+# queue is not a shell (test_there_is_no_shell_or_command_column).
+_NHL_RESEARCH_SEASONS = (2024, 2025, 2026)
+
+
+def _nhl_prop_spec(value) -> str:
+    import models.nhl_props as np_
+    v = str(value)
+    if v not in np_.SPECS:
+        raise ValueError(f"model must be one of {sorted(np_.SPECS)}, got {v!r}")
+    return v
+
+
+def _nhl_priced_season(value) -> str:
+    try:
+        v = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"season must be an ending year, got {value!r}") from exc
+    if v not in _NHL_RESEARCH_SEASONS:
+        raise ValueError(f"season must be one of {_NHL_RESEARCH_SEASONS}, got {v}")
+    return str(v)
+
+
+# script -> (module, {argument: (cli flag, validator)})
+NHL_RESEARCH_SCRIPTS: dict[str, tuple[str, dict]] = {
+    "nhl_prop_backtest": ("scripts.nhl_prop_backtest", {"model": ("--model", _nhl_prop_spec)}),
+    "nhl_prop_combined_cap": ("scripts.nhl_prop_combined_cap", {}),
+    "nhl_prop_blocked_shots_backtest": ("scripts.nhl_prop_blocked_shots_backtest", {}),
+    "nhl_prop_lab_priced": ("scripts.nhl_prop_lab_priced", {"season": ("--season", _nhl_priced_season)}),
+    "nhl_threeway_lab": ("scripts.nhl_threeway_lab", {"season": ("--season", _nhl_priced_season)}),
+    "nhl_totals_lab": ("scripts.nhl_totals_lab", {}),
+    "nhl_moneyline_market_lab": ("scripts.nhl_moneyline_market_lab", {}),
+    "nhl_live_artifact_grade": ("scripts.nhl_live_artifact_grade", {}),
+    "nhl_derivative_totals_backtest": ("scripts.nhl_derivative_totals_backtest", {}),
+    "nhl_prop_ev_lab": ("scripts.nhl_prop_ev_lab", {}),
+}
+# The full printout is kept on the row; a job card shows the last 800 chars.
+_NHL_RESEARCH_STDOUT_CAP = 400_000
+
+
+def _job_nhl_research(**kw):
+    """Run one allowlisted NHL backtest or lab and keep everything it printed.
+
+    The statement timeout is raised for this job's connections only and put
+    back afterwards, as the retrain does: a three-season prop load runs past
+    the database's 120s default.
+    """
+    module, flags = NHL_RESEARCH_SCRIPTS[kw["script"]]
+    argv: list[str] = []
+    for name, value in kw["args"].items():
+        argv += [flags[name][0], value]
+    prev_timeout = os.environ.get("DB_STATEMENT_TIMEOUT_MS")
+    os.environ["DB_STATEMENT_TIMEOUT_MS"] = str(kw["statement_timeout_ms"])
+    try:
+        stdout = _run_script_main(module, argv)
+    finally:
+        if prev_timeout is None:
+            os.environ.pop("DB_STATEMENT_TIMEOUT_MS", None)
+        else:
+            os.environ["DB_STATEMENT_TIMEOUT_MS"] = prev_timeout
+    text = stdout.strip()
+    return {"script": kw["script"], "argv": argv,
+            "summary": text[-800:] if text else "(no output)",
+            "chars": len(text), "truncated": len(text) > _NHL_RESEARCH_STDOUT_CAP,
+            "stdout": text[-_NHL_RESEARCH_STDOUT_CAP:]}
+
+
+def _validate_nhl_research(args: dict) -> dict:
+    extra = sorted(set(args) - {"script", "args", "statement_timeout_ms"})
+    if extra:
+        raise ValueError(f"unknown keys {extra}; this job takes script, args, statement_timeout_ms")
+    script = str(args.get("script") or "")
+    if script not in NHL_RESEARCH_SCRIPTS:
+        raise ValueError(f"script must be one of {sorted(NHL_RESEARCH_SCRIPTS)}, got {script!r}")
+    _, flags = NHL_RESEARCH_SCRIPTS[script]
+    given = args.get("args") or {}
+    if not isinstance(given, dict):
+        raise ValueError("args must be an object of named arguments")
+    unknown = sorted(set(given) - set(flags))
+    if unknown:
+        raise ValueError(f"{script} takes {sorted(flags) or 'no arguments'}, not {unknown}")
+    cleaned = {name: flags[name][1](value) for name, value in sorted(given.items())}
+    timeout_ms = int(args.get("statement_timeout_ms") or 1_800_000)   # 30 min
+    if not (60_000 <= timeout_ms <= 7_200_000):
+        raise ValueError(f"statement_timeout_ms out of range: {timeout_ms}")
+    return {"script": script, "args": cleaned, "statement_timeout_ms": timeout_ms}
+
+
 def _job_relabel_in_play(**kw):
     from data.ingestors.odds_ingestor import relabel_in_play
     return relabel_in_play(sport=kw["sport"], since=kw["since"])
@@ -1582,6 +1684,9 @@ JOBS = {
     # _job_nhl_derivative_odds_history.
     "nhl_derivative_odds_history": (_job_nhl_derivative_odds_history,
                                     _validate_nhl_derivative_odds_history),
+    # Measure-only: one allowlisted NHL backtest or lab, its printout on the
+    # row. Writes nothing else. See _job_nhl_research.
+    "nhl_research": (_job_nhl_research, _validate_nhl_research),
     "game_log_backfill": (_job_game_log_backfill, _validate_game_log_backfill),
     "ncaaf_player_backfill": (_job_ncaaf_player_backfill,
                               _validate_ncaaf_player_backfill),

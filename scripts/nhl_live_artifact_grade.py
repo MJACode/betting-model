@@ -376,7 +376,9 @@ def bands() -> None:
           f"corrected says {lifted.cal.mean():.3f} | actually happened {lifted.won.mean():.3f}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    # A function, not module-level code, so the worker's nhl_research job can
+    # import and run it (tracking/job_queue._run_script_main).
     for i, a in enumerate(sys.argv):
         if a == "--artifact" and i + 1 < len(sys.argv):
             k, _, v = sys.argv[i + 1].partition("=")
@@ -392,3 +394,7 @@ if __name__ == "__main__":
         bands()
     finally:
         c.close()
+
+
+if __name__ == "__main__":
+    main()
