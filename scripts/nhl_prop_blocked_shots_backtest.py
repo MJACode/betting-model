@@ -60,6 +60,9 @@ def bets(frame: pd.DataFrame, conn) -> pd.DataFrame:
     for season in SEASONS:
         model, n_train = bs.fit(frame, season - 1)
         te = bs.usable(frame[(frame.season == season) & ~frame.upcoming]).dropna(subset=[bs.STAT]).copy()
+        # a name two players share is one the card refuses (scripts/nhl_prop_backtest.namesakes)
+        from scripts.nhl_prop_backtest import namesakes
+        te = te[~namesakes(te, frame, season)]
         te["mu"] = bs.predict_mean(model, te)
         px = prices(conn, season)
         m = px.merge(te[["game_id", "pkey", "game_date", "mu", bs.STAT]], on=["game_id", "pkey"], how="inner")
