@@ -21,7 +21,12 @@
 
 ---
 
-## [ ] [needs-decision] NHL props: the nightly cap and first-come slots (2026-10-08 assessment)
+## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
+
+Two a night became four (`scripts/nhl_props_card.MAX_PROP_BETS_PER_NIGHT`),
+`Updated-By: mike`. What remains open is the first-come ordering, below.
+
+## [ ] NHL props: first-come slots (2026-10-08 assessment)
 
 Full numbers: `docs/nhl_clv_ev_assessment.md`. Two caps apply across the four
 NHL prop models: one bet a game, and two a night. The nightly cap costs units
@@ -35,7 +40,12 @@ night's best two instead is +5.1 pp in the backtest at 0.18, but its interval
 is -0.5..+10.7, so that size is not established. The size of either cap is
 mike's call (10-02 "best of the best", 10-03 "too many unders").
 
-## [ ] [needs-decision] NHL props: a closing snapshot about 10 minutes before puck drop
+## [x] NHL props: a CLV-only closing snapshot — DECIDED 2026-10-08 (mike): added
+
+Built as the FINAL in `data/ingestors/nhl_prop_odds_ingestor.py`: between 25
+and 12 minutes before the feed's start time, filed as snapshot_type 'close'
+so no card decides on it. Read the first week of prop CLV once it exists.
+The original item:
 
 The prop ingestor buys an open and a 70-minute close. Saves and blocked shots
 appear only in the close, so they are bet on it, and their CLV is zero (or a

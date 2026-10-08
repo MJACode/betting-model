@@ -32,7 +32,7 @@ rule. Claims that did not survive are marked as refuted, with the reason.
 | `nhl_prop_shots_on_goal` | live | Weaker than published once shared names are refused. Alone at 0.18: 885 bets +6.1% (-0.6..+12.6). At 0.10: +4.4%, 2025-26 +1.4%. Strong only at a high EV (0.25: 192 bets +24.0%). | 52 bets, 51 settled, 29-22, +4.68u. Current rule: 6 bets, 1-4, -3.09u. | At the price paid against Pinnacle's close: EV +0.18% (n=37), i.e. break-even |
 | `nhl_prop_assists` | live | Alone at 0.18: 213 bets +16.8% (+1.7..+30.6), but only 20 in 2024-25. Calibrated where it bets. Unders only is right: its overs lose. | 5 bets, 2-3, -0.97u. None under the current rule. | 1 of 5 is a real lock-to-close measure |
 | derivative totals (team, alternate, first period) | built, not registered | The published grade has two defects. Team totals were graded on regulation goals, while every book prices full-game goals; on full-game goals the same unders lose. The alternate and first-period grades paid a push as an under win. Not re-graded. | none | none |
-| anytime goalscorer (no model) | candidate | The lab's "+10.0% on 6,656" is inflated by the same name defect below (+254u on 93 bets from the two Elias Petterssons). Corrected, about +6.3%, and it leans on FanDuel, which production does not shop. | none | none |
+| anytime goalscorer (no model) | candidate | The lab's "+10.0% on 6,656" is inflated by the same name defect below (+254u on 93 bets from the two Elias Petterssons). Corrected, about +6.3%, and it leans on FanDuel, which production does not shop. The check that the best book's Yes price is a real, offered price was still running when this was written. | none | none |
 | regulation draw, Pinnacle against the soft books (no model) | candidate | Positive in all three seasons, but no interval clears zero. Realised profit was about 3x what Pinnacle's own prices implied. DraftKings has since priced it out: 0 of 2,358 same-fetch prices qualify this season. | none | none |
 
 ## The defect that inflated the prop evidence
@@ -199,31 +199,43 @@ Five defects, found by more than one assessment:
   `scripts/nhl_prop_ev_lab.py` (the four prop models together, in units a
   season, every floor × per-game cap × per-night cap).
 - #895: the backtests refuse a shared name, as the card does.
-- This change: CLV for the 30 picks at a line DraftKings never hung. The game
-  grade now labels the row production actually runs. This document.
+- This change:
+  - CLV for the 30 picks at a line DraftKings never hung.
+  - The game grade now labels the row production actually runs.
+  - Four NHL prop bets a night (mike).
+  - The CLV-only final prop snapshot (mike).
+  - Dated corrections beside the inflated figures in `config.py` and
+    `docs/thresholds.md`.
+  - This document.
 
-No threshold, cap, side, book set or model was changed.
+No threshold, side, book set or model changed. The nightly prop limit did,
+from two to four.
 
-## Decisions for mike
+## Decided 2026-10-08 (mike)
 
-Recorded in `docs/followups.md` as `[needs-decision]` items. In order of units
-a season:
+1. **NHL props: four bets a night, not two.** One a game and the 0.18 floor
+   stay. On the corrected backtest this is +54.6 units a season against +38.8
+   (+15.8). On the books that post these markets live it is +56.8 against
+   +35.5, the same as no nightly limit (+56.5). Every season is positive. It
+   runs at about 2.8 bets a night, never more than four. `Updated-By: mike`.
+   Against the first-come card as it actually ran, the gain is larger: the
+   verifiers put two a night, filled first-come, at +43.6 to +46.9 units a
+   season before the name correction.
+2. **A third, CLV-only prop snapshot** between 25 and 12 minutes before the
+   feed's start time, filed as `snapshot_type = 'close'` so no card decides on
+   it. About 6,600 credits a season.
 
-1. **The nightly cap on NHL props.** Removing it (one bet a game stays) is
-   +26.8 units a season on the corrected backtest. Raising it to four a night
-   is +15.8. Both gains hold in every season. The cost is volume: about 3.6 bets
-   a night on average with no nightly cap, at most one per game, against 1.8
-   today. Lowering the floor to 0.15 as well is +47.2 units a season, at 4.5
-   bets a night.
-2. **A prop closing snapshot about 10 minutes before puck drop**, so CLV can be
-   measured on saves, blocked shots and evening picks. About 6,600 credits a
-   season (5 a game, measured).
-3. **CLV at the price taken** for every model that shops books. It changes the
+## Still open, for mike (in `docs/followups.md`)
+
+1. **CLV at the price taken** for every model that shops books. It changes the
    published CLV of those models.
-4. **`nhl_over_under` as a market-anchored paper model.** It would bet soft
+2. **`nhl_over_under` as a market-anchored paper model.** It would bet soft
    books that lag Pinnacle, and its CLV is positive in all six seasons. Its ROI
    interval still includes zero (+4.72%, -0.6..+10.1). About +3 to +4.5 units
    a season if it holds.
+3. **Lowering the prop floor to 0.15**, the units-a-season peak with one bet a
+   game (+86.0 with no nightly limit, +68.4 at four a night). It is in-sample,
+   because the floor was chosen on these seasons, and it was not asked about.
 
 The game models need no decision. Neither has a cut that clears, and both stay
 live (mike, 2026-10-01). The regulation model's measured cost at its live
