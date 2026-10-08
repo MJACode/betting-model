@@ -1,8 +1,8 @@
 """The four NHL prop models graded TOGETHER, in expected units a season: every cap the card could run.
 
-WHY. The card (scripts/nhl_props_card.py) now writes at most one NHL prop bet a
-game and two a night, at EV >= 0.18 (mike, 2026-10-02 and 10-03). Those were
-graded on return per bet. Expected value is maximised on units a season, and a
+WHY. The card (scripts/nhl_props_card.py) writes at most one NHL prop bet a
+game, and a nightly limit (two from 2026-10-03, four from 10-08), at EV >= 0.18.
+Those were first graded on return per bet. Expected value is maximised on units a season, and a
 cap that lifts the return per bet can still cost units, so this prints both,
 for every floor x per-game cap x per-night cap, from the production backtest
 code (scripts/nhl_prop_backtest.py), walk-forward on the three priced seasons.
@@ -148,8 +148,10 @@ def history() -> None:
     print(f"candidates at EV >= {min(FLOORS)}: {len(live):,} "
           f"({live.groupby('model_id').size().to_dict()}); priced game days {live.game_date.nunique():,}")
 
-    show("TODAY'S RULE, reproduced: EV >= 0.18, one a game, two a night (live order)",
-         [summary({"rule": "today"}, regime(live, 0.18, 1, 2)),
+    from scripts.nhl_props_card import MAX_PROP_BETS_PER_GAME, MAX_PROP_BETS_PER_NIGHT
+    show(f"TODAY'S RULE, reproduced: EV >= 0.18, {MAX_PROP_BETS_PER_GAME} a game, "
+         f"{MAX_PROP_BETS_PER_NIGHT} a night (the card's order, the night's best first)",
+         [summary({"rule": "today"}, regime(live, 0.18, MAX_PROP_BETS_PER_GAME, MAX_PROP_BETS_PER_NIGHT)),
           summary({"rule": "one a game, no nightly limit"}, regime(live, 0.18, 1, None))])
     show("Floor x bets a game, no nightly limit (units/season is what expected value is maximised on)",
          [summary({"EV>=": f, "per game": g if g else "none"}, regime(live, f, g, None))

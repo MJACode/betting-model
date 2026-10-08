@@ -1929,6 +1929,11 @@ MODEL_OWN_EV_FLOOR: dict = {
     # sweep at 0.18 (the others at 0.10): shots +18.8% (570), saves +16.7%
     # (623), assists +26.2% (131), blocked shots +7.2% (335; flat at every cut).
     # Chosen on the same seasons it is graded on.
+    # CORRECTED 2026-10-08: those figures carried a name defect. The two Elias
+    # Petterssons shared one price in the backtest, and it graded the forward's
+    # under on the defenceman's count. With shared names refused (#895), one a
+    # game at 0.18 is +12.2% on 1,615, +65.6 units a season; 0.15 is +11.7%,
+    # +86.0. docs/nhl_clv_ev_assessment.md. The 0.18 floor is unchanged.
     "nhl_prop_blocked_shots":    0.18,
     "nhl_prop_saves":            0.18,
     "nhl_prop_shots_on_goal":    0.18,
