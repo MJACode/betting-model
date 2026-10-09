@@ -19,6 +19,7 @@ import {
   movementFromLatest,
   numOrNull,
   pickTimingInfo,
+  priceAgeFor,
   splitPickTitle,
   storedQuoteBook,
   type Movement,
@@ -125,7 +126,12 @@ export function PickCard({
   const clvTone = pnlTone(pick.clv_pct, 1);
   const clvInk = clvTone === 'textSecondary' ? colors.textTertiary : colors[clvTone];
 
-  const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
+  // The scorer's price-age rule (markets.PREGAME_PRICE_MAX_AGE_MIN): before
+  // the start, a deciding price the book stopped updating is no price, so
+  // the card shows "Now —" and offers no hand-off at it. Same start test
+  // as the price check above.
+  const priceAge = priceAgeFor(pick, game, liveState);
+  const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge);
   // Compare home-relative as numbers: PostgREST can send NUMERIC as a string,
   // and "-1" !== -1 would print a line on every card. Print from the pick's
   // side so an away spread that has moved (NYJ +5, scored −5, Now −4.5)
@@ -182,7 +188,7 @@ export function PickCard({
   // in-play price is not the price it was made at (H5).
   const offersBook = !preview && !paused && pick.signal_type === 'BET';
   const handoff = offersBook && cta.handoff
-    ? bestHandoffForPick(pick, item.bookRows, heroPrice)
+    ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge)
     : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);

@@ -212,6 +212,119 @@ eq([h2?.bookmaker, h2?.price, h2?.verb], [MODEL_BOOK, -112, 'Bet'], 'DK now -112
     assert proc.returncode == 0, proc.stderr
 
 
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_a_stale_pre_game_price_is_no_price_on_the_card(tmp_path):
+    """The scorer's price-age rule, on the card (2026-10-09). Pick 3204788,
+    BYU vs Notre Dame Under 54.5 -112, was posted off DraftKings' 2026-09-05
+    row. The app's latest-price views keep the newest row whatever its age, so
+    the card showed -112 as current, with a bet link, and the price check
+    passed it. Before the start, a deciding price older than
+    PREGAME_PRICE_MAX_AGE_MIN is now "Now -", no hand-off at it, and a price
+    check. Runs in CI (node 22); the machine it was written on had no node."""
+    files = ["markets.ts", "format.ts", "thresholds.ts", "thresholds.generated.ts",
+             "decisionPrice.ts", "discordPublish.ts", "clvBet.ts", "priceCheck.ts",
+             "pickPriceCheck.ts"]
+    for name in files:
+        src = _read(LIB / name)
+        src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = PRELUDE + """
+import { bestHandoffForPick, heroAmericanForPick, PREGAME_PRICE_MAX_AGE_MIN, priceAgeApplies, priceAgeFor } from './markets.ts';
+import { priceCheckForItem } from './pickPriceCheck.ts';
+const NOW = Date.parse('2026-10-09T16:30:00Z');
+const kick = '2099-01-01T00:00:00Z';     // never started, whenever CI runs
+const pick = {
+  pick_id: 3204788, game_id: 'NCAAF_2026-10-17_notre-dame_byu', model_id: 'ncaaf_over_under', sport: 'NCAAF',
+  game_date: '2026-10-17', game_time: kick, pick_side: 'under', pick_label: 'BYU vs Notre Dame Under 54.5',
+  model_probability: 0.56, dk_implied_prob: 0.528, edge: 0.03, dk_odds: -112, scored_line: 54.5,
+  signal_type: 'BET', is_live: false, dk_bet_link: 'dk://under', decision_odds: -112, decision_edge: 0.03,
+  decision_book: 'draftkings', line_book: null,
+};
+const STALE = '2026-09-05T23:59:48Z';
+const FRESH = '2026-10-09T16:20:00Z';
+const latest = (snap) => ({ game_id: pick.game_id, game_date: '2026-10-17', market: 'totals', home_price: null,
+  away_price: null, spread_home: null, total_line: 54.5, over_price: -108, under_price: -112, snapshot_at: snap });
+const staleRows = [
+  { bookmaker: 'draftkings', under_price: -112, total_line: 54.5, snapshot_at: STALE },
+  { bookmaker: 'fanduel', under_price: -105, total_line: 54.5, under_link: 'fd://old', snapshot_at: STALE },
+];
+const pre = { started: false, now: NOW };
+eq(PREGAME_PRICE_MAX_AGE_MIN, 180, 'the bound');
+
+// The September price is no price.
+const hero = heroAmericanForPick(pick, latest(STALE), staleRows, pre);
+eq([hero?.kind, hero?.price, hero?.link, hero?.showLockedCaption, hero?.lockedPrice, hero?.stale],
+   ['now', null, null, true, -112, true], 'stale: Now -, Locked -112, no link');
+eq(heroAmericanForPick(pick, latest(STALE), staleRows)?.kind, 'decision', 'no clock passed: unchanged');
+eq(heroAmericanForPick(pick, latest(STALE), staleRows, { started: true, now: NOW })?.kind, 'decision',
+   'after the start the last pre-game row is the close');
+eq(heroAmericanForPick(pick, null, [], pre)?.kind, 'decision', 'a missing row is not a stale row');
+const at = (min) => new Date(NOW - min * 60000).toISOString();
+eq(heroAmericanForPick(pick, latest(at(179)), [], pre)?.stale, undefined, '179 minutes old is current');
+eq(heroAmericanForPick(pick, latest(at(181)), [], pre)?.stale, true, '181 minutes old is not');
+
+// No hand-off at a stale price.
+eq(bestHandoffForPick(pick, staleRows, hero, pre), null, 'every book stale: no hand-off');
+const mixed = [staleRows[0], { bookmaker: 'betmgm', under_price: -110, total_line: 54.5, under_link: 'mgm://now', snapshot_at: FRESH }];
+const hm = bestHandoffForPick(pick, mixed, heroAmericanForPick(pick, latest(STALE), mixed, pre), pre);
+eq([hm?.bookmaker, hm?.price, hm?.link], ['betmgm', -110, 'mgm://now'], 'only a book still pricing it');
+const stamped = { ...pick, best_book: 'fanduel', best_odds: -105, best_bet_link: 'fd://stamp' };
+eq(bestHandoffForPick(stamped, staleRows, heroAmericanForPick(stamped, latest(STALE), staleRows, pre), pre), null,
+   'the best-price stamp at a book whose row went stale is not offered');
+const freshRows = staleRows.map((r) => ({ ...r, snapshot_at: FRESH }));
+const fh = heroAmericanForPick(pick, latest(FRESH), freshRows, pre);
+eq([fh?.kind, fh?.price], ['decision', -112], 'fresh: unchanged');
+eq(bestHandoffForPick(pick, freshRows, fh, pre)?.bookmaker, 'fanduel', 'fresh: best price hand-off');
+
+// Only where the scorer applies the rule.
+eq(priceAgeApplies({ ...pick, model_id: 'nhl_prop_shots_on_goal' }, pre), false, 'props');
+eq(priceAgeApplies({ ...pick, model_id: 'nfl_wind_totals' }, pre), false, 'NFL card models');
+eq(priceAgeApplies({ ...pick, is_live: true }, pre), false, 'in-play signals');
+eq(priceAgeApplies(pick, {}), false, 'no clock');
+// No known start time: not bounded, the scorer's convention too.
+eq(priceAgeFor({ game_time: null }, null, null, NOW), { now: NOW }, 'no start known: rule off');
+eq(priceAgeFor({ game_time: kick }, null, null, NOW), { started: false, now: NOW }, 'start ahead: rule on');
+eq(priceAgeFor({ game_time: null }, { sport: 'NCAAF', commence_time: '2026-01-01T00:00:00Z' }, null, NOW).started, true, 'started: rule off');
+eq(priceCheckForItem({ pick: { ...pick, game_time: null }, latestOdds: latest(STALE), bookRows: staleRows, game: null }, null, NOW).flagged,
+   false, 'no start known: a stale row is not judged');
+
+// The price check flags it; fresh and missing pass.
+const game = { sport: 'NCAAF', commence_time: kick };
+const pc = priceCheckForItem({ pick, latestOdds: latest(STALE), bookRows: staleRows, game }, null, NOW);
+eq([pc.flagged, pc.reasons], [true, ['stale']], 'a stale price is a price check');
+eq(priceCheckForItem({ pick, latestOdds: latest(FRESH), bookRows: freshRows, game }, null, NOW).flagged, false, 'fresh');
+eq(priceCheckForItem({ pick, latestOdds: null, bookRows: [], game }, null, NOW).flagged, false, 'missing');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_the_card_applies_the_price_age_rule():
+    """The static half, for runners without node."""
+    markets = _read(LIB / "markets.ts")
+    hero = markets[markets.index("export function heroAmericanForPick("):]
+    hero = hero[:hero.index("\nexport function ")]
+    assert "priceAge?: PriceAgeContext" in hero
+    assert "priceAgeApplies(pick, priceAge)" in hero and "stale: true" in hero
+    handoff = markets[markets.index("export function bestHandoffForPick("):]
+    assert "freshBookRows(pick, bookRows, priceAge)" in handoff[:2500]
+    assert "hero?.stale" in handoff[:2500]
+    card = _read(SRC / "components" / "PickCard.tsx")
+    assert "const priceAge = priceAgeFor(pick, game, liveState);" in card
+    assert "heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge)" in card
+    pc = _read(LIB / "priceCheck.ts")
+    assert "if (!started && stale) reasons.push('stale');" in pc
+    ppc = _read(LIB / "pickPriceCheck.ts")
+    assert "priceAgeFor(item.pick, item.game ?? null, liveState ?? null, now)" in ppc
+    assert "heroAmericanForPick(item.pick, item.latestOdds, item.bookRows, priceAge)" in ppc
+    assert "stale: hero?.stale === true" in ppc
+    # No known start time, no bound: the scorer's convention.
+    assert "if (!(game?.commence_time || pick.game_time)) return { now };" in markets
+
+
 def test_best_handoff_rerank_is_wired():
     """The static half, for runners without node: the re-rank reads the hero's
     current price, not the record chip's stored one."""
@@ -219,7 +332,7 @@ def test_best_handoff_rerank_is_wired():
     assert re.search(r"export function bestHandoffForPick\(", markets)
     assert "hero" in markets[markets.index("export function bestHandoffForPick("):][:3000]
     card = _read(SRC / "components" / "PickCard.tsx")
-    assert re.search(r"bestHandoffForPick\(pick, item\.bookRows, heroPrice\)", card)
+    assert re.search(r"bestHandoffForPick\(pick, item\.bookRows, heroPrice, priceAge\)", card)
 
 
 def test_pick_card_wiring():

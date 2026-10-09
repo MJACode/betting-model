@@ -49,23 +49,32 @@ export interface PriceCheckInput {
    * #847).
    */
   started?: boolean;
+  /**
+   * The deciding book's newest price is older than PREGAME_PRICE_MAX_AGE_MIN
+   * on a game that has not started (heroAmericanForPick's `stale`). The scorer
+   * treats that as no price, so the card must not present the lock as a
+   * current, bettable number. A MISSING price is not this: it may be a failed
+   * read, and keeps passing.
+   */
+  stale?: boolean;
 }
 
 export interface PriceCheck {
   flagged: boolean;
   /** Which rule tripped, for the accessibility label and the tests. */
-  reasons: Array<'edge' | 'moved'>;
+  reasons: Array<'edge' | 'moved' | 'stale'>;
 }
 
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
 /** Strictly greater than either bound flags; the bound itself does not. */
-export function priceCheck({ edge, locked, current, started = false }: PriceCheckInput): PriceCheck {
+export function priceCheck({ edge, locked, current, started = false, stale = false }: PriceCheckInput): PriceCheck {
   const reasons: PriceCheck['reasons'] = [];
   if (finite(edge) && edge > PRICE_CHECK_MAX_EDGE) reasons.push('edge');
   if (!started && finite(locked) && finite(current) && centsApart(locked, current) > PRICE_CHECK_MAX_CENTS) {
     reasons.push('moved');
   }
+  if (!started && stale) reasons.push('stale');
   return { flagged: reasons.length > 0, reasons };
 }
 

@@ -23,7 +23,9 @@ The tests added after it say what they pin where they sit.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -80,6 +82,16 @@ class _OddsConn:
 
 def test_the_bound_is_three_hours_and_one_constant():
     assert config.PREGAME_PRICE_MAX_AGE_MIN == 180
+
+
+def test_the_app_applies_the_same_bound():
+    """The card refuses a stale price on the same rule (mobile/src/lib/
+    markets.ts). Two copies of one number drift, so they are pinned."""
+    src = (Path(__file__).resolve().parents[1] / "mobile" / "src" / "lib"
+           / "markets.ts").read_text(encoding="utf-8")
+    m = re.search(r"export const PREGAME_PRICE_MAX_AGE_MIN = (\d+);", src)
+    assert m, "the app has no pre-game price-age bound"
+    assert int(m.group(1)) == config.PREGAME_PRICE_MAX_AGE_MIN
 
 
 def test_the_entry_checks_floor_is_exactly_the_bound():
