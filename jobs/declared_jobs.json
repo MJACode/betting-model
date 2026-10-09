@@ -926,5 +926,17 @@
     "args": {
       "script": "nhl_prop_ev_lab"
     }
+  },
+  {
+    "key": "void-stale-ncaaf-3094555-2026-10-09",
+    "job_type": "void_picks",
+    "requested_by": "mike",
+    "note": "mike 2026-10-09: void the open NCAAF BETs priced off September lines. 3094555 (ncaaf_moneyline, Alabama ML -142, NCAAF_2026-10-24_texas-a-m_alabama) was decided on a DraftKings price 25.8 days old: its last DraftKings price was stored 2026-09-05 16:15 UTC, after which the feed stopped listing the game, and the scorer kept reading that row. It was never posted (paused model) and has not settled. The 8 posted ones are refused by scripts/void_picks.py (posted signals are locked) and are not in this job.",
+    "args": {
+      "pick_ids": [
+        3094555
+      ],
+      "reason": "decided on a DraftKings price 25.8 days old (its last stored price, 2026-09-05 16:15 UTC): the odds feed stopped listing the game and the scorer used that row; nobody could bet that number (mike, 2026-10-09)"
+    }
   }
 ]
