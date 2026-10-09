@@ -56,12 +56,17 @@ Found 2026-10-09 while fixing the stale-price bound. The odds feed builds a
 UFC id from its home fighter, and that flips between fetches, so one fight can
 sit under both orientations. Since 2026-10-09 an id whose own DraftKings rows
 went stale no longer borrows its twin's price (`_ufc_id_never_priced`), so the
-abandoned copy is skipped. Still open:
+abandoned copy is skipped, but only once its newest DraftKings row is more
+than 3 hours old: for up to 3 hours after a flip both ids hold current rows.
 
-- **An id DraftKings never priced** may still borrow its twin's price; that
-  is what the fallback is for, when only one id carries a market. But the
-  code does not stop the twin being scored in the same pass, so the fight
-  can be bet under both ids. Not measured how often both are scored.
+- [x] **Both ids scored in one pass — FIXED 2026-10-09 (second review).** An
+  id DraftKings never priced still borrowed its twin's price, and both ids
+  were current for up to 3 hours after a flip, so both were decided and the
+  fight could be bet twice. `run_scorer` now scores a fight present under
+  both ids on one of them (the id whose own newest DraftKings row is newer,
+  `_ufc_one_id_per_fight`), clears the other id's no-bet rows, and a BET on
+  either id locks that model on both. The chosen id still borrows a market
+  only its twin carries (the 08-29 totals case).
 - **Two ids for one fight have each carried a BET, and both were graded**
   (cause not established). Swapped ids: 332605 and 332615
   (`ufc_total_rounds`, 2026-06-20, "Andre Lima vs Kevin Borjas Over 2.5" and

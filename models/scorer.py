@@ -2357,10 +2357,14 @@ def _ufc_id_never_priced(conn: DBConnection, game_id: str, market: str,
     Only when DraftKings has NEVER stored a pre-game row for it in this
     market. An id with rows, all older than config.PREGAME_PRICE_MAX_AGE_MIN,
     is the copy the feed abandoned when it flipped home and away: it gets no
-    price, so the "is this fight real" check skips it and only the live copy is
-    scored. Before the age bound its own stale row answered, which was wrong
-    too; with the bound and without this check, the read fell through to the
-    live copy's fresh price and BOTH ids decided the same fight (2026-10-09:
+    price, so the "is this fight real" check skips it. (That alone does not
+    make one id per fight: a never-priced id still borrows, and for up to 3
+    hours after a flip both ids hold fresh rows of their own. run_scorer
+    scores a fight present under both ids on one of them,
+    _ufc_one_id_per_fight.) Before the age bound its own stale row answered,
+    which was wrong too; with the bound and without this check, the read fell
+    through to the live copy's fresh price and BOTH ids decided the same fight
+    (2026-10-09:
     UFC_2026-10-10_rj-harris_allen-frye-jr has DraftKings rows to 10-08 18:17Z
     and none since; the swapped id has rows from 10-08 18:38Z on). Per MARKET,
     not per id: on the 2026-08-29 card UFC_2026-08-29_andre-lima_namsrai-
@@ -2370,6 +2374,83 @@ def _ufc_id_never_priced(conn: DBConnection, game_id: str, market: str,
     """
     return _newest_book_game_row(conn, game_id, market, "draftkings",
                                  cutoff) is None
+
+
+def _ufc_own_newest_dk(conn: DBConnection, game_id: str,
+                       markets: tuple) -> datetime | None:
+    """The newest pre-game DraftKings row stored under THIS id, any of
+    `markets`, whatever its age; None when it has none. One LIMIT 1 read per
+    market on idx_odds_book_snap (the same read _ufc_id_never_priced makes;
+    5.9 ms on production, 2026-10-09). Only ids whose twin is also on the
+    board are read: 2 fights on the 10-10 card."""
+    cutoff = _pregame_cutoff(conn, game_id)
+    best = None
+    for market in markets:
+        row = _newest_book_game_row(conn, game_id, market, ODDS_API_BOOKMAKER,
+                                    cutoff)
+        ts = _parse_snapshot(row.get("snapshot_at")) if row else None
+        if ts is not None and (best is None or ts > best):
+            best = ts
+    return best
+
+
+def _ufc_one_id_per_fight(conn: DBConnection, games) -> dict:
+    """{id left out: id scored} for every UFC fight in `games` under both
+    orientations (second review, 2026-10-09).
+
+    The per-market rule (_ufc_id_never_priced) stops only the abandoned copy.
+    An id DraftKings never priced still borrows its twin's price, and for up to
+    3 hours after the feed flips home and away both ids hold fresh rows of
+    their own, so both passed the "is this fight real" check and the fight was
+    decided twice in one pass, and could be bet twice (picks 332605 and
+    332615 are one fight, BET and graded under both orientations on
+    2026-06-20; that cause was never established).
+
+    The id scored is the one whose own newest DraftKings row is newer: the
+    feed's current orientation. When neither has a row of its own, the first
+    in sort order (neither can pass the real-fight check then anyway). Only
+    the scoring pass is affected: the chosen id still borrows a market only
+    its twin carries (_get_dk_odds), which is the 2026-08-29 totals case the
+    fallback exists for.
+    """
+    markets = tuple(sorted({mk for sp, mk, _ in MODELS.values() if sp == "UFC"}))
+    ids = {g[0] for g in games if g[1] == "UFC"}
+    out: dict = {}
+    for a in sorted(ids):
+        b = _sibling_ufc_game_id(a)
+        if not b or b not in ids or b < a:
+            continue
+        ta = _ufc_own_newest_dk(conn, a, markets)
+        tb = _ufc_own_newest_dk(conn, b, markets)
+        keep = b if tb is not None and (ta is None or tb > ta) else a
+        out[a if keep == b else b] = keep
+    return out
+
+
+def _clear_left_out_ufc_id(conn: DBConnection, game_id: str) -> None:
+    """Clear the unsettled no-bet and avoid rows of a UFC id run_scorer leaves
+    out (_ufc_one_id_per_fight), so they leave the board this pass. The same
+    statement as the per-game clear in run_scorer: BETs, in-play rows and NFL
+    props are never touched. The sweep after the loop would also catch these
+    rows, but it yields when it cannot get its locks within 10 s. Housekeeping
+    only, so a failure is logged and never fails the pass."""
+    try:
+        conn.execute("""
+            DELETE FROM picks
+            WHERE game_id = %s
+              AND result IS NULL
+              AND signal_type != 'BET'
+              AND is_live IS NOT TRUE
+              AND model_id NOT LIKE 'nfl_prop_%%'
+        """, (game_id,))
+        conn.commit()
+    except Exception as exc:                                  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:                                     # noqa: BLE001
+            pass
+        logger.warning(f"  {game_id}: clearing the left-out id's rows failed "
+                       f"({exc!r}); the sweep after the loop retries")
 
 
 def _fallback_game_line_quote(conn: DBConnection, game_id: str, market: str,
@@ -3307,6 +3388,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     + traceback.format_exc())
                 ahead_unpriced = set()
 
+        # ONE ID PER UFC FIGHT (second review, 2026-10-09). A fight the feed
+        # holds under both home/away orientations is scored on the id
+        # _ufc_one_id_per_fight picks; the other is skipped in the loop below.
+        # Fails OPEN like the filters above: if the read breaks, both ids are
+        # scored, which is the behaviour before this change.
+        ufc_left_out: dict = {}
+        if sum(1 for g in games if g[1] == "UFC") > 1:
+            ufc_left_out = _fail_open(
+                conn, "sp_ufc_one_id",
+                lambda: _ufc_one_id_per_fight(conn, games),
+                {}, "UFC one-id-per-fight read")
+
         # Check for postponed MLB games via the official schedule API
         postponed_ids = _get_postponed_games(target_date)
         if postponed_ids:
@@ -3420,6 +3513,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if locked_pairs:
                 logger.info(f"Pick lock: {len(locked_pairs)} game-model pick(s) "
                             f"already locked for {target_date} — preserving")
+            # A UFC fight is ONE proposition under either orientation, so a
+            # BET on one id locks that model on its swapped id too. Without
+            # this, the id scored after a flip could bet a fight a second
+            # time, at any point after the flip (second review, 2026-10-09).
+            for gid, mid in list(locked_pairs):
+                twin = _sibling_ufc_game_id(gid)
+                if twin:
+                    locked_pairs.add((twin, mid))
 
         # Only delete unsettled picks for games that haven't started yet.
         # This preserves picks for games already in progress or completed so
@@ -3465,6 +3566,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         skipped_started = 0
         skipped_postponed = 0
         skipped_locked = 0
+        skipped_twin = 0
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
@@ -3493,6 +3595,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             # Skip games that have already started — their picks are locked in
             if commence_time and commence_time <= now_utc:
                 skipped_started += 1
+                continue
+
+            # The same fight under its other orientation is the id scored.
+            # This id's old no-bet and avoid rows leave the board now; the
+            # sweep after the loop would also clear them, but it yields when
+            # it cannot get its locks. BETs are never deleted.
+            if game_id in ufc_left_out:
+                skipped_twin += 1
+                logger.info(f"  [SKIP] {away_team} vs {home_team} — the same "
+                            f"fight is scored as {ufc_left_out[game_id]}, the "
+                            f"id DraftKings priced most recently")
+                if not dry_run:
+                    _clear_left_out_ufc_id(conn, game_id)
                 continue
 
             # Build features once per game, reuse across all models for that sport
@@ -3760,6 +3875,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             logger.info(f"Skipped {skipped_started} games already started (picks locked)")
         if skipped_locked:
             logger.info(f"Skipped {skipped_locked} game-model pick(s) locked from an earlier run today")
+        if skipped_twin:
+            logger.info(f"Skipped {skipped_twin} UFC id(s) whose fight is scored under its other id")
 
         if not dry_run:
             conn.commit()

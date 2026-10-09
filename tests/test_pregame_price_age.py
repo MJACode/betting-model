@@ -419,3 +419,145 @@ def test_the_best_price_shop_follows_the_same_rule(_clock, monkeypatch):
     best = scorer._best_game_price(conn, ABANDONED, "h2h", "away", None,
                                    UFC_CUTOFF)
     assert best is not None and best["book"] == "fanduel" and best["odds"] == 130
+
+
+# ── one fight, one id, in each scoring pass (second review, 2026-10-09) ──────
+#
+# The per-market rule above stops only the ABANDONED copy. An id DraftKings
+# never priced still borrows its twin's price, and for up to 3 hours after a
+# flip both ids hold fresh rows of their own, so both passed the "is this
+# fight real" check and both were decided in one pass. run_scorer now scores
+# a fight present under both ids on ONE of them: the id whose own newest
+# DraftKings row is newer (the first in sort order when neither has one), and
+# a BET on either id locks that model for both. All four tests failed before
+# that, because both ids were scored; the fourth also pins that the chosen id
+# still borrows a market only its twin carries (the 08-29 totals case).
+
+TWIN_A = "UFC_2099-01-01_aa-fighter_bb-fighter"        # away aa
+TWIN_B = "UFC_2099-01-01_bb-fighter_aa-fighter"        # away bb
+FAR_KICK = "2099-01-01T23:00:00+00:00"                 # never started, whenever this runs
+
+
+def _ago(minutes: int) -> str:
+    return (NOW - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class _UfcBoardConn:
+    """Enough of Postgres for run_scorer over a UFC card: the game list, the
+    newest-row read per (game_id, market, bookmaker), the kickoff read, the
+    BET lock read and the writes (recorded, not applied)."""
+
+    def __init__(self, games, newest, bets=()):
+        self.games = games
+        self.newest = newest
+        self.bets = list(bets)
+        self.deletes: list[tuple] = []
+        self._last = ("", ())
+
+    def execute(self, sql, params=None):
+        self._last = (" ".join(sql.split()), tuple(params or ()))
+        if self._last[0].startswith("DELETE FROM picks WHERE game_id"):
+            self.deletes.append(self._last[1])
+        return self
+
+    def fetchone(self):
+        sql, params = self._last
+        if "FROM odds" in sql:
+            return self.newest.get(params[:3])
+        if "FROM games WHERE game_id" in sql:
+            return (FAR_KICK,)
+        return None
+
+    def fetchall(self):
+        sql, _ = self._last
+        if "home_team" in sql and "FROM games" in sql:
+            return self.games
+        if "FROM picks p" in sql and "signal_type = 'BET'" in sql:
+            return self.bets
+        return []
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _ufc_game(gid):
+    _, _, away, home = gid.split("_")
+    return (gid, "UFC", 2099, "2099-01-01", home, away, FAR_KICK)
+
+
+def _score_card(monkeypatch, conn, dry_run=True):
+    """run_scorer over `conn`; returns the (game_id, model_id) pairs scored."""
+    monkeypatch.setattr(scorer, "get_connection", lambda: conn)
+    monkeypatch.setattr(scorer, "_get_postponed_games", lambda _d: set())
+    import features.ufc_feature_engine as ufe
+    monkeypatch.setattr(ufe, "build_ufc_game_features", lambda *a, **k: {"f": 1})
+    scored: list[tuple] = []
+
+    def _score(conn_, game_id, model_id, *a, **k):
+        scored.append((game_id, model_id))
+        return []
+    monkeypatch.setattr(scorer, "score_game", _score)
+    scorer.run_scorer("2098-12-31", dry_run=dry_run)
+    return scored
+
+
+def test_a_never_priced_id_is_not_scored_beside_its_priced_twin(_clock, monkeypatch):
+    """TWIN_A has no DraftKings row at all; TWIN_B is current. Before: TWIN_A
+    borrowed TWIN_B's moneyline, passed the real-fight check, and both ids
+    were decided."""
+    conn = _UfcBoardConn(
+        [_ufc_game(TWIN_A), _ufc_game(TWIN_B)],
+        {(TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(10), 125, -150),
+         (TWIN_B, "totals", "draftkings"): _totals_row(_ago(10), line=2.5)})
+    scored = _score_card(monkeypatch, conn)
+    assert {g for g, _ in scored} == {TWIN_B}, scored
+
+
+def test_two_current_ids_of_one_fight_score_only_the_newer(_clock, monkeypatch):
+    """The hours after a flip: both ids hold rows inside the bound."""
+    conn = _UfcBoardConn(
+        [_ufc_game(TWIN_A), _ufc_game(TWIN_B)],
+        {(TWIN_A, "h2h", "draftkings"): _h2h_row(_ago(70), -150, 125),
+         (TWIN_A, "totals", "draftkings"): _totals_row(_ago(70), line=2.5),
+         (TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(5), 125, -150)})
+    scored = _score_card(monkeypatch, conn)
+    assert {g for g, _ in scored} == {TWIN_B}, scored
+
+
+def test_a_bet_on_either_id_locks_the_model_for_both(_clock, monkeypatch):
+    """TWIN_A carried the moneyline BET; the feed flipped, and TWIN_B is now
+    the id scored. Before: TWIN_B could write a second moneyline BET on the
+    same fight."""
+    conn = _UfcBoardConn(
+        [_ufc_game(TWIN_A), _ufc_game(TWIN_B)],
+        {(TWIN_A, "h2h", "draftkings"): _h2h_row(_ago(300), -150, 125),
+         (TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(5), 125, -150),
+         (TWIN_B, "totals", "draftkings"): _totals_row(_ago(5), line=2.5)},
+        bets=[(TWIN_A, "ufc_moneyline")])
+    scored = _score_card(monkeypatch, conn, dry_run=False)
+    assert (TWIN_B, "ufc_moneyline") not in scored, scored
+    assert (TWIN_B, "ufc_total_rounds") in scored
+    assert all(g == TWIN_B for g, _ in scored), scored
+    # The id left out loses its old no-bet rows (BETs are never deleted).
+    assert (TWIN_A,) in conn.deletes
+
+
+def test_the_chosen_id_still_borrows_a_market_only_its_twin_carries(_clock, monkeypatch):
+    """The 2026-08-29 shape: one id has the moneyline and no totals row ever,
+    the other has both. The id with the newer row is scored, and its totals
+    read still borrows the twin's line, which is what the fallback is for."""
+    newest = {(TWIN_A, "h2h", "draftkings"): _h2h_row(_ago(2), -150, 125),
+              (TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(40), 125, -150),
+              (TWIN_B, "totals", "draftkings"): _totals_row(_ago(40), line=2.5)}
+    conn = _UfcBoardConn([_ufc_game(TWIN_A), _ufc_game(TWIN_B)], newest)
+    scored = _score_card(monkeypatch, conn)
+    assert {g for g, _ in scored} == {TWIN_A}, scored
+    assert (TWIN_A, "ufc_total_rounds") in scored
+    totals = scorer._get_dk_odds(_UfcBoardConn([], newest), TWIN_A, "totals")
+    assert totals is not None and totals["total_line"] == 2.5
