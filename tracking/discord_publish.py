@@ -8,6 +8,11 @@ A confirmed post is a `push_sent` row of kind `discord_signal` (pre-game) or
 message. VOID does not delete that message and does not delete the row, so
 the ledger IS the channel.
 
+A `discord_void` row, written only after a void notice is accepted, is the
+publish state for that lock. The signal row stays. The published join drops
+the lock, which is how the app stops showing it. A published VOID with no
+notice stays visible.
+
 `opening_signals` is the CLV shadow track, not the board.
 `opening_lock_is_live` / `discord_published_exists_sql` are the join a
 reader should use (a capture is live only when this ledger has the key).
@@ -18,7 +23,9 @@ here deletes a capture.
 
 from __future__ import annotations
 
-from tracking.publish_keys import KEY_PARTS, LIVE_KEY_PREFIX
+from tracking.publish_keys import (
+    KEY_PARTS, LIVE_KEY_PREFIX, void_notice_exclusion_sql,
+)
 
 # The two kinds that are a message in a Discord channel. `new_bet` is the
 # phone push and stores no message. `discord_free_pick.message_id` stores a
@@ -43,10 +50,13 @@ def discord_published_exists_sql(lock_expr: str) -> str:
     """SQL: this lock was posted to a Discord channel and the post stands.
 
     Kinds are the channel posts only. A `new_bet` row is not Discord.
+    A discord_void notice means the post no longer stands as the publish
+    state. The signal row is not deleted.
     """
     kinds = ", ".join(f"'{k}'" for k in DISCORD_LED_KINDS)
     return (f"EXISTS (SELECT 1 FROM push_sent s "
-            f"WHERE s.lock_key = {lock_expr} AND s.kind IN ({kinds}))")
+            f"WHERE s.lock_key = {lock_expr} AND s.kind IN ({kinds}) "
+            f"AND {void_notice_exclusion_sql('s')})")
 
 
 def discord_led_visible(condition_status: str | None,

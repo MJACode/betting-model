@@ -8,10 +8,27 @@
 -- security_invoker: the caller is checked against the column grant and the
 -- policy below. The worker connects as the owner and is unaffected.
 --
+-- Keyword check: if the live view already mentions discord_void, this file
+-- must not put the narrower definition back.
+-- discord_void_notice_2026_10_09.sql owns that clause and the policy that
+-- lets the security_invoker subquery see the notice. Re-applying the body
+-- below would drop the exclusion on every pass and the notice would not
+-- change the publish state.
+--
 -- Idempotent. One statement (a DO block) so view_migrations can re-run it.
 
 DO $mig$
+DECLARE
+  d text;
 BEGIN
+  IF to_regclass('public.v_discord_published') IS NOT NULL THEN
+    d := pg_get_viewdef('public.v_discord_published'::regclass, true);
+    IF position('discord_void' in d) > 0 THEN
+      RAISE NOTICE 'v_discord_published excludes discord_void; leaving that definition';
+      RETURN;
+    END IF;
+  END IF;
+
   EXECUTE $v$
     CREATE OR REPLACE VIEW public.v_discord_published
     WITH (security_invoker = on) AS

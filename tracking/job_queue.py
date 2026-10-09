@@ -810,6 +810,65 @@ def _validate_publish_discord_signals(args: dict) -> dict:
     return {"target_date": raw}
 
 
+def _job_publish_discord_void(**kw):
+    """Post a one-off void notice for picks that are already VOID and posted.
+
+    Calls notify_discord_void. dry_run defaults to true, so a job that omits
+    the flag returns the payload and does not post. The real post is
+    dry_run false, run by a person after they have read the payload.
+
+    Does not edit or delete the original Discord messages. Does not update
+    pick rows. A lock already carrying discord_void is skipped.
+    """
+    from tracking.discord_notifier import notify_discord_void
+
+    return notify_discord_void(
+        pick_ids=kw["pick_ids"],
+        reason=kw.get("reason"),
+        dry_run=kw.get("dry_run", True),
+    )
+
+
+def _validate_publish_discord_void(args: dict) -> dict:
+    raw = args.get("pick_ids")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("pick_ids must be a non-empty list of pick ids")
+    try:
+        ids: list[int] = []
+        seen: set[int] = set()
+        for p in raw:
+            if isinstance(p, bool):
+                raise ValueError("pick_ids must be integers")
+            i = int(p)
+            if i <= 0:
+                raise ValueError(f"pick id {i} is not a pick")
+            if i not in seen:
+                seen.add(i)
+                ids.append(i)
+    except (TypeError, ValueError) as exc:
+        if str(exc).startswith("pick id") or str(exc).startswith("pick_ids"):
+            raise
+        raise ValueError("pick_ids must be integers") from exc
+    if len(ids) > 100:
+        raise ValueError(f"{len(ids)} picks in one void notice; split it")
+    reason = args.get("reason")
+    if reason is not None:
+        reason = str(reason).strip()
+        if not reason:
+            reason = None
+        elif len(reason) > 4000:
+            raise ValueError("reason is longer than Discord's description cap")
+    dry_run = args.get("dry_run", True)
+    if not isinstance(dry_run, bool):
+        raise ValueError(
+            "dry_run must be true or false (a JSON boolean); "
+            f"got {dry_run!r}")
+    out: dict = {"pick_ids": ids, "dry_run": dry_run}
+    if reason:
+        out["reason"] = reason
+    return out
+
+
 def _job_discord_probe(**kw):
     """Ask Discord WHICH CHANNEL each configured webhook actually points at.
 
@@ -1691,6 +1750,10 @@ JOBS = {
     "publish_results": (_job_publish_results, _validate_publish_x_results),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
+    # One-off void notice. dry_run defaults true. Does not edit or delete
+    # the original messages. See _job_publish_discord_void.
+    "publish_discord_void": (_job_publish_discord_void,
+                             _validate_publish_discord_void),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
