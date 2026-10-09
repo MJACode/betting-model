@@ -495,6 +495,76 @@ console.log(JSON.stringify({ settled: r.settled, onWins: r.on.wins, overLosses: 
     assert got == '{"settled":2,"onWins":1,"overLosses":1}', got
 
 
+# ── the app's on-device cache ─────────────────────────────────────────────────
+
+def test_every_load_reads_the_markers_and_applies_them_before_the_merge():
+    """The cache re-downloads only the last 21 days and keeps older rows as
+    first fetched. A copy is marked only after both copies settle and a
+    migration merges, which can be weeks later, so every load reads the
+    markers and copies them onto the cached rows."""
+    hook = _read(ROOT / "mobile" / "src" / "hooks" / "useCustomModelStats.ts")
+    body = _fn(hook, "export function useSettledPicksSincePaperStart(")
+    assert "fetchSettledPickMarkers(PAPER_START).catch(() => null)" in body
+    assert "mergeSettled(applySettledMarkers(cached, markers, PAPER_START), fresh, from)" in body
+    q = _fn(_read(LIB / "queries.ts"), "export async function fetchSettledPickMarkers(")
+    assert "fetchAllPages<SettledPickMarker>(" in q, "the server caps a response at 1,000 rows"
+    assert ".not('condition_status', 'is', null)" in q
+    assert ".gte('game_date', since)" in q
+    assert ".order('pick_id'" in q
+    # Settled or not: a result filter would make the list incomplete for the
+    # range, and a cached row missing from it is set back to null.
+    assert "result" not in q.split("supabase", 1)[1]
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_a_marker_set_after_caching_reaches_the_cached_row(tmp_path: Path):
+    """Run the real settledPickCache and settledPickMarkers the way the hook
+    does. A copy cached unmarked on 09-05, more than 21 days before the newest
+    cached day, is marked on the server later. Without the marker read the
+    merge keeps it unmarked and the record counts it; with it, it is out."""
+    _copy_for_node(tmp_path, ("settledPickCache.ts", "settledPickMarkers.ts", "recordStart.ts",
+                              "format.ts", "decisionPrice.ts", "thresholds.ts",
+                              "thresholds.generated.ts", "discordPublish.ts"))
+    cache = tmp_path / "settledPickCache.ts"
+    cache.write_text(_read(cache).replace(
+        "from '@react-native-async-storage/async-storage';", "from './asyncStorage.ts';"),
+        encoding="utf-8")
+    (tmp_path / "asyncStorage.ts").write_text(
+        "export default { getItem: async () => null, setItem: async () => {}, "
+        "removeItem: async () => {} };\n", encoding="utf-8")
+    script = """
+import { mergeSettled, refreshFrom } from './settledPickCache.ts';
+import { applySettledMarkers } from './settledPickMarkers.ts';
+import { passesRecordFilter } from './thresholds.ts';
+const bet = (id, date, cs = null) => ({ pick_id: id, game_date: date, result: 'WIN',
+  model_id: 'ufc_total_rounds', signal_type: 'BET', is_live: false,
+  downgrade_reason: null, condition_status: cs });
+// Cached on an earlier load: the kept copy, the extra copy (not yet marked),
+// a copy marked once and since rolled back, and the newest row.
+const cached = [bet(1, '2026-09-05'), bet(2, '2026-09-05'), bet(3, '2026-09-06', 'DUPLICATE'),
+                bet(4, '2026-09-07', 'VOID'), bet(9, '2026-10-08')];
+const from = refreshFrom(cached, '2026-09-01');
+const fresh = [bet(9, '2026-10-08'), bet(10, '2026-10-09')];
+const markers = [{ pick_id: 2, condition_status: 'DUPLICATE' }, { pick_id: 4, condition_status: 'VOID' }];
+const counted = (rows) => rows.filter(passesRecordFilter).map((r) => r.pick_id).sort((a, b) => a - b);
+const status = (rows, id) => rows.find((r) => r.pick_id === id).condition_status;
+const withMarkers = mergeSettled(applySettledMarkers(cached, markers, '2026-09-01'), fresh, from);
+const without = mergeSettled(cached, fresh, from);
+const failed = mergeSettled(applySettledMarkers(cached, null, '2026-09-01'), fresh, from);
+console.log(JSON.stringify({
+  from,
+  withMarkers: counted(withMarkers), extra: status(withMarkers, 2), rolledBack: status(withMarkers, 3),
+  without: counted(without),
+  failed: counted(failed), failedKept: status(failed, 3),
+}));
+"""
+    got = _node(tmp_path, script)
+    assert got == ('{"from":"2026-09-17",'
+                   '"withMarkers":[1,3,9,10],"extra":"DUPLICATE","rolledBack":null,'
+                   '"without":[1,2,9,10],'
+                   '"failed":[1,2,9,10],"failedKept":"DUPLICATE"}'), got
+
+
 # ── the rule is where a session doing SQL will see it ─────────────────────────
 
 def test_the_rule_is_in_claude_md():

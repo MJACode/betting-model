@@ -29,6 +29,7 @@ import {
   type ServerThreshold,
 } from './thresholds';
 import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
+import type { SettledPickMarker } from './settledPickMarkers';
 import { sanitizeFilters } from './customModelFilters';
 
 /** Raw row shape of the model_action_thresholds table. */
@@ -1827,6 +1828,28 @@ export async function fetchSettledPicks(
     from += page.length;
   }
   return out;
+}
+
+/**
+ * The condition_status of every pick dated `since` or later that has one: the
+ * markers the settled-pick cache must copy onto rows it fetched before the
+ * marker was set (lib/settledPickMarkers). Settled or not, so the list is
+ * complete for the range. 118 rows on 2026-10-09 (VOID, GONE, OK); drained by
+ * pages all the same, because the server caps a response at 1,000 rows
+ * without saying so (lib/paging).
+ */
+export async function fetchSettledPickMarkers(since: string): Promise<SettledPickMarker[]> {
+  return fetchAllPages<SettledPickMarker>(
+    (fromRow, toRow) =>
+      supabase
+        .from('picks')
+        .select('pick_id, condition_status')
+        .gte('game_date', since)
+        .not('condition_status', 'is', null)
+        .order('pick_id', { ascending: true })
+        .range(fromRow, toRow),
+    (m) => String(m.pick_id),
+  );
 }
 
 /**
