@@ -70,13 +70,21 @@ row at all. The result was a sport that looked like it was not running. It also
 made the opener rule structurally DORMANT: it only fires while DK is still on
 its opening number, which is rarely true by kickoff.
 
-- **Look-ahead**: `NCAAF_SCORE_AHEAD_DAYS` (150) puts every game DraftKings
-  has priced in the scorer's game query and in the app
-  (`fetchUpcomingNcaafPicks`). It was 7 until 2026-09-07 (Matt: *"it should
-  be whenever lines are released. speed speed speed is what matters to get a
-  good line"*); the DK-price prefilter is what admits a game, so the window
-  is the season and the extra rows are the marquee games DK lists months out
-  (44 beyond 14 days on the day it changed).
+- **Look-ahead**: `NCAAF_SCORE_AHEAD_DAYS` (150) is the outer edge of the
+  scorer's game query and of the app's (`fetchUpcomingNcaafPicks`). It was 7
+  until 2026-09-07 (Matt: *"it should be whenever lines are released. speed
+  speed speed is what matters to get a good line"*). What admits a game is a
+  CURRENT DraftKings price: a DraftKings row stored within
+  `PREGAME_PRICE_MAX_AGE_MIN` (180 minutes). Until 2026-10-09 the check was
+  "has DraftKings ever priced it", and that is how 31 games DraftKings pulled
+  in early September were scored off their 09-04 to 09-06 rows into October
+  (16 BETs; `docs/sessions/2026-10.md`, 2026-10-09).
+  - **Corrected 2026-10-09.** This line used to say DraftKings listed 44
+    games more than 14 days out on the day the window changed. That counted
+    rows already stored. Our own DraftKings totals rows stamped 2026-09-07
+    12:00-13:30Z cover 50 games, none more than 14 days out (latest 09-13).
+    DraftKings lists the big games early, pulls them, and re-lists them about
+    ten days before kickoff.
 - **A decline writes a row.** Every precondition failure now yields a NONE row
   carrying DK's live number and a reason, instead of nothing. An empty board
   and a broken pipeline are indistinguishable to a user — which is exactly how

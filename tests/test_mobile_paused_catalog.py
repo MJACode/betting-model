@@ -221,10 +221,10 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     # stake, Sharp Score, post time, hand-off or betslip for a paused pick.
     detail = _read(MOBILE / "src" / "screens" / "PickDetailScreen.tsx")
     assert "const paused = !retired && isPausedForDisplay(pick);" in detail
-    assert "<ReasoningCard pick={pick} paused={paused} />" in detail
+    assert "<ReasoningCard pick={pick} paused={paused} stale={hero?.stale === true} />" in detail
     assert "{paused ? null : <SharpScoreCard pick={pick} />}" in detail
     assert "{paused ? null : <PickTimingCard pick={pick} />}" in detail
     assert "!preview && !retired && !paused && !voided ? (" in detail
     assert "openHere && !preview && !retired && !paused" in detail
     reasoning = _read(MOBILE / "src" / "components" / "ReasoningCard.tsx")
-    assert "!isUnlockedPreview(pick) && !paused ? (" in reasoning
+    assert "!isUnlockedPreview(pick) && !paused && !stale ? (" in reasoning

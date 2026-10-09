@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, no pre-game game pick is decided on a price more than 3 hours old (`PREGAME_PRICE_MAX_AGE_MIN`); the feed had dropped 31 NCAAF games in early September and 16 NCAAF BETs were written on prices 2 to 28 days old, plus 2 NHL BETs during the 09-27 to 10-01 odds-key outage; the 18 BETs listed for mike; props not bounded |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, the line-movement card shows the line from the pick to the start (it read the oldest 50 snapshots); prop stamps parsed on the phone; the player page fixed by the same read. Review fixes: the price at the pick kept when the window is cut, "At pick" only on the locked number, no grading after the start, "No new price" with its date, only live picks lose the card, dated row times, signed spreads; stale NCAAF scoring logged |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Anytime TD lists everyone with a line (69 priced with no 2026 game on 10-11 NFL); Stats ruler typed line |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Teams board gets a "Playing today" filter; filtered rows keep league rank |

@@ -323,6 +323,8 @@ export type BookPricedRow = {
   away_link?: string | null;
   over_link?: string | null;
   under_link?: string | null;
+  /** The book's update time. Both all-books views carry it; the price-age rule reads it. */
+  snapshot_at?: string | null;
 };
 
 /** One row from v_latest_dk_odds — the freshest DK snapshot per game+market. */
