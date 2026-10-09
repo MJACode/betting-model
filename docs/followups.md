@@ -21,6 +21,55 @@
 
 ---
 
+## [ ] Land the job that voids the eight stale-price NCAAF unders (deadline 2026-10-17)
+
+mike, 2026-10-09: *"Change the rule, void them"*. Eight posted NCAAF unders
+were decided on DraftKings prices 15 to 28 days old (the table is in the
+session log for 2026-10-09). The code that lets a posted pick be voided is on
+branch `claude/void-posted-stale`. The job that does it is not: the session's
+permission check refused the write to the queued-jobs file three times. It
+needs mike to add it, or to approve it being added.
+
+Add it to the end of `jobs/declared_jobs.json` as text, without reformatting
+the file:
+
+- key `void-ncaaf-stale-dk-posted-unders-2026-10-09`, job type `void_picks`,
+  requested by `mike`, and a note recording mike's decision and the price ages
+- `pick_ids`: 2558703, 2558736, 2935576, 2992283, 2992290, 2992474, 3020766,
+  3204788
+- `allow_posted`: true
+- `reason` (449 characters, under the 500 that are kept): *decided on a
+  DraftKings price 15 to 28 days old: the newest DraftKings row for this game
+  at or before the pick was stored 2026-09-05 and no book had a row for it
+  between then and the pick (the odds feed had stopped listing the game), so
+  the number was not one DraftKings was offering when the pick was made. It
+  was posted to members. Voided by mike's decision of 2026-10-09 to lift the
+  posted-pick lock for these picks: 'Change the rule, void them'.*
+
+Two rules. **Merge it with that branch or after it, never before**: master's
+job check drops `allow_posted` without a word, so the job would refuse all
+eight as posted, be marked done, and never run again under its name. **It must
+run before 2026-10-17 16:00 UTC**, when 2992283 kicks off (2992290 and
+3204788 play later that day): once a pick is graded, the void refuses it even
+with the opt-in. After it runs, check its result: all eight under "voided",
+none under "refused".
+
+## [ ] [needs-decision] A voided posted pick gives members no sign it was withdrawn
+
+Found 2026-10-09 while making posted picks voidable. After a void:
+
+- **Discord.** The original post stays. Nothing new is posted.
+- **Phone.** The "new bet" push went out when the pick was posted. Nothing
+  follows the void.
+- **App.** The card keeps its badge, Track and the betslip button. Only the
+  pick's detail screen adds "Posted to Discord · not counted in the model's
+  record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
+
+So a member who bet one of the eight unders is not told it was withdrawn.
+Two options: a correction post in the channel, or a marker on the app card
+(or both). Either is a small change. The choice is mike's; nothing has been
+posted.
+
 ## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
 
 Two a night became four (`scripts/nhl_props_card.MAX_PROP_BETS_PER_NIGHT`),
