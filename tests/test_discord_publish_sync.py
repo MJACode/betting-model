@@ -140,6 +140,24 @@ def test_the_view_exposes_the_ledger_without_the_message_id():
     assert "message_id" not in view
     assert "DELETE FROM" not in sql
     assert "_delete_message" not in sql
+    # Keyword check: this file must not put the narrower view back once a
+    # void notice owns the definition. The later migration is the one that
+    # adds the exclusion and lets anon see discord_void (security_invoker).
+    assert "position('discord_void' in d)" in sql
+    later = (ROOT / "data/migrations/discord_void_notice_2026_10_09.sql").read_text(
+        encoding="utf-8")
+    assert "position('discord_void' in d)" in later
+    assert "position('discord_void' in pol)" in later
+    assert "v.kind = 'discord_void'" in later
+    assert "kind IN ('discord_signal', 'discord_live', 'discord_void')" in later
+    later_view = later.split("CREATE OR REPLACE VIEW", 1)[1].split("$v$", 1)[0]
+    assert "message_id" not in later_view
+    assert "DELETE FROM" not in later
+    assert "UPDATE public.picks" not in later
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    assert "discord_void_notice_2026_10_09.sql" in ACTIVE_MIGRATIONS
+    assert (ACTIVE_MIGRATIONS.index("discord_void_notice_2026_10_09.sql")
+            > ACTIVE_MIGRATIONS.index(MIG.name))
 
 
 def test_void_picks_does_not_retract_discord():
@@ -278,6 +296,7 @@ def test_the_discord_pins_are_on_the_pr_ci_subset():
         "tests/test_discord_publish_sync.py",
         "tests/test_publish_key_identity.py",
         "tests/test_void_picks.py",
+        "tests/test_discord_void_notice.py",
     ):
         assert name in yml
     assert 'node-version: "22"' in yml

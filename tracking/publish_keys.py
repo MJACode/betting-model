@@ -145,6 +145,25 @@ def live_lock_key(game_id: str, model_id: str, pick_side: str,
 # was POSTED as a signal -- the same join mobile's v_discord_published makes.
 DISCORD_KINDS = ("discord_signal", "discord_live")
 
+# A later push_sent row of this kind is the void notice. The original
+# discord_signal / discord_live row stays (the message is not deleted). The
+# published join treats the notice as the publish state and drops the lock.
+VOID_NOTICE_KIND = "discord_void"
+
+
+def void_notice_exclusion_sql(alias: str = "s") -> str:
+    """NOT EXISTS: this lock has a discord_void notice.
+
+    Same predicate v_discord_published applies. A published VOID with no
+    notice stays visible. `alias` is the channel-post row (discord_signal
+    or discord_live), not the pick.
+    """
+    return (
+        "NOT EXISTS (SELECT 1 FROM push_sent v "
+        f"WHERE v.lock_key = {alias}.lock_key "
+        f"AND v.kind = '{VOID_NOTICE_KIND}')"
+    )
+
 
 def posted_sql(alias: str = "p") -> str:
     """EXISTS: the Discord ledger holds this pick's lock_key (pre-game or live).
@@ -154,10 +173,15 @@ def posted_sql(alias: str = "p") -> str:
     opts in with --allow-posted (mike, 2026-10-09: for a posted pick decided on
     a price nobody could bet; a graded pick stays refused). Built from the two
     key expressions above so there is one definition of the key, not two.
+
+    A discord_void notice drops the lock here, the same way
+    v_discord_published drops it. The signal row is still in the ledger; the
+    notice is what the publish state follows.
     """
     kinds = ", ".join(f"'{k}'" for k in DISCORD_KINDS)
     return ("EXISTS (SELECT 1 FROM push_sent s "
             f"WHERE s.kind IN ({kinds}) "
             f"AND s.lock_key = CASE WHEN {alias}.is_live "
             f"THEN {live_lock_key_sql(alias)} "
-            f"ELSE {lock_key_sql(alias)} END)")
+            f"ELSE {lock_key_sql(alias)} END "
+            f"AND {void_notice_exclusion_sql('s')})")

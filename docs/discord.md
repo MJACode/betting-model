@@ -217,6 +217,15 @@ treat a capture row as locked. Wiring them is TBD. The void path does not
 delete captures or Discord messages. The settled record still excludes
 every VOID.
 
+**A void notice is the publish state (2026-10-09).** `notify_discord_void`
+posts one gray embed per sport for picks that are already VOID and already
+have a `discord_signal` (or `discord_live`) row, then writes `push_sent`
+kind `discord_void` only after Discord accepts it. `v_discord_published`
+drops that lock. The original message is not edited or deleted. A published
+VOID with no `discord_void` row stays on the board. The worker job is
+`publish_discord_void` (`dry_run` defaults to true). The migration is
+`discord_void_notice_2026_10_09.sql`; it is not applied from a dev session.
+
 **3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
 beyond it on the day (0 rows), so this is closed before it costs a pick rather
 than after. `NFL_AHEAD_DAYS` is 11 = the 10-day poll/prop horizon

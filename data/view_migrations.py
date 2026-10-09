@@ -236,6 +236,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # post. push_sent stays closed except lock_key + kind on the two
     # channel kinds. No Discord mutation.
     "discord_publish_state_2026_09_23.sql",
+    # 2026-10-09: a void notice (push_sent kind discord_void) drops that lock
+    # from v_discord_published and widens anon_read_discord_publish so the
+    # security_invoker subquery can see the notice. The original message is
+    # not deleted. Must run after discord_publish_state, which returns early
+    # once the view text contains discord_void (its keyword check) so the
+    # narrower definition is not put back on the next pass.
+    "discord_void_notice_2026_10_09.sql",
     # 2026-09-26 (mike / Michael Alksninis): demote the ncaaf_over_under
     # Platt map promoted 2026-09-19 17:45 ET (a=1, b=-0.281555). The
     # decision goes back to the raw probability, which is ~0.650 at the
