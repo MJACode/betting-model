@@ -1243,8 +1243,9 @@ export const movementFromDkHistory = movementFromSameBookHistory;
  * Is this snapshot the number the pick locked? The line-movement card labels
  * its first row "At pick" only when it is. That row is the book's last stored
  * snapshot at or before the pick, which can be another number: an NFL opener
- * locked TEN +9.5 at -108 while DraftKings' last stored snapshot before it
- * read +7.5 at -117 (review, 2026-10-09). Such a row keeps its time label.
+ * locked TEN +9.5 at -108 while BetRivers' last stored snapshot before it
+ * read +7.5 at -117 (pick 3386046; review, 2026-10-09). Such a row keeps its
+ * time label.
  *
  * The rules are movementFromSameBookHistory's. NFL picks compare the line
  * only. Every other pick compares the price at the deciding book, and the

@@ -399,8 +399,9 @@ eq([held.verdict.label, held.asOf], ['Line steady since pick', 'As of Sat, 10/3,
 
 @node
 def test_at_pick_only_when_the_row_is_the_lock(tmp_path):
-    """An NFL opener locked TEN +9.5 at -108 while DraftKings' last stored
-    snapshot before the pick read +7.5 at -117. That row keeps its time; it
+    """An NFL opener locked TEN +9.5 at -108 while the book's last stored
+    snapshot before the pick read +7.5 at -117 (pick 3386046, BetRivers; the
+    fixture names DraftKings). That row keeps its time; it
     is not labelled as the pick. NFL picks compare the line only (home to
     home: PHI +6 is stored as -6 on both sides); other picks compare the price
     at the deciding book."""

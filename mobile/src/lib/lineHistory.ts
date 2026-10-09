@@ -201,7 +201,11 @@ export interface PickWindow<T> {
    * with `fromPick`, before rows[0] without it.
    */
   gap: boolean;
-  /** Snapshots after the pick and before the start, kept or not. */
+  /**
+   * Snapshots after the pick and before the start that reached the phone,
+   * kept or not (the game-line read already stops at the newest 50). Zero
+   * with `fromPick`: the book has posted nothing since the pick.
+   */
   since: number;
   /** The game has started: the last row is the last price before it, not "now". */
   closed: boolean;

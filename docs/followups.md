@@ -56,12 +56,32 @@ over a 1,312-game season. It spends credits, so it needs mike's OK.
 ## [x] The line-movement card shows the OLDEST 50 snapshots as "now" — FIXED 2026-10-09
 
 Fixed on `claude/line-movement-since-pick` (session note 2026-10-09). The card
-now shows the book's price when the pick was made, then every snapshot up to
-the game's start, newest kept. Game lines are cut on the server (every stamp
-there is UTC); prop series come back whole and are sorted and cut on the phone
-(about half of them are stamped in Eastern time). The first row reads "At pick",
-after the start the card says "by game time", and live picks have no card.
-The player page reads the same prop series and was fixed by the same change.
+now shows the book's price when the pick was made, then the newest snapshots
+up to the game's start. Game lines are cut on the server (every stamp there is
+UTC); prop series come back whole and are sorted and cut on the phone (about
+half of them are stamped in Eastern time). The player page reads the same prop
+series and was fixed by the same change.
+
+After review, the same day:
+
+- When the newest snapshots don't all fit, the price at the pick still stays
+  as the first row. A divider row marks the dropped stretch, and the footer
+  says which stretch is missing.
+- That row reads "At pick" only when it is the number the pick locked.
+- After the start, the card no longer grades the move as for or against you.
+  It says where the line went and leaves the grading to the Closing Line
+  Value card.
+- A pick the book hasn't re-priced reads "No new price from <book>", with the
+  date of the newest price.
+- Only live picks have no card. A pre-game pick made after the start the card
+  computes (an NHL start moved earlier at settlement) reads the last pre-game
+  price instead of losing the card.
+
+Known limit: the prop read keeps the 500 rows written most recently. On a
+longer series the price at the pick can fall off; the card then says the price
+at your pick isn't available instead of claiming the table runs from it. The
+longest series for the card's markets was 174 rows (measured 2026-10-09).
+
 Original report below.
 
 `fetchOddsHistory` and `fetchPropOddsHistory` (`mobile/src/lib/queries.ts`)
@@ -95,6 +115,23 @@ filters this column as text, including the latest-prop trigger
 `datetime.now(timezone.utc).isoformat()`. `backfilled_dates()` tells history
 from live rows by a trailing "Z", which "+00:00" does not match, so it keeps
 working. Not done in the line-movement fix because it changes a writer.
+
+## [ ] NCAAF picks scored from prices more than a week old (found 2026-10-09)
+
+Found while reviewing the line-movement card. Measured 2026-10-09 with
+read-only SQL: 200 of the 682 pre-game NCAAF picks made on 10-08 and 10-09
+sit on 31 games where the deciding book's newest stored pre-game price is more
+than 7 days older than the pick. For every one of them that newest price is
+from 2026-09-04 to 2026-09-06. The games are dated 2026-10-24 to 2026-12-12,
+mostly at DraftKings (a few at BetParx, FanDuel and BetRivers). So those picks
+were priced off early-September lines, not a price anyone can bet now. The
+line-movement card now says "No new price from <book> since your pick" and
+shows that old date, so the app no longer calls it steady. The scoring is the
+real problem and is not touched here: either odds for those games stopped being
+collected after 09-06, or the scorer should skip a game whose newest price is
+that old. Query shape: for each pick, the newest `odds` row (not in-play) for
+its game at its deciding book, compared with `picks.created_at`, both parsed as
+timestamps.
 
 ## [ ] The model screen's "Avg CLV" tile mixes two CLV definitions (found 2026-10-09)
 
