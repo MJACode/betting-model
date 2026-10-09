@@ -795,7 +795,7 @@ export function StatsScreen() {
               // An abort of a superseded stamp is ignored inside
               // touchRejectionRecordsFailure. An abort of this stamp is a
               // failure, or the skeleton never ends.
-              if (!touchRejectionRecordsFailure(inFlight.current, stamp, isAbortError(e))) return;
+              if (!touchRejectionRecordsFailure(inFlight.current, stamp)) return;
               markTouchFailed(e);
             });
         }

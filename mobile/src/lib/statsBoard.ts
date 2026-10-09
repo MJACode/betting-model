@@ -169,14 +169,9 @@ export function touchCommitAction(
  * load the user has left. An abort of the load still on screen is a failure.
  * Leaving it unrecorded holds the skeleton until the question changes.
  */
-export function touchRejectionRecordsFailure(
-  inFlight: string | null,
-  stamp: string,
-  _aborted: boolean,
-): boolean {
+export function touchRejectionRecordsFailure(inFlight: string | null, stamp: string): boolean {
   if (inFlight !== stamp) return false;
-  // An abort of this stamp records a failure too. The flag is the caller's
-  // classification; it does not dismiss the load still on screen.
+  // Including an abort of this stamp. Leaving it unrecorded holds the skeleton.
   return true;
 }
 
@@ -253,10 +248,10 @@ const TOUCH_SET_TITLE = 'Couldn’t load this list';
 
 /** Designer, #899. A missing kind uses the server line, never a blank. */
 const TOUCH_SET_CAUSE: Record<ErrorKind, string> = {
-  offline: 'You’re offline. Check your connection, then pull down to retry.',
-  slow: 'Signalbase is slow to respond right now. Pull down to retry in a moment.',
-  auth: 'Your session has expired. Pull down to retry, or sign out and back in.',
-  server: 'Something went wrong on our side. Pull down to retry in a moment.',
+  offline: 'You’re offline. Check your connection, then try again.',
+  slow: 'Signalbase is slow to respond right now. Try again in a moment.',
+  auth: 'Your session has expired. Try again, or sign out and back in.',
+  server: 'Something went wrong on our side. Try again in a moment.',
 };
 
 export function touchSetCopy(kind: ErrorKind | null | undefined): {

@@ -312,19 +312,21 @@ check('a failure for another key does not drop the set that was kept',
   && touchBoardView(true, good.key, 'NFL|wrte', true) === 'error');
 check('the touch-set error line for offline',
   touchSetErrorLine('offline')
-  === 'Couldn’t load this list. You’re offline. Check your connection, then pull down to retry.');
+  === 'Couldn’t load this list. You’re offline. Check your connection, then try again.');
 check('the touch-set error line for a slow response',
   touchSetErrorLine('slow')
-  === 'Couldn’t load this list. Signalbase is slow to respond right now. Pull down to retry in a moment.');
+  === 'Couldn’t load this list. Signalbase is slow to respond right now. Try again in a moment.');
 check('the touch-set error line for an expired session',
   touchSetErrorLine('auth')
-  === 'Couldn’t load this list. Your session has expired. Pull down to retry, or sign out and back in.');
+  === 'Couldn’t load this list. Your session has expired. Try again, or sign out and back in.');
 check('the touch-set error line for a server failure',
   touchSetErrorLine('server')
-  === 'Couldn’t load this list. Something went wrong on our side. Pull down to retry in a moment.');
+  === 'Couldn’t load this list. Something went wrong on our side. Try again in a moment.');
 check('a missing touch-set cause still shows the server line',
   touchSetErrorLine(null) === touchSetErrorLine('server')
-  && touchSetErrorLine(undefined) === touchSetErrorLine('server'));
+  && touchSetErrorLine(undefined) === touchSetErrorLine('server')
+  && errorAnnouncement(touchSetCopy(null)) === touchSetErrorLine('server')
+  && errorAnnouncement(touchSetCopy(undefined)) === touchSetErrorLine('server'));
 check('the alert reads the same sentence as the line',
   (['offline', 'slow', 'auth', 'server'] as const).every((k) =>
     errorAnnouncement(touchSetCopy(k)) === touchSetErrorLine(k)));
@@ -336,11 +338,11 @@ check('a stale touch failure does not mark the new key failed',
   staleFail === null
   && touchBoardView(true, 'NCAAF|wrte', 'NCAAF|wrte', false) === 'list');
 check('an abort of the touch read still on screen records a failure',
-  touchRejectionRecordsFailure(stampNflRb, stampNflRb, true)
+  touchRejectionRecordsFailure(stampNflRb, stampNflRb)
   && touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|qb') === 'NFL|qb'
   && touchBoardView(true, null, 'NFL|qb', true) === 'error');
 check('an abort from a superseded stamp is ignored',
-  !touchRejectionRecordsFailure(stampNcaaf, stampNflRb, true)
+  !touchRejectionRecordsFailure(stampNcaaf, stampNflRb)
   && touchSetAfterFailure('NCAAF|wrte', stampNcaaf, stampNflRb, 'NFL|qb') === 'NCAAF|wrte');
 check('an empty touch total is not committed, and the last good set stays',
   touchCommitAction(stampNflRb, stampNflRb, 0) === 'fail'
@@ -355,6 +357,7 @@ check('a good set is not refetched, and a failed key is',
   !shouldFetchTouchSet(true, true, false) && shouldFetchTouchSet(true, false, false)
   && !shouldFetchTouchSet(false, false, true));
 
+const statsBoardSrc = readFileSync(join(import.meta.dirname, '..', 'src/lib/statsBoard.ts'), 'utf-8');
 const statsScreen = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
 const touchCatch = /\.catch\(\(e: unknown\) => \{([\s\S]*?)\n            \}\);/.exec(statsScreen)?.[1] ?? '';
 check('StatsScreen commits the touch set only through touchSetFromResponse',
@@ -373,9 +376,11 @@ check('StatsScreen commits the touch set only through touchSetFromResponse',
   && /seasonTouchFlag\(/.test(statsScreen)
   && /touchView !== 'list' \? EMPTY_ROWS : hitRatePlayers/.test(statsScreen)
   && /emptyLabel=\{touchView === 'error' \? 'Couldn’t load this list\. Pull down to retry\.' : undefined\}/.test(statsScreen)
-  && /touchRejectionRecordsFailure\(inFlight\.current, stamp, isAbortError\(e\)\)/.test(touchCatch)
+  && /touchRejectionRecordsFailure\(inFlight\.current, stamp\)/.test(touchCatch)
   && !/if \(isAbortError\(e\)\) return;/.test(touchCatch)
-  && !/setTouchSet\(/.test(touchCatch));
+  && !/setTouchSet\(/.test(touchCatch)
+  && /export function touchRejectionRecordsFailure\(inFlight: string \| null, stamp: string\): boolean/.test(statsBoardSrc)
+  && !/function touchRejectionRecordsFailure\([^)]*_aborted/.test(statsBoardSrc));
 
 // ── The row subline: when the game starts, and against whom ────────────────
 // Matt, 2026-09-05: "add the time of the game and who they are playing under

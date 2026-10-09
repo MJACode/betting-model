@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, touch-set error lines say try again |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, touch-set failure uses the shared error state and Designer’s lines |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Season/H2H Anytime TD fails closed without a touch set |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, a failed Anytime TD touch read no longer opens the board; a typed line commits once on Android |
