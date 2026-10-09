@@ -61,7 +61,9 @@ plus the declared `clv_backfill` job). Only the bet side moved; the close is
 still Pinnacle, else DraftKings. `docs/clv.md`. Still open: the app's pick
 screen shows `dk_odds` and a label/DraftKings book in its CLV card
 (`PickDetailScreen.tsx` ClvCard) — it should show the price taken at
-`clv_bet_book`. The original item:
+`clv_bet_book`. Fall back to `decision_book` when `clv_bet_book` is NULL: the
+30 NHL prop picks captured at the price taken before this change were never
+re-graded, so they keep it NULL. The original item:
 
 ### CLV is graded at DraftKings' price, not the price taken
 
@@ -77,9 +79,11 @@ the published CLV of every model that shops books, so it is a decision.
 Found 2026-10-08 in the CLV-at-the-price-taken design. The worker logged
 `Odds prune failed (non-fatal): canceling statement due to statement timeout`
 on 2026-10-07 and 2026-10-08 at 10:26 UTC, while the daily run printed
-`✓ prune_odds` (`run_pipeline.step_prune_odds` swallows the error). Games from
-2026-09-03 on still hold 150 to 900 snapshots per book, against 2 or 3 for
-09-01 and 09-02, so it has not pruned `odds` since about then.
+`✓ prune_odds` (`run_pipeline.step_prune_odds` swallows the error). It has not
+pruned `odds` since early September. Re-measured 2026-10-08 on one MLB game per
+date, moneyline plus totals: 2026-09-02 holds 6 FanDuel and 6 Pinnacle rows
+(pruned) against 3,152 DraftKings; 2026-09-20 still holds 1,998 FanDuel and
+1,978 Pinnacle.
 
 **Do not just make it fast.** For every game before today, `data/prune_odds.py`
 keeps only each non-DraftKings book's first row and its last row not marked
