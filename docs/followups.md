@@ -270,14 +270,45 @@ seasons at a 2% cut and no edge (`scripts/nhl_moneyline_market_lab.py`,
 quotes from one snapshot (`odds.created_at` groups one; `snapshot_at` is each
 book's own last update).
 
-## [ ] `nhl_over_under` and `nhl_puckline` have never been trained
+## [x] `nhl_over_under` — a live rule since 2026-10-08 (mike), not a trained model
+
+It is the Pinnacle rule now: `models/nhl_totals_market.py`, written by
+`scripts/nhl_totals_card.py` (step `nhl-over-under`), EV >= 0.01 on Pinnacle's
+own number, out of `config.MODELS` and the feature map, and the trainer refuses
+any rule id. Evidence and cut: `docs/thresholds.md`.
+
+## [ ] `nhl_puckline` has never been trained
 
 Blocked since 2026-06 on "no historical lines". DraftKings and Pinnacle game
 lines for 2020-21 -> 2025-26 landed in `odds` on 2026-09-21
-(`source = 'odds_api_historical'`). The lab's totals model found nothing in
-three rounds and its puck-line result was a peak, so the honest options are to
-train and grade them the same way or to retire the two ids. Both still carry
-their own cuts and EV floors in `config.py`.
+(`source = 'odds_api_historical'`). The lab's puck-line result was a peak, so
+the honest options are to train and grade it the same way or to retire the id.
+It still carries its own cut and EV floor in `config.py`.
+
+## [ ] `nhl_over_under`: check the first weeks live (from 2026-10-08)
+
+Three things to measure once it has written bets, each against what the six
+seasons said:
+
+- **Firing rate.** Live fetches are far denser than the history (about 41
+  Pinnacle fetches a game against about 5), and a first-qualifying rule
+  gets more looks the denser the fetches. Before go-live it fired on 10 of 58
+  games (17.2%) against 16.1% historically. If it climbs well past that, the
+  extra bets are a population the cut was not measured on.
+- **Closing-line value at the price taken.** The case for the model is CLV
+  (+1.32% at Pinnacle's close in the history), not the return. Read it once the
+  price-taken CLV change has landed, so a bet taken off DraftKings is graded
+  at its own price.
+- **Bets found within 3 hours of puck drop.** They lost 9.41 units on 501 bets
+  in the history while every earlier bucket was positive. That is an in-sample
+  split, so nothing was cut (mike, 2026-10-08); re-check it on this season's
+  own bets.
+
+Two things with no backtest behind them: **betparx** is in the bettable books
+(mike, 2026-10-08) but the history purchase never asked for it, and the
+**"Pinnacle withdrawn"** guard (no bet while a newer fetch lacks Pinnacle) is
+new with this card. The card's per-pass log line counts `pinnacle_withdrawn`
+and names the book of every bet, so both can be read off the worker log.
 
 ## [ ] Per-game closing lines for the team page, for every sport (not just NFL)
 

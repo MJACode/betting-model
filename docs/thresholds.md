@@ -371,6 +371,56 @@ own probability, edge cuts 0.02-0.10 all lose (-0.3% to -19.5%).
 `nhl_moneyline_regulation` as it ran: 447 bets, -20.5 units (-4.6%); on its own
 probability (live from 2026-10-03): 47 bets, -6.0 units (-12.7%).
 
+**Full-game totals, `nhl_over_under`** (a rule since 2026-10-08, mike: *"This
+is live model"*; `models/nhl_totals_market.py`). Pinnacle's no-vig price against
+the bettable books in the same stored fetch, at the same number: bet the best
+EV if EV >= **0.01** and the price is **-200** or better, one bet a game, the
+first fetch in which the game qualifies. The cut is EV, held in
+`config.MODEL_OWN_EV_FLOOR`; the action cut is 0.0 / 0.0 so every surface shows
+what the card wrote, and the price floor is pinned in `MODEL_MIN_ODDS`. It
+decides on Pinnacle's own number (`MODELS_ON_OWN_PROBABILITY`): the promoted
+pooled map turns every price between about 0.435 and 0.565 into 0.500.
+
+Six seasons (2020-21 to 2025-26, `odds_api_historical`), at the bettable books
+(the lab's SOFT list without Bovada; betparx was never in the history
+purchase). These figures come from the 2026-10-08 design session's own queries;
+the committed way to reproduce them is the "best bettable book" rows of
+`scripts/nhl_totals_lab.py` (worker job `nhl_research`), which have not been
+run since that set was added.
+
+| EV floor | bets | units | return | EV at Pinnacle's close |
+|---|---|---|---|---|
+| 0.000 | 2,768 | +35.7 | +1.29% | +0.35% |
+| 0.005 | 1,859 | +41.2 | +2.22% | +0.82% |
+| **0.010 (live)** | **1,276** | **+60.2** | **+4.72%** | **+1.32%** |
+| 0.015 | 819 | +58.9 | +7.19% | +1.80% |
+| 0.020 | 548 | +0.7 | +0.14% | +2.36% |
+
+0.01 sits on a units plateau with 0.015. Closing-line value is positive at every
+cut and rises with it, which is the case for going live: the return is not
+established (normal-approximation interval -0.6% to +10.1%; by season +10.1 /
++9.6 / +3.1 / -6.9 / +6.9 / +1.9%). Chosen on the seasons it is graded on.
+
+When the first qualifying fetch came, at 0.01 (hours before puck drop):
+
+| hours before | bets | units |
+|---|---|---|
+| 0-3 | 501 | -9.41 |
+| 3-6 | 98 | +4.08 |
+| 6-12 | 340 | +21.06 |
+| 12-20 | 28 | +2.60 |
+| 20-32 | 294 | +34.86 |
+| over 32 | 15 | +7.03 |
+
+So the card prices every pre-game Pinnacle quote, not game day only: the
+prior-day fetches carry +34.86 of the +60.22 units. The 0-3 h loss is an
+in-sample split, not a cut (mike, 2026-10-08: no change; re-check it on this
+season's own bets). Live 2026-27 before go-live, the same rule found 10 bets in
+58 games with a Pinnacle quote (17.2%, against 16.1% historically); 6 settled
+for -1.908 units, EV at close +2.96% on the 5 that closed at the same number.
+On a whole number (6.0) the stated EV ignores the push, so it overstates the
+true EV by the push share; the lab did the same.
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the
