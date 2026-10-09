@@ -13,7 +13,7 @@ import { americanImplied, americanToDecimal, formatStampET } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
-import { clvLabelBook } from './clvBet';
+import { CLV_NFL_LABEL_MODELS, clvLabelBook } from './clvBet';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -1145,6 +1145,22 @@ export function computeMovement(
   };
 }
 
+/**
+ * The book whose NUMBER `scored_line` is. `line_book` when the row names one.
+ * The NFL wind and opener cards with no deciding book store the label book's
+ * own line (scripts/nfl_wind_publisher.py), so it is that book. Everything
+ * else is scored at DraftKings' line. A line is compared only against the same
+ * book's line: another book's number is a different bet, not movement.
+ */
+function scoredLineBook(pick: Pick): string {
+  const named = lineBook(pick);
+  if (named) return named;
+  if (decisionBook(pick) == null && CLV_NFL_LABEL_MODELS.includes(pick.model_id)) {
+    return clvLabelBook(pick);
+  }
+  return MODEL_BOOK;
+}
+
 /** Movement for a pick given the day's latest-odds rows (PickCard chip path). */
 export function movementFromLatest(
   pick: Pick,
@@ -1158,7 +1174,8 @@ export function movementFromLatest(
   const lineOnly = isNflLineOnly(pick.model_id);
   const book = storedQuoteBook(pick);
   const scored = decisionOdds(pick);
-  const skipLineDeltas = (lineBook(pick) ?? MODEL_BOOK) !== book;
+  const lineAt = scoredLineBook(pick);
+  const skipLineDeltas = lineAt !== book;
   if (book === MODEL_BOOK && latest) {
     return computeMovement(pick, latest, latest.market, {
       lineOnly,
@@ -1175,10 +1192,13 @@ export function movementFromLatest(
     });
   }
   if (latest && pick.dk_odds != null) {
+    // This row is DraftKings'. Its line is compared only when the scored line
+    // is DraftKings' too: a Fanatics 42.5 against DraftKings' 41.5 is two
+    // books, not a move.
     return computeMovement(pick, latest, latest.market, {
       lineOnly,
       scoredPrice: numOrNull(pick.dk_odds),
-      skipLineDeltas,
+      skipLineDeltas: skipLineDeltas || lineAt !== MODEL_BOOK,
     });
   }
   return null;
@@ -1199,7 +1219,7 @@ export function movementFromSameBookHistory(
   const locked = decisionOdds(pick);
   if (locked == null) return null;
   const historyBook = historyBookForPick(pick);
-  const lineAt = lineBook(pick) ?? MODEL_BOOK;
+  const lineAt = scoredLineBook(pick);
   return computeMovement(pick, latest, market, {
     lineOnly: isNflLineOnly(pick.model_id),
     scoredPrice: locked,

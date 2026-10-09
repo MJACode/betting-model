@@ -189,6 +189,61 @@ def test_the_app_prices_every_row_as_the_server_grades_it():
             assert g[2] == w[0], (case, g, w)
 
 
+def _node_strips_types() -> bool:
+    if shutil.which("node") is None:
+        return False
+    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
+    m = re.match(r"v(\d+)\.(\d+)", out)
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_a_label_book_nfl_pick_compares_its_line_with_that_book(tmp_path):
+    """The header names the label's book (storedQuoteBook = clvLabelBook), so
+    the movement check must compare the scored line with THAT book's line, not
+    assume DraftKings' line and skip. Pick 3350315: "CIN @ MIA Under 42.5
+    (Wind 11 mph, fanatics)". And with no Fanatics row it must not fall back
+    to comparing DraftKings' line with Fanatics'."""
+    lib = ROOT / "mobile/src/lib"
+    for name in ["markets.ts", "format.ts", "thresholds.ts", "thresholds.generated.ts",
+                 "decisionPrice.ts", "discordPublish.ts", "clvBet.ts"]:
+        src = (lib / name).read_text(encoding="utf-8")
+        src = re.sub(r"from '\./([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = r"""
+import { movementFromLatest, movementFromSameBookHistory, storedQuoteBook } from './markets.ts';
+const eq = (got, want, what) => {
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(what + ': ' + JSON.stringify(got) + ' !== ' + JSON.stringify(want));
+};
+const pick = {
+  pick_id: 3350315, game_id: 'NFL_2026_05_CIN_MIA', model_id: 'nfl_wind_totals', sport: 'NFL',
+  game_date: '2026-10-11', pick_side: 'under',
+  pick_label: 'CIN @ MIA Under 42.5 (Wind 11 mph, fanatics) · 1.00u',
+  dk_odds: -105, scored_line: 42.5, signal_type: 'BET', is_live: false,
+  decision_odds: null, decision_edge: null, decision_book: null, line_book: null,
+};
+const dk = (line) => ({ game_id: pick.game_id, game_date: '2026-10-11', market: 'totals', home_price: null,
+  away_price: null, spread_home: null, total_line: line, over_price: -110, under_price: -110,
+  snapshot_at: '2026-10-09T13:00:00+00:00' });
+const fan = (line) => ({ bookmaker: 'fanatics', total_line: line, over_price: -110, under_price: -110 });
+const sev = (m) => (m ? [m.severity, m.scoredLine, m.currentLine] : null);
+eq(storedQuoteBook(pick), 'fanatics', 'the header names Fanatics');
+eq(sev(movementFromLatest(pick, dk(42.5), [fan(41.5)])), ['skip', 42.5, 41.5], 'Fanatics moved against the Under');
+eq(sev(movementFromLatest(pick, dk(42.5), [fan(43)])), ['good', 42.5, 43], 'Fanatics moved for the Under');
+eq(movementFromLatest(pick, dk(41.5), [fan(42.5)]), null, 'Fanatics held; DraftKings moving is another book');
+eq(movementFromLatest(pick, dk(41.5), []), null, 'no Fanatics row: never compare DraftKings to Fanatics');
+eq(sev(movementFromSameBookHistory(pick, fan(41.5), 'totals')), ['skip', 42.5, 41.5], 'detail card, Fanatics history');
+// A DraftKings-scored NFL pick is unchanged: its line still compares at DraftKings.
+const dkPick = { ...pick, pick_label: 'CIN @ MIA Under 42.5 (Wind 11 mph, DK) · 1.00u' };
+eq(sev(movementFromLatest(dkPick, dk(41.5), [])), ['skip', 42.5, 41.5], 'DraftKings pick, DraftKings line');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
 def _clv_card() -> str:
     start = DETAIL.index("function ClvCard(")
     return DETAIL[start:DETAIL.index("\nconst styles", start)]
