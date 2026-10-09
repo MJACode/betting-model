@@ -327,6 +327,11 @@ class TwoOrientationConn:
     def fetchall(self):
         return self._rows if self._last[0] == self._only_for else []
 
+    def fetchone(self):
+        # The "was this id ever priced at DraftKings?" read the fallback asks
+        # first (scorer._ufc_id_never_priced). The asked id never was.
+        return None
+
 
 def test_ufc_h2h_resolves_the_sibling_orientation_and_flips_the_side():
     stored = "UFC_2026-09-05_mario-pinto_ryan-spann"
@@ -338,7 +343,8 @@ def test_ufc_h2h_resolves_the_sibling_orientation_and_flips_the_side():
     best = _best_game_price(conn, asked, "h2h", "home", None)
     assert best is not None, "the sibling orientation was never tried"
     assert best["book"] == "fanduel"
-    assert conn.seen[0][0] == asked and conn.seen[1][0] == stored
+    # own shop, then the never-priced check on the asked id, then the sibling
+    assert [p[0] for p in conn.seen] == [asked, asked, stored]
     assert "away_price" in str(conn._sql), (
         "the sibling was read on the same side, so home was priced as away")
 

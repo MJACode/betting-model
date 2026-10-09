@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import { gameHasStarted, gameStartState } from '../src/lib/format';
 import { changesFooter, collapseLineHistory, recentChanges } from '../src/lib/lineHistory';
 import { bestHandoffForPick, heroAmericanForPick, MODEL_BOOK } from '../src/lib/markets';
+import { heroPriceSpeech, lockedCaptionText, priceCheckChipText, priceCheckSpeech } from '../src/lib/heroPriceText';
 import { gameStartedLine, pickCta, pickCtaFor, reasoningHeading } from '../src/lib/pickCta';
 import { priceCheckForItem } from '../src/lib/pickPriceCheck';
 import { sortPicks } from '../src/lib/pickSort';
@@ -187,6 +188,43 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, lo2, rows2));
   check('M4: DK now −112 beats FD −115 → "Bet DK −112" (the current number)', h2?.bookmaker === MODEL_BOOK && h2.price === -112 && h2.verb === 'Bet', JSON.stringify(h2));
 }
+{
+  // Third review (2026-10-09): DraftKings moved IN the bettor's favour. The
+  // record chip ranked at its stored −110, behind MGM −105, so DK's current
+  // price was never compared and the button said "Best MGM −105" while DK
+  // paid −102 on the same bet.
+  const pick = mkPick({ decision_book: 'draftkings', decision_odds: -110 });
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -102, total_line: 8.5 },
+    { bookmaker: 'betmgm', over_price: -105, total_line: 8.5, over_link: 'mgm://now' },
+  ];
+  const hero = heroAmericanForPick(pick, latest({ over_price: -102 }), rows);
+  check('DK better: setup, hero is Now DK −102', hero?.kind === 'now' && hero.price === -102 && hero.book === MODEL_BOOK, JSON.stringify(hero));
+  const h = bestHandoffForPick(pick, rows, hero);
+  check('DK better: locked DK −110 / now DK −102 / MGM −105 → "Bet DK −102", never "Best MGM −105"',
+    h?.bookmaker === MODEL_BOOK && h.price === -102 && h.verb === 'Bet', JSON.stringify(h));
+  // DK's current price at a MOVED line is a different bet, so it is not
+  // ranked against the books still at the pick's line.
+  const moved: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -102, total_line: 9 },
+    { bookmaker: 'betmgm', over_price: -105, total_line: 8.5, over_link: 'mgm://now' },
+  ];
+  const movedHero = heroAmericanForPick(pick, latest({ over_price: -102, total_line: 9 }), moved);
+  check('DK better, moved line: setup, hero is Now DK −102 at 9', movedHero?.kind === 'now' && movedHero.price === -102 && movedHero.line === 9, JSON.stringify(movedHero));
+  const hm = bestHandoffForPick(pick, moved, movedHero);
+  check('DK better, moved line: DK −102 at 9 is not swapped in → "Best MGM −105"',
+    hm?.bookmaker === 'betmgm' && hm.price === -105 && hm.verb === 'Best', JSON.stringify(hm));
+  // The M4 case at a moved line keeps its re-rank: record DK −110 ranks
+  // first, DK now −130 at 9, FD −115 at 8.5 → FD −115, never "Bet DK −130".
+  const m4moved: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -130, total_line: 9 },
+    { bookmaker: 'fanduel', over_price: -115, total_line: 8.5, over_link: 'fd://now' },
+  ];
+  const m4Hero = heroAmericanForPick(pick, latest({ over_price: -130, total_line: 9 }), m4moved);
+  const h4 = bestHandoffForPick(pick, m4moved, m4Hero);
+  check('M4, moved line: record DK −110 / now DK −130 at 9 / FD −115 → "Best FD −115"',
+    h4?.bookmaker === 'fanduel' && h4.price === -115 && h4.verb === 'Best', JSON.stringify(h4));
+}
 
 // ── H4: price check ─────────────────────────────────────────────────────────
 check('display constants: 25pp and 500 cents', PRICE_CHECK_MAX_EDGE === 0.25 && PRICE_CHECK_MAX_CENTS === 500);
@@ -202,6 +240,22 @@ check('501 cents IS flagged (−601 vs −100)', P(0.05, -601, -100));
 check('across even money: +450 vs −151 = 401, not flagged', !P(0.05, 450, -151));
 check('no current price → only the edge rule', !P(0.05, 3300, null) && P(0.3, 3300, null));
 check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locked: 3300, current: -110 }).reasons) === '["edge","moved"]');
+// Second review (2026-10-09): the words follow the reasons. An old price is
+// not "off", it is old, and the card says whose and since when.
+{
+  const stale = { flagged: true, reasons: ['stale' as const] };
+  check('chip: "Old price" when the only reason is an old price', priceCheckChipText(stale) === 'Old price');
+  check('chip: "Price check" for an implausible edge, also with an old price',
+    priceCheckChipText({ reasons: ['edge', 'stale'] }) === 'Price check' && priceCheckChipText({ reasons: ['moved'] }) === 'Price check');
+  const hero = { kind: 'now' as const, price: null, book: 'draftkings', line: null, link: null, lockedPrice: -112, showLockedCaption: true, stale: true, staleSince: '2026-09-05T23:59:48Z' };
+  const said = priceCheckSpeech(stale, hero);
+  check('spoken: "DraftKings has not updated this price since …", not "looks off"',
+    said.startsWith('DraftKings has not updated this price since ') && said.includes('9/5') && !said.includes('looks off'), said);
+  check('spoken: an implausible edge keeps "looks off"', priceCheckSpeech({ reasons: ['edge'] }, hero) === 'Price check: this price looks off, so edge and EV are hidden');
+  check('spoken price: "No current DraftKings price. Locked -112"', heroPriceSpeech(hero, 'Now') === 'No current DraftKings price. Locked -112', heroPriceSpeech(hero, 'Now'));
+  const cap = lockedCaptionText(hero);
+  check('caption: "Locked -112 · DK last priced <day, time ET>"', cap.startsWith('Locked -112 · DK last priced ') && cap.endsWith(' ET'), cap);
+}
 {
   const nyy = { pick: mkPick({ decision_odds: 3300, dk_odds: 3300, decision_edge: 0.548 }), latestOdds: latest({ over_price: -110 }), bookRows: [] };
   const fine = { pick: mkPick(), latestOdds: latest({ over_price: -115 }), bookRows: [] };
@@ -344,13 +398,19 @@ check('PickCard: the started line is role text, lock icon, not a Pressable',
   /accessibilityRole="text"/.test(started) && /name="lock-closed"/.test(started) && !/Pressable|onPress/.test(started));
 check('PickCard: started line is textSecondary', /startedText: \{[\s\S]*?color: colors\.textSecondary/.test(card));
 check('PickCard: the tag reads cta.priceTag (Now / Live price)', (card.match(/cta\.priceTag/g) ?? []).length >= 2 && !/kind === 'now' \? 'Now'/.test(card));
-check('PickCard: "Price check" chip on medSoft, medInk icon', />Price check</.test(card) && /priceCheckChip: \{[\s\S]*?colors\.medSoft/.test(card) && /alert-circle-outline"[\s\S]{0,80}colors\.medInk/.test(card));
+check('PickCard: "Price check" / "Old price" chip on medSoft, medInk icon', /\{priceCheckChipText\(check\)\}/.test(card) && /priceCheckChip: \{[\s\S]*?colors\.medSoft/.test(card) && /alert-circle-outline"[\s\S]{0,80}colors\.medInk/.test(card));
+check('PickCard: no slip offer and no stake on a stale price (a slip leg can still come out)',
+  /const canSlip =[^;]*\(!heroPrice\?\.stale \|\| Boolean\(inSlip\)\) && cta\.slip;/.test(card) &&
+  /const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview \|\| paused \|\| heroPrice\?\.stale/.test(card));
+check('PickCard: the label speaks the reason and the lock (heroPriceText)',
+  /flagged \? priceCheckSpeech\(check, heroPrice\) : `Edge \$\{edgeText\}`/.test(card) &&
+  /heroPrice \? heroPriceSpeech\(heroPrice, cta\.priceTag\) : null/.test(card) && /\{lockedCaptionText\(heroPrice\)\}/.test(card));
 check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(decisionEdge\(pick\)\)/.test(card) && /flagged \? 'EV —'/.test(card));
 check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEdge = pick\.signal_type !== 'BET';/.test(card) && /edgeSecondary: \{[\s\S]*?font\.size\.footnote[\s\S]*?colors\.textSecondary/.test(card));
 check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('PickDetail: hand-off (BookLinesRow) only while cta.handoff, started line otherwise',
-  /cta\.handoff \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
+  /cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
 check('PickDetail: betslip card needs cta.slip; Track unchanged', /&& !voided && cta\.slip \?/.test(detail) && /const canTrack = openHere;/.test(detail));
 check('PickDetail: cta = pickCtaFor(pick, game, liveState)', /const cta = pickCtaFor\(pick, game, liveState\);/.test(detail));
 check('PickDetail: AllBooksCard (rows open betslips) hidden when !cta.handoff (H5)',

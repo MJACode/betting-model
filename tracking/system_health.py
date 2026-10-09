@@ -440,6 +440,252 @@ class HealthReport:
                      cadence=cadence)
 
 
+# ── Are the games about to be played still priced? ───────────────────────────
+# Since 2026-10-09 the scorer makes no pre-game pick on a game whose newest
+# DraftKings price is older than config.PREGAME_PRICE_MAX_AGE_MIN (180 min,
+# models.scorer._latest_book_game_odds). So an odds outage now EMPTIES THE
+# BOARD after 3 hours, while odds_dk_lines only fires when the newest odds row
+# of any kind is 12 hours old -- and from 09-27 to 10-01, with the odds fetch
+# failing on every pass ("Invalid ODDS_API_KEY"), in-play rows and a trickle of
+# DraftKings rows kept that one green. This check asks game by game instead.
+#
+# Sized from production, sampled every 6 hours (games kicking off in the next
+# 36 hours that DraftKings had priced at all):
+#   * 2026-10-03 to 10-09, 28 samples: the only stale games were UFC fights
+#     the feed had moved to their swapped id (up to 10 of 85 on 09-26 18:00Z)
+#     and the odd cancelled fight (1 of 15 UFC on 10-03 and 10-04);
+#   * the odds-key outage, 09-27 to 09-30 at 18:00Z: 11 of 11, 6 of 6, 9 of 9
+#     and 11 of 11 stale.
+# So the alarm is a SHARE, never "any stale game": at least half of the priced
+# games, overall or within one sport (a single sport's fetch can fail on its
+# own), and at least 2 of them.
+#
+# LEFTOVER IDS ARE NOT GAMES (second review, 2026-10-09). The feed re-keys a
+# game when it flips home and away (UFC), shifts its date, or renames a team,
+# and the old id keeps its last price forever. Counted as stale games, two of
+# them meet the 2-game minimum by themselves: 09-12 22:30Z read "UFC 3 of 6"
+# (all three were copies of the Jean Silva fight, priced under a third id) and
+# 09-02 11:30Z read "NCAAF 6 of 9" (UCF and Kennesaw State priced under renamed
+# ids, Rutgers and Delaware each under two stale ids). So a stale id is skipped
+# when a CURRENT id in the same sport shares a team or fighter name with it
+# and starts within PREGAME_SAME_GAME_HOURS (that id may start outside the 36
+# hours: Kennesaw's did), and stale ids linked the same way count once.
+# Replayed on production rows as of each sample (2026-10-09): 09-02 10:30Z
+# and 11:30Z, 09-12 22:30Z and 23:30Z went from CRIT to OK (NCAAF 1 of 1 and
+# 2 of 5, UFC 0 of 3 and 0 of 1); the outage samples 09-27 18:00Z, 09-28
+# 18:00Z, 09-29 21:00Z and 09-30 18:00Z read exactly as before (11 of 11,
+# 6 of 6, 8 of 8, 11 of 11). Nothing is compared with a reference timestamp,
+# so a trickle of fresh rows elsewhere (09-29 and 09-30: NHL alternate totals
+# from another writer) cannot make an outage look like pulled games. The
+# leftovers seen started at most 3 h 49 min from their live id; one team's
+# games on consecutive days are about 24 hours apart (PHI, 09-30 and 10-01:
+# 23 h 30 min).
+#
+# TOO FEW GAMES TO JUDGE ONE BY ONE. With 0 priced games the share reads
+# SKIPPED, which never alerts, and with 1 it reads OK (the minimum is 2), so a
+# dead fetch on a quiet slate stayed silent and STALE -> OK posted an
+# all-clear. Below PREGAME_STALE_MIN_GAMES the check also asks whether ANY
+# DraftKings pre-game row was stored inside the bound; none is CRIT. NFL and
+# golf rows are not counted: their own pollers could keep it green while the
+# main fetch is dead. idx_odds_date, 1-2 ms on production (2026-10-09, a live
+# and a dead-feed interval).
+PREGAME_CURRENT_WINDOW_HOURS: int = 36
+PREGAME_STALE_SHARE: float = 0.5
+PREGAME_STALE_MIN_GAMES: int = 2
+PREGAME_SAME_GAME_HOURS: int = 6
+# The newest of the three main markets: DraftKings pulls a lopsided game's
+# moneyline and keeps its spread and total (a moneyline-only read called one
+# 10-09 NCAAF game stale that was not). One LIMIT 1 read per market rides
+# idx_odds_book_snap backwards: 394 ms for 124 games on 2026-10-09, where a
+# MAX(snapshot_at) over every DraftKings row took 11 s.
+_PREGAME_CURRENT_MARKETS = ("h2h", "spreads", "totals")
+
+
+def _swapped_ufc_id(game_id: str) -> str | None:
+    """UFC_{date}_{away}_{home} -> UFC_{date}_{home}_{away}; None otherwise.
+    The same swap as models.scorer._sibling_ufc_game_id, kept here so the
+    health check does not import the scorer."""
+    parts = game_id.split("_")
+    if len(parts) != 4 or parts[0] != "UFC":
+        return None
+    return f"{parts[0]}_{parts[1]}_{parts[3]}_{parts[2]}"
+
+
+def check_pregame_prices_current(conn, r: "HealthReport",
+                                 now: datetime | None = None) -> None:
+    """Add the odds_dk_pregame_current row (CRIT): do the games about to be
+    played still have a DraftKings price the scorer will decide on?"""
+    check = "odds_dk_pregame_current"
+    limit = config.PREGAME_PRICE_MAX_AGE_MIN
+    cadence = (f"every {limit // 60} hours" if limit % 60 == 0
+               else f"every {limit} minutes")
+    now = now or datetime.now(timezone.utc)
+    floor = now - timedelta(minutes=limit)
+    horizon = now + timedelta(hours=PREGAME_CURRENT_WINDOW_HOURS)
+    # game_date is the Eastern date; a day either side of now's UTC date
+    # covers every game kicking off inside the window.
+    lo = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    hi = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+    newest_cols = ",\n".join(
+        f"""(SELECT o.snapshot_at FROM odds o
+              WHERE o.game_id = g.game_id AND o.market = '{m}'
+                AND o.bookmaker = ? AND o.snapshot_type <> 'in_play'
+              ORDER BY o.snapshot_at DESC LIMIT 1)"""
+        for m in _PREGAME_CURRENT_MARKETS)
+    try:
+        # NFL and golf are left out: the scorer runs no NFL game model and
+        # golf is retired, so this bound never refuses a price for either.
+        rows = conn.execute(f"""
+            SELECT g.game_id, g.sport, g.commence_time, g.home_team, g.away_team,
+                   {newest_cols}
+            FROM games g
+            WHERE g.game_date >= ? AND g.game_date <= ?
+              AND g.sport NOT IN ('GOLF', 'NFL')
+              AND g.commence_time IS NOT NULL
+        """, (config.ODDS_API_BOOKMAKER,) * len(_PREGAME_CURRENT_MARKETS)
+             + (lo, hi)).fetchall()
+    except Exception as exc:                                  # noqa: BLE001
+        # Same reason as ts_check: an aborted transaction would take every
+        # later check on this connection down with it.
+        getattr(conn, "rollback", lambda: None)()
+        r.add(check, ERROR, "CRIT", f"query failed: {exc}",
+              reason=REASON_QUERY_ERROR, cadence=cadence)
+        return
+
+    # Every fetched row, in the window or not: a leftover's live id can start
+    # just outside it.
+    info: dict = {}                      # game_id -> (sport, start, names, newest)
+    window: list = []
+    for row in rows:
+        game_id, sport, commence, home, away = row[:5]
+        stamps = [t for t in (_parse_ts(c) for c in row[5:]) if t is not None]
+        start = _parse_ts(commence)
+        names = frozenset(str(n).strip().lower() for n in (home, away)
+                          if n is not None and str(n).strip())
+        info[game_id] = (sport, start, names, max(stamps) if stamps else None)
+        if start is not None and now < start <= horizon:
+            window.append(game_id)
+
+    same_game_gap = timedelta(hours=PREGAME_SAME_GAME_HOURS)
+
+    def _same_game(a: str, b: str) -> bool:
+        sa, ta, na, _ = info[a]
+        sb, tb, nb, _ = info[b]
+        return (sa == sb and ta is not None and tb is not None
+                and abs(ta - tb) <= same_game_gap and bool(na & nb))
+
+    current_ids = {g for g, (_, _, _, ts) in info.items()
+                   if ts is not None and ts >= floor}
+
+    def _leftover(game_id: str) -> bool:
+        """A current id for the same game exists: the swapped UFC id, or one
+        sharing a name in the same sport within PREGAME_SAME_GAME_HOURS."""
+        twin = _swapped_ufc_id(game_id)
+        if twin in info and twin in current_ids:
+            return True
+        return any(c != game_id and _same_game(game_id, c) for c in current_ids)
+
+    priced: dict = {}
+    stale: dict = {}
+    stale_ids: list = []
+    leftovers = 0
+    for game_id in window:
+        sport, _, _, ts = info[game_id]
+        if ts is None:
+            continue                     # DraftKings never priced it
+        if ts >= floor:
+            priced[sport] = priced.get(sport, 0) + 1
+        elif _leftover(game_id):
+            leftovers += 1
+        else:
+            stale_ids.append(game_id)
+    # Stale ids of one game count once: link the pairs, count the groups.
+    group = {g: g for g in stale_ids}
+
+    def _root(g: str) -> str:
+        while group[g] != g:
+            group[g] = group[group[g]]
+            g = group[g]
+        return g
+
+    for i, a in enumerate(stale_ids):
+        for b in stale_ids[i + 1:]:
+            if _same_game(a, b):
+                group[_root(b)] = _root(a)
+    groups: dict = {}
+    for g in stale_ids:
+        groups.setdefault(_root(g), []).append(g)
+    for members in groups.values():
+        sport = info[members[0]][0]
+        priced[sport] = priced.get(sport, 0) + 1
+        stale.setdefault(sport, []).append(max(info[g][3] for g in members))
+    merged = len(stale_ids) - len(groups)
+
+    hours = PREGAME_CURRENT_WINDOW_HOURS
+    n_priced = sum(priced.values())
+    n_stale = sum(len(v) for v in stale.values())
+    if n_priced < PREGAME_STALE_MIN_GAMES:
+        # Too few games for the share to mean anything: is the feed alive?
+        try:
+            fresh = conn.execute("""
+                SELECT 1 FROM odds
+                WHERE snapshot_at >= ? AND bookmaker = ?
+                  AND snapshot_type <> 'in_play'
+                  AND sport NOT IN ('GOLF', 'NFL')
+                LIMIT 1
+            """, (floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                  config.ODDS_API_BOOKMAKER)).fetchone()
+        except Exception as exc:                              # noqa: BLE001
+            getattr(conn, "rollback", lambda: None)()
+            r.add(check, ERROR, "CRIT", f"query failed: {exc}",
+                  reason=REASON_QUERY_ERROR, cadence=cadence)
+            return
+        if fresh is None:
+            r.add(check, STALE, "CRIT",
+                  f"no DraftKings pre-game price stored in the last {limit} "
+                  f"minutes for any game; the odds fetch has stopped (too few "
+                  f"games in the next {hours} hours to judge game by game)",
+                  reason=REASON_STALE_DATA, cadence=cadence)
+            return
+    if n_priced == 0:
+        r.add(check, SKIPPED, "CRIT",
+              f"no game DraftKings prices kicks off in the next {hours} hours",
+              reason=REASON_GATE_SHUT, cadence=cadence)
+        return
+
+    def _alarm(n_s: int, n_p: int) -> bool:
+        return n_s >= PREGAME_STALE_MIN_GAMES and n_s >= PREGAME_STALE_SHARE * n_p
+
+    by_sport = ", ".join(f"{s} {len(stale.get(s, []))} of {priced[s]}"
+                         for s in sorted(priced))
+    if _alarm(n_stale, n_priced) or any(
+            _alarm(len(stale.get(s, [])), priced[s]) for s in priced):
+        last = max(t for v in stale.values() for t in v)
+        late_h = (now - last).total_seconds() / 3600 - limit / 60
+        r.add(check, STALE, "CRIT",
+              f"{n_stale} of {n_priced} games DraftKings prices in the next "
+              f"{hours} hours have no DraftKings price from the last {limit} "
+              f"minutes ({by_sport}). The scorer makes no pre-game pick on "
+              f"them, so the board is emptying: check the odds fetch. Raised "
+              f"when at least half the priced games (overall or in one sport) "
+              f"and at least {PREGAME_STALE_MIN_GAMES} are behind, because a "
+              f"cancelled fight or a pulled game is normal.",
+              last.isoformat(),
+              reason=(f"{late_h:.0f} hours late" if late_h >= 1 else "Just late"),
+              cadence=cadence)
+        return
+    detail = (f"{n_priced - n_stale} of {n_priced} games DraftKings prices in the "
+              f"next {hours} hours have a DraftKings price from the last "
+              f"{limit} minutes")
+    if n_stale:
+        detail += (f"; {n_stale} do not ({by_sport}), under the alarm level of "
+                   f"half the priced games and at least {PREGAME_STALE_MIN_GAMES}")
+    if leftovers or merged:
+        detail += (f"; {leftovers + merged} extra ids of a game counted under "
+                   f"another id were left out")
+    r.add(check, OK, "CRIT", detail, reason=REASON_FRESH, cadence=cadence)
+
+
 def _published_record_problems(rec: dict, daily: dict, live_start: str) -> list[str]:
     """Reconcile the two published record views. Returns a list of problems.
 
@@ -590,6 +836,10 @@ def run_system_health(run_date: str | None = None) -> dict:
                       f"no games rows for {run_date} AND last odds snapshot {age_note} "
                       f"(max 48h) — the odds feed itself is likely down (quota/key/API); "
                       f"games rows come from this feed, so 'no games today' cannot be trusted")
+        # The 3-hour question, game by game (see check_pregame_prices_current):
+        # odds_dk_lines above stays as it is, because its 48-hour off-day
+        # branch answers a different question (is the feed alive at all).
+        check_pregame_prices_current(conn, r)
         r.ts_check(conn, "player_prop_odds", "WARN", "player_prop_odds", "snapshot_at", 12,
                    gate_ok=mlb_today, gate_note="no MLB games today")
 

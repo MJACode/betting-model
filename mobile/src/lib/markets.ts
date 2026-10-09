@@ -9,7 +9,7 @@
  *   - total/spread line moved 0.5+ against the pick    → SKIP
  */
 
-import { americanImplied, americanToDecimal, formatStampET } from './format';
+import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, parseStamp } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
@@ -818,6 +818,101 @@ export function selectLineChips(
   return { shown, hidden: quotes.length - shown.length };
 }
 
+// ── Pre-game price age ──────────────────────────────────────────────────────
+
+/**
+ * A game that has not started may only be decided on a price stored within
+ * this many minutes. Mirrors config.PREGAME_PRICE_MAX_AGE_MIN, and
+ * tests/test_pregame_price_age.py pins the two equal.
+ *
+ * Since 2026-10-09 the scorer treats an older row as no price at all: the odds
+ * feed stopped listing 31 NCAAF games in early September, and 16 BETs were
+ * written on DraftKings prices 2 to 28 days old. The app's latest-price views
+ * keep the newest row whatever its age, so without this the card showed that
+ * September price as the current one, with a bet link, and the price check
+ * passed it. The card now applies the same rule as the scorer.
+ */
+export const PREGAME_PRICE_MAX_AGE_MIN = 180;
+
+/** What the card knows about the clock, for the price-age rule. */
+export interface PriceAgeContext {
+  /**
+   * gameHasStarted(game, liveState, pick.game_time). Only an explicit `false`
+   * turns the rule on: once a game starts, its last pre-game row is the close
+   * and its age is not a question (the scorer's rule too).
+   */
+  started?: boolean;
+  /** Epoch ms. Defaults to Date.now(); a seam for the tests. */
+  now?: number;
+}
+
+/**
+ * Does the price-age rule apply to this pick? Only where the scorer applies
+ * it: a pre-game pick on a game market whose game has not started. Not props
+ * (their normal price age is hours by design), not in-play signals, and not
+ * the NFL card models, which their own publishers price on their own clock.
+ */
+export function priceAgeApplies(
+  pick: Pick,
+  ctx?: PriceAgeContext,
+): boolean {
+  if (ctx?.started !== false) return false;
+  if (pick.is_live === true) return false;
+  const id = pick.model_id ?? '';
+  if (id.startsWith('nfl_')) return false;
+  return gameMarketForModel(id) != null;
+}
+
+/**
+ * The card's clock for the rule, from the pick, its games row and the live
+ * snapshot. A game with NO known start time is not bounded, the scorer's
+ * convention too (_pregame_price_floor: no cutoff, no bound), so `started`
+ * is left unset and the rule stays off.
+ */
+export function priceAgeFor(
+  pick: { game_time?: string | null },
+  game: Parameters<typeof gameHasStarted>[0],
+  live: Parameters<typeof gameHasStarted>[1],
+  now?: number,
+): PriceAgeContext {
+  if (!(game?.commence_time || pick.game_time)) return { now };
+  return { started: gameHasStarted(game, live, pick.game_time), now };
+}
+
+/**
+ * True unless `snapshotAt` is older than the bound. A missing or unreadable
+ * stamp is kept, failing open like the scorer (_quote_is_current).
+ */
+export function quoteIsCurrent(snapshotAt: string | null | undefined, now: number = Date.now()): boolean {
+  if (!snapshotAt) return true;
+  const t = parseStamp(snapshotAt).getTime();
+  if (Number.isNaN(t)) return true;
+  return t >= now - PREGAME_PRICE_MAX_AGE_MIN * 60_000;
+}
+
+/** The newest stamp we hold for `book` on this pick's market, or null. */
+function bookSnapshotAt(
+  book: string,
+  latest: LatestDkOddsRow | null | undefined,
+  bookRows: BookPricedRow[] | undefined,
+): string | null {
+  const stamps: string[] = [];
+  if (book === MODEL_BOOK && latest?.snapshot_at) stamps.push(latest.snapshot_at);
+  for (const r of bookRows ?? []) {
+    if (r.bookmaker === book && r.snapshot_at) stamps.push(r.snapshot_at);
+  }
+  let best: string | null = null;
+  let bestT = -Infinity;
+  for (const s of stamps) {
+    const t = parseStamp(s).getTime();
+    if (!Number.isNaN(t) && t > bestT) {
+      best = s;
+      bestT = t;
+    }
+  }
+  return best;
+}
+
 // ── Board card: one hero American + one book CTA ────────────────────────────
 
 /** How the card's American number is labelled. */
@@ -835,17 +930,32 @@ export type HeroAmericanKind = 'now' | 'locked' | 'decision';
  * `decision` — pre-game, unmoved. The lock IS the bettable number; no Now tag
  *              (ASCII: Locked caption is Live and when moved).
  *
+ * A pre-game pick whose deciding book's newest price is older than
+ * PREGAME_PRICE_MAX_AGE_MIN, on a game that has not started, gets the same
+ * shape as Live with no snapshot — "Now —", "Locked −112", no link — and
+ * `stale: true`. A MISSING row is not stale: it can mean the enrichment read
+ * failed, which the board's partial-load banner already says, so it keeps
+ * the decision shape.
+ *
  * Edge / EV / stake stay on decisionOdds. This is display only (§1c).
  */
 export interface HeroAmerican {
   kind: HeroAmericanKind;
-  /** Null only on Live when the current DK snapshot has not landed. */
+  /** Null on Live when the current DK snapshot has not landed, and on a stale pre-game price. */
   price: number | null;
   book: string;
   line: number | null;
   link: string | null;
   lockedPrice: number;
   showLockedCaption: boolean;
+  /** The deciding book has not updated this price within PREGAME_PRICE_MAX_AGE_MIN. */
+  stale?: boolean;
+  /**
+   * Set with `stale`: the deciding book's newest stamp we hold (either view),
+   * so the card can say when it last priced the bet ("DK last priced Sat 9/5
+   * · 7:59 PM ET") rather than a bare "—", which on Live means "not loaded yet".
+   */
+  staleSince?: string;
 }
 
 function currentAtBook(
@@ -880,11 +990,32 @@ export function heroAmericanForPick(
   pick: Pick,
   latest: LatestDkOddsRow | null | undefined,
   bookRows?: BookPricedRow[],
+  priceAge?: PriceAgeContext,
 ): HeroAmerican | null {
   const locked = decisionOdds(pick);
   if (locked == null) return null;
   const live = pick.is_live === true;
   const book = live ? MODEL_BOOK : storedQuoteBook(pick);
+
+  // The scorer's rule: an unstarted game's price older than the bound is no
+  // price. Only a row we HOLD can be stale; a missing one keeps the old path.
+  if (priceAgeApplies(pick, priceAge)) {
+    const at = bookSnapshotAt(book, latest, bookRows);
+    if (at != null && !quoteIsCurrent(at, priceAge?.now)) {
+      return {
+        kind: 'now',
+        price: null,
+        book,
+        line: null,
+        link: null,
+        lockedPrice: locked,
+        showLockedCaption: true,
+        stale: true,
+        staleSince: at,
+      };
+    }
+  }
+
   const current = currentAtBook(pick, book, latest, bookRows);
   const lockedLine = numOrNull(pick.scored_line);
 
@@ -934,6 +1065,60 @@ export function heroAmericanForPick(
   };
 }
 
+/**
+ * The all-books rows inside the price-age bound (all of them when it does not
+ * apply). Pick Detail's All books table reads these: it is built from the
+ * stored rows alone, so dropping the old rows is the whole rule there.
+ */
+export function freshBookRows(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  priceAge?: PriceAgeContext,
+): BookPricedRow[] {
+  const rows = bookRows ?? [];
+  if (!priceAgeApplies(pick, priceAge)) return rows;
+  return rows.filter((r) => quoteIsCurrent(r.snapshot_at, priceAge?.now));
+}
+
+/**
+ * The same-line book quotes a pick may still be handed off to: the card's
+ * one hand-off (bestHandoffForPick) and Pick Detail's "Betting lines" chips
+ * (BookLinesRow) both read this, so the two cannot disagree.
+ *
+ * Filtering the stored rows is not enough. Two chips are built from the pick
+ * itself and ignore the rows: the record chip (the deciding book at the
+ * stored price) and the scorer's best-price stamp. So under the price-age
+ * rule a book whose newest price is older than the bound is dropped too: the
+ * record chip when the deciding book is stale (hero.stale), and the stamp at
+ * a book whose own rows all went stale. A book we hold no row for keeps its
+ * chip, as before (missing ≠ stale). With no clock passed, this is
+ * pickLineQuotes unchanged.
+ */
+export function currentLineQuotes(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  hero?: HeroAmerican | null,
+  priceAge?: PriceAgeContext,
+): LineQuote[] {
+  const quotes = pickLineQuotes(pick, freshBookRows(pick, bookRows, priceAge));
+  if (!priceAgeApplies(pick, priceAge)) return quotes;
+  // A book is stale when we hold rows for it and none is current.
+  const rows = bookRows ?? [];
+  const currentBooks = new Set(
+    rows.filter((r) => quoteIsCurrent(r.snapshot_at, priceAge?.now)).map((r) => r.bookmaker),
+  );
+  const staleBooks = new Set(
+    rows.filter((r) => !currentBooks.has(r.bookmaker)).map((r) => r.bookmaker),
+  );
+  // The hero already judged the deciding book across BOTH views (the
+  // DraftKings latest row and the all-books row), so its verdict wins.
+  if (hero?.stale) staleBooks.add(hero.book);
+  else if (hero) staleBooks.delete(hero.book);
+  const kept = quotes.filter((q) => !staleBooks.has(q.bookmaker));
+  if (kept.length === quotes.length) return quotes;
+  return kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
+}
+
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
 export interface BoardHandoff {
   bookmaker: string;
@@ -947,6 +1132,7 @@ export function bestHandoffForPick(
   pick: Pick,
   bookRows: BookPricedRow[] | undefined,
   hero?: HeroAmerican | null,
+  priceAge?: PriceAgeContext,
 ): BoardHandoff | null {
   if (pick.is_live === true) {
     const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
@@ -958,14 +1144,27 @@ export function bestHandoffForPick(
       verb: 'Bet',
     };
   }
-  let quotes = pickLineQuotes(pick, bookRows ?? []);
+  // No hand-off to a book whose newest price is older than the bound
+  // (currentLineQuotes; Pick Detail's chips read the same list).
+  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge);
   if (quotes.length === 0) return null;
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet
   // placed NOW. When the record chip wins and hero Now is at that same book,
   // re-rank with that book at its current price: record DK −110, now DK −130,
   // FD −115 must hand off to FD −115, not "Bet DK −130" (Reviewer #847).
-  if (best.isRecord && hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book) {
+  // The same re-rank when that book has moved IN the bettor's favour and the
+  // record chip ranked behind another book: locked DK −110, now DK −102, MGM
+  // −105 must hand off to DK −102, not "Best MGM −105" (third review,
+  // 2026-10-09). That case only at the pick's line: DK's price at a moved
+  // line is a different bet, not ranked against books still at the line.
+  const scored = numOrNull(pick.scored_line);
+  if (
+    hero?.kind === 'now' && hero.price != null &&
+    ((best.isRecord && best.bookmaker === hero.book) ||
+      ((hero.line == null || scored == null || hero.line === scored) &&
+        quotes.some((q) => q.isRecord && q.bookmaker === hero.book)))
+  ) {
     const nowPrice = hero.price;
     quotes = rankQuotes(
       quotes.map(({ isBest: _isBest, ...q }) =>
