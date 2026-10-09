@@ -53,6 +53,18 @@ same-instant gap) by construction. One more snapshot per game makes CLV
 measurable. Measured cost: 5 credits a game per snapshot, about 6,600 credits
 over a 1,312-game season. It spends credits, so it needs mike's OK.
 
+## [ ] The model screen's "Avg CLV" tile mixes two CLV definitions (found 2026-10-09)
+
+`BuiltInModelDetailScreen.tsx` (`clvSummary`) averages every settled pick's
+`clv_pct`, whatever its `clv_method`. 1,016 captured picks still carry an
+older posted-price grade (`raw_one_sided` 1,012, `raw_one_way` 4; game dates
+2026-05-01 to 07-02, MLB and WNBA props, `mlb_f5_moneyline`,
+`mlb_moneyline`; measured by the CLV card review). The published average
+(`v_public_track_record`, the Models tab) counts only `no_vig` and
+`zero_vig`. The tile should filter on `clv_method` the same way, or say which
+picks it averages. The CLV card's footnote ("the fair (no-vig) close") is
+also untrue for those 1,016 picks; it predates the price-taken change.
+
 ## [x] CLV at the price taken — DECIDED and BUILT 2026-10-08 (mike: "yes")
 
 Built: `paper_tracker._bet_price_and_book`, `picks.clv_bet_book`, the
