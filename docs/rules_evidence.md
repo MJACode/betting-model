@@ -1401,3 +1401,21 @@ untried without anything noticing; sources reported rather than used; the wrong
 yardstick (classifier metrics, not units and CLV against the market); no
 feature hypotheses or ablation; plumbing with no timebox; and no standing
 method in the repo, which is why it recurred across sessions.
+
+## §0 (evidence). Say each thing once (2026-10-09)
+
+mike: *"Why do you keep restating results? What the fuck is going on, fix this
+bullshit."* Measured on the three session transcripts from 2026-10-03 and
+2026-10-04 (13 replies that carried the four headings):
+
+- Every one put 1,200–1,900 characters of prose ABOVE the headings (averages per
+  session: 1,221 / 1,887 / 1,695), and the "Quick summary" then listed the same
+  facts again. The answer was being written twice per reply.
+- Items carried across replies with no change in status: "the 9 test failures
+  that are also on master" appeared in 8 of the 13; "the in-play NCAAF cut was
+  chosen on the broken numbers" in three consecutive replies.
+
+Cause: §0 required the four headings but never said what goes above them, so the
+habit was a prose answer followed by a heading-shaped recap of it, with every
+open item re-listed each turn. The rule now says the headings are the reply and
+only what is new since the last reply is stated.
