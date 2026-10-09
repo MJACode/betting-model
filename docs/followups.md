@@ -77,10 +77,73 @@ After review, the same day:
   computes (an NHL start moved earlier at settlement) reads the last pre-game
   price instead of losing the card.
 
+After a second review, the same day: the price at the pick and the divider
+stay on the 8-row table; "steady" only when the numbers did not move; an old
+or different first row is named, never called the price at the pick; a pick
+made after the card's start says so instead of "No new price"; no footer when
+nothing is missing.
+
 Known limit: the prop read keeps the 500 rows written most recently. On a
 longer series the price at the pick can fall off; the card then says the price
 at your pick isn't available instead of claiming the table runs from it. The
 longest series for the card's markets was 174 rows (measured 2026-10-09).
+
+## [ ] The line-movement card's game-line read misses most moves on minute-by-minute books (found 2026-10-09)
+
+The card reads the price at the pick plus the newest 50 snapshots before the
+start (`fetchOddsHistory`, `mobile/src/lib/queries.ts`). DraftKings NFL
+spreads are stored about once a minute, so on a busy game those 50 cover under
+an hour. Measured 2026-10-09: pick 3262471 (PHI +6 at DraftKings) has 5,791
+snapshots from the pick to 10-09 18:17 UTC holding 15 changes to the line or
+PHI's price; the newest 49 cover 47 minutes and hold none. The card shows the
+price at the pick, a "Some prices after your pick not shown" divider, and one
+row. Raising the limit does not fix it: that series already holds 8,899
+pre-game rows.
+
+Fix: a read-only SQL function, called by `fetchOddsHistory` instead of the two
+reads. Arguments: game_id, market, bookmaker, the pick's UTC second and the
+start's. It returns:
+
+- the last row before the pick (as now);
+- the rows after it where a priced column changed (home_price, away_price,
+  spread_home, total_line, over_price, under_price), ordered by parsed time,
+  compared with the row before, seeded with the row at the pick; the newest 50
+  of those;
+- always the newest row before the start, even when nothing changed. Without
+  it a book that re-posted the same price reads "No new price", because
+  `sincePick` counts the rows after the pick, and the "As of" time would show
+  the last change instead of the newest post.
+
+Comparing every price column on the server keeps every row the phone would
+show; the phone then merges rows that read the same for the pick's side. The
+phone code (`sincePick`, the table, the card's text) stays as it is.
+Delivery: a guarded migration in `data/migrations` listed in
+`ACTIVE_MIGRATIONS` (`data/view_migrations.py`), `GRANT EXECUTE` to anon and
+authenticated, the name in `RPC_ANON_CALLABLE` (`data/anon_readable.py`), and
+the phone falls back to the two current reads if the call fails, so an app
+build that ships before the worker applies the migration still has a card.
+Not built in the second review: it is a database change, and that session
+had read-only database access, so it could neither apply the function nor
+test it as deployed.
+
+## [ ] The line-movement card could end its window at the listed start (found 2026-10-09)
+
+The card's window ends at the earlier of `games.commence_time` and
+`picks.game_time` (`gameStartAt`, `mobile/src/lib/lineHistory.ts`). NHL
+settlement rewrites `commence_time` about ten minutes before the listed start,
+and real pre-game prices keep arriving in between: pick 3414594 (TOR ML at
+betPARX +160, made 02:06:55 UTC) has a +155 at 02:09:27 that the card cannot
+show because its window ends at 02:00. The card now says plainly that the
+recorded start is before the pick (second review), but it still hides that
+move. Ending the window at `picks.game_time` when it is set would show it.
+Not done: rows after the real start are stamped `open`, like pre-game rows, so
+only the start keeps in-game prices out. Before switching, measure across NHL
+and MLB, at each pick's deciding book, that no row between the two stamps
+carries an in-game price. There is no column that marks one, so the check has
+to be built (for example, a price more than N points of implied chance away
+from the last row before `commence_time`). One game checked (TOR @ VGK, two
+books): the first in-game prices are at 02:19 UTC, after `game_time` (02:10).
+One game is not the measurement.
 
 Original report below.
 
@@ -130,8 +193,9 @@ than 7 days older than the pick. For every one of them that newest price is
 from 2026-09-04 to 2026-09-06. The games are dated 2026-10-24 to 2026-12-12,
 mostly at DraftKings (a few at BetParx, FanDuel and BetRivers). So those picks
 were priced off early-September lines, not a price anyone can bet now. The
-line-movement card now says "No new price from <book> since your pick" and
-shows that old date, so the app no longer calls it steady. The scoring is the
+line-movement card now says "Our newest <book> price is from <date>, before
+your pick" and labels that row with its date, not "At pick", so the app no
+longer calls it steady or the price at the pick. The scoring is the
 real problem and is not touched here: either odds for those games stopped being
 collected after 09-06, or the scorer should skip a game whose newest price is
 that old. Query shape: for each pick, the newest `odds` row (not in-play) for
