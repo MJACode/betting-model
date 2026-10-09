@@ -119,4 +119,6 @@ jobs:
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
+            tests/test_job_queue.py \
+            tests/test_voided_pick_not_rechosen.py \
             tests/test_mobile_stat_segments.py

@@ -938,5 +938,25 @@
       ],
       "reason": "decided on a DraftKings price 25.8 days old (its last stored price, 2026-09-05 16:15 UTC): the odds feed stopped listing the game and the scorer used that row; nobody could bet that number (mike, 2026-10-09)"
     }
+  },
+  {
+    "key": "void-ncaaf-stale-dk-posted-unders-2026-10-09",
+    "job_type": "void_picks",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-09: 'Change the rule, void them'. Eight posted NCAAF unders were decided on DraftKings totals rows stored 2026-09-05, 15.1 to 28.4 days before each pick; no book stored a totals row for these games between then and the pick (re-measured 2026-10-09). allow_posted lifts Matt's 2026-09-28 posted-pick lock for these picks only (scripts/void_picks.py). Must run before 2026-10-17 16:00 UTC, when 2992283 kicks off.",
+    "args": {
+      "pick_ids": [
+        2558703,
+        2558736,
+        2935576,
+        2992283,
+        2992290,
+        2992474,
+        3020766,
+        3204788
+      ],
+      "allow_posted": true,
+      "reason": "decided on a DraftKings price 15 to 28 days old: the newest DraftKings row for this game at or before the pick was stored 2026-09-05 and no book had a row for it between then and the pick (the odds feed had stopped listing the game), so the number was not one DraftKings was offering when the pick was made. It was posted to members. Voided by mike's decision of 2026-10-09 to lift the posted-pick lock for these picks: 'Change the rule, void them'."
+    }
   }
 ]
