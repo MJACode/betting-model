@@ -219,7 +219,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
     try:
         games = slate(conn, game_date)
         if not games:
-            logger.info(f"wnba-prop-market: no WNBA games {game_date}")
+            logger.info(f"wnba-prop-market: no untipped WNBA games {game_date}")
             return {"flags": 0, "published": 0}
 
         quotes = mk.load_wnba_prop_quotes(conn, game_date, game_ids=list(games))

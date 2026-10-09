@@ -220,7 +220,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
     try:
         games = slate(conn, game_date)
         if not games:
-            logger.info(f"mlb total public fade: no MLB games on {game_date}")
+            logger.info(f"mlb total public fade: no unstarted MLB games on {game_date}")
             return {"flags": 0, "published": 0,
                     "publish_enabled": fade.publish_enabled()}
         gids = list(games)

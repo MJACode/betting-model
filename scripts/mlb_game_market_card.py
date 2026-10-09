@@ -286,7 +286,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False,
     try:
         games = slate(conn, game_date)
         if not games:
-            logger.info(f"mlb {market} market: no MLB games on {game_date}")
+            logger.info(f"mlb {market} market: no unstarted MLB games on {game_date}")
             return {"flags": 0, "published": 0, "market": market,
                     "publish_enabled": mk.publish_enabled(market)}
         quotes = mk.load_latest_quotes(conn, SPORT, market, list(games))
