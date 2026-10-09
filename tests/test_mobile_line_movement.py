@@ -441,7 +441,7 @@ const after = [sp('2026-10-08T09:12:45Z', 9, -109, -112), sp('2026-10-08T14:17:1
 const wrong = view(TEN, [before, ...after], 'spreads', '2026-10-08T15:00:00Z');
 eq(wrong.rows.map((r) => r.label), ['4:16 AM', '5:12 AM', '10:17 AM'], 'another number keeps its time');
 eq(wrong.footer, null, 'still a window from the pick');
-eq([wrong.header, wrong.verdict.label], ['+9.5 → +7.5', 'Line moved +9.5 → +7.5 against your home'], 'measured from the locked number, graded on the row after the pick');
+eq([wrong.header, wrong.verdict.label], ['+9.5 → +7.5', 'Line moved +9.5 → +7.5 against you'], 'measured from the locked number, graded on the row after the pick');
 const firstRow = "The first row is BetRivers' last stored price before your pick (+7.5 at -117), not the number your pick locked.";
 if (!wrong.note.includes(firstRow)) throw new Error(`note: ${wrong.note}`);
 if (/when you picked|moved since your pick|from your pick/.test(wrong.note)) throw new Error(`calls the first row the price at the pick: ${wrong.note}`);

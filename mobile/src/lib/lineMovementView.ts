@@ -215,7 +215,10 @@ export function lineMovementView(
     if (!closed && movement) {
       if (movement.severity === 'skip') {
         return {
-          label: `Line moved ${line(movement.scoredLine)} → ${line(movement.currentLine)} against your ${side}`,
+          // "against you", like "in your favor" below: pick_side is "home" /
+          // "away" on spreads and moneylines, and "against your home" is not
+          // English.
+          label: `Line moved ${line(movement.scoredLine)} → ${line(movement.currentLine)} against you`,
           tone: 'against',
         };
       }
