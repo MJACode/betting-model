@@ -60,3 +60,17 @@ def test_both_live_non_bet_clears_leave_nfl_rows():
         assert "model_id NOT LIKE 'nfl_prop_%%'" in block, (
             f"the {name} clear still deletes unsettled nfl_prop_% rows "
             f"on a game that has not kicked")
+
+
+def test_the_left_out_ufc_clear_only_removes_unsettled_non_bets():
+    """_clear_left_out_ufc_id (2026-10-09) deletes outside run_scorer, so the
+    scans above never see it. A BET is never deleted (CLAUDE.md 1c): without
+    `signal_type != 'BET'` here, every other test still passes and the helper
+    would delete the BETs of a UFC fight's left-out id."""
+    body = _between("def _clear_left_out_ufc_id(", "
+def ")
+    assert body.count("DELETE FROM picks") == 1
+    for clause in ("game_id = %s", "result IS NULL", "signal_type != 'BET'",
+                   "is_live IS NOT TRUE", "model_id NOT LIKE 'nfl_prop_%%'"):
+        assert clause in body, clause
+
