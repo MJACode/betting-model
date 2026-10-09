@@ -17,8 +17,9 @@ points:
 
 ```
 fair_close_p = no-vig probability of our side at the close
-fair_bet_p   = no-vig probability of our side at lock, when the locked
-               two-way is on the snapshot; otherwise raw bet implied
+fair_bet_p   = no-vig probability of the PRICE TAKEN at lock, when the
+               two-way at the book it was taken shows that price;
+               otherwise raw bet implied
 clv_pct      = (fair_close_p − fair_bet_p) × 100
 ```
 
@@ -32,8 +33,29 @@ the raw implied is stored so pick-detail still has a number, and the
 published pedigree **excludes** it.
 
 OddsShopper’s worked Dodgers example only shows one bet price, so `fair_bet_p`
-is raw implied (−130 → 56.52%). Capture looks up the pick-book snapshot at
-`created_at` and de-vigs the bet too when that row’s price matches the lock.
+is raw implied (−130 → 56.52%). Capture looks up the snapshot at the book the
+bet was taken (`clv_bet_book`) at `created_at` and de-vigs the bet too when
+that row’s price on our side equals the price taken.
+
+## Which price is the bet? (mike, 2026-10-08: "grade CLV at the price taken")
+
+The bet is the price the pick was decided and settled at, at the book it was
+taken (`paper_tracker._bet_price_and_book`). The price is
+`COALESCE(decision_odds, dk_odds)`. The book is, in order:
+
+1. `decision_book`, whenever the row carries one (since 2026-09-09);
+2. the book the label names, for the four cards that keep a soft book's price
+   in `dk_odds` and name the book only in the label: `nfl_prop_market` and
+   `wnba_prop_market` (a `(FD)` suffix), `nfl_wind_totals` and
+   `nfl_opener_spread` (`(Wind 11 mph, FD)`);
+3. DraftKings, for every row decided before 2026-09-09.
+
+`clv_bet_book` records it on every capture. Until 2026-10-08 a pick decided
+at another book but carrying DraftKings' price in `dk_odds` was graded at
+DraftKings' price against DraftKings' lock quote, and the MLB market cards'
+line-book price was looked up at DraftKings, where it never matched, so the
+bet kept its margin while the close lost it. A line DraftKings never hung
+(`dk_odds` NULL) has been graded at the price taken since earlier that day.
 
 **Line CLV** (`picks.line_clv_pts`) is a different bet: points the number
 moved toward our side. When the line moved, `clv_pct` is NULL. The two are
@@ -44,8 +66,20 @@ where the number moved, price CLV where it held.
 
 1. **Pinnacle**, when a pre-game snapshot exists for that game + market
    ( Circa is not in The Odds API feed we store).
-2. Else the book the pick was priced at (DraftKings for distributional
-   models; the label suffix for market-relative props).
+2. Else **DraftKings**, for every pick at DraftKings' line. Only the BET moved
+   to the price taken on 2026-10-08; the close did not, because a soft book's
+   "close" is junk-prone (pick 2899429: Fanatics −110/−130 nine minutes before
+   first pitch while DraftKings sat at +380/−600).
+3. Two exceptions keep the fallback they already had: a line DraftKings never
+   hung falls back to the book it was taken at, and the market-relative prop
+   cards to their label book.
+
+**The close is bounded by the earliest start on record**: the earlier of
+`games.commence_time` and `picks.game_time` (the start the pick was written
+against). `games.commence_time` moves — the odds feed rewrites it on every
+poll, and for NHL it read :10 before puck drop, 00:10:37 after it, and the
+league's :00 once settled — and a close read against a start that moved later
+took an in-play quote ("Alex Nedeljkovic Under 25.5 Saves", 2026-10-08).
 
 `clv_close_book` names it. `closing_dk_odds` is the American on our side at
 that book (legacy column name).
@@ -75,7 +109,7 @@ is hold, not edge. Pinned by `tests/test_clv_math.py::test_oddsshopper_dodgers_n
 Vig *widening* at close (−110/−110 → −115/−115) is +1.11 pp raw. Close-only
 de-vig vs raw bet is −2.38 pp (juice paid, not a beat). De-vigging **both**
 two-ways is **exactly 0**. That is the trap. Capture de-vigs both when the
-lock snapshot matches `dk_odds`.
+lock snapshot at the bet book shows the price taken.
 
 ## What this is not
 
@@ -101,6 +135,18 @@ is rewritten, **`v_public_track_record` averages only `no_vig` and
 `zero_vig`**, so the app pedigree (Sharp Score / `useModelClvPedigree`) never
 mixes the two definitions. During the catch-up the CLV sample on the Models
 tab shrinks, then grows back with the honest number.
+
+**The price taken (2026-10-08).** Rows captured before it that were graded at
+DraftKings although the bet was taken elsewhere are stamped
+`clv_method = graded_at_dk_legacy` by
+`data/migrations/clv_price_taken_2026_10_08.sql` (216 rows on 27 game dates
+when written) and re-measured once by `_backfill_clv`, run in one go by the
+declared job `clv-price-taken-recompute-2026-10-08`. Like `raw_one_sided`,
+the stamp is outside the pedigree, so a stamped row leaves the published
+average until it is re-measured. `clv_bet_book` is the visited mark: a row the
+recompute cannot re-measure is marked, keeps the stamp and its old number, and
+stays out of the average. `results_snapshots` (what Discord posted) is never
+rewritten.
 
 `opening_signals.clv_pct` uses the same no-vig formula from this change
 forward. It grades the *opening lock* vs close, not the live BET vs close,

@@ -53,7 +53,17 @@ same-instant gap) by construction. One more snapshot per game makes CLV
 measurable. Measured cost: 5 credits a game per snapshot, about 6,600 credits
 over a 1,312-game season. It spends credits, so it needs mike's OK.
 
-## [ ] [needs-decision] CLV is graded at DraftKings' price, not the price taken
+## [x] CLV at the price taken — DECIDED and BUILT 2026-10-08 (mike: "yes")
+
+Built: `paper_tracker._bet_price_and_book`, `picks.clv_bet_book`, the
+`graded_at_dk_legacy` recompute (`data/migrations/clv_price_taken_2026_10_08.sql`
+plus the declared `clv_backfill` job). Only the bet side moved; the close is
+still Pinnacle, else DraftKings. `docs/clv.md`. Still open: the app's pick
+screen shows `dk_odds` and a label/DraftKings book in its CLV card
+(`PickDetailScreen.tsx` ClvCard) — it should show the price taken at
+`clv_bet_book`. The original item:
+
+### CLV is graded at DraftKings' price, not the price taken
 
 `tracking/paper_tracker._capture_clv` grades `dk_odds` against a DraftKings
 lock snapshot whenever DraftKings hung the line, even when the pick was
@@ -67,10 +77,14 @@ the published CLV of every model that shops books, so it is a decision.
 - The prop close lookup matches names exactly: Pinnacle's "Lafreniere" missed
   DraftKings' "Lafrenière" and fell back to a structural 0.0
   (`paper_tracker.py`, the `player_name = %s` lookup).
-- Before a game `games.commence_time` carries the feed's :10 time; after
-  settlement it carries the NHL's :00. A close read before settlement can take
-  a quote from the first ten minutes after the scheduled start. Whether those
-  quotes are in-play prices is not measured.
+- [x] FIXED 2026-10-08: the close is now bounded by the earlier of
+  `games.commence_time` and `picks.game_time`. Measured that day: the feed moved
+  SJS_STL's start from 00:10 to 00:10:37 after puck drop, and "Alex Nedeljkovic
+  Under 25.5 Saves" closed on a quote 45 s past the start it was written
+  against. The NHL prop ingestor also buys nothing after a game's final
+  snapshot now (it had bought an in-play board, filed as pre-game, when the
+  start moved). Still open: `games.commence_time` itself keeps moving, and
+  every reader that bounds on it alone inherits that.
 
 ## [ ] The NHL prop lab still pairs a shared name's prices
 

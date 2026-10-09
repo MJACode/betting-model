@@ -326,7 +326,7 @@ What shipped, in one change:
 - **What stays DraftKings:** the LINE a pick is scored at (until 2026-09-12,
   when a prop DraftKings does not list gained a line from the first bettable
   book that does -- the last section of this file), training features, and the
-  line-movement monitor. **CLV** grades the locked `dk_odds` against the
+  line-movement monitor. **CLV** grades the price taken (since 2026-10-08) against the
   no-vig sharp close (Pinnacle when a pre-game snapshot exists) —
   `docs/clv.md`. The live lanes were fenced out on 2026-09-09
   (his 2026-09-02 "only for pregame picks for now") and joined on 2026-09-10
