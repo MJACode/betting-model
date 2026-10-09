@@ -3,7 +3,8 @@
 mike, 2026-10-09: "fix the prop writers to stamp UTC too". The MLB/WNBA/NBA
 writer and the college football writer stamped Eastern time
 (`datetime.now(_ET).isoformat()`, "-04:00"); the NFL and NHL writers stamp UTC.
-About half of recent player_prop_odds rows were Eastern. Several readers order
+For games on 2026-10-05 to 10-10, 1,990,335 of 2,542,384 player_prop_odds rows
+were Eastern (measured 2026-10-09). Several readers order
 the stamp as text inside one prop (the trigger that keeps the latest price, the
 odds pruner, the app's prop history), and on 2026-11-01 an Eastern writer would
 switch to "-05:00" and the repeated 1am hour would sort backwards.

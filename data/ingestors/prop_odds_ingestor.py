@@ -473,10 +473,10 @@ def backfilled_dates(conn: DBConnection, dates: list[str],
 
     Detected on the snapshot_at SHAPE. The historical writer stamps the API's
     served timestamp, which ends in 'Z'; the live ingestor stamps isoformat
-    with a numeric offset ('+00:00' UTC since 2026-10-09, '-04:00' Eastern
-    before that). That is a real distinction in this table today, and it is
-    also a constraint on future writers: anything that starts stamping 'Z' on
-    live rows makes a re-run skip dates it should buy.
+    with a numeric offset ('+00:00' UTC from the 2026-10-09 change on,
+    '-04:00' Eastern before it). That is a real distinction in this table, and
+    it is also a constraint on future writers: anything that starts stamping
+    'Z' on live rows makes a re-run skip dates it should buy.
     """
     rows = conn.execute(
         "SELECT DISTINCT game_date FROM player_prop_odds "
@@ -797,8 +797,8 @@ def run_prop_odds_ingestor(target_date: str = None,
 
     # The stamp is UTC, like the NFL and NHL writers. The slate date above stays
     # Eastern. isoformat() writes "+00:00", never "Z": backfilled_dates() reads a
-    # trailing "Z" as a bought historical row. Rows before 2026-10-09 carry
-    # "-04:00", so readers parse or cast this column, never compare its text.
+    # trailing "Z" as a bought historical row. Rows written before this change
+    # carry "-04:00", so readers convert the stamp to a time before comparing.
     snapshot_at = datetime.now(timezone.utc).isoformat()
     start = datetime.now()
 
