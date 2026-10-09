@@ -1856,6 +1856,11 @@ def notify_discord_free_pick(target_date: str | None = None,
 # config.PAUSED_NOTE from the moment it is written, and that ROW marker (not
 # the model's present state) is what keeps it out, so this is still a filter
 # on what the pick WAS. A pick a live model wrote stays in after a pause.
+#
+# ONE EVENT IS ONE BET (mike, 2026-10-09, "Count each fight once"). When a
+# model bet one event under two game ids, the second copy carries
+# condition_status = config.DUPLICATE_STATUS and counts once, here and on
+# every other record surface. Its result is never touched.
 _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
                p.clv_pct, p.is_live
@@ -1866,7 +1871,8 @@ _SETTLED_SQL = r"""
           -- VOIDed picks are result='NO_ACTION' and drop out here.
           AND p.result IN ('WIN', 'LOSS', 'PUSH')""" \
     + config.record_exclusion_sql("p") \
-    + config.paused_row_exclusion_sql("p") + "\n"
+    + config.paused_row_exclusion_sql("p") \
+    + config.duplicate_copy_exclusion_sql("p") + "\n"
 
 
 def _settled_rows(conn, game_date: str) -> list[tuple]:

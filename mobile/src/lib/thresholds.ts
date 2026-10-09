@@ -24,6 +24,7 @@ import {
   RETIRED_PROB_ONLY_MODELS,
   RETIRED_MODELS,
   RECORD_EXCLUDED_MODELS,
+  DUPLICATE_STATUS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
 } from './thresholds.generated';
@@ -37,6 +38,7 @@ export {
   RETIRED_PROB_ONLY_MODELS,
   RETIRED_MODELS,
   RECORD_EXCLUDED_MODELS,
+  DUPLICATE_STATUS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
 };
@@ -70,6 +72,18 @@ export const PAUSED_NOTE = 'model paused';
 
 export function isPausedRow(p: { downgrade_reason?: string | null }): boolean {
   return p.downgrade_reason === PAUSED_NOTE;
+}
+
+/**
+ * The second copy of ONE bet: the same model bet one real event under two
+ * game ids (a UFC fight under both fighter orders, an Eastern and a UTC date).
+ * mike, 2026-10-09: "Count each fight once." The extra copy carries
+ * condition_status DUPLICATE_STATUS (config.DUPLICATE_STATUS, set by a guarded
+ * migration); its result is never touched, and the copy that stays counts.
+ * Same clause as the record views and the Discord recap.
+ */
+export function isDuplicateCopy(p: { condition_status?: string | null }): boolean {
+  return p.condition_status === DUPLICATE_STATUS;
 }
 
 export function isProbOnlyModel(modelId: string): boolean {
@@ -340,6 +354,8 @@ export function passesActionFilter(p: ActionFilterable): boolean {
  * checked here, and an entry in config.RECORD_EXCLUSIONS, enforced in the
  * record views AND here, through RECORD_EXCLUDED_MODELS (generated from that
  * list; nfl_live_prop, struck 2026-10-04). Model state is checked nowhere.
+ * The second copy of one bet (isDuplicateCopy) is not a bet leaving: the
+ * event still counts, once.
  *
  * Use passesActionFilter instead for anything the reader could still BET —
  * there a paused model must not be offered. The two filters answering two
@@ -355,6 +371,9 @@ export function passesRecordFilter(p: RecordFilterable): boolean {
   // A VOIDed pick is not a bet of record (CLAUDE.md 1c). Server-side the same
   // exclusion happens via result='NO_ACTION'.
   if (p.condition_status === 'VOID') return false;
+  // The second copy of one bet under another game id counts once, as the
+  // copy that stays (2026-10-09). Same clause as the record views.
+  if (isDuplicateCopy(p)) return false;
   // A pick written while its model was paused was never posted or staked, so
   // it was never bet (2026-09-28). The ROW's marker, never the model's present
   // state: a live model's settled bets stay in the record after a pause.

@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-10-08
+ * Last generated: 2026-10-09
  */
 
 export interface ModelThreshold {
@@ -146,6 +146,8 @@ export const RETIRED_MODELS = new Set<string>([
 export const RECORD_EXCLUDED_MODELS = new Set<string>([
   'nfl_live_prop',
 ]);
+
+export const DUPLICATE_STATUS = 'DUPLICATE';
 
 export const KELLY_MULTIPLIER = 0.1;
 export const MAX_KELLY_FRACTION = 0.05;

@@ -523,20 +523,38 @@ def model_performance(conn) -> list[dict]:
     a different price and CLAUDE.md section 6 keeps the two apart. (Today no
     model reaching the second arm has picks of both kinds; if one ever does, its
     row would blend them and this is where to split it.)
+
+    ONE EVENT IS ONE BET (mike, 2026-10-09, "Count each fight once"). The picks
+    arm drops the second copy of a bet a model wrote under two game ids for one
+    event (config.DUPLICATE_STATUS). ufc_total_rounds counted two fights twice:
+    measured read-only 2026-10-09, 14 settled 9-5 -1.09u (8 priced) reads 12
+    settled 7-5 -1.86u (7 priced) once each fight counts once.
+
+    The matview arm needs the same exclusion, through a join back to picks.
+    mv_scored_pick_outcomes re-grades MLB and WNBA from box scores and carries
+    no pick-level marker: measured 2026-10-09, of its 3,706 settled BET rows, 2
+    are VOID picks and 35 more are picks whose own result is
+    NO_ACTION, and the matview grades all 37 anyway. No MLB or WNBA copy is
+    marked DUPLICATE today (the one MLB pair, 04-15/04-16, is VOID), so the join
+    changes no number now; it keeps a future marked copy off this dashboard.
+    LEFT JOIN, so a graded row whose pick is gone stays counted as before. The
+    VOID and NO_ACTION rows are left as they are: that is a separate question.
     """
-    sql = """
+    from config import duplicate_copy_exclusion_sql
+    sql = f"""
         WITH agg AS (
-            SELECT model_id, sport,
-                   COUNT(*)                                   AS settled,
-                   COUNT(*) FILTER (WHERE result = 'WIN')     AS wins,
-                   COUNT(*) FILTER (WHERE result = 'LOSS')    AS losses,
-                   COUNT(*) FILTER (WHERE result = 'PUSH')    AS pushes,
-                   COUNT(profit_units)                        AS priced,
-                   COALESCE(SUM(profit_units), 0)             AS units,
-                   MAX(game_date)                             AS last_date
-            FROM mv_scored_pick_outcomes
-            WHERE signal_type = 'BET' AND result IN ('WIN', 'LOSS', 'PUSH')
-            GROUP BY model_id, sport
+            SELECT o.model_id, o.sport,
+                   COUNT(*)                                     AS settled,
+                   COUNT(*) FILTER (WHERE o.result = 'WIN')     AS wins,
+                   COUNT(*) FILTER (WHERE o.result = 'LOSS')    AS losses,
+                   COUNT(*) FILTER (WHERE o.result = 'PUSH')    AS pushes,
+                   COUNT(o.profit_units)                        AS priced,
+                   COALESCE(SUM(o.profit_units), 0)             AS units,
+                   MAX(o.game_date)                             AS last_date
+            FROM mv_scored_pick_outcomes o
+            LEFT JOIN picks pk ON pk.pick_id = o.pick_id
+            WHERE o.signal_type = 'BET' AND o.result IN ('WIN', 'LOSS', 'PUSH'){duplicate_copy_exclusion_sql("pk")}
+            GROUP BY o.model_id, o.sport
             UNION ALL
             -- Models the matview does not grade at all (the live lanes, UFC,
             -- wnba_spread, the F5 secondary markets), from picks. The NOT
@@ -556,7 +574,7 @@ def model_performance(conn) -> list[dict]:
             FROM picks p
             WHERE p.signal_type = 'BET' AND p.result IN ('WIN', 'LOSS', 'PUSH')
               AND NOT EXISTS (SELECT 1 FROM mv_scored_pick_outcomes m
-                               WHERE m.model_id = p.model_id)
+                               WHERE m.model_id = p.model_id){duplicate_copy_exclusion_sql("p")}
             GROUP BY p.model_id, p.sport
         )
         SELECT t.model_id,

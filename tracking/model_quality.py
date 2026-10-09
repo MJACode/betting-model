@@ -38,7 +38,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import record_exclusion_sql, today_et
+from config import duplicate_copy_exclusion_sql, record_exclusion_sql, today_et
 from data.db import get_connection
 from data.ddl_guard import schema_is_current
 
@@ -751,7 +751,9 @@ def run_model_quality(run_date: str | None = None) -> dict:
 
         open_by_model = _group(open_rows)
 
-        excl = record_exclusion_sql("p")
+        # Explicit removals, plus the second copy of a bet written under two
+        # game ids for one event (config.DUPLICATE_STATUS, mike 2026-10-09).
+        excl = record_exclusion_sql("p") + duplicate_copy_exclusion_sql("p")
         try:
             settled_sql = _SETTLED_BET_SQL.format(excl=excl)
             recent_rows = [_row_settled(r) for r in conn.execute(

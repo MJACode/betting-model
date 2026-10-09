@@ -50,6 +50,8 @@ import {
   refreshFrom,
   REFRESH_WINDOW_DAYS,
 } from '../src/lib/settledPickCache';
+import { applySettledMarkers } from '../src/lib/settledPickMarkers';
+import { passesRecordFilter } from '../src/lib/thresholds';
 import {
   EMPTY_STATS,
   mergeStats,
@@ -528,6 +530,27 @@ check(
   check(
     'an empty refresh keeps out-of-window history intact',
     mergeSettled(cached, [], '2026-07-17').length === 1,
+  );
+
+  // A marker set after a row was cached, on a row older than the window: the
+  // second copy of one bet, marked DUPLICATE once both copies settle
+  // (2026-10-09). The per-load marker read reaches it; the record skips it.
+  const bet = (id: number): SettledPick =>
+    ({
+      pick_id: id, game_date: '2026-09-05', result: 'WIN', model_id: 'ufc_total_rounds',
+      signal_type: 'BET', is_live: false, downgrade_reason: null, condition_status: null,
+    }) as unknown as SettledPick;
+  const marked = applySettledMarkers(
+    [bet(1), bet(2)],
+    [{ pick_id: 2, condition_status: 'DUPLICATE' }],
+    '2026-09-01',
+  );
+  check('a late marker reaches a cached row', marked[1].condition_status === 'DUPLICATE');
+  check('the marked copy leaves the record', !passesRecordFilter(marked[1]));
+  check('its twin stays in the record', passesRecordFilter(marked[0]));
+  check(
+    'a failed marker read leaves the cache as it was',
+    applySettledMarkers(marked, null, '2026-09-01')[1].condition_status === 'DUPLICATE',
   );
 }
 

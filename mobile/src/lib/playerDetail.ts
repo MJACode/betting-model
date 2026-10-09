@@ -22,7 +22,7 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
-import { isPausedRow, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
+import { isDuplicateCopy, isPausedRow, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropModel, type StatDef } from '@/lib/statCatalog';
@@ -410,6 +410,8 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     if (isPausedRow(p)) continue;
     // Struck from the record (config.RECORD_EXCLUSIONS); same rule as passesRecordFilter.
     if (RECORD_EXCLUDED_MODELS.has(p.model_id)) continue;
+    // The second copy of one bet under another game id counts once (2026-10-09).
+    if (isDuplicateCopy(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
     let line = by.get(p.model_id);
     if (!line) {

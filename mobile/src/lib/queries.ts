@@ -21,8 +21,15 @@ import {
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
-import { isPausedRow, PAUSED_NOTE, type ServerThreshold } from './thresholds';
+import {
+  DUPLICATE_STATUS,
+  isDuplicateCopy,
+  isPausedRow,
+  PAUSED_NOTE,
+  type ServerThreshold,
+} from './thresholds';
 import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
+import type { SettledPickMarker } from './settledPickMarkers';
 import { sanitizeFilters } from './customModelFilters';
 
 /** Raw row shape of the model_action_thresholds table. */
@@ -1824,6 +1831,28 @@ export async function fetchSettledPicks(
 }
 
 /**
+ * The condition_status of every pick dated `since` or later that has one: the
+ * markers the settled-pick cache must copy onto rows it fetched before the
+ * marker was set (lib/settledPickMarkers). Settled or not, so the list is
+ * complete for the range. 118 rows on 2026-10-09 (VOID, GONE, OK); drained by
+ * pages all the same, because the server caps a response at 1,000 rows
+ * without saying so (lib/paging).
+ */
+export async function fetchSettledPickMarkers(since: string): Promise<SettledPickMarker[]> {
+  return fetchAllPages<SettledPickMarker>(
+    (fromRow, toRow) =>
+      supabase
+        .from('picks')
+        .select('pick_id, condition_status')
+        .gte('game_date', since)
+        .not('condition_status', 'is', null)
+        .order('pick_id', { ascending: true })
+        .range(fromRow, toRow),
+    (m) => String(m.pick_id),
+  );
+}
+
+/**
  * Server-side custom-model backtest over the graded every-pick universe
  * (mv_scored_pick_outcomes, refreshed daily after settle). rules/filters are
  * passed verbatim — the RPC implements the same semantics as pickMatchesModel,
@@ -2628,6 +2657,15 @@ export async function fetchNflTeamGameStats(team: string, season: number): Promi
 export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq."${PAUSED_NOTE}"`;
 
 /**
+ * The second copy of one bet, as a PostgREST or= filter (2026-10-09, mike:
+ * "Count each fight once"): a model that bet one real event under two game
+ * ids has its extra copy marked condition_status = DUPLICATE_STATUS, and the
+ * record counts the event once. NULL must pass explicitly, as above. Same
+ * clause as the server's duplicate_copy_exclusion_sql.
+ */
+export const NOT_DUPLICATE_COPY = `condition_status.is.null,condition_status.neq."${DUPLICATE_STATUS}"`;
+
+/**
  * Settled game-level BET rows in a set of games — the team page's "our
  * record on this team". The RECORD filter, on the server: `signal_type =
  * 'BET'` and a real result, which is what the pick WAS (CLAUDE.md §1c — never
@@ -2654,9 +2692,13 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       .is('player_id', null)
       .in('pick_side', ['home', 'away', 'over', 'under'])
       .not('model_id', 'ilike', '%prop%')
-      .or(NOT_PAUSED_ROW);
+      .or(NOT_PAUSED_ROW)
+      // A second or= is ANDed with the first by PostgREST.
+      .or(NOT_DUPLICATE_COPY);
     if (error) throw error;
-    out.push(...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p)));
+    out.push(
+      ...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p) && !isDuplicateCopy(p)),
+    );
   }
   return out;
 }
@@ -2691,13 +2733,15 @@ export async function fetchSettledPropPicksForPlayer(args: {
     .or(clauses.join(','))
     // A second or= is ANDed with the first by PostgREST.
     .or(NOT_PAUSED_ROW)
+    .or(NOT_DUPLICATE_COPY)
     .order('game_date', { ascending: false })
     .limit(200);
   if (error) throw error;
   // A game-level pick can never match a player_id; the label match could in
   // theory catch a team whose name starts a label, so keep prop rows only.
   return ((data ?? []) as unknown as SettledPick[]).filter(
-    (p) => (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p),
+    (p) =>
+      (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p) && !isDuplicateCopy(p),
   );
 }
 

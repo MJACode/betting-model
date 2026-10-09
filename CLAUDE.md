@@ -295,10 +295,10 @@ was available and is part of the pick's meaning.
   (mike, 2026-09-12: *"Pausing a model should not erase settled record unless I
   explicitly say so."*) A pick is in the record because it was WRITTEN as a
   BET; no pause, threshold change or retrain reaches back and removes one.
-  One query answering both "may bet next" and "did bet" moves the number with
-  nothing deleted — 55 settled NCAAF bets, overnight. A record query filters on
-  what the pick WAS (`signal_type='BET'`, a real result, in the window), never
-  joining `model_action_thresholds`. The exits: **VOID** — a row the model should never
+  A record query filters on what the pick WAS (`signal_type='BET'`, a real
+  result, in the window), never joining `model_action_thresholds`. One event
+  bet twice under two game ids counts once: the extra copy is
+  `condition_status='DUPLICATE'`, result kept (mike 10-09). The exits: **VOID** — a row the model should never
   have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
   sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
   line, price and lock. REFUSES graded picks; posted ones (Matt 09-28) need

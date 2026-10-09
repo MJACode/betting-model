@@ -313,16 +313,18 @@ def test_the_recap_excludes_a_settled_paused_bet_and_keeps_a_live_models_bet():
     if sqlite3.sqlite_version_info < (3, 39):
         pytest.skip("IS DISTINCT FROM needs SQLite >= 3.39")
     db = sqlite3.connect(":memory:")
+    # condition_status: the recap also skips the second copy of one bet
+    # (config.DUPLICATE_STATUS, 2026-10-09); NULL here, as on almost every row.
     db.execute("""CREATE TABLE picks (sport, model_id, result, kelly_fraction,
                   dk_odds, clv_pct, is_live, game_date, signal_type,
-                  downgrade_reason)""")
+                  downgrade_reason, condition_status)""")
     rows = [
-        ("MLB", "m_live", "WIN", 0.02, -110, None, 0, "2026-09-28", "BET", None),
-        ("MLB", "m_now_paused", "LOSS", 0.02, -110, None, 0, "2026-09-28", "BET", None),
-        ("MLB", "m_paused_row", "WIN", 0.02, 250, None, 0, "2026-09-28", "BET", NOTE),
-        ("MLB", "m_capped", "WIN", 0.0, -110, None, 0, "2026-09-28", "NONE", "daily cap"),
+        ("MLB", "m_live", "WIN", 0.02, -110, None, 0, "2026-09-28", "BET", None, None),
+        ("MLB", "m_now_paused", "LOSS", 0.02, -110, None, 0, "2026-09-28", "BET", None, None),
+        ("MLB", "m_paused_row", "WIN", 0.02, 250, None, 0, "2026-09-28", "BET", NOTE, None),
+        ("MLB", "m_capped", "WIN", 0.0, -110, None, 0, "2026-09-28", "NONE", "daily cap", None),
     ]
-    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
     sql = _SETTLED_SQL.format(window="= ?").replace("%%", "%")
     got = sorted(r[1] for r in db.execute(sql, ("2026-09-28",)).fetchall())
     assert got == ["m_live", "m_now_paused"]
@@ -376,7 +378,8 @@ def test_no_earlier_owner_guard_reverts_the_new_definition():
 def test_the_threshold_review_counts_only_published_signals():
     body = _src("tracking/threshold_review.py")
     assert "AND downgrade_reason IS DISTINCT FROM %s" in body
-    assert "(EPOCH, config.PAUSED_NOTE)" in body
+    # 2026-10-09: the second copy of one bet is skipped too (DUPLICATE_STATUS).
+    assert "(EPOCH, config.PAUSED_NOTE, config.DUPLICATE_STATUS)" in body
 
 
 # ── the app agrees (source pins; tsc keeps the types honest) ────────────────

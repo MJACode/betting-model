@@ -13,6 +13,12 @@
  * history every time and treat the server as authoritative for that window —
  * dropping cached rows inside it rather than merging, so a deleted or re-graded
  * pick can't linger.
+ *
+ * Rows older than the window keep their result as first fetched, but NOT their
+ * condition_status: a marker can be set weeks later (the second copy of one
+ * bet, marked DUPLICATE once both copies settle, 2026-10-09), so every load
+ * first copies the server's markers onto the whole cache (settledPickMarkers).
+ * That is why a new marker needs no bump of KEY below.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';

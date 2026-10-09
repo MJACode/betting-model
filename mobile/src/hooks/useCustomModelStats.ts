@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchCustomModelBacktest,
   fetchCustomModelPicks,
+  fetchSettledPickMarkers,
   fetchSettledPicks,
   fetchPublishedModelRecord,
   FullOutcomeRecord,
@@ -22,6 +23,8 @@ import {
   refreshFrom,
   writeSettledCache,
 } from '@/lib/settledPickCache';
+import { applySettledMarkers } from '@/lib/settledPickMarkers';
+import { isDuplicateCopy } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
 import { errorText, isAbortError } from '@/lib/errors';
@@ -72,12 +75,20 @@ export function useSettledPicksSincePaperStart() {
       // built-in model rows — the same v_public_track_record rows Retool reads,
       // so the two surfaces cannot disagree (Matt, 2026-09-04: "mirror retool").
       // View fetch is failure-tolerant so a view error can't blank the screen.
-      const [fresh, recs] = await Promise.all([
+      //
+      // Markers: a row older than the refetch window is kept as first cached,
+      // so a marker set on it later (the second copy of one bet, marked
+      // DUPLICATE once both copies settle) would never arrive.
+      // The marker read is small and covers the whole cached range; on a
+      // failure (null) the cached rows keep what they had, and the next load
+      // tries again (lib/settledPickMarkers).
+      const [fresh, recs, markers] = await Promise.all([
         fetchSettledPicks(from, todayET()),
         fetchPublishedModelRecord().catch(() => ({} as Record<string, FullOutcomeRecord>)),
+        fetchSettledPickMarkers(PAPER_START).catch(() => null),
       ]);
 
-      const merged = mergeSettled(cached, fresh, from);
+      const merged = mergeSettled(applySettledMarkers(cached, markers, PAPER_START), fresh, from);
       setRows(merged);
       setRecords(recs);
       void writeSettledCache(merged);
@@ -221,7 +232,8 @@ export function useCustomModelBacktest(
     if (!model || !withPicks || uncovered.length === 0) return [];
     const sub = { ...model, rules: uncovered };
     return settled
-      .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION')
+      .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION'
+        && !isDuplicateCopy(p))
       .map((p) => ({
         pick_id: p.pick_id,
         model_id: p.model_id,
