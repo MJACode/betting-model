@@ -637,7 +637,7 @@ const PICK_COLUMNS =
   'is_live, inning_at_pick, score_diff_at_pick, player_key, prop_market, ' +
   'public_bet_pct, public_money_pct, ' +
   'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
-  'clv_captured_at, clv_method, clv_close_book, dk_bet_link, ' +
+  'clv_captured_at, clv_method, clv_close_book, clv_bet_book, dk_bet_link, ' +
   'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, downgrade_reason, ' +
   'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 

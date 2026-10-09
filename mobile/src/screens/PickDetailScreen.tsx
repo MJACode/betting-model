@@ -37,6 +37,7 @@ import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
+import { clvBetQuote } from '@/lib/clvBet';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
@@ -45,7 +46,6 @@ import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookLabel,
   bookName,
-  clvLockBook,
   displayQuoteForPick,
   formatSideLine,
   gameMarketForModel,
@@ -556,8 +556,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
 // a moved line rather than misleading. `clv_beat_close` carries the single
 // verdict so this card can never pick the wrong one of the two.
 //
-// The headline the card exists for is the SIGNAL LINE vs THE CLOSING LINE:
-// the number we handed the user against the number the market settled on.
+// The headline the card exists for is THE PRICE TAKEN vs THE CLOSING LINE:
+// the number and price the bet was taken at against the number the market
+// settled on. Since 2026-10-08 CLV is graded at the price taken, at the book it
+// was taken (mike: "grade CLV at the price taken"), so the card prints that
+// price at that book (lib/clvBet.ts), never DraftKings' price on a pick taken
+// elsewhere.
 function ClvCard({ pick }: { pick: Pick }) {
   // clv_captured_at is the "we have a close" flag. Gating on clv_pct instead
   // would hide the card for exactly the picks whose line moved — the ones with
@@ -601,11 +605,12 @@ function ClvCard({ pick }: { pick: Pick }) {
 
   const closeBook = (pick.clv_close_book || 'draftkings').toLowerCase();
   const closeName = bookName(closeBook);
-  // The American on this card is picks.dk_odds. Do not use storedQuoteBook /
-  // decisionBook — those name the deciding book and would stamp FD on a DK
-  // price (CLAUDE.md §6 chip/price mismatch).
-  const lockBook = clvLockBook(pick);
-  const lockName = bookName(lockBook);
+  // The book printed is the book whose price is printed: the price the bet was
+  // taken at and graded at, from the same rule the capture uses
+  // (paper_tracker._bet_price_and_book). Do not print dk_odds here: on a pick
+  // taken at another book it is DraftKings' price, which the bet never got.
+  const bet = clvBetQuote(pick);
+  const betName = bookName(bet.book ?? MODEL_BOOK);
 
   return (
     <View style={styles.infoCard}>
@@ -617,10 +622,10 @@ function ClvCard({ pick }: { pick: Pick }) {
 
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Signal line ({lockName})</Text>
+          <Text style={styles.clvRowLabel}>Price taken ({betName})</Text>
           <Text style={styles.clvRowValue} numberOfLines={1}>
             {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
-            {formatAmerican(pick.dk_odds)}
+            {formatAmerican(bet.price)}
           </Text>
         </View>
       ) : null}
@@ -634,7 +639,7 @@ function ClvCard({ pick }: { pick: Pick }) {
         </View>
       ) : (
         <Text style={styles.infoBody}>
-          {lockName} {formatAmerican(pick.dk_odds)} at signal → {closeName}{' '}
+          {betName} {formatAmerican(bet.price)} taken → {closeName}{' '}
           {formatAmerican(pick.closing_dk_odds)} at close
         </Text>
       )}
@@ -646,7 +651,7 @@ function ClvCard({ pick }: { pick: Pick }) {
             } ${lineCLV > 0 ? 'in your favor' : 'against you'} after we posted this — ` +
             `betting it later would have been ${lineCLV > 0 ? 'worse' : 'better'}. ` +
             `The prices aren't compared here because they're quoted on different numbers.`
-          : `The number held. The pp is the fair (no-vig) ${closeName} close versus the ${lockName} signal — not a posted-price delta. Independent of whether the bet won.`}
+          : `The number held. The pp is the fair (no-vig) ${closeName} close versus the ${betName} price taken — not a posted-price delta. Independent of whether the bet won.`}
       </Text>
     </View>
   );

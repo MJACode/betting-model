@@ -326,7 +326,8 @@ before the module is imported. Nothing has been queued yet.
   `wnba_prop_market` store the soft book's price in `dk_odds`, and
   `mobile/src/lib/parlay.ts` `legFromPick` calls any non-null `dk_odds`
   DraftKings'. Either move those cards to the `decision_*` / `line_book` shape
-  these NHL cards use, or key the leg on `clvLockBook`.
+  these NHL cards use, or key the leg on `clvBetQuote`
+  (`mobile/src/lib/clvBet.ts`), which names the book that owns the price.
 - A correction fitted on each model's own bets once it has about 150.
 - Points and anytime scorer have prices and no model.
 
