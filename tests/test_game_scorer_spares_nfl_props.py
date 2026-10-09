@@ -67,8 +67,7 @@ def test_the_left_out_ufc_clear_only_removes_unsettled_non_bets():
     scans above never see it. A BET is never deleted (CLAUDE.md 1c): without
     `signal_type != 'BET'` here, every other test still passes and the helper
     would delete the BETs of a UFC fight's left-out id."""
-    body = _between("def _clear_left_out_ufc_id(", "
-def ")
+    body = _between("def _clear_left_out_ufc_id(", "\ndef ")
     assert body.count("DELETE FROM picks") == 1
     for clause in ("game_id = %s", "result IS NULL", "signal_type != 'BET'",
                    "is_live IS NOT TRUE", "model_id NOT LIKE 'nfl_prop_%%'"):
