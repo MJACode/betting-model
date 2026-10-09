@@ -18,8 +18,9 @@
 --   2. Stamps clv_method = 'graded_at_dk_legacy' on captured rows whose bet was
 --      taken somewhere other than DraftKings and that were graded at DraftKings:
 --        - dk_odds present and decision_book not DraftKings
---          (153 at a different price + 51 at the same price, 2026-10-08), and
---        - the NFL cards whose label names a book other than DK.
+--          (150 at a different price + 48 at the same price), and
+--        - the NFL cards whose label names a book other than DK (18).
+--      216 rows on 27 game dates, measured 2026-10-08 22:20 ET.
 --      Rows with no DraftKings price (30, 2026-10-08) and the market-relative
 --      prop cards were already graded at the price taken and are not stamped.
 --      v_public_track_record, model_quality and the pedigree average only
