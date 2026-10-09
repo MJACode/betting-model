@@ -34,9 +34,12 @@ sys.path.insert(0, ".")
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+import config  # noqa: E402
+
 pd.set_option("display.width", 260)
 pd.set_option("display.max_rows", 300)
 SOFT = ["draftkings", "fanduel", "betmgm", "williamhill_us", "betrivers", "hardrockbet", "fanatics", "bovada"]
+BETTABLE = [b for b in SOFT if b in config.BEST_LINE_BOOKMAKERS]
 SOURCE = "odds_api_historical"
 
 
@@ -158,7 +161,12 @@ def main() -> None:
         b = q[q.ev >= cut].sort_values(["game_id", "snap_t", "ev"], ascending=[True, True, False])
         return b.drop_duplicates("game_id").sort_values(["game_date", "game_id"])
 
-    for books, label in ((["draftkings"], "DraftKings"), (SOFT, "the best soft book")):
+    # BETTABLE is the SOFT list without the books a member cannot bet (Bovada).
+    # It is the set nhl_over_under's 0.01 cut was graded on (config.py,
+    # MODEL_OWN_EV_FLOOR); the live model also bets betparx, which the history
+    # purchase never asked for.
+    for books, label in ((["draftkings"], "DraftKings"), (SOFT, "the best soft book"),
+                         (BETTABLE, "the best bettable book")):
         q = long[long.book.isin(books)]
         show(f"SHARP-VS-SOFT: the first snapshot Pinnacle's no-vig makes {label}'s price +EV (same number)",
              [row({"pin EV>=": c}, first_hit(q, c), seasons) for c in (0.0, 0.01, 0.02, 0.03, 0.04)])

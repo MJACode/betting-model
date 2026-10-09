@@ -214,6 +214,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-14: CLV is no-vig two-way close, sharp book when present.
     # Columns first so the view filter cannot run against a missing clv_method.
     "add_clv_method_2026_09_14.sql",
+    # 2026-10-08 (mike): grade CLV at the price taken. picks.clv_bet_book, and
+    # the graded_at_dk_legacy stamp on rows graded at DraftKings although taken
+    # elsewhere, which _backfill_clv re-measures once. MUST run after
+    # add_clv_method (it reads clv_method). Guarded: the no-op pass is DML only.
+    "clv_price_taken_2026_10_08.sql",
     "track_record_clv_no_vig_2026_09_14.sql",
     # 2026-09-28 (Matt via CoS; Michael-gated): a paused model keeps its real
     # verdict (scorer._paused_signal), so a paused BET can exist; it is not a

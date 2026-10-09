@@ -1373,8 +1373,10 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // post off the books' prices, not off a confirmed lineup, so the generic
   // prop note would claim a check that was never made. For saves it would
   // also hide the one risk particular to the bet: the books void it when the
-  // goalie does not start, and so does settlement.
-  if (pick.model_id.startsWith('nhl_prop_')) {
+  // goalie does not start, and so does settlement. The NHL totals card
+  // (scripts/nhl_totals_card.py) posts on the first refresh that qualifies,
+  // often the evening before, not at "the first scoring run of the day".
+  if (pick.model_id.startsWith('nhl_prop_') || pick.model_id === 'nhl_over_under') {
     return {
       kind: 'posted',
       verb: 'Posted',

@@ -1245,6 +1245,26 @@ def step_mlb_game_market(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_nhl_over_under(dry_run: bool = False) -> bool:
+    """NHL total goals (`nhl_over_under`): Pinnacle's no-vig price against the
+    bettable books in the fetch the odds step just stored.
+
+    Writes at most one BET a game, once, under the model's lock
+    (scripts/nhl_totals_card.py). LIVE, no write switch (mike, 2026-10-08).
+    Every unstarted NHL game is priced on every pass, so it runs right after
+    the odds fetch; a pass with no NHL game or no Pinnacle quote writes
+    nothing and logs why.
+    """
+    try:
+        from scripts.nhl_totals_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NHL totals card: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL totals card failed: {exc}")
+        return False
+
+
 def step_mlb_total_public_fade(run_date: str, dry_run: bool = False) -> bool:
     """Paper MLB totals public-fade card only. INSERT gated (default 0)."""
     try:
@@ -1728,6 +1748,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["odds"] = step_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
+    # ── Step 2a: NHL totals ────────────────────────────────────────────────────
+    # Prices Pinnacle against the bettable books in the fetch just stored, so it
+    # runs while that fetch is the newest (scripts/nhl_totals_card.py).
+    logger.info("Step 2a: NHL totals card (Pinnacle vs the bettable books)...")
+    results["nhl_over_under"] = step_nhl_over_under(dry_run=dry_run)
+
     # ── Step 2b: Player prop odds ─────────────────────────────────────────────
     logger.info("Step 2b/7: Fetching DK player prop lines...")
     results["prop_odds"] = step_prop_odds(run_date, snapshot_type="open")
@@ -2090,6 +2116,7 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
+                                 "nhl-over-under",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
@@ -2167,6 +2194,7 @@ Examples:
             "wnba-prop-market": lambda: step_wnba_prop_market(run_date, dry_run=args.dry_run),
             "mlb-game-market": lambda: step_mlb_game_market(run_date, dry_run=args.dry_run),
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
+            "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),

@@ -53,7 +53,19 @@ same-instant gap) by construction. One more snapshot per game makes CLV
 measurable. Measured cost: 5 credits a game per snapshot, about 6,600 credits
 over a 1,312-game season. It spends credits, so it needs mike's OK.
 
-## [ ] [needs-decision] CLV is graded at DraftKings' price, not the price taken
+## [x] CLV at the price taken — DECIDED and BUILT 2026-10-08 (mike: "yes")
+
+Built: `paper_tracker._bet_price_and_book`, `picks.clv_bet_book`, the
+`graded_at_dk_legacy` recompute (`data/migrations/clv_price_taken_2026_10_08.sql`
+plus the declared `clv_backfill` job). Only the bet side moved; the close is
+still Pinnacle, else DraftKings. `docs/clv.md`. Still open: the app's pick
+screen shows `dk_odds` and a label/DraftKings book in its CLV card
+(`PickDetailScreen.tsx` ClvCard) — it should show the price taken at
+`clv_bet_book`. Fall back to `decision_book` when `clv_bet_book` is NULL: the
+30 NHL prop picks captured at the price taken before this change were never
+re-graded, so they keep it NULL. The original item:
+
+### CLV is graded at DraftKings' price, not the price taken
 
 `tracking/paper_tracker._capture_clv` grades `dk_odds` against a DraftKings
 lock snapshot whenever DraftKings hung the line, even when the pick was
@@ -62,15 +74,88 @@ measured shots-on-goal bets. Grading `decision_odds` at `decision_book` changes
 the published CLV of every model that shops books, so it is a decision.
 (Picks with no DraftKings price at all were fixed on 2026-10-08.)
 
+## [ ] The odds pruner fails every night, and fixing it as written would break CLV
+
+Found 2026-10-08 in the CLV-at-the-price-taken design. The worker logged
+`Odds prune failed (non-fatal): canceling statement due to statement timeout`
+on 2026-10-07 and 2026-10-08 at 10:26 UTC, while the daily run printed
+`✓ prune_odds` (`run_pipeline.step_prune_odds` swallows the error). It has not
+pruned `odds` since early September. Re-measured 2026-10-08 on one MLB game per
+date, moneyline plus totals: 2026-09-02 holds 6 FanDuel and 6 Pinnacle rows
+(pruned) against 3,152 DraftKings; 2026-09-20 still holds 1,998 FanDuel and
+1,978 Pinnacle.
+
+**Do not just make it fast.** For every game before today, `data/prune_odds.py`
+keeps only each non-DraftKings book's first row and its last row not marked
+`in_play`. Pinnacle is protected only in `player_prop_odds`, not in `odds`.
+Two things depend on the rows it would delete:
+- **CLV at the price taken** de-vigs the bet with the two-way at the book it
+  was taken, at the pick's `created_at`. That row is usually neither first nor
+  last, so a later capture or re-grade falls back to the price with the margin
+  in it.
+- **The close.** NHL in-play rows are stored as `open`, not `in_play`, so the
+  "last pre-game" row the pruner keeps can be an in-play quote, and the real
+  last pre-game Pinnacle quote is the one deleted.
+
+The one-time re-grade (`clv-price-taken-recompute-2026-10-08`) must run before
+any pruner fix. The fix should keep, per game and book, the row at every
+pick's `created_at` and the last row at or before the start.
+
+## [ ] [needs-decision] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
+
+Read-only query, 2026-10-08: `mlb_total_public_fade` wrote 4 BETs at
+2026-09-16 22:07Z and `mlb_spread_market` 2 at 2026-09-17 00:57Z, each 3 to 7
+hours after its game's first pitch (pick_ids 2304600, 2304601, 2304605,
+2304610, 2321911, 2321912; 2-4). Of their 29 and 49 BETs, those are the only
+ones. Cause: `scripts/mlb_game_market_card.slate()` selects by `game_date`
+with no started-game check, and its quotes are bounded only to the last
+pre-game snapshot. The NHL totals card's slate shows the check. Also assess
+whether the MLB card needs the NHL card's "Pinnacle withdrawn" guard. Check
+whether the six rows count in the published record before changing anything
+settled; that is mike's call.
+
+**2026-10-09:** the code half is done. Both MLB cards (and the WNBA prop card,
+which had the same gap) now skip a game that has started. The Pinnacle-withdrawn
+guard was assessed and is not needed for MLB. Still open, mike's call: the six
+rows (and two late WNBA prop bets) count in the published record, the app's
+Models and Record tabs, and the Discord recaps. Neither existing exit fits:
+`void_picks.py` refuses graded picks and `RECORD_EXCLUSIONS` has no per-pick
+form. Numbers and options: `docs/sessions/2026-10.md`, 2026-10-09 entry.
+
+## [ ] `games.first_pitch_at` has not been filled since 2026-08-31 (found 2026-10-09)
+
+Read-only query, 2026-10-09: the newest MLB game with `first_pitch_at` is
+game_date 2026-08-31; 0 of 188 MLB games since 2026-09-15 have it. The
+`derive_first_pitch` job ran once (`worker_jobs`, 2026-09-01) and nothing
+schedules it (not in `scheduler.py` or `run_pipeline.py`). So every pre-game
+bound built on `data/first_pitch.pregame_cutoff_sql` (the odds relabel,
+`models/mlb_prop_market.py`, `models/wnba_prop_market.py`, the scorer's price
+reads) has fallen back to the scheduled start for every MLB game since, which
+`data/first_pitch.py` measured as about 16 minutes too late. Fix: run the
+derivation on the worker's schedule, after the live loop's state is written.
+Check first whether "Live" there means first pitch or warm-ups (the module
+records that the cause is not known).
+
+## [ ] NHL props: revisit the 0.18 floor after a month of real CLV (mike, 2026-10-08)
+
+mike: keep 0.18 for now. Lowering it to 0.15 is the units-a-season peak with
+one bet a game (+68.4 at four a night against +54.6), but that floor was
+chosen on the seasons it is graded on. Read it against the first month of CLV
+from the new final prop snapshot, at the price taken. From about 2026-11-08.
+
 ## [ ] Two smaller CLV-capture defects (found 2026-10-08)
 
 - The prop close lookup matches names exactly: Pinnacle's "Lafreniere" missed
   DraftKings' "Lafrenière" and fell back to a structural 0.0
   (`paper_tracker.py`, the `player_name = %s` lookup).
-- Before a game `games.commence_time` carries the feed's :10 time; after
-  settlement it carries the NHL's :00. A close read before settlement can take
-  a quote from the first ten minutes after the scheduled start. Whether those
-  quotes are in-play prices is not measured.
+- [x] FIXED 2026-10-08: the close is now bounded by the earlier of
+  `games.commence_time` and `picks.game_time`. Measured that day: the feed moved
+  SJS_STL's start from 00:10 to 00:10:37 after puck drop, and "Alex Nedeljkovic
+  Under 25.5 Saves" closed on a quote 45 s past the start it was written
+  against. The NHL prop ingestor also buys nothing after a game's final
+  snapshot now (it had bought an in-play board, filed as pre-game, when the
+  start moved). Still open: `games.commence_time` itself keeps moving, and
+  every reader that bounds on it alone inherits that.
 
 ## [ ] The NHL prop lab still pairs a shared name's prices
 
@@ -270,14 +355,45 @@ seasons at a 2% cut and no edge (`scripts/nhl_moneyline_market_lab.py`,
 quotes from one snapshot (`odds.created_at` groups one; `snapshot_at` is each
 book's own last update).
 
-## [ ] `nhl_over_under` and `nhl_puckline` have never been trained
+## [x] `nhl_over_under` — a live rule since 2026-10-08 (mike), not a trained model
+
+It is the Pinnacle rule now: `models/nhl_totals_market.py`, written by
+`scripts/nhl_totals_card.py` (step `nhl-over-under`), EV >= 0.01 on Pinnacle's
+own number, out of `config.MODELS` and the feature map, and the trainer refuses
+any rule id. Evidence and cut: `docs/thresholds.md`.
+
+## [ ] `nhl_puckline` has never been trained
 
 Blocked since 2026-06 on "no historical lines". DraftKings and Pinnacle game
 lines for 2020-21 -> 2025-26 landed in `odds` on 2026-09-21
-(`source = 'odds_api_historical'`). The lab's totals model found nothing in
-three rounds and its puck-line result was a peak, so the honest options are to
-train and grade them the same way or to retire the two ids. Both still carry
-their own cuts and EV floors in `config.py`.
+(`source = 'odds_api_historical'`). The lab's puck-line result was a peak, so
+the honest options are to train and grade it the same way or to retire the id.
+It still carries its own cut and EV floor in `config.py`.
+
+## [ ] `nhl_over_under`: check the first weeks live (from 2026-10-08)
+
+Three things to measure once it has written bets, each against what the six
+seasons said:
+
+- **Firing rate.** Live fetches are far denser than the history (about 41
+  Pinnacle fetches a game against about 5), and a first-qualifying rule
+  gets more looks the denser the fetches. Before go-live it fired on 10 of 58
+  games (17.2%) against 16.1% historically. If it climbs well past that, the
+  extra bets are a population the cut was not measured on.
+- **Closing-line value at the price taken.** The case for the model is CLV
+  (+1.32% at Pinnacle's close in the history), not the return. Read it once the
+  price-taken CLV change has landed, so a bet taken off DraftKings is graded
+  at its own price.
+- **Bets found within 3 hours of puck drop.** They lost 9.41 units on 501 bets
+  in the history while every earlier bucket was positive. That is an in-sample
+  split, so nothing was cut (mike, 2026-10-08); re-check it on this season's
+  own bets.
+
+Two things with no backtest behind them: **betparx** is in the bettable books
+(mike, 2026-10-08) but the history purchase never asked for it, and the
+**"Pinnacle withdrawn"** guard (no bet while a newer fetch lacks Pinnacle) is
+new with this card. The card's per-pass log line counts `pinnacle_withdrawn`
+and names the book of every bet, so both can be read off the worker log.
 
 ## [ ] Per-game closing lines for the team page, for every sport (not just NFL)
 

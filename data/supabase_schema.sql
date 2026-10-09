@@ -981,6 +981,7 @@ CREATE TABLE IF NOT EXISTS picks (
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     clv_method         TEXT,               -- no_vig | zero_vig | raw_one_way | raw_one_sided (legacy)
     clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close
+    clv_bet_book       TEXT,               -- book the bet side was graded at: the book the pick was taken at
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)

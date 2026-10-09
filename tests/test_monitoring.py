@@ -423,12 +423,12 @@ def test_slow_panels_are_bounded_on_an_indexed_column():
 
 
 def test_roster_reports_a_registered_but_untrained_model():
-    """NHL totals and the golf models are registered with thresholds and no
-    artifact. That is a real state and worth seeing before score time."""
-    conn = FakeConn([("nhl_over_under", False, False, 0.55, 0.05, None,
+    """NHL puck line is registered with thresholds and no artifact. That is
+    a real state and worth seeing before score time."""
+    conn = FakeConn([("nhl_puckline", False, False, 0.55, 0.05, None,
                       None, None, None, None, None)])
     m = store.model_roster(conn)[0]
-    assert m["model_id"] == "nhl_over_under" and m["version"] is None
+    assert m["model_id"] == "nhl_puckline" and m["version"] is None
 
 
 # ── cache ────────────────────────────────────────────────────────────────────

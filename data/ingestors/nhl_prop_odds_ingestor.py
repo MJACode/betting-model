@@ -102,6 +102,13 @@ def due(start: datetime, now: datetime, stored: list[datetime],
     pre = [s for s in stored if s <= start]
     if not pre:
         return "open"
+    # NOTHING AFTER THE FINAL. The feed's start time moves: on 2026-10-08
+    # SJS_STL's read 00:10 when its final was bought at 23:50 and later than
+    # 00:10:45 when the next pass ran, so `close` looked owed again and an
+    # in-play board was bought and filed as pre-game. Once the final is held
+    # the game is done, whatever its start time says now.
+    if final_taken:
+        return None
     window_opens = start - timedelta(minutes=window_min)
     if now >= window_opens and max(pre) < window_opens:
         return "close"

@@ -95,8 +95,8 @@ python -m data.ingestors.sbr_loader --sport NHL
 # 4. Train (multiclass branch handles nhl_moneyline_regulation automatically)
 python -m models.trainer --model nhl_moneyline
 python -m models.trainer --model nhl_moneyline_regulation
-python -m models.trainer --model nhl_over_under
 python -m models.trainer --model nhl_puckline
+# (nhl_over_under is a rule since 2026-10-08; the trainer refuses it)
 # 5. Backtest (moneyline/regulation prob-only at synthetic -110 — directional)
 python -m models.backtester --model nhl_moneyline --season 2025
 # 6. Commit the trained artifacts so GitHub Actions scoring can load them:

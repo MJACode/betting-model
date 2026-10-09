@@ -55,6 +55,15 @@ CLV_METHOD_NO_VIG = "no_vig"
 CLV_METHOD_ZERO_VIG = "zero_vig"
 CLV_METHOD_ONE_WAY = "raw_one_way"
 
+# Rows captured before 2026-10-08 graded the bet at DraftKings (dk_odds against
+# a DraftKings lock snapshot) even when the pick was taken at another book.
+# data/migrations/clv_price_taken_2026_10_08.sql stamps them with this value;
+# _backfill_clv re-measures them once at the price taken. Like
+# raw_one_sided it is NOT in the pedigree, so the published average never
+# mixes the two definitions while the recompute runs. A row the recompute
+# cannot re-measure keeps this stamp (and its old number) for good.
+CLV_METHOD_DK_GRADED_LEGACY = "graded_at_dk_legacy"
+
 # Published avg_clv_pct / beat-rate pedigree. Legacy raw and one-way juice
 # stay on the pick row for pick-detail but do not enter the model average.
 PEDIGREE_CLV_METHODS = frozenset({CLV_METHOD_NO_VIG, CLV_METHOD_ZERO_VIG})
