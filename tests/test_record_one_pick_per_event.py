@@ -9,8 +9,9 @@ settled record twice: `ufc_total_rounds` scored both games rows of one fight
 
 The extra copy is MARKED (condition_status = config.DUPLICATE_STATUS), never
 re-graded, and every record surface skips the marker: the two published views,
-the Discord recap, model_quality, the 250-bet review, the monitor dashboard,
-and the app's record filter and player record. These tests pin each surface,
+the Discord recap, model_quality, the 250-bet review, the monitor dashboard
+(both halves), the probability calibration, and the app's record filter, team
+record, player record and settled-pick cache. These tests pin each surface,
 the marking migration, the view patch, and the rule for which copy stays.
 """
 from __future__ import annotations
@@ -138,6 +139,47 @@ def test_the_monitor_dashboard_picks_arm_counts_each_event_once():
     assert config.duplicate_copy_exclusion_sql("p").strip() in arm
 
 
+def test_the_monitor_dashboard_box_score_arm_counts_each_event_once():
+    """The arm that reads mv_scored_pick_outcomes (MLB, WNBA). The matview
+    re-grades from box scores and carries no pick-level marker, so the copy is
+    dropped through a join back to its pick. LEFT JOIN: a graded row whose
+    pick is gone stays counted."""
+    from monitoring import store
+    from tests.test_monitoring import FakeConn
+    conn = FakeConn([])
+    store.model_performance(conn)
+    sql = conn.queries[0]
+    arm = sql[sql.index("FROM mv_scored_pick_outcomes o"):]
+    arm = arm[:arm.index("GROUP BY")]
+    assert "LEFT JOIN picks pk ON pk.pick_id = o.pick_id" in arm
+    assert config.duplicate_copy_exclusion_sql("pk").strip() in arm
+
+
+class _RecordingConn:
+    def __init__(self):
+        self.sql: list[str] = []
+
+    def execute(self, sql, params=None):
+        self.sql.append(" ".join(sql.split()))
+        return self
+
+    def fetchall(self):
+        return []
+
+
+@pytest.mark.parametrize("model_id", ["ufc_total_rounds", "mlb_live_total_runs"])
+def test_the_probability_calibration_counts_each_event_once(model_id):
+    """The calibration sets the betting threshold for every UFC, NCAAF, NFL and
+    in-play model from graded picks. Both reads of the picks table skip the
+    copy: ufc_total_rounds read the June Borjas-Lima WIN twice (8 graded bets,
+    4 won; 7 and 3 once it counts once, measured 2026-10-09)."""
+    from models import probability_calibration as pc
+    conn = _RecordingConn()
+    pc.fetch_graded(conn, model_id, "2026-06-20")
+    assert "FROM picks" in conn.sql[0]
+    assert "AND picks.condition_status IS DISTINCT FROM 'DUPLICATE'" in conn.sql[0]
+
+
 # ── the published views ───────────────────────────────────────────────────────
 
 def test_both_migrations_are_registered_after_every_owner_of_the_views():
@@ -210,6 +252,16 @@ def test_the_migration_is_guarded_so_a_second_pass_is_a_no_op():
         # The kept copy must still be there, settled and unmarked.
         assert "EXISTS (SELECT 1 FROM public.picks k" in where
         assert "k.condition_status IS NULL" in where
+
+
+def test_the_migration_header_quotes_the_measured_numbers():
+    """The migration file is the permanent record of this change; its numbers
+    must be the ones measured (and quoted in store.py and the session log)."""
+    header = "\n".join(l for l in _read(MARK).splitlines() if l.lstrip().startswith("--"))
+    header = " ".join(header.replace("--", " ").split())
+    assert ("14 settled 9-5 (-1.09u, 8 priced) to 12 settled 7-5 "
+            "(-1.86u, 7 priced)") in header
+    assert "13 settled 8-5" not in header and "11 settled 6-5" not in header
 
 
 # ── which copy stays ──────────────────────────────────────────────────────────
@@ -330,6 +382,34 @@ def test_the_player_record_skips_the_extra_copy():
     assert "if (isDuplicateCopy(p)) continue;" in body[:body.index("\n}")]
 
 
+def _fn(src: str, sig: str) -> str:
+    m = re.search(re.escape(sig) + r".*?\n\}\n", src, re.S)
+    assert m, f"{sig} is missing"
+    return m.group(0)
+
+
+def test_the_team_and_player_records_skip_the_extra_copy():
+    """Both re-implement the record filter inline. The team page is where an
+    NCAAF copy (an Eastern and a UTC date for one game) would land."""
+    team = _fn(_read(LIB / "teamDetail.ts"), "export function teamPickRecords(")
+    player = _fn(_read(LIB / "playerDetail.ts"), "export function playerPickRecord(")
+    for name, body in (("teamPickRecords", team), ("playerPickRecord", player)):
+        assert "if (isDuplicateCopy(p)) continue;" in body, name
+
+
+def test_the_team_and_player_record_reads_drop_the_extra_copy_on_the_server():
+    q = _read(LIB / "queries.ts")
+    assert ("export const NOT_DUPLICATE_COPY = "
+            "`condition_status.is.null,condition_status.neq.\"${DUPLICATE_STATUS}\"`;"
+            in q), "NULL must pass explicitly: neq alone drops every unmarked row"
+    for sig in ("export async function fetchSettledGamePicksForGames(",
+                "export async function fetchSettledPropPicksForPlayer("):
+        body = _fn(q, sig)
+        assert ".or(NOT_DUPLICATE_COPY)" in body, sig
+        assert ".or(NOT_PAUSED_ROW)" in body, sig
+        assert "!isDuplicateCopy(p)" in body, f"{sig}: filter the rows too"
+
+
 def _node_strips_types() -> bool:
     if shutil.which("node") is None:
         return False
@@ -365,6 +445,54 @@ console.log(JSON.stringify(out));
     got = proc.stdout.strip().splitlines()[-1]
     assert got == ('{"plain":true,"duplicate":false,"voided":false,'
                    '"ncaafGone":true,"helper":true}'), got
+
+
+def _copy_for_node(tmp_path: Path, names: tuple[str, ...]) -> None:
+    """Copy lib files so node can import them: './x' and '@/lib/x' become
+    './x.ts'. Type-only imports (@/types, @/hooks) are erased by node."""
+    for name in names:
+        src = _read(LIB / name)
+        src = re.sub(r"from '\./([\w.]+)';", r"from './\1.ts';", src)
+        src = re.sub(r"from '@/lib/([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+
+
+def _node(tmp_path: Path, script: str) -> str:
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip().splitlines()[-1]
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_the_team_record_counts_the_kept_copy_once(tmp_path: Path):
+    """Run the real teamPickRecords: one NCAAF game under an Eastern and a UTC
+    date, the same bet on both, the extra copy marked. One bet counts."""
+    _copy_for_node(tmp_path, ("teamDetail.ts", "format.ts", "decisionPrice.ts",
+                              "thresholds.ts", "thresholds.generated.ts",
+                              "discordPublish.ts", "teamStatCatalog.ts", "teamBoard.ts"))
+    script = """
+import { teamPickRecords } from './teamDetail.ts';
+const games = [
+  { game_id: 'NCAAF_2026-10-03_ohio-state_michigan', home_team: 'Ohio State', away_team: 'Michigan' },
+  { game_id: 'NCAAF_2026-10-04_ohio-state_michigan', home_team: 'Ohio State', away_team: 'Michigan' },
+];
+const bet = { model_id: 'ncaaf_spread', signal_type: 'BET', result: 'WIN', pick_side: 'home',
+              player_id: null, dk_odds: -110, decision_odds: -110, profit_flat: 90.91,
+              downgrade_reason: null, condition_status: null };
+const picks = [
+  { ...bet, pick_id: 1, game_id: games[0].game_id },
+  { ...bet, pick_id: 2, game_id: games[1].game_id, condition_status: 'DUPLICATE' },
+  { ...bet, pick_id: 3, game_id: games[1].game_id, pick_side: 'over', result: 'LOSS',
+    profit_flat: -100, condition_status: 'GONE' },
+];
+const r = teamPickRecords(picks, games, 'Ohio State');
+console.log(JSON.stringify({ settled: r.settled, onWins: r.on.wins, overLosses: r.over.losses }));
+"""
+    got = _node(tmp_path, script)
+    # The marked copy is out; a live state on a real pick ('GONE') still counts.
+    assert got == '{"settled":2,"onWins":1,"overLosses":1}', got
 
 
 # ── the rule is where a session doing SQL will see it ─────────────────────────

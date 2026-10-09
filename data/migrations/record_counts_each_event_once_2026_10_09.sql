@@ -17,7 +17,7 @@
 -- Both are before the published window (2026-09-01), so the app, the public
 -- views and the Discord recaps show the same numbers before and after this;
 -- the monitor dashboard and any all-time count of ufc_total_rounds move from
--- 13 settled 8-5 to 11 settled 6-5.
+-- 14 settled 9-5 (-1.09u, 8 priced) to 12 settled 7-5 (-1.86u, 7 priced).
 --
 -- WHAT CHANGES. The extra copy gets condition_status = 'DUPLICATE' and a note
 -- naming the copy kept and who asked. NOTHING ELSE: result, profit_flat, the
