@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, a posted pick can be voided only on purpose (mike: "Change the rule, void them"): `--allow-posted` on the void script, `"allow_posted": true` on the job; graded picks stay refused. Eight posted NCAAF unders measured at 15-28 day old DraftKings prices; the job to void them was blocked by the session's permission check and must land before 2026-10-17. A voided posted pick stays on the app board and in Discord with no sign it was withdrawn |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, the line-movement card shows the line from the pick to the start (it read the oldest 50 snapshots); prop stamps parsed on the phone; the player page fixed by the same read. Review fixes: the price at the pick kept when the window is cut, "At pick" only on the locked number, no grading after the start, "No new price" with its date, only live picks lose the card, dated row times, signed spreads; stale NCAAF scoring logged |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Anytime TD lists everyone with a line (69 priced with no 2026 game on 10-11 NFL); Stats ruler typed line |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Teams board gets a "Playing today" filter; filtered rows keep league rank |
