@@ -188,6 +188,43 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, lo2, rows2));
   check('M4: DK now −112 beats FD −115 → "Bet DK −112" (the current number)', h2?.bookmaker === MODEL_BOOK && h2.price === -112 && h2.verb === 'Bet', JSON.stringify(h2));
 }
+{
+  // Third review (2026-10-09): DraftKings moved IN the bettor's favour. The
+  // record chip ranked at its stored −110, behind MGM −105, so DK's current
+  // price was never compared and the button said "Best MGM −105" while DK
+  // paid −102 on the same bet.
+  const pick = mkPick({ decision_book: 'draftkings', decision_odds: -110 });
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -102, total_line: 8.5 },
+    { bookmaker: 'betmgm', over_price: -105, total_line: 8.5, over_link: 'mgm://now' },
+  ];
+  const hero = heroAmericanForPick(pick, latest({ over_price: -102 }), rows);
+  check('DK better: setup, hero is Now DK −102', hero?.kind === 'now' && hero.price === -102 && hero.book === MODEL_BOOK, JSON.stringify(hero));
+  const h = bestHandoffForPick(pick, rows, hero);
+  check('DK better: locked DK −110 / now DK −102 / MGM −105 → "Bet DK −102", never "Best MGM −105"',
+    h?.bookmaker === MODEL_BOOK && h.price === -102 && h.verb === 'Bet', JSON.stringify(h));
+  // DK's current price at a MOVED line is a different bet, so it is not
+  // ranked against the books still at the pick's line.
+  const moved: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -102, total_line: 9 },
+    { bookmaker: 'betmgm', over_price: -105, total_line: 8.5, over_link: 'mgm://now' },
+  ];
+  const movedHero = heroAmericanForPick(pick, latest({ over_price: -102, total_line: 9 }), moved);
+  check('DK better, moved line: setup, hero is Now DK −102 at 9', movedHero?.kind === 'now' && movedHero.price === -102 && movedHero.line === 9, JSON.stringify(movedHero));
+  const hm = bestHandoffForPick(pick, moved, movedHero);
+  check('DK better, moved line: DK −102 at 9 is not swapped in → "Best MGM −105"',
+    hm?.bookmaker === 'betmgm' && hm.price === -105 && hm.verb === 'Best', JSON.stringify(hm));
+  // The M4 case at a moved line keeps its re-rank: record DK −110 ranks
+  // first, DK now −130 at 9, FD −115 at 8.5 → FD −115, never "Bet DK −130".
+  const m4moved: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -130, total_line: 9 },
+    { bookmaker: 'fanduel', over_price: -115, total_line: 8.5, over_link: 'fd://now' },
+  ];
+  const m4Hero = heroAmericanForPick(pick, latest({ over_price: -130, total_line: 9 }), m4moved);
+  const h4 = bestHandoffForPick(pick, m4moved, m4Hero);
+  check('M4, moved line: record DK −110 / now DK −130 at 9 / FD −115 → "Best FD −115"',
+    h4?.bookmaker === 'fanduel' && h4.price === -115 && h4.verb === 'Best', JSON.stringify(h4));
+}
 
 // ── H4: price check ─────────────────────────────────────────────────────────
 check('display constants: 25pp and 500 cents', PRICE_CHECK_MAX_EDGE === 0.25 && PRICE_CHECK_MAX_CENTS === 500);

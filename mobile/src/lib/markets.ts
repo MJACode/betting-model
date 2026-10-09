@@ -1153,7 +1153,18 @@ export function bestHandoffForPick(
   // placed NOW. When the record chip wins and hero Now is at that same book,
   // re-rank with that book at its current price: record DK −110, now DK −130,
   // FD −115 must hand off to FD −115, not "Bet DK −130" (Reviewer #847).
-  if (best.isRecord && hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book) {
+  // The same re-rank when that book has moved IN the bettor's favour and the
+  // record chip ranked behind another book: locked DK −110, now DK −102, MGM
+  // −105 must hand off to DK −102, not "Best MGM −105" (third review,
+  // 2026-10-09). That case only at the pick's line: DK's price at a moved
+  // line is a different bet, not ranked against books still at the line.
+  const scored = numOrNull(pick.scored_line);
+  if (
+    hero?.kind === 'now' && hero.price != null &&
+    ((best.isRecord && best.bookmaker === hero.book) ||
+      ((hero.line == null || scored == null || hero.line === scored) &&
+        quotes.some((q) => q.isRecord && q.bookmaker === hero.book)))
+  ) {
     const nowPrice = hero.price;
     quotes = rankQuotes(
       quotes.map(({ isBest: _isBest, ...q }) =>
