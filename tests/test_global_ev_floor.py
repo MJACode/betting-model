@@ -317,6 +317,26 @@ def test_nfl_wind_and_opener_rows_drop_a_bet_under_the_floor(floor_030, identity
     assert picks == []
 
 
+def test_nhl_totals_card_drops_a_bet_under_the_floor(floor_030, identity_maps):
+    from models.nhl_totals_market import NhlTotalBet
+    from scripts.nhl_totals_card import pick_rows
+    games = {"NHL_2026-10-08_PHI_OTT": {"home": "OTT", "away": "PHI",
+                                       "game_date": "2026-10-08",
+                                       "commence_time": "2026-10-08T23:00:00Z"}}
+
+    def bet(fair):
+        return NhlTotalBet(game_id="NHL_2026-10-08_PHI_OTT", side="over",
+                           book="fanduel", line=6.5, price=MINUS_110, fair=fair,
+                           ev=fair * (1 + 100 / 110) - 1, sharp_over=-125.0,
+                           sharp_under=108.0, created_at="2026-10-08 01:00:07+00",
+                           soft_snapshot_at=None, sharp_snapshot_at=None,
+                           link=None, dk_price=None, dk_link=None)
+    # 0.60 at -110 is EV 0.145: it clears this model's own cut (EV 0.01, price
+    # -200 or better) and only the 0.30 floor refuses it. 0.72 is EV 0.375.
+    rows = pick_rows([bet(0.60), bet(0.72)], games, 1000.0)
+    assert [r["model_probability"] for r in rows] == [0.72]
+
+
 # ── the two NFL rules on their own floor and their own probability ───────────
 
 # The 2026-09-20 MIN @ CHI row, as the 15:40 UTC card wrote it.
