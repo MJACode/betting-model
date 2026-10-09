@@ -179,7 +179,7 @@ eq(historyFrom(late, kick), '2026-10-07T23:05:00.000Z', 'a pre-game pick after t
 const w = sincePick([row('2026-10-07T22:00:00Z', 50), row('2026-10-07T23:00:00Z', 51), row('2026-10-07T23:20:00Z', 52)], historyFrom(late, kick), kick, HISTORY_ROWS, Date.parse('2026-10-08T03:00:00Z'));
 eq([w.rows.map((r) => r.total_line), w.fromPick, w.since, w.closed], [[51], true, 0, true], 'the last pre-game price, as the price at the pick');
 // The clamp holds inside sincePick too: a pick time after the start reads as the start.
-eq(sincePick([row('2026-10-07T23:00:00Z', 51)], late.created_at, kick).rows.length, 1, 'sincePick clamps');
+eq(sincePick([row('2026-10-07T23:00:00Z', 51)], late.created_at, kick).rows.length, 1, 'a raw pick time after the start also reads the last pre-game price');
 eq(historyFrom({ is_live: false, created_at: PICK }, START), '2026-10-07T18:00:15.889Z', 'a pick before the start reads from the pick');
 eq(historyFrom({ is_live: null, created_at: PICK }, null), '2026-10-07T18:00:15.889Z', 'an unknown start does not hide the card');
 eq(historyFrom({ is_live: false, created_at: 'not a time' }, START), null, 'an unreadable pick time hides it');
@@ -328,6 +328,8 @@ const week = collapseLineHistory([p('2026-10-01T16:00:00Z', 42.5), p('2026-10-03
 eq(week.map((r) => r.label), ['Thu 10/1, 12:00 PM', 'Sat 10/3, 2:17 AM', 'Fri 10/9, 11:00 AM'], 'over six days: the date too');
 const sixDays = collapseLineHistory([p('2026-10-03T16:00:00Z', 42.5), p('2026-10-09T15:00:00Z', 43.5)]);
 eq(sixDays.map((r) => r.label), ['Sat 12:00 PM', 'Fri 11:00 AM'], 'six days apart: weekdays are still unique');
+const sevenDays = collapseLineHistory([p('2026-10-01T16:00:00Z', 42.5), p('2026-10-08T15:00:00Z', 43.5)]);
+eq(sevenDays.map((r) => r.label), ['Thu 10/1, 12:00 PM', 'Thu 10/8, 11:00 AM'], 'seven days apart: the weekday repeats, so the date');
 // Seconds still break a shared minute, with the day.
 const clash = collapseLineHistory([p('2026-10-08T16:16:05Z', 42.5), p('2026-10-09T06:17:05Z', 43), p('2026-10-09T06:17:40Z', 43.5)]);
 eq(clash.map((r) => r.label), ['Thu 12:16 PM', 'Fri 2:17:05 AM', 'Fri 2:17:40 AM'], 'seconds with the day');
