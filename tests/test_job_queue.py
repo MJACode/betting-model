@@ -705,13 +705,16 @@ def _run_void_job(monkeypatch, rows, **args):
     cleaned = q._validate_void_picks({"pick_ids": [2558703],
                                       "reason": "decided on a price nobody could bet",
                                       **args})
+    # The opt-in must survive validation, or the job never sees it.
+    assert cleaned["allow_posted"] is args.get("allow_posted", False)
     return conn, q._job_void_picks(**cleaned)
 
 
 def test_the_job_refuses_a_posted_pick_without_the_opt_in(monkeypatch):
     conn, out = _run_void_job(monkeypatch, [_posted_row()])
     assert out["voided"] == [] and conn.writes == []
-    assert "posted as a signal" in out["refused"][0][1]
+    why = out["refused"][0][1]
+    assert "posted as a signal" in why and "allow_posted" in why
 
 
 def test_the_job_voids_a_posted_pick_with_the_opt_in(monkeypatch):
