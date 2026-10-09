@@ -65,9 +65,10 @@ at, and it excludes the books a member cannot bet.
   the app's action filter all read them as `COALESCE(decision_x, dk_x)`
   (pre-2026-09-09 rows were decided at DraftKings, so the fallback is exact).
   **DraftKings stays the REFERENCE for features:** training features, `edge`
-  and `dk_odds` keep their DraftKings meaning. **CLV grades the locked bet
-  against the no-vig sharp close** (Pinnacle when a pre-game snapshot exists,
-  else the pick's book) — `docs/clv.md`. No cut moved with either change. One code path per model decides at both prices —
+  and `dk_odds` keep their DraftKings meaning. **CLV grades the price taken**
+  (`COALESCE(decision_odds, dk_odds)` at the book it was taken, mike
+  2026-10-08) **against the no-vig sharp close** (Pinnacle when a pre-game
+  snapshot exists, else DraftKings) — `docs/clv.md`. No cut moved with either change. One code path per model decides at both prices —
   `scorer._decide` / `_size`, `live_scorer.classify_live_signal`,
   `ncaaf_live.serve.LiveEngine._decide` — with the stale-line cap always on
   the DraftKings edge. `nfl_live_prop` stays DraftKings-only (its feed carries

@@ -691,6 +691,7 @@ CREATE TABLE IF NOT EXISTS picks (
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     clv_method         TEXT,               -- no_vig | zero_vig | raw_one_way | raw_one_sided (legacy)
     clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close
+    clv_bet_book       TEXT,               -- book the bet side was graded at: the book the pick was taken at
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
     -- The model probability mapped to what it is actually worth
     -- (models/probability_calibration.py). DISPLAY ONLY: edge, the signal,
@@ -704,7 +705,7 @@ CREATE TABLE IF NOT EXISTS picks (
     best_bet_link      TEXT,               -- betslip deep link at best_book, when the feed carries one
     -- The price the pick was DECIDED at (2026-09-09): the best bettable price
     -- at the DraftKings line. `edge` / `dk_odds` stay DraftKings (the reference
-    -- line, and the CLV basis); every reader COALESCEs decision_x to dk_x.
+    -- line); every reader COALESCEs decision_x to dk_x, and so does CLV.
     decision_book         TEXT,
     decision_odds         NUMERIC,
     decision_implied_prob NUMERIC,
@@ -1455,6 +1456,7 @@ _MIGRATIONS = [
     ("picks", "clv_captured_at",     "TEXT"),
     ("picks", "clv_method",          "TEXT"),
     ("picks", "clv_close_book",      "TEXT"),
+    ("picks", "clv_bet_book",        "TEXT"),
     # DraftKings betslip deep links (The Odds API includeLinks/includeSids)
     ("odds", "home_link",  "TEXT"),
     ("odds", "away_link",  "TEXT"),

@@ -20,7 +20,9 @@ def test_models_include_expected_ids():
         "mlb_moneyline", "mlb_over_under", "mlb_runline",
         "mlb_f5_moneyline", "mlb_f5_over_under", "mlb_f5_runline",
         # NHL
-        "nhl_moneyline", "nhl_moneyline_regulation", "nhl_over_under", "nhl_puckline",
+        # nhl_over_under left 2026-10-08: it is a rule now
+        # (models/nhl_totals_market.py), not a trained artifact.
+        "nhl_moneyline", "nhl_moneyline_regulation", "nhl_puckline",
         # WNBA
         "wnba_moneyline", "wnba_over_under", "wnba_spread",
         # NBA
@@ -174,7 +176,10 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
         {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
          "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
          # 2026-10-03 (mike): the two-way correction on a three-way market.
-         "nhl_moneyline_regulation"}
+         "nhl_moneyline_regulation",
+         # 2026-10-08 (mike): Pinnacle's no-vig price IS the probability;
+         # the pooled map sends every one of them to 0.500.
+         "nhl_over_under"}
     )
 
 
@@ -236,6 +241,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
     not_named_here = config.MODELS_ON_OWN_PROBABILITY - {
         "nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
         "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
-        "nhl_moneyline_regulation",
+        "nhl_moneyline_regulation", "nhl_over_under",
     }
     assert not not_named_here

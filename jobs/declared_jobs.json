@@ -801,6 +801,13 @@
     "args": {}
   },
   {
+    "key": "clv-price-taken-recompute-2026-10-08",
+    "job_type": "clv_backfill",
+    "requested_by": "mike",
+    "note": "ONE-SHOT. mike 2026-10-08: grade CLV at the price taken. clv_price_taken_2026_10_08.sql stamps the captured BETs that were graded at DraftKings although taken at another book (216 on 2026-10-08, 27 game dates) as graded_at_dk_legacy; this loops paper_tracker._backfill_clv until a pass fills 0 so they are re-measured in one go, while the odds history they need is still unpruned, and so model_quality's 14/28-day CLV windows never hold two definitions. No model, threshold, pick, result or stake change.",
+    "args": {}
+  },
+  {
     "key": "mlb-game-line-market-sweep-2026-09-15",
     "job_type": "game_line_market_sweep",
     "requested_by": "mike",

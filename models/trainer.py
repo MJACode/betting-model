@@ -7,7 +7,7 @@ registered in the model_registry table.
 
 Usage:
     python -m models.trainer --model mlb_moneyline
-    python -m models.trainer --model nhl_over_under --seasons 2019 2020 2021 2022 2023
+    python -m models.trainer --model nhl_moneyline --seasons 2019 2020 2021 2022 2023
     python -m models.trainer --all                  # train all 7 models
 """
 
@@ -39,7 +39,7 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (LIVE_MODELS, MODEL_PROB_THRESHOLDS, MODELS, MODELS_DIR,
-                    PROP_MODELS, SPORTS, calibration_method)
+                    PROP_MODELS, SPORTS, calibration_method, scoring_method)
 from data.anon_readable import lock_down
 from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset, coerce_numeric_features
@@ -695,6 +695,14 @@ def _register_model(model_id: str, version: str,
                      train_seasons: list[int], holdout_season: int,
                      metrics: dict, model_path: str) -> None:
     """Register or update model version in model_registry table."""
+    # A RULE HAS NO ARTIFACT, and a registry row for one would put two writers
+    # on one id: the generic scorer would load it while the rule's own card
+    # writes picks (nhl_over_under, 2026-10-08). Refused before anything is
+    # stored, whatever --no-register says.
+    if scoring_method(model_id) == "rule":
+        raise ValueError(
+            f"{model_id} is a rule (config.SCORING_METHODS); it has no trained "
+            f"artifact and must not be registered")
     if not REGISTER_TRAINED_MODELS:
         logger.warning(
             f"--no-register: {model_id} {version} was NOT registered and the "

@@ -119,6 +119,15 @@ par player-news-refresh
 par public-betting
 par_wait
 
+# NHL total goals (nhl_over_under): Pinnacle's no-vig price against the
+# bettable books IN THE FETCH `par odds` JUST STORED. First after the wait, so
+# the fetch is priced while it is the newest one (an NHL game pick written by
+# the scoring step was measured 7.3 minutes after its fetch, one example).
+# SEQUENTIAL: it writes picks, and every
+# writer to picks runs one at a time. Insert-once under the model's own lock,
+# so every later pass on a game already bet is a no-op.
+step nhl-over-under
+
 # MLB probable starters for today AND the look-ahead window. The scorer can
 # now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB game
 # models fail CLOSED without a starter -- so without this the widened window

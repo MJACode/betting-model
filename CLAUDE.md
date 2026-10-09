@@ -329,21 +329,22 @@ dashboard). It was framed that way through 2026 H1 and the wording lingered in
 copy long after it stopped being true; that is what produced a "Paper trading"
 footer on a real daily-results recap on 2026-08-29.
 
-**The go-live gate is per MODEL, not for the platform.** A NEW or retrained
-model is paper-only — surfaced but not backed — until it clears:
-- ≥ 50 settled picks
-- Positive flat-bet ROI
-- Calibration error ≤ 5%
+**The go-live gate is per MODEL, not for the platform**: ≥ 50 settled picks,
+positive flat-bet ROI, calibration error ≤ 5%. A model explicitly held back
+is flagged PAPER ONLY in its own section (e.g. `ncaaf_spread`,
+`docs/sports/ncaaf.md`). Everything else is live.
 
-Models currently in that state are flagged as PAPER ONLY in their own section
-(e.g. `ncaaf_spread` — see `docs/sports/ncaaf.md`). Everything else is live.
+**NEVER PROPOSE PAPER.** (mike, 2026-10-08: *"stop asking about paper — what
+is the fucking point of paper."*) A model mike asks for is built LIVE, gate
+met or not. Report its gate standing; never offer a paper version or ask
+whether to hold it back.
 
 **`nfl_live_prop` (NFL in-play props) was RETIRED 2026-10-04 and its record
 STRUCK** (mike: *"It was never a good model. Remove this model."*) — 7-17,
 -10.27 units over 24 settled bets. `config.RETIRED_MODELS` + `RECORD_EXCLUSIONS`;
 the worker loop is off unless `RUN_NFL_LIVE=1`. Do not revive it under that id.
 
-**Both NHL models are LIVE the same way** (mike, 2026-10-01): `docs/sports/nhl.md`.
+**The NHL models are LIVE this way**: `docs/sports/nhl.md`.
 
 ---
 

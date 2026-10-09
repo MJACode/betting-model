@@ -42,6 +42,17 @@ def test_after_the_close_one_final_is_bought_for_clv_and_then_nothing():
                        final_taken=True) is None
 
 
+def test_nothing_is_owed_after_the_final_even_if_the_start_time_moves_later():
+    """2026-10-08, SJS_STL: final bought at 23:50 for a 00:10 start; the feed then
+    moved the start past 00:10:45, which made a 'close' look owed again and an
+    in-play board was bought as pre-game."""
+    stored = [MORNING, START - timedelta(minutes=69)]
+    moved = START + timedelta(minutes=30)                      # the feed's later start time
+    now = START + timedelta(minutes=1)                          # after the real puck drop
+    assert ing.due(moved, now, stored, window_min=70) == "close"          # the bug, without the flag
+    assert ing.due(moved, now, stored, window_min=70, final_taken=True) is None
+
+
 def test_the_final_is_never_taken_inside_twelve_minutes_of_the_feeds_start():
     """The feed lists NHL starts at :10, ten minutes after the scheduled puck drop,
     so a later fetch could hold in-play prices."""

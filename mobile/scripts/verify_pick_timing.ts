@@ -131,6 +131,12 @@ function mkPick(over: Partial<Pick>): Pick {
     mkPick({ model_id: 'nhl_prop_blocked_shots', player_id: '8477488', created_at: NOW }),
   );
   check('blocked shots takes the NHL prop note too', Boolean(blocks && !blocks.note.includes('lineup')));
+  // NHL totals post on the first refresh that qualifies, often the night
+  // before: not at the first scoring run of the day.
+  const totals = pickTimingInfo(mkPick({ sport: 'NHL', model_id: 'nhl_over_under', created_at: NOW }));
+  check('NHL totals take the posted-once note', Boolean(totals?.note.startsWith('Posted once and never re-priced')), totals?.note);
+  check('NHL totals note claims no daily run', Boolean(totals && !totals.note.includes('first scoring run')));
+  check('NHL totals note has no void line', Boolean(totals && !totals.note.includes('Void')));
 
   const yesterday = pickTimingInfo(mkPick({ created_at: THREE_DAYS_AGO }));
   check(

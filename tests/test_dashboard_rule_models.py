@@ -32,6 +32,7 @@ KNOWN_RULES = {
     "nfl_wind_totals", "nfl_opener_spread", "nfl_prop_market",
     "wnba_prop_market", "mlb_spread_market",
     "mlb_total_market", "mlb_total_public_fade",
+    "nhl_over_under",
 }
 
 

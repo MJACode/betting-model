@@ -505,7 +505,7 @@ machine / GitHub Actions (where the API is reachable). Same hand-off pattern as 
 |---|---|---|---|
 | `nhl_moneyline` | h2h | real DK moneyline | home wins incl. OT/SO |
 | `nhl_moneyline_regulation` | h2h_3way | real DK 3-way regulation | **3-class** XGBoost (away reg / draw / home reg) — the spec's "regulation market often has better value" play |
-| `nhl_over_under` | totals | real DK totals | total goals O/U |
+| `nhl_over_under` | totals | Pinnacle's no-vig price vs the bettable books | a rule since 2026-10-08, not trained (`docs/sports/nhl.md`) |
 | `nhl_puckline` | spreads | real DK puck line | home covers ±1.5 |
 
 First-time setup (Matt's machine — see Section 24):
@@ -514,7 +514,6 @@ python -m data.ingestors.nhl_stats_ingestor --backfill-games 2019 2025   # games
 python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2025         # team + goalie season snapshots
 python -m models.trainer --model nhl_moneyline
 python -m models.trainer --model nhl_moneyline_regulation
-python -m models.trainer --model nhl_over_under
 python -m models.trainer --model nhl_puckline
 python -m models.backtester --model nhl_moneyline --season 2025
 ```

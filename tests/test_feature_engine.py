@@ -297,8 +297,8 @@ class TestFeatureMap:
             "mlb_moneyline", "mlb_over_under", "mlb_runline",
             "mlb_f5_moneyline", "mlb_f5_over_under", "mlb_f5_runline",
             # NHL
-            "nhl_moneyline", "nhl_moneyline_regulation",
-            "nhl_over_under", "nhl_puckline",
+            # nhl_over_under is a rule since 2026-10-08: no feature list.
+            "nhl_moneyline", "nhl_moneyline_regulation", "nhl_puckline",
             # WNBA
             "wnba_moneyline", "wnba_over_under", "wnba_spread",
             # NBA
