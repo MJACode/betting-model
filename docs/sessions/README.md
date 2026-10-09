@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, no pre-game game pick is decided on a price more than 3 hours old (`PREGAME_PRICE_MAX_AGE_MIN`); the feed had dropped 31 NCAAF games in early September and 16 NCAAF BETs were written on prices 2 to 28 days old, plus 2 NHL BETs during the 09-27 to 10-01 odds-key outage; the 18 BETs listed for mike; props not bounded |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB, WNBA, NBA and college football prop odds are stamped in UTC like NFL and NHL ("+00:00", never "Z"; the slate date stays Eastern; old rows not rewritten); no reader breaks, switch-day order checked on the production database |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, origin/master merged into the touch-set branch; session-log hunks kept both sides |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB rule cards (and the WNBA prop card) skip a game that has started; the six 2026-09-16 late bets still count in the published record and Discord recaps (removal proposed, mike to decide); Pinnacle-withdrawn guard not needed for MLB; `first_pitch_at` not filled since 2026-08-31 |

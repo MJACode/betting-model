@@ -21,6 +21,29 @@
 
 ---
 
+## [x] NCAAF picks scored from prices more than a week old — FIXED 2026-10-09
+
+Found by the 2026-10-09 line-movement review: 200 of 682 pre-game NCAAF picks
+on 10-08 and 10-09 stood on DraftKings prices from 09-04 to 09-06. The odds
+feed stopped listing 31 games then; the scorer kept deciding them off the last
+stored row. Not the two-ids defect below. Branch `claude/ncaaf-stale-prices`:
+a game that has not started is now decided only on a price stored within
+`config.PREGAME_PRICE_MAX_AGE_MIN` (180 minutes), in every game-market read,
+the best-price shop, both entry checks and the NHL totals card
+(`tests/test_pregame_price_age.py`). Still open:
+
+- **mike decides** the 9 open BETs written on stale prices (list in
+  `docs/sessions/2026-10.md`, 2026-10-09). Three kick off 10-17.
+- **Player props have no age bound.** Their normal age is hours by design
+  (NHL props are bought at an opening and a closing snapshot, NCAAF props
+  three times a day), so a prop bound needs its own size per sport.
+- **The odds step failed on every pass 2026-09-27 to 10-01** ("Invalid
+  ODDS_API_KEY", 378 failures a day in `pipeline_log`) while scoring reported
+  success. Not checked: whether any health check raised it.
+- **The app's latest-price views and the closing-price reader** still read
+  the newest stored row whatever its age. Not measured: whether any closing
+  price was taken from a row the feed had stopped refreshing.
+
 ## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
 
 Two a night became four (`scripts/nhl_props_card.MAX_PROP_BETS_PER_NIGHT`),
@@ -873,6 +896,13 @@ in the ingestor's id derivation (ET, everywhere, per CLAUDE.md §4), plus a
 one-off merge of the duplicates that PRESERVES the earlier row's identity —
 picks point at it (§1c: `created_at` and the pick's game_id are part of the bet
 of record, not metadata).
+
+**Checked 2026-10-09, and NOT the cause of the stale NCAAF picks** (that was the
+feed dropping games; entry at the top of this file). 10 unplayed NCAAF games
+exist twice with the same kickoff, all night games. In every pair the
+Eastern-date id (written by the odds feed) holds every pick and every stored
+price; the UTC-date id (the CFBD import) holds 0 picks and 0 prices. Still
+open, unchanged.
 
 ## [ ] [needs-decision] The player detail screen speaks the fan idiom while the board may be speaking the book's
 
