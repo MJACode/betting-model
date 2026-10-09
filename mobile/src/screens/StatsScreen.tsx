@@ -3,7 +3,10 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   FlatList,
+  InputAccessoryView,
+  Keyboard,
   PixelRatio,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -83,7 +86,7 @@ import {
   selectionFor,
   type HitMode,
 } from '@/lib/hitMode';
-import { supportsPlayerDetail } from '@/lib/playerLog';
+import { parseTypedLine, stepLineFrom, supportsPlayerDetail } from '@/lib/playerLog';
 import {
   buildMatchupMap,
   defenceMetricSpoken,
@@ -112,7 +115,12 @@ import {
   hitRateBand,
   inHitRateBand,
   isOnSlate,
+  isLineOnlyId,
   isStatParticipant,
+  LINE_ONLY_ID_PREFIX,
+  lineOnlyPlayers,
+  pricedPlayers,
+  type PricedPlayer,
   needsTouchSet,
   seasonTouchFlag,
   shouldFetchTouchSet,
@@ -129,6 +137,7 @@ import {
   sublineSpoken,
   type TonightSlate,
 } from '@/lib/statsBoard';
+import { normalizePlayerName } from '@/lib/playerNews';
 import {
   defaultStatFor,
   propMarketForStat,
@@ -257,6 +266,9 @@ const SLATE_GATE_MS = 4000;
 
 /** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
 const EMPTY_ROWS: never[] = [];
+/** The keyboard bar under the ruler's typed-line field. */
+const RULER_ACCESSORY_ID = 'stats-ruler-line-input';
+const EMPTY_PRICED: ReadonlyMap<string, PricedPlayer> = new Map();
 /** Not an AbortError, so ErrorState renders. The copy comes from touchSetCopy. */
 const TOUCH_SET_SHOWN = new Error('touch set');
 
@@ -1513,14 +1525,44 @@ export function StatsScreen() {
   // one is typed.
   const activePositions = query.trim() ? null : segmentPositions;
 
+  // ── Anytime TD: everyone with a line (Matt, 2026-10-09) ────────────────────
+  // Who any book prices in this market on the slate, at any line. A priced
+  // player is on the board whatever his log says, and one the board's read has
+  // no row for at all is listed after the ranked rows, with no number.
+  const pricedByKey = useMemo(
+    () =>
+      stat && propMarket != null && propLines.market === propMarket && needsTouchSet(sport, String(stat.key))
+        ? pricedPlayers(propLines.rows, propMarket, slateGameIds)
+        : EMPTY_PRICED,
+    [stat, sport, propMarket, propLines, slateGameIds],
+  );
+  // Line-only rows pass the same filters a row with a log would, except the
+  // slate (they are on it by construction) and the team, which the feed does
+  // not carry for these markets — a picked game is matched on its game_id.
+  const lineOnlyFor = useCallback(
+    (boardNames: Iterable<string | null | undefined>): PricedPlayer[] => {
+      if (pricedByKey.size === 0) return [];
+      const q = query.trim().toLowerCase();
+      return lineOnlyPlayers(pricedByKey, boardNames)
+        .filter((p) => !gamesPicked || gamePicker.selected.has(p.gameId))
+        .filter(() => !minGrade || includeUngraded)
+        .filter((p) => !q || p.name.toLowerCase().includes(q));
+    },
+    [pricedByKey, query, gamesPicked, gamePicker.selected, minGrade, includeUngraded],
+  );
+
   // Everything but the position cut, sorted. The position cut runs last
   // (below) so the empty state can tell "this position has nobody on this
   // stat" from "there is no data".
   const rankedAll = useMemo(() => {
     if (!stat || effectiveMode !== 'totals') return [];
     const q = query.trim().toLowerCase();
-    return rows
-      .filter((r) => isStatParticipant(sport, [statValue(r, stat)], { statKey: String(stat.key), rows: [r] }))
+    const ranked = rows
+      .filter((r) => isStatParticipant(sport, [statValue(r, stat)], {
+        statKey: String(stat.key),
+        rows: [r],
+        priced: pricedByKey.has(normalizePlayerName(r.player_name)),
+      }))
       .filter((r) => !tonightActive || gamesPicked || isOnSlate(r, slate))
       .filter((r) => !gameTeams || (!!r.team && gameTeams.includes(r.team)))
       .filter((r) => !minGrade || meetsGradeFloor(matchupFor(r)?.grade, minGrade, includeUngraded))
@@ -1534,7 +1576,21 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.value, games: a.gp }, { primary: b.value, games: b.gp }),
       );
-  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+    // After the sort, so a player with no games never ranks above one with.
+    const lineOnly = lineOnlyFor(rows.map((r) => r.player_name)).map((p) => ({
+      row: {
+        player_id: `${LINE_ONLY_ID_PREFIX}${p.key}`,
+        player_name: p.name,
+        team: null,
+        season: SEASON,
+        games_played: 0,
+      } as SeasonTotalsRow,
+      value: 0,
+      total: 0,
+      gp: 0,
+    }));
+    return [...ranked, ...lineOnly];
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, lineOnlyFor]);
 
   // A filter preserves order, so the cut costs one pass and no re-sort.
   const ranked = useMemo(
@@ -1625,10 +1681,11 @@ export function StatsScreen() {
       }
     }
     const q = query.trim().toLowerCase();
-    return out
+    const sorted = out
       .filter((p) => isStatParticipant(sport, p.values, {
         statKey: String(stat.key),
         rows: p.games,
+        priced: pricedByKey.has(normalizePlayerName(p.player_name)),
         touched: seasonTouchFlag(
           p.games.length === 0,
           touchSet?.key,
@@ -1643,7 +1700,29 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+    // Every name the read returned, not only the survivors: a player the cut
+    // above dropped is not "missing from the log". H2H is excluded — its rows
+    // are only the players who have MET tonight's opponent, so absence there
+    // means no meeting, and a line-only row would read as one with no games.
+    const readNames =
+      timeWindow === 'season' ? seasonValues.rows.map((r) => r.player_name)
+      : timeWindow === 'h2h' ? null
+      : recentRows.map((r) => r.player_name);
+    const lineOnly: HitRatePlayer[] = readNames
+      ? lineOnlyFor(readNames).map((p) => ({
+          player_id: `${LINE_ONLY_ID_PREFIX}${p.key}`,
+          player_name: p.name,
+          team: null,
+          games: [],
+          values: [],
+          hits: 0,
+          total: 0,
+          pct: 0,
+          avg: 0,
+        }))
+      : [];
+    return [...sorted, ...lineOnly];
+  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, lineOnlyFor]);
 
   // The position cut, last and separate for the same reason as `ranked`.
   const hitRateBase = useMemo<HitRatePlayer[]>(
@@ -1732,7 +1811,9 @@ export function StatsScreen() {
     // so this line is what narrows `sport` to a sport the route accepts.
     if (!supportsPlayerDetail(sport)) return;
     navigation.navigate('PlayerStats', {
-      playerId: p.player_id,
+      // A line-only row has no player_id; the detail screen looks him up by
+      // name, as it does for any caller without one.
+      playerId: isLineOnlyId(p.player_id) ? '' : p.player_id,
       playerName: p.player_name,
       sport,
       // MLB only — it decides batter vs pitcher chips. Fall back to the selected
@@ -2193,6 +2274,13 @@ export function StatsScreen() {
                   : hitModeHeadline(n, hitMode, stat?.label ?? '')
               }
               a11yLabel={`${stat?.label ?? ''} line`}
+              // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
+              // that line in Over/Under). Below one stop is refused: "0+" is
+              // every game.
+              parseTyped={(text) => {
+                const n = parseTypedLine(text, hitMode);
+                return n != null && n >= rulerScale.min ? n : null;
+              }}
             />
             {/* At Least only, and a footnote rather than a headline. The row
                 this replaces restated the stat, the number and the direction —
@@ -2821,8 +2909,15 @@ function LineRuler({
   format,
   describe,
   a11yLabel,
+  parseTyped,
 }: {
   a11yLabel: string;
+  /** Reads a typed line into a stop, or null to refuse it. When given, the
+   *  number in the centre is a field (Matt, 2026-10-09: "need to allow user
+   *  to edit manually"). A typed number need not sit on the strip's grid —
+   *  the strip scrolls to the nearest stop and the centre shows the number
+   *  typed, until the next drag. */
+  parseTyped?: (text: string) => number | null;
   /** The ruler's whole-number STOP. What the user sees is `format(value)`. */
   value: number;
   /** Which numbers the ruler can reach, and how far apart they sit. */
@@ -2915,6 +3010,14 @@ function LineRuler({
     onChange(v);
   };
 
+  const [draft, setDraft] = useState<string | null>(null);
+  const commitDraft = () => {
+    const typed = draft == null || !parseTyped ? null : parseTyped(draft);
+    setDraft(null);
+    if (typed == null || typed === value) return;
+    pickTick(typed);
+  };
+
   return (
     // ONE adjustable element, not N tick buttons. VoiceOver gets the number
     // as a value it can increment and decrement; the ticks themselves are
@@ -2939,7 +3042,9 @@ function LineRuler({
         // One STOP per action, so VoiceOver moves the line by the same amount
         // a drag notch does. A hard-coded 1 here would leave a step-5 ruler
         // reachable only by touch, at four values it can never settle on.
-        const next = value + (e.nativeEvent.actionName === 'increment' ? step : -step);
+        // stepLineFrom lands a typed, off-grid line on the grid first, so
+        // the next stop is one VoiceOver can keep stepping from.
+        const next = stepLineFrom(value, e.nativeEvent.actionName === 'increment' ? 1 : -1, step);
         if (next >= min && next <= hi) pickTick(next);
       }}
     >
@@ -2989,12 +3094,58 @@ function LineRuler({
         </ScrollView>
       ) : null}
       {/* Fixed centre marker + the selected value, over the scrolling strip. */}
-      <View pointerEvents="none" style={styles.centerMarker}>
-        <View style={styles.centerLine} />
-        <View style={styles.tickValueBox}>
-          <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
-        </View>
+      <View pointerEvents="box-none" style={styles.centerMarker}>
+        <View pointerEvents="none" style={styles.centerLine} />
+        {!parseTyped ? (
+          <View pointerEvents="none" style={styles.tickValueBox}>
+            <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
+          </View>
+        ) : draft != null ? (
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            onEndEditing={commitDraft}
+            onSubmitEditing={commitDraft}
+            placeholder={faceOf(value)}
+            placeholderTextColor={colors.textSecondary}
+            keyboardType="decimal-pad"
+            returnKeyType="done"
+            autoFocus
+            maxLength={6}
+            inputAccessoryViewID={Platform.OS === 'ios' ? RULER_ACCESSORY_ID : undefined}
+            style={[styles.tickValueBox, styles.tickValueActive, styles.tickValueInput]}
+            accessibilityLabel={`Type a ${a11yLabel}`}
+          />
+        ) : (
+          // The ruler itself stays the one adjustable for VoiceOver; this is
+          // the touch path to type a number, and it says so to VoiceOver too.
+          <Pressable
+            onPress={() => setDraft('')}
+            hitSlop={{ top: 11, bottom: 11, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Type a ${a11yLabel}`}
+            accessibilityHint={`Now ${describeOf(value)}`}
+            style={({ pressed }) => [styles.tickValueBox, styles.tickValueTappable, pressed && styles.pressed]}
+          >
+            <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
+            <Ionicons name="pencil" size={11} color={colors.textSecondary} />
+          </Pressable>
+        )}
       </View>
+      {parseTyped && Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={RULER_ACCESSORY_ID}>
+          <View style={styles.doneBar}>
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
     </View>
   );
 }
@@ -3351,7 +3502,7 @@ function LeaderRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}${subline ? `, ${sublineSpoken(subline)}` : ''}`
+            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${isLineOnlyId(row.player_id) ? 'no games logged' : `${fmtValue(value, basis)} ${statLabel}`}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
@@ -3375,7 +3526,11 @@ function LeaderRow({
         ) : null}
       </View>
       <View style={styles.valueWrap}>
-        <Text style={styles.value}>{fmtValue(value, basis)}</Text>
+        {isLineOnlyId(row.player_id) ? (
+          <Text style={[styles.value, { color: colors.textSecondary }]}>—</Text>
+        ) : (
+          <Text style={styles.value}>{fmtValue(value, basis)}</Text>
+        )}
       </View>
       {showOdds ? (
         <OddsCell
@@ -3457,6 +3612,8 @@ function HitRateRow({
   // detail screen and full green on the board. Scoped to H2H because every
   // other window has a uniform denominator, where the rule would say nothing.
   const pctColor = hitRateColor(player.pct, colorful && !(thinSample && player.total < 3));
+  // A book prices him and the log has no game for him: nothing to rate.
+  const lineOnly = isLineOnlyId(player.player_id);
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
@@ -3466,7 +3623,7 @@ function HitRateRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}${subline ? `, ${sublineSpoken(subline)}` : ''}`
+            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${lineOnly ? 'no games logged' : `${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}`}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
@@ -3490,11 +3647,11 @@ function HitRateRow({
         ) : null}
       </View>
       <View style={styles.valueWrap}>
-        <Text style={[styles.value, { color: pctColor }]}>
-          {Math.round(player.pct * 100)}%
+        <Text style={[styles.value, { color: lineOnly ? colors.textSecondary : pctColor }]}>
+          {lineOnly ? '—' : `${Math.round(player.pct * 100)}%`}
         </Text>
         <Text style={styles.valueLabel}>
-          {player.hits}/{player.total}
+          {lineOnly ? 'no games' : `${player.hits}/${player.total}`}
         </Text>
       </View>
       {showOdds ? (
@@ -3749,6 +3906,35 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  // The centre number is a button now: a pencil says it can be typed into.
+  tickValueTappable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  tickValueInput: {
+    minWidth: 56,
+    textAlign: 'center',
+    paddingVertical: 2,
+  },
+  doneBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    backgroundColor: colors.bgGrouped,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  doneBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  doneText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   // The book's half-point line, sitting at the end of the ruler row. A
   // footnote, not a headline: it qualifies the number the ruler is showing.

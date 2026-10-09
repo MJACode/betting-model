@@ -38,7 +38,12 @@ import {
   hitRateBand,
   inHitRateBand,
   isOnSlate,
+  isLineOnlyId,
   isStatParticipant,
+  isTeamPropName,
+  LINE_ONLY_ID_PREFIX,
+  lineOnlyPlayers,
+  pricedPlayers,
   needsTouchSet,
   seasonTouchFlag,
   shouldFetchTouchSet,
@@ -248,6 +253,33 @@ check('touchedPlayerIds keeps only ball-carriers',
 check('needsTouchSet: Anytime TD on football only',
   needsTouchSet('NFL', 'rush_rec_tds') && needsTouchSet('NCAAF', 'rush_rec_tds') &&
   !needsTouchSet('NFL', 'receptions') && !needsTouchSet('MLB', 'rush_rec_tds'));
+// Anytime TD shows everyone with a betting line (Matt, 2026-10-09).
+check('Anytime TD: a priced player stays even with no touches and no TD',
+  isStatParticipant('NFL', [0, 0], { ...TD, priced: true, rows: [{ carries: 0, receptions: 0, targets: 0 }] }));
+check('Anytime TD: priced overrides a negative touch answer (Season/H2H)',
+  isStatParticipant('NFL', [0], { ...TD, priced: true, touched: false }));
+check('priced does not keep an all-zero player on a yardage board',
+  !isStatParticipant('NFL', [0, 0], { statKey: 'receiving_yards', priced: true }));
+check('team names in the TD market are not players',
+  isTeamPropName('Dallas Cowboys D/ST') && isTeamPropName('Dallas Cowboys Defense') &&
+  isTeamPropName('No Scorer') && !isTeamPropName('George Pickens') && !isTeamPropName('Tyler Conklin'));
+const tdRows = [
+  { market: 'player_anytime_td', player_name: 'George Pickens', game_id: 'g1' },
+  { market: 'player_anytime_td', player_name: 'George Pickens', game_id: 'g1' },
+  { market: 'player_anytime_td', player_name: 'Michael Pittman Jr.', game_id: 'g2' },
+  { market: 'player_anytime_td', player_name: 'Tank Dell', game_id: 'g2' },
+  { market: 'player_anytime_td', player_name: 'Houston Texans D/ST', game_id: 'g2' },
+  { market: 'player_anytime_td', player_name: 'Off Slate', game_id: 'g9' },
+  { market: 'player_reception_yds', player_name: 'Other Market', game_id: 'g1' },
+];
+const priced = pricedPlayers(tdRows, 'player_anytime_td', new Set(['g1', 'g2']));
+check('pricedPlayers: one per player, slate and market bounded, no team rows',
+  [...priced.keys()].sort().join('|') === 'george pickens|michael pittman|tank dell');
+const missing = lineOnlyPlayers(priced, ['George Pickens', 'Michael Pittman']);
+check('lineOnlyPlayers: suffix-folded names count as present; the rest are listed',
+  missing.map((p) => p.name).join() === 'Tank Dell' && missing[0]!.gameId === 'g2');
+check('line-only ids are recognisable and never a real id',
+  isLineOnlyId(`${LINE_ONLY_ID_PREFIX}tank dell`) && !isLineOnlyId('00-0036900'));
 check('the TD exemption does not leak to other stats',
   !isStatParticipant('NFL', [0, 0], { statKey: 'passing_yards', rows: [{ carries: 9 }] }));
 
