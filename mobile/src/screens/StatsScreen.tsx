@@ -124,6 +124,7 @@ import {
   touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
+  slateLabelFor,
   slateSubline,
   slateTeams,
   sublineSpoken,
@@ -300,18 +301,6 @@ const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   { value: 20, label: 'L20' },
   { value: 'season', label: 'Season' },
 ];
-
-/** '2026-08-30' → 'Sun 8/30' (for the next-slate chip). */
-function shortDate(date: string): string {
-  if (!date) return '';
-  const d = new Date(`${date}T12:00:00Z`);
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'UTC',
-    weekday: 'short',
-    month: 'numeric',
-    day: 'numeric',
-  }).format(d);
-}
 
 /**
  * The board's PRIMARY number, on the same ramp as the matchup grade.
@@ -658,7 +647,7 @@ export function StatsScreen() {
   const slateChecking = slateFor !== sport;
   /** The Availability switch cannot act: no slate, or Games is the narrower cut. */
   const slateCutDead = slateChecking || !hasSlate || gamesPicked;
-  const slateLabel = slate.isToday ? 'Playing today' : `Next slate ${shortDate(slate.date)}`;
+  const slateLabel = slateLabelFor(slate);
 
   const playerType = stat?.playerType;
 
