@@ -80,6 +80,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import timedelta
 
 import config
 from models.market_relative import devig, implied
@@ -95,7 +96,8 @@ SOFT_BOOKS = tuple(b for b in config.BEST_LINE_BOOKMAKERS if b != SHARP_BOOK)
 # to be read as a price (nhl_totals_lab.py:123).
 COHERENT = (1.0, 1.15)
 
-DIAG_KEYS = ("games", "no_sharp", "pinnacle_withdrawn", "sharp_incoherent",
+DIAG_KEYS = ("games", "no_sharp", "pinnacle_withdrawn", "stale_fetch",
+             "sharp_incoherent",
              "no_pair", "soft_incoherent", "line_mismatch", "below_price_floor",
              "below_ev_floor", "compared", "bets")
 
@@ -226,8 +228,8 @@ def load_fetch_quotes(conn, games) -> list[dict]:
 
 
 def find_bets(quotes, soft_books: tuple[str, ...] | None = None,
-              min_ev: float | None = None, min_odds: float | None = None
-              ) -> tuple[list[NhlTotalBet], dict]:
+              min_ev: float | None = None, min_odds: float | None = None,
+              now=None) -> tuple[list[NhlTotalBet], dict]:
     """At most one bet a game from `quotes` (rows shaped as load_fetch_quotes
     returns them; any superset of those rows gives the same answer, because the
     fetch selection is re-applied here).
@@ -235,10 +237,20 @@ def find_bets(quotes, soft_books: tuple[str, ...] | None = None,
     The diagnostic is logged on every pass, so an empty card can be told apart
     from a broken one: `no_sharp` counts games with no Pinnacle quote, and if
     that is every game, Pinnacle has left the fetched books.
+
+    `now` (the card passes its clock) refuses a game whose newest Pinnacle
+    fetch is older than config.PREGAME_PRICE_MAX_AGE_MIN: `stale_fetch`.
+    "pinnacle_withdrawn" only catches a NEWER fetch without Pinnacle; when the
+    odds step stops altogether (it failed on every pass 2026-09-27 to 10-01)
+    there is no newer fetch, and the card would bet hours- or days-old prices.
+    The fetch time is odds.created_at, the clock this rule already pairs on.
+    None (the replay and unit-test callers) applies no age check.
     """
     soft = tuple(soft_books) if soft_books is not None else SOFT_BOOKS
     floor_ev = config.min_ev_for(MODEL_ID) if min_ev is None else float(min_ev)
     floor_odds = config.min_odds_for(MODEL_ID) if min_odds is None else min_odds
+    oldest_fetch = (None if now is None else
+                    now - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN))
     diag = dict.fromkeys(DIAG_KEYS, 0)
 
     by_game: dict[str, list[dict]] = defaultdict(list)
@@ -262,6 +274,9 @@ def find_bets(quotes, soft_books: tuple[str, ...] | None = None,
                      default=fetched)
         if newest > fetched:
             diag["pinnacle_withdrawn"] += 1
+            continue
+        if oldest_fetch is not None and fetched < oldest_fetch:
+            diag["stale_fetch"] += 1
             continue
         if not _coherent(sharp):
             diag["sharp_incoherent"] += 1

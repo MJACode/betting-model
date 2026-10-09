@@ -196,7 +196,9 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             logger.info("NHL totals card: no unstarted NHL games")
             return {"games": 0, "bets": 0, "published": 0}
         quotes = mk.load_fetch_quotes(conn, games)
-        bets, diag = mk.find_bets(quotes)
+        # The card's clock goes to the rule, so a fetch older than
+        # config.PREGAME_PRICE_MAX_AGE_MIN is refused (diag `stale_fetch`).
+        bets, diag = mk.find_bets(quotes, now=now)
         logger.info("\n" + render(bets, diag))
         published = 0
         if do_publish and bets:

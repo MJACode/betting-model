@@ -3137,6 +3137,40 @@ DECIDE_ON_BEST_PRICE: bool = (
 # newest quote in the shop is a book that stopped pricing, not a better number.
 BEST_LINE_MAX_LAG_MIN: float = float(os.environ.get("BEST_LINE_MAX_LAG_MIN", "30"))
 
+# NO PRE-GAME PICK IS DECIDED ON A PRICE THE BOOK STOPPED OFFERING (mike,
+# 2026-10-09). The bound above compares books with EACH OTHER, so when every
+# book stops at once nothing is dropped -- and the price read itself had no
+# lower time limit. The odds feed stopped listing 31 NCAAF games between
+# 2026-09-05 and 09-07; the scorer kept deciding them off the last stored row
+# and wrote 16 BETs at DraftKings prices 2 to 28 days old (15 posted). The
+# odds step then failed on every pass from 09-27 to 10-01 ("Invalid
+# ODDS_API_KEY" in pipeline_log) while scoring reported success, and two NHL
+# moneyline BETs fired on 09-30 at 83-hour-old prices.
+#
+# So a game that has NOT STARTED may only be decided on a row whose
+# snapshot_at is within this many minutes of now (models.scorer.
+# _pregame_price_floor). Once the game starts, the last pre-game row is the
+# close and its age does not matter: the in-play models read it as a feature
+# and the replay scripts read completed games, both unchanged.
+#
+# Sized from what was measured on 2026-10-09:
+#   * every refresh pass fetches odds and then scores; the longest normal gap
+#     between fetches is 5:17am -> 6:00am -> 7:17am ET (77 minutes);
+#   * age of the deciding row at pick time, game-market BETs since 09-01:
+#     every one not caused by this defect was at most 46 minutes old (MLB 57
+#     bets, max 19 min; NCAAF 63, 28; NHL 30, 46; UFC 3, 3; WNBA 6, 9);
+#   * pre-game game-market picks written since 10-01, BET or not (1,682):
+#     1,475 at most 1 hour old, 1 at 1-2 hours, none at 2-24 hours, and 206
+#     over 24 hours (this defect);
+#   * snapshot_at (the book's own update time) trails our write time by at
+#     most 14 minutes (50,196 DraftKings pre-game rows stamped 10-08);
+#   * the youngest stale price behind any of the 18 BETs was 49.6 hours old.
+# 180 minutes survives one missed hourly pass and refuses every one of those.
+# Player props are NOT under this bound: NHL props are bought at an opening
+# and a closing snapshot by design and NCAAF props three times a day, so their
+# normal age is hours (14 of 81 NHL prop BETs since 08-15 were 6-24 hours).
+PREGAME_PRICE_MAX_AGE_MIN: int = int(os.environ.get("PREGAME_PRICE_MAX_AGE_MIN", "180"))
+
 # A PROPOSITION DraftKings DOES NOT LIST IS STILL A PROPOSITION (mike,
 # 2026-09-12: "Yes, scoring of other books lines.")
 #
@@ -4130,12 +4164,21 @@ GAME_SCORE_AHEAD_SPORTS: tuple = ("MLB", "NBA", "NHL", "WNBA")
 # NCAAF is scored as far ahead as a line exists. Matt, 2026-09-07: "it should
 # be whenever lines are released. speed speed speed is what matters to get a
 # good line." This is the OUTER edge of the scorer's game query; what actually
-# admits a look-ahead game is a DraftKings price (run_scorer's ncaaf_unpriced
-# prefilter), so a wide window costs nothing on games nobody has priced.
-# Measured on the live feed 2026-09-07: DK had totals up on 107 NCAAF games,
-# 44 of them more than 14 days out (marquee games listed to 12-12); the old
-# 7-day window was clipping every one of those. 150 days covers a season from
-# its first week through the bowls.
+# admits a look-ahead game is a CURRENT DraftKings price (run_scorer's
+# ncaaf_unpriced prefilter: a DraftKings row within PREGAME_PRICE_MAX_AGE_MIN),
+# so a wide window costs nothing on games nobody is pricing.
+#
+# CORRECTED 2026-10-09. This comment used to say the live feed had DK totals
+# on 107 NCAAF games on 2026-09-07, 44 of them more than 14 days out. That
+# count was of rows ALREADY STORED, not of what the feed listed that day. Our
+# own DraftKings totals rows stamped 2026-09-07 12:00-13:30Z cover 50 games,
+# none more than 14 days out, the latest on 09-13; on 09-04 at the same hour
+# they covered 130 games, 41 of them more than 14 days out, the latest 12-12.
+# DraftKings lists the big games early, pulls them, and re-lists them about
+# ten days before kickoff. Until 2026-10-09 the prefilter asked whether
+# DraftKings had EVER priced a game, so the window let the scorer decide the
+# pulled games off their early-September rows (16 BETs). 150 days still covers
+# a season from its first week through the bowls.
 #
 # The look-ahead interacts with the pick lock deliberately (see run_scorer): an
 # NCAAF row carrying an actual signal locks at first cross while a "no signal"

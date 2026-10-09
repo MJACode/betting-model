@@ -1746,9 +1746,62 @@ def _best_of(quotes: list[dict]) -> dict | None:
     return best[1] if best else None
 
 
-def _fresh_quotes(quotes: list[dict]) -> list[dict]:
+def _utcnow() -> datetime:
+    """The wall clock, UTC. One seam, so a test can pin "now"."""
+    return datetime.now(timezone.utc)
+
+
+def _pregame_price_floor(cutoff: str | None,
+                         now: datetime | None = None) -> datetime | None:
+    """The oldest snapshot_at a pre-game DECISION may stand on, or None for
+    no bound (config.PREGAME_PRICE_MAX_AGE_MIN; the measurements are there).
+
+    Bounded only while the game has not started. After first pitch the last
+    pre-game row is the close, and its age is not a question: the in-play
+    models read it as a feature (live_scorer._pregame_features) and the replay
+    scripts read completed games, so both see exactly what they saw before.
+
+    No cutoff means "do not bound", the convention _pregame_cutoff already
+    documents: a game with no start time keeps the old behaviour rather than
+    losing every price. Measured 2026-10-09: 0 of 873 unplayed games in the
+    next five months have neither commence_time nor first_pitch_at.
+    """
+    if not cutoff:
+        return None
+    start = _parse_snapshot(cutoff)
+    if start is None:
+        return None
+    now = now or _utcnow()
+    if start <= now:
+        return None
+    return now - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN)
+
+
+def _current_price_since(now: datetime | None = None) -> str:
+    """The same floor as SQL text, 'YYYY-MM-DDTHH:MM:SS' UTC, for a
+    `snapshot_at >= ?` comparison. Safe as text: every odds.snapshot_at is ISO
+    with a 'T' and UTC (_get_dk_odds' docstring), so the first 19 characters
+    order the rows; a date-only historical row sorts before it, i.e. stale."""
+    now = now or _utcnow()
+    floor = now - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN)
+    return floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _quote_is_current(snapshot_at, floor: datetime | None) -> bool:
+    """True unless `snapshot_at` is older than `floor`. A row with no
+    parseable stamp is kept, failing open like _fresh_quotes; every odds row
+    carries an ISO stamp (measured in _get_dk_odds' docstring)."""
+    if floor is None:
+        return True
+    ts = _parse_snapshot(snapshot_at)
+    return ts is None or ts >= floor
+
+
+def _fresh_quotes(quotes: list[dict],
+                  floor: datetime | None = None) -> list[dict]:
     """Drop quotes that lag the newest quote in the shop by more than
-    config.BEST_LINE_MAX_LAG_MIN minutes.
+    config.BEST_LINE_MAX_LAG_MIN minutes, and (when `floor` is given) any
+    quote older than `floor`.
 
     Since 2026-09-09 the best price DECIDES the pick, so a book that stopped
     pricing an hour ago must not qualify it on a number it no longer offers.
@@ -1756,7 +1809,16 @@ def _fresh_quotes(quotes: list[dict]) -> list[dict]:
     behind DraftKings across 13 books), so on a live board nothing is dropped;
     this bites only when a book has genuinely gone quiet. Quotes with no
     parseable stamp are kept -- failing open, like every guard here.
+
+    THE LAG ALONE COMPARES BOOKS WITH EACH OTHER, so when every book goes
+    quiet together nothing lags and nothing is dropped. That is what the feed
+    did to 31 NCAAF games in September (config.PREGAME_PRICE_MAX_AGE_MIN).
+    `floor` is the absolute half: _best_game_price_one passes the pre-game
+    floor; player props pass nothing, because their normal age is hours.
     """
+    if floor is not None:
+        quotes = [q for q in quotes
+                  if _quote_is_current(q.get("snapshot_at"), floor)]
     stamps = []
     for q in quotes:
         ts = _parse_snapshot(q.get("snapshot_at"))
@@ -1872,7 +1934,7 @@ def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
                 continue
         quotes.append({"book": book, "odds": r[1], "link": r[2],
                        "snapshot_at": r[5] if len(r) > 5 else None})
-    return _best_of(_fresh_quotes(quotes))
+    return _best_of(_fresh_quotes(quotes, floor=_pregame_price_floor(cutoff)))
 
 
 def _best_prop_price(conn: DBConnection, game_id: str, player_name: str,
@@ -2221,7 +2283,17 @@ def _has_real_game_price(odds: dict | None, market: str) -> bool:
 
 def _latest_book_game_odds(conn: DBConnection, game_id: str, market: str,
                            bookmaker: str, cutoff: str | None) -> dict | None:
-    """Newest pre-game snapshot for one book, bounded at first pitch."""
+    """Newest pre-game snapshot for one book, bounded at first pitch.
+
+    AND, WHILE THE GAME HAS NOT STARTED, NO OLDER THAN
+    config.PREGAME_PRICE_MAX_AGE_MIN. Every game-market model reads its line
+    and price through here (_get_dk_odds, _get_scoring_odds, the NCAAF margin,
+    totals and opener rules, the feature row, the NHL 3-way), so a row the
+    book has stopped refreshing is no row: the model gets "no DraftKings
+    price" and writes nothing for that market. Until 2026-10-09 the newest row
+    was returned whatever its age, and 31 NCAAF games the feed had dropped in
+    early September were decided off those rows into October.
+    """
     spread_filter = _game_spread_filter_sql(game_id, market)
     pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
     row = conn.execute(f"""
@@ -2242,7 +2314,13 @@ def _latest_book_game_odds(conn: DBConnection, game_id: str, market: str,
         ).fetchone()
     if not row:
         return None
-    return dict(zip(_GAME_ODDS_COLS, row))
+    odds = dict(zip(_GAME_ODDS_COLS, row))
+    if not _quote_is_current(odds.get("snapshot_at"), _pregame_price_floor(cutoff)):
+        logger.debug(f"  {game_id}/{market}: newest {bookmaker} row is from "
+                     f"{odds.get('snapshot_at')}, older than "
+                     f"{config.PREGAME_PRICE_MAX_AGE_MIN} min -- not a current price")
+        return None
+    return odds
 
 
 def _fallback_game_line_quote(conn: DBConnection, game_id: str, market: str,
@@ -3077,6 +3155,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # refresh 82578720862b4c88990a974ff33ed81d still cancelled the old
         # form at statement_timeout; _select_isolated's savepoint is what
         # keeps that from aborting the rest of scoring.
+        #
+        # "PRICES" MEANS PRICES NOW (2026-10-09). This asked whether DK had
+        # EVER stored a row for the game. DK listed the big games in early
+        # September, pulled them, and re-lists them about ten days out; 31 of
+        # them were scored off their 09-04..09-06 rows into October (16 BETs).
+        # A game is admitted only with a DK row inside
+        # config.PREGAME_PRICE_MAX_AGE_MIN, the same bound
+        # _latest_book_game_odds applies per market, so this stays a COST
+        # filter. snapshot_at, not created_at: it is indexed (idx_odds_date)
+        # and the same clock the row check reads. EXPLAIN ANALYZE 2026-10-09 on
+        # the live window: 66 games admitted in 65 ms (old form: 0.725 s).
         ncaaf_unpriced: set = set()
         if any(g[1] == "NCAAF" for g in games):
             try:
@@ -3091,13 +3180,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                           SELECT 1 FROM odds o
                           WHERE o.game_id = g.game_id
                             AND o.bookmaker = ?
+                            AND o.snapshot_at >= ?
                       )
-                """, (target_date, ncaaf_horizon, ODDS_API_BOOKMAKER))}
+                """, (target_date, ncaaf_horizon, ODDS_API_BOOKMAKER,
+                      _current_price_since()))}
                 ncaaf_unpriced = {g[0] for g in games
                                   if g[1] == "NCAAF" and g[0] not in priced}
                 if ncaaf_unpriced:
                     logger.info(f"NCAAF: skipping {len(ncaaf_unpriced)} game(s) "
-                                f"{ODDS_API_BOOKMAKER} does not price")
+                                f"{ODDS_API_BOOKMAKER} has not priced in the last "
+                                f"{config.PREGAME_PRICE_MAX_AGE_MIN} min")
             except Exception as exc:
                 # Fail OPEN — a filter that can't be built must never be able to
                 # empty the board. Worst case we pay the old cost. The
@@ -3121,7 +3213,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # TODAY'S GAMES ARE NEVER FILTERED. They were scored before this change
         # whether or not DK had posted, several models handle a missing price
         # themselves, and quietly dropping them here would be a behaviour
-        # change nobody asked for hiding inside a look-ahead feature.
+        # change nobody asked for hiding inside a look-ahead feature. (A
+        # today's game with no CURRENT price still gets no pick: the per-market
+        # read refuses the row, _latest_book_game_odds.)
+        #
+        # Same recency bound as the NCAAF filter above: two NHL BETs fired on
+        # 2026-09-30 for 10-01 games off 09-26 rows, while the odds step was
+        # failing on every pass.
         #
         # Fails OPEN for the same reason as the NCAAF filter above.
         ahead_unpriced: set = set()
@@ -3138,14 +3236,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                           SELECT 1 FROM odds o
                           WHERE o.game_id = g.game_id
                             AND o.bookmaker = ?
+                            AND o.snapshot_at >= ?
                       )
-                """, ([g[0] for g in _ahead], ODDS_API_BOOKMAKER))}
+                """, ([g[0] for g in _ahead], ODDS_API_BOOKMAKER,
+                      _current_price_since()))}
                 ahead_unpriced = {g[0] for g in _ahead if g[0] not in priced}
                 if ahead_unpriced:
                     logger.info(
                         f"Look-ahead: skipping {len(ahead_unpriced)} of "
                         f"{len(_ahead)} future game(s) {ODDS_API_BOOKMAKER} "
-                        f"has not priced yet")
+                        f"has not priced in the last "
+                        f"{config.PREGAME_PRICE_MAX_AGE_MIN} min")
             except Exception as exc:                          # noqa: BLE001
                 logger.warning(f"Look-ahead price pre-filter failed ({exc}); "
                                f"scoring all")
