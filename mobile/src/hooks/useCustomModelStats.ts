@@ -24,6 +24,7 @@ import {
   writeSettledCache,
 } from '@/lib/settledPickCache';
 import { applySettledMarkers } from '@/lib/settledPickMarkers';
+import { isDuplicateCopy } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
 import { errorText, isAbortError } from '@/lib/errors';
@@ -231,7 +232,8 @@ export function useCustomModelBacktest(
     if (!model || !withPicks || uncovered.length === 0) return [];
     const sub = { ...model, rules: uncovered };
     return settled
-      .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION')
+      .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION'
+        && !isDuplicateCopy(p))
       .map((p) => ({
         pick_id: p.pick_id,
         model_id: p.model_id,

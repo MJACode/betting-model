@@ -572,3 +572,38 @@ def test_the_rule_is_in_claude_md():
     start = text.index("A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS")
     block = text[start:start + 2000]
     assert "condition_status='DUPLICATE'" in block
+
+
+# ── custom models ─────────────────────────────────────────────────────────────
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_a_custom_model_counts_the_kept_copy_once(tmp_path: Path):
+    """The labelled copy keeps its real WIN, so a custom model's own W/L/P
+    tally counted it until it learned the label (UX review, 2026-10-09)."""
+    _copy_for_node(tmp_path, ("customModelBacktest.ts", "customModelFilters.ts",
+                              "modelMeta.ts", "thresholds.ts", "thresholds.generated.ts",
+                              "decisionPrice.ts", "discordPublish.ts", "format.ts"))
+    script = """
+import { computeCustomModelStats } from './customModelBacktest.ts';
+const bet = { model_id: 'ufc_total_rounds', sport: 'UFC', signal_type: 'BET', result: 'WIN',
+              pick_side: 'over', model_probability: 0.6, edge: 0.05, dk_odds: -130,
+              decision_odds: -130, profit_flat: 76.92, is_live: false, downgrade_reason: null,
+              condition_status: null, game_date: '2026-06-20' };
+const settled = [
+  { ...bet, pick_id: 332605, game_id: 'UFC_2026-06-20_kevin-borjas_andre-lima' },
+  { ...bet, pick_id: 332615, game_id: 'UFC_2026-06-20_andre-lima_kevin-borjas',
+    condition_status: 'DUPLICATE' },
+];
+const model = { id: 'm', name: 'm', rules: [{ model_id: 'ufc_total_rounds' }], filters: {} };
+const s = computeCustomModelStats(model, settled);
+console.log(JSON.stringify({ picks: s.picks, wins: s.wins }));
+"""
+    got = _node(tmp_path, script)
+    assert got == '{"picks":1,"wins":1}', got
+
+
+def test_the_custom_model_pick_list_skips_the_labelled_copy():
+    hook = _read(ROOT / "mobile" / "src" / "hooks" / "useCustomModelStats.ts")
+    assert "&& !isDuplicateCopy(p))" in hook
+    assert "import { isDuplicateCopy } from '@/lib/thresholds';" in hook
+
