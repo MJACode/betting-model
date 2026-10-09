@@ -21,6 +21,26 @@
 
 ---
 
+## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
+
+Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe
+one fight, 71 of them the two fighter orders on one date
+(`UFC_2026-06-20_kevin-borjas_andre-lima` and `..._andre-lima_kevin-borjas`),
+the rest an Eastern and a UTC date. `ufc_total_rounds` bet both rows of two
+fights (picks 332605/332615 and 524487/530849); the record now counts each
+once (`docs/sessions/2026-10.md`, "count each fight once"), but nothing stops
+the next one, and the `one_pick_per_event` health check only reports it after
+both copies settle. On 2026-09-05 Spann vs Pinto had BETs on both rows from
+two different models (1438528 total rounds, 1664623 moneyline), so the scorer
+still scores both rows. Two more shapes in the same table: placeholder rows a
+week from the real card (`UFC_2026-10-10_esteban-ribovics_king-green` beside
+the 10-03 fight, which has a final) and pairs 23-24 hours apart with
+placeholder start times. Fix at the source: one id per fight in the UFC
+ingestor (sorted fighters, Eastern date), a merge of the existing pairs that
+keeps the row picks point at, and a scorer guard that skips a fight whose twin
+already carries a pick for the model. Check the moneyline side first: on a
+swapped row `home` is the other fighter.
+
 ## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
 
 Two a night became four (`scripts/nhl_props_card.MAX_PROP_BETS_PER_NIGHT`),
@@ -1005,6 +1025,17 @@ in the ingestor's id derivation (ET, everywhere, per CLAUDE.md §4), plus a
 one-off merge of the duplicates that PRESERVES the earlier row's identity —
 picks point at it (§1c: `created_at` and the pick's game_id are part of the bet
 of record, not metadata).
+
+**2026-10-09: the record half is covered; the `games` half is not.** Measured
+read-only: since 2026-06-01, 71 NCAAF pairs of `games` rows describe one game
+(62 an ET and a UTC date, 3 home and away swapped), and 78 UFC pairs. No NCAAF
+model has bet both rows of one game (0 settled pairs). Two UFC fights were bet
+twice and counted twice; those copies are now marked and every record surface
+counts the event once (`condition_status='DUPLICATE'`, result unchanged;
+`docs/sessions/2026-10.md`, "count each fight once"). A health check,
+`one_pick_per_event`, now reports any new settled pair. Still open: the
+ingestor's id derivation and the merge of the duplicate rows, which is what
+stops a model betting the second row in the first place.
 
 ## [ ] [needs-decision] The player detail screen speaks the fan idiom while the board may be speaking the book's
 

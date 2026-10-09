@@ -93,6 +93,11 @@ def render() -> str:
         lines.append(f"  '{m}',")
     lines.append("]);")
     lines.append("")
+    # The marker on the second copy of a bet written under two game ids for
+    # one event (config.DUPLICATE_STATUS, mike 2026-10-09). passesRecordFilter
+    # counts the event once.
+    lines.append(f"export const DUPLICATE_STATUS = '{config.DUPLICATE_STATUS}';")
+    lines.append("")
     lines.append(f"export const KELLY_MULTIPLIER = {_fmt(float(config.KELLY_MULTIPLIER))};")
     lines.append(f"export const MAX_KELLY_FRACTION = {_fmt(float(config.MAX_KELLY_FRACTION))};")
     lines.append("")

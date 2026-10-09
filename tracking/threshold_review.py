@@ -189,8 +189,11 @@ def _slate(conn) -> list[tuple[str, int, float]]:
           -- written while its model was paused (scorer._paused_signal) was
           -- not one, so it counts toward no milestone and no slate ROI.
           AND downgrade_reason IS DISTINCT FROM %s
+          -- One event is one bet: the second copy of a bet written under two
+          -- game ids is not a second bet (config.DUPLICATE_STATUS, 2026-10-09).
+          AND condition_status IS DISTINCT FROM %s
         GROUP BY model_id
-    """, (EPOCH, config.PAUSED_NOTE)).fetchall()
+    """, (EPOCH, config.PAUSED_NOTE, config.DUPLICATE_STATUS)).fetchall()
     # A retired model's picks stay in the table (§1c) but it is out of every
     # total, and it must never be judged or milestoned again.
     return [(r[0], int(r[1]), float(r[2])) for r in rows

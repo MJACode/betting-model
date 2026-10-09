@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, count each fight once: two UFC fights bet twice by `ufc_total_rounds` under two game ids each; the extra copies marked DUPLICATE (results untouched) and every record surface counts one bet per event; the published record held none of them (monitor dashboard 14 settled 9-5 to 12 settled 7-5); `one_pick_per_event` health check; UFC duplicate game rows logged as a follow-up |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, the line-movement card shows the line from the pick to the start (it read the oldest 50 snapshots); prop stamps parsed on the phone; the player page fixed by the same read. Review fixes: the price at the pick kept when the window is cut, "At pick" only on the locked number, no grading after the start, "No new price" with its date, only live picks lose the card, dated row times, signed spreads; stale NCAAF scoring logged |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Anytime TD lists everyone with a line (69 priced with no 2026 game on 10-11 NFL); Stats ruler typed line |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Teams board gets a "Playing today" filter; filtered rows keep league rank |

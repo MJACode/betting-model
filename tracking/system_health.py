@@ -1417,6 +1417,32 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("one_row_per_pick", ERROR, "CRIT", f"query failed: {exc}")
 
+        # ── One bet per real event ───────────────────────────────────────────
+        # The same bet written twice under two game ids for ONE event: UFC's
+        # swapped fighter order, an ET and a UTC date. Each copy settles, so
+        # the record counts the event twice (ufc_total_rounds, 2026-06-20 and
+        # 07-18/19). mike, 2026-10-09: "Count each fight once." The fix for a
+        # pair this finds is a guarded migration marking the extra copy
+        # (config.DUPLICATE_STATUS); nothing here writes. All-time, because the
+        # marker is the only thing that keeps a pair out of every surface.
+        # WARN: the miscount is one bet, and a person decides the marking.
+        try:
+            from tracking.record_duplicates import describe, find_duplicate_pairs
+            pairs = find_duplicate_pairs(conn)
+            if pairs:
+                r.add("one_pick_per_event", STALE, "WARN",
+                      f"{len(pairs)} bet(s) settled twice under two game ids "
+                      f"for one event, so the record counts them twice; mark "
+                      f"the extra copy with a guarded migration "
+                      f"(record_counts_each_event_once_2026_10_09.sql is the "
+                      f"pattern): {describe(pairs)}")
+            else:
+                r.add("one_pick_per_event", OK, "WARN",
+                      "no settled bet is counted twice under two game ids")
+        except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
+            r.add("one_pick_per_event", ERROR, "WARN", f"query failed: {exc}")
+
         # ── One games row per NCAAF matchup ──────────────────────────────────
         # NCAAF game_ids are built from RESOLVED school names, and two feeds
         # build them: CFBD writes its canonical school, the odds ingestor writes

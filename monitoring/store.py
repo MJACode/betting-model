@@ -523,8 +523,17 @@ def model_performance(conn) -> list[dict]:
     a different price and CLAUDE.md section 6 keeps the two apart. (Today no
     model reaching the second arm has picks of both kinds; if one ever does, its
     row would blend them and this is where to split it.)
+
+    ONE EVENT IS ONE BET (mike, 2026-10-09, "Count each fight once"). The picks
+    arm drops the second copy of a bet a model wrote under two game ids for one
+    event (config.DUPLICATE_STATUS). ufc_total_rounds counted two fights twice:
+    measured read-only 2026-10-09, 14 settled 9-5 -1.09u (8 priced) reads 12
+    settled 7-5 -1.86u (7 priced) once each fight counts once. The matview arm
+    needs no clause: it grades MLB and WNBA from box scores, and the one pair
+    ever written there (MLB 04-15/04-16) is VOID.
     """
-    sql = """
+    from config import duplicate_copy_exclusion_sql
+    sql = f"""
         WITH agg AS (
             SELECT model_id, sport,
                    COUNT(*)                                   AS settled,
@@ -556,7 +565,7 @@ def model_performance(conn) -> list[dict]:
             FROM picks p
             WHERE p.signal_type = 'BET' AND p.result IN ('WIN', 'LOSS', 'PUSH')
               AND NOT EXISTS (SELECT 1 FROM mv_scored_pick_outcomes m
-                               WHERE m.model_id = p.model_id)
+                               WHERE m.model_id = p.model_id){duplicate_copy_exclusion_sql("p")}
             GROUP BY p.model_id, p.sport
         )
         SELECT t.model_id,

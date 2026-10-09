@@ -1,0 +1,353 @@
+"""One real event is one bet in the record, however many game ids it was bet under.
+
+mike, 2026-10-09: "Count each fight once." Two UFC fights were each in the
+settled record twice: `ufc_total_rounds` scored both games rows of one fight
+(fighters swapped; an Eastern and a UTC date) and both copies settled WIN.
+
+    kept 332605  UFC_2026-06-20_kevin-borjas_andre-lima          mark 332615
+    kept 524487  UFC_2026-07-18_kamaru-usman_dricus-du-plessis   mark 530849
+
+The extra copy is MARKED (condition_status = config.DUPLICATE_STATUS), never
+re-graded, and every record surface skips the marker: the two published views,
+the Discord recap, model_quality, the 250-bet review, the monitor dashboard,
+and the app's record filter and player record. These tests pin each surface,
+the marking migration, the view patch, and the rule for which copy stays.
+"""
+from __future__ import annotations
+
+import inspect
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+import config
+from tracking import record_duplicates as rd
+
+ROOT = Path(__file__).resolve().parents[1]
+MIG_DIR = ROOT / "data" / "migrations"
+MARK = MIG_DIR / "record_counts_each_event_once_2026_10_09.sql"
+VIEWS = MIG_DIR / "record_views_count_each_event_once_2026_10_09.sql"
+LIB = ROOT / "mobile" / "src" / "lib"
+
+CLAUSE = "condition_status IS DISTINCT FROM 'DUPLICATE'"
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _code(sql: str) -> str:
+    """SQL minus comment lines, so a comment cannot satisfy a test."""
+    return "\n".join(l for l in sql.splitlines() if not l.lstrip().startswith("--"))
+
+
+# ── the shared predicate ──────────────────────────────────────────────────────
+
+def test_the_marker_is_one_constant_and_one_predicate():
+    assert config.DUPLICATE_STATUS == "DUPLICATE"
+    sql = config.duplicate_copy_exclusion_sql("p")
+    assert sql.lstrip().startswith("AND")
+    assert f"p.{CLAUSE}" in sql
+
+
+def test_the_predicate_keeps_rows_with_no_marker():
+    """`<>` would drop every NULL condition_status, i.e. almost every pick."""
+    sql = config.duplicate_copy_exclusion_sql("x")
+    assert "IS DISTINCT FROM" in sql and "<>" not in sql
+    assert "x.condition_status" in sql
+
+
+# ── every server-side record surface ──────────────────────────────────────────
+
+def test_the_discord_recap_counts_each_event_once():
+    from tracking.discord_notifier import _SETTLED_SQL
+    assert config.duplicate_copy_exclusion_sql("p") in _SETTLED_SQL
+
+
+def test_model_quality_counts_each_event_once():
+    from tracking import model_quality
+    src = inspect.getsource(model_quality.run_model_quality)
+    line = next(l for l in src.splitlines() if l.strip().startswith("excl = "))
+    assert 'duplicate_copy_exclusion_sql("p")' in line
+    assert 'record_exclusion_sql("p")' in line
+
+
+class _CaptureConn:
+    def __init__(self, rows=()):
+        self.rows = list(rows)
+        self.calls: list[tuple[str, tuple]] = []
+
+    def execute(self, sql, params=()):
+        self.calls.append((sql, tuple(params or ())))
+        rows = self.rows
+
+        class _C:
+            def fetchall(self_inner):
+                return rows
+
+            def fetchone(self_inner):
+                return rows[0] if rows else None
+        return _C()
+
+
+def test_the_250_bet_review_counts_each_event_once():
+    from tracking import threshold_review
+    conn = _CaptureConn()
+    threshold_review._slate(conn)
+    sql, params = conn.calls[0]
+    assert "condition_status IS DISTINCT FROM %s" in _code(sql)
+    assert config.DUPLICATE_STATUS in params
+
+
+def test_the_monitor_dashboard_picks_arm_counts_each_event_once():
+    """The arm that grades UFC from picks. It showed ufc_total_rounds at
+    14 settled 9-5 on 2026-10-09; once each fight counts once, 12 settled 7-5."""
+    from monitoring import store
+    from tests.test_monitoring import FakeConn
+    conn = FakeConn([])
+    store.model_performance(conn)
+    sql = conn.queries[0]
+    arm = sql[sql.index("FROM picks p"):]
+    arm = arm[:arm.index("GROUP BY")]
+    assert config.duplicate_copy_exclusion_sql("p").strip() in arm
+
+
+# ── the published views ───────────────────────────────────────────────────────
+
+def test_both_migrations_are_registered_after_every_owner_of_the_views():
+    """An unregistered migration never runs; one ordered before an owner of
+    the views is overwritten by it on the next pass."""
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    assert MARK.exists() and VIEWS.exists()
+    strike = ACTIVE_MIGRATIONS.index("record_strikes_nfl_live_prop_2026_10_04.sql")
+    assert ACTIVE_MIGRATIONS.index(MARK.name) > strike
+    assert ACTIVE_MIGRATIONS.index(VIEWS.name) > strike
+
+
+def test_the_view_patch_adds_the_clause_to_both_published_views():
+    code = _code(_read(VIEWS))
+    assert "ARRAY['v_public_track_record', 'v_public_track_record_daily']" in code
+    # The clause it splices in front of GROUP BY ('' is an escaped quote).
+    assert "AND condition_status IS DISTINCT FROM ''DUPLICATE''::text" in code
+    assert "GROUP BY" in code
+
+
+def test_the_view_patch_is_idempotent_and_keeps_the_grants():
+    code = _code(_read(VIEWS))
+    assert "IF position('DUPLICATE' in d) > 0 THEN" in code
+    assert "CONTINUE" in code
+    assert "security_invoker = on" in code
+    assert "GRANT SELECT ON public.%I TO anon, authenticated" in code
+    assert code.count("DO $mig$") == 1, "view migrations must be ONE statement"
+
+
+def test_the_view_patch_does_not_touch_the_sweep_views():
+    """The sweep universe re-cuts by design (CLAUDE.md 7) and is not a record."""
+    code = _code(_read(VIEWS))
+    for view in ("mv_scored_pick_outcomes", "v_model_full_outcome_record",
+                 "v_model_full_outcome_picks"):
+        assert view not in code
+
+
+# ── the marking migration ─────────────────────────────────────────────────────
+
+def _updates(sql: str) -> list[str]:
+    code = _code(sql)
+    return re.findall(r"UPDATE public\.picks x(.*?);\s*\n\s*GET DIAGNOSTICS",
+                      code, re.S)
+
+
+def test_the_migration_marks_exactly_the_two_extra_copies():
+    updates = _updates(_read(MARK))
+    assert len(updates) == 2
+    marked = {int(m) for u in updates for m in re.findall(r"x\.pick_id = (\d+)", u)}
+    assert marked == {332615, 530849}
+
+
+def test_the_migration_never_touches_a_result_a_price_or_a_time():
+    """mike: count each fight once, leaving the picks themselves untouched."""
+    for u in _updates(_read(MARK)):
+        set_clause = u[u.index("SET"):u.index("WHERE")]
+        assigned = set(re.findall(r"(\w+)\s*=", set_clause))
+        assert assigned == {"condition_status", "condition_note"}, assigned
+        assert "'DUPLICATE'" in set_clause
+        assert "mike, 2026-10-09" in set_clause
+
+
+def test_the_migration_is_guarded_so_a_second_pass_is_a_no_op():
+    for u in _updates(_read(MARK)):
+        where = u[u.index("WHERE"):]
+        assert "x.condition_status IS NULL" in where
+        assert "x.result IN ('WIN', 'LOSS', 'PUSH')" in where
+        assert "x.signal_type = 'BET'" in where
+        assert "x.model_id = 'ufc_total_rounds'" in where
+        # The kept copy must still be there, settled and unmarked.
+        assert "EXISTS (SELECT 1 FROM public.picks k" in where
+        assert "k.condition_status IS NULL" in where
+
+
+# ── which copy stays ──────────────────────────────────────────────────────────
+
+# The four rows as read from production, 2026-10-09 (read-only SQL).
+JUNE = (
+    {"pick_id": 332605, "created_at": "2026-06-20 22:38:42.060968+00", "posted": False},
+    {"pick_id": 332615, "created_at": "2026-06-20 22:38:42.060968+00", "posted": False},
+)
+JULY = (
+    {"pick_id": 524487, "created_at": "2026-07-12 20:49:05.91343+00", "posted": False},
+    {"pick_id": 530849, "created_at": "2026-07-19 03:50:46.752974+00", "posted": False},
+)
+
+
+@pytest.mark.parametrize("pair,kept_id,extra_id", [(JUNE, 332605, 332615),
+                                                   (JULY, 524487, 530849)])
+def test_the_rule_keeps_the_copies_the_migration_keeps(pair, kept_id, extra_id):
+    for a, b in (pair, pair[::-1]):
+        kept, extra = rd.choose_kept(a, b)
+        assert (kept["pick_id"], extra["pick_id"]) == (kept_id, extra_id)
+    code = _code(_read(MARK))
+    assert f"x.pick_id = {extra_id}" in code and f"k.pick_id = {kept_id}" in code
+
+
+def test_a_posted_copy_stays_even_when_it_was_written_later():
+    early = {"pick_id": 1, "created_at": "2026-09-01 10:00:00+00", "posted": False}
+    late = {"pick_id": 2, "created_at": "2026-09-01 12:00:00+00", "posted": True}
+    assert rd.choose_kept(early, late)[0]["pick_id"] == 2
+
+
+def test_the_earlier_copy_stays_and_compares_instants_not_text():
+    """'+00' and '-04:00' stamps compare as instants: 09:00-04:00 is 13:00Z."""
+    utc = {"pick_id": 1, "created_at": "2026-09-01 12:30:00+00", "posted": False}
+    et = {"pick_id": 2, "created_at": "2026-09-01T09:00:00-04:00", "posted": False}
+    assert rd.choose_kept(et, utc)[0]["pick_id"] == 1
+
+
+def test_an_unreadable_stamp_never_wins():
+    bad = {"pick_id": 1, "created_at": "not a time", "posted": False}
+    ok = {"pick_id": 2, "created_at": "2026-09-01 12:00:00+00", "posted": False}
+    assert rd.choose_kept(bad, ok)[0]["pick_id"] == 2
+
+
+def test_the_finder_reports_which_copy_to_mark():
+    row = ("UFC", "ufc_total_rounds",
+           332605, "UFC_2026-06-20_kevin-borjas_andre-lima",
+           "2026-06-20 22:38:42.060968+00", False,
+           332615, "UFC_2026-06-20_andre-lima_kevin-borjas",
+           "2026-06-20 22:38:42.060968+00", False)
+    pairs = rd.find_duplicate_pairs(_CaptureConn([row]))
+    assert [(p["kept"]["pick_id"], p["extra"]["pick_id"]) for p in pairs] == [(332605, 332615)]
+    assert rd.describe(pairs) == "ufc_total_rounds 332615 (keep 332605)"
+
+
+# ── when two rows are one event ───────────────────────────────────────────────
+
+def test_the_finder_skips_copies_already_marked():
+    assert config.duplicate_copy_exclusion_sql("p") in rd.DUPLICATE_PAIRS_SQL
+
+
+def test_the_finder_matches_the_same_pick_on_the_same_two_sides_either_way_round():
+    sql = rd.DUPLICATE_PAIRS_SQL
+    assert "LEAST(g.home_team, g.away_team)" in sql
+    assert "GREATEST(g.home_team, g.away_team)" in sql
+    assert "a.model_id = b.model_id" in sql
+    from tracking.publish_keys import KEY_PARTS
+    for part in KEY_PARTS:      # one player's prop is not another's
+        assert f"COALESCE(a.{part}, '') = COALESCE(b.{part}, '')" in sql
+    assert "ABS(a.game_date::date - b.game_date::date) <= 1" in sql
+
+
+def test_a_series_sport_needs_the_same_start_and_no_conflicting_final():
+    """MLB plays the same opponent on consecutive days and in doubleheaders, so
+    the date alone would call two real games one event."""
+    assert rd.NO_SERIES_SPORTS == ("UFC", "NCAAF", "NFL")
+    sql = rd.DUPLICATE_PAIRS_SQL
+    assert "a.sport IN ('UFC', 'NCAAF', 'NFL')" in sql
+    assert f"< {rd.SERIES_WINDOW_HOURS} * 3600" in sql
+    assert rd.SERIES_WINDOW_HOURS < 16, "an MLB series game can start 16.3h later"
+    assert "a.lo <> b.lo OR a.hi <> b.hi" in sql
+
+
+def test_an_in_play_pick_must_also_be_on_the_same_side():
+    sql = rd.DUPLICATE_PAIRS_SQL
+    assert "WHEN 'home' THEN g.home_team" in sql and "WHEN 'away' THEN g.away_team" in sql
+    assert "(a.is_live IS NOT TRUE OR a.side = b.side)" in sql
+
+
+def test_the_health_check_reports_and_never_writes():
+    src = _read(ROOT / "tracking" / "system_health.py")
+    block = src[src.index("# ── One bet per real event"):src.index("# ── One games row per NCAAF")]
+    assert '"one_pick_per_event"' in block
+    assert "find_duplicate_pairs(conn)" in block
+    assert "UPDATE" not in block and "INSERT" not in block
+
+
+# ── the app ───────────────────────────────────────────────────────────────────
+
+def test_the_app_marker_is_generated_from_config():
+    gen = _read(LIB / "thresholds.generated.ts")
+    assert f"export const DUPLICATE_STATUS = '{config.DUPLICATE_STATUS}';" in gen
+
+
+def test_the_app_record_filter_skips_the_extra_copy():
+    src = _read(LIB / "thresholds.ts")
+    body = src[src.index("export function passesRecordFilter"):]
+    body = body[:body.index("\n}")]
+    assert "if (isDuplicateCopy(p)) return false;" in body
+    helper = src[src.index("export function isDuplicateCopy"):]
+    assert "p.condition_status === DUPLICATE_STATUS" in helper[:helper.index("\n}")]
+
+
+def test_the_player_record_skips_the_extra_copy():
+    """playerPickRecord re-implements the record filter inline."""
+    src = _read(LIB / "playerDetail.ts")
+    body = src[src.index("export function playerPickRecord"):]
+    assert "if (isDuplicateCopy(p)) continue;" in body[:body.index("\n}")]
+
+
+def _node_strips_types() -> bool:
+    if shutil.which("node") is None:
+        return False
+    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
+    m = re.match(r"v(\d+)\.(\d+)", out)
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_the_app_record_filter_behaves(tmp_path: Path):
+    """Run the real passesRecordFilter under node's type stripping."""
+    for name in ("thresholds.ts", "thresholds.generated.ts", "decisionPrice.ts",
+                 "discordPublish.ts", "format.ts"):
+        src = re.sub(r"from '\./([\w.]+)';", r"from './\1.ts';", _read(LIB / name))
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = """
+import { passesRecordFilter, isDuplicateCopy } from './thresholds.ts';
+const bet = { model_id: 'ufc_total_rounds', signal_type: 'BET', is_live: false,
+              downgrade_reason: null, condition_status: null };
+const out = {
+  plain: passesRecordFilter(bet),
+  duplicate: passesRecordFilter({ ...bet, condition_status: 'DUPLICATE' }),
+  voided: passesRecordFilter({ ...bet, condition_status: 'VOID' }),
+  ncaafGone: passesRecordFilter({ ...bet, condition_status: 'GONE' }),
+  helper: isDuplicateCopy({ condition_status: 'DUPLICATE' }),
+};
+console.log(JSON.stringify(out));
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    got = proc.stdout.strip().splitlines()[-1]
+    assert got == ('{"plain":true,"duplicate":false,"voided":false,'
+                   '"ncaafGone":true,"helper":true}'), got
+
+
+# ── the rule is where a session doing SQL will see it ─────────────────────────
+
+def test_the_rule_is_in_claude_md():
+    text = _read(ROOT / "CLAUDE.md")
+    start = text.index("A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS")
+    block = text[start:start + 2000]
+    assert "condition_status='DUPLICATE'" in block

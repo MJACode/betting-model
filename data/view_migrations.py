@@ -260,6 +260,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # (config.RECORD_EXCLUSIONS). Patches the LIVE view text with one clause,
     # so it must run after every migration that owns the two record views.
     "record_strikes_nfl_live_prop_2026_10_04.sql",
+    # 2026-10-09 (mike, "Count each fight once"): two UFC fights were bet
+    # twice by ufc_total_rounds under two game ids each. The extra copies are
+    # marked condition_status='DUPLICATE' (result untouched; no-ops after
+    # once), and the two record views stop counting a marked copy. The view
+    # patch reads the LIVE view text, so it runs after every owner above.
+    "record_counts_each_event_once_2026_10_09.sql",
+    "record_views_count_each_event_once_2026_10_09.sql",
 ]
 
 

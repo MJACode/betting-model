@@ -104,6 +104,12 @@ def assert_retrain_allowed(sport: str, *, what: str = "retrain") -> None:
 #      its reason and its requester in `condition_note`.
 #   2. An entry HERE, for a whole model or a model-before-a-date.
 #
+# NOT a third way out: the SECOND COPY of one bet. When a model wrote the same
+# bet on the same real event under two game ids (UFC fighters swapped, an ET
+# and a UTC date), the event stays in the record ONCE. The extra copy carries
+# condition_status = DUPLICATE_STATUS below; its result is never touched.
+# mike, 2026-10-09: "Count each fight once."
+#
 # ADD TO THIS ONLY ON AN EXPLICIT INSTRUCTION, AND NAME WHO GAVE IT. An entry
 # with no attribution puts a decision in somebody's mouth, which is how the
 # 2026-09-11 NCAAF pause came to be stamped `Updated-By: mike` (docs/rules_evidence.md).
@@ -184,6 +190,33 @@ def paused_row_exclusion_sql(alias: str = "p") -> str:
     `NULL <> 'model paused'` is NULL, which would drop every ordinary pick.
     """
     return f"\n          AND {alias}.downgrade_reason IS DISTINCT FROM '{PAUSED_NOTE}'"
+
+
+# ── One event, one bet: the second copy of a bet under another game id ───────
+# mike, 2026-10-09: "Count each fight once." Two games rows can describe one
+# real event: UFC writes a fight under both fighter orders, NCAAF and UFC under
+# an ET and a UTC date. When a model bet BOTH rows, the record counted one bet
+# twice (ufc_total_rounds, 2026-06-20 and 2026-07-18/19: two fights, four
+# WINs). The extra copy is marked on its row, never re-graded: result, price,
+# line and created_at stay as written, and so does the copy that is kept.
+#
+# The marker is set only by a guarded migration naming the pick ids
+# (data/migrations/record_counts_each_event_once_2026_10_09.sql is the first);
+# tracking/record_duplicates.py finds candidates and says which copy stays.
+# Every record query ANDs duplicate_copy_exclusion_sql() in, beside the paused
+# marker; the app mirrors it in passesRecordFilter (DUPLICATE_STATUS is
+# generated into thresholds.generated.ts).
+DUPLICATE_STATUS = "DUPLICATE"
+
+
+def duplicate_copy_exclusion_sql(alias: str = "p") -> str:
+    """`AND <alias>.condition_status IS DISTINCT FROM 'DUPLICATE'`.
+
+    IS DISTINCT FROM for the same reason as the paused marker:
+    condition_status is NULL on almost every row.
+    """
+    return (f"\n          AND {alias}.condition_status "
+            f"IS DISTINCT FROM '{DUPLICATE_STATUS}'")
 
 # ── Pick locking ──────────────────────────────────────────────────────────────
 # When True (default), game-level picks (ML / runline / O-U / F5 / 3-way /
