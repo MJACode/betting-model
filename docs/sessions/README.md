@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, the line-movement card shows the line from the pick to the start (it read the oldest 50 snapshots); prop stamps parsed on the phone; the player page fixed by the same read. Review fixes: the price at the pick kept when the window is cut, "At pick" only on the locked number, no grading after the start, "No new price" with its date, only live picks lose the card, dated row times, signed spreads; stale NCAAF scoring logged |
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB, WNBA, NBA and college football prop odds are stamped in UTC like NFL and NHL ("+00:00", never "Z"; the slate date stays Eastern; old rows not rewritten); no reader breaks, switch-day order checked on the production database |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, origin/master merged into the touch-set branch; session-log hunks kept both sides |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB rule cards (and the WNBA prop card) skip a game that has started; the six 2026-09-16 late bets still count in the published record and Discord recaps (removal proposed, mike to decide); Pinnacle-withdrawn guard not needed for MLB; `first_pitch_at` not filled since 2026-08-31 |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, the app's CLV card shows the price taken at the book it was taken (`clvBetQuote` mirrors the server, pinned by a Node parity test) |
