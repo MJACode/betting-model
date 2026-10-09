@@ -73,9 +73,43 @@ def test_the_cron_is_about_to_run_the_same_pass():
     assert d.action == "skip" and "8 minute(s) away" in d.reason
 
 
-def test_an_evening_pass_is_never_replaced():
-    d = _decide([_run(kind="evening", started=NOW - timedelta(minutes=3))])
-    assert d.action == "skip" and "ten minutes" in d.reason
+def test_an_evening_pass_a_deploy_killed_is_replaced_before_the_next_tick():
+    """2026-10-09 23:11:47 UTC: the worker had just booted after #910, the
+    23:10 pass was already dead, and the next tick was 23:20. Waiting was the
+    gap with no health-check."""
+    now = datetime(2026, 10, 9, 23, 11, 47, tzinfo=UTC)
+    started = now - timedelta(minutes=11, seconds=20)  # 23:00:27 UTC
+    d = _decide([_run(kind="evening", started=started)], now=now)
+    assert d.action == "run", d.reason
+    assert d.mode == "evening"
+    assert "23:00 UTC evening pass was interrupted" in d.reason
+
+
+def test_an_evening_tick_under_three_minutes_away_is_left_to_the_cron():
+    now = datetime(2026, 10, 9, 23, 18, tzinfo=UTC)  # 19:18 ET, tick at 19:20
+    d = _decide([_run(kind="evening", started=now - timedelta(minutes=8))], now=now)
+    assert d.action == "skip", d.reason
+    assert "2 minute(s) away" in d.reason
+
+
+def test_an_evening_pass_killed_after_the_window_is_replaced_before_the_hourly():
+    """23:50 ET is the last evening tick. A deploy that kills it does not
+    get another evening fire until 18:00 ET; the overnight :17 is the next
+    run of this chain, and it is far enough to replace now."""
+    now = datetime(2026, 10, 10, 4, 5, tzinfo=UTC)  # 00:05 ET
+    started = datetime(2026, 10, 10, 3, 50, tzinfo=UTC)  # 23:50 ET
+    d = _decide([_run(kind="evening", started=started)], now=now)
+    assert d.action == "run", d.reason
+    assert d.mode == "evening"
+
+
+def test_an_evening_restart_loop_does_not_buy_odds_on_every_boot():
+    now = datetime(2026, 10, 9, 23, 11, tzinfo=UTC)
+    runs = [_run(kind="evening", started=now - timedelta(minutes=m))
+            for m in (40, 25, 8)]
+    d = _decide(runs, now=now)
+    assert d.action == "skip" and "not buying odds again" in d.reason
+    assert _decide(runs[1:], now=now).action == "run"
 
 
 def test_a_restart_loop_does_not_buy_odds_on_every_boot():
@@ -118,7 +152,8 @@ def test_the_scheduler_runs_one_pass_at_a_time_and_asks_at_boot():
     main = src.split("def main(")[1]
     assert "catch_up_refresh_pass" in main and '"date"' in main
     catch_up = src.split("def catch_up_refresh_pass(")[1].split("\ndef ")[0]
-    assert "decide_refresh_retry" in catch_up and "run_refresh_pass()" in catch_up
+    assert "decide_refresh_retry" in catch_up
+    assert "run_refresh_pass(mode=decision.mode)" in catch_up
 
 
 # ── a step that swallowed its own failures ───────────────────────────────────

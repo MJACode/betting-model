@@ -1241,12 +1241,16 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
 
 
 def catch_up_refresh_pass(*, source: str = "boot") -> dict:
-    """Re-run the :17 refresh pass a deploy killed, rather than lose the hour.
+    """Re-run the refresh pass a deploy killed, rather than wait for the cron.
 
     2026-09-20: every merge to master replaced the worker mid-pass, no pass
     completed between 16:32 and 19:31 UTC, and MLB props had no rows until
-    19:23 on a slate that started at 17:11. The decision, its caps and what a
-    catch-up costs in Odds API credits are in tracking.refresh_retry.
+    19:23 on a slate that started at 17:11. 2026-10-09: the same kill on the
+    evening pass, three merges in one hour, and health-check did not run
+    again until a later tick happened to finish. The decision, its caps and
+    what a catch-up costs in Odds API credits are in tracking.refresh_retry.
+    An evening replacement uses that mode so it does not add the ESPN results
+    pull the 10-minute pass leaves to the hourly.
 
     Best-effort, like the daily catch-up: raising here must not stop the
     scheduler.
@@ -1277,8 +1281,8 @@ def catch_up_refresh_pass(*, source: str = "boot") -> dict:
             log.info("refresh catch-up [%s]: skip — %s", source, decision.reason)
             return {"status": "skipped", "reason": decision.reason}
         log.info("refresh catch-up [%s]: run — %s", source, decision.reason)
-        run_refresh_pass()
-        return {"status": "run", "reason": decision.reason}
+        run_refresh_pass(mode=decision.mode)
+        return {"status": "run", "reason": decision.reason, "mode": decision.mode}
     except Exception:  # noqa: BLE001 — never block the scheduler
         log.exception("refresh catch-up [%s] failed (scheduler continues)", source)
         return {"status": "error", "reason": "catch-up raised"}
