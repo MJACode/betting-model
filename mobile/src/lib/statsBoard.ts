@@ -395,6 +395,27 @@ export interface TonightSlate {
 
 export const EMPTY_SLATE: TonightSlate = { date: '', keys: new Set(), isToday: false };
 
+/** '2026-08-30' → 'Sun 8/30' (for the next-slate label). */
+function shortSlateDate(date: string): string {
+  if (!date) return '';
+  const d = new Date(`${date}T12:00:00Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'numeric',
+    day: 'numeric',
+  }).format(d);
+}
+
+/**
+ * The slate cut's name — ONE expression for the Players board's Availability
+ * switch and the Teams board's chip, so a sport tab never has two names for
+ * the same cut (UX review, 2026-10-09).
+ */
+export function slateLabelFor(slate: { date: string; isToday: boolean }): string {
+  return slate.isToday ? 'Playing today' : `Next slate ${shortSlateDate(slate.date)}`;
+}
+
 /**
  * Reduce upcoming games to the slate to filter on: today's games when there
  * are any, otherwise the next scheduled day. Sports that don't play daily
