@@ -321,7 +321,9 @@ check('StatsScreen commits the touch set only through touchSetFromResponse',
   && /shouldFetchTouchSet\(/.test(statsScreen)
   && /touchBoardView\(/.test(statsScreen)
   && /touchSetErrorLine\(/.test(statsScreen)
-  && /touchView !== 'list' \? EMPTY_ROWS : hitRatePlayers/.test(statsScreen));
+  && /touchView !== 'list' \? EMPTY_ROWS : hitRatePlayers/.test(statsScreen)
+  && /accessibilityRole="alert"/.test(statsScreen)
+  && /emptyLabel=\{touchView === 'error' \? 'Couldn’t load this list\. Pull down to retry\.' : undefined\}/.test(statsScreen));
 
 // ── The row subline: when the game starts, and against whom ────────────────
 // Matt, 2026-09-05: "add the time of the game and who they are playing under

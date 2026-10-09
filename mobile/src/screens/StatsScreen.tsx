@@ -2416,7 +2416,7 @@ export function StatsScreen() {
           }}
           ListEmptyComponent={
             touchView === 'error' && !error ? (
-              <View style={styles.errorBanner}>
+              <View style={styles.errorBanner} accessibilityRole="alert" accessibilityLiveRegion="polite">
                 <Text style={styles.errorText}>{touchSetErrorLine(touchFailure?.cause ?? '')}</Text>
               </View>
             ) : loading || (timeWindow === 'h2h' && slateChecking) || (touchView === 'loading' && !error) ? (
@@ -2519,6 +2519,7 @@ export function StatsScreen() {
         title="Filter players"
         resultCount={effectiveMode === 'hitRate' ? hitData.length : ranked.length}
         itemNoun="player"
+        emptyLabel={touchView === 'error' ? 'Couldn’t load this list. Pull down to retry.' : undefined}
         // The Availability toggle re-READS the board (the server is narrowed to
         // the slate's teams), so the count on the footer is the answer to the
         // previous question until it lands. It is the one control on this sheet
