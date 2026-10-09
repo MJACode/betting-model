@@ -303,6 +303,98 @@ eq(priceCheckForItem({ pick, latestOdds: null, bookRows: [], game }, null, NOW).
     assert proc.returncode == 0, proc.stderr
 
 
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_a_stale_card_says_why_and_speaks_the_locked_price(tmp_path):
+    """Second review (2026-10-09). A stale card said "Price check" and spoke
+    "this price looks off", when DraftKings had simply not updated the price
+    since September; "Now —" never said why; and VoiceOver heard "Now
+    unavailable DK" with no price at all while the eye saw "Locked -112". The
+    wording now comes from the check's reasons, the stale result carries the
+    deciding book's last update time, and the label speaks the lock."""
+    files = ["markets.ts", "format.ts", "thresholds.ts", "thresholds.generated.ts",
+             "decisionPrice.ts", "discordPublish.ts", "clvBet.ts", "priceCheck.ts",
+             "pickPriceCheck.ts", "heroPriceText.ts"]
+    for name in files:
+        src = _read(LIB / name)
+        src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = PRELUDE + """
+import { heroAmericanForPick } from './markets.ts';
+import { heroPriceSpeech, lockedCaptionText, priceCheckChipText, priceCheckSpeech } from './heroPriceText.ts';
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const NOW = Date.parse('2026-10-09T16:30:00Z');
+const pre = { started: false, now: NOW };
+const pick = {
+  pick_id: 2558736, game_id: 'NCAAF_2099-11-07_x_y', model_id: 'ncaaf_over_under', sport: 'NCAAF',
+  game_date: '2099-11-07', game_time: '2099-11-07T20:00:00Z', pick_side: 'under', pick_label: 'Under 54.5',
+  model_probability: 0.56, dk_implied_prob: 0.528, edge: 0.03, dk_odds: -112, scored_line: 54.5,
+  signal_type: 'BET', is_live: false, dk_bet_link: 'dk://under', decision_odds: -112, decision_edge: 0.03,
+  decision_book: 'draftkings', line_book: null,
+};
+const STALE = '2026-09-05T23:59:48Z';
+const latest = (snap) => ({ game_id: pick.game_id, game_date: '2099-11-07', market: 'totals', home_price: null,
+  away_price: null, spread_home: null, total_line: 54.5, over_price: -108, under_price: -112, snapshot_at: snap });
+
+// The stale result carries the deciding book's newest stamp, from either view.
+const hero = heroAmericanForPick(pick, latest(STALE), [], pre);
+eq([hero?.stale, hero?.staleSince], [true, STALE], 'stale carries the stamp');
+const newerRow = [{ bookmaker: 'draftkings', under_price: -112, total_line: 54.5, snapshot_at: '2026-09-06T02:00:00Z' }];
+eq(heroAmericanForPick(pick, latest(STALE), newerRow, pre)?.staleSince, '2026-09-06T02:00:00Z', 'the newer of the two views');
+eq(heroAmericanForPick(pick, latest('2026-10-09T16:20:00Z'), [], pre)?.staleSince, undefined, 'a current price has no stamp');
+
+// The chip and the spoken reason follow the reasons.
+const staleOnly = { flagged: true, reasons: ['stale'] };
+eq(priceCheckChipText(staleOnly), 'Old price', 'old price only');
+eq(priceCheckChipText({ flagged: true, reasons: ['edge', 'stale'] }), 'Price check', 'edge and old');
+eq(priceCheckChipText({ flagged: true, reasons: ['moved'] }), 'Price check', 'moved');
+const why = priceCheckSpeech(staleOnly, hero);
+ok(why.startsWith('DraftKings has not updated this price since ') && why.includes('9/5') && why.includes(' ET')
+   && why.endsWith(', so edge and EV are hidden') && !why.includes('looks off'), why);
+eq(priceCheckSpeech({ flagged: true, reasons: ['edge'] }, hero),
+   'Price check: this price looks off, so edge and EV are hidden', 'edge keeps the looks-off sentence');
+
+// The spoken price: no "unavailable DK", and the lock is read out.
+eq(heroPriceSpeech(hero, 'Now'), 'No current DraftKings price. Locked -112', 'stale label speaks the lock');
+const moved = heroAmericanForPick({ ...pick, decision_odds: -110, dk_odds: -110 }, latest('2026-10-09T16:20:00Z'), [], pre);
+eq(heroPriceSpeech(moved, 'Now'), 'Now -112 DraftKings. Locked -110', 'moved: Now and the lock');
+const unmoved = heroAmericanForPick(pick, latest('2026-10-09T16:20:00Z'), [], pre);
+eq(heroPriceSpeech(unmoved, 'Now'), '-112 DraftKings', 'unmoved: the decision price');
+const live = heroAmericanForPick({ ...pick, is_live: true }, null, []);
+eq(heroPriceSpeech(live, 'Live price'), 'Live price unavailable DraftKings. Locked -112',
+   'a live price not loaded yet is not "no current price"');
+
+// The visible caption says when the book last priced it.
+const cap = lockedCaptionText(hero);
+ok(cap.startsWith('Locked -112 · DK last priced ') && cap.includes('9/5') && cap.endsWith(' ET'), cap);
+eq(lockedCaptionText(moved), 'Locked -110', 'a moved price keeps the plain caption');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_a_stale_card_offers_no_bet():
+    """Second review (2026-10-09): with "Now —" and no hand-off, the card
+    still offered "Add to betslip" (and the VoiceOver slip action), which
+    priced the leg at the September number with its full edge, and still
+    printed a stake. A leg already in the slip can still be taken out."""
+    card = _read(SRC / "components" / "PickCard.tsx")
+    slip = re.search(r"const canSlip =[^;]*;", card).group(0)
+    assert "(!heroPrice?.stale || Boolean(inSlip))" in slip and slip.endswith("&& cta.slip;")
+    assert re.search(r"const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview"
+                     r" \|\| paused \|\| heroPrice\?\.stale\s*\?\s*null", card)
+    # The words come from the reasons (lib/heroPriceText.ts).
+    assert "{priceCheckChipText(check)}" in card and ">Price check<" not in card
+    assert "flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`" in card
+    assert "heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null" in card
+    assert "{lockedCaptionText(heroPrice)}" in card
+    markets = _read(LIB / "markets.ts")
+    hero = markets[markets.index("export function heroAmericanForPick("):]
+    assert "staleSince: at" in hero[:2000]
+
+
 def test_the_card_applies_the_price_age_rule():
     """The static half, for runners without node."""
     markets = _read(LIB / "markets.ts")
@@ -354,7 +446,7 @@ def test_pick_card_wiring():
     assert "onPress" not in block and "Pressable" not in block
     assert re.search(r"startedText: \{[^}]*color: colors\.textSecondary", card)
     assert card.count("cta.priceTag") >= 2 and "kind === 'now' ? 'Now'" not in card
-    assert ">Price check<" in card and re.search(r"priceCheckChip: \{[^}]*colors\.medSoft", card)
+    assert "{priceCheckChipText(check)}" in card and re.search(r"priceCheckChip: \{[^}]*colors\.medSoft", card)
     assert "flagged ? '—' : formatPctSigned(decisionEdge(pick))" in card and "flagged ? 'EV —'" in card
     assert "const demoteEdge = pick.signal_type !== 'BET';" in card
     assert "kind === 'pre' && !flagged" in card

@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import { gameHasStarted, gameStartState } from '../src/lib/format';
 import { changesFooter, collapseLineHistory, recentChanges } from '../src/lib/lineHistory';
 import { bestHandoffForPick, heroAmericanForPick, MODEL_BOOK } from '../src/lib/markets';
+import { heroPriceSpeech, lockedCaptionText, priceCheckChipText, priceCheckSpeech } from '../src/lib/heroPriceText';
 import { gameStartedLine, pickCta, pickCtaFor, reasoningHeading } from '../src/lib/pickCta';
 import { priceCheckForItem } from '../src/lib/pickPriceCheck';
 import { sortPicks } from '../src/lib/pickSort';
@@ -202,6 +203,22 @@ check('501 cents IS flagged (−601 vs −100)', P(0.05, -601, -100));
 check('across even money: +450 vs −151 = 401, not flagged', !P(0.05, 450, -151));
 check('no current price → only the edge rule', !P(0.05, 3300, null) && P(0.3, 3300, null));
 check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locked: 3300, current: -110 }).reasons) === '["edge","moved"]');
+// Second review (2026-10-09): the words follow the reasons. An old price is
+// not "off", it is old, and the card says whose and since when.
+{
+  const stale = { flagged: true, reasons: ['stale' as const] };
+  check('chip: "Old price" when the only reason is an old price', priceCheckChipText(stale) === 'Old price');
+  check('chip: "Price check" for an implausible edge, also with an old price',
+    priceCheckChipText({ reasons: ['edge', 'stale'] }) === 'Price check' && priceCheckChipText({ reasons: ['moved'] }) === 'Price check');
+  const hero = { kind: 'now' as const, price: null, book: 'draftkings', line: null, link: null, lockedPrice: -112, showLockedCaption: true, stale: true, staleSince: '2026-09-05T23:59:48Z' };
+  const said = priceCheckSpeech(stale, hero);
+  check('spoken: "DraftKings has not updated this price since …", not "looks off"',
+    said.startsWith('DraftKings has not updated this price since ') && said.includes('9/5') && !said.includes('looks off'), said);
+  check('spoken: an implausible edge keeps "looks off"', priceCheckSpeech({ reasons: ['edge'] }, hero) === 'Price check: this price looks off, so edge and EV are hidden');
+  check('spoken price: "No current DraftKings price. Locked -112"', heroPriceSpeech(hero, 'Now') === 'No current DraftKings price. Locked -112', heroPriceSpeech(hero, 'Now'));
+  const cap = lockedCaptionText(hero);
+  check('caption: "Locked -112 · DK last priced <day, time ET>"', cap.startsWith('Locked -112 · DK last priced ') && cap.endsWith(' ET'), cap);
+}
 {
   const nyy = { pick: mkPick({ decision_odds: 3300, dk_odds: 3300, decision_edge: 0.548 }), latestOdds: latest({ over_price: -110 }), bookRows: [] };
   const fine = { pick: mkPick(), latestOdds: latest({ over_price: -115 }), bookRows: [] };
@@ -344,7 +361,13 @@ check('PickCard: the started line is role text, lock icon, not a Pressable',
   /accessibilityRole="text"/.test(started) && /name="lock-closed"/.test(started) && !/Pressable|onPress/.test(started));
 check('PickCard: started line is textSecondary', /startedText: \{[\s\S]*?color: colors\.textSecondary/.test(card));
 check('PickCard: the tag reads cta.priceTag (Now / Live price)', (card.match(/cta\.priceTag/g) ?? []).length >= 2 && !/kind === 'now' \? 'Now'/.test(card));
-check('PickCard: "Price check" chip on medSoft, medInk icon', />Price check</.test(card) && /priceCheckChip: \{[\s\S]*?colors\.medSoft/.test(card) && /alert-circle-outline"[\s\S]{0,80}colors\.medInk/.test(card));
+check('PickCard: "Price check" / "Old price" chip on medSoft, medInk icon', /\{priceCheckChipText\(check\)\}/.test(card) && /priceCheckChip: \{[\s\S]*?colors\.medSoft/.test(card) && /alert-circle-outline"[\s\S]{0,80}colors\.medInk/.test(card));
+check('PickCard: no slip offer and no stake on a stale price (a slip leg can still come out)',
+  /const canSlip =[^;]*\(!heroPrice\?\.stale \|\| Boolean\(inSlip\)\) && cta\.slip;/.test(card) &&
+  /const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview \|\| paused \|\| heroPrice\?\.stale/.test(card));
+check('PickCard: the label speaks the reason and the lock (heroPriceText)',
+  /flagged \? priceCheckSpeech\(check, heroPrice\) : `Edge \$\{edgeText\}`/.test(card) &&
+  /heroPrice \? heroPriceSpeech\(heroPrice, cta\.priceTag\) : null/.test(card) && /\{lockedCaptionText\(heroPrice\)\}/.test(card));
 check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(decisionEdge\(pick\)\)/.test(card) && /flagged \? 'EV —'/.test(card));
 check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEdge = pick\.signal_type !== 'BET';/.test(card) && /edgeSecondary: \{[\s\S]*?font\.size\.footnote[\s\S]*?colors\.textSecondary/.test(card));
 check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));

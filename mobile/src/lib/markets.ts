@@ -950,6 +950,12 @@ export interface HeroAmerican {
   showLockedCaption: boolean;
   /** The deciding book has not updated this price within PREGAME_PRICE_MAX_AGE_MIN. */
   stale?: boolean;
+  /**
+   * Set with `stale`: the deciding book's newest stamp we hold (either view),
+   * so the card can say when it last priced the bet ("DK last priced Sat 9/5
+   * · 7:59 PM ET") rather than a bare "—", which on Live means "not loaded yet".
+   */
+  staleSince?: string;
 }
 
 function currentAtBook(
@@ -1005,6 +1011,7 @@ export function heroAmericanForPick(
         lockedPrice: locked,
         showLockedCaption: true,
         stale: true,
+        staleSince: at,
       };
     }
   }

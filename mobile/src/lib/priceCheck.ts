@@ -61,7 +61,11 @@ export interface PriceCheckInput {
 
 export interface PriceCheck {
   flagged: boolean;
-  /** Which rule tripped, for the accessibility label and the tests. */
+  /**
+   * Which rule tripped. The card's chip and spoken label pick their words
+   * from it (lib/heroPriceText.ts: "Old price" when 'stale' is the only
+   * reason, "Price check" otherwise), and the tests read it.
+   */
   reasons: Array<'edge' | 'moved' | 'stale'>;
 }
 
