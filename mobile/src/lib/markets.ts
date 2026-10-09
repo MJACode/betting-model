@@ -13,6 +13,7 @@ import { americanImplied, americanToDecimal, formatStampET } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
+import { clvLabelBook } from './clvBet';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -432,22 +433,6 @@ export function booksShortList(books: readonly string[]): string {
   return `${books.slice(0, 3).map(bookLabelShort).join(' · ')} +${books.length - 3}`;
 }
 
-/** Abbrev → book key, for reading the book back out of an NFL pick_label. */
-const BOOK_KEY_BY_ABBREV: Record<string, string> = {
-  DK: 'draftkings',
-  FD: 'fanduel',
-  MGM: 'betmgm',
-  CZR: 'williamhill_us',
-  ESPN: 'espnbet',
-  FAN: 'fanatics',
-  BR: 'betrivers',
-  HRB: 'hardrockbet',
-  BALLY: 'ballybet',
-  PARX: 'betparx',
-  REBET: 'rebet',
-  PIN: 'pinnacle',
-};
-
 /**
  * The betslip link for the RECORD chip: DraftKings' link when DraftKings
  * decided the pick, the scorer's best-price link when the deciding book is the
@@ -465,27 +450,22 @@ function recordLink(pick: Pick, recordBook: string): string | null {
 /**
  * Which book the price STORED on a pick came from.
  *
- * Everywhere except NFL that's DraftKings — the book the models score against.
- * The standalone nfl/ package (§28) line-shops by design and stores the best/soft
- * book's price in `dk_odds`, naming the book in pick_label:
- *   "NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u"
+ * Mostly that's DraftKings — the book the models score against. Four cards
+ * store a soft book's price in `dk_odds` and name the book only in pick_label:
+ *   "NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u"      (NFL wind/opener)
  *   "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM) · 1.00u"
+ *   "Jadarian Price Over 1.5 Rec (FD)"                   (market-relative props)
  * Labeling that "DK" tells the user a price they cannot get at the book named.
- * An unrecognised abbrev is returned as-is rather than guessed at.
+ * The rule is the CLV card's (clvBet.clvLabelBook, pinned to the server's), so
+ * the header and the CLV card name the same book. A book the maps do not know
+ * is returned as its raw lowercased key ("fanatics"), never guessed at.
  */
 export function storedQuoteBook(
   pick: { model_id: string; pick_label?: string | null; decision_book?: string | null },
 ): string {
   // Since 2026-09-09 the row says which book DECIDED it; only rows from
-  // before the flip (and the NFL cards, which name their book in the label)
-  // fall through to the rules below.
-  const decided = decisionBook(pick);
-  if (decided) return decided;
-  if (!(pick.model_id ?? '').startsWith('nfl_')) return MODEL_BOOK;
-  const m = /\(([^()]*?),\s*([A-Za-z]{2,5})\)/.exec(pick.pick_label ?? '');
-  if (!m) return MODEL_BOOK;
-  const abbrev = m[2].toUpperCase();
-  return BOOK_KEY_BY_ABBREV[abbrev] ?? abbrev;
+  // before the flip (and the four label-priced cards) read the label.
+  return decisionBook(pick) ?? clvLabelBook(pick);
 }
 
 export interface BookPrice {

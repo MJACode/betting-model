@@ -22,6 +22,10 @@
  * "(F5)", say) is not a book. The ids and both label maps are pinned to
  * paper_tracker.py by tests/test_clv_card_price_taken.py.
  *
+ * `clvLabelBook` is the same three steps without the price. Every other price
+ * on the pick screens is named by markets.storedQuoteBook, which returns it,
+ * so the header and the CLV card cannot name different books for one price.
+ *
  * No imports on purpose: that test runs this file under Node directly, which
  * cannot resolve the app's extensionless imports.
  */
@@ -54,12 +58,15 @@ export const CLV_NFL_LABEL_BOOK: Readonly<Record<string, string>> = {
 const SUFFIX_RE = /\(([A-Za-z_]+)\)\s*$/;
 const NFL_RE = /,\s*([A-Za-z_]+)\)/;
 
-export interface ClvBetRow {
+export interface ClvBookRow {
   model_id?: string | null;
   pick_label?: string | null;
+  decision_book?: string | null;
+}
+
+export interface ClvBetRow extends ClvBookRow {
   dk_odds?: number | null;
   decision_odds?: number | null;
-  decision_book?: string | null;
   clv_bet_book?: string | null;
 }
 
@@ -83,22 +90,36 @@ export function clvBetQuote(p: ClvBetRow): ClvBetQuote {
   return derived;
 }
 
+/**
+ * The book a pick's stored price came from, without the price: the deciding
+ * book, else the book the label names (the four label-priced models only),
+ * else DraftKings.
+ */
+export function clvLabelBook(p: ClvBookRow): string {
+  const decided = String(p.decision_book ?? '').trim().toLowerCase();
+  return decided || labelBook(p);
+}
+
 function derive(p: ClvBetRow): ClvBetQuote {
   const decided = String(p.decision_book ?? '').trim().toLowerCase();
   if (p.decision_odds != null && decided) {
     return { book: decided, price: Number(p.decision_odds) };
   }
   if (p.dk_odds == null) return { book: null, price: null };
-  const dk = Number(p.dk_odds);
+  return { book: labelBook(p), price: Number(p.dk_odds) };
+}
+
+// Steps 2 and 3: the book that owns `dk_odds`.
+function labelBook(p: ClvBookRow): string {
   const model = p.model_id ?? '';
   const label = p.pick_label ?? '';
   if (CLV_SUFFIX_LABEL_MODELS.includes(model)) {
     const m = SUFFIX_RE.exec(label);
-    return { book: m ? fromLabel(m[1], CLV_SUFFIX_LABEL_BOOK) : 'draftkings', price: dk };
+    return m ? fromLabel(m[1], CLV_SUFFIX_LABEL_BOOK) : 'draftkings';
   }
   if (CLV_NFL_LABEL_MODELS.includes(model)) {
     const m = NFL_RE.exec(label);
-    if (m) return { book: fromLabel(m[1], CLV_NFL_LABEL_BOOK), price: dk };
+    if (m) return fromLabel(m[1], CLV_NFL_LABEL_BOOK);
   }
-  return { book: 'draftkings', price: dk };
+  return 'draftkings';
 }

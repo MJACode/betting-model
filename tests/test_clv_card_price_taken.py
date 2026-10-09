@@ -128,11 +128,11 @@ def test_the_cases_cover_every_server_branch():
 def test_the_app_prices_every_row_as_the_server_grades_it():
     want = [_server(c) for c in CASES]
     script = f"""
-import {{ clvBetQuote }} from "./mobile/src/lib/clvBet.ts";
+import {{ clvBetQuote, clvLabelBook }} from "./mobile/src/lib/clvBet.ts";
 const cases = {json.dumps(CASES)};
 const got = cases.map((c) => {{
   const q = clvBetQuote(c);
-  return [q.book, q.price == null ? null : Number(q.price)];
+  return [q.book, q.price == null ? null : Number(q.price), clvLabelBook(c)];
 }});
 process.stdout.write(JSON.stringify(got));
 """
@@ -143,7 +143,11 @@ process.stdout.write(JSON.stringify(got));
     assert proc.returncode == 0, proc.stderr
     got = json.loads(proc.stdout)
     for case, g, w in zip(CASES, got, want):
-        assert g == w, (case, g, w)
+        assert g[:2] == w, (case, g, w)
+        # The book the header names (storedQuoteBook) is the graded book
+        # wherever the row carries a price.
+        if w[1] is not None:
+            assert g[2] == w[0], (case, g, w)
 
 
 def _clv_card() -> str:
@@ -157,6 +161,21 @@ def test_the_card_prints_the_price_taken_not_draftkings():
     assert "formatAmerican(bet.price)" in card
     assert "formatAmerican(pick.dk_odds)" not in card
     assert "Signal line" not in card
+
+
+def test_the_header_takes_its_book_from_the_cards_rule():
+    # storedQuoteBook names the book on every other price on the pick screens
+    # (the header, the board's price chip, the movement card). It read its own
+    # NFL-only pattern and named DraftKings over a CLV card that said Caesars
+    # or FanDuel for the same price. It must return the card's rule.
+    markets = (ROOT / "mobile/src/lib/markets.ts").read_text(encoding="utf-8")
+    start = markets.index("export function storedQuoteBook(")
+    body = markets[start:markets.index("\n}", start)]
+    assert "return decisionBook(pick) ?? clvLabelBook(pick);" in body
+    assert not any(f".{m}(" in body for m in ("exec", "match", "test", "startsWith"))
+    assert "BOOK_KEY_BY_ABBREV" not in markets
+    assert re.search(r"^import \{[^}]*\bclvLabelBook\b[^}]*\} from '\./clvBet';",
+                     markets, re.M)
 
 
 def test_the_query_and_the_type_carry_the_bet_book():
