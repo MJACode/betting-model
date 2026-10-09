@@ -468,6 +468,27 @@ def test_pick_detail_applies_the_price_age_rule():
     assert "pickLineQuotes(" not in row
 
 
+def test_pick_detail_shows_no_stake_or_edge_at_an_old_price():
+    """Third review (2026-10-09). On a price the deciding book stopped
+    updating, the card hides edge, EV and stake. One tap later, Pick Detail's
+    "Why this bet?" still showed the edge in green and "Stake 1.12u to win
+    1u", just under the note that no sportsbook or betslip is offered. The
+    screen now passes the card's verdict: no stake row, and the edge reads
+    "—" with no colour. Model probability and the implied price stay."""
+    detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
+    assert "<ReasoningCard pick={pick} paused={paused} stale={hero?.stale === true} />" in detail
+    reasoning = _read(SRC / "components" / "ReasoningCard.tsx")
+    assert "export function ReasoningCard({ pick, paused = false, stale = false }: Props)" in reasoning
+    stake = re.search(r"\{pick\.signal_type === 'BET' &&[^?]*\? \(\s*<Row\s+label=\"Stake\"", reasoning)
+    assert stake and "&& !stale" in stake.group(0), "no stake row on an old price"
+    old_edge = re.search(r"\{!isProbOnly && stale \? \((.*?)\) : !isProbOnly \? \(", reasoning, re.S)
+    assert old_edge, "an old price gets its own edge row, ahead of the priced one"
+    row = old_edge.group(1)
+    assert 'label="Edge"' in row and 'value="—"' in row and "tint" not in row
+    assert "has not updated this price since the time shown above, so edge is not shown." in row
+    assert 'label="Model probability"' in reasoning and "implied`}" in reasoning
+
+
 def test_the_card_applies_the_price_age_rule():
     """The static half, for runners without node."""
     markets = _read(LIB / "markets.ts")

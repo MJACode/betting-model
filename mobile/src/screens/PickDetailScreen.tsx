@@ -368,7 +368,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
 
-        <ReasoningCard pick={pick} paused={paused} />
+        <ReasoningCard pick={pick} paused={paused} stale={hero?.stale === true} />
 
         {paused ? null : <PickTimingCard pick={pick} />}
 

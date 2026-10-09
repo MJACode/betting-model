@@ -30,9 +30,14 @@ interface Props {
   /** Paused model, never posted (isPausedForDisplay): no stake row — the
    *  model's number is shown, but nothing sizes it as a bet. */
   paused?: boolean;
+  /** The deciding book has not updated this price within the 3-hour bound
+   *  (markets.heroAmericanForPick `stale`; the card's "Old price"): no stake
+   *  row and no edge, as on the card. A stake is an instruction to bet at a
+   *  number the book no longer offers. */
+  stale?: boolean;
 }
 
-export function ReasoningCard({ pick, paused = false }: Props) {
+export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
   // Everything here is at the price the pick was DECIDED at (2026-09-09):
   // the best bettable price at the DraftKings line, DraftKings itself on
   // rows from before the flip.
@@ -78,7 +83,13 @@ export function ReasoningCard({ pick, paused = false }: Props) {
         />
       )}
 
-      {!isProbOnly ? (
+      {!isProbOnly && stale ? (
+        <Row
+          label="Edge"
+          value="—"
+          sub={`${bookFull} has not updated this price since the time shown above, so edge is not shown.`}
+        />
+      ) : !isProbOnly ? (
         <Row
           label="Edge"
           value={formatPctSigned(edge)}
@@ -93,7 +104,7 @@ export function ReasoningCard({ pick, paused = false }: Props) {
         />
       )}
 
-      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) && !paused ? (
+      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) && !paused && !stale ? (
         <Row
           label="Stake"
           value={
