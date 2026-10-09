@@ -18,8 +18,9 @@ Pinned here through the real run functions, with a frozen clock:
      tonight's games, not tomorrow's.
   4. Two passes either side of the 2026-11-01 clock change sort in time order
      as text.
-Old rows are not rewritten, so readers keep parsing or casting; item 5 pins
-that a switch-day series still sorts in time order as text.
+Old rows are not rewritten, so readers keep parsing or casting; item 5
+records, without calling the writers, why a switch-day series still sorts in
+time order as text.
 """
 from __future__ import annotations
 
@@ -203,7 +204,11 @@ def test_passes_either_side_of_the_fall_back_sort_in_time_order(monkeypatch):
 # ── 5: switch day ───────────────────────────────────────────────────────────
 
 def test_an_eastern_row_then_a_later_utc_row_sorts_in_time_order():
-    """Rows written before this change stay Eastern. On switch day one prop's
+    """This checks a property of the two stamp formats, not the writers. Tests
+    1-4 cover the writers, and only a run against the real trigger in
+    tests/test_latest_line_state.py would check the database's own ordering.
+
+    Rows written before this change stay Eastern. On switch day one prop's
     series is Eastern rows, then UTC rows. Readers that order inside one prop
     as text (the latest-price trigger, the pruner) need the UTC rows to sort
     after every earlier Eastern row. A UTC wall clock is always 4 or 5 hours
