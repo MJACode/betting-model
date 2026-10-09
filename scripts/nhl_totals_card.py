@@ -132,7 +132,11 @@ def pick_rows(bets, games: dict, bankroll: float) -> list[dict]:
             "recommended_bet": rec_bet,
             "bankroll_at_pick": bankroll,
             "signal_type": "BET",
-            "confidence_tier": "MED" if decision_edge < 0.03 else "HIGH",
+            # MED on every bet, as the NHL prop cards write. The app draws HIGH
+            # as a green chip, and the evidence gives no tier: the EV >= 0.02
+            # cut, which holds every edge >= 3 points, returned +0.14% on 548
+            # bets against +4.72% at the live 0.01 (UX review, 2026-10-08).
+            "confidence_tier": "MED",
             "injury_flag": None,
             "injury_detail": None,
             # The price the bet was taken at. Always set: the scorer deletes an

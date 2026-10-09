@@ -388,6 +388,13 @@ the committed way to reproduce them is the "best bettable book" rows of
 `scripts/nhl_totals_lab.py` (worker job `nhl_research`), which have not been
 run since that set was added.
 
+The table is the lab's selection: the first soft quote by its own snapshot
+time. The live rule takes the best EV across the books in the first qualifying
+fetch. The 2026-10-08 review replicated both, read-only, on two seasons: in
+2025-26, 197 of 210 games got the same bet, 13 the same fetch at another book
+or side, none another fetch (+3.89 units lab, +3.95 rule); in 2024-25, 161 of
+176, 15 and none (+12.18 vs +12.22).
+
 | EV floor | bets | units | return | EV at Pinnacle's close |
 |---|---|---|---|---|
 | 0.000 | 2,768 | +35.7 | +1.29% | +0.35% |

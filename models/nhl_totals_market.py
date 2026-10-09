@@ -46,6 +46,13 @@ game qualifies, one bet a game, flat units at the price taken:
 for going live is closing-line value, which is positive at every cut and rises
 with it. The cut was chosen on the same seasons it is graded on.
 
+THE TABLE IS THE LAB'S SELECTION, NOT EXACTLY THIS RULE'S. The lab takes the
+first soft quote by its own snapshot time; this rule takes the best EV across
+the books in the first qualifying fetch. The 2026-10-08 review replicated both
+read-only on two seasons. 2025-26: 197 of 210 games the same bet, 13 the same
+fetch at another book or side, 0 from another fetch, +3.89u lab vs +3.95u
+rule. 2024-25: 161 of 176, 15, 0, +12.18u vs +12.22u.
+
 THE WINDOW is every pre-game Pinnacle quote, not game day only. The first
 qualifying fetch by hours before puck drop, at 0.01:
 
@@ -276,8 +283,14 @@ def find_bets(quotes, soft_books: tuple[str, ...] | None = None,
             diag["no_pair"] += 1
             continue
 
+        # DraftKings' own price fills the dk_* columns only when it is a price:
+        # the same number AND a coherent two-way, the test every compared book
+        # passes. A quote the rule refuses as a candidate must not become the
+        # reference either, or Discord (which headlines dk_odds when it is no
+        # worse than best_odds) would show a price the bet was not taken at.
         dk = same.get(REFERENCE_BOOK)
-        if dk is not None and float(dk["total_line"]) != line:
+        if dk is not None and (float(dk["total_line"]) != line
+                               or not _coherent(dk)):
             dk = None
 
         best: NhlTotalBet | None = None

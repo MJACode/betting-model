@@ -1943,7 +1943,10 @@ MODEL_OWN_EV_FLOOR: dict = {
     # 0.01 sits on the units plateau with 0.015, and closing-line value is
     # positive at every cut and rises with it. The return is not established
     # (interval -0.6% to +10.1%; 2023-24 lost 6.94%). Chosen on the seasons it
-    # is graded on.
+    # is graded on. The table is the lab's selection (first soft quote by
+    # snapshot time); the live rule's (best EV in the first qualifying fetch)
+    # was replicated on 2024-25 and 2025-26: same fetch every time, units
+    # within 0.06 (models/nhl_totals_market.py).
     "nhl_over_under":            0.01,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).

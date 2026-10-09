@@ -137,6 +137,60 @@ def test_row_when_draftkings_hung_the_number():
     assert r["decision_odds"] is not None
 
 
+def test_an_incoherent_draftkings_quote_is_not_the_reference_price():
+    # DraftKings +105 / +100 sums to 0.988 implied: not a price (COHERENT). The
+    # rule drops it as a candidate, so it must not fill dk_odds either. If it
+    # did, Discord would headline DraftKings +105 while the bet, the app and
+    # settlement are FanDuel +103.
+    from tracking.discord_notifier import publish_price
+    pin = _q("pinnacle", 6.5, -105, -105)       # no-vig 0.5 / 0.5
+    dk = _q("draftkings", 6.5, 105, 100)
+    fd = _q("fanduel", 6.5, 103, -125)          # over EV 0.5 x 2.03 - 1 = 0.015
+    bets, diag = mk.find_bets([pin, dk, fd])
+    assert diag["soft_incoherent"] == 1
+    assert len(bets) == 1 and bets[0].book == "fanduel"
+    assert bets[0].dk_price is None and bets[0].dk_link is None
+    r = card.pick_rows(bets, GAMES, bankroll=10_000)[0]
+    assert r["dk_odds"] is None and r["dk_bet_link"] is None
+    assert r["line_book"] == "fanduel"
+    assert r["decision_book"] == "fanduel" and r["decision_odds"] == 103
+    assert publish_price(r)[0] == 103
+
+
+def test_every_bet_is_med_however_large_the_edge():
+    # Pinnacle 0.60 against BetMGM -105 is an edge of 8.8 points; the card
+    # still writes MED, as the NHL prop cards do.
+    r = card.pick_rows([_bet(fair=0.60, ev=0.60 * (1 + 100 / 105) - 1)],
+                       GAMES, bankroll=10_000)
+    assert len(r) == 1
+    assert r[0]["decision_edge"] > 0.03
+    assert r[0]["confidence_tier"] == "MED"
+    assert card.pick_rows([_bet()], GAMES, bankroll=10_000)[0][
+        "confidence_tier"] == "MED"
+
+
+def test_the_step_is_a_choice_the_pipeline_accepts():
+    # refresh_pass.sh and the 6am run call `run_pipeline.py --step
+    # nhl-over-under`; without the choice, argparse rejects it and the model
+    # writes nothing, with one WARN line in the worker log.
+    from pathlib import Path
+    rp = (Path(__file__).parent.parent / "run_pipeline.py").read_text(
+        encoding="utf-8")
+    choices = rp.split("choices=[", 1)[1].split("]", 1)[0]
+    assert '"nhl-over-under"' in choices
+
+
+def test_the_6am_run_prices_the_fetch_its_odds_step_just_stored():
+    from pathlib import Path
+    rp = (Path(__file__).parent.parent / "run_pipeline.py").read_text(
+        encoding="utf-8")
+    daily = rp.split("def run_daily_pipeline(", 1)[1].split("\ndef ", 1)[0]
+    odds = daily.index('results["odds"] = step_odds(')
+    card_at = daily.index("step_nhl_over_under(")
+    props = daily.index("step_prop_odds(")
+    assert odds < card_at < props
+
+
 def test_a_mismatched_label_is_refused(monkeypatch):
     # The same bet is written with its own label, so the refusal below is the
     # label's doing, not the EV gate's.
