@@ -20,6 +20,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { HitModeSheet } from '@/components/HitModeSheet';
@@ -113,6 +114,14 @@ import {
   isOnSlate,
   isStatParticipant,
   needsTouchSet,
+  seasonTouchFlag,
+  shouldFetchTouchSet,
+  touchBoardView,
+  touchCommitAction,
+  touchRejectionRecordsFailure,
+  touchSetAfterFailure,
+  touchSetCopy,
+  touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
   slateSubline,
@@ -156,7 +165,7 @@ import {
 } from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
-import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import type {
   EnrichedPick,
@@ -248,6 +257,8 @@ const SLATE_GATE_MS = 4000;
 
 /** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
 const EMPTY_ROWS: never[] = [];
+/** Not an AbortError, so ErrorState renders. The copy comes from touchSetCopy. */
+const TOUCH_SET_SHOWN = new Error('touch set');
 
 /**
  * Row-shaped placeholders, in place of a bare spinner.
@@ -403,6 +414,14 @@ export function StatsScreen() {
   // H2H, whose reads carry the one stat and no usage columns. Without it a
   // receiver with no TD is indistinguishable from a lineman (Matt, 2026-10-08).
   const [touchSet, setTouchSet] = useState<{ key: string; ids: Set<string> } | null>(null);
+  /** The key whose last touch read failed, and which sentence to show. */
+  const [touchFailure, setTouchFailure] = useState<{ key: string; kind: ErrorKind } | null>(null);
+  // `load` closes over neither of these (its deps are the question, not the
+  // answer), so the failure path reads the refs. A render updates them.
+  const touchSetRef = useRef(touchSet);
+  touchSetRef.current = touchSet;
+  const touchFailureRef = useRef(touchFailure);
+  touchFailureRef.current = touchFailure;
   const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode, last-N
   // Hit-rate mode, Season window. The rows are ONE stat's value arrays, so they
   // carry the stat key they were fetched for — the memo below ignores them
@@ -719,17 +738,66 @@ export function StatsScreen() {
       }
       const teams = readTeams;
       if (effectiveMode === 'hitRate') {
-        // Fired alongside the read below, not after it; a failure leaves the
-        // board on its no-usage fallback rather than costing the board.
+        // Alongside the read below. A failure keeps the last good set for
+        // this key and is retried on the next load; with nothing kept, the
+        // list stays empty and says so (touchBoardView) instead of falling
+        // open to anyone with games.
         const touchKey = `${sport}|${playerType ?? ''}`;
+        const haveSet = touchSetRef.current?.key === touchKey;
+        const failedForKey = touchFailureRef.current?.key === touchKey;
+        let touchJob: Promise<void> | null = null;
         if (
-          (timeWindow === 'h2h' || timeWindow === 'season') &&
-          needsTouchSet(sport, String(stat.key)) &&
-          touchSet?.key !== touchKey
+          shouldFetchTouchSet(
+            (timeWindow === 'h2h' || timeWindow === 'season') && needsTouchSet(sport, String(stat.key)),
+            haveSet,
+            failedForKey,
+          )
         ) {
-          fetchWindowTotals(sport, SEASON, null, playerType)
-            .then((t) => setTouchSet({ key: touchKey, ids: touchedPlayerIds(t) }))
-            .catch(() => undefined);
+          const markTouchFailed = (error: unknown) => {
+            const failedKey = touchSetAfterFailure(
+              touchFailureRef.current?.key ?? null,
+              inFlight.current,
+              stamp,
+              touchKey,
+            );
+            if (inFlight.current !== stamp || failedKey == null) return;
+            // The set already held is left where it is. A failure does not
+            // clear a last good set for this key, or a set for another key.
+            // An abort of this stamp is a server failure: ErrorState renders
+            // nothing for an AbortError, and this one is a real miss.
+            const kind: ErrorKind = isAbortError(error) ? 'server' : errorKind(error);
+            touchFailureRef.current = { key: failedKey, kind };
+            setTouchFailure(touchFailureRef.current);
+          };
+          touchJob = fetchWindowTotals(sport, SEASON, null, playerType)
+            .then((t) => {
+              // Same stamp as the reads below. A response for a sport or
+              // player type the user has already left must not replace the
+              // set those reads are filtering with. An empty id set is not
+              // usable: it would mark every zero-TD carrier as untouched.
+              const ids = touchedPlayerIds(t);
+              const action = touchCommitAction(inFlight.current, stamp, ids.size);
+              if (action === 'ignore') return;
+              if (action === 'fail') {
+                markTouchFailed(new Error('empty touch totals'));
+                return;
+              }
+              const next = touchSetFromResponse(inFlight.current, stamp, touchKey, ids);
+              if (!next) return;
+              touchSetRef.current = next;
+              setTouchSet(next);
+              if (touchFailureRef.current?.key === touchKey) {
+                touchFailureRef.current = null;
+                setTouchFailure(null);
+              }
+            })
+            .catch((e: unknown) => {
+              // An abort of a superseded stamp is ignored inside
+              // touchRejectionRecordsFailure. An abort of this stamp is a
+              // failure, or the skeleton never ends.
+              if (!touchRejectionRecordsFailure(inFlight.current, stamp)) return;
+              markTouchFailed(e);
+            });
         }
         if (timeWindow === 'h2h') {
           const key = String(stat.key);
@@ -750,6 +818,10 @@ export function StatsScreen() {
           if (inFlight.current !== stamp) return;
           setRecentRows(data);
         }
+        // No set yet: keep the skeleton up until this read resolves or fails.
+        // A retry that already has a set leaves the filtered list on screen.
+        if (touchJob && !haveSet) await touchJob;
+        if (inFlight.current !== stamp) return;
       } else {
         // 'h2h' cannot reach here — `effectiveMode` forces Hit Rates under that
         // window, because there is no per-opponent totals read. Narrowed rather
@@ -1557,9 +1629,12 @@ export function StatsScreen() {
       .filter((p) => isStatParticipant(sport, p.values, {
         statKey: String(stat.key),
         rows: p.games,
-        touched: p.games.length === 0 && touchSet?.key === `${sport}|${playerType ?? ''}`
-          ? touchSet.ids.has(p.player_id)
-          : undefined,
+        touched: seasonTouchFlag(
+          p.games.length === 0,
+          touchSet?.key,
+          `${sport}|${playerType ?? ''}`,
+          touchSet?.ids.has(p.player_id) ?? false,
+        ),
       }))
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
@@ -1580,6 +1655,21 @@ export function StatsScreen() {
     () => hitRateBase.filter((p) => inHitRateBand(p.pct, band)),
     [hitRateBase, band],
   );
+
+  // Season and H2H Anytime TD have no usage columns, so the rows above are
+  // unfiltered until the touch set for this key lands. Hold that list on the
+  // skeleton (or an error line, when the read failed and nothing was kept)
+  // rather than painting anyone with games.
+  const touchKey = `${sport}|${playerType ?? ''}`;
+  const touchView = touchBoardView(
+    effectiveMode === 'hitRate' &&
+      (timeWindow === 'season' || timeWindow === 'h2h') &&
+      needsTouchSet(sport, stat ? String(stat.key) : null),
+    touchSet?.key,
+    touchKey,
+    touchFailure?.key === touchKey,
+  );
+  const hitData = rowsAreStale || touchView !== 'list' ? EMPTY_ROWS : hitRatePlayers;
 
   // Did the position cut, and only it, empty the board? Measured across the
   // cut itself: Hit Rates compare before/after the position filter, not the
@@ -2265,7 +2355,7 @@ export function StatsScreen() {
           against ONE opponent over two seasons, not a recent-form window, and a
           reader who has not tapped through to a player has no way to know that.
           Same quiet caption idiom as the no-lines note below it. */}
-      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitRatePlayers.length > 0 ? (
+      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0 ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
           <Text style={styles.noLinesText}>
@@ -2296,7 +2386,7 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
-      {(effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length) > 0 ? (
+      {(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0 ? (
         <ColumnHeader
           rightLabel={rightLabel}
           showOdds={showOdds}
@@ -2318,7 +2408,7 @@ export function StatsScreen() {
       {effectiveMode === 'hitRate' ? (
         <FlatList
           ListFooterComponent={<BetslipBarSpacer />}
-          data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
+          data={hitData}
           // `slateChecking` counts as loading under H2H: the load gate skips
           // the REQUEST until the slate lands but nothing held the RENDER, so
           // the board printed "No upcoming games, so there is no opponent to
@@ -2350,7 +2440,16 @@ export function StatsScreen() {
             );
           }}
           ListEmptyComponent={
-            loading || (timeWindow === 'h2h' && slateChecking) ? (
+            touchView === 'error' && !error ? (
+              <ErrorState
+                compact
+                what="this list"
+                error={TOUCH_SET_SHOWN}
+                copy={touchSetCopy(touchFailure?.kind)}
+                onRetry={() => void load()}
+                retrying={loading}
+              />
+            ) : loading || (timeWindow === 'h2h' && slateChecking) || (touchView === 'loading' && !error) ? (
               <BoardSkeleton />
             ) : (
               <EmptyState
@@ -2448,8 +2547,9 @@ export function StatsScreen() {
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         title="Filter players"
-        resultCount={effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length}
+        resultCount={effectiveMode === 'hitRate' ? hitData.length : ranked.length}
         itemNoun="player"
+        emptyLabel={touchView === 'error' ? 'Couldn’t load this list. Pull down to retry.' : undefined}
         // The Availability toggle re-READS the board (the server is narrowed to
         // the slate's teams), so the count on the footer is the answer to the
         // previous question until it lands. It is the one control on this sheet
