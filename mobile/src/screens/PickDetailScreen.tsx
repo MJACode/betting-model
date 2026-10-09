@@ -48,13 +48,17 @@ import {
   bookName,
   displayQuoteForPick,
   formatSideLine,
+  freshBookRows,
   gameMarketForModel,
+  heroAmericanForPick,
   numOrNull,
   playerNameFromPickLabel,
+  priceAgeFor,
   propMarketForModel,
   storedQuoteBook,
   MODEL_BOOK,
 } from '@/lib/markets';
+import { stalePriceNote } from '@/lib/heroPriceText';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
@@ -224,6 +228,17 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // what the pick was. Track stays. Live in-play signals are unchanged. The
   // pick's game_time stands in for a missing games row (fails closed).
   const cta = pickCtaFor(pick, game, liveState);
+  // The card's price-age verdict (markets.PREGAME_PRICE_MAX_AGE_MIN), on the
+  // same clock: before the start, a deciding price the book stopped updating
+  // is no price. One tap from the card's "Now —" this screen still offered
+  // that September number in the Betting lines chips, the All books table
+  // and the betslip (second review, 2026-10-09). The screen loads no
+  // separate DraftKings latest row; the all-books rows carry DraftKings with
+  // its update time, which is what the verdict reads here.
+  const priceAge = priceAgeFor(pick, game, liveState);
+  const hero = heroAmericanForPick(pick, enriched.latestOdds ?? null, bookRows, priceAge);
+  const staleNote = stalePriceNote(hero);
+  const inSlip = slip.has(slipKeyForPick(pick));
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
@@ -335,6 +350,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           {quoteProvenance ? (
             <Text style={styles.quoteProvenance}>{quoteProvenance}</Text>
           ) : null}
+          {/* Why there is no book or betslip below: the deciding book stopped
+              updating this price (the card's "Old price"). */}
+          {staleNote ? <Text style={styles.quoteProvenance}>{staleNote}</Text> : null}
           {game ? (
             <View style={styles.matchupRow}>
               <Text style={styles.matchup}>
@@ -375,7 +393,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
           cta.handoff ? (
             <View style={styles.linesCard}>
-              <BookLinesRow pick={pick} bookRows={bookRows} />
+              <BookLinesRow pick={pick} bookRows={bookRows} hero={hero} priceAge={priceAge} />
             </View>
           ) : null
         ) : null}
@@ -402,19 +420,25 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           </View>
         ) : null}
         {/* Every row of AllBooksCard opens that book's betslip, so after the
-            start it goes with the hand-off and the Slip (H5, Reviewer #847). */}
-        {live || !cta.handoff ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
+            start it goes with the hand-off and the Slip (H5, Reviewer #847).
+            Before the start, a row older than the pre-game bound is not
+            listed (freshBookRows): the table is built from the stored rows
+            alone, so that is the whole rule here. */}
+        {live || !cta.handoff ? null : <AllBooksCard pick={pick} bookRows={freshBookRows(pick, bookRows, priceAge)} />}
 
         {/* A retired model's pick (reachable from a tracked bet on Performance)
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
+        {/* Not on a stale price either (the card's rule): the slip prices the
+            leg at the lock with its full edge. A leg already in the slip can
+            still be taken out here. */}
         {hasPricedLine(pick) && openHere && !preview && !retired && !paused
-          && !voided && cta.slip ? (
+          && (!hero?.stale || inSlip) && !voided && cta.slip ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
               <Text style={styles.trackTitle}>
-                {slip.has(slipKeyForPick(pick)) ? 'In your betslip' : 'Add to your betslip'}
+                {inSlip ? 'In your betslip' : 'Add to your betslip'}
               </Text>
               <Text style={styles.trackSub}>
                 Package this bet with others in your betslip — combined odds, EV, and each
@@ -422,7 +446,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
               </Text>
             </View>
             <AddToPlayButton
-              inPlay={slip.has(slipKeyForPick(pick))}
+              inPlay={inSlip}
               onPress={() => slip.toggle(slipKeyForPick(pick))}
             />
           </View>

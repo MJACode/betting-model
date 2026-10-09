@@ -36,13 +36,17 @@ export function priceCheckSpeech(
   hero: HeroAmerican | null | undefined,
 ): string {
   if (onlyStalePrice(check) && hero?.stale) {
-    const since = hero.staleSince ? formatStampET(hero.staleSince) : '';
-    const when = since
-      ? `since ${since}`
-      : `in over ${Math.round(PREGAME_PRICE_MAX_AGE_MIN / 60)} hours`;
-    return `${bookName(hero.book)} has not updated this price ${when}, so edge and EV are hidden`;
+    return `${notUpdated(hero)}, so edge and EV are hidden`;
   }
   return 'Price check: this price looks off, so edge and EV are hidden';
+}
+
+/** "DraftKings has not updated this price since Sat, 9/5 · 7:59 PM ET". */
+function notUpdated(hero: HeroAmerican): string {
+  const when = hero.staleSince
+    ? `since ${formatStampET(hero.staleSince)}`
+    : `in over ${Math.round(PREGAME_PRICE_MAX_AGE_MIN / 60)} hours`;
+  return `${bookName(hero.book)} has not updated this price ${when}`;
 }
 
 /**
@@ -54,6 +58,16 @@ export function lockedCaptionText(hero: HeroAmerican): string {
   const locked = `Locked ${formatAmerican(hero.lockedPrice)}`;
   if (!hero.stale || !hero.staleSince) return locked;
   return `${locked} · ${bookLabel(hero.book)} last priced ${formatStampET(hero.staleSince)}`;
+}
+
+/**
+ * Pick Detail's header line under the decided price, when the deciding book
+ * has stopped updating it: why the screen offers no sportsbook and no
+ * betslip. Null otherwise.
+ */
+export function stalePriceNote(hero: HeroAmerican | null | undefined): string | null {
+  if (!hero?.stale) return null;
+  return `${notUpdated(hero)}, so no sportsbook or betslip is offered at it.`;
 }
 
 /**

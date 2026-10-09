@@ -1065,8 +1065,12 @@ export function heroAmericanForPick(
   };
 }
 
-/** The all-books rows inside the price-age bound (all of them when it does not apply). */
-function freshBookRows(
+/**
+ * The all-books rows inside the price-age bound (all of them when it does not
+ * apply). Pick Detail's All books table reads these: it is built from the
+ * stored rows alone, so dropping the old rows is the whole rule there.
+ */
+export function freshBookRows(
   pick: Pick,
   bookRows: BookPricedRow[] | undefined,
   priceAge?: PriceAgeContext,
@@ -1074,6 +1078,45 @@ function freshBookRows(
   const rows = bookRows ?? [];
   if (!priceAgeApplies(pick, priceAge)) return rows;
   return rows.filter((r) => quoteIsCurrent(r.snapshot_at, priceAge?.now));
+}
+
+/**
+ * The same-line book quotes a pick may still be handed off to: the card's
+ * one hand-off (bestHandoffForPick) and Pick Detail's "Betting lines" chips
+ * (BookLinesRow) both read this, so the two cannot disagree.
+ *
+ * Filtering the stored rows is not enough. Two chips are built from the pick
+ * itself and ignore the rows: the record chip (the deciding book at the
+ * stored price) and the scorer's best-price stamp. So under the price-age
+ * rule a book whose newest price is older than the bound is dropped too: the
+ * record chip when the deciding book is stale (hero.stale), and the stamp at
+ * a book whose own rows all went stale. A book we hold no row for keeps its
+ * chip, as before (missing ≠ stale). With no clock passed, this is
+ * pickLineQuotes unchanged.
+ */
+export function currentLineQuotes(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  hero?: HeroAmerican | null,
+  priceAge?: PriceAgeContext,
+): LineQuote[] {
+  const quotes = pickLineQuotes(pick, freshBookRows(pick, bookRows, priceAge));
+  if (!priceAgeApplies(pick, priceAge)) return quotes;
+  // A book is stale when we hold rows for it and none is current.
+  const rows = bookRows ?? [];
+  const currentBooks = new Set(
+    rows.filter((r) => quoteIsCurrent(r.snapshot_at, priceAge?.now)).map((r) => r.bookmaker),
+  );
+  const staleBooks = new Set(
+    rows.filter((r) => !currentBooks.has(r.bookmaker)).map((r) => r.bookmaker),
+  );
+  // The hero already judged the deciding book across BOTH views (the
+  // DraftKings latest row and the all-books row), so its verdict wins.
+  if (hero?.stale) staleBooks.add(hero.book);
+  else if (hero) staleBooks.delete(hero.book);
+  const kept = quotes.filter((q) => !staleBooks.has(q.bookmaker));
+  if (kept.length === quotes.length) return quotes;
+  return kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
 }
 
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
@@ -1101,29 +1144,9 @@ export function bestHandoffForPick(
       verb: 'Bet',
     };
   }
-  let quotes = pickLineQuotes(pick, freshBookRows(pick, bookRows, priceAge));
-  if (priceAgeApplies(pick, priceAge)) {
-    // No hand-off to a book whose newest price is older than the bound: not
-    // the record chip when the deciding book is stale (hero.stale), and not
-    // the scorer's best-price stamp for a book whose own row went stale. A
-    // book we hold no row for keeps its chip, as before (missing ≠ stale).
-    // A book is stale when we hold rows for it and none is current.
-    const rows = bookRows ?? [];
-    const currentBooks = new Set(
-      rows.filter((r) => quoteIsCurrent(r.snapshot_at, priceAge?.now)).map((r) => r.bookmaker),
-    );
-    const staleBooks = new Set(
-      rows.filter((r) => !currentBooks.has(r.bookmaker)).map((r) => r.bookmaker),
-    );
-    // The hero already judged the deciding book across BOTH views (the
-    // DraftKings latest row and the all-books row), so its verdict wins.
-    if (hero?.stale) staleBooks.add(hero.book);
-    else if (hero) staleBooks.delete(hero.book);
-    const kept = quotes.filter((q) => !staleBooks.has(q.bookmaker));
-    if (kept.length !== quotes.length) {
-      quotes = kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
-    }
-  }
+  // No hand-off to a book whose newest price is older than the bound
+  // (currentLineQuotes; Pick Detail's chips read the same list).
+  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge);
   if (quotes.length === 0) return null;
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet

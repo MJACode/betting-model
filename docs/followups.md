@@ -45,10 +45,12 @@ the best-price shop, both entry checks and the NHL totals card
   as failed. In `pipeline_runs`, no run from 09-27 to 10-02 lists an odds
   step in `failed_steps`, and 51 to 53 of 54 runs a day were `ok` from 09-27
   to 09-30.
-- **The Pick Detail screen's book lists and the closing-price reader** still
-  read the newest stored row whatever its age (the pick card follows the rule
-  since 2026-10-09). Not measured: whether any closing price was taken from a
-  row the feed had stopped refreshing.
+- **The closing-price reader** still reads the newest stored row whatever
+  its age. Not measured: whether any closing price was taken from a row the
+  feed had stopped refreshing. (Pick Detail's chips, All books table and
+  betslip follow the card's rule since the second review, 2026-10-09. The
+  betslip screen itself still prices a leg added before its price went old
+  at the lock, with its full edge.)
 
 ## [ ] One UFC fight can be scored, and graded, under two ids
 

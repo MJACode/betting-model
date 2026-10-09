@@ -395,6 +395,76 @@ def test_a_stale_card_offers_no_bet():
     assert "staleSince: at" in hero[:2000]
 
 
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_pick_detail_offers_no_book_at_an_old_price(tmp_path):
+    """Second review (2026-10-09). One tap from the card's "Now —", Pick
+    Detail still showed the old price with bet links: the Betting lines chips,
+    the All books table and "Add to your betslip". The shape of production
+    pick 2558736, LSU vs Alabama Under 54.5 -112: one DraftKings totals row,
+    stored 2026-09-05T16:15:49Z (values as PostgREST sends them), a 11-07
+    kickoff that has not happened, read on 10-09."""
+    files = ["markets.ts", "format.ts", "thresholds.ts", "thresholds.generated.ts",
+             "decisionPrice.ts", "discordPublish.ts", "clvBet.ts", "priceCheck.ts",
+             "heroPriceText.ts"]
+    for name in files:
+        src = _read(LIB / name)
+        src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = PRELUDE + """
+import { currentLineQuotes, freshBookRows, heroAmericanForPick } from './markets.ts';
+import { stalePriceNote } from './heroPriceText.ts';
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const pre = { started: false, now: Date.parse('2026-10-09T16:30:00Z') };
+const pick = {
+  pick_id: 2558736, game_id: 'NCAAF_2026-11-07_alabama_lsu', model_id: 'ncaaf_over_under', sport: 'NCAAF',
+  game_date: '2026-11-07', game_time: '2026-11-07T16:00:00+00:00', pick_side: 'under',
+  pick_label: 'LSU vs Alabama Under 54.5', model_probability: 0.56, dk_implied_prob: 0.528, edge: 0.03,
+  dk_odds: '-112.0', decision_odds: '-112.0', decision_book: 'draftkings', line_book: null,
+  scored_line: '54.5', signal_type: 'BET', is_live: false, dk_bet_link: 'dk://under',
+  best_book: 'draftkings', best_odds: '-112.0',
+};
+const rows = [{ bookmaker: 'draftkings', market: 'totals', total_line: '54.5', over_price: '-108',
+  under_price: '-112', under_link: 'dk://under', snapshot_at: '2026-09-05T16:15:49Z' }];
+
+const hero = heroAmericanForPick(pick, null, rows, pre);
+eq([hero?.stale, hero?.staleSince], [true, '2026-09-05T16:15:49Z'], 'the detail judges the deciding book from the all-books row');
+eq(currentLineQuotes(pick, rows, hero, pre), [], 'no Betting lines chip, not even the record chip');
+eq(freshBookRows(pick, rows, pre), [], 'no All books row');
+const note = stalePriceNote(hero);
+ok(note != null && note.startsWith('DraftKings has not updated this price since ') && note.includes('9/5'), String(note));
+
+// A current price changes nothing.
+const fresh = rows.map((r) => ({ ...r, snapshot_at: '2026-10-09T16:20:00Z' }));
+const fh = heroAmericanForPick(pick, null, fresh, pre);
+eq(fh?.stale, undefined, 'fresh');
+eq(currentLineQuotes(pick, fresh, fh, pre).map((q) => q.bookmaker), ['draftkings'], 'fresh: the DraftKings chip');
+eq(freshBookRows(pick, fresh, pre).length, 1, 'fresh: the row stays');
+eq(stalePriceNote(fh), null, 'fresh: no note');
+// No clock passed: the old behaviour, for every other caller.
+eq(currentLineQuotes(pick, rows).map((q) => q.bookmaker), ['draftkings'], 'no clock: unchanged');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_pick_detail_applies_the_price_age_rule():
+    """The static half: the detail screen judges the price the way the card
+    does and passes that verdict to the chips, the table and the slip."""
+    detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
+    assert "const priceAge = priceAgeFor(pick, game, liveState);" in detail
+    assert "heroAmericanForPick(pick, enriched.latestOdds ?? null, bookRows, priceAge)" in detail
+    assert "<BookLinesRow pick={pick} bookRows={bookRows} hero={hero} priceAge={priceAge} />" in detail
+    assert "<AllBooksCard pick={pick} bookRows={freshBookRows(pick, bookRows, priceAge)} />" in detail
+    assert "&& (!hero?.stale || inSlip) && !voided && cta.slip ?" in detail
+    assert "stalePriceNote(hero)" in detail
+    row = _read(SRC / "components" / "BookLinesRow.tsx")
+    assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in row
+    assert "pickLineQuotes(" not in row
+
+
 def test_the_card_applies_the_price_age_rule():
     """The static half, for runners without node."""
     markets = _read(LIB / "markets.ts")
@@ -403,8 +473,11 @@ def test_the_card_applies_the_price_age_rule():
     assert "priceAge?: PriceAgeContext" in hero
     assert "priceAgeApplies(pick, priceAge)" in hero and "stale: true" in hero
     handoff = markets[markets.index("export function bestHandoffForPick("):]
-    assert "freshBookRows(pick, bookRows, priceAge)" in handoff[:2500]
-    assert "hero?.stale" in handoff[:2500]
+    assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in handoff[:1500]
+    # One list for the card's hand-off and Pick Detail's chips.
+    shop = markets[markets.index("export function currentLineQuotes("):]
+    shop = shop[:shop.index("\nexport function ")]
+    assert "freshBookRows(pick, bookRows, priceAge)" in shop and "hero?.stale" in shop
     card = _read(SRC / "components" / "PickCard.tsx")
     assert "const priceAge = priceAgeFor(pick, game, liveState);" in card
     assert "heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge)" in card
