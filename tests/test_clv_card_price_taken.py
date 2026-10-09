@@ -8,7 +8,9 @@ mirrors that function. These tests pin the mirror three ways:
 
 - its model ids, label maps and label patterns equal the server's (runs here);
 - the same rows through both functions give the same book and price (needs
-  Node, which CI has; skipped where it is missing);
+  Node, which CI has; skipped where it is missing); where the capture recorded
+  a book, the app prints that one, against answers written out by hand, since
+  the server function takes no recorded book;
 - the card reads the helper, and the query and the type carry `clv_bet_book`.
 """
 from __future__ import annotations
@@ -107,29 +109,36 @@ CASES = [
 ]
 
 
+# The capture writes clv_bet_book from this same derivation
+# (tracking/paper_tracker.py:1834, written at :1857 and :1963), so on every
+# row in production it equals the derived book. The app still prefers it,
+# which guards a row whose decision columns or label changed after it was
+# graded; no row looks like that today. The server function takes no
+# recorded book, so these answers are written out, not computed.
+RECORDED = [
+    # the recorded book wins, trimmed and lowercased, at the derived price
+    (dict(model_id="mlb_over_under", pick_label="NYY vs TB Under 7.0",
+          dk_odds=101, decision_odds=105, decision_book="betmgm",
+          clv_bet_book="FanDuel "),
+     ["fanduel", 105.0]),
+    # a recorded book on a row with no price prints nothing
+    (dict(model_id="mlb_moneyline", pick_label="NYY ML",
+          dk_odds=None, decision_odds=None, decision_book=None, clv_bet_book="betmgm"),
+     [None, None]),
+]
+
+
 def _server(c: dict) -> list:
     price, book = pt._bet_price_and_book(c["model_id"], c["dk_odds"], c["decision_odds"],
                                          c["decision_book"], c["pick_label"])
-    if c["clv_bet_book"] and price is not None:
-        book = c["clv_bet_book"]
     return [book, None if price is None else float(price)]
 
 
-def test_the_cases_cover_every_server_branch():
-    books = {tuple(_server(c)) for c in CASES}
-    assert ("betmgm", 105.0) in books and ("betmgm", 154.0) in books
-    assert ("hardrockbet", -115.0) in books and ("fanduel", -120.0) in books
-    assert ("fliff", 110.0) in books and ("williamhill_us", -105.0) in books
-    assert ("bovada", -110.0) in books and (None, None) in books
-    assert ("draftkings", -120.0) in books and ("draftkings", -130.0) in books
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs node (CI has 22)")
-def test_the_app_prices_every_row_as_the_server_grades_it():
-    want = [_server(c) for c in CASES]
+def _app(rows: list[dict]) -> list:
+    """[book, price, clvLabelBook] per row, from clvBet.ts under Node."""
     script = f"""
 import {{ clvBetQuote, clvLabelBook }} from "./mobile/src/lib/clvBet.ts";
-const cases = {json.dumps(CASES)};
+const cases = {json.dumps(rows)};
 const got = cases.map((c) => {{
   const q = clvBetQuote(c);
   return [q.book, q.price == null ? null : Number(q.price), clvLabelBook(c)];
@@ -141,7 +150,37 @@ process.stdout.write(JSON.stringify(got));
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
-    got = json.loads(proc.stdout)
+    return json.loads(proc.stdout)
+
+
+def test_the_cases_cover_every_server_branch():
+    books = {tuple(_server(c)) for c in CASES}
+    assert ("betmgm", 105.0) in books and ("betmgm", 154.0) in books
+    assert ("hardrockbet", -115.0) in books and ("fanduel", -120.0) in books
+    assert ("fliff", 110.0) in books and ("williamhill_us", -105.0) in books
+    assert ("bovada", -110.0) in books and (None, None) in books
+    assert ("draftkings", -120.0) in books and ("draftkings", -130.0) in books
+
+
+def test_a_recorded_book_differs_from_the_derived_one():
+    # Otherwise "the recorded book wins" and "the recorded book is ignored"
+    # give the same answer and the Node test below cannot tell them apart.
+    row, want = RECORDED[0]
+    derived = _server(row)
+    assert derived[0] != want[0] and derived[1] == want[1], (derived, want)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node (CI has 22)")
+def test_the_app_prefers_the_recorded_book_at_the_derived_price():
+    got = _app([row for row, _ in RECORDED])
+    for (row, want), g in zip(RECORDED, got):
+        assert g[:2] == want, (row, g, want)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node (CI has 22)")
+def test_the_app_prices_every_row_as_the_server_grades_it():
+    want = [_server(c) for c in CASES]
+    got = _app(CASES)
     for case, g, w in zip(CASES, got, want):
         assert g[:2] == w, (case, g, w)
         # The book the header names (storedQuoteBook) is the graded book
