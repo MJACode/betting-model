@@ -3,6 +3,7 @@ import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/pro
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
 import { isNotFoundError } from './errors';
+import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
   LOG_COLUMNS,
   LOG_TABLE,
@@ -2238,25 +2239,62 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
 
 // ── Line movement ───────────────────────────────────────────────────────────
 
-/** Snapshots for one game+market at one book, oldest first (line movement history). */
+/**
+ * One game market at one book from a pick to the game's start (line movement
+ * history), oldest first: the last pre-game snapshot before the pick's second,
+ * then the newest HISTORY_ROWS from that second up to the start. Two reads,
+ * split at the same bound, so they never overlap; lib/lineHistory.sincePick
+ * places the pick inside its second.
+ *
+ * It used to be the OLDEST 50 snapshots with the last called "now": days
+ * before the pick on a busy NFL market (2026-10-09). The server can filter and
+ * order this table by snapshot_at because every row is UTC (utcSecond). In-play
+ * rows are excluded by type and by the start: "open" rows keep coming after it.
+ */
 export async function fetchOddsHistory(
   gameId: string,
   market: string,
   bookmaker: string,
+  pickAt: string,
+  startAt: string | null,
 ): Promise<OddsSnapshotRow[]> {
-  const { data, error } = await supabase
-    .from('odds')
-    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
-    .eq('game_id', gameId)
-    .eq('market', market)
-    .eq('bookmaker', bookmaker)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
-  if (error) throw error;
-  return (data ?? []) as OddsSnapshotRow[];
+  const from = utcSecond(pickAt);
+  if (from == null) return [];
+  const until = utcSecond(startAt);
+  const series = () =>
+    supabase
+      .from('odds')
+      .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
+      .eq('game_id', gameId)
+      .eq('market', market)
+      .eq('bookmaker', bookmaker)
+      .neq('snapshot_type', 'in_play');
+  let since = series().gte('snapshot_at', from);
+  if (until != null) since = since.lt('snapshot_at', until);
+  const [atPick, after] = await Promise.all([
+    series().lt('snapshot_at', from).order('snapshot_at', { ascending: false }).limit(1),
+    since.order('snapshot_at', { ascending: false }).limit(HISTORY_ROWS),
+  ]);
+  if (atPick.error) throw atPick.error;
+  if (after.error) throw after.error;
+  return byTime([...(atPick.data ?? []), ...(after.data ?? [])] as OddsSnapshotRow[]);
 }
 
-/** Prop-line snapshots for one player+market in a game at one book, oldest first. */
+/** Rows per prop series: about three times the longest the card's markets hold. */
+const PROP_HISTORY_CAP = 500;
+
+/**
+ * Every prop-line snapshot for one player+market in a game at one book,
+ * oldest first by the instant it was taken.
+ *
+ * Never ordered or filtered by snapshot_at on the server: the MLB, WNBA, NBA
+ * and NCAAF writers stamp Eastern time ("…-04:00"), the NFL and NHL writers
+ * UTC, so text order is hours off time order wherever the two meet. The whole
+ * series comes back (the longest for the card's markets was 174 rows,
+ * measured 2026-10-09) and is sorted on the phone; the cap keeps the most
+ * recently written rows. Callers window it themselves: the card from the pick
+ * to the start (sincePick); the player page reads the first and the last.
+ */
 export async function fetchPropOddsHistory(
   gameId: string,
   market: string,
@@ -2270,10 +2308,10 @@ export async function fetchPropOddsHistory(
     .eq('market', market)
     .eq('bookmaker', bookmaker)
     .eq('player_name', playerName)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
+    .order('prop_id', { ascending: false })
+    .limit(PROP_HISTORY_CAP);
   if (error) throw error;
-  return (data ?? []) as PropOddsSnapshotRow[];
+  return byTime((data ?? []) as PropOddsSnapshotRow[]);
 }
 
 // ── Prop matchup context ────────────────────────────────────────────────────

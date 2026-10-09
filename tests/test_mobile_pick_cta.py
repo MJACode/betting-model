@@ -135,16 +135,17 @@ const runs = collapseLineHistory([
   { at: t(20, 5), line: 8.5, price: -115 }, { at: t(20, 30), line: 9, price: -105 },
 ]);
 eq(runs.map((r) => r.count), [2, 1, 1], 'collapse');
-eq(runs.map((r) => r.label), ['3:50 PM ET', '4:05 PM ET', '4:30 PM ET'], 'minute labels');
+// "ET" is in the card's column heading ("Time (ET)"), not on every row.
+eq(runs.map((r) => r.label), ['3:50 PM', '4:05 PM', '4:30 PM'], 'minute labels');
 const flick = collapseLineHistory([
   { at: t(19, 50, 5), line: null, price: -105 }, { at: t(19, 50, 25), line: null, price: -115 },
 ]);
-if (!flick.every((r) => /^3:50:\\d\\d PM ET$/.test(r.label))) throw new Error(flick.map((r) => r.label).join('|'));
+if (!flick.every((r) => /^3:50:\\d\\d PM$/.test(r.label))) throw new Error(flick.map((r) => r.label).join('|'));
 const rc = recentChanges(Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
 eq([rc.rows.length, rc.changes, rc.shownChanges, rc.hidden], [8, 19, 8, 12], 'recent');
-// Reviewer #847 lows: the opening row is not a change; a mid-run null joins
+// Reviewer #847 lows: the first row is not a change; a mid-run null joins
 // the run; same-timestamp rows get unique keys.
-eq(recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 8.5, price: -115 }]).changes, 1, 'opening not a change');
+eq(recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 8.5, price: -115 }]).changes, 1, 'first row not a change');
 const gap = collapseLineHistory([
   { at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: 8.5, price: null },
   { at: t(18, 10), line: null, price: -110 }, { at: t(18, 15), line: 8.5, price: -110 },
@@ -160,14 +161,14 @@ eq(collapseLineHistory([
   { at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: null, price: null }, { at: t(18, 10), line: 8.5, price: -110 },
 ]).map((r) => r.count), [3], 'both null is a gap');
 eq(collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 5), line: null, price: -120 }]).length, 2, 'moneyline: line untracked');
-// Footer: the hidden row is the opening → not "Last 8 of 8 changes".
+// Footer: the hidden row is the first row → not "Last 8 of 8 changes".
 const nine = recentChanges(Array.from({ length: 9 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
-eq(changesFooter(nine, 9), '8 changes · opening not shown · 9 snapshots', 'opening-only hidden');
-eq(changesFooter(rc, 20), 'Last 8 of 19 changes · 20 snapshots', 'really cut');
+eq(changesFooter(nine, { fromPick: true, gap: false }), '8 changes since your pick', 'first-row-only hidden');
+eq(changesFooter(rc, { fromPick: true, gap: false }), 'Last 8 of 19 changes since your pick', 'really cut');
 const same = collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 0), line: null, price: -115 }]);
 eq(new Set(same.map((r) => r.key)).size, 2, 'unique keys');
 """
-    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    proc = _run(tmp_path, ["lineHistory.ts", "format.ts"], script)
     assert proc.returncode == 0, proc.stderr
 
 
@@ -259,7 +260,10 @@ def test_pick_detail_board_and_copy_wiring():
     reasoning = _read(SRC / "components" / "ReasoningCard.tsx")
     assert "reasoningHeading(pick.signal_type" in reasoning and ">Why this bet?<" not in reasoning
     movement = _read(SRC / "components" / "LineMovementCard.tsx")
-    assert "recentChanges(" in movement and "snaps.slice(-8)" not in movement
+    # The card renders lib/lineMovementView, which builds the rows (review, 2026-10-09).
+    movement_view = _read(LIB / "lineMovementView.ts")
+    assert "recentChanges(" in movement_view and "snaps.slice(-8)" not in movement_view
+    assert "view.rows.map(" in movement
     assert "key={r.key}" in movement and "key={r.at}" not in movement
     home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
     assert "priceCheck: (d) => priceCheckForItem(d, liveStates.get(d.pick.game_id) ?? null).flagged" in home

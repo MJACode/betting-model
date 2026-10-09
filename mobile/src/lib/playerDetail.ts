@@ -175,9 +175,11 @@ export interface PropLineMove {
 
 /**
  * DraftKings' opening snapshot against its latest, for one player market.
- * `history` is oldest-first (fetchPropOddsHistory); `now` is the same book's
- * latest row from the all-books view, which may be newer than the history's
- * last element because that read is capped.
+ * `history` is the whole series oldest-first by the instant each row was taken
+ * (fetchPropOddsHistory sorts on the phone: Eastern-time stamps make text
+ * order wrong); `now` is the same book's latest row from the all-books view.
+ * Without it the last history row is the latest. That fallback used to be the
+ * 50th-oldest row, because the read was the oldest 50 (fixed 2026-10-09).
  */
 export function propLineMove(
   history: PropOddsSnapshotRow[],

@@ -161,8 +161,9 @@ export function usePlayerDetail(args: {
 
   // ── Tonight's line for the selected stat, and its movement ───────────────
   // fetchPropLineRows is bounded by (game, market, player): a few dozen rows.
-  // The history read is capped at 50 oldest-first, which is enough for the
-  // OPENING row; the latest comes from the all-books view.
+  // The history read is the whole series, sorted by time on the phone: its
+  // first row is the OPENING; the latest comes from the all-books view, and
+  // the history's last row stands in when that view has no DraftKings row.
   const lines = useSection<{ rows: PropOddsByBookRow[]; history: PropOddsSnapshotRow[] }>(
     { rows: [], history: [] },
     gameId && market
