@@ -403,6 +403,40 @@ export function isLineOnlyId(id: string): boolean {
   return id.startsWith(LINE_ONLY_ID_PREFIX);
 }
 
+/**
+ * Whether a row may open PlayerStats.
+ *
+ * A line-only row has no `player_id`. Navigating with `''` lands on an empty
+ * page — the detail screen's log read has nothing to ask for. A blank id is
+ * the same. A real id opens.
+ */
+export function canOpenPlayerDetail(playerId: string | null | undefined): boolean {
+  return !!playerId && !isLineOnlyId(playerId);
+}
+
+/**
+ * Identity of one slate read. A sport switch or an ET-date rollover is a
+ * different slate. Both boards key the fetch on this, so an app left open
+ * overnight does not keep filtering on yesterday's teams under "Playing today".
+ * Pull-to-refresh passes a separate nonce beside the key.
+ */
+export function slateReadKey(sport: string, etDay: string): string {
+  return `${sport}|${etDay}`;
+}
+
+/**
+ * The Teams "Playing today" chip.
+ *
+ * Disabled while the slate for THIS sport has not settled. The previous
+ * sport's teams are still in state for that moment, and `!hasSlate` alone
+ * leaves the chip tappable — labelled with the old slate, filtering by the
+ * old teams — while VoiceOver says "checking the schedule". Also disabled
+ * when the settled read has no games.
+ */
+export function slateChipDisabled(slateChecking: boolean, hasSlate: boolean): boolean {
+  return slateChecking || !hasSlate;
+}
+
 // ── 3. Tonight's slate ──
 
 export interface TonightSlate {

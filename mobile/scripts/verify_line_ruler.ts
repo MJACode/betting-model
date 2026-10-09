@@ -26,18 +26,25 @@
  *    puts the ceiling between ticks, where the strip cannot settle on it.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   YARDAGE_STEP,
+  clampTypedLine,
+  clearSettleSkip,
   defaultLineN,
   maxLineN,
+  programmaticPick,
   rulerScaleFor,
   rulerStepFor,
+  settleHold,
   snapStop,
   stopAt,
   stopCount,
   stopIndexOf,
   type RulerScale,
 } from '../src/lib/lineRuler';
+import { parseTypedLine, stepLineFrom } from '../src/lib/playerLog';
 import { STAT_CATALOG, defaultThresholdFor, type StatDef } from '../src/lib/statCatalog';
 import { HIT_MODES, selectionFor } from '../src/lib/hitMode';
 
@@ -71,7 +78,9 @@ for (const [sport, key] of FIVES) {
 const ONES: [StatDef['sport'], string][] = [
   // The football stats a blanket five would have destroyed: their whole ruler
   // is 1..10, so five leaves the stops {5, 10} and no way to say "2+ TDs".
-  ['NFL', 'passing_tds'], ['NFL', 'receptions'], ['NFL', 'targets'], ['NFL', 'def_sacks'],
+  // Targets left the catalog 2026-10-06. Naming it here aborted the script
+  // before any later check ran.
+  ['NFL', 'passing_tds'], ['NFL', 'receptions'], ['NFL', 'def_sacks'],
   ['NCAAF', 'rush_rec_tds'], ['NCAAF', 'def_tackles'], ['NCAAF', 'carries'],
   // The volume stats, left at one deliberately: books price completions and
   // attempts by the single unit, so 20/21/22 is the question people ask.
@@ -245,6 +254,70 @@ for (const def of STAT_CATALOG) {
     'the strip is a fifth as long as it was',
     stopCount(s) === Math.floor((maxLineN(def) - YARDAGE_STEP) / YARDAGE_STEP) + 1,
     `${stopCount(s)} stops`,
+  );
+}
+
+// ── 8. A typed off-grid line must not snap when the scroll settles ────────
+// Typing 47 on Rec Yards (step 5) calls onChange(47) and scrolls to the
+// nearest stop. iOS (and some Android) then fire onMomentumScrollEnd, and
+// settle reads that stop. Measured: stopIndexOf(47) settles on 45.
+{
+  const def = find('NFL', 'receiving_yards');
+  const scale = rulerScaleFor(def, 'atLeast');
+  const typed = parseTypedLine('47', 'atLeast');
+  check('Rec Yards "47" parses as 47', typed === 47);
+  const offset = stopIndexOf(typed ?? 0, scale);
+  const nearest = stopAt(offset, scale);
+  check(
+    'typing 47 on Rec Yards snaps to 45 when that settle is not skipped',
+    nearest === 45 && nearest !== typed,
+    `nearest ${nearest}`,
+  );
+  const kept = settleHold(programmaticPick(typed ?? 0), offset, scale);
+  check(
+    'a programmatic pick of 47 skips that settle and stays 47',
+    kept.value === 47 && kept.skipNextSettle === false,
+    `value ${kept.value}, skip ${kept.skipNextSettle}`,
+  );
+  // The flag is one shot, and a finger drag clears it before the drag settles.
+  const armed = programmaticPick(47);
+  const dragged = clearSettleSkip(armed);
+  const afterDrag = settleHold(dragged, stopIndexOf(50, scale), scale);
+  check(
+    'a user drag clears the skip and the settle lands on the dragged stop',
+    dragged.skipNextSettle === false && afterDrag.value === 50,
+  );
+  const hi = scale.max;
+  const clamped = clampTypedLine(parseTypedLine('999'), scale.min, hi);
+  check('typed 999 clamps to the Rec Yards ceiling', clamped === hi, `got ${clamped}, hi ${hi}`);
+  const down = stepLineFrom(clamped ?? 0, -1, scale.step);
+  check(
+    'VoiceOver can step down from a clamped ceiling',
+    down >= scale.min && down <= hi && down < (clamped ?? 0),
+    `down ${down}`,
+  );
+  const unclampedDown = stepLineFrom(999, -1, scale.step);
+  check(
+    'an unclamped 999 steps to a number the ruler refuses',
+    unclampedDown > hi,
+    `step ${unclampedDown}, hi ${hi}`,
+  );
+  check('typed 0 clamps up to the floor', clampTypedLine(parseTypedLine('0'), scale.min, hi) === scale.min);
+  check('junk stays refused', clampTypedLine(parseTypedLine('abc'), scale.min, hi) === null);
+}
+
+{
+  const screen = readFileSync(join(import.meta.dirname, '../src/screens/StatsScreen.tsx'), 'utf-8');
+  check(
+    'the ruler arms the skip on a programmatic pick and clears it when a drag starts',
+    screen.includes('programmaticPick(v)') &&
+      screen.includes('settleHold(') &&
+      screen.includes('clearSettleSkip(') &&
+      screen.includes('onScrollBeginDrag='),
+  );
+  check(
+    'a typed line is clamped onto the ruler scale',
+    /clampTypedLine\(parseTypedLine\(text, hitMode\), rulerScale\.min, rulerScale\.max\)/.test(screen),
   );
 }
 

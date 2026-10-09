@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const stats = readFileSync(join(ROOT, 'src/screens/StatsScreen.tsx'), 'utf-8');
+const teams = readFileSync(join(ROOT, 'src/components/TeamsBoard.tsx'), 'utf-8');
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -56,6 +57,34 @@ check('Games stays open when there are no fixtures',
   /summary=\{gamesEmpty \? undefined : gameFilterSummary/.test(stats));
 check('Games emptyNote does not claim a dead week while checking',
   /slateChecking\s*\?\s*'Checking the schedule…'/.test(stats));
+
+check('the Players slate refetches when the ET date changes and on pull-to-refresh',
+  /const slateKey = slateReadKey\(sport, etDay\)/.test(stats) &&
+    /const etDay = etDate\(new Date\(now\)\)/.test(stats) &&
+    /\[slateKey, etDay, sport, slateReload\]/.test(stats) &&
+    /setSlateReload\(\(n\) => n \+ 1\)/.test(stats) &&
+    /onRefresh=\{refreshBoard\}/.test(stats));
+check('a line-only row does not navigate, and says why',
+  /canOpenPlayerDetail\(p\.player_id\)/.test(stats) &&
+    /No logged games, so this row does not open/.test(stats) &&
+    !/LineOnlyRow[\s\S]{0,900}openPlayer\(/.test(stats));
+
+const teamsReset = teams.slice(
+  teams.indexOf('// Reset to the sport\'s default stat'),
+  teams.indexOf('}, [sport]);') + 12,
+);
+check('a sport change clears the Teams slate before the next read lands',
+  /setSlate\(\{ date: '', isToday: false, games: \[\] \}\)/.test(teamsReset) &&
+    /setSlateFor\(null\)/.test(teamsReset) &&
+    /setSlateOnly\(false\)/.test(teamsReset));
+check('the Teams chip is disabled while the slate is still checking',
+  /disabled=\{slateChipDisabled\(slateChecking, hasSlate\)\}/.test(teams));
+check('the Teams slate refetches when the ET date changes and on pull-to-refresh',
+  /const slateKey = slateReadKey\(sport, etDay\)/.test(teams) &&
+    /const etDay = etDate\(new Date\(now\)\)/.test(teams) &&
+    /\[slateKey, etDay, sport, slateReload\]/.test(teams) &&
+    /setSlateReload\(\(n\) => n \+ 1\)/.test(teams) &&
+    /onRefresh=\{refresh\}/.test(teams));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -147,3 +147,58 @@ export function stopIndexOf(v: number, s: RulerScale): number {
 export function snapStop(v: number, s: RulerScale): number {
   return stopAt(stopIndexOf(v, s), s);
 }
+
+/**
+ * A parsed typed line, clamped onto the ruler's `[lo, hi]`.
+ *
+ * `parseTypedLine` accepts four digits, so "999" is a line. The strip can
+ * only scroll to the last stop (`stopIndexOf` clamps the offset), but the
+ * VALUE stayed 999. VoiceOver then steps with `stepLineFrom`, which from 999
+ * on a step-5 ruler lands on 995, and the ruler's `next <= hi` refuses it —
+ * the number is pinned and cannot be stepped down. Clamping the typed value
+ * onto the scale leaves the ceiling as a stop VoiceOver can leave.
+ *
+ * Junk (`null`, non-finite) stays null so the field can still refuse it.
+ */
+export function clampTypedLine(n: number | null, lo: number, hi: number): number | null {
+  if (n == null || !Number.isFinite(n)) return null;
+  const floor = Math.min(lo, hi);
+  const ceil = Math.max(lo, hi);
+  return Math.min(ceil, Math.max(floor, n));
+}
+
+/** The number the centre is holding, and whether the next settle belongs to
+ *  a programmatic scroll rather than a finger. */
+export interface RulerHold {
+  value: number;
+  skipNextSettle: boolean;
+}
+
+/**
+ * A tap, a VoiceOver step, or a typed commit. Reports `value` itself and
+ * arms a one-shot skip of the settle the animated `scrollTo` is about to
+ * fire (`onMomentumScrollEnd` on iOS, and on some Android).
+ *
+ * An off-grid typed line scrolls to the NEAREST stop. Without the skip,
+ * settle reads that stop and overwrites the typed number — 47 on Rec Yards
+ * (step 5) becomes 45.
+ */
+export function programmaticPick(value: number): RulerHold {
+  return { value, skipNextSettle: true };
+}
+
+/** A finger drag started. The pending skip must not swallow this drag's settle. */
+export function clearSettleSkip(hold: RulerHold): RulerHold {
+  if (!hold.skipNextSettle) return hold;
+  return { value: hold.value, skipNextSettle: false };
+}
+
+/**
+ * `onMomentumScrollEnd` / `onScrollEndDrag`. `offsetStops` is
+ * `contentOffset.x / tickW`. The one-shot skip keeps the held value and
+ * clears itself; the next settle applies.
+ */
+export function settleHold(hold: RulerHold, offsetStops: number, scale: RulerScale): RulerHold {
+  if (hold.skipNextSettle) return { value: hold.value, skipNextSettle: false };
+  return { value: stopAt(offsetStops, scale), skipNextSettle: false };
+}

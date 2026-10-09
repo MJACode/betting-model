@@ -101,7 +101,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, etDate, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -112,13 +112,13 @@ import {
   h2hMatchups,
   nextGameByTeam,
   buildTonightSlate,
+  slateReadKey,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
-  isLineOnlyId,
+  canOpenPlayerDetail,
   isStatParticipant,
-  LINE_ONLY_ID_PREFIX,
   fixtureSubline,
   lineOnlyPlayers,
   startedForGame,
@@ -168,8 +168,12 @@ import {
 } from '@/lib/statSegments';
 import {
   baseStopCount,
+  clampTypedLine,
+  clearSettleSkip,
   defaultLineN,
+  programmaticPick,
   rulerScaleFor,
+  settleHold,
   snapStop,
   stopAt,
   stopCount,
@@ -465,6 +469,10 @@ export function StatsScreen() {
   // (UX review, 2026-09-09). The stamping below means no wrong rows were ever
   // painted; the cost was a wasted multi-page request and a slower first paint.
   const [slateFor, setSlateFor] = useState<string | null>(null);
+  // Bumped by pull-to-refresh. The slate effect also re-runs when `etDay`
+  // changes (midnight, or a resume via useNow), so a board left open overnight
+  // does not keep yesterday's teams under "Playing today".
+  const [slateReload, setSlateReload] = useState(0);
   // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
   // grade a spot off the probable starter or the lineup; every other sport had
   // a column of dashes, so a toughness filter over it would have filtered
@@ -555,9 +563,14 @@ export function StatsScreen() {
   // daily still get a usable toggle — buildTonightSlate prefers today and falls
   // back to the next scheduled day. Failure-tolerant: a slate we can't reach
   // just leaves the toggle hidden.
+  // Keyed on the ET date, not on mount: `todayET()` read once left an app
+  // open past midnight filtering on yesterday. `useNow` moves at midnight and
+  // on foreground; pull-to-refresh bumps `slateReload`.
+  const etDay = etDate(new Date(now));
+  const slateKey = slateReadKey(sport, etDay);
   useEffect(() => {
     let cancelled = false;
-    const from = todayET();
+    const from = etDay;
     // BOUNDED, because .finally() is not a guarantee that anything happens.
     // The supabase client is created with no fetch timeout, so a request that
     // hangs never settles: no `.finally`, no `error` to render the Retry banner
@@ -587,7 +600,7 @@ export function StatsScreen() {
       cancelled = true;
       clearTimeout(release);
     };
-  }, [sport]);
+  }, [slateKey, etDay, sport, slateReload]);
 
   // Team stats for the defence grade. Only fetched where it is actually used,
   // so the sports that already grade off a matchup view pay nothing for it.
@@ -848,6 +861,11 @@ export function StatsScreen() {
     // refetch the board on a timer. `readKey` carries the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey, h2hKey]);
+
+  const refreshBoard = useCallback(() => {
+    setSlateReload((n) => n + 1);
+    void load();
+  }, [load]);
 
   useEffect(() => {
     // The gate exists so a read NARROWED by the slate's teams is not fired
@@ -1748,10 +1766,6 @@ export function StatsScreen() {
               hitMode={hitMode}
               oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
               onOddsPress={quote ? () => openBook(quote) : undefined}
-              tappable={playerDetail}
-              onPress={() =>
-                openPlayer({ player_id: `${LINE_ONLY_ID_PREFIX}${p.key}`, player_name: p.name, team: null })
-              }
             />
           );
         })}
@@ -1817,11 +1831,9 @@ export function StatsScreen() {
   }) => {
     // Called directly rather than via `playerDetail` above: it is a type guard,
     // so this line is what narrows `sport` to a sport the route accepts.
-    if (!supportsPlayerDetail(sport)) return;
+    if (!supportsPlayerDetail(sport) || !canOpenPlayerDetail(p.player_id)) return;
     navigation.navigate('PlayerStats', {
-      // A line-only row has no player_id; the detail screen looks him up by
-      // name, as it does for any caller without one.
-      playerId: isLineOnlyId(p.player_id) ? '' : p.player_id,
+      playerId: p.player_id,
       playerName: p.player_name,
       sport,
       // MLB only — it decides batter vs pitcher chips. Fall back to the selected
@@ -2285,10 +2297,9 @@ export function StatsScreen() {
               // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
               // that line in Over/Under). Below one stop is refused: "0+" is
               // every game.
-              parseTyped={(text) => {
-                const n = parseTypedLine(text, hitMode);
-                return n != null && n >= rulerScale.min ? n : null;
-              }}
+              parseTyped={(text) =>
+                clampTypedLine(parseTypedLine(text, hitMode), rulerScale.min, rulerScale.max)
+              }
             />
             {/* At Least only, and a footnote rather than a headline. The row
                 this replaces restated the stat, the number and the direction —
@@ -2562,7 +2573,7 @@ export function StatsScreen() {
           // between fetches — and it was the one list screen in the app whose
           // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
           // ages the LABELS; this is how a user re-reads the DATA.
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshBoard} />}
         />
       ) : (
         <FlatList
@@ -2612,7 +2623,7 @@ export function StatsScreen() {
           // between fetches — and it was the one list screen in the app whose
           // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
           // ages the LABELS; this is how a user re-reads the DATA.
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshBoard} />}
         />
       )}
 
@@ -2946,6 +2957,9 @@ function LineRuler({
   const [width, setWidth] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const reportedRef = useRef(value);
+  // One programmatic scroll's settle (the animated scrollTo in pickTick).
+  // Cleared when that settle arrives, or sooner if a finger drag starts.
+  const skipSettleRef = useRef(false);
   const { min, step } = scale;
   const count = stopCount(scale);
   /** The last reachable stop — `scale.max` aligned onto the grid. */
@@ -3005,15 +3019,22 @@ function LineRuler({
   // both end events (a drag with no fling never gets a momentum-end); emitting
   // is idempotent via reportedRef.
   const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const v = stopAt(e.nativeEvent.contentOffset.x / tickW, scale);
-    if (v !== reportedRef.current) {
-      reportedRef.current = v;
-      onChange(v);
+    const next = settleHold(
+      { value: reportedRef.current, skipNextSettle: skipSettleRef.current },
+      e.nativeEvent.contentOffset.x / tickW,
+      scale,
+    );
+    skipSettleRef.current = next.skipNextSettle;
+    if (next.value !== reportedRef.current) {
+      reportedRef.current = next.value;
+      onChange(next.value);
     }
   };
 
   const pickTick = (v: number) => {
-    reportedRef.current = v;
+    const next = programmaticPick(v);
+    reportedRef.current = next.value;
+    skipSettleRef.current = next.skipNextSettle;
     scrollRef.current?.scrollTo({ x: offsetFor(v), animated: true });
     onChange(v);
   };
@@ -3094,6 +3115,13 @@ function LineRuler({
           contentContainerStyle={{ paddingHorizontal: sidePad }}
           onMomentumScrollEnd={settle}
           onScrollEndDrag={settle}
+          onScrollBeginDrag={() => {
+            const next = clearSettleSkip({
+              value: reportedRef.current,
+              skipNextSettle: skipSettleRef.current,
+            });
+            skipSettleRef.current = next.skipNextSettle;
+          }}
         >
           {Array.from({ length: count }, (_, i) => {
             const v = stopAt(i, scale);
@@ -3614,8 +3642,6 @@ function LineOnlyRow({
   hitMode,
   oddsDay,
   onOddsPress,
-  tappable,
-  onPress,
 }: {
   name: string;
   subline: string | null;
@@ -3627,20 +3653,15 @@ function LineOnlyRow({
   hitMode: HitMode;
   oddsDay?: string | null;
   onOddsPress?: () => void;
-  tappable: boolean;
-  onPress: () => void;
 }) {
   const body = (
     <>
       <Text style={styles.rank} />
       <View
         style={styles.rowMain}
-        accessible={tappable}
-        accessibilityRole={tappable ? 'button' : undefined}
-        accessibilityLabel={
-          tappable ? `${name}, no games logged${subline ? `, ${sublineSpoken(subline)}` : ''}` : undefined
-        }
-        accessibilityHint={tappable ? 'Opens this player' : undefined}
+        accessible
+        accessibilityLabel={`${name}, no games logged${subline ? `, ${sublineSpoken(subline)}` : ''}`}
+        accessibilityHint="No logged games, so this row does not open"
       >
         <Text style={styles.rowName} numberOfLines={1}>
           {name}
@@ -3669,18 +3690,9 @@ function LineOnlyRow({
       {showMatchup ? <MatchupCell matchup={null} /> : null}
     </>
   );
-  if (!tappable) return <View style={styles.row}>{body}</View>;
-  return (
-    // accessible={false} for the same reason as HitRateRow: the price pill
-    // stays its own VoiceOver button.
-    <Pressable
-      onPress={onPress}
-      accessible={false}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-    >
-      {body}
-    </Pressable>
-  );
+  // Not a button. There is no player id, and PlayerStats with a blank id is
+  // an empty page. The price pill stays its own control.
+  return <View style={styles.row}>{body}</View>;
 }
 
 function HitRateRow({

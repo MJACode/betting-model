@@ -39,7 +39,10 @@ import {
   inHitRateBand,
   isOnSlate,
   fixtureSubline,
+  canOpenPlayerDetail,
   isLineOnlyId,
+  slateChipDisabled,
+  slateReadKey,
   isStatParticipant,
   isTeamPropName,
   LINE_ONLY_ID_PREFIX,
@@ -281,6 +284,20 @@ check('lineOnlyPlayers: suffix-folded names count as present; the rest are liste
   missing.map((p) => p.name).join() === 'Tank Dell' && missing[0]!.gameId === 'g2');
 check('line-only ids are recognisable and never a real id',
   isLineOnlyId(`${LINE_ONLY_ID_PREFIX}tank dell`) && !isLineOnlyId('00-0036900'));
+check('a line-only or blank id does not open a player page',
+  !canOpenPlayerDetail(`${LINE_ONLY_ID_PREFIX}tank dell`) &&
+    !canOpenPlayerDetail('') &&
+    !canOpenPlayerDetail(null));
+check('a real player id still opens', canOpenPlayerDetail('00-0036900'));
+check('the Teams chip stays disabled while the previous sport\'s slate is still in state',
+  slateChipDisabled(true, true) === true);
+check('the Teams chip stays disabled with no slate', slateChipDisabled(false, false) === true);
+check('the Teams chip is tappable once this sport\'s slate has teams',
+  slateChipDisabled(false, true) === false);
+check('an ET rollover is a different slate read',
+  slateReadKey('NFL', '2026-10-09') !== slateReadKey('NFL', '2026-10-10'));
+check('a sport switch is a different slate read',
+  slateReadKey('NFL', '2026-10-09') !== slateReadKey('NBA', '2026-10-09'));
 check('fixtureSubline: a line-only row names its game, not a team it does not know',
   /· HOU @ TEN$/.test(fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, null) ?? '') &&
   fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, 'Live') === 'Live · HOU @ TEN' &&
