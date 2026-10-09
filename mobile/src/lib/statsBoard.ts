@@ -132,9 +132,9 @@ export function needsTouchSet(sport: string, statKey: string | null | undefined)
  * The season and H2H reads beside this one drop a response whose stamp is no
  * longer `inFlight`. The touch read is fired and not awaited, so without the
  * same check a response for the sport and player type the user has left
- * overwrites the set that just landed. The key then no longer matches, Season
- * and H2H Anytime TD fall back to "anyone with games", and the linemen return
- * until the next load (review of #898).
+ * overwrites the set that just landed. The key then no longer matches, and
+ * Season and H2H Anytime TD would have to answer without a set (review of
+ * #898). An empty id set is not committed: that is not a real answer.
  */
 export function touchSetFromResponse(
   inFlight: string | null,
@@ -142,8 +142,39 @@ export function touchSetFromResponse(
   touchKey: string,
   ids: Set<string>,
 ): { key: string; ids: Set<string> } | null {
-  if (inFlight !== stamp) return null;
+  if (touchCommitAction(inFlight, stamp, ids.size) !== 'commit') return null;
   return { key: touchKey, ids };
+}
+
+/**
+ * What a touch-totals response may do. A load the user has left is ignored.
+ * An empty id set is not "nobody touched the ball" — committing it would mark
+ * every zero-TD carrier as untouched — so it fails like a rejected read.
+ */
+export function touchCommitAction(
+  inFlight: string | null,
+  stamp: string,
+  idCount: number,
+): 'ignore' | 'fail' | 'commit' {
+  if (inFlight !== stamp) return 'ignore';
+  if (idCount <= 0) return 'fail';
+  return 'commit';
+}
+
+/**
+ * Whether a rejected touch read should mark this key failed.
+ *
+ * A superseded stamp is ignored, abort or not: that rejection belongs to a
+ * load the user has left. An abort of the load still on screen is a failure.
+ * Leaving it unrecorded holds the skeleton until the question changes.
+ */
+export function touchRejectionRecordsFailure(
+  inFlight: string | null,
+  stamp: string,
+  aborted: boolean,
+): boolean {
+  if (inFlight !== stamp) return false;
+  return aborted || !aborted;
 }
 
 export interface TouchSet {
@@ -170,15 +201,30 @@ export function shouldFetchTouchSet(
  * key stays on screen, and a set for another key stays for the way back.
  * The failed key is recorded so the next load retries.
  */
-export function touchSetAfterFailure<T extends { key: string }>(
-  current: T | null,
+export function touchSetAfterFailure(
   failedKey: string | null,
   inFlight: string | null,
   stamp: string,
   touchKey: string,
-): { set: T | null; failedKey: string | null } {
-  if (inFlight !== stamp) return { set: current, failedKey };
-  return { set: current, failedKey: touchKey };
+): string | null {
+  if (inFlight !== stamp) return failedKey;
+  return touchKey;
+}
+
+/**
+ * The `touched` flag Season and H2H pass. Those reads have no usage columns
+ * (`games` is empty). A set for this key answers the question. Anything else
+ * — no set, or a set for another sport or player type — is unknown, and
+ * `isStatParticipant` then fails closed.
+ */
+export function seasonTouchFlag(
+  gamesEmpty: boolean,
+  setKey: string | null | undefined,
+  touchKey: string,
+  inSet: boolean,
+): boolean | undefined {
+  if (!gamesEmpty || setKey !== touchKey) return undefined;
+  return inSet;
 }
 
 export type TouchBoardView = 'list' | 'loading' | 'error';
@@ -200,9 +246,13 @@ export function touchBoardView(
   return 'loading';
 }
 
+/** Same sentence `friendlyCause` uses for a server failure. Never a blank. */
+const TOUCH_FAIL_CAUSE = 'Something went wrong on our side. Try again in a moment.';
+
 /** The line under the board when the touch read failed and nothing was kept. */
-export function touchSetErrorLine(cause: string): string {
-  return `Couldn’t load who has touched the ball. ${cause} Pull down to retry.`;
+export function touchSetErrorLine(cause: string | null | undefined): string {
+  const sentence = cause?.trim() ? cause.trim() : TOUCH_FAIL_CAUSE;
+  return `Couldn’t load who has touched the ball. ${sentence} Pull down to retry.`;
 }
 
 /** The player_ids with any carry, reception or target on a totals read. */
@@ -237,13 +287,13 @@ export function isStatParticipant(
   if (opts.touched !== undefined) return opts.touched;
   const rows = (opts.rows ?? []) as ReadonlyArray<Record<string, unknown>>;
   const hasUsage = rows.some((r) => TOUCH_KEYS.some((k) => r[k] != null));
-  // No usage columns and no touch set: a player with games in the window is
-  // kept — hiding the receiver is the bug this replaced. Season and H2H pass
-  // `touched` once that read has landed. Until it lands, and when it fails
-  // with nothing kept, the board holds the skeleton or an error line and does
-  // not paint this fallback (1,327 Season rows, 897 never touched the ball —
-  // measured 2026-10-08).
-  if (!hasUsage) return values.length > 0;
+  // No usage columns and no touch answer (missing, or a set for another key).
+  // Fail closed: a zero is not evidence the player touched the ball, and
+  // keeping anyone with games built the wide list (1,327 Season rows, 897
+  // never touched — measured 2026-10-08). A player who scored still stayed,
+  // above. Last-N and Averages carry the usage columns and take the branch
+  // below.
+  if (!hasUsage) return false;
   return rows.some((r) => TOUCH_KEYS.some((k) => Number(r[k] ?? 0) > 0));
 }
 

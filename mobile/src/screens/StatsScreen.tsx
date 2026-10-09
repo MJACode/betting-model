@@ -113,8 +113,11 @@ import {
   isOnSlate,
   isStatParticipant,
   needsTouchSet,
+  seasonTouchFlag,
   shouldFetchTouchSet,
   touchBoardView,
+  touchCommitAction,
+  touchRejectionRecordsFailure,
   touchSetAfterFailure,
   touchSetErrorLine,
   touchSetFromResponse,
@@ -747,12 +750,33 @@ export function StatsScreen() {
             failedForKey,
           )
         ) {
+          const markTouchFailed = (cause: string) => {
+            const failedKey = touchSetAfterFailure(
+              touchFailureRef.current?.key ?? null,
+              inFlight.current,
+              stamp,
+              touchKey,
+            );
+            if (inFlight.current !== stamp || failedKey == null) return;
+            // The set already held is left where it is. A failure does not
+            // clear a last good set for this key, or a set for another key.
+            touchFailureRef.current = { key: failedKey, cause };
+            setTouchFailure(touchFailureRef.current);
+          };
           touchJob = fetchWindowTotals(sport, SEASON, null, playerType)
             .then((t) => {
               // Same stamp as the reads below. A response for a sport or
               // player type the user has already left must not replace the
-              // set those reads are filtering with.
-              const next = touchSetFromResponse(inFlight.current, stamp, touchKey, touchedPlayerIds(t));
+              // set those reads are filtering with. An empty id set is not
+              // usable: it would mark every zero-TD carrier as untouched.
+              const ids = touchedPlayerIds(t);
+              const action = touchCommitAction(inFlight.current, stamp, ids.size);
+              if (action === 'ignore') return;
+              if (action === 'fail') {
+                markTouchFailed(friendlyCause(new Error('empty touch totals')));
+                return;
+              }
+              const next = touchSetFromResponse(inFlight.current, stamp, touchKey, ids);
               if (!next) return;
               touchSetRef.current = next;
               setTouchSet(next);
@@ -762,19 +786,11 @@ export function StatsScreen() {
               }
             })
             .catch((e: unknown) => {
-              if (isAbortError(e)) return;
-              const next = touchSetAfterFailure(
-                touchSetRef.current,
-                touchFailureRef.current?.key ?? null,
-                inFlight.current,
-                stamp,
-                touchKey,
-              );
-              if (inFlight.current !== stamp) return;
-              // `next.set` is the set already held. A failure does not write
-              // it back, and does not clear a set for another key.
-              touchFailureRef.current = { key: next.failedKey ?? touchKey, cause: friendlyCause(e) };
-              setTouchFailure(touchFailureRef.current);
+              // An abort of a superseded stamp is ignored inside
+              // touchRejectionRecordsFailure. An abort of this stamp is a
+              // failure, or the skeleton never ends.
+              if (!touchRejectionRecordsFailure(inFlight.current, stamp, isAbortError(e))) return;
+              markTouchFailed(friendlyCause(e));
             });
         }
         if (timeWindow === 'h2h') {
@@ -1607,9 +1623,12 @@ export function StatsScreen() {
       .filter((p) => isStatParticipant(sport, p.values, {
         statKey: String(stat.key),
         rows: p.games,
-        touched: p.games.length === 0 && touchSet?.key === `${sport}|${playerType ?? ''}`
-          ? touchSet.ids.has(p.player_id)
-          : undefined,
+        touched: seasonTouchFlag(
+          p.games.length === 0,
+          touchSet?.key,
+          `${sport}|${playerType ?? ''}`,
+          touchSet?.ids.has(p.player_id) ?? false,
+        ),
       }))
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
@@ -2417,7 +2436,7 @@ export function StatsScreen() {
           ListEmptyComponent={
             touchView === 'error' && !error ? (
               <View style={styles.errorBanner} accessibilityRole="alert" accessibilityLiveRegion="polite">
-                <Text style={styles.errorText}>{touchSetErrorLine(touchFailure?.cause ?? '')}</Text>
+                <Text style={styles.errorText}>{touchSetErrorLine(touchFailure?.cause)}</Text>
               </View>
             ) : loading || (timeWindow === 'h2h' && slateChecking) || (touchView === 'loading' && !error) ? (
               <BoardSkeleton />
