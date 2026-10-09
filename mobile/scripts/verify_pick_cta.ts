@@ -260,11 +260,11 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
   check('rows sharing a minute get seconds', flicker.every((r) => /^3:50:\d\d PM ET$/.test(r.label)), flicker.map((r) => r.label).join(' | '));
   const many = Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 }));
   const rc = recentChanges(many, 8);
-  check('the card shows the last 8 rows and counts every CHANGE (the opening row is not one)',
+  check('the card shows the last 8 rows and counts every CHANGE (the first row is not one)',
     rc.rows.length === 8 && rc.changes === 19 && rc.shownChanges === 8 && rc.hidden === 12, JSON.stringify({ c: rc.changes, s: rc.shownChanges, h: rc.hidden }));
   // Reviewer #847 lows.
   const one = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 8.5, price: -115 }]);
-  check('M13: opening + one move = 1 change, not 2', one.changes === 1 && one.rows[0].opening && !one.rows[1].opening);
+  check('M13: first row + one move = 1 change, not 2', one.changes === 1 && one.rows[0].baseline && !one.rows[1].baseline);
   check('M13: an unmoved line is 0 changes', recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: 8.5, price: -110 }]).changes === 0);
   const gap = collapseLineHistory([
     { at: t(18, 0), line: 8.5, price: -110 },
@@ -290,10 +290,14 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
   const ml = collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 5), line: null, price: -120 }]);
   check('M13: a field no snapshot has (moneyline line) is untracked, not "partial"', ml.length === 2);
   const nine = recentChanges(Array.from({ length: 9 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
-  check('footer: only the opening hidden → "8 changes · opening not shown", not "Last 8 of 8"',
-    changesFooter(nine, 9) === '8 changes · opening not shown · 9 snapshots', changesFooter(nine, 9));
-  check('footer: changes really cut → "Last 8 of 19 changes"', changesFooter(rc, 20) === 'Last 8 of 19 changes · 20 snapshots', changesFooter(rc, 20));
-  check('footer: nothing hidden → "1 change"', changesFooter(one, 2) === '1 change · 2 snapshots');
+  check('footer: only the first row hidden → "8 changes since your pick", not "Last 8 of 8"',
+    changesFooter(nine, 9, true) === '8 changes since your pick · 9 snapshots', changesFooter(nine, 9, true));
+  check('footer: changes really cut → "Last 8 of 19 changes"', changesFooter(rc, 20, true) === 'Last 8 of 19 changes since your pick · 20 snapshots', changesFooter(rc, 20, true));
+  check('footer: nothing hidden → "1 change"', changesFooter(one, 2, true) === '1 change since your pick · 2 snapshots');
+  check('footer: only the newest snapshots held → says so', changesFooter(rc, 50, false) === 'Last 8 of 19 changes in the newest 50 snapshots', changesFooter(rc, 50, false));
+  // The first row is the price at the pick (lib/lineHistory sincePick), not the opener.
+  const atPick = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 9, price: -110 }], 8, true);
+  check('the price at the pick reads "At pick"', atPick.rows[0].label === 'At pick' && atPick.rows[1].label === '2:30 PM ET', atPick.rows.map((r) => r.label).join(' | '));
   const same = collapseLineHistory([
     { at: t(18, 0), line: null, price: -110 },
     { at: t(18, 0), line: null, price: -115 },
@@ -313,7 +317,7 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, postponed, in-play tag)',
   /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
 check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
-check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length\)/.test(read('src/components/LineMovementCard.tsx')));
+check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length, fromPick\)/.test(read('src/components/LineMovementCard.tsx')));
 check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
 check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
   /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));

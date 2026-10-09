@@ -365,7 +365,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           </View>
         ) : null}
 
-        <LineMovementCard pick={pick} playerName={playerName} />
+        <LineMovementCard pick={pick} playerName={playerName} commenceTime={game?.commence_time ?? null} />
 
         {/* Where to place it, then every book and line — one section, action
             first (UX review): the chips are the bettable same-line subset, the

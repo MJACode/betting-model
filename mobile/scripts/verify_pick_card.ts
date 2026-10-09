@@ -296,7 +296,7 @@ check(
   check(
     'LineMovementCard fetch uses historyBook, not MODEL_BOOK',
     cardSrc.includes('historyBookForPick') &&
-      cardSrc.includes('fetchOddsHistory(pick.game_id, market, historyBook)') &&
+      cardSrc.includes('fetchOddsHistory(pick.game_id, market, historyBook, pick.created_at, startAt)') &&
       !cardSrc.includes('MODEL_BOOK'),
   );
   const qSrc = readFileSync(join(__dirname, '../src/lib/queries.ts'), 'utf-8');
@@ -307,6 +307,16 @@ check(
   check(
     'history fetches have no draftkings literal',
     hist.includes(".eq('bookmaker', bookmaker)") && !hist.includes("'draftkings'"),
+  );
+  // 2026-10-09: the reads were the OLDEST 50 snapshots, the last called "now".
+  check(
+    'history fetches are not the oldest 50',
+    !hist.includes('ascending: true') && hist.includes('ascending: false') && hist.includes("neq('snapshot_type', 'in_play')"),
+  );
+  check(
+    'the card windows the rows from the pick to the start',
+    cardSrc.includes('sincePick(rows as Snap[], pick.created_at, startAt)') &&
+      cardSrc.includes('gameStartAt(commenceTime, pick.game_time)'),
   );
 }
 

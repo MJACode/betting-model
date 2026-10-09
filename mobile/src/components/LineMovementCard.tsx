@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican } from '@/lib/format';
-import { changesFooter, recentChanges } from '@/lib/lineHistory';
+import { changesFooter, gameStartAt, pickedBeforeStart, recentChanges, sincePick, type PickWindow } from '@/lib/lineHistory';
 import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -12,23 +12,33 @@ interface Props {
   pick: Pick;
   /** Player name parsed from pick_label (prop picks only). */
   playerName: string | null;
+  /** games.commence_time. The window ends at the earlier of it and pick.game_time. */
+  commenceTime?: string | null;
 }
 
 interface Snap extends PricedSnapshot {
   snapshot_at: string;
 }
 
+const NO_HISTORY: PickWindow<Snap> = { rows: [], fromPick: false, closed: false };
+
 /**
  * Same-book price/line history since the pick was scored. Steam against
  * the lock is the "don't bet this anymore" signal. Fetch is the deciding
  * book (`historyBookForPick`), never a hard-coded DraftKings series.
+ *
+ * The rows run from the book's price when the pick was made to the game's
+ * start (lib/lineHistory `sincePick`), so the last row is the latest pre-game
+ * price, and after the start the card says "by game time", not "now". A pick
+ * made after the start (a live pick) has no pre-game line since it: no card.
  */
-export function LineMovementCard({ pick, playerName }: Props) {
-  const [snaps, setSnaps] = useState<Snap[] | null>(null);
+export function LineMovementCard({ pick, playerName, commenceTime }: Props) {
+  const [hist, setHist] = useState<PickWindow<Snap> | null>(null);
 
   const isProp = pick.model_id.includes('prop');
   const market = isProp ? propMarketForModel(pick.model_id) : gameMarketForModel(pick.model_id);
   const historyBook = historyBookForPick(pick);
+  const startAt = gameStartAt(commenceTime, pick.game_time);
 
   useEffect(() => {
     let mounted = true;
@@ -36,27 +46,31 @@ export function LineMovementCard({ pick, playerName }: Props) {
       !canShowLineMovementHistory(pick) ||
       historyBook == null ||
       market == null ||
-      (isProp && !playerName)
+      (isProp && !playerName) ||
+      !pickedBeforeStart(pick.created_at, startAt)
     ) {
-      setSnaps([]);
+      setHist(NO_HISTORY);
       return undefined;
     }
     const load = isProp
       ? fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook)
-      : fetchOddsHistory(pick.game_id, market, historyBook);
+      : fetchOddsHistory(pick.game_id, market, historyBook, pick.created_at, startAt);
     load
       .then((rows) => {
-        if (mounted) setSnaps(rows as Snap[]);
+        if (mounted) setHist(sincePick(rows as Snap[], pick.created_at, startAt));
       })
       .catch(() => {
-        if (mounted) setSnaps([]);
+        if (mounted) setHist(NO_HISTORY);
       });
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, historyBook, market, isProp, playerName]);
+  }, [pick.pick_id, pick.game_id, pick.created_at, historyBook, market, isProp, playerName, startAt]);
 
-  if (!snaps || snaps.length === 0 || market == null) return null;
+  if (!hist || hist.rows.length === 0 || market == null) return null;
+  const snaps = hist.rows;
+  // After the start the last row is the last price before it, not "now".
+  const byGameTime = hist.closed;
 
   // NFL game lines compare LINE only (soft-book price is not the snapshot
   // book). Props are not lineOnly — they steam at the deciding book.
@@ -69,13 +83,17 @@ export function LineMovementCard({ pick, playerName }: Props) {
 
   const verdict = (() => {
     if (!movement) {
-      return { label: 'Line steady since pick', color: colors.textSecondary };
+      return {
+        label: byGameTime ? 'Line steady from pick to game time' : 'Line steady since pick',
+        color: colors.textSecondary,
+      };
     }
+    const when = byGameTime ? ' by game time' : '';
     if (movement.severity === 'skip') {
       return {
         label:
           `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
-          `${formatSideLine(movement.currentLine, pick.pick_side, market)} against your ${pick.pick_side}`,
+          `${formatSideLine(movement.currentLine, pick.pick_side, market)} against your ${pick.pick_side}${when}`,
         color: colors.avoidInk,
       };
     }
@@ -83,19 +101,20 @@ export function LineMovementCard({ pick, playerName }: Props) {
       return {
         label:
           `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
-          `${formatSideLine(movement.currentLine, pick.pick_side, market)} in your favor`,
+          `${formatSideLine(movement.currentLine, pick.pick_side, market)} in your favor${when}`,
         color: colors.betInk,
       };
     }
     const pp = movement.priceShiftPp ?? 0;
+    const since = byGameTime ? 'by game time' : 'since scoring';
     if (movement.severity === 'caution') {
       return {
-        label: `Steamed ${pp.toFixed(1)}pp against you since scoring`,
+        label: `Steamed ${pp.toFixed(1)}pp against you ${since}`,
         color: colors.avoidInk,
       };
     }
     return {
-      label: `Moved ${Math.abs(pp).toFixed(1)}pp in your favor since scoring`,
+      label: `Moved ${Math.abs(pp).toFixed(1)}pp in your favor ${since}`,
       color: colors.betInk,
     };
   })();
@@ -103,12 +122,16 @@ export function LineMovementCard({ pick, playerName }: Props) {
   const showLineCol = market.startsWith('totals') || market.startsWith('spreads') || isProp;
   // M13: a row is a CHANGE, not a raw snapshot — runs at the same line and
   // price collapse, and rows sharing a minute get seconds (lib/lineHistory).
+  // The first row is the price at the pick ("At pick"), not the opener.
+  const { fromPick } = hist;
   const { rows: recent, changes, shownChanges, hidden } = recentChanges(
     snaps.map((s) => ({
       at: s.snapshot_at,
       line: showLineCol ? lineForSide(lineFromSnapshot(s, market), pick.pick_side, market) : null,
       price: priceForSide(s, pick.pick_side),
     })),
+    8,
+    fromPick,
   );
 
   return (
@@ -142,7 +165,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
       ))}
       {hidden > 0 || snaps.length > recent.length ? (
         <Text style={styles.more}>
-          {changesFooter({ changes, shownChanges, hidden }, snaps.length)}
+          {changesFooter({ changes, shownChanges, hidden }, snaps.length, fromPick)}
         </Text>
       ) : null}
       <Text style={styles.note}>
@@ -150,12 +173,12 @@ export function LineMovementCard({ pick, playerName }: Props) {
           ? `Your pick is locked at the number the card took — ` +
             `${formatSideLine(pick.scored_line, pick.pick_side, market)} at ` +
             `${formatAmerican(lockedPrice)} (the book is named in the pick). The table shows ` +
-            `${bookName(historyBook ?? storedQuoteBook(pick))}'s line since. It doesn't change the pick or how ` +
-            `it settles.`
+            `${bookName(historyBook ?? storedQuoteBook(pick))}'s line ${byGameTime ? 'from your pick to game time' : 'since'}. ` +
+            `It doesn't change the pick or how it settles.`
           : `Your pick was decided at ${bookName(historyBook ?? storedQuoteBook(pick))} ${formatAmerican(lockedPrice)}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
-            `This just shows how that book's line has moved since, for or against you. It doesn't ` +
-            `change the pick or how it settles.`}
+            `This just shows how that book's line ${byGameTime ? 'moved from your pick to game time' : 'has moved since'}, ` +
+            `for or against you. It doesn't change the pick or how it settles.`}
       </Text>
     </View>
   );
