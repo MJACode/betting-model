@@ -1751,6 +1751,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _price_age_floor(now: datetime | None = None) -> datetime:
+    """now minus config.PREGAME_PRICE_MAX_AGE_MIN: the one place the bound is
+    turned into a moment. The per-market read (_pregame_price_floor) and the
+    entry checks' SQL text (_current_price_since) both come from here, so the
+    two cannot drift apart."""
+    return (now or _utcnow()) - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN)
+
+
 def _pregame_price_floor(cutoff: str | None,
                          now: datetime | None = None) -> datetime | None:
     """The oldest snapshot_at a pre-game DECISION may stand on, or None for
@@ -1774,17 +1782,18 @@ def _pregame_price_floor(cutoff: str | None,
     now = now or _utcnow()
     if start <= now:
         return None
-    return now - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN)
+    return _price_age_floor(now)
 
 
 def _current_price_since(now: datetime | None = None) -> str:
     """The same floor as SQL text, 'YYYY-MM-DDTHH:MM:SS' UTC, for a
     `snapshot_at >= ?` comparison. Safe as text: every odds.snapshot_at is ISO
     with a 'T' and UTC (_get_dk_odds' docstring), so the first 19 characters
-    order the rows; a date-only historical row sorts before it, i.e. stale."""
-    now = now or _utcnow()
-    floor = now - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN)
-    return floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    order the rows; a date-only historical row sorts before it, i.e. stale.
+    It takes no kickoff, unlike _pregame_price_floor: run_scorer skips a
+    started game whatever the entry checks admit."""
+    return _price_age_floor(now).astimezone(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S")
 
 
 def _quote_is_current(snapshot_at, floor: datetime | None) -> bool:

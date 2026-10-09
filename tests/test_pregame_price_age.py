@@ -16,7 +16,10 @@ has started, the last pre-game row is the close and its age does not matter,
 so the in-play models' pre-game line and every historical replay read exactly
 what they read before.
 
-Every test here was run against the code before the change and failed.
+The 10 tests written with the rule were run against the code before it: 8
+failed. The other 2 check that the rule does not reach too far: a fresh price
+still decides, and a game that has started still reads its old pre-game row.
+The tests added after it say what they pin where they sit.
 """
 from __future__ import annotations
 
@@ -77,6 +80,16 @@ class _OddsConn:
 
 def test_the_bound_is_three_hours_and_one_constant():
     assert config.PREGAME_PRICE_MAX_AGE_MIN == 180
+
+
+def test_the_entry_checks_floor_is_exactly_the_bound():
+    """The SQL text the two entry checks compare snapshot_at against is the
+    same moment the per-market read refuses at, to the second."""
+    want = (NOW - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN)).astimezone(
+        timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    assert scorer._current_price_since(NOW) == want
+    assert scorer._pregame_price_floor(FUTURE_CUTOFF, NOW) == (
+        NOW - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN))
 
 
 # ── the read every game model decides through ────────────────────────────────
@@ -213,16 +226,23 @@ class _BoardConn:
 
 def test_a_game_the_feed_dropped_is_not_scored(_clock, monkeypatch):
     far = "2099-01-01T00:00:00Z"          # never started, whenever this runs
+    inside = (NOW - timedelta(minutes=179)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    outside = (NOW - timedelta(minutes=181)).strftime("%Y-%m-%dT%H:%M:%SZ")
     games = [
         ("NCAAF_2099-01-01_fresh_a", "NCAAF", 2099, "2099-01-01", "A", "F", far),
         ("NCAAF_2099-01-01_stale_b", "NCAAF", 2099, "2099-01-01", "B", "S", far),
+        ("NCAAF_2099-01-01_edge_in", "NCAAF", 2099, "2099-01-01", "I", "E", far),
+        ("NCAAF_2099-01-01_edge_out", "NCAAF", 2099, "2099-01-01", "O", "E", far),
         ("NHL_2099-01-01_NEW_OLD", "NHL", 2099, "2099-01-01", "OLD", "NEW", far),
         ("NHL_2099-01-01_LIV_ON", "NHL", 2099, "2099-01-01", "ON", "LIV", far),
     ]
     conn = _BoardConn(games, {
         "NCAAF_2099-01-01_fresh_a": FRESH_SNAP,
         "NCAAF_2099-01-01_stale_b": STALE_SNAP,
-        "NHL_2099-01-01_NEW_OLD": "2026-09-26T22:59:42Z",   # the outage case
+        "NCAAF_2099-01-01_edge_in": inside,                 # 179 minutes old
+        "NCAAF_2099-01-01_edge_out": outside,               # 181 minutes old
+        # the outage case: the 09-30 NHL BETs stood on prices 83 hours old
+        "NHL_2099-01-01_NEW_OLD": "2026-10-06T05:30:00Z",
         "NHL_2099-01-01_LIV_ON": FRESH_SNAP,
     })
     monkeypatch.setattr(scorer, "get_connection", lambda: conn)
@@ -240,6 +260,9 @@ def test_a_game_the_feed_dropped_is_not_scored(_clock, monkeypatch):
     assert "NHL_2099-01-01_LIV_ON" in asked
     assert "NCAAF_2099-01-01_stale_b" not in asked, (
         "the NCAAF entry check admitted a game DraftKings last priced a month ago")
+    # The window is the 3-hour bound exactly, not "somewhere under 12 days".
+    assert "NCAAF_2099-01-01_edge_in" in asked
+    assert "NCAAF_2099-01-01_edge_out" not in asked
     assert "NHL_2099-01-01_NEW_OLD" not in asked, (
         "the look-ahead entry check admitted a game with an 83-hour-old price")
 
@@ -294,6 +317,8 @@ def test_the_card_passes_its_clock_to_the_rule(monkeypatch):
 # 2026-10-08 18:17Z and nothing since; its swapped id has fresh rows. Once the
 # abandoned id's own row counts as no price, the read must NOT fall through to
 # the swapped id's fresh price, or both ids decide (and grade) the same fight.
+# The two abandoned-copy assertions failed before that fix; the never-priced
+# case passed before and after it, by design.
 
 ABANDONED = "UFC_2026-10-10_rj-harris_allen-frye-jr"     # away rj-harris
 CURRENT = "UFC_2026-10-10_allen-frye-jr_rj-harris"       # away allen-frye-jr
