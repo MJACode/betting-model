@@ -90,6 +90,10 @@ export interface Pick {
   clv_method: string | null;
   // Book whose snapshot is the close. closing_dk_odds is that book's American.
   clv_close_book: string | null;
+  // Book the bet side of clv_pct was graded at: the book the pick was taken at
+  // (paper_tracker._bet_price_and_book). NULL on rows captured before
+  // 2026-10-08; lib/clvBet.ts derives the same book for those.
+  clv_bet_book: string | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
   inning_at_pick: number | null;

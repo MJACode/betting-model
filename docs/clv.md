@@ -50,7 +50,13 @@ taken (`paper_tracker._bet_price_and_book`). The price is
    `nfl_opener_spread` (`(Wind 11 mph, FD)`);
 3. DraftKings, for every row decided before 2026-09-09.
 
-`clv_bet_book` records it on every capture. Until 2026-10-08 a pick decided
+`clv_bet_book` records it on every capture. The app's CLV card prints the
+same price at the same book (`mobile/src/lib/clvBet.ts`, pinned to this
+function by `tests/test_clv_card_price_taken.py`); for a row captured before
+the column existed it derives the book with the same three steps, which on
+every captured row (2026-10-09) gives the book it was graded at.
+
+Until 2026-10-08 a pick decided
 at another book but carrying DraftKings' price in `dk_odds` was graded at
 DraftKings' price against DraftKings' lock quote, and the MLB market cards'
 line-book price was looked up at DraftKings, where it never matched, so the

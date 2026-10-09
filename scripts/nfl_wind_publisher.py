@@ -901,7 +901,7 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
             continue
         book = (r.get("current_book") or "").strip()
         # "(<words>, <BOOK>)" is the shape the app reads the quote's book from
-        # (mobile storedQuoteBook / clvLockBook): the BET rows' own form. A
+        # (mobile storedQuoteBook / clvBet.ts): the BET rows' own form. A
         # bare "(FD)" falls through to DraftKings there and mislabels the price.
         tag = BOOK_ABBREV.get(book, book or "?")
         home, away = g["home_team"], g["away_team"]

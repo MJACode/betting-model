@@ -177,7 +177,7 @@ def test_best_handoff_reranks_by_current_price(tmp_path):
     needed): record DK -110, now DK -130, FD -115 → the hand-off is FD -115,
     never "Bet DK -130". markets.ts and its pure imports run under node's type
     stripping (type-only imports are erased)."""
-    files = ["markets.ts", "format.ts", "thresholds.ts", "thresholds.generated.ts", "decisionPrice.ts", "discordPublish.ts"]
+    files = ["markets.ts", "format.ts", "thresholds.ts", "thresholds.generated.ts", "decisionPrice.ts", "discordPublish.ts", "clvBet.ts"]
     for name in files:
         src = _read(LIB / name)
         src = re.sub(r"from '\./([\w.]+)';", r"from './\1.ts';", src)

@@ -21,6 +21,7 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, origin/master merged into the touch-set branch; session-log hunks kept both sides |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB rule cards (and the WNBA prop card) skip a game that has started; the six 2026-09-16 late bets still count in the published record and Discord recaps (removal proposed, mike to decide); Pinnacle-withdrawn guard not needed for MLB; `first_pitch_at` not filled since 2026-08-31 |
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, the app's CLV card shows the price taken at the book it was taken (`clvBetQuote` mirrors the server, pinned by a Node parity test) |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, CLV graded at the price taken (216 old rows re-graded once; close bounded by the earliest start); `nhl_over_under` live as a Pinnacle rule (EV >= 0.01, one bet a game); never propose paper; pruner and MLB late-bet defects found |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, touch-set error lines say try again |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, touch-set failure uses the shared error state and Designer’s lines |

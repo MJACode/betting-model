@@ -13,6 +13,7 @@ import { americanImplied, americanToDecimal, formatStampET } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
+import { CLV_NFL_LABEL_MODELS, clvLabelBook } from './clvBet';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -432,22 +433,6 @@ export function booksShortList(books: readonly string[]): string {
   return `${books.slice(0, 3).map(bookLabelShort).join(' · ')} +${books.length - 3}`;
 }
 
-/** Abbrev → book key, for reading the book back out of an NFL pick_label. */
-const BOOK_KEY_BY_ABBREV: Record<string, string> = {
-  DK: 'draftkings',
-  FD: 'fanduel',
-  MGM: 'betmgm',
-  CZR: 'williamhill_us',
-  ESPN: 'espnbet',
-  FAN: 'fanatics',
-  BR: 'betrivers',
-  HRB: 'hardrockbet',
-  BALLY: 'ballybet',
-  PARX: 'betparx',
-  REBET: 'rebet',
-  PIN: 'pinnacle',
-};
-
 /**
  * The betslip link for the RECORD chip: DraftKings' link when DraftKings
  * decided the pick, the scorer's best-price link when the deciding book is the
@@ -465,55 +450,22 @@ function recordLink(pick: Pick, recordBook: string): string | null {
 /**
  * Which book the price STORED on a pick came from.
  *
- * Everywhere except NFL that's DraftKings — the book the models score against.
- * The standalone nfl/ package (§28) line-shops by design and stores the best/soft
- * book's price in `dk_odds`, naming the book in pick_label:
- *   "NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u"
+ * Mostly that's DraftKings — the book the models score against. Four cards
+ * store a soft book's price in `dk_odds` and name the book only in pick_label:
+ *   "NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u"      (NFL wind/opener)
  *   "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM) · 1.00u"
+ *   "Jadarian Price Over 1.5 Rec (FD)"                   (market-relative props)
  * Labeling that "DK" tells the user a price they cannot get at the book named.
- * An unrecognised abbrev is returned as-is rather than guessed at.
+ * The rule is the CLV card's (clvBet.clvLabelBook, pinned to the server's), so
+ * the header and the CLV card name the same book. A book the maps do not know
+ * is returned as its raw lowercased key ("fanatics"), never guessed at.
  */
 export function storedQuoteBook(
   pick: { model_id: string; pick_label?: string | null; decision_book?: string | null },
 ): string {
   // Since 2026-09-09 the row says which book DECIDED it; only rows from
-  // before the flip (and the NFL cards, which name their book in the label)
-  // fall through to the rules below.
-  const decided = decisionBook(pick);
-  if (decided) return decided;
-  if (!(pick.model_id ?? '').startsWith('nfl_')) return MODEL_BOOK;
-  const m = /\(([^()]*?),\s*([A-Za-z]{2,5})\)/.exec(pick.pick_label ?? '');
-  if (!m) return MODEL_BOOK;
-  const abbrev = m[2].toUpperCase();
-  return BOOK_KEY_BY_ABBREV[abbrev] ?? abbrev;
-}
-
-/**
- * Book whose American is `picks.dk_odds` — the CLV lock, not the deciding book.
- *
- * `storedQuoteBook` prefers `decision_book`, which is the bet of record and
- * can be FanDuel on a pick whose `dk_odds` is still DraftKings. ClvCard must
- * name the American it prints. Trailing `(FD)` matches
- * tracking/paper_tracker._book_from_label (market-relative props). The NFL
- * opener/wind comma form is the other place `dk_odds` is not DraftKings.
- */
-export function clvLockBook(pick: {
-  model_id?: string;
-  pick_label?: string | null;
-}): string {
-  const suffix = /\(([A-Za-z_]+)\)\s*$/.exec(pick.pick_label ?? '');
-  if (suffix) {
-    const token = suffix[1];
-    return BOOK_KEY_BY_ABBREV[token.toUpperCase()] ?? token.toLowerCase();
-  }
-  if ((pick.model_id ?? '').startsWith('nfl_')) {
-    const nfl = /\(([^()]*?),\s*([A-Za-z]{2,5})\)/.exec(pick.pick_label ?? '');
-    if (nfl) {
-      const abbrev = nfl[2].toUpperCase();
-      return BOOK_KEY_BY_ABBREV[abbrev] ?? abbrev;
-    }
-  }
-  return MODEL_BOOK;
+  // before the flip (and the four label-priced cards) read the label.
+  return decisionBook(pick) ?? clvLabelBook(pick);
 }
 
 export interface BookPrice {
@@ -1193,6 +1145,22 @@ export function computeMovement(
   };
 }
 
+/**
+ * The book whose NUMBER `scored_line` is. `line_book` when the row names one.
+ * The NFL wind and opener cards with no deciding book store the label book's
+ * own line (scripts/nfl_wind_publisher.py), so it is that book. Everything
+ * else is scored at DraftKings' line. A line is compared only against the same
+ * book's line: another book's number is a different bet, not movement.
+ */
+function scoredLineBook(pick: Pick): string {
+  const named = lineBook(pick);
+  if (named) return named;
+  if (decisionBook(pick) == null && CLV_NFL_LABEL_MODELS.includes(pick.model_id)) {
+    return clvLabelBook(pick);
+  }
+  return MODEL_BOOK;
+}
+
 /** Movement for a pick given the day's latest-odds rows (PickCard chip path). */
 export function movementFromLatest(
   pick: Pick,
@@ -1206,7 +1174,8 @@ export function movementFromLatest(
   const lineOnly = isNflLineOnly(pick.model_id);
   const book = storedQuoteBook(pick);
   const scored = decisionOdds(pick);
-  const skipLineDeltas = (lineBook(pick) ?? MODEL_BOOK) !== book;
+  const lineAt = scoredLineBook(pick);
+  const skipLineDeltas = lineAt !== book;
   if (book === MODEL_BOOK && latest) {
     return computeMovement(pick, latest, latest.market, {
       lineOnly,
@@ -1223,10 +1192,13 @@ export function movementFromLatest(
     });
   }
   if (latest && pick.dk_odds != null) {
+    // This row is DraftKings'. Its line is compared only when the scored line
+    // is DraftKings' too: a Fanatics 42.5 against DraftKings' 41.5 is two
+    // books, not a move.
     return computeMovement(pick, latest, latest.market, {
       lineOnly,
       scoredPrice: numOrNull(pick.dk_odds),
-      skipLineDeltas,
+      skipLineDeltas: skipLineDeltas || lineAt !== MODEL_BOOK,
     });
   }
   return null;
@@ -1247,7 +1219,7 @@ export function movementFromSameBookHistory(
   const locked = decisionOdds(pick);
   if (locked == null) return null;
   const historyBook = historyBookForPick(pick);
-  const lineAt = lineBook(pick) ?? MODEL_BOOK;
+  const lineAt = scoredLineBook(pick);
   return computeMovement(pick, latest, market, {
     lineOnly: isNflLineOnly(pick.model_id),
     scoredPrice: locked,
