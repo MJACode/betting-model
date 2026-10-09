@@ -301,8 +301,8 @@ was available and is part of the pick's meaning.
   `condition_status='DUPLICATE'`, result kept (mike 10-09). The exits: **VOID** — a row the model should never
   have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
   sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
-  the line, the price and the lock, and REFUSES a graded or Discord-posted
-  pick (Matt 09-28) — and **`config.RECORD_EXCLUSIONS`**, naming who
+  line, price and lock. REFUSES graded picks; posted ones (Matt 09-28) need
+  `--allow-posted` (mike 10-09) — and **`config.RECORD_EXCLUSIONS`**, naming who
   asked. Sweep views DO re-cut (§7). Test:
   `tests/test_settled_record_is_immutable.py`.
   **A paused model is LISTED, not hidden** on the Record tab (mike, same day:

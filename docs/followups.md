@@ -40,6 +40,114 @@ ingestor (sorted fighters, Eastern date), a merge of the existing pairs that
 keeps the row picks point at, and a scorer guard that skips a fight whose twin
 already carries a pick for the model. Check the moneyline side first: on a
 swapped row `home` is the other fighter.
+## [x] Land the job that voids the eight stale-price NCAAF unders (deadline 2026-10-17) — in this branch
+
+Added to `jobs/declared_jobs.json` on 2026-10-09 with mike's approval in the session, so it merges together with
+the code. After the worker runs it, check its result: all eight under "voided", none under "refused".
+The original item:
+
+
+mike, 2026-10-09: *"Change the rule, void them"*. Eight posted NCAAF unders
+were decided on DraftKings prices 15 to 28 days old (the table is in the
+session log for 2026-10-09). The code that lets a posted pick be voided is on
+branch `claude/void-posted-stale`. The job that does it is not: the session's
+permission check refused the write to the queued-jobs file three times. It
+needs mike to add it, or to approve it being added.
+
+Add it to the end of `jobs/declared_jobs.json` as text, without reformatting
+the file:
+
+- key `void-ncaaf-stale-dk-posted-unders-2026-10-09`, job type `void_picks`,
+  requested by `mike`, and a note recording mike's decision and the price ages
+- `pick_ids`: 2558703, 2558736, 2935576, 2992283, 2992290, 2992474, 3020766,
+  3204788
+- `allow_posted`: true
+- `reason` (449 characters, under the 500 that are kept): *decided on a
+  DraftKings price 15 to 28 days old: the newest DraftKings row for this game
+  at or before the pick was stored 2026-09-05 and no book had a row for it
+  between then and the pick (the odds feed had stopped listing the game), so
+  the number was not one DraftKings was offering when the pick was made. It
+  was posted to members. Voided by mike's decision of 2026-10-09 to lift the
+  posted-pick lock for these picks: 'Change the rule, void them'.*
+
+Two rules. **Merge it with that branch or after it, never before**: master's
+job check drops `allow_posted` without a word, so the job would refuse all
+eight as posted, be marked done, and never run again under its name. **It must
+run before 2026-10-17 16:00 UTC**, when 2992283 kicks off (2992290 and
+3204788 play later that day): once a pick is graded, the void refuses it even
+with the opt-in. After it runs, check its result: all eight under "voided",
+none under "refused".
+
+## [ ] [needs-decision] A voided posted pick gives members no sign it was withdrawn
+
+Found 2026-10-09 while making posted picks voidable. After a void:
+
+- **Discord.** The original post stays. Nothing new is posted.
+- **Phone.** The "new bet" push went out when the pick was posted. Nothing
+  follows the void.
+- **App.** The card keeps its badge, Track and the betslip button. Only the
+  pick's detail screen adds "Posted to Discord · not counted in the model's
+  record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
+
+So a member who bet one of the eight unders is not told it was withdrawn.
+Two options: a correction post in the channel, or a marker on the app card
+(or both). Either is a small change. The choice is mike's; nothing has been
+posted.
+## [x] NCAAF picks scored from prices more than a week old — FIXED 2026-10-09
+
+Found by the 2026-10-09 line-movement review: 200 of 682 pre-game NCAAF picks
+on 10-08 and 10-09 stood on DraftKings prices from 09-04 to 09-06. The odds
+feed stopped listing 31 games then; the scorer kept deciding them off the last
+stored row. Not the two-ids defect below. Branch `claude/ncaaf-stale-prices`:
+a game that has not started is now decided only on a price stored within
+`config.PREGAME_PRICE_MAX_AGE_MIN` (180 minutes), in every game-market read,
+the best-price shop, both entry checks and the NHL totals card
+(`tests/test_pregame_price_age.py`). Still open:
+
+- **mike decides** the 9 open BETs written on stale prices (list in
+  `docs/sessions/2026-10.md`, 2026-10-09). Three kick off 10-17.
+- **Player props have no age bound.** Their normal age is hours by design
+  (NHL props are bought at an opening and a closing snapshot, NCAAF props
+  three times a day), so a prop bound needs its own size per sport.
+- **The odds step failed on every pass 2026-09-27 to 10-01** ("Invalid
+  ODDS_API_KEY", 378 failures a day in `pipeline_log`) while scoring reported
+  success. Checked: `odds_dk_lines` ended 09-28 STALE and 09-29 and 09-30 OK.
+  The new CRIT row `odds_dk_pregame_current` reads 100% of priced games stale
+  on every outage sample. Still open: the pass never recorded the odds step
+  as failed. In `pipeline_runs`, no run from 09-27 to 10-02 lists an odds
+  step in `failed_steps`, and 51 to 53 of 54 runs a day were `ok` from 09-27
+  to 09-30.
+- **The closing-price reader** still reads the newest stored row whatever
+  its age. Not measured: whether any closing price was taken from a row the
+  feed had stopped refreshing. (Pick Detail's chips, All books table and
+  betslip follow the card's rule since the second review, 2026-10-09. The
+  betslip screen itself still prices a leg added before its price went old
+  at the lock, with its full edge.)
+
+## [ ] One UFC fight can be scored, and graded, under two ids
+
+Found 2026-10-09 while fixing the stale-price bound. The odds feed builds a
+UFC id from its home fighter, and that flips between fetches, so one fight can
+sit under both orientations. Since 2026-10-09 an id whose own DraftKings rows
+went stale no longer borrows its twin's price (`_ufc_id_never_priced`), so the
+abandoned copy is skipped, but only once its newest DraftKings row is more
+than 3 hours old: for up to 3 hours after a flip both ids hold current rows.
+
+- [x] **Both ids scored in one pass — FIXED 2026-10-09 (second review).** An
+  id DraftKings never priced still borrowed its twin's price, and both ids
+  were current for up to 3 hours after a flip, so both were decided and the
+  fight could be bet twice. `run_scorer` now scores a fight present under
+  both ids on one of them (the id whose own newest DraftKings row is newer,
+  `_ufc_one_id_per_fight`), clears the other id's no-bet rows, and a BET on
+  either id locks that model on both. The chosen id still borrows a market
+  only its twin carries (the 08-29 totals case).
+- **Two ids for one fight have each carried a BET, and both were graded**
+  (cause not established). Swapped ids: 332605 and 332615
+  (`ufc_total_rounds`, 2026-06-20, "Andre Lima vs Kevin Borjas Over 2.5" and
+  "Kevin Borjas vs Andre Lima Over 2.5", both BET, both WIN). Two dates, a
+  different shape: 524487 (`UFC_2026-07-18_kamaru-usman_dricus-du-plessis`)
+  and 530849 (the 07-19 id), both BET, both WIN. Nothing was changed; whether
+  the record keeps both is mike's call.
 
 ## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
 
@@ -204,7 +312,7 @@ filters this column as text, including the latest-prop trigger
 from live rows by a trailing "Z", which "+00:00" does not match, so it keeps
 working. Not done in the line-movement fix because it changes a writer.
 
-## [ ] NCAAF picks scored from prices more than a week old (found 2026-10-09)
+## [x] NCAAF picks scored from prices more than a week old (found 2026-10-09) — fixed in #908; see the FIXED entry above
 
 Found while reviewing the line-movement card. Measured 2026-10-09 with
 read-only SQL: 200 of the 682 pre-game NCAAF picks made on 10-08 and 10-09
@@ -1036,6 +1144,13 @@ counts the event once (`condition_status='DUPLICATE'`, result unchanged;
 `one_pick_per_event`, now reports any new settled pair. Still open: the
 ingestor's id derivation and the merge of the duplicate rows, which is what
 stops a model betting the second row in the first place.
+
+**Checked 2026-10-09, and NOT the cause of the stale NCAAF picks** (that was the
+feed dropping games; entry at the top of this file). 10 unplayed NCAAF games
+exist twice with the same kickoff, all night games. In every pair the
+Eastern-date id (written by the odds feed) holds every pick and every stored
+price; the UTC-date id (the CFBD import) holds 0 picks and 0 prices. Still
+open, unchanged.
 
 ## [ ] [needs-decision] The player detail screen speaks the fan idiom while the board may be speaking the book's
 

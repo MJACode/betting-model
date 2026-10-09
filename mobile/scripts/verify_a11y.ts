@@ -630,8 +630,11 @@ const detail = read('src/screens/PickDetailScreen.tsx');
 check('Pick Detail: the started card speaks gameStartedSpeech, like the card (#847)', /styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)\}/.test(detail));
 check('PicksHome: "—" header counts speak "count not available", like the sub-tabs (#845)', /<Text style=\{styles\.subtitle\} accessibilityLabel=\{unknownCountSpeech\(unitsSpeech\(subtitle\)\)\}>/.test(read('src/screens/PicksHomeScreen.tsx')));
 check('TrackRecord: "— settled picks" speaks "count not available"', /accessibilityLabel=\{notLoaded \? unknownCountSpeech\('— settled picks'\) : undefined\}/.test(read('src/screens/TrackRecordScreen.tsx')));
+// The sentence itself lives in lib/heroPriceText.ts ("looks off", or for an
+// old price which book has not updated it and since when); the pytest pin
+// and verify_pick_cta run it.
 check('PickCard: "Price check" is spoken once — in cardLabel, the nested chip hidden',
-  /flagged \? 'Price check: this price looks off, so edge and EV are hidden' : `Edge \$\{edgeText\}`/.test(card) &&
+  /flagged \? priceCheckSpeech\(check, heroPrice\) : `Edge \$\{edgeText\}`/.test(card) &&
     /styles\.priceCheckChip\]\}\s*accessibilityRole="text"\s*accessibilityElementsHidden\s*importantForAccessibility="no-hide-descendants"/.test(card) &&
     !/accessibilityLabel="Price check/.test(card));
 check('PickCard: no nested element inside the card is separately accessible', !/\n\s+accessible\n/.test(card.slice(card.indexOf('accessibilityLabel={cardLabel}'))));

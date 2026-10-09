@@ -50,7 +50,7 @@ from data.db import get_connection
 from tracking.publish_lock import (
     DISCORD_LIVE_LOCK, DISCORD_SIGNALS_LOCK, publish_lock,
 )
-from tracking.publish_filters import live_publishable_sql
+from tracking.publish_filters import captured_not_voided_sql, live_publishable_sql
 from tracking.publish_keys import live_lock_key_sql
 from tracking.publish_keys import key_partition_sql, lock_key_sql
 from tracking.postable import still_pre_game as _still_pre_game
@@ -1640,8 +1640,12 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     Deliberately does NOT exclude signals already posted to a sport channel: the
     free channel is a different audience, and the pick of the day is expected to
     also appear in the full feed.
+
+    DOES exclude a signal whose pick was VOIDED (2026-10-09): the void writes
+    only to `picks`, so the captured row stays, and without this the free
+    channel and X could make a voided pick the pick of the day.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
                pk.created_at, pk.best_book, pk.best_odds,
@@ -1667,6 +1671,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
           AND os.model_probability >= t.min_prob
           AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
           AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
+          {captured_not_voided_sql("os")}
         ORDER BY os.lock_key
     """, (target_date,)).fetchall()
     return refuse_mismatched([{

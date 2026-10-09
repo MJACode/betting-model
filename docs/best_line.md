@@ -315,6 +315,13 @@ What shipped, in one change:
   are bounded at the pre-game cutoff like the DraftKings reads, exclude in-play
   rows, and drop a book whose newest quote lags the shop by more than
   `BEST_LINE_MAX_LAG_MIN` (30; measured max 4.3 minutes on 2026-09-09).
+  Since 2026-10-09, game-market lookups (`_best_game_price_one`, and the
+  DraftKings read `_latest_book_game_odds`) also drop any quote older than
+  `PREGAME_PRICE_MAX_AGE_MIN` (180 minutes, env-overridable) on a game that
+  has not started. The lag check alone drops nothing when every book stops at
+  once, which is how 31 NCAAF games were priced on September lines
+  (`docs/sessions/2026-10.md`). Player props have no age limit, because their
+  normal price age is hours.
 - **Settlement** grades at `COALESCE(decision_odds, dk_odds)` on all four
   settle paths; `mv_scored_pick_outcomes` carries `decision_*` and grades
   `profit_units` there; the record views, the custom-model RPCs, the Discord

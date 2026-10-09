@@ -904,6 +904,13 @@ def _job_void_picks(**kw):
     Same rules as the script: a graded WIN/LOSS/PUSH is refused, an
     already-void pick is a no-op, and every row keeps its created_at, its line
     and its price. The reason is written to the row.
+
+    A pick already posted as a signal is refused unless the job says
+    `"allow_posted": true` (mike, 2026-10-09: "Change the rule, void them").
+    That opt-in is for a posted pick decided on a price nobody could bet; the
+    module docstring of scripts/void_picks.py says when, and why the lock
+    exists. It never makes a graded pick voidable, and nothing here touches
+    the channel the pick was posted in.
     """
     from data.db import get_connection
     from scripts.void_picks import _select, plan_voids, void
@@ -911,7 +918,8 @@ def _job_void_picks(**kw):
     conn = get_connection()
     try:
         rows = _select(conn, kw["pick_ids"], None, None, None)
-        to_void, refused = plan_voids(rows, kw["reason"])
+        to_void, refused = plan_voids(rows, kw["reason"],
+                                      allow_posted=bool(kw.get("allow_posted", False)))
         void(conn, to_void, kw["reason"])
         conn.commit()
         found = {r["pick_id"] for r in rows}
@@ -936,7 +944,13 @@ def _validate_void_picks(args: dict) -> dict:
     if len(reason) < 20:
         raise ValueError("reason must say what was wrong with the pick "
                          "(20+ characters); it is written to the row")
-    return {"pick_ids": ids, "reason": reason[:500]}
+    # A real JSON boolean only. "true", 1 or null is a typo, and a typo must
+    # not be what lifts the posted-signal lock.
+    allow_posted = args.get("allow_posted", False)
+    if not isinstance(allow_posted, bool):
+        raise ValueError("allow_posted must be true or false (a JSON boolean); "
+                         f"got {allow_posted!r}")
+    return {"pick_ids": ids, "reason": reason[:500], "allow_posted": allow_posted}
 
 
 def _job_ncaaf_pbp_pull(**kw):

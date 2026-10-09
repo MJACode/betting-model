@@ -19,6 +19,7 @@ import {
   movementFromLatest,
   numOrNull,
   pickTimingInfo,
+  priceAgeFor,
   splitPickTitle,
   storedQuoteBook,
   type Movement,
@@ -36,6 +37,12 @@ import { openForAction } from '@/lib/discordPublish';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { gameStatusSpeech, unitsSpeech } from '@/lib/a11y';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
+import {
+  heroPriceSpeech,
+  lockedCaptionText,
+  priceCheckChipText,
+  priceCheckSpeech,
+} from '@/lib/heroPriceText';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
@@ -125,7 +132,12 @@ export function PickCard({
   const clvTone = pnlTone(pick.clv_pct, 1);
   const clvInk = clvTone === 'textSecondary' ? colors.textTertiary : colors[clvTone];
 
-  const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
+  // The scorer's price-age rule (markets.PREGAME_PRICE_MAX_AGE_MIN): before
+  // the start, a deciding price the book stopped updating is no price, so
+  // the card shows "Now —" and offers no hand-off at it. Same start test
+  // as the price check above.
+  const priceAge = priceAgeFor(pick, game, liveState);
+  const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge);
   // Compare home-relative as numbers: PostgREST can send NUMERIC as a string,
   // and "-1" !== -1 would print a line on every card. Print from the pick's
   // side so an away spread that has moved (NYJ +5, scored −5, Now −4.5)
@@ -182,7 +194,7 @@ export function PickCard({
   // in-play price is not the price it was made at (H5).
   const offersBook = !preview && !paused && pick.signal_type === 'BET';
   const handoff = offersBook && cta.handoff
-    ? bestHandoffForPick(pick, item.bookRows, heroPrice)
+    ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge)
     : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
@@ -196,9 +208,13 @@ export function PickCard({
   // Track stays after the start; it scores the pick at its lock.
   const canTrack = Boolean(onToggleTrack) && open && cta.track;
   // Betslip — priced (decision price, not dk_odds), unsettled, non-preview,
-  // and hidden once a pre-game pick's game has started (H5).
+  // and hidden once a pre-game pick's game has started (H5). Not offered on
+  // a stale price either: the slip prices the leg at the lock with its full
+  // edge, so "Add to betslip" was a bet link at a September number (second
+  // review). A leg already in the slip can still be taken out here.
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused && cta.slip;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused &&
+    (!heroPrice?.stale || Boolean(inSlip)) && cta.slip;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
   // A flagged row carries "Price check" in the chip slot instead (H4).
@@ -206,8 +222,10 @@ export function PickCard({
   // The tier is the model's confidence in a BET. On a NONE / AVOID card a
   // "HIGH" chip reads as a high-confidence non-pick, so it is BET-only (M6).
   const showTier = Boolean(pick.confidence_tier) && !showSharp && !flagged && pick.signal_type === 'BET';
+  // No stake on a stale price: EV reads "—" there, and a stake is an
+  // instruction to bet at a number the book no longer offers.
   const stakeCaption =
-    pick.signal_type !== 'BET' || preview || paused
+    pick.signal_type !== 'BET' || preview || paused || heroPrice?.stale
       ? null
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
@@ -231,10 +249,12 @@ export function PickCard({
     gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
     pick.pick_label,
     paused ? 'Paused model, not a bet' : pick.signal_type,
-    flagged ? 'Price check: this price looks off, so edge and EV are hidden' : `Edge ${edgeText}`,
-    heroPrice
-      ? `${heroPrice.kind === 'now' ? cta.priceTag : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
-      : null,
+    // The reason in words (lib/heroPriceText.ts): "looks off" for an
+    // implausible edge or a moved price; for an old price, which book has not
+    // updated it and since when.
+    flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
+    // The full book name, and the lock whenever the eye sees "Locked".
+    heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
     stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
     timing ? timing.label : null,
     startedSpoken,
@@ -313,9 +333,10 @@ export function PickCard({
             ) : null}
           </View>
           {flagged ? (
-            // Read ONCE, in cardLabel ("Price check: this price looks off…"):
-            // the card is the accessible element, so a separately accessible
-            // chip inside it said it twice (Reviewer #848).
+            // Read ONCE, in cardLabel (priceCheckSpeech): the card is the
+            // accessible element, so a separately accessible chip inside it
+            // said it twice (Reviewer #848). "Old price" when the only reason
+            // is a price the book stopped updating, "Price check" otherwise.
             <View
               style={[styles.labelChip, styles.priceCheckChip]}
               accessibilityRole="text"
@@ -329,7 +350,7 @@ export function PickCard({
                 accessibilityElementsHidden
                 importantForAccessibility="no"
               />
-              <Text style={styles.priceCheckText}>Price check</Text>
+              <Text style={styles.priceCheckText}>{priceCheckChipText(check)}</Text>
             </View>
           ) : null}
           {showSharp && sharp ? (
@@ -376,9 +397,9 @@ export function PickCard({
               <Text style={styles.heroBook}>{bookLabel(heroPrice.book)}</Text>
             </View>
             {heroPrice.showLockedCaption ? (
-              <Text style={styles.lockedCaption}>
-                Locked {formatAmerican(heroPrice.lockedPrice)}
-              </Text>
+              // On a stale price: "Locked −112 · DK last priced Sat, 9/5 ·
+              // 7:59 PM ET", so "Now —" is not read as "still loading".
+              <Text style={styles.lockedCaption}>{lockedCaptionText(heroPrice)}</Text>
             ) : null}
           </View>
         ) : null}
