@@ -99,7 +99,12 @@ those rows the "opening" (`lineHistory.ts`), or fetch the real opener. Not
 caused by the CLV card change; that change only moved some picks to their
 label book's equally stale history.
 
-## [ ] Three prop writers stamp Eastern time (found 2026-10-09)
+## [x] Three prop writers stamp Eastern time — FIXED 2026-10-09 (#904, mike: "fix the prop writers to stamp UTC too")
+
+Both writers stamp `datetime.now(timezone.utc).isoformat()` from #904's deploy on. Old rows keep "-04:00"; an audit of every
+reader (code, views, functions, triggers, the app) found none that breaks, and the latest-prop trigger's text `MAX` is right
+across the switch because a later UTC stamp always sorts above an earlier Eastern one. The original item:
+
 
 `data/ingestors/prop_odds_ingestor.py:797` (MLB, WNBA, NBA) and
 `data/ingestors/ncaaf_prop_odds_ingestor.py:338` write
