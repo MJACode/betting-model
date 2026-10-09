@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-10-04
+ * Last generated: 2026-10-08
  */
 
 export interface ModelThreshold {
@@ -69,7 +69,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03, min_odds: -200 },
   nhl_moneyline: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 },
   nhl_moneyline_regulation: { min_prob: 0.4, min_edge: 0.05, min_odds: -200 },
-  nhl_over_under: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 },
+  nhl_over_under: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_prop_assists: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_prop_blocked_shots: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_prop_saves: { min_prob: 0, min_edge: 0, min_odds: -200 },

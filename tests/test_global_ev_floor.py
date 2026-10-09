@@ -345,7 +345,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
         {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
          "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
          # 2026-10-03 (mike): the two-way correction on a three-way market.
-         "nhl_moneyline_regulation"}
+         "nhl_moneyline_regulation",
+         # 2026-10-08 (mike): the NHL totals rule; its number IS Pinnacle's.
+         "nhl_over_under"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

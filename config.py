@@ -437,12 +437,20 @@ ACTION_THRESHOLDS: dict = {
     "wnba_prop_player_threes":   {"min_prob": 0.706, "min_edge": 0.026},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      {"min_prob": 0.68, "min_edge": 0.16},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
-    # over_under / puckline score vs real DK lines. moneyline_regulation scores
+    # puckline score vs real DK lines. moneyline_regulation scores
     # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
     # 0.40 floor vs 0.55 for the binary markets.
     "nhl_moneyline":            {"min_prob": 0.55, "min_edge": 0.05},
     "nhl_moneyline_regulation": {"min_prob": 0.40, "min_edge": 0.05},
-    "nhl_over_under":           {"min_prob": 0.55, "min_edge": 0.05},
+    # NHL full-game totals, a RULE since 2026-10-08 (mike: live, not paper):
+    # Pinnacle's no-vig price against the bettable books in the same fetch,
+    # models/nhl_totals_market.py, written by scripts/nhl_totals_card.py.
+    # THE CUT IS EV, in MODEL_OWN_EV_FLOOR (0.01, the evidence is there), on
+    # the model's own probability. prob / edge are 0.0 here so the publishers
+    # show exactly what the card wrote, as for the NHL props below: at EV 0.01
+    # the edge over the price taken is about half a point, which a 0.05 edge
+    # cut would hide on every surface.
+    "nhl_over_under":           {"min_prob": 0.0, "min_edge": 0.0},
     "nhl_puckline":             {"min_prob": 0.55, "min_edge": 0.05},
     # NHL blocked shots at DraftKings (models/nhl_prop_blocked_shots.py, mike
     # 2026-10-01: "just build profitable models"). THE CUT IS EV, in
@@ -1744,6 +1752,10 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
+    # NHL totals rule (2026-10-08, mike): -200 is the price floor its evidence
+    # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
+    # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
+    "nhl_over_under":            -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
 }
 
@@ -1904,7 +1916,7 @@ MODEL_OWN_EV_FLOOR: dict = {
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
     "nfl_prop_rush_rec_yards":   0.20,   # n=1, min +0.354, never bet under 0.20
     "nfl_prop_rush_yards":       0.20,   # n=1, min +0.354, never bet under 0.20
-    # THE FOUR NHL MODELS HAVE NEVER WRITTEN A BET (zero picks, ever: the
+    # THESE THREE NHL GAME MODELS HAD NEVER WRITTEN A BET (zero picks, ever: the
     # pipeline's six defects, docs/nhl_market_research.md), so there is no
     # record to sweep and no written EV to sit under. Written out at the global
     # number rather than left absent (mike, 2026-09-20: every model carries its
@@ -1916,8 +1928,23 @@ MODEL_OWN_EV_FLOOR: dict = {
     # probability edge, not EV.
     "nhl_moneyline":             0.20,   # n=0, no written bet
     "nhl_moneyline_regulation":  0.20,   # n=0, no written bet
-    "nhl_over_under":            0.20,   # n=0, no written bet
     "nhl_puckline":              0.20,   # n=0, no written bet
+    # NHL full-game totals, the Pinnacle rule (models/nhl_totals_market.py;
+    # mike 2026-10-08, live). Its own sweep, not a written record: six seasons
+    # (2020-21 to 2025-26), the first fetch in which a game qualifies, one bet a
+    # game, at the bettable books (scripts/nhl_totals_lab.py SHARP-VS-SOFT, its
+    # BETTABLE set). Graded by the 2026-10-08 design session's own queries:
+    #     EV>=    bets    units    return   EV at Pinnacle's close
+    #     0.000   2,768   +35.7    +1.29%   +0.35%
+    #     0.005   1,859   +41.2    +2.22%   +0.82%
+    #     0.010   1,276   +60.2    +4.72%   +1.32%
+    #     0.015     819   +58.9    +7.19%   +1.80%
+    #     0.020     548    +0.7    +0.14%   +2.36%
+    # 0.01 sits on the units plateau with 0.015, and closing-line value is
+    # positive at every cut and rises with it. The return is not established
+    # (interval -0.6% to +10.1%; 2023-24 lost 6.94%). Chosen on the seasons it
+    # is graded on.
+    "nhl_over_under":            0.01,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2007,6 +2034,12 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # -6.0 units (-12.7%). Neither makes money; this removes the arithmetic
     # error, it does not make the model profitable.
     "nhl_moneyline_regulation",
+    # 2026-10-08 (mike: live). The NHL totals rule's probability IS Pinnacle's
+    # no-vig price, which its cut was measured on. The promoted pooled map
+    # (platt a=1, b=-0.259947) sends every raw probability between about 0.435
+    # and 0.565 to exactly 0.500 (probability_calibration.apply_calibration),
+    # which is EV -0.024 at -105: under it the model could never bet.
+    "nhl_over_under",
 })
 
 
@@ -2070,6 +2103,7 @@ SCORING_METHODS: dict = {
     "mlb_spread_market":   "rule",    # models/mlb_game_market.py — the same rule, pointed at MLB run lines
     "mlb_total_market":    "rule",    # models/mlb_game_market.py — Pin-lean vs soft implied 2pp, INSERT gated
     "mlb_total_public_fade": "rule",  # models/mlb_total_public_fade.py — fade public OVER, bet UNDER, INSERT gated
+    "nhl_over_under":      "rule",    # models/nhl_totals_market.py — Pinnacle no-vig vs bettable books, same fetch
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
     "ncaaf_live_total":    "engine",
@@ -2109,7 +2143,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_f5_runline":           0.15,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
     "nhl_moneyline":            0.05,   # placeholder — tune after 50+ settled picks
     "nhl_moneyline_regulation": 0.05,
-    "nhl_over_under":           0.05,
+    "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2207,7 +2241,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_f5_runline":           0.65,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
     "nhl_moneyline":            0.55,
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
-    "nhl_over_under":           0.55,
+    "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -2667,7 +2701,8 @@ MODELS = {
     "mlb_f5_runline":           ("MLB", "spreads_1st_5_innings",  "Home covers F5 spread"),
     "nhl_moneyline":            ("NHL", "h2h",      "Home team wins incl. OT/SO"),
     "nhl_moneyline_regulation": ("NHL", "h2h_3way", "Regulation result: Home / Draw / Away"),
-    "nhl_over_under":           ("NHL", "totals",   "Total goals over/under"),
+    # nhl_over_under left 2026-10-08: a rule card now (models/nhl_totals_market.py,
+    # SCORING_METHODS), never trained, so it has no place in the artifact registry.
     "nhl_puckline":             ("NHL", "spreads",  "Favored team covers -1.5 puck line"),
     "wnba_moneyline":           ("WNBA", "h2h",     "Home team wins"),
     "wnba_over_under":          ("WNBA", "totals",  "Total points over/under"),
