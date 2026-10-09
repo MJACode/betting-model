@@ -101,7 +101,7 @@ The one-time re-grade (`clv-price-taken-recompute-2026-10-08`) must run before
 any pruner fix. The fix should keep, per game and book, the row at every
 pick's `created_at` and the last row at or before the start.
 
-## [needs-decision] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
+## [ ] [needs-decision] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
 
 Read-only query, 2026-10-08: `mlb_total_public_fade` wrote 4 BETs at
 2026-09-16 22:07Z and `mlb_spread_market` 2 at 2026-09-17 00:57Z, each 3 to 7
