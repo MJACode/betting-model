@@ -62,10 +62,7 @@ whose label and fields disagree (`tracking/pick_integrity.py`).
 ---
 
 ## 0. HOW TO REPLY — every response, every session, no exceptions
-**This is the first rule in the file because it applies to every single reply,
-including this sentence's session.** Matt asked for it three times across
-different chats before it got written down (2026-08-30). It is not a
-suggestion, it is the required shape of a response.
+Matt asked for it three times before it was written down (2026-08-30).
 
 Every substantive reply ends with these four headings, in this order, always
 present even when a section is empty (say "None" — an omitted heading reads as
@@ -78,13 +75,19 @@ Decisions needed from you
 Outstanding tasks
 ```
 
+**SAY EACH THING ONCE.** (mike, 2026-10-09: *"Why do you keep restating
+results?"*) The headings ARE the reply: above them only what no heading holds
+(a direct answer, a table), never a recap they repeat. Only what is new since
+the last reply; an unchanged item is not restated. Evidence:
+`docs/rules_evidence.md`.
+
 Notes on each:
 
 - **Quick summary of what was done** — what actually changed, not what was
   explored. Past tense, concrete.
-- **Errors or Bugs found and status** — everything found, each with a status
-  (fixed / not fixed / pre-existing / flagged only). Bugs found in passing and
-  deliberately NOT fixed belong here too, with the reason. "None" if none.
+- **Errors or Bugs found and status** — each with a status (fixed / not fixed /
+  pre-existing / flagged only), including ones deliberately not fixed, with the
+  reason.
 - **Decisions needed from you** — anything blocked on the reader, and anything
   where a judgement call was made that they might want reversed. If nothing is
   blocked, say so explicitly. **Second person, never first** (mike,
@@ -97,8 +100,7 @@ Short factual answers to direct questions ("is the worker up?") do not need the
 four headings. Anything involving work done, a change made, or an
 investigation does.
 
-**If you are reading this at the start of a session: this rule survives context
-compaction. Re-read it before the first substantive reply.**
+**This rule survives compaction. Re-read it before the first substantive reply.**
 
 ---
 
