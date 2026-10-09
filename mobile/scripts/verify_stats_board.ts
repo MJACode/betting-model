@@ -21,6 +21,8 @@
  *    and yields to Live/Final once the game is under way.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { GameRow } from '../src/types';
 import * as board from '../src/lib/statsBoard';
 import {
@@ -38,12 +40,22 @@ import {
   isOnSlate,
   isStatParticipant,
   needsTouchSet,
+  seasonTouchFlag,
+  shouldFetchTouchSet,
+  touchBoardView,
+  touchCommitAction,
+  touchRejectionRecordsFailure,
+  touchSetAfterFailure,
+  touchSetCopy,
+  touchSetErrorLine,
+  touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
   slateSubline,
   type SortableRow,
 } from '../src/lib/statsBoard';
 import { todayET } from '../src/lib/format';
+import { errorAnnouncement } from '../src/lib/errors';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -208,8 +220,22 @@ check('Anytime TD: a back with carries and no TD stays (NCAAF too)',
   isStatParticipant('NCAAF', [0], { ...TD, rows: [{ carries: 12, receptions: null, targets: null }] }));
 check('Anytime TD: a player with no touches still drops',
   !isStatParticipant('NFL', [0, 0], { ...TD, rows: [{ carries: 0, receptions: 0, targets: 0 }] }));
-check('Anytime TD on a read with no usage columns (Season/H2H): anyone with games stays',
-  isStatParticipant('NFL', [0, 0], TD) && !isStatParticipant('NFL', [], TD));
+check('Season/H2H Anytime TD with no touch set drops a player with games',
+  !isStatParticipant('NFL', [0, 0], TD)
+  && !isStatParticipant('NFL', [0, 0], { ...TD, touched: undefined })
+  && !isStatParticipant('NFL', [], TD));
+check('a mismatched touch key does not build the wide list',
+  !isStatParticipant('NFL', [0, 0], {
+    ...TD,
+    touched: seasonTouchFlag(true, 'NFL|rb', 'NFL|wrte', true),
+  }));
+check('a matching touch key keeps a zero-TD carrier',
+  isStatParticipant('NFL', [0, 0], {
+    ...TD,
+    touched: seasonTouchFlag(true, 'NFL|wrte', 'NFL|wrte', true),
+  }));
+check('a TD still stays while the touch set is unknown',
+  isStatParticipant('NFL', [1, 0], TD));
 check('Season/H2H: the touch set decides — a lineman with games drops, a receiver stays',
   !isStatParticipant('NFL', [0, 0], { ...TD, touched: false }) &&
   isStatParticipant('NFL', [0, 0], { ...TD, touched: true }));
@@ -224,6 +250,137 @@ check('needsTouchSet: Anytime TD on football only',
   !needsTouchSet('NFL', 'receptions') && !needsTouchSet('MLB', 'rush_rec_tds'));
 check('the TD exemption does not leak to other stats',
   !isStatParticipant('NFL', [0, 0], { statKey: 'passing_yards', rows: [{ carries: 9 }] }));
+
+// A touch-set response is not awaited, so it can land after the user has
+// switched sport or player type and overwrite the set that is already on
+// screen. Modelled the way StatsScreen.load does it: each load writes its
+// stamp into inFlight, and a response may commit only while that stamp is
+// still the one in flight.
+type TouchSet = { key: string; ids: Set<string> };
+function landTouch(
+  inFlight: string,
+  current: TouchSet | null,
+  stamp: string,
+  touchKey: string,
+  ids: string[],
+): TouchSet | null {
+  return touchSetFromResponse(inFlight, stamp, touchKey, new Set(ids)) ?? current;
+}
+const stampNflRb = 'NFL|rb|season|hitRate|rush_rec_tds||';
+const stampNcaaf = 'NCAAF|wrte|season|hitRate|rush_rec_tds||';
+const stampNflWr = 'NFL|wrte|season|hitRate|rush_rec_tds||';
+let inFlight = stampNflRb;
+let touch: TouchSet | null = null;
+// The NFL read is still in flight when the board switches to NCAAF. NCAAF
+// lands first; the NFL response arrives after it.
+inFlight = stampNcaaf;
+touch = landTouch(inFlight, touch, stampNcaaf, 'NCAAF|wrte', ['bowers']);
+touch = landTouch(inFlight, touch, stampNflRb, 'NFL|rb', ['lineman']);
+check('a late touch set after a sport switch keeps the current key',
+  touch?.key === 'NCAAF|wrte' && touch.ids.has('bowers') && !touch.ids.has('lineman'),
+  touch ? `${touch.key}:${[...touch.ids].join()}` : 'null');
+// Same shape for a player-type switch: RB's response must not replace WR/TE.
+inFlight = stampNflWr;
+touch = landTouch(inFlight, touch, stampNflWr, 'NFL|wrte', ['pickens']);
+touch = landTouch(inFlight, touch, stampNcaaf, 'NCAAF|wrte', ['bowers']);
+check('a late touch set after a playerType switch keeps the current key',
+  touch?.key === 'NFL|wrte' && touch.ids.has('pickens') && !touch.ids.has('bowers'),
+  touch ? `${touch.key}:${[...touch.ids].join()}` : 'null');
+touch = landTouch(inFlight, touch, stampNflWr, 'NFL|wrte', ['pickens', 'lamb']);
+check('the touch set for the load still in flight still commits',
+  touch?.key === 'NFL|wrte' && touch.ids.has('lamb') && touch.ids.has('pickens'));
+
+// A failed touch read used to resolve to undefined and leave `touched`
+// unset, so Season/H2H Anytime TD fell open to anyone with games and stayed
+// there. A failure keeps a set only when it is already for this key, records
+// the key so the next load retries, and with nothing kept asks the board to
+// show the error line instead of that wide list.
+const good = { key: 'NFL|qb', ids: new Set(['mahomes']) };
+const failedWithSet = touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|qb');
+check('a failed touch read keeps the last good set for the same key',
+  failedWithSet === 'NFL|qb' && good.ids.has('mahomes')
+  && touchBoardView(true, good.key, 'NFL|qb', true) === 'list'
+  && shouldFetchTouchSet(true, true, true));
+const failedWithout = touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|qb');
+check('a failed touch read with no set is an error, not the wide list',
+  failedWithout === 'NFL|qb'
+  && touchBoardView(true, null, 'NFL|qb', true) === 'error'
+  && shouldFetchTouchSet(true, false, true));
+const failedOtherKey = touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|wrte');
+check('a failure for another key does not drop the set that was kept',
+  failedOtherKey === 'NFL|wrte' && good.key === 'NFL|qb' && good.ids.has('mahomes')
+  && touchBoardView(true, good.key, 'NFL|wrte', true) === 'error');
+check('the touch-set error line for offline',
+  touchSetErrorLine('offline')
+  === 'Couldn’t load this list. You’re offline. Check your connection, then try again.');
+check('the touch-set error line for a slow response',
+  touchSetErrorLine('slow')
+  === 'Couldn’t load this list. Signalbase is slow to respond right now. Try again in a moment.');
+check('the touch-set error line for an expired session',
+  touchSetErrorLine('auth')
+  === 'Couldn’t load this list. Your session has expired. Try again, or sign out and back in.');
+check('the touch-set error line for a server failure',
+  touchSetErrorLine('server')
+  === 'Couldn’t load this list. Something went wrong on our side. Try again in a moment.');
+check('a missing touch-set cause still shows the server line',
+  touchSetErrorLine(null) === touchSetErrorLine('server')
+  && touchSetErrorLine(undefined) === touchSetErrorLine('server')
+  && errorAnnouncement(touchSetCopy(null)) === touchSetErrorLine('server')
+  && errorAnnouncement(touchSetCopy(undefined)) === touchSetErrorLine('server'));
+check('the alert reads the same sentence as the line',
+  (['offline', 'slow', 'auth', 'server'] as const).every((k) =>
+    errorAnnouncement(touchSetCopy(k)) === touchSetErrorLine(k)));
+// The user has moved on: the failure belongs to a load that is no longer in
+// flight, so it must not mark the new key failed.
+inFlight = stampNcaaf;
+const staleFail = touchSetAfterFailure(null, inFlight, stampNflRb, 'NFL|qb');
+check('a stale touch failure does not mark the new key failed',
+  staleFail === null
+  && touchBoardView(true, 'NCAAF|wrte', 'NCAAF|wrte', false) === 'list');
+check('an abort of the touch read still on screen records a failure',
+  touchRejectionRecordsFailure(stampNflRb, stampNflRb)
+  && touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|qb') === 'NFL|qb'
+  && touchBoardView(true, null, 'NFL|qb', true) === 'error');
+check('an abort from a superseded stamp is ignored',
+  !touchRejectionRecordsFailure(stampNcaaf, stampNflRb)
+  && touchSetAfterFailure('NCAAF|wrte', stampNcaaf, stampNflRb, 'NFL|qb') === 'NCAAF|wrte');
+check('an empty touch total is not committed, and the last good set stays',
+  touchCommitAction(stampNflRb, stampNflRb, 0) === 'fail'
+  && touchSetFromResponse(stampNflRb, stampNflRb, 'NFL|qb', new Set()) === null
+  && landTouch(stampNflRb, good, stampNflRb, 'NFL|qb', []) === good
+  && touchCommitAction(stampNcaaf, stampNflRb, 0) === 'ignore');
+check('the list stays on its skeleton until the touch set for this key resolves',
+  touchBoardView(true, null, 'NFL|qb', false) === 'loading'
+  && touchBoardView(true, undefined, 'NFL|qb', false) === 'loading'
+  && touchBoardView(false, null, 'NFL|qb', false) === 'list');
+check('a good set is not refetched, and a failed key is',
+  !shouldFetchTouchSet(true, true, false) && shouldFetchTouchSet(true, false, false)
+  && !shouldFetchTouchSet(false, false, true));
+
+const statsBoardSrc = readFileSync(join(import.meta.dirname, '..', 'src/lib/statsBoard.ts'), 'utf-8');
+const statsScreen = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
+const touchCatch = /\.catch\(\(e: unknown\) => \{([\s\S]*?)\n            \}\);/.exec(statsScreen)?.[1] ?? '';
+check('StatsScreen commits the touch set only through touchSetFromResponse',
+  /touchSetFromResponse\(inFlight\.current, stamp, touchKey, ids\)/.test(statsScreen)
+  && /touchCommitAction\(inFlight\.current, stamp, ids\.size\)/.test(statsScreen)
+  && /if \(!next\) return;/.test(statsScreen)
+  && /setTouchSet\(next\)/.test(statsScreen)
+  && !/setTouchSet\(\{/.test(statsScreen)
+  && !/\.catch\(\(\) => undefined\)/.test(statsScreen)
+  && /touchSetAfterFailure\(/.test(statsScreen)
+  && /shouldFetchTouchSet\(/.test(statsScreen)
+  && /touchBoardView\(/.test(statsScreen)
+  && /touchSetCopy\(touchFailure\?\.kind\)/.test(statsScreen)
+  && /<ErrorState/.test(statsScreen)
+  && /onRetry=\{\(\) => void load\(\)\}/.test(statsScreen)
+  && /seasonTouchFlag\(/.test(statsScreen)
+  && /touchView !== 'list' \? EMPTY_ROWS : hitRatePlayers/.test(statsScreen)
+  && /emptyLabel=\{touchView === 'error' \? 'Couldn’t load this list\. Pull down to retry\.' : undefined\}/.test(statsScreen)
+  && /touchRejectionRecordsFailure\(inFlight\.current, stamp\)/.test(touchCatch)
+  && !/if \(isAbortError\(e\)\) return;/.test(touchCatch)
+  && !/setTouchSet\(/.test(touchCatch)
+  && /export function touchRejectionRecordsFailure\(inFlight: string \| null, stamp: string\): boolean/.test(statsBoardSrc)
+  && !/function touchRejectionRecordsFailure\([^)]*_aborted/.test(statsBoardSrc));
 
 // ── The row subline: when the game starts, and against whom ────────────────
 // Matt, 2026-09-05: "add the time of the game and who they are playing under

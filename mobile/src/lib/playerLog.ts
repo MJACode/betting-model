@@ -480,6 +480,64 @@ export function stepLineFrom(prev: number, deltaSteps: number, step: number, cei
  *    is that line (51+ / 50 or fewer), and a whole "50" is the half-point
  *    above it — the card only prices half-lines, which cannot push.
  */
+/**
+ * The Avg | Median | ± line row on the player card, on a 375pt phone.
+ *
+ * Widths are Inter advances (a stand-in for the iOS system font), measured
+ * 2026-10-08 and scaled linearly with `fontScale`. The case is the one the
+ * card opens on for a yards prop: "At Least", a 50.5 line, averages 112.4
+ * and 98.6. Chrome that does not scale — the 12pt chevron, the 30pt − / +,
+ * the 8pt gaps, the field's 8pt padding and 48pt floor — is added on top.
+ *
+ * At fontScale 1 that row is 309pt of the card's 319 and fits. Above 1 it
+ * does not. The stepper's `flex: 1` basis is 0, so the row will not wrap by
+ * itself and the + button leaves the screen. Giving the stepper its own line
+ * still fits at fontScale 2 (287 of 319) and at Accessibility Large (2.143,
+ * the multiplier in RCTAccessibilityManager). From Accessibility Extra Large
+ * (2.643) that line overflows too. The mode control is what grows, so it
+ * takes the line above and − / field / + stay together; at the largest size
+ * (Accessibility Extra Extra Extra Large, 3.571) that group is 221pt.
+ * The − / + stay 30pt with 8pt of slop (46pt); the field and the mode
+ * control stay minHeight 44.
+ */
+export const STEPPER_ROW_INNER = 375 - 16 * 2 - 12 * 2;
+
+/** How the stepper sits in the Avg | Median row. */
+export type StepperRowLayout = 'inline' | 'stacked' | 'split';
+
+export interface StepperRowMeasure {
+  /** Avg, Median and the stepper on one line. */
+  single: number;
+  /** The stepper once it has the line to itself. */
+  stacked: number;
+  /** − / field / +, without the mode control. */
+  controls: number;
+  /** "At Least" plus the chevron. */
+  mode: number;
+  inner: number;
+  layout: StepperRowLayout;
+}
+
+export function measureStepperRow(fontScale: number): StepperRowMeasure {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  // Advances at fontScale 1, from the measurement above.
+  const avg = Math.max(40.039062, 18.652344) * scale;
+  const med = Math.max(36.539062, 34.931641) * scale;
+  const mode = 50.222656 * scale + 2 + 12 + 4;
+  const input = Math.max(48, 38.291504 * scale + 8);
+  const controls = 30 + 8 + input + 8 + 30;
+  const stacked = mode + 8 + controls;
+  const single = avg + 16 + med + 16 + stacked;
+  const layout: StepperRowLayout =
+    single <= STEPPER_ROW_INNER ? 'inline' : stacked <= STEPPER_ROW_INNER ? 'stacked' : 'split';
+  return { single, stacked, controls, mode, inner: STEPPER_ROW_INNER, layout };
+}
+
+/** Where the stepper sits so the + stays on a 375pt card. */
+export function stepperRowLayout(fontScale: number): StepperRowLayout {
+  return measureStepperRow(fontScale).layout;
+}
+
 export function parseTypedLine(text: string, mode: 'atLeast' | 'over' | 'under' = 'atLeast'): number | null {
   const t = text.trim().replace(/\+$/, '');
   if (!/^\d{1,4}(\.\d+)?$/.test(t)) return null;
@@ -487,6 +545,28 @@ export function parseTypedLine(text: string, mode: 'atLeast' | 'over' | 'under' 
   if (!Number.isFinite(n)) return null;
   if (mode === 'atLeast') return Number.isInteger(n) ? n : Math.ceil(n);
   return Math.floor(n) + 1;
+}
+
+/**
+ * Apply a typed line once when the return key and blur both fire.
+ *
+ * Android delivers `onSubmitEditing` and then `onEndEditing` for one Done
+ * press, in the same turn, with the same draft. The second call finds
+ * `taken` and applies nothing. A field that was never opened (`draft == null`)
+ * does not latch, so a later edit can still commit. iOS commits from blur
+ * alone; this runs there once.
+ */
+export function commitTypedLineOnce(
+  draft: string | null,
+  taken: boolean,
+  mode: 'atLeast' | 'over' | 'under',
+  current: number | null,
+): { line: number | null; taken: boolean } {
+  if (taken) return { line: null, taken: true };
+  if (draft == null) return { line: null, taken: false };
+  const typed = parseTypedLine(draft, mode);
+  if (typed == null || typed === current) return { line: null, taken: true };
+  return { line: typed, taken: true };
 }
 
 // ── Reading a stat off a row ────────────────────────────────────────────────

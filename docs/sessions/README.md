@@ -19,8 +19,14 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, origin/master merged into the touch-set branch; session-log hunks kept both sides |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB rule cards (and the WNBA prop card) skip a game that has started; the six 2026-09-16 late bets still count in the published record and Discord recaps (removal proposed, mike to decide); Pinnacle-withdrawn guard not needed for MLB; `first_pitch_at` not filled since 2026-08-31 |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, CLV graded at the price taken (216 old rows re-graded once; close bounded by the earliest start); `nhl_over_under` live as a Pinnacle rule (EV >= 0.01, one bet a game); never propose paper; pruner and MLB late-bet defects found |
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, touch-set error lines say try again |
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, touch-set failure uses the shared error state and Designer’s lines |
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Season/H2H Anytime TD fails closed without a touch set |
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, a failed Anytime TD touch read no longer opens the board; a typed line commits once on Android |
+| 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, a late Anytime TD touch set cannot replace the board on screen; the player stepper stays on the card at the largest type size |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, every NHL model assessed for CLV and expected value: a name defect inflated the prop backtests (35% of the two-a-night case); game models clear no cut; four NHL prop bets a night (mike); a CLV-only final prop snapshot; CLV for picks at a line DraftKings never hung; `nhl_research` worker job |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, Anytime TD board keeps every ball-carrier (16 hidden on TB@DAL); player stepper snaps 51→50, typed line entry |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
