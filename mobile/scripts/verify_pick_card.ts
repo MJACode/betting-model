@@ -8,6 +8,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hasPricedLine } from '../src/lib/decisionPrice';
+import { historyFrom, sincePick } from '../src/lib/lineHistory';
+import { lineMovementView } from '../src/lib/lineMovementView';
 import {
   bestHandoffForPick,
   canShowLineMovementHistory,
@@ -296,7 +298,7 @@ check(
   check(
     'LineMovementCard fetch uses historyBook, not MODEL_BOOK',
     cardSrc.includes('historyBookForPick') &&
-      cardSrc.includes('fetchOddsHistory(pick.game_id, market, historyBook, pick.created_at, startAt)') &&
+      cardSrc.includes('fetchOddsHistory(pick.game_id, market, historyBook, from, startAt)') &&
       !cardSrc.includes('MODEL_BOOK'),
   );
   const qSrc = readFileSync(join(__dirname, '../src/lib/queries.ts'), 'utf-8');
@@ -315,9 +317,33 @@ check(
   );
   check(
     'the card windows the rows from the pick to the start',
-    cardSrc.includes('sincePick(rows as Snap[], pick.created_at, startAt)') &&
+    cardSrc.includes('sincePick(rows as Snap[], from, startAt)') &&
+      cardSrc.includes('const from = historyFrom(pick, startAt);') &&
       cardSrc.includes('gameStartAt(commenceTime, pick.game_time)'),
   );
+}
+
+// Review 2026-10-09: the book has posted nothing since the pick. The only row
+// is the snapshot the pick was scored from — "No new price", not "steady".
+{
+  const pick = mkPick({ created_at: '2026-09-13 16:00:00.5+00', game_time: '2026-09-13T23:05:00+00:00' } as Partial<Pick>);
+  const only = [{ snapshot_at: '2026-09-13T15:58:00Z', total_line: 8.5, over_price: -110, under_price: -110 }];
+  const from = historyFrom(pick, pick.game_time);
+  const open = lineMovementView(pick, sincePick(only, from!, pick.game_time, 50, Date.parse('2026-09-13T16:05:00Z')), 'totals', false);
+  check(
+    'one row at the pick: "No new price", grey, dated',
+    open?.verdict.label === 'No new price from DraftKings since your pick' &&
+      open?.verdict.tone === 'neutral' &&
+      open?.asOf === 'As of Sun, 9/13, 11:58 AM ET',
+    JSON.stringify(open && [open.verdict, open.asOf]),
+  );
+  const shut = lineMovementView(pick, sincePick(only, from!, pick.game_time, 50, Date.parse('2026-09-14T03:00:00Z')), 'totals', false);
+  check(
+    'one row at the pick, after the start: "between your pick and game time"',
+    shut?.verdict.label === 'No new price from DraftKings between your pick and game time',
+    JSON.stringify(shut?.verdict),
+  );
+  check('a live pick has no window', historyFrom(mkPick({ is_live: true }), pick.game_time) === null);
 }
 
 // ── splitPickTitle (PickCard two-line prop titles) ─────────────────────────
