@@ -39,10 +39,36 @@ the best-price shop, both entry checks and the NHL totals card
   three times a day), so a prop bound needs its own size per sport.
 - **The odds step failed on every pass 2026-09-27 to 10-01** ("Invalid
   ODDS_API_KEY", 378 failures a day in `pipeline_log`) while scoring reported
-  success. Not checked: whether any health check raised it.
-- **The app's latest-price views and the closing-price reader** still read
-  the newest stored row whatever its age. Not measured: whether any closing
-  price was taken from a row the feed had stopped refreshing.
+  success. Checked: `odds_dk_lines` ended 09-28 STALE and 09-29 and 09-30 OK.
+  The new CRIT row `odds_dk_pregame_current` reads 100% of priced games stale
+  on every outage sample. Still open: the pass never recorded the odds step
+  as failed. In `pipeline_runs`, no run from 09-27 to 10-02 lists an odds
+  step in `failed_steps`, and 51 to 53 of 54 runs a day were `ok` from 09-27
+  to 09-30.
+- **The Pick Detail screen's book lists and the closing-price reader** still
+  read the newest stored row whatever its age (the pick card follows the rule
+  since 2026-10-09). Not measured: whether any closing price was taken from a
+  row the feed had stopped refreshing.
+
+## [ ] One UFC fight can be scored, and graded, under two ids
+
+Found 2026-10-09 while fixing the stale-price bound. The odds feed builds a
+UFC id from its home fighter, and that flips between fetches, so one fight can
+sit under both orientations. Since 2026-10-09 an id whose own DraftKings rows
+went stale no longer borrows its twin's price (`_ufc_id_never_priced`), so the
+abandoned copy is skipped. Still open:
+
+- **An id DraftKings never priced** may still borrow its twin's price; that
+  is what the fallback is for, when only one id carries a market. But the
+  code does not stop the twin being scored in the same pass, so the fight
+  can be bet under both ids. Not measured how often both are scored.
+- **Two ids for one fight have each carried a BET, and both were graded**
+  (cause not established). Swapped ids: 332605 and 332615
+  (`ufc_total_rounds`, 2026-06-20, "Andre Lima vs Kevin Borjas Over 2.5" and
+  "Kevin Borjas vs Andre Lima Over 2.5", both BET, both WIN). Two dates, a
+  different shape: 524487 (`UFC_2026-07-18_kamaru-usman_dricus-du-plessis`)
+  and 530849 (the 07-19 id), both BET, both WIN. Nothing was changed; whether
+  the record keeps both is mike's call.
 
 ## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
 
