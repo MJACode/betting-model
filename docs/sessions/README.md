@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Anytime TD lists everyone with a line (69 priced with no 2026 game on 10-11 NFL); Stats ruler typed line |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Teams board gets a "Playing today" filter; filtered rows keep league rank |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB, WNBA, NBA and college football prop odds are stamped in UTC like NFL and NHL ("+00:00", never "Z"; the slate date stays Eastern; old rows not rewritten); no reader breaks, switch-day order checked on the production database |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, origin/master merged into the touch-set branch; session-log hunks kept both sides |

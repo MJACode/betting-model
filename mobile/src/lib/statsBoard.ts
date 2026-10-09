@@ -24,7 +24,7 @@
 // Relative, not '@/…': the verify script below runs this module under tsx,
 // which does not resolve the bundler alias for a VALUE import (a type-only
 // import is erased, which is why '@/types' can stay).
-import { formatGameTimeET, weekdayShortET } from './format';
+import { formatGameTimeET, gameStatus, weekdayShortET } from './format';
 import type { ErrorKind } from './errors';
 import type { GameRow } from '@/types';
 import { normalizePlayerName } from './playerNews';
@@ -374,6 +374,27 @@ export function lineOnlyPlayers(
   return [...priced.values()]
     .filter((p) => !present.has(p.key))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A game's Live/Final label, or null before kickoff. */
+export function startedForGame(g: GameRow): 'Live' | 'Final' | null {
+  const kind = gameStatus(g).kind;
+  return kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null;
+}
+
+/**
+ * The subline for a row that knows its GAME and not its team — a line-only
+ * player: "SUN 1:00 PM ET · HOU @ TEN", or "Live · HOU @ TEN" once under way
+ * when the price column is hidden (the cell says it otherwise; slateSubline).
+ */
+export function fixtureSubline(g: GameRow, started: 'Live' | 'Final' | null): string | null {
+  const fixture = g.away_team && g.home_team ? `${g.away_team} @ ${g.home_team}` : null;
+  if (!fixture) return null;
+  if (started) return `${started} · ${fixture}`;
+  const time = formatGameTimeET(g.commence_time);
+  if (!time) return fixture;
+  const day = weekdayShortET(g.commence_time);
+  return `${day ? `${day} ` : ''}${time} · ${fixture}`;
 }
 
 /** The synthetic id a line-only row carries — never a real player_id. */

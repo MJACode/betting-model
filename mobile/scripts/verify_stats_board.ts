@@ -38,6 +38,7 @@ import {
   hitRateBand,
   inHitRateBand,
   isOnSlate,
+  fixtureSubline,
   isLineOnlyId,
   isStatParticipant,
   isTeamPropName,
@@ -280,6 +281,10 @@ check('lineOnlyPlayers: suffix-folded names count as present; the rest are liste
   missing.map((p) => p.name).join() === 'Tank Dell' && missing[0]!.gameId === 'g2');
 check('line-only ids are recognisable and never a real id',
   isLineOnlyId(`${LINE_ONLY_ID_PREFIX}tank dell`) && !isLineOnlyId('00-0036900'));
+check('fixtureSubline: a line-only row names its game, not a team it does not know',
+  /· HOU @ TEN$/.test(fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, null) ?? '') &&
+  fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, 'Live') === 'Live · HOU @ TEN' &&
+  fixtureSubline({ away_team: null, home_team: 'TEN' } as never, null) === null);
 check('the TD exemption does not leak to other stats',
   !isStatParticipant('NFL', [0, 0], { statKey: 'passing_yards', rows: [{ carries: 9 }] }));
 
