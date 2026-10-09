@@ -284,3 +284,101 @@ def test_the_card_passes_its_clock_to_the_rule(monkeypatch):
     assert out["bets"] == 0
     out = card.run_card(do_publish=False, now=FETCH + timedelta(minutes=10))
     assert out["bets"] == 1
+
+
+# ── a UFC fight stored under two ids ─────────────────────────────────────────
+#
+# The feed builds a UFC id from its home fighter, and that assignment flips
+# between fetches, so one fight can sit under both orientations. Measured
+# 2026-10-09: UFC_2026-10-10_rj-harris_allen-frye-jr has DraftKings rows up to
+# 2026-10-08 18:17Z and nothing since; its swapped id has fresh rows. Once the
+# abandoned id's own row counts as no price, the read must NOT fall through to
+# the swapped id's fresh price, or both ids decide (and grade) the same fight.
+
+ABANDONED = "UFC_2026-10-10_rj-harris_allen-frye-jr"     # away rj-harris
+CURRENT = "UFC_2026-10-10_allen-frye-jr_rj-harris"       # away allen-frye-jr
+UFC_CUTOFF = "2026-10-10T23:00:00"
+ABANDONED_SNAP = "2026-10-08T18:17:06Z"                  # its last DK row
+CURRENT_SNAP = "2026-10-09T16:16:31Z"
+
+
+def _h2h_row(snap, home, away):
+    return (home, away, None, None, None, None, None,
+            "home-link", "away-link", None, None, None, snap)
+
+
+class _TwoIdConn:
+    """Both orientations of one fight. `newest` answers the newest-row read
+    per (game_id, bookmaker); `shop` answers the best-price read per game_id."""
+
+    def __init__(self, newest: dict, shop: dict):
+        self.newest = newest
+        self.shop = shop
+        self._last = ("", ())
+
+    def execute(self, sql, params=None):
+        self._last = (" ".join(sql.split()), tuple(params or ()))
+        return self
+
+    def fetchone(self):
+        sql, params = self._last
+        if "FROM games" in sql:
+            return ("2026-10-10T23:00:00+00:00",)
+        if "FROM odds" in sql:
+            return self.newest.get((params[0], params[2]))
+        return None
+
+    def fetchall(self):
+        sql, params = self._last
+        if "FROM odds" in sql:
+            return self.shop.get(params[0], [])
+        return []
+
+
+# On CURRENT, rj-harris is home: +125 rj-harris, -150 allen-frye-jr.
+_CURRENT_DK = _h2h_row(CURRENT_SNAP, home=125, away=-150)
+
+
+def test_the_abandoned_copy_of_a_fight_does_not_borrow_the_live_copys_price(_clock):
+    conn = _TwoIdConn(
+        newest={(ABANDONED, "draftkings"): _h2h_row(ABANDONED_SNAP, -140, 118),
+                (CURRENT, "draftkings"): _CURRENT_DK},
+        shop={})
+    assert scorer._get_dk_odds(conn, ABANDONED, "h2h") is None, (
+        "the abandoned id was handed the other id's fresh price, so both ids "
+        "would decide the same fight")
+    # The live copy itself is untouched.
+    assert scorer._get_dk_odds(conn, CURRENT, "h2h")["home_price"] == 125
+
+
+def test_a_copy_that_was_never_priced_still_reads_the_other_orientation(_clock):
+    """The 2026-08-29 case the fallback exists for: one id has no DraftKings
+    row for the market at all, so the swapped id's row is its price."""
+    conn = _TwoIdConn(newest={(CURRENT, "draftkings"): _CURRENT_DK}, shop={})
+    odds = scorer._get_dk_odds(conn, ABANDONED, "h2h")
+    assert odds is not None
+    # swapped into THIS id's orientation: allen-frye-jr is home here
+    assert (odds["home_price"], odds["away_price"]) == (-150, 125)
+
+
+def test_the_best_price_shop_follows_the_same_rule(_clock, monkeypatch):
+    monkeypatch.setattr(scorer, "BEST_LINE_BOOKMAKERS", ["draftkings", "fanduel"])
+    current_shop = [("fanduel", 130, "fd", None, None, CURRENT_SNAP),
+                    ("draftkings", 125, "dk", None, None, CURRENT_SNAP)]
+    stale_shop = [("fanduel", 120, "fd-old", None, None, ABANDONED_SNAP),
+                  ("draftkings", 118, "dk-old", None, None, ABANDONED_SNAP)]
+
+    # Abandoned id: its own quotes are stale, so it gets no price at all.
+    conn = _TwoIdConn(
+        newest={(ABANDONED, "draftkings"): _h2h_row(ABANDONED_SNAP, -140, 118),
+                (CURRENT, "draftkings"): _CURRENT_DK},
+        shop={ABANDONED: stale_shop, CURRENT: current_shop})
+    assert scorer._best_game_price(conn, ABANDONED, "h2h", "away", None,
+                                   UFC_CUTOFF) is None
+
+    # Never-priced id: shops the other orientation, on the swapped side.
+    conn = _TwoIdConn(newest={(CURRENT, "draftkings"): _CURRENT_DK},
+                      shop={CURRENT: current_shop})
+    best = scorer._best_game_price(conn, ABANDONED, "h2h", "away", None,
+                                   UFC_CUTOFF)
+    assert best is not None and best["book"] == "fanduel" and best["odds"] == 130

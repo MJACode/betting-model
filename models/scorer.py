@@ -1885,6 +1885,10 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     sibling = _sibling_ufc_game_id(game_id)
     if not sibling:
         return None
+    # The same rule as _get_dk_odds: an id whose own DraftKings rows went stale
+    # is the abandoned copy and shops nothing (_ufc_id_never_priced).
+    if not _ufc_id_never_priced(conn, game_id, market, cutoff):
+        return None
     # Totals are orientation-independent (over/under at a line); h2h is not, so
     # "home" on this row is "away" on the sibling.
     side = pick_side if market.startswith("totals") else _OPPOSITE_SIDE.get(
@@ -2294,6 +2298,26 @@ def _latest_book_game_odds(conn: DBConnection, game_id: str, market: str,
     was returned whatever its age, and 31 NCAAF games the feed had dropped in
     early September were decided off those rows into October.
     """
+    odds = _newest_book_game_row(conn, game_id, market, bookmaker, cutoff)
+    if odds is None:
+        return None
+    if not _quote_is_current(odds.get("snapshot_at"), _pregame_price_floor(cutoff)):
+        logger.debug(f"  {game_id}/{market}: newest {bookmaker} row is from "
+                     f"{odds.get('snapshot_at')}, older than "
+                     f"{config.PREGAME_PRICE_MAX_AGE_MIN} min -- not a current price")
+        return None
+    return odds
+
+
+def _newest_book_game_row(conn: DBConnection, game_id: str, market: str,
+                          bookmaker: str, cutoff: str | None) -> dict | None:
+    """The newest pre-game row for one book, WHATEVER ITS AGE.
+
+    Not a price: _latest_book_game_odds is the read a decision goes through.
+    This half exists so the UFC fallback can tell an id that was never priced
+    (borrow the swapped id's row) from an id the feed abandoned (its own rows
+    are all older than the bound: no price, never the other id's).
+    """
     spread_filter = _game_spread_filter_sql(game_id, market)
     pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
     row = conn.execute(f"""
@@ -2314,13 +2338,29 @@ def _latest_book_game_odds(conn: DBConnection, game_id: str, market: str,
         ).fetchone()
     if not row:
         return None
-    odds = dict(zip(_GAME_ODDS_COLS, row))
-    if not _quote_is_current(odds.get("snapshot_at"), _pregame_price_floor(cutoff)):
-        logger.debug(f"  {game_id}/{market}: newest {bookmaker} row is from "
-                     f"{odds.get('snapshot_at')}, older than "
-                     f"{config.PREGAME_PRICE_MAX_AGE_MIN} min -- not a current price")
-        return None
-    return odds
+    return dict(zip(_GAME_ODDS_COLS, row))
+
+
+def _ufc_id_never_priced(conn: DBConnection, game_id: str, market: str,
+                         cutoff: str | None) -> bool:
+    """May this UFC id borrow its swapped twin's price for this market?
+
+    Only when DraftKings has NEVER stored a pre-game row for it in this
+    market. An id with rows, all older than config.PREGAME_PRICE_MAX_AGE_MIN,
+    is the copy the feed abandoned when it flipped home and away: it gets no
+    price, so the "is this fight real" check skips it and only the live copy is
+    scored. Before the age bound its own stale row answered, which was wrong
+    too; with the bound and without this check, the read fell through to the
+    live copy's fresh price and BOTH ids decided the same fight (2026-10-09:
+    UFC_2026-10-10_rj-harris_allen-frye-jr has DraftKings rows to 10-08 18:17Z
+    and none since; the swapped id has rows from 10-08 18:38Z on). Per MARKET,
+    not per id: on the 2026-08-29 card UFC_2026-08-29_andre-lima_namsrai-
+    batbayar had DraftKings moneyline rows up to 09:56Z on fight day and no
+    totals row ever, while its swapped id had both. That totals borrow is what
+    the fallback was built for, and a per-id check would refuse it.
+    """
+    return _newest_book_game_row(conn, game_id, market, "draftkings",
+                                 cutoff) is None
 
 
 def _fallback_game_line_quote(conn: DBConnection, game_id: str, market: str,
@@ -2416,8 +2456,11 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     # prob-only fallback even though DK had priced the fight. Verified on the
     # 2026-08-29 card: three fights had 195 DK totals rows on one orientation
     # and zero on the other, and all three picks landed on the empty one.
+    # ONLY for an id DraftKings never priced in this market: an id whose own
+    # rows went stale is the abandoned copy, and borrowing would score the
+    # fight twice (_ufc_id_never_priced).
     sibling = _sibling_ufc_game_id(game_id)
-    if sibling:
+    if sibling and _ufc_id_never_priced(conn, game_id, market, cutoff):
         odds = _latest_book_game_odds(conn, sibling, market, "draftkings", cutoff)
         if odds:
             # totals are orientation-independent (over/under/line); h2h is NOT,
