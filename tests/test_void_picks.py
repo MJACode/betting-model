@@ -184,3 +184,49 @@ class TestAPostedSignalIsLocked:
     def test_the_worker_job_uses_the_same_plan(self):
         src = (ROOT / "tracking" / "job_queue.py").read_text(encoding="utf-8")
         assert "from scripts.void_picks import _select, plan_voids, void" in src
+
+
+class TestVoidingAPostedPickIsAnExplicitOptIn:
+    """mike, 2026-10-09: "Change the rule, void them".
+
+    Eight NCAAF unders were posted to members and decided on DraftKings
+    prices 15 to 28 days old: the odds feed had stopped listing those games
+    on 2026-09-05, so the number was not one the book was offering. Matt's
+    lock (2026-09-28) still holds by default. A posted pick is voided only
+    when the caller opts in, and a graded pick is never voided, opt-in or not.
+    """
+
+    def test_a_posted_pick_is_refused_by_default_and_told_how_to_opt_in(self):
+        to_void, refused = plan_voids([{**_row(), "posted": True}], REASON)
+        assert not to_void
+        why = refused[0]["why"]
+        assert "posted as a signal" in why
+        assert "--allow-posted" in why and "allow_posted" in why
+
+    def test_a_posted_pick_is_voided_with_the_opt_in(self):
+        to_void, refused = plan_voids([{**_row(), "posted": True}], REASON,
+                                      allow_posted=True)
+        assert [r["pick_id"] for r in to_void] == [1] and not refused
+
+    def test_a_graded_pick_is_refused_with_or_without_the_opt_in(self):
+        for allow in (False, True):
+            for result in GRADED:
+                rows = [{**_row(result=result), "posted": True},
+                        {**_row(2, result=result), "posted": False}]
+                to_void, refused = plan_voids(rows, REASON, allow_posted=allow)
+                assert not to_void, f"{result} voided with allow_posted={allow}"
+                assert all(f"already graded {result}" == r["why"] for r in refused)
+
+    def test_the_opt_in_does_not_skip_the_other_checks(self):
+        """An already-void pick stays a no-op and an empty reason is refused."""
+        to_void, refused = plan_voids([{**_row(result=VOID_RESULT), "posted": True}],
+                                      REASON, allow_posted=True)
+        assert not to_void and "no-op" in refused[0]["why"]
+        to_void, refused = plan_voids([{**_row(), "posted": True}], "  ",
+                                      allow_posted=True)
+        assert not to_void and "reason" in refused[0]["why"]
+
+    def test_the_command_line_has_the_flag(self):
+        src = (ROOT / "scripts" / "void_picks.py").read_text(encoding="utf-8")
+        assert '"--allow-posted"' in src
+        assert "allow_posted=a.allow_posted" in src

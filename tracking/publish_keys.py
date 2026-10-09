@@ -150,7 +150,9 @@ def posted_sql(alias: str = "p") -> str:
     """EXISTS: the Discord ledger holds this pick's lock_key (pre-game or live).
 
     Matt, 2026-09-28: "if a bet is posted as a signal it should be locked".
-    scripts/void_picks.py refuses any pick this is true for. Built from the two
+    scripts/void_picks.py refuses any pick this is true for, unless the caller
+    opts in with --allow-posted (mike, 2026-10-09: for a posted pick decided on
+    a price nobody could bet; a graded pick stays refused). Built from the two
     key expressions above so there is one definition of the key, not two.
     """
     kinds = ", ".join(f"'{k}'" for k in DISCORD_KINDS)

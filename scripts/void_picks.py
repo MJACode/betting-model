@@ -6,6 +6,7 @@ Void picks that should never have been official, WITHOUT deleting them.
         --reason "fired outside the validated lead window (pre-#517)"
     python -m scripts.void_picks --pick-id 1634280 --pick-id 1655591 --reason "..."
     python -m scripts.void_picks ... --apply        # writes; omit for a dry run
+    python -m scripts.void_picks --pick-id 2558703 --allow-posted --reason "..."
 
 WHY THIS EXISTS, AND WHY IT IS NOT A DELETE
 
@@ -40,15 +41,28 @@ WHAT IT REFUSES
 A pick already graded WIN / LOSS / PUSH. Voiding one of those is not correcting
 a bug, it is rewriting a settled result, and nothing in §1c permits it.
 
-A pick already POSTED as a signal. (Matt, 2026-09-28: "if a bet is posted as a
-signal it should be locked".) Once the channel has it, members were told to bet
-it, and a void cannot take the message back -- this script never touches the
-channel (2026-09-23). The 2026-09-19 EV-floor void showed what happens
-otherwise: Ailin Perez ML was posted, stayed on the board, won, and the daily
-recap said no UFC pick cleared the bar that day. "Posted" is the publish ledger
-on the pick's lock_key: tracking/publish_keys.posted_sql, the same join the
-app's published-picks view makes. There is no override flag on purpose:
-changing this rule is a code change.
+A pick already POSTED as a signal, BY DEFAULT. (Matt, 2026-09-28: "if a bet is
+posted as a signal it should be locked".) Once the channel has it, members were
+told to bet it, and a void cannot take the message back -- this script never
+touches the channel (2026-09-23). The 2026-09-19 EV-floor void showed what
+happens otherwise: Ailin Perez ML was posted, stayed on the board, won, and the
+daily recap said no UFC pick cleared the bar that day. "Posted" is the publish
+ledger on the pick's lock_key: tracking/publish_keys.posted_sql, the same join
+the app's published-picks view makes.
+
+THE OPT-IN, AND WHEN IT IS MEANT TO BE USED. Matt's lock shipped with no
+override flag, so that changing it would have to be a code change. mike made
+that change on 2026-10-09 ("Change the rule, void them"): `--allow-posted` here,
+`"allow_posted": true` on the worker job. It exists for one case: a posted pick
+that was DECIDED ON A PRICE NOBODY COULD BET. The first use was eight NCAAF
+unders the scorer priced from DraftKings rows last stored 2026-09-05, 15 to 28
+days before each pick, after the odds feed had stopped listing those games. Not
+for a rule or threshold change after posting: that is a pick that existed at a
+real number, and Matt's reasoning above still applies to it in full.
+
+With the opt-in, a posted pick is voided like any other. Without it, it is
+refused and the refusal says how to opt in. A graded pick is refused either
+way. The void still never touches the channel: the post stays where it is.
 
 FIRST USE: 2026-09-07 (mike), the six `nfl_wind_totals` Week 1 picks that fired
 at 7.2-8.7 day leads before #517 landed the firing gate. All six had lost their
@@ -79,11 +93,19 @@ def _posted_sql() -> str:
 POSTED_SQL = _posted_sql()
 
 
-def plan_voids(rows: list[dict], reason: str) -> tuple[list[dict], list[dict]]:
+POSTED_REFUSAL = ("posted as a signal -- a posted signal is locked; to void it "
+                  "anyway pass --allow-posted (worker job: \"allow_posted\": true)")
+
+
+def plan_voids(rows: list[dict], reason: str,
+               allow_posted: bool = False) -> tuple[list[dict], list[dict]]:
     """Split candidate rows into (to_void, refused). Pure; the tests drive this.
 
     Idempotent: a pick already carrying the void result is reported as a no-op
     rather than refused, so re-running the same command is safe.
+
+    `allow_posted` lifts ONLY the posted-signal lock (see the module docstring
+    for when it is meant to be used). A graded pick is refused with or without it.
     """
     to_void, refused = [], []
     for r in rows:
@@ -92,8 +114,8 @@ def plan_voids(rows: list[dict], reason: str) -> tuple[list[dict], list[dict]]:
             refused.append({**r, "why": f"already graded {result}"})
         elif result == VOID_RESULT:
             refused.append({**r, "why": "already void (no-op)"})
-        elif r.get("posted"):
-            refused.append({**r, "why": "posted as a signal -- a posted signal is locked"})
+        elif r.get("posted") and not allow_posted:
+            refused.append({**r, "why": POSTED_REFUSAL})
         elif not reason.strip():
             refused.append({**r, "why": "no reason given"})
         else:
@@ -150,6 +172,10 @@ def main() -> int:
     ap.add_argument("--reason", required=True)
     ap.add_argument("--apply", action="store_true",
                     help="actually write. Without it this is a dry run.")
+    ap.add_argument("--allow-posted", action="store_true",
+                    help="also void picks already posted as a signal (mike, "
+                         "2026-10-09). Only for a posted pick decided on a "
+                         "price nobody could bet. Graded picks stay refused.")
     a = ap.parse_args()
 
     if not (a.pick_id or a.model or a.game_id):
@@ -159,7 +185,7 @@ def main() -> int:
     conn = get_connection()
     try:
         rows = _select(conn, a.pick_id, a.model, a.before, a.game_id)
-        to_void, refused = plan_voids(rows, a.reason)
+        to_void, refused = plan_voids(rows, a.reason, allow_posted=a.allow_posted)
 
         for r in refused:
             print(f"  SKIP  {r['pick_id']}  {r['pick_label']}  -- {r['why']}")
