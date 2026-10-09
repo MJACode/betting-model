@@ -37,6 +37,7 @@ def _cases():
     import models.mlb_game_market as mlb_game
     import models.mlb_prop_market as mlb
     import models.mlb_total_public_fade as fade
+    import models.nhl_totals_market as nhl_totals
     import models.nfl_prop_market as nfl
     import models.wnba_prop_market as wnba
     from data.ingestors.nfl_prop_odds_ingestor import MARKET_BOOKS as NFL_BOOKS
@@ -53,6 +54,8 @@ def _cases():
         ("mlb game-line soft", mlb_game.SOFT_BOOKS, general),
         ("mlb game-line sharp", (mlb_game.SHARP_BOOK,), general),
         ("mlb public-fade soft", fade.SOFT_BOOKS, general),
+        ("nhl totals soft", nhl_totals.SOFT_BOOKS, general),
+        ("nhl totals sharp", (nhl_totals.SHARP_BOOK,), general),
     ]
     return out
 
@@ -73,6 +76,7 @@ def test_a_sharp_reference_is_never_also_a_soft_book():
     import models.mlb_game_market as mlb_game
     import models.mlb_prop_market as mlb
     import models.nfl_prop_market as nfl
+    import models.nhl_totals_market as nhl_totals
     import models.wnba_prop_market as wnba
 
     for label, sharp, soft in (
@@ -80,6 +84,7 @@ def test_a_sharp_reference_is_never_also_a_soft_book():
         ("wnba", {wnba.SHARP_BOOK}, set(wnba.SOFT_BOOKS)),
         ("mlb", {mlb.SHARP_BOOK}, set(mlb.SOFT_BOOKS)),
         ("mlb_game", {mlb_game.SHARP_BOOK}, set(mlb_game.SOFT_BOOKS)),
+        ("nhl_totals", {nhl_totals.SHARP_BOOK}, set(nhl_totals.SOFT_BOOKS)),
     ):
         assert not (sharp & soft), f"{label}: {sorted(sharp & soft)} is both"
 

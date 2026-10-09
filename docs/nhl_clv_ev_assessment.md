@@ -229,10 +229,12 @@ from two to four.
 
 1. **CLV at the price taken** for every model that shops books. It changes the
    published CLV of those models.
-2. **`nhl_over_under` as a market-anchored paper model.** It would bet soft
-   books that lag Pinnacle, and its CLV is positive in all six seasons. Its ROI
-   interval still includes zero (+4.72%, -0.6..+10.1). About +3 to +4.5 units
-   a season if it holds.
+2. **`nhl_over_under` as a market-anchored model. Decided 2026-10-08 (mike):
+   live, not paper** (*"This is live model, stop asking about paper"*). It bets
+   the bettable book that lags Pinnacle in the same fetch, EV >= 0.01
+   (`models/nhl_totals_market.py`, `docs/thresholds.md`). Its CLV is positive
+   in all six seasons; its ROI interval still includes zero (+4.72%,
+   -0.6..+10.1).
 3. **Lowering the prop floor to 0.15**, the units-a-season peak with one bet a
    game (+86.0 with no nightly limit, +68.4 at four a night). It is in-sample,
    because the floor was chosen on these seasons, and it was not asked about.

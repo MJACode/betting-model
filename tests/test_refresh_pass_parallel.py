@@ -157,6 +157,18 @@ def test_opening_signals_follows_every_scorer():
         assert _order(scorer) < _order("opening-signals")
 
 
+def test_the_nhl_totals_card_reads_the_fetch_it_follows():
+    """nhl_over_under prices Pinnacle against the bettable books in ONE stored
+    fetch, so it must run after `odds` has stored this pass's fetch, before
+    scoring (an NHL pick written by scoring was measured 7.3 minutes after
+    its fetch, one example), and before settle. Sequential, like every writer
+    to picks."""
+    assert re.search(r"^step nhl-over-under$", SH, re.M), (
+        "nhl-over-under must be a sequential step")
+    assert _order("odds") < _order("nhl-over-under") < _order("scoring")
+    assert _order("nhl-over-under") < _order("settle")
+
+
 def test_parlay_follows_opening_signals():
     """It reads the locked legs."""
     assert _order("opening-signals") < _order("parlay-track-record")

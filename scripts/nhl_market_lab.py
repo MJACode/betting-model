@@ -132,10 +132,10 @@ def grade_pl(df: pd.DataFrame, side_home: np.ndarray):
 
 # ── frames ───────────────────────────────────────────────────────────────────
 
-def frames(model_id: str) -> dict[int, pd.DataFrame]:
+def frames(model_id: str, feature_cols: list[str] | None = None) -> dict[int, pd.DataFrame]:
     out = {}
     for s in SEASONS:
-        f = build_training_dataset(model_id, seasons=[s])
+        f = build_training_dataset(model_id, seasons=[s], feature_cols=feature_cols)
         out[s] = f[0] if isinstance(f, tuple) else f
     return out
 
@@ -248,8 +248,14 @@ def main() -> None:
     show("Moneyline — bet at the OPEN when model minus no-vig open >= edge", ml_rows)
 
     # ── 3. totals ────────────────────────────────────────────────────────────
-    tf = frames("nhl_over_under")
-    tfeats = list(fe.FEATURE_MAP["nhl_over_under"])
+    # nhl_over_under is a rule since 2026-10-08 and out of MODELS, so its
+    # frames are built through another NHL id with the totals feature list.
+    # total_line is left out of the build (the moneyline's odds row carries
+    # none, and a NaN in it would drop every row); it is set below from the
+    # opening number, and the target is recomputed below too.
+    tf = frames("nhl_moneyline",
+                feature_cols=[c for c in fe.NHL_TOTALS_FEATURES if c != "total_line"])
+    tfeats = list(fe.NHL_TOTALS_FEATURES)
     for s in SEASONS:
         f = tf[s].drop(columns=["total_line", "target"], errors="ignore").merge(
             prices[["game_id", "total_open", "hs", "as_"]], on="game_id").dropna(subset=["total_open"])

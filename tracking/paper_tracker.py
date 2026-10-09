@@ -2063,6 +2063,9 @@ _RULE_MODEL_MARKETS = {
     "mlb_spread_market": "spreads",
     "mlb_total_market": "totals",
     "mlb_total_public_fade": "totals",
+    # NHL full-game totals (models/nhl_totals_market.py). scored_line is the
+    # total; the stored final includes the shootout goal, as books settle it.
+    "nhl_over_under": "totals",
 }
 # 2026 paper-track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

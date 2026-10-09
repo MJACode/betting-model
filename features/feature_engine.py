@@ -388,7 +388,8 @@ FEATURE_MAP = {
     "mlb_f5_runline":           MLB_F5_SPREADS_FEATURES,
     "nhl_moneyline":            NHL_H2H_FEATURES,
     "nhl_moneyline_regulation": NHL_REG_FEATURES,
-    "nhl_over_under":           NHL_TOTALS_FEATURES,
+    # nhl_over_under is a rule since 2026-10-08 (models/nhl_totals_market.py):
+    # no artifact, so no feature list. NHL_TOTALS_FEATURES stays for the labs.
     "nhl_puckline":             NHL_PUCKLINE_FEATURES,
     "wnba_moneyline":           WNBA_H2H_FEATURES,
     "wnba_over_under":          WNBA_TOTALS_FEATURES,
@@ -1968,7 +1969,7 @@ def build_training_dataset(model_id: str,
     and attaches the appropriate target variable.
 
     Args:
-        model_id: e.g. 'mlb_moneyline', 'nhl_over_under'
+        model_id: e.g. 'mlb_moneyline', 'nhl_moneyline'
         seasons:  list of seasons to include
         db_path:  ignored (kept for backwards compat); uses DATABASE_URL
 
