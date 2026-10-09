@@ -35,6 +35,7 @@ LEFT JOIN (Discord, for the price bound) or do not join at all (push).
 from __future__ import annotations
 
 import config
+from tracking.publish_keys import lock_key_sql
 
 
 def live_publishable_sql(alias: str = "p") -> str:
@@ -67,3 +68,30 @@ def live_publishable_sql(alias: str = "p") -> str:
           -- (scorer._paused_signal, 2026-09-28), whatever the model's state
           -- now. The live lanes write NONE for a paused model today
           -- (live_scorer), so this is the same rule held on the row.{config.paused_row_exclusion_sql(alias)}"""
+
+
+def captured_not_voided_sql(alias: str = "os") -> str:
+    """WHERE fragment (leading ``AND``): the captured signal's pick is not VOID.
+
+    `opening_signals` is a capture of `picks`, and scripts/void_picks.py writes
+    only to `picks`. So a voided pick keeps its captured row, and every reader
+    of that capture would still choose it. Until 2026-10-09 the free pick of the
+    day (Discord's free channel, mirrored by X) and the public parlay record
+    both did: the eight posted NCAAF unders mike voided that day (decided on
+    DraftKings prices 15 to 28 days old) were 3 of the 4 free-pick candidates
+    for 2026-10-17, 2 of 3 for 11-07, 1 of 2 for 11-14 and 2 of 3 for 11-28.
+
+    Matched on the lock_key, the identity every surface agrees on
+    (tracking/publish_keys), not on the component columns: a model that leaves
+    player_id NULL would otherwise match every pick in the game. The game_id
+    equality is implied by the key and only lets the planner use
+    idx_picks_game. Only 'VOID': nfl_pick_monitor writes OK / DEGRADED / GONE
+    to the same column as health states on standing picks.
+    """
+    return f"""
+          AND NOT EXISTS (
+              SELECT 1 FROM picks pv
+              WHERE pv.game_id = {alias}.game_id
+                AND {lock_key_sql("pv")} = {alias}.lock_key
+                AND pv.condition_status = 'VOID'
+          )"""
