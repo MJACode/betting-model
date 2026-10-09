@@ -101,7 +101,7 @@ The one-time re-grade (`clv-price-taken-recompute-2026-10-08`) must run before
 any pruner fix. The fix should keep, per game and book, the row at every
 pick's `created_at` and the last row at or before the start.
 
-## [ ] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
+## [ ] [needs-decision] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
 
 Read-only query, 2026-10-08: `mlb_total_public_fade` wrote 4 BETs at
 2026-09-16 22:07Z and `mlb_spread_market` 2 at 2026-09-17 00:57Z, each 3 to 7
@@ -113,6 +113,28 @@ pre-game snapshot. The NHL totals card's slate shows the check. Also assess
 whether the MLB card needs the NHL card's "Pinnacle withdrawn" guard. Check
 whether the six rows count in the published record before changing anything
 settled; that is mike's call.
+
+**2026-10-09:** the code half is done. Both MLB cards (and the WNBA prop card,
+which had the same gap) now skip a game that has started. The Pinnacle-withdrawn
+guard was assessed and is not needed for MLB. Still open, mike's call: the six
+rows (and two late WNBA prop bets) count in the published record, the app's
+Models and Record tabs, and the Discord recaps. Neither existing exit fits:
+`void_picks.py` refuses graded picks and `RECORD_EXCLUSIONS` has no per-pick
+form. Numbers and options: `docs/sessions/2026-10.md`, 2026-10-09 entry.
+
+## [ ] `games.first_pitch_at` has not been filled since 2026-08-31 (found 2026-10-09)
+
+Read-only query, 2026-10-09: the newest MLB game with `first_pitch_at` is
+game_date 2026-08-31; 0 of 188 MLB games since 2026-09-15 have it. The
+`derive_first_pitch` job ran once (`worker_jobs`, 2026-09-01) and nothing
+schedules it (not in `scheduler.py` or `run_pipeline.py`). So every pre-game
+bound built on `data/first_pitch.pregame_cutoff_sql` (the odds relabel,
+`models/mlb_prop_market.py`, `models/wnba_prop_market.py`, the scorer's price
+reads) has fallen back to the scheduled start for every MLB game since, which
+`data/first_pitch.py` measured as about 16 minutes too late. Fix: run the
+derivation on the worker's schedule, after the live loop's state is written.
+Check first whether "Live" there means first pitch or warm-ups (the module
+records that the cause is not known).
 
 ## [ ] NHL props: revisit the 0.18 floor after a month of real CLV (mike, 2026-10-08)
 
