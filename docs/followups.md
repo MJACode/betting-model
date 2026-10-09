@@ -58,12 +58,10 @@ over a 1,312-game season. It spends credits, so it needs mike's OK.
 Built: `paper_tracker._bet_price_and_book`, `picks.clv_bet_book`, the
 `graded_at_dk_legacy` recompute (`data/migrations/clv_price_taken_2026_10_08.sql`
 plus the declared `clv_backfill` job). Only the bet side moved; the close is
-still Pinnacle, else DraftKings. `docs/clv.md`. Still open: the app's pick
-screen shows `dk_odds` and a label/DraftKings book in its CLV card
-(`PickDetailScreen.tsx` ClvCard) — it should show the price taken at
-`clv_bet_book`. Fall back to `decision_book` when `clv_bet_book` is NULL: the
-30 NHL prop picks captured at the price taken before this change were never
-re-graded, so they keep it NULL. The original item:
+still Pinnacle, else DraftKings. `docs/clv.md`. The app's CLV card shows the
+price taken at that book since 2026-10-09 (`mobile/src/lib/clvBet.ts`, which
+derives the same book for rows captured before `clv_bet_book` existed). The
+original item:
 
 ### CLV is graded at DraftKings' price, not the price taken
 
