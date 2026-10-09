@@ -53,7 +53,16 @@ same-instant gap) by construction. One more snapshot per game makes CLV
 measurable. Measured cost: 5 credits a game per snapshot, about 6,600 credits
 over a 1,312-game season. It spends credits, so it needs mike's OK.
 
-## [ ] The line-movement card shows the OLDEST 50 snapshots as "now" (found 2026-10-09)
+## [x] The line-movement card shows the OLDEST 50 snapshots as "now" — FIXED 2026-10-09
+
+Fixed on `claude/line-movement-since-pick` (session note 2026-10-09). The card
+now shows the book's price when the pick was made, then every snapshot up to
+the game's start, newest kept. Game lines are cut on the server (every stamp
+there is UTC); prop series come back whole and are sorted and cut on the phone
+(about half of them are stamped in Eastern time). The first row reads "At pick",
+after the start the card says "by game time", and live picks have no card.
+The player page reads the same prop series and was fixed by the same change.
+Original report below.
 
 `fetchOddsHistory` and `fetchPropOddsHistory` (`mobile/src/lib/queries.ts`)
 sort oldest first and keep 50 rows, and `LineMovementCard` reads the last of
@@ -69,6 +78,23 @@ game's start (rows typed `open` run past kickoff). Stop calling the first of
 those rows the "opening" (`lineHistory.ts`), or fetch the real opener. Not
 caused by the CLV card change; that change only moved some picks to their
 label book's equally stale history.
+
+## [ ] Three prop writers stamp Eastern time (found 2026-10-09)
+
+`data/ingestors/prop_odds_ingestor.py:797` (MLB, WNBA, NBA) and
+`data/ingestors/ncaaf_prop_odds_ingestor.py:338` write
+`snapshot_at = datetime.now(_ET).isoformat()`, so about half of recent
+`player_prop_odds` rows end "-04:00" (measured 2026-10-09: 1,685,669 of
+3,512,638 rows since 10-05, 48%). The NFL and NHL writers stamp UTC. From
+2026-11-01 the Eastern rows become "-05:00". Wherever two offsets meet in one
+series, text order is hours off time order; today that is only where the
+historical backfill ("Z") overlaps live rows. The app's line-movement reads now
+parse every stamp, so they are safe. Still exposed: anything that orders or
+filters this column as text, including the latest-prop trigger
+(`latest_prop_odds_on_insert` takes `MAX(snapshot_at)`, which is text). Fix: write
+`datetime.now(timezone.utc).isoformat()`. `backfilled_dates()` tells history
+from live rows by a trailing "Z", which "+00:00" does not match, so it keeps
+working. Not done in the line-movement fix because it changes a writer.
 
 ## [ ] The model screen's "Avg CLV" tile mixes two CLV definitions (found 2026-10-09)
 

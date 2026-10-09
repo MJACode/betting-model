@@ -28,7 +28,7 @@
  * every snapshot after it up to the game's start, newest kept (`sincePick`).
  * The first row is that price, not the opener, so it reads "At pick".
  *
- * Every stamp is parsed (`parseStamp`), never compared as text: a third of
+ * Every stamp is parsed (`parseStamp`), never compared as text: about half of
  * player_prop_odds is stamped in Eastern time ("...-04:00", "-05:00" from
  * November), so its text order is hours off its time order.
  */

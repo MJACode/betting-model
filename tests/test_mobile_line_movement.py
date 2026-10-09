@@ -9,8 +9,8 @@ Fanatics had moved to 43.0: the card said "steady". Now:
 - game lines (odds): every stamp is UTC, so the server cuts the window: the
   last pre-game snapshot before the pick's second, then the newest 50 from
   that second up to the start, in-play rows excluded;
-- props (player_prop_odds): a third of the rows are stamped in Eastern time,
-  so text order is not time order. The whole series comes back, never ordered
+- props (player_prop_odds): about half of the rows are stamped in Eastern
+  time, so text order is not time order. The whole series comes back, never ordered
   or filtered by snapshot_at on the server, and is sorted and cut on the
   phone. The player page reads the same series: its opening line is the true
   earliest row and its fallback "now" the true latest;
