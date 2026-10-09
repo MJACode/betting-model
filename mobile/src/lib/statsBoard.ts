@@ -24,9 +24,10 @@
 // Relative, not '@/…': the verify script below runs this module under tsx,
 // which does not resolve the bundler alias for a VALUE import (a type-only
 // import is erased, which is why '@/types' can stay).
-import { formatGameTimeET, weekdayShortET } from './format';
+import { formatGameTimeET, gameStatus, weekdayShortET } from './format';
 import type { ErrorKind } from './errors';
 import type { GameRow } from '@/types';
+import { normalizePlayerName } from './playerNews';
 
 // ── 1. Sort ──
 
@@ -293,11 +294,16 @@ export function isStatParticipant(
      *  totals read — what Season and H2H use, having no usage columns of
      *  their own. Undefined = not known. */
     touched?: boolean;
+    /** A book posts this player a line in the market today. On Anytime TD
+     *  that alone keeps him (Matt, 2026-10-09: "ATD should show for
+     *  everyone that has a betting line"). */
+    priced?: boolean;
   },
 ): boolean {
   if (!MULTI_ROLE_SPORTS.has(sport)) return true;
   if (values.some((v) => (v ?? 0) !== 0)) return true;
   if (!opts?.statKey || !ZERO_IS_AN_ANSWER_KEYS.has(opts.statKey)) return false;
+  if (opts.priced) return true;
   if (opts.touched !== undefined) return opts.touched;
   const rows = (opts.rows ?? []) as ReadonlyArray<Record<string, unknown>>;
   const hasUsage = rows.some((r) => TOUCH_KEYS.some((k) => r[k] != null));
@@ -309,6 +315,92 @@ export function isStatParticipant(
   // below.
   if (!hasUsage) return false;
   return rows.some((r) => TOUCH_KEYS.some((k) => Number(r[k] ?? 0) > 0));
+}
+
+/**
+ * A prop row that names a TEAM, not a player: books list "Dallas Cowboys
+ * D/ST" (and "… Defense") and "No Scorer" in the anytime-TD market — 52 of
+ * the 427 names on the 2026-10-11 NFL slate. None is a player row.
+ */
+export function isTeamPropName(name: string | null | undefined): boolean {
+  const n = (name ?? '').trim();
+  return /(\bD\/ST|\bDefense)$/i.test(n) || /^no (td )?scorer$/i.test(n);
+}
+
+/** One player a book prices in the market on the slate. */
+export interface PricedPlayer {
+  key: string;
+  name: string;
+  gameId: string;
+}
+
+/**
+ * The players any book prices in `market` on the slate, at any line, keyed by
+ * the folded name the odds column joins on. Rows naming a team are left out.
+ */
+export function pricedPlayers(
+  rows: ReadonlyArray<{ market: string; player_name: string | null; game_id: string }>,
+  market: string,
+  gameIds?: ReadonlySet<string> | null,
+): Map<string, PricedPlayer> {
+  const out = new Map<string, PricedPlayer>();
+  for (const r of rows) {
+    if (r.market !== market) continue;
+    if (gameIds && !gameIds.has(r.game_id)) continue;
+    if (isTeamPropName(r.player_name)) continue;
+    const key = normalizePlayerName(r.player_name);
+    if (!key || out.has(key)) continue;
+    out.set(key, { key, name: r.player_name ?? '', gameId: r.game_id });
+  }
+  return out;
+}
+
+/**
+ * Priced players the board's read has no row for — a line and no game in the
+ * log (a player back from injury, a depth tight end, a nickname the book
+ * prints): 69 of the 375 priced players on the 2026-10-11 NFL anytime-TD
+ * slate. They are listed so the board shows everyone with a line, with no
+ * number of their own, since there is none to show.
+ */
+export function lineOnlyPlayers(
+  priced: ReadonlyMap<string, PricedPlayer>,
+  boardNames: Iterable<string | null | undefined>,
+): PricedPlayer[] {
+  const present = new Set<string>();
+  for (const n of boardNames) {
+    const k = normalizePlayerName(n);
+    if (k) present.add(k);
+  }
+  return [...priced.values()]
+    .filter((p) => !present.has(p.key))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A game's Live/Final label, or null before kickoff. */
+export function startedForGame(g: GameRow): 'Live' | 'Final' | null {
+  const kind = gameStatus(g).kind;
+  return kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null;
+}
+
+/**
+ * The subline for a row that knows its GAME and not its team — a line-only
+ * player: "SUN 1:00 PM ET · HOU @ TEN", or "Live · HOU @ TEN" once under way
+ * when the price column is hidden (the cell says it otherwise; slateSubline).
+ */
+export function fixtureSubline(g: GameRow, started: 'Live' | 'Final' | null): string | null {
+  const fixture = g.away_team && g.home_team ? `${g.away_team} @ ${g.home_team}` : null;
+  if (!fixture) return null;
+  if (started) return `${started} · ${fixture}`;
+  const time = formatGameTimeET(g.commence_time);
+  if (!time) return fixture;
+  const day = weekdayShortET(g.commence_time);
+  return `${day ? `${day} ` : ''}${time} · ${fixture}`;
+}
+
+/** The synthetic id a line-only row carries — never a real player_id. */
+export const LINE_ONLY_ID_PREFIX = 'line-only:';
+export function isLineOnlyId(id: string): boolean {
+  return id.startsWith(LINE_ONLY_ID_PREFIX);
 }
 
 // ── 3. Tonight's slate ──
@@ -323,6 +415,27 @@ export interface TonightSlate {
 }
 
 export const EMPTY_SLATE: TonightSlate = { date: '', keys: new Set(), isToday: false };
+
+/** '2026-08-30' → 'Sun 8/30' (for the next-slate label). */
+function shortSlateDate(date: string): string {
+  if (!date) return '';
+  const d = new Date(`${date}T12:00:00Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'numeric',
+    day: 'numeric',
+  }).format(d);
+}
+
+/**
+ * The slate cut's name — ONE expression for the Players board's Availability
+ * switch and the Teams board's chip, so a sport tab never has two names for
+ * the same cut (UX review, 2026-10-09).
+ */
+export function slateLabelFor(slate: { date: string; isToday: boolean }): string {
+  return slate.isToday ? 'Playing today' : `Next slate ${shortSlateDate(slate.date)}`;
+}
 
 /**
  * Reduce upcoming games to the slate to filter on: today's games when there

@@ -251,20 +251,21 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
     { at: t(20, 30), line: 9, price: -105 },
   ]);
   check('repeated line + price collapse into one row', runs.length === 3 && runs[0].count === 3, JSON.stringify(runs.map((r) => r.count)));
-  check('distinct minutes print minute precision in ET', runs[0].label === '3:50 PM ET' && runs[1].label === '4:05 PM ET', runs.map((r) => r.label).join(' | '));
+  // "ET" is in the card's column heading ("Time (ET)"), not on every row.
+  check('distinct minutes print minute precision in ET', runs[0].label === '3:50 PM' && runs[1].label === '4:05 PM', runs.map((r) => r.label).join(' | '));
   const flicker = collapseLineHistory([
     { at: t(19, 50, 5), line: null, price: -105 },
     { at: t(19, 50, 25), line: null, price: -115 },
     { at: t(19, 50, 45), line: null, price: -105 },
   ]);
-  check('rows sharing a minute get seconds', flicker.every((r) => /^3:50:\d\d PM ET$/.test(r.label)), flicker.map((r) => r.label).join(' | '));
+  check('rows sharing a minute get seconds', flicker.every((r) => /^3:50:\d\d PM$/.test(r.label)), flicker.map((r) => r.label).join(' | '));
   const many = Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 }));
   const rc = recentChanges(many, 8);
-  check('the card shows the last 8 rows and counts every CHANGE (the opening row is not one)',
+  check('the card shows the last 8 rows and counts every CHANGE (the first row is not one)',
     rc.rows.length === 8 && rc.changes === 19 && rc.shownChanges === 8 && rc.hidden === 12, JSON.stringify({ c: rc.changes, s: rc.shownChanges, h: rc.hidden }));
   // Reviewer #847 lows.
   const one = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 8.5, price: -115 }]);
-  check('M13: opening + one move = 1 change, not 2', one.changes === 1 && one.rows[0].opening && !one.rows[1].opening);
+  check('M13: first row + one move = 1 change, not 2', one.changes === 1 && one.rows[0].baseline && !one.rows[1].baseline);
   check('M13: an unmoved line is 0 changes', recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: 8.5, price: -110 }]).changes === 0);
   const gap = collapseLineHistory([
     { at: t(18, 0), line: 8.5, price: -110 },
@@ -290,10 +291,28 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
   const ml = collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 5), line: null, price: -120 }]);
   check('M13: a field no snapshot has (moneyline line) is untracked, not "partial"', ml.length === 2);
   const nine = recentChanges(Array.from({ length: 9 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
-  check('footer: only the opening hidden → "8 changes · opening not shown", not "Last 8 of 8"',
-    changesFooter(nine, 9) === '8 changes · opening not shown · 9 snapshots', changesFooter(nine, 9));
-  check('footer: changes really cut → "Last 8 of 19 changes"', changesFooter(rc, 20) === 'Last 8 of 19 changes · 20 snapshots', changesFooter(rc, 20));
-  check('footer: nothing hidden → "1 change"', changesFooter(one, 2) === '1 change · 2 snapshots');
+  const fromPick = { fromPick: true, gap: false };
+  check('footer: only the first row hidden → "8 changes since your pick", not "Last 8 of 8"',
+    changesFooter(nine, fromPick) === '8 changes since your pick', changesFooter(nine, fromPick));
+  check('footer: changes really cut → "Last 8 of 19 changes"', changesFooter(rc, fromPick) === 'Last 8 of 19 changes since your pick', changesFooter(rc, fromPick));
+  check('footer: nothing hidden → "1 change"', changesFooter(one, fromPick) === '1 change since your pick');
+  // Review 2026-10-09: snapshots dropped after the pick → name the stretch, never count snapshots.
+  const cut = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(19, 0), line: 8.5, price: -110 }], 8, { atPick: true, gap: true });
+  check('footer: a gap after the pick names the missing stretch',
+    changesFooter(cut, { fromPick: true, gap: true }) === 'Prices between your pick and Fri, 9/25, 3:00 PM ET not shown', changesFooter(cut, { fromPick: true, gap: true }));
+  check('a gap is a divider row, and no run crosses it', cut.rows.map((r) => r.label).join(' | ') === 'At pick | Some prices after your pick not shown | 3:00 PM', cut.rows.map((r) => r.label).join(' | '));
+  // Second review 2026-10-09: on a cut window the price at the pick and the divider stay on the 8-row table.
+  const longCut = recentChanges(
+    [{ at: t(18, 0), line: 8.5, price: -110 }, ...Array.from({ length: 12 }, (_, i) => ({ at: t(19, i), line: 8.5 + (i % 2) / 2, price: -110 }))],
+    8,
+    { atPick: true, gap: true },
+  );
+  check('a cut window keeps "At pick" and the divider on screen',
+    longCut.rows.length === 8 && longCut.rows[0].label === 'At pick' && longCut.rows[1].divider && longCut.rows[7].at === t(19, 11),
+    longCut.rows.map((r) => r.label).join(' | '));
+  // The first row is the price at the pick (lib/lineHistory sincePick), not the opener.
+  const atPick = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 9, price: -110 }], 8, { atPick: true });
+  check('the price at the pick reads "At pick"', atPick.rows[0].label === 'At pick' && atPick.rows[1].label === '2:30 PM', atPick.rows.map((r) => r.label).join(' | '));
   const same = collapseLineHistory([
     { at: t(18, 0), line: null, price: -110 },
     { at: t(18, 0), line: null, price: -115 },
@@ -313,7 +332,7 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, postponed, in-play tag)',
   /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
 check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
-check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length\)/.test(read('src/components/LineMovementCard.tsx')));
+check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(recent, \{ fromPick: hist\.fromPick, gap: hist\.gap \}\)/.test(read('src/lib/lineMovementView.ts')));
 check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
 check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
   /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));
@@ -339,7 +358,7 @@ check('PickDetail: AllBooksCard (rows open betslips) hidden when !cta.handoff (H
 check('PickDetail: the started line is NOT gated on paused',
   /\{pick\.signal_type === 'BET' && !preview && !retired && !voided && cta\.startedLine && openHere \? \(/.test(detail));
 check('ReasoningCard: heading from reasoningHeading', /reasoningHeading\(pick\.signal_type/.test(read('src/components/ReasoningCard.tsx')) && !/>Why this bet\?</.test(read('src/components/ReasoningCard.tsx')));
-check('LineMovementCard: rows from recentChanges', /recentChanges\(/.test(read('src/components/LineMovementCard.tsx')) && !/snaps\.slice\(-8\)/.test(read('src/components/LineMovementCard.tsx')));
+check('LineMovementCard: rows from recentChanges', /recentChanges\(/.test(read('src/lib/lineMovementView.ts')) && /view\.rows\.map\(/.test(read('src/components/LineMovementCard.tsx')) && !/snaps\.slice\(-8\)/.test(read('src/lib/lineMovementView.ts')));
 const home = read('src/screens/PicksHomeScreen.tsx');
 check('PicksHome: Edge sort passes the price check, with the live snapshot',
   /priceCheck: \(d\) => priceCheckForItem\(d, liveStates\.get\(d\.pick\.game_id\) \?\? null\)\.flagged/.test(home));

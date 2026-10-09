@@ -1172,16 +1172,25 @@ export function lineForSide(
   return line;
 }
 
+/**
+ * A line already in the pick's side (lineForSide), printed the way the pick
+ * label writes it: spreads get a sign ("+7.5"), totals and props do not. The
+ * line-movement table prints its rows with this, so a spread row reads the
+ * way the header does (it printed "7.5" under a "+7.5" header).
+ */
+export function formatLineValue(v: number | null, market: string | null): string {
+  if (v == null) return '—';
+  const isSpread = market != null && market.startsWith('spreads');
+  return isSpread && v > 0 ? `+${v}` : `${v}`;
+}
+
 /** lineForSide, formatted the way the pick label writes it (spreads get a sign). */
 export function formatSideLine(
   line: number | null,
   side: PickSide,
   market: string | null,
 ): string {
-  const v = lineForSide(line, side, market);
-  if (v == null) return '—';
-  const isSpread = market != null && market.startsWith('spreads');
-  return isSpread ? `${v > 0 ? '+' : ''}${v}` : `${v}`;
+  return formatLineValue(lineForSide(line, side, market), market);
 }
 
 /** Line value (total or spread) from a snapshot, if the market carries one. */
@@ -1387,6 +1396,52 @@ export function movementFromSameBookHistory(
 
 /** @deprecated Use movementFromSameBookHistory — same function. */
 export const movementFromDkHistory = movementFromSameBookHistory;
+
+/**
+ * Is this snapshot the number the pick locked? The line-movement card labels
+ * its first row "At pick" only when it is. That row is the book's last stored
+ * snapshot at or before the pick, which can be another number: an NFL opener
+ * locked TEN +9.5 at -108 while BetRivers' last stored snapshot before it
+ * read +7.5 at -117 (pick 3386046; review, 2026-10-09). Such a row keeps its
+ * time label.
+ *
+ * The rules are movementFromSameBookHistory's. NFL picks compare the line
+ * only. Every other pick compares the price at the deciding book, and the
+ * line too when the scored line is that book's (another book's line is a
+ * different bet). Lines compare home to home: `scored_line` and
+ * `spread_home` are both the home number, so an away spread is never flipped
+ * on one side only. Nothing to compare is not a match.
+ */
+export function snapshotMatchesLock(
+  pick: Pick,
+  snap: PricedSnapshot,
+  market: string | null,
+): boolean {
+  if (historyBookForPick(pick) == null) return false;
+  const lockLine = lockedLineAtHistoryBook(pick, market);
+  const lineMatches = lockLine != null && lineFromSnapshot(snap, market) === lockLine;
+  if (isNflLineOnly(pick.model_id)) return lineMatches;
+  const price = priceForSide(snap, pick.pick_side);
+  if (price == null || price !== decisionOdds(pick)) return false;
+  return lockLine == null || lineMatches;
+}
+
+/**
+ * The line the pick locked, when a snapshot from the deciding book can be
+ * compared with it: a line market (not a moneyline), a scored line, and that
+ * line is the deciding book's own number (another book's line is a different
+ * bet). Home-relative on spreads, like `spread_home`. Null otherwise.
+ *
+ * snapshotMatchesLock and the line-movement card's "did the line move" check
+ * (lib/lineMovementView) both use it, so the two cannot disagree about which
+ * lines count.
+ */
+export function lockedLineAtHistoryBook(pick: Pick, market: string | null): number | null {
+  const historyBook = historyBookForPick(pick);
+  const scoredLine = numOrNull(pick.scored_line);
+  if (historyBook == null || market == null || market.startsWith('h2h') || scoredLine == null) return null;
+  return scoredLineBook(pick) === historyBook ? scoredLine : null;
+}
 
 /** Book whose snapshot series the detail card may fetch. */
 export function historyBookForPick(pick: Pick): string | null {
