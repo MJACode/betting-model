@@ -113,6 +113,10 @@ import {
   isOnSlate,
   isStatParticipant,
   needsTouchSet,
+  shouldFetchTouchSet,
+  touchBoardView,
+  touchSetAfterFailure,
+  touchSetErrorLine,
   touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
@@ -404,6 +408,14 @@ export function StatsScreen() {
   // H2H, whose reads carry the one stat and no usage columns. Without it a
   // receiver with no TD is indistinguishable from a lineman (Matt, 2026-10-08).
   const [touchSet, setTouchSet] = useState<{ key: string; ids: Set<string> } | null>(null);
+  /** The key whose last touch read failed, and the cause sentence for the line. */
+  const [touchFailure, setTouchFailure] = useState<{ key: string; cause: string } | null>(null);
+  // `load` closes over neither of these (its deps are the question, not the
+  // answer), so the failure path reads the refs. A render updates them.
+  const touchSetRef = useRef(touchSet);
+  touchSetRef.current = touchSet;
+  const touchFailureRef = useRef(touchFailure);
+  touchFailureRef.current = touchFailure;
   const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode, last-N
   // Hit-rate mode, Season window. The rows are ONE stat's value arrays, so they
   // carry the stat key they were fetched for — the memo below ignores them
@@ -720,23 +732,50 @@ export function StatsScreen() {
       }
       const teams = readTeams;
       if (effectiveMode === 'hitRate') {
-        // Fired alongside the read below, not after it; a failure leaves the
-        // board on its no-usage fallback rather than costing the board.
+        // Alongside the read below. A failure keeps the last good set for
+        // this key and is retried on the next load; with nothing kept, the
+        // list stays empty and says so (touchBoardView) instead of falling
+        // open to anyone with games.
         const touchKey = `${sport}|${playerType ?? ''}`;
+        const haveSet = touchSetRef.current?.key === touchKey;
+        const failedForKey = touchFailureRef.current?.key === touchKey;
+        let touchJob: Promise<void> | null = null;
         if (
-          (timeWindow === 'h2h' || timeWindow === 'season') &&
-          needsTouchSet(sport, String(stat.key)) &&
-          touchSet?.key !== touchKey
+          shouldFetchTouchSet(
+            (timeWindow === 'h2h' || timeWindow === 'season') && needsTouchSet(sport, String(stat.key)),
+            haveSet,
+            failedForKey,
+          )
         ) {
-          fetchWindowTotals(sport, SEASON, null, playerType)
+          touchJob = fetchWindowTotals(sport, SEASON, null, playerType)
             .then((t) => {
               // Same stamp as the reads below. A response for a sport or
               // player type the user has already left must not replace the
               // set those reads are filtering with.
               const next = touchSetFromResponse(inFlight.current, stamp, touchKey, touchedPlayerIds(t));
-              if (next) setTouchSet(next);
+              if (!next) return;
+              touchSetRef.current = next;
+              setTouchSet(next);
+              if (touchFailureRef.current?.key === touchKey) {
+                touchFailureRef.current = null;
+                setTouchFailure(null);
+              }
             })
-            .catch(() => undefined);
+            .catch((e: unknown) => {
+              if (isAbortError(e)) return;
+              const next = touchSetAfterFailure(
+                touchSetRef.current,
+                touchFailureRef.current?.key ?? null,
+                inFlight.current,
+                stamp,
+                touchKey,
+              );
+              if (inFlight.current !== stamp) return;
+              // `next.set` is the set already held. A failure does not write
+              // it back, and does not clear a set for another key.
+              touchFailureRef.current = { key: next.failedKey ?? touchKey, cause: friendlyCause(e) };
+              setTouchFailure(touchFailureRef.current);
+            });
         }
         if (timeWindow === 'h2h') {
           const key = String(stat.key);
@@ -757,6 +796,10 @@ export function StatsScreen() {
           if (inFlight.current !== stamp) return;
           setRecentRows(data);
         }
+        // No set yet: keep the skeleton up until this read resolves or fails.
+        // A retry that already has a set leaves the filtered list on screen.
+        if (touchJob && !haveSet) await touchJob;
+        if (inFlight.current !== stamp) return;
       } else {
         // 'h2h' cannot reach here — `effectiveMode` forces Hit Rates under that
         // window, because there is no per-opponent totals read. Narrowed rather
@@ -1588,6 +1631,21 @@ export function StatsScreen() {
     [hitRateBase, band],
   );
 
+  // Season and H2H Anytime TD have no usage columns, so the rows above are
+  // unfiltered until the touch set for this key lands. Hold that list on the
+  // skeleton (or an error line, when the read failed and nothing was kept)
+  // rather than painting anyone with games.
+  const touchKey = `${sport}|${playerType ?? ''}`;
+  const touchView = touchBoardView(
+    effectiveMode === 'hitRate' &&
+      (timeWindow === 'season' || timeWindow === 'h2h') &&
+      needsTouchSet(sport, stat ? String(stat.key) : null),
+    touchSet?.key,
+    touchKey,
+    touchFailure?.key === touchKey,
+  );
+  const hitData = rowsAreStale || touchView !== 'list' ? EMPTY_ROWS : hitRatePlayers;
+
   // Did the position cut, and only it, empty the board? Measured across the
   // cut itself: Hit Rates compare before/after the position filter, not the
   // banded list, so a band that empties a non-empty position list keeps the
@@ -2272,7 +2330,7 @@ export function StatsScreen() {
           against ONE opponent over two seasons, not a recent-form window, and a
           reader who has not tapped through to a player has no way to know that.
           Same quiet caption idiom as the no-lines note below it. */}
-      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitRatePlayers.length > 0 ? (
+      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0 ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
           <Text style={styles.noLinesText}>
@@ -2303,7 +2361,7 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
-      {(effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length) > 0 ? (
+      {(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0 ? (
         <ColumnHeader
           rightLabel={rightLabel}
           showOdds={showOdds}
@@ -2325,7 +2383,7 @@ export function StatsScreen() {
       {effectiveMode === 'hitRate' ? (
         <FlatList
           ListFooterComponent={<BetslipBarSpacer />}
-          data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
+          data={hitData}
           // `slateChecking` counts as loading under H2H: the load gate skips
           // the REQUEST until the slate lands but nothing held the RENDER, so
           // the board printed "No upcoming games, so there is no opponent to
@@ -2357,7 +2415,11 @@ export function StatsScreen() {
             );
           }}
           ListEmptyComponent={
-            loading || (timeWindow === 'h2h' && slateChecking) ? (
+            touchView === 'error' && !error ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>{touchSetErrorLine(touchFailure?.cause ?? '')}</Text>
+              </View>
+            ) : loading || (timeWindow === 'h2h' && slateChecking) || (touchView === 'loading' && !error) ? (
               <BoardSkeleton />
             ) : (
               <EmptyState
@@ -2455,7 +2517,7 @@ export function StatsScreen() {
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         title="Filter players"
-        resultCount={effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length}
+        resultCount={effectiveMode === 'hitRate' ? hitData.length : ranked.length}
         itemNoun="player"
         // The Availability toggle re-READS the board (the server is narrowed to
         // the slate's teams), so the count on the footer is the answer to the

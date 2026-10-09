@@ -40,6 +40,10 @@ import {
   isOnSlate,
   isStatParticipant,
   needsTouchSet,
+  shouldFetchTouchSet,
+  touchBoardView,
+  touchSetAfterFailure,
+  touchSetErrorLine,
   touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
@@ -267,13 +271,57 @@ touch = landTouch(inFlight, touch, stampNflWr, 'NFL|wrte', ['pickens', 'lamb']);
 check('the touch set for the load still in flight still commits',
   touch?.key === 'NFL|wrte' && touch.ids.has('lamb') && touch.ids.has('pickens'));
 
+// A failed touch read used to resolve to undefined and leave `touched`
+// unset, so Season/H2H Anytime TD fell open to anyone with games and stayed
+// there. A failure keeps a set only when it is already for this key, records
+// the key so the next load retries, and with nothing kept asks the board to
+// show the error line instead of that wide list.
+const good = { key: 'NFL|qb', ids: new Set(['mahomes']) };
+const failedWithSet = touchSetAfterFailure(good, null, stampNflRb, stampNflRb, 'NFL|qb');
+check('a failed touch read keeps the last good set for the same key',
+  failedWithSet.set === good && failedWithSet.set.ids.has('mahomes') && failedWithSet.failedKey === 'NFL|qb'
+  && touchBoardView(true, failedWithSet.set?.key, 'NFL|qb', failedWithSet.failedKey === 'NFL|qb') === 'list'
+  && shouldFetchTouchSet(true, true, true));
+const failedWithout = touchSetAfterFailure(null, null, stampNflRb, stampNflRb, 'NFL|qb');
+check('a failed touch read with no set is an error, not the wide list',
+  failedWithout.set === null && failedWithout.failedKey === 'NFL|qb'
+  && touchBoardView(true, null, 'NFL|qb', true) === 'error'
+  && shouldFetchTouchSet(true, false, true));
+const failedOtherKey = touchSetAfterFailure(good, null, stampNflRb, stampNflRb, 'NFL|wrte');
+check('a failure for another key does not drop the set that was kept',
+  failedOtherKey.set === good && failedOtherKey.failedKey === 'NFL|wrte'
+  && touchBoardView(true, good.key, 'NFL|wrte', true) === 'error');
+check('the touch-set error line names the failure and the pull',
+  touchSetErrorLine('You’re offline. Check your connection and try again.')
+  === 'Couldn’t load who has touched the ball. You’re offline. Check your connection and try again. Pull down to retry.');
+// The user has moved on: the failure belongs to a load that is no longer in
+// flight, so it must not mark the new key failed or drop the set that landed.
+inFlight = stampNcaaf;
+const landed = { key: 'NCAAF|wrte', ids: new Set(['bowers']) };
+const staleFail = touchSetAfterFailure(landed, null, inFlight, stampNflRb, 'NFL|qb');
+check('a stale touch failure keeps the set that has since landed',
+  staleFail.set === landed && staleFail.failedKey === null
+  && touchBoardView(true, staleFail.set?.key, 'NCAAF|wrte', false) === 'list');
+check('the list stays on its skeleton until the touch set for this key resolves',
+  touchBoardView(true, null, 'NFL|qb', false) === 'loading'
+  && touchBoardView(true, undefined, 'NFL|qb', false) === 'loading'
+  && touchBoardView(false, null, 'NFL|qb', false) === 'list');
+check('a good set is not refetched, and a failed key is',
+  !shouldFetchTouchSet(true, true, false) && shouldFetchTouchSet(true, false, false)
+  && !shouldFetchTouchSet(false, false, true));
+
 const statsScreen = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
-const touchThen = /fetchWindowTotals\(sport, SEASON, null, playerType\)\s*\.then\(\(t\) => \{([\s\S]*?)\}\)/.exec(statsScreen);
 check('StatsScreen commits the touch set only through touchSetFromResponse',
-  !!touchThen
-  && /touchSetFromResponse\(inFlight\.current, stamp, touchKey, touchedPlayerIds\(t\)\)/.test(touchThen?.[1] ?? '')
-  && /if \(next\) setTouchSet\(next\)/.test(touchThen?.[1] ?? '')
-  && !/setTouchSet\(\{/.test(touchThen?.[1] ?? ''));
+  /touchSetFromResponse\(inFlight\.current, stamp, touchKey, touchedPlayerIds\(t\)\)/.test(statsScreen)
+  && /if \(!next\) return;/.test(statsScreen)
+  && /setTouchSet\(next\)/.test(statsScreen)
+  && !/setTouchSet\(\{/.test(statsScreen)
+  && !/\.catch\(\(\) => undefined\)/.test(statsScreen)
+  && /touchSetAfterFailure\(/.test(statsScreen)
+  && /shouldFetchTouchSet\(/.test(statsScreen)
+  && /touchBoardView\(/.test(statsScreen)
+  && /touchSetErrorLine\(/.test(statsScreen)
+  && /touchView !== 'list' \? EMPTY_ROWS : hitRatePlayers/.test(statsScreen));
 
 // ── The row subline: when the game starts, and against whom ────────────────
 // Matt, 2026-09-05: "add the time of the game and who they are playing under

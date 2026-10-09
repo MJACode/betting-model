@@ -40,12 +40,12 @@ import {
   chipsWithRequested,
   defaultChipForPlayer,
   filledChipCounts,
+  commitTypedLineOnce,
   gameContextLine,
   groupsOfChips,
   lineStepFor,
   logStatValue,
   openingChip,
-  parseTypedLine,
   playerSubtitle,
   requestedChip,
   roundLineToStep,
@@ -468,13 +468,17 @@ export function PlayerStatsScreen() {
   // (Matt, 2026-10-08: "allow a user to manually enter in the line"). The
   // stepper's ceiling does not apply — a typed line is a deliberate question.
   const [lineDraft, setLineDraft] = useState<string | null>(null);
+  // Android fires onSubmitEditing and then onEndEditing for one Done press.
+  // The ref latches in the first call so the second does not apply the line again.
+  const lineCommitTaken = useRef(false);
   const commitLineDraft = () => {
-    const typed = lineDraft == null ? null : parseTypedLine(lineDraft, mode);
-    setLineDraft(null);
-    if (typed == null || typed === line) return;
+    const result = commitTypedLineOnce(lineDraft, lineCommitTaken.current, mode, line);
+    lineCommitTaken.current = result.taken;
+    if (result.taken) setLineDraft(null);
+    if (result.line == null) return;
     setLineTouched(true);
     setLineFromBoard(false);
-    setLine(typed);
+    setLine(result.line);
   };
 
   const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
@@ -765,7 +769,10 @@ export function PlayerStatsScreen() {
                     </Pressable>
                     <TextInput
                       value={lineDraft ?? rulerValueLabel(effLine, mode)}
-                      onFocus={() => setLineDraft('')}
+                      onFocus={() => {
+                        lineCommitTaken.current = false;
+                        setLineDraft('');
+                      }}
                       onChangeText={setLineDraft}
                       onEndEditing={commitLineDraft}
                       onSubmitEditing={commitLineDraft}

@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  commitTypedLineOnce,
   measureStepperRow,
   parseTypedLine,
   stepLineFrom,
@@ -288,6 +289,25 @@ check('typed "50.5" in Over is that line: 51+', parseTypedLine('50.5', 'over') =
 check('typed "50" in Under is Under 50.5: threshold 51', parseTypedLine('50', 'under') === 51);
 check('junk is refused', parseTypedLine('') === null && parseTypedLine('abc') === null && parseTypedLine('-5') === null);
 
+// Android delivers Done as onSubmitEditing and then blur as onEndEditing, in
+// one turn, with the same draft. The first call commits; the second finds
+// the latch and applies nothing. iOS commits from blur only, once.
+let taken = false;
+let typedLine: number | null = 51;
+const firstCommit = commitTypedLineOnce('50', taken, 'atLeast', typedLine);
+taken = firstCommit.taken;
+if (firstCommit.line != null) typedLine = firstCommit.line;
+const secondCommit = commitTypedLineOnce('50', taken, 'atLeast', typedLine);
+check('a typed line commits once when Done and blur both fire',
+  firstCommit.line === 50 && firstCommit.taken === true
+  && secondCommit.line === null && secondCommit.taken === true
+  && typedLine === 50);
+check('a latched commit does not apply a second draft',
+  commitTypedLineOnce('40', true, 'atLeast', 50).line === null);
+check('an unopened field does not latch, so a later edit can commit',
+  commitTypedLineOnce(null, false, 'atLeast', 51).taken === false
+  && commitTypedLineOnce('40', false, 'atLeast', 51).line === 40);
+
 // The stepper row at Dynamic Type. Measured (Inter, stand-in for SF): at
 // fontScale 1, "At Least" + a 50.5 line + three-digit averages is 309pt of a
 // 375pt card's 319 and fits. At fontScale 2 the one line is 472pt, so the +
@@ -319,6 +339,13 @@ check('the − / + stay a 44pt target (30 + 8 + 8) and do not overlap the field'
   30 + 8 + 8 >= 44);
 
 const playerScreen = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
+check('Done and blur share one commit, and the field resets the latch on focus',
+  /returnKeyType="done"/.test(playerScreen)
+  && /onSubmitEditing=\{commitLineDraft\}/.test(playerScreen)
+  && /onEndEditing=\{commitLineDraft\}/.test(playerScreen)
+  && /commitTypedLineOnce\(lineDraft, lineCommitTaken\.current, mode, line\)/.test(playerScreen)
+  && /lineCommitTaken\.current = false/.test(playerScreen)
+  && /lineCommitTaken\.current = result\.taken/.test(playerScreen));
 check('the card places the stepper from stepperRowLayout',
   /const \{ fontScale \} = useWindowDimensions\(\)/.test(playerScreen)
   && /const stepperLayout = stepperRowLayout\(fontScale\)/.test(playerScreen)

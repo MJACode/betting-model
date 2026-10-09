@@ -547,6 +547,28 @@ export function parseTypedLine(text: string, mode: 'atLeast' | 'over' | 'under' 
   return Math.floor(n) + 1;
 }
 
+/**
+ * Apply a typed line once when the return key and blur both fire.
+ *
+ * Android delivers `onSubmitEditing` and then `onEndEditing` for one Done
+ * press, in the same turn, with the same draft. The second call finds
+ * `taken` and applies nothing. A field that was never opened (`draft == null`)
+ * does not latch, so a later edit can still commit. iOS commits from blur
+ * alone; this runs there once.
+ */
+export function commitTypedLineOnce(
+  draft: string | null,
+  taken: boolean,
+  mode: 'atLeast' | 'over' | 'under',
+  current: number | null,
+): { line: number | null; taken: boolean } {
+  if (taken) return { line: null, taken: true };
+  if (draft == null) return { line: null, taken: false };
+  const typed = parseTypedLine(draft, mode);
+  if (typed == null || typed === current) return { line: null, taken: true };
+  return { line: typed, taken: true };
+}
+
 // ── Reading a stat off a row ────────────────────────────────────────────────
 
 /**

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, a failed Anytime TD touch read no longer opens the board; a typed line commits once on Android |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, a late Anytime TD touch set cannot replace the board on screen; the player stepper stays on the card at the largest type size |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, every NHL model assessed for CLV and expected value: a name defect inflated the prop backtests (35% of the two-a-night case); game models clear no cut; four NHL prop bets a night (mike); a CLV-only final prop snapshot; CLV for picks at a line DraftKings never hung; `nhl_research` worker job |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, Anytime TD board keeps every ball-carrier (16 hidden on TB@DAL); player stepper snaps 51→50, typed line entry |

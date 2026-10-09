@@ -146,6 +146,65 @@ export function touchSetFromResponse(
   return { key: touchKey, ids };
 }
 
+export interface TouchSet {
+  key: string;
+  ids: Set<string>;
+}
+
+/**
+ * Ask for the touch set when Anytime TD needs one we do not have, and again
+ * after a failure — the next load and pull-to-refresh both call this. A key
+ * that already has a set and has not failed is not asked again.
+ */
+export function shouldFetchTouchSet(
+  needed: boolean,
+  haveSetForKey: boolean,
+  failedForKey: boolean,
+): boolean {
+  return needed && (!haveSetForKey || failedForKey);
+}
+
+/**
+ * A failed touch read. A response for a load the user has left changes
+ * nothing. A current failure never drops a set: the last good one for this
+ * key stays on screen, and a set for another key stays for the way back.
+ * The failed key is recorded so the next load retries.
+ */
+export function touchSetAfterFailure<T extends { key: string }>(
+  current: T | null,
+  failedKey: string | null,
+  inFlight: string | null,
+  stamp: string,
+  touchKey: string,
+): { set: T | null; failedKey: string | null } {
+  if (inFlight !== stamp) return { set: current, failedKey };
+  return { set: current, failedKey: touchKey };
+}
+
+export type TouchBoardView = 'list' | 'loading' | 'error';
+
+/**
+ * What Season and H2H Anytime TD may paint. A set for this key is the list,
+ * including while a retry of that key is in flight. With no set, a failure
+ * is an error line; until the read resolves the board stays on its skeleton.
+ * Anything that does not need the set paints its rows.
+ */
+export function touchBoardView(
+  needed: boolean,
+  setKey: string | null | undefined,
+  touchKey: string,
+  failedForKey: boolean,
+): TouchBoardView {
+  if (!needed || setKey === touchKey) return 'list';
+  if (failedForKey) return 'error';
+  return 'loading';
+}
+
+/** The line under the board when the touch read failed and nothing was kept. */
+export function touchSetErrorLine(cause: string): string {
+  return `Couldn’t load who has touched the ball. ${cause} Pull down to retry.`;
+}
+
 /** The player_ids with any carry, reception or target on a totals read. */
 export function touchedPlayerIds(rows: ReadonlyArray<object>): Set<string> {
   const out = new Set<string>();
@@ -179,10 +238,11 @@ export function isStatParticipant(
   const rows = (opts.rows ?? []) as ReadonlyArray<Record<string, unknown>>;
   const hasUsage = rows.some((r) => TOUCH_KEYS.some((k) => r[k] != null));
   // No usage columns and no touch set: a player with games in the window is
-  // kept — hiding the receiver is the bug this replaced. The board passes
-  // `touched` on the reads that land here, so this is the fallback while the
-  // touch read is in flight or failed (1,327 Season rows, 897 never touched
-  // the ball — measured 2026-10-08).
+  // kept — hiding the receiver is the bug this replaced. Season and H2H pass
+  // `touched` once that read has landed. Until it lands, and when it fails
+  // with nothing kept, the board holds the skeleton or an error line and does
+  // not paint this fallback (1,327 Season rows, 897 never touched the ball —
+  // measured 2026-10-08).
   if (!hasUsage) return values.length > 0;
   return rows.some((r) => TOUCH_KEYS.some((k) => Number(r[k] ?? 0) > 0));
 }
