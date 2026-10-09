@@ -179,8 +179,9 @@ Five defects, found by more than one assessment:
    it touches.
 2. **CLV is graded at DraftKings' price, not the price taken** when the pick was
    decided elsewhere. 17 of 23 regulation bets and 15 of 30 measured
-   shots-on-goal bets. Not changed: it would change the published CLV of every
-   model that shops books (a decision, below).
+   shots-on-goal bets. **Fixed 2026-10-08 (mike: "grade CLV at the price
+   taken")** for every model, with a one-time re-grade of the 216 rows graded
+   the old way (`docs/clv.md`, "Which price is the bet?").
 3. **The close is the decision snapshot** for every saves and blocked-shots
    pick, and for most evening picks. The ingestor buys only an open and a
    70-minute close, so those CLVs are zero (or a same-instant gap) by
@@ -191,7 +192,10 @@ Five defects, found by more than one assessment:
 5. **Two start times.** Before a game, `games.commence_time` carries the feed's
    :10 time. After settlement it carries the NHL's scheduled :00. A close read
    before settlement can take a quote from the first ten minutes after the
-   scheduled start. Whether those are in-play prices is not measured. Not fixed.
+   scheduled start. **Fixed 2026-10-08**: the close is now bounded by the
+   earlier of the game's start and the start the pick was written against.
+   One pick had taken an in-play quote ("Alex Nedeljkovic Under 25.5 Saves":
+   +2.4 recorded, about +1.96 from the last pre-game quote).
 
 ## Changes made
 
@@ -225,19 +229,28 @@ from two to four.
    feed's start time, filed as `snapshot_type = 'close'` so no card decides on
    it. About 6,600 credits a season.
 
-## Still open, for mike (in `docs/followups.md`)
+## Decided 2026-10-08, second round (mike)
 
-1. **CLV at the price taken** for every model that shops books. It changes the
-   published CLV of those models.
-2. **`nhl_over_under` as a market-anchored model. Decided 2026-10-08 (mike):
-   live, not paper** (*"This is live model, stop asking about paper"*). It bets
-   the bettable book that lags Pinnacle in the same fetch, EV >= 0.01
-   (`models/nhl_totals_market.py`, `docs/thresholds.md`). Its CLV is positive
-   in all six seasons; its ROI interval still includes zero (+4.72%,
-   -0.6..+10.1).
-3. **Lowering the prop floor to 0.15**, the units-a-season peak with one bet a
-   game (+86.0 with no nightly limit, +68.4 at four a night). It is in-sample,
-   because the floor was chosen on these seasons, and it was not asked about.
+*"yes to 1, grade CLV at the price taken. This is live model, stop asking
+about paper ... 3) ok"*
+
+1. **CLV at the price taken** for every model that shops books: the price the
+   pick was decided and settled at, at the book it was taken. The close is
+   unchanged (Pinnacle, else DraftKings). 216 rows graded the old way are
+   re-graded once by a declared job; until each is, it is out of the
+   published average. `docs/clv.md`.
+2. **`nhl_over_under` is live, as a market-anchored rule.** It bets the
+   bettable book that lags Pinnacle's no-vig total in the same fetch, at
+   EV >= 0.01 and -200 or better, one bet a game, written once
+   (`models/nhl_totals_market.py`, `docs/thresholds.md`). Six seasons at the
+   bettable books: 1,276 bets, +60.2 units (about 10 a season), +4.72%. Its
+   CLV is positive in all six seasons; its return interval still includes
+   zero (-0.6..+10.1%). Gate standing: 0 settled picks of the 50 the gate
+   asks for.
+3. **The NHL prop floor stays 0.18** for now. Revisit it after a month of
+   real CLV. Lowering it to 0.15 is the units-a-season peak with one bet a
+   game (+86.0 with no nightly limit, +68.4 at four a night), but that floor
+   was chosen on the seasons it is graded on.
 
 The game models need no decision. Neither has a cut that clears, and both stay
 live (mike, 2026-10-01). The regulation model's measured cost at its live

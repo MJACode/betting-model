@@ -72,6 +72,51 @@ measured shots-on-goal bets. Grading `decision_odds` at `decision_book` changes
 the published CLV of every model that shops books, so it is a decision.
 (Picks with no DraftKings price at all were fixed on 2026-10-08.)
 
+## [ ] The odds pruner fails every night, and fixing it as written would break CLV
+
+Found 2026-10-08 in the CLV-at-the-price-taken design. The worker logged
+`Odds prune failed (non-fatal): canceling statement due to statement timeout`
+on 2026-10-07 and 2026-10-08 at 10:26 UTC, while the daily run printed
+`✓ prune_odds` (`run_pipeline.step_prune_odds` swallows the error). Games from
+2026-09-03 on still hold 150 to 900 snapshots per book, against 2 or 3 for
+09-01 and 09-02, so it has not pruned `odds` since about then.
+
+**Do not just make it fast.** For every game before today, `data/prune_odds.py`
+keeps only each non-DraftKings book's first row and its last row not marked
+`in_play`. Pinnacle is protected only in `player_prop_odds`, not in `odds`.
+Two things depend on the rows it would delete:
+- **CLV at the price taken** de-vigs the bet with the two-way at the book it
+  was taken, at the pick's `created_at`. That row is usually neither first nor
+  last, so a later capture or re-grade falls back to the price with the margin
+  in it.
+- **The close.** NHL in-play rows are stored as `open`, not `in_play`, so the
+  "last pre-game" row the pruner keeps can be an in-play quote, and the real
+  last pre-game Pinnacle quote is the one deleted.
+
+The one-time re-grade (`clv-price-taken-recompute-2026-10-08`) must run before
+any pruner fix. The fix should keep, per game and book, the row at every
+pick's `created_at` and the last row at or before the start.
+
+## [ ] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
+
+Read-only query, 2026-10-08: `mlb_total_public_fade` wrote 4 BETs at
+2026-09-16 22:07Z and `mlb_spread_market` 2 at 2026-09-17 00:57Z, each 3 to 7
+hours after its game's first pitch (pick_ids 2304600, 2304601, 2304605,
+2304610, 2321911, 2321912; 2-4). Of their 29 and 49 BETs, those are the only
+ones. Cause: `scripts/mlb_game_market_card.slate()` selects by `game_date`
+with no started-game check, and its quotes are bounded only to the last
+pre-game snapshot. The NHL totals card's slate shows the check. Also assess
+whether the MLB card needs the NHL card's "Pinnacle withdrawn" guard. Check
+whether the six rows count in the published record before changing anything
+settled; that is mike's call.
+
+## [ ] NHL props: revisit the 0.18 floor after a month of real CLV (mike, 2026-10-08)
+
+mike: keep 0.18 for now. Lowering it to 0.15 is the units-a-season peak with
+one bet a game (+68.4 at four a night against +54.6), but that floor was
+chosen on the seasons it is graded on. Read it against the first month of CLV
+from the new final prop snapshot, at the price taken. From about 2026-11-08.
+
 ## [ ] Two smaller CLV-capture defects (found 2026-10-08)
 
 - The prop close lookup matches names exactly: Pinnacle's "Lafreniere" missed
