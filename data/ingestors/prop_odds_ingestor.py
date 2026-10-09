@@ -29,7 +29,7 @@ Usage:
 
 import argparse
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import sys
@@ -472,10 +472,11 @@ def backfilled_dates(conn: DBConnection, dates: list[str],
     date already fetched.
 
     Detected on the snapshot_at SHAPE. The historical writer stamps the API's
-    served timestamp, which ends in 'Z'; the live ingestor stamps ET isoformat
-    with a numeric offset. That is a real distinction in this table today, and
-    it is also a constraint on future writers: anything that starts stamping 'Z'
-    on live rows makes a re-run skip dates it should buy.
+    served timestamp, which ends in 'Z'; the live ingestor stamps isoformat
+    with a numeric offset ('+00:00' UTC from the 2026-10-09 change on,
+    '-04:00' Eastern before it). That is a real distinction in this table, and
+    it is also a constraint on future writers: anything that starts stamping
+    'Z' on live rows makes a re-run skip dates it should buy.
     """
     rows = conn.execute(
         "SELECT DISTINCT game_date FROM player_prop_odds "
@@ -794,7 +795,11 @@ def run_prop_odds_ingestor(target_date: str = None,
     # (e.g. DK's batter_home_runs_alternate → batter_home_runs).
     markets  += EXTRA_REQUEST_MARKETS.get(sport, [])
 
-    snapshot_at = datetime.now(_ET).isoformat()
+    # The stamp is UTC, like the NFL and NHL writers. The slate date above stays
+    # Eastern. isoformat() writes "+00:00", never "Z": backfilled_dates() reads a
+    # trailing "Z" as a bought historical row. Rows written before this change
+    # carry "-04:00", so readers convert the stamp to a time before comparing.
+    snapshot_at = datetime.now(timezone.utc).isoformat()
     start = datetime.now()
 
     logger.info(f"Prop odds ingestor: {sport} {target_date} ({snapshot_type})")

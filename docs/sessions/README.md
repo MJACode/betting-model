@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, Teams board gets a "Playing today" filter; filtered rows keep league rank |
+| 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB, WNBA, NBA and college football prop odds are stamped in UTC like NFL and NHL ("+00:00", never "Z"; the slate date stays Eastern; old rows not rewritten); no reader breaks, switch-day order checked on the production database |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, origin/master merged into the touch-set branch; session-log hunks kept both sides |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, MLB rule cards (and the WNBA prop card) skip a game that has started; the six 2026-09-16 late bets still count in the published record and Discord recaps (removal proposed, mike to decide); Pinnacle-withdrawn guard not needed for MLB; `first_pitch_at` not filled since 2026-08-31 |
 | 2026-10-09 | [2026-10](./2026-10.md) | 2026-10-09, the app's CLV card shows the price taken at the book it was taken (`clvBetQuote` mirrors the server, pinned by a Node parity test) |
