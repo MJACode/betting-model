@@ -46,6 +46,7 @@ import {
   touchCommitAction,
   touchRejectionRecordsFailure,
   touchSetAfterFailure,
+  touchSetCopy,
   touchSetErrorLine,
   touchSetFromResponse,
   touchedPlayerIds,
@@ -54,6 +55,7 @@ import {
   type SortableRow,
 } from '../src/lib/statsBoard';
 import { todayET } from '../src/lib/format';
+import { errorAnnouncement } from '../src/lib/errors';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -308,15 +310,24 @@ const failedOtherKey = touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|w
 check('a failure for another key does not drop the set that was kept',
   failedOtherKey === 'NFL|wrte' && good.key === 'NFL|qb' && good.ids.has('mahomes')
   && touchBoardView(true, good.key, 'NFL|wrte', true) === 'error');
-check('the touch-set error line names the failure and the pull',
-  touchSetErrorLine('You’re offline. Check your connection and try again.')
-  === 'Couldn’t load who has touched the ball. You’re offline. Check your connection and try again. Pull down to retry.');
-const fallbackLine = 'Couldn’t load who has touched the ball. Something went wrong on our side. Try again in a moment. Pull down to retry.';
-check('a missing touch-set cause still shows a line',
-  touchSetErrorLine('') === fallbackLine
-  && touchSetErrorLine('   ') === fallbackLine
-  && touchSetErrorLine(null) === fallbackLine
-  && touchSetErrorLine(undefined) === fallbackLine);
+check('the touch-set error line for offline',
+  touchSetErrorLine('offline')
+  === 'Couldn’t load this list. You’re offline. Check your connection, then pull down to retry.');
+check('the touch-set error line for a slow response',
+  touchSetErrorLine('slow')
+  === 'Couldn’t load this list. Signalbase is slow to respond right now. Pull down to retry in a moment.');
+check('the touch-set error line for an expired session',
+  touchSetErrorLine('auth')
+  === 'Couldn’t load this list. Your session has expired. Pull down to retry, or sign out and back in.');
+check('the touch-set error line for a server failure',
+  touchSetErrorLine('server')
+  === 'Couldn’t load this list. Something went wrong on our side. Pull down to retry in a moment.');
+check('a missing touch-set cause still shows the server line',
+  touchSetErrorLine(null) === touchSetErrorLine('server')
+  && touchSetErrorLine(undefined) === touchSetErrorLine('server'));
+check('the alert reads the same sentence as the line',
+  (['offline', 'slow', 'auth', 'server'] as const).every((k) =>
+    errorAnnouncement(touchSetCopy(k)) === touchSetErrorLine(k)));
 // The user has moved on: the failure belongs to a load that is no longer in
 // flight, so it must not mark the new key failed.
 inFlight = stampNcaaf;
@@ -356,10 +367,11 @@ check('StatsScreen commits the touch set only through touchSetFromResponse',
   && /touchSetAfterFailure\(/.test(statsScreen)
   && /shouldFetchTouchSet\(/.test(statsScreen)
   && /touchBoardView\(/.test(statsScreen)
-  && /touchSetErrorLine\(/.test(statsScreen)
+  && /touchSetCopy\(touchFailure\?\.kind\)/.test(statsScreen)
+  && /<ErrorState/.test(statsScreen)
+  && /onRetry=\{\(\) => void load\(\)\}/.test(statsScreen)
   && /seasonTouchFlag\(/.test(statsScreen)
   && /touchView !== 'list' \? EMPTY_ROWS : hitRatePlayers/.test(statsScreen)
-  && /accessibilityRole="alert"/.test(statsScreen)
   && /emptyLabel=\{touchView === 'error' \? 'Couldn’t load this list\. Pull down to retry\.' : undefined\}/.test(statsScreen)
   && /touchRejectionRecordsFailure\(inFlight\.current, stamp, isAbortError\(e\)\)/.test(touchCatch)
   && !/if \(isAbortError\(e\)\) return;/.test(touchCatch)

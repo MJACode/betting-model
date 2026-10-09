@@ -39,6 +39,11 @@ interface Props {
    * (Designer, #845). Read out with the title and cause.
    */
   reassurance?: string;
+  /**
+   * Replaces the generated title and cause. Retry, the alert, and the icon
+   * stay. An abort in `error` still renders nothing.
+   */
+  copy?: FriendlyError;
 }
 
 /**
@@ -87,8 +92,12 @@ function useAnnounceAndLog(
   };
 }
 
-export function ErrorState({ what, error, onRetry, retrying, compact, style, reassurance }: Props & { compact?: boolean }) {
-  const copy = friendlyError(error, what);
+function shownCopy(what: string, error: unknown, override?: FriendlyError): FriendlyError {
+  return override ?? friendlyError(error, what);
+}
+
+export function ErrorState({ what, error, onRetry, retrying, compact, style, reassurance, copy: override }: Props & { compact?: boolean }) {
+  const copy = shownCopy(what, error, override);
   const silent = isAbortError(error);
   const markRetry = useAnnounceAndLog(copy, error, silent, retrying, reassurance);
   if (silent) return null;
@@ -127,8 +136,8 @@ export function ErrorState({ what, error, onRetry, retrying, compact, style, rea
   );
 }
 
-export function ErrorBanner({ what, error, onRetry, retrying, style, reassurance }: Props) {
-  const copy = friendlyError(error, what);
+export function ErrorBanner({ what, error, onRetry, retrying, style, reassurance, copy: override }: Props) {
+  const copy = shownCopy(what, error, override);
   const silent = isAbortError(error);
   const markRetry = useAnnounceAndLog(copy, error, silent, retrying, reassurance);
   if (silent) return null;

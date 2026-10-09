@@ -25,6 +25,7 @@
 // which does not resolve the bundler alias for a VALUE import (a type-only
 // import is erased, which is why '@/types' can stay).
 import { formatGameTimeET, weekdayShortET } from './format';
+import type { ErrorKind } from './errors';
 import type { GameRow } from '@/types';
 
 // ── 1. Sort ──
@@ -171,10 +172,12 @@ export function touchCommitAction(
 export function touchRejectionRecordsFailure(
   inFlight: string | null,
   stamp: string,
-  aborted: boolean,
+  _aborted: boolean,
 ): boolean {
   if (inFlight !== stamp) return false;
-  return aborted || !aborted;
+  // An abort of this stamp records a failure too. The flag is the caller's
+  // classification; it does not dismiss the load still on screen.
+  return true;
 }
 
 export interface TouchSet {
@@ -246,13 +249,29 @@ export function touchBoardView(
   return 'loading';
 }
 
-/** Same sentence `friendlyCause` uses for a server failure. Never a blank. */
-const TOUCH_FAIL_CAUSE = 'Something went wrong on our side. Try again in a moment.';
+const TOUCH_SET_TITLE = 'Couldn’t load this list';
+
+/** Designer, #899. A missing kind uses the server line, never a blank. */
+const TOUCH_SET_CAUSE: Record<ErrorKind, string> = {
+  offline: 'You’re offline. Check your connection, then pull down to retry.',
+  slow: 'Signalbase is slow to respond right now. Pull down to retry in a moment.',
+  auth: 'Your session has expired. Pull down to retry, or sign out and back in.',
+  server: 'Something went wrong on our side. Pull down to retry in a moment.',
+};
+
+export function touchSetCopy(kind: ErrorKind | null | undefined): {
+  title: string;
+  cause: string;
+  kind: ErrorKind;
+} {
+  const k: ErrorKind = kind != null && kind in TOUCH_SET_CAUSE ? kind : 'server';
+  return { title: TOUCH_SET_TITLE, cause: TOUCH_SET_CAUSE[k], kind: k };
+}
 
 /** The line under the board when the touch read failed and nothing was kept. */
-export function touchSetErrorLine(cause: string | null | undefined): string {
-  const sentence = cause?.trim() ? cause.trim() : TOUCH_FAIL_CAUSE;
-  return `Couldn’t load who has touched the ball. ${sentence} Pull down to retry.`;
+export function touchSetErrorLine(kind: ErrorKind | null | undefined): string {
+  const copy = touchSetCopy(kind);
+  return `${copy.title}. ${copy.cause}`;
 }
 
 /** The player_ids with any carry, reception or target on a totals read. */

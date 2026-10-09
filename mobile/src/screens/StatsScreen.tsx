@@ -20,6 +20,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { HitModeSheet } from '@/components/HitModeSheet';
@@ -119,7 +120,7 @@ import {
   touchCommitAction,
   touchRejectionRecordsFailure,
   touchSetAfterFailure,
-  touchSetErrorLine,
+  touchSetCopy,
   touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
@@ -164,7 +165,7 @@ import {
 } from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
-import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import type {
   EnrichedPick,
@@ -256,6 +257,8 @@ const SLATE_GATE_MS = 4000;
 
 /** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
 const EMPTY_ROWS: never[] = [];
+/** Not an AbortError, so ErrorState renders. The copy comes from touchSetCopy. */
+const TOUCH_SET_SHOWN = new Error('touch set');
 
 /**
  * Row-shaped placeholders, in place of a bare spinner.
@@ -411,8 +414,8 @@ export function StatsScreen() {
   // H2H, whose reads carry the one stat and no usage columns. Without it a
   // receiver with no TD is indistinguishable from a lineman (Matt, 2026-10-08).
   const [touchSet, setTouchSet] = useState<{ key: string; ids: Set<string> } | null>(null);
-  /** The key whose last touch read failed, and the cause sentence for the line. */
-  const [touchFailure, setTouchFailure] = useState<{ key: string; cause: string } | null>(null);
+  /** The key whose last touch read failed, and which sentence to show. */
+  const [touchFailure, setTouchFailure] = useState<{ key: string; kind: ErrorKind } | null>(null);
   // `load` closes over neither of these (its deps are the question, not the
   // answer), so the failure path reads the refs. A render updates them.
   const touchSetRef = useRef(touchSet);
@@ -750,7 +753,7 @@ export function StatsScreen() {
             failedForKey,
           )
         ) {
-          const markTouchFailed = (cause: string) => {
+          const markTouchFailed = (error: unknown) => {
             const failedKey = touchSetAfterFailure(
               touchFailureRef.current?.key ?? null,
               inFlight.current,
@@ -760,7 +763,10 @@ export function StatsScreen() {
             if (inFlight.current !== stamp || failedKey == null) return;
             // The set already held is left where it is. A failure does not
             // clear a last good set for this key, or a set for another key.
-            touchFailureRef.current = { key: failedKey, cause };
+            // An abort of this stamp is a server failure: ErrorState renders
+            // nothing for an AbortError, and this one is a real miss.
+            const kind: ErrorKind = isAbortError(error) ? 'server' : errorKind(error);
+            touchFailureRef.current = { key: failedKey, kind };
             setTouchFailure(touchFailureRef.current);
           };
           touchJob = fetchWindowTotals(sport, SEASON, null, playerType)
@@ -773,7 +779,7 @@ export function StatsScreen() {
               const action = touchCommitAction(inFlight.current, stamp, ids.size);
               if (action === 'ignore') return;
               if (action === 'fail') {
-                markTouchFailed(friendlyCause(new Error('empty touch totals')));
+                markTouchFailed(new Error('empty touch totals'));
                 return;
               }
               const next = touchSetFromResponse(inFlight.current, stamp, touchKey, ids);
@@ -790,7 +796,7 @@ export function StatsScreen() {
               // touchRejectionRecordsFailure. An abort of this stamp is a
               // failure, or the skeleton never ends.
               if (!touchRejectionRecordsFailure(inFlight.current, stamp, isAbortError(e))) return;
-              markTouchFailed(friendlyCause(e));
+              markTouchFailed(e);
             });
         }
         if (timeWindow === 'h2h') {
@@ -2435,9 +2441,14 @@ export function StatsScreen() {
           }}
           ListEmptyComponent={
             touchView === 'error' && !error ? (
-              <View style={styles.errorBanner} accessibilityRole="alert" accessibilityLiveRegion="polite">
-                <Text style={styles.errorText}>{touchSetErrorLine(touchFailure?.cause)}</Text>
-              </View>
+              <ErrorState
+                compact
+                what="this list"
+                error={TOUCH_SET_SHOWN}
+                copy={touchSetCopy(touchFailure?.kind)}
+                onRetry={() => void load()}
+                retrying={loading}
+              />
             ) : loading || (timeWindow === 'h2h' && slateChecking) || (touchView === 'loading' && !error) ? (
               <BoardSkeleton />
             ) : (
