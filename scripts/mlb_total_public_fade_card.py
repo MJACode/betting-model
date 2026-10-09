@@ -1,7 +1,9 @@
 """Paper MLB totals public-fade card: fade OVER tickets ≥ cut, bet UNDER.
 
 Deployment of models/mlb_total_public_fade. Mirrors scripts/mlb_game_market_card
-(slate, insert-once, INSERT gated by env default 0).
+(slate, insert-once, INSERT gated by env default 0). The slate is that
+card's slate(): only games that have not started, so a past --date prints
+an empty card (2026-09-16 wrote four unders after first pitch).
 
 Deliberate and load-bearing:
 
