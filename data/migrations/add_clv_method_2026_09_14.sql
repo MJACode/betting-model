@@ -34,8 +34,9 @@ BEGIN
   COMMENT ON COLUMN public.picks.clv_pct IS
     'Probability-point CLV: (fair_close_p - fair_bet_p)*100, same-line only. '
     'fair_close_p is the multiplicative no-vig close except zero-vig books '
-    '(kalshi) and one-way markets. fair_bet_p is no-vig at lock when the '
-    'two-way matches dk_odds, else raw bet implied. NULL when the number moved. '
+    '(kalshi) and one-way markets. fair_bet_p is the price taken '
+    '(COALESCE(decision_odds, dk_odds) at clv_bet_book), no-vig at lock when '
+    'that book''s two-way shows it, else raw bet implied. NULL when the number moved. '
     'docs/clv.md.';
   COMMENT ON COLUMN public.picks.clv_method IS
     'How clv_pct was computed: no_vig | zero_vig | raw_one_way | raw_one_sided '

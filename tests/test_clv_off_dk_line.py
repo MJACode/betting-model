@@ -33,6 +33,7 @@ PICK = dict(pick_id=1, game_id=GAME, model_id="nhl_prop_shots_on_goal", pick_sid
             pick_label="Brock Nelson Under 2.5 Shots on Goal", scored_line=2.5,
             created_at="2026-10-03 04:18:06.856386+00", prop_market="player_shots_on_goal",
             clv_method=None, decision_odds=-115.0, decision_book="hardrockbet",
+            game_time="2026-10-04T01:00:00Z",
             game_date="2026-10-03", signal_type="BET", is_live=False, clv_captured_at=None)
 
 
@@ -78,8 +79,9 @@ class _Conn:
                           key=lambda q: _ts(q[1]), reverse=True)
             return _Res([(q[3], q[4], q[2]) for q in rows[:1]])
         if s.startswith("UPDATE picks"):
-            keys = ("closing_dk_odds", "closing_line", "clv_pct", "line_clv_pts", "clv_beat_close",
-                    "clv_captured_at", "clv_method", "clv_close_book", "pick_id")
+            set_part = s[s.index(" SET ") + 5:s.index(" WHERE ")]
+            keys = [a.split("=")[0].strip() for a in set_part.split(",")] + ["pick_id"]
+            assert len(keys) == len(params), s
             self.updates.append(dict(zip(keys, params)))
             return _Res([])
         raise AssertionError(f"unexpected statement: {s[:80]}")

@@ -1271,6 +1271,7 @@ def _job_clv_backfill(**kw):
     from zoneinfo import ZoneInfo
 
     from data.db import get_connection
+    from data.view_migrations import apply_view_migrations
     from tracking.paper_tracker import _backfill_clv
 
     max_passes = int(kw.get("max_passes") or _CLV_BACKFILL_MAX_PASSES)
@@ -1278,6 +1279,11 @@ def _job_clv_backfill(**kw):
     conn = get_connection()
     filled_per_pass: list[int] = []
     try:
+        # A declared job is claimed on the worker's next tick, which can come
+        # before the first pass after a deploy has applied that deploy's
+        # migrations -- and the capture SELECT names columns a migration adds
+        # (clv_bet_book, 2026-10-08). Every file is idempotent and never raises.
+        apply_view_migrations(conn)
         for n in range(1, max_passes + 1):
             filled = int(_backfill_clv(conn, now_iso) or 0)
             conn.commit()
