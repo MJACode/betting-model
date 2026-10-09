@@ -21,6 +21,8 @@
  *    and yields to Live/Final once the game is under way.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { GameRow } from '../src/types';
 import * as board from '../src/lib/statsBoard';
 import {
@@ -38,6 +40,7 @@ import {
   isOnSlate,
   isStatParticipant,
   needsTouchSet,
+  touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
   slateSubline,
@@ -224,6 +227,53 @@ check('needsTouchSet: Anytime TD on football only',
   !needsTouchSet('NFL', 'receptions') && !needsTouchSet('MLB', 'rush_rec_tds'));
 check('the TD exemption does not leak to other stats',
   !isStatParticipant('NFL', [0, 0], { statKey: 'passing_yards', rows: [{ carries: 9 }] }));
+
+// A touch-set response is not awaited, so it can land after the user has
+// switched sport or player type and overwrite the set that is already on
+// screen. Modelled the way StatsScreen.load does it: each load writes its
+// stamp into inFlight, and a response may commit only while that stamp is
+// still the one in flight.
+type TouchSet = { key: string; ids: Set<string> };
+function landTouch(
+  inFlight: string,
+  current: TouchSet | null,
+  stamp: string,
+  touchKey: string,
+  ids: string[],
+): TouchSet | null {
+  return touchSetFromResponse(inFlight, stamp, touchKey, new Set(ids)) ?? current;
+}
+const stampNflRb = 'NFL|rb|season|hitRate|rush_rec_tds||';
+const stampNcaaf = 'NCAAF|wrte|season|hitRate|rush_rec_tds||';
+const stampNflWr = 'NFL|wrte|season|hitRate|rush_rec_tds||';
+let inFlight = stampNflRb;
+let touch: TouchSet | null = null;
+// The NFL read is still in flight when the board switches to NCAAF. NCAAF
+// lands first; the NFL response arrives after it.
+inFlight = stampNcaaf;
+touch = landTouch(inFlight, touch, stampNcaaf, 'NCAAF|wrte', ['bowers']);
+touch = landTouch(inFlight, touch, stampNflRb, 'NFL|rb', ['lineman']);
+check('a late touch set after a sport switch keeps the current key',
+  touch?.key === 'NCAAF|wrte' && touch.ids.has('bowers') && !touch.ids.has('lineman'),
+  touch ? `${touch.key}:${[...touch.ids].join()}` : 'null');
+// Same shape for a player-type switch: RB's response must not replace WR/TE.
+inFlight = stampNflWr;
+touch = landTouch(inFlight, touch, stampNflWr, 'NFL|wrte', ['pickens']);
+touch = landTouch(inFlight, touch, stampNcaaf, 'NCAAF|wrte', ['bowers']);
+check('a late touch set after a playerType switch keeps the current key',
+  touch?.key === 'NFL|wrte' && touch.ids.has('pickens') && !touch.ids.has('bowers'),
+  touch ? `${touch.key}:${[...touch.ids].join()}` : 'null');
+touch = landTouch(inFlight, touch, stampNflWr, 'NFL|wrte', ['pickens', 'lamb']);
+check('the touch set for the load still in flight still commits',
+  touch?.key === 'NFL|wrte' && touch.ids.has('lamb') && touch.ids.has('pickens'));
+
+const statsScreen = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
+const touchThen = /fetchWindowTotals\(sport, SEASON, null, playerType\)\s*\.then\(\(t\) => \{([\s\S]*?)\}\)/.exec(statsScreen);
+check('StatsScreen commits the touch set only through touchSetFromResponse',
+  !!touchThen
+  && /touchSetFromResponse\(inFlight\.current, stamp, touchKey, touchedPlayerIds\(t\)\)/.test(touchThen?.[1] ?? '')
+  && /if \(next\) setTouchSet\(next\)/.test(touchThen?.[1] ?? '')
+  && !/setTouchSet\(\{/.test(touchThen?.[1] ?? ''));
 
 // ── The row subline: when the game starts, and against whom ────────────────
 // Matt, 2026-09-05: "add the time of the game and who they are playing under

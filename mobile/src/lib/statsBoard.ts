@@ -125,6 +125,27 @@ export function needsTouchSet(sport: string, statKey: string | null | undefined)
   return MULTI_ROLE_SPORTS.has(sport) && statKey != null && ZERO_IS_AN_ANSWER_KEYS.has(statKey);
 }
 
+/**
+ * The touch set a late response is allowed to commit, or null when a newer
+ * load has taken the board.
+ *
+ * The season and H2H reads beside this one drop a response whose stamp is no
+ * longer `inFlight`. The touch read is fired and not awaited, so without the
+ * same check a response for the sport and player type the user has left
+ * overwrites the set that just landed. The key then no longer matches, Season
+ * and H2H Anytime TD fall back to "anyone with games", and the linemen return
+ * until the next load (review of #898).
+ */
+export function touchSetFromResponse(
+  inFlight: string | null,
+  stamp: string,
+  touchKey: string,
+  ids: Set<string>,
+): { key: string; ids: Set<string> } | null {
+  if (inFlight !== stamp) return null;
+  return { key: touchKey, ids };
+}
+
 /** The player_ids with any carry, reception or target on a totals read. */
 export function touchedPlayerIds(rows: ReadonlyArray<object>): Set<string> {
   const out = new Set<string>();

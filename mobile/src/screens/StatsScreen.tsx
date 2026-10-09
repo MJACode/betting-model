@@ -113,6 +113,7 @@ import {
   isOnSlate,
   isStatParticipant,
   needsTouchSet,
+  touchSetFromResponse,
   touchedPlayerIds,
   slateGameFor,
   slateSubline,
@@ -728,7 +729,13 @@ export function StatsScreen() {
           touchSet?.key !== touchKey
         ) {
           fetchWindowTotals(sport, SEASON, null, playerType)
-            .then((t) => setTouchSet({ key: touchKey, ids: touchedPlayerIds(t) }))
+            .then((t) => {
+              // Same stamp as the reads below. A response for a sport or
+              // player type the user has already left must not replace the
+              // set those reads are filtering with.
+              const next = touchSetFromResponse(inFlight.current, stamp, touchKey, touchedPlayerIds(t));
+              if (next) setTouchSet(next);
+            })
             .catch(() => undefined);
         }
         if (timeWindow === 'h2h') {

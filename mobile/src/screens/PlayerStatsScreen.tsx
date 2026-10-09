@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -49,6 +50,7 @@ import {
   requestedChip,
   roundLineToStep,
   stepLineFrom,
+  stepperRowLayout,
   windowOptionsFor,
   type GameWindow,
   type PlayerLogEntry,
@@ -109,6 +111,13 @@ const LINE_ACCESSORY_ID = 'player-line-input';
 
 export function PlayerStatsScreen() {
   const route = useRoute<Route>();
+  // Above fontScale 1 the Avg | Median | stepper row is wider than a 375pt
+  // card (measureStepperRow). The stepper's flex basis is 0, so it will not
+  // wrap on its own and the + button leaves the screen. On its own line it
+  // still fits through Accessibility Large (2.143). From Accessibility Extra
+  // Large (2.643) the mode control takes the line above − / field / +.
+  const { fontScale } = useWindowDimensions();
+  const stepperLayout = stepperRowLayout(fontScale);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
   const fromParlay = route.params.fromParlay === true;
@@ -703,7 +712,7 @@ export function PlayerStatsScreen() {
                 </View>
               </View>
 
-              <View style={styles.statsRow}>
+              <View style={[styles.statsRow, stepperLayout !== 'inline' && styles.statsRowStacked]}>
                 <View style={styles.statCell}>
                   <Text style={styles.statCellValue}>{avg != null ? avg.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Avg</Text>
@@ -712,7 +721,12 @@ export function PlayerStatsScreen() {
                   <Text style={styles.statCellValue}>{median != null ? median.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Median</Text>
                 </View>
-                <View style={styles.stepper}>
+                <View
+                  style={[
+                    stepperLayout === 'inline' ? styles.stepper : styles.stepperStacked,
+                    stepperLayout === 'split' && styles.stepperSplit,
+                  ]}
+                >
                   {/* The board's own mode control, not a second one. It opens
                       HitModeSheet, which is the one place the three idioms are
                       shown side by side — "2+ Hits", "Over 1.5 Hits", "Under
@@ -723,50 +737,59 @@ export function PlayerStatsScreen() {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Direction: ${hitModeLabel(mode)}. Change`}
-                    style={({ pressed }) => [styles.modeBtn, pressed && { opacity: 0.7 }]}
+                    style={({ pressed }) => [
+                      styles.modeBtn,
+                      stepperLayout === 'split' && styles.modeBtnSplit,
+                      pressed && { opacity: 0.7 },
+                    ]}
                   >
                     <Text style={styles.stepperLabel}>{hitModeLabel(mode)}</Text>
                     <Ionicons name="chevron-down" size={12} color={colors.textSecondary} />
                   </Pressable>
-                  {/* Icon-only, so the label is the only thing VoiceOver has
-                      — an unlabelled glyph button is announced as "button" and
-                      nothing else. Pre-existing; cleared here because this
-                      change brought the file into the reviewed set. */}
-                  <Pressable
-                    onPress={() => stepLine(-1)}
-                    hitSlop={8}
-                    style={styles.stepBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Lower the line"
-                  >
-                    <Ionicons name="remove" size={18} color={colors.tint} />
-                  </Pressable>
-                  <TextInput
-                    value={lineDraft ?? rulerValueLabel(effLine, mode)}
-                    onFocus={() => setLineDraft('')}
-                    onChangeText={setLineDraft}
-                    onEndEditing={commitLineDraft}
-                    onSubmitEditing={commitLineDraft}
-                    placeholder={rulerValueLabel(effLine, mode)}
-                    placeholderTextColor={colors.textSecondary}
-                    keyboardType="decimal-pad"
-                    returnKeyType="done"
-                    selectTextOnFocus
-                    maxLength={6}
-                    inputAccessoryViewID={Platform.OS === 'ios' ? LINE_ACCESSORY_ID : undefined}
-                    style={[styles.stepValue, styles.stepInput]}
-                    accessibilityLabel={`Line, ${headline}`}
-                    accessibilityHint="Type a line"
-                  />
-                  <Pressable
-                    onPress={() => stepLine(1)}
-                    hitSlop={8}
-                    style={styles.stepBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Raise the line"
-                  >
-                    <Ionicons name="add" size={18} color={colors.tint} />
-                  </Pressable>
+                  {/* The three stay one group so a wrap can move them together
+                      without a second copy of the field. At the default size
+                      the group is only as wide as its contents. */}
+                  <View style={[styles.stepperControls, stepperLayout === 'split' && styles.stepperControlsSplit]}>
+                    {/* Icon-only, so the label is the only thing VoiceOver has
+                        — an unlabelled glyph button is announced as "button" and
+                        nothing else. Pre-existing; cleared here because this
+                        change brought the file into the reviewed set. */}
+                    <Pressable
+                      onPress={() => stepLine(-1)}
+                      hitSlop={8}
+                      style={styles.stepBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Lower the line"
+                    >
+                      <Ionicons name="remove" size={18} color={colors.tint} />
+                    </Pressable>
+                    <TextInput
+                      value={lineDraft ?? rulerValueLabel(effLine, mode)}
+                      onFocus={() => setLineDraft('')}
+                      onChangeText={setLineDraft}
+                      onEndEditing={commitLineDraft}
+                      onSubmitEditing={commitLineDraft}
+                      placeholder={rulerValueLabel(effLine, mode)}
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      maxLength={6}
+                      inputAccessoryViewID={Platform.OS === 'ios' ? LINE_ACCESSORY_ID : undefined}
+                      style={[styles.stepValue, styles.stepInput]}
+                      accessibilityLabel={`Line, ${headline}`}
+                      accessibilityHint="Type a line"
+                    />
+                    <Pressable
+                      onPress={() => stepLine(1)}
+                      hitSlop={8}
+                      style={styles.stepBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Raise the line"
+                    >
+                      <Ionicons name="add" size={18} color={colors.tint} />
+                    </Pressable>
+                  </View>
                 </View>
               </View>
 
@@ -1779,6 +1802,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.sm,
+  },
+  // Own line, full width of the card. Not an override of `flex: 1` — that
+  // shorthand's basis of 0 wins over a later flexBasis and the row never wraps.
+  stepperStacked: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  // Mode on one line, − / field / + on the next. Only when the stepper's own
+  // line is wider than the card (Accessibility Extra Large and up).
+  stepperSplit: {
+    flexWrap: 'wrap',
+  },
+  stepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  stepperControlsSplit: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
+  modeBtnSplit: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
+  statsRowStacked: {
+    flexWrap: 'wrap',
   },
   stepperLabel: {
     fontSize: font.size.footnote,

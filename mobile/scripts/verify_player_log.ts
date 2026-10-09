@@ -15,9 +15,13 @@
  *    5.2 IP means five and two THIRDS and cannot be compared against a line.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  measureStepperRow,
   parseTypedLine,
   stepLineFrom,
+  stepperRowLayout,
   chipKey,
   chipsForLoadedPlayer,
   chipsForPlayer,
@@ -283,6 +287,58 @@ check('typed "50.5" in At Least clears the half-line: 51+', parseTypedLine('50.5
 check('typed "50.5" in Over is that line: 51+', parseTypedLine('50.5', 'over') === 51);
 check('typed "50" in Under is Under 50.5: threshold 51', parseTypedLine('50', 'under') === 51);
 check('junk is refused', parseTypedLine('') === null && parseTypedLine('abc') === null && parseTypedLine('-5') === null);
+
+// The stepper row at Dynamic Type. Measured (Inter, stand-in for SF): at
+// fontScale 1, "At Least" + a 50.5 line + three-digit averages is 309pt of a
+// 375pt card's 319 and fits. At fontScale 2 the one line is 472pt, so the +
+// button leaves the screen; on its own line the stepper is 287pt and fits,
+// including Accessibility Large (2.143, RCTAccessibilityManager). From
+// Accessibility Extra Large (2.643) that line overflows too, and the mode
+// control moves above − / field / +. At the largest size (3.571) that group
+// is 221pt. The − / + stay 30pt with 8pt slop (46 ≥ 44). The field and the
+// mode control stay minHeight 44. Nothing overlaps: the 8pt gap equals the
+// slop, so a button's slop ends where the field begins.
+const at1 = measureStepperRow(1);
+const at2 = measureStepperRow(2);
+const axLarge = measureStepperRow(2.143);
+const axXL = measureStepperRow(2.643);
+const axXXXL = measureStepperRow(3.571);
+check('at default type the stepper row fits on one line',
+  at1.layout === 'inline' && at1.single <= at1.inner && at1.single > 300 && stepperRowLayout(1) === 'inline');
+check('at fontScale 2 the one-line row overflows and the stepper line still fits',
+  at2.layout === 'stacked' && at2.single > at2.inner && at2.single > 450
+  && at2.stacked <= at2.inner && at2.stacked > 250 && stepperRowLayout(2) === 'stacked');
+check('Accessibility Large (2.143) still fits on the stepper line',
+  axLarge.layout === 'stacked' && axLarge.stacked <= axLarge.inner);
+check('from Accessibility Extra Large (2.643) the mode control has to leave that line',
+  axXL.layout === 'split' && axXL.stacked > axXL.inner && axXL.controls <= axXL.inner && axXL.mode <= axXL.inner);
+check('at the largest Dynamic Type (3.571) − / field / + and the mode label each fit',
+  axXXXL.layout === 'split' && axXXXL.controls <= axXXXL.inner && axXXXL.mode <= axXXXL.inner
+  && stepperRowLayout(3.571) === 'split');
+check('the − / + stay a 44pt target (30 + 8 + 8) and do not overlap the field',
+  30 + 8 + 8 >= 44);
+
+const playerScreen = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
+check('the card places the stepper from stepperRowLayout',
+  /const \{ fontScale \} = useWindowDimensions\(\)/.test(playerScreen)
+  && /const stepperLayout = stepperRowLayout\(fontScale\)/.test(playerScreen)
+  && /stepperLayout === 'inline' \? styles\.stepper : styles\.stepperStacked/.test(playerScreen)
+  && /stepperLayout !== 'inline' && styles\.statsRowStacked/.test(playerScreen)
+  && /stepperLayout === 'split' && styles\.stepperSplit/.test(playerScreen)
+  && /stepperLayout === 'split' && styles\.modeBtnSplit/.test(playerScreen)
+  && /stepperLayout === 'split' && styles\.stepperControlsSplit/.test(playerScreen));
+const stackedBlock = /stepperStacked: \{([\s\S]*?)\n  \},/.exec(playerScreen)?.[1] ?? '';
+check('the stacked stepper takes the full line and does not keep flex: 1',
+  /width: '100%'/.test(stackedBlock) && !/flex:\s*1/.test(stackedBlock));
+check('the split puts the mode control and the ± line on their own full lines',
+  /modeBtnSplit: \{[\s\S]*?width: '100%'/.test(playerScreen)
+  && /stepperControlsSplit: \{[\s\S]*?width: '100%'/.test(playerScreen)
+  && /stepperSplit: \{[\s\S]*?flexWrap: 'wrap'/.test(playerScreen));
+check('the mode control and the field stay 44pt, and the − / + keep their slop',
+  /modeBtn: \{[\s\S]*?minHeight: 44/.test(playerScreen)
+  && /stepInput: \{[\s\S]*?minHeight: 44/.test(playerScreen)
+  && /stepBtn: \{[\s\S]*?width: 30,\n\s*height: 30/.test(playerScreen)
+  && (playerScreen.match(/hitSlop=\{8\}/g) ?? []).length >= 3);
 
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
