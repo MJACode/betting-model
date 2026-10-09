@@ -163,7 +163,8 @@ def void(conn, rows: list[dict], reason: str, now: str | None = None) -> int:
     return len(rows)
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, separate from main() so a test can parse it."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--pick-id", type=int, action="append", default=[])
     ap.add_argument("--model")
@@ -176,7 +177,11 @@ def main() -> int:
                     help="also void picks already posted as a signal (mike, "
                          "2026-10-09). Only for a posted pick decided on a "
                          "price nobody could bet. Graded picks stay refused.")
-    a = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    a = build_parser().parse_args()
 
     if not (a.pick_id or a.model or a.game_id):
         raise SystemExit("refusing to match every pick: give --pick-id, --model or --game-id")

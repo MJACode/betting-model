@@ -226,7 +226,54 @@ class TestVoidingAPostedPickIsAnExplicitOptIn:
                                       allow_posted=True)
         assert not to_void and "reason" in refused[0]["why"]
 
-    def test_the_command_line_has_the_flag(self):
-        src = (ROOT / "scripts" / "void_picks.py").read_text(encoding="utf-8")
-        assert '"--allow-posted"' in src
-        assert "allow_posted=a.allow_posted" in src
+    def test_the_command_line_opt_in_is_off_unless_given(self):
+        """A flag that defaulted on would lift Matt's lock on every void."""
+        from scripts.void_picks import build_parser
+        base = ["--pick-id", "1", "--reason", REASON]
+        assert build_parser().parse_args(base).allow_posted is False
+        assert build_parser().parse_args(base + ["--allow-posted"]).allow_posted is True
+
+    def test_the_command_line_hands_the_opt_in_to_the_plan(self, monkeypatch, capsys):
+        """main() end to end, with the database faked: a posted pick is skipped
+        without the flag, and written only with it."""
+        import data.db
+        import scripts.void_picks as vp
+
+        class _Conn:
+            def __init__(self):
+                self.updates = []
+
+            def execute(self, sql, params=()):
+                if "UPDATE picks" in sql:
+                    self.updates.append(params)
+                return self
+
+            def commit(self):
+                pass
+
+            def close(self):
+                pass
+
+        conn = _Conn()
+        monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+        monkeypatch.setattr(vp, "_select", lambda *a: [{**_row(), "posted": True}])
+        base = ["void_picks", "--pick-id", "1", "--reason", REASON]
+
+        monkeypatch.setattr(sys, "argv", base)
+        assert vp.main() == 0
+        out = capsys.readouterr().out
+        assert "SKIP  1" in out and "--allow-posted" in out
+        assert "VOID  1" not in out
+
+        monkeypatch.setattr(sys, "argv", base + ["--allow-posted"])
+        assert vp.main() == 0
+        out = capsys.readouterr().out
+        assert "VOID  1" in out and "1 would be voided" in out
+
+        monkeypatch.setattr(sys, "argv", base + ["--apply"])
+        vp.main()
+        assert conn.updates == [], "a posted pick was written without the opt-in"
+
+        monkeypatch.setattr(sys, "argv", base + ["--apply", "--allow-posted"])
+        vp.main()
+        assert [p[-1] for p in conn.updates] == [1]
