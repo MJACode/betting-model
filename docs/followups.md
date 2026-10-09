@@ -53,6 +53,23 @@ same-instant gap) by construction. One more snapshot per game makes CLV
 measurable. Measured cost: 5 credits a game per snapshot, about 6,600 credits
 over a 1,312-game season. It spends credits, so it needs mike's OK.
 
+## [ ] The line-movement card shows the OLDEST 50 snapshots as "now" (found 2026-10-09)
+
+`fetchOddsHistory` and `fetchPropOddsHistory` (`mobile/src/lib/queries.ts`)
+sort oldest first and keep 50 rows, and `LineMovementCard` reads the last of
+those as the current price. Any book with more than 50 snapshots therefore
+shows a stale "now", often from before the pick existed. Measured
+2026-10-09: pick 3350315 (CIN @ MIA Under 42.5, Fanatics) has 192 Fanatics
+totals rows; the 50th is 2026-10-06 17:16Z at 42.5, the latest 2026-10-09
+13:16Z at 43.0. Week-1 opener games hold about 8,100 DraftKings spread rows,
+and the 50th is a week before kickoff. Fix: newest 50 (descending, reversed on
+the client), bounded below by the pick's own `created_at` (parsed, not raw
+text: `created_at` has a space where `snapshot_at` has a "T") and above by the
+game's start (rows typed `open` run past kickoff). Stop calling the first of
+those rows the "opening" (`lineHistory.ts`), or fetch the real opener. Not
+caused by the CLV card change; that change only moved some picks to their
+label book's equally stale history.
+
 ## [ ] The model screen's "Avg CLV" tile mixes two CLV definitions (found 2026-10-09)
 
 `BuiltInModelDetailScreen.tsx` (`clvSummary`) averages every settled pick's
@@ -338,6 +355,11 @@ before the module is imported. Nothing has been queued yet.
   DraftKings'. Either move those cards to the `decision_*` / `line_book` shape
   these NHL cards use, or key the leg on `clvBetQuote`
   (`mobile/src/lib/clvBet.ts`), which names the book that owns the price.
+  Since 2026-10-09 the pick screens name the label's book on all four
+  label-priced models (126 picks: 32 NFL wind/opener, 94 props), so on those
+  the screen and the slip now disagree; 23 NFL picks already did. Fix in
+  `legFromPick`: when `lineBook(p) ?? storedQuoteBook(p)` is not DraftKings,
+  mark the leg `dkPriced: false` at that book.
 - A correction fitted on each model's own bets once it has about 150.
 - Points and anytime scorer have prices and no model.
 
