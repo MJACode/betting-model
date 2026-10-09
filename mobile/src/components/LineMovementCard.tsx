@@ -15,7 +15,14 @@ interface Props {
   commenceTime?: string | null;
 }
 
-const NO_HISTORY: PickWindow<Snap> = { rows: [], fromPick: false, gap: false, since: 0, closed: false };
+const NO_HISTORY: PickWindow<Snap> = {
+  rows: [],
+  fromPick: false,
+  gap: false,
+  since: 0,
+  closed: false,
+  afterStart: false,
+};
 
 /**
  * Same-book price/line history since the pick was scored. Steam against
@@ -28,6 +35,11 @@ const NO_HISTORY: PickWindow<Snap> = { rows: [], fromPick: false, gap: false, si
  * under Node in the tests: after the start the verdict is not graded (the
  * Closing Line Value card grades the number), and a pick the book has not
  * re-priced reads "No new price". A live pick has no card (`historyFrom`).
+ *
+ * `from` is only the fetch bound. The window is cut from the pick's own time
+ * (`pick.created_at`), so `sincePick` can tell a pick made after the start the
+ * card uses from one made before it; `from` has already been moved back to
+ * the start for such a pick.
  */
 export function LineMovementCard({ pick, playerName, commenceTime }: Props) {
   const [hist, setHist] = useState<PickWindow<Snap> | null>(null);
@@ -56,7 +68,7 @@ export function LineMovementCard({ pick, playerName, commenceTime }: Props) {
       : fetchOddsHistory(pick.game_id, market, historyBook, from, startAt);
     load
       .then((rows) => {
-        if (mounted) setHist(sincePick(rows as Snap[], from, startAt));
+        if (mounted) setHist(sincePick(rows as Snap[], pick.created_at, startAt));
       })
       .catch(() => {
         if (mounted) setHist(NO_HISTORY);
@@ -64,7 +76,7 @@ export function LineMovementCard({ pick, playerName, commenceTime }: Props) {
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, from, historyBook, market, isProp, playerName, startAt]);
+  }, [pick.pick_id, pick.game_id, pick.created_at, from, historyBook, market, isProp, playerName, startAt]);
 
   const view = hist && market != null ? lineMovementView(pick, hist, market, isProp) : null;
   if (!view) return null;

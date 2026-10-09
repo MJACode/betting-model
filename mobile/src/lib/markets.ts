@@ -1259,19 +1259,30 @@ export function snapshotMatchesLock(
   snap: PricedSnapshot,
   market: string | null,
 ): boolean {
-  const historyBook = historyBookForPick(pick);
-  if (historyBook == null) return false;
-  const scoredLine = numOrNull(pick.scored_line);
-  const lineComparable =
-    market != null &&
-    !market.startsWith('h2h') &&
-    scoredLine != null &&
-    scoredLineBook(pick) === historyBook;
-  const lineMatches = lineComparable && lineFromSnapshot(snap, market) === scoredLine;
+  if (historyBookForPick(pick) == null) return false;
+  const lockLine = lockedLineAtHistoryBook(pick, market);
+  const lineMatches = lockLine != null && lineFromSnapshot(snap, market) === lockLine;
   if (isNflLineOnly(pick.model_id)) return lineMatches;
   const price = priceForSide(snap, pick.pick_side);
   if (price == null || price !== decisionOdds(pick)) return false;
-  return !lineComparable || lineMatches;
+  return lockLine == null || lineMatches;
+}
+
+/**
+ * The line the pick locked, when a snapshot from the deciding book can be
+ * compared with it: a line market (not a moneyline), a scored line, and that
+ * line is the deciding book's own number (another book's line is a different
+ * bet). Home-relative on spreads, like `spread_home`. Null otherwise.
+ *
+ * snapshotMatchesLock and the line-movement card's "did the line move" check
+ * (lib/lineMovementView) both use it, so the two cannot disagree about which
+ * lines count.
+ */
+export function lockedLineAtHistoryBook(pick: Pick, market: string | null): number | null {
+  const historyBook = historyBookForPick(pick);
+  const scoredLine = numOrNull(pick.scored_line);
+  if (historyBook == null || market == null || market.startsWith('h2h') || scoredLine == null) return null;
+  return scoredLineBook(pick) === historyBook ? scoredLine : null;
 }
 
 /** Book whose snapshot series the detail card may fetch. */

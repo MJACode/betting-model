@@ -35,8 +35,8 @@
  * Review of that change (2026-10-09):
  * - When more snapshots follow the pick than the card holds, the price at the
  *   pick is still the first row. The dropped ones sit behind a divider row
- *   ("Earlier changes not shown") that no run crosses, and the footer names
- *   the missing stretch instead of counting changes it cannot see.
+ *   that no run crosses, and the footer names the missing stretch instead of
+ *   counting changes it cannot see.
  * - `since` counts the snapshots after the pick, so a pick the book has not
  *   re-priced reads "no new price", not "steady".
  * - Labels carry the weekday when the rows cross an Eastern midnight, and the
@@ -44,6 +44,19 @@
  *   column heading, not on every row.
  * - A pick made after the start that is not live (an NHL start moved earlier
  *   at settlement) reads the last pre-game price (`historyFrom`).
+ *
+ * Second review (2026-10-09):
+ * - The 8-row table keeps the price at the pick and its divider on screen when
+ *   the window was cut; the newest rows fill the rest (`recentChanges`). It
+ *   used to keep the last 8 rows, which dropped both off the top while the
+ *   note still said the table started at the pick (pick 3133024).
+ * - The divider says "Some prices after your pick not shown". "Earlier changes"
+ *   read as changes before the pick, and claimed changes the card never saw
+ *   (on pick 3350315 every dropped snapshot equals the price at the pick).
+ * - `afterStart` says the pick time is at or after the start the card uses, so
+ *   the card never says "since your pick" about a window that ends before it.
+ * - `anchorAt` (the pick time) joins the day check, so a lone row from five
+ *   weeks before the pick carries its date.
  */
 
 import { etDate, formatDayTimeET, parseStamp } from './format';
@@ -82,8 +95,12 @@ export interface HistoryRow extends HistoryPoint {
   label: string;
 }
 
-/** The divider row's text. */
-export const DIVIDER_LABEL = 'Earlier changes not shown';
+/**
+ * The divider row's text. It sits under the price at the pick, so it names
+ * that stretch, and it says "prices", not "changes": the card never saw the
+ * dropped snapshots, which may all equal the price at the pick.
+ */
+export const DIVIDER_LABEL = 'Some prices after your pick not shown';
 
 const ET = 'America/New_York';
 const minuteFmt = new Intl.DateTimeFormat('en-US', { timeZone: ET, hour: 'numeric', minute: '2-digit' });
@@ -209,6 +226,12 @@ export interface PickWindow<T> {
   since: number;
   /** The game has started: the last row is the last price before it, not "now". */
   closed: boolean;
+  /**
+   * The pick time is at or after the start the card uses (an NHL start moved
+   * earlier at settlement): rows[0] is the last price before the start, not
+   * the price at the pick, and there is no stretch "since the pick".
+   */
+  afterStart: boolean;
 }
 
 /** The last `k` items (none for k <= 0; `slice(-0)` would keep them all). */
@@ -222,8 +245,10 @@ function newest<T>(rows: T[], k: number): T[] {
  * that began AT the pick would be empty for most NHL props; it begins at that
  * snapshot instead. Rows at or after the start are dropped (books keep
  * posting "open" rows after it). A pick time after the start reads as the
- * start. The price at the pick is always kept; after it, the newest that fit
- * in `max`, and `gap` says whether any were dropped.
+ * start, and `afterStart` says so. Pass the pick's own time, not one already
+ * moved back to the start (`historyFrom`). The price at the pick is always
+ * kept; after it, the newest that fit in `max`, and `gap` says whether any
+ * were dropped.
  */
 export function sincePick<T extends { snapshot_at: string }>(
   rows: T[],
@@ -235,8 +260,12 @@ export function sincePick<T extends { snapshot_at: string }>(
   const start = instant(startAt);
   const closed = !Number.isNaN(start) && now >= start;
   const end = Number.isNaN(start) ? Infinity : start;
-  const pick = Math.min(instant(pickAt), end);
-  if (Number.isNaN(pick)) return { rows: [], fromPick: false, gap: false, since: 0, closed };
+  const raw = instant(pickAt);
+  // At the start itself nothing is after the pick and before the start, so a
+  // pick made exactly then has no stretch "since the pick" either.
+  const afterStart = !Number.isNaN(raw) && raw >= end;
+  const pick = Math.min(raw, end);
+  if (Number.isNaN(pick)) return { rows: [], fromPick: false, gap: false, since: 0, closed, afterStart };
   const pre = byTime(rows).filter((r) => instant(r.snapshot_at) < end);
   const after = pre.filter((r) => instant(r.snapshot_at) > pick);
   const atPick = pre.filter((r) => instant(r.snapshot_at) <= pick).pop();
@@ -247,6 +276,7 @@ export function sincePick<T extends { snapshot_at: string }>(
     gap: kept.length < after.length,
     since: after.length,
     closed,
+    afterStart,
   };
 }
 
@@ -259,6 +289,12 @@ export interface CollapseOptions {
    * says nothing about what happened in between).
    */
   gap?: boolean;
+  /**
+   * A stamp the rows are read against (the pick): it joins the day check but
+   * is not a row. A lone row from five weeks before the pick then reads
+   * "Sat 9/5, 3:16 PM", not a bare "3:16 PM".
+   */
+  anchorAt?: string | null;
 }
 
 /** Collapse runs of the same line + price; returns oldest → newest. */
@@ -294,7 +330,10 @@ export function collapseLineHistory(points: HistoryPoint[], opts: CollapseOption
       runs.push({ ...p, count: 1, baseline: open == null, divider: false, atPick: i === 0 && opts.atPick === true });
     }
   }
-  const part = dayPart(runs.filter((r) => !r.divider).map((r) => r.at));
+  const part = dayPart([
+    ...runs.filter((r) => !r.divider).map((r) => r.at),
+    ...(runs.length > 0 && opts.anchorAt ? [opts.anchorAt] : []),
+  ]);
   const minutes = runs.map((r) => (r.divider ? '' : stamp(r.at, false, part)));
   const clash = new Set(minutes.filter((m, i) => m !== '' && minutes.indexOf(m) !== i));
   return runs.map((r, i) => ({
@@ -322,21 +361,33 @@ export interface RecentChanges {
   changes: number;
   /** How many of them are on screen. */
   shownChanges: number;
-  /** Rows above the screen (a divider counts). */
+  /**
+   * Rows not on screen. Without a pinned price at the pick they are above the
+   * screen; with one (a cut window), they sit between the divider and the
+   * newest rows.
+   */
   hidden: number;
   /** The first snapshot row's stamp, on screen or not. */
   firstAt: string | null;
 }
 
 /**
- * The last `n` rows, oldest → newest (what the card shows). `changes` counts
- * moves only — the first row is where they are measured from, not one, and
- * neither is the first row after a divider — and `shownChanges` is how many
- * of them are on screen.
+ * The `n` rows the card shows, oldest → newest: the last `n`, except that a
+ * cut window (`gap`) keeps the price at the pick and its divider as the first
+ * two rows and fills the rest with the newest. Without that pin, more than
+ * about six changes after the cut pushed both off the top, and nothing on
+ * screen marked where the pick was (pick 3133024). `changes` counts moves
+ * only — the first row is where they are measured from, not one, and neither
+ * is the first row after a divider — and `shownChanges` is how many of them
+ * are on screen.
  */
 export function recentChanges(points: HistoryPoint[], n = 8, opts: CollapseOptions = {}): RecentChanges {
   const all = collapseLineHistory(points, opts);
-  const rows = all.slice(-n);
+  // all[0] can itself be the divider (a partial first point is skipped), so
+  // pin only a real price followed by the divider.
+  const pin =
+    opts.gap && n > 2 && all.length > n && !all[0].divider && all[1]?.divider ? all.slice(0, 2) : [];
+  const rows = [...pin, ...newest(all.slice(pin.length), n - pin.length)];
   const isChange = (r: HistoryRow) => !r.baseline && !r.divider;
   return {
     rows,
@@ -356,8 +407,10 @@ export function recentChanges(points: HistoryPoint[], n = 8, opts: CollapseOptio
  * Never a snapshot count: snapshots are the feed's unit, not the reader's (50
  * of them is 50 minutes at DraftKings). When snapshots after the pick were
  * dropped (`gap`), the change count is not a total, so the footer names the
- * stretch that is missing instead. Without the price at the pick, it says
- * where the table starts.
+ * stretch that is missing instead. It says "prices", not "changes": the card
+ * never saw them. Without the price at the pick, it says where the table
+ * starts. The card shows no footer while the divider row is on screen; the
+ * divider already says the same thing.
  */
 export function changesFooter(
   r: Pick<RecentChanges, 'rows' | 'changes' | 'shownChanges' | 'hidden' | 'firstAt'>,
@@ -372,10 +425,16 @@ export function changesFooter(
       : `The price at your pick isn't available.`;
   }
   if (!w.gap) return `${head} since your pick`;
-  // The first row on screen after the price at the pick: everything between
-  // the pick and it is missing, whether the cut or the 8-row screen hid it.
-  const resume = r.rows.find((x, i) => !x.divider && r.hidden + i > 0);
+  // The first row on screen after the missing stretch. With the price at the
+  // pick pinned above a divider, that is the first row after the divider (the
+  // pinned row is the pick's own time); otherwise the first row on screen
+  // that is not the very first row.
+  const d = r.rows.findIndex((x) => x.divider);
+  const resume =
+    d >= 0
+      ? r.rows.slice(d + 1).find((x) => !x.divider)
+      : r.rows.find((x, i) => !x.divider && r.hidden + i > 0);
   return resume
-    ? `Changes between your pick and ${formatDayTimeET(resume.at)} not shown`
-    : 'Some changes since your pick not shown';
+    ? `Prices between your pick and ${formatDayTimeET(resume.at)} not shown`
+    : 'Some prices since your pick not shown';
 }

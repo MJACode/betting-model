@@ -299,8 +299,17 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
   // Review 2026-10-09: snapshots dropped after the pick → name the stretch, never count snapshots.
   const cut = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(19, 0), line: 8.5, price: -110 }], 8, { atPick: true, gap: true });
   check('footer: a gap after the pick names the missing stretch',
-    changesFooter(cut, { fromPick: true, gap: true }) === 'Changes between your pick and Fri, 9/25, 3:00 PM ET not shown', changesFooter(cut, { fromPick: true, gap: true }));
-  check('a gap is a divider row, and no run crosses it', cut.rows.map((r) => r.label).join(' | ') === 'At pick | Earlier changes not shown | 3:00 PM', cut.rows.map((r) => r.label).join(' | '));
+    changesFooter(cut, { fromPick: true, gap: true }) === 'Prices between your pick and Fri, 9/25, 3:00 PM ET not shown', changesFooter(cut, { fromPick: true, gap: true }));
+  check('a gap is a divider row, and no run crosses it', cut.rows.map((r) => r.label).join(' | ') === 'At pick | Some prices after your pick not shown | 3:00 PM', cut.rows.map((r) => r.label).join(' | '));
+  // Second review 2026-10-09: on a cut window the price at the pick and the divider stay on the 8-row table.
+  const longCut = recentChanges(
+    [{ at: t(18, 0), line: 8.5, price: -110 }, ...Array.from({ length: 12 }, (_, i) => ({ at: t(19, i), line: 8.5 + (i % 2) / 2, price: -110 }))],
+    8,
+    { atPick: true, gap: true },
+  );
+  check('a cut window keeps "At pick" and the divider on screen',
+    longCut.rows.length === 8 && longCut.rows[0].label === 'At pick' && longCut.rows[1].divider && longCut.rows[7].at === t(19, 11),
+    longCut.rows.map((r) => r.label).join(' | '));
   // The first row is the price at the pick (lib/lineHistory sincePick), not the opener.
   const atPick = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 9, price: -110 }], 8, { atPick: true });
   check('the price at the pick reads "At pick"', atPick.rows[0].label === 'At pick' && atPick.rows[1].label === '2:30 PM', atPick.rows.map((r) => r.label).join(' | '));

@@ -317,7 +317,7 @@ check(
   );
   check(
     'the card windows the rows from the pick to the start',
-    cardSrc.includes('sincePick(rows as Snap[], from, startAt)') &&
+    cardSrc.includes('sincePick(rows as Snap[], pick.created_at, startAt)') &&
       cardSrc.includes('const from = historyFrom(pick, startAt);') &&
       cardSrc.includes('gameStartAt(commenceTime, pick.game_time)'),
   );
