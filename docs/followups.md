@@ -21,7 +21,12 @@
 
 ---
 
-## [ ] Land the job that voids the eight stale-price NCAAF unders (deadline 2026-10-17)
+## [x] Land the job that voids the eight stale-price NCAAF unders (deadline 2026-10-17) — in this branch
+
+Added to `jobs/declared_jobs.json` on 2026-10-09 with mike's approval in the session, so it merges together with
+the code. After the worker runs it, check its result: all eight under "voided", none under "refused".
+The original item:
+
 
 mike, 2026-10-09: *"Change the rule, void them"*. Eight posted NCAAF unders
 were decided on DraftKings prices 15 to 28 days old (the table is in the
