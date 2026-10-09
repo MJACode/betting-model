@@ -373,7 +373,7 @@ check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEd
 check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('PickDetail: hand-off (BookLinesRow) only while cta.handoff, started line otherwise',
-  /cta\.handoff \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
+  /cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
 check('PickDetail: betslip card needs cta.slip; Track unchanged', /&& !voided && cta\.slip \?/.test(detail) && /const canTrack = openHere;/.test(detail));
 check('PickDetail: cta = pickCtaFor(pick, game, liveState)', /const cta = pickCtaFor\(pick, game, liveState\);/.test(detail));
 check('PickDetail: AllBooksCard (rows open betslips) hidden when !cta.handoff (H5)',

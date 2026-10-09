@@ -633,7 +633,7 @@ def check_pregame_prices_current(conn, r: "HealthReport",
                   AND snapshot_type <> 'in_play'
                   AND sport NOT IN ('GOLF', 'NFL')
                 LIMIT 1
-            """, (floor.strftime("%Y-%m-%dT%H:%M:%S"),
+            """, (floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
                   config.ODDS_API_BOOKMAKER)).fetchone()
         except Exception as exc:                              # noqa: BLE001
             getattr(conn, "rollback", lambda: None)()
@@ -681,8 +681,8 @@ def check_pregame_prices_current(conn, r: "HealthReport",
         detail += (f"; {n_stale} do not ({by_sport}), under the alarm level of "
                    f"half the priced games and at least {PREGAME_STALE_MIN_GAMES}")
     if leftovers or merged:
-        detail += (f"; {leftovers + merged} old copies of games the feed now "
-                   f"lists under another id were not counted")
+        detail += (f"; {leftovers + merged} extra ids of a game counted under "
+                   f"another id were left out")
     r.add(check, OK, "CRIT", detail, reason=REASON_FRESH, cadence=cadence)
 
 

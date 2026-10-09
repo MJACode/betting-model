@@ -46,6 +46,7 @@ import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookLabel,
   bookName,
+  currentLineQuotes,
   displayQuoteForPick,
   formatSideLine,
   freshBookRows,
@@ -238,6 +239,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const priceAge = priceAgeFor(pick, game, liveState);
   const hero = heroAmericanForPick(pick, enriched.latestOdds ?? null, bookRows, priceAge);
   const staleNote = stalePriceNote(hero);
+  const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge);
   const inSlip = slip.has(slipKeyForPick(pick));
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
@@ -389,9 +391,10 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             first (UX review): the chips are the bettable same-line subset, the
             table below carries books at a different number and the reference
             books that cannot be bet. Not for live picks: they are DraftKings
-            only, and the in-play rows are no longer fetched. */}
+            only, and the in-play rows are no longer fetched. With no chip left
+            (every book's price too old), no empty card either. */}
         {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
-          cta.handoff ? (
+          cta.handoff && lineQuotes.length > 0 ? (
             <View style={styles.linesCard}>
               <BookLinesRow pick={pick} bookRows={bookRows} hero={hero} priceAge={priceAge} />
             </View>

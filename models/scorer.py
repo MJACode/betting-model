@@ -3604,8 +3604,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if game_id in ufc_left_out:
                 skipped_twin += 1
                 logger.info(f"  [SKIP] {away_team} vs {home_team} — the same "
-                            f"fight is scored as {ufc_left_out[game_id]}, the "
-                            f"id DraftKings priced most recently")
+                            f"fight is scored as {ufc_left_out[game_id]} "
+                            f"(_ufc_one_id_per_fight)")
                 if not dry_run:
                     _clear_left_out_ufc_id(conn, game_id)
                 continue

@@ -460,6 +460,9 @@ def test_pick_detail_applies_the_price_age_rule():
     assert "<AllBooksCard pick={pick} bookRows={freshBookRows(pick, bookRows, priceAge)} />" in detail
     assert "&& (!hero?.stale || inSlip) && !voided && cta.slip ?" in detail
     assert "stalePriceNote(hero)" in detail
+    # No chip left: no empty "Betting lines" card either.
+    assert "const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge);" in detail
+    assert re.search(r"cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>", detail)
     row = _read(SRC / "components" / "BookLinesRow.tsx")
     assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in row
     assert "pickLineQuotes(" not in row
@@ -527,7 +530,7 @@ def test_pick_card_wiring():
 
 def test_pick_detail_board_and_copy_wiring():
     detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
-    assert re.search(r"cta\.handoff \? \(\s*<View style=\{styles\.linesCard\}>", detail)
+    assert re.search(r"cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>", detail)
     assert "cta.startedLine && openHere" in detail
     assert "gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))" in detail
     assert "&& !voided && cta.slip ?" in detail and "const canTrack = openHere;" in detail
