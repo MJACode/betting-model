@@ -86,9 +86,11 @@ def test_skip_existing_is_on_by_default():
 
 def test_the_resume_marker_distinguishes_historical_from_live_rows():
     """It keys on the snapshot_at shape: the historical writer stamps the API's
-    served timestamp ('...Z'), the live ingestor stamps ET with a numeric
-    offset. This test exists to make that a stated contract — a future writer
-    that stamps 'Z' on live rows would make a re-run skip dates it should buy."""
+    served timestamp ('...Z'), the live ingestor stamps a numeric offset
+    ('+00:00' UTC since 2026-10-09, '-04:00' Eastern before). This test exists
+    to make that a stated contract — a future writer that stamps 'Z' on live
+    rows would make a re-run skip dates it should buy. The live side is pinned
+    in tests/test_prop_odds_utc_stamp.py."""
     src = inspect.getsource(ing.backfilled_dates)
     assert "LIKE '%%Z'" in src or "LIKE '%Z'" in src, src
     assert "bookmaker = %s" in src, src
