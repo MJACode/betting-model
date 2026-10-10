@@ -2811,6 +2811,22 @@ def notify_discord_void(pick_ids, reason: str | None = None,
                         f"already noticed")
             return {"dry_run": dry_run, "posted": 0,
                     "skipped_lock_keys": skipped, "payloads": []}
+
+        # An attempt row with no discord_void row: an earlier send has no
+        # outcome on record (the reply was lost, the save failed, or the
+        # worker died). Only the channel can say whether it posted. This
+        # comes before the partial-list check: a list a person half settled
+        # has both, and "pass only the picks still pending" would point
+        # them at a second correction for picks that may be in the channel.
+        unresolved = [p["lock_key"] for p in pending if p["attempted"]]
+        if unresolved and not dry_run:
+            raise DiscordVoidUnresolved(
+                [f"an earlier void notice for {len(unresolved)} of these "
+                 f"picks may already be in the channel. Check the channel. "
+                 f"If it is there, save its discord_void rows with its "
+                 f"message id; if not, delete the {_VOID_ATTEMPT_KIND} rows. "
+                 f"Nothing was sent. Picks: {', '.join(unresolved)}"])
+
         if skipped and custom:
             # A written text describes the whole list ("the 15 ... below").
             # Posting it over the picks still pending would tell members 15
@@ -2841,11 +2857,6 @@ def notify_discord_void(pick_ids, reason: str | None = None,
                     "lock_keys": [p["lock_key"] for p in chunk],
                 })
 
-        # An attempt row with no discord_void row: an earlier send has no
-        # outcome on record (the reply was lost, the save failed, or the
-        # worker died). Only the channel can say whether it posted.
-        unresolved = [p["lock_key"] for p in pending if p["attempted"]]
-
         if dry_run:
             for item in payloads:
                 logger.info(f"[dry-run] discord void {item['sport']} "
@@ -2856,14 +2867,6 @@ def notify_discord_void(pick_ids, reason: str | None = None,
                     "app_view_ready": _app_view_ready(conn),
                     "unresolved_attempt_lock_keys": unresolved,
                     "skipped_lock_keys": skipped, "payloads": payloads}
-
-        if unresolved:
-            raise DiscordVoidUnresolved(
-                [f"an earlier void notice for {len(unresolved)} of these "
-                 f"picks may already be in the channel ({', '.join(unresolved)})."
-                 f" Check the channel. If it is there, save its discord_void "
-                 f"rows with its message id; if not, delete the "
-                 f"{_VOID_ATTEMPT_KIND} rows. Nothing was sent."])
 
         # The notice is what takes these picks out of the app, and mike's
         # text says so ("The app no longer shows them as picks"). That is

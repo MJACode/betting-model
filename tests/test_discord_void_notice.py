@@ -638,6 +638,107 @@ def test_a_check_before_the_send_keeps_the_ordinary_retry(monkeypatch):
     assert announced == []
 
 
+# The 15 picks' lock keys as production computes them (read 2026-10-10).
+# Their length is what decides whether the ops alert fits.
+_STALE_LOCKS = {
+    1769626: "NCAAF_2026-10-24_texas-a-m_alabama:ncaaf_over_under",
+    1769753: "NCAAF_2026-11-27_mississippi-state_ole-miss:ncaaf_over_under",
+    1769812: "NCAAF_2026-12-12_army_navy:ncaaf_over_under",
+    1992830: "NCAAF_2026-10-03_miami_clemson:ncaaf_over_under",
+    2109187: "NCAAF_2026-11-07_michigan-state_michigan:ncaaf_over_under",
+    2109205: "NCAAF_2026-11-14_ole-miss_oklahoma:ncaaf_over_under",
+    2109285: "NCAAF_2026-11-28_michigan_ohio-state:ncaaf_over_under",
+    2558703: "NCAAF_2026-11-07_oregon_ohio-state:ncaaf_over_under",
+    2558736: "NCAAF_2026-11-07_alabama_lsu:ncaaf_over_under",
+    2935576: "NCAAF_2026-11-28_south-carolina_clemson:ncaaf_over_under",
+    2992283: "NCAAF_2026-10-17_kansas_kansas-state:ncaaf_over_under",
+    2992290: "NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under",
+    2992474: "NCAAF_2026-11-28_tennessee_vanderbilt:ncaaf_over_under",
+    3020766: "NCAAF_2026-11-14_tennessee_texas-a-m:ncaaf_over_under",
+    3204788: "NCAAF_2026-10-17_notre-dame_byu:ncaaf_over_under",
+}
+
+
+def _stale_rows(attempted=(), voided=()):
+    return [_row(i, lock=_STALE_LOCKS[i], attempted=i in attempted,
+                 voided=i in voided, label=f"Georgia vs Auburn Under {50 + n}.5")
+            for n, i in enumerate(sorted(_STALE_LOCKS))]
+
+
+def _run_stale_15_job(monkeypatch, rows, post=None):
+    """The real job and notice for the 15; returns the ops alert's text."""
+    from tracking import job_queue as q
+
+    _bind(monkeypatch, rows, post=post)
+    ops = "https://discord.com/api/webhooks/1/ops-token"
+    monkeypatch.setattr(q.config, "DISCORD_WEBHOOK_OPS", ops)
+    alerts = []
+
+    def capture(url, payload):
+        assert url == ops, "only the ops alert may use _post"
+        alerts.append(payload["embeds"][0]["description"])
+        return True
+
+    monkeypatch.setattr(dn, "_post", capture)
+    job = {"job_id": 7, "job_type": "publish_discord_void", "attempts": 1,
+           "args": {"pick_ids": _FIFTEEN, "reason_key": "ncaaf_stale_15",
+                    "dry_run": False}}
+    out = q._execute(_JobConn(), job)
+    assert out["status"] == "failed" and out["final"] is True
+    assert len(alerts) == 1
+    return alerts[0]
+
+
+def test_the_ops_alert_keeps_every_pick_and_the_instruction(monkeypatch):
+    """The alert is what a person acts on. Cut at 900 characters, the 15
+    picks' alert lost the last keys and the closing instruction."""
+    # A rerun after a worker died mid-send: every pick has an attempt row.
+    alert = _run_stale_15_job(monkeypatch,
+                              _stale_rows(attempted=set(_STALE_LOCKS)))
+    assert "Check the channel." in alert
+    assert "delete the void_notice_attempt rows" in alert
+    assert "Nothing was sent." in alert
+    for key in _STALE_LOCKS.values():
+        assert key in alert
+    assert len(alert) <= 4000
+
+    # A lost reply on the real post.
+    lost = {"outcome": "unknown", "message_id": None,
+            "detail": "no reply from Discord (ReadTimeout)"}
+    alert = _run_stale_15_job(monkeypatch, _stale_rows(),
+                              post=lambda url, payload: lost)
+    assert "check the channel before queueing again" in alert
+    for key in _STALE_LOCKS.values():
+        assert key in alert
+    assert alert.rstrip("`").endswith(
+        "Until then a rerun refuses these picks and sends nothing.")
+    assert len(alert) <= 4000
+
+
+def test_a_half_settled_list_is_refused_for_the_real_reason(monkeypatch):
+    """A person saved the notice rows for 11 of the 15 and stopped. The rerun
+    used to say "11 already have a notice; pass only the picks still
+    pending and a text written for them", which points at a second
+    correction for 4 picks that are already in the channel."""
+    settled = sorted(_STALE_LOCKS)[:11]
+    rows = _stale_rows(attempted=set(_STALE_LOCKS), voided=set(settled))
+    ledger, calls = _bind(monkeypatch, rows)
+    with pytest.raises(dn.DiscordVoidUnresolved,
+                       match="may already be in the channel") as exc:
+        dn.notify_discord_void(_FIFTEEN, reason=dn.VOID_NOTICE_NCAAF_STALE_15,
+                               dry_run=False)
+    assert "already have a void notice" not in str(exc.value)
+    left = [_STALE_LOCKS[i] for i in sorted(_STALE_LOCKS)[11:]]
+    # The instruction first, the keys last (str() of the list adds "']").
+    assert str(exc.value).rstrip("']").endswith(f"Picks: {', '.join(left)}")
+    assert calls == []
+    assert ledger.migrations == 0
+    assert ledger.commits == 0
+    # A dry run still reports them rather than refusing.
+    dry = dn.notify_discord_void(_FIFTEEN, dry_run=True)
+    assert dry["unresolved_attempt_lock_keys"] == left
+
+
 def test_validation_rejects_the_whole_list_before_any_post(monkeypatch):
     rows = [
         _row(1),

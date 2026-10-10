@@ -2083,7 +2083,12 @@ def _execute(conn, job: dict) -> dict:
         conn.commit()
         logger.error(f"job {job['job_id']} {job['job_type']} failed, not "
                      f"retried: {exc}")
-        _announce(job, ok=False, detail=str(exc)[:900])
+        # The alert is what a person acts on, so it carries the whole text:
+        # a void notice for 15 picks lists every lock key before what to
+        # do, and 900 characters cut the instruction off. 3500 plus the
+        # header and the 300-character args line stays under _announce's
+        # 4000.
+        _announce(job, ok=False, detail=str(exc)[:3500])
         return {"status": "failed", "job": job, "error": str(exc),
                 "final": True}
     except Exception as exc:  # noqa: BLE001 — every failure is recorded, not raised
