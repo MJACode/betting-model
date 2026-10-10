@@ -335,3 +335,66 @@ def test_ledger_ddl_is_guarded():
     src = (ROOT / "data/ingestors/nhl_derivative_odds_history.py").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS nhl_derivative_odds_pulls" in src
     assert "lock_down(" in src
+
+
+# ── the grader: what settles each market, and the Pinnacle table ─────────────
+
+def _graded_game():
+    """BOS at home beat TOR 3-2 in overtime: 2-2 after three, 1-0 in the first period."""
+    from scripts import nhl_derivative_totals_backtest as bt
+    games = pd.DataFrame([{"game_id": "NHL_2026-01-10_TOR_BOS", "season": 2026, "game_date": "2026-01-10",
+                           "home_team": "BOS", "away_team": "TOR", "home_score": 3, "away_score": 2,
+                           "commence_time": "2026-01-11T00:00:00Z"}])
+    periods = pd.DataFrame([
+        {"game_id": "NHL_2026-01-10_TOR_BOS", "season": 2026, "game_date": "2026-01-10", "home_p1": 1,
+         "away_p1": 0, "home_p2": 0, "away_p2": 1, "home_p3": 1, "away_p3": 1, "source": "nhl_api_score"},
+        # An older source for the same game, with a different first period, loses to the feed.
+        {"game_id": "NHL_2026-01-10_TOR_BOS", "season": 2026, "game_date": "2026-01-10", "home_p1": 0,
+         "away_p1": 0, "home_p2": 1, "away_p2": 1, "home_p3": 1, "away_p3": 1, "source": "sbr_archive_nhl"},
+    ])
+    return bt, bt.outcomes(periods, games)
+
+
+def test_team_totals_settle_on_the_full_game_score_overtime_included():
+    bt, games = _graded_game()
+    assert "reg_home" not in games.columns and "reg_away" not in games.columns
+    g = games.iloc[0]
+    assert (g.total, g.p1_total) == (5, 1)
+    px = pd.DataFrame({"market": ["team_totals_home", "team_totals_away", "totals_p1", "alternate_totals"]})
+    for c in ("home_score", "away_score", "p1_total", "total"):
+        px[c] = g[c]
+    # BOS scored 2 in regulation and 3 in all. The book's 2.5 over on BOS wins.
+    assert list(bt.settling_count(px)) == [3.0, 2.0, 1.0, 5.0]
+
+
+def _quote(book, market, line, over, under, snap="2026-01-10T22:00:00Z"):
+    return {"game_id": "NHL_2026-01-10_TOR_BOS", "market": market, "bookmaker": book, "total_line": line,
+            "over_price": over, "under_price": under, "snapshot_at": snap}
+
+
+def test_the_pinnacle_table_prices_a_bettable_book_off_pinnacle_at_the_same_number_and_snapshot():
+    bt, games = _graded_game()
+    prices = pd.DataFrame([
+        _quote("pinnacle", "team_totals_home", 2.5, -120, +105),
+        _quote("fanduel", "team_totals_home", 2.5, +110, -135),     # over at +110 against Pinnacle's ~0.53
+        _quote("fanduel", "team_totals_home", 3.5, +200, -260),     # Pinnacle has no 3.5: not priced
+        _quote("pinnacle", "totals_p1", 1.5, +120, -140, snap="2026-01-10T21:00:00Z"),
+        _quote("draftkings", "totals_p1", 1.5, +130, -160),          # a different snapshot: not priced
+        _quote("pinnacle", "alternate_totals", 6.5, +300, +300),     # implied sum 0.5: not a market
+        _quote("draftkings", "alternate_totals", 6.5, +150, -180),
+    ])
+    px = bt.pregame(prices, games)
+    s = bt.sharp_sides(px, ["fanduel", "draftkings"])
+    assert set(zip(s.market, s.total_line)) == {("team_totals_home", 2.5)}
+    over = s[s.side == "over"].iloc[0]
+    io, iu = 120 / 220, 100 / 205
+    assert over.pin == pytest.approx(io / (io + iu))
+    assert over.ev == pytest.approx(over.pin * 2.10 - 1.0)
+    assert over.ev > 0.02
+    # Settled on the full game: BOS scored 3, so the over at 2.5 won 1.10 units.
+    assert over.profit == pytest.approx(1.10)
+    under = s[s.side == "under"].iloc[0]
+    assert under.pin == pytest.approx(1.0 - over.pin) and under.profit == pytest.approx(-1.0)
+    rows = bt.sharp_rows(s, ("over", "under"))
+    assert [r["pin EV>="] for r in rows] == list(bt.SHARP_EV_CUTS)
+    assert rows[0]["bets"] == 1                                 # one bet a game per market
