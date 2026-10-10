@@ -43,10 +43,11 @@ converging on the same place from the other side.
   equal total, `BEST_LINE_BOOKMAKERS`, pin-lean only. INSERT off
   (`MLB_TOTAL_MARKET_PUBLISH` default 0). Pin-de-vig vs soft-de-vig May–Jun
   2pp −11.13% / 79 is a sweep flag. Do not resurrect 0.50/0.06.
-  A **separate** paper lane, `mlb_total_public_fade`, fades consensus OVER
+  A **separate** paper model, `mlb_total_public_fade`, fades consensus OVER
   tickets ≥70 (env; 80 supported) and bets UNDER. INSERT off
   (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). Optional top-K
-  (`MAX_PER_SLATE` default 0; recommended 2 + `RANK=ticket`). Not an
+  (`MAX_PER_SLATE` default 0; recommended 2 + `RANK=ticket` on 2026-09-19,
+  red over the full season: 78 bets −1.4%, September −27.6% on 27). Not an
   unpause. `docs/mlb_total_public_fade.md`.
   `docs/mlb_runline_ou_edge_search.md`.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the

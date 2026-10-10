@@ -122,7 +122,9 @@ gives back some units for a 2-bet cap. September all-pass is the
 bleed; top-2 cuts it. Wilson on the pooled top-2 cell is 44–71%
 win rate (28–20). n=48 is still small.
 
-**Recommended flag (PUBLISH stays 0):**
+**Top-2 flags** (the 2026-09-19 recommendation; no longer one since
+2026-10-10: 78 bets −1.4%, September −27.6% on 27, see the note below;
+PUBLISH stays 0):
 
 ```
 MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=70
@@ -327,7 +329,7 @@ order by 1, 2;
 |---|---|---|
 | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` | `0` | `1` writes BET rows |
 | `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Over-ticket cut; `80` is the tighter neighbour |
-| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `0` | `0` = all-pass. Set `2` to keep top-K per day (recommended with `RANK=ticket`) |
+| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `0` | `0` = all-pass. Set `2` to keep top-K per day (recommended with `RANK=ticket` on 2026-09-19; red in September, 78 bets −1.4% through 2026-10-10) |
 | `MLB_TOTAL_PUBLIC_FADE_RANK` | `ticket` | `ticket` \| `gap` \| `juice` \| `composite` \| `ev`. Only `ticket` cleared the holdout. `ev` without a bucket table ranks as ticket |
 | `MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR` | `0` | LOMO estimated-edge floor. Sweep-only (card has no bucket table). Every floor tried (≥2/3/5pp) lost |
 | `MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN` | unset | Inclusive American band lower bound (most juice). I24 = `-110`. Unset = no band |

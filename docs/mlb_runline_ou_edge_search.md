@@ -139,9 +139,12 @@ apart. Requiring both quotes within 300 seconds of each other on the same
 total, a gap of 1.5 points or more between Pinnacle's no-vig price and a
 soft book's raw price (with its margin) never occurred in June, July or
 Sep 16-18 (2026-09-19). The no-vig against no-vig version at 1.8 points or
-more: June +16.2% on 17, July +8.8% on 30 (PR #759), and the whole of
-September −22.4% on 31, −6.93u (re-measured 2026-10-10 in the review of
-PR #759). Detail: `docs/mlb_over_under_edge_hunt.md`.
+more, re-measured for every month on 2026-10-10: Apr −4.9% on 36, May
+−24.5% on 26, Jun +16.2% on 17, Jul +8.8% on 30, Aug −20.5% on 32, Sep
+−22.4% on 31. That is 172 bets and −16.25u for the season, red in four of
+six months, including the April and May the table above shows as +34.3%
+and −8.8%. June and July match PR #759. Detail and the query:
+`docs/mlb_over_under_edge_hunt.md`.
 
 **SPREADS** ≥2pp, equal line:
 
