@@ -232,7 +232,9 @@ is "unknown", not resent), commits a `void_notice_attempt` row before each
 send, never raises after a send, and retries a failed save once on a fresh
 connection. Any later run refuses picks with an attempt row and no
 `discord_void` row until a person has checked the channel, and the job fails
-such a run without a retry. A real post also applies the view migrations and
+such a run without a retry. Two runs that overlap (the queue lost its lock
+mid-run) send once: only the run whose insert wrote the attempt rows sends.
+A real post also applies the view migrations and
 refuses unless the view and the `anon_read_discord_publish` policy both
 mention `discord_void`. The job takes a reviewed text by name (`reason_key`,
 `VOID_NOTICE_TEXTS`) over exactly its picks; pasted text and the short

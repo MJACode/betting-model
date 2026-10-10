@@ -74,6 +74,8 @@ class Ledger:
         self.policy = policy
         # How many discord_void INSERTs raise before one succeeds.
         self.fail_void_inserts = 0
+        # Rows written since the last commit; rollback() takes them back.
+        self.uncommitted: list[tuple[list, int]] = []
 
     def execute(self, sql, params=None):
         self.statements.append((sql, params))
@@ -81,32 +83,43 @@ class Ledger:
             if self.fail_void_inserts:
                 self.fail_void_inserts -= 1
                 raise RuntimeError("server closed the connection")
+        # ON CONFLICT DO NOTHING ... RETURNING gives a row back only when
+        # this insert wrote one.
+        new = False
         if "INSERT INTO push_sent" in sql:
             lock = params[0]
             column = 22 if "'discord_void'" in sql else 23
             for row in self.rows:
-                if row[18] == lock:
+                if row[18] == lock and not row[column]:
+                    new = True
                     row[column] = 1
+                    self.uncommitted.append((row, column))
         outer = self
+        returned = [(params[0],)] if "RETURNING" in sql and new else []
 
         class Result:
             def fetchall(self):
                 if "FROM picks" in sql:
                     return [tuple(r) for r in outer.rows]
-                return []
+                return list(returned)
 
             def fetchone(self):
                 if "pg_get_viewdef" in sql:
                     return (outer.view, outer.policy)
+                if "RETURNING" in sql:
+                    return returned[0] if returned else None
                 return (True,)
 
         return Result()
 
     def commit(self):
         self.commits += 1
+        self.uncommitted = []
 
     def rollback(self):
-        pass
+        for row, column in self.uncommitted:
+            row[column] = 0
+        self.uncommitted = []
 
     def close(self):
         pass
@@ -461,6 +474,77 @@ def test_a_reclaimed_run_with_an_attempt_on_record_sends_nothing(monkeypatch):
     dry = dn.notify_discord_void([2992290], dry_run=True)
     assert dry["unresolved_attempt_lock_keys"] == [
         "NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under"]
+
+
+def test_two_overlapping_runs_send_the_notice_once(monkeypatch):
+    """The queue's one-runner lock lives on its own connection. If the pooler
+    drops it while a send is under way, the next runner reclaims the job and
+    runs it again while the first is still going. Both runs read the picks
+    before either saved its attempt row, so the check made at read time
+    passes for both. The attempt insert decides which one sends."""
+    inner: dict = {}
+
+    def second_run(conn):
+        # The view migrations sit between the read and the attempt row, so
+        # the second run starts and finishes inside the first one's window.
+        if not inner:
+            inner["started"] = True
+            inner["out"] = dn.notify_discord_void(
+                [2992290], reason=REVIEWED, dry_run=False)
+
+    ledger, calls = _bind(monkeypatch, [_row(2992290)], migrate=second_run)
+    with pytest.raises(dn.DiscordVoidUnresolved, match="another run") as exc:
+        dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
+    assert len(calls) == 1
+    assert inner["out"]["complete"] is True
+    assert len(ledger.inserts) == 1
+    assert "Nothing was sent" in str(exc.value)
+
+
+def test_a_run_that_starts_during_the_send_refuses(monkeypatch):
+    seen: dict = {}
+
+    def post(url, payload):
+        if not seen:
+            seen["started"] = True
+            try:
+                dn.notify_discord_void([2992290], reason=REVIEWED,
+                                       dry_run=False)
+            except dn.DiscordVoidUnresolved as exc:
+                seen["refused"] = str(exc)
+        return {"outcome": "posted", "message_id": "9001", "detail": "HTTP 200"}
+
+    ledger, calls = _bind(monkeypatch, [_row(2992290)], post=post)
+    out = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
+    assert out["complete"] is True
+    assert len(calls) == 1
+    assert "may already be in the channel" in seen["refused"]
+
+
+def test_a_later_message_claimed_by_another_run_is_not_sent(monkeypatch):
+    """27 picks are two messages. Another run claims one pick of the second
+    while the first is sending: the first message stands, the second is not
+    sent, and this run's own attempt rows for it are taken back."""
+    ids = list(range(1, 28))
+    rows = _rows_for(ids)
+
+    def post(url, payload):
+        if len(calls) == 1:
+            for row in ledger.rows:
+                if row[0] == 27:
+                    row[23] = 1          # the other run's committed claim
+        return {"outcome": "posted", "message_id": "9001", "detail": "HTTP 200"}
+
+    ledger, calls = _bind(monkeypatch, rows, post=post)
+    out = dn.notify_discord_void(ids, reason=REVIEWED, dry_run=False)
+    assert len(calls) == 1
+    assert out["complete"] is False
+    assert [m["outcome"] for m in out["messages"]] == ["posted", "not_sent"]
+    assert "another run" in out["messages"][1]["detail"]
+    assert out["posted"] == 25
+    by_id = {row[0]: row for row in ledger.rows}
+    assert by_id[26][23] == 0                # rolled back, not left claimed
+    assert by_id[26][22] == 0
 
 
 def test_a_check_that_fails_before_the_send_still_raises(monkeypatch):

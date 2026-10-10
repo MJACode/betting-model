@@ -2628,16 +2628,31 @@ def _post_void_once(url: str, payload: dict) -> dict:
             "detail": f"still rate-limited after {_MAX_RETRIES + 1} tries"}
 
 
-def _mark_void_attempt(conn, picks: list[dict]) -> None:
-    """Committed before the send, so a death after it leaves a trace."""
-    for pick in picks:
-        conn.execute(
+def _mark_void_attempt(conn, picks: list[dict]) -> list[str]:
+    """Claim these picks for one send. Committed before the send, so a death
+    after it leaves a trace.
+
+    Returns the lock keys another run claimed first. Then nothing is kept
+    and the caller must not send. Two runs that both read the picks before
+    either saved its attempt row both pass the check made at read time; the
+    insert is what tells them apart, because only the run that wrote a row
+    gets it back. Keys go in sorted order, so two runs cannot deadlock.
+    """
+    taken: list[str] = []
+    for key in sorted({p["lock_key"] for p in picks}):
+        row = conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
             f"VALUES (%s, '{_VOID_ATTEMPT_KIND}', NULL, NULL) "
-            "ON CONFLICT (lock_key, kind) DO NOTHING",
-            (pick["lock_key"],),
-        )
+            "ON CONFLICT (lock_key, kind) DO NOTHING RETURNING lock_key",
+            (key,),
+        ).fetchone()
+        if row is None:
+            taken.append(key)
+    if taken:
+        conn.rollback()
+        return taken
     conn.commit()
+    return []
 
 
 def _record_void(conn, picks: list[dict], sent_at: str,
@@ -2762,7 +2777,8 @@ def notify_discord_void(pick_ids, reason: str | None = None,
     refused, unknown, posted_not_recorded, not_sent); when not complete,
     "next_step" says what a person has to check. An attempt row committed
     before each send makes any later run refuse those picks
-    (DiscordVoidUnresolved) until that is settled.
+    (DiscordVoidUnresolved) until that is settled. Two runs that overlap
+    send once: only the run whose insert wrote the attempt rows sends.
     """
     ids = _normalize_void_ids(pick_ids)
     custom = reason is not None and bool(str(reason).strip())
@@ -2889,7 +2905,7 @@ def notify_discord_void(pick_ids, reason: str | None = None,
             if stop:
                 continue
             try:
-                _mark_void_attempt(conn, chunk)
+                taken = _mark_void_attempt(conn, chunk)
             except Exception as exc:  # noqa: BLE001
                 try:
                     conn.rollback()
@@ -2900,6 +2916,20 @@ def notify_discord_void(pick_ids, reason: str | None = None,
                         [f"could not save the attempt record, so nothing was "
                          f"sent: {type(exc).__name__}: {exc}"]) from exc
                 entry["detail"] = f"attempt record not saved: {exc}"
+                stop = True
+                continue
+            if taken:
+                # Another run saved its attempt row after this one read the
+                # picks, so it may be sending this notice now.
+                if not tried:
+                    raise DiscordVoidUnresolved(
+                        [f"another run claimed {len(taken)} of these picks "
+                         f"after this run read them, and may be sending the "
+                         f"notice now. Nothing was sent by this run. Check "
+                         f"that run's outcome and the channel before queueing "
+                         f"again. Picks: {', '.join(taken)}"])
+                entry["detail"] = (f"another run claimed {len(taken)} of "
+                                   f"these picks first; not sent")
                 stop = True
                 continue
             tried = True
