@@ -167,6 +167,29 @@ export function clampTypedLine(n: number | null, lo: number, hi: number): number
   return Math.min(ceil, Math.max(floor, n));
 }
 
+/**
+ * The text the type-a-line field shows once a typed number has been clamped.
+ *
+ * `applied` is the number the board will use. When the digits in the field
+ * are a different number, the field has to paint `face(applied)` in that
+ * same update — otherwise the reader is still looking at 999 while 150 is
+ * what was applied. An in-range value, and junk, return null so the field
+ * closes without being rewritten.
+ */
+export function clampedFieldText(
+  draft: string,
+  applied: number | null,
+  face: (n: number) => string,
+): string | null {
+  if (applied == null || !Number.isFinite(applied)) return null;
+  const raw = draft.trim().replace(/\+$/, '');
+  const shown = face(applied);
+  // Already the applied face — including Over/Under, where "1.5" is stop 2.
+  // Returning the same glyphs would setState a no-op and leave the field open.
+  if (raw === shown) return null;
+  return shown;
+}
+
 /** The number the centre is holding, and whether the next settle belongs to
  *  a programmatic scroll rather than a finger. */
 export interface RulerHold {

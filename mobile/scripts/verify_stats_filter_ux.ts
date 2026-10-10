@@ -64,10 +64,28 @@ check('the Players slate refetches when the ET date changes and on pull-to-refre
     /\[slateKey, etDay, sport, slateReload\]/.test(stats) &&
     /setSlateReload\(\(n\) => n \+ 1\)/.test(stats) &&
     /onRefresh=\{refreshBoard\}/.test(stats));
-check('a line-only row does not navigate, and says why',
+const lineOnlyFn = stats.slice(stats.indexOf('function LineOnlyRow'), stats.indexOf('function HitRateRow'));
+check('a line-only row is not a button, and the label ends with no games logged yet',
   /canOpenPlayerDetail\(p\.player_id\)/.test(stats) &&
-    /No logged games, so this row does not open/.test(stats) &&
+    /lineOnlyRowLabel\(name, subline \? sublineSpoken\(subline\) : null\)/.test(lineOnlyFn) &&
+    !/No logged games, so this row does not open/.test(stats) &&
+    !/accessibilityHint/.test(lineOnlyFn) &&
+    !/accessibilityRole/.test(lineOnlyFn) &&
+    !/<Pressable/.test(lineOnlyFn) &&
+    !/chevron/.test(lineOnlyFn) &&
     !/LineOnlyRow[\s\S]{0,900}openPlayer\(/.test(stats));
+check('a sport change clears the Players slate before the next paint',
+  /if \(slateSport !== sport\)/.test(stats) &&
+    /setSlate\(EMPTY_SLATE\)/.test(stats) &&
+    /setSlateFor\(null\)/.test(stats) &&
+    /setSlateGames\(\[\]\)/.test(stats));
+check('a row with no player id is not pressable',
+  /tappable=\{playerDetail && canOpenPlayerDetail\(item\.player_id\)\}/.test(stats) &&
+    /tappable=\{playerDetail && canOpenPlayerDetail\(item\.row\.player_id\)\}/.test(stats));
+check('the Players Availability switch is dimmed while checking, then uses its normal hint',
+  /accessibilityState=\{\{\s*disabled: slateCutDead,\s*checked: tonightActive && !gamesPicked,\s*\}\}/.test(stats) &&
+    /slateChecking\s*\?\s*SLATE_CHECKING_HINT/.test(stats) &&
+    /On shows only players in action, off shows every player/.test(stats));
 
 const teamsReset = teams.slice(
   teams.indexOf('// Reset to the sport\'s default stat'),
@@ -77,8 +95,13 @@ check('a sport change clears the Teams slate before the next read lands',
   /setSlate\(\{ date: '', isToday: false, games: \[\] \}\)/.test(teamsReset) &&
     /setSlateFor\(null\)/.test(teamsReset) &&
     /setSlateOnly\(false\)/.test(teamsReset));
-check('the Teams chip is disabled while the slate is still checking',
-  /disabled=\{slateChipDisabled\(slateChecking, hasSlate\)\}/.test(teams));
+const chip = readFileSync(join(ROOT, 'src/components/filters/FilterChip.tsx'), 'utf-8');
+check('the Teams chip is dimmed while checking, with the checking hint, then its normal hint',
+  /disabled=\{slateChipDisabled\(slateChecking, hasSlate\)\}/.test(teams) &&
+    /slateChecking\s*\?\s*SLATE_CHECKING_HINT/.test(teams) &&
+    /Showing only teams on this slate/.test(teams) &&
+    /accessibilityState=\{\{ selected: active, disabled, busy \}\}/.test(chip) &&
+    /accessibilityHint=\{accessibilityHint\}/.test(chip));
 check('the Teams slate refetches when the ET date changes and on pull-to-refresh',
   /const slateKey = slateReadKey\(sport, etDay\)/.test(teams) &&
     /const etDay = etDate\(new Date\(now\)\)/.test(teams) &&

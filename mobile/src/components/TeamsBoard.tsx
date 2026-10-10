@@ -47,6 +47,7 @@ import {
   slateGameFor,
   slateLabelFor,
   slateReadKey,
+  SLATE_CHECKING_HINT,
   slateSubline,
   sublineSpoken,
 } from '@/lib/statsBoard';
@@ -452,9 +453,10 @@ export function TeamsBoard({
           active={slateActive}
           disabled={slateChipDisabled(slateChecking, hasSlate)}
           onPress={() => setSlateOnly((v) => !v)}
-          accessibilityLabel={
+          accessibilityLabel={hasSlate ? slateLabel : 'Playing today'}
+          accessibilityHint={
             slateChecking
-              ? 'Playing today, checking the schedule'
+              ? SLATE_CHECKING_HINT
               : slateFailed
                 ? 'Playing today, unavailable: the schedule could not be loaded'
                 : !hasSlate

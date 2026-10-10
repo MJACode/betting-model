@@ -118,6 +118,8 @@ import {
   inHitRateBand,
   isOnSlate,
   canOpenPlayerDetail,
+  lineOnlyRowLabel,
+  SLATE_CHECKING_HINT,
   isStatParticipant,
   fixtureSubline,
   lineOnlyPlayers,
@@ -169,6 +171,7 @@ import {
 import {
   baseStopCount,
   clampTypedLine,
+  clampedFieldText,
   clearSettleSkip,
   defaultLineN,
   programmaticPick,
@@ -483,6 +486,16 @@ export function StatsScreen() {
   // `player_points` is both an NBA and a WNBA market, so the odds read is
   // bounded to these game ids rather than to a date alone.
   const [slateGames, setSlateGames] = useState<GameRow[]>([]);
+  // During render, not in an effect: the effect runs after paint, and that
+  // paint would still name the previous sport's slate on Playing today.
+  const [slateSport, setSlateSport] = useState(sport);
+  if (slateSport !== sport) {
+    setSlateSport(sport);
+    setSlate(EMPTY_SLATE);
+    setSlateGames([]);
+    setSlateFor(null);
+    setTonightOnly(SLATE_ONLY_DEFAULT);
+  }
   // Every book's latest line for the selected stat's market on the slate date.
   const [propLines, setPropLines] = useState<{
     market: string;
@@ -541,6 +554,12 @@ export function StatsScreen() {
     if (!supportsHitRate(sport)) setTimeWindow((w) => (w === 'h2h' ? 10 : w));
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
+    // Drop the previous sport's slate in the same commit as the chip reset.
+    // Until the new read lands, hasSlate would still be true and the
+    // Availability label would name the outgoing slate.
+    setSlate(EMPTY_SLATE);
+    setSlateGames([]);
+    setSlateFor(null);
   }, [sport]);
 
   // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
@@ -2541,7 +2560,7 @@ export function StatsScreen() {
                 thinSample={timeWindow === 'h2h'}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
-                tappable={playerDetail}
+                tappable={playerDetail && canOpenPlayerDetail(item.player_id)}
                 onPress={() => openPlayer(item)}
               />
             );
@@ -2600,7 +2619,7 @@ export function StatsScreen() {
                 hitMode={hitMode}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
-                tappable={playerDetail}
+                tappable={playerDetail && canOpenPlayerDetail(item.row.player_id)}
                 onPress={() => openPlayer(item.row)}
               />
             );
@@ -2723,9 +2742,14 @@ export function StatsScreen() {
               value={tonightActive && !gamesPicked}
               onValueChange={setTonightOnly}
               disabled={slateCutDead}
-              accessibilityLabel={
+              accessibilityState={{
+                disabled: slateCutDead,
+                checked: tonightActive && !gamesPicked,
+              }}
+              accessibilityLabel={hasSlate ? slateLabel : 'Playing today'}
+              accessibilityHint={
                 slateChecking
-                  ? 'Playing today, checking the schedule'
+                  ? SLATE_CHECKING_HINT
                   : !hasSlate
                     ? 'Playing today, unavailable: no games scheduled'
                     : gamesPicked
@@ -3044,19 +3068,39 @@ function LineRuler({
   // same turn with the same draft; the latch applies it once (the player
   // card's commitTypedLineOnce, same reason).
   const commitTaken = useRef(false);
+  // A clamped commit writes the applied face into the field first. Closing
+  // in that same setState would drop it — React keeps the last value — so
+  // the close waits until that face has painted.
+  const pendingClose = useRef(false);
+  useEffect(() => {
+    if (!pendingClose.current || draft == null) return;
+    pendingClose.current = false;
+    setDraft(null);
+  }, [draft]);
   const openDraft = () => {
     commitTaken.current = false;
+    pendingClose.current = false;
     setDraft('');
   };
   const commitDraft = () => {
     if (commitTaken.current || draft == null) return;
     commitTaken.current = true;
-    setDraft(null);
-    if (!parseTyped || draft.trim() === '') return;
+    if (!parseTyped || draft.trim() === '') {
+      setDraft(null);
+      return;
+    }
     const typed = parseTyped(draft);
     if (typed == null) {
+      setDraft(null);
       showToast(`Enter a line from ${faceOf(min)} up`);
       return;
+    }
+    const clampedText = clampedFieldText(draft, typed, faceOf);
+    if (clampedText != null && clampedText !== draft) {
+      setDraft(clampedText);
+      pendingClose.current = true;
+    } else {
+      setDraft(null);
     }
     if (typed !== value) pickTick(typed);
   };
@@ -3660,8 +3704,7 @@ function LineOnlyRow({
       <View
         style={styles.rowMain}
         accessible
-        accessibilityLabel={`${name}, no games logged${subline ? `, ${sublineSpoken(subline)}` : ''}`}
-        accessibilityHint="No logged games, so this row does not open"
+        accessibilityLabel={lineOnlyRowLabel(name, subline ? sublineSpoken(subline) : null)}
       >
         <Text style={styles.rowName} numberOfLines={1}>
           {name}

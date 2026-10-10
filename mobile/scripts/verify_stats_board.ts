@@ -41,8 +41,11 @@ import {
   fixtureSubline,
   canOpenPlayerDetail,
   isLineOnlyId,
+  lineOnlyRowLabel,
+  LINE_ONLY_ROW_TAIL,
   slateChipDisabled,
   slateReadKey,
+  SLATE_CHECKING_HINT,
   isStatParticipant,
   isTeamPropName,
   LINE_ONLY_ID_PREFIX,
@@ -61,6 +64,7 @@ import {
   touchedPlayerIds,
   slateGameFor,
   slateSubline,
+  sublineSpoken,
   type SortableRow,
 } from '../src/lib/statsBoard';
 import { todayET } from '../src/lib/format';
@@ -289,6 +293,24 @@ check('a line-only or blank id does not open a player page',
     !canOpenPlayerDetail('') &&
     !canOpenPlayerDetail(null));
 check('a real player id still opens', canOpenPlayerDetail('00-0036900'));
+check('a fixture is spoken with "at", not "at sign"',
+  sublineSpoken('SUN 1:00 PM ET · HOU @ TEN') === 'SUN 1:00 PM ET, HOU at TEN' &&
+    sublineSpoken('9:40 PM ET · @ SEA') === '9:40 PM ET, at SEA');
+check('a line-only label speaks the fixture, then ", no games logged yet"',
+  lineOnlyRowLabel('Tank Dell', sublineSpoken('SUN 1:00 PM ET · HOU @ TEN')) ===
+    'Tank Dell, SUN 1:00 PM ET, HOU at TEN, no games logged yet');
+check('a line-only label ends with ", no games logged yet"',
+  lineOnlyRowLabel('Tank Dell', null) === `Tank Dell${LINE_ONLY_ROW_TAIL}` &&
+    lineOnlyRowLabel('Tank Dell', 'SUN 1:00 PM ET, HOU at TEN') ===
+      'Tank Dell, SUN 1:00 PM ET, HOU at TEN, no games logged yet' &&
+    LINE_ONLY_ROW_TAIL === ', no games logged yet');
+{
+  const mark = SLATE_CHECKING_HINT.indexOf('s schedule') - 1;
+  check('the checking hint is "Checking today’s schedule" with U+2019',
+    SLATE_CHECKING_HINT === 'Checking today\u2019s schedule' &&
+      SLATE_CHECKING_HINT.charCodeAt(mark) === 0x2019 &&
+      !SLATE_CHECKING_HINT.includes("'"));
+}
 check('the Teams chip stays disabled while the previous sport\'s slate is still in state',
   slateChipDisabled(true, true) === true);
 check('the Teams chip stays disabled with no slate', slateChipDisabled(false, false) === true);

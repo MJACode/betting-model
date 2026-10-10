@@ -31,6 +31,7 @@ import { join } from 'node:path';
 import {
   YARDAGE_STEP,
   clampTypedLine,
+  clampedFieldText,
   clearSettleSkip,
   defaultLineN,
   maxLineN,
@@ -304,6 +305,28 @@ for (const def of STAT_CATALOG) {
   );
   check('typed 0 clamps up to the floor', clampTypedLine(parseTypedLine('0'), scale.min, hi) === scale.min);
   check('junk stays refused', clampTypedLine(parseTypedLine('abc'), scale.min, hi) === null);
+  check(
+    'a clamped 999 paints 150 in the text field',
+    clampedFieldText('999', hi, String) === String(hi),
+    `got ${clampedFieldText('999', hi, String)}`,
+  );
+  check(
+    'an in-range typed line does not rewrite the field',
+    clampedFieldText('47', 47, String) === null,
+  );
+  check(
+    'a typed 0 paints the floor in the field',
+    clampedFieldText('0', scale.min, String) === String(scale.min),
+  );
+  check(
+    'the field uses the face, so a half-point mode shows the half point',
+    clampedFieldText('999', hi, (n) => String(n - 0.5)) === String(hi - 0.5),
+  );
+  check(
+    'an in-range Over face is already applied, so the field closes',
+    clampedFieldText('1.5', 2, (n) => String(n - 0.5)) === null,
+  );
+  check('junk does not rewrite the field', clampedFieldText('abc', null, String) === null);
 }
 
 {
@@ -318,6 +341,13 @@ for (const def of STAT_CATALOG) {
   check(
     'a typed line is clamped onto the ruler scale',
     /clampTypedLine\(parseTypedLine\(text, hitMode\), rulerScale\.min, rulerScale\.max\)/.test(screen),
+  );
+  check(
+    'a clamped typed line is written into the field before the field closes',
+    screen.includes('clampedFieldText(draft, typed, faceOf)') &&
+      screen.includes('clampedText !== draft') &&
+      screen.includes('setDraft(clampedText)') &&
+      screen.includes('pendingClose.current = true'),
   );
 }
 

@@ -414,6 +414,25 @@ export function canOpenPlayerDetail(playerId: string | null | undefined): boolea
   return !!playerId && !isLineOnlyId(playerId);
 }
 
+/** Spoken ending of a line-only row. It goes at the end of the label. */
+export const LINE_ONLY_ROW_TAIL = ', no games logged yet';
+
+/**
+ * The line-only row's accessibility label. Name, then the spoken fixture,
+ * then the tail — VoiceOver reads that the row has no games after it has
+ * said who and which game. The row is not a button and has no hint.
+ */
+export function lineOnlyRowLabel(name: string, spokenSubline: string | null): string {
+  const head = spokenSubline ? `${name}, ${spokenSubline}` : name;
+  return `${head}${LINE_ONLY_ROW_TAIL}`;
+}
+
+/**
+ * VoiceOver hint while a slate read is in flight, on the Teams chip and the
+ * Players Availability switch. The apostrophe is U+2019.
+ */
+export const SLATE_CHECKING_HINT = 'Checking today\u2019s schedule';
+
 /**
  * Identity of one slate read. A sport switch or an ET-date rollover is a
  * different slate. Both boards key the fetch on this, so an app left open
@@ -796,5 +815,7 @@ export function slateSubline(
  * review, 2026-09-05).
  */
 export function sublineSpoken(subline: string): string {
-  return subline.replace(/ · /g, ', ').replace(/(^|, )@ /, '$1at ');
+  // "HOU @ TEN" is not the away marker "@ SEA". VoiceOver reads a bare "@"
+  // as "at sign", so both shapes become the word.
+  return subline.replace(/ · /g, ', ').replace(/(^|, )@ /, '$1at ').replace(/ @ /g, ' at ');
 }

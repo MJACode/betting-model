@@ -34,6 +34,8 @@ export interface FilterChipProps {
    */
   busy?: boolean;
   accessibilityLabel?: string;
+  /** Spoken after the label. Omitted on a chip that has nothing further to say. */
+  accessibilityHint?: string;
 }
 
 export function FilterChip({
@@ -46,6 +48,7 @@ export function FilterChip({
   disabled = false,
   busy = false,
   accessibilityLabel,
+  accessibilityHint,
 }: FilterChipProps) {
   const fg = disabled ? colors.textTertiary : active ? colors.textInverse : colors.textSecondary;
   return (
@@ -61,6 +64,7 @@ export function FilterChip({
       accessibilityRole="button"
       accessibilityState={{ selected: active, disabled, busy }}
       accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityHint={accessibilityHint}
       style={({ pressed }) => [
         styles.chip,
         size === 'sm' && styles.chipSm,
