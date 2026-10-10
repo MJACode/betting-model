@@ -85,7 +85,13 @@ check('a row with no player id is not pressable',
 check('the Players Availability switch is dimmed while checking, then uses its normal hint',
   /accessibilityState=\{\{\s*disabled: slateCutDead,\s*checked: tonightActive && !gamesPicked,\s*\}\}/.test(stats) &&
     /slateChecking\s*\?\s*SLATE_CHECKING_HINT/.test(stats) &&
-    /On shows only players in action, off shows every player/.test(stats));
+    /PLAYERS_SLATE_EMPTY_HINT/.test(stats) &&
+    /PLAYERS_SLATE_GAMES_HINT/.test(stats) &&
+    /PLAYERS_SLATE_LOADING_HINT/.test(stats) &&
+    /PLAYERS_SLATE_CUT_HINT/.test(stats) &&
+    !/Playing today, unavailable/.test(stats) &&
+    !/\$\{slateLabel\}, /.test(stats) &&
+    !/\$\{slateLabel\}\. On shows/.test(stats));
 
 const teamsReset = teams.slice(
   teams.indexOf('// Reset to the sport\'s default stat'),
@@ -99,7 +105,12 @@ const chip = readFileSync(join(ROOT, 'src/components/filters/FilterChip.tsx'), '
 check('the Teams chip is dimmed while checking, with the checking hint, then its normal hint',
   /disabled=\{slateChipDisabled\(slateChecking, hasSlate\)\}/.test(teams) &&
     /slateChecking\s*\?\s*SLATE_CHECKING_HINT/.test(teams) &&
-    /Showing only teams on this slate/.test(teams) &&
+    /TEAMS_SLATE_ON_HINT/.test(teams) &&
+    /TEAMS_SLATE_OFF_HINT/.test(teams) &&
+    /TEAMS_SLATE_FAILED_HINT/.test(teams) &&
+    /teamsNoGamesHint\(sport\)/.test(teams) &&
+    !/Playing today, unavailable/.test(teams) &&
+    !/\$\{slateLabel\}, /.test(teams) &&
     /accessibilityState=\{\{ selected: active, disabled, busy \}\}/.test(chip) &&
     /accessibilityHint=\{accessibilityHint\}/.test(chip));
 check('the Teams slate refetches when the ET date changes and on pull-to-refresh',

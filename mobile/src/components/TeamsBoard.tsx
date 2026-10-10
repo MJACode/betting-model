@@ -48,6 +48,10 @@ import {
   slateLabelFor,
   slateReadKey,
   SLATE_CHECKING_HINT,
+  TEAMS_SLATE_FAILED_HINT,
+  TEAMS_SLATE_OFF_HINT,
+  TEAMS_SLATE_ON_HINT,
+  teamsNoGamesHint,
   slateSubline,
   sublineSpoken,
 } from '@/lib/statsBoard';
@@ -458,12 +462,12 @@ export function TeamsBoard({
             slateChecking
               ? SLATE_CHECKING_HINT
               : slateFailed
-                ? 'Playing today, unavailable: the schedule could not be loaded'
+                ? TEAMS_SLATE_FAILED_HINT
                 : !hasSlate
-                  ? `Playing today, unavailable: no ${sport} games in the next week`
+                  ? teamsNoGamesHint(sport)
                   : slateActive
-                    ? `${slateLabel}, on. Showing only teams on this slate`
-                    : `${slateLabel}, off. Showing every team`
+                    ? TEAMS_SLATE_ON_HINT
+                    : TEAMS_SLATE_OFF_HINT
           }
         />
       </View>

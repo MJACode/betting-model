@@ -46,6 +46,14 @@ import {
   slateChipDisabled,
   slateReadKey,
   SLATE_CHECKING_HINT,
+  TEAMS_SLATE_FAILED_HINT,
+  TEAMS_SLATE_OFF_HINT,
+  TEAMS_SLATE_ON_HINT,
+  teamsNoGamesHint,
+  PLAYERS_SLATE_CUT_HINT,
+  PLAYERS_SLATE_EMPTY_HINT,
+  PLAYERS_SLATE_GAMES_HINT,
+  PLAYERS_SLATE_LOADING_HINT,
   isStatParticipant,
   isTeamPropName,
   LINE_ONLY_ID_PREFIX,
@@ -311,6 +319,19 @@ check('a line-only label ends with ", no games logged yet"',
       SLATE_CHECKING_HINT.charCodeAt(mark) === 0x2019 &&
       !SLATE_CHECKING_HINT.includes("'"));
 }
+check('a restored hint drops the control name and ends with a period',
+  teamsNoGamesHint('NFL') === 'Unavailable: no NFL games in the next week.' &&
+    TEAMS_SLATE_FAILED_HINT === 'Unavailable: the schedule could not be loaded.' &&
+    TEAMS_SLATE_ON_HINT === 'On. Showing only teams on this slate.' &&
+    TEAMS_SLATE_OFF_HINT === 'Off. Showing every team.' &&
+    PLAYERS_SLATE_EMPTY_HINT === 'Unavailable: no games scheduled.' &&
+    PLAYERS_SLATE_GAMES_HINT === 'Unavailable while a game is picked above.' &&
+    PLAYERS_SLATE_LOADING_HINT === 'Loading.' &&
+    PLAYERS_SLATE_CUT_HINT === 'On shows only players in action, off shows every player.' &&
+    ![TEAMS_SLATE_FAILED_HINT, TEAMS_SLATE_ON_HINT, TEAMS_SLATE_OFF_HINT,
+      teamsNoGamesHint('NFL'), PLAYERS_SLATE_EMPTY_HINT, PLAYERS_SLATE_GAMES_HINT,
+      PLAYERS_SLATE_LOADING_HINT, PLAYERS_SLATE_CUT_HINT,
+    ].some((h) => h.startsWith('Playing today') || h.startsWith('Next slate')));
 check('the Teams chip stays disabled while the previous sport\'s slate is still in state',
   slateChipDisabled(true, true) === true);
 check('the Teams chip stays disabled with no slate', slateChipDisabled(false, false) === true);

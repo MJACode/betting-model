@@ -434,6 +434,24 @@ export function lineOnlyRowLabel(name: string, spokenSubline: string | null): st
 export const SLATE_CHECKING_HINT = 'Checking today\u2019s schedule';
 
 /**
+ * The hint once the slate read has settled. VoiceOver reads the control's
+ * name first, so these start at the words after it, capitalised, and end
+ * with a period. The checking hint above is the exception: it does not
+ * repeat the name.
+ */
+export const TEAMS_SLATE_FAILED_HINT = 'Unavailable: the schedule could not be loaded.';
+export const TEAMS_SLATE_ON_HINT = 'On. Showing only teams on this slate.';
+export const TEAMS_SLATE_OFF_HINT = 'Off. Showing every team.';
+export function teamsNoGamesHint(sport: string): string {
+  return `Unavailable: no ${sport} games in the next week.`;
+}
+
+export const PLAYERS_SLATE_EMPTY_HINT = 'Unavailable: no games scheduled.';
+export const PLAYERS_SLATE_GAMES_HINT = 'Unavailable while a game is picked above.';
+export const PLAYERS_SLATE_LOADING_HINT = 'Loading.';
+export const PLAYERS_SLATE_CUT_HINT = 'On shows only players in action, off shows every player.';
+
+/**
  * Identity of one slate read. A sport switch or an ET-date rollover is a
  * different slate. Both boards key the fetch on this, so an app left open
  * overnight does not keep filtering on yesterday's teams under "Playing today".

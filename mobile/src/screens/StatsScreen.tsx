@@ -120,6 +120,10 @@ import {
   canOpenPlayerDetail,
   lineOnlyRowLabel,
   SLATE_CHECKING_HINT,
+  PLAYERS_SLATE_CUT_HINT,
+  PLAYERS_SLATE_EMPTY_HINT,
+  PLAYERS_SLATE_GAMES_HINT,
+  PLAYERS_SLATE_LOADING_HINT,
   isStatParticipant,
   fixtureSubline,
   lineOnlyPlayers,
@@ -2751,18 +2755,19 @@ export function StatsScreen() {
                 slateChecking
                   ? SLATE_CHECKING_HINT
                   : !hasSlate
-                    ? 'Playing today, unavailable: no games scheduled'
+                    ? PLAYERS_SLATE_EMPTY_HINT
                     : gamesPicked
-                      ? `${slateLabel}, unavailable while a game is picked above`
+                      ? PLAYERS_SLATE_GAMES_HINT
                       // The chip said ", loading" for this exact reason: the tap
                       // is a network read and VoiceOver focus stays on the
                       // control while the board changes underneath it. The
                       // footer's `busy` is a visible affordance, not a spoken
                       // one — accessibilityState.busy has no VoiceOver trait —
                       // so the words have to be here (UX review, 2026-09-12).
+                      // The name is the label; the hint starts at the state.
                       : loading
-                        ? `${slateLabel}, loading`
-                        : `${slateLabel}. On shows only players in action, off shows every player`
+                        ? PLAYERS_SLATE_LOADING_HINT
+                        : PLAYERS_SLATE_CUT_HINT
               }
             />
           </View>
