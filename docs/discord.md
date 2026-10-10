@@ -226,6 +226,17 @@ VOID with no `discord_void` row stays on the board. The worker job is
 `publish_discord_void` (`dry_run` defaults to true). The migration is
 `discord_void_notice_2026_10_09.sql`; it is not applied from a dev session.
 
+A real post (2026-10-10 review) reaches Discord at most once. It sends each
+message once (`_post_void_once`: a 429 is the only retry; a timeout or a 5xx
+is "unknown", not resent), commits a `void_notice_attempt` row before each
+send, never raises after a send, and retries a failed save once on a fresh
+connection. Any later run refuses picks with an attempt row and no
+`discord_void` row until a person has checked the channel, and the job fails
+such a run without a retry. A real post also applies the view migrations and
+refuses unless the view and the `anon_read_discord_publish` policy both
+mention `discord_void`. The job takes a reviewed text by name (`reason_key`,
+`VOID_NOTICE_TEXTS`) over exactly its picks; pasted text is for dry runs.
+
 **3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
 beyond it on the day (0 rows), so this is closed before it costs a pick rather
 than after. `NFL_AHEAD_DAYS` is 11 = the 10-day poll/prop horizon

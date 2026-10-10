@@ -98,10 +98,15 @@ Found 2026-10-09 while making posted picks voidable. After a void:
 The notice wording: mike chose his fuller text on 2026-10-10. Branch
 `claude/void-notice-fuller-text` has it twice: `VOID_NOTICE_NCAAF_STALE_8` for
 the 8, and `VOID_NOTICE_NCAAF_STALE_15`, which adds the 7 posted picks voided
-on 2026-09-19. Which one goes out is still mike's call. Before it posts, the
-view and the `push_sent` read policy must both mention `discord_void` (on
-2026-10-10 neither did), and it must go out before Sat Oct 17 12:00 PM ET.
-The phone push is still a decision.
+on 2026-09-19. Which one goes out is still mike's call. The declared job names
+it with `reason_key` (`ncaaf_stale_8` or `ncaaf_stale_15`) and lists exactly
+its picks; pasted text is refused for a real post. A real post refuses to run
+until the view and the `push_sent` read policy both mention `discord_void` (it
+applies the migration itself first; on 2026-10-10 neither did), and it must go
+out before Sat Oct 17 12:00 PM ET. If a real post comes back incomplete, the
+job fails without a retry and its `next_step` says what to check in the
+channel; any rerun refuses those picks until the `void_notice_attempt` rows
+are settled. The phone push is still a decision.
 
 ## [x] NCAAF picks scored from prices more than a week old — FIXED 2026-10-09
 

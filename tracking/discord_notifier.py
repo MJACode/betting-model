@@ -16,6 +16,7 @@ Producers, each independently enabled by whether its webhook is configured:
   • notify_discord_void — one gray notice per sport for picks that are already
     VOID and already posted. Writes push_sent kind discord_void only after
     Discord accepts the message. Does not edit or delete the original post.
+    Sends each message at most once; it does not use _post, which resends.
 
 Dedupe reuses the existing `push_sent` ledger (UNIQUE(lock_key, kind)) with
 discord_* kinds, so a Discord post is independent of the mobile push for the
@@ -2212,15 +2213,17 @@ VOID_NOTICE_REASON = (
 
 # mike's text for the NCAAF totals priced off DraftKings numbers saved before
 # DraftKings took the games down (2026-10-10: "the bot posts my fuller text").
-# Pass one as `reason`. It is the description; the fields under it are the
-# list, so the text carries no list of its own. The title stays _void_title.
+# The worker job passes one by name (reason_key, VOID_NOTICE_TEXTS below). It
+# is the description; the fields under it are the list, so the text carries
+# no list of its own. _void_title gives it mike's "Correction: n picks voided".
 #
 # Two things must hold when it posts, or a sentence in it is false:
 #   * "The app no longer shows them as picks" needs the view migration
 #     discord_void_notice_2026_10_09.sql to have run, so v_discord_published
-#     drops a lock once its discord_void row exists.
+#     drops a lock once its discord_void row exists. notify_discord_void
+#     refuses a real post until it has (_app_view_ready).
 #   * "None ... has been played": the first of the 8 kicks off Sat Oct 17
-#     at 12:00 PM ET.
+#     at 12:00 PM ET. Nothing in the code checks this one.
 #
 # _8 is the eight voided 2026-10-09 (2558703, 2558736, 2935576, 2992283,
 # 2992290, 2992474, 3020766, 3204788). _15 adds the seven voided 2026-09-19
