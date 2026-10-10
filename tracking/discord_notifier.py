@@ -2468,7 +2468,8 @@ def _void_rows_sql() -> str:
                {key} AS lock_key,
                sig.message_id, sig.sent_at,
                (sig.kind IS NOT NULL) AS has_signal,
-               (void.kind IS NOT NULL) AS already_voided
+               (void.kind IS NOT NULL) AS already_voided,
+               (att.kind IS NOT NULL) AS attempted
           FROM picks p
           LEFT JOIN games g ON g.game_id = p.game_id
           LEFT JOIN push_sent sig
@@ -2478,6 +2479,9 @@ def _void_rows_sql() -> str:
           LEFT JOIN push_sent void
             ON void.lock_key = {key}
            AND void.kind = 'discord_void'
+          LEFT JOIN push_sent att
+            ON att.lock_key = {key}
+           AND att.kind = '{_VOID_ATTEMPT_KIND}'
          WHERE p.pick_id = ANY(%s)
     """
 
@@ -2511,6 +2515,7 @@ def _pick_from_row(row) -> dict:
         "posted_at": posted,
         "has_signal": bool(row[21]),
         "already_voided": bool(row[22]),
+        "attempted": bool(row[23]),
     }
 
 
@@ -2546,6 +2551,149 @@ def _ledger_void(conn, picks: list[dict], sent_at: str, message_id: str) -> None
             (pick["lock_key"], sent_at, stored),
         )
     conn.commit()
+
+
+# ── Send at most once ────────────────────────────────────────────────────────
+# A void notice cannot be taken back, and a second copy in the channel is a
+# second correction. The ledger stops a rerun after a clean run, but three
+# paths could still post it twice: _post resends after a lost reply; a raise
+# after the send made the worker queue the job again; and a worker that died
+# between the send and the save left no record, so the rerun posted again.
+#
+# So: one HTTP send per message (a 429 is the only retry, because Discord did
+# not take the message); no raise once a send has been tried; one more try to
+# save on a fresh connection; and an attempt row, committed before each send,
+# that blocks any rerun until a person has looked at the channel.
+#
+# The attempt kind deliberately does not start with "discord": the ops
+# dashboard counts kind LIKE 'discord%' as delivered posts. Its sent_at is
+# NULL so the delivery reports, which filter on sent_at, do not list it.
+_VOID_ATTEMPT_KIND = "void_notice_attempt"
+
+
+class DiscordVoidUnresolved(DiscordVoidRejected):
+    """An earlier send for one of these picks has no outcome on record.
+
+    Nothing was sent. Rerunning cannot help until a person has checked the
+    channel and settled the record.
+    """
+
+
+def _post_void_once(url: str, payload: dict) -> dict:
+    """POST one void notice. Never resends a message Discord may have taken.
+
+    Returns {"outcome", "message_id", "detail"}. outcome is:
+      posted   Discord answered 2xx; message_id is its id.
+      refused  Discord answered and did not take it (4xx, or still 429
+               after the retries). Nothing is in the channel.
+      unknown  No answer (timeout, dropped connection) or a 5xx. Discord may
+               have taken it; only the channel can say.
+    detail never carries the webhook URL: it is a credential.
+    """
+    sep = "&" if "?" in url else "?"
+    wait_url = f"{url}{sep}wait=true"
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = requests.post(wait_url, json=payload, timeout=_POST_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001 — the reply is lost, not the post
+            return {"outcome": "unknown", "message_id": None,
+                    "detail": f"no reply from Discord ({type(exc).__name__})"}
+        if resp.status_code in (200, 204):
+            try:
+                message_id = str(resp.json().get("id") or _POST_OK_NO_ID)
+            except Exception:  # noqa: BLE001 — 204, or a body we can't parse
+                message_id = _POST_OK_NO_ID
+            return {"outcome": "posted", "message_id": message_id,
+                    "detail": f"HTTP {resp.status_code}"}
+        if resp.status_code == 429:
+            try:
+                wait = float(resp.json().get("retry_after", 1.0))
+            except Exception:  # noqa: BLE001 — malformed 429 body
+                wait = 1.0
+            logger.warning(f"Discord 429 on a void notice; Discord asked for "
+                           f"{wait:.1f}s (attempt {attempt + 1}/"
+                           f"{_MAX_RETRIES + 1})")
+            time.sleep(min(max(wait, 0.5), _MAX_429_WAIT))
+            continue
+        if 500 <= resp.status_code < 600:
+            return {"outcome": "unknown", "message_id": None,
+                    "detail": f"HTTP {resp.status_code} from Discord"}
+        return {"outcome": "refused", "message_id": None,
+                "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    return {"outcome": "refused", "message_id": None,
+            "detail": f"still rate-limited after {_MAX_RETRIES + 1} tries"}
+
+
+def _mark_void_attempt(conn, picks: list[dict]) -> None:
+    """Committed before the send, so a death after it leaves a trace."""
+    for pick in picks:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            f"VALUES (%s, '{_VOID_ATTEMPT_KIND}', NULL, NULL) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (pick["lock_key"],),
+        )
+    conn.commit()
+
+
+def _record_void(conn, picks: list[dict], sent_at: str,
+                 message_id: str) -> str | None:
+    """Save the notice's rows; once more on a fresh connection if that fails.
+
+    Returns None when saved, else what went wrong. Never raises: the message
+    is already in the channel.
+    """
+    try:
+        _ledger_void(conn, picks, sent_at, message_id)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        first = f"{type(exc).__name__}: {exc}"
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+    fresh = None
+    try:
+        fresh = get_connection()
+        _ledger_void(fresh, picks, sent_at, message_id)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        return f"{first}; again on a fresh connection: {type(exc).__name__}: {exc}"
+    finally:
+        if fresh is not None:
+            try:
+                fresh.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _void_next_step(messages: list[dict]) -> str:
+    """What a person has to do, in the order it matters."""
+    steps: list[str] = []
+    for m in messages:
+        keys = ", ".join(m["lock_keys"])
+        if m["outcome"] == "unknown":
+            steps.append(
+                f"Discord may have accepted it; check the channel before "
+                f"queueing again ({m['sport']}: {m['detail']}). If the notice "
+                f"is there, save its discord_void rows with that message's id. "
+                f"If it is not, delete the {_VOID_ATTEMPT_KIND} rows for: {keys}.")
+        elif m["outcome"] == "refused":
+            steps.append(
+                f"Discord refused the {m['sport']} notice ({m['detail']}); "
+                f"nothing was posted. Fix the cause, then delete the "
+                f"{_VOID_ATTEMPT_KIND} rows for: {keys}, and queue again.")
+        elif m["outcome"] == "posted_not_recorded":
+            steps.append(
+                f"The {m['sport']} notice posted as message {m['message_id']}, "
+                f"but its discord_void rows were not saved ({m['detail']}). "
+                f"Save them by hand with that id. Do not queue again.")
+        elif m["outcome"] == "not_sent":
+            steps.append(
+                f"The {m['sport']} notice for {keys} was not sent; queue it "
+                f"once the above is settled.")
+    steps.append("Until then a rerun refuses these picks and sends nothing.")
+    return " ".join(steps)
 
 
 # The same two-part check the migration uses to skip itself. Both parts are
@@ -2598,8 +2746,16 @@ def notify_discord_void(pick_ids, reason: str | None = None,
     are skipped; a rerun of a finished list is a no-op.
 
     dry_run makes no HTTP call and no ledger write. It returns the exact
-    POST bodies. A failed post writes nothing for that message. This never
-    edits or deletes an existing Discord message.
+    POST bodies. This never edits or deletes an existing Discord message.
+
+    A real post reaches Discord at most once per message. Every check that
+    can fail runs before the first send and raises DiscordVoidRejected; a
+    rerun after one of those is safe. Once a send has been tried this never
+    raises. It returns "complete" and, per message, an outcome (posted,
+    refused, unknown, posted_not_recorded, not_sent); when not complete,
+    "next_step" says what a person has to check. An attempt row committed
+    before each send makes any later run refuse those picks
+    (DiscordVoidUnresolved) until that is settled.
     """
     ids = _normalize_void_ids(pick_ids)
     custom = reason is not None and bool(str(reason).strip())
@@ -2654,6 +2810,11 @@ def notify_discord_void(pick_ids, reason: str | None = None,
                     "lock_keys": [p["lock_key"] for p in chunk],
                 })
 
+        # An attempt row with no discord_void row: an earlier send has no
+        # outcome on record (the reply was lost, the save failed, or the
+        # worker died). Only the channel can say whether it posted.
+        unresolved = [p["lock_key"] for p in pending if p["attempted"]]
+
         if dry_run:
             for item in payloads:
                 logger.info(f"[dry-run] discord void {item['sport']} "
@@ -2662,7 +2823,16 @@ def notify_discord_void(pick_ids, reason: str | None = None,
             # whether a real post would find the app ready.
             return {"dry_run": True, "posted": 0,
                     "app_view_ready": _app_view_ready(conn),
+                    "unresolved_attempt_lock_keys": unresolved,
                     "skipped_lock_keys": skipped, "payloads": payloads}
+
+        if unresolved:
+            raise DiscordVoidUnresolved(
+                [f"an earlier void notice for {len(unresolved)} of these "
+                 f"picks may already be in the channel ({', '.join(unresolved)})."
+                 f" Check the channel. If it is there, save its discord_void "
+                 f"rows with its message id; if not, delete the "
+                 f"{_VOID_ATTEMPT_KIND} rows. Nothing was sent."])
 
         # The notice is what takes these picks out of the app, and mike's
         # text says so ("The app no longer shows them as picks"). That is
@@ -2684,25 +2854,71 @@ def notify_discord_void(pick_ids, reason: str | None = None,
             raise DiscordVoidRejected(
                 [f"no webhook for {sport}" for sport in missing])
 
+        # From here a send can happen. Nothing below raises once one has been
+        # tried: a raise would make the worker queue the job again, and the
+        # rerun would post the same notice a second time.
         sent_at = datetime.now(ET).isoformat()
         posted = 0
         message_ids: list[str] = []
+        messages: list[dict] = []
         by_key = {p["lock_key"]: p for p in pending}
+        tried = False
+        stop = False
         for item in payloads:
-            url = _webhook_for_sport(item["sport"])
-            message_id = _post(url, item["payload"])
-            if not message_id:
-                raise DiscordVoidRejected(
-                    [f"Discord rejected the {item['sport']} void notice; "
-                     f"nothing was ledgered for that message"])
             chunk = [by_key[k] for k in item["lock_keys"]]
-            _ledger_void(conn, chunk, sent_at, message_id)
+            entry: dict = {"sport": item["sport"],
+                           "lock_keys": list(item["lock_keys"]),
+                           "outcome": "not_sent", "message_id": None,
+                           "detail": ""}
+            messages.append(entry)
+            if stop:
+                continue
+            try:
+                _mark_void_attempt(conn, chunk)
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+                if not tried:
+                    raise DiscordVoidRejected(
+                        [f"could not save the attempt record, so nothing was "
+                         f"sent: {type(exc).__name__}: {exc}"]) from exc
+                entry["detail"] = f"attempt record not saved: {exc}"
+                stop = True
+                continue
+            tried = True
+            url = _webhook_for_sport(item["sport"])
+            try:
+                sent = _post_void_once(url, item["payload"])
+            except Exception as exc:  # noqa: BLE001 — it never raises; be sure
+                sent = {"outcome": "unknown", "message_id": None,
+                        "detail": f"send raised {type(exc).__name__}"}
+            entry["outcome"] = sent["outcome"]
+            entry["detail"] = sent["detail"]
+            if sent["outcome"] != "posted":
+                stop = True
+                continue
+            entry["message_id"] = sent["message_id"]
+            message_ids.append(sent["message_id"])
+            problem = _record_void(conn, chunk, sent_at, sent["message_id"])
+            if problem:
+                entry["outcome"] = "posted_not_recorded"
+                entry["detail"] = problem
+                stop = True
+                continue
             posted += len(chunk)
-            message_ids.append(message_id)
-        logger.success(f"✓ Discord void: posted {posted} pick(s)")
-        return {"dry_run": False, "posted": posted,
-                "skipped_lock_keys": skipped, "message_ids": message_ids,
-                "payloads": payloads}
+
+        complete = all(m["outcome"] == "posted" for m in messages)
+        result = {"dry_run": False, "posted": posted, "complete": complete,
+                  "skipped_lock_keys": skipped, "message_ids": message_ids,
+                  "messages": messages, "payloads": payloads}
+        if complete:
+            logger.success(f"✓ Discord void: posted {posted} pick(s)")
+        else:
+            result["next_step"] = _void_next_step(messages)
+            logger.error(f"Discord void incomplete: {result['next_step']}")
+        return result
     finally:
         conn.close()
 

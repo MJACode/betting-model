@@ -30,7 +30,8 @@ WEBHOOK = "https://discord.com/api/webhooks/999/super-secret-token"
 def _row(pick_id, *, status="VOID", signal=True, voided=False,
          message_id="1553713576831885365", sport="NCAAF", live=False,
          label="Georgia vs Auburn Under 54.5",
-         lock="NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under"):
+         lock="NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under",
+         attempted=False):
     return (
         pick_id, sport, "ncaaf_over_under", "NCAAF_2026-10-17_auburn_georgia",
         "2026-10-17", "under", label, status,
@@ -43,6 +44,7 @@ def _row(pick_id, *, status="VOID", signal=True, voided=False,
         "2026-09-27T06:23:03-04:00" if signal else None,
         1 if signal else 0,
         1 if voided else 0,
+        1 if attempted else 0,
     )
 
 
@@ -70,14 +72,21 @@ class Ledger:
         self.commits = 0
         self.view = view
         self.policy = policy
+        # How many discord_void INSERTs raise before one succeeds.
+        self.fail_void_inserts = 0
 
     def execute(self, sql, params=None):
         self.statements.append((sql, params))
+        if "INSERT INTO push_sent" in sql and "'discord_void'" in sql:
+            if self.fail_void_inserts:
+                self.fail_void_inserts -= 1
+                raise RuntimeError("server closed the connection")
         if "INSERT INTO push_sent" in sql:
             lock = params[0]
+            column = 22 if "'discord_void'" in sql else 23
             for row in self.rows:
                 if row[18] == lock:
-                    row[22] = 1
+                    row[column] = 1
         outer = self
 
         class Result:
@@ -104,7 +113,15 @@ class Ledger:
 
     @property
     def inserts(self):
-        return [s for s in self.statements if "INSERT INTO push_sent" in s[0]]
+        """discord_void rows: the notice's record, written after Discord took it."""
+        return [s for s in self.statements
+                if "INSERT INTO push_sent" in s[0] and "'discord_void'" in s[0]]
+
+    @property
+    def attempts(self):
+        """void_notice_attempt rows, committed before each send."""
+        return [s for s in self.statements
+                if "INSERT INTO push_sent" in s[0] and "'void_notice_attempt'" in s[0]]
 
 
 def _bind(monkeypatch, rows, post=None, migrate=None):
@@ -124,13 +141,19 @@ def _bind(monkeypatch, rows, post=None, migrate=None):
     monkeypatch.setattr(dn, "_apply_app_view_migrations", _migrate)
     calls = []
 
-    def _post(url, payload):
+    def _post_void_once(url, payload):
         calls.append((url, payload))
         if post is None:
-            return "9001"
+            return {"outcome": "posted", "message_id": "9001",
+                    "detail": "HTTP 200"}
         return post(url, payload)
 
-    monkeypatch.setattr(dn, "_post", _post)
+    monkeypatch.setattr(dn, "_post_void_once", _post_void_once)
+
+    def forbid(*_a, **_k):
+        raise AssertionError("the void notice used the resending _post")
+
+    monkeypatch.setattr(dn, "_post", forbid)
     return ledger, calls
 
 
@@ -264,7 +287,13 @@ def test_a_rerun_skips_locks_that_already_have_a_notice(monkeypatch):
     assert ledger.inserts[0][1][2] == "9001"
     assert "discord_void" in ledger.inserts[0][0]
     assert "ON CONFLICT" in ledger.inserts[0][0]
-    assert ledger.commits == 1
+    assert first["complete"] is True
+    assert [m["outcome"] for m in first["messages"]] == ["posted"]
+    # The attempt row is committed before the send, the record after it.
+    assert len(ledger.attempts) == 1
+    assert ledger.statements.index(ledger.attempts[0]) < \
+        ledger.statements.index(ledger.inserts[0])
+    assert ledger.commits == 2
     second = dn.notify_discord_void([2992290], dry_run=False)
     assert second["posted"] == 0
     assert second["payloads"] == []
@@ -272,16 +301,24 @@ def test_a_rerun_skips_locks_that_already_have_a_notice(monkeypatch):
         "NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under"]
     assert len(calls) == 1
     assert len(ledger.inserts) == 1
-    assert ledger.commits == 1
+    assert ledger.commits == 2
 
 
-def test_a_rejected_post_and_a_raised_post_record_nothing(monkeypatch):
-    ledger, calls = _bind(monkeypatch, [_row(2992290)], post=lambda url, payload: None)
-    with pytest.raises(dn.DiscordVoidRejected):
-        dn.notify_discord_void([2992290], dry_run=False)
+def test_a_refused_or_lost_send_records_no_notice_and_does_not_raise(monkeypatch):
+    """After a send is tried nothing raises: a raise would make the queue run
+    the job again and post the notice twice."""
+    refuse = {"outcome": "refused", "message_id": None, "detail": "HTTP 400: bad"}
+    ledger, calls = _bind(monkeypatch, [_row(2992290)],
+                          post=lambda url, payload: refuse)
+    out = dn.notify_discord_void([2992290], dry_run=False)
     assert len(calls) == 1
+    assert out["complete"] is False
+    assert out["posted"] == 0
+    assert [m["outcome"] for m in out["messages"]] == ["refused"]
+    assert "nothing was posted" in out["next_step"]
     assert ledger.inserts == []
-    assert ledger.commits == 0
+    assert len(ledger.attempts) == 1      # the attempt row, before the send
+    assert ledger.commits == 1
 
     def explode(url, payload):
         raise RuntimeError("webhook down")
@@ -289,45 +326,217 @@ def test_a_rejected_post_and_a_raised_post_record_nothing(monkeypatch):
     ledger2, calls2 = _bind(monkeypatch, [_row(2992283, lock="other:ncaaf_over_under",
                                                 label="Kansas State vs Kansas Under 54.5")],
                             post=explode)
-    with pytest.raises(RuntimeError, match="webhook down"):
-        dn.notify_discord_void([2992283], dry_run=False)
+    out2 = dn.notify_discord_void([2992283], dry_run=False)
     assert len(calls2) == 1
+    assert [m["outcome"] for m in out2["messages"]] == ["unknown"]
+    assert "check the channel before queueing again" in out2["next_step"]
     assert ledger2.inserts == []
-    assert ledger2.commits == 0
 
 
-def test_a_non_2xx_response_and_a_request_exception_record_nothing(monkeypatch):
-    """Through the real _post: a 400 and a raised request write no ledger row."""
-    ledger = Ledger([_row(2992290)])
+class _Resp:
+    def __init__(self, status, body=None, text=""):
+        self.status_code = status
+        self._body = body if body is not None else {}
+        self.text = text
+
+    def json(self):
+        return self._body
+
+
+def _through_requests(monkeypatch, rows, replies):
+    """The real _post_void_once; requests.post answers from `replies`."""
+    ledger = Ledger(rows)
     monkeypatch.setattr(dn, "get_connection", lambda: ledger)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: WEBHOOK)
     monkeypatch.setattr(dn, "_apply_app_view_migrations", lambda conn: None)
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+    sends = []
 
-    class Resp:
-        status_code = 400
-        text = "rejected"
+    def post(url, **kw):
+        sends.append(url)
+        reply = replies[min(len(sends), len(replies)) - 1]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
-        def json(self):
-            return {}
+    monkeypatch.setattr(dn.requests, "post", post)
+    return ledger, sends
 
-    monkeypatch.setattr(dn.requests, "post", lambda *a, **k: Resp())
-    with pytest.raises(dn.DiscordVoidRejected):
-        dn.notify_discord_void([2992290], dry_run=False)
+
+@pytest.mark.parametrize("reply", [
+    dn.requests.exceptions.ReadTimeout("read timed out"),
+    dn.requests.exceptions.ConnectionError("connection reset"),
+    _Resp(502, text="bad gateway"),
+    _Resp(500, text="internal"),
+])
+def test_a_lost_reply_is_sent_exactly_once(monkeypatch, reply):
+    """Discord may have taken it. _post would send it three more times."""
+    ledger, sends = _through_requests(monkeypatch, [_row(2992290)], [reply])
+    out = dn.notify_discord_void([2992290], dry_run=False)
+    assert len(sends) == 1
+    assert out["complete"] is False
+    assert out["messages"][0]["outcome"] == "unknown"
+    assert "check the channel before queueing again" in out["next_step"]
     assert ledger.inserts == []
-    assert ledger.commits == 0
+    blob = json.dumps(out)
+    assert "super-secret-token" not in blob and "api/webhooks" not in blob
 
-    ledger2 = Ledger([_row(2992290)])
-    monkeypatch.setattr(dn, "get_connection", lambda: ledger2)
 
-    def down(*_a, **_k):
-        raise dn.requests.RequestException("connection reset")
+def test_a_refusal_is_sent_once_and_a_429_is_the_only_retry(monkeypatch):
+    ledger, sends = _through_requests(
+        monkeypatch, [_row(2992290)], [_Resp(400, text="Invalid Form Body")])
+    out = dn.notify_discord_void([2992290], dry_run=False)
+    assert len(sends) == 1
+    assert out["messages"][0]["outcome"] == "refused"
+    assert "Invalid Form Body" in out["messages"][0]["detail"]
+    assert ledger.inserts == []
 
-    monkeypatch.setattr(dn.requests, "post", down)
-    with pytest.raises(dn.DiscordVoidRejected):
+    # 429: Discord did not take it, so trying again cannot double-post.
+    ledger2, sends2 = _through_requests(
+        monkeypatch, [_row(2992290)],
+        [_Resp(429, {"retry_after": 0.1}), _Resp(200, {"id": "4242"})])
+    out2 = dn.notify_discord_void([2992290], dry_run=False)
+    assert len(sends2) == 2
+    assert out2["complete"] is True
+    assert out2["message_ids"] == ["4242"]
+    assert len(ledger2.inserts) == 1
+
+
+def test_a_post_whose_save_fails_keeps_its_id_and_never_posts_again(monkeypatch):
+    """Discord took it, then the database dropped. The id is in the result,
+    nothing raises, and the next run refuses instead of posting again."""
+    ledger, calls = _bind(monkeypatch, [_row(2992290)])
+    ledger.fail_void_inserts = 2          # this connection, then the fresh one
+    out = dn.notify_discord_void([2992290], dry_run=False)
+    assert len(calls) == 1
+    assert out["complete"] is False
+    assert out["message_ids"] == ["9001"]
+    m = out["messages"][0]
+    assert m["outcome"] == "posted_not_recorded"
+    assert m["message_id"] == "9001"
+    assert "again on a fresh connection" in m["detail"]
+    assert "9001" in out["next_step"]
+    # The rerun: the attempt row has no notice row beside it.
+    with pytest.raises(dn.DiscordVoidUnresolved, match="may already be in the channel"):
         dn.notify_discord_void([2992290], dry_run=False)
-    assert ledger2.inserts == []
-    assert ledger2.commits == 0
+    assert len(calls) == 1
+
+
+def test_a_failed_save_is_tried_once_more_on_a_fresh_connection(monkeypatch):
+    ledger, calls = _bind(monkeypatch, [_row(2992290)])
+    ledger.fail_void_inserts = 1
+    out = dn.notify_discord_void([2992290], dry_run=False)
+    assert out["complete"] is True
+    assert out["posted"] == 1
+    assert len(calls) == 1
+    # Two INSERT tries: the failed one and the one that saved.
+    assert len(ledger.inserts) == 2
+
+
+def test_a_reclaimed_run_with_an_attempt_on_record_sends_nothing(monkeypatch):
+    """The worker died between the send and the save. The job comes back with
+    its attempt given back; the attempt row stops it."""
+    ledger, calls = _bind(monkeypatch, [_row(2992290, attempted=True)])
+    with pytest.raises(dn.DiscordVoidUnresolved):
+        dn.notify_discord_void([2992290], dry_run=False)
+    assert calls == []
+    assert ledger.inserts == [] and ledger.attempts == []
+    assert ledger.commits == 0
+    assert ledger.migrations == 0          # refused before anything else
+    # A dry run shows it rather than refusing.
+    dry = dn.notify_discord_void([2992290], dry_run=True)
+    assert dry["unresolved_attempt_lock_keys"] == [
+        "NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under"]
+
+
+def test_a_check_that_fails_before_the_send_still_raises(monkeypatch):
+    """Before a send nothing is in the channel, so the ordinary retry is safe."""
+    ledger, calls = _bind(monkeypatch, [_row(2992290)])
+    monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: None)
+    with pytest.raises(dn.DiscordVoidRejected, match="no webhook"):
+        dn.notify_discord_void([2992290], dry_run=False)
+    assert calls == [] and ledger.attempts == []
+
+    # The attempt row cannot be saved: nothing is sent, and it raises.
+    ledger2, calls2 = _bind(monkeypatch, [_row(2992290)])
+    real = ledger2.execute
+
+    def no_attempt(sql, params=None):
+        if "INSERT INTO push_sent" in sql and "'void_notice_attempt'" in sql:
+            raise RuntimeError("read-only transaction")
+        return real(sql, params)
+
+    ledger2.execute = no_attempt
+    with pytest.raises(dn.DiscordVoidRejected, match="so nothing was sent"):
+        dn.notify_discord_void([2992290], dry_run=False)
+    assert calls2 == []
+
+
+# ── The queue never reruns a send by itself ─────────────────────────────────
+
+class _JobConn:
+    def __init__(self):
+        self.statements = []
+
+    def execute(self, sql, params=None):
+        self.statements.append((sql, params))
+
+    def commit(self):
+        pass
+
+
+def _run_job(monkeypatch, notify):
+    from tracking import job_queue as q
+
+    announced = []
+    monkeypatch.setattr(q, "_announce",
+                        lambda job, ok, detail: announced.append((ok, detail)))
+    monkeypatch.setattr(dn, "notify_discord_void", notify)
+    conn = _JobConn()
+    job = {"job_id": 7, "job_type": "publish_discord_void", "attempts": 1,
+           "args": {"pick_ids": [2992290], "dry_run": False}}
+    out = q._execute(conn, job)
+    update = [s for s in conn.statements if "UPDATE worker_jobs" in s[0]]
+    return out, update, announced
+
+
+def test_an_incomplete_post_fails_the_job_on_its_first_attempt(monkeypatch):
+    """Without this the half-sent notice is "done" with a green check, or a
+    raise puts it back to pending and the next tick posts it again."""
+    result = {"dry_run": False, "posted": 0, "complete": False,
+              "message_ids": [], "messages": [{"outcome": "unknown"}],
+              "next_step": "Discord may have accepted it; check the channel "
+                           "before queueing again."}
+    out, update, announced = _run_job(
+        monkeypatch, lambda pick_ids, reason=None, dry_run=True: result)
+    assert out["status"] == "failed" and out["final"] is True
+    sql, params = update[0]
+    assert "status = 'failed'" in sql
+    assert "pending" not in json.dumps(params)
+    assert json.loads(params[0])["complete"] is False
+    assert announced and announced[0][0] is False
+    assert "check the channel" in announced[0][1]
+
+
+def test_an_unresolved_attempt_fails_the_job_without_a_retry(monkeypatch):
+    def unresolved(pick_ids, reason=None, dry_run=True):
+        raise dn.DiscordVoidUnresolved(["an earlier void notice may already "
+                                        "be in the channel"])
+
+    out, update, announced = _run_job(monkeypatch, unresolved)
+    assert out["final"] is True
+    assert "status = 'failed'" in update[0][0]
+    assert announced and announced[0][0] is False
+
+
+def test_a_check_before_the_send_keeps_the_ordinary_retry(monkeypatch):
+    def rejected(pick_ids, reason=None, dry_run=True):
+        raise dn.DiscordVoidRejected(["no webhook for NCAAF"])
+
+    out, update, announced = _run_job(monkeypatch, rejected)
+    assert out["final"] is False
+    assert update[0][1][0] == "pending"
+    assert announced == []
 
 
 def test_validation_rejects_the_whole_list_before_any_post(monkeypatch):

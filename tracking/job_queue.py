@@ -60,6 +60,20 @@ from data.ddl_guard import schema_is_current
 
 MAX_ATTEMPTS = 3
 
+
+class FinalJobFailure(Exception):
+    """The job must not run again by itself.
+
+    _execute marks it failed at once, whatever the attempt count, keeps
+    `result` on the row, and announces it. For a job whose rerun could
+    repeat something that cannot be taken back, such as a Discord post
+    whose outcome is unknown.
+    """
+
+    def __init__(self, message: str, result: dict | None = None):
+        super().__init__(message)
+        self.result = result
+
 # One job at a time, ACROSS EVERY WORKER AND THREAD.
 #
 # max_instances=1 on the APScheduler job stops concurrent ticks and I assumed
@@ -815,7 +829,13 @@ def _job_publish_discord_void(**kw):
 
     Calls notify_discord_void. dry_run defaults to true, so a job that omits
     the flag returns the payload and does not post. The real post is
-    dry_run false, run by a person after they have read the payload.
+    dry_run false, declared by a person after they have read the payload.
+
+    The queue never reruns a real post by itself once a send may have
+    happened: an incomplete post, or a list blocked by an earlier send with
+    no outcome on record, is a FinalJobFailure. The job is marked failed
+    and announced to ops with what to check. A check that fails before any
+    send still raises the ordinary way, and a retry of that is safe.
 
     Does not edit or delete the original Discord messages. Does not update
     pick rows. A lock already carrying discord_void is skipped.
@@ -830,11 +850,19 @@ def _job_publish_discord_void(**kw):
     key = kw.get("reason_key")
     if key is not None:
         reason = dn.VOID_NOTICE_TEXTS[key]
-    return dn.notify_discord_void(
-        pick_ids=kw["pick_ids"],
-        reason=reason,
-        dry_run=kw.get("dry_run", True),
-    )
+    try:
+        result = dn.notify_discord_void(
+            pick_ids=kw["pick_ids"],
+            reason=reason,
+            dry_run=kw.get("dry_run", True),
+        )
+    except dn.DiscordVoidUnresolved as exc:
+        raise FinalJobFailure(f"void notice not sent: {exc}") from exc
+    if result.get("complete") is False:
+        raise FinalJobFailure(
+            f"void notice incomplete, posted {result.get('posted', 0)} "
+            f"pick(s): {result.get('next_step', '')}", result=result)
+    return result
 
 
 def _validate_publish_discord_void(args: dict) -> dict:
@@ -2028,6 +2056,21 @@ def _execute(conn, job: dict) -> dict:
         logger.success(f"job {job['job_id']} {job['job_type']} done")
         _announce(job, ok=True, detail=json.dumps(result, default=str)[:900])
         return {"status": "done", "job": job, "result": result}
+    except FinalJobFailure as exc:
+        # No retry, whatever the attempt count: a rerun could repeat what
+        # the first run may already have done.
+        conn.execute("""
+            UPDATE worker_jobs SET status = 'failed', finished_at = NOW(),
+                                   result = %s::jsonb, error = %s
+             WHERE job_id = %s
+        """, (None if exc.result is None else json.dumps(exc.result, default=str),
+              f"FinalJobFailure: {exc}", job["job_id"]))
+        conn.commit()
+        logger.error(f"job {job['job_id']} {job['job_type']} failed, not "
+                     f"retried: {exc}")
+        _announce(job, ok=False, detail=str(exc)[:900])
+        return {"status": "failed", "job": job, "error": str(exc),
+                "final": True}
     except Exception as exc:  # noqa: BLE001 — every failure is recorded, not raised
         err = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-1500:]}"
         final = job["attempts"] >= MAX_ATTEMPTS
