@@ -55,6 +55,10 @@ converging on the same place from the other side.
   at 1.8pp exists but INSERT is gated (`MLB_SPREAD_MARKET_PUBLISH` default 0).
   GROK Pin-vs-DK ≥2pp spreads ~−5% n≈200 — do not live-publish that construction.
   Not an unpause of this id. `docs/mlb_runline_ou_edge_search.md`.
+  2026-10-10: the 1.8-point rule month by month over the whole season is in
+  `docs/mlb_spread_market_2026.md`: +3.2% to +3.7% overall, April flat or red
+  and May red on every book list; the publish switch has been off since
+  2026-09-19 and the own-EV floor blocks it too (PR #761).
 * **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last
   three starts), shared by the daily ingest and the rebuild via
   `data/pitcher_rates.py`. It used to be `AVG(era)` over the last three stored
