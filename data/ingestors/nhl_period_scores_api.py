@@ -24,6 +24,14 @@ three period sums do not agree with the stored final -- the final may exceed
 them by one overtime or shootout goal, never trail them -- is skipped and
 counted, not written.
 
+A FEED THAT CANNOT BE READ IS A FAILURE, NOT A MISSING GAME. A date the feed
+does not answer after four tries is listed in `feed_failed`; once every row
+that was read has been written, the run raises, so the worker job fails and is
+retried (each retry reads only what is still missing). A game absent from a
+feed that WAS read is only counted (`not_in_feed`) and the run finishes.
+Before this, an outage finished as a successful run with every game counted as
+`not_in_feed`, and a finished worker job never runs again.
+
     python -m data.ingestors.nhl_period_scores_api --from 2022-11-28                 # count what is missing, write nothing
     python -m data.ingestors.nhl_period_scores_api --from 2022-11-28 --apply
     python -m data.ingestors.nhl_period_scores_api --recent 5 --apply               # a top-up
@@ -78,7 +86,8 @@ def agrees(hp: list[int], ap: list[int], home_final, away_final) -> bool:
     return (dh, da) in ((1, 0), (0, 1)) and sum(hp) == sum(ap)
 
 
-def fetch(day: str) -> list[dict]:
+def fetch(day: str) -> list[dict] | None:
+    """The day's games, [] for a day the feed answered with none, None when it did not answer after four tries."""
     for attempt in range(4):
         try:
             r = requests.get(URL.format(date=day), timeout=30)
@@ -88,7 +97,7 @@ def fetch(day: str) -> list[dict]:
         except requests.RequestException as exc:
             logger.warning(f"{day}: {exc}")
         time.sleep(2 * (attempt + 1))
-    return []
+    return None
 
 
 def run(first: str, last: str, apply: bool) -> dict:
@@ -108,14 +117,18 @@ def run(first: str, last: str, apply: bool) -> dict:
             if g["game_id"] not in stored:
                 by_date[g["game_date"]].append(nhl_id)
         out = {"games_in_range": len(ours), "already_stored": len(ours) - sum(map(len, by_date.values())),
-               "dates_to_read": len(by_date), "written": 0, "disagree": 0, "not_in_feed": 0}
+               "dates_to_read": len(by_date), "written": 0, "disagree": 0, "not_in_feed": 0,
+               "feed_failed": []}
         if not apply:
             return out
-        payload, seen = [], {}
+        payload, seen, feed_failed = [], {}, set()
 
         def day_feed(d: str) -> list[dict]:
             if d not in seen:
-                seen[d] = fetch(d)
+                got = fetch(d)
+                if got is None:
+                    feed_failed.add(d)                 # unread, not empty: this run fails once the rest is written
+                seen[d] = got or []
                 time.sleep(0.15)
             return seen[d]
 
@@ -138,6 +151,13 @@ def run(first: str, last: str, apply: bool) -> dict:
                 out["written"] += _write(conn, payload)
                 payload = []
         out["written"] += _write(conn, payload)
+        out["feed_failed"] = sorted(feed_failed)
+        if feed_failed:
+            # After the write, so what was read is kept. Raising makes the worker job fail and retry;
+            # a printed count of games "not in the feed" would have finished it for good.
+            counts = {k: v for k, v in out.items() if k != "feed_failed"}
+            raise RuntimeError(f"NHL score feed could not be read for {len(feed_failed)} date(s), "
+                               f"first {out['feed_failed'][:10]}; {counts}")
         return out
     finally:
         conn.close()

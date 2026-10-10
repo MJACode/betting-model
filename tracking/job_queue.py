@@ -551,6 +551,8 @@ def _validate_nhl_derivative_odds_history(args: dict) -> dict:
 # unmerged PR #863. It is free and keyless, skips a game already stored under
 # any source, and writes only `nhl_period_scores`. A dev session holds no
 # DATABASE_URL, so the run is a worker job. Dry run unless apply is true.
+# A date the feed cannot be read raises after the rows that were read are
+# written, so this job fails and _execute retries it; a done job never reruns.
 _NHL_PERIOD_SCORES_ARGS = frozenset({"first", "last", "recent", "apply"})
 _NHL_PERIOD_SCORES_MAX_RECENT = 30
 

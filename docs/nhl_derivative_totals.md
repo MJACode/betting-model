@@ -206,7 +206,13 @@ The importer runs on the worker as job type `nhl_period_scores`
 (`tracking/job_queue.py`): `{"first": "YYYY-MM-DD"}` counts what is missing,
 `"apply": true` writes, and `{"recent": N, "apply": true}` tops up the last N
 days. It skips any game already stored under either source, and skips (and
-counts) a game whose periods do not add up to the stored final. The declared
+counts) a game whose periods do not add up to the stored final. If the feed
+cannot be read for a date after four tries, the job keeps the rows it did read
+and then fails, so the worker tries it again, up to three attempts in all.
+Each attempt reads only the games still missing. A game that is simply absent
+from a feed that was read is counted (`not_in_feed`) and the job finishes. If
+all three attempts fail, the fill needs a new declared key: a key already in
+the queue is never queued again. The declared
 job `nhl-period-scores-2026-27-fill-2026-10-10` fills 2026-27: on 2026-10-10,
 69 games had a final score and 8 had period scores. Nothing tops the table up
 daily. The feed keeps its history, so a top-up run before any grade that
