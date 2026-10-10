@@ -181,6 +181,16 @@ export function TeamsBoard({
   const now = useNow();
   const etDay = etDate(new Date(now));
   const slateKey = slateReadKey(sport, etDay);
+  // Same gap as a sport change: until this read returns, yesterday's teams
+  // would stay under an enabled chip. `slateFor` null is "checking".
+  const [slateDay, setSlateDay] = useState(etDay);
+  if (slateDay !== etDay) {
+    setSlateDay(etDay);
+    setSlate({ date: '', isToday: false, games: [] });
+    setGameLines([]);
+    setSlateFailed(false);
+    setSlateFor(null);
+  }
 
   useEffect(() => {
     let cancelled = false;

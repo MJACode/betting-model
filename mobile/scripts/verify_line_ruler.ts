@@ -36,6 +36,7 @@ import {
   defaultLineN,
   maxLineN,
   programmaticPick,
+  rulerHi,
   rulerScaleFor,
   rulerStepFor,
   settleHold,
@@ -338,9 +339,25 @@ for (const def of STAT_CATALOG) {
       screen.includes('clearSettleSkip(') &&
       screen.includes('onScrollBeginDrag='),
   );
+  const offGrid: RulerScale = { min: 5, max: 152, step: 5 };
+  const last = rulerHi(offGrid);
   check(
-    'a typed line is clamped onto the ruler scale',
-    /clampTypedLine\(parseTypedLine\(text, hitMode\), rulerScale\.min, rulerScale\.max\)/.test(screen),
+    'an off-grid max leaves the last stop below scale.max',
+    last === 150 && last < offGrid.max,
+    `hi ${last}, max ${offGrid.max}`,
+  );
+  check(
+    'typed 999 clamps to that last stop, not the off-grid max',
+    clampTypedLine(parseTypedLine('999'), offGrid.min, last) === last &&
+      clampTypedLine(parseTypedLine('999'), offGrid.min, offGrid.max) === offGrid.max,
+  );
+  check(
+    'a typed line is clamped to the VoiceOver ceiling, not scale.max',
+    /clampTypedLine\(parseTypedLine\(text, hitMode\), rulerScale\.min, rulerCeiling\)/.test(screen) &&
+      /const rulerCeiling = rulerHi\(rulerScale\)/.test(screen) &&
+      /const hi = rulerHi\(scale\)/.test(screen) &&
+      !/clampTypedLine\([\s\S]{0,120}rulerScale\.max\)/.test(screen) &&
+      !screen.includes('Below one stop is refused'),
   );
   check(
     'a clamped typed line is written into the field before the field closes',

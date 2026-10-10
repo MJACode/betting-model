@@ -58,6 +58,11 @@ check('Games stays open when there are no fixtures',
 check('Games emptyNote does not claim a dead week while checking',
   /slateChecking\s*\?\s*'Checking the schedule…'/.test(stats));
 
+const playersDay = stats.slice(stats.indexOf('if (slateDay !== etDay)'), stats.indexOf('if (slateDay !== etDay)') + 280);
+check('an ET date change marks the Players slate checking before the refetch',
+  /setSlate\(EMPTY_SLATE\)/.test(playersDay) &&
+    /setSlateGames\(\[\]\)/.test(playersDay) &&
+    /setSlateFor\(null\)/.test(playersDay));
 check('the Players slate refetches when the ET date changes and on pull-to-refresh',
   /const slateKey = slateReadKey\(sport, etDay\)/.test(stats) &&
     /const etDay = etDate\(new Date\(now\)\)/.test(stats) &&
@@ -113,6 +118,12 @@ check('the Teams chip is dimmed while checking, with the checking hint, then its
     !/\$\{slateLabel\}, /.test(teams) &&
     /accessibilityState=\{\{ selected: active, disabled, busy \}\}/.test(chip) &&
     /accessibilityHint=\{accessibilityHint\}/.test(chip));
+const teamsDay = teams.slice(teams.indexOf('if (slateDay !== etDay)'), teams.indexOf('if (slateDay !== etDay)') + 320);
+check('an ET date change marks the Teams slate checking before the refetch',
+  /setSlate\(\{ date: '', isToday: false, games: \[\] \}\)/.test(teamsDay) &&
+    /setGameLines\(\[\]\)/.test(teamsDay) &&
+    /setSlateFor\(null\)/.test(teamsDay) &&
+    !/setSlateOnly\(false\)/.test(teamsDay));
 check('the Teams slate refetches when the ET date changes and on pull-to-refresh',
   /const slateKey = slateReadKey\(sport, etDay\)/.test(teams) &&
     /const etDay = etDate\(new Date\(now\)\)/.test(teams) &&

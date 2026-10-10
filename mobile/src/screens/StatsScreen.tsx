@@ -179,6 +179,7 @@ import {
   clearSettleSkip,
   defaultLineN,
   programmaticPick,
+  rulerHi,
   rulerScaleFor,
   settleHold,
   snapStop,
@@ -386,6 +387,7 @@ export function StatsScreen() {
   // time, the Live/Final label and the "is it still bettable" filter all age
   // together on one tick (useNow).
   const now = useNow();
+  const etDay = etDate(new Date(now));
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   // The "hasn't posted lines" note is the switch — an instruction sits with
@@ -500,6 +502,16 @@ export function StatsScreen() {
     setSlateFor(null);
     setTonightOnly(SLATE_ONLY_DEFAULT);
   }
+  // An ET-date change is the same gap as a sport change: the effect refetches
+  // after paint, and that paint would still filter on yesterday's teams with
+  // the chip enabled. `slateFor` null is "checking", which disables it.
+  const [slateDay, setSlateDay] = useState(etDay);
+  if (slateDay !== etDay) {
+    setSlateDay(etDay);
+    setSlate(EMPTY_SLATE);
+    setSlateGames([]);
+    setSlateFor(null);
+  }
   // Every book's latest line for the selected stat's market on the slate date.
   const [propLines, setPropLines] = useState<{
     market: string;
@@ -589,7 +601,6 @@ export function StatsScreen() {
   // Keyed on the ET date, not on mount: `todayET()` read once left an app
   // open past midnight filtering on yesterday. `useNow` moves at midnight and
   // on foreground; pull-to-refresh bumps `slateReload`.
-  const etDay = etDate(new Date(now));
   const slateKey = slateReadKey(sport, etDay);
   useEffect(() => {
     let cancelled = false;
@@ -965,6 +976,10 @@ export function StatsScreen() {
   // keeps `lineN` on it — three copies of this arithmetic is three chances to
   // leave the board on a number the strip cannot scroll back to.
   const rulerScale: RulerScale = useMemo(() => rulerScaleFor(stat, hitMode), [stat, hitMode]);
+  // The last stop the adjustable will step to. Not `rulerScale.max`: that
+  // can sit off the grid, and a typed number parked there cannot be stepped
+  // down (`next <= hi` inside LineRuler).
+  const rulerCeiling = rulerHi(rulerScale);
 
   // Leaving Under drops the one extra stop Under needs ("n-1 or fewer" has to
   // reach a ceiling At Least says as "n+"), so a user parked on it would keep
@@ -2318,10 +2333,12 @@ export function StatsScreen() {
               }
               a11yLabel={`${stat?.label ?? ''} line`}
               // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
-              // that line in Over/Under). Below one stop is refused: "0+" is
-              // every game.
+              // that line in Over/Under). The number is clamped onto the
+              // stops VoiceOver can step: below the first stop it is raised
+              // to that stop, and above the last on-grid stop it is brought
+              // down to that stop. Junk still parses as nothing.
               parseTyped={(text) =>
-                clampTypedLine(parseTypedLine(text, hitMode), rulerScale.min, rulerScale.max)
+                clampTypedLine(parseTypedLine(text, hitMode), rulerScale.min, rulerCeiling)
               }
             />
             {/* At Least only, and a footnote rather than a headline. The row
@@ -2991,8 +3008,8 @@ function LineRuler({
   const skipSettleRef = useRef(false);
   const { min, step } = scale;
   const count = stopCount(scale);
-  /** The last reachable stop — `scale.max` aligned onto the grid. */
-  const hi = stopAt(count - 1, scale);
+  /** The last reachable stop — the same ceiling a typed line is clamped to. */
+  const hi = rulerHi(scale);
   // Short rulers (hits, Ks) get wide ticks with every value labeled — the old
   // look, now scrollable. Long rulers (points, yards) get dense ticks with
   // labels every 5th/10th value so the strip stays legible and flickable.

@@ -120,6 +120,18 @@ export function stopCount(s: RulerScale): number {
 }
 
 /**
+ * The last stop VoiceOver will step to.
+ *
+ * `scale.max` can sit off the grid (a ceiling that is not a multiple of the
+ * step). The strip and the adjustable both stop at this stop. A typed clamp
+ * has to use it too, or a number between here and `max` is one a decrement
+ * is then refused.
+ */
+export function rulerHi(s: RulerScale): number {
+  return stopAt(stopCount(s) - 1, s);
+}
+
+/**
  * The value at a stop index, clamped to the scale's ends.
  *
  * A non-finite index reads as the floor rather than propagating: this is fed
