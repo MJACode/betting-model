@@ -958,5 +958,24 @@
       "allow_posted": true,
       "reason": "decided on a DraftKings price 15 to 28 days old: the newest DraftKings row for this game at or before the pick was stored 2026-09-05 and no book had a row for it between then and the pick (the odds feed had stopped listing the game), so the number was not one DraftKings was offering when the pick was made. It was posted to members. Voided by mike's decision of 2026-10-09 to lift the posted-pick lock for these picks: 'Change the rule, void them'."
     }
+  },
+  {
+    "key": "nhl-period-scores-2026-27-fill-2026-10-10",
+    "job_type": "nhl_period_scores",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-10: triage the old PRs and rebuild the ones worth having (PR #863). Goals by period for every scored 2026-27 NHL game, from the NHL's free score feed (data/ingestors/nhl_period_scores_api.py). Measured 2026-10-10: 69 games dated 2026-09-29 to 2026-10-09 have a final score and 8 have period scores. A game already stored is skipped, so the 8 are not written twice. Writes only nhl_period_scores. The derivative-totals grade queued beside this one reads 2023-24 to 2025-26 only, so it does not wait on this fill. A later top-up is the same job type with recent.",
+    "args": {
+      "first": "2026-09-29",
+      "apply": true
+    }
+  },
+  {
+    "key": "nhl-derivative-totals-regrade-2026-10-10",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-10, PR #863 rebuilt: the derivative-totals grade again with both fixes from the 2026-10-08 follow-up. Team totals are settled on the full-game score only. On a whole-number line the model's chance of a push no longer counts as a win for the under, and the expected value returns the stake on a push. Adds the Pinnacle-against-a-bettable-book table for all three markets. Read-only. Result: worker_jobs.result->>'stdout'.",
+    "args": {
+      "script": "nhl_derivative_totals_backtest"
+    }
   }
 ]

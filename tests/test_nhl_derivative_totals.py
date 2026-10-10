@@ -172,6 +172,49 @@ def test_profit_pays_the_side_that_won():
     assert np.isnan(dt.profit(6, 5.5, np.nan, "over"))
 
 
+def test_a_whole_line_leaves_the_push_to_neither_side():
+    """On a line of 3, exactly 3 goals wins for nobody. The under is P(count < 3)."""
+    from scipy.stats import poisson
+    mu = 3.1
+    over = dt.p_over(mu, 3.0)
+    under = dt.p_under(mu, 3.0)
+    assert under == pytest.approx(poisson.cdf(2, mu))
+    assert over + under == pytest.approx(1.0 - poisson.pmf(3, mu))
+    assert over + under < 0.85                          # the push is about 22% here
+    # Negative binomial: the same rule.
+    assert dt.p_under(mu, 3.0, 0.2) + dt.p_over(mu, 3.0, 0.2) < 1.0
+    # A half line has no push: the two are complements.
+    assert dt.p_under(mu, 2.5) == pytest.approx(1.0 - dt.p_over(mu, 2.5))
+
+
+def test_side_frame_returns_the_stake_on_a_push_in_the_expected_value():
+    """EV = P(win) x payout - P(lose). The push is neither a win nor a loss."""
+    from scipy.stats import poisson
+    mu = 3.1
+    q = pd.DataFrame({"game_id": ["G1", "G2"], "game_date": ["2026-01-01"] * 2, "season": [2026] * 2})
+    # Line 3: over +105, under -125 (a coherent two-way quote). Line 2.5: -110 both ways.
+    s = dt.side_frame(q, np.array([mu, mu]), np.array([3.0, 2.5]),
+                      np.array([+105, -110]), np.array([-125, -110]), np.array([3.0, 3.0]))
+    win_under, win_over = poisson.cdf(2, mu), poisson.sf(3, mu)
+    whole_u = s[(s.side == "under") & (s.line == 3.0)].iloc[0]
+    whole_o = s[(s.side == "over") & (s.line == 3.0)].iloc[0]
+    assert whole_u.p == pytest.approx(win_under)
+    assert whole_u.ev == pytest.approx(win_under * 0.8 - win_over)
+    assert whole_o.ev == pytest.approx(win_over * 1.05 - win_under)
+    assert whole_u.p_push == pytest.approx(poisson.pmf(3, mu))
+    # The old rule (under = 1 - over, the push counted as a win) made this
+    # under a +12% bet. Without the push it loses money.
+    assert (1.0 - win_over) * 1.8 - 1.0 > 0.10
+    assert whole_u.ev < 0
+    # A half line is priced exactly as before.
+    half_u = s[(s.side == "under") & (s.line == 2.5)].iloc[0]
+    p = 1.0 - dt.p_over(mu, 2.5)
+    assert half_u.ev == pytest.approx(p * (1 + 100 / 110) - 1.0)
+    assert half_u.p_push == pytest.approx(0.0)
+    # Graded, a landing on the whole line is a push for both sides.
+    assert whole_u.profit == 0 and whole_o.profit == 0
+
+
 def _clear_bets(n_per_season: int = 200, profit: float = 0.5) -> pd.DataFrame:
     rows = []
     for season, start in ((2024, "2023-10-10"), (2025, "2024-10-10")):

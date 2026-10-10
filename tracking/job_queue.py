@@ -543,6 +543,61 @@ def _validate_nhl_derivative_odds_history(args: dict) -> dict:
     return {"apply": apply, "probe": probe, "seasons": cleaned}
 
 
+# ── NHL goals by period, from the league's free score feed ──────────────────
+#
+# 2026-10-10 (mike: triage the old PRs, rebuild the ones worth having). The
+# derivative-totals grader and model read `nhl_period_scores` and prefer the
+# 'nhl_api_score' rows, and nothing on master wrote them: the importer lived on
+# unmerged PR #863. It is free and keyless, skips a game already stored under
+# any source, and writes only `nhl_period_scores`. A dev session holds no
+# DATABASE_URL, so the run is a worker job. Dry run unless apply is true.
+_NHL_PERIOD_SCORES_ARGS = frozenset({"first", "last", "recent", "apply"})
+_NHL_PERIOD_SCORES_MAX_RECENT = 30
+
+
+def _job_nhl_period_scores(**kw):
+    """Run data.ingestors.nhl_period_scores_api with typed arguments."""
+    argv: list[str] = []
+    if kw.get("recent"):
+        argv += ["--recent", str(kw["recent"])]
+    else:
+        argv += ["--from", str(kw["first"])]
+    if kw.get("last"):
+        argv += ["--to", str(kw["last"])]
+    if kw.get("apply"):
+        argv.append("--apply")
+    return _run_script_main("data.ingestors.nhl_period_scores_api", argv)[-4000:]
+
+
+def _validate_nhl_period_scores(args: dict) -> dict:
+    """`first` (a date) or `recent` (days back, 1-30), not both. `last` is optional."""
+    extra = sorted(set(args) - _NHL_PERIOD_SCORES_ARGS)
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes first, last, recent and apply")
+    if "apply" in args and not isinstance(args["apply"], bool):
+        raise ValueError("apply must be true or false")
+    first = args.get("first")
+    last = args.get("last")
+    recent = args.get("recent")
+    if (first is None) == (recent is None):
+        raise ValueError("give first (a date) or recent (days back), exactly one")
+    if first is not None:
+        first = str(first)
+        datetime.strptime(first, "%Y-%m-%d")      # ValueError if it is not a date
+    if last is not None:
+        last = str(last)
+        datetime.strptime(last, "%Y-%m-%d")
+        if first is not None and last < first:
+            raise ValueError(f"last {last} is before first {first}")
+    if recent is not None:
+        if isinstance(recent, bool) or not isinstance(recent, int):
+            raise ValueError(f"recent must be a whole number of days, got {recent!r}")
+        if not 1 <= recent <= _NHL_PERIOD_SCORES_MAX_RECENT:
+            raise ValueError(f"recent must be 1..{_NHL_PERIOD_SCORES_MAX_RECENT}, got {recent}")
+    return {"first": first, "last": last, "recent": recent,
+            "apply": bool(args.get("apply", False))}
+
+
 # ── NHL research scripts, run where the database is ─────────────────────────
 #
 # 2026-10-08. The NHL backtests and labs read production through
@@ -1704,6 +1759,9 @@ JOBS = {
     # _job_nhl_derivative_odds_history.
     "nhl_derivative_odds_history": (_job_nhl_derivative_odds_history,
                                     _validate_nhl_derivative_odds_history),
+    # Writes only nhl_period_scores, from the free NHL score feed. Dry run
+    # unless apply. See _job_nhl_period_scores.
+    "nhl_period_scores": (_job_nhl_period_scores, _validate_nhl_period_scores),
     # Measure-only: one allowlisted NHL backtest or lab, its printout on the
     # row. Writes nothing else. See _job_nhl_research.
     "nhl_research": (_job_nhl_research, _validate_nhl_research),
