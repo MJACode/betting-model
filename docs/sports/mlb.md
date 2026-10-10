@@ -114,6 +114,8 @@ card's prices, 49 bets −12.6% to the end of the season; its +25% came from
 each game's first DraftKings quote, which the card does not use. Ticket top-2
 at 70% also turned red in September (78 bets −1.4% overall). Pre-game
 public coverage is now 255 games (Aug 0). `docs/mlb_total_public_fade.md`.
+The 2026-09-19 search for a second totals rule (PR #759) found none, and the
+full September made its closest misses worse: `docs/mlb_over_under_edge_hunt.md`.
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
