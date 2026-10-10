@@ -711,6 +711,15 @@ add it to `data/anon_readable.py`, and the page reads ~40 rows per team by
 `(sport, team)` and drops its NFL-only branch. One migration, one line in the
 daily refresh, first fill on the worker.
 
+## [ ] MLB pitcher prop models: re-run the pitcher-prop market check on 2027 prices before any unpause (added 2026-10-10)
+
+All five pitcher prop models are paused (strikeouts, outs and hits allowed
+since 2026-09-19, #764). The one market-price test of pitcher outs found
+August +2.0% on 52 bets and September 1-19 −9.7% on 28
+(`docs/mlb_prop_market_eval.md` §3). Before considering any unpause in
+2027, re-run that check on the new season's Pinnacle and DraftKings
+pitcher-prop prices; the commands are in §5 of the same file.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
