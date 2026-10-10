@@ -57,3 +57,26 @@ def test_rows_carry_their_own_source_and_never_overwrite_the_archive():
     assert a._write(c, [("G", "2026-01-15", 2026, 1, 1, 3, 3, 1, 1, a.SOURCE)]) == 1
     assert "ON CONFLICT DO NOTHING" in c.sql and a.SOURCE == "nhl_api_score"
     assert a._write(c, []) == 0
+
+
+def test_a_game_already_stored_under_either_source_is_not_read_again(monkeypatch):
+    class Cur:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class Conn:
+        def execute(self, sql, params):
+            if "nhl_team_game_log" in sql:
+                return Cur([(2025020001, "G1", "2026-01-15", 2026, 3, 2),
+                            (2025020002, "G2", "2026-01-16", 2026, 4, 1)])
+            assert "source" not in sql      # a game stored by the archive counts as stored too
+            return Cur([("G1",)])
+
+        def close(self):
+            pass
+    monkeypatch.setattr(a, "get_connection", lambda: Conn())
+    out = a.run("2026-01-15", "2026-01-16", apply=False)
+    assert out["already_stored"] == 1 and out["dates_to_read"] == 1
