@@ -824,6 +824,10 @@ def _validate_publish_discord_signals(args: dict) -> dict:
     return {"target_date": raw}
 
 
+_PUBLISH_DISCORD_VOID_ARGS = frozenset({"pick_ids", "reason", "reason_key",
+                                        "dry_run"})
+
+
 def _job_publish_discord_void(**kw):
     """Post a one-off void notice for picks that are already VOID and posted.
 
@@ -843,6 +847,8 @@ def _job_publish_discord_void(**kw):
     reason_key names one of the reviewed texts (VOID_NOTICE_TEXTS). It is
     turned into the text here, when the job runs, so the words that go out
     are the constant in the code, not a copy saved when the job was queued.
+    A real post needs one; pasted reason text and the short default are for
+    dry runs.
     """
     from tracking import discord_notifier as dn
 
@@ -866,6 +872,13 @@ def _job_publish_discord_void(**kw):
 
 
 def _validate_publish_discord_void(args: dict) -> dict:
+    # A misspelled reason_key would otherwise be dropped here, and a real
+    # post would go out with the short default instead of the reviewed text.
+    extra = sorted(set(args) - _PUBLISH_DISCORD_VOID_ARGS)
+    if extra:
+        raise ValueError(
+            f"unknown args {extra}; this job takes "
+            f"{', '.join(sorted(_PUBLISH_DISCORD_VOID_ARGS))}")
     raw = args.get("pick_ids")
     if not isinstance(raw, list) or not raw:
         raise ValueError("pick_ids must be a non-empty list of pick ids")
@@ -900,10 +913,12 @@ def _validate_publish_discord_void(args: dict) -> dict:
             "dry_run must be true or false (a JSON boolean); "
             f"got {dry_run!r}")
 
-    # A real post carries a reviewed text by name, or the short default. A
+    # A real post carries a reviewed text by name, and nothing else. A
     # pasted text is a hand copy of a reviewed one at best, and at worst an
     # older draft (the one that said "They'll still show in the app for
-    # now" would pass every other check).
+    # now" would pass every other check). The short default names no count,
+    # so no list check could hold it to its picks: it went out over 7 of the
+    # 8 as readily as over all 8. Both are for dry runs only.
     from tracking.discord_notifier import VOID_NOTICE_PICK_IDS
 
     key = args.get("reason_key")
@@ -920,10 +935,10 @@ def _validate_publish_discord_void(args: dict) -> dict:
                 f"reason_key {key} was written for exactly {len(want)} picks "
                 f"({', '.join(map(str, sorted(want)))}); this job lists "
                 f"{len(ids)}")
-    elif reason and dry_run is False:
+    elif dry_run is False:
         raise ValueError(
-            "a real post (dry_run false) takes reason_key, not pasted reason "
-            "text; leave both out for the short default")
+            "a real post (dry_run false) takes reason_key; pasted reason text "
+            "and the short default are for dry runs only")
 
     out: dict = {"pick_ids": ids, "dry_run": dry_run}
     if key is not None:

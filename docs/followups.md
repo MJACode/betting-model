@@ -100,7 +100,8 @@ The notice wording: mike chose his fuller text on 2026-10-10. Branch
 the 8, and `VOID_NOTICE_NCAAF_STALE_15`, which adds the 7 posted picks voided
 on 2026-09-19. Which one goes out is still mike's call. The declared job names
 it with `reason_key` (`ncaaf_stale_8` or `ncaaf_stale_15`) and lists exactly
-its picks; pasted text is refused for a real post. A real post refuses to run
+its picks; pasted text and the short default are refused for a real post.
+A real post refuses to run
 until the view and the `push_sent` read policy both mention `discord_void` (it
 applies the migration itself first; on 2026-10-10 neither did), and it must go
 out before Sat Oct 17 12:00 PM ET. If a real post comes back incomplete, the

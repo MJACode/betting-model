@@ -235,7 +235,8 @@ connection. Any later run refuses picks with an attempt row and no
 such a run without a retry. A real post also applies the view migrations and
 refuses unless the view and the `anon_read_discord_publish` policy both
 mention `discord_void`. The job takes a reviewed text by name (`reason_key`,
-`VOID_NOTICE_TEXTS`) over exactly its picks; pasted text is for dry runs.
+`VOID_NOTICE_TEXTS`) over exactly its picks; pasted text and the short
+default are for dry runs. The job refuses argument names it does not know.
 
 **3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
 beyond it on the day (0 rows), so this is closed before it costs a pick rather

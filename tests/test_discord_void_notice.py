@@ -124,8 +124,21 @@ class Ledger:
                 if "INSERT INTO push_sent" in s[0] and "'void_notice_attempt'" in s[0]]
 
 
+# A real post needs a reviewed text over exactly its picks. _bind and
+# _through_requests register this one for the picks they serve, so the tests
+# below can post for real; monkeypatch takes it out again after each test.
+REVIEWED = "Test notice: these picks are void."
+
+
+def _review(monkeypatch, rows):
+    ids = frozenset(int(r[0]) for r in rows)
+    monkeypatch.setitem(dn.VOID_NOTICE_TEXTS, "test_text", REVIEWED)
+    monkeypatch.setitem(dn.VOID_NOTICE_PICK_IDS, "test_text", ids)
+
+
 def _bind(monkeypatch, rows, post=None, migrate=None):
     ledger = Ledger(rows)
+    _review(monkeypatch, rows)
     monkeypatch.setattr(dn, "get_connection", lambda: ledger)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: WEBHOOK)
     ledger.migrations = 0
@@ -279,7 +292,7 @@ def test_the_matchup_line_shows_only_when_the_label_lacks_a_team(monkeypatch):
 
 def test_a_rerun_skips_locks_that_already_have_a_notice(monkeypatch):
     ledger, calls = _bind(monkeypatch, [_row(2992290)])
-    first = dn.notify_discord_void([2992290], dry_run=False)
+    first = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert first["posted"] == 1
     assert len(calls) == 1
     assert len(ledger.inserts) == 1
@@ -294,7 +307,7 @@ def test_a_rerun_skips_locks_that_already_have_a_notice(monkeypatch):
     assert ledger.statements.index(ledger.attempts[0]) < \
         ledger.statements.index(ledger.inserts[0])
     assert ledger.commits == 2
-    second = dn.notify_discord_void([2992290], dry_run=False)
+    second = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert second["posted"] == 0
     assert second["payloads"] == []
     assert second["skipped_lock_keys"] == [
@@ -310,7 +323,7 @@ def test_a_refused_or_lost_send_records_no_notice_and_does_not_raise(monkeypatch
     refuse = {"outcome": "refused", "message_id": None, "detail": "HTTP 400: bad"}
     ledger, calls = _bind(monkeypatch, [_row(2992290)],
                           post=lambda url, payload: refuse)
-    out = dn.notify_discord_void([2992290], dry_run=False)
+    out = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert len(calls) == 1
     assert out["complete"] is False
     assert out["posted"] == 0
@@ -326,7 +339,7 @@ def test_a_refused_or_lost_send_records_no_notice_and_does_not_raise(monkeypatch
     ledger2, calls2 = _bind(monkeypatch, [_row(2992283, lock="other:ncaaf_over_under",
                                                 label="Kansas State vs Kansas Under 54.5")],
                             post=explode)
-    out2 = dn.notify_discord_void([2992283], dry_run=False)
+    out2 = dn.notify_discord_void([2992283], reason=REVIEWED, dry_run=False)
     assert len(calls2) == 1
     assert [m["outcome"] for m in out2["messages"]] == ["unknown"]
     assert "check the channel before queueing again" in out2["next_step"]
@@ -346,6 +359,7 @@ class _Resp:
 def _through_requests(monkeypatch, rows, replies):
     """The real _post_void_once; requests.post answers from `replies`."""
     ledger = Ledger(rows)
+    _review(monkeypatch, rows)
     monkeypatch.setattr(dn, "get_connection", lambda: ledger)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: WEBHOOK)
     monkeypatch.setattr(dn, "_apply_app_view_migrations", lambda conn: None)
@@ -372,7 +386,7 @@ def _through_requests(monkeypatch, rows, replies):
 def test_a_lost_reply_is_sent_exactly_once(monkeypatch, reply):
     """Discord may have taken it. _post would send it three more times."""
     ledger, sends = _through_requests(monkeypatch, [_row(2992290)], [reply])
-    out = dn.notify_discord_void([2992290], dry_run=False)
+    out = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert len(sends) == 1
     assert out["complete"] is False
     assert out["messages"][0]["outcome"] == "unknown"
@@ -385,7 +399,7 @@ def test_a_lost_reply_is_sent_exactly_once(monkeypatch, reply):
 def test_a_refusal_is_sent_once_and_a_429_is_the_only_retry(monkeypatch):
     ledger, sends = _through_requests(
         monkeypatch, [_row(2992290)], [_Resp(400, text="Invalid Form Body")])
-    out = dn.notify_discord_void([2992290], dry_run=False)
+    out = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert len(sends) == 1
     assert out["messages"][0]["outcome"] == "refused"
     assert "Invalid Form Body" in out["messages"][0]["detail"]
@@ -395,7 +409,7 @@ def test_a_refusal_is_sent_once_and_a_429_is_the_only_retry(monkeypatch):
     ledger2, sends2 = _through_requests(
         monkeypatch, [_row(2992290)],
         [_Resp(429, {"retry_after": 0.1}), _Resp(200, {"id": "4242"})])
-    out2 = dn.notify_discord_void([2992290], dry_run=False)
+    out2 = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert len(sends2) == 2
     assert out2["complete"] is True
     assert out2["message_ids"] == ["4242"]
@@ -407,7 +421,7 @@ def test_a_post_whose_save_fails_keeps_its_id_and_never_posts_again(monkeypatch)
     nothing raises, and the next run refuses instead of posting again."""
     ledger, calls = _bind(monkeypatch, [_row(2992290)])
     ledger.fail_void_inserts = 2          # this connection, then the fresh one
-    out = dn.notify_discord_void([2992290], dry_run=False)
+    out = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert len(calls) == 1
     assert out["complete"] is False
     assert out["message_ids"] == ["9001"]
@@ -418,14 +432,14 @@ def test_a_post_whose_save_fails_keeps_its_id_and_never_posts_again(monkeypatch)
     assert "9001" in out["next_step"]
     # The rerun: the attempt row has no notice row beside it.
     with pytest.raises(dn.DiscordVoidUnresolved, match="may already be in the channel"):
-        dn.notify_discord_void([2992290], dry_run=False)
+        dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert len(calls) == 1
 
 
 def test_a_failed_save_is_tried_once_more_on_a_fresh_connection(monkeypatch):
     ledger, calls = _bind(monkeypatch, [_row(2992290)])
     ledger.fail_void_inserts = 1
-    out = dn.notify_discord_void([2992290], dry_run=False)
+    out = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert out["complete"] is True
     assert out["posted"] == 1
     assert len(calls) == 1
@@ -438,7 +452,7 @@ def test_a_reclaimed_run_with_an_attempt_on_record_sends_nothing(monkeypatch):
     its attempt given back; the attempt row stops it."""
     ledger, calls = _bind(monkeypatch, [_row(2992290, attempted=True)])
     with pytest.raises(dn.DiscordVoidUnresolved):
-        dn.notify_discord_void([2992290], dry_run=False)
+        dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert calls == []
     assert ledger.inserts == [] and ledger.attempts == []
     assert ledger.commits == 0
@@ -454,7 +468,7 @@ def test_a_check_that_fails_before_the_send_still_raises(monkeypatch):
     ledger, calls = _bind(monkeypatch, [_row(2992290)])
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: None)
     with pytest.raises(dn.DiscordVoidRejected, match="no webhook"):
-        dn.notify_discord_void([2992290], dry_run=False)
+        dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert calls == [] and ledger.attempts == []
 
     # The attempt row cannot be saved: nothing is sent, and it raises.
@@ -468,7 +482,7 @@ def test_a_check_that_fails_before_the_send_still_raises(monkeypatch):
 
     ledger2.execute = no_attempt
     with pytest.raises(dn.DiscordVoidRejected, match="so nothing was sent"):
-        dn.notify_discord_void([2992290], dry_run=False)
+        dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert calls2 == []
 
 
@@ -494,7 +508,8 @@ def _run_job(monkeypatch, notify):
     monkeypatch.setattr(dn, "notify_discord_void", notify)
     conn = _JobConn()
     job = {"job_id": 7, "job_type": "publish_discord_void", "attempts": 1,
-           "args": {"pick_ids": [2992290], "dry_run": False}}
+           "args": {"pick_ids": _EIGHT, "reason_key": "ncaaf_stale_8",
+                    "dry_run": False}}
     out = q._execute(conn, job)
     update = [s for s in conn.statements if "UPDATE worker_jobs" in s[0]]
     return out, update, announced
@@ -547,7 +562,7 @@ def test_validation_rejects_the_whole_list_before_any_post(monkeypatch):
     ]
     ledger, calls = _bind(monkeypatch, rows)
     with pytest.raises(dn.DiscordVoidRejected, match="not VOID") as exc:
-        dn.notify_discord_void([1, 2, 3], dry_run=False)
+        dn.notify_discord_void([1, 2, 3], reason=REVIEWED, dry_run=False)
     assert "no discord_signal row" in str(exc.value)
     assert calls == []
     assert ledger.inserts == []
@@ -721,7 +736,7 @@ def test_the_15_notice_says_which_7_were_already_off_the_record():
     assert "Clemson vs Miami was played Oct 3 and never counted" in text
     assert "15" not in dn.VOID_NOTICE_NCAAF_STALE_8
     assert "Sep 7" not in dn.VOID_NOTICE_NCAAF_STALE_8
-    # The short default stays for any other void notice.
+    # The short default stays, for dry runs; a real post needs a reviewed text.
     assert dn.VOID_NOTICE_REASON == (
         "Voided: priced off a stale sportsbook line after our odds feed dropped "
         "the game. These picks are void and do not count in the record. The "
@@ -859,11 +874,42 @@ def test_the_job_refuses_a_text_nobody_reviewed_for_a_real_post():
     for text in (_OLD_DRAFT_SENTENCE, dn.VOID_NOTICE_NCAAF_STALE_8):
         with pytest.raises(ValueError, match="takes reason_key"):
             validate({"pick_ids": _EIGHT, "reason": text, "dry_run": False})
-    # A dry run may still try out a text, and the short default still posts.
+    # A dry run may still try out a text or the short default. Neither posts.
     assert validate({"pick_ids": _EIGHT, "reason": _OLD_DRAFT_SENTENCE}) == {
         "pick_ids": _EIGHT, "dry_run": True, "reason": _OLD_DRAFT_SENTENCE}
-    assert validate({"pick_ids": [5], "dry_run": False}) == {
-        "pick_ids": [5], "dry_run": False}
+    assert validate({"pick_ids": [5]}) == {"pick_ids": [5], "dry_run": True}
+    with pytest.raises(ValueError, match="takes reason_key"):
+        validate({"pick_ids": [5], "dry_run": False})
+
+
+def test_a_real_post_without_a_reviewed_text_is_refused(monkeypatch):
+    """The short default names no count, so it went out over 7 of the 8 as
+    readily as over all 8. A misspelled reason_key was dropped without an
+    error and became that default. Both are refused for a real post, at the
+    job and in the notice itself, before anything is read or sent."""
+    from tracking import job_queue as q
+
+    validate = q._validate_publish_discord_void
+    for ids in (_EIGHT, _EIGHT[:7]):
+        with pytest.raises(ValueError, match="takes reason_key"):
+            validate({"pick_ids": ids, "dry_run": False})
+    for dry_run in (False, True):
+        with pytest.raises(ValueError, match="unknown args"):
+            validate({"pick_ids": _EIGHT, "reasonKey": "ncaaf_stale_8",
+                      "dry_run": dry_run})
+
+    ledger, calls = _bind(monkeypatch, _rows_for(_EIGHT))
+    _forbid_http(monkeypatch)
+    for ids in (_EIGHT, _EIGHT[:7]):
+        for text in (None, "", _OLD_DRAFT_SENTENCE):
+            with pytest.raises(dn.DiscordVoidRejected, match="reviewed text"):
+                dn.notify_discord_void(ids, reason=text, dry_run=False)
+    assert ledger.statements == []
+    assert calls == []
+    assert ledger.migrations == 0
+    # The same lists as a dry run still show the payload.
+    out = dn.notify_discord_void(_EIGHT[:7], dry_run=True)
+    assert len(out["payloads"][0]["payload"]["embeds"][0]["fields"]) == 7
 
 
 def test_every_declared_void_notice_names_a_reviewed_text():
@@ -902,7 +948,7 @@ def test_a_real_post_waits_for_the_app_to_drop_voided_picks(monkeypatch, view,
     ledger, calls = _bind(monkeypatch, [_row(2992290)])
     ledger.view, ledger.policy = view, policy
     with pytest.raises(dn.DiscordVoidRejected, match="app would still show"):
-        dn.notify_discord_void([2992290], dry_run=False)
+        dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert ledger.migrations == 1          # it tried to fix it first
     assert calls == []
     assert ledger.inserts == []
@@ -917,7 +963,7 @@ def test_a_real_post_applies_the_migration_then_posts(monkeypatch):
 
     ledger, calls = _bind(monkeypatch, [_row(2992290)], migrate=migrate)
     ledger.view, ledger.policy = OLD_VIEW, OLD_POLICY
-    out = dn.notify_discord_void([2992290], dry_run=False)
+    out = dn.notify_discord_void([2992290], reason=REVIEWED, dry_run=False)
     assert ledger.migrations == 1
     assert len(calls) == 1
     assert out["posted"] == 1

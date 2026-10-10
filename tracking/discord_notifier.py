@@ -2310,7 +2310,8 @@ def _void_title(sport: str, reason: str | None = None) -> str:
     mike's reviewed texts carry his draft's title, 'Correction: 8 picks
     voided' (15 for the longer one): "Correction" and the count say this is
     not a pick list. Any other text, the short default included, keeps
-    'Voided picks'.
+    'Voided picks'; only a dry run shows one, because a real post needs a
+    reviewed text.
     """
     emoji = _SPORT_EMOJI.get(sport, "\U0001f3af")
     key = _void_notice_key(reason)
@@ -2751,6 +2752,9 @@ def notify_discord_void(pick_ids, reason: str | None = None,
     dry_run makes no HTTP call and no ledger write. It returns the exact
     POST bodies. This never edits or deletes an existing Discord message.
 
+    A real post needs a reviewed text (VOID_NOTICE_TEXTS) over exactly its
+    picks. The short default and any other text are for dry runs only.
+
     A real post reaches Discord at most once per message. Every check that
     can fail runs before the first send and raises DiscordVoidRejected; a
     rerun after one of those is safe. Once a send has been tried this never
@@ -2768,6 +2772,14 @@ def notify_discord_void(pick_ids, reason: str | None = None,
             [f"reason is {len(text)} characters; Discord's description cap "
              f"is {_EMBED_DESCRIPTION_MAX}"])
     _reject_wrong_list_for_text(text, ids)
+    if not dry_run and _void_notice_key(text) is None:
+        # Before any database work, so nothing is sent and a retry is safe.
+        # The short default names no count, so no list check could hold it
+        # to its picks; a pasted text is nobody's reviewed copy.
+        raise DiscordVoidRejected(
+            ["a real post needs a reviewed text (VOID_NOTICE_TEXTS) over "
+             "exactly its picks; the short default and any other text are "
+             "for dry runs only"])
 
     conn = get_connection()
     try:
@@ -2787,7 +2799,7 @@ def notify_discord_void(pick_ids, reason: str | None = None,
             # A written text describes the whole list ("the 15 ... below").
             # Posting it over the picks still pending would tell members 15
             # under a message that lists 7. The short default names no count,
-            # so it still fits a partial list.
+            # so a dry run of it still shows a partial list; it never posts.
             raise DiscordVoidRejected(
                 [f"{len(skipped)} of these picks already have a void notice; "
                  f"a written reason describes the whole list, so pass only the "
