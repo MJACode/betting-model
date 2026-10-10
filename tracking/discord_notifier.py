@@ -2210,6 +2210,59 @@ VOID_NOTICE_REASON = (
     "original posts are left as they were."
 )
 
+# mike's text for the NCAAF totals priced off DraftKings numbers saved before
+# DraftKings took the games down (2026-10-10: "the bot posts my fuller text").
+# Pass one as `reason`. It is the description; the fields under it are the
+# list, so the text carries no list of its own. The title stays _void_title.
+#
+# Two things must hold when it posts, or a sentence in it is false:
+#   * "The app no longer shows them as picks" needs the view migration
+#     discord_void_notice_2026_10_09.sql to have run, so v_discord_published
+#     drops a lock once its discord_void row exists.
+#   * "None ... has been played": the first of the 8 kicks off Sat Oct 17
+#     at 12:00 PM ET.
+#
+# _8 is the eight voided 2026-10-09 (2558703, 2558736, 2935576, 2992283,
+# 2992290, 2992474, 3020766, 3204788). _15 adds the seven voided 2026-09-19
+# (1769626, 1769753, 1769812, 1992830, 2109187, 2109205, 2109285); their
+# prices were the same stale DraftKings numbers.
+VOID_NOTICE_NCAAF_STALE_8 = (
+    "We've voided the 8 college football picks below, posted between Sep 20 "
+    "and Oct 4. They won't count in the record, win or lose.\n\n"
+    "Why: DraftKings took these games down in early September, and we kept "
+    "making picks off the last number we'd saved. DraftKings wasn't offering "
+    "these numbers when we posted them. That's on us.\n\n"
+    "None of these 8 is a pick anymore, at the posted number or any other, "
+    "and they won't be re-posted. If you bet one, it stands with your "
+    "sportsbook; we won't count it either way. None has been played, so "
+    "nothing already in the record changes, and none was the free pick. "
+    "The app no longer shows them as picks. If you tracked one, it stays "
+    "under Tracked picks, marked \"Not graded.\"\n\n"
+    "What changed: before kickoff, our college football spread, total and "
+    "moneyline picks now need a DraftKings price from the last 3 hours. If "
+    "DraftKings takes a game down, we stop making picks on it."
+)
+
+VOID_NOTICE_NCAAF_STALE_15 = (
+    "We've voided the 15 college football picks below: 8 posted Sep 20 – "
+    "Oct 4, and 7 posted Sep 7–13 that were already taken off the record on "
+    "Sep 19 and never counted. None of them will count in the record, win or "
+    "lose.\n\n"
+    "Why: DraftKings took these games down in early September, and we kept "
+    "making picks off the last number we'd saved. DraftKings wasn't offering "
+    "these numbers when we posted them. That's on us.\n\n"
+    "None of these 15 is a pick anymore, at the posted number or any other, "
+    "and they won't be re-posted. If you bet one, it stands with your "
+    "sportsbook; we won't count it either way. None of the 8 has been "
+    "played. Of the 7 earlier ones, Clemson vs Miami was played Oct 3 and "
+    "never counted. So nothing already in the record changes, and none of "
+    "the 15 was the free pick. The app no longer shows them as picks. If you "
+    "tracked one, it stays under Tracked picks, marked \"Not graded.\"\n\n"
+    "What changed: before kickoff, our college football spread, total and "
+    "moneyline picks now need a DraftKings price from the last 3 hours. If "
+    "DraftKings takes a game down, we stop making picks on it."
+)
+
 _EMBED_TOTAL_MAX = 6000
 _EMBED_DESCRIPTION_MAX = 4096
 _FIELD_NAME_MAX = 256

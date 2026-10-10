@@ -407,3 +407,75 @@ def test_the_migration_is_one_statement():
     assert sql.count("$mig$") == 2
     assert "UPDATE public.picks" not in code
     assert "DELETE FROM" not in code
+
+
+# The 15 labels as stored on the picks, in the order the notice lists them:
+# the 8 voided 2026-10-09 by game date, then the 7 voided 2026-09-19.
+_STALE_LABELS = [
+    "Kansas State vs Kansas Under 54.5", "Georgia vs Auburn Under 54.5",
+    "BYU vs Notre Dame Under 54.5", "Ohio State vs Oregon Under 52.5",
+    "LSU vs Alabama Under 54.5", "Texas A&M vs Tennessee Under 55.5",
+    "Clemson vs South Carolina Under 53.5", "Vanderbilt vs Tennessee Under 57.5",
+    "Clemson vs Miami Under 55.5", "Alabama vs Texas A&M Under 54.5",
+    "Michigan vs Michigan State Under 50.5", "Oklahoma vs Ole Miss Under 53.5",
+    "Ole Miss vs Mississippi State Over 57.5", "Ohio State vs Michigan Under 46.5",
+    "Navy vs Army Over 37.5",
+]
+
+
+def _stale_picks(n):
+    return [{
+        "sport": "NCAAF", "label": label,
+        "home": label.split(" vs ")[0], "away": label.split(" vs ")[1].rsplit(" ", 2)[0],
+        "dk_odds": -112, "best_odds": -112, "best_book": "draftkings",
+        "game_date": "2026-11-28", "posted_at": "2026-09-27T06:23:03-04:00",
+    } for label in _STALE_LABELS[:n]]
+
+
+@pytest.mark.parametrize("name, n", [
+    ("VOID_NOTICE_NCAAF_STALE_8", 8), ("VOID_NOTICE_NCAAF_STALE_15", 15),
+])
+def test_the_ncaaf_stale_notice_is_one_message_and_true_after_it_posts(name, n):
+    """mike's fuller text, as the description of one embed.
+
+    The fields are the list, so the text has none. The app sentence says what
+    the app shows once the notice is the publish state; the draft's "they'll
+    still show in the app for now" would be false by then.
+    """
+    from tracking import job_queue as q
+
+    text = getattr(dn, name)
+    assert "\u2022" not in text and "\n- " not in text
+    assert "still show in the app" not in text
+    assert "The app no longer shows them as picks." in text
+    assert 'under Tracked picks, marked "Not graded."' in text
+    assert "DraftKings took these games down in early September" in text
+    assert "That's on us." in text
+    assert text.startswith(f"We've voided the {n} college football picks below")
+    assert text.endswith("If DraftKings takes a game down, we stop making "
+                         "picks on it.")
+    # The job carries the text as `reason` and caps it at 4000.
+    assert q._validate_publish_discord_void(
+        {"pick_ids": [1], "reason": text})["reason"] == text
+    embeds = dn.void_notice_embeds("NCAAF", _stale_picks(n), text)
+    assert len(embeds) == 1
+    embed = embeds[0]
+    assert embed["title"] == "\U0001f3c8 NCAAF \u00b7 Voided picks"
+    assert embed["description"] == text
+    assert [f["name"] for f in embed["fields"]] == _STALE_LABELS[:n]
+    assert dn._embed_size(embed["title"], text, embed["fields"]) < 6000
+
+
+def test_the_15_notice_says_which_7_were_already_off_the_record():
+    text = dn.VOID_NOTICE_NCAAF_STALE_15
+    assert "8 posted Sep 20 \u2013 Oct 4, and 7 posted Sep 7\u201313" in text
+    assert "already taken off the record on Sep 19 and never counted" in text
+    assert "None of the 8 has been played." in text
+    assert "Clemson vs Miami was played Oct 3 and never counted" in text
+    assert "15" not in dn.VOID_NOTICE_NCAAF_STALE_8
+    assert "Sep 7" not in dn.VOID_NOTICE_NCAAF_STALE_8
+    # The short default stays for any other void notice.
+    assert dn.VOID_NOTICE_REASON == (
+        "Voided: priced off a stale sportsbook line after our odds feed dropped "
+        "the game. These picks are void and do not count in the record. The "
+        "original posts are left as they were.")
