@@ -2548,6 +2548,46 @@ def _ledger_void(conn, picks: list[dict], sent_at: str, message_id: str) -> None
     conn.commit()
 
 
+# The same two-part check the migration uses to skip itself. Both parts are
+# needed: the view runs with the caller's permissions, so a new view under the
+# old policy cannot see the discord_void rows and still shows every pick.
+_APP_VIEW_READY_SQL = """
+    SELECT pg_get_viewdef(to_regclass('public.v_discord_published'), true),
+           (SELECT pg_get_expr(p.polqual, p.polrelid)
+              FROM pg_policy p
+              JOIN pg_class c ON c.oid = p.polrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'public'
+               AND c.relname = 'push_sent'
+               AND p.polname = 'anon_read_discord_publish')
+"""
+
+
+def _app_view_ready(conn) -> bool:
+    """The app drops a pick once its void notice exists. Read only."""
+    try:
+        row = conn.execute(_APP_VIEW_READY_SQL).fetchone()
+    except Exception as exc:  # noqa: BLE001 — unknown is not ready
+        logger.warning(f"Discord void: could not read the app view: {exc}")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+    if not row:
+        return False
+    view, policy = row[0], row[1]
+    return (isinstance(view, str) and "discord_void" in view
+            and isinstance(policy, str) and "discord_void" in policy)
+
+
+def _apply_app_view_migrations(conn) -> None:
+    """Run the view migrations on this connection. Idempotent; never raises."""
+    from data.view_migrations import apply_view_migrations
+
+    apply_view_migrations(conn)
+
+
 def notify_discord_void(pick_ids, reason: str | None = None,
                         dry_run: bool = True) -> dict:
     """Post one gray void notice per sport. dry_run is the default.
@@ -2618,8 +2658,25 @@ def notify_discord_void(pick_ids, reason: str | None = None,
             for item in payloads:
                 logger.info(f"[dry-run] discord void {item['sport']} "
                             f"{json.dumps(item['payload'], default=str)}")
+            # Read only. A dry run does not apply the migration; it says
+            # whether a real post would find the app ready.
             return {"dry_run": True, "posted": 0,
+                    "app_view_ready": _app_view_ready(conn),
                     "skipped_lock_keys": skipped, "payloads": payloads}
+
+        # The notice is what takes these picks out of the app, and mike's
+        # text says so ("The app no longer shows them as picks"). That is
+        # true only once the app's view and its read policy drop a lock with
+        # a discord_void row. A declared job can run before the deploy's
+        # migrations have, so apply them here (the CLV backfill job does the
+        # same), then check both, and post nothing if either is old.
+        _apply_app_view_migrations(conn)
+        if not _app_view_ready(conn):
+            raise DiscordVoidRejected(
+                ["the app would still show these picks: v_discord_published "
+                 "and the push_sent read policy must both drop picks with a "
+                 "void notice (data/migrations/discord_void_notice_2026_10_09"
+                 ".sql) before a notice is posted"])
 
         missing = sorted({item["sport"] for item in payloads
                           if not item["webhook_configured"]})

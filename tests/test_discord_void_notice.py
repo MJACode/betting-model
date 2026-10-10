@@ -46,13 +46,30 @@ def _row(pick_id, *, status="VOID", signal=True, voided=False,
     )
 
 
+# pg_get_viewdef / pg_get_expr text as production printed it on 2026-10-10,
+# before the void migration (the 2026-09-23 view and policy) ...
+OLD_VIEW = (" SELECT lock_key,\n    kind\n   FROM push_sent s\n  WHERE kind = "
+            "ANY (ARRAY['discord_signal'::text, 'discord_live'::text]);")
+OLD_POLICY = "(kind = ANY (ARRAY['discord_signal'::text, 'discord_live'::text]))"
+# ... and the view and policy the void migration creates. Not yet read back
+# from production (it has not run there); the check only needs the word.
+NEW_VIEW = (" SELECT lock_key,\n    kind\n   FROM push_sent s\n  WHERE (kind = "
+            "ANY (ARRAY['discord_signal'::text, 'discord_live'::text])) AND NOT "
+            "(EXISTS ( SELECT 1\n           FROM push_sent v\n          WHERE "
+            "v.lock_key = s.lock_key AND v.kind = 'discord_void'::text));")
+NEW_POLICY = ("(kind = ANY (ARRAY['discord_signal'::text, 'discord_live'::text, "
+              "'discord_void'::text]))")
+
+
 class Ledger:
     """Serves the void SELECT and records inserts. close() keeps the rows."""
 
-    def __init__(self, rows):
+    def __init__(self, rows, view=NEW_VIEW, policy=NEW_POLICY):
         self.rows = [list(r) for r in rows]
         self.statements: list[tuple] = []
         self.commits = 0
+        self.view = view
+        self.policy = policy
 
     def execute(self, sql, params=None):
         self.statements.append((sql, params))
@@ -70,6 +87,8 @@ class Ledger:
                 return []
 
             def fetchone(self):
+                if "pg_get_viewdef" in sql:
+                    return (outer.view, outer.policy)
                 return (True,)
 
         return Result()
@@ -88,10 +107,21 @@ class Ledger:
         return [s for s in self.statements if "INSERT INTO push_sent" in s[0]]
 
 
-def _bind(monkeypatch, rows, post=None):
+def _bind(monkeypatch, rows, post=None, migrate=None):
     ledger = Ledger(rows)
     monkeypatch.setattr(dn, "get_connection", lambda: ledger)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: WEBHOOK)
+    ledger.migrations = 0
+
+    def _migrate(conn):
+        # Each real file commits; here the call is only counted, so the
+        # commit counts below stay about the notice's own writes.
+        assert conn is ledger
+        ledger.migrations += 1
+        if migrate is not None:
+            migrate(conn)
+
+    monkeypatch.setattr(dn, "_apply_app_view_migrations", _migrate)
     calls = []
 
     def _post(url, payload):
@@ -271,6 +301,7 @@ def test_a_non_2xx_response_and_a_request_exception_record_nothing(monkeypatch):
     ledger = Ledger([_row(2992290)])
     monkeypatch.setattr(dn, "get_connection", lambda: ledger)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: WEBHOOK)
+    monkeypatch.setattr(dn, "_apply_app_view_migrations", lambda conn: None)
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
 
     class Resp:
@@ -642,3 +673,75 @@ def test_every_declared_void_notice_names_a_reviewed_text():
         assert key in dn.VOID_NOTICE_TEXTS, entry.get("key")
         assert set(args.get("pick_ids") or []) == dn.VOID_NOTICE_PICK_IDS[key]
         q._validate_publish_discord_void(args)
+
+
+# ── The app has to drop the picks before the notice says it does ────────────
+
+@pytest.mark.parametrize("view, policy", [
+    (OLD_VIEW, OLD_POLICY),     # production on 2026-10-10
+    (NEW_VIEW, OLD_POLICY),     # the view runs as the caller: still shows them
+    (OLD_VIEW, NEW_POLICY),
+    (None, NEW_POLICY),         # no view at all
+    (NEW_VIEW, None),           # no policy at all
+])
+def test_a_real_post_waits_for_the_app_to_drop_voided_picks(monkeypatch, view,
+                                                             policy):
+    """mike's text says "The app no longer shows them as picks." Until the
+    view and its read policy both drop a pick with a void notice, that is
+    false, and a post cannot be taken back."""
+    ledger, calls = _bind(monkeypatch, [_row(2992290)])
+    ledger.view, ledger.policy = view, policy
+    with pytest.raises(dn.DiscordVoidRejected, match="app would still show"):
+        dn.notify_discord_void([2992290], dry_run=False)
+    assert ledger.migrations == 1          # it tried to fix it first
+    assert calls == []
+    assert ledger.inserts == []
+    assert ledger.commits == 0
+
+
+def test_a_real_post_applies_the_migration_then_posts(monkeypatch):
+    """A declared job can run before the deploy's migrations have. The
+    notice applies them itself, then checks, then posts."""
+    def migrate(conn):
+        conn.view, conn.policy = NEW_VIEW, NEW_POLICY
+
+    ledger, calls = _bind(monkeypatch, [_row(2992290)], migrate=migrate)
+    ledger.view, ledger.policy = OLD_VIEW, OLD_POLICY
+    out = dn.notify_discord_void([2992290], dry_run=False)
+    assert ledger.migrations == 1
+    assert len(calls) == 1
+    assert out["posted"] == 1
+
+
+def test_a_dry_run_reports_the_app_view_and_changes_nothing(monkeypatch):
+    ledger, calls = _bind(monkeypatch, [_row(2992290)])
+    ledger.view, ledger.policy = OLD_VIEW, OLD_POLICY
+    out = dn.notify_discord_void([2992290], dry_run=True)
+    assert out["app_view_ready"] is False
+    assert ledger.migrations == 0
+    assert ledger.commits == 0
+    assert calls == []
+    ledger.view, ledger.policy = NEW_VIEW, NEW_POLICY
+    assert dn.notify_discord_void([2992290])["app_view_ready"] is True
+
+
+def test_the_readiness_read_is_the_migrations_own_skip_check():
+    """The guard reads what the migration's skip clause reads: the view text
+    and the anon_read_discord_publish policy on push_sent."""
+    sql = dn._APP_VIEW_READY_SQL
+    assert "pg_get_viewdef(to_regclass('public.v_discord_published'), true)" in sql
+    assert "p.polname = 'anon_read_discord_publish'" in sql
+    assert "c.relname = 'push_sent'" in sql
+    mig = NEW_MIG.read_text(encoding="utf-8")
+    assert "p.polname = 'anon_read_discord_publish'" in mig
+    assert "position('discord_void' in d) > 0" in mig
+    assert "position('discord_void' in pol) > 0" in mig
+
+    class Broken:
+        def execute(self, *_a, **_k):
+            raise RuntimeError("no such function")
+
+        def rollback(self):
+            pass
+
+    assert dn._app_view_ready(Broken()) is False
