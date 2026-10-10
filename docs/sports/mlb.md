@@ -441,6 +441,8 @@ CalError is measured vs. synthetic lines. Those AUCs were also fit on leaked `ml
 
 **BET stays paused.** Artifacts are 2026-05-08, leak-mismatched, trained on synthetic lines, never swept on real F5 prices. Unpause path is a retrain on the as-of tables + real F5 quotes, then a §7 sweep. Scoring writes NONE rows so that sweep has a universe.
 
+**2026-09-19 first-five market search (no card; re-checked 2026-10-10).** Pinnacle first-five totals and spreads exist only from 2026-09-02; Pinnacle has no first-five moneyline; public splits are full-game only and August has none taken before first pitch. Closest miss: Pinnacle no-vig against a bettable soft book's no-vig on first-five totals at 1.5 points, 96 bets +9.92% from Sep 2 to 30. All of the plus is on the over side (54 bets +30.1%, against +4.8% for blind overs at the same book and line); under picks lost (42 bets −16.0%). One month, found in a many-cell search, so no card; the over side is the lead to re-check in 2027. `docs/mlb_f5_edge_search.md`.
+
 **Full-game `mlb_runline` / `mlb_over_under` stay paused independently.** Honest-era runline −6.93% both sides negative, 0.68 floor unreachable, no live-artifact §7 cut (3 settled at the pooled 0.70/0.08 cell). Over/under honest-era AUC 0.486, zero of six folds clearing 0.55. A human CLE −1.5 is a market/PCG handicap, not `mlb_runline` output.
 
 **v1 F5 O/U backtest:**
