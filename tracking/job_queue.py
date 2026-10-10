@@ -819,12 +819,20 @@ def _job_publish_discord_void(**kw):
 
     Does not edit or delete the original Discord messages. Does not update
     pick rows. A lock already carrying discord_void is skipped.
-    """
-    from tracking.discord_notifier import notify_discord_void
 
-    return notify_discord_void(
+    reason_key names one of the reviewed texts (VOID_NOTICE_TEXTS). It is
+    turned into the text here, when the job runs, so the words that go out
+    are the constant in the code, not a copy saved when the job was queued.
+    """
+    from tracking import discord_notifier as dn
+
+    reason = kw.get("reason")
+    key = kw.get("reason_key")
+    if key is not None:
+        reason = dn.VOID_NOTICE_TEXTS[key]
+    return dn.notify_discord_void(
         pick_ids=kw["pick_ids"],
-        reason=kw.get("reason"),
+        reason=reason,
         dry_run=kw.get("dry_run", True),
     )
 
@@ -863,7 +871,35 @@ def _validate_publish_discord_void(args: dict) -> dict:
         raise ValueError(
             "dry_run must be true or false (a JSON boolean); "
             f"got {dry_run!r}")
+
+    # A real post carries a reviewed text by name, or the short default. A
+    # pasted text is a hand copy of a reviewed one at best, and at worst an
+    # older draft (the one that said "They'll still show in the app for
+    # now" would pass every other check).
+    from tracking.discord_notifier import VOID_NOTICE_PICK_IDS
+
+    key = args.get("reason_key")
+    if key is not None:
+        if reason:
+            raise ValueError("give reason_key or reason, not both")
+        if not isinstance(key, str) or key not in VOID_NOTICE_PICK_IDS:
+            raise ValueError(
+                f"unknown reason_key {key!r}; known: "
+                f"{', '.join(sorted(VOID_NOTICE_PICK_IDS))}")
+        want = VOID_NOTICE_PICK_IDS[key]
+        if set(ids) != want:
+            raise ValueError(
+                f"reason_key {key} was written for exactly {len(want)} picks "
+                f"({', '.join(map(str, sorted(want)))}); this job lists "
+                f"{len(ids)}")
+    elif reason and dry_run is False:
+        raise ValueError(
+            "a real post (dry_run false) takes reason_key, not pasted reason "
+            "text; leave both out for the short default")
+
     out: dict = {"pick_ids": ids, "dry_run": dry_run}
+    if key is not None:
+        out["reason_key"] = key
     if reason:
         out["reason"] = reason
     return out

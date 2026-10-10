@@ -565,3 +565,80 @@ def test_a_written_text_is_not_posted_over_part_of_its_list(monkeypatch):
     again = dn.notify_discord_void(_FIFTEEN, reason=dn.VOID_NOTICE_NCAAF_STALE_15,
                                    dry_run=False)
     assert again["posted"] == 0 and again["payloads"] == []
+
+
+# ── The job takes a reviewed text by name ───────────────────────────────────
+
+# The draft's paragraph that is false once the notice is the publish state.
+_OLD_DRAFT_SENTENCE = (
+    "None has been played, so nothing already in the record changes, and none "
+    "was the free pick. They'll still show in the app for now, marked \"not "
+    "counted\" on the pick's page.")
+
+
+def test_the_job_hands_the_notice_the_constant_by_name(monkeypatch):
+    """The job stores the name and looks the text up when it runs, so the
+    words that go out are the reviewed constant, character for character."""
+    from tracking import job_queue as q
+
+    calls = []
+
+    def fake(pick_ids, reason=None, dry_run=True):
+        calls.append((list(pick_ids), reason, dry_run))
+        return {"posted": 0, "dry_run": dry_run}
+
+    monkeypatch.setattr(dn, "notify_discord_void", fake)
+    for key, ids in (("ncaaf_stale_8", _EIGHT), ("ncaaf_stale_15", _FIFTEEN)):
+        for dry_run in (True, False):
+            args = q._validate_publish_discord_void(
+                {"pick_ids": ids, "reason_key": key, "dry_run": dry_run})
+            assert args == {"pick_ids": ids, "dry_run": dry_run,
+                            "reason_key": key}
+            q._job_publish_discord_void(**args)
+            assert calls[-1] == (ids, dn.VOID_NOTICE_TEXTS[key], dry_run)
+
+
+def test_the_job_refuses_a_text_nobody_reviewed_for_a_real_post():
+    from tracking import job_queue as q
+
+    validate = q._validate_publish_discord_void
+    with pytest.raises(ValueError, match="unknown reason_key"):
+        validate({"pick_ids": _EIGHT, "reason_key": "ncaaf_stale_9"})
+    with pytest.raises(ValueError, match="unknown reason_key"):
+        validate({"pick_ids": _EIGHT, "reason_key": ["ncaaf_stale_8"]})
+    with pytest.raises(ValueError, match="not both"):
+        validate({"pick_ids": _EIGHT, "reason_key": "ncaaf_stale_8",
+                  "reason": dn.VOID_NOTICE_NCAAF_STALE_8})
+    # The 15 text with the 8 ids would say 15 over a list of 8.
+    with pytest.raises(ValueError, match="exactly 15 picks"):
+        validate({"pick_ids": _EIGHT, "reason_key": "ncaaf_stale_15"})
+    with pytest.raises(ValueError, match="exactly 8 picks"):
+        validate({"pick_ids": _FIFTEEN, "reason_key": "ncaaf_stale_8"})
+    # Pasted text cannot make a real post, not even a perfect copy.
+    for text in (_OLD_DRAFT_SENTENCE, dn.VOID_NOTICE_NCAAF_STALE_8):
+        with pytest.raises(ValueError, match="takes reason_key"):
+            validate({"pick_ids": _EIGHT, "reason": text, "dry_run": False})
+    # A dry run may still try out a text, and the short default still posts.
+    assert validate({"pick_ids": _EIGHT, "reason": _OLD_DRAFT_SENTENCE}) == {
+        "pick_ids": _EIGHT, "dry_run": True, "reason": _OLD_DRAFT_SENTENCE}
+    assert validate({"pick_ids": [5], "dry_run": False}) == {
+        "pick_ids": [5], "dry_run": False}
+
+
+def test_every_declared_void_notice_names_a_reviewed_text():
+    """The declared job is what posts. It must carry a name, not pasted
+    text, and exactly that text's picks. (None is declared yet: the entry
+    waits for mike's final OK. This holds it to the rule when it lands.)"""
+    from tracking import job_queue as q
+
+    entries = json.loads((ROOT / "jobs/declared_jobs.json").read_text(
+        encoding="utf-8"))
+    for entry in entries:
+        if entry.get("job_type") != "publish_discord_void":
+            continue
+        args = entry.get("args") or {}
+        assert "reason" not in args, entry.get("key")
+        key = args.get("reason_key")
+        assert key in dn.VOID_NOTICE_TEXTS, entry.get("key")
+        assert set(args.get("pick_ids") or []) == dn.VOID_NOTICE_PICK_IDS[key]
+        q._validate_publish_discord_void(args)
