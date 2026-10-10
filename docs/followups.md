@@ -95,8 +95,13 @@ Found 2026-10-09 while making posted picks voidable. After a void:
   button. The detail screen still adds "Posted to Discord · not counted in
   the model's record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
 
-The notice wording is in that PR for approval. The phone push is still a
-decision.
+The notice wording: mike chose his fuller text on 2026-10-10. Branch
+`claude/void-notice-fuller-text` has it twice: `VOID_NOTICE_NCAAF_STALE_8` for
+the 8, and `VOID_NOTICE_NCAAF_STALE_15`, which adds the 7 posted picks voided
+on 2026-09-19. Which one goes out is still mike's call. Before it posts, the
+view and the `push_sent` read policy must both mention `discord_void` (on
+2026-10-10 neither did), and it must go out before Sat Oct 17 12:00 PM ET.
+The phone push is still a decision.
 
 ## [x] NCAAF picks scored from prices more than a week old — FIXED 2026-10-09
 
