@@ -2433,6 +2433,29 @@ def _normalize_void_ids(pick_ids) -> list[int]:
     return ids
 
 
+def _reject_wrong_list_for_text(text: str, ids: list[int]) -> None:
+    """A reviewed text goes out only over the exact picks it was written for.
+
+    VOID_NOTICE_NCAAF_STALE_15 says "the 15 ... below"; sent with the 8 ids
+    it would be false in its first sentence.
+    """
+    key = _void_notice_key(text)
+    if key is None:
+        return
+    want = VOID_NOTICE_PICK_IDS[key]
+    got = set(ids)
+    if got == want:
+        return
+    problems = [f"the {key} text was written for exactly {len(want)} picks"]
+    missing = sorted(want - got)
+    extra = sorted(got - want)
+    if missing:
+        problems.append(f"missing: {', '.join(map(str, missing))}")
+    if extra:
+        problems.append(f"not in that text: {', '.join(map(str, extra))}")
+    raise DiscordVoidRejected(problems)
+
+
 def _void_rows_sql() -> str:
     key = (f"CASE WHEN p.is_live THEN {live_lock_key_sql('p')} "
            f"ELSE {lock_key_sql('p')} END")
@@ -2539,11 +2562,13 @@ def notify_discord_void(pick_ids, reason: str | None = None,
     edits or deletes an existing Discord message.
     """
     ids = _normalize_void_ids(pick_ids)
-    text = VOID_NOTICE_REASON if reason is None or not str(reason).strip() else str(reason).strip()
+    custom = reason is not None and bool(str(reason).strip())
+    text = str(reason).strip() if custom else VOID_NOTICE_REASON
     if len(text) > _EMBED_DESCRIPTION_MAX:
         raise DiscordVoidRejected(
             [f"reason is {len(text)} characters; Discord's description cap "
              f"is {_EMBED_DESCRIPTION_MAX}"])
+    _reject_wrong_list_for_text(text, ids)
 
     conn = get_connection()
     try:
@@ -2559,6 +2584,15 @@ def notify_discord_void(pick_ids, reason: str | None = None,
                         f"already noticed")
             return {"dry_run": dry_run, "posted": 0,
                     "skipped_lock_keys": skipped, "payloads": []}
+        if skipped and custom:
+            # A written text describes the whole list ("the 15 ... below").
+            # Posting it over the picks still pending would tell members 15
+            # under a message that lists 7. The short default names no count,
+            # so it still fits a partial list.
+            raise DiscordVoidRejected(
+                [f"{len(skipped)} of these picks already have a void notice; "
+                 f"a written reason describes the whole list, so pass only the "
+                 f"picks still pending and a text written for them"])
 
         by_sport: dict[str, list[dict]] = {}
         for pick in pending:

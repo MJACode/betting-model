@@ -485,3 +485,83 @@ def test_the_15_notice_says_which_7_were_already_off_the_record():
         "Voided: priced off a stale sportsbook line after our odds feed dropped "
         "the game. These picks are void and do not count in the record. The "
         "original posts are left as they were.")
+
+
+# ── A written text and the list it describes ────────────────────────────────
+
+_EIGHT = sorted(dn.VOID_NOTICE_PICK_IDS["ncaaf_stale_8"])
+_FIFTEEN = sorted(dn.VOID_NOTICE_PICK_IDS["ncaaf_stale_15"])
+
+
+def _rows_for(ids, voided=()):
+    return [_row(i, voided=i in voided, lock=f"L{i}:ncaaf_over_under",
+                 label=f"Georgia vs Auburn Under {50 + n}.5")
+            for n, i in enumerate(ids)]
+
+
+def _forbid_http(monkeypatch):
+    def forbid(*_a, **_k):
+        raise AssertionError("an HTTP call was made")
+
+    monkeypatch.setattr(dn.requests, "post", forbid)
+
+
+def test_the_named_texts_carry_their_exact_picks():
+    assert dn.VOID_NOTICE_TEXTS == {
+        "ncaaf_stale_8": dn.VOID_NOTICE_NCAAF_STALE_8,
+        "ncaaf_stale_15": dn.VOID_NOTICE_NCAAF_STALE_15,
+    }
+    assert set(_EIGHT) == {2558703, 2558736, 2935576, 2992283, 2992290,
+                           2992474, 3020766, 3204788}
+    assert set(_FIFTEEN) == set(_EIGHT) | {1769626, 1769753, 1769812, 1992830,
+                                           2109187, 2109205, 2109285}
+
+
+def test_a_written_text_goes_out_only_over_its_own_picks(monkeypatch):
+    """The 15 text sent with the 8 ids is false in its first sentence."""
+    ledger, calls = _bind(monkeypatch, _rows_for(_FIFTEEN))
+    _forbid_http(monkeypatch)
+    with pytest.raises(dn.DiscordVoidRejected, match="exactly 15 picks"):
+        dn.notify_discord_void(_EIGHT, reason=dn.VOID_NOTICE_NCAAF_STALE_15,
+                               dry_run=False)
+    with pytest.raises(dn.DiscordVoidRejected, match="exactly 8 picks"):
+        dn.notify_discord_void(_FIFTEEN, reason=dn.VOID_NOTICE_NCAAF_STALE_8,
+                               dry_run=True)
+    with pytest.raises(dn.DiscordVoidRejected, match="not in that text: 1"):
+        dn.notify_discord_void(_EIGHT + [1], reason=dn.VOID_NOTICE_NCAAF_STALE_8,
+                               dry_run=True)
+    # Refused before the database is read, so nothing is sent or written.
+    assert calls == []
+    assert ledger.statements == []
+    assert ledger.commits == 0
+    out = dn.notify_discord_void(_EIGHT, reason=dn.VOID_NOTICE_NCAAF_STALE_8,
+                                 dry_run=True)
+    assert len(out["payloads"][0]["payload"]["embeds"][0]["fields"]) == 8
+
+
+def test_a_written_text_is_not_posted_over_part_of_its_list(monkeypatch):
+    """The 8 already noticed, then the 15 run: the bot would post "We've
+    voided the 15 ... below" over a message that lists 7."""
+    ledger, calls = _bind(monkeypatch, _rows_for(_FIFTEEN, voided=set(_EIGHT)))
+    _forbid_http(monkeypatch)
+    for dry_run in (False, True):
+        with pytest.raises(dn.DiscordVoidRejected,
+                           match="8 of these picks already have a void notice"):
+            dn.notify_discord_void(_FIFTEEN, reason=dn.VOID_NOTICE_NCAAF_STALE_15,
+                                   dry_run=dry_run)
+    assert calls == []
+    assert ledger.inserts == []
+    assert ledger.commits == 0
+    # The short default names no count, so it still fits the 7 left.
+    out = dn.notify_discord_void(_FIFTEEN, dry_run=True)
+    embeds = [e for item in out["payloads"] for e in item["payload"]["embeds"]]
+    assert len(embeds) == 1
+    assert len(embeds[0]["fields"]) == 7
+    assert embeds[0]["description"] == dn.VOID_NOTICE_REASON
+    assert len(out["skipped_lock_keys"]) == 8
+    # A finished list is still a no-op, written text or not.
+    done = _rows_for(_FIFTEEN, voided=set(_FIFTEEN))
+    _bind(monkeypatch, done)
+    again = dn.notify_discord_void(_FIFTEEN, reason=dn.VOID_NOTICE_NCAAF_STALE_15,
+                                   dry_run=False)
+    assert again["posted"] == 0 and again["payloads"] == []
