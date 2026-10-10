@@ -2263,6 +2263,34 @@ VOID_NOTICE_NCAAF_STALE_15 = (
     "DraftKings takes a game down, we stop making picks on it."
 )
 
+_NCAAF_STALE_8_IDS = frozenset({
+    2558703, 2558736, 2935576, 2992283, 2992290, 2992474, 3020766, 3204788})
+_NCAAF_STALE_7_IDS = frozenset({
+    1769626, 1769753, 1769812, 1992830, 2109187, 2109205, 2109285})
+
+# Each reviewed text by name, with the exact picks it was written for. The
+# worker job takes the name (reason_key) and never pasted text for a real
+# post, so the words that go out are these constants, character for
+# character. A text names its own count ("the 8 ... below"), so it is only
+# true for exactly these picks: notify_discord_void refuses any other list.
+VOID_NOTICE_TEXTS: dict[str, str] = {
+    "ncaaf_stale_8": VOID_NOTICE_NCAAF_STALE_8,
+    "ncaaf_stale_15": VOID_NOTICE_NCAAF_STALE_15,
+}
+VOID_NOTICE_PICK_IDS: dict[str, frozenset[int]] = {
+    "ncaaf_stale_8": _NCAAF_STALE_8_IDS,
+    "ncaaf_stale_15": _NCAAF_STALE_8_IDS | _NCAAF_STALE_7_IDS,
+}
+
+
+def _void_notice_key(text: str | None) -> str | None:
+    """The name of a reviewed text, or None for any other text."""
+    for key, known in VOID_NOTICE_TEXTS.items():
+        if text == known:
+            return key
+    return None
+
+
 _EMBED_TOTAL_MAX = 6000
 _EMBED_DESCRIPTION_MAX = 4096
 _FIELD_NAME_MAX = 256
@@ -2273,9 +2301,19 @@ class DiscordVoidRejected(ValueError):
     """The list is not postable. Nothing was sent and nothing was written."""
 
 
-def _void_title(sport: str) -> str:
-    """Same emoji the slate embeds use. NCAAF is '🏈 NCAAF · Voided picks'."""
+def _void_title(sport: str, reason: str | None = None) -> str:
+    """Same emoji the slate embeds use. NCAAF is '🏈 NCAAF · Voided picks'.
+
+    mike's reviewed texts carry his draft's title, 'Correction: 8 picks
+    voided' (15 for the longer one): "Correction" and the count say this is
+    not a pick list. Any other text, the short default included, keeps
+    'Voided picks'.
+    """
     emoji = _SPORT_EMOJI.get(sport, "\U0001f3af")
+    key = _void_notice_key(reason)
+    if key is not None:
+        n = len(VOID_NOTICE_PICK_IDS[key])
+        return f"{emoji} {sport} \u00b7 Correction: {n} picks voided"
     return f"{emoji} {sport} \u00b7 Voided picks"
 
 
@@ -2300,7 +2338,8 @@ def _void_field(pick: dict) -> dict:
     First line: the matchup, only when the label does not already name both
     teams ("Georgia vs Auburn Under 54.5" needs no "Auburn @ Georgia"), then
     the game day the way the slate titles print it ("Sat Oct 17"). Second
-    line: the price @ book and when it was posted.
+    line: the price @ book and when it was posted. "Posted" is when the pick
+    was written (picks.created_at), the same minute the slate card printed.
 
     No message id. A member cannot do anything with a raw id, and the webhook
     that would address it is a credential, so this never sees the webhook.
@@ -2343,7 +2382,7 @@ def void_notice_embeds(sport: str, picks: list[dict], reason: str) -> list[dict]
         raise DiscordVoidRejected(
             [f"reason is {len(reason)} characters; Discord's description cap "
              f"is {_EMBED_DESCRIPTION_MAX}"])
-    title = _void_title(sport)
+    title = _void_title(sport, reason)
     fields = [_void_field(p) for p in picks]
     for field in fields:
         if len(field["name"]) > _FIELD_NAME_MAX or len(field["value"]) > _FIELD_VALUE_MAX:
@@ -2424,7 +2463,11 @@ def _pick_from_row(row) -> dict:
     game_date = row[4]
     if hasattr(game_date, "isoformat"):
         game_date = game_date.isoformat()
-    posted = row[20] if row[20] is not None else row[15]
+    # picks.created_at, the time the slate card printed as "posted" (see
+    # _posted_et). The Discord send time is a minute or more later, so it
+    # would print a different minute from the card a member saw. It is only
+    # the fallback when created_at is missing.
+    posted = row[15] if row[15] is not None else row[20]
     return {
         "pick_id": int(row[0]),
         "sport": row[1],

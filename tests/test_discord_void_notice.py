@@ -168,7 +168,7 @@ def test_the_notice_quotes_the_label_and_does_not_carry_the_webhook(monkeypatch)
     field = embed["fields"][0]
     assert field["name"] == "Georgia vs Auburn Under 54.5"
     assert "-105 @ DraftKings" in field["value"]
-    assert dn._posted_et("2026-09-27T06:23:03-04:00") in field["value"]
+    assert dn._posted_et("2026-09-27 10:22:17+00:00") in field["value"]
     blob = json.dumps(out)
     assert "super-secret-token" not in blob
     assert "api/webhooks" not in blob
@@ -183,8 +183,13 @@ def test_a_field_reads_like_a_slate_field_for_a_member(monkeypatch):
     _bind(monkeypatch, [_row(2992290)])
     out = dn.notify_discord_void([2992290], dry_run=True)
     value = out["payloads"][0]["payload"]["embeds"][0]["fields"][0]["value"]
-    posted = dn._posted_et("2026-09-27T06:23:03-04:00")
+    # "Posted" is when the pick was written (created_at, 6:22 AM ET), the
+    # minute the slate card printed. The bot sent it at 6:23; that minute
+    # would not match the card a member saw.
+    posted = dn._posted_et("2026-09-27 10:22:17+00:00")
+    assert "6:22 AM ET" in posted
     assert value.endswith(f"`-105 @ DraftKings` \u00b7 posted {posted}")
+    assert "6:23" not in value
     assert "Sat Oct 17" in value
     assert "2026-10-17" not in value
     assert "1553713576831885365" not in value
@@ -460,7 +465,8 @@ def test_the_ncaaf_stale_notice_is_one_message_and_true_after_it_posts(name, n):
     embeds = dn.void_notice_embeds("NCAAF", _stale_picks(n), text)
     assert len(embeds) == 1
     embed = embeds[0]
-    assert embed["title"] == "\U0001f3c8 NCAAF \u00b7 Voided picks"
+    # mike's draft title: "Correction" and the count, not "Voided picks".
+    assert embed["title"] == f"\U0001f3c8 NCAAF \u00b7 Correction: {n} picks voided"
     assert embed["description"] == text
     assert [f["name"] for f in embed["fields"]] == _STALE_LABELS[:n]
     assert dn._embed_size(embed["title"], text, embed["fields"]) < 6000
