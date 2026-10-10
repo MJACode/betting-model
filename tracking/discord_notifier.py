@@ -1065,6 +1065,23 @@ def _signal_field(s: dict) -> dict:
     }
 
 
+def _slate_day(game_date) -> str:
+    """A game date the way a slate title prints it: 'Sat Oct 17'.
+
+    The slate embed and the void notice both use this, so a member reads the
+    same date in both. A value that does not parse comes back as it was.
+    """
+    if not game_date:
+        return ""
+    if hasattr(game_date, "isoformat"):
+        game_date = game_date.isoformat()
+    try:
+        return datetime.fromisoformat(str(game_date)).strftime(
+            "%a %b %d").replace(" 0", " ")
+    except ValueError:
+        return str(game_date)
+
+
 def _picks_embed(sport: str, signals: list[dict], game_date: str,
                  live: bool = False, note: str | None = None) -> dict:
     """One embed per message holding the whole slate — far tidier in-channel than
@@ -1076,10 +1093,7 @@ def _picks_embed(sport: str, signals: list[dict], game_date: str,
     nothing under it, and the retry posts a second header. One post is atomic.
     """
     emoji = _SPORT_EMOJI.get(sport, "\U0001f3af")
-    try:
-        pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
-    except ValueError:
-        pretty = game_date
+    pretty = _slate_day(game_date)
     title = (f"\U0001f534 {emoji} {sport} LIVE" if live
              else f"{emoji} {sport} Picks \u00b7 {pretty}")
     embed = {
@@ -2212,48 +2226,53 @@ def _void_title(sport: str) -> str:
     return f"{emoji} {sport} \u00b7 Voided picks"
 
 
-def _original_post_line(webhook_url: str | None, message_id) -> str | None:
-    """The original message, addressed with _message_url.
+def _label_names_teams(label: str, names: list[str | None]) -> bool:
+    """Every team name is already in the label.
 
-    The URL _message_url returns is the webhook credential (the probe job
-    refuses to store one). The channel gets the message id, which is the
-    last segment of that URL. No id, no line.
+    Longest name first, and each match is cut out before the next is looked
+    for, so 'Kansas State ML' does not also count as naming Kansas.
     """
-    if message_id is None or str(message_id) in ("", _POST_OK_NO_ID):
-        return None
-    mid = str(message_id)
-    if webhook_url:
-        addressed = _message_url(webhook_url, mid)
-        mid = addressed.rstrip("/").rsplit("/", 1)[-1]
-    return f"original post {mid}"
+    rest = label.lower()
+    for name in sorted((n for n in names if n), key=len, reverse=True):
+        at = rest.find(name.lower())
+        if at < 0:
+            return False
+        rest = rest[:at] + " " + rest[at + len(name):]
+    return True
 
 
-def _void_field(pick: dict, webhook_url: str | None) -> dict:
-    """One pick. The name is pick_label, word for word."""
+def _void_field(pick: dict) -> dict:
+    """One pick, laid out like a slate field. The name is pick_label, word for word.
+
+    First line: the matchup, only when the label does not already name both
+    teams ("Georgia vs Auburn Under 54.5" needs no "Auburn @ Georgia"), then
+    the game day the way the slate titles print it ("Sat Oct 17"). Second
+    line: the price @ book and when it was posted.
+
+    No message id. A member cannot do anything with a raw id, and the webhook
+    that would address it is a credential, so this never sees the webhook.
+    """
     label = str(pick.get("label") or "")
-    matchup = _matchup(pick.get("sport"), pick.get("home"), pick.get("away"))
+    sport = pick.get("sport")
+    home, away = pick.get("home"), pick.get("away")
+    matchup = _matchup(sport, home, away)
+    shown = [home] if sport == "GOLF" else [away, home]
+    if matchup and _label_names_teams(label, shown):
+        matchup = ""
+    context = " \u00b7 ".join(
+        x for x in (matchup, _slate_day(pick.get("game_date"))) if x)
     odds, book = publish_price(pick)
     price = _american(odds)
     if book:
         price = f"{price} @ {book}"
-    game_date = pick.get("game_date") or ""
-    if hasattr(game_date, "isoformat"):
-        game_date = game_date.isoformat()
+    line = f"`{price}`"
     posted = _posted_et(
         None if pick.get("posted_at") is None else str(pick.get("posted_at"))
     )
-    bits = [x for x in (
-        matchup,
-        price,
-        " \u00b7 ".join(x for x in (
-            f"game {game_date}" if game_date else "",
-            f"posted {posted}" if posted else "",
-        ) if x),
-    ) if x]
-    original = _original_post_line(webhook_url, pick.get("message_id"))
-    if original:
-        bits.append(original)
-    return {"name": label, "value": "\n".join(bits), "inline": False}
+    if posted:
+        line += f" \u00b7 posted {posted}"
+    return {"name": label, "value": f"{context}\n{line}" if context else line,
+            "inline": False}
 
 
 def _embed_size(title: str, description: str, fields: list[dict]) -> int:
@@ -2261,8 +2280,7 @@ def _embed_size(title: str, description: str, fields: list[dict]) -> int:
             + sum(len(f["name"]) + len(f["value"]) for f in fields))
 
 
-def void_notice_embeds(sport: str, picks: list[dict], reason: str,
-                       webhook_url: str | None) -> list[dict]:
+def void_notice_embeds(sport: str, picks: list[dict], reason: str) -> list[dict]:
     """Gray embeds for one sport, chunked at Discord's 25-field and 6000-char caps.
 
     The reason is the description of every embed, so a later page still says
@@ -2273,7 +2291,7 @@ def void_notice_embeds(sport: str, picks: list[dict], reason: str,
             [f"reason is {len(reason)} characters; Discord's description cap "
              f"is {_EMBED_DESCRIPTION_MAX}"])
     title = _void_title(sport)
-    fields = [_void_field(p, webhook_url) for p in picks]
+    fields = [_void_field(p) for p in picks]
     for field in fields:
         if len(field["name"]) > _FIELD_NAME_MAX or len(field["value"]) > _FIELD_VALUE_MAX:
             raise DiscordVoidRejected(
@@ -2453,7 +2471,7 @@ def notify_discord_void(pick_ids, reason: str | None = None,
         payloads: list[dict] = []
         for sport in sorted(by_sport):
             url = _webhook_for_sport(sport)
-            embeds = void_notice_embeds(sport, by_sport[sport], text, url)
+            embeds = void_notice_embeds(sport, by_sport[sport], text)
             for index, embed in enumerate(embeds):
                 chunk = by_sport[sport][
                     sum(len(e["fields"]) for e in embeds[:index]):

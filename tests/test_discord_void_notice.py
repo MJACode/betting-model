@@ -155,14 +155,6 @@ def test_a_voided_lock_drops_from_the_view_and_the_python_join():
 
 def test_the_notice_quotes_the_label_and_does_not_carry_the_webhook(monkeypatch):
     ledger, calls = _bind(monkeypatch, [_row(2992290)])
-    seen = []
-    real = dn._message_url
-
-    def spy(url, message_id):
-        seen.append((url, message_id))
-        return real(url, message_id)
-
-    monkeypatch.setattr(dn, "_message_url", spy)
     out = dn.notify_discord_void([2992290], dry_run=True)
     assert calls == []
     assert ledger.inserts == []
@@ -175,16 +167,56 @@ def test_the_notice_quotes_the_label_and_does_not_carry_the_webhook(monkeypatch)
     assert embed["color"] == dn._COLOR_VOID
     field = embed["fields"][0]
     assert field["name"] == "Georgia vs Auburn Under 54.5"
-    assert "Auburn @ Georgia" in field["value"]
     assert "-105 @ DraftKings" in field["value"]
-    assert "game 2026-10-17" in field["value"]
     assert dn._posted_et("2026-09-27T06:23:03-04:00") in field["value"]
-    assert "original post 1553713576831885365" in field["value"]
     blob = json.dumps(out)
     assert "super-secret-token" not in blob
     assert "api/webhooks" not in blob
-    assert seen == [(WEBHOOK, "1553713576831885365")]
     assert dn._void_title("MLB") == f"{dn._SPORT_EMOJI['MLB']} MLB \u00b7 Voided picks"
+
+
+def test_a_field_reads_like_a_slate_field_for_a_member(monkeypatch):
+    """The game day as the slate title prints it, the price, the post time.
+
+    No raw date and no message id: a member can use neither.
+    """
+    _bind(monkeypatch, [_row(2992290)])
+    out = dn.notify_discord_void([2992290], dry_run=True)
+    value = out["payloads"][0]["payload"]["embeds"][0]["fields"][0]["value"]
+    posted = dn._posted_et("2026-09-27T06:23:03-04:00")
+    assert value.endswith(f"`-105 @ DraftKings` \u00b7 posted {posted}")
+    assert "Sat Oct 17" in value
+    assert "2026-10-17" not in value
+    assert "1553713576831885365" not in value
+    assert "original post" not in value
+    # The slate title and the notice print the same day.
+    title = dn._picks_embed("NCAAF", [], "2026-10-17")["title"]
+    assert title.endswith(dn._slate_day("2026-10-17"))
+    assert dn._slate_day("2026-11-07") == "Sat Nov 7"
+
+
+def test_the_matchup_line_shows_only_when_the_label_lacks_a_team(monkeypatch):
+    """'Georgia vs Auburn Under 54.5' already says who plays. 'Auburn @
+    Georgia' under it repeats the label, so it is left off."""
+    _bind(monkeypatch, [_row(2992290)])
+    out = dn.notify_discord_void([2992290], dry_run=True)
+    value = out["payloads"][0]["payload"]["embeds"][0]["fields"][0]["value"]
+    assert "Auburn @ Georgia" not in value
+    assert value.startswith("Sat Oct 17\n")
+
+    base = {
+        "sport": "NCAAF", "home": "Kansas", "away": "Kansas State",
+        "dk_odds": -110, "best_odds": -110, "best_book": "draftkings",
+        "game_date": "2026-10-17", "posted_at": None,
+    }
+    prop = dn._void_field({**base, "label": "Avery Johnson Over 1.5 Pass TDs"})
+    assert prop["value"].startswith("Kansas State @ Kansas \u00b7 Sat Oct 17\n")
+    # "Kansas State" is cut out before "Kansas" is looked for, so a label
+    # naming only Kansas State does not count as naming both.
+    side = dn._void_field({**base, "label": "Kansas State ML"})
+    assert side["value"].startswith("Kansas State @ Kansas \u00b7 ")
+    total = dn._void_field({**base, "label": "Kansas State vs Kansas Under 54.5"})
+    assert total["value"] == "Sat Oct 17\n`-110 @ DraftKings`"
 
 
 def test_a_rerun_skips_locks_that_already_have_a_notice(monkeypatch):
@@ -306,7 +338,7 @@ def test_embeds_chunk_at_the_field_cap_and_the_size_cap():
         "game_date": "2026-10-17", "posted_at": "2026-09-27T06:23:03-04:00",
         "message_id": None,
     } for i in range(26)]
-    embeds = dn.void_notice_embeds("NCAAF", picks, dn.VOID_NOTICE_REASON, None)
+    embeds = dn.void_notice_embeds("NCAAF", picks, dn.VOID_NOTICE_REASON)
     assert [len(e["fields"]) for e in embeds] == [25, 1]
     assert all(e["color"] == dn._COLOR_VOID for e in embeds)
     fat = [{
@@ -318,14 +350,14 @@ def test_embeds_chunk_at_the_field_cap_and_the_size_cap():
 
     real = dn._void_field
 
-    def bulky(pick, webhook_url):
-        field = real(pick, webhook_url)
+    def bulky(pick):
+        field = real(pick)
         field["value"] = long
         return field
 
     dn._void_field = bulky
     try:
-        chunked = dn.void_notice_embeds("NCAAF", fat, dn.VOID_NOTICE_REASON, None)
+        chunked = dn.void_notice_embeds("NCAAF", fat, dn.VOID_NOTICE_REASON)
     finally:
         dn._void_field = real
     assert len(chunked) >= 2
