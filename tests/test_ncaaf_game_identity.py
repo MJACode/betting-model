@@ -185,6 +185,19 @@ def test_the_odds_api_map_bridges_names_no_rule_can():
     # The Odds API spells it out, and no automatic rule bridges them.
     assert m.get("Southeastern Louisiana Lions") == "SE Louisiana"
     assert m.get("Southeastern Louisiana") == "SE Louisiana"
+    # 2026-09-26: three small-school visitors split from their stats-feed
+    # rows. The "and" fold and the abbreviation rule also bridge the first
+    # two; Houston Baptist (renamed Houston Christian) needs the map.
+    assert m.get("William and Mary Tribe") == "William & Mary"
+    assert m.get("William and Mary") == "William & Mary"
+    assert m.get("LIU Sharks") == "Long Island University"
+    assert m.get("LIU") == "Long Island University"
+    assert m.get("Houston Baptist Huskies") == "Houston Christian"
+    assert m.get("Houston Baptist") == "Houston Christian"
+    # 2026-09-05 Charlotte split (8,639 odds rows on the duplicate), and the
+    # stats-feed row for 2026-10-17 at Texas A&M is already in games.
+    assert m.get("Citadel Bulldogs") == "The Citadel"
+    assert m.get("Citadel") == "The Citadel"
 
 
 def test_every_override_target_is_a_canonical_school_shape():

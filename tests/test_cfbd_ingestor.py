@@ -1054,3 +1054,179 @@ def test_odds_ingest_builds_the_cfbd_id_for_this_matchup(
     assert games[0]["home_team"] == "UL Monroe"
     assert {o["game_id"] for o in odds} == {
         "NCAAF_2026-09-19_se-louisiana_ul-monroe"}
+
+
+# ── Small-school names the odds feed spells differently (rebuild of #818) ────
+#
+# Four production splits, each a stats-feed games row plus a second row minted
+# from the odds feed's name: William and Mary Tribe @ Duke, LIU Sharks @ FIU
+# and Houston Baptist Huskies @ North Texas (all 2026-09-26), and Citadel
+# Bulldogs @ Charlotte (2026-09-05). The Citadel plays at Texas A&M on
+# 2026-10-17; the stats-feed row NCAAF_2026-10-17_the-citadel_texas-a-m is
+# already in games. alt_names is NULL on every school in the registry.
+
+
+@pytest.fixture
+def fcs_alias_registry(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "William & Mary", "mascot": "Tribe", "abbreviation": "W&M", "alt": []},
+        {"school": "Duke", "mascot": "Blue Devils", "abbreviation": "DUKE", "alt": []},
+        {"school": "Long Island University", "mascot": "Sharks", "abbreviation": "LIU", "alt": []},
+        {"school": "Florida International", "mascot": "Panthers", "abbreviation": "FIU", "alt": []},
+        {"school": "Houston Christian", "mascot": "Huskies", "abbreviation": "HCU", "alt": []},
+        {"school": "Houston", "mascot": "Cougars", "abbreviation": "HOU", "alt": []},
+        {"school": "North Texas", "mascot": "Mean Green", "abbreviation": "UNT", "alt": []},
+        {"school": "Washington", "mascot": "Huskies", "abbreviation": "WASH", "alt": []},
+        {"school": "Washington and Lee", "mascot": "Generals", "abbreviation": "W&L", "alt": []},
+        {"school": "The Citadel", "mascot": "Bulldogs", "abbreviation": "CIT", "alt": []},
+        {"school": "Texas A&M", "mascot": "Aggies", "abbreviation": "TA&M", "alt": []},
+        {"school": "Charlotte", "mascot": "49ers", "abbreviation": "CLT", "alt": []},
+        {"school": "Anderson (IN)", "mascot": "Ravens", "abbreviation": "ANIN", "alt": []},
+        {"school": "South Carolina", "mascot": "Gamecocks", "abbreviation": "SC", "alt": []},
+        {"school": "Pennsylvania", "mascot": "Quakers", "abbreviation": "PENN", "alt": []},
+        {"school": "Penn State", "mascot": "Nittany Lions", "abbreviation": "PSU", "alt": []},
+    ])
+    return cf
+
+
+def test_and_versus_ampersand_resolves_without_the_map(fcs_alias_registry, monkeypatch):
+    """The stats feed writes "William & Mary"; the odds feed "William and Mary"."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "William and Mary Tribe") == "William & Mary"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "William and Mary") == "William & Mary"
+
+
+def test_only_a_standalone_and_is_dropped(fcs_alias_registry):
+    fold = fcs_alias_registry._fold
+    assert fold("William and Mary") == fold("William & Mary") == "william mary"
+    assert fold("Anderson (IN)") == "anderson in"
+    assert fold("Andrews and Sand") == "andrews sand"
+
+
+def test_dropping_and_does_not_hand_washington_and_lee_to_washington(
+        fcs_alias_registry, monkeypatch):
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Washington and Lee Generals") == "Washington and Lee"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Washington & Lee") == "Washington and Lee"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Washington Huskies") == "Washington"
+
+
+def test_abbreviation_plus_mascot_resolves_liu_without_the_map(
+        fcs_alias_registry, monkeypatch):
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school("LIU Sharks") == \
+        "Long Island University"
+    assert fcs_alias_registry.resolve_odds_api_school("LIU") == \
+        "Long Island University"
+
+
+def test_a_bare_abbreviation_under_three_letters_is_not_a_match(
+        fcs_alias_registry, monkeypatch):
+    """"SC" and "W&M" (two letters once folded) are too short to trust on
+    their own. With the mascot they are exact."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school("SC") == "SC"
+    assert fcs_alias_registry.resolve_odds_api_school("W&M") == "W&M"
+    assert fcs_alias_registry.resolve_odds_api_school("SC Gamecocks") == \
+        "South Carolina"
+    assert fcs_alias_registry.resolve_odds_api_school("W&M Tribe") == \
+        "William & Mary"
+
+
+def test_a_bare_abbreviation_does_not_beat_an_exact_school(
+        fcs_alias_registry, monkeypatch):
+    """Kalshi writes "Penn" for Pennsylvania, whose abbreviation is PENN.
+    "Penn State" is still Penn State: exact school is tried first."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school("Penn") == "Pennsylvania"
+    assert fcs_alias_registry.resolve_odds_api_school("Penn State") == "Penn State"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Penn State Nittany Lions") == "Penn State"
+
+
+def test_houston_baptist_does_not_resolve_without_the_map(
+        fcs_alias_registry, monkeypatch):
+    """A rename, not a spelling. HCU is the abbreviation; "Houston" is a
+    different school whose mascot is not Huskies, so the prefix rule must not
+    fire either."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Houston Baptist Huskies") == "Houston Baptist Huskies"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Houston Baptist") == "Houston Baptist"
+
+
+def test_citadel_bulldogs_does_not_resolve_without_the_map(
+        fcs_alias_registry, monkeypatch):
+    """"the citadel" does not prefix "citadel bulldogs", the abbreviation is
+    CIT, and alt_names is empty. Only the map entry bridges it."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Citadel Bulldogs") == "Citadel Bulldogs"
+    assert fcs_alias_registry.resolve_odds_api_school("Citadel") == "Citadel"
+
+
+def test_the_map_resolves_houston_baptist_and_the_citadel(fcs_alias_registry):
+    """These assertions fail if either map entry is removed."""
+    r = fcs_alias_registry.resolve_odds_api_school
+    assert r("Houston Baptist Huskies") == "Houston Christian"
+    assert r("Houston Baptist") == "Houston Christian"
+    assert r("Citadel Bulldogs") == "The Citadel"
+    assert r("Citadel") == "The Citadel"
+
+
+@pytest.mark.parametrize("away, home, kickoff, game_id", [
+    ("William and Mary Tribe", "Duke Blue Devils", "2026-09-26T19:32:00Z",
+     "NCAAF_2026-09-26_william-mary_duke"),
+    ("LIU Sharks", "Florida International Panthers", "2026-09-26T22:00:00Z",
+     "NCAAF_2026-09-26_long-island-university_florida-international"),
+    ("Houston Baptist Huskies", "North Texas Mean Green", "2026-09-26T23:30:00Z",
+     "NCAAF_2026-09-26_houston-christian_north-texas"),
+    ("Citadel Bulldogs", "Charlotte 49ers", "2026-09-05T19:30:00Z",
+     "NCAAF_2026-09-05_the-citadel_charlotte"),
+    ("Citadel Bulldogs", "Texas A&M Aggies", "2026-10-17T17:00:00Z",
+     "NCAAF_2026-10-17_the-citadel_texas-a-m"),
+])
+def test_odds_ingest_builds_the_stats_feed_id(fcs_alias_registry,
+                                              away, home, kickoff, game_id):
+    """_process_events is what minted each duplicate. Each id on the right is
+    the stats-feed row already in games."""
+    from data.ingestors.odds_ingestor import _process_events
+    event = {
+        "id": game_id, "commence_time": kickoff,
+        "home_team": home, "away_team": away,
+        "bookmakers": [{
+            "key": "draftkings",
+            "markets": [{"key": "totals", "outcomes": [
+                {"name": "Over", "price": -110, "point": 55.5},
+                {"name": "Under", "price": -110, "point": 55.5},
+            ]}],
+        }],
+    }
+    games, odds = _process_events([event], "NCAAF", "open", "2026-09-22T05:49:20Z")
+    assert [g["game_id"] for g in games] == [game_id]
+    assert {o["game_id"] for o in odds} == {game_id}
+
+
+def test_load_schools_reads_the_abbreviation(monkeypatch):
+    """The abbreviation rule is dead unless the registry load selects it."""
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", None)
+    seen = []
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            seen.append(sql)
+            rows = [("Long Island University", "Sharks", None, "LIU")]
+            return type("R", (), {"fetchall": lambda _self: rows})()
+
+    schools = cf._load_schools(_Conn())
+    assert "abbreviation" in seen[0]
+    assert schools == [{"school": "Long Island University", "mascot": "Sharks",
+                        "alt": [], "abbreviation": "LIU"}]

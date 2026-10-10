@@ -178,10 +178,17 @@ its opening number, which is rarely true by kickoff.
   Name-resolution phantoms (Tennessee vs Tennessee State) are a separate
   population — not this rule.
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
-  slugs. Odds API names no fold / "school mascot" / prefix rule can bridge
-  (Southern Miss, App State, UMass, SE Louisiana) live in
-  `config.NCAAF_ODDS_API_MAP`; without an entry the odds ingest mints a
-  second `games` row and `ncaaf_game_identity` goes CRIT. Historical lines
+  slugs. `_fold` drops a standalone "and", so "William and Mary" =
+  "William & Mary". The resolver also matches a school's abbreviation (three
+  letters or more) or abbreviation + mascot ("LIU Sharks" = Long Island
+  University). Odds API names no rule can bridge (Southern Miss, App State,
+  UMass, SE Louisiana, The Citadel, and the Houston Baptist → Houston
+  Christian rename) live in `config.NCAAF_ODDS_API_MAP`; without an entry
+  the odds ingest mints a second `games` row, and `ncaaf_game_identity`
+  goes CRIT when the home team is FBS. There is no fallback yet for a name
+  that is in neither the map nor any rule. The planned one: match the side
+  that did resolve, the same kickoff within a few minutes, ±1 day, as a
+  second step inside PR #890's games-row lookup. Historical lines
   under `cfbd_*` bookmakers (provider priority
   `NCAAF_LINE_BOOKMAKER_PRIORITY`; 2023-25 DK, 2019-22 Bovada, 2015-18
   consensus). Openers are protected from the pruner (earliest snapshot per

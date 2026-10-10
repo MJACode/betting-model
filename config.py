@@ -4106,6 +4106,26 @@ NCAAF_ODDS_API_MAP: dict = {
     # same commence_time 2026-09-19T20:30:00Z.
     "Southeastern Louisiana Lions": "SE Louisiana",
     "Southeastern Louisiana": "SE Louisiana",
+    # 2026-09-26: three small-school visitors each got a second games row
+    # beside the stats-feed row (Duke, FIU, North Texas; the odds sat on the
+    # second row, the final on the first). alt_names is NULL on all three.
+    # "William and Mary" is also bridged by the fold (the word "and" vs "&")
+    # and "LIU Sharks" by abbreviation + mascot; both stay here so the map
+    # alone still lands them. "Houston Baptist" is a rename (now Houston
+    # Christian, abbreviation HCU): no rule bridges it.
+    "William and Mary Tribe": "William & Mary",
+    "William and Mary": "William & Mary",
+    "LIU Sharks": "Long Island University",
+    "LIU": "Long Island University",
+    "Houston Baptist Huskies": "Houston Christian",
+    "Houston Baptist": "Houston Christian",
+    # 2026-09-05: Citadel @ Charlotte split the same way (8,639 odds rows on
+    # ..._citadel-bulldogs_charlotte, 0 on the stats-feed row). The school is
+    # "The Citadel", which does not prefix "Citadel Bulldogs", and its
+    # abbreviation is CIT. Next game against an FBS team: Texas A&M 2026-10-17,
+    # stats-feed row NCAAF_2026-10-17_the-citadel_texas-a-m.
+    "Citadel Bulldogs": "The Citadel",
+    "Citadel": "The Citadel",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.

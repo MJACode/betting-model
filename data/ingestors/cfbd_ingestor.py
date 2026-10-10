@@ -1885,9 +1885,11 @@ def _load_schools(conn=None) -> list[dict]:
     try:
         _SCHOOL_CACHE = [
             {"school": r[0], "mascot": r[1],
-             "alt": [a for a in (r[2] or "").split("|") if a]}
+             "alt": [a for a in (r[2] or "").split("|") if a],
+             "abbreviation": r[3]}
             for r in conn.execute(
-                "SELECT school, mascot, alt_names FROM ncaaf_teams").fetchall()
+                "SELECT school, mascot, alt_names, abbreviation FROM ncaaf_teams"
+            ).fetchall()
         ]
     except Exception as exc:                            # noqa: BLE001
         logger.warning(f"ncaaf_teams unavailable ({exc}) — name resolution is identity-only")
@@ -1905,10 +1907,19 @@ def reset_school_cache() -> None:
 
 
 def _fold(v: str) -> str:
-    """Case-, accent- and punctuation-insensitive comparison key."""
+    """Case-, accent- and punctuation-insensitive comparison key.
+
+    "&" is punctuation, so "William & Mary" folds to "william mary" while the
+    odds feed's "William and Mary" kept the word, and the two never met (a
+    second games row for Duke's 2026-09-26 game). A standalone "and" is
+    dropped; "Anderson" keeps its letters. Measured on the production
+    registry 2026-10-10: 683 schools, 1,366 school and school+mascot keys,
+    still no two schools sharing a key.
+    """
     import unicodedata
     v = unicodedata.normalize("NFD", (v or "").strip().lower())
-    return "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
+    folded = "".join(ch for ch in v if ch.isalnum() or ch == " ")
+    return " ".join(p for p in folded.split() if p != "and")
 
 
 def _rest_is_mascot(rest: str, mascot: str | None) -> bool:
@@ -1936,8 +1947,9 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
 
     The Odds API lists NCAAF teams with the mascot appended ("Ohio State
     Buckeyes"), so this strips it by matching against ncaaf_teams. Resolution
-    order: explicit config override → exact school → "school mascot" → longest
-    school that prefixes the input → alt name → the input unchanged (warned).
+    order: explicit config override → exact school → "school mascot" →
+    abbreviation, or abbreviation + mascot → longest school that prefixes the
+    input → alt name → the input unchanged (warned).
 
     Identity fallback is deliberate: an unresolved name yields a game_id that
     simply won't match a stats row, so the scorer skips that game — far safer
@@ -1968,6 +1980,26 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     for s in schools:
         if s["mascot"] and _fold(f"{s['school']} {s['mascot']}") == lowered:
             return s["school"]
+    # Abbreviation, exact. "LIU Sharks" is Long Island University's
+    # abbreviation plus its mascot; "school mascot" looks for "Long Island
+    # University Sharks" and misses (a second games row for FIU's 2026-09-26
+    # game). A bare abbreviation must be at least three letters once folded:
+    # "SC" or "W&M" on their own are too short to trust. With the mascot
+    # appended it is exact at any length. Only a single hit counts.
+    # Measured on the production registry 2026-10-10: 680 abbreviations, all
+    # different, and none folds to another school's name or name + mascot.
+    abbrev_hits: list[str] = []
+    for s in schools:
+        raw = s.get("abbreviation") or ""
+        abbrev = _fold(raw)
+        if not abbrev:
+            continue
+        if s.get("mascot") and _fold(f"{raw} {s['mascot']}") == lowered:
+            abbrev_hits.append(s["school"])
+        elif abbrev == lowered and sum(ch.isalnum() for ch in abbrev) >= 3:
+            abbrev_hits.append(s["school"])
+    if len(abbrev_hits) == 1:
+        return abbrev_hits[0]
     # A school that PREFIXES the input is a match only when what follows it is
     # that school's mascot. ncaaf_teams was /teams/fbs only until 2026-09-07,
     # so an FCS opponent whose name extends an FBS school's found no exact
