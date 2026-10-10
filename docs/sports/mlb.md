@@ -59,6 +59,9 @@ converging on the same place from the other side.
   `docs/mlb_spread_market_2026.md`: +3.2% to +3.7% overall, April flat or red
   and May red on every book list; the publish switch has been off since
   2026-09-19 and the own-EV floor blocks it too (PR #761).
+  Rules built on public splits, line moves and Pinnacle gaps instead of the
+  trained model found nothing bettable, and every near miss lost in the 105
+  games after 2026-09-19 (PR #757, `docs/mlb_runline_edge_hunt.md`).
 * **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last
   three starts), shared by the daily ingest and the rebuild via
   `data/pitcher_rates.py`. It used to be `AVG(era)` over the last three stored

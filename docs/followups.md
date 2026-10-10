@@ -754,6 +754,12 @@ After this merges: `mlb_runline_retrain_sweep` register=false. Worker job
 consumes the same `FEATURE_MAP`. Do not flip `PAUSED_MODELS` or
 `MLB_*_MARKET_PUBLISH`.
 
+2026-10-10: the search for a run-line rule built on market data instead
+of a trained model (PR #757, 2026-09-19, never merged) found none: fading
+the public by tickets or money, the home underdog, reverse line movement,
+line moves and Pinnacle gaps. Every near miss lost in the 105 games played
+after it (`docs/mlb_runline_edge_hunt.md`).
+
 ## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)
 
 Measured 2026-09-14 against the health-check predicates: +11.06pp / 414 at
