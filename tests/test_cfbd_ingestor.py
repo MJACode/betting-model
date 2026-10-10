@@ -1139,6 +1139,20 @@ def test_a_bare_abbreviation_under_three_letters_is_not_a_match(
         "William & Mary"
 
 
+def test_an_abbreviation_two_schools_share_matches_neither(monkeypatch):
+    """Every production abbreviation is different today (680 of 680,
+    2026-10-10). If the stats feed ever repeats one, guessing between the two
+    schools would put odds on the wrong game; pass the name through instead."""
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "Long Island University", "mascot": "Sharks", "abbreviation": "LIU", "alt": []},
+        {"school": "Lincoln University", "mascot": "Lions", "abbreviation": "LIU", "alt": []},
+    ])
+    assert cf.resolve_odds_api_school("LIU") == "LIU"
+    assert cf.resolve_odds_api_school("LIU Sharks") == "Long Island University"
+
+
 def test_a_bare_abbreviation_does_not_beat_an_exact_school(
         fcs_alias_registry, monkeypatch):
     """Kalshi writes "Penn" for Pennsylvania, whose abbreviation is PENN.
