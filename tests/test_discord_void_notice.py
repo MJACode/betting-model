@@ -699,7 +699,8 @@ def test_the_ncaaf_stale_notice_is_one_message_and_true_after_it_posts(name, n):
     assert text.startswith(f"We've voided the {n} college football picks below")
     assert text.endswith("If DraftKings takes a game down, we stop making "
                          "picks on it.")
-    # The job carries the text as `reason` and caps it at 4000.
+    # A dry run may still carry the text as `reason` (capped at 4000); a
+    # real post names it with reason_key (see the job tests below).
     assert q._validate_publish_discord_void(
         {"pick_ids": [1], "reason": text})["reason"] == text
     embeds = dn.void_notice_embeds("NCAAF", _stale_picks(n), text)
