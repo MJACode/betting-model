@@ -39,7 +39,21 @@ import {
   inHitRateBand,
   isOnSlate,
   fixtureSubline,
+  canOpenPlayerDetail,
   isLineOnlyId,
+  lineOnlyRowLabel,
+  LINE_ONLY_ROW_TAIL,
+  slateChipDisabled,
+  slateReadKey,
+  SLATE_CHECKING_HINT,
+  TEAMS_SLATE_FAILED_HINT,
+  TEAMS_SLATE_OFF_HINT,
+  TEAMS_SLATE_ON_HINT,
+  teamsNoGamesHint,
+  PLAYERS_SLATE_CUT_HINT,
+  PLAYERS_SLATE_EMPTY_HINT,
+  PLAYERS_SLATE_GAMES_HINT,
+  PLAYERS_SLATE_LOADING_HINT,
   isStatParticipant,
   isTeamPropName,
   LINE_ONLY_ID_PREFIX,
@@ -58,6 +72,7 @@ import {
   touchedPlayerIds,
   slateGameFor,
   slateSubline,
+  sublineSpoken,
   type SortableRow,
 } from '../src/lib/statsBoard';
 import { todayET } from '../src/lib/format';
@@ -281,6 +296,51 @@ check('lineOnlyPlayers: suffix-folded names count as present; the rest are liste
   missing.map((p) => p.name).join() === 'Tank Dell' && missing[0]!.gameId === 'g2');
 check('line-only ids are recognisable and never a real id',
   isLineOnlyId(`${LINE_ONLY_ID_PREFIX}tank dell`) && !isLineOnlyId('00-0036900'));
+check('a line-only or blank id does not open a player page',
+  !canOpenPlayerDetail(`${LINE_ONLY_ID_PREFIX}tank dell`) &&
+    !canOpenPlayerDetail('') &&
+    !canOpenPlayerDetail(null));
+check('a real player id still opens', canOpenPlayerDetail('00-0036900'));
+check('a fixture is spoken with "at", not "at sign"',
+  sublineSpoken('SUN 1:00 PM ET · HOU @ TEN') === 'SUN 1:00 PM ET, HOU at TEN' &&
+    sublineSpoken('9:40 PM ET · @ SEA') === '9:40 PM ET, at SEA');
+check('a line-only label speaks the fixture, then ", no games logged yet"',
+  lineOnlyRowLabel('Tank Dell', sublineSpoken('SUN 1:00 PM ET · HOU @ TEN')) ===
+    'Tank Dell, SUN 1:00 PM ET, HOU at TEN, no games logged yet');
+check('a line-only label ends with ", no games logged yet"',
+  lineOnlyRowLabel('Tank Dell', null) === `Tank Dell${LINE_ONLY_ROW_TAIL}` &&
+    lineOnlyRowLabel('Tank Dell', 'SUN 1:00 PM ET, HOU at TEN') ===
+      'Tank Dell, SUN 1:00 PM ET, HOU at TEN, no games logged yet' &&
+    LINE_ONLY_ROW_TAIL === ', no games logged yet');
+{
+  const mark = SLATE_CHECKING_HINT.indexOf('s schedule') - 1;
+  check('the checking hint is "Checking today’s schedule" with U+2019',
+    SLATE_CHECKING_HINT === 'Checking today\u2019s schedule' &&
+      SLATE_CHECKING_HINT.charCodeAt(mark) === 0x2019 &&
+      !SLATE_CHECKING_HINT.includes("'"));
+}
+check('a restored hint drops the control name and ends with a period',
+  teamsNoGamesHint('NFL') === 'Unavailable: no NFL games in the next week.' &&
+    TEAMS_SLATE_FAILED_HINT === 'Unavailable: the schedule could not be loaded.' &&
+    TEAMS_SLATE_ON_HINT === 'On. Showing only teams on this slate.' &&
+    TEAMS_SLATE_OFF_HINT === 'Off. Showing every team.' &&
+    PLAYERS_SLATE_EMPTY_HINT === 'Unavailable: no games scheduled.' &&
+    PLAYERS_SLATE_GAMES_HINT === 'Unavailable while a game is picked above.' &&
+    PLAYERS_SLATE_LOADING_HINT === 'Loading.' &&
+    PLAYERS_SLATE_CUT_HINT === 'On shows only players in action, off shows every player.' &&
+    ![TEAMS_SLATE_FAILED_HINT, TEAMS_SLATE_ON_HINT, TEAMS_SLATE_OFF_HINT,
+      teamsNoGamesHint('NFL'), PLAYERS_SLATE_EMPTY_HINT, PLAYERS_SLATE_GAMES_HINT,
+      PLAYERS_SLATE_LOADING_HINT, PLAYERS_SLATE_CUT_HINT,
+    ].some((h) => h.startsWith('Playing today') || h.startsWith('Next slate')));
+check('the Teams chip stays disabled while the previous sport\'s slate is still in state',
+  slateChipDisabled(true, true) === true);
+check('the Teams chip stays disabled with no slate', slateChipDisabled(false, false) === true);
+check('the Teams chip is tappable once this sport\'s slate has teams',
+  slateChipDisabled(false, true) === false);
+check('an ET rollover is a different slate read',
+  slateReadKey('NFL', '2026-10-09') !== slateReadKey('NFL', '2026-10-10'));
+check('a sport switch is a different slate read',
+  slateReadKey('NFL', '2026-10-09') !== slateReadKey('NBA', '2026-10-09'));
 check('fixtureSubline: a line-only row names its game, not a team it does not know',
   /· HOU @ TEN$/.test(fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, null) ?? '') &&
   fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, 'Live') === 'Live · HOU @ TEN' &&

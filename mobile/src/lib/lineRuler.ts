@@ -120,6 +120,18 @@ export function stopCount(s: RulerScale): number {
 }
 
 /**
+ * The last stop VoiceOver will step to.
+ *
+ * `scale.max` can sit off the grid (a ceiling that is not a multiple of the
+ * step). The strip and the adjustable both stop at this stop. A typed clamp
+ * has to use it too, or a number between here and `max` is one a decrement
+ * is then refused.
+ */
+export function rulerHi(s: RulerScale): number {
+  return stopAt(stopCount(s) - 1, s);
+}
+
+/**
  * The value at a stop index, clamped to the scale's ends.
  *
  * A non-finite index reads as the floor rather than propagating: this is fed
@@ -146,4 +158,82 @@ export function stopIndexOf(v: number, s: RulerScale): number {
  */
 export function snapStop(v: number, s: RulerScale): number {
   return stopAt(stopIndexOf(v, s), s);
+}
+
+/**
+ * A parsed typed line, clamped onto the ruler's `[lo, hi]`.
+ *
+ * `parseTypedLine` accepts four digits, so "999" is a line. The strip can
+ * only scroll to the last stop (`stopIndexOf` clamps the offset), but the
+ * VALUE stayed 999. VoiceOver then steps with `stepLineFrom`, which from 999
+ * on a step-5 ruler lands on 995, and the ruler's `next <= hi` refuses it —
+ * the number is pinned and cannot be stepped down. Clamping the typed value
+ * onto the scale leaves the ceiling as a stop VoiceOver can leave.
+ *
+ * Junk (`null`, non-finite) stays null so the field can still refuse it.
+ */
+export function clampTypedLine(n: number | null, lo: number, hi: number): number | null {
+  if (n == null || !Number.isFinite(n)) return null;
+  const floor = Math.min(lo, hi);
+  const ceil = Math.max(lo, hi);
+  return Math.min(ceil, Math.max(floor, n));
+}
+
+/**
+ * The text the type-a-line field shows once a typed number has been clamped.
+ *
+ * `applied` is the number the board will use. When the digits in the field
+ * are a different number, the field has to paint `face(applied)` in that
+ * same update — otherwise the reader is still looking at 999 while 150 is
+ * what was applied. An in-range value, and junk, return null so the field
+ * closes without being rewritten.
+ */
+export function clampedFieldText(
+  draft: string,
+  applied: number | null,
+  face: (n: number) => string,
+): string | null {
+  if (applied == null || !Number.isFinite(applied)) return null;
+  const raw = draft.trim().replace(/\+$/, '');
+  const shown = face(applied);
+  // Already the applied face — including Over/Under, where "1.5" is stop 2.
+  // Returning the same glyphs would setState a no-op and leave the field open.
+  if (raw === shown) return null;
+  return shown;
+}
+
+/** The number the centre is holding, and whether the next settle belongs to
+ *  a programmatic scroll rather than a finger. */
+export interface RulerHold {
+  value: number;
+  skipNextSettle: boolean;
+}
+
+/**
+ * A tap, a VoiceOver step, or a typed commit. Reports `value` itself and
+ * arms a one-shot skip of the settle the animated `scrollTo` is about to
+ * fire (`onMomentumScrollEnd` on iOS, and on some Android).
+ *
+ * An off-grid typed line scrolls to the NEAREST stop. Without the skip,
+ * settle reads that stop and overwrites the typed number — 47 on Rec Yards
+ * (step 5) becomes 45.
+ */
+export function programmaticPick(value: number): RulerHold {
+  return { value, skipNextSettle: true };
+}
+
+/** A finger drag started. The pending skip must not swallow this drag's settle. */
+export function clearSettleSkip(hold: RulerHold): RulerHold {
+  if (!hold.skipNextSettle) return hold;
+  return { value: hold.value, skipNextSettle: false };
+}
+
+/**
+ * `onMomentumScrollEnd` / `onScrollEndDrag`. `offsetStops` is
+ * `contentOffset.x / tickW`. The one-shot skip keeps the held value and
+ * clears itself; the next settle applies.
+ */
+export function settleHold(hold: RulerHold, offsetStops: number, scale: RulerScale): RulerHold {
+  if (hold.skipNextSettle) return { value: hold.value, skipNextSettle: false };
+  return { value: stopAt(offsetStops, scale), skipNextSettle: false };
 }
