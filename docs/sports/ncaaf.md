@@ -179,9 +179,11 @@ its opening number, which is rarely true by kickoff.
   population — not this rule.
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
   slugs. `_fold` drops a standalone "and", so "William and Mary" =
-  "William & Mary". The resolver also matches a school's abbreviation (three
-  letters or more) or abbreviation + mascot ("LIU Sharks" = Long Island
-  University). Odds API names no rule can bridge (Southern Miss, App State,
+  "William & Mary". The resolver also matches a school's abbreviation +
+  mascot ("LIU Sharks" = Long Island University), but never a bare
+  abbreviation: the stats feed gives OSU to Ohio State and BSU to Buffalo
+  State, so a bare acronym can mean another school. Odds API names no rule
+  can bridge (Southern Miss, App State,
   UMass, SE Louisiana, The Citadel, and the Houston Baptist → Houston
   Christian rename) live in `config.NCAAF_ODDS_API_MAP`; without an entry
   the odds ingest mints a second `games` row, and `ncaaf_game_identity`

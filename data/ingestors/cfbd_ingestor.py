@@ -1948,8 +1948,8 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     The Odds API lists NCAAF teams with the mascot appended ("Ohio State
     Buckeyes"), so this strips it by matching against ncaaf_teams. Resolution
     order: explicit config override → exact school → "school mascot" →
-    abbreviation, or abbreviation + mascot → longest school that prefixes the
-    input → alt name → the input unchanged (warned).
+    "abbreviation mascot" (a bare abbreviation is never a match) → longest
+    school that prefixes the input → alt name → the input unchanged (warned).
 
     Identity fallback is deliberate: an unresolved name yields a game_id that
     simply won't match a stats row, so the scorer skips that game — far safer
@@ -1980,23 +1980,25 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     for s in schools:
         if s["mascot"] and _fold(f"{s['school']} {s['mascot']}") == lowered:
             return s["school"]
-    # Abbreviation, exact. "LIU Sharks" is Long Island University's
+    # Abbreviation + mascot, exact. "LIU Sharks" is Long Island University's
     # abbreviation plus its mascot; "school mascot" looks for "Long Island
     # University Sharks" and misses (a second games row for FIU's 2026-09-26
-    # game). A bare abbreviation must be at least three letters once folded:
-    # "SC" or "W&M" on their own are too short to trust. With the mascot
-    # appended it is exact at any length. Only a single hit counts.
+    # game). The school's own mascot is the evidence, so it is exact at any
+    # length ("SC Gamecocks"). Only a single hit counts.
+    # A bare abbreviation is never a match. Common acronyms belong to many
+    # schools, but the registry gives each to one: on production (2026-10-10)
+    # OSU is Ohio State, MSU is Michigan State and BSU is Buffalo State, a
+    # Division III school. A bare "BSU" would put Boise State's odds there.
+    # The bare "LIU" the odds feed has used is in config.NCAAF_ODDS_API_MAP.
     # Measured on the production registry 2026-10-10: 680 abbreviations, all
-    # different, and none folds to another school's name or name + mascot.
+    # different, and no abbreviation + mascot folds to another school's name
+    # or name + mascot.
     abbrev_hits: list[str] = []
     for s in schools:
         raw = s.get("abbreviation") or ""
-        abbrev = _fold(raw)
-        if not abbrev:
+        if not _fold(raw) or not s.get("mascot"):
             continue
-        if s.get("mascot") and _fold(f"{raw} {s['mascot']}") == lowered:
-            abbrev_hits.append(s["school"])
-        elif abbrev == lowered and sum(ch.isalnum() for ch in abbrev) >= 3:
+        if _fold(f"{raw} {s['mascot']}") == lowered:
             abbrev_hits.append(s["school"])
     if len(abbrev_hits) == 1:
         return abbrev_hits[0]

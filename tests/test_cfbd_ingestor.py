@@ -1119,46 +1119,74 @@ def test_dropping_and_does_not_hand_washington_and_lee_to_washington(
 
 def test_abbreviation_plus_mascot_resolves_liu_without_the_map(
         fcs_alias_registry, monkeypatch):
+    """With the mascot it is exact at any length: "SC Gamecocks" is two
+    letters once folded, and still only South Carolina."""
     monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
     assert fcs_alias_registry.resolve_odds_api_school("LIU Sharks") == \
         "Long Island University"
-    assert fcs_alias_registry.resolve_odds_api_school("LIU") == \
-        "Long Island University"
-
-
-def test_a_bare_abbreviation_under_three_letters_is_not_a_match(
-        fcs_alias_registry, monkeypatch):
-    """"SC" and "W&M" (two letters once folded) are too short to trust on
-    their own. With the mascot they are exact."""
-    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    assert fcs_alias_registry.resolve_odds_api_school("SC") == "SC"
-    assert fcs_alias_registry.resolve_odds_api_school("W&M") == "W&M"
     assert fcs_alias_registry.resolve_odds_api_school("SC Gamecocks") == \
         "South Carolina"
     assert fcs_alias_registry.resolve_odds_api_school("W&M Tribe") == \
         "William & Mary"
 
 
-def test_an_abbreviation_two_schools_share_matches_neither(monkeypatch):
+def test_a_bare_abbreviation_is_never_a_match(fcs_alias_registry, monkeypatch):
+    """Passing a name through is safer than putting odds on the wrong team.
+    Common college acronyms belong to many schools, but the stats feed gives
+    each to one: on the production registry (2026-10-10) OSU is Ohio State
+    (Oklahoma State is OKST, Oregon State ORST), MSU is Michigan State
+    (Mississippi State is MSST), and BSU is Buffalo State, a Division III
+    school (Boise State is BOIS). A bare "BSU" would land on Buffalo State.
+    The bare "LIU" the odds feed has used is in config.NCAAF_ODDS_API_MAP
+    instead."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    for bare in ("LIU", "Penn", "SC", "W&M"):
+        assert fcs_alias_registry.resolve_odds_api_school(bare) == bare
+
+
+def test_a_shared_acronym_does_not_land_on_the_school_that_owns_it(monkeypatch):
+    """Production-shaped: the registry gives BSU, OSU and MSU to one school
+    each, and none of these inputs names that school."""
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "Buffalo State", "mascot": "Bengals", "abbreviation": "BSU", "alt": []},
+        {"school": "Boise State", "mascot": "Broncos", "abbreviation": "BOIS", "alt": []},
+        {"school": "Ohio State", "mascot": "Buckeyes", "abbreviation": "OSU", "alt": []},
+        {"school": "Oklahoma State", "mascot": "Cowboys", "abbreviation": "OKST", "alt": []},
+        {"school": "Michigan State", "mascot": "Spartans", "abbreviation": "MSU", "alt": []},
+        {"school": "Mississippi State", "mascot": "Bulldogs", "abbreviation": "MSST", "alt": []},
+    ])
+    for bare in ("BSU", "OSU", "MSU"):
+        assert cf.resolve_odds_api_school(bare) == bare
+    # The abbreviation with the school's own mascot is still exact.
+    assert cf.resolve_odds_api_school("OSU Buckeyes") == "Ohio State"
+    assert cf.resolve_odds_api_school("BSU Bengals") == "Buffalo State"
+
+
+def test_an_abbreviation_and_mascot_two_schools_share_matches_neither(monkeypatch):
     """Every production abbreviation is different today (680 of 680,
-    2026-10-10). If the stats feed ever repeats one, guessing between the two
-    schools would put odds on the wrong game; pass the name through instead."""
+    2026-10-10), so no two schools share abbreviation + mascot. If the stats
+    feed ever repeats one, guessing between the two schools would put odds on
+    the wrong game; pass the name through instead."""
     from data.ingestors import cfbd_ingestor as cf
     monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
     monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
         {"school": "Long Island University", "mascot": "Sharks", "abbreviation": "LIU", "alt": []},
         {"school": "Lincoln University", "mascot": "Lions", "abbreviation": "LIU", "alt": []},
+        {"school": "Lincoln (PA)", "mascot": "Lions", "abbreviation": "LU", "alt": []},
+        {"school": "Lindenwood", "mascot": "Lions", "abbreviation": "LU", "alt": []},
     ])
-    assert cf.resolve_odds_api_school("LIU") == "LIU"
+    assert cf.resolve_odds_api_school("LU Lions") == "LU Lions"
+    # A shared abbreviation with different mascots still tells them apart.
     assert cf.resolve_odds_api_school("LIU Sharks") == "Long Island University"
+    assert cf.resolve_odds_api_school("LIU Lions") == "Lincoln University"
 
 
-def test_a_bare_abbreviation_does_not_beat_an_exact_school(
-        fcs_alias_registry, monkeypatch):
-    """Kalshi writes "Penn" for Pennsylvania, whose abbreviation is PENN.
-    "Penn State" is still Penn State: exact school is tried first."""
+def test_penn_state_is_still_penn_state(fcs_alias_registry, monkeypatch):
+    """Kalshi writes "Penn" for Pennsylvania (abbreviation PENN) and "Penn
+    St." for Penn State. Exact school is tried first."""
     monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    assert fcs_alias_registry.resolve_odds_api_school("Penn") == "Pennsylvania"
     assert fcs_alias_registry.resolve_odds_api_school("Penn State") == "Penn State"
     assert fcs_alias_registry.resolve_odds_api_school(
         "Penn State Nittany Lions") == "Penn State"
