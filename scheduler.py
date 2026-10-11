@@ -203,16 +203,25 @@ _DAILY_LOCK = threading.Lock()
 # ---------------------------------------------------------------------------
 
 def _run(cmd: list[str], label: str, cwd: Path | None = None,
-         env: dict[str, str] | None = None) -> None:
+         env: dict[str, str] | None = None, timeout: float | None = None) -> None:
     """Run a pipeline entrypoint, logging start/stop. Never raises — a failed run
-    must not tear down the long-lived scheduler process."""
+    must not tear down the long-lived scheduler process.
+
+    `timeout` kills a step that runs past it. A job registered with
+    max_instances=1 skips every tick while one run is still going, so a step
+    with no bound can silence its job for hours: on 2026-10-11 one publish step
+    held the fast NFL poll from 12:20Z for ~5.7 hours. Default None keeps the
+    old unbounded behaviour for steps that are legitimately long."""
     log.info("START %s: %s", label, " ".join(cmd))
     try:
-        result = subprocess.run(cmd, cwd=cwd or ROOT, env=env or BASE_ENV, check=False)
+        result = subprocess.run(cmd, cwd=cwd or ROOT, env=env or BASE_ENV,
+                                check=False, timeout=timeout)
         if result.returncode == 0:
             log.info("DONE  %s (exit 0)", label)
         else:
             log.warning("FAIL  %s (exit %s)", label, result.returncode)
+    except subprocess.TimeoutExpired:
+        log.warning("TIMEOUT %s killed after %ss", label, timeout)
     except Exception:  # noqa: BLE001 - keep the scheduler alive no matter what
         log.exception("ERROR %s crashed", label)
 
@@ -643,7 +652,8 @@ def run_ncaaf_live_loop() -> None:
     )
 
 
-def run_nfl_wind_card(days: int, regions: str = "us") -> None:
+def run_nfl_wind_card(days: int, regions: str = "us",
+                      timeout: float | None = None) -> None:
     # The Section-28 wind-totals bet card from the standalone nfl/ package. MUST run
     # with cwd=nfl/ — the script reads data/games.csv and writes data/cards/ relative
     # to its package root. It exits 0 before any odds call when no games are in the
@@ -672,7 +682,7 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
         log.warning("Neither THE_ODDS_API_KEY nor ODDS_API_KEY is set — running NFL "
                     "wind card in --dry-run (weather only, no priced card).")
         cmd.append("--dry-run")
-    _run(cmd, f"nfl-wind-card-{days}d", cwd=ROOT / "nfl", env=env)
+    _run(cmd, f"nfl-wind-card-{days}d", cwd=ROOT / "nfl", env=env, timeout=timeout)
     # Mirror the card into the app (games + picks tables) — LIVE runs only.
     # A dry-run card has no prices and writes no CSV, so the publisher is
     # skipped without a key. Since 2026-08-22 the wind publisher is INSERT-ONCE
@@ -680,10 +690,16 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
     # forecast that later collapses is flagged by scripts.nfl_pick_monitor
     # rather than deleting the bet.
     if key:
-        _run([sys.executable, "-m", "scripts.nfl_wind_publisher"], "nfl-wind-publish")
+        _run([sys.executable, "-m", "scripts.nfl_wind_publisher"], "nfl-wind-publish",
+             timeout=timeout)
 
 
 NFL_POLL_HORIZON_DAYS = 10.0   # start watching this far out
+# Longest any one step of an NFL poll tick may run before it is killed. The
+# steps normally take 1-25 s, and the board flush stops itself at 120 s
+# (scripts/nfl_wind_publisher.BOARD_FLUSH_BUDGET_S), so 180 s is headroom, not
+# a target.
+NFL_POLL_STEP_TIMEOUT_S = float(os.environ.get("NFL_POLL_STEP_TIMEOUT_S", "180"))
 NFL_FAST_WINDOW_HOURS = float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))
 # Inside this many hours to kickoff, poll every 10 minutes instead of hourly.
 #
@@ -789,17 +805,22 @@ def run_nfl_poll(fast: bool = False) -> None:
 
     label = "fast" if fast else "hourly"
     log.info("NFL poll (%s): next kickoff in %.1fh", label, lead)
-    run_nfl_wind_card(int(NFL_POLL_HORIZON_DAYS), "us,eu")
+    # Every step is bounded so that no one of them can hold the poll past its
+    # own cadence (see _run): max_instances=1 turns one stuck step into hours
+    # of skipped ticks, which is how the fast poll went silent on 2026-10-11.
+    step = NFL_POLL_STEP_TIMEOUT_S
+    run_nfl_wind_card(int(NFL_POLL_HORIZON_DAYS), "us,eu", timeout=step)
     # Record what the models thought of every game this tick, and flag any
     # locked pick whose conditions have changed. Never re-prices anything.
-    _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
+    _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor",
+         timeout=step)
     # And put that same view on the board: one NONE row per (game, model) the
     # wind and opener rules evaluated, refreshed until kickoff (Matt,
     # 2026-09-26: "All bet lines should be showing on the today tab"). Off the
     # opener's one-minute path on purpose -- that path is timed in seconds to
     # Discord, and a NONE row is not a pick. No dump today = no-op.
     _run([sys.executable, "-m", "scripts.nfl_wind_publisher", "--scored"],
-         "nfl-scored-rows")
+         "nfl-scored-rows", timeout=step)
     # PUBLISH WHAT THE CARD JUST WROTE. Same reason as the pre-game poller
     # (2026-09-05): a writer outside the refresh pass used to leave its picks
     # sitting until the next :17 pass captured them, and inside the 3-hour fast
