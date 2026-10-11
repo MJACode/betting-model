@@ -18,7 +18,7 @@ number below names the script that prints it.
 
 | question | answer |
 |---|---|
-| Why was in-play NFL betting retired? | mike's instruction, 2026-10-04, after a 7-18 record (−11.27 units over 25 settled bets). 22 of those bets came from a pass-attempt OVER model that gave every quote the same probability (§1). |
+| Why was in-play NFL betting retired? | mike's instruction, 2026-10-04, at 7-17 (−10.27 units over 24 settled bets, one still open). It is 7-18 (−11.27 units over 25) since that bet settled. 22 of the 25 came from a pass-attempt OVER model that gave every quote the same probability (§1). |
 | Is there a new low-volume, extreme-EV NFL model? | **No new one survives.** Fourteen ideas were tested. Thirteen are null, negative, or a selection artefact (§3). |
 | What does survive? | **The in-play rushing-attempt UNDER**, the rule that replaced the pass-attempt overs on 09-21. It was rebuilt independently: 960 bets, +11.79% (90% CI +6.8, +16.8), positive in every season. It has no out-of-sample season (§4). |
 | What is the biggest practical finding? | **The one validated pre-game model, `nfl_prop_market`, has bet nothing since 2026-09-19.** Two things block it: a 0.20 EV floor, which allows 1 bet in three seasons of its own record, and a calibration offset borrowed from other models. At a 0.07 floor on its own probability, the same record is 54 bets a season at +20.89% (§5). |
@@ -33,7 +33,7 @@ Taken from `picks` (`model_id='nfl_live_prop'`) and docs/sessions/2026-10.md (20
   record. It was never a good model. Remove this model."* It is in
   `config.RETIRED_MODELS` and `RECORD_EXCLUSIONS`. The worker has
   `RUN_NFL_LIVE=0`.
-- Settled record: **7-18, −11.27 units over 25 bets.**
+- Settled record when he ordered it: 7-17, −10.27 units over 24 bets, with one open. Since that bet settled: **7-18, −11.27 units over 25 bets.**
 - **22 of the 25** were pass-attempt OVERS (09-09 to 09-20). That model returned
   one constant probability (0.6003, or 0.642 on the blind arm). Its EV cut was
   therefore a price filter, and the 2.33-attempt bias it was built on measures
