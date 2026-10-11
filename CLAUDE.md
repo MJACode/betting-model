@@ -619,6 +619,7 @@ to be known BEFORE deciding which file to open.
 | **The stat models: what is exhausted, what the outside world does, the one method left (market-anchored shape simulation)** | `docs/nfl_prop_method_search.md` |
 | **NFL prop lines lean over — the measured bias, and the per-side cut it bought** | `docs/nfl_prop_over_lean.md` |
 | **nfl_prop_market 2026 remeasure — no cut change, no 24h-ceiling change** | `docs/nfl_prop_market_2026.md` |
+| **NFL edge search 2026-10-11: why in-play was retired, 14 ideas tested, the carries under survives in-sample, nfl_prop_market is dark** | `docs/nfl_edge_search.md` |
 | **MLB runline / O/U edge search (paper totals 2pp, spreads gated)** | `docs/mlb_runline_ou_edge_search.md` |
 | **MLB totals public-OVER fade (paper UNDER, INSERT default 0)** | `docs/mlb_total_public_fade.md` |
 | **MLB market-handicap features (public/RLM/steam; RL+OU matrix; retrain next)** | `docs/mlb_market_handicap_features.md` |
