@@ -152,6 +152,44 @@ def test_a_poll_step_that_hangs_is_killed_at_its_timeout():
     assert time.monotonic() - t0 < 30
 
 
+def test_a_killed_step_fails_the_run_loudly_after_publishing(monkeypatch):
+    """The timeouts must not trade the silence alarm for nothing: a run that
+    had to kill a step raises, so its heartbeat records "error"."""
+    import pytest
+    import scheduler
+    published = []
+    monkeypatch.setattr(scheduler, "_nfl_lead_hours", lambda: 1.0)
+    monkeypatch.setattr(scheduler, "run_nfl_wind_card",
+                        lambda *a, **k: ["nfl-wind-publish"])
+    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: "ok")
+    monkeypatch.setattr(scheduler, "_publish_new_signals", published.append)
+    with pytest.raises(RuntimeError, match="nfl-wind-publish"):
+        scheduler.run_nfl_poll(fast=True)
+    assert published == ["nfl-poll"], "a pick that did get written must still go out"
+
+
+def test_the_alerter_reports_a_watched_job_whose_last_run_failed():
+    from tracking import failure_alerter as fa
+
+    class Conn:
+        def execute(self, sql, params=()):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            if "job_heartbeats" not in self.sql:
+                return []
+            now = "2999-01-01T00:00:00+00:00"   # fresh: this is not about silence
+            if "last_status" in self.sql:
+                return [("nfl_poll_fast", "error",
+                         "RuntimeError('NFL poll step(s) killed at 180s: nfl-wind-publish')")]
+            return [("nfl_poll_fast", now)]
+
+    got = fa._conditions(Conn())
+    assert "jobfail:nfl_poll_fast" in got
+    assert "nfl-wind-publish" in got["jobfail:nfl_poll_fast"][2]
+
+
 def _body(src: str, name: str) -> str:
     rest = src[src.index(f"def {name}("):]
     end = rest.find("\ndef ", 1)

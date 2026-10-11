@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
 import time
 from datetime import datetime, timezone
@@ -463,26 +464,23 @@ def publish_board(run_date: str | None = None) -> int:
             done = int(marker.read_text(encoding="utf-8").strip() or 0)
         except (OSError, ValueError):
             done = 0
-        # Stream past the rows already in rather than holding the whole day
-        # (~800k rows by midnight on an NFL Sunday) in memory.
-        total, pending = 0, []
-        with open(path, newline="", encoding="utf-8") as fh:
-            for total, r in enumerate(csv.DictReader(fh), 1):
-                if total > done:
-                    pending.append(r)
-        if done > total:                  # a rewritten file: start over
-            done, pending = 0, read_card(path)
-        # The opener may be mid-append. A last line with no newline yet is left
-        # for the next tick: past the marker, a half-written row would stay
-        # half-written for good.
+        # The opener may be appending while this reads. Fix the end FIRST -- the
+        # last newline in the file as it stands now -- and read only up to it,
+        # so a half-written row waits for the next tick instead of going in
+        # past the marker, half-written for good.
         with open(path, "rb") as fh:
-            complete = True
-            if fh.seek(0, 2):
-                fh.seek(-1, 2)
-                complete = fh.read(1) == b"\n"
-        if pending and not complete:
-            pending.pop()
-            total -= 1
+            data = fh.read()
+        data = data[:data.rfind(b"\n") + 1]
+        # Count past the rows already in rather than keeping the whole day
+        # (~800k rows by midnight on an NFL Sunday) as dicts.
+        total, pending = 0, []
+        for total, r in enumerate(
+                csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")), 1):
+            if total > done:
+                pending.append(r)
+        if done > total:                  # a rewritten file: start over
+            done = 0
+            pending = list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
         if not pending:
             return 0
 
