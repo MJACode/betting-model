@@ -146,6 +146,24 @@ def seed(job_id: str) -> None:
     beat(job_id, status="registered", detail="scheduled, not yet run")
 
 
+def failing_jobs(conn) -> list:
+    """[(job_id, detail)] for every watched job whose last run raised.
+
+    Silence is not the only way a watched job breaks. Since 2026-10-11 the NFL
+    poll kills a step that overruns instead of hanging on it, and then RAISES
+    so the run is recorded as "error" -- a job that beats on time and fails
+    every tick would otherwise look healthy here. Never raises.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT job_id, last_status, detail FROM job_heartbeats").fetchall()
+        return [(r[0], (r[2] if len(r) > 2 else "") or "") for r in rows
+                if r[0] in MAX_SILENCE and len(r) > 1 and str(r[1]) == "error"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"heartbeat status read failed: {exc}")
+        return []
+
+
 def stale_jobs(conn, now: datetime | None = None) -> list:
     """[(job_id, minutes_silent, allowed)] for every watched job that is late.
 
