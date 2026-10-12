@@ -68,8 +68,15 @@ WHAT IT DELIBERATELY DOES NOT DO
     which run on the refresh pass, not here -- never re-wrote the ones taken
     after the last pass. On MLB_2026-10-11_LAD_MIL the 00:17:18Z tick took
     103 of them 2m41s before first pitch. Those rows are the evaluation
-    universe (CLAUDE.md §7), and no bet depends on this tick clearing them:
-    the refresh pass's own clear still runs before every prop pass.
+    universe (CLAUDE.md §7). The refresh pass's own clear still runs right
+    before every prop pass, so it, not this tick, is what frees a player
+    the prop lock holds. ONE NARROW EXCEPTION, not bet-neutral: when a
+    refresh pass reads a game as already started (so its clear skips it)
+    and the feed then pushes the start back before that pass's prop step,
+    a tick in between used to free the game's prop players for that step.
+    Now they stay held until the next refresh pass's clear (passes run 10
+    minutes apart in the evening, up to an hour apart in the day), or for
+    good if the game starts first. docs/signal_timing.md, trap 4.
 
 SAFETY
   * A daily credit cap (PREGAME_POLL_DAILY_CREDIT_CAP), mirroring the live

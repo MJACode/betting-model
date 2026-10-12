@@ -17,19 +17,25 @@ prop row:
    00:17:18.831Z and "1 game(s) re-scored, 8 pick(s)" at 00:17:26.784Z. The
    game finished with one prop row (its BET) and no NONE or AVOID row.
 
-2. A refresh pass reads the clock once, before its game loop, and a pass
-   takes minutes. A game that started while the pass was running was still
-   cleared, and the prop scorer that runs next skips a started game, so its
-   rows were never re-written. Measured on WNBA_2026-10-09_ATL_NY (start
-   23:34:00Z): 91 prop rows deleted at 23:36:48.096Z; the pollers service ran
-   no scorer at that instant (its runs began 23:36:13.5Z and 23:36:41.9Z).
+2. NOT FIXED, deliberately. A refresh pass reads the clock once, before its
+   game loop, and a pass takes minutes. A game that starts while the pass is
+   running is still cleared, and the prop scorer that runs next usually skips
+   it as started, so its rows are lost. Measured on WNBA_2026-10-09_ATL_NY
+   (start 23:34:00Z): 91 prop rows deleted at 23:36:48.096Z; the pollers
+   service ran no scorer at that instant (its runs began 23:36:13.5Z and
+   23:36:41.9Z). Sparing those rows is not bet-neutral: the odds feed pushes
+   starts back around first pitch or tip, the prop scorers re-read the start
+   and score the game as pre-game, and a kept NONE row would hold that player
+   under the prop lock where the clear frees him today. The worker's clear
+   is therefore left exactly as it is on master, and the test below pins it.
 
 WHAT MUST NOT CHANGE. The prop lock (_locked_prop_keys) holds ANY row a
 player has, NONE included, and it is the refresh pass's own clear that
 releases a NONE player so the next prop pass can make him a BET. These tests
-pin that the refresh pass still clears an unstarted game's prop no-bet rows
-(and that the real lock then lets the player be scored again), that a BET is
-never touched, and that the game-level models are still cleared and
+pin that the refresh pass still clears every prop no-bet row it cleared
+before -- an unstarted game's, and a game's that starts while the pass runs
+-- (and that the real lock then lets the player be scored again), that a BET
+is never touched, and that the game-level models are still cleared and
 re-scored exactly as before.
 
 Behavioural, not source scans: run_scorer runs against a fake connection
@@ -232,59 +238,35 @@ def test_the_poller_keeps_prop_no_bet_rows_the_refresh_pass_still_clears(
     assert poller.held(unscored, game_model) == set()
 
     # ── the refresh pass on the same board: unchanged ──
-    worker = _Board(games)
-    for g in (moved, unscored):
+    # Plus two games that start while the pass is running (its clock is read
+    # before the loop): one the loop reaches after its start, one only the
+    # end-of-run clear reaches. Their prop rows are cleared exactly as on
+    # master. Sparing them is NOT bet-neutral: the feed can push the start
+    # back, the prop scorer then scores the game as pre-game, and a kept NONE
+    # row would hold the player under the lock.
+    mid_loop, mid_sweep = f"{sport}_{TARGET}_EEE_FFF", f"{sport}_{TARGET}_GGG_HHH"
+    worker_games = games + [_game(mid_loop, sport, T0 + timedelta(minutes=5)),
+                            _game(mid_sweep, sport, T0 + timedelta(minutes=7))]
+    worker = _Board(worker_games)
+    for g in (moved, unscored, mid_loop, mid_sweep):
         worker.seed(g, game_model, prop_model)
-    _wire(monkeypatch, worker, *builder, no_features={unscored})
+    _wire(monkeypatch, worker, *builder, no_features={unscored, mid_sweep},
+          clock_after={mid_loop: T0 + timedelta(minutes=10)})
     scorer.run_scorer(target_date=TARGET)
 
-    for g in (moved, unscored):
+    for g in (moved, unscored, mid_loop, mid_sweep):
         assert worker.held(g, prop_model) == PROP_BET_ONLY, (
-            "the refresh pass must still clear an unstarted game's prop "
-            "NONE/AVOID rows -- that is what releases the prop lock")
+            f"{g}: the refresh pass must still clear every prop NONE/AVOID "
+            "row it cleared before -- that is what releases the prop lock")
     assert worker.held(moved, game_model) == GAME_ROWS_RESCORED
+    assert worker.held(mid_loop, game_model) == GAME_ROWS_RESCORED
     assert worker.held(unscored, game_model) == set()
+    assert worker.held(mid_sweep, game_model) == set()
     # The real lock read, on what the pass left: the NONE and AVOID players
     # are free to be scored again (and can become BETs); the BET stays locked.
     locked = scorer._locked_prop_keys(worker, TARGET, [prop_model])
-    assert locked == {(moved, prop_model, "p_bet"),
-                      (unscored, prop_model, "p_bet")}
-
-
-@pytest.mark.parametrize("sport,game_model,prop_model,builder", SPORTS,
-                         ids=[s[0] for s in SPORTS])
-def test_a_game_that_starts_during_the_pass_keeps_its_rows(
-        monkeypatch, sport, game_model, prop_model, builder):
-    """The refresh pass's clock is read before its loop. A game that starts
-    while the pass is running must not be cleared on that stale reading."""
-    started_in_loop = f"{sport}_{TARGET}_AAA_BBB"   # starts at T0+5m, reached at T0+10m
-    started_by_sweep = f"{sport}_{TARGET}_CCC_DDD"  # starts at T0+7m, not re-scored
-    tonight = f"{sport}_{TARGET}_EEE_FFF"           # starts at T0+3h
-    games = [_game(started_in_loop, sport, T0 + timedelta(minutes=5)),
-             _game(started_by_sweep, sport, T0 + timedelta(minutes=7)),
-             _game(tonight, sport, T0 + timedelta(hours=3))]
-    board = _Board(games)
-    for g in (started_in_loop, started_by_sweep, tonight):
-        board.seed(g, game_model, prop_model)
-    _wire(monkeypatch, board, *builder, no_features={started_by_sweep},
-          clock_after={started_in_loop: T0 + timedelta(minutes=10)})
-
-    scorer.run_scorer(target_date=TARGET)
-
-    assert board.held(started_in_loop, prop_model) == PROPS_UNTOUCHED, (
-        "a game that started mid-pass lost its prop rows; the prop scorer "
-        "skips a started game, so nothing re-writes them")
-    # Its game-level model is still cleared and re-scored, exactly as before:
-    # leaving the old row would make the re-insert a silent no-op.
-    assert board.held(started_in_loop, game_model) == GAME_ROWS_RESCORED
-
-    assert board.held(started_by_sweep, prop_model) == PROPS_UNTOUCHED, (
-        "the end-of-pass clear used the stale clock on a started game")
-    assert board.held(started_by_sweep, game_model) == GAME_ROWS_UNTOUCHED
-
-    # An unstarted game is cleared exactly as before; the BET is never touched.
-    assert board.held(tonight, prop_model) == PROP_BET_ONLY
-    assert board.held(tonight, game_model) == GAME_ROWS_RESCORED
+    assert locked == {(g, prop_model, "p_bet")
+                      for g in (moved, unscored, mid_loop, mid_sweep)}
 
 
 class _PollConn:
