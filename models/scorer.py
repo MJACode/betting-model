@@ -3724,6 +3724,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         #     23:34:00Z and lost 91 prop rows at 23:36:48Z; the
                         #     prop scorers skip a started game, so they were
                         #     never re-written. The clock here is read fresh.
+                        #     "Started" is the scheduled start. The prop
+                        #     scorers use COALESCE(first_pitch_at, start), and
+                        #     first_pitch_at is not written during the day (only
+                        #     by the one-off derive_first_pitch job; newest MLB
+                        #     game carrying it: 2026-08-31), so the two agree.
+                        #     If that job is ever scheduled intra-day, read the
+                        #     same cutoff here.
                         # The game-level rows are cleared and re-scored exactly
                         # as before in both cases: a stale row left in place
                         # would turn the re-insert into a silent no-op

@@ -32,7 +32,8 @@ Four coverage traps to check BEFORE trusting any such analysis:
    `mlb_moneyline` 8.3%, `mlb_f5_moneyline` 7.4%, `mlb_over_under` 7.2%,
    **`mlb_runline` 35.3%**. Only a model re-run can recover those probabilities.
 4. **Player-prop `NONE`/`AVOID` rows are a survivor sample from 2026-08-30** until
-   the 2026-10-12 fix reached the worker (`run_scorer(game_models_only=...)`). The 30-second
+   the 2026-10-12 fix is running on BOTH the worker and the pollers service (the
+   poller now clears game-level rows only, `run_scorer(game_models_only=True)`). The 30-second
    pre-game line poller (shipped 2026-08-30) re-ran the game scorer on any game whose
    line moved, and that scorer's clear took every prop no-bet row on the game; the
    prop scorers did not run again before the start unless a refresh pass did. A
