@@ -135,13 +135,14 @@ def test_the_audit_ratios():
 
 def test_signal_badge_ink_and_glyph_mapping():
     tone = _read(SRC / "lib" / "tone.ts")
-    for sig, glyph, ink, fill in (
-        ("BET", "checkmark", "betInk", "betSoft"),
-        ("NONE", "remove", "textSecondary", "noneSoft"),
-        ("AVOID", "close", "avoidInk", "avoidSoft"),
+    # NONE is stored as NONE and read as NEUTRAL (Matt, 2026-10-12).
+    for sig, label, glyph, ink, fill in (
+        ("BET", "BET", "checkmark", "betInk", "betSoft"),
+        ("NONE", "NEUTRAL", "remove", "textSecondary", "noneSoft"),
+        ("AVOID", "AVOID", "close", "avoidInk", "avoidSoft"),
     ):
         assert re.search(
-            rf"{sig}: \{{ label: '{sig}', glyph: '{glyph}', ink: '{ink}', fill: '{fill}' \}}", tone
+            rf"{sig}: \{{ label: '{label}', glyph: '{glyph}', ink: '{ink}', fill: '{fill}' \}}", tone
         ), sig
         t = _tokens()
         assert _ratio(t[ink], t[fill]) >= 4.5

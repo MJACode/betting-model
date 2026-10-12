@@ -174,9 +174,11 @@ check('the old failures really were failures', ratio(tok.bet, tok.bgCard) < 3 &&
 
 // ── signal badge (H1) ───────────────────────────────────────────────────────
 const GLYPH = { BET: 'checkmark', NONE: 'remove', AVOID: 'close' } as const;
+// NONE is stored as NONE and read as NEUTRAL (Matt, 2026-10-12).
+const WORD = { BET: 'BET', NONE: 'NEUTRAL', AVOID: 'AVOID' } as const;
 for (const s of ['BET', 'NONE', 'AVOID'] as const) {
   const spec = SIGNAL_BADGE[s];
-  check(`badge ${s}: word "${s}"`, spec.label === s);
+  check(`badge ${s}: word "${WORD[s]}"`, spec.label === WORD[s]);
   check(`badge ${s}: glyph ${GLYPH[s]}`, spec.glyph === GLYPH[s], spec.glyph);
   const r = ratio(tok[spec.ink], tok[spec.fill]);
   check(`badge ${s}: ${spec.ink} on ${spec.fill} ≥ 4.5:1`, r >= 4.5, r.toFixed(2));

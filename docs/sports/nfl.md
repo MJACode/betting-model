@@ -5,6 +5,11 @@
 > Session-by-session history: `docs/sessions/`.
 
 ## 28. NFL — Standalone Wind/Opener Model (`nfl/`)
+
+> **2026-10-11: the NFL edge search** (`docs/nfl_edge_search.md`). It covers why
+> the in-play model was retired, and 14 ideas tested at zero credits. The
+> in-play rushing-attempt under survives in-sample only. `nfl_prop_market` has
+> bet nothing since 2026-09-19 (its EV floor grid is in §5).
 Imported 2026-08-15 (session 116) as a **self-contained package** — developed externally,
 NOT wired into the platform pipeline, scheduler, or Supabase. It has its own `models/`,
 `scripts/`, `data/`, `features/`, `data_ingest/`, README, RESTORE.md, and requirements.txt.

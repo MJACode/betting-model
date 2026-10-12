@@ -76,9 +76,9 @@ Outstanding tasks
 ```
 
 **SAY EACH THING ONCE.** (mike, 2026-10-09: *"Why do you keep restating
-results?"*) The headings ARE the reply: above them only what no heading holds
-(a direct answer, a table), never a recap they repeat. Only what is new since
-the last reply; an unchanged item is not restated. Evidence:
+results?"*, and 10-10 after the fix's own reply broke it.) NOTHING goes above
+the headings. Each fact under one heading, once; "why" goes under Errors.
+Only what is new since the last reply. Evidence:
 `docs/rules_evidence.md`.
 
 Notes on each:

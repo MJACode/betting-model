@@ -1936,14 +1936,22 @@ MODEL_OWN_EV_FLOOR: dict = {
     "mlb_total_public_fade":    -0.01,   # n=37, EV -0.0001..+0.0001 by design
     "ncaaf_over_under":          0.20,   # n=20, min +0.218, never bet under 0.20
     "ncaaf_spread":              0.06,   # n=1, min written EV +0.065
-    # DELIBERATELY AT THE GLOBAL NUMBER, not at its own +0.009. #794 left
-    # nfl_prop_market under the global floor on its record (19-20, -2.49u over
-    # 39) and that was a decision, not an oversight. Written out rather than
-    # left absent so the next session reads a choice instead of a gap; §1b's
-    # rule is that a losing model is an assessment to run, and until that runs
-    # the 0.20 stands. 0.05 keeps 12 bets at +2.4u, which is a single-cell peak
-    # on 12 bets, not a floor.
-    "nfl_prop_market":           0.20,   # n=41, min written EV +0.009
+    # 2026-10-12 (mike: "yes"): 0.20 -> 0.07, and onto its own probability
+    # (MODELS_ON_OWN_PROBABILITY). The assessment the old comment waited for
+    # ran on 2026-10-11, swept on its own 2023-25 record
+    # (scripts/nfl_edge_prop_market_floor.py part_a_card, docs/nfl_edge_search.md
+    # §5). The CARD'S setup: its six SOFT_BOOKS, shipped side cuts, one board
+    # read inside 24h, the selecting book's own price, EV = sharp fair x that
+    # price (review of #920; the best-of-8-books version reads 163 / +20.89%):
+    #   floor 0.00  932 bets  +14.30% (+9.3, +19.6)   every season positive
+    #   floor 0.05  434 bets  +18.15% (+10.2, +26.4)  every season positive
+    #   floor 0.07  148 bets  +21.95% (+7.7, +36.0)   every season positive, ~49/season
+    #   floor 0.10   26 bets  +14.58% (-22.7, +52.7)
+    #   floor 0.20    1 bet in three seasons
+    # At 0.20 the card had written no BET since 2026-09-19 20:27Z (worker log
+    # 2026-10-11: "ev_below_floor:0.037<0.20"). In-sample, and 2026's five
+    # weeks were 19-20, -2.49u over 39; re-read at ~50 settled.
+    "nfl_prop_market":           0.07,
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
@@ -2076,6 +2084,14 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # and 0.565 to exactly 0.500 (probability_calibration.apply_calibration),
     # which is EV -0.024 at -105: under it the model could never bet.
     "nhl_over_under",
+    # 2026-10-12 (mike: "yes"). Its probability IS the sharp reference's no-vig
+    # price, which its cut and its 0.07 floor were measured on. The promoted
+    # map is an offset (a=1, b=-0.28) fitted on n=23 graded picks and marked
+    # "prior-dominated" -- mostly the pooled offset borrowed from the other
+    # models -- promoted 2026-09-19 21:45Z with promoted_helps=false, 78
+    # minutes after the model's last BET; it takes 0.573 to 0.506. Same
+    # treatment as wind and opener: its own number until it has 50 graded bets.
+    "nfl_prop_market",
 })
 
 
