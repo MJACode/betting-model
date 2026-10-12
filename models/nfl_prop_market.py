@@ -388,6 +388,65 @@ MARKET_STAT = {
 }
 
 
+# A book's row for a player is PULLED when that book's latest fetch of the same
+# game and market no longer carries the player. The prop ingestor appends every
+# poll (no dedup), so a player still on the board has a row at the book's
+# newest snapshot; one whose newest row is older than that was not returned.
+# Tolerance covers a fetch whose markets land a few seconds or minutes apart.
+PULLED_TOLERANCE_MIN = 30
+
+
+def _ts(v):
+    from datetime import datetime, timezone
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    s = str(v).strip().replace(" ", "T")
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        d = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def drop_pulled_quotes(quotes: dict, tolerance_min: float = PULLED_TOLERANCE_MIN):
+    """Drop rows a book had stopped quoting while it still quoted the market.
+
+    WHY (docs/nfl_edge_search.md §5, measured 2026-10-11). The loader keeps
+    each (game, player, market, book)'s LATEST row however old it is, so a prop
+    the book had taken down stayed on the board at its last price. 6 of
+    nfl_prop_market's 39 settled 2026 BETs locked on such a row (Tyjae Spears
+    Under 2.5 Rec at hardrockbet: last quoted 66 hours before the lock), and a
+    bet on a price that is not on the board cannot be placed.
+
+    Relative, not absolute: the comparison is with the SAME book's newest row
+    for the same game and market, so a book that is simply polled less often
+    is not penalised. A row with no readable timestamp is kept.
+    Returns (kept, n_dropped)."""
+    from datetime import timedelta
+    newest: dict = {}
+    for (gid, _player, market, book), q in quotes.items():
+        t = _ts(q.get("snapshot_at"))
+        if t is None:
+            continue
+        k = (gid, market, book)
+        if k not in newest or t > newest[k]:
+            newest[k] = t
+    tol = timedelta(minutes=tolerance_min)
+    kept, dropped = {}, 0
+    for key, q in quotes.items():
+        gid, _player, market, book = key
+        t = _ts(q.get("snapshot_at"))
+        if t is not None and newest.get((gid, market, book)) and t < newest[(gid, market, book)] - tol:
+            dropped += 1
+            continue
+        kept[key] = q
+    return kept, dropped
+
+
 def best_per_prop(bets):
     """One bet per (game, player, market), best edge first.
 
