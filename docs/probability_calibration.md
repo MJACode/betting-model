@@ -127,6 +127,38 @@ Forward half: the `model_calibration` health check measures the LIVE graded
 record per model (WARN at 5pp, CRIT at 8pp, n≥150), because a training-time
 metric cannot see drift after shipping.
 
+**Since 2026-10-12 it sees every model, and judges only unpaused ones**
+(`tracking/system_health.py`, `_report_model_calibration`):
+
+- **Two sources, the same split the weekly fitter uses.** MLB and WNBA pre-game
+  models are read from `mv_scored_pick_outcomes` as before (every scored pick,
+  decision probability ≥ 0.60). Everything that view cannot grade — every NBA,
+  NHL, NFL, NCAAF and UFC model, the in-play models, every market rule
+  including `wnba_prop_market` — is read from settled BETs in `picks` (a real
+  price, not VOID, not a duplicate copy), including models with no registry
+  row. Those readings are labelled **bet-only** in the detail: settled bets
+  are the model's own selections, so the gap leans high next to a reading over
+  every scored pick. The bet-only source applies **no probability floor**,
+  because every row already passed the model's own cut, and a 0.60 floor would
+  have hidden every rule and the NHL three-way model (their bets claim
+  0.47–0.58). Same 150 gate, so nothing new can alarm on a thin sample.
+- **A paused model is informational.** Its gap, count and last graded date stay
+  in the detail; it never turns the check WARN. `wnba_prop_player_threes`
+  (paused 2026-08-31) had made the check WARN every morning at +6.9pp/159. The
+  set is `config.PAUSED_MODELS`, read each run, so unpausing re-arms it. There
+  is deliberately no "nothing graded in N days" rule — that would hide a real
+  deletion or grading bug.
+- On 2026-10-12 it reads: 3 models measured, worst gap +0.7pp
+  (`mlb_prop_batter_walks`); paused `wnba_prop_player_threes` +6.9pp/159 and
+  `mlb_prop_batter_hits` +0.2pp/2504 shown as informational; no bet-only model
+  has 150 settled bets in its current window yet (largest: `ncaaf_over_under`
+  53, claiming 68.9% and hitting 52.8%).
+- **Not fixed, flagged:** the weekly fitter still reads `wnba_prop_market` from
+  the view (its id matches the view's `wnba_prop_%` filter but no grading
+  branch exists), so it fits that model on n=0 against 27 settled bets.
+  Changing what the fitter reads changes maps that decide bets, so it is not a
+  monitoring fix.
+
 ### 2026-09-14 — two CRITs, two different problems (mike)
 
 Health check predicates (decision probability ≥ 0.60, later of version/promotion
