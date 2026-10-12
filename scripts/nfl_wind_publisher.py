@@ -788,6 +788,12 @@ def publish(run_date: str | None = None) -> int:
             print(f"  {len(skipped)} game(s) already locked — not re-priced: "
                   + ", ".join(sorted({p["game_id"] for p in skipped})))
 
+        # Pregame cutoff gate, same function _insert_picks calls. This INSERT
+        # stores a non-DraftKings price in dk_odds; the scorer normalizer
+        # would label that book DraftKings.
+        from models.scorer import _drop_pregame_after_cutoff
+        pick_rows = _drop_pregame_after_cutoff(conn, pick_rows)
+
         for p in pick_rows:
             _clear_scored_row(conn, p["game_id"], p["model_id"])
             conn.execute("""
@@ -856,6 +862,7 @@ def publish_opener(run_date: str | None = None) -> int:
 
         # Serialise against publish_scored before the insert-once reads.
         _lock_model(conn, NFL_OPENER_MODEL_ID)
+        unlocked = []
         for p in pick_rows:
             # BET rows only: a NONE row (publish_scored) is not a lock.
             existing = conn.execute("""
@@ -865,6 +872,10 @@ def publish_opener(run_date: str | None = None) -> int:
             """, (p["game_id"], p["model_id"])).fetchone()
             if existing:
                 continue  # locked at its first qualifying card
+            unlocked.append(p)
+        # Clear the NONE row only for a bet the cutoff gate still accepts.
+        from models.scorer import _drop_pregame_after_cutoff
+        for p in _drop_pregame_after_cutoff(conn, unlocked):
             _clear_scored_row(conn, p["game_id"], p["model_id"])
             conn.execute("""
                 INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
@@ -885,7 +896,7 @@ def publish_opener(run_date: str | None = None) -> int:
         conn.close()
 
     print(f"NFL opener publish {run_date}: {written} new pick(s) locked, "
-          f"{len(pick_rows) - written} already locked")
+          f"{len(pick_rows) - written} already locked or past the pregame cutoff")
     _flush_snapshots_safe(run_date)
     return written
 
@@ -1098,26 +1109,14 @@ def publish_scored(run_date: str | None = None) -> int:
             if key in existing and key[0] in games:
                 cleared += _clear_scored_row(conn, *key)
 
+        pending = []
         for p in build_scored_rows(latest, games, config.BANKROLL):
             key = (p["game_id"], p["model_id"])
             if key in bet:
                 continue            # the pick of record stands; no NONE beside it
             old = existing.get(key)
             if old is None:
-                conn.execute("""
-                    INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
-                                       pick_side, pick_label, model_probability,
-                                       dk_implied_prob, edge, dk_odds, scored_line,
-                                       kelly_fraction, recommended_bet, bankroll_at_pick,
-                                       signal_type, downgrade_reason)
-                    VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
-                            %(game_time)s, %(pick_side)s, %(pick_label)s,
-                            %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
-                            %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
-                            %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
-                            %(downgrade_reason)s)
-                """, p)
-                inserted += 1
+                pending.append(p)
             elif _changed(old, p):
                 # created_at moves with the number: on a NONE row it says when
                 # THIS line was observed, which is what the card's chip shows.
@@ -1134,6 +1133,25 @@ def publish_scored(run_date: str | None = None) -> int:
                       AND signal_type = 'NONE' AND result IS NULL
                 """, {**p, "pick_id": old["pick_id"]})
                 updated += 1
+        # The Python kickoff skip above is the scheduled start. This is the
+        # same cutoff the insert gate uses, so an early first pitch is refused
+        # here too. A refresh of a row already written is not a new insert.
+        from models.scorer import _drop_pregame_after_cutoff
+        for p in _drop_pregame_after_cutoff(conn, pending):
+            conn.execute("""
+                INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
+                                   pick_side, pick_label, model_probability,
+                                   dk_implied_prob, edge, dk_odds, scored_line,
+                                   kelly_fraction, recommended_bet, bankroll_at_pick,
+                                   signal_type, downgrade_reason)
+                VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
+                        %(game_time)s, %(pick_side)s, %(pick_label)s,
+                        %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
+                        %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
+                        %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
+                        %(downgrade_reason)s)
+            """, p)
+            inserted += 1
         conn.commit()
     finally:
         conn.close()

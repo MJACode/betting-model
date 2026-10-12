@@ -134,6 +134,9 @@ class TestTheCard:
                 class R:
                     def __init__(s, row): s.row = row
                     def fetchone(s): return s.row
+                    def fetchall(s): return []
+                if "first_pitch_at" in sql:
+                    return R(None)
                 if sql.lstrip().upper().startswith("SELECT"):
                     return R((1,) if any(i["player_key"] == params[2] for i in self.inserted) else None)
                 self.inserted.append(params)

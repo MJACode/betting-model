@@ -154,6 +154,11 @@ class _FakeConn:
         class R:
             def __init__(r, row): r._row = row
             def fetchone(r): return r._row
+        if "first_pitch_at" in sql:
+            class C:
+                def fetchall(c): return []
+                def fetchone(c): return None
+            return C()
         if sql.strip().startswith("SELECT 1 FROM picks"):
             # One side per line (2026-09-13): the lock no longer carries pick_side.
             key = tuple(params)

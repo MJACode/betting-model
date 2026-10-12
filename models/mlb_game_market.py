@@ -52,6 +52,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 import config
+from data.first_pitch import pregame_cutoff_sql
 from models.market_relative import devig, implied
 
 SHARP_BOOK = "pinnacle"
@@ -114,8 +115,9 @@ def load_latest_quotes(conn, sport: str, market: str, game_ids: list[str],
     """Latest OPEN quote per (game, book) for the given games.
 
     `odds.snapshot_type` is open|in_play|close. `odds` has no commence_time
-    — that lives on `games`. We still leak-bound snapshot_at <= commence_time
-    because the evening refresh has written post-start rows as open.
+    — that lives on `games`. The bound is pregame_cutoff_sql (actual first
+    pitch, clamped), not the scheduled start: the evening refresh has written
+    post-start rows as open, and commence_time runs late.
     """
     if not game_ids:
         return {}
@@ -134,7 +136,7 @@ def load_latest_quotes(conn, sport: str, market: str, game_ids: list[str],
         WHERE o.sport = %s AND o.market = %s
           AND o.game_id = ANY(%s)
           AND o.snapshot_type = 'open'
-          AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+          AND o.snapshot_at::timestamptz <= ({pregame_cutoff_sql("g")})::timestamptz
           {extra}
         ORDER BY o.game_id, o.bookmaker, o.snapshot_at DESC
     """, tuple(params)).fetchall()

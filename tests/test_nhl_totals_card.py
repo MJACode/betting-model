@@ -220,6 +220,9 @@ class _LockConn:
     def fetchone(self):
         return self._found
 
+    def fetchall(self):
+        return []
+
     def executemany(self, sql, rows):
         self.statements.append((" ".join(sql.split())[:20], None))
         for r in rows:
@@ -245,7 +248,7 @@ def test_insert_once_under_the_model_lock():
     # Any BET on the game counts: the other side, a VOIDed one, a settled one.
     assert "pick_side" not in sqls[2] and "condition_status" not in sqls[2]
     assert "result" not in sqls[2]
-    assert sqls[3].startswith("INSERT INTO picks")
+    assert any(s.startswith("INSERT INTO picks") for s in sqls)
     assert conn.commits == 1
     # A second identical pass writes nothing.
     assert card.publish(conn, [dict(r) for r in rows]) == 0

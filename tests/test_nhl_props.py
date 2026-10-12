@@ -427,6 +427,11 @@ class _Shim:
         self._c = conn
 
     def execute(self, sql, params=None):
+        if "first_pitch_at" in sql:
+            class R:
+                def fetchall(self): return []
+                def fetchone(self): return None
+            return R()
         if isinstance(params, dict):
             import re
             names = re.findall(r"%\((\w+)\)s", sql)
