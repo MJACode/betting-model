@@ -13,9 +13,10 @@
  * key is game + model, so a later bet on that game shares it. Once that bet
  * posts, the published view includes the key again. A VOID pick on a noticed
  * key stays unpublished. A pick that is not VOID is unaffected, and a lock
- * with no notice is unaffected. A failed read of the notice view fails
- * closed for VOID: that pick is unpublished, so a VOID never shows as
- * published when the notice list could not be read.
+ * with no notice is unaffected. A missing notice view is an empty list (no
+ * notice has been posted). Any other failed read fails closed for VOID:
+ * that pick is unpublished, so a VOID never shows as published when the
+ * notice list could not be read.
  *
  * The lock key is tracking/publish_keys.py. Null and empty identity parts
  * are omitted, matching COALESCE(':' || col, '').
@@ -122,9 +123,10 @@ export function discordPublishState(key: string, published: Set<string> | null):
 
 /**
  * Publish state for one pick. A void notice unpublishes that VOID pick only.
- * `noticed == null` means the notice view could not be read. A VOID then
- * stays unpublished: a failed read must not show it as published. A pick
- * that is not VOID still follows the published view.
+ * `noticed == null` means the notice read failed for a reason other than a
+ * missing view. A VOID then stays unpublished. An empty set means no notice
+ * (the view is absent, or it exists and lists nothing): a published VOID
+ * stays published. A pick that is not VOID still follows the published view.
  */
 export function discordPublishForPick(
   conditionStatus: string | null | undefined,
@@ -138,7 +140,51 @@ export function discordPublishForPick(
   return discordPublishState(key, published);
 }
 
-/** Locks with a void notice. `null` means the read failed. */
+/**
+ * The notice view is not in the database yet.
+ *
+ * `@supabase/postgrest-js` 2.106.1 (the `supabase-js` 2.49.4 client) sets
+ * `error` to the parsed PostgREST JSON. It does not remap `code`. A thrown
+ * fetch becomes `{ code: "" }`.
+ *
+ * Measured 2026-10-12, anon key, GET `/rest/v1/v_discord_void_notice`:
+ * HTTP 404, `code` `PGRST205`, message
+ * `Could not find the table 'public.v_discord_void_notice' in the schema cache`.
+ * That body did not contain `42P01`. The client would still put `42P01` on
+ * `error.code` if PostgREST sent it, so a dropped relation counts as missing.
+ * A permission failure on `push_sent` the same day was `42501`, which is not
+ * this case.
+ */
+export function isMissingNoticeView(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  if (code === 'PGRST205' || code === '42P01') return true;
+  const message = typeof error.message === 'string' ? error.message : '';
+  return message.includes('Could not find the table');
+}
+
+/**
+ * One chunk of the notice read.
+ *
+ * Missing view → empty set (no notice posted). Any other error → `null`
+ * (fail closed). Rows → the keys in them.
+ */
+export function voidNoticeFromChunk(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+  rows: { lock_key?: string | null }[] | null | undefined,
+): Set<string> | null {
+  if (error) return isMissingNoticeView(error) ? new Set() : null;
+  const found = new Set<string>();
+  for (const row of rows ?? []) {
+    if (row.lock_key) found.add(row.lock_key);
+  }
+  return found;
+}
+
+/** Locks with a void notice. `null` means the read failed and the view was not simply missing. */
 export async function fetchVoidNoticeKeys(picks: LockPick[]): Promise<Set<string> | null> {
   const keys = [...new Set(picks.filter((p) => p.signal_type === 'BET').map(lockKeyForPick))];
   if (keys.length === 0) return new Set();
@@ -149,8 +195,9 @@ export async function fetchVoidNoticeKeys(picks: LockPick[]): Promise<Set<string
   const results = await Promise.all(chunks.map((chunk) =>
     supabase.from('v_discord_void_notice').select('lock_key').in('lock_key', chunk)));
   for (const { data, error } of results) {
-    if (error) return null;
-    for (const row of (data ?? []) as { lock_key: string }[]) found.add(row.lock_key);
+    const chunkKeys = voidNoticeFromChunk(error, (data ?? []) as { lock_key: string }[]);
+    if (chunkKeys == null) return null;
+    for (const key of chunkKeys) found.add(key);
   }
   return found;
 }

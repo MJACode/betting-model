@@ -170,7 +170,8 @@ def test_void_picks_does_not_retract_discord():
 def test_the_app_predicate_matches():
     """The board and this module are one decision. Drift here is the desync."""
     script = r"""
-import { discordLedVisible, discordPublishForPick, lockKeyForPick, voidHiddenFromBoard }
+import { discordLedVisible, discordPublishForPick, isMissingNoticeView,
+  lockKeyForPick, voidHiddenFromBoard, voidNoticeFromChunk }
   from "./mobile/src/lib/discordPublish.ts";
 
 const cases = [
@@ -223,12 +224,50 @@ if (discordPublishForPick("VOID", "G:m", published, null) !== "unpublished")
   throw new Error("a failed notice read showed a void as published");
 if (discordPublishForPick(null, "G:m", published, null) !== "published")
   throw new Error("a failed notice read hid a pick that is not void");
+
+const missing = {
+  code: "PGRST205",
+  message: "Could not find the table 'public.v_discord_void_notice' in the schema cache",
+};
+if (!isMissingNoticeView(missing)) throw new Error("PGRST205 was not a missing view");
+if (!isMissingNoticeView({ code: "42P01", message: 'relation "v_discord_void_notice" does not exist' }))
+  throw new Error("42P01 was not a missing view");
+if (!isMissingNoticeView({ message: "Could not find the table 'public.v_discord_void_notice' in the schema cache" }))
+  throw new Error("the table message was not a missing view");
+const missingKeys = voidNoticeFromChunk(missing, null);
+if (missingKeys == null || missingKeys.size !== 0)
+  throw new Error("a missing view did not come back empty");
+if (discordPublishForPick("VOID", "G:m", published, missingKeys) !== "published")
+  throw new Error("a missing notice view hid a published void");
+
+const denied = voidNoticeFromChunk(
+  { code: "42501", message: "permission denied for table push_sent" }, null);
+if (denied !== null) throw new Error("a permission error looked like no notices");
+if (discordPublishForPick("VOID", "G:m", published, denied) !== "unpublished")
+  throw new Error("a permission error showed a void as published");
+const offline = voidNoticeFromChunk({ code: "", message: "TypeError: Failed to fetch" }, null);
+if (offline !== null) throw new Error("a network error looked like no notices");
+if (discordPublishForPick("VOID", "G:m", published, offline) !== "unpublished")
+  throw new Error("a network error showed a void as published");
+const server = voidNoticeFromChunk({ code: "PGRST000", message: "Internal server error" }, null);
+if (server !== null) throw new Error("a server error looked like no notices");
+if (discordPublishForPick("VOID", "G:m", published, server) !== "unpublished")
+  throw new Error("a server error showed a void as published");
+
+const present = voidNoticeFromChunk(null, [{ lock_key: "G:m" }]);
+if (present == null || !present.has("G:m")) throw new Error("a notice row was dropped");
+if (discordPublishForPick("VOID", "G:m", published, present) !== "unpublished")
+  throw new Error("a notice present stayed published");
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
+    src = (ROOT / "mobile/src/lib/discordPublish.ts").read_text(encoding="utf-8")
+    body = src[src.index("export async function fetchVoidNoticeKeys"):]
+    body = body[:body.index("\nexport async function attachDiscordPublish")]
+    assert "voidNoticeFromChunk(error" in body
 
 
 def test_a_published_void_keeps_track_and_betslip():

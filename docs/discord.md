@@ -229,8 +229,10 @@ later stamp out of the view; it releases only a signal that also has no
 `game_id:model_id`, so a later pick on that game shares it: the notice
 releases the lock, and that pick's post stamps the signal after the notice
 and holds the lock again. `v_discord_void_notice` keeps the key so the app
-leaves the VOID pick unpublished. A failed read of that view fails closed
-for a VOID pick. A lock with no notice is unchanged. The view is
+leaves the VOID pick unpublished. A missing view (`PGRST205`, the
+message `Could not find the table`, or `42P01` if the client forwards
+that code) is an empty notice list, so a published VOID stays published.
+Any other read error fails closed for a VOID pick. A lock with no notice is unchanged. The view is
 `security_invoker` and reads `sent_at`, so anon's column grant on
 `push_sent` is `lock_key, kind, sent_at`. `message_id` stays ungranted. The original message is not edited or deleted. A published
 VOID with no `discord_void` row stays on the board. The worker job is
