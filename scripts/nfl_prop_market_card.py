@@ -239,6 +239,9 @@ def render(bets, diag, games, names=None) -> str:
     if diag.get("injury_veto"):
         lines.append(f"({diag['injury_veto']} bet(s) vetoed — player Out/Doubtful "
                      f"before the quote)")
+    if diag.get("pulled_dropped"):
+        lines.append(f"({diag['pulled_dropped']} quote(s) dropped — the book no "
+                     f"longer quoting that player or market)")
     if not bets:
         lines.append(f"\nNo qualifying edges. {diag.get('reason', '')}".rstrip())
         return "\n".join(lines)

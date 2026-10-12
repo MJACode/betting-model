@@ -546,20 +546,25 @@ way:
   graded picks and marked "prior-dominated". It was promoted 2026-09-19 21:45Z
   with `promoted_helps = false`, and it takes 0.573 to 0.506.
 
-**Swept on its own 2023-25 record** (`python -m scripts.nfl_edge_prop_market_floor`).
-The construction:
+**Swept on its own 2023-25 record, in the card's own setup**
+(`python -m scripts.nfl_edge_prop_market_floor`, `part_a_card`). The
+construction:
+- the six soft books the card loads (`models.nfl_prop_market.SOFT_BOOKS`);
 - the shipped side cuts, over 6pp / under 5pp;
 - one board read inside 24h;
-- the best bettable price;
-- EV on the reference's own no-vig probability.
+- the selecting book's own price;
+- EV = the sharp reference's no-vig probability × that price.
 
 | EV floor | bets | / season | ROI | 90% CI | 2023 / 2024 / 2025 |
 |---|---|---|---|---|---|
-| 0.00 | 971 | 324 | +14.29% | (+9.5, +19.4) | +14.0 / +19.8 / +10.1 |
-| 0.05 | 473 | 158 | +18.39% | (+10.8, +26.4) | +19.2 / +31.0 / +8.8 |
-| **0.07** | **163** | **54** | **+20.89%** | **(+7.2, +34.3)** | **+18.6 / +35.1 / +13.2** |
-| 0.10 | 29 | 10 | +11.00% | (−24.0, +47.8) | +59.0 / −39.2 / +20.0 |
+| 0.00 | 932 | 311 | +14.30% | (+9.3, +19.6) | +13.9 / +19.5 / +10.1 |
+| 0.05 | 434 | 145 | +18.15% | (+10.2, +26.4) | +20.5 / +30.0 / +5.8 |
+| **0.07** | **148** | **49** | **+21.95%** | **(+7.7, +36.0)** | **+17.1 / +29.7 / +20.4** |
+| 0.10 | 26 | 9 | +14.58% | (−22.7, +52.7) | +59.0 / −39.2 / +44.0 |
 | 0.20 | 1 | 0 | — | — | — |
+
+The best-of-eight-books version (`part_a`) reads 163 bets, +20.89% at 0.07. The
+review of #920 found that version is looser than the card.
 
 **What shipped:**
 - `config.MODEL_OWN_EV_FLOOR["nfl_prop_market"] = 0.07`.
@@ -572,9 +577,11 @@ The construction:
 - Re-read at ~50 settled bets.
 
 **Same change, separate mechanism.** The card drops a prop the book has pulled
-(`models.nfl_prop_market.drop_pulled_quotes`). That is a row older than the same
-book's newest fetch of the game and market. 6 of the 39 settled 2026 BETs had
-locked on one.
+(`models.nfl_prop_market.drop_pulled_quotes`). A row is dropped when it is
+older than the same book's newest fetch of the game (30 min). That catches one
+player or a whole market pulled. A row is also dropped when it is more than 3h
+behind the game's newest fetch across books, i.e. a book that stopped
+returning the game. 6 of the 39 settled 2026 BETs had locked on a pulled prop.
 
 ## `nfl_prop_market` cut, 2026-09-12 (mike): one floor → two, over 5pp → 6pp
 

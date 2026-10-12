@@ -527,22 +527,58 @@ def _load_nfl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     return out
 
 
-def _nfl_name_fallback(nfl_actuals: dict, game_id: str, raw_name: str | None):
+# First names that are the same person but not a prefix of each other.
+_NFL_NICKNAMES = {
+    "kenny": "kenneth", "mike": "michael", "bill": "william", "will": "william",
+    "bob": "robert", "rob": "robert", "bobby": "robert", "jim": "james",
+    "jimmy": "james", "tom": "thomas", "tony": "anthony", "dan": "daniel",
+    "danny": "daniel", "nick": "nicholas", "dave": "david", "steve": "steven",
+    "jake": "jacob", "zach": "zachary", "joe": "joseph", "pat": "patrick",
+    "chig": "chigoziem",
+}
+
+
+def _same_first_name(a: str, b: str) -> bool:
+    """"josh"/"joshua", "matt"/"matthew", "kenny"/"kenneth": True.
+    "ty"/"taron", "michael"/"marco", "david"/"danthony": False."""
+    if a == b:
+        return True
+    if _NFL_NICKNAMES.get(a, a) == _NFL_NICKNAMES.get(b, b):
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 3 and long_.startswith(short)
+
+
+def _nfl_name_fallback(nfl_actuals: dict, game_id: str, raw_name: str | None,
+                       known_elsewhere=None):
     """The row for a player the exact normalised name missed, or None.
 
     The odds feed and the stat log spell some first names differently:
     "Joshua Palmer" in the feed, "Josh Palmer" in nfl_player_game_log. Both
     2026-09-17 DET@BUF picks on him settled NO_ACTION although he played (one
-    a win, one a loss; docs/nfl_edge_search.md §5). The fallback is the same
-    surname and the same first initial in the SAME game, and only when exactly
-    one player matches -- two candidates is ambiguity, and ambiguity must stay
-    a miss, never a guess."""
+    a win, one a loss; docs/nfl_edge_search.md §5).
+
+    THE DANGER IS A SCRATCH, NOT A SPELLING. A player who did not play also
+    has no exact row, and grading him on someone else's line turns a void
+    into a WIN or LOSS: on the 2023-25 log a bare surname-and-initial rule
+    matched 130 such absences to a different player (Ty Johnson -> Taron
+    Johnson, Michael Wilson -> Marco Wilson; review of #920). So a match needs
+    ALL of:
+      * the pick's own spelling appears nowhere in the stat log
+        (`known_elsewhere`): if it does, the log knows him by that name and
+        his absence today is a scratch;
+      * the same surname, in the same game;
+      * the same first name: equal, a known nickname, or one a prefix of the
+        other of at least 3 letters (josh/joshua);
+      * exactly one such player -- ambiguity stays a miss, never a guess."""
     from data.ingestors.nfl_props_data_ingestor import norm_player_name
     if not raw_name:
         return None
     parts = [norm_player_name(t) for t in str(raw_name).split()]
     parts = [t for t in parts if t]
     if len(parts) < 2:
+        return None
+    if known_elsewhere is not None and known_elsewhere(norm_player_name(raw_name)):
         return None
     first, last = parts[0], parts[-1]
     hits = []
@@ -551,9 +587,13 @@ def _nfl_name_fallback(nfl_actuals: dict, game_id: str, raw_name: str | None):
             continue
         theirs = [norm_player_name(t) for t in str(d.get("player_name") or "").split()]
         theirs = [t for t in theirs if t]
-        if len(theirs) >= 2 and theirs[-1] == last and theirs[0][:1] == first[:1]:
+        if len(theirs) >= 2 and theirs[-1] == last and _same_first_name(first, theirs[0]):
             hits.append(d)
-    return hits[0] if len(hits) == 1 else None
+    if len(hits) != 1:
+        return None
+    logger.warning(f"NFL prop settle: '{raw_name}' matched stat-log "
+                   f"'{hits[0].get('player_name')}' in {game_id} (first-name spelling)")
+    return hits[0]
 
 
 def _nfl_prop_actual(row: dict, stat_col: str):
@@ -839,7 +879,10 @@ def _settle_prop_picks(
                 # unique, or nothing.
                 m = _PICK_LABEL_RE.match(pick_label or "")
                 row_data = _nfl_name_fallback(
-                    nfl_actuals, game_id, m.group(1).strip() if m else None)
+                    nfl_actuals, game_id, m.group(1).strip() if m else None,
+                    known_elsewhere=lambda k: conn.execute(
+                        "SELECT 1 FROM nfl_player_game_log WHERE norm_name = %s LIMIT 1",
+                        (k,)).fetchone() is not None)
             if row_data:
                 actual_stat = _nfl_prop_actual(row_data, stat_col)
 

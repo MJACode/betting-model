@@ -1939,13 +1939,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # 2026-10-12 (mike: "yes"): 0.20 -> 0.07, and onto its own probability
     # (MODELS_ON_OWN_PROBABILITY). The assessment the old comment waited for
     # ran on 2026-10-11, swept on its own 2023-25 record
-    # (scripts/nfl_edge_prop_market_floor.py, docs/nfl_edge_search.md §5;
-    # shipped side cuts, one board read inside 24h, best bettable price, EV on
-    # the reference's own probability):
-    #   floor 0.00  971 bets  +14.29% (+9.5, +19.4)   every season positive
-    #   floor 0.05  473 bets  +18.39% (+10.8, +26.4)  every season positive
-    #   floor 0.07  163 bets  +20.89% (+7.2, +34.3)   every season positive
-    #   floor 0.10   29 bets  +11.00% (-24.0, +47.8)
+    # (scripts/nfl_edge_prop_market_floor.py part_a_card, docs/nfl_edge_search.md
+    # §5). The CARD'S setup: its six SOFT_BOOKS, shipped side cuts, one board
+    # read inside 24h, the selecting book's own price, EV = sharp fair x that
+    # price (review of #920; the best-of-8-books version reads 163 / +20.89%):
+    #   floor 0.00  932 bets  +14.30% (+9.3, +19.6)   every season positive
+    #   floor 0.05  434 bets  +18.15% (+10.2, +26.4)  every season positive
+    #   floor 0.07  148 bets  +21.95% (+7.7, +36.0)   every season positive, ~49/season
+    #   floor 0.10   26 bets  +14.58% (-22.7, +52.7)
     #   floor 0.20    1 bet in three seasons
     # At 0.20 the card had written no BET since 2026-09-19 20:27Z (worker log
     # 2026-10-11: "ev_below_floor:0.037<0.20"). In-sample, and 2026's five

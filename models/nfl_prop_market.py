@@ -394,6 +394,10 @@ MARKET_STAT = {
 # newest snapshot; one whose newest row is older than that was not returned.
 # Tolerance covers a fetch whose markets land a few seconds or minutes apart.
 PULLED_TOLERANCE_MIN = 30
+# A book whose newest row for the GAME is this far behind the game's newest
+# fetch across every book stopped returning the game altogether. Generous, so a
+# reference fetched on its own cadence is not dropped for it.
+GAME_DROPPED_TOLERANCE_MIN = 180
 
 
 def _ts(v):
@@ -412,7 +416,8 @@ def _ts(v):
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
-def drop_pulled_quotes(quotes: dict, tolerance_min: float = PULLED_TOLERANCE_MIN):
+def drop_pulled_quotes(quotes: dict, tolerance_min: float = PULLED_TOLERANCE_MIN,
+                       game_tolerance_min: float = GAME_DROPPED_TOLERANCE_MIN):
     """Drop rows a book had stopped quoting while it still quoted the market.
 
     WHY (docs/nfl_edge_search.md §5, measured 2026-10-11). The loader keeps
@@ -422,25 +427,33 @@ def drop_pulled_quotes(quotes: dict, tolerance_min: float = PULLED_TOLERANCE_MIN
     Under 2.5 Rec at hardrockbet: last quoted 66 hours before the lock), and a
     bet on a price that is not on the board cannot be placed.
 
-    Relative, not absolute: the comparison is with the SAME book's newest row
-    for the same game and market, so a book that is simply polled less often
-    is not penalised. A row with no readable timestamp is kept.
-    Returns (kept, n_dropped)."""
+    Two comparisons, both relative to what the feed returned later:
+      * the SAME book's newest row for the same GAME (any market), within
+        `tolerance_min`. The ingestor stamps one time per event fetch, so a
+        player -- or a whole market -- the book no longer returned is older
+        than the book's newest stamp for the game;
+      * the game's newest row across EVERY book, within the generous
+        `game_tolerance_min`: a book that stopped returning the game at all.
+    A book polled on its own cadence inside that window is not penalised. A
+    row with no readable timestamp is kept. Returns (kept, n_dropped)."""
     from datetime import timedelta
-    newest: dict = {}
-    for (gid, _player, market, book), q in quotes.items():
+    by_book: dict = {}
+    by_game: dict = {}
+    for (gid, _player, _market, book), q in quotes.items():
         t = _ts(q.get("snapshot_at"))
         if t is None:
             continue
-        k = (gid, market, book)
-        if k not in newest or t > newest[k]:
-            newest[k] = t
+        if (gid, book) not in by_book or t > by_book[(gid, book)]:
+            by_book[(gid, book)] = t
+        if gid not in by_game or t > by_game[gid]:
+            by_game[gid] = t
     tol = timedelta(minutes=tolerance_min)
+    gtol = timedelta(minutes=game_tolerance_min)
     kept, dropped = {}, 0
     for key, q in quotes.items():
-        gid, _player, market, book = key
+        gid, _player, _market, book = key
         t = _ts(q.get("snapshot_at"))
-        if t is not None and newest.get((gid, market, book)) and t < newest[(gid, market, book)] - tol:
+        if t is not None and (t < by_book[(gid, book)] - tol or t < by_game[gid] - gtol):
             dropped += 1
             continue
         kept[key] = q
