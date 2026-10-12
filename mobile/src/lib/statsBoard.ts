@@ -403,6 +403,77 @@ export function isLineOnlyId(id: string): boolean {
   return id.startsWith(LINE_ONLY_ID_PREFIX);
 }
 
+/**
+ * Whether a row may open PlayerStats.
+ *
+ * A line-only row has no `player_id`. Navigating with `''` lands on an empty
+ * page — the detail screen's log read has nothing to ask for. A blank id is
+ * the same. A real id opens.
+ */
+export function canOpenPlayerDetail(playerId: string | null | undefined): boolean {
+  return !!playerId && !isLineOnlyId(playerId);
+}
+
+/** Spoken ending of a line-only row. It goes at the end of the label. */
+export const LINE_ONLY_ROW_TAIL = ', no games logged yet';
+
+/**
+ * The line-only row's accessibility label. Name, then the spoken fixture,
+ * then the tail — VoiceOver reads that the row has no games after it has
+ * said who and which game. The row is not a button and has no hint.
+ */
+export function lineOnlyRowLabel(name: string, spokenSubline: string | null): string {
+  const head = spokenSubline ? `${name}, ${spokenSubline}` : name;
+  return `${head}${LINE_ONLY_ROW_TAIL}`;
+}
+
+/**
+ * VoiceOver hint while a slate read is in flight, on the Teams chip and the
+ * Players Availability switch. The apostrophe is U+2019.
+ */
+export const SLATE_CHECKING_HINT = 'Checking today\u2019s schedule';
+
+/**
+ * The hint once the slate read has settled. VoiceOver reads the control's
+ * name first, so these start at the words after it, capitalised, and end
+ * with a period. The checking hint above is the exception: it does not
+ * repeat the name.
+ */
+export const TEAMS_SLATE_FAILED_HINT = 'Unavailable: the schedule could not be loaded.';
+export const TEAMS_SLATE_ON_HINT = 'On. Showing only teams on this slate.';
+export const TEAMS_SLATE_OFF_HINT = 'Off. Showing every team.';
+export function teamsNoGamesHint(sport: string): string {
+  return `Unavailable: no ${sport} games in the next week.`;
+}
+
+export const PLAYERS_SLATE_EMPTY_HINT = 'Unavailable: no games scheduled.';
+export const PLAYERS_SLATE_GAMES_HINT = 'Unavailable while a game is picked above.';
+export const PLAYERS_SLATE_LOADING_HINT = 'Loading.';
+export const PLAYERS_SLATE_CUT_HINT = 'On shows only players in action, off shows every player.';
+
+/**
+ * Identity of one slate read. A sport switch or an ET-date rollover is a
+ * different slate. Both boards key the fetch on this, so an app left open
+ * overnight does not keep filtering on yesterday's teams under "Playing today".
+ * Pull-to-refresh passes a separate nonce beside the key.
+ */
+export function slateReadKey(sport: string, etDay: string): string {
+  return `${sport}|${etDay}`;
+}
+
+/**
+ * The Teams "Playing today" chip.
+ *
+ * Disabled while the slate for THIS sport has not settled. The previous
+ * sport's teams are still in state for that moment, and `!hasSlate` alone
+ * leaves the chip tappable — labelled with the old slate, filtering by the
+ * old teams — while VoiceOver says "checking the schedule". Also disabled
+ * when the settled read has no games.
+ */
+export function slateChipDisabled(slateChecking: boolean, hasSlate: boolean): boolean {
+  return slateChecking || !hasSlate;
+}
+
 // ── 3. Tonight's slate ──
 
 export interface TonightSlate {
@@ -762,5 +833,7 @@ export function slateSubline(
  * review, 2026-09-05).
  */
 export function sublineSpoken(subline: string): string {
-  return subline.replace(/ · /g, ', ').replace(/(^|, )@ /, '$1at ');
+  // "HOU @ TEN" is not the away marker "@ SEA". VoiceOver reads a bare "@"
+  // as "at sign", so both shapes become the word.
+  return subline.replace(/ · /g, ', ').replace(/(^|, )@ /, '$1at ').replace(/ @ /g, ' at ');
 }
