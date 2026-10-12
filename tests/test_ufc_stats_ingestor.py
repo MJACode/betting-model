@@ -429,3 +429,174 @@ def test_resolve_anchor_declines_when_opponent_changed():
 def test_resolve_ignores_unrelated_fights():
     rows = [("UFC_2026-08-15_other", "Neil Magny", "Ramiz Brahimaj")]
     assert _resolve(rows, "islam-makhachev", "ian-machado-garry") == []
+
+
+def test_resolve_anchor_returns_a_fight_stored_twice_but_not_beside_a_changed_opponent():
+    """The odds feed stored one fight twice, home/away swapped, under a
+    spelling ufcstats does not use (Pereira vs Zheleznyakova, 2026-10-10:
+    ufcstats spells her Daria Zhelezniakova). Both rows are the SAME two
+    fighters, so this is not a changed matchup: every row is returned and
+    each is scored in its own orientation. Declining here left both odds rows
+    unscored and created a third, ufcstats-only row instead.
+
+    The rule is "every row is the same two fighters", not "several rows":
+    the same duplicate pair beside a row naming a different opponent is
+    still ambiguous and still declines."""
+    rows = [
+        ("UFC_2026-10-10_alice-pereira_darya-zheleznyakova",
+         "Darya Zheleznyakova", "Alice Pereira"),
+        ("UFC_2026-10-10_darya-zheleznyakova_alice-pereira",
+         "Alice Pereira", "Darya Zheleznyakova"),
+    ]
+    got = _resolve(rows, "alice-pereira", "daria-zhelezniakova", date="2026-10-10")
+    assert sorted(g[0] for g in got) == sorted(r[0] for r in rows)
+
+    rows_with_a_changed_opponent = rows + [
+        ("UFC_2026-10-10_alice-pereira_tracy-cortez",
+         "Tracy Cortez", "Alice Pereira"),
+    ]
+    assert _resolve(rows_with_a_changed_opponent, "alice-pereira",
+                    "daria-zhelezniakova", date="2026-10-10") == []
+
+
+# ── Scoring a matched row: which side won ─────────────────────────────────────
+# The results ingest writes home_score/away_score/home_win onto each matched
+# games row. Settlement grades UFC moneyline picks from games.home_win, so a
+# wrong side here grades a winning pick as a loss.
+
+class _IngestConn:
+    """DBConnection stand-in for _ingest_event: serves the games rows near the
+    event date, reports no existing fight-log rows, and records every score
+    written to games."""
+
+    def __init__(self, games_rows):
+        self._games_rows = games_rows
+        self._result = []
+        self.scores = []          # (home_score, away_score, home_win, game_id)
+        self.inserted_games = []
+
+    def execute(self, sql, params=None):
+        text = " ".join(sql.split())
+        if text.startswith("SELECT game_id, home_team, away_team FROM games"):
+            self._result = list(self._games_rows)
+        elif text.startswith("UPDATE games"):
+            self.scores.append(tuple(params))
+            self._result = []
+        elif text.startswith("INSERT INTO games"):
+            self.inserted_games.append(tuple(params))
+            self._result = []
+        elif text.startswith("SELECT COUNT(*)"):
+            self._result = [(0,)]
+        else:                     # fight-log lookups and upserts, fighter upserts
+            self._result = []
+        return self
+
+    def fetchall(self):
+        return self._result
+
+    def fetchone(self):
+        return self._result[0] if self._result else None
+
+    def commit(self):
+        pass
+
+
+def _one_fight_event(winner, loser, date, outcome="first_won"):
+    """A parse_event_page-shaped event with one fight; winner listed first."""
+    return {
+        "name": "UFC Fight Night",
+        "date": date,
+        "fights": [{
+            "fight_id": "f0f0f0f0f0f0f0f0",
+            "fighter_ids": ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"],
+            "fighter_names": [winner, loser],
+            "outcome": outcome,
+            "weight_class": "Flyweight",
+            "is_title_fight": 0,
+            "method_raw": "Decision - Unanimous",
+            "end_round": 3,
+            "end_time_sec": 300,
+            "kd": [0, 0],
+            "sig_landed": [40, 30],
+            "td_landed": [1, 0],
+            "sub_attempts": [0, 0],
+        }],
+    }
+
+
+def _ingest(games_rows, winner, loser, date, outcome="first_won"):
+    from data.ingestors.ufc_stats_ingestor import _ingest_event
+    conn = _IngestConn(games_rows)
+    _ingest_event(conn, "evt", ev=_one_fight_event(winner, loser, date, outcome),
+                  detail_lookup=lambda _fight_id: {}, force=True)
+    return conn
+
+
+def test_a_misspelled_fighter_is_scored_for_the_side_they_fought_on():
+    """Godinez vs Souza, 2026-10-10: the odds feed has 'Lupita Godinez' at
+    home, ufcstats has 'Loopy Godinez', and she won. Her row is matched by
+    the anchor rule (Souza is spelled the same in both). Comparing only the
+    winner's name with the home name credited Souza (home_win=0); checking
+    the loser's name too places the win at home.
+
+    Every combination of side and result is checked, plus both orientations
+    of a correctly spelled row, so the fix for the one broken case cannot
+    break the others: (home name, away name, winner, loser, expected scores).
+    """
+    cases = [
+        # misspelled fighter at home, wins: the case that was scored backwards
+        ("Lupita Godinez", "Ketlen Souza", "Loopy Godinez", "Ketlen Souza", (1, 0, 1)),
+        # misspelled fighter at home, loses
+        ("Lupita Godinez", "Ketlen Souza", "Ketlen Souza", "Loopy Godinez", (0, 1, 0)),
+        # misspelled fighter away, wins
+        ("Ketlen Souza", "Lupita Godinez", "Loopy Godinez", "Ketlen Souza", (0, 1, 0)),
+        # misspelled fighter away, loses
+        ("Ketlen Souza", "Lupita Godinez", "Ketlen Souza", "Loopy Godinez", (1, 0, 1)),
+        # both spelled alike in both sources: unchanged, either orientation
+        ("Islam Makhachev", "Ian Machado Garry", "Ian Machado Garry", "Islam Makhachev", (0, 1, 0)),
+        ("Ian Machado Garry", "Islam Makhachev", "Ian Machado Garry", "Islam Makhachev", (1, 0, 1)),
+    ]
+    got = []
+    for home, away, winner, loser, _expected in cases:
+        gid = f"UFC_2026-10-10_{slugify_fighter(away)}_{slugify_fighter(home)}"
+        conn = _ingest([(gid, home, away)], winner=winner, loser=loser,
+                       date="2026-10-10")
+        assert conn.inserted_games == []      # matched the odds row, made none
+        got.append(conn.scores)
+    assert got == [
+        [(*expected, f"UFC_2026-10-10_{slugify_fighter(away)}_{slugify_fighter(home)}")]
+        for home, away, _w, _l, expected in cases
+    ]
+
+
+def test_the_same_fight_stored_twice_is_scored_on_both_rows_each_way_round():
+    """Pereira beat Zheleznyakova (ufcstats: Daria Zhelezniakova); the odds
+    feed stored the fight twice, home/away swapped. Both rows are scored, each
+    with its own orientation (Pereira at home wins, Pereira away wins) and
+    no third row is created."""
+    away_pereira = "UFC_2026-10-10_alice-pereira_darya-zheleznyakova"
+    home_pereira = "UFC_2026-10-10_darya-zheleznyakova_alice-pereira"
+    conn = _ingest([
+        (away_pereira, "Darya Zheleznyakova", "Alice Pereira"),
+        (home_pereira, "Alice Pereira", "Darya Zheleznyakova"),
+    ], winner="Alice Pereira", loser="Daria Zhelezniakova", date="2026-10-10")
+    assert conn.inserted_games == []
+    assert sorted(conn.scores, key=lambda s: s[3]) == [
+        (0, 1, 0, away_pereira),
+        (1, 0, 1, home_pereira),
+    ]
+
+
+def test_a_row_naming_neither_fighter_is_left_unscored(monkeypatch):
+    """If a matched row names neither fighter the way ufcstats does, nothing
+    says which side won. The old rule scored it as an away win by default;
+    it must be left unscored (and logged) rather than guessed. The resolver
+    never produces such a row today, so it is injected here directly."""
+    import data.ingestors.ufc_stats_ingestor as ingestor
+    gid = "UFC_2026-10-10_ketlyn-sousa_lupita-godinez"
+    monkeypatch.setattr(ingestor, "_resolve_game_rows",
+                        lambda *_a, **_k: [(gid, "Lupita Godinez", "Ketlyn Sousa")])
+    conn = _ingest([], winner="Loopy Godinez", loser="Ketlen Souza",
+                   date="2026-10-10")
+    assert conn.inserted_games == []
+    assert conn.scores == []

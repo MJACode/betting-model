@@ -502,19 +502,24 @@ def _resolve_game_rows(conn: DBConnection, game_date: str,
     # ANCHOR RULE: within the ±1 day window, a row where exactly ONE fighter's
     # slug matches ours is the same fight — a fighter competes once per card,
     # so a shared participant on the same date identifies the bout. Applied
-    # only when it resolves to exactly ONE row: if several rows share a
-    # fighter, the matchup genuinely changed (a replaced opponent is a
-    # DIFFERENT proposition and must not be silently settled), so we decline.
+    # only when every such row is the SAME two fighters: one row, or the one
+    # fight stored more than once (home/away swapped between odds fetches, or
+    # ±1-day date drift — picks can sit on each, so each needs its score). If
+    # the rows name DIFFERENT opponents, the matchup genuinely changed (a
+    # replaced opponent is a DIFFERENT proposition and must not be silently
+    # settled), so we decline.
     anchored = [(game_id, home_team, away_team)
                 for game_id, home_team, away_team in rows
                 if len({slugify_fighter(home_team), slugify_fighter(away_team)} & want) == 1]
-    if len(anchored) == 1:
-        game_id, home_team, away_team = anchored[0]
-        logger.warning(
-            f"UFC name variant resolved by anchor: {away_team} vs {home_team} "
-            f"({game_id}) ← ufcstats {slug_a}/{slug_b}. Add the pair to "
-            f"config.UFC_NAME_ALIASES so both sources build the same game_id."
-        )
+    pairs = {frozenset((slugify_fighter(home_team), slugify_fighter(away_team)))
+             for _gid, home_team, away_team in anchored}
+    if anchored and len(pairs) == 1:
+        for game_id, home_team, away_team in anchored:
+            logger.warning(
+                f"UFC name variant resolved by anchor: {away_team} vs {home_team} "
+                f"({game_id}) ← ufcstats {slug_a}/{slug_b}. Add the pair to "
+                f"config.UFC_NAME_ALIASES so both sources build the same game_id."
+            )
         return anchored
     if len(anchored) > 1:
         logger.warning(
@@ -522,6 +527,34 @@ def _resolve_game_rows(conn: DBConnection, game_date: str,
             f"near {game_date} — matchup likely changed; not auto-resolving."
         )
     return []
+
+
+def _home_win_for_row(winner_name: str, loser_name: str,
+                      home_name: str, away_name: str) -> int | None:
+    """
+    Which side of a games row won: 1 = home, 0 = away, None = cannot tell.
+
+    The row's names come from the odds feed and may spell ONE fighter
+    differently from ufcstats (that is how the anchor rule matched it), so the
+    winner alone is not enough — a misspelled home winner matches neither
+    name, and treating "winner is not home" as "away won" credits the loser.
+    Each fighter is checked against each side, using the same slug
+    normalisation the matcher uses, in this order:
+        winner is home → home won;  loser is home → away won;
+        winner is away → away won;  loser is away → home won.
+    None when neither fighter matches either side (the caller skips the row).
+    """
+    winner, loser = slugify_fighter(winner_name), slugify_fighter(loser_name)
+    home, away = slugify_fighter(home_name), slugify_fighter(away_name)
+    if home and winner == home:
+        return 1
+    if home and loser == home:
+        return 0
+    if away and winner == away:
+        return 0
+    if away and loser == away:
+        return 1
+    return None
 
 
 def _upsert_fighter_stub(conn: DBConnection, fighter_id: str, name: str) -> None:
@@ -662,17 +695,26 @@ def _ingest_event(conn: DBConnection, event_id: str, event_meta: dict | None = N
         totals = detail.get("totals") or {}
 
         # ── games outcome (per matched row's own home/away convention) ─────
-        winner_slug = None
-        if fight["outcome"] == "first_won":
-            winner_slug = slugs[0]
-
-        for row_game_id, row_home_name, _row_away_name in matched:
+        # A row matched by the anchor rule spells one fighter differently from
+        # ufcstats, so the winner's name alone cannot say which side won: when
+        # the misspelled fighter is the home fighter and wins, the winner
+        # matches neither name. Both fighters' names are checked against both
+        # sides (_home_win_for_row); a row neither name places is left
+        # unscored rather than guessed.
+        for row_game_id, row_home_name, row_away_name in matched:
             if fight["outcome"] in ("draw", "nc"):
                 home_score, away_score, home_win = 0.5, 0.5, None
-            elif winner_slug == slugify_fighter(row_home_name):
-                home_score, away_score, home_win = 1, 0, 1
             else:
-                home_score, away_score, home_win = 0, 1, 0
+                home_win = _home_win_for_row(names[0], names[1],
+                                             row_home_name, row_away_name)
+                if home_win is None:
+                    logger.warning(
+                        f"UFC: cannot place {names[0]} (won) / {names[1]} on "
+                        f"{row_game_id} ({row_away_name} at {row_home_name}) "
+                        f"— neither name matches either side; not scored."
+                    )
+                    continue
+                home_score, away_score = (1, 0) if home_win == 1 else (0, 1)
 
             conn.execute("""
                 UPDATE games
