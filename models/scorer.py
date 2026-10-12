@@ -3152,10 +3152,20 @@ def _log_pipeline(conn, run_date, status, records_in, records_out,
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
+def _model_id_filter(model_ids) -> tuple[str, tuple]:
+    """(` AND model_id IN (...)`, params) for a no-bet clear that must touch
+    only these models' rows. Never builds `IN ()`: no models means no rows."""
+    ids = sorted(set(model_ids))
+    if not ids:
+        return " AND FALSE", ()
+    return f" AND model_id IN ({','.join(['%s'] * len(ids))})", tuple(ids)
+
+
 # ── Main Daily Run ────────────────────────────────────────────────────────────
 
 def run_scorer(target_date: str = None, dry_run: bool = False,
-               only_games: set | None = None) -> dict:
+               only_games: set | None = None,
+               game_models_only: bool = False) -> dict:
     """
     Score all games scheduled for target_date across all models.
 
@@ -3173,6 +3183,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                      It is deliberately distinct from None: conflating them
                      would turn a quiet poll into a full re-score, which is the
                      entire cost this parameter exists to avoid.
+        game_models_only:
+                     Clear only the rows of the game-level models this call
+                     re-scores (config.MODELS), and leave every other model's
+                     unsettled no-bet rows where they are. ONLY the pre-game
+                     poller passes it: it re-runs this scorer and nothing else,
+                     so the player-prop NONE/AVOID rows its clears used to take
+                     were never re-written before the game started (see the
+                     per-game clear below). The refresh pass and the daily
+                     pipeline must NOT pass it: their clear is what releases a
+                     prop player held at NONE by the first-signal lock
+                     (_locked_prop_keys) so the prop scorers that run next can
+                     score him again.
 
     Returns:
         Summary dict with total picks and breakdown.
@@ -3683,6 +3705,37 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         # of range (#243, and again on 2026-09-22 after #813
                         # added this clause unescaped — every hourly scoring
                         # step failed mid-loop after pick-lock).
+                        #
+                        # WHOSE ROWS (2026-10-12). By default every model's
+                        # no-bet rows on the game, player props included: on
+                        # the refresh pass and the daily run the prop scorers
+                        # run right after this, and this clear is what lets
+                        # them re-score a player the prop lock holds at NONE.
+                        # Two callers must clear only the game-level models
+                        # re-scored just below, because nothing re-writes the
+                        # prop rows after them:
+                        #   * the pre-game poller (game_models_only). On
+                        #     MLB_2026-10-11_LAD_MIL its run at 00:17:18Z took
+                        #     103 prop NONE/AVOID rows 2m41s before first pitch;
+                        #     the game ended with only its one prop BET.
+                        #   * a game that started while this pass was running.
+                        #     now_utc is read once, before the loop, and a pass
+                        #     takes minutes. WNBA_2026-10-09_ATL_NY started at
+                        #     23:34:00Z and lost 91 prop rows at 23:36:48Z; the
+                        #     prop scorers skip a started game, so they were
+                        #     never re-written. The clock here is read fresh.
+                        # The game-level rows are cleared and re-scored exactly
+                        # as before in both cases: a stale row left in place
+                        # would turn the re-insert into a silent no-op
+                        # (uq_picks_one_row_per_pick, ON CONFLICT DO NOTHING).
+                        _mf, _mp = "", ()
+                        if game_models_only:
+                            _mf, _mp = _model_id_filter(relevant_models)
+                        elif _game_started(commence_time):
+                            _mf, _mp = _model_id_filter(relevant_models)
+                            logger.info(f"  {game_id}: started while this pass "
+                                        f"was running -- clearing its game-level "
+                                        f"rows only")
                         conn.execute("""
                             DELETE FROM picks
                             WHERE game_id = %s
@@ -3690,7 +3743,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                               AND signal_type != 'BET'
                               AND is_live IS NOT TRUE
                               AND model_id NOT LIKE 'nfl_prop_%%'
-                        """, (game_id,))
+                        """ + _mf, (game_id,) + _mp)
                     for model_id in relevant_models:
                         # Pick lock: this pair has already produced a BET, so it is
                         # frozen — the number given is the bet of record and nothing
@@ -3831,6 +3884,15 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # %-interpolates the whole statement. A bare % is a format spec and
         # raises IndexError: tuple index out of range (same class as #243;
         # produced every scoring pass after #813 until escaped).
+        #
+        # TWO MORE LIMITS (2026-10-12), the same two as the per-game clear:
+        #   * "not started" is read on a FRESH clock. now_utc is from before
+        #     the loop, so a game that started while the pass ran was still
+        #     swept, and nothing re-writes a started game's rows.
+        #   * the pre-game poller (game_models_only) sweeps only game-level
+        #     models' rows. It re-writes nothing else, so player-prop rows
+        #     and the NFL opener and wind no-bet rows stay for the writers
+        #     that own them.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -3838,6 +3900,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if rescored:
                 _keep = f" AND game_id NOT IN ({','.join(['%s'] * len(rescored))})"
                 _keep_p = tuple(sorted(rescored))
+            _mf, _mp = (_model_id_filter(MODELS) if game_models_only
+                        else ("", ()))
+            sweep_now = _utcnow().isoformat()
             try:
                 conn.execute("SET LOCAL lock_timeout = '10s'")
                 conn.execute("""
@@ -3850,7 +3915,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                   SELECT game_id FROM games
                   WHERE game_date >= %s AND game_date <= %s
                     AND (commence_time IS NULL OR commence_time > %s)
-              )""" + _sc + _keep,
+              )""" + _sc + _keep + _mf,
             (target_date,
              # EVERY look-ahead horizon, not just the two that existed when
              # this was written. The bound has to cover the whole window
@@ -3859,7 +3924,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
              # ever clearing the last one — duplicates on exactly the games
              # this change just started scoring.
              max(ncaaf_horizon, ufc_horizon, game_horizon),
-             now_utc) + _sp + _keep_p)
+             sweep_now) + _sp + _keep_p + _mp)
                 conn.commit()
             except Exception as exc:                          # noqa: BLE001
                 # A sweep that cannot get its locks in 10s yields; the

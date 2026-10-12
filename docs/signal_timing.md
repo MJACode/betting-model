@@ -15,7 +15,7 @@ from. This is the same lesson as the session-68 full-outcome sweep (the `BET`-on
 sweep overstated `mlb_moneyline` at +29% on 23 bets; the full-outcome sample said
 +4.1% on 50) and it is why `mv_scored_pick_outcomes` (§113) grades the whole universe.
 
-Three coverage traps to check BEFORE trusting any such analysis:
+Four coverage traps to check BEFORE trusting any such analysis:
 
 1. **`NONE` rows did not always exist.** They were only introduced 2026-05-12
    (session 16). Anything before that date has no dead-zone rows to grade.
@@ -31,6 +31,17 @@ Three coverage traps to check BEFORE trusting any such analysis:
    persisted. Measured share of DK-priced games with zero rows, clean windows:
    `mlb_moneyline` 8.3%, `mlb_f5_moneyline` 7.4%, `mlb_over_under` 7.2%,
    **`mlb_runline` 35.3%**. Only a model re-run can recover those probabilities.
+4. **Player-prop `NONE`/`AVOID` rows are a survivor sample from 2026-08-30** until
+   the 2026-10-12 fix reached the worker (`run_scorer(game_models_only=...)`). The 30-second
+   pre-game line poller (shipped 2026-08-30) re-ran the game scorer on any game whose
+   line moved, and that scorer's clear took every prop no-bet row on the game; the
+   prop scorers did not run again before the start unless a refresh pass did. A
+   refresh pass also cleared games that started while it was running. Measured
+   2026-10-12 from `picks`: of 18 MLB games 2026-10-01 → 10-11, **10 ended with zero
+   prop no-bet rows** (the other 8 kept 131–146 each), and **all 12 WNBA games** in
+   that span ended with zero. Which games survived depends on whether a line moved
+   after the last pass, so the survivors are not a random sample. Prop BET rows were
+   never touched by either clear.
 
 ### 29.2 Analysis: does the daily pick lock cost us signals? (2026-08-23)
 
