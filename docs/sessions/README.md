@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, the three standing health alarms investigated (UFC placeholder rows and one wrong winner; a paused WNBA model; two newly promoted FBS schools); the line poller has deleted player-prop no-bet rows since 08-30, so the prop evaluation window is not clean after that date; fixes in #922, #923, #927, #928 |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, a missing `v_discord_void_notice` is an empty notice list (`PGRST205` / `Could not find the table` / `42P01`); permission, network, and server errors still leave a VOID unpublished |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, anon can read `v_discord_published` after the void-notice view: the grant is `(lock_key, kind, sent_at)`; release is strict `>`; a null void stamp does not hold the lock open; a failed notice read leaves a VOID unpublished; `v_discord_void_notice` is on the anon manifest and the PR CI tripwire |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, a void notice releases the shared game:model lock for a later pick; the later post re-holds it; the app keeps the VOID pick unpublished via `v_discord_void_notice`; no jump link because guild and channel ids are not stored; the void job rejects non-integers |

@@ -505,7 +505,7 @@ your case; the rules below are complete as stated, the evidence is why.
   Three coverage traps to check FIRST: `NONE` rows only exist from 2026-05-12;
   they were **deleted ~2026-06-26 → 2026-08-09**; and a game where `abs(edge) >
   MAX_EDGE_CAP` gets **no row at all**. Clean windows: 2026-05-12→06-25 and
-  2026-08-09→present. Re-verify by month; never assume.
+  2026-08-09→present (props: only to 08-29). Re-verify by month.
   Full version: `docs/signal_timing.md`.
 - **The method rules — validate the grading before moving a cut, require a
   plateau and not a peak, split early/late, in-sample is in-sample** — are in
