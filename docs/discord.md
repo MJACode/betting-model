@@ -217,6 +217,28 @@ treat a capture row as locked. Wiring them is TBD. The void path does not
 delete captures or Discord messages. The settled record still excludes
 every VOID.
 
+**A void notice is the publish state (2026-10-09).** `notify_discord_void`
+posts one gray embed per sport for picks that are already VOID and already
+have a `discord_signal` (or `discord_live`) row, then writes `push_sent`
+kind `discord_void` only after Discord accepts it. `v_discord_published`
+drops that lock only while the notice is strictly newer
+(`void.sent_at > signal.sent_at`; the same instant does not release). A
+null void `sent_at` does not release a stamped signal and does not keep a
+later stamp out of the view; it releases only a signal that also has no
+`sent_at`, and the next post then holds. The pre-game key is
+`game_id:model_id`, so a later pick on that game shares it: the notice
+releases the lock, and that pick's post stamps the signal after the notice
+and holds the lock again. `v_discord_void_notice` keeps the key so the app
+leaves the VOID pick unpublished. A missing view (`PGRST205`, the
+message `Could not find the table`, or `42P01` if the client forwards
+that code) is an empty notice list, so a published VOID stays published.
+Any other read error fails closed for a VOID pick. A lock with no notice is unchanged. The view is
+`security_invoker` and reads `sent_at`, so anon's column grant on
+`push_sent` is `lock_key, kind, sent_at`. `message_id` stays ungranted. The original message is not edited or deleted. A published
+VOID with no `discord_void` row stays on the board. The worker job is
+`publish_discord_void` (`dry_run` defaults to true). The migration is
+`discord_void_notice_2026_10_09.sql`; it is not applied from a dev session.
+
 **3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
 beyond it on the day (0 rows), so this is closed before it costs a pick rather
 than after. `NFL_AHEAD_DAYS` is 11 = the 10-day poll/prop horizon

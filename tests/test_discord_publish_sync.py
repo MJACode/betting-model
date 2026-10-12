@@ -104,15 +104,16 @@ def test_an_opening_signal_is_live_only_when_discord_published_it():
 def test_the_join_is_the_discord_ledger_and_not_a_new_bet_row():
     raw = sqlite3.connect(":memory:")
     raw.execute(
-        "CREATE TABLE push_sent (lock_key TEXT, kind TEXT, message_id TEXT)")
+        "CREATE TABLE push_sent (lock_key TEXT, kind TEXT, message_id TEXT, "
+        "sent_at TEXT)")
     raw.execute(
         "CREATE TABLE opening_signals (lock_key TEXT, result TEXT)")
     raw.executemany(
-        "INSERT INTO push_sent VALUES (?, ?, ?)",
+        "INSERT INTO push_sent VALUES (?, ?, ?, ?)",
         [
-            ("G:posted", "discord_signal", "1552"),
-            ("G:phone", "new_bet", None),
-            ("live:G:m:over", "discord_live", "99"),
+            ("G:posted", "discord_signal", "1552", "2026-09-01T00:00:00-04:00"),
+            ("G:phone", "new_bet", None, "2026-09-01T00:00:00-04:00"),
+            ("live:G:m:over", "discord_live", "99", "2026-09-01T00:00:00-04:00"),
         ],
     )
     raw.executemany(
@@ -140,6 +141,24 @@ def test_the_view_exposes_the_ledger_without_the_message_id():
     assert "message_id" not in view
     assert "DELETE FROM" not in sql
     assert "_delete_message" not in sql
+    # Keyword check: this file must not put the narrower view back once a
+    # void notice owns the definition. The later migration is the one that
+    # adds the exclusion and lets anon see discord_void (security_invoker).
+    assert "position('discord_void' in d)" in sql
+    later = (ROOT / "data/migrations/discord_void_notice_2026_10_09.sql").read_text(
+        encoding="utf-8")
+    assert "position('discord_void' in d)" in later
+    assert "position('discord_void' in pol)" in later
+    assert "v.kind = 'discord_void'" in later
+    assert "kind IN ('discord_signal', 'discord_live', 'discord_void')" in later
+    later_view = later.split("CREATE OR REPLACE VIEW", 1)[1].split("$v$", 1)[0]
+    assert "message_id" not in later_view
+    assert "DELETE FROM" not in later
+    assert "UPDATE public.picks" not in later
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    assert "discord_void_notice_2026_10_09.sql" in ACTIVE_MIGRATIONS
+    assert (ACTIVE_MIGRATIONS.index("discord_void_notice_2026_10_09.sql")
+            > ACTIVE_MIGRATIONS.index(MIG.name))
 
 
 def test_void_picks_does_not_retract_discord():
@@ -151,7 +170,8 @@ def test_void_picks_does_not_retract_discord():
 def test_the_app_predicate_matches():
     """The board and this module are one decision. Drift here is the desync."""
     script = r"""
-import { discordLedVisible, lockKeyForPick, voidHiddenFromBoard }
+import { discordLedVisible, discordPublishForPick, isMissingNoticeView,
+  lockKeyForPick, voidHiddenFromBoard, voidNoticeFromChunk }
   from "./mobile/src/lib/discordPublish.ts";
 
 const cases = [
@@ -190,12 +210,64 @@ if (!voidHiddenFromBoard({ condition_status: "VOID", discordPublish: "unpublishe
   throw new Error("unpublished void shown");
 if (!voidHiddenFromBoard({ condition_status: "VOID" }))
   throw new Error("unknown void shown");
+const published = new Set(["G:m"]);
+const noticed = new Set(["G:m"]);
+if (discordPublishForPick("VOID", "G:m", published, noticed) !== "unpublished")
+  throw new Error("noticed void stayed published");
+if (discordPublishForPick(null, "G:m", published, noticed) !== "published")
+  throw new Error("later pick on a noticed key was hidden");
+if (discordPublishForPick("VOID", "G:m", published, new Set()) !== "published")
+  throw new Error("a void with no notice was hidden");
+if (discordPublishForPick("VOID", "H:m", published, noticed) !== "unpublished")
+  throw new Error("an unposted key was published");
+if (discordPublishForPick("VOID", "G:m", published, null) !== "unpublished")
+  throw new Error("a failed notice read showed a void as published");
+if (discordPublishForPick(null, "G:m", published, null) !== "published")
+  throw new Error("a failed notice read hid a pick that is not void");
+
+const missing = {
+  code: "PGRST205",
+  message: "Could not find the table 'public.v_discord_void_notice' in the schema cache",
+};
+if (!isMissingNoticeView(missing)) throw new Error("PGRST205 was not a missing view");
+if (!isMissingNoticeView({ code: "42P01", message: 'relation "v_discord_void_notice" does not exist' }))
+  throw new Error("42P01 was not a missing view");
+if (!isMissingNoticeView({ message: "Could not find the table 'public.v_discord_void_notice' in the schema cache" }))
+  throw new Error("the table message was not a missing view");
+const missingKeys = voidNoticeFromChunk(missing, null);
+if (missingKeys == null || missingKeys.size !== 0)
+  throw new Error("a missing view did not come back empty");
+if (discordPublishForPick("VOID", "G:m", published, missingKeys) !== "published")
+  throw new Error("a missing notice view hid a published void");
+
+const denied = voidNoticeFromChunk(
+  { code: "42501", message: "permission denied for table push_sent" }, null);
+if (denied !== null) throw new Error("a permission error looked like no notices");
+if (discordPublishForPick("VOID", "G:m", published, denied) !== "unpublished")
+  throw new Error("a permission error showed a void as published");
+const offline = voidNoticeFromChunk({ code: "", message: "TypeError: Failed to fetch" }, null);
+if (offline !== null) throw new Error("a network error looked like no notices");
+if (discordPublishForPick("VOID", "G:m", published, offline) !== "unpublished")
+  throw new Error("a network error showed a void as published");
+const server = voidNoticeFromChunk({ code: "PGRST000", message: "Internal server error" }, null);
+if (server !== null) throw new Error("a server error looked like no notices");
+if (discordPublishForPick("VOID", "G:m", published, server) !== "unpublished")
+  throw new Error("a server error showed a void as published");
+
+const present = voidNoticeFromChunk(null, [{ lock_key: "G:m" }]);
+if (present == null || !present.has("G:m")) throw new Error("a notice row was dropped");
+if (discordPublishForPick("VOID", "G:m", published, present) !== "unpublished")
+  throw new Error("a notice present stayed published");
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
+    src = (ROOT / "mobile/src/lib/discordPublish.ts").read_text(encoding="utf-8")
+    body = src[src.index("export async function fetchVoidNoticeKeys"):]
+    body = body[:body.index("\nexport async function attachDiscordPublish")]
+    assert "voidNoticeFromChunk(error" in body
 
 
 def test_a_published_void_keeps_track_and_betslip():
@@ -271,13 +343,16 @@ def test_the_settled_record_still_excludes_every_void():
 
 
 def test_the_discord_pins_are_on_the_pr_ci_subset():
-    """A local-only green is how the NHL pin stayed red. These three files
-    are the Discord display, the publish key, and the void contract."""
+    """A local-only green is how the NHL pin stayed red. These files are the
+    Discord display, the publish key, the void contract, and the anon
+    read-surface tripwire that names v_discord_void_notice."""
     yml = (ROOT / ".github/workflows/pr-ci.yml").read_text(encoding="utf-8")
     for name in (
         "tests/test_discord_publish_sync.py",
         "tests/test_publish_key_identity.py",
         "tests/test_void_picks.py",
+        "tests/test_discord_void_notice.py",
+        "tests/test_anon_readable.py",
     ):
         assert name in yml
     assert 'node-version: "22"' in yml

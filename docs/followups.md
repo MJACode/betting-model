@@ -82,17 +82,22 @@ none under "refused".
 
 Found 2026-10-09 while making posted picks voidable. After a void:
 
-- **Discord.** The original post stays. Nothing new is posted.
+- **Discord.** The original post stays. The correction is a separate gray
+  notice, `notify_discord_void` / job `publish_discord_void` (branch
+  `cursor/discord-void-notice-eaef`). It is not posted until someone runs the
+  job with `dry_run` false, after the migration is applied. The original
+  message is not edited.
 - **Phone.** The "new bet" push went out when the pick was posted. Nothing
-  follows the void.
-- **App.** The card keeps its badge, Track and the betslip button. Only the
-  pick's detail screen adds "Posted to Discord · not counted in the model's
-  record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
+  follows the void. Still open.
+- **App.** Once a `discord_void` row exists, `v_discord_published` drops the
+  lock and the card leaves the board the same way an unpublished VOID does.
+  Until that row exists, the card keeps its badge, Track and the betslip
+  button. The detail screen still adds "Posted to Discord · not counted in
+  the model's record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
 
-So a member who bet one of the eight unders is not told it was withdrawn.
-Two options: a correction post in the channel, or a marker on the app card
-(or both). Either is a small change. The choice is mike's; nothing has been
-posted.
+The notice wording is in that PR for approval. The phone push is still a
+decision.
+
 ## [x] NCAAF picks scored from prices more than a week old — FIXED 2026-10-09
 
 Found by the 2026-10-09 line-movement review: 200 of 682 pre-game NCAAF picks
