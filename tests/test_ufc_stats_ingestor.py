@@ -429,3 +429,340 @@ def test_resolve_anchor_declines_when_opponent_changed():
 def test_resolve_ignores_unrelated_fights():
     rows = [("UFC_2026-08-15_other", "Neil Magny", "Ramiz Brahimaj")]
     assert _resolve(rows, "islam-makhachev", "ian-machado-garry") == []
+
+
+def test_resolve_anchor_returns_a_fight_stored_twice_but_not_beside_a_changed_opponent():
+    """The odds feed stored one fight twice, home/away swapped, under a
+    spelling ufcstats does not use (Pereira vs Zheleznyakova, 2026-10-10:
+    ufcstats spells her Daria Zhelezniakova). Both rows are the SAME two
+    fighters, so this is not a changed matchup: every row is returned and
+    each is scored in its own orientation. Declining here left both odds rows
+    unscored and created a third, ufcstats-only row instead.
+
+    The rule is "every row is the same two fighters", not "several rows":
+    the same duplicate pair beside a row naming a different opponent is
+    still ambiguous and still declines."""
+    rows = [
+        ("UFC_2026-10-10_alice-pereira_darya-zheleznyakova",
+         "Darya Zheleznyakova", "Alice Pereira"),
+        ("UFC_2026-10-10_darya-zheleznyakova_alice-pereira",
+         "Alice Pereira", "Darya Zheleznyakova"),
+    ]
+    got = _resolve(rows, "alice-pereira", "daria-zhelezniakova", date="2026-10-10")
+    assert sorted(g[0] for g in got) == sorted(r[0] for r in rows)
+
+    rows_with_a_changed_opponent = rows + [
+        ("UFC_2026-10-10_alice-pereira_tracy-cortez",
+         "Tracy Cortez", "Alice Pereira"),
+    ]
+    assert _resolve(rows_with_a_changed_opponent, "alice-pereira",
+                    "daria-zhelezniakova", date="2026-10-10") == []
+
+
+def _warnings_while(fn):
+    """Run fn() and return (its result, every WARNING message logged)."""
+    from loguru import logger
+    messages = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        return fn(), messages
+    finally:
+        logger.remove(sink)
+
+
+@pytest.mark.parametrize("rows", [
+    # booked once: the odds feed has only the original matchup
+    [("UFC_2026-08-15_charles-johnson_jose-ochoa", "Jose Ochoa", "Charles Johnson")],
+    # booked twice, home/away swapped — the same two fighters on both rows
+    [("UFC_2026-08-15_charles-johnson_jose-ochoa", "Jose Ochoa", "Charles Johnson"),
+     ("UFC_2026-08-15_jose-ochoa_charles-johnson", "Charles Johnson", "Jose Ochoa")],
+], ids=["one row", "stored twice"])
+def test_resolve_anchor_refuses_a_late_replacement(rows):
+    """Charles Johnson was booked against Jose Ochoa and fought Eduardo
+    Chapolin. If the odds feed only ever listed the Ochoa booking, every row
+    shares exactly one fighter (Johnson) with the result, and every row is
+    the same two fighters — so "same pair on every row" alone accepts it, and
+    a moneyline pick on Ochoa would be graded on the Chapolin fight (a
+    sportsbook voids that bet). Ochoa does not resemble Chapolin, so this is
+    a different fight: nothing is matched, and the refusal is logged."""
+    got, warnings = _warnings_while(
+        lambda: _resolve(rows, "charles-johnson", "eduardo-chapolin"))
+    assert got == []
+    refusals = [m for m in warnings if "does not resemble" in m]
+    assert len(refusals) == 1, warnings
+    assert "jose-ochoa" in refusals[0] and "eduardo-chapolin" in refusals[0]
+
+
+# Every name-variant match the results ingest has met since 2025-01-01: a
+# read-only replay of every ufcstats fight in ufc_fight_log from 2025-01-01 to
+# 2026-10-10 against the odds-feed games rows within a day of it. The odds
+# feed's games rows start on 2026-06-13, so all of them are from then on. Each
+# row is as stored (both orientations where the fight was stored twice). The
+# feed's spelling and the ufcstats spelling of the misspelled fighter differ
+# in every one of these; each must still be matched.
+_GENUINE_NAME_VARIANTS = [
+    # (ufcstats winner, ufcstats loser, date, odds-feed rows: (game_id, home, away))
+    ("Kai Asakura", "Aoriqileng", "2026-08-29", [
+        ("UFC_2026-08-29_aori-qileng_kai-asakura", "Kai Asakura", "Aori Qileng"),
+        ("UFC_2026-08-29_kai-asakura_aori-qileng", "Aori Qileng", "Kai Asakura"),
+    ]),
+    ("Sumudaerji", "Alex Perez", "2026-08-29", [
+        ("UFC_2026-08-29_alex-perez_su-mudaerji", "Su Mudaerji", "Alex Perez"),
+        ("UFC_2026-08-29_su-mudaerji_alex-perez", "Alex Perez", "Su Mudaerji"),
+    ]),
+    ("Julia Polastri", "Xiong Jingnan", "2026-08-29", [
+        ("UFC_2026-08-29_jingnan-xiong_julia-polastri", "Julia Polastri", "Jingnan Xiong"),
+        ("UFC_2026-08-29_julia-polastri_jingnan-xiong", "Jingnan Xiong", "Julia Polastri"),
+    ]),
+    ("Losene Keita", "Muhammad Naimov", "2026-09-05", [
+        ("UFC_2026-09-05_losene-keita_muhammadjon-naimov", "Muhammadjon Naimov", "Losene Keita"),
+        ("UFC_2026-09-05_muhammadjon-naimov_losene-keita", "Losene Keita", "Muhammadjon Naimov"),
+    ]),
+    ("Nora Cornolle", "Klaudia Sygula", "2026-09-05", [
+        ("UFC_2026-09-05_klaudia-sygu-a_nora-cornolle", "Nora Cornolle", "Klaudia Syguła"),
+        ("UFC_2026-09-05_nora-cornolle_klaudia-sygu-a", "Klaudia Syguła", "Nora Cornolle"),
+    ]),
+    ("Tommy Gantt", "Drakkar Klose", "2026-09-12", [
+        ("UFC_2026-09-12_drakkar-klose_thomas-gantt", "Thomas Gantt", "Drakkar Klose"),
+        ("UFC_2026-09-12_thomas-gantt_drakkar-klose", "Drakkar Klose", "Thomas Gantt"),
+    ]),
+    ("Rongzhu", "Rafa Garcia", "2026-09-12", [
+        ("UFC_2026-09-12_zhu-rong_rafa-garcia", "Rafa Garcia", "Zhu Rong"),
+    ]),
+    ("Elves Brener", "Josiah Harrell", "2026-09-26", [
+        ("UFC_2026-09-26_elves-brenner_josiah-harrell", "Josiah Harrell", "Elves Brenner"),
+    ]),
+    ("Alatengheili", "John Castaneda", "2026-09-26", [
+        ("UFC_2026-09-26_heili-alateng_john-castaneda", "John Castaneda", "Heili Alateng"),
+        ("UFC_2026-09-26_john-castaneda_heili-alateng", "Heili Alateng", "John Castaneda"),
+    ]),
+    ("Alexander Hernandez", "Rafael Dos Anjos", "2026-10-03", [
+        ("UFC_2026-10-03_alex-hernandez_rafael-dos-anjos", "Rafael dos Anjos", "Alex Hernandez"),
+    ]),
+    ("Johnny Walker", "Mick Parkin", "2026-10-03", [
+        ("UFC_2026-10-03_michael-parkin_johnny-walker", "Johnny Walker", "Michael Parkin"),
+    ]),
+    ("Alice Pereira", "Daria Zhelezniakova", "2026-10-10", [
+        ("UFC_2026-10-10_alice-pereira_darya-zheleznyakova", "Darya Zheleznyakova", "Alice Pereira"),
+        ("UFC_2026-10-10_darya-zheleznyakova_alice-pereira", "Alice Pereira", "Darya Zheleznyakova"),
+    ]),
+    ("Loopy Godinez", "Ketlen Souza", "2026-10-10", [
+        ("UFC_2026-10-10_ketlen-souza_lupita-godinez", "Lupita Godinez", "Ketlen Souza"),
+    ]),
+]
+
+
+@pytest.mark.parametrize("winner,loser,date,rows", _GENUINE_NAME_VARIANTS,
+                         ids=[f"{w} v {l}" for w, l, _d, _r in _GENUINE_NAME_VARIANTS])
+def test_resolve_anchor_matches_every_real_name_variant(winner, loser, date, rows):
+    got = _resolve(rows, slugify_fighter(winner), slugify_fighter(loser), date=date)
+    assert sorted(g[0] for g in got) == sorted(r[0] for r in rows)
+
+
+# The same replay found these fights where the odds feed ALSO kept a row for
+# an opponent the fighter did not end up facing (a changed booking). Each
+# fight was matched through its correct row, which the feed had too. Had the
+# feed never listed the real matchup, the stale row would be the only one
+# sharing a fighter — and "same pair on every row" alone accepted every one of
+# them. None of the stale opponents resembles the real one.
+_STALE_BOOKINGS = [
+    # (ufcstats winner, ufcstats loser, date, the stale odds-feed rows)
+    ("Farid Basharat", "John Garza", "2026-07-11", [
+        ("UFC_2026-07-11_ethyn-ewing_farid-basharat", "Farid Basharat", "Ethyn Ewing"),
+    ]),
+    ("Magomed Ankalaev", "Bogdan Guskov", "2026-07-25", [
+        ("UFC_2026-07-25_khalil-rountree_magomed-ankalaev", "Magomed Ankalaev", "Khalil Rountree"),
+    ]),
+    ("Borislav Nikolic", "Mark Vologdin", "2026-08-01", [
+        ("UFC_2026-08-01_josias-musasa_mark-vologdin", "Mark Vologdin", "Josias Musasa"),
+    ]),
+    ("Miles Johns", "Gianni Vazquez", "2026-08-08", [
+        ("UFC_2026-08-08_jessie-rosas_miles-johns", "Miles Johns", "Jessie Rosas"),
+        ("UFC_2026-08-08_miles-johns_jessie-rosas", "Jessie Rosas", "Miles Johns"),
+    ]),
+    ("Pavel Andrusca", "Nathaniel Wood", "2026-09-05", [
+        ("UFC_2026-09-05_mairon-santos_nathaniel-wood", "Nathaniel Wood", "Mairon Santos"),
+    ]),
+    ("Jean Silva", "Jose Delgado", "2026-09-12", [
+        ("UFC_2026-09-12_jean-silva_yair-rodriguez", "Yair Rodriguez", "Jean Silva"),
+        ("UFC_2026-09-12_yair-rodriguez_jean-silva", "Jean Silva", "Yair Rodriguez"),
+    ]),
+    ("Luis Hernandez", "Sedriques Dumas", "2026-09-26", [
+        ("UFC_2026-09-26_mickey-gall_sedriques-dumas", "Sedriques Dumas", "Mickey Gall"),
+        ("UFC_2026-09-26_sedriques-dumas_mickey-gall", "Mickey Gall", "Sedriques Dumas"),
+    ]),
+    ("Marcus McGhee", "Anthony Romero", "2026-10-03", [
+        ("UFC_2026-10-03_benardo-sopaj_marcus-mcghee", "Marcus McGhee", "Benardo Sopaj"),
+    ]),
+    ("Natalia Silva", "Wang Cong", "2026-10-03", [
+        ("UFC_2026-10-03_natalia-silva_valentina-shevchenko", "Valentina Shevchenko", "Natalia Silva"),
+    ]),
+]
+
+
+@pytest.mark.parametrize("winner,loser,date,rows", _STALE_BOOKINGS,
+                         ids=[f"{w} v {l}" for w, l, _d, _r in _STALE_BOOKINGS])
+def test_resolve_anchor_refuses_every_real_stale_booking_on_its_own(winner, loser, date, rows):
+    assert _resolve(rows, slugify_fighter(winner), slugify_fighter(loser), date=date) == []
+
+
+# ── Scoring a matched row: which side won ─────────────────────────────────────
+# The results ingest writes home_score/away_score/home_win onto each matched
+# games row. Settlement grades UFC moneyline picks from games.home_win, so a
+# wrong side here grades a winning pick as a loss.
+
+class _IngestConn:
+    """DBConnection stand-in for _ingest_event: serves the games rows near the
+    event date, reports no existing fight-log rows, and records every score
+    written to games."""
+
+    def __init__(self, games_rows):
+        self._games_rows = games_rows
+        self._result = []
+        self.scores = []          # (home_score, away_score, home_win, game_id)
+        self.inserted_games = []
+
+    def execute(self, sql, params=None):
+        text = " ".join(sql.split())
+        if text.startswith("SELECT game_id, home_team, away_team FROM games"):
+            self._result = list(self._games_rows)
+        elif text.startswith("UPDATE games"):
+            self.scores.append(tuple(params))
+            self._result = []
+        elif text.startswith("INSERT INTO games"):
+            self.inserted_games.append(tuple(params))
+            self._result = []
+        elif text.startswith("SELECT COUNT(*)"):
+            self._result = [(0,)]
+        else:                     # fight-log lookups and upserts, fighter upserts
+            self._result = []
+        return self
+
+    def fetchall(self):
+        return self._result
+
+    def fetchone(self):
+        return self._result[0] if self._result else None
+
+    def commit(self):
+        pass
+
+
+def _one_fight_event(winner, loser, date, outcome="first_won"):
+    """A parse_event_page-shaped event with one fight; winner listed first."""
+    return {
+        "name": "UFC Fight Night",
+        "date": date,
+        "fights": [{
+            "fight_id": "f0f0f0f0f0f0f0f0",
+            "fighter_ids": ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"],
+            "fighter_names": [winner, loser],
+            "outcome": outcome,
+            "weight_class": "Flyweight",
+            "is_title_fight": 0,
+            "method_raw": "Decision - Unanimous",
+            "end_round": 3,
+            "end_time_sec": 300,
+            "kd": [0, 0],
+            "sig_landed": [40, 30],
+            "td_landed": [1, 0],
+            "sub_attempts": [0, 0],
+        }],
+    }
+
+
+def _ingest(games_rows, winner, loser, date, outcome="first_won"):
+    from data.ingestors.ufc_stats_ingestor import _ingest_event
+    conn = _IngestConn(games_rows)
+    _ingest_event(conn, "evt", ev=_one_fight_event(winner, loser, date, outcome),
+                  detail_lookup=lambda _fight_id: {}, force=True)
+    return conn
+
+
+def test_a_misspelled_fighter_is_scored_for_the_side_they_fought_on():
+    """Godinez vs Souza, 2026-10-10: the odds feed has 'Lupita Godinez' at
+    home, ufcstats has 'Loopy Godinez', and she won. Her row is matched by
+    the anchor rule (Souza is spelled the same in both). Comparing only the
+    winner's name with the home name credited Souza (home_win=0); checking
+    the loser's name too places the win at home.
+
+    Every combination of side and result is checked, plus both orientations
+    of a correctly spelled row, so the fix for the one broken case cannot
+    break the others: (home name, away name, winner, loser, expected scores).
+    """
+    cases = [
+        # misspelled fighter at home, wins: the case that was scored backwards
+        ("Lupita Godinez", "Ketlen Souza", "Loopy Godinez", "Ketlen Souza", (1, 0, 1)),
+        # misspelled fighter at home, loses
+        ("Lupita Godinez", "Ketlen Souza", "Ketlen Souza", "Loopy Godinez", (0, 1, 0)),
+        # misspelled fighter away, wins
+        ("Ketlen Souza", "Lupita Godinez", "Loopy Godinez", "Ketlen Souza", (0, 1, 0)),
+        # misspelled fighter away, loses
+        ("Ketlen Souza", "Lupita Godinez", "Ketlen Souza", "Loopy Godinez", (1, 0, 1)),
+        # both spelled alike in both sources: unchanged, either orientation
+        ("Islam Makhachev", "Ian Machado Garry", "Ian Machado Garry", "Islam Makhachev", (0, 1, 0)),
+        ("Ian Machado Garry", "Islam Makhachev", "Ian Machado Garry", "Islam Makhachev", (1, 0, 1)),
+    ]
+    got = []
+    for home, away, winner, loser, _expected in cases:
+        gid = f"UFC_2026-10-10_{slugify_fighter(away)}_{slugify_fighter(home)}"
+        conn = _ingest([(gid, home, away)], winner=winner, loser=loser,
+                       date="2026-10-10")
+        assert conn.inserted_games == []      # matched the odds row, made none
+        got.append(conn.scores)
+    assert got == [
+        [(*expected, f"UFC_2026-10-10_{slugify_fighter(away)}_{slugify_fighter(home)}")]
+        for home, away, _w, _l, expected in cases
+    ]
+
+
+def test_the_same_fight_stored_twice_is_scored_on_both_rows_each_way_round():
+    """Pereira beat Zheleznyakova (ufcstats: Daria Zhelezniakova); the odds
+    feed stored the fight twice, home/away swapped. Both rows are scored, each
+    with its own orientation (Pereira at home wins, Pereira away wins) and
+    no third row is created."""
+    away_pereira = "UFC_2026-10-10_alice-pereira_darya-zheleznyakova"
+    home_pereira = "UFC_2026-10-10_darya-zheleznyakova_alice-pereira"
+    conn = _ingest([
+        (away_pereira, "Darya Zheleznyakova", "Alice Pereira"),
+        (home_pereira, "Alice Pereira", "Darya Zheleznyakova"),
+    ], winner="Alice Pereira", loser="Daria Zhelezniakova", date="2026-10-10")
+    assert conn.inserted_games == []
+    assert sorted(conn.scores, key=lambda s: s[3]) == [
+        (0, 1, 0, away_pereira),
+        (1, 0, 1, home_pereira),
+    ]
+
+
+def test_a_row_naming_neither_fighter_is_left_unscored(monkeypatch):
+    """If a matched row names neither fighter the way ufcstats does, nothing
+    says which side won. The old rule scored it as an away win by default;
+    it must be left unscored (and logged) rather than guessed. The resolver
+    never produces such a row today, so it is injected here directly."""
+    import data.ingestors.ufc_stats_ingestor as ingestor
+    gid = "UFC_2026-10-10_ketlyn-sousa_lupita-godinez"
+    monkeypatch.setattr(ingestor, "_resolve_game_rows",
+                        lambda *_a, **_k: [(gid, "Lupita Godinez", "Ketlyn Sousa")])
+    conn = _ingest([], winner="Loopy Godinez", loser="Ketlen Souza",
+                   date="2026-10-10")
+    assert conn.inserted_games == []
+    assert conn.scores == []
+
+
+def test_a_late_replacement_is_not_scored_on_the_original_booking():
+    """End to end: the odds feed has Johnson v Ochoa stored twice; ufcstats
+    has Johnson beating Chapolin. Neither Ochoa row may receive a score
+    (that would grade an Ochoa pick on someone else's fight); the result goes
+    on a new ufcstats-only row instead, as it did before name variants were
+    matched at all."""
+    ochoa_home = "UFC_2026-08-15_charles-johnson_jose-ochoa"
+    ochoa_away = "UFC_2026-08-15_jose-ochoa_charles-johnson"
+    conn = _ingest([
+        (ochoa_home, "Jose Ochoa", "Charles Johnson"),
+        (ochoa_away, "Charles Johnson", "Jose Ochoa"),
+    ], winner="Charles Johnson", loser="Eduardo Chapolin", date="2026-08-15")
+    scored = {s[3] for s in conn.scores}
+    assert ochoa_home not in scored and ochoa_away not in scored
+    assert [g[0] for g in conn.inserted_games] == [
+        "UFC_2026-08-15_eduardo-chapolin_charles-johnson"]
+    assert scored == {"UFC_2026-08-15_eduardo-chapolin_charles-johnson"}
