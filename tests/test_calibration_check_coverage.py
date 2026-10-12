@@ -12,9 +12,12 @@ Two faults, measured against production on 2026-10-12:
     measured. The weekly fitter fixed the same blind spot on 2026-09-19 by
     reading settled bets from `picks`; the check was never moved with it.
 
-Every test here drives the real check end to end -- `run_system_health()` over a
-SQLite database -- so each one fails on the code before the fix for the reason
-it names, not because a helper is missing.
+All but the last two tests drive the real check end to end --
+`run_system_health()` over a SQLite database -- so they fail on the code before
+the fix on the verdict itself (STALE where it should be OK, SKIPPED where it
+should be STALE, two results where there should be one). The last two pin the
+settled-bet source directly: that its failure is reported, and which models it
+covers. They fail before the fix because that source did not exist.
 """
 
 import glob
