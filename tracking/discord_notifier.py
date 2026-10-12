@@ -55,7 +55,9 @@ from tracking.publish_lock import (
     DISCORD_LIVE_LOCK, DISCORD_SIGNALS_LOCK, publish_lock,
 )
 from tracking.publish_filters import captured_not_voided_sql, live_publishable_sql
-from tracking.publish_keys import live_lock_key_sql
+from tracking.publish_keys import (
+    SIGNAL_LEDGER_SQL, channel_lock_held_sql, live_lock_key_sql,
+)
 from tracking.publish_keys import key_partition_sql, lock_key_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
@@ -665,10 +667,7 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
                    OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
-              AND NOT EXISTS (
-                  SELECT 1 FROM push_sent s
-                  WHERE s.lock_key = {lock_key_sql()} AND s.kind = 'discord_signal'
-              )
+              AND NOT ({channel_lock_held_sql(lock_key_sql(), 'discord_signal')})
             GROUP BY p.model_id
             ORDER BY p.model_id
         """, (target_date,)).fetchall()
@@ -778,10 +777,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
-        WHERE NOT EXISTS (
-            SELECT 1 FROM push_sent s
-            WHERE s.lock_key = bet.lock_key AND s.kind = 'discord_signal'
-        )
+        WHERE NOT ({channel_lock_held_sql('bet.lock_key', 'discord_signal')})
         ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{
@@ -1516,10 +1512,8 @@ def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
         for chunk, message_id in chunks:
             for s in chunk:
                 conn.execute(
-                    "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
-                    "VALUES (%s, 'discord_signal', %s, %s) "
-                    "ON CONFLICT (lock_key, kind) DO NOTHING",
-                    (s["lock_key"], sent_at, message_id),
+                    SIGNAL_LEDGER_SQL,
+                    (s["lock_key"], "discord_signal", sent_at, message_id),
                 )
         posted_total += delivered
 
@@ -1561,11 +1555,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
           AND p.signal_type = 'BET'
           AND p.result IS NULL
           {live_publishable_sql()}
-          AND NOT EXISTS (
-              SELECT 1 FROM push_sent s
-              WHERE s.lock_key = {live_lock_key_sql()}
-                AND s.kind = 'discord_live'
-          )
+          AND NOT ({channel_lock_held_sql(live_lock_key_sql(), 'discord_live')})
         ORDER BY p.game_id
     """, (target_date,)).fetchall()
     return [{
@@ -1645,10 +1635,8 @@ def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
         for chunk, message_id in chunks:
             for s in chunk:
                 conn.execute(
-                    "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
-                    "VALUES (%s, 'discord_live', %s, %s) "
-                    "ON CONFLICT (lock_key, kind) DO NOTHING",
-                    (s["lock_key"], sent_at, message_id),
+                    SIGNAL_LEDGER_SQL,
+                    (s["lock_key"], "discord_live", sent_at, message_id),
                 )
         posted_total += delivered
 
@@ -2236,20 +2224,32 @@ def _void_title(sport: str) -> str:
     return f"{emoji} {sport} \u00b7 Voided picks"
 
 
-def _original_post_line(webhook_url: str | None, message_id) -> str | None:
-    """The original message, addressed with _message_url.
+def _known_channel_ids(sport: str | None) -> tuple[str, str]:
+    """Guild id and channel id for a jump link, when both are known.
 
-    The URL _message_url returns is the webhook credential (the probe job
-    refuses to store one). The channel gets the message id, which is the
-    last segment of that URL. No id, no line.
+    Config stores webhook URLs, which are credentials, not a guild id and a
+    channel id. The ledger does not store either id. Nothing here calls
+    Discord to look them up. Both empty means the notice omits the line.
+    """
+    del sport  # no per-sport channel id is configured
+    return "", ""
+
+
+def _discord_jump_line(message_id, guild_id: str | None,
+                       channel_id: str | None) -> str | None:
+    """https://discord.com/channels/<guild>/<channel>/<message>, or nothing.
+
+    That URL has no webhook token. A missing id drops the line rather than
+    printing the snowflake or the webhook address.
     """
     if message_id is None or str(message_id) in ("", _POST_OK_NO_ID):
         return None
-    mid = str(message_id)
-    if webhook_url:
-        addressed = _message_url(webhook_url, mid)
-        mid = addressed.rstrip("/").rsplit("/", 1)[-1]
-    return f"original post {mid}"
+    guild = (guild_id or "").strip()
+    channel = (channel_id or "").strip()
+    mid = str(message_id).strip()
+    if not (guild.isdigit() and channel.isdigit() and mid.isdigit()):
+        return None
+    return f"https://discord.com/channels/{guild}/{channel}/{mid}"
 
 
 def _void_field(pick: dict, webhook_url: str | None) -> dict:
@@ -2274,7 +2274,8 @@ def _void_field(pick: dict, webhook_url: str | None) -> dict:
             f"posted {posted}" if posted else "",
         ) if x),
     ) if x]
-    original = _original_post_line(webhook_url, pick.get("message_id"))
+    guild_id, channel_id = _known_channel_ids(pick.get("sport"))
+    original = _discord_jump_line(pick.get("message_id"), guild_id, channel_id)
     if original:
         bits.append(original)
     return {"name": label, "value": "\n".join(bits), "inline": False}

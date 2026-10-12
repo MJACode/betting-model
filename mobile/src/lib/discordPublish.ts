@@ -9,6 +9,13 @@
  * discord_live). The app cannot read push_sent itself. A failed read is
  * `unknown`: non-VOID bets keep the previous display, VOID stays hidden.
  *
+ * `v_discord_void_notice` is the locks that have a void notice. The pre-game
+ * key is game + model, so a later bet on that game shares it. Once that bet
+ * posts, the published view includes the key again. A VOID pick on a noticed
+ * key stays unpublished. A pick that is not VOID is unaffected, and a lock
+ * with no notice is unaffected. A failed read of the notice view does not
+ * hide a published VOID: the published view is what the board follows.
+ *
  * The lock key is tracking/publish_keys.py. Null and empty identity parts
  * are omitted, matching COALESCE(':' || col, '').
  */
@@ -112,15 +119,53 @@ export function discordPublishState(key: string, published: Set<string> | null):
   return published.has(key) ? 'published' : 'unpublished';
 }
 
+/**
+ * Publish state for one pick. A void notice unpublishes that VOID pick only.
+ * `noticed == null` means the notice view could not be read, so a published
+ * VOID stays published.
+ */
+export function discordPublishForPick(
+  conditionStatus: string | null | undefined,
+  key: string,
+  published: Set<string> | null,
+  noticed: Set<string> | null,
+): DiscordPublish {
+  if (conditionStatus === 'VOID' && noticed != null && noticed.has(key)) {
+    return 'unpublished';
+  }
+  return discordPublishState(key, published);
+}
+
+/** Locks with a void notice. `null` means the read failed. */
+export async function fetchVoidNoticeKeys(picks: LockPick[]): Promise<Set<string> | null> {
+  const keys = [...new Set(picks.filter((p) => p.signal_type === 'BET').map(lockKeyForPick))];
+  if (keys.length === 0) return new Set();
+  const { supabase } = await import('./supabase');
+  const found = new Set<string>();
+  const chunks: string[][] = [];
+  for (let i = 0; i < keys.length; i += CHUNK) chunks.push(keys.slice(i, i + CHUNK));
+  const results = await Promise.all(chunks.map((chunk) =>
+    supabase.from('v_discord_void_notice').select('lock_key').in('lock_key', chunk)));
+  for (const { data, error } of results) {
+    if (error) return null;
+    for (const row of (data ?? []) as { lock_key: string }[]) found.add(row.lock_key);
+  }
+  return found;
+}
+
 export async function attachDiscordPublish<T extends LockPick & {
   signal_type?: string | null;
+  condition_status?: string | null;
   discordPublish?: DiscordPublish;
 }>(picks: T[]): Promise<T[]> {
-  const published = await fetchPublishedLockKeys(picks);
+  const [published, noticed] = await Promise.all([
+    fetchPublishedLockKeys(picks),
+    fetchVoidNoticeKeys(picks),
+  ]);
   return picks.map((p) => ({
     ...p,
     discordPublish: p.signal_type === 'BET'
-      ? discordPublishState(lockKeyForPick(p), published)
+      ? discordPublishForPick(p.condition_status, lockKeyForPick(p), published, noticed)
       : p.discordPublish,
   }));
 }

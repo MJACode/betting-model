@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, a void notice releases the shared game:model lock for a later pick; the later post re-holds it; the app keeps the VOID pick unpublished via `v_discord_void_notice`; no jump link because guild and channel ids are not stored; the void job rejects non-integers |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, origin/master merged into the stats-review branch; session-log hunks kept both sides |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, the NFL edge search decisions carried out: nfl_prop_market back on (EV floor 0.07, own probability, pulled props dropped); Palmer re-graded; 2023-25 halftime and 2025 in-game lines bought (223,829 credits) and graded, both null; the fetched free data backed up to Supabase |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, dead-zone picks read NEUTRAL instead of NONE (Matt), one `signalDisplayName` for the badge, filters and VoiceOver; withdrawn picks show WITHDRAWN; the explainer no longer gives a ±3% cut; the sportsbook button on non-BET cards waits on Matt |

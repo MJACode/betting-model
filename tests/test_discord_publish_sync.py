@@ -104,15 +104,16 @@ def test_an_opening_signal_is_live_only_when_discord_published_it():
 def test_the_join_is_the_discord_ledger_and_not_a_new_bet_row():
     raw = sqlite3.connect(":memory:")
     raw.execute(
-        "CREATE TABLE push_sent (lock_key TEXT, kind TEXT, message_id TEXT)")
+        "CREATE TABLE push_sent (lock_key TEXT, kind TEXT, message_id TEXT, "
+        "sent_at TEXT)")
     raw.execute(
         "CREATE TABLE opening_signals (lock_key TEXT, result TEXT)")
     raw.executemany(
-        "INSERT INTO push_sent VALUES (?, ?, ?)",
+        "INSERT INTO push_sent VALUES (?, ?, ?, ?)",
         [
-            ("G:posted", "discord_signal", "1552"),
-            ("G:phone", "new_bet", None),
-            ("live:G:m:over", "discord_live", "99"),
+            ("G:posted", "discord_signal", "1552", "2026-09-01T00:00:00-04:00"),
+            ("G:phone", "new_bet", None, "2026-09-01T00:00:00-04:00"),
+            ("live:G:m:over", "discord_live", "99", "2026-09-01T00:00:00-04:00"),
         ],
     )
     raw.executemany(
@@ -169,7 +170,7 @@ def test_void_picks_does_not_retract_discord():
 def test_the_app_predicate_matches():
     """The board and this module are one decision. Drift here is the desync."""
     script = r"""
-import { discordLedVisible, lockKeyForPick, voidHiddenFromBoard }
+import { discordLedVisible, discordPublishForPick, lockKeyForPick, voidHiddenFromBoard }
   from "./mobile/src/lib/discordPublish.ts";
 
 const cases = [
@@ -208,6 +209,18 @@ if (!voidHiddenFromBoard({ condition_status: "VOID", discordPublish: "unpublishe
   throw new Error("unpublished void shown");
 if (!voidHiddenFromBoard({ condition_status: "VOID" }))
   throw new Error("unknown void shown");
+const published = new Set(["G:m"]);
+const noticed = new Set(["G:m"]);
+if (discordPublishForPick("VOID", "G:m", published, noticed) !== "unpublished")
+  throw new Error("noticed void stayed published");
+if (discordPublishForPick(null, "G:m", published, noticed) !== "published")
+  throw new Error("later pick on a noticed key was hidden");
+if (discordPublishForPick("VOID", "G:m", published, new Set()) !== "published")
+  throw new Error("a void with no notice was hidden");
+if (discordPublishForPick("VOID", "H:m", published, noticed) !== "unpublished")
+  throw new Error("an unposted key was published");
+if (discordPublishForPick("VOID", "G:m", published, null) !== "published")
+  throw new Error("a failed notice read hid a published void");
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],

@@ -20,7 +20,10 @@ from tracking import discord_notifier as dn
 from tracking.discord_publish import (
     discord_led_visible, discord_published_exists_sql,
 )
-from tracking.publish_keys import posted_sql, void_notice_exclusion_sql
+from tracking.publish_keys import (
+    SIGNAL_LEDGER_SQL, channel_lock_held_sql, posted_sql,
+    void_notice_exclusion_sql,
+)
 
 ROOT = Path(__file__).parent.parent
 NEW_MIG = ROOT / "data/migrations/discord_void_notice_2026_10_09.sql"
@@ -114,15 +117,15 @@ def _view_select() -> str:
 def test_a_voided_lock_drops_from_the_view_and_the_python_join():
     """The notice is the publish state. A posted VOID with no notice stays."""
     db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE push_sent (lock_key TEXT, kind TEXT)")
+    db.execute("CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)")
     db.executemany(
-        "INSERT INTO push_sent VALUES (?, ?)",
+        "INSERT INTO push_sent VALUES (?, ?, ?)",
         [
-            ("stay", "discord_signal"),
-            ("drop", "discord_signal"),
-            ("drop", "discord_void"),
-            ("phone", "new_bet"),
-            ("live-stay", "discord_live"),
+            ("stay", "discord_signal", "2026-09-01T00:00:00-04:00"),
+            ("drop", "discord_signal", "2026-09-01T00:00:00-04:00"),
+            ("drop", "discord_void", "2026-10-09T00:00:00-04:00"),
+            ("phone", "new_bet", "2026-09-01T00:00:00-04:00"),
+            ("live-stay", "discord_live", "2026-09-01T00:00:00-04:00"),
         ],
     )
     select = _view_select()
@@ -136,7 +139,9 @@ def test_a_voided_lock_drops_from_the_view_and_the_python_join():
         "player_key TEXT, prop_market TEXT, pick_side TEXT, is_live INT)")
     db.execute(
         "INSERT INTO p VALUES ('G', 'm', NULL, NULL, NULL, 'under', 0)")
-    db.execute("INSERT INTO push_sent VALUES ('G:m', 'discord_signal')")
+    db.execute(
+        "INSERT INTO push_sent VALUES ('G:m', 'discord_signal', "
+        "'2026-09-01T00:00:00-04:00')")
     assert db.execute(f"SELECT {posted_sql('p')} FROM p").fetchone()[0] == 1
     assert db.execute(
         f"SELECT {discord_published_exists_sql(repr('G:m'))}"
@@ -144,13 +149,81 @@ def test_a_voided_lock_drops_from_the_view_and_the_python_join():
     # The boolean is unchanged: published still means visible. The join is
     # what stops returning the lock once the notice exists.
     assert discord_led_visible("VOID", True) is True
-    db.execute("INSERT INTO push_sent VALUES ('G:m', 'discord_void')")
+    db.execute(
+        "INSERT INTO push_sent VALUES ('G:m', 'discord_void', "
+        "'2026-10-09T00:00:00-04:00')")
     assert db.execute(f"SELECT {posted_sql('p')} FROM p").fetchone()[0] == 0
     assert db.execute(
         f"SELECT {discord_published_exists_sql(repr('G:m'))}"
     ).fetchone()[0] == 0
     assert void_notice_exclusion_sql("s") in posted_sql("p")
     assert void_notice_exclusion_sql("s") in discord_published_exists_sql("k")
+
+
+def test_a_noticed_void_releases_the_lock_and_a_later_pick_reholds_it():
+    """The pre-game key has no side. A notice releases it for a new pick
+    on the same game:model. No notice, the signal still blocks."""
+    db = sqlite3.connect(":memory:")
+    db.execute(
+        "CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT, "
+        "message_id TEXT, UNIQUE (lock_key, kind))")
+    held = channel_lock_held_sql("'G:m'", "discord_signal")
+    other = channel_lock_held_sql("'H:m'", "discord_signal")
+    db.execute(
+        "INSERT INTO push_sent VALUES ('G:m', 'discord_signal', "
+        "'2026-09-27T06:23:00-04:00', '111')")
+    db.execute(
+        "INSERT INTO push_sent VALUES ('H:m', 'discord_signal', "
+        "'2026-10-01T00:00:00-04:00', '222')")
+    assert db.execute(f"SELECT {held}").fetchone()[0] == 1
+    assert db.execute(f"SELECT {other}").fetchone()[0] == 1
+
+    db.execute(
+        "INSERT INTO push_sent VALUES ('G:m', 'discord_void', "
+        "'2026-10-09T12:00:00-04:00', 'notice')")
+    assert db.execute(f"SELECT {held}").fetchone()[0] == 0
+    assert db.execute(f"SELECT {other}").fetchone()[0] == 1
+
+    sql = SIGNAL_LEDGER_SQL.replace("%s", "?")
+    db.execute(sql, ("G:m", "discord_signal", "2026-10-12T18:00:00-04:00", "333"))
+    row = db.execute(
+        "SELECT sent_at, message_id FROM push_sent "
+        "WHERE lock_key = 'G:m' AND kind = 'discord_signal'"
+    ).fetchone()
+    assert row == ("2026-10-12T18:00:00-04:00", "333")
+    assert db.execute(f"SELECT {held}").fetchone()[0] == 1
+    assert db.execute(
+        "SELECT 1 FROM push_sent WHERE lock_key = 'G:m' AND kind = 'discord_void'"
+    ).fetchone() is not None
+    # A second write with no release left must not replace the message.
+    db.execute(sql, ("H:m", "discord_signal", "2026-10-12T18:00:00-04:00", "999"))
+    kept = db.execute(
+        "SELECT message_id FROM push_sent "
+        "WHERE lock_key = 'H:m' AND kind = 'discord_signal'"
+    ).fetchone()[0]
+    assert kept == "222"
+    src = inspect.getsource(dn._new_signals)
+    assert "channel_lock_held_sql" in src
+
+
+def test_a_known_channel_is_a_jump_link_and_an_unknown_one_is_omitted():
+    guild, channel, mid = "111", "222", "1553713576831885365"
+    url = dn._discord_jump_line(mid, guild, channel)
+    assert url == f"https://discord.com/channels/{guild}/{channel}/{mid}"
+    assert dn._discord_jump_line(mid, "", channel) is None
+    assert dn._discord_jump_line(mid, guild, "") is None
+    assert dn._known_channel_ids("NCAAF") == ("", "")
+    pick = {
+        "label": "Georgia vs Auburn Under 54.5",
+        "sport": "NCAAF", "home": "Georgia", "away": "Auburn",
+        "dk_odds": -105, "best_odds": -105, "best_book": "draftkings",
+        "game_date": "2026-10-17", "posted_at": "2026-09-27T06:23:03-04:00",
+        "message_id": mid,
+    }
+    plain = dn._void_field(pick, WEBHOOK)
+    assert "discord.com" not in plain["value"]
+    assert mid not in plain["value"]
+    assert "api/webhooks" not in plain["value"]
 
 
 def test_the_notice_quotes_the_label_and_does_not_carry_the_webhook(monkeypatch):
@@ -179,11 +252,13 @@ def test_the_notice_quotes_the_label_and_does_not_carry_the_webhook(monkeypatch)
     assert "-105 @ DraftKings" in field["value"]
     assert "game 2026-10-17" in field["value"]
     assert dn._posted_et("2026-09-27T06:23:03-04:00") in field["value"]
-    assert "original post 1553713576831885365" in field["value"]
+    assert "original post" not in field["value"]
+    assert "1553713576831885365" not in field["value"]
+    assert "discord.com/channels" not in field["value"]
     blob = json.dumps(out)
     assert "super-secret-token" not in blob
     assert "api/webhooks" not in blob
-    assert seen == [(WEBHOOK, "1553713576831885365")]
+    assert seen == []
     assert dn._void_title("MLB") == f"{dn._SPORT_EMOJI['MLB']} MLB \u00b7 Voided picks"
 
 
@@ -354,6 +429,12 @@ def test_the_worker_job_is_registered_and_defaults_to_dry_run(monkeypatch):
         q._validate_publish_discord_void({"pick_ids": [1], "dry_run": "false"})
     with pytest.raises(ValueError):
         q._validate_publish_discord_void({"pick_ids": []})
+    with pytest.raises(ValueError):
+        q._validate_publish_discord_void({"pick_ids": [2.7]})
+    with pytest.raises(ValueError):
+        q._validate_publish_discord_void({"pick_ids": ["8"]})
+    with pytest.raises(ValueError):
+        q._validate_publish_discord_void({"pick_ids": [True]})
 
     calls = []
 

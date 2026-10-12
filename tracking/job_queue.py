@@ -837,15 +837,16 @@ def _validate_publish_discord_void(args: dict) -> dict:
         ids: list[int] = []
         seen: set[int] = set()
         for p in raw:
-            if isinstance(p, bool):
+            # bool is an int. A float or a numeric string must not be
+            # truncated or coerced: int(2.7) is 2 and int("8") is 8.
+            if isinstance(p, bool) or not isinstance(p, int):
                 raise ValueError("pick_ids must be integers")
-            i = int(p)
-            if i <= 0:
-                raise ValueError(f"pick id {i} is not a pick")
-            if i not in seen:
-                seen.add(i)
-                ids.append(i)
-    except (TypeError, ValueError) as exc:
+            if p <= 0:
+                raise ValueError(f"pick id {p} is not a pick")
+            if p not in seen:
+                seen.add(p)
+                ids.append(p)
+    except ValueError as exc:
         if str(exc).startswith("pick id") or str(exc).startswith("pick_ids"):
             raise
         raise ValueError("pick_ids must be integers") from exc
