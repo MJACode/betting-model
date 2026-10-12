@@ -27,7 +27,7 @@ import {
 import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
-import { pnlTone, roundedAt } from '@/lib/tone';
+import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
@@ -248,7 +248,7 @@ export function PickCard({
     matchup,
     gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
     pick.pick_label,
-    paused ? 'Paused model, not a bet' : pick.signal_type,
+    paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
     // The reason in words (lib/heroPriceText.ts): "looks off" for an
     // implausible edge or a moved price; for an old price, which book has not
     // updated it and since when.

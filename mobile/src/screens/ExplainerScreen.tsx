@@ -90,7 +90,7 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="BET / AVOID / NONE">
+        <Section heading="BET / AVOID / NEUTRAL">
           <Bullet>
             <Strong>BET</Strong> — model probability AND edge both clear that
             model's threshold. Unit stake attached. These are the picks worth
@@ -101,7 +101,7 @@ export function ExplainerScreen() {
             -3%). Informational; do NOT bet the other side blindly.
           </Bullet>
           <Bullet>
-            <Strong>NONE</Strong> — edge is in the dead zone (between -3% and
+            <Strong>NEUTRAL</Strong> — edge is in the dead zone (between -3% and
             +3%). Model and DK essentially agree; no advantage either way.
           </Bullet>
           <P>

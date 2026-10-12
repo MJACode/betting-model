@@ -54,6 +54,7 @@ import { FilterSection, FilterSheet } from './FilterSheet';
 import { GameFilterSection } from './GameFilterSection';
 import { gameFilterSummary, type SelectableGame } from '@/lib/gameFilter';
 import { dateFilterSummary, datesAreNarrowed, type DateOption } from '@/lib/dateFilter';
+import { signalDisplayName } from '@/lib/tone';
 import type { SignalType } from '@/types';
 
 // Re-exported so the screens keep one import site for the whole filter surface.
@@ -363,18 +364,18 @@ export function PickFilters({
         {showSignals ? (
           <FilterSection
             title="Signal"
-            subtitle="BET, AVOID or no-signal picks."
+            subtitle="BET, AVOID or NEUTRAL picks."
             summary={
               state.signals.size === ALL_SIGNALS.length
                 ? 'All'
-                : ALL_SIGNALS.filter((s) => state.signals.has(s)).join(', ') || 'None'
+                : ALL_SIGNALS.filter((s) => state.signals.has(s)).map(signalDisplayName).join(', ') || 'None'
             }
           >
             <View style={styles.chipWrap}>
               {ALL_SIGNALS.map((s) => (
                 <FilterChip
                   key={s}
-                  label={s}
+                  label={signalDisplayName(s)}
                   active={state.signals.has(s)}
                   onPress={() => toggleSignal(s)}
                 />
@@ -470,7 +471,7 @@ function buildPills(
   if (state.signals.size < ALL_SIGNALS.length) {
     out.push({
       key: 'signals',
-      label: Array.from(state.signals).join(', ') || 'No signals',
+      label: Array.from(state.signals).map(signalDisplayName).join(', ') || 'No signals',
       onRemove: () => patch((d) => (d.signals = new Set(ALL_SIGNALS))),
     });
   }
