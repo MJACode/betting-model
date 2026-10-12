@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, the three standing health alarms investigated (UFC placeholder rows and one wrong winner; a paused WNBA model; two newly promoted FBS schools); the line poller has deleted player-prop no-bet rows since 08-30, so the prop evaluation window is not clean after that date; fixes in #922, #923, #927, #928 |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, dead-zone picks read NEUTRAL instead of NONE (Matt), one `signalDisplayName` for the badge, filters and VoiceOver; withdrawn picks show WITHDRAWN; the explainer no longer gives a ±3% cut; the sportsbook button on non-BET cards waits on Matt |
 | 2026-10-11 | [2026-10](./2026-10.md) | 2026-10-11, the NFL edge search (mike: "why did we retire live nfl betting ... find a profitable nfl model"): 14 ideas tested at zero credits, each verified twice; only the in-play rushing-attempt under survives (960 bets +11.79%, in-sample, no 2026 quotes stored); `nfl_prop_market` has bet nothing since 09-19 (0.20 EV floor + a borrowed calibration offset), floor grid in `docs/nfl_edge_search.md` §5 |
 | 2026-10-11 | [2026-10](./2026-10.md) | 2026-10-11, "nfl_live_worker has gone silent" was a false alarm: off on purpose since 10-04, it alarmed from the check-in row its last run left; switched-off watched jobs are now marked disabled at startup |
