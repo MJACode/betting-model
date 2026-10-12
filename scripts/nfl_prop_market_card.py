@@ -180,6 +180,11 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     quotes = load_nfl_prop_quotes(
         conn, open_games, list(mk.SHARP_MARKETS),
         books=tuple(mk.SHARP_BOOKS) + tuple(SOFT_BOOKS), **kw)
+    # A prop the book has pulled is not a price anyone can take. The loader
+    # keeps each book's latest row however old (docs/nfl_edge_search.md §5:
+    # 6 of 39 settled 2026 BETs locked on one), so drop rows the book's own
+    # latest fetch of that game and market no longer carried.
+    quotes, pulled = mk.drop_pulled_quotes(quotes)
     # Exchange reference. None means "fetch now" on a LIVE run; a replay must
     # not mix today's Kalshi board with a past soft book (fail closed -> {}).
     # Explicit {} / a passed dict skips the network (tests, offline).
@@ -201,6 +206,7 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     injuries = mk.load_nfl_injury_index(conn, as_of)
     bets, veto_diag = mk.apply_injury_veto(bets, quotes, injuries)
     diag.update(veto_diag)
+    diag["pulled_dropped"] = pulled
     diag["games"] = len(open_games)
     diag["started_skipped"] = len(live)
     diag["too_early"] = len(too_early)
@@ -233,6 +239,9 @@ def render(bets, diag, games, names=None) -> str:
     if diag.get("injury_veto"):
         lines.append(f"({diag['injury_veto']} bet(s) vetoed — player Out/Doubtful "
                      f"before the quote)")
+    if diag.get("pulled_dropped"):
+        lines.append(f"({diag['pulled_dropped']} quote(s) dropped — the book no "
+                     f"longer quoting that player or market)")
     if not bets:
         lines.append(f"\nNo qualifying edges. {diag.get('reason', '')}".rstrip())
         return "\n".join(lines)

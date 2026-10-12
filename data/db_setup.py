@@ -742,6 +742,7 @@ CREATE TABLE IF NOT EXISTS nfl_odds_history (
     price_home    REAL,                -- home / over
     price_away    REAL,                -- away / under
     lead_hours    REAL,                -- hours to kickoff at this snapshot
+    source        TEXT,                -- purchase marker (historical_h2| / historical_inplay|)
     PRIMARY KEY (snapshot_at, game_id, bookmaker, market)
 );
 CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_game   ON nfl_odds_history(game_id, market);

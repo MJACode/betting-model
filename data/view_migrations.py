@@ -267,6 +267,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # patch reads the LIVE view text, so it runs after every owner above.
     "record_counts_each_event_once_2026_10_09.sql",
     "record_views_count_each_event_once_2026_10_09.sql",
+    # 2026-10-12 (mike: buy the NFL in-game history): a source column on
+    # nfl_odds_history and a ledger of paid calls, so the purchase resumes.
+    "add_nfl_odds_history_source_and_pulls_2026_10_12.sql",
+    # 2026-10-12 (mike: "5) yes"): the free data the NFL edge search fetched,
+    # one gzipped row per file (scripts/nfl_research_backup.py).
+    "add_nfl_research_data_backup_2026_10_12.sql",
 ]
 
 

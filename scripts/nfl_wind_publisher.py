@@ -53,7 +53,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -417,6 +419,10 @@ def snapshot_row_params(r: dict) -> dict | None:
         return None
 
 
+BOARD_CHUNK = 5000            # rows per batch; each batch commits and moves the marker
+BOARD_FLUSH_BUDGET_S = 120    # no new batch starts after this; the poll runs every 10 min
+
+
 def publish_board(run_date: str | None = None) -> int:
     """
     Flush the tick's full board CSV into `nfl_odds_history`.
@@ -432,6 +438,20 @@ def publish_board(run_date: str | None = None) -> int:
 
     Idempotent: ON CONFLICT DO NOTHING on (snapshot_at, game_id, bookmaker,
     market). Never raises — an archive write must not sink a bet card.
+
+    INCREMENTAL AND BATCHED (2026-10-11). Since the opener went to a one-minute
+    poll (2026-09-22) it appends the whole board here every minute, ~560 rows a
+    minute on an NFL Sunday. This flush re-read the WHOLE day on every wind
+    tick, with two round trips per row inside one transaction, so each run took
+    longer than the last: 18, 27, 48, 71, 105, 151 and 232 minutes on
+    2026-10-11. The fast NFL poll allows one run at a time, so the run that
+    started at 12:20Z held it for ~5.7 hours and the wind model re-checked that
+    Sunday's games twice before kickoff. Now the marker beside the CSV holds how
+    many rows are already in, each matchup is looked up once, rows go in
+    batches that each commit and advance the marker, and no new batch starts
+    after BOARD_FLUSH_BUDGET_S, so the rest waits for the next tick instead of
+    holding the poll. A lost marker (redeploy) costs one re-flush, which the
+    ON CONFLICT makes harmless.
     """
     if run_date is None:
         run_date = datetime.now(timezone.utc).date().isoformat()
@@ -439,27 +459,68 @@ def publish_board(run_date: str | None = None) -> int:
     if not path.exists():
         return 0
     try:
-        rows = read_card(path)
-        if not rows:
+        marker = path.with_suffix(".flushed")
+        try:
+            done = int(marker.read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            done = 0
+        # The opener may be appending while this reads. Fix the end FIRST -- the
+        # last newline in the file as it stands now -- and read only up to it,
+        # so a half-written row waits for the next tick instead of going in
+        # past the marker, half-written for good.
+        with open(path, "rb") as fh:
+            data = fh.read()
+        data = data[:data.rfind(b"\n") + 1]
+        # Count past the rows already in rather than keeping the whole day
+        # (~800k rows by midnight on an NFL Sunday) as dicts.
+        total, pending = 0, []
+        for total, r in enumerate(
+                csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")), 1):
+            if total > done:
+                pending.append(r)
+        if done > total:                  # a rewritten file: start over
+            done = 0
+            pending = list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
+        if not pending:
             return 0
+
+        def matchup(r):
+            return ((r.get("home") or "").strip(), (r.get("away") or "").strip())
+
         from data.db import get_connection
         conn = get_connection()
-        written = 0
+        written, started = 0, time.monotonic()
         try:
-            for r in rows:
-                away, home = (r.get("away") or "").strip(), (r.get("home") or "").strip()
-                if not away or not home:
-                    continue
-                # Match the nflverse id the rest of the NFL tables use.
-                g = conn.execute("""
-                    SELECT game_id, season, week FROM games
-                    WHERE sport = 'NFL' AND home_team = %s AND away_team = %s
-                      AND commence_time IS NOT NULL
-                    ORDER BY commence_time DESC LIMIT 1
-                """, (home, away)).fetchone()
-                if not g:
-                    continue          # game not published yet; nothing to hang it on
-                conn.execute("""
+            # Match the nflverse id the rest of the NFL tables use, once per
+            # matchup rather than once per quote.
+            games: dict = {}
+            for key in {matchup(r) for r in pending}:
+                if all(key):
+                    games[key] = conn.execute("""
+                        SELECT game_id, season, week FROM games
+                        WHERE sport = 'NFL' AND home_team = %s AND away_team = %s
+                          AND commence_time IS NOT NULL
+                        ORDER BY commence_time DESC LIMIT 1
+                    """, key).fetchone()
+            for start in range(0, len(pending), BOARD_CHUNK):
+                if start and time.monotonic() - started > BOARD_FLUSH_BUDGET_S:
+                    break                 # the rest goes next tick, from the marker
+                chunk = pending[start:start + BOARD_CHUNK]
+                params = []
+                for r in chunk:
+                    g = games.get(matchup(r))
+                    if not g:
+                        continue          # game not published yet; nothing to hang it on
+                    params.append({
+                        "snapshot_at": r.get("snapshot_at"), "game_id": g[0],
+                        "season": g[1], "week": g[2],
+                        "commence_time": r.get("commence_time") or None,
+                        "bookmaker": r.get("bookmaker"), "market": r.get("market"),
+                        "point": _num(r.get("point")),
+                        "price_home": _num(r.get("price_home")),
+                        "price_away": _num(r.get("price_away")),
+                    })
+                conn.executemany("""
                     INSERT INTO nfl_odds_history
                         (snapshot_at, game_id, season, week, commence_time,
                          bookmaker, market, point, price_home, price_away)
@@ -467,20 +528,19 @@ def publish_board(run_date: str | None = None) -> int:
                             %(commence_time)s, %(bookmaker)s, %(market)s,
                             %(point)s, %(price_home)s, %(price_away)s)
                     ON CONFLICT (snapshot_at, game_id, bookmaker, market) DO NOTHING
-                """, {
-                    "snapshot_at": r.get("snapshot_at"), "game_id": g[0],
-                    "season": g[1], "week": g[2],
-                    "commence_time": r.get("commence_time") or None,
-                    "bookmaker": r.get("bookmaker"), "market": r.get("market"),
-                    "point": _num(r.get("point")),
-                    "price_home": _num(r.get("price_home")),
-                    "price_away": _num(r.get("price_away")),
-                })
-                written += 1
-            conn.commit()
+                """, params)
+                conn.commit()
+                written += len(params)
+                done += len(chunk)
+                try:
+                    marker.write_text(str(done), encoding="utf-8")
+                except OSError as exc:
+                    print(f"WARNING: could not write {marker}: {exc}", file=sys.stderr)
         finally:
             conn.close()
-        print(f"NFL board archive {run_date}: {written} quote(s) into nfl_odds_history")
+        left = total - done
+        print(f"NFL board archive {run_date}: {written} quote(s) into nfl_odds_history"
+              + (f", {left} row(s) left for the next tick" if left else ""))
         return written
     except Exception as exc:                                   # noqa: BLE001
         print(f"WARNING: board archive failed: {exc}", file=sys.stderr)
