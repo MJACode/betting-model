@@ -295,6 +295,15 @@ class TestRegistryHealthCheck:
         hdb.commit()
         assert _registry_check(hdb)["status"] == "OK"
 
+    def test_an_fcs_school_without_a_rating_is_not_reported(self, hdb):
+        """126 FCS schools carry snapshots with no SP+ — that is what FCS
+        looks like, and reporting it would make the check useless."""
+        _team(hdb, "Colgate", "Patriot", "fcs")
+        _team(hdb, "Air Force", "Mountain West", "fbs")
+        _rating(hdb, "Air Force", -3.2)
+        hdb.commit()
+        assert _registry_check(hdb)["status"] == "OK"
+
 
 def test_the_promoted_list_names_the_2026_schools():
     """The real list. Both moved up to FBS for 2026 (CFBD lists them as FBS,
@@ -412,15 +421,6 @@ def test_the_scorer_reads_the_registry_once_per_pass_and_only_for_the_log():
 
     from features.ncaaf_feature_engine import _STAT_COLS
     assert "classification" not in _STAT_COLS
-
-    def test_an_fcs_school_without_a_rating_is_not_reported(self, hdb):
-        """126 FCS schools carry snapshots with no SP+ — that is what FCS
-        looks like, and reporting it would make the check useless."""
-        _team(hdb, "Colgate", "Patriot", "fcs")
-        _team(hdb, "Air Force", "Mountain West", "fbs")
-        _rating(hdb, "Air Force", -3.2)
-        hdb.commit()
-        assert _registry_check(hdb)["status"] == "OK"
 
 
 # ── the declared job that fixes the data ────────────────────────────────────
