@@ -1755,6 +1755,20 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_NCAAF_PROP_ODDS=0 — NCAAF player props NOT scheduled.")
 
+    # A watched job this service owns but did not register is switched off
+    # here on purpose (RUN_NFL_LIVE=0 and friends). Record that, or the row
+    # its last run left behind reads as silence forever: the NFL in-play
+    # worker, off since 2026-10-04, was still alarming on 10-11. Jobs another
+    # service owns are left alone -- that service speaks for them.
+    try:
+        from tracking.job_heartbeat import MAX_SILENCE, mark_disabled
+        for jid in sorted(MAX_SILENCE):
+            if owns(jid) and sched.get_job(jid) is None:
+                mark_disabled(jid)
+                log.info("watched job %s is not scheduled here — marked disabled", jid)
+    except Exception:                                         # noqa: BLE001
+        log.warning("could not mark switched-off watched jobs as disabled")
+
     return sched
 
 
