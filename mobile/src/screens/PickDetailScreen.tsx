@@ -314,12 +314,17 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             />
           </View>
           <View style={styles.metaRow}>
-            {preview || paused ? (
+            {/* A withdrawn pick takes the neutral pill, not a signal badge:
+                NEUTRAL would say the model and the book agree, right above a
+                banner saying the pick should not exist (UX review). */}
+            {preview || paused || voided ? (
               <View style={styles.previewBadge}>
-                <Text style={styles.previewBadgeText}>{preview ? 'PREVIEW' : 'PAUSED'}</Text>
+                <Text style={styles.previewBadgeText}>
+                  {preview ? 'PREVIEW' : paused ? 'PAUSED' : 'WITHDRAWN'}
+                </Text>
               </View>
             ) : (
-              <SignalBadge signal={voided ? 'NONE' : pick.signal_type} />
+              <SignalBadge signal={pick.signal_type} />
             )}
             <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
           </View>

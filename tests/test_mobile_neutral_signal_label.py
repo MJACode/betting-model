@@ -34,3 +34,26 @@ def test_explainer_names_neutral():
     explainer = _read("screens/ExplainerScreen.tsx")
     assert "<Strong>NEUTRAL</Strong>" in explainer
     assert "<Strong>NONE</Strong>" not in explainer
+
+
+def test_model_screens_speak_the_display_name():
+    md = _read("screens/ModelDetailScreen.tsx")
+    assert "signalDisplayName(ep.pick.signal_type)" in md
+    assert "signalDisplayName(item.signal_type)" in md
+    bim = _read("screens/BuiltInModelDetailScreen.tsx")
+    assert "signalDisplayName(pick.signal_type)" in bim
+
+
+def test_withdrawn_pick_is_not_badged_neutral():
+    detail = _read("screens/PickDetailScreen.tsx")
+    assert "voided ? 'NONE'" not in detail
+    assert "'WITHDRAWN'" in detail
+
+
+def test_no_member_label_prints_a_raw_signal_type():
+    """accessibilityLabel arrays must not carry a bare `.signal_type` item."""
+    import re
+    for path in ROOT.rglob("*.tsx"):
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"accessibilityLabel=\{\[(.*?)\]", src, re.S):
+            assert not re.search(r"(?<!\()\b[\w.]*signal_type\b(?!\))", m.group(1)), path

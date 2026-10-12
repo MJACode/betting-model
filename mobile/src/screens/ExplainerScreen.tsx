@@ -97,12 +97,12 @@ export function ExplainerScreen() {
             backing.
           </Bullet>
           <Bullet>
-            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge ≤
-            -3%). Informational; do NOT bet the other side blindly.
+            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge at or
+            below that model's AVOID cut). Informational; do NOT bet the other side blindly.
           </Bullet>
           <Bullet>
-            <Strong>NEUTRAL</Strong> — edge is in the dead zone (between -3% and
-            +3%). Model and DK essentially agree; no advantage either way.
+            <Strong>NEUTRAL</Strong> — edge sits between that model's AVOID and
+            BET cuts. Model and DK essentially agree; no advantage either way.
           </Bullet>
           <P>
             The Signals tab applies the per-model action filter (e.g. moneyline

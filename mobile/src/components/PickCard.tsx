@@ -320,9 +320,12 @@ export function PickCard({
             <Text
               style={styles.label}
               numberOfLines={1}
+              // A game pick that runs out of room clips its middle, never the
+              // line at the end — "-4.5" is the number the member came for
+              // (UX review: the NEUTRAL badge is ~17pt wider than NONE).
               {...(titleSecondary
                 ? { adjustsFontSizeToFit: true, minimumFontScale: 0.75 }
-                : {})}
+                : { ellipsizeMode: 'middle' as const })}
             >
               {titlePrimary}
             </Text>
