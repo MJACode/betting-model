@@ -177,6 +177,14 @@ def posted_sql(alias: str = "p") -> str:
     A discord_void notice drops the lock here, the same way
     v_discord_published drops it. The signal row is still in the ledger; the
     notice is what the publish state follows.
+
+    This exclusion also reaches the two other callers of posted_sql.
+    scripts/void_picks.py uses it as the posted-signal lock, and
+    tracking/record_duplicates.py uses it as the "which copy was posted"
+    flag. Harmless today: a notice is written only for a pick that is
+    already VOID (result NO_ACTION), void_picks treats that result as a
+    no-op before it looks at the posted flag, and record_duplicates only
+    pairs WIN/LOSS/PUSH copies, which the void path refuses to grade.
     """
     kinds = ", ".join(f"'{k}'" for k in DISCORD_KINDS)
     return ("EXISTS (SELECT 1 FROM push_sent s "

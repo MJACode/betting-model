@@ -337,6 +337,25 @@ def _message_url(url: str, message_id: str) -> str:
     return f"{url.split('?', 1)[0].rstrip('/')}/messages/{message_id}"
 
 
+# urllib3 puts the request URL in timeout and connection errors. A webhook
+# URL is the credential, so a delivery log must not keep it.
+_WEBHOOK_IN_TEXT = re.compile(
+    r"(?:https?://[^\s'\"<>]+)?/api/webhooks/\d+/[A-Za-z0-9._=\-]+",
+    re.IGNORECASE,
+)
+
+
+def _redact_delivery_error(exc: BaseException, url: str) -> str:
+    """Exception type plus message, with every webhook URL removed."""
+    text = str(exc)
+    bare = url.split("?", 1)[0]
+    for secret in (url, bare):
+        if secret:
+            text = text.replace(secret, "[webhook]")
+    text = _WEBHOOK_IN_TEXT.sub("[webhook]", text)
+    return f"{type(exc).__name__}: {text}"
+
+
 def _post(url: str, payload: dict) -> str | None:
     """POST one webhook message. Returns the MESSAGE ID on a confirmed success
     and None on failure, so the caller knows both whether it is safe to ledger
@@ -385,10 +404,15 @@ def _post(url: str, payload: dict) -> str | None:
             logger.error(f"Discord webhook rejected ({resp.status_code}): {resp.text[:200]}")
             return None
         except Exception as exc:  # noqa: BLE001 — delivery must never break a run
+            # A timeout (or a dropped connection) can mean Discord already
+            # accepted this POST and the response never arrived. Retrying
+            # then posts a second copy of the same message. Left as it is:
+            # this retry predates the void notice, and changing it would
+            # change every producer that calls _post.
             if attempt < _MAX_RETRIES:
                 time.sleep(1.0 * (attempt + 1))
                 continue
-            logger.error(f"Discord webhook post failed: {exc}")
+            logger.error(f"Discord webhook post failed: {_redact_delivery_error(exc, url)}")
             return False
     logger.error("Discord webhook still rate-limited after retries; will retry next pass")
     return None
