@@ -61,6 +61,22 @@ WHAT IT DELIBERATELY DOES NOT DO
   * It does not re-price a locked pick. It calls the ordinary scorer, so §1c
     holds exactly as it does on any other pass: a BET freezes its pair, and
     only pairs that never produced a bet are re-scored.
+  * It does not clear anything it does not re-write (2026-10-12). It re-runs
+    the GAME scorer only, so it asks that scorer to clear game-level rows
+    only (`game_models_only=True`). Until then each tick that moved a game
+    took every player-prop NONE and AVOID row on it, and the prop scorers --
+    which run on the refresh pass, not here -- never re-wrote the ones taken
+    after the last pass. On MLB_2026-10-11_LAD_MIL the 00:17:18Z tick took
+    103 of them 2m41s before first pitch. Those rows are the evaluation
+    universe (CLAUDE.md §7). The refresh pass's own clear still runs right
+    before every prop pass, so it, not this tick, is what frees a player
+    the prop lock holds. ONE NARROW EXCEPTION, not bet-neutral: when a
+    refresh pass reads a game as already started (so its clear skips it)
+    and the feed then pushes the start back before that pass's prop step,
+    a tick in between used to free the game's prop players for that step.
+    Now they stay held until the next refresh pass's clear (passes run 10
+    minutes apart in the evening, up to an hour apart in the day), or for
+    good if the game starts first. docs/signal_timing.md, trap 4.
 
 SAFETY
   * A daily credit cap (PREGAME_POLL_DAILY_CREDIT_CAP), mirroring the live
@@ -287,7 +303,8 @@ def poll_once(conn: DBConnection, sports: list | None = None,
     target_date = config.today_et()
     if score and moved:
         from models.scorer import run_scorer
-        result = run_scorer(target_date=target_date, only_games=moved)
+        result = run_scorer(target_date=target_date, only_games=moved,
+                            game_models_only=True)
         scored = result.get("total_picks", 0)
         bets = result.get("bets", 0)
 
