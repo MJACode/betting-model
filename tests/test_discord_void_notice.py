@@ -206,6 +206,262 @@ def test_a_noticed_void_releases_the_lock_and_a_later_pick_reholds_it():
     assert "channel_lock_held_sql" in src
 
 
+def test_release_is_strictly_newer_and_a_null_void_stamp_does_not_stick():
+    """Equal stamps hold. A null void sent_at does not release a stamped
+    signal, and it does not keep a later stamp unpublished."""
+    db = sqlite3.connect(":memory:")
+    db.execute(
+        "CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT, "
+        "message_id TEXT, UNIQUE (lock_key, kind))")
+    select = _view_select()
+    assert "v.sent_at > s.sent_at" in select
+    assert ">=" not in select
+    rows = [
+        ("newer", "discord_signal", "2026-09-01T00:00:00Z", "1"),
+        ("newer", "discord_void", "2026-10-09T00:00:00Z", "2"),
+        ("equal", "discord_signal", "2026-10-09T00:00:00Z", "3"),
+        ("equal", "discord_void", "2026-10-09T00:00:00Z", "4"),
+        ("older", "discord_signal", "2026-10-12T00:00:00Z", "5"),
+        ("older", "discord_void", "2026-10-09T00:00:00Z", "6"),
+        ("nullvoid", "discord_signal", "2026-09-01T00:00:00Z", "7"),
+        ("nullvoid", "discord_void", None, "8"),
+        ("bothnull", "discord_signal", None, "9"),
+        ("bothnull", "discord_void", None, "10"),
+        ("unstamped", "discord_signal", None, "11"),
+        ("unstamped", "discord_void", "2026-10-09T00:00:00Z", "12"),
+    ]
+    db.executemany("INSERT INTO push_sent VALUES (?, ?, ?, ?)", rows)
+    published = [r[0] for r in db.execute(select + " ORDER BY 1").fetchall()]
+    assert published == ["equal", "nullvoid", "older"]
+
+    sql = SIGNAL_LEDGER_SQL.replace("%s", "?")
+    # Equal: the post that shares the notice's instant is not replaced.
+    db.execute(sql, ("equal", "discord_signal", "2026-10-12T00:00:00Z", "99"))
+    assert db.execute(
+        "SELECT message_id FROM push_sent WHERE lock_key = 'equal' "
+        "AND kind = 'discord_signal'"
+    ).fetchone()[0] == "3"
+    # Null void stamp: the existing signal stays, and stays in the view.
+    db.execute(sql, ("nullvoid", "discord_signal", "2026-10-12T00:00:00Z", "99"))
+    assert db.execute(
+        "SELECT message_id FROM push_sent WHERE lock_key = 'nullvoid' "
+        "AND kind = 'discord_signal'"
+    ).fetchone()[0] == "7"
+    # Both stamps missing: the notice releases once. The rehold's stamp
+    # then holds, and a second write does not replace it.
+    db.execute(sql, ("bothnull", "discord_signal", "2026-10-12T18:00:00Z", "33"))
+    assert db.execute(
+        "SELECT sent_at, message_id FROM push_sent WHERE lock_key = 'bothnull' "
+        "AND kind = 'discord_signal'"
+    ).fetchone() == ("2026-10-12T18:00:00Z", "33")
+    db.execute(sql, ("bothnull", "discord_signal", "2026-10-13T00:00:00Z", "99"))
+    assert db.execute(
+        "SELECT message_id FROM push_sent WHERE lock_key = 'bothnull' "
+        "AND kind = 'discord_signal'"
+    ).fetchone()[0] == "33"
+    published = [r[0] for r in db.execute(select + " ORDER BY 1").fetchall()]
+    assert "bothnull" in published
+    assert "newer" not in published
+    assert db.execute(
+        f"SELECT {channel_lock_held_sql(repr('bothnull'), 'discord_signal')}"
+    ).fetchone()[0] == 1
+    assert db.execute(
+        f"SELECT {channel_lock_held_sql(repr('nullvoid'), 'discord_signal')}"
+    ).fetchone()[0] == 1
+    assert db.execute(
+        f"SELECT {channel_lock_held_sql(repr('newer'), 'discord_signal')}"
+    ).fetchone()[0] == 0
+
+
+def _pg_bin(name):
+    import shutil
+    found = shutil.which(name)
+    if found:
+        return found
+    path = Path(f"/usr/lib/postgresql/16/bin/{name}")
+    return str(path) if path.is_file() else None
+
+
+def _swap_dbname(dsn, name):
+    if "://" in dsn:
+        from urllib.parse import urlparse, urlunparse
+        parts = urlparse(dsn)
+        return urlunparse(parts._replace(path="/" + name))
+    out = []
+    seen = False
+    for tok in dsn.split():
+        if tok.startswith("dbname="):
+            out.append("dbname=" + name)
+            seen = True
+        else:
+            out.append(tok)
+    if not seen:
+        out.append("dbname=" + name)
+    return " ".join(out)
+
+
+def test_anon_reads_both_discord_views():
+    """security_invoker runs the view as anon. The published view reads
+    sent_at, so that column has to be granted or the board read fails.
+    Same shape as tests/test_latest_line_state.py: SET ROLE anon on a
+    scratch cluster. Skips when no Postgres binary and no
+    LATEST_LINE_TEST_DSN."""
+    import os
+    import shutil
+    import socket
+    import subprocess
+    import tempfile
+
+    psycopg2 = pytest.importorskip("psycopg2")
+    from psycopg2.errors import InsufficientPrivilege
+
+    dsn = os.environ.get("LATEST_LINE_TEST_DSN")
+    owned = None
+    if not dsn:
+        initdb = _pg_bin("initdb")
+        pg_ctl = _pg_bin("pg_ctl")
+        if not initdb or not pg_ctl:
+            pytest.skip(
+                "LATEST_LINE_TEST_DSN not set and initdb is missing -- "
+                "needs a scratch Postgres")
+        owned = tempfile.mkdtemp(prefix="discord-void-pg-")
+        subprocess.run(
+            [initdb, "-D", owned, "-A", "trust", "--username", "postgres"],
+            check=True, capture_output=True, text=True)
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        subprocess.run(
+            [pg_ctl, "-D", owned, "-o", f"-p {port} -k {owned}",
+             "-l", str(Path(owned) / "log"), "-w", "start"],
+            check=True, capture_output=True, text=True)
+        dsn = f"host={owned} port={port} dbname=postgres user=postgres"
+
+    conn = None
+    try:
+        if owned is None:
+            admin = psycopg2.connect(dsn)
+            admin.autocommit = True
+            acur = admin.cursor()
+            acur.execute(
+                "SELECT 1 FROM pg_database WHERE datname = 'discord_void_anon'")
+            if acur.fetchone() is None:
+                acur.execute("CREATE DATABASE discord_void_anon")
+            admin.close()
+            dsn = _swap_dbname(dsn, "discord_void_anon")
+        conn = psycopg2.connect(dsn)
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                CREATE ROLE anon NOLOGIN;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                CREATE ROLE authenticated NOLOGIN;
+              END IF;
+            END $$
+        """)
+        cur.execute("DROP SCHEMA IF EXISTS public CASCADE")
+        cur.execute("CREATE SCHEMA public")
+        cur.execute("GRANT USAGE ON SCHEMA public TO anon, authenticated")
+        cur.execute("""
+            CREATE TABLE public.push_sent (
+              lock_key text NOT NULL,
+              kind text NOT NULL,
+              sent_at timestamptz,
+              message_id text,
+              UNIQUE (lock_key, kind)
+            )
+        """)
+        cur.execute("ALTER TABLE public.push_sent ENABLE ROW LEVEL SECURITY")
+        cur.execute(NEW_MIG.read_text(encoding="utf-8"))
+        cur.execute(NEW_MIG.read_text(encoding="utf-8"))
+        cur.execute("""
+            INSERT INTO public.push_sent (lock_key, kind, sent_at, message_id) VALUES
+             ('stay', 'discord_signal', '2026-09-01T00:00:00Z', '111'),
+             ('drop', 'discord_signal', '2026-09-01T00:00:00Z', '222'),
+             ('drop', 'discord_void', '2026-10-09T00:00:00Z', '333'),
+             ('equal', 'discord_signal', '2026-10-09T00:00:00Z', '444'),
+             ('equal', 'discord_void', '2026-10-09T00:00:00Z', '555'),
+             ('nullvoid', 'discord_signal', '2026-09-01T00:00:00Z', '666'),
+             ('nullvoid', 'discord_void', NULL, '777'),
+             ('bothnull', 'discord_signal', NULL, '888'),
+             ('bothnull', 'discord_void', NULL, '999'),
+             ('phone', 'new_bet', '2026-09-01T00:00:00Z', '000')
+        """)
+
+        def as_anon(sql):
+            cur.execute("SET ROLE anon")
+            try:
+                cur.execute(sql)
+                return cur.fetchall()
+            finally:
+                cur.execute("RESET ROLE")
+
+        published = as_anon(
+            "SELECT lock_key, kind FROM public.v_discord_published ORDER BY 1")
+        assert published == [
+            ("equal", "discord_signal"),
+            ("nullvoid", "discord_signal"),
+            ("stay", "discord_signal"),
+        ]
+        noticed = as_anon(
+            "SELECT lock_key FROM public.v_discord_void_notice ORDER BY 1")
+        assert noticed == [("bothnull",), ("drop",), ("equal",), ("nullvoid",)]
+        visible = as_anon(
+            "SELECT lock_key FROM public.push_sent ORDER BY 1")
+        assert "phone" not in [r[0] for r in visible]
+        with pytest.raises(InsufficientPrivilege):
+            as_anon("SELECT message_id FROM public.push_sent")
+
+        cur.execute(
+            "REVOKE SELECT (sent_at) ON public.push_sent FROM anon, authenticated")
+        with pytest.raises(InsufficientPrivilege):
+            as_anon("SELECT lock_key FROM public.v_discord_published")
+        assert as_anon(
+            "SELECT lock_key FROM public.v_discord_void_notice ORDER BY 1"
+        ) == [("bothnull",), ("drop",), ("equal",), ("nullvoid",)]
+        cur.execute(
+            "GRANT SELECT (sent_at) ON public.push_sent TO anon, authenticated")
+        assert ("stay", "discord_signal") in as_anon(
+            "SELECT lock_key, kind FROM public.v_discord_published")
+
+        cur.execute(
+            "UPDATE public.push_sent SET sent_at = '2026-10-12T18:00:00Z' "
+            "WHERE lock_key = 'bothnull' AND kind = 'discord_signal'")
+        assert ("bothnull", "discord_signal") in as_anon(
+            "SELECT lock_key, kind FROM public.v_discord_published")
+    finally:
+        if conn is not None:
+            conn.close()
+        if owned is not None:
+            subprocess.run(
+                [_pg_bin("pg_ctl"), "-D", owned, "-w", "-m", "immediate", "stop"],
+                check=False, capture_output=True, text=True)
+            shutil.rmtree(owned, ignore_errors=True)
+
+
+def test_the_migration_grants_sent_at_and_not_message_id():
+    """The role read above skips with no Postgres. This pin is what CI runs."""
+    code = NEW_MIG.read_text(encoding="utf-8")
+    stmts = "\n".join(
+        ln for ln in code.splitlines() if not ln.lstrip().startswith("--"))
+    grant = stmts.split("GRANT SELECT (", 1)[1].split(")", 1)[0]
+    assert grant == "lock_key, kind, sent_at"
+    assert "message_id" not in grant
+    assert "has_column_privilege" in stmts
+    view = code.split("CREATE OR REPLACE VIEW", 1)[1].split("$v$", 1)[0]
+    assert "message_id" not in view
+    assert "v.sent_at > s.sent_at" in view
+    assert ">=" not in view
+    from tracking.publish_keys import void_notice_is_newer_sql
+    frag = " ".join(void_notice_is_newer_sql("s").split())
+    body = " ".join(view.replace("public.", "").split())
+    assert frag in body
+
+
 def test_a_known_channel_is_a_jump_link_and_an_unknown_one_is_omitted():
     guild, channel, mid = "111", "222", "1553713576831885365"
     url = dn._discord_jump_line(mid, guild, channel)

@@ -221,12 +221,18 @@ every VOID.
 posts one gray embed per sport for picks that are already VOID and already
 have a `discord_signal` (or `discord_live`) row, then writes `push_sent`
 kind `discord_void` only after Discord accepts it. `v_discord_published`
-drops that lock while the notice is newer than the channel row. The
-pre-game key is `game_id:model_id`, so a later pick on that game shares it:
-the notice releases the lock, and that pick's post stamps the signal after
-the notice and holds the lock again. `v_discord_void_notice` keeps the key
-so the app leaves the VOID pick unpublished. A lock with no notice is
-unchanged. The original message is not edited or deleted. A published
+drops that lock only while the notice is strictly newer
+(`void.sent_at > signal.sent_at`; the same instant does not release). A
+null void `sent_at` does not release a stamped signal and does not keep a
+later stamp out of the view; it releases only a signal that also has no
+`sent_at`, and the next post then holds. The pre-game key is
+`game_id:model_id`, so a later pick on that game shares it: the notice
+releases the lock, and that pick's post stamps the signal after the notice
+and holds the lock again. `v_discord_void_notice` keeps the key so the app
+leaves the VOID pick unpublished. A failed read of that view fails closed
+for a VOID pick. A lock with no notice is unchanged. The view is
+`security_invoker` and reads `sent_at`, so anon's column grant on
+`push_sent` is `lock_key, kind, sent_at`. `message_id` stays ungranted. The original message is not edited or deleted. A published
 VOID with no `discord_void` row stays on the board. The worker job is
 `publish_discord_void` (`dry_run` defaults to true). The migration is
 `discord_void_notice_2026_10_09.sql`; it is not applied from a dev session.

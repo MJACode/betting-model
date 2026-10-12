@@ -13,8 +13,9 @@
  * key is game + model, so a later bet on that game shares it. Once that bet
  * posts, the published view includes the key again. A VOID pick on a noticed
  * key stays unpublished. A pick that is not VOID is unaffected, and a lock
- * with no notice is unaffected. A failed read of the notice view does not
- * hide a published VOID: the published view is what the board follows.
+ * with no notice is unaffected. A failed read of the notice view fails
+ * closed for VOID: that pick is unpublished, so a VOID never shows as
+ * published when the notice list could not be read.
  *
  * The lock key is tracking/publish_keys.py. Null and empty identity parts
  * are omitted, matching COALESCE(':' || col, '').
@@ -121,8 +122,9 @@ export function discordPublishState(key: string, published: Set<string> | null):
 
 /**
  * Publish state for one pick. A void notice unpublishes that VOID pick only.
- * `noticed == null` means the notice view could not be read, so a published
- * VOID stays published.
+ * `noticed == null` means the notice view could not be read. A VOID then
+ * stays unpublished: a failed read must not show it as published. A pick
+ * that is not VOID still follows the published view.
  */
 export function discordPublishForPick(
   conditionStatus: string | null | undefined,
@@ -130,7 +132,7 @@ export function discordPublishForPick(
   published: Set<string> | null,
   noticed: Set<string> | null,
 ): DiscordPublish {
-  if (conditionStatus === 'VOID' && noticed != null && noticed.has(key)) {
+  if (conditionStatus === 'VOID' && (noticed == null || noticed.has(key))) {
     return 'unpublished';
   }
   return discordPublishState(key, published);

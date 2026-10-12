@@ -219,8 +219,10 @@ if (discordPublishForPick("VOID", "G:m", published, new Set()) !== "published")
   throw new Error("a void with no notice was hidden");
 if (discordPublishForPick("VOID", "H:m", published, noticed) !== "unpublished")
   throw new Error("an unposted key was published");
-if (discordPublishForPick("VOID", "G:m", published, null) !== "published")
-  throw new Error("a failed notice read hid a published void");
+if (discordPublishForPick("VOID", "G:m", published, null) !== "unpublished")
+  throw new Error("a failed notice read showed a void as published");
+if (discordPublishForPick(null, "G:m", published, null) !== "published")
+  throw new Error("a failed notice read hid a pick that is not void");
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
@@ -302,14 +304,16 @@ def test_the_settled_record_still_excludes_every_void():
 
 
 def test_the_discord_pins_are_on_the_pr_ci_subset():
-    """A local-only green is how the NHL pin stayed red. These three files
-    are the Discord display, the publish key, and the void contract."""
+    """A local-only green is how the NHL pin stayed red. These files are the
+    Discord display, the publish key, the void contract, and the anon
+    read-surface tripwire that names v_discord_void_notice."""
     yml = (ROOT / ".github/workflows/pr-ci.yml").read_text(encoding="utf-8")
     for name in (
         "tests/test_discord_publish_sync.py",
         "tests/test_publish_key_identity.py",
         "tests/test_void_picks.py",
         "tests/test_discord_void_notice.py",
+        "tests/test_anon_readable.py",
     ):
         assert name in yml
     assert 'node-version: "22"' in yml

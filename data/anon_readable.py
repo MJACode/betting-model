@@ -73,11 +73,16 @@ ANON_READABLE: tuple[str, ...] = (
     # ── views ───────────────────────────────────────────────────────────────
     "v_fighter_season_totals_ufc",
     # Which locks Discord still has (discord_signal / discord_live), minus
-    # a lock with a discord_void notice. The app joins it so a VOID-after-post
-    # stays on the board until that notice, and a pick the channel never got
-    # is not an active Discord bet. push_sent itself stays closed; the view
-    # is lock_key + kind only.
+    # a lock whose discord_void notice is strictly newer than the channel
+    # row. The app joins it so a VOID-after-post stays on the board until
+    # that notice, and a pick the channel never got is not an active Discord
+    # bet. The view returns lock_key + kind. Its security_invoker WHERE reads
+    # sent_at, so that column is granted on push_sent; message_id is not.
+    # The app does not read push_sent itself.
     "v_discord_published",
+    # Locks that have a void notice. A VOID pick on one stays unpublished
+    # after a later pick reholds the shared game:model key.
+    "v_discord_void_notice",
     "v_latest_dk_odds",
     "v_latest_inplay_odds_all_books",
     "v_latest_odds_all_books",
@@ -239,6 +244,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().
     "model_auto_pauses",
+    # NHL derivative-totals pull ledger. Created on demand by
+    # data/ingestors/nhl_derivative_odds_history.py, same shape as
+    # odds_history_pulls: a fixed name, never read by the app.
+    "nhl_derivative_odds_pulls",
     "odds_history_pulls",
     "threshold_reviews",
     "worker_jobs",

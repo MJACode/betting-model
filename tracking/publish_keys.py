@@ -151,23 +151,37 @@ DISCORD_KINDS = ("discord_signal", "discord_live")
 VOID_NOTICE_KIND = "discord_void"
 
 
+def void_notice_is_newer_sql(signal_alias: str = "s") -> str:
+    """The stamp rule inside `void_notice_releases_sql`.
+
+    Strictly newer (`v.sent_at > signal.sent_at`). Equal stamps do not
+    release. A null void `sent_at` releases only a signal that also has no
+    `sent_at`; it does not release a stamped signal, and once a rehold
+    stamps that signal the notice stops matching so the new post holds.
+    A stamped notice releases a signal with no `sent_at`.
+    """
+    return (
+        f"((v.sent_at IS NOT NULL AND ({signal_alias}.sent_at IS NULL "
+        f"OR v.sent_at > {signal_alias}.sent_at)) "
+        f"OR (v.sent_at IS NULL AND {signal_alias}.sent_at IS NULL))"
+    )
+
+
 def void_notice_releases_sql(signal_alias: str = "s") -> str:
-    """True when a discord_void notice is the newest word on this lock.
+    """True when a discord_void notice is strictly newer than this signal.
 
     The pre-game key is game_id:model_id, with no side and no pick id, so
     the voided pick and a later bet on that game share one lock. The notice
-    releases it. A signal stamped after the notice is a later pick taking
-    the lock back; that signal is not released.
+    releases it only while `void_notice_is_newer_sql` is true. A signal
+    stamped after the notice is a later pick taking the lock back.
 
-    A missing stamp still releases. A clock we do not have must not keep a
-    withdrawn post holding the key. `signal_alias` is the channel-post row.
+    `signal_alias` is the channel-post row.
     """
     return (
         "EXISTS (SELECT 1 FROM push_sent v "
         f"WHERE v.lock_key = {signal_alias}.lock_key "
         f"AND v.kind = '{VOID_NOTICE_KIND}' "
-        f"AND ({signal_alias}.sent_at IS NULL OR v.sent_at IS NULL "
-        f"OR v.sent_at >= {signal_alias}.sent_at))"
+        f"AND {void_notice_is_newer_sql(signal_alias)})"
     )
 
 
@@ -209,8 +223,7 @@ SIGNAL_LEDGER_SQL = (
     "WHERE EXISTS (SELECT 1 FROM push_sent v "
     "WHERE v.lock_key = EXCLUDED.lock_key "
     f"AND v.kind = '{VOID_NOTICE_KIND}' "
-    "AND (push_sent.sent_at IS NULL OR v.sent_at IS NULL "
-    "OR v.sent_at >= push_sent.sent_at))"
+    f"AND {void_notice_is_newer_sql('push_sent')})"
 )
 
 
@@ -223,8 +236,9 @@ def posted_sql(alias: str = "p") -> str:
     a price nobody could bet; a graded pick stays refused). Built from the two
     key expressions above so there is one definition of the key, not two.
 
-    A discord_void notice releases the lock here while it is newer than the
-    channel row, the same way v_discord_published does. A signal stamped
+    A discord_void notice releases the lock here only while it is strictly
+    newer than the channel row, the same way v_discord_published does. A
+    null void sent_at does not release a stamped signal. A signal stamped
     after the notice holds the lock again. The signal row is not deleted.
 
     This exclusion also reaches the two other callers of posted_sql.

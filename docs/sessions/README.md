@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, anon can read `v_discord_published` after the void-notice view: the grant is `(lock_key, kind, sent_at)`; release is strict `>`; a null void stamp does not hold the lock open; a failed notice read leaves a VOID unpublished; `v_discord_void_notice` is on the anon manifest and the PR CI tripwire |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, a void notice releases the shared game:model lock for a later pick; the later post re-holds it; the app keeps the VOID pick unpublished via `v_discord_void_notice`; no jump link because guild and channel ids are not stored; the void job rejects non-integers |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, origin/master merged into the stats-review branch; session-log hunks kept both sides |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, the NFL edge search decisions carried out: nfl_prop_market back on (EV floor 0.07, own probability, pulled props dropped); Palmer re-graded; 2023-25 halftime and 2025 in-game lines bought (223,829 credits) and graded, both null; the fetched free data backed up to Supabase |
