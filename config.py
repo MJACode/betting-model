@@ -4081,6 +4081,35 @@ NCAAF_MIN_GAMES: int = int(os.environ.get("NCAAF_MIN_GAMES", "4"))
 # carry soft numbers and low limits — thresholds are expected to differ by tier.
 NCAAF_POWER_CONFERENCES: set = {"SEC", "Big Ten", "ACC", "Big 12"}
 
+# Schools that moved up to FBS, keyed to their FIRST season as an FBS program.
+#
+# MONITORING ONLY. Nothing that scores, trains, backtests or publishes reads
+# this: the FBS gate (features.ncaaf_feature_engine._is_fbs) still refuses
+# every game these schools play while they have no SP+ rating, and nothing here
+# boards them with a substitute rating — that would be a model update. It is
+# read by the `ncaaf_fbs_registry` health check and by the pre-game refusal log.
+#
+# WHY A PROMOTED SCHOOL IS UNRATED FOR ITS WHOLE FIRST SEASON, BY DESIGN. A
+# season's `sp_overall` is CFBD's PRIOR season's final SP+, held constant all
+# year (cfbd_ingestor._prior_season_context — current-season SP+ is computed
+# from the games being predicted, so it is never used). A school that was FCS
+# last season has no SP+ from last season, so it has none this season, and no
+# re-pull changes that. Its rating can first appear when the season label
+# rolls over (cfbd_ingestor.ncaaf_season_for_date: March 1) and the next
+# season's preseason rows are built from this season's final SP+ — and only if
+# CFBD rates it. Precedent, measured 2026-10-12 in ncaaf_team_stats: Delaware
+# and Missouri State (FBS from 2025) are unrated in 2025 and rated in 2026;
+# Kennesaw State (FBS from 2024) unrated in 2024, rated in 2025.
+#
+# The health check reports a listed school as OK only in its promotion season.
+# The exemption ends with that season by itself: a school still unrated in its
+# second FBS season is an alarm again, and so is any established school that
+# loses its rating. Add a school here when CFBD first lists it as FBS.
+NCAAF_PROMOTED_TO_FBS: dict = {
+    "North Dakota State": 2026,
+    "Sacramento State":   2026,
+}
+
 # The Odds API team name → CFBD canonical school name.
 #
 # LOAD-BEARING CONVENTION: the canonical NCAAF team identifier is the CFBD

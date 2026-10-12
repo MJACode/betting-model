@@ -139,17 +139,47 @@ its opening number, which is rarely true by kickoff.
   number.
   **The gate is still right, for a different reason:** a school SP+ has not
   rated cannot be MODELLED whatever division it plays in, because `sp_overall`
-  is itself a feature (`d_sp_overall`) and a missing feature is not 0.0. SP+
-  needs FBS history, so it lags a promotion by a season. The same shape recurs
-  every season on schools crossing between the divisions: 2025 Delaware, Idaho,
-  Missouri State; 2024 those three plus Kennesaw State.
-  A decline where the school is FBS but unrated logs at WARNING (an ordinary
-  FCS opponent stays at debug, or 33 of a 98-game Saturday would bury the two
-  that matter), and `system_health`'s **`ncaaf_fbs_registry`** check reports any
-  FBS school with no current-season rating. **A re-pull does not clear it** —
-  it clears when SP+ rates the school.
-  Tests: `tests/test_ncaaf_fbs_registry.py` (14; the two gate cases watched
-  failing, and the check's FBS-only bound watched failing under mutation).
+  is itself a feature (`d_sp_overall`) and a missing feature is not 0.0.
+- **WHY A NEWLY PROMOTED SCHOOL IS UNRATED ALL SEASON — by design, not a lag**
+  (corrected 2026-10-12; this said "SP+ needs FBS history, so it lags a
+  promotion" and "it clears when SP+ rates the school"). A season's
+  `sp_overall` is CFBD's **prior** season's final SP+, held constant all year
+  (`cfbd_ingestor._prior_season_context`; measured: one distinct value per
+  team-season). North Dakota State and Sacramento State were FCS in 2025,
+  which SP+ does not rate, so they have no rating for any of 2026 and **their
+  2026 games stay refused at the FBS gate**. A rating can first appear on the
+  first run on or after **2027-03-01**, when the season label rolls to 2027
+  and the 2027 preseason rows are built from the 2026 final SP+ — and only if
+  CFBD rates them. Precedent in `ncaaf_team_stats`: Delaware and Missouri State
+  (FBS from 2025) are unrated in 2025 and rated in 2026; Kennesaw State (FBS
+  from 2024) unrated in 2024, rated in 2025.
+  **`config.NCAAF_PROMOTED_TO_FBS`** lists each promoted school with its first
+  FBS season (NDSU 2026, Sacramento State 2026). It is monitoring only — the
+  gate never reads it and nothing boards these games with a stand-in rating
+  (that would be a model update). `system_health`'s **`ncaaf_fbs_registry`**
+  check reports a listed school as **OK in its promotion season**, with the
+  reason and the earliest date it can change; the exemption ends with that
+  season by itself, so a school still unrated in its second FBS season is
+  STALE again, and so is any established school that loses its rating. Before
+  this the check sat STALE for 30 straight days (2026-09-13 → 10-12), and the
+  failure alerter repeats a standing STALE warning to the ops channel every 12
+  hours — about something nobody could act on. **Add a school to the list the season CFBD
+  first calls it FBS.**
+  A decline where the registry calls the school FBS but it is unrated logs at
+  WARNING, naming the school (and, for a listed school, why); an ordinary FCS
+  opponent stays at debug, or 33 of a 98-game Saturday would bury the two that
+  matter. Until 2026-10-12 that WARNING never fired: the live snapshot read
+  carries no `classification`, so every refusal logged at debug. The scorer
+  now reads the `ncaaf_teams` classification once per pass and hands it to the
+  refusal log only — `classification` must NEVER be added to the feature
+  engine's `_STAT_COLS`, which would switch the gate's classification veto on
+  in training and backtests (a model update).
+  **A re-pull does not change any of this** (`ncaaf_teams_refresh`, tried
+  2026-09-13).
+  Tests: `tests/test_ncaaf_fbs_registry.py` (the two gate cases watched
+  failing, the check's FBS-only bound watched failing under mutation, and the
+  promoted-school exemption, its expiry and the refusal log each watched
+  failing on the code before 2026-10-12).
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
   ~52 DK-priced — so the board is tens of games, not hundreds.
 

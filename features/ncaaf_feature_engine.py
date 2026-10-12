@@ -132,11 +132,22 @@ def _is_fbs(stats: dict) -> bool:
     That leaves the gate correct for a different reason than first claimed: a
     school SP+ has not rated cannot be MODELLED, whatever division it plays in,
     because `sp_overall` is itself a feature (`d_sp_overall`) and a missing
-    feature is not 0.0. SP+ lags a promotion — it needs FBS history — so a
-    newly promoted program is unpriceable until it has one. The same shape
-    appears in every season the registry covers, always on a school moving
-    between the divisions: 2025 Delaware, Idaho, Missouri State; 2024 those
-    three plus Kennesaw State.
+    feature is not 0.0.
+
+    WHY A PROMOTED SCHOOL HAS NO RATING ALL SEASON (corrected 2026-10-12; this
+    said "SP+ lags a promotion — it needs FBS history", which names the wrong
+    cause). A season's `sp_overall` is CFBD's PRIOR season's final SP+, held
+    constant all year (cfbd_ingestor._prior_season_context — current-season
+    SP+ is built from the games being predicted, so it is never read). A school
+    that was FCS last season has no SP+ from last season, so it has none for
+    the whole of its first FBS season, and no re-pull changes that. The rating
+    can first appear when the season label rolls over on March 1 and next
+    season's preseason rows are built from this season's final SP+ — and only
+    if CFBD rates it. Measured in `ncaaf_team_stats` (2026-10-12): Delaware and
+    Missouri State, FBS from 2025, are unrated in 2025 and rated in 2026;
+    Kennesaw State, FBS from 2024, unrated in 2024 and rated in 2025. The
+    schools are listed in `config.NCAAF_PROMOTED_TO_FBS`, which only the health
+    check and the refusal log read — this gate still refuses them.
 
     So the order is inverted: SP+ is NECESSARY, and `classification` may only
     ever VETO. Nothing that could be priced is lost — the game was already
@@ -163,9 +174,17 @@ def unrated_fbs_claim(stats: dict) -> str | None:
     nothing) and no one expects a pick. This is a team we are SUPPOSED to be
     able to price and cannot, which is how a DK-priced game goes missing from
     the board with nobody able to say why. In practice it means a NEWLY
-    PROMOTED program: SP+ needs FBS history, so it lags a promotion by a
-    season (2026-09-13 — confirmed against CFBD, which lists both of the 2026
-    cases as FBS). Returns None when there is nothing surprising to report.
+    PROMOTED program in its first FBS season: the season's SP+ is last
+    season's, when it was FCS and unrated (see `_is_fbs`; CFBD lists both of
+    the 2026 cases as FBS, confirmed 2026-09-13). Returns None when there is
+    nothing surprising to report.
+
+    `stats` must carry `classification` for this to say anything. The live
+    snapshot read (`_get_ncaaf_team_stats`) does not select it — `_STAT_COLS`
+    must never gain it, because `_is_fbs` would then apply its classification
+    veto in training and backtests too, which is a model update — so the live
+    refusal log passes the registry's classification in separately
+    (`build_ncaaf_game_features(fbs_registry=...)`).
     """
     if not stats or stats.get("sp_overall") is not None:
         return None
@@ -484,10 +503,51 @@ def _rest_days_live(conn: DBConnection, team: str, as_of_date: str) -> int | Non
     return _rest_days([row[0]], as_of_date) if row else None
 
 
+def fbs_refusal_claims(teams, season: int,
+                       fbs_registry: dict | None = None) -> list[str]:
+    """Why an FBS-gate refusal is SURPRISING, one string per team — [] when it
+    is an ordinary FCS opponent. For the refusal LOG only; never for scoring.
+
+    `teams` is ((team, snapshot), ...). The live snapshot carries no
+    `classification` (see `unrated_fbs_claim`), so the registry's value —
+    `fbs_registry`, {school: classification}, read once per scoring pass — is
+    filled in where the snapshot has none. Without it this sees no
+    classification, so the WARNING the docs promised never fired: the worker's
+    logs for 2026-10-12 (06:00Z onward) hold no "FBS gate declined" line,
+    though a scoring pass ran at 10:34Z with two games DraftKings had priced at
+    10:23Z (Nevada @ North Dakota State, Ohio @ Sacramento State, both 10-17),
+    neither of which has a pick row.
+
+    A school listed in `config.NCAAF_PROMOTED_TO_FBS` for this season is named
+    with the reason it is unrated, so the line answers its own question.
+    """
+    promoted = getattr(config, "NCAAF_PROMOTED_TO_FBS", {}) or {}
+    out: list[str] = []
+    for team, stats in teams:
+        probe = dict(stats or {})
+        if fbs_registry is not None and probe.get("classification") is None:
+            probe["classification"] = fbs_registry.get(team)
+        why = unrated_fbs_claim(probe)
+        if not why:
+            continue
+        if promoted.get(team) == season:
+            why += (f" (newly promoted to FBS in {season}: a season's SP+ is "
+                    f"the prior season's final rating and it was FCS then, so "
+                    f"it cannot have one before the first run on or after "
+                    f"{season + 1}-03-01, and only if CFBD rates it)")
+        out.append(f"{team} {why}")
+    return out
+
+
 def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
                               home_team: str, away_team: str, season: int,
-                              odds_row: dict = None) -> dict | None:
-    """Full feature row for one NCAAF game (live scoring path)."""
+                              odds_row: dict = None,
+                              fbs_registry: dict | None = None) -> dict | None:
+    """Full feature row for one NCAAF game (live scoring path).
+
+    `fbs_registry` ({school: classification} from `ncaaf_teams`) feeds the
+    refusal LOG and nothing else: the gate and the returned row never read it.
+    """
     home_stats = _get_ncaaf_team_stats(conn, home_team, season, game_date)
     away_stats = _get_ncaaf_team_stats(conn, away_team, season, game_date)
     if not _is_fbs(home_stats) or not _is_fbs(away_stats):
@@ -496,13 +556,11 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         # A team the REGISTRY calls FBS that SP+ has never rated is a different
         # animal: two of our own tables disagreeing, which is how a DK-priced
         # game leaves the board with no row and no reason (2026-09-12).
-        claims = [f"{team} {why}"
-                  for team, why in ((home_team, unrated_fbs_claim(home_stats)),
-                                    (away_team, unrated_fbs_claim(away_stats)))
-                  if why]
+        claims = fbs_refusal_claims(((home_team, home_stats),
+                                     (away_team, away_stats)),
+                                    season, fbs_registry)
         if claims:
-            logger.warning(f"{game_id}: FBS gate declined — " + "; ".join(claims)
-                           + " (check ncaaf_teams against CFBD)")
+            logger.warning(f"{game_id}: FBS gate declined — " + "; ".join(claims))
         else:
             logger.debug(f"{game_id}: not an FBS-vs-FBS matchup — skipping")
         return None
