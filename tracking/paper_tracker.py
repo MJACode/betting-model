@@ -527,6 +527,35 @@ def _load_nfl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     return out
 
 
+def _nfl_name_fallback(nfl_actuals: dict, game_id: str, raw_name: str | None):
+    """The row for a player the exact normalised name missed, or None.
+
+    The odds feed and the stat log spell some first names differently:
+    "Joshua Palmer" in the feed, "Josh Palmer" in nfl_player_game_log. Both
+    2026-09-17 DET@BUF picks on him settled NO_ACTION although he played (one
+    a win, one a loss; docs/nfl_edge_search.md §5). The fallback is the same
+    surname and the same first initial in the SAME game, and only when exactly
+    one player matches -- two candidates is ambiguity, and ambiguity must stay
+    a miss, never a guess."""
+    from data.ingestors.nfl_props_data_ingestor import norm_player_name
+    if not raw_name:
+        return None
+    parts = [norm_player_name(t) for t in str(raw_name).split()]
+    parts = [t for t in parts if t]
+    if len(parts) < 2:
+        return None
+    first, last = parts[0], parts[-1]
+    hits = []
+    for (_key, gid), d in nfl_actuals.items():
+        if gid != game_id:
+            continue
+        theirs = [norm_player_name(t) for t in str(d.get("player_name") or "").split()]
+        theirs = [t for t in theirs if t]
+        if len(theirs) >= 2 and theirs[-1] == last and theirs[0][:1] == first[:1]:
+            hits.append(d)
+    return hits[0] if len(hits) == 1 else None
+
+
 def _nfl_prop_actual(row: dict, stat_col: str):
     """Resolve one NFL prop's actual, including the three derived targets."""
     def n(c):
@@ -804,6 +833,13 @@ def _settle_prop_picks(
                 m = _PICK_LABEL_RE.match(pick_label or "")
                 key = norm_player_name(m.group(1).strip()) if m else None
             row_data = nfl_actuals.get((key, game_id)) if key else None
+            if row_data is None:
+                # A first-name spelling the stat log does not share
+                # ("Joshua" vs "Josh"): same surname and initial, same game,
+                # unique, or nothing.
+                m = _PICK_LABEL_RE.match(pick_label or "")
+                row_data = _nfl_name_fallback(
+                    nfl_actuals, game_id, m.group(1).strip() if m else None)
             if row_data:
                 actual_stat = _nfl_prop_actual(row_data, stat_col)
 
