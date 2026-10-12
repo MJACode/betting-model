@@ -212,6 +212,16 @@ def _conditions(conn, now: datetime | None = None) -> dict:
                       f"running.")
         out[f"job:{job_id}"] = ("CRIT", f"{job_id} has gone silent", detail)
 
+    # Running on time is not the same as working: a watched job whose last run
+    # raised (the NFL poll raises when it had to kill an overrunning step).
+    from tracking.job_heartbeat import failing_jobs
+    for job_id, why in failing_jobs(conn):
+        if f"job:{job_id}" not in out:    # silence already says more
+            out[f"jobfail:{job_id}"] = (
+                "WARN", f"{job_id} failed its last run",
+                f"`{job_id}` is running on schedule, but its last run failed:\n"
+                f"{why or '(no detail)'}")
+
     clean, total, ranked = _clean_rate(conn)
     if total >= CLEAN_RATE_WINDOW:
         rate = clean / total
