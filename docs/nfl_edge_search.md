@@ -163,9 +163,11 @@ operational subset, not because it is the best ROI cell.
 5. The same pace construction on receptions and completions, read once on
    2025, is flat or negative (−0.98% on 335 and 143 bets).
 
-**What a forward test needs:**
+**Publishing.** A model either goes live with real bets once it clears the
+repo's evidence bar, or it does not publish. The five points above mean this
+one has not cleared that bar, so it does not publish. Going live, once it
+clears, needs:
 - a new model id (`nfl_live_prop` is struck);
-- paper only;
 - a scheduler job, because `RUN_NFL_LIVE` defaults off;
 - one live event-odds call per game at halftime, for one market in one region.
 
