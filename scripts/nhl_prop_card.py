@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import config  # noqa: E402
 import models.nhl_prop_blocked_shots as bs  # noqa: E402
 from data.db import get_connection  # noqa: E402
+from data.first_pitch import pregame_cutoff_sql, pregame_still_open_sql  # noqa: E402
 from data.season_labels import nhl_season_label  # noqa: E402
 
 MODEL_ID = bs.MODEL_ID
@@ -56,13 +57,34 @@ def _utc(v) -> datetime:
 
 
 def slate(conn, game_date: str, now: datetime) -> dict[str, dict]:
-    """Tonight's games that have not started."""
-    rows = conn.execute("""
-        SELECT game_id, home_team, away_team, commence_time
+    """Tonight's games whose pregame cutoff is still ahead of `now`.
+
+    Shared with the other NHL prop card. The cutoff is `pregame_cutoff_sql`.
+    For NHL that is commence_time until a first pitch is stored; this does
+    not add an NHL-specific offset. A row that also carries the cutoff column
+    is filtered on that column. At the cutoff the game has started.
+    """
+    rows = conn.execute(f"""
+        SELECT game_id, home_team, away_team, commence_time,
+               {pregame_cutoff_sql("games")}
         FROM games WHERE sport = 'NHL' AND game_date = %s AND commence_time IS NOT NULL
-    """, (game_date,)).fetchall()
-    return {r[0]: {"home": r[1], "away": r[2], "commence_time": r[3]}
-            for r in rows if _utc(r[3]) > now}
+          AND {pregame_still_open_sql("games")}
+    """, (game_date, now.astimezone(timezone.utc).isoformat())).fetchall()
+    out = {}
+    for r in rows:
+        if len(r) > 4:
+            stamp = r[4]
+            if stamp is None:
+                continue
+            start = stamp if isinstance(stamp, datetime) else _utc(stamp)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            if start.astimezone(timezone.utc) <= now:
+                continue
+        elif not (_utc(r[3]) > now):
+            continue
+        out[r[0]] = {"home": r[1], "away": r[2], "commence_time": r[3]}
+    return out
 
 
 def latest_quotes(conn, games: dict[str, dict]) -> pd.DataFrame:
@@ -204,7 +226,13 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
 
 
 def publish(conn, rows: list[dict]) -> int:
-    """Insert-once per (game, player, market): a second pass never touches a pick that exists."""
+    """Insert-once per (game, player, market): a second pass never touches a pick that exists.
+
+    The pregame cutoff gate runs here. This INSERT keeps prop_market and
+    player_key, which `_insert_picks` does not write.
+    """
+    from models.scorer import _drop_pregame_after_cutoff
+    rows = _drop_pregame_after_cutoff(conn, rows)
     written = 0
     for r in rows:
         if conn.execute("""

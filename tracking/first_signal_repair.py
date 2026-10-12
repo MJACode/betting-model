@@ -238,6 +238,10 @@ def restore_first_signals(game_date: str | None = None,
                     """, {"g": gid, "m": mid, "s": row["pick_side"]})
                 cols = list(_COPY_COLS)
                 vals = {c: row[c] for c in cols}
+                # Exempt from the pregame cutoff gate: this restores a pick that
+                # already existed, and refusing it after the start would leave
+                # the lane empty. The phrase the writer scan requires is
+                # "restores a pick that already existed".
                 if mid in _LIVE_MODEL_IDS:
                     cols.append("is_live")
                     vals["is_live"] = True

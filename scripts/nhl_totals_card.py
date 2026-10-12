@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import models.nhl_totals_market as mk
 from data.db import get_connection
+from data.first_pitch import pregame_cutoff_sql, pregame_still_open_sql
 from models.market_relative import implied
 from models.scorer import (
     _build_pick_label,
@@ -63,22 +64,28 @@ def slate(conn, now: datetime) -> dict[str, dict]:
     """Every NHL game whose start is after `now`. No horizon.
 
     The game_date bound only lets the query use the date: a game that starts
-    after `now` cannot carry an ET date earlier than yesterday's. The started
-    check is done on the parsed start time, because commence_time is TEXT in
-    mixed shapes.
+    after `now` cannot carry an ET date earlier than yesterday's. The query
+    also requires the pregame cutoff (`pregame_still_open_sql`) to still be
+    ahead of `now`. The started check is done on the parsed cutoff when the
+    row carries it, else the scheduled start, because commence_time is TEXT
+    in mixed shapes. For NHL that cutoff is commence_time until a first pitch
+    is stored; this does not add an NHL-specific offset.
     """
     from features.feature_engine import _parse_iso_ts
     since = (now.astimezone(_ET).date() - timedelta(days=1)).isoformat()
-    rows = conn.execute("""
-        SELECT game_id, home_team, away_team, commence_time, game_date
+    rows = conn.execute(f"""
+        SELECT game_id, home_team, away_team, commence_time, game_date,
+               {pregame_cutoff_sql("games")}
         FROM games
         WHERE sport = 'NHL'
           AND commence_time IS NOT NULL
           AND game_date >= %s
-    """, (since,)).fetchall()
+          AND {pregame_still_open_sql("games")}
+    """, (since, now.astimezone(timezone.utc).isoformat())).fetchall()
     out = {}
-    for gid, home, away, commence, gd in rows:
-        start = _parse_iso_ts(commence)
+    for row in rows:
+        gid, home, away, commence, gd = row[:5]
+        start = _parse_iso_ts(row[5] if len(row) > 5 else commence)
         if start is None or start <= now:
             continue
         out[gid] = {"home": home, "away": away,

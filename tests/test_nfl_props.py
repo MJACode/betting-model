@@ -1175,6 +1175,11 @@ class TestMarketCardPublisher:
             def execute(self, sql, params=None):
                 s = self
                 up = sql.strip().upper()
+                if "first_pitch_at" in sql:
+                    class R:
+                        def fetchall(s_): return []
+                        def fetchone(self_inner): return None
+                    return R()
                 if up.startswith("SELECT GAME_ID FROM GAMES"):
                     class R:
                         def fetchall(s_): return [(g,) for g in params[0]]
@@ -1254,6 +1259,11 @@ def test_publish_skips_games_with_no_games_row():
         def __init__(self): self.inserted = []
         def execute(self, sql, params=None):
             up = sql.strip().upper()
+            if "first_pitch_at" in sql:
+                class R:
+                    def fetchall(s_): return []
+                    def fetchone(s_): return None
+                return R()
             if up.startswith("SELECT GAME_ID FROM GAMES"):
                 class R:
                     def fetchall(s_): return [("NFL_2025_01_KC_BUF",)]

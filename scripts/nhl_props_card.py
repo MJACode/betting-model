@@ -393,7 +393,13 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
 
 
 def publish(conn, rows: list[dict]) -> int:
-    """Insert-once per (game, model, market, player id): a later pass never touches a pick that exists."""
+    """Insert-once per (game, model, market, player id): a later pass never touches a pick that exists.
+
+    The pregame cutoff gate runs here. This INSERT keeps the prop columns
+    `_insert_picks` does not write.
+    """
+    from models.scorer import _drop_pregame_after_cutoff
+    rows = _drop_pregame_after_cutoff(conn, rows)
     written = 0
     for r in rows:
         if conn.execute("""

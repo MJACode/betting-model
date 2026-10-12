@@ -2678,12 +2678,41 @@ def _pregame_cutoff_map(conn: DBConnection, game_date: str, sport: str) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
-def _game_started(pregame_cutoff: str | None) -> bool:
+def _parse_cutoff(pregame_cutoff):
+    """UTC datetime for a pregame cutoff, or None when it cannot be read.
+
+    None, blank and unparseable all mean unknown. A naive value is UTC.
+    Datetimes from the driver are accepted as-is.
+    """
+    if not pregame_cutoff:
+        return None
+    if isinstance(pregame_cutoff, datetime):
+        dt = pregame_cutoff
+    else:
+        ts = str(pregame_cutoff).strip()
+        if not ts:
+            return None
+        if ts.endswith(("Z", "z")):
+            ts = ts[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(ts)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _game_started(pregame_cutoff: str | None, *, now: datetime | None = None) -> bool:
     """
     True if a game's first pitch/tip is in the past — i.e. any DK snapshot
     taken now is an IN-PLAY price. Callers pass the PRE-GAME CUTOFF
     (_pregame_cutoff_map), not the scheduled start, so a game that began
     early is recognised as started when it actually started.
+
+    `now` defaults to `_utcnow()` at call time. A once-per-pass snapshot
+    must not be passed in: a long scoring pass reaches later games after
+    they have started.
 
     Prop scorers use this to skip started games entirely. Without the guard,
     the evening refresh loop kept scoring props DURING games: a player whose
@@ -2696,20 +2725,16 @@ def _game_started(pregame_cutoff: str | None) -> bool:
     Timestamp formats vary ('Z' suffix, ±HH:MM offset, naive) — parse in
     Python, never string-compare (session-93 lesson). Unknown/unparseable
     start time → False (don't skip; the morning pipeline must still score
-    games whose start hasn't been ingested yet).
+    games whose start hasn't been ingested yet). The cutoff itself counts
+    as started.
     """
-    if not pregame_cutoff:
+    dt = _parse_cutoff(pregame_cutoff)
+    if dt is None:
         return False
-    ts = str(pregame_cutoff).strip()
-    try:
-        if ts.endswith("Z"):
-            ts = ts[:-1] + "+00:00"
-        dt = datetime.fromisoformat(ts)
-    except ValueError:
-        return False
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    return dt <= datetime.now(ZoneInfo("UTC"))
+    clock = now or _utcnow()
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    return dt <= clock.astimezone(timezone.utc)
 
 
 def _final_game_ids(conn: DBConnection, game_date: str, sport: str) -> set:
@@ -2769,7 +2794,64 @@ def _calibrated(model_id, prob):
         return float(prob)
 
 
+def _cutoff_by_game(conn: DBConnection, game_ids: list[str]) -> dict:
+    """{game_id: pregame cutoff} for these games. Missing ids are absent.
+
+    The value is `pregame_cutoff_sql` — actual first pitch, clamped — not
+    the scheduled start. A game with no row, or a NULL cutoff, is unknown.
+    """
+    if not game_ids:
+        return {}
+    rows = conn.execute(
+        f"SELECT game_id, {pregame_cutoff_sql('games')} "
+        "FROM games WHERE game_id = ANY(?)",
+        (list(game_ids),),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def _drop_pregame_after_cutoff(conn: DBConnection, picks: list[dict]) -> list[dict]:
+    """Drop `is_live` false rows once a fresh now() is at or past the cutoff.
+
+    Unknown start (no game row, NULL cutoff, unparseable) is kept. A live
+    row is kept and is not looked up. Every drop is one structured warning
+    with game_id, model and minutes_after_start. Order of the kept rows
+    matches the input.
+    """
+    if not picks:
+        return picks
+    pregame_ids = [
+        p.get("game_id") for p in picks
+        if not p.get("is_live") and p.get("game_id")
+    ]
+    if not pregame_ids:
+        return list(picks)
+    cutoffs = _cutoff_by_game(conn, sorted(set(pregame_ids)))
+    now = _utcnow()
+    kept: list[dict] = []
+    for p in picks:
+        if p.get("is_live"):
+            kept.append(p)
+            continue
+        gid = p.get("game_id")
+        raw = cutoffs.get(gid) if gid else None
+        start = _parse_cutoff(raw)
+        if start is None or not _game_started(raw, now=now):
+            kept.append(p)
+            continue
+        minutes = (now - start).total_seconds() / 60.0
+        logger.bind(
+            game_id=gid,
+            model=p.get("model_id"),
+            minutes_after_start=round(minutes, 4),
+        ).warning("pregame pick rejected: at or past the pregame cutoff")
+    return kept
+
+
 def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
+    picks = _drop_pregame_after_cutoff(conn, picks)
+    if not picks:
+        return
     sql = """
         INSERT INTO picks (
             game_id, model_id, sport, game_date, pick_side, pick_label,
@@ -3592,8 +3674,21 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 skipped_postponed += 1
                 continue
 
-            # Skip games that have already started — their picks are locked in
-            if commence_time and commence_time <= now_utc:
+            # Skip games that have already started — their picks are locked in.
+            # Re-read the cutoff and the clock here. `commence_time` is the
+            # scheduled start from the games query at the top of the pass,
+            # and `now_utc` was captured once before the loop; neither is the
+            # pregame cutoff, and both are stale by the time a long pass
+            # reaches this game. Unknown cutoff does not skip (the insert
+            # gate below is the same rule). A failed read fails open so one
+            # lookup cannot abort the pass; `_insert_picks` reads it again.
+            cutoff = _fail_open(
+                conn, "sp_game_started",
+                lambda gid=game_id: _pregame_cutoff(conn, gid),
+                None,
+                f"started-game cutoff for {game_id}",
+            )
+            if _game_started(cutoff):
                 skipped_started += 1
                 continue
 

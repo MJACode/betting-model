@@ -454,7 +454,14 @@ class PicksRecorder:
             row["signal_type"] = "AVOID"
             row["kelly_fraction"] = 0.0
             row["recommended_bet"] = 0.0
-            conn.execute(_INSERT_SQL, row)
+            # Live rows carry is_live, so the gate keeps them and does not
+            # look the game up. Calling it is what puts this writer on the
+            # same path as every other INSERT into picks.
+            from models.scorer import _drop_pregame_after_cutoff
+            kept = _drop_pregame_after_cutoff(conn, [row])
+            if not kept:
+                return
+            conn.execute(_INSERT_SQL, kept[0])
             conn.commit()
             self._avoid_sigs[key] = sig
         finally:
@@ -488,6 +495,14 @@ class PicksRecorder:
 
             row = build_pick(decision, game_id, self._bankroll_value(),
                              game_date=game_date)
+            # Same gate as _insert_picks. is_live is set, so a live row is
+            # kept and the cutoff is not queried. An empty result returns
+            # before announce: nothing was written.
+            from models.scorer import _drop_pregame_after_cutoff
+            kept = _drop_pregame_after_cutoff(conn, [row])
+            if not kept:
+                return
+            row = kept[0]
             conn.execute(_INSERT_SQL, row)
             conn.commit()
             log.info("WROTE live %s %s %s @ %s", row["model_id"],
