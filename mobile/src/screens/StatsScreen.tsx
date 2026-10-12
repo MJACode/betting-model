@@ -101,7 +101,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, etDate, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -112,13 +112,19 @@ import {
   h2hMatchups,
   nextGameByTeam,
   buildTonightSlate,
+  slateReadKey,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
-  isLineOnlyId,
+  canOpenPlayerDetail,
+  lineOnlyRowLabel,
+  SLATE_CHECKING_HINT,
+  PLAYERS_SLATE_CUT_HINT,
+  PLAYERS_SLATE_EMPTY_HINT,
+  PLAYERS_SLATE_GAMES_HINT,
+  PLAYERS_SLATE_LOADING_HINT,
   isStatParticipant,
-  LINE_ONLY_ID_PREFIX,
   fixtureSubline,
   lineOnlyPlayers,
   startedForGame,
@@ -168,8 +174,14 @@ import {
 } from '@/lib/statSegments';
 import {
   baseStopCount,
+  clampTypedLine,
+  clampedFieldText,
+  clearSettleSkip,
   defaultLineN,
+  programmaticPick,
+  rulerHi,
   rulerScaleFor,
+  settleHold,
   snapStop,
   stopAt,
   stopCount,
@@ -375,6 +387,7 @@ export function StatsScreen() {
   // time, the Live/Final label and the "is it still bettable" filter all age
   // together on one tick (useNow).
   const now = useNow();
+  const etDay = etDate(new Date(now));
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   // The "hasn't posted lines" note is the switch — an instruction sits with
@@ -465,6 +478,10 @@ export function StatsScreen() {
   // (UX review, 2026-09-09). The stamping below means no wrong rows were ever
   // painted; the cost was a wasted multi-page request and a slower first paint.
   const [slateFor, setSlateFor] = useState<string | null>(null);
+  // Bumped by pull-to-refresh. The slate effect also re-runs when `etDay`
+  // changes (midnight, or a resume via useNow), so a board left open overnight
+  // does not keep yesterday's teams under "Playing today".
+  const [slateReload, setSlateReload] = useState(0);
   // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
   // grade a spot off the probable starter or the lineup; every other sport had
   // a column of dashes, so a toughness filter over it would have filtered
@@ -475,6 +492,26 @@ export function StatsScreen() {
   // `player_points` is both an NBA and a WNBA market, so the odds read is
   // bounded to these game ids rather than to a date alone.
   const [slateGames, setSlateGames] = useState<GameRow[]>([]);
+  // During render, not in an effect: the effect runs after paint, and that
+  // paint would still name the previous sport's slate on Playing today.
+  const [slateSport, setSlateSport] = useState(sport);
+  if (slateSport !== sport) {
+    setSlateSport(sport);
+    setSlate(EMPTY_SLATE);
+    setSlateGames([]);
+    setSlateFor(null);
+    setTonightOnly(SLATE_ONLY_DEFAULT);
+  }
+  // An ET-date change is the same gap as a sport change: the effect refetches
+  // after paint, and that paint would still filter on yesterday's teams with
+  // the chip enabled. `slateFor` null is "checking", which disables it.
+  const [slateDay, setSlateDay] = useState(etDay);
+  if (slateDay !== etDay) {
+    setSlateDay(etDay);
+    setSlate(EMPTY_SLATE);
+    setSlateGames([]);
+    setSlateFor(null);
+  }
   // Every book's latest line for the selected stat's market on the slate date.
   const [propLines, setPropLines] = useState<{
     market: string;
@@ -533,6 +570,12 @@ export function StatsScreen() {
     if (!supportsHitRate(sport)) setTimeWindow((w) => (w === 'h2h' ? 10 : w));
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
+    // Drop the previous sport's slate in the same commit as the chip reset.
+    // Until the new read lands, hasSlate would still be true and the
+    // Availability label would name the outgoing slate.
+    setSlate(EMPTY_SLATE);
+    setSlateGames([]);
+    setSlateFor(null);
   }, [sport]);
 
   // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
@@ -555,9 +598,13 @@ export function StatsScreen() {
   // daily still get a usable toggle — buildTonightSlate prefers today and falls
   // back to the next scheduled day. Failure-tolerant: a slate we can't reach
   // just leaves the toggle hidden.
+  // Keyed on the ET date, not on mount: `todayET()` read once left an app
+  // open past midnight filtering on yesterday. `useNow` moves at midnight and
+  // on foreground; pull-to-refresh bumps `slateReload`.
+  const slateKey = slateReadKey(sport, etDay);
   useEffect(() => {
     let cancelled = false;
-    const from = todayET();
+    const from = etDay;
     // BOUNDED, because .finally() is not a guarantee that anything happens.
     // The supabase client is created with no fetch timeout, so a request that
     // hangs never settles: no `.finally`, no `error` to render the Retry banner
@@ -587,7 +634,7 @@ export function StatsScreen() {
       cancelled = true;
       clearTimeout(release);
     };
-  }, [sport]);
+  }, [slateKey, etDay, sport, slateReload]);
 
   // Team stats for the defence grade. Only fetched where it is actually used,
   // so the sports that already grade off a matchup view pay nothing for it.
@@ -849,6 +896,11 @@ export function StatsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey, h2hKey]);
 
+  const refreshBoard = useCallback(() => {
+    setSlateReload((n) => n + 1);
+    void load();
+  }, [load]);
+
   useEffect(() => {
     // The gate exists so a read NARROWED by the slate's teams is not fired
     // before the slate lands (or fired twice). With the board no longer opening
@@ -924,6 +976,10 @@ export function StatsScreen() {
   // keeps `lineN` on it — three copies of this arithmetic is three chances to
   // leave the board on a number the strip cannot scroll back to.
   const rulerScale: RulerScale = useMemo(() => rulerScaleFor(stat, hitMode), [stat, hitMode]);
+  // The last stop the adjustable will step to. Not `rulerScale.max`: that
+  // can sit off the grid, and a typed number parked there cannot be stepped
+  // down (`next <= hi` inside LineRuler).
+  const rulerCeiling = rulerHi(rulerScale);
 
   // Leaving Under drops the one extra stop Under needs ("n-1 or fewer" has to
   // reach a ceiling At Least says as "n+"), so a user parked on it would keep
@@ -1748,10 +1804,6 @@ export function StatsScreen() {
               hitMode={hitMode}
               oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
               onOddsPress={quote ? () => openBook(quote) : undefined}
-              tappable={playerDetail}
-              onPress={() =>
-                openPlayer({ player_id: `${LINE_ONLY_ID_PREFIX}${p.key}`, player_name: p.name, team: null })
-              }
             />
           );
         })}
@@ -1817,11 +1869,9 @@ export function StatsScreen() {
   }) => {
     // Called directly rather than via `playerDetail` above: it is a type guard,
     // so this line is what narrows `sport` to a sport the route accepts.
-    if (!supportsPlayerDetail(sport)) return;
+    if (!supportsPlayerDetail(sport) || !canOpenPlayerDetail(p.player_id)) return;
     navigation.navigate('PlayerStats', {
-      // A line-only row has no player_id; the detail screen looks him up by
-      // name, as it does for any caller without one.
-      playerId: isLineOnlyId(p.player_id) ? '' : p.player_id,
+      playerId: p.player_id,
       playerName: p.player_name,
       sport,
       // MLB only — it decides batter vs pitcher chips. Fall back to the selected
@@ -2283,12 +2333,13 @@ export function StatsScreen() {
               }
               a11yLabel={`${stat?.label ?? ''} line`}
               // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
-              // that line in Over/Under). Below one stop is refused: "0+" is
-              // every game.
-              parseTyped={(text) => {
-                const n = parseTypedLine(text, hitMode);
-                return n != null && n >= rulerScale.min ? n : null;
-              }}
+              // that line in Over/Under). The number is clamped onto the
+              // stops VoiceOver can step: below the first stop it is raised
+              // to that stop, and above the last on-grid stop it is brought
+              // down to that stop. Junk still parses as nothing.
+              parseTyped={(text) =>
+                clampTypedLine(parseTypedLine(text, hitMode), rulerScale.min, rulerCeiling)
+              }
             />
             {/* At Least only, and a footnote rather than a headline. The row
                 this replaces restated the stat, the number and the direction —
@@ -2530,7 +2581,7 @@ export function StatsScreen() {
                 thinSample={timeWindow === 'h2h'}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
-                tappable={playerDetail}
+                tappable={playerDetail && canOpenPlayerDetail(item.player_id)}
                 onPress={() => openPlayer(item)}
               />
             );
@@ -2562,7 +2613,7 @@ export function StatsScreen() {
           // between fetches — and it was the one list screen in the app whose
           // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
           // ages the LABELS; this is how a user re-reads the DATA.
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshBoard} />}
         />
       ) : (
         <FlatList
@@ -2589,7 +2640,7 @@ export function StatsScreen() {
                 hitMode={hitMode}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
-                tappable={playerDetail}
+                tappable={playerDetail && canOpenPlayerDetail(item.row.player_id)}
                 onPress={() => openPlayer(item.row)}
               />
             );
@@ -2612,7 +2663,7 @@ export function StatsScreen() {
           // between fetches — and it was the one list screen in the app whose
           // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
           // ages the LABELS; this is how a user re-reads the DATA.
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshBoard} />}
         />
       )}
 
@@ -2712,22 +2763,28 @@ export function StatsScreen() {
               value={tonightActive && !gamesPicked}
               onValueChange={setTonightOnly}
               disabled={slateCutDead}
-              accessibilityLabel={
+              accessibilityState={{
+                disabled: slateCutDead,
+                checked: tonightActive && !gamesPicked,
+              }}
+              accessibilityLabel={hasSlate ? slateLabel : 'Playing today'}
+              accessibilityHint={
                 slateChecking
-                  ? 'Playing today, checking the schedule'
+                  ? SLATE_CHECKING_HINT
                   : !hasSlate
-                    ? 'Playing today, unavailable: no games scheduled'
+                    ? PLAYERS_SLATE_EMPTY_HINT
                     : gamesPicked
-                      ? `${slateLabel}, unavailable while a game is picked above`
+                      ? PLAYERS_SLATE_GAMES_HINT
                       // The chip said ", loading" for this exact reason: the tap
                       // is a network read and VoiceOver focus stays on the
                       // control while the board changes underneath it. The
                       // footer's `busy` is a visible affordance, not a spoken
                       // one — accessibilityState.busy has no VoiceOver trait —
                       // so the words have to be here (UX review, 2026-09-12).
+                      // The name is the label; the hint starts at the state.
                       : loading
-                        ? `${slateLabel}, loading`
-                        : `${slateLabel}. On shows only players in action, off shows every player`
+                        ? PLAYERS_SLATE_LOADING_HINT
+                        : PLAYERS_SLATE_CUT_HINT
               }
             />
           </View>
@@ -2946,10 +3003,13 @@ function LineRuler({
   const [width, setWidth] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const reportedRef = useRef(value);
+  // One programmatic scroll's settle (the animated scrollTo in pickTick).
+  // Cleared when that settle arrives, or sooner if a finger drag starts.
+  const skipSettleRef = useRef(false);
   const { min, step } = scale;
   const count = stopCount(scale);
-  /** The last reachable stop — `scale.max` aligned onto the grid. */
-  const hi = stopAt(count - 1, scale);
+  /** The last reachable stop — the same ceiling a typed line is clamped to. */
+  const hi = rulerHi(scale);
   // Short rulers (hits, Ks) get wide ticks with every value labeled — the old
   // look, now scrollable. Long rulers (points, yards) get dense ticks with
   // labels every 5th/10th value so the strip stays legible and flickable.
@@ -3005,15 +3065,22 @@ function LineRuler({
   // both end events (a drag with no fling never gets a momentum-end); emitting
   // is idempotent via reportedRef.
   const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const v = stopAt(e.nativeEvent.contentOffset.x / tickW, scale);
-    if (v !== reportedRef.current) {
-      reportedRef.current = v;
-      onChange(v);
+    const next = settleHold(
+      { value: reportedRef.current, skipNextSettle: skipSettleRef.current },
+      e.nativeEvent.contentOffset.x / tickW,
+      scale,
+    );
+    skipSettleRef.current = next.skipNextSettle;
+    if (next.value !== reportedRef.current) {
+      reportedRef.current = next.value;
+      onChange(next.value);
     }
   };
 
   const pickTick = (v: number) => {
-    reportedRef.current = v;
+    const next = programmaticPick(v);
+    reportedRef.current = next.value;
+    skipSettleRef.current = next.skipNextSettle;
     scrollRef.current?.scrollTo({ x: offsetFor(v), animated: true });
     onChange(v);
   };
@@ -3023,19 +3090,39 @@ function LineRuler({
   // same turn with the same draft; the latch applies it once (the player
   // card's commitTypedLineOnce, same reason).
   const commitTaken = useRef(false);
+  // A clamped commit writes the applied face into the field first. Closing
+  // in that same setState would drop it — React keeps the last value — so
+  // the close waits until that face has painted.
+  const pendingClose = useRef(false);
+  useEffect(() => {
+    if (!pendingClose.current || draft == null) return;
+    pendingClose.current = false;
+    setDraft(null);
+  }, [draft]);
   const openDraft = () => {
     commitTaken.current = false;
+    pendingClose.current = false;
     setDraft('');
   };
   const commitDraft = () => {
     if (commitTaken.current || draft == null) return;
     commitTaken.current = true;
-    setDraft(null);
-    if (!parseTyped || draft.trim() === '') return;
+    if (!parseTyped || draft.trim() === '') {
+      setDraft(null);
+      return;
+    }
     const typed = parseTyped(draft);
     if (typed == null) {
+      setDraft(null);
       showToast(`Enter a line from ${faceOf(min)} up`);
       return;
+    }
+    const clampedText = clampedFieldText(draft, typed, faceOf);
+    if (clampedText != null && clampedText !== draft) {
+      setDraft(clampedText);
+      pendingClose.current = true;
+    } else {
+      setDraft(null);
     }
     if (typed !== value) pickTick(typed);
   };
@@ -3094,6 +3181,13 @@ function LineRuler({
           contentContainerStyle={{ paddingHorizontal: sidePad }}
           onMomentumScrollEnd={settle}
           onScrollEndDrag={settle}
+          onScrollBeginDrag={() => {
+            const next = clearSettleSkip({
+              value: reportedRef.current,
+              skipNextSettle: skipSettleRef.current,
+            });
+            skipSettleRef.current = next.skipNextSettle;
+          }}
         >
           {Array.from({ length: count }, (_, i) => {
             const v = stopAt(i, scale);
@@ -3614,8 +3708,6 @@ function LineOnlyRow({
   hitMode,
   oddsDay,
   onOddsPress,
-  tappable,
-  onPress,
 }: {
   name: string;
   subline: string | null;
@@ -3627,20 +3719,14 @@ function LineOnlyRow({
   hitMode: HitMode;
   oddsDay?: string | null;
   onOddsPress?: () => void;
-  tappable: boolean;
-  onPress: () => void;
 }) {
   const body = (
     <>
       <Text style={styles.rank} />
       <View
         style={styles.rowMain}
-        accessible={tappable}
-        accessibilityRole={tappable ? 'button' : undefined}
-        accessibilityLabel={
-          tappable ? `${name}, no games logged${subline ? `, ${sublineSpoken(subline)}` : ''}` : undefined
-        }
-        accessibilityHint={tappable ? 'Opens this player' : undefined}
+        accessible
+        accessibilityLabel={lineOnlyRowLabel(name, subline ? sublineSpoken(subline) : null)}
       >
         <Text style={styles.rowName} numberOfLines={1}>
           {name}
@@ -3669,18 +3755,9 @@ function LineOnlyRow({
       {showMatchup ? <MatchupCell matchup={null} /> : null}
     </>
   );
-  if (!tappable) return <View style={styles.row}>{body}</View>;
-  return (
-    // accessible={false} for the same reason as HitRateRow: the price pill
-    // stays its own VoiceOver button.
-    <Pressable
-      onPress={onPress}
-      accessible={false}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-    >
-      {body}
-    </Pressable>
-  );
+  // Not a button. There is no player id, and PlayerStats with a blank id is
+  // an empty page. The price pill stays its own control.
+  return <View style={styles.row}>{body}</View>;
 }
 
 function HitRateRow({
