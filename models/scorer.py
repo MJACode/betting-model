@@ -3333,6 +3333,25 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     "NCAAF price pre-filter traceback:\n" + traceback.format_exc())
                 ncaaf_unpriced = set()
 
+        # The FBS registry, read ONCE per pass, for the refusal LOG only. The
+        # gate itself never sees it (it reads the team's snapshot, and the
+        # snapshot read deliberately carries no classification). It lets the
+        # log tell "an FCS opponent" (expected, debug) from "a school the
+        # registry calls FBS that has no SP+ rating" (named, WARNING) — without
+        # it the second case logged at debug like the first. Fails open: no
+        # registry means the old debug line, never a different score.
+        ncaaf_fbs_registry = None
+        if any(g[1] == "NCAAF" for g in games):
+            try:
+                ncaaf_fbs_registry = {
+                    r[0]: r[1] for r in _select_isolated(
+                        conn, "ncaaf_fbs_registry",
+                        "SELECT school, classification FROM ncaaf_teams", ())}
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning(f"NCAAF FBS registry read failed ({exc}); "
+                               f"refusal log falls back to debug")
+                ncaaf_fbs_registry = None
+
         # THE SAME GATE FOR THE NEW LOOK-AHEAD SPORTS, and here it is not only
         # a cost filter — it is the rule.
         #
@@ -3652,7 +3671,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 from features.ncaaf_feature_engine import build_ncaaf_game_features
                 features = build_ncaaf_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_mlb_h2h
+                    odds_row=odds_mlb_h2h, fbs_registry=ncaaf_fbs_registry
                 )
             else:  # NHL
                 features = build_nhl_game_features(
