@@ -54,6 +54,41 @@ BOOK_LABEL = {"DK": "draftkings", "FD": "fanduel", "MGM": "betmgm",
               "HR": "hardrockbet", "PARX": "betparx"}
 
 
+def _table(sel, ev_col, profit_col, title):
+    print(f"\n{title}")
+    print(f"  {'floor':>6} {'bets':>5} {'/season':>8} {'units':>8} {'ROI%':>7} {'90% CI':>16} "
+          f"| {'2023':>16} {'2024':>16} {'2025':>16}")
+    for f in FLOORS:
+        z = sel[sel[ev_col] >= f]
+        roi, (lo, hi) = L.boot_ci(z[profit_col], z["game_id"]) if len(z) else (np.nan, (np.nan, np.nan))
+        per = []
+        for s in X.SEASONS:
+            zs = z[z["season"] == s]
+            per.append(f"{len(zs):>4} {100 * zs[profit_col].mean() if len(zs) else float('nan'):+6.1f}%")
+        print(f"  {f:>6.2f} {len(z):>5} {len(z) / 3:>8.0f} {z[profit_col].sum():>+8.1f} {100 * roi:>+7.2f} "
+              f"({100 * lo:>+6.1f},{100 * hi:>+6.1f}) | " + " | ".join(f"{p:>16}" for p in per))
+
+
+def part_a_card() -> None:
+    """THE CARD'S OWN SETUP (review of #920): the soft books it actually loads
+    (models.nfl_prop_market.SOFT_BOOKS, six), the bet at the selecting book's
+    OWN price, and the EV the gate computes: max reference fair x decimal(own
+    price) - 1. One bet per proposition by biggest edge, then the floor -- the
+    order find_bets -> best_per_prop -> pick_rows runs in."""
+    from models.nfl_prop_market import SOFT_BOOKS
+    books = set(SOFT_BOOKS) | set(X.REFS)
+    props = X.load_props(books)
+    act = X.actuals()
+    board = X.decision_boards(props)
+    c = X.grade(X.add_modes(X.candidates(board, X.REFS, tuple(SOFT_BOOKS),
+                                         tuple(SOFT_BOOKS)), X.REFS), act)
+    fair = c[[f"fair_{r}" for r in X.REFS]].max(axis=1)
+    c["ev_own"] = fair * (1 + X.payout(c["own_price"])) - 1
+    sel = X.one_per_prop(c, "m_either", side_cut=SIDE_CUT)
+    _table(sel, "ev_own", "profit_own",
+           "PART A (card setup). six soft books, own price, EV at own price")
+
+
 def part_a() -> None:
     books = set(L.BETTABLE) | set(X.REFS) | set(X.SOFT_0912)
     props = X.load_props(books)
@@ -121,4 +156,5 @@ def part_b() -> None:
 
 if __name__ == "__main__":
     part_a()
+    part_a_card()
     part_b()

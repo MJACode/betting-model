@@ -535,6 +535,54 @@ finds if the floor moved (measured, not shipped): at 0.25 nothing new; at
 | `ncaaf_live_total` | 2025, 504 games | 0.73/0.12: 0 bets | no cell reaches 25; every populated cell negative (0.50/0.00 = 10 bets −53%). **Cut kept; dark under the floor** |
 | `mlb_live_total_runs` | 2026 in-play states since 07-22 (650 games) through the 09-09 artifact, map a=1 b=−0.253, floor 0.32 (its own) | 0.72/0.14: **0 bets** | **negative in every cell**: the loosest 0.50/0.00 = 161 bets −3.7%, 0.54/0.00 = 70 bets −2.9%, nothing above 0.54 clears the floor. **Cut kept; dark under the floor.** The +12.2u forward record was the June artifact deciding on raw claims; the honest replay of the current artifact does not reproduce it |
 
+## `nfl_prop_market` EV floor, 2026-10-12 (mike: "yes"): 0.20 → 0.07, on its own probability
+
+**The model had written no BET since 2026-09-19 20:27Z.** The worker card log of
+2026-10-11 printed the same reason on every candidate:
+`ev_below_floor:0.037<0.20 (p 0.573->0.506 at +105)`. Two things stood in the
+way:
+- its own EV floor, 0.20;
+- the promoted calibration map, an offset (a = 1, b = −0.28) fitted on n = 23
+  graded picks and marked "prior-dominated". It was promoted 2026-09-19 21:45Z
+  with `promoted_helps = false`, and it takes 0.573 to 0.506.
+
+**Swept on its own 2023-25 record, in the card's own setup**
+(`python -m scripts.nfl_edge_prop_market_floor`, `part_a_card`). The
+construction:
+- the six soft books the card loads (`models.nfl_prop_market.SOFT_BOOKS`);
+- the shipped side cuts, over 6pp / under 5pp;
+- one board read inside 24h;
+- the selecting book's own price;
+- EV = the sharp reference's no-vig probability × that price.
+
+| EV floor | bets | / season | ROI | 90% CI | 2023 / 2024 / 2025 |
+|---|---|---|---|---|---|
+| 0.00 | 932 | 311 | +14.30% | (+9.3, +19.6) | +13.9 / +19.5 / +10.1 |
+| 0.05 | 434 | 145 | +18.15% | (+10.2, +26.4) | +20.5 / +30.0 / +5.8 |
+| **0.07** | **148** | **49** | **+21.95%** | **(+7.7, +36.0)** | **+17.1 / +29.7 / +20.4** |
+| 0.10 | 26 | 9 | +14.58% | (−22.7, +52.7) | +59.0 / −39.2 / +44.0 |
+| 0.20 | 1 | 0 | — | — | — |
+
+The best-of-eight-books version (`part_a`) reads 163 bets, +20.89% at 0.07. The
+review of #920 found that version is looser than the card.
+
+**What shipped:**
+- `config.MODEL_OWN_EV_FLOOR["nfl_prop_market"] = 0.07`.
+- The model added to `config.MODELS_ON_OWN_PROBABILITY`, the treatment wind and
+  opener already have, until it has 50 graded bets.
+
+**Caveats:**
+- The floor was swept on the same seasons it was graded on.
+- 2026's five weeks were 19-20, −2.49u over 39.
+- Re-read at ~50 settled bets.
+
+**Same change, separate mechanism.** The card drops a prop the book has pulled
+(`models.nfl_prop_market.drop_pulled_quotes`). A row is dropped when it is
+older than the same book's newest fetch of the game (30 min). That catches one
+player or a whole market pulled. A row is also dropped when it is more than 3h
+behind the game's newest fetch across books, i.e. a book that stopped
+returning the game. 6 of the 39 settled 2026 BETs had locked on a pulled prop.
+
 ## `nfl_prop_market` cut, 2026-09-12 (mike): one floor → two, over 5pp → 6pp
 
 mike: *"I asked you to find evidence for stat models any way you can... Figure
