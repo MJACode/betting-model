@@ -585,6 +585,35 @@ def test_post_returns_false_when_the_network_is_down(monkeypatch):
     assert not dn._post("http://hook", {})
 
 
+def test_a_network_error_log_redacts_the_webhook_url(monkeypatch):
+    """urllib3 names the request URL in a timeout. That URL is the webhook
+    token, so the error log keeps the exception type and drops the URL."""
+    from loguru import logger
+
+    secret = "https://discord.com/api/webhooks/999/SUPERSECRETTOKEN"
+    other = "/api/webhooks/111/ANOTHERT0KEN"
+
+    def boom(*_a, **_k):
+        raise dn.requests.exceptions.ReadTimeout(
+            f"Read timed out. (read timeout=15) for url: {secret}?wait=true "
+            f"also {other}")
+
+    monkeypatch.setattr(dn.requests, "post", boom)
+    monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+    lines = []
+    sink = logger.add(lines.append, level="ERROR", format="{message}")
+    try:
+        assert dn._post(secret, {}) is False
+    finally:
+        logger.remove(sink)
+    text = "".join(str(m) for m in lines)
+    assert "ReadTimeout" in text
+    assert "SUPERSECRETTOKEN" not in text
+    assert "ANOTHERT0KEN" not in text
+    assert secret not in text
+    assert "[webhook]" in text
+
+
 def test_partial_delivery_reports_only_what_landed(monkeypatch):
     """The second chunk fails, so only the first chunk's embeds count as sent —
     this is what keeps the undelivered signals un-ledgered and retryable."""

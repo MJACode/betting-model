@@ -763,6 +763,188 @@ def _calibration_eligibility_notes(conn, model_ids: list[str]) -> list[str]:
     return notes
 
 
+def _calibration_bet_only_models() -> list[str]:
+    """The models the calibration check reads from settled bets in `picks`.
+
+    `mv_scored_pick_outcomes` grades five MLB/WNBA game models and the
+    mlb_prop_/wnba_prop_ stat families, pre-game only. Everything else is
+    invisible to it: every NBA, NHL, NFL, NCAAF and UFC model, the in-play
+    models (the view drops is_live rows by construction), the MLB first-five
+    totals and run line, WNBA spread and total, and every market rule --
+    including `wnba_prop_market`, whose id matches the view's `wnba_prop_%`
+    filter but which has no grading branch there, so it lands as zero rows.
+    Until 2026-10-12 the check read the view alone, so none of these could
+    ever be measured, however far their probabilities drifted.
+
+    The split reuses the weekly fitter's two helpers (in-play test, view
+    membership) and adds the rule test the fitter lacks. The fitter itself
+    still reads `wnba_prop_market` from the view and fits it on n=0 (measured
+    2026-10-12: 27 settled bets) -- left alone here, because changing what the
+    fitter reads changes the maps that decide bets.
+    """
+    from models import probability_calibration as pc
+    methods = getattr(config, "SCORING_METHODS", {}) or {}
+    retired = set(getattr(config, "RETIRED_MODELS", ()) or ())
+    return sorted(
+        m for m in config.ACTION_THRESHOLDS
+        if m not in retired
+        and (pc._is_live_lane(m) or not pc._in_graded_matview(m)
+             or methods.get(m) == "rule"))
+
+
+def _calibration_bet_only_rows(conn, model_ids: list[str]) -> list:
+    """(model_id, n, claimed %, realised %, since, last graded) from settled bets.
+
+    The weekly fitter's third source (fetch_graded), restated for this check:
+    BET rows with a WIN/LOSS result and a real price, not VOID, not the second
+    copy of one event. Two deliberate differences, both because this grades the
+    number that DECIDED the bet rather than fitting a map to the raw one:
+
+      * it averages COALESCE(model_probability_cal, model_probability) -- the
+        same decision number the graded-view query grades;
+      * it applies NO probability floor. The view query's 0.60 floor picks
+        bet-shaped rows out of a BET+AVOID+NONE universe; here every row has
+        already passed the model's own cut. A floor would blind the check to
+        the very models it exists for: measured 2026-10-12, the settled bets of
+        nfl_prop_market, wnba_prop_market, mlb_spread_market, nfl_wind_totals
+        and nhl_moneyline_regulation all claim between 0.47 and 0.58.
+
+    The window is the view query's regime (the later of the active version and
+    the promoted map), extended to models with NO registry row -- the rules and
+    the NCAAF in-play engine -- whose regime is their promoted map, or every
+    pick since the fitter's paper start when nothing was ever promoted. Gated at
+    150 like the view query, so nothing new can alarm on a thin sample.
+
+    Cost: one aggregate over settled BETs, which `idx_picks_signal`
+    (signal_type, result) narrows to a few thousand rows.
+    """
+    if not model_ids:
+        return []
+    from models.probability_calibration import PAPER_START
+    before_start = (datetime.strptime(PAPER_START, "%Y-%m-%d")
+                    - timedelta(days=1)).strftime("%Y-%m-%d")
+    marks = ",".join("?" * len(model_ids))
+    return conn.execute(f"""
+        WITH regime AS (
+            SELECT r.model_id,
+                   CASE WHEN c.promoted IS TRUE
+                             AND SUBSTRING(c.promoted_at, 1, 10)
+                                 > SUBSTRING(r.created_at, 1, 10)
+                        THEN SUBSTRING(c.promoted_at, 1, 10)
+                        ELSE SUBSTRING(r.created_at, 1, 10) END AS since
+            FROM model_registry r
+            LEFT JOIN model_calibration c ON c.model_id = r.model_id
+            WHERE r.is_active = 1
+        ),
+        promoted AS (
+            SELECT model_id, SUBSTRING(promoted_at, 1, 10) AS since
+            FROM model_calibration
+            WHERE promoted IS TRUE
+        )
+        SELECT p.model_id,
+               COUNT(*) AS n,
+               AVG(COALESCE(p.model_probability_cal, p.model_probability))
+                   * 100 AS claimed,
+               100.0 * COUNT(*) FILTER (WHERE p.result = 'WIN') / COUNT(*) AS realised,
+               MIN(COALESCE(g.since, c.since, ?)) AS since,
+               MAX(p.game_date) AS last_graded
+        FROM picks p
+        LEFT JOIN regime g ON g.model_id = p.model_id
+        LEFT JOIN promoted c ON c.model_id = p.model_id
+        WHERE p.model_id IN ({marks})
+          AND p.signal_type = 'BET'
+          AND p.result IN ('WIN','LOSS')
+          AND COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL
+          AND COALESCE(p.condition_status, '') <> 'VOID'{config.duplicate_copy_exclusion_sql("p")}
+          AND p.game_date > COALESCE(g.since, c.since, ?)
+        GROUP BY p.model_id
+        HAVING COUNT(*) >= 150
+    """, (before_start, *model_ids, before_start)).fetchall()
+
+
+def _report_model_calibration(r, conn, rows, bet_only_rows) -> None:
+    """Turn the two readings into ONE model_calibration result.
+
+    Both inputs are (model_id, n, claimed %, realised %, since, last graded),
+    already gated at 150. Where a model somehow appears in both, the graded
+    view wins: it is the whole population, the settled bets only its top.
+
+    A PAUSED model is reported, not judged. Its gap, row count and last graded
+    date stay in the detail, but it never makes the check WARN: it bets
+    nothing, and a paused model's population can sit frozen for a whole
+    offseason (wnba_prop_player_threes, paused 2026-08-31, read +6.9pp/159 and
+    turned the check WARN every morning from then on). The set is read from
+    config.PAUSED_MODELS on every run, so unpausing re-arms it with no other
+    change. There is deliberately NO "nothing graded in N days, so it must be
+    frozen" rule: that would hide a real bug that deletes or stops grading
+    picks, which is the failure most worth seeing.
+    """
+    paused = set(getattr(config, "PAUSED_MODELS", ()) or ())
+    readings: dict = {}
+    bet_only: set = set()
+    for source_rows, is_bet_only in ((rows, False), (bet_only_rows, True)):
+        for m, n, c, rl, _since, last in source_rows:
+            m = str(m)
+            if m in readings:
+                continue
+            readings[m] = (float(c) - float(rl), int(n), str(last or "")[:10])
+            if is_bet_only:
+                bet_only.add(m)
+
+    def _tag(m: str) -> str:
+        return " bet-only" if m in bet_only else ""
+
+    held = sorted(((g, m, n, last) for m, (g, n, last) in readings.items()
+                   if m in paused), reverse=True)
+    paused_txt = ""
+    if held:
+        paused_txt = (
+            " Paused, so informational only (judged again automatically once "
+            "unpaused): " + "; ".join(
+                f"{m} {g:+.1f}pp/{n}{_tag(m)}, last graded {last or 'unknown'}"
+                for g, m, n, last in held) + ".")
+
+    gaps = sorted(((g, m, n) for m, (g, n, _last) in readings.items()
+                   if m not in paused), reverse=True)
+    crit = [g for g in gaps if g[0] >= 8.0]
+    warn = [g for g in gaps if 5.0 <= g[0] < 8.0]
+    measured_bet_only = sorted(m for _g, m, _n in gaps if m in bet_only)
+    bet_only_txt = ""
+    if measured_bet_only:
+        bet_only_txt = (
+            f" Bet-only ({', '.join(measured_bet_only)}): measured on settled "
+            f"bets alone, which are the model's own selections, so the gap "
+            f"leans high next to a reading over every scored pick.")
+    tail = bet_only_txt + paused_txt
+
+    if not gaps:
+        r.add("model_calibration", SKIPPED, "WARN",
+              "no unpaused model has 150+ graded picks yet under its current "
+              "version and promoted calibration map." + paused_txt,
+              reason="Nothing to check")
+        return
+
+    worst = ", ".join(f"{m} +{g:.1f}pp/{n}{_tag(m)}"
+                      for g, m, n in gaps[:4] if g >= 5.0)
+    flagged = [m for _, m, _ in crit + warn]
+    extra = _calibration_eligibility_notes(conn, flagged)
+    extra_txt = (" " + " ".join(extra) + ".") if extra else ""
+    if crit:
+        r.add("model_calibration", STALE, "WARN",
+              f"{len(crit)} model(s) 8pp+ overconfident at the probability "
+              f"actually bet: {worst}. A threshold cannot fix a "
+              f"calibration error.{extra_txt}{tail}",
+              reason=f"{crit[0][0]:.0f}pp overconfident")
+    elif warn:
+        r.add("model_calibration", STALE, "WARN",
+              f"{len(warn)} model(s) 5-8pp overconfident: {worst}.{extra_txt}{tail}",
+              reason=f"{warn[0][0]:.0f}pp overconfident")
+    else:
+        r.add("model_calibration", OK, "WARN",
+              f"{len(gaps)} model(s) measured, worst gap "
+              f"{gaps[0][0]:+.1f}pp ({gaps[0][1]}{_tag(gaps[0][1])}).{tail}")
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -1769,14 +1951,35 @@ def run_system_health(run_date: str | None = None) -> dict:
         # worker (job 82908, 683 rows — the whole table) and `_TEAM_UPSERT`
         # overwrites classification and conference unconditionally from CFBD.
         # Both came back `fbs`; the count stayed 138. CFBD asserts they are FBS
-        # programs, so what this check finds is a NEWLY PROMOTED school: SP+
-        # needs FBS history and lags a promotion by a season.
+        # programs, so what this check finds is a NEWLY PROMOTED school. Why it
+        # is unrated is a matter of WHICH season's SP+ we read (next paragraph).
         #
-        # WARN, not CRIT, and NOT ACTIONABLE BY A RE-PULL: nothing is mispriced
-        # — `features.ncaaf_feature_engine._is_fbs` requires the SP+ rating, so
-        # these decline at the gate with a name. It clears when SP+ rates the
-        # school. Worth a row anyway: it is the standing answer to "why is that
-        # game not on the board?".
+        # NOT ACTIONABLE BY A RE-PULL, AND IT DOES NOT CLEAR WHEN "SP+ RATES
+        # IT" (corrected 2026-10-12). A season's `sp_overall` is CFBD's PRIOR
+        # season's final SP+, held constant all year
+        # (cfbd_ingestor._prior_season_context; measured: one distinct value
+        # per team-season). Both schools were FCS in 2025, which SP+ does not
+        # rate, so they are blank for all of 2026 by design. A rating can first
+        # land when the season label rolls to 2027 on March 1 and the 2027
+        # preseason rows are built from the 2026 final SP+ — and only if CFBD
+        # rates them. Until then this check was STALE for 30 straight days
+        # (2026-09-13 → 10-12), and the failure alerter repeats a standing
+        # STALE warning to the ops channel every 12 hours
+        # (tracking/failure_alerter.RENOTIFY_WARN_MIN) — about something
+        # nobody could act on.
+        #
+        # So a school in config.NCAAF_PROMOTED_TO_FBS is EXPECTED to be unrated
+        # in its promotion season and is reported in the OK detail, with the
+        # reason and the earliest date it can change. The exemption ends with
+        # that season by itself: a listed school still unrated the season after
+        # is STALE again, and any other FBS school with no rating is STALE as
+        # before. Nothing about the games changes — `_is_fbs` still declines
+        # them at the gate, which is correct: an unrated school cannot be
+        # modelled because `sp_overall` is itself a feature.
+        #
+        # WARN, not CRIT: nothing is mispriced, the gate declines the game.
+        # Worth a row anyway: it is the standing answer to "why is that game
+        # not on the board?".
         # Season label = calendar year of the FALL (cfbd_ingestor.
         # ncaaf_season_for_date); never derived by hand — CLAUDE.md section 4.
         from data.ingestors.cfbd_ingestor import ncaaf_season_for_date
@@ -1793,15 +1996,49 @@ def run_system_health(run_date: str | None = None) -> dict:
                   )
                 ORDER BY t.school
             """, (season_now,)).fetchall()
-            if unrated:
-                named = "; ".join(f"{row[0]} [{row[1] or '?'}]" for row in unrated[:5])
-                more = f" (+{len(unrated) - 5} more)" if len(unrated) > 5 else ""
+            # Read at call time, not imported, so the list is whatever config
+            # holds now (and a test can substitute it).
+            promoted = getattr(config, "NCAAF_PROMOTED_TO_FBS", {}) or {}
+            expected = [row for row in unrated
+                        if promoted.get(row[0]) == season_now]
+            alarming = [row for row in unrated
+                        if promoted.get(row[0]) != season_now]
+            expected_note = ""
+            if expected:
+                names = "; ".join(f"{row[0]} [{row[1] or '?'}]" for row in expected)
+                expected_note = (
+                    f"{len(expected)} school(s) newly promoted to FBS in "
+                    f"{season_now} have no {season_now} SP+ by design and their "
+                    f"games are declined at the FBS gate: {names}. A season's "
+                    f"SP+ is the prior season's final rating and they were FCS "
+                    f"in {season_now - 1}, so this cannot change before the "
+                    f"first run on or after {season_now + 1}-03-01, and only if "
+                    f"CFBD rates them")
+            if alarming:
+                def _label(row):
+                    since = promoted.get(row[0])
+                    if since is None:
+                        tag = ""
+                    elif since < season_now:
+                        tag = f", promoted in {since}, no longer exempt"
+                    else:
+                        tag = f", listed as promoted in {since}, not exempt yet"
+                    return f"{row[0]} [{row[1] or '?'}{tag}]"
+                named = "; ".join(_label(row) for row in alarming[:5])
+                more = f" (+{len(alarming) - 5} more)" if len(alarming) > 5 else ""
                 r.add("ncaaf_fbs_registry", STALE, "WARN",
-                      f"{len(unrated)} FBS school(s) with no {season_now} SP+ "
+                      f"{len(alarming)} FBS school(s) with no {season_now} SP+ "
                       f"rating — their games are declined at the FBS gate and "
-                      f"never reach the board: {named}{more}. Usually a newly "
-                      f"promoted program; clears when SP+ rates it. A "
-                      f"ncaaf_teams_refresh does NOT fix this (tried 2026-09-13)")
+                      f"never reach the board: {named}{more}. Not a newly "
+                      f"promoted school in its first FBS season "
+                      f"(config.NCAAF_PROMOTED_TO_FBS), so this is not expected. "
+                      f"A ncaaf_teams_refresh does NOT fix a missing rating "
+                      f"(tried 2026-09-13)"
+                      + (f". Separately, {expected_note}" if expected_note else ""))
+            elif expected:
+                r.add("ncaaf_fbs_registry", OK, "WARN",
+                      f"every established FBS school carries a {season_now} SP+ "
+                      f"rating; {expected_note}")
             else:
                 r.add("ncaaf_fbs_registry", OK, "WARN",
                       f"every FBS school carries a {season_now} SP+ rating")
@@ -1847,6 +2084,21 @@ def run_system_health(run_date: str | None = None) -> dict:
         #
         # WARN at 5pp (the documented go-live criterion), CRIT at 8pp. Gated on
         # 150 graded picks so a new or thin model is SKIPPED rather than accused.
+        #
+        # TWO SOURCES, ONE VERDICT (2026-10-12). The graded view below grades
+        # MLB and WNBA pre-game models only, so every NBA, NHL, NFL, NCAAF and
+        # UFC model, every in-play model and every market rule was invisible
+        # here -- the same blind spot the weekly fitter closed on 2026-09-19
+        # (docs/probability_calibration.md, "A third graded source"). Those are
+        # now read from settled bets in `picks` (_calibration_bet_only_rows),
+        # labelled bet-only in the detail. And a PAUSED model is reported but
+        # never judged (_report_model_calibration says why).
+        #
+        # ONE RESULT PER RUN. A failed query used to add an ERROR and then fall
+        # through to add a SKIPPED as well; the persist below upserts on
+        # (run_date, check_name), so the SKIPPED overwrote the ERROR and the
+        # stored row hid the failure. A failure is now the only result.
+        source = "graded-pick view"
         try:
             rows = conn.execute("""
                 WITH regime AS (
@@ -1865,7 +2117,8 @@ def run_system_health(run_date: str | None = None) -> dict:
                        AVG(COALESCE(p.model_probability_cal, o.model_probability))
                            * 100 AS claimed,
                        100.0 * COUNT(*) FILTER (WHERE o.result = 'WIN') / COUNT(*) AS realised,
-                       MIN(g.since) AS since
+                       MIN(g.since) AS since,
+                       MAX(o.game_date) AS last_graded
                 FROM mv_scored_pick_outcomes o
                 JOIN regime g ON g.model_id = o.model_id
                 LEFT JOIN picks p ON p.pick_id = o.pick_id
@@ -1875,44 +2128,21 @@ def run_system_health(run_date: str | None = None) -> dict:
                 GROUP BY o.model_id
                 HAVING COUNT(*) >= 150
             """).fetchall()
+            source = "settled-bet"
+            bet_only_rows = _calibration_bet_only_rows(
+                conn, _calibration_bet_only_models())
         except Exception as exc:
             # Roll back before anything else touches this connection: a failed
             # statement aborts the Postgres transaction, and the persist below
             # now runs AFTER this block, so without the rollback one broken
             # calibration query would discard every result in the run.
             getattr(conn, "rollback", lambda: None)()
-            r.add("model_calibration", ERROR, "WARN", f"query failed: {exc}")
-            rows = []
-        if rows:
-            gaps = sorted(((float(c) - float(rl), m, int(n))
-                           for m, n, c, rl, _since in rows), reverse=True)
-            crit = [g for g in gaps if g[0] >= 8.0]
-            warn = [g for g in gaps if 5.0 <= g[0] < 8.0]
-            worst = ", ".join(f"{m} +{g:.1f}pp/{n}" for g, m, n in gaps[:4] if g >= 5.0)
-            flagged = [m for _, m, _ in crit + warn]
-            extra = _calibration_eligibility_notes(conn, flagged)
-            extra_txt = (" " + " ".join(extra) + ".") if extra else ""
-            if crit:
-                r.add("model_calibration", STALE, "WARN",
-                      f"{len(crit)} model(s) 8pp+ overconfident at the probability "
-                      f"actually bet: {worst}. A threshold cannot fix a "
-                      f"calibration error.{extra_txt}",
-                      reason=f"{crit[0][0]:.0f}pp overconfident")
-            elif warn:
-                r.add("model_calibration", STALE, "WARN",
-                      f"{len(warn)} model(s) 5-8pp overconfident: {worst}.{extra_txt}",
-                      reason=f"{warn[0][0]:.0f}pp overconfident")
-            else:
-                r.add("model_calibration", OK, "WARN",
-                      f"{len(gaps)} model(s) measured, worst gap "
-                      f"{gaps[0][0]:+.1f}pp ({gaps[0][1]})")
+            r.add("model_calibration", ERROR, "WARN",
+                  f"{source} query failed: {exc}")
         else:
-            # Honest, and it un-skips on its own as picks accrue under the
-            # current regime -- it does not mean "calibrated".
-            r.add("model_calibration", SKIPPED, "WARN",
-                  "no model has 150+ graded picks yet under its current "
-                  "version and promoted calibration map",
-                  reason="Nothing to check")
+            # SKIPPED (inside) is honest, and it un-skips on its own as picks
+            # accrue under the current regime -- it does not mean "calibrated".
+            _report_model_calibration(r, conn, rows, bet_only_rows)
 
         # ── Persist + summarize ──────────────────────────────────────────────
         # This runs AFTER every check, model_calibration included. It used to

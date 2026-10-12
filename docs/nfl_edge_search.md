@@ -276,7 +276,8 @@ The implied edge from the mechanism and the line's own adjustment is about −1%
 
 ## 7. Data this search did not buy
 
-None was bought. Each item is a credits decision.
+None was bought on 2026-10-11. The first two rows were bought on 2026-10-12
+(§9); the last two are still not bought.
 
 | data | what it would answer | credits |
 |---|---|---|
@@ -290,6 +291,66 @@ counts. The research agent did the arithmetic; nothing was measured on a live
 call.
 
 ---
+
+## 9. 2026-10-12: the decisions carried out
+
+mike: "1) yes 2) no 3) yes 4) yes 5) yes 6) merge 918".
+
+**The prop model is back on** (#920, `Updated-By: mike`).
+- `nfl_prop_market` now has an EV floor of 0.07 and decides on the sharp
+  reference's own probability.
+- Measured in the card's own setup (its six soft books, its own price), 0.07 on
+  2023-25 is 148 bets, ~49 a season, +21.95% (90% CI +7.7, +36.0). Every season
+  is positive (`scripts/nfl_edge_prop_market_floor.py part_a_card`).
+- The card drops props a book has pulled. On its first run after deploy (14:25Z)
+  it logged "26 quote(s) dropped". It found no qualifying edge on the one game in
+  range.
+
+**The settlement fallback** joins "Joshua" and "Josh" Palmer. It needs:
+- the same surname;
+- a matching first name: equal, a nickname, or a 3+ letter prefix;
+- that the pick's spelling appears nowhere else in the stat log.
+
+A first version without those guards matched 130 of 13,895 skill-player
+absences to a different player; the shipped version matches 0. The two picks
+were re-graded on production:
+- `Joshua Palmer Under 1.5 Rec (MGM)`: WIN, +0.54 units.
+- `Joshua Palmer Under 11.5 Rec Yds (betrivers)`: LOSS, −1 unit.
+
+**The two purchases** (#921, `data/ingestors/nfl_inplay_history.py`):
+
+| purchase | calls | credits | rows |
+|---|---|---|---|
+| halftime 2H spreads + totals, 2023-25 (835 games) | 2,941 + 409 event lists | 59,129 | 14,601 |
+| 2025 in-game h2h / spreads / totals every 5 min (285 games) | 5,491 | 164,700 | 216,782 |
+
+Both purchases sit in `nfl_odds_history` with a `source` marker, and every call
+is recorded in `nfl_odds_history_pulls`.
+
+**Halftime, out of sample at real prices** (`scripts/nfl_edge_halftime_oos.py`): null.
+- Real 2H lines carry about −115 on both sides, so break-even is ~53.5%, not the
+  52.4% the SBR study assumed.
+- None of the 9 frozen rules survives Benjamini-Hochberg. Wind ≥ 15 mph 2H
+  under: 51 bets, −0.7%.
+- The trailing-team rule went −15% on the 217 bets outside its published record.
+- 2H dogs +7: 47 bets, +10.7%, p 0.22.
+- The market does over-react to the first half: +0.058 points per point of
+  surprise (90% CI +0.006, +0.111). That is smaller than the vig.
+
+**2025 in-game, at real prices** (`scripts/nfl_edge_inplay_2025.py`): null.
+- 0 of 132 cells survive Benjamini-Hochberg.
+- Late-game leader moneylines at DraftKings: −4.6% to +2.7% across cuts.
+- DraftKings' live hold is 5.6% on the moneyline, 6.6% on spreads and 6.7% on
+  totals, against 4.3-4.7% pre-kick.
+- The only positive cells come from the best of five books at one snapshot.
+  Graded at the median book they earn +1.1%: the gain is a book that had not
+  caught up, i.e. cross-book latency, not a model.
+- A second season would cost about 161,940 credits (2024).
+
+**The fetched free data** is in `nfl_research_data_backup`:
+- 3,067 files, 467 MB raw, 271.6 MB gzipped;
+- `--verify` found 0 mismatches;
+- two files were spot-restored.
 
 ## 8. Reproduce
 

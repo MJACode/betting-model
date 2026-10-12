@@ -1,7 +1,7 @@
 """
 Discord webhook notifications — routes generated picks to per-sport channels.
 
-Three producers, each independently enabled by whether its webhook is configured:
+Producers, each independently enabled by whether its webhook is configured:
 
   • notify_discord_signals — a pick posts to its SPORT's channel the first time
     it clears the action thresholds (the same cut the app's Signals tab and the
@@ -13,6 +13,9 @@ Three producers, each independently enabled by whether its webhook is configured
     channel, else the sport's pre-game channel.
   • notify_discord_results — one morning recap after settlement: yesterday's
     record, P&L and ROI, overall and by sport.
+  • notify_discord_void — one gray notice per sport for picks that are already
+    VOID and already posted. Writes push_sent kind discord_void only after
+    Discord accepts the message. Does not edit or delete the original post.
 
 Dedupe reuses the existing `push_sent` ledger (UNIQUE(lock_key, kind)) with
 discord_* kinds, so a Discord post is independent of the mobile push for the
@@ -34,6 +37,7 @@ pipeline step or the live loop.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import time
@@ -51,7 +55,9 @@ from tracking.publish_lock import (
     DISCORD_LIVE_LOCK, DISCORD_SIGNALS_LOCK, publish_lock,
 )
 from tracking.publish_filters import captured_not_voided_sql, live_publishable_sql
-from tracking.publish_keys import live_lock_key_sql
+from tracking.publish_keys import (
+    SIGNAL_LEDGER_SQL, channel_lock_held_sql, live_lock_key_sql,
+)
 from tracking.publish_keys import key_partition_sql, lock_key_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
@@ -79,6 +85,7 @@ _COLOR_LIVE = 0xE74C3C          # red
 _COLOR_RESULTS_UP = 0x2ECC71
 _COLOR_RESULTS_DOWN = 0xE74C3C
 _COLOR_RESULTS_FLAT = 0x95A5A6
+_COLOR_VOID = 0x95A5A6          # gray — a void notice is not a bet
 
 # Models whose record is tracked but whose money is not counted (mirrors the
 # mobile RECORD_ONLY_MODELS and the v_model_full_outcome_record zeroing).
@@ -332,6 +339,25 @@ def _message_url(url: str, message_id: str) -> str:
     return f"{url.split('?', 1)[0].rstrip('/')}/messages/{message_id}"
 
 
+# urllib3 puts the request URL in timeout and connection errors. A webhook
+# URL is the credential, so a delivery log must not keep it.
+_WEBHOOK_IN_TEXT = re.compile(
+    r"(?:https?://[^\s'\"<>]+)?/api/webhooks/\d+/[A-Za-z0-9._=\-]+",
+    re.IGNORECASE,
+)
+
+
+def _redact_delivery_error(exc: BaseException, url: str) -> str:
+    """Exception type plus message, with every webhook URL removed."""
+    text = str(exc)
+    bare = url.split("?", 1)[0]
+    for secret in (url, bare):
+        if secret:
+            text = text.replace(secret, "[webhook]")
+    text = _WEBHOOK_IN_TEXT.sub("[webhook]", text)
+    return f"{type(exc).__name__}: {text}"
+
+
 def _post(url: str, payload: dict) -> str | None:
     """POST one webhook message. Returns the MESSAGE ID on a confirmed success
     and None on failure, so the caller knows both whether it is safe to ledger
@@ -380,10 +406,15 @@ def _post(url: str, payload: dict) -> str | None:
             logger.error(f"Discord webhook rejected ({resp.status_code}): {resp.text[:200]}")
             return None
         except Exception as exc:  # noqa: BLE001 — delivery must never break a run
+            # A timeout (or a dropped connection) can mean Discord already
+            # accepted this POST and the response never arrived. Retrying
+            # then posts a second copy of the same message. Left as it is:
+            # this retry predates the void notice, and changing it would
+            # change every producer that calls _post.
             if attempt < _MAX_RETRIES:
                 time.sleep(1.0 * (attempt + 1))
                 continue
-            logger.error(f"Discord webhook post failed: {exc}")
+            logger.error(f"Discord webhook post failed: {_redact_delivery_error(exc, url)}")
             return False
     logger.error("Discord webhook still rate-limited after retries; will retry next pass")
     return None
@@ -636,10 +667,7 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
                    OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
-              AND NOT EXISTS (
-                  SELECT 1 FROM push_sent s
-                  WHERE s.lock_key = {lock_key_sql()} AND s.kind = 'discord_signal'
-              )
+              AND NOT ({channel_lock_held_sql(lock_key_sql(), 'discord_signal')})
             GROUP BY p.model_id
             ORDER BY p.model_id
         """, (target_date,)).fetchall()
@@ -749,10 +777,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
-        WHERE NOT EXISTS (
-            SELECT 1 FROM push_sent s
-            WHERE s.lock_key = bet.lock_key AND s.kind = 'discord_signal'
-        )
+        WHERE NOT ({channel_lock_held_sql('bet.lock_key', 'discord_signal')})
         ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{
@@ -1487,10 +1512,8 @@ def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
         for chunk, message_id in chunks:
             for s in chunk:
                 conn.execute(
-                    "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
-                    "VALUES (%s, 'discord_signal', %s, %s) "
-                    "ON CONFLICT (lock_key, kind) DO NOTHING",
-                    (s["lock_key"], sent_at, message_id),
+                    SIGNAL_LEDGER_SQL,
+                    (s["lock_key"], "discord_signal", sent_at, message_id),
                 )
         posted_total += delivered
 
@@ -1532,11 +1555,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
           AND p.signal_type = 'BET'
           AND p.result IS NULL
           {live_publishable_sql()}
-          AND NOT EXISTS (
-              SELECT 1 FROM push_sent s
-              WHERE s.lock_key = {live_lock_key_sql()}
-                AND s.kind = 'discord_live'
-          )
+          AND NOT ({channel_lock_held_sql(live_lock_key_sql(), 'discord_live')})
         ORDER BY p.game_id
     """, (target_date,)).fetchall()
     return [{
@@ -1616,10 +1635,8 @@ def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
         for chunk, message_id in chunks:
             for s in chunk:
                 conn.execute(
-                    "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
-                    "VALUES (%s, 'discord_live', %s, %s) "
-                    "ON CONFLICT (lock_key, kind) DO NOTHING",
-                    (s["lock_key"], sent_at, message_id),
+                    SIGNAL_LEDGER_SQL,
+                    (s["lock_key"], "discord_live", sent_at, message_id),
                 )
         posted_total += delivered
 
@@ -2174,6 +2191,338 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             f"✓ Discord(results): {'restated' if restate else 'posted'} "
             f"recap for {game_date}")
         return 1
+    finally:
+        conn.close()
+
+
+# ── Void notice ──────────────────────────────────────────────────────────────
+# A one-off. Picks that were already posted, then VOIDED, stay on the app
+# board because v_discord_published returns the discord_signal row. This
+# posts a gray notice and, only after Discord accepts it, ledger
+# kind discord_void. The view then drops the lock. The original message
+# is left where it was: this path never edits or deletes.
+
+VOID_NOTICE_REASON = (
+    "Voided: priced off a stale sportsbook line after our odds feed dropped "
+    "the game. These picks are void and do not count in the record. The "
+    "original posts are left as they were."
+)
+
+_EMBED_TOTAL_MAX = 6000
+_EMBED_DESCRIPTION_MAX = 4096
+_FIELD_NAME_MAX = 256
+_FIELD_VALUE_MAX = 1024
+
+
+class DiscordVoidRejected(ValueError):
+    """The list is not postable. Nothing was sent and nothing was written."""
+
+
+def _void_title(sport: str) -> str:
+    """Same emoji the slate embeds use. NCAAF is '🏈 NCAAF · Voided picks'."""
+    emoji = _SPORT_EMOJI.get(sport, "\U0001f3af")
+    return f"{emoji} {sport} \u00b7 Voided picks"
+
+
+def _known_channel_ids(sport: str | None) -> tuple[str, str]:
+    """Guild id and channel id for a jump link, when both are known.
+
+    Config stores webhook URLs, which are credentials, not a guild id and a
+    channel id. The ledger does not store either id. Nothing here calls
+    Discord to look them up. Both empty means the notice omits the line.
+    """
+    del sport  # no per-sport channel id is configured
+    return "", ""
+
+
+def _discord_jump_line(message_id, guild_id: str | None,
+                       channel_id: str | None) -> str | None:
+    """https://discord.com/channels/<guild>/<channel>/<message>, or nothing.
+
+    That URL has no webhook token. A missing id drops the line rather than
+    printing the snowflake or the webhook address.
+    """
+    if message_id is None or str(message_id) in ("", _POST_OK_NO_ID):
+        return None
+    guild = (guild_id or "").strip()
+    channel = (channel_id or "").strip()
+    mid = str(message_id).strip()
+    if not (guild.isdigit() and channel.isdigit() and mid.isdigit()):
+        return None
+    return f"https://discord.com/channels/{guild}/{channel}/{mid}"
+
+
+def _void_field(pick: dict, webhook_url: str | None) -> dict:
+    """One pick. The name is pick_label, word for word."""
+    label = str(pick.get("label") or "")
+    matchup = _matchup(pick.get("sport"), pick.get("home"), pick.get("away"))
+    odds, book = publish_price(pick)
+    price = _american(odds)
+    if book:
+        price = f"{price} @ {book}"
+    game_date = pick.get("game_date") or ""
+    if hasattr(game_date, "isoformat"):
+        game_date = game_date.isoformat()
+    posted = _posted_et(
+        None if pick.get("posted_at") is None else str(pick.get("posted_at"))
+    )
+    bits = [x for x in (
+        matchup,
+        price,
+        " \u00b7 ".join(x for x in (
+            f"game {game_date}" if game_date else "",
+            f"posted {posted}" if posted else "",
+        ) if x),
+    ) if x]
+    guild_id, channel_id = _known_channel_ids(pick.get("sport"))
+    original = _discord_jump_line(pick.get("message_id"), guild_id, channel_id)
+    if original:
+        bits.append(original)
+    return {"name": label, "value": "\n".join(bits), "inline": False}
+
+
+def _embed_size(title: str, description: str, fields: list[dict]) -> int:
+    return (len(title) + len(description or "")
+            + sum(len(f["name"]) + len(f["value"]) for f in fields))
+
+
+def void_notice_embeds(sport: str, picks: list[dict], reason: str,
+                       webhook_url: str | None) -> list[dict]:
+    """Gray embeds for one sport, chunked at Discord's 25-field and 6000-char caps.
+
+    The reason is the description of every embed, so a later page still says
+    why. One embed per message is the caller's job.
+    """
+    if len(reason) > _EMBED_DESCRIPTION_MAX:
+        raise DiscordVoidRejected(
+            [f"reason is {len(reason)} characters; Discord's description cap "
+             f"is {_EMBED_DESCRIPTION_MAX}"])
+    title = _void_title(sport)
+    fields = [_void_field(p, webhook_url) for p in picks]
+    for field in fields:
+        if len(field["name"]) > _FIELD_NAME_MAX or len(field["value"]) > _FIELD_VALUE_MAX:
+            raise DiscordVoidRejected(
+                [f"pick field exceeds Discord's size limit: {field['name'][:80]}"])
+    chunks: list[list[dict]] = []
+    cur: list[dict] = []
+    for field in fields:
+        trial = cur + [field]
+        over = (len(trial) > _FIELDS_PER_EMBED
+                or _embed_size(title, reason, trial) > _EMBED_TOTAL_MAX)
+        if cur and over:
+            chunks.append(cur)
+            cur = [field]
+        else:
+            cur = trial
+        if _embed_size(title, reason, cur) > _EMBED_TOTAL_MAX:
+            raise DiscordVoidRejected(
+                ["one pick does not fit in a Discord embed"])
+    if cur:
+        chunks.append(cur)
+    return [{
+        "title": title,
+        "description": reason,
+        "color": _COLOR_VOID,
+        "fields": chunk,
+    } for chunk in chunks]
+
+
+def _normalize_void_ids(pick_ids) -> list[int]:
+    if isinstance(pick_ids, (str, bytes)) or not isinstance(pick_ids, (list, tuple)):
+        raise DiscordVoidRejected(
+            ["pick_ids must be a non-empty list of pick ids"])
+    if len(pick_ids) == 0:
+        raise DiscordVoidRejected(
+            ["pick_ids must be a non-empty list of pick ids"])
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in pick_ids:
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise DiscordVoidRejected(
+                [f"pick id {raw!r} is not an integer"])
+        if raw <= 0:
+            raise DiscordVoidRejected([f"pick id {raw} is not a pick"])
+        if raw not in seen:
+            seen.add(raw)
+            ids.append(raw)
+    return ids
+
+
+def _void_rows_sql() -> str:
+    key = (f"CASE WHEN p.is_live THEN {live_lock_key_sql('p')} "
+           f"ELSE {lock_key_sql('p')} END")
+    return f"""
+        SELECT p.pick_id, p.sport, p.model_id, p.game_id, p.game_date,
+               p.pick_side, p.pick_label, p.condition_status,
+               p.dk_odds, p.best_odds, p.best_book,
+               p.is_live, p.player_id, p.player_key, p.prop_market,
+               p.created_at, g.home_team, g.away_team,
+               {key} AS lock_key,
+               sig.message_id, sig.sent_at,
+               (sig.kind IS NOT NULL) AS has_signal,
+               (void.kind IS NOT NULL) AS already_voided
+          FROM picks p
+          LEFT JOIN games g ON g.game_id = p.game_id
+          LEFT JOIN push_sent sig
+            ON sig.lock_key = {key}
+           AND sig.kind = CASE WHEN p.is_live THEN 'discord_live'
+                               ELSE 'discord_signal' END
+          LEFT JOIN push_sent void
+            ON void.lock_key = {key}
+           AND void.kind = 'discord_void'
+         WHERE p.pick_id = ANY(%s)
+    """
+
+
+def _pick_from_row(row) -> dict:
+    game_date = row[4]
+    if hasattr(game_date, "isoformat"):
+        game_date = game_date.isoformat()
+    posted = row[20] if row[20] is not None else row[15]
+    return {
+        "pick_id": int(row[0]),
+        "sport": row[1],
+        "model_id": row[2],
+        "game_id": row[3],
+        "game_date": game_date,
+        "side": row[5],
+        "label": row[6],
+        "condition_status": row[7],
+        "dk_odds": row[8],
+        "best_odds": row[9],
+        "best_book": row[10],
+        "is_live": bool(row[11]),
+        "home": row[16],
+        "away": row[17],
+        "lock_key": row[18],
+        "message_id": None if row[19] is None else str(row[19]),
+        "posted_at": posted,
+        "has_signal": bool(row[21]),
+        "already_voided": bool(row[22]),
+    }
+
+
+def _reject_void_candidates(wanted: list[int], picks: list[dict]) -> None:
+    """Every requested pick is VOID and already posted, or the call fails."""
+    by_id = {p["pick_id"]: p for p in picks}
+    problems: list[str] = []
+    for pick_id in wanted:
+        pick = by_id.get(pick_id)
+        if pick is None:
+            problems.append(f"pick {pick_id} was not found")
+            continue
+        if not pick["sport"]:
+            problems.append(f"pick {pick_id} has no sport")
+        if pick["condition_status"] != "VOID":
+            problems.append(
+                f"pick {pick_id} condition_status is "
+                f"{pick['condition_status']!r}, not VOID")
+        kind = "discord_live" if pick["is_live"] else "discord_signal"
+        if not pick["has_signal"]:
+            problems.append(f"pick {pick_id} has no {kind} row")
+    if problems:
+        raise DiscordVoidRejected(problems)
+
+
+def _ledger_void(conn, picks: list[dict], sent_at: str, message_id: str) -> None:
+    stored = None if message_id == _POST_OK_NO_ID else message_id
+    for pick in picks:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, 'discord_void', %s, %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (pick["lock_key"], sent_at, stored),
+        )
+    conn.commit()
+
+
+def notify_discord_void(pick_ids, reason: str | None = None,
+                        dry_run: bool = True) -> dict:
+    """Post one gray void notice per sport. dry_run is the default.
+
+    Validates the whole list before any post. A pick that is not VOID, or
+    that has no discord_signal (discord_live when the pick is in-play),
+    fails the call and nothing is sent. Locks that already have discord_void
+    are skipped; a rerun of a finished list is a no-op.
+
+    dry_run makes no HTTP call and no ledger write. It returns the exact
+    POST bodies. A failed post writes nothing for that message. This never
+    edits or deletes an existing Discord message.
+    """
+    ids = _normalize_void_ids(pick_ids)
+    text = VOID_NOTICE_REASON if reason is None or not str(reason).strip() else str(reason).strip()
+    if len(text) > _EMBED_DESCRIPTION_MAX:
+        raise DiscordVoidRejected(
+            [f"reason is {len(text)} characters; Discord's description cap "
+             f"is {_EMBED_DESCRIPTION_MAX}"])
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(_void_rows_sql(), (ids,)).fetchall()
+        picks = [_pick_from_row(r) for r in rows]
+        _reject_void_candidates(ids, picks)
+        by_id = {p["pick_id"]: p for p in picks}
+        ordered = [by_id[i] for i in ids]
+        skipped = [p["lock_key"] for p in ordered if p["already_voided"]]
+        pending = [p for p in ordered if not p["already_voided"]]
+        if not pending:
+            logger.info(f"Discord void: nothing to post; {len(skipped)} lock(s) "
+                        f"already noticed")
+            return {"dry_run": dry_run, "posted": 0,
+                    "skipped_lock_keys": skipped, "payloads": []}
+
+        by_sport: dict[str, list[dict]] = {}
+        for pick in pending:
+            by_sport.setdefault(pick["sport"] or "", []).append(pick)
+
+        payloads: list[dict] = []
+        for sport in sorted(by_sport):
+            url = _webhook_for_sport(sport)
+            embeds = void_notice_embeds(sport, by_sport[sport], text, url)
+            for index, embed in enumerate(embeds):
+                chunk = by_sport[sport][
+                    sum(len(e["fields"]) for e in embeds[:index]):
+                    sum(len(e["fields"]) for e in embeds[:index + 1])
+                ]
+                payloads.append({
+                    "sport": sport,
+                    "webhook_configured": bool(url),
+                    "payload": {"embeds": [embed]},
+                    "lock_keys": [p["lock_key"] for p in chunk],
+                })
+
+        if dry_run:
+            for item in payloads:
+                logger.info(f"[dry-run] discord void {item['sport']} "
+                            f"{json.dumps(item['payload'], default=str)}")
+            return {"dry_run": True, "posted": 0,
+                    "skipped_lock_keys": skipped, "payloads": payloads}
+
+        missing = sorted({item["sport"] for item in payloads
+                          if not item["webhook_configured"]})
+        if missing:
+            raise DiscordVoidRejected(
+                [f"no webhook for {sport}" for sport in missing])
+
+        sent_at = datetime.now(ET).isoformat()
+        posted = 0
+        message_ids: list[str] = []
+        by_key = {p["lock_key"]: p for p in pending}
+        for item in payloads:
+            url = _webhook_for_sport(item["sport"])
+            message_id = _post(url, item["payload"])
+            if not message_id:
+                raise DiscordVoidRejected(
+                    [f"Discord rejected the {item['sport']} void notice; "
+                     f"nothing was ledgered for that message"])
+            chunk = [by_key[k] for k in item["lock_keys"]]
+            _ledger_void(conn, chunk, sent_at, message_id)
+            posted += len(chunk)
+            message_ids.append(message_id)
+        logger.success(f"✓ Discord void: posted {posted} pick(s)")
+        return {"dry_run": False, "posted": posted,
+                "skipped_lock_keys": skipped, "message_ids": message_ids,
+                "payloads": payloads}
     finally:
         conn.close()
 

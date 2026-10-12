@@ -35,7 +35,7 @@ import { showToast } from '@/components/Toast';
 import { useNow } from '@/hooks/useNow';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
-import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
+import { addDays, etDate, formatAmerican, weekdayET, gameStatus } from '@/lib/format';
 import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
@@ -43,8 +43,15 @@ import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/qu
 import {
   buildSlateGameIndex,
   buildTonightSlate,
+  slateChipDisabled,
   slateGameFor,
   slateLabelFor,
+  slateReadKey,
+  SLATE_CHECKING_HINT,
+  TEAMS_SLATE_FAILED_HINT,
+  TEAMS_SLATE_OFF_HINT,
+  TEAMS_SLATE_ON_HINT,
+  teamsNoGamesHint,
   slateSubline,
   sublineSpoken,
 } from '@/lib/statsBoard';
@@ -154,10 +161,40 @@ export function TeamsBoard({
   const [slateFor, setSlateFor] = useState<Sport | null>(null);
   const [slateFailed, setSlateFailed] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Bumped by pull-to-refresh. The effect also re-runs when the ET date
+  // changes (useNow, including a resume), so yesterday's teams do not stay
+  // under "Playing today".
+  const [slateReload, setSlateReload] = useState(0);
+  // During render, not in an effect: the effect runs after paint, and that
+  // paint would still filter the new sport by the previous sport's teams.
+  const [slateSport, setSlateSport] = useState(sport);
+  if (slateSport !== sport) {
+    setSlateSport(sport);
+    setSlate({ date: '', isToday: false, games: [] });
+    setGameLines([]);
+    setSlateFailed(false);
+    setSlateFor(null);
+    setSlateOnly(false);
+  }
+  // One clock for every time-derived cell on the board — see hooks/useNow.
+  // Also the ET date the slate read is keyed on.
+  const now = useNow();
+  const etDay = etDate(new Date(now));
+  const slateKey = slateReadKey(sport, etDay);
+  // Same gap as a sport change: until this read returns, yesterday's teams
+  // would stay under an enabled chip. `slateFor` null is "checking".
+  const [slateDay, setSlateDay] = useState(etDay);
+  if (slateDay !== etDay) {
+    setSlateDay(etDay);
+    setSlate({ date: '', isToday: false, games: [] });
+    setGameLines([]);
+    setSlateFailed(false);
+    setSlateFor(null);
+  }
 
   useEffect(() => {
     let cancelled = false;
-    const from = todayET();
+    const from = etDay;
     // Today's games, or the next scheduled day for a sport that does not play
     // daily — the same rule the Players board's "Playing today" toggle uses.
     fetchSlateGames(sport, from, addDays(from, 7))
@@ -190,7 +227,7 @@ export function TeamsBoard({
     return () => {
       cancelled = true;
     };
-  }, [sport]);
+  }, [slateKey, etDay, sport, slateReload]);
 
   // Reset to the sport's default stat whenever the sport changes — the stat
   // sets do not overlap across sports, so keeping the old one would be invalid.
@@ -198,6 +235,13 @@ export function TeamsBoard({
     setStat(defaultTeamStatFor(sport));
     setQuery('');
     setSlateOnly(false); // a different sport is a different slate
+    // Drop the previous sport's games in the same commit. Until the new read
+    // lands, `hasSlate` would still be true and the chip would filter by the
+    // outgoing teams while VoiceOver says it is checking the schedule.
+    setSlate({ date: '', isToday: false, games: [] });
+    setGameLines([]);
+    setSlateFailed(false);
+    setSlateFor(null);
   }, [sport]);
 
   const load = useCallback(async () => {
@@ -221,6 +265,11 @@ export function TeamsBoard({
   }, [sport]);
 
   useEffect(() => {
+    void load();
+  }, [load]);
+
+  const refresh = useCallback(() => {
+    setSlateReload((n) => n + 1);
     void load();
   }, [load]);
 
@@ -277,8 +326,6 @@ export function TeamsBoard({
   const lineMarket = stat ? teamLineMarketFor(String(stat.key)) : 'h2h';
   // Only games that have NOT started: a game in progress has no line a user
   // can still take, and its "latest" pre-game row is a live number.
-  // One clock for every time-derived cell on the board — see hooks/useNow.
-  const now = useNow();
   const unstarted = useMemo(
     () => unstartedGameIds(slate.games, new Date(now).toISOString()),
     [slate.games, now],
@@ -418,18 +465,19 @@ export function TeamsBoard({
           label={hasSlate ? slateLabel : 'Playing today'}
           icon="calendar-outline"
           active={slateActive}
-          disabled={!hasSlate}
+          disabled={slateChipDisabled(slateChecking, hasSlate)}
           onPress={() => setSlateOnly((v) => !v)}
-          accessibilityLabel={
+          accessibilityLabel={hasSlate ? slateLabel : 'Playing today'}
+          accessibilityHint={
             slateChecking
-              ? 'Playing today, checking the schedule'
+              ? SLATE_CHECKING_HINT
               : slateFailed
-                ? 'Playing today, unavailable: the schedule could not be loaded'
+                ? TEAMS_SLATE_FAILED_HINT
                 : !hasSlate
-                  ? `Playing today, unavailable: no ${sport} games in the next week`
+                  ? teamsNoGamesHint(sport)
                   : slateActive
-                    ? `${slateLabel}, on. Showing only teams on this slate`
-                    : `${slateLabel}, off. Showing every team`
+                    ? TEAMS_SLATE_ON_HINT
+                    : TEAMS_SLATE_OFF_HINT
           }
         />
       </View>
@@ -521,7 +569,7 @@ export function TeamsBoard({
         initialNumToRender={20}
         // The board prints a clock on every row now, and this was one of the
         // two lists in the app whose pull gesture did nothing (UX review).
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
       />
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
