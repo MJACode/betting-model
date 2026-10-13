@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-13 | [2026-10](./2026-10.md) | 2026-10-12/13, a second in-game NFL season (2024, 161,940 credits) bought and graded: no clean cell survives pooled; late-leader moneyline at DraftKings pooled +9.4% on 167 bets, p 0.022, marginal |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, the three standing health alarms investigated (UFC placeholder rows and one wrong winner; a paused WNBA model; two newly promoted FBS schools); the line poller has deleted player-prop no-bet rows since 08-30, so the prop evaluation window is not clean after that date; fixes in #922, #923, #927, #928 |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, a missing `v_discord_void_notice` is an empty notice list (`PGRST205` / `Could not find the table` / `42P01`); permission, network, and server errors still leave a VOID unpublished |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, anon can read `v_discord_published` after the void-notice view: the grant is `(lock_key, kind, sent_at)`; release is strict `>`; a null void stamp does not hold the lock open; a failed notice read leaves a VOID unpublished; `v_discord_void_notice` is on the anon manifest and the PR CI tripwire |
