@@ -229,9 +229,10 @@ class FakeClock:
 class FakeClient:
     """Scripted ESPN states, one list per tick, for two games."""
 
-    def __init__(self, script, clock):
+    def __init__(self, script, clock, season_types=None):
         self.script = script
         self.clock = clock
+        self.season_types = season_types or {}
 
     def list_event_refs(self, now=None):
         return ["r1", "r2"]
@@ -240,7 +241,7 @@ class FakeClient:
         eid = {"r1": "E1", "r2": "E2"}[ref]
         return EventMeta(event_id=eid, date="2026-10-09T00:15Z", home_id="6", away_id="27",
                          home_abbr="DAL", away_abbr="TB", status_ref=None, situation_ref=None,
-                         plays_ref=None)
+                         plays_ref=None, season_type=self.season_types.get(eid, 2))
 
     def poll(self, meta, detail=True):
         rows = self.script[min(int(self.clock.t // 20), len(self.script) - 1)]
@@ -258,9 +259,9 @@ class FakeFeed:
         return self.payload
 
 
-def _run_loop(monkeypatch, script, payload, locked=False):
+def _run_loop(monkeypatch, script, payload, locked=False, season_types=None):
     clock = FakeClock()
-    client = FakeClient(script, clock)
+    client = FakeClient(script, clock, season_types)
     feed = FakeFeed(payload)
     writes, notes, evals = [], [], []
     ctx2 = G.GameContext(game_id="NFL_E2", game_date="2026-10-08", home="NYG", away="WAS",
@@ -311,7 +312,9 @@ def test_one_bet_per_game_and_the_five_minute_cadence(monkeypatch):
     rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, payload)
     assert rc == 0
     assert len(writes) == 1 and writes[0]["pick_label"] == "TB ML (live)"
-    assert notes == ["2026-10-08"]
+    # Announced on the pass that wrote it AND every live pass after, so a
+    # failed post is retried (the notifiers' ledgers make repeats no-ops).
+    assert set(notes) == {"2026-10-08"} and len(notes) > 1
     e1_evals = [t for e, t in evals if e == "E1"]
     e2_evals = [t for e, t in evals if e == "E2"]
     assert e1_evals == [0.0]
@@ -352,3 +355,54 @@ def test_an_unanswered_status_feed_is_not_an_empty_slate(monkeypatch):
         [{"E1": final, "E2": final}] * 4
     rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -500))
     assert rc == 0 and len(writes) == 1
+
+
+def test_preseason_and_unknown_season_types_are_never_priced(monkeypatch):
+    e1 = live_state(eid="E1", poss="away")
+    e2 = live_state(eid="E2", home=20, away=14, poss="home")
+    final = live_state(eid="E1", state="post", final=True, evaluable=False)
+    ticks = [{"E1": e1, "E2": e2}] * 3 + [{"E1": final, "E2": final}] * 4
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -500),
+                                               season_types={"E1": 1, "E2": None})
+    assert rc == 0 and writes == [] and evals == [] and feed.fetches == 0
+
+
+def test_a_standing_bet_from_an_earlier_process_is_still_announced(monkeypatch):
+    e1 = live_state(eid="E1", poss="away")
+    e2 = live_state(eid="E2", home=20, away=14, poss="home", evaluable=False, reason="x")
+    final = live_state(eid="E1", state="post", final=True, evaluable=False)
+    ticks = [{"E1": e1, "E2": e2}] * 3 + [{"E1": final, "E2": final}] * 4
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -500),
+                                               locked=True)
+    assert writes == [] and notes and set(notes) == {"2026-10-08"}
+
+
+def test_the_pick_row_binds_every_parameter_of_the_real_insert(art):
+    """_insert_picks binds ~40 named parameters; a key the loop forgot would
+    raise on the first live BET, inside a non-fatal try that only logs. Run the
+    REAL insert against a recording connection."""
+    import re
+
+    from models.scorer import _insert_picks
+
+    class Rec:
+        def __init__(self):
+            self.calls = []
+
+        def executemany(self, sql, rows):
+            self.calls.append((sql, list(rows)))
+
+    d = M.decide(art, period=4, secs=300, home_score=16, away_score=24, possession="away",
+                 spread_home=-8.5, home_price=450, away_price=-500)
+    pick = G.build_pick(CTX, live_state(poss="away"), d, 1000.0)
+    conn = Rec()
+    _insert_picks(conn, [dict(pick)])
+    sql, rows = conn.calls[0]
+    names = set(re.findall(r"%\((\w+)\)s", sql))
+    assert len(names) >= 35
+    missing = names - set(rows[0])
+    assert not missing, f"the pick row lacks {sorted(missing)}"
+    r = rows[0]
+    assert r["decision_book"] == "draftkings" and r["decision_odds"] == -500.0
+    assert r["model_probability_cal"] == r["model_probability"]   # its own probability
+    assert r["is_live"] is True and r["best_book"] is None

@@ -27,8 +27,12 @@ ONE PASS (every NFL_LIVE_LEADER_POLL_STATE_SEC, default 20 s)
      change WE saw (data/live_quote_guard.quote_predates_score); otherwise
      model.decide(). The first BET per game is written and locked; the game
      is not evaluated again.
-  6. One announcement per pass (push, then Discord's NFL live channel), the
-     ncaaf_live path.
+  6. Every pass asks the notifiers (push, then Discord's NFL live channel, the
+     ncaaf_live path) about each slate date that carries a BET of record, so a
+     failed post is retried; their ledgers make the repeats no-ops.
+
+Regular season and playoffs only (ESPN core season type 2 or 3): the model
+was trained on nothing else, and a preseason 4th quarter is backups.
 
 WHAT IS NOT HERE, ON PURPOSE. No price floor or ceiling, no edge cap, no
 book-move or settled-state guard: none existed in the backtest, so each would
@@ -71,6 +75,7 @@ EVAL_EVERY_SEC = float(os.environ.get("NFL_LIVE_LEADER_EVAL_SEC", "300"))
 IDLE_EXIT_TICKS = int(os.environ.get("NFL_LIVE_LEADER_IDLE_EXIT_TICKS", "3"))
 FEED_FAIL_EXIT_TICKS = int(os.environ.get("NFL_LIVE_LEADER_FEED_FAIL_EXIT_TICKS", "45"))
 EVENT_REFRESH_SEC = 300.0
+SEASON_TYPES = (2, 3)        # ESPN core: 1 preseason, 2 regular season, 3 postseason
 
 
 # ─── the cadence ──────────────────────────────────────────────────────────────
@@ -356,6 +361,14 @@ def main(argv=None) -> int:
     contexts: dict[str, GameContext | None] = {}
     done: set[str] = set()                        # games with their BET of record
     finished: set[str] = set()                    # games ESPN reports final
+    # Slate dates that carry a BET of record from this model. Announced on
+    # EVERY pass, not only the pass that wrote it: a push 5xx or a webhook
+    # added mid-game would otherwise leave the bet unposted for the rest of the
+    # slate. Both notifiers dedupe through their ledgers, so a repeat is a
+    # no-op (ncaaf_live.gameday.write_picks has the same rule).
+    bet_dates: set[str] = set()
+    skipped: set[str] = set()                     # event refs outside REG/POST
+    listed = False
     bankroll: float | None = None
     last_list = 0.0
     idle = fails = 0
@@ -374,7 +387,7 @@ def main(argv=None) -> int:
         while True:
             started = time.monotonic()
             now = datetime.now(timezone.utc)
-            if not metas or started - last_list >= EVENT_REFRESH_SEC:
+            if not listed or started - last_list >= EVENT_REFRESH_SEC:
                 refs = client.list_event_refs(now)
                 if refs is None:
                     fails += 1
@@ -386,11 +399,22 @@ def main(argv=None) -> int:
                     continue
                 fails = 0
                 last_list = started
+                listed = True
                 for ref in refs:
-                    if ref not in metas:
+                    if ref not in metas and ref not in skipped:
                         m = client.event_meta(ref)
-                        if m is not None:
-                            metas[ref] = m
+                        if m is None:
+                            continue
+                        if m.season_type not in SEASON_TYPES:
+                            # Trained on regular season and playoffs only. A
+                            # preseason 4th quarter is backups, and a missing
+                            # season type is a shape change, not a REG game.
+                            skipped.add(ref)
+                            log.info("%s %s @ %s: season type %s is not regular season or "
+                                     "playoffs - not priced", m.event_id, m.away_abbr,
+                                     m.home_abbr, m.season_type)
+                            continue
+                        metas[ref] = m
 
             states = [client.poll(m) for m in metas.values()
                       if m.event_id not in done and m.event_id not in finished]
@@ -430,7 +454,6 @@ def main(argv=None) -> int:
                 if cadence.due(s.event_id, mono):
                     due.append(s)
 
-            notify_date = None
             if due:
                 meta_by_id = {m.event_id: m for m in metas.values()}
                 ready: list[tuple[LiveState, GameContext]] = []
@@ -443,6 +466,7 @@ def main(argv=None) -> int:
                                 log.info("%s already carries its BET of record - not "
                                          "evaluating again", ctx.game_id)
                                 done.add(s.event_id)
+                                bet_dates.add(ctx.game_date)
                         except Exception as exc:          # noqa: BLE001
                             log.error("context load failed for %s: %s", s.event_id, exc)
                             conn = _recycle(conn)
@@ -499,7 +523,7 @@ def main(argv=None) -> int:
                                 bets_written += 1
                                 log.info("WROTE BET %s %s at %+.0f wp=%.4f edge=%+.4f",
                                          MODEL_ID, pick["pick_label"], d.price, d.wp, d.edge)
-                            notify_date = ctx.game_date
+                            bet_dates.add(ctx.game_date)
                             done.add(s.event_id)
                         except Exception as exc:          # noqa: BLE001
                             log.error("write failed for %s (non-fatal): %s", ctx.game_id, exc)
@@ -513,8 +537,9 @@ def main(argv=None) -> int:
                             log.warning("live price log failed (non-fatal): %s", exc)
                             conn = _recycle(conn)
 
-            if notify_date:
-                notify_live(notify_date)
+            if not a.dry_run:
+                for d_ in sorted(bet_dates):
+                    notify_live(d_)
 
             if a.once:
                 log.info("--once: %d live, %d due, %d BETs written; ESPN calls %d, odds "
