@@ -306,6 +306,29 @@ def test_x_failing_at_6am_is_retried_alone_at_the_next_pass(monkeypatch):
     assert w.tweets[0].startswith("\U0001F4CA Oct 12 results: 2-0")
 
 
+def test_x_failing_at_6am_then_a_late_pick_ends_on_the_same_numbers(monkeypatch):
+    """X failed at 6am, Discord posted 2-0, a counting pick grades at 07:24.
+    The retry tweets the day (2-1); the restatement scan in the same pass
+    sees Discord's 06:02 recap is behind and restates both. X ends with two
+    tweets carrying the same record -- the second says "(restated)", so it is
+    not duplicate content -- and Discord with its original plus one restated."""
+    w = World(monkeypatch, nhl_graded_by_midnight=True)
+    late = (3599999, "NHL", "nhl_prop_shots_on_goal", "LOSS", None,
+            "2026-10-13T07:24:06.000000-04:00", -110.0)
+    _add_pick(w.db, late, graded=False)
+    w.x_fails = True
+    w.daily("06:02:33", NFL_PAUSED)
+    assert len(w.discord) == 1 and w.tweets == []
+    w.x_fails = False
+    w.refresh("07:24:30", late)
+    w.refresh("08:24:30")
+    assert len(w.discord) == 2 and "restated" in w.discord[1]["title"]
+    assert "2-1" in w.discord[1]["description"]
+    assert [t.split("\n")[0].split(",")[0] for t in w.tweets] == [
+        "\U0001F4CA Oct 12 results: 2-1",
+        "\U0001F4CA Oct 12 results (restated): 2-1"]
+
+
 def test_discord_failing_at_6am_is_retried_alone_at_the_next_pass(monkeypatch):
     w = World(monkeypatch, nhl_graded_by_midnight=True)
     w.discord_fails = True
