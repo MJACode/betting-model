@@ -21,7 +21,7 @@
 
 ---
 
-## [ ] [needs-decision] NHL game picks can lock overnight on the previous game's goalie (found 2026-10-13)
+## [ ] [needs-decision] NHL game picks are decided before the night's goalie is known (found 2026-10-13)
 
 "OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am
 ET, on Linus Ullmark's goalie row: he started for Ottawa the night before.
@@ -35,9 +35,23 @@ start's goalie, which for Ottawa on 10-13 was not the listed starter. MLB alread
 the guard (`models/scorer.score_game`: no game-model score until both
 probable starters are loaded); NHL has none. The fix is the same guard for
 NHL — no game pick until that date's goalie row exists for both teams —
-which changes when NHL picks fire: mike's call, `Updated-By`. Measure first
-how many NHL game BETs since 2026-10-01 were written before 10:05Z, and
-whether their goalie row named a different starter from the one that played.
+which changes when NHL picks fire: mike's call, `Updated-By`.
+
+Measured the same day, it is not only overnight. **32 of the 35 NHL game
+BETs since 2026-10-01 were written before that game's first goalie row**,
+31 of them on an Eastern day before the game (up to six days ahead), because
+a game pick locks at the first run that clears and lines open days out. Re-scored with the game-day goalie
+row and everything else as of the pick (all 32 reproduced their stored
+probability exactly first): in **14 of 32** the goalie the model used was not
+the one listed on game day, and there the bet side fell 2.8 points on
+average. Four fall below today's bar at the price taken: WSH ML 10-03 (0.486
+→ 0.378), "PIT (Regulation)" 10-07 (0.483 → 0.387), "SEA (Regulation)" 10-13
+(0.446 → 0.413), "OTT (Regulation)" 10-13 (0.493 → 0.461). Moneyline picks
+sitting at 0.50 also flip on the correction's 0.50 seam (FLA ML 10-04: 0.4998
+→ 0.5002, no longer a bet), so read those separately. The guard as written
+would end NHL game bets at early prices; the alternative is to keep the
+early decision and re-check it once the goalie row lands, which collides with
+the pick lock (CLAUDE.md §1c) and is mike's call either way.
 Related, also not in the model: rest. On 2025-26 the regulation model sat
 1.2-3.0 points above DraftKings' no-vig price on every back-to-back split
 and below it on the rested ones (`docs/sessions/2026-10.md`, 2026-10-13);
