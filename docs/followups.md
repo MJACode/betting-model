@@ -21,6 +21,43 @@
 
 ---
 
+## [ ] [needs-decision] NHL game picks can lock overnight on the previous game's goalie (found 2026-10-13)
+
+"OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am
+ET, on Linus Ullmark's goalie row: he started for Ottawa the night before.
+Tonight's probable-starter row, Samuel Ersson, landed in `nhl_goalie_stats`
+at 10:05Z. Re-scored with it, the model says 0.4606 (0.4549 on all of
+tonight's inputs) against the 0.4931 it bet on, and neither clears the 0.20
+EV floor at +145. The hourly overnight passes score every NHL game, and
+`_get_nhl_goalie_stats` falls back to the latest earlier row, so any game
+pick that first clears between midnight and ~6am ET is decided on the last
+start's goalie, which for Ottawa on 10-13 was not the listed starter. MLB already has
+the guard (`models/scorer.score_game`: no game-model score until both
+probable starters are loaded); NHL has none. The fix is the same guard for
+NHL — no game pick until that date's goalie row exists for both teams —
+which changes when NHL picks fire: mike's call, `Updated-By`. Measure first
+how many NHL game BETs since 2026-10-01 were written before 10:05Z, and
+whether their goalie row named a different starter from the one that played.
+Related, also not in the model: rest. On 2025-26 the regulation model sat
+1.2-3.0 points above DraftKings' no-vig price on every back-to-back split
+and below it on the rested ones (`docs/sessions/2026-10.md`, 2026-10-13);
+a rest input is a retrain, so a candidate to grade, not a fix.
+
+## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
+
+`injuries` gets a full copy of each team's list on every ingest run
+(report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per
+player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). `query_injuries_for_game`
+reads every row for the latest report_date and `_compute_injury_adjustment`
+sums them, so `home_injury_adj` / `away_injury_adj` grow all day: Ottawa read
+11.2 at 07:22Z and 53.9 at 22:23Z, against 2.8 and 3.5 counting each player once
+(the docstring says 0-3). It is also the "Opponent injury burden: 79.80" note
+on picks. `nhl_moneyline_regulation` never splits on an injury input (0
+splits across all folds), so it changed nothing there. Before a fix (read
+only the latest snapshot), list which live artifacts DO split on injury
+inputs and what their inputs looked like in training, since the fix moves
+those models' inputs: mike's call.
+
 ## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
 
 Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe
