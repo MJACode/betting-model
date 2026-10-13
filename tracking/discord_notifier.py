@@ -2179,8 +2179,10 @@ def snapshot_rows(game_date: str, published_at: str,
 
 
 def _store_snapshot(conn, rows: list[tuple]) -> None:
-    """Persist the published figures. Non-fatal: an audit trail must never stop
-    the recap being posted -- the post is the product, this is the receipt."""
+    """Persist the published figures, in their own transaction. Non-fatal: an
+    audit trail must never stop the recap being posted -- the post is the
+    product, this is the receipt -- and must never take the post's ledger row
+    down with it, which is why the caller commits that row first."""
     try:
         conn.executemany("""
             INSERT INTO results_snapshots (
@@ -2197,8 +2199,13 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
                 clv_graded=EXCLUDED.clv_graded, clv_beat=EXCLUDED.clv_beat,
                 clv_pct=EXCLUDED.clv_pct, published_at=EXCLUDED.published_at
         """, rows)
+        conn.commit()
     except Exception as exc:                         # noqa: BLE001
         logger.warning(f"results snapshot not stored (non-fatal): {exc}")
+        try:
+            conn.rollback()          # clear an aborted transaction
+        except Exception:                            # noqa: BLE001
+            pass
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
@@ -2317,6 +2324,16 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             "VALUES (%s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
             (lock_key, kind, published_at),
         )
+        # The post has gone out, so its ledger row commits NOW, on its own.
+        # It used to share one transaction with the snapshot below, which
+        # swallows its own failure: a pooler drop mid-snapshot (data.db
+        # reconnects and raises ConnectionLost) or a failed snapshot statement
+        # (PostgreSQL turns the COMMIT into a ROLLBACK and raises nothing)
+        # silently took this row with it. With the refresh passes retrying a
+        # missed recap (post_missed_recap) and restating late ones on every
+        # pass, a lost row means the same post again on every pass until
+        # midnight.
+        conn.commit()
         # The snapshot is the published record for that date, so a restatement
         # OVERWRITES it rather than adding a second row: the corrected numbers
         # are the ones that should reproduce later, and two rows for one date
@@ -2324,7 +2341,6 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         _store_snapshot(conn, snapshot_rows(
             game_date, published_at, overall, by_sport, all_overall,
             all_by_sport, len(rows), len(all_rows)))
-        conn.commit()
         logger.success(
             f"✓ Discord(results): {'restated' if restate else 'posted'} "
             f"recap for {game_date}")

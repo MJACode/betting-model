@@ -70,23 +70,58 @@ def _lite(sql: str) -> str:
 
 class _LiteConn:
     """The repo's connection shape over one shared SQLite database. close()
-    is a no-op so every get_connection() in a pass sees the same data."""
+    is a no-op so every get_connection() in a pass sees the same data.
+
+    `fail_snapshot` makes the NEXT results_snapshots write fail, once, in one
+    of the two ways production can:
+      "lost"  -- the pooler drops mid-write. data.db's contract: it has
+                 already reconnected, the transaction's uncommitted work is
+                 gone, and it raises ConnectionLost.
+      "error" -- the statement errors. PostgreSQL then refuses every
+                 statement until rollback, and COMMIT of that transaction is
+                 a ROLLBACK that raises nothing. SQLite does neither on its
+                 own, so `aborted` models it.
+    """
 
     def __init__(self, db):
         self.db, self.statements = db, []
+        self.fail_snapshot: str | None = None
+        self.aborted = False
+
+    def _refuse_if_aborted(self):
+        if self.aborted:
+            raise RuntimeError("current transaction is aborted, commands "
+                               "ignored until end of transaction block")
 
     def execute(self, sql, params=()):
         self.statements.append(sql)
+        self._refuse_if_aborted()
         return self.db.execute(_lite(sql), tuple(params or ()))
 
     def executemany(self, sql, rows):
         self.statements.append(sql)
+        self._refuse_if_aborted()
+        if self.fail_snapshot and "results_snapshots" in sql:
+            mode, self.fail_snapshot = self.fail_snapshot, None
+            if mode == "lost":
+                from data.db import ConnectionLost
+                self.db.rollback()
+                raise ConnectionLost("connection lost with uncommitted "
+                                     "writes; reconnected, transaction "
+                                     "discarded")
+            self.aborted = True
+            raise RuntimeError("snapshot insert failed")
         self.db.executemany(_lite(sql), rows)
 
     def commit(self):
+        if self.aborted:
+            self.aborted = False
+            self.db.rollback()
+            return
         self.db.commit()
 
     def rollback(self):
+        self.aborted = False
         self.db.rollback()
 
     def close(self):
@@ -362,6 +397,69 @@ def test_a_tweet_left_behind_by_a_late_discord_post_is_restated_once(monkeypatch
     assert len(w.discord) == 1 and "2-1" in w.discord[0]["description"]
     assert len(w.tweets) == 2
     assert w.tweets[1].startswith("\U0001F4CA Oct 12 results (restated): 2-1")
+
+
+# ── a delivered post stays ledgered when its receipt fails ──────────────────
+# The recap posts, then writes its "already posted" row and its snapshot (the
+# receipt). Both used to share one transaction, and the snapshot write
+# swallows its own failure. So a failed snapshot took the ledger row with it:
+# a pooler drop discards the whole transaction (data.db raises ConnectionLost,
+# which the snapshot write swallowed), and a failed statement turns the
+# transaction's COMMIT into a ROLLBACK that raises nothing (measured on a
+# local PostgreSQL 16.2 with psycopg2 2.9.12: 0 ledger rows after commit()).
+# On master only the 6am run asks, so that cost one post. With the retry,
+# every pass from 7am saw "Discord missing, something counting settled" and
+# posted the day again -- once per pass: 5 recaps from the 5 passes replayed
+# below. 2026-10-12 had 46 settle passes between 07:00 ET and midnight ET
+# (pipeline_log, step 'dispatch:settle').
+
+@pytest.mark.parametrize("failure", ["lost", "error"])
+def test_a_failed_receipt_never_reposts_the_day(monkeypatch, failure):
+    """The snapshot write fails on every pass (a schema drift, a constraint):
+    the day still posts exactly once."""
+    w = World(monkeypatch)
+    w.daily("06:02:33", NFL_PAUSED)
+    for hhmmss, grade in (("07:24:30", NHL_COUNTING), ("08:24:30", ()),
+                          ("09:24:30", ()), ("10:24:30", ()),
+                          ("23:54:30", ())):
+        w.conn.fail_snapshot = failure
+        w.refresh(hhmmss, *grade)
+    assert len(w.discord) == 1, f"Discord posted the day {len(w.discord)} times"
+    assert len(w.tweets) == 1
+    assert w.ledger() == {f"discord_results:{DAY}", f"x_results:{DAY}"}, (
+        "the post went out: its ledger row must land even though the "
+        "snapshot did not")
+    assert w.db.execute("SELECT count(*) FROM results_snapshots").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("failure", ["lost", "error"])
+def test_a_failed_receipt_on_a_restatement_never_repeats_it(monkeypatch, failure):
+    """The same shape on the existing restatement path: a correction whose
+    snapshot write fails must still be ledgered, or every pass restates it."""
+    w = World(monkeypatch)
+    w.daily("06:02:33", NFL_PAUSED)
+    w.refresh("07:24:30", *NHL_COUNTING)
+    late = (3599999, "NHL", "nhl_prop_shots_on_goal", "LOSS", None,
+            "2026-10-13T09:24:06.000000-04:00", -110.0)
+    _add_pick(w.db, late, graded=False)
+    for hhmmss, grade in (("09:24:30", (late,)), ("10:24:30", ()),
+                          ("11:24:30", ()), ("23:54:30", ())):
+        w.conn.fail_snapshot = failure
+        w.refresh(hhmmss, *grade)
+    assert len(w.discord) == 2, f"Discord posted {len(w.discord)} recaps"
+    assert "restated" in w.discord[1]["title"]
+    assert len(w.tweets) == 2
+
+
+def test_a_later_snapshot_still_lands_after_the_ledger_commits(monkeypatch):
+    """Committing the ledger first must not lose the receipt on a good day."""
+    w = World(monkeypatch)
+    w.daily("06:02:33", NFL_PAUSED)
+    w.refresh("07:24:30", *NHL_COUNTING)
+    assert w.db.execute(
+        "SELECT settled FROM results_snapshots WHERE game_date = ? "
+        "AND scope = 'daily' AND sport IS NULL", (DAY,)).fetchone() == (2,)
+    assert not w.db.in_transaction, "nothing left uncommitted"
 
 
 # ── what it costs, and what it must not do ──────────────────────────────────

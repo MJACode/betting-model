@@ -409,6 +409,15 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   keeps the overnight passes (00:17-05:17 ET) from posting yesterday before
   its late games and the 6am-only ingests are in. It runs before the
   restatement scan, so picks graded after it restate it once.
+  Because a missing ledger row now means "post again" on every pass, the
+  recap commits its ledger row the moment the post is delivered, BEFORE the
+  results snapshot is written. They used to share one transaction, and a
+  failed snapshot (a dropped connection, or a failed statement whose COMMIT
+  PostgreSQL turns into a silent ROLLBACK) took the ledger row with it: in
+  the test replay that re-posted the day once per pass, and 2026-10-12 had
+  46 settle passes between 7am ET and midnight.
+  The trade: a recap whose snapshot fails is ledgered with no snapshot, so
+  that date can never be restated; the warning in the log is its only trace.
 - **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
   toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
   and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
