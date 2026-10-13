@@ -235,3 +235,17 @@ def test_espn_and_book_names_map_to_the_platform_abbreviations():
     assert abbrev("Los Angeles Rams") == "LA" and abbrev("Washington Commanders") == "WAS"
     assert abbrev("DAL") == "DAL" and abbrev("LAC") == "LAC"
     assert abbrev("XYZ") is None and abbrev(None) is None
+
+
+def test_the_end_of_the_game_is_refused_before_the_status_flips():
+    """ESPN can still say 'in' after the final snap. An End of Game / End Period
+    row after the last real play, or a 4th-quarter clock at 0:00, ends it."""
+    end = {"id": "4018729804255", "sequenceNumber": "425500",
+           "type": {"id": "66", "text": "End of Game"}, "period": {"number": 4},
+           "clock": {"value": 0.0}, "homeScore": 16, "awayScore": 24, "scoringPlay": False}
+    st = S.state_from_docs(META, status(clock=5.0), situation(2, TB), [end, RUSH_116])
+    assert not st.evaluable and st.reason == "the 4th quarter has ended"
+    st = S.state_from_docs(META, status(clock=0.0), situation(2, TB), [RUSH_116])
+    assert not st.evaluable and st.reason == "4th-quarter clock at 0:00"
+    st = S.state_from_docs(META, status(clock=40.0), situation(2, TB), [RUSH_116])
+    assert st.evaluable, st.reason

@@ -77,6 +77,7 @@ ADMIN_TYPE_TEXTS = frozenset({"end period", "timeout", "official timeout", "two-
                               "end of half", "end of game", "coin toss", "end of regulation"})
 CONVERSION_HINTS = ("extra point", "two-point", "two point", "2pt", "2-pt", "conversion", "pat")
 SCRIMMAGE_DOWNS = (1, 2, 3, 4)
+END_TYPE_IDS = frozenset({"2", "66"})    # End Period, End of Game
 _TEAM_IN_REF = re.compile(r"/teams/(\d+)")
 
 
@@ -293,6 +294,18 @@ def state_from_docs(meta: EventMeta, status: dict | None, situation: dict | None
         return st
     if st.play_period != st.period:
         st.reason = f"last play is from period {st.play_period}"
+        return st
+    # THE GAME IS OVER BEFORE THE STATUS SAYS SO. Between the final snap and
+    # ESPN flipping the status to 'post', the last real play still reads as a
+    # live state. The study never bet at or after the final play, so an
+    # end-of-period / end-of-game row after it, or a 4th-quarter running
+    # clock at 0:00, is a refusal.
+    if any(play_type_id(x) in END_TYPE_IDS and play_seq(x) > play_seq(play)
+           for x in plays or [] if isinstance(x, dict)):
+        st.reason = "the 4th quarter has ended"
+        return st
+    if st.running_clock is not None and st.running_clock <= 0:
+        st.reason = "4th-quarter clock at 0:00"
         return st
     if is_scoring_play(play):
         st.reason = "last play was a scoring play (clock is its end, score includes the PAT)"
