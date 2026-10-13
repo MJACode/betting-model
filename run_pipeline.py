@@ -1597,6 +1597,28 @@ def step_settle(settle_date: str) -> bool:
         logger.error(f"✗ X results post failed (settlement + Discord "
                      f"unaffected): {exc}")
 
+    # Yesterday's recap, when the 6am run could not post it. 2026-10-13: the
+    # 6am run found nothing counting for 10-12 (its only counting bets, two
+    # NHL props, were graded at 07:24 by the next pass), and nothing asked
+    # again, so neither surface ever posted it. A refresh pass settles TODAY,
+    # so the two calls above refuse; this asks for yesterday instead, from
+    # 7am ET, both surfaces, Discord first, ledgered per date -- it posts once,
+    # on the first pass where something counting has settled.
+    #
+    # Only on a pass settling today. The 6am run settles yesterday and has
+    # just made the ordinary attempt above, so it runs nothing new here.
+    # Before the restatement scan, so a recap posted here is never "late".
+    import config
+    if settle_date == config.today_et():
+        try:
+            from tracking.discord_notifier import post_missed_recap
+            n = post_missed_recap()
+            if n:
+                logger.info(f"Yesterday's results recap posted late: {n} post(s)")
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"✗ Late results recap failed (settlement "
+                         f"unaffected): {exc}")
+
     # A recap published before one of its picks settled is corrected here, on
     # every pass, both surfaces (2026-09-10: the 09-09 recap went out MLB-only
     # and the NFL settled an hour later against a ledgered date). Ledgered per

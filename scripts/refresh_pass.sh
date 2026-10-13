@@ -224,6 +224,10 @@ if [ "$MODE" = "hourly" ]; then
   step golf-results
 fi
 
+# Settles TODAY. From 7am ET it also posts YESTERDAY's results recap if the
+# 6am run could not (nothing counting had settled yet, as on 2026-10-12, or a
+# post failed) -- Discord then X, once per date, on the first pass where
+# something counting has settled (run_pipeline.step_settle).
 step settle
 
 # Re-grade the every-pick universe now that this pass's finals are in. The
