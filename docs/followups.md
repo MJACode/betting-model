@@ -44,11 +44,12 @@ a game pick locks at the first run that clears and lines open days out. Re-score
 row and everything else as of the pick (all 32 reproduced their stored
 probability exactly first): in **14 of 32** the goalie the model used was not
 the one listed on game day, and there the bet side fell 2.8 points on
-average. Four fall below today's bar at the price taken: WSH ML 10-03 (0.486
-→ 0.378), "PIT (Regulation)" 10-07 (0.483 → 0.387), "SEA (Regulation)" 10-13
-(0.446 → 0.413), "OTT (Regulation)" 10-13 (0.493 → 0.461). Moneyline picks
-sitting at 0.50 also flip on the correction's 0.50 seam (FLA ML 10-04: 0.4998
-→ 0.5002, no longer a bet), so read those separately. The guard as written
+average. Five fall below today's bar at the price taken: WSH ML 10-03 (0.486
+→ 0.378), PIT ML 10-07 (0.498 → 0.484), "PIT (Regulation)" 10-07 (0.483 →
+0.387), "SEA (Regulation)" 10-13 (0.446 → 0.413), "OTT (Regulation)" 10-13
+(0.493 → 0.461). A sixth, FLA ML 10-04, flips only because its probability
+crossed the moneyline correction's 0.50 seam (0.4998 → 0.5002), so it is not
+counted. The guard as written
 would end NHL game bets at early prices; the alternative is to keep the
 early decision and re-check it once the goalie row lands, which collides with
 the pick lock (CLAUDE.md §1c) and is mike's call either way.
