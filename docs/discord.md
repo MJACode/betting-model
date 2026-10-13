@@ -395,6 +395,20 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   difference is not, because the recap query applies today's cuts. Hand
   re-posts stay a worker job: `publish_results` with `{"game_date": ...}`
   clears both ledger rows and posts through the ordinary paths.
+- **A day the 6am run could not recap posts at the first pass that can.**
+  2026-10-12's only counting bets (two NHL props) were graded at 07:24 on
+  10-13, after the 6am run had found nothing to recap, and nothing asked again
+  -- the recap never posted on either surface; 2026-10-05 had the same shape.
+  Now every refresh pass from 7am ET (`RECAP_RETRY_FROM_HOUR_ET`) runs
+  `post_missed_recap`: one statement asks whether each surface is ledgered for
+  YESTERDAY and whether anything in the recap's universe has settled; if a
+  surface is missing and something has, the ordinary notifiers post, Discord
+  then X. A surface that already posted is not re-posted (its own ledger), so
+  a 6am post that failed on one surface is retried on that surface alone. A
+  day with nothing counting posts nothing and logs nothing. The hour gate
+  keeps the overnight passes (00:17-05:17 ET) from posting yesterday before
+  its late games and the 6am-only ingests are in. It runs before the
+  restatement scan, so picks graded after it restate it once.
 - **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
   toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
   and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
