@@ -153,6 +153,12 @@ RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
 # model id and the go-live gate (CLAUDE.md §2).
 RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"
 
+# NFL in-play LEADER MONEYLINE loop (nfl_live_leader/, run from the repo root)
+# -- a different model and a different loop from the retired worker above,
+# which stays off. LIVE since 2026-10-13 (mike: "reenable the model"), so ON
+# by default; set RUN_NFL_LIVE_LEADER=0 to stop it without a deploy.
+RUN_NFL_LIVE_LEADER = os.environ.get("RUN_NFL_LIVE_LEADER", "1") != "0"
+
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
 # do rather than three days later.
@@ -565,6 +571,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
 # either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
 # or the poller service gets its own volume.
 _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
+                # Writes only to Supabase (picks, odds) and needs no volume,
+                # so it sits with the other live loops -- unlike
+                # nfl_live_worker above.
+                "nfl_live_leader",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -653,6 +663,24 @@ def run_ncaaf_live_loop() -> None:
     _run(
         [sys.executable, "-m", "ncaaf_live.gameday", "--source", "cfbd"],
         "ncaaf-live-loop",
+    )
+
+
+def run_nfl_live_leader() -> None:
+    # The NFL in-play leader moneyline loop (nfl_live_leader/gameday.py), the
+    # same supervisor shape as run_ncaaf_live_loop: the loop polls ESPN core
+    # (free; site.api is 403 from the worker) every 20 s and EXITS after a
+    # few idle ticks with no NFL game in progress, so this */10 cron relaunches
+    # it and max_instances=1 makes the ticks during a slate no-ops. Run from the
+    # REPO ROOT, not nfl/ (the import trap in data/live_quote_guard.py).
+    #
+    # Odds API credits are spent ONLY when an in-window game (4th quarter,
+    # <= 10:00, lead 4-16) is due its 5-minute evaluation: one bulk
+    # DraftKings h2h call covers every due game, capped per process by
+    # NFL_LIVE_LEADER_CREDIT_CAP (default 2000).
+    _run(
+        [sys.executable, "-m", "nfl_live_leader.gameday"],
+        "nfl-live-leader",
     )
 
 
@@ -1713,6 +1741,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_LIVE=0 — NFL in-play worker NOT scheduled.")
+
+    # NFL in-play leader moneyline. Every day 9am-midnight ET for the same
+    # reason as the worker above (Thursday, Saturday, Monday and the 9:30am ET
+    # international kickoffs); an idle launch reads ESPN and exits.
+    if RUN_NFL_LIVE_LEADER:
+        sched.add_job(
+            run_nfl_live_leader,
+            CronTrigger(hour="9-23", minute="*/10", timezone=TIMEZONE),
+            id="nfl_live_leader",
+            name="NFL in-play leader moneyline loop supervisor (9am-midnight ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NFL_LIVE_LEADER=0 — NFL in-play leader loop NOT scheduled.")
 
     if RUN_NFL_PROP_CARD:
         sched.add_job(
