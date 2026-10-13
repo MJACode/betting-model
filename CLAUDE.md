@@ -332,9 +332,7 @@ copy long after it stopped being true; that is what produced a "Paper trading"
 footer on a real daily-results recap on 2026-08-29.
 
 **The go-live gate is per MODEL, not for the platform**: ≥ 50 settled picks,
-positive flat-bet ROI, calibration error ≤ 5%. A model explicitly held back
-is flagged PAPER ONLY in its own section (e.g. `ncaaf_spread`,
-`docs/sports/ncaaf.md`). Everything else is live.
+positive flat-bet ROI, calibration error ≤ 5%. Report that standing.
 
 **NEVER PROPOSE PAPER.** (mike, 2026-10-08: *"stop asking about paper — what
 is the fucking point of paper."*) A model mike asks for is built LIVE, gate
