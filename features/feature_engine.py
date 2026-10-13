@@ -132,6 +132,16 @@ MLB_F5_TOTALS_FEATURES = [
 MLB_F5_SPREADS_FEATURES = MLB_F5_H2H_FEATURES + ["spread_home", "wind_out_component", "is_dome_game"]
 
 
+# SCHEDULE INPUTS -- A CANDIDATE, 2026-10-13 (research branch nhl-rest-candidate;
+# trained --no-register, not live). Rest days, the second night of a
+# back-to-back, and the visitor's road trip: the "schedule" group of
+# scripts/nhl_market_lab2.py, computed by _nhl_schedule_features for training
+# and scoring alike. Appended to the moneyline list below, so both moneyline
+# models carry them; the puck-line list is deliberately left as it was.
+NHL_SCHEDULE_FEATURES = [
+    "home_rest_days", "away_rest_days", "home_b2b", "away_b2b", "away_road_trip",
+]
+
 NHL_H2H_FEATURES = [
     "d_goals_per_game", "d_goals_last_5", "d_goals_last_10",
     # d_xgf_pct removed 2026-06-21: xGF% is NOT available from the free NHL API
@@ -151,7 +161,7 @@ NHL_H2H_FEATURES = [
     "home_goalie_out", "away_goalie_out",
     "home_has_returnee", "away_has_returnee",
     "is_early_season",
-]
+] + NHL_SCHEDULE_FEATURES
 
 NHL_TOTALS_FEATURES = [
     "home_goals_per_game", "away_goals_per_game",
@@ -204,7 +214,9 @@ NHL_H2H_FEATURES_BLENDED = [
 
 NHL_REG_FEATURES = NHL_H2H_FEATURES  # regulation moneyline uses same inputs
 
-NHL_PUCKLINE_FEATURES = NHL_H2H_FEATURES + ["spread_home"]
+# Unchanged by the schedule candidate: the same 22 inputs it always had, plus the line.
+NHL_PUCKLINE_FEATURES = ([c for c in NHL_H2H_FEATURES if c not in NHL_SCHEDULE_FEATURES]
+                         + ["spread_home"])
 
 # ── WNBA Feature Groups ───────────────────────────────────────────────────────
 # Basketball: pace + efficiency drive scoring; rest/back-to-back is a real signal.
@@ -1092,6 +1104,86 @@ def _get_nhl_goalie_stats(conn: DBConnection,
     return {}
 
 
+# ── NHL schedule inputs: rest, back-to-back, road trip ───────────────────────
+# ONE rule for the training path and the scoring path, applied by the same
+# three functions to the same rows, so the two cannot drift:
+#
+#   * The previous game is the team's latest NHL game THIS SEASON dated
+#     strictly before the game's date -- never a same-day or later row.
+#   * A `games` row counts as a game when it has a final score, OR when it is
+#     too recent for one: dated no more than NHL_SCHEDULE_GRACE_DAYS before
+#     today. Production prices NHL games up to config.GAME_SCORE_AHEAD_DAYS
+#     out, so the second night of a back-to-back is usually decided before the
+#     first night has been played; what is known then is the schedule, not the
+#     score. An unscored row older than that never happened -- 74 of them on
+#     2026-10-13, COVID postponements, playoff "if necessary" dates and a
+#     snow-day reschedule -- and is dropped. One row per date (a scored row wins).
+#   * rest = days since that game, capped at NHL_REST_CAP_DAYS, and the cap
+#     when there is none; b2b = rest == 1; road trip = the number of AWAY games
+#     played consecutively right before this one, whether or not this one is
+#     away. These are scripts/nhl_market_lab2.py's definitions, with one
+#     difference: the road trip restarts each season, where the lab carries a
+#     team's last away run of April into its October opener.
+#
+# No preseason: every scored NHL row in `games` has a game-log row of game type
+# 2 or 3 (checked 2026-10-13), and 2026-27's regular season opened 2026-09-29.
+NHL_REST_CAP_DAYS = 6
+NHL_SCHEDULE_GRACE_DAYS = 2
+
+
+def _nhl_team_schedule(rows, game_date: str, today: str) -> list[tuple[str, int]]:
+    """One team's games that count, strictly before `game_date`, oldest first,
+    as (date, is_home). `rows` is (game_date, is_home, scored) in any order."""
+    cutoff = (date.fromisoformat(today) - timedelta(days=NHL_SCHEDULE_GRACE_DAYS)).isoformat()
+    day = str(game_date)[:10]
+    kept: dict = {}
+    for d, is_home, scored in sorted((str(d)[:10], int(h), bool(s)) for d, h, s in rows):
+        if d >= day or not (scored or d >= cutoff):
+            continue
+        if d not in kept or (scored and not kept[d][1]):
+            kept[d] = (is_home, scored)
+    return [(d, kept[d][0]) for d in sorted(kept)]
+
+
+def _nhl_rest_trip(prior: list[tuple[str, int]], game_date: str) -> tuple[int, int, int]:
+    """(rest days, back-to-back, road trip) from one team's prior games."""
+    if not prior:
+        return NHL_REST_CAP_DAYS, 0, 0
+    rest = min((date.fromisoformat(str(game_date)[:10])
+                - date.fromisoformat(prior[-1][0])).days, NHL_REST_CAP_DAYS)
+    trip = 0
+    for _, is_home in reversed(prior):
+        if is_home:
+            break
+        trip += 1
+    return rest, int(rest == 1), trip
+
+
+def _nhl_schedule_features(home_rows, away_rows, game_date: str,
+                           today: str | None = None) -> dict:
+    """The five NHL_SCHEDULE_FEATURES for one game. `*_rows` are each team's
+    games this season as (game_date, is_home, scored)."""
+    today = today or datetime.now(timezone.utc).date().isoformat()
+    h_rest, h_b2b, _ = _nhl_rest_trip(_nhl_team_schedule(home_rows, game_date, today), game_date)
+    a_rest, a_b2b, a_trip = _nhl_rest_trip(_nhl_team_schedule(away_rows, game_date, today),
+                                           game_date)
+    return {"home_rest_days": h_rest, "away_rest_days": a_rest,
+            "home_b2b": h_b2b, "away_b2b": a_b2b, "away_road_trip": a_trip}
+
+
+def _get_nhl_schedule_rows(conn: DBConnection, team: str, season: int,
+                           game_date: str) -> list[tuple[str, int, bool]]:
+    """Scoring path: one team's games this season before `game_date`, scored or
+    not, as (game_date, is_home, scored). The rule above decides which count."""
+    rows = conn.execute("""
+        SELECT game_date, home_team, home_score
+        FROM games
+        WHERE sport = 'NHL' AND season = ? AND game_date < ?
+          AND (home_team = ? OR away_team = ?)
+    """, (season, str(game_date)[:10], team, team)).fetchall()
+    return [(d, int(ht == team), hs is not None) for d, ht, hs in rows]
+
+
 def build_nhl_game_features(conn: DBConnection,
                               game_id: str,
                               game_date: str,
@@ -1200,6 +1292,11 @@ def build_nhl_game_features(conn: DBConnection,
         "home_has_returnee": _has_returnee(home_inj),
         "away_has_returnee": _has_returnee(away_inj),
     }
+    # Schedule inputs: same rule and same functions as the training path.
+    features.update(_nhl_schedule_features(
+        _get_nhl_schedule_rows(conn, home_team, season, game_date),
+        _get_nhl_schedule_rows(conn, away_team, season, game_date),
+        game_date))
 
     if odds_row:
         features["total_line"]  = odds_row.get("total_line")
@@ -1288,6 +1385,20 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             away_goals.setdefault(at, ([], []))[0].append(gdate)
             away_goals[at][1].append(float(as_))
 
+    # ── Schedule: (team, season) → [(game_date, is_home, scored)], oldest first.
+    # EVERY row, scored or not: the schedule rule (_nhl_team_schedule) decides
+    # which count, exactly as it does for the scoring path's per-team read.
+    schedule: dict = {}
+    for gdate, season_, ht, at, hs in conn.execute("""
+        SELECT game_date, season, home_team, away_team, home_score
+        FROM games WHERE sport = 'NHL'
+    """).fetchall():
+        d = str(gdate)[:10]
+        schedule.setdefault((ht, season_), []).append((d, 1, hs is not None))
+        schedule.setdefault((at, season_), []).append((d, 0, hs is not None))
+    for v in schedule.values():
+        v.sort()
+
     # ── Injuries (same structure the shared _blk_injuries helper expects) ────
     inj_cols = ["team", "report_date", "scenario", "severity_weight",
                 "return_ramp_factor", "status"]
@@ -1368,7 +1479,8 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     return dict(team_stats=team_stats, goalies=goalies,
                 goals=goals, home_goals=home_goals, away_goals=away_goals,
                 injuries=injuries, inj_dates=inj_dates, odds=odds_lookup,
-                team_book=book)
+                team_book=book, schedule=schedule,
+                schedule_today=datetime.now(timezone.utc).date().isoformat())
 
 
 def _blk_nhl_asof(store: dict, team: str, season: int, game_date: str) -> dict:
@@ -1516,6 +1628,13 @@ def _build_nhl_features_from_bulk(bulk: dict,
     }
     features.update(_nhl_blended_features(bulk.get("team_book"), home_team, away_team,
                                           season, game_date))
+
+    # Schedule inputs: same rule and same functions as the scoring path.
+    def _season_rows(team: str) -> list:
+        rows = bulk.get("schedule", {}).get((team, season), [])
+        return rows[:bisect.bisect_left(rows, (str(game_date)[:10],))]
+    features.update(_nhl_schedule_features(_season_rows(home_team), _season_rows(away_team),
+                                           game_date, today=bulk.get("schedule_today")))
 
     if odds_row:
         features["total_line"]  = odds_row.get("total_line")
