@@ -30,6 +30,10 @@ export function gameMarketForModel(modelId: string): string | null {
   // NFL movement is LINE-only — see isNflLineOnly / computeMovement.
   if (modelId === 'nfl_wind_totals') return 'totals';
   if (modelId === 'nfl_opener_spread') return 'spreads';
+  // The NFL in-play leader moneyline prices DraftKings' live h2h, which the loop
+  // logs to the odds table as in_play rows (v_latest_inplay_odds_all_books), so
+  // it HAS a market -- without this it would fall into the null below.
+  if (modelId === 'nfl_live_leader_ml') return 'h2h';
   if (modelId.startsWith('nfl_')) return null; // any future NFL model without snapshots
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
