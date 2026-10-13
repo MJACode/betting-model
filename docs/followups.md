@@ -73,6 +73,17 @@ only the latest snapshot), list which live artifacts DO split on injury
 inputs and what their inputs looked like in training, since the fix moves
 those models' inputs: mike's call.
 
+**For the NHL game models the six injury inputs are dead whatever the reader
+does.** NHL rows in `injuries` start 2026-04-05, so every training game
+(2018-19 → 2024-25) had none and the inputs were zero on every training row;
+that is why neither tree splits on them. And two of the six can never switch
+on for NHL even now: every NHL row is stored at `severity_weight` 0.7 and
+`scenario` 'A', while `_has_starter_out` needs severity ≥ 0.8 and
+`_has_returnee` needs scenario 'B'. A usable NHL injury input has to be
+built from history the model can learn from — e.g. who dressed each game in
+the per-game skater logs, weighted by usage — which is a project, not a
+reader fix.
+
 ## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
 
 Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe
