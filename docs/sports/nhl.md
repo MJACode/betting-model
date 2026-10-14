@@ -153,10 +153,15 @@
 - **Expected goals** (`data/nhl_xg.py`): LightGBM on unblocked attempts, fit
   2018-19 → 2021-22, stored on each attempt as `nhl_shot_events.xg` with
   `xg_model_version`. Out of sample it OVERSHOOTS goals and the gap grows
-  (xG/goals 1.066 in 2022-23 → 1.144 in 2025-26) because of the recording
-  change above, so an absolute xG level is not comparable across that line;
-  shares (xGF%) are. Per team-game and per goalie-game sums:
-  `nhl_team_game_xg`, `nhl_goalie_game_xg` (`data/nhl_xg_aggregates.py`).
+  (xG/goals 1.066 in 2022-23 → 1.144 in 2025-26). The overshoot lines up with
+  the recording shifts above and sits where they are (attempts within 10 ft,
+  tip-ins, deflections, backhands) -- inferred from that breakdown, not
+  proven. So an absolute xG level is not comparable across 2021-22 / 2022-23,
+  and league goals saved above expected, which should sum to about zero, reads
+  +567 to +1,162 a season from 2022-23. Shares (xGF%) hold: 0.991 / 0.983
+  correlation with MoneyPuck's team xGF% in 2023-24 / 2024-25. Per team-game
+  and per goalie-game sums: `nhl_team_game_xg`, `nhl_goalie_game_xg`
+  (`data/nhl_xg_aggregates.py`).
 - **One function rates goalies and teams for training and for scoring**:
   `data/nhl_asof.py`. Strictly before the date asked about. A goalie's save%
   and GAA are taken over this season and last and regressed to the league
