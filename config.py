@@ -4151,6 +4151,13 @@ NCAAF_ODDS_API_MAP: dict = {
     # same commence_time 2026-09-19T20:30:00Z.
     "Southeastern Louisiana Lions": "SE Louisiana",
     "Southeastern Louisiana": "SE Louisiana",
+    # 2026-10-14: ncaaf_game_identity CRIT, Texas A&M 2026-10-17. CFBD's school
+    # is "The Citadel"; The Odds API writes "Citadel Bulldogs" (no "The"), so no
+    # fold or "school mascot" match bridges them and the odds ingest minted
+    # NCAAF_2026-10-17_citadel-bulldogs_texas-a-m beside the CFBD row
+    # ..._the-citadel_texas-a-m (same commence_time 2026-10-17T17:00Z).
+    "Citadel Bulldogs": "The Citadel",
+    "Citadel": "The Citadel",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.

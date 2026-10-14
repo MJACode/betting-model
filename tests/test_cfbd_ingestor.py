@@ -1054,3 +1054,23 @@ def test_odds_ingest_builds_the_cfbd_id_for_this_matchup(
     assert games[0]["home_team"] == "UL Monroe"
     assert {o["game_id"] for o in odds} == {
         "NCAAF_2026-09-19_se-louisiana_ul-monroe"}
+
+
+# ── The Citadel / Citadel Bulldogs (2026-10-14) ─────────────────────────────
+#
+# ncaaf_game_identity CRIT: Texas A&M 2026-10-17 had two games rows, same
+# commence_time. CFBD's school is "The Citadel"; The Odds API writes
+# "Citadel Bulldogs".
+
+
+def test_the_map_resolves_citadel_bulldogs_to_the_cfbd_school(monkeypatch):
+    """This assertion fails if the map entry is removed."""
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "The Citadel", "mascot": "Bulldogs", "alt": []},
+        {"school": "Texas A&M", "mascot": "Aggies", "alt": []},
+    ])
+    away = cf.resolve_odds_api_school("Citadel Bulldogs")
+    assert away == "The Citadel"
+    assert build_ncaaf_game_id("2026-10-17", away, "Texas A&M") == \
+        "NCAAF_2026-10-17_the-citadel_texas-a-m"
