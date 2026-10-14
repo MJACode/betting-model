@@ -54,6 +54,22 @@ jobs:
         with:
           node-version: "22"
 
+      # #942 read discordPublish on SettledPick without declaring it. tsc
+      # then failed outside queries.ts, mobile-ota.yml skipped Publish, and
+      # every later mobile merge was blocked. The 31 known diagnostics live
+      # in mobile/tsc-baseline.txt. A diagnostic that is not in that multiset
+      # fails the PR. Line and column are ignored, so an existing diagnostic
+      # can move; another copy of a listed message cannot.
+      - name: Install mobile deps
+        working-directory: mobile
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck mobile against the known-error baseline
+        working-directory: mobile
+        run: |
+          npx tsc --noEmit > tsc.log 2>&1 || true
+          python scripts/check_tsc_baseline.py tsc.log tsc-baseline.txt
+
       - name: Pytest non-integration subset
         env:
           # Ensure no accidental prod URL from a fork secret leak path.
@@ -110,6 +126,7 @@ jobs:
             ncaaf_live/tests/test_cfbd_yardline.py \
             tests/test_nfl_prop_market_kalshi.py \
             tests/test_mobile_team_detail.py \
+            tests/test_mobile_tsc_baseline.py \
             tests/test_mobile_player_detail.py \
             tests/test_position_vs_opponent.py \
             tests/test_player_positions.py \

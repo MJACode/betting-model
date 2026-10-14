@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { DiscordPublish } from '@/lib/discordPublish';
 import type { PlayerLogSport } from '@/lib/playerLog';
 
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
@@ -184,6 +185,11 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
+  // Client-only. attachDiscordPublish stamps it after the fetch; it is not
+  // a column and not part of SETTLED_PICK_COLUMNS, so the cache key stays.
+  // Optional like downgrade_reason: a hand-built row and a cache written
+  // before the stamp still type-check. The published-record readers need it.
+  discordPublish?: DiscordPublish;
 };
 
 export interface LiveGameState {
