@@ -472,7 +472,7 @@ function TodayPickRow({
 // a row may have been a dead-zone NONE when it was scored; showing that badge
 // next to a W/L outcome would read as a contradiction. Shows date, DK odds,
 // outcome, and flat P&L at the $100-per-bet convention ('—' when the pick had
-// no real DK price, e.g. prob-only HR — record-only, no fabricated P&L).
+// no real price, so no invented profit is shown).
 function FullOutcomeHistoryRow({
   row,
   onPress,

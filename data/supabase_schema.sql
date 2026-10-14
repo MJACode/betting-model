@@ -948,7 +948,7 @@ ALTER TABLE golf_odds        ENABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "anon read golf_rounds"      ON golf_rounds      FOR SELECT TO anon, authenticated USING (true);
 
 
--- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
+-- ── PICKS — Picks Log ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS picks (
     pick_id            BIGSERIAL PRIMARY KEY,
@@ -2461,7 +2461,7 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- ── PUBLIC TRACK RECORD (session: competitor-analysis-disruption) ────────────
 -- Applied via migrations add_public_track_record_views + track_record_current_criteria.
 -- The verifiable, public-facing proof of performance: every settled BET pick
--- since paper-trading start (2026-04-14) that meets the CURRENT action criteria,
+-- since the evaluation start (2026-04-14) that meets the CURRENT action criteria,
 -- aggregated for the mobile Track Record screen and the website proof page.
 -- Nothing cherry-picked — losing models are included.
 --
@@ -2540,10 +2540,9 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   models, so it would be a no-op there. Mirrored in the app by
 --   thresholds.isLiveModel / isContaminatedPregamePick and in the Discord
 --   recap's _SETTLED_SQL, so all three publish the same population.
---   2026-07-05 (migration full_outcome_record_hr_record_only): HR is now
---   record-only in v_model_full_outcome_record too — units forced to 0 and
---   roi_pct to NULL (its 1-2 priced longshot bets rendered as "-100% ROI" on
---   the Models tab). The W-L record still displays; it just carries no money.
+--   2026-07-05: HR units in v_model_full_outcome_record were forced to 0.
+--   2026-10-14: that special case is removed. Units are the summed real
+--   profit of the graded picks, the same set as the W-L.
 --   2026-09-02 (migration track_record_reads_graded_matview): the MLB/WNBA
 --   full-outcome branch of v_model_full_outcome_record and
 --   v_public_track_record_daily (and so v_public_track_record, which reads the

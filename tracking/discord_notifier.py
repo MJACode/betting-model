@@ -87,11 +87,6 @@ _COLOR_RESULTS_DOWN = 0xE74C3C
 _COLOR_RESULTS_FLAT = 0x95A5A6
 _COLOR_VOID = 0x95A5A6          # gray — a void notice is not a bet
 
-# Models whose record is tracked but whose money is not counted (mirrors the
-# mobile RECORD_ONLY_MODELS and the v_model_full_outcome_record zeroing).
-_RECORD_ONLY_MODELS = {"mlb_prop_batter_hr"}
-
-
 # ── Formatting helpers ───────────────────────────────────────────────────────
 
 def _american(odds) -> str:
@@ -1039,18 +1034,10 @@ def _signal_field(s: dict) -> dict:
     # The price the reader should actually take, at the book that has it.
     odds, book = publish_price(s)
 
-    # A record-only model's money is zeroed in every record view and in the
-    # recap, so publishing a stake for it invites a bet we do not count. Say so
-    # instead. mlb_prop_batter_hr was the case: 103 settled picks, 19.4% win at
-    # +393 average odds -- a longshot ledger, not a staking plan.
-    #
     # The stake is grossed up by the price being PUBLISHED, not by DraftKings'.
     # Telling a reader to risk 1.39u at -139 while pointing them at BetMGM's
     # -120 would have them lay 16% more than the bet needs.
-    if s.get("model_id") in _RECORD_ONLY_MODELS:
-        stake = "record only"
-    else:
-        stake = fmt_stake(stake_for(s.get("kelly"), odds))
+    stake = fmt_stake(stake_for(s.get("kelly"), odds))
 
     price = _american(odds)
     if book:
@@ -2015,7 +2002,8 @@ def notify_discord_free_pick(target_date: str | None = None,
 # condition_status = config.DUPLICATE_STATUS and counts once, here and on
 # every other record surface. Its result is never touched.
 _SETTLED_SQL = r"""
-        SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
+        SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
+               COALESCE(p.decision_odds, p.dk_odds),
                p.clv_pct, p.is_live
         FROM picks p
         WHERE p.game_date {window}
@@ -2045,9 +2033,9 @@ def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
         (start_date, through)).fetchall()
 
 
-# Fallback for a malformed/zero price on a pick that DOES carry one. Picks with
-# NO price at all are now excluded from the units math entirely (see _tally) --
-# grading them at a -110 that was never available fabricates P&L.
+# Fallback for a malformed/zero price inside _decimal_odds only. The recap
+# tally does not use it: a pick with no taken price is staked at its bare
+# conviction (stake_for), never at a -110 that was not on the board.
 _NO_PRICE_FALLBACK = -110.0
 
 
@@ -2069,19 +2057,23 @@ def units_won(units_risked: float, american) -> float:
 
 
 def _tally(rows: list[tuple]) -> dict:
-    """Record over every graded pick; units over the ones that count.
+    """Win-loss and units over the same graded picks.
 
-    Units convention (Matt, 2026-08-28): a pick's CONVICTION is 1u-3u of units
-    TO WIN, and the stake is grossed up by the price -- risk 1.1u at -110 to win
-    1u -- capped so no single event ever lays more than MAX_RISK_UNITS. `stake`
-    below is therefore the units RISKED: a loss costs it in full and a win pays
-    stake x (decimal - 1), which is the conviction back (or the capped payout).
-    Record-only models (HR) contribute W-L but never units -- mirrors the app.
+    The price column is the price the bet was taken at:
+    COALESCE(decision_odds, dk_odds). Units use that price and the published
+    stake (stake_for): conviction is 1u to win, the stake is grossed up by the
+    price -- risk 1.1u at -110 to win 1u -- capped at MAX_RISK_UNITS. A loss
+    costs the stake. A win pays stake.win, which is the conviction back unless
+    the cap bound. A push returns the stake.
+
+    A pick with no taken price is still in both totals. stake_for stakes it at
+    the bare conviction. It is not dropped, and it is not given a -110 that
+    was never on the board.
     """
-    t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0,
+    t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0,
          "clv_n": 0, "clv_beat": 0, "live": 0}
     for row in rows:
-        _sport, model_id, result, kelly, dk_odds, clv = row[:6]
+        _sport, _model_id, result, kelly, price, clv = row[:6]
         # is_live is optional so a caller passing the older 6-tuple still works.
         is_live = bool(row[6]) if len(row) > 6 else False
         if is_live:
@@ -2102,24 +2094,14 @@ def _tally(rows: list[tuple]) -> dict:
             t["l"] += 1
         else:
             t["p"] += 1
-        # Record-only: counts toward W-L, never toward units.
-        #   - _RECORD_ONLY_MODELS (HR): most picks have no real price, so units
-        #     would be fabricated.
-        #   - ANY pick with no book price: settlement grades it at -110, but
-        #     that price never existed, so reporting units on it invents P&L.
-        #     config.REQUIRE_DK_PRICE stops NEW ones being created; this keeps
-        #     the historical ones out of the published numbers.
-        if model_id in _RECORD_ONLY_MODELS or dk_odds is None:
-            t["record_only"] += 1
-            continue
-        stake = units_for(kelly, dk_odds)
+        stake = stake_for(kelly, price)
         if result == "WIN":
-            t["units"] += units_won(stake, dk_odds)
+            t["units"] += stake.win
         elif result == "LOSS":
-            t["units"] -= stake
+            t["units"] -= stake.risk
         # PUSH returns the stake: no unit change.
         if result != "PUSH":
-            t["risked"] += stake
+            t["risked"] += stake.risk
     return t
 
 
@@ -2138,8 +2120,10 @@ def clv_line(t: dict) -> str:
 
 def _tally_line(t: dict, with_clv: bool = False) -> str:
     rec = f"{t['w']}-{t['l']}" + (f"-{t['p']}" if t["p"] else "")
+    # A push-only slate risked nothing, so there is no ROI to divide by.
+    # The units are still the units: zero, stated, on the same picks as the record.
     if t["risked"] <= 0:
-        base = f"{rec} · record only"
+        base = f"{rec} · {t['units']:+.2f}u"
     else:
         roi = t["units"] / t["risked"] * 100
         base = f"{rec} · {t['units']:+.2f}u · {roi:+.1f}% ROI"
@@ -2164,7 +2148,7 @@ def snapshot_rows(game_date: str, published_at: str,
         roi = (t["units"] / t["risked"] * 100) if t["risked"] > 0 else None
         clv = (t["clv_beat"] / t["clv_n"] * 100) if t.get("clv_n") else None
         out.append((game_date, scope, sport, t["w"], t["l"], t["p"], settled,
-                    t["record_only"], round(t["units"], 4),
+                    round(t["units"], 4),
                     round(t["risked"], 4), None if roi is None else round(roi, 4),
                     t.get("clv_n", 0), t.get("clv_beat", 0),
                     None if clv is None else round(clv, 4), published_at))
@@ -2187,14 +2171,14 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
         conn.executemany("""
             INSERT INTO results_snapshots (
                 game_date, scope, sport, wins, losses, pushes, settled,
-                record_only, units, risked, roi_pct, clv_graded, clv_beat,
+                units, risked, roi_pct, clv_graded, clv_beat,
                 clv_pct, published_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (game_date, scope, COALESCE(sport, ''))
             DO UPDATE SET
                 wins=EXCLUDED.wins, losses=EXCLUDED.losses,
                 pushes=EXCLUDED.pushes, settled=EXCLUDED.settled,
-                record_only=EXCLUDED.record_only, units=EXCLUDED.units,
+                units=EXCLUDED.units,
                 risked=EXCLUDED.risked, roi_pct=EXCLUDED.roi_pct,
                 clv_graded=EXCLUDED.clv_graded, clv_beat=EXCLUDED.clv_beat,
                 clv_pct=EXCLUDED.clv_pct, published_at=EXCLUDED.published_at

@@ -77,15 +77,15 @@ def test_the_recap_query_counts_the_kept_copy_and_not_the_marked_one():
         pytest.skip("IS DISTINCT FROM needs SQLite >= 3.39")
     db = sqlite3.connect(":memory:")
     db.execute("""CREATE TABLE picks (pick_id, sport, model_id, result,
-                  kelly_fraction, dk_odds, clv_pct, is_live, game_date,
+                  kelly_fraction, dk_odds, decision_odds, clv_pct, is_live, game_date,
                   signal_type, downgrade_reason, condition_status)""")
     rows = [
-        (332605, "UFC", "ufc_total_rounds", "WIN", 0.02, -166, None, 0, "2026-06-20", "BET", None, None),
-        (332615, "UFC", "ufc_total_rounds", "WIN", 0.02, -130, None, 0, "2026-06-20", "BET", None, "DUPLICATE"),
-        (9, "UFC", "ufc_total_rounds", "NO_ACTION", 0.02, -110, None, 0, "2026-06-20", "BET", None, "VOID"),
-        (10, "NCAAF", "ncaaf_spread", "LOSS", 0.02, -110, None, 0, "2026-06-20", "BET", None, "GONE"),
+        (332605, "UFC", "ufc_total_rounds", "WIN", 0.02, -166, None, None, 0, "2026-06-20", "BET", None, None),
+        (332615, "UFC", "ufc_total_rounds", "WIN", 0.02, -130, None, None, 0, "2026-06-20", "BET", None, "DUPLICATE"),
+        (9, "UFC", "ufc_total_rounds", "NO_ACTION", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "VOID"),
+        (10, "NCAAF", "ncaaf_spread", "LOSS", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "GONE"),
     ]
-    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     sql = _SETTLED_SQL.format(window="= ?").replace("%%", "%")
     got = sorted((r[1], r[4]) for r in db.execute(sql, ("2026-06-20",)).fetchall())
     assert got == [("ncaaf_spread", -110), ("ufc_total_rounds", -166)]

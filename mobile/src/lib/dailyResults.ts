@@ -13,7 +13,6 @@ import {
   isModelRetired,
   passesActionFilter,
   passesRecordFilter,
-  RECORD_ONLY_MODELS,
 } from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
@@ -22,10 +21,6 @@ import { decisionEdge } from '@/lib/decisionPrice';
 
 export interface ModelDayStats extends CustomModelStats {
   modelId: string;
-  /** Record-only model (e.g. batter HR): its W-L is shown on the row, but it is
-   *  excluded from the overall/sport totals and its money fields are zeroed —
-   *  the same treatment as the Models tab and the public track record. */
-  recordOnly: boolean;
   /** In-play model. Its picks count exactly like a pre-game pick — they lock at
    *  first signal and settle the same way — but a reader deciding whether a day
    *  went well should be able to see which half of the book produced it. */
@@ -221,10 +216,9 @@ function gameMatchup(g: GameRow): string {
 
 /**
  * Group a day's picks into overall + per-sport + per-model records.
- * Only settled (WIN/LOSS/PUSH) BET picks that pass the current action filter
- * count toward the record; NO_ACTION rows, off-date rows, live picks, and
- * sub-threshold picks are excluded. Record-only models (RECORD_ONLY_MODELS —
- * batter HR) are listed but never counted. BET picks awaiting a result (result NULL)
+ * Only settled (WIN/LOSS/PUSH) BET picks that pass the record filter
+ * count toward the record and the units. NO_ACTION rows, off-date rows, and
+ * sub-threshold ungraded picks are excluded. BET picks awaiting a result (result NULL)
  * are tallied per-sport as `pending` and listed in `pendingPicks` — a sport
  * whose games haven't settled yet shows as "pending", never as absent.
  * `dayGames` (optional) yields `games`: every game with ≥1 scored pick row.
@@ -303,18 +297,14 @@ export function computeDailyResults(
       liveBySport.set(p.sport, (liveBySport.get(p.sport) ?? 0) + 1);
     }
 
-    // Record-only models (batter HR) are listed and get a per-model W-L row,
-    // but never count toward the overall or per-sport record/P&L.
-    if (!RECORD_ONLY_MODELS.has(p.model_id)) {
-      tally(overall, p);
+    tally(overall, p);
 
-      let sAcc = bySport.get(p.sport);
-      if (!sAcc) {
-        sAcc = emptyAcc();
-        bySport.set(p.sport, sAcc);
-      }
-      tally(sAcc, p);
+    let sAcc = bySport.get(p.sport);
+    if (!sAcc) {
+      sAcc = emptyAcc();
+      bySport.set(p.sport, sAcc);
     }
+    tally(sAcc, p);
 
     let mEntry = byModel.get(p.model_id);
     if (!mEntry) {
@@ -329,21 +319,18 @@ export function computeDailyResults(
     tally(mEntry.acc, p);
   }
 
-  // Per-model rows grouped under their sport. Record-only models keep their
-  // W-L but get zeroed money so the row can never read as counted P&L.
+  // Per-model rows grouped under their sport. Money is the same graded picks
+  // as the W-L on the row.
   const modelsBySport = new Map<string, ModelDayStats[]>();
   for (const [modelId, { sport, acc, live }] of byModel) {
-    const recordOnly = RECORD_ONLY_MODELS.has(modelId);
-    let stats = finalize(acc);
+    const stats = finalize(acc);
     if (stats.picks === 0) continue;
-    if (recordOnly) stats = { ...stats, profitFlat: 0, stakedFlat: 0, roiFlat: 0 };
     const arr = modelsBySport.get(sport) ?? [];
-    arr.push({ modelId, recordOnly, live, ...stats });
+    arr.push({ modelId, live, ...stats });
     modelsBySport.set(sport, arr);
   }
 
-  // A sport gets a section if it has counted picks, pending picks, OR
-  // record-only model rows — a day where only HR graded must still surface MLB.
+  // A sport gets a section if it has counted picks or pending picks.
   const sectionSports = new Set([
     ...bySport.keys(),
     ...pendingBySport.keys(),
@@ -365,7 +352,7 @@ export function computeDailyResults(
   gradedPicks.sort(
     (a, b) =>
       bySportOrder(a.sport, b.sport) ||
-      Number(b.profit_flat ?? 0) - Number(a.profit_flat ?? 0),
+      flatPnl(b).profit - flatPnl(a).profit,
   );
   pendingPicks.sort(
     (a, b) => bySportOrder(a.sport, b.sport) || decisionEdge(b) - decisionEdge(a),

@@ -157,7 +157,7 @@ in-week during the season.
   VOIDED, not deleted (`scripts/void_picks.py`); BUF @ HOU at |dev| 2.0
   stands. Full table: `docs/thresholds.md`.
 
-  **2026 paper-track (no unit bump):** live through 2026; retire if the season
+  **2026 live track (no unit bump):** live through 2026; retire if the season
   finishes ≤ flat. Wind: `MAX_FIRE_LEAD` stays 4; measure the deployed
   Open-Meteo population. Do not unpause paused XGB props off this track.
   `python -m scripts.nfl_rule_2026_track`. `docs/nfl_rule_2026_track.md`.

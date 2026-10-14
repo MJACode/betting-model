@@ -1730,7 +1730,7 @@ def build_scheduler() -> BlockingScheduler:
         run_kalshi_ladder_record,
         CronTrigger(minute=40, timezone=TIMEZONE),
         id="kalshi_ladders",
-        name="Kalshi NFL prop ladders (record only)",
+        name="Kalshi NFL prop ladders (quotes stored, not bet)",
     )
     # Minute 45, same reasoning: the NCAAF game markets (winner / total /
     # spread ladders) are a research record, never on the betting path.
@@ -1738,7 +1738,7 @@ def build_scheduler() -> BlockingScheduler:
         run_kalshi_game_record,
         CronTrigger(minute=45, timezone=TIMEZONE),
         id="kalshi_game_markets",
-        name="Kalshi NCAAF game markets (record only)",
+        name="Kalshi NCAAF game markets (quotes stored, not bet)",
     )
 
     if RUN_NCAAF_PROP_ODDS:

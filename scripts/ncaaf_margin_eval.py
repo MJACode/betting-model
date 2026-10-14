@@ -399,7 +399,7 @@ def _print_walk_forward(res: dict, market: str = "SPREAD") -> None:
             print("  -> the whole interval clears breakeven. That is a real result.")
         elif wr >= BREAKEVEN:
             print("  -> above breakeven, but the interval still contains it: the")
-            print("     record is CONSISTENT with having no edge. Paper trading")
+            print("     record is CONSISTENT with having no edge. Forward results")
             print("     settles it, not more backtesting.")
         else:
             print("  -> below breakeven pooled. The single-season pass does NOT")

@@ -65,7 +65,7 @@ from models.scorer import (
 
 # ── Go-Live Gate Thresholds ──────────────────────────────────────────────────
 
-GO_LIVE_MIN_PICKS    = 50     # a NEW model stays paper-only until ≥50 settled picks
+GO_LIVE_MIN_PICKS    = 50     # gate report: ≥50 settled picks. The model is live either way.
 GO_LIVE_MIN_ROI      = 0.00   # must show positive flat ROI
 GO_LIVE_MAX_CAL_ERR  = 0.05   # calibration error ≤5%
 

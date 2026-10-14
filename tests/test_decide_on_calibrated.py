@@ -167,9 +167,9 @@ def test_mlb_f5_moneyline_is_on_the_out_of_sample_cut():
     2026-09-03 (mike): the `mlb_pitcher_stats` leak repair forced a retrain
     (docs/team_stats_leak.md), and 0.74 did not survive it. Scored across 2026
     the new artifact's MAXIMUM probability is 0.734, so the cut fired ZERO bets
-    -- mlb_runline's failure mode, and worse here, because f5 is PAPER ONLY
-    after a retrain and a cut that fires nothing can never reach the >=50
-    settled picks §2's gate needs. It was also a CALIBRATED bar applied to a RAW
+    -- mlb_runline's failure mode, and worse here, because a retrain resets
+    the settled-pick count the gate reports and a cut that fires nothing can
+    never reach the >=50 that report needs. It was also a CALIBRATED bar applied to a RAW
     probability, since f5's map has never been promoted.
 
     The replacement comes from `scripts/mlb_f5_sweep` on 2026 (held out of the
@@ -178,11 +178,11 @@ def test_mlb_f5_moneyline_is_on_the_out_of_sample_cut():
 
     THE EVIDENCE IS THIN AND THIS TEST SAYS SO. One of 50 non-thin cells is
     positive and it fails the plateau check 0 of 8 -- the isolated-peak shape
-    sessions 74 and 87 retracted. That is an argument against ever making this
-    cut LIVE. It is not an argument against measuring it: these picks are PAPER,
-    the retrain reset §2's gate, and nothing is backed at 0.58/0.02. Pausing
-    would differ only in producing no record at all -- and a paused model cannot
-    clear the gate that would unpause it.
+    sessions 74 and 87 retracted. That is why the kill criterion pauses the
+    model at 50 settled picks if flat-bet ROI is negative. It is not an
+    argument for leaving the picks out of the units: every graded pick is
+    live money. Pausing would differ only in producing no record at all --
+    and a paused model cannot clear the review that would unpause it.
 
     Kill criterion is pre-committed in config: review at 50 settled picks, pause
     if flat ROI is negative, and do NOT go looking for a better cell.

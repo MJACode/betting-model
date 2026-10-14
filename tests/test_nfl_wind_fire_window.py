@@ -80,7 +80,7 @@ def test_the_same_game_fires_once_it_is_inside_the_window(wind):
 
 
 def test_max_fire_lead_is_four_and_stays_four(wind):
-    """2026 paper-track: do not widen the fire window. Pin the number, not just the name."""
+    """2026 live track: do not widen the fire window. Pin the number, not just the name."""
     assert wind.MAX_FIRE_LEAD == 4.0
     assert wind.UNIT_PCT == 0.01
 

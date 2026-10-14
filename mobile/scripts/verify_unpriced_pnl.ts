@@ -6,8 +6,8 @@
  * (tracking/paper_tracker), so its profit_flat is fabricated: +$90.91 on a win
  * that could not have been placed. The DB side already refuses that money —
  * v_public_track_record / _daily count the W-L but sum profit and stake over
- * priced picks only (migration require_price_for_published_units, 2026-08-31),
- * and Discord's recap tallies them as record-only. The app's own tallies did
+ * priced picks only (migration require_price_for_published_units, 2026-08-31).
+ * The app's own tallies did
  * not, so on 2026-09-03 the Models tab showed UFC Total Rounds at +13.0% and
  * the Record tab showed the same 8-5 at -26.6%.
  *

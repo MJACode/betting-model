@@ -2160,7 +2160,7 @@ _RULE_MODEL_MARKETS = {
     # total; the stored final includes the shootout goal, as books settle it.
     "nhl_over_under": "totals",
 }
-# 2026 paper-track for these two: python -m scripts.nfl_rule_2026_track
+# 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
 
 # Models removed from the registries but whose picks still live in the picks

@@ -1977,8 +1977,7 @@ export async function fetchPublishedModelRecord(): Promise<Record<string, FullOu
       pushes: Number(r.pushes ?? 0),
       priced_bets: staked / 100,
       units: profit / 100,
-      // Null rather than 0 when nothing was priced: 0.0% reads as break-even,
-      // and a record-only model has no ROI to report.
+      // Null rather than 0 when nothing was priced: 0.0% reads as break-even.
       roi_pct: staked > 0 ? (profit / staked) * 100 : null,
     };
   }
