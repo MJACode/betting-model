@@ -285,7 +285,10 @@ one point, which is why timing is key."*
 Once a model produces a BET at a line and a price, **that pick existed** and is
 the bet of record. If the line then moves so the model would no longer take it,
 that is LINE MOVEMENT: it does not retract the bet, does not change the number
-that was given, and **must never delete or overwrite the row**. Every model locks
+that was given, and **must never delete or overwrite the row**. The published
+record (Discord, X, `results_snapshots`, the two app views) counts a settled
+BET only while Discord still holds its lock (`v_discord_published`). An
+unposted row stays in `picks`. Every model locks
 its pick — game-level at the first scoring run, props at the first signal on a
 confirmed lineup, live at the first BET per lane, NFL wind/opener by
 construction. **Timing is data, not metadata:** `created_at` is when the number
@@ -327,9 +330,8 @@ props. Seven sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL and NCAAF
 
 **Every model is live real money.** There is no second mode that counts a
 graded pick in the win-loss record and leaves it out of the units, and there
-is no hold-back ledger. Units and the record are the same graded set, at the
-stake and profit of the price the bet was taken at
-(`COALESCE(decision_odds, dk_odds)`). A pick with no price is not given a
+is no hold-back ledger. Units and the record are the same graded set, sized by `stake_for`
+(1u to win, risk capped at 3) at `COALESCE(decision_odds, dk_odds)`. A pick with no price is not given a
 made-up price. (mike, 2026-10-14, and 2026-10-08: do not ask to hold a model
 back.) Report gate standing — ≥ 50 settled picks, positive flat-bet ROI,
 calibration error ≤ 5% — and build the model live.

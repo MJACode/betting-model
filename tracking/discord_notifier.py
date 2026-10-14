@@ -58,7 +58,7 @@ from tracking.publish_filters import captured_not_voided_sql, live_publishable_s
 from tracking.publish_keys import (
     SIGNAL_LEDGER_SQL, channel_lock_held_sql, live_lock_key_sql,
 )
-from tracking.publish_keys import key_partition_sql, lock_key_sql
+from tracking.publish_keys import key_partition_sql, lock_key_sql, posted_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
 from tracking.pick_integrity import refuse_mismatched
@@ -2001,6 +2001,13 @@ def notify_discord_free_pick(target_date: str | None = None,
 # model bet one event under two game ids, the second copy carries
 # condition_status = config.DUPLICATE_STATUS and counts once, here and on
 # every other record surface. Its result is never touched.
+#
+# POSTED TO DISCORD (owner, 2026-10-14). Daily, the 7-day restatement, and
+# all-time all read this query, and X and the snapshot builder read it too.
+# A settled BET Discord never carried is not in that record. The lock is
+# posted_sql: push_sent discord_signal / discord_live, the same key
+# v_discord_published joins, dropped when a newer discord_void notice holds.
+# The row stays in picks. nfl_live_prop stays out through RECORD_EXCLUSIONS.
 _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
                COALESCE(p.decision_odds, p.dk_odds),
@@ -2013,7 +2020,8 @@ _SETTLED_SQL = r"""
           AND p.result IN ('WIN', 'LOSS', 'PUSH')""" \
     + config.record_exclusion_sql("p") \
     + config.paused_row_exclusion_sql("p") \
-    + config.duplicate_copy_exclusion_sql("p") + "\n"
+    + config.duplicate_copy_exclusion_sql("p") \
+    + "\n          AND " + posted_sql("p") + "\n"
 
 
 def _settled_rows(conn, game_date: str) -> list[tuple]:

@@ -76,6 +76,7 @@ jobs:
             tests/test_settle_self_heal.py \
             tests/test_settled_record_is_immutable.py \
             tests/test_live_money_no_record_only.py \
+            tests/test_published_record.py \
             tests/test_settlement_timing.py \
             tests/test_nhl_boxscore.py \
             tests/test_nba_espn_box.py \
