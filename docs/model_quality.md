@@ -49,7 +49,7 @@ are excluded. `RECORD_EXCLUSIONS` is applied to settled windows.
 |---|---|---|---|
 | `slate_concentration` | Today's open BETs on one `model_id` pile the same side (over / under / home / away / yes / no) | ≥5 BETs, ≥85% one side, enough distinct games | 100% one side, ≥6 BETs, slate large enough (the all-unders fade case) |
 | `public_fade_risk` | Those BETs are fading a public pile, and they pile one side | ≥85% look like fades and share a side | 100% fades, one side, ≥6 BETs. Fade-style = `fade` in `model_id` (any sport). Other models: `public_bet_pct` ≤40 (minority side) or ≥70 (publisher stamped the opposite pile) |
-| `clv_degradation` | Settled BETs with `clv_method` in (`no_vig`,`zero_vig`) — last 14 days vs the prior 28 | recent mean CLV ≤ −1.0pp **and** ≥1.5pp worse than baseline (n≥15) | recent mean ≤ −2.0pp **and** beat-rate < 40% (n≥20) |
+| `clv_degradation` | Settled BETs with `clv_method = standard_v2` — last 14 days vs the prior 28. The number is now same-book percent; the cutoffs were not retuned | recent mean CLV ≤ −1.0 **and** ≥1.5 worse than baseline (n≥15) | recent mean ≤ −2.0 **and** beat-rate < 40% (n≥20) |
 | `roi_collapse` | Same windows; units = `profit_flat / 100` gated on a non-NULL price (§6) | recent ROI ≤ −15% **and** ≥10pp worse than baseline (n≥20 priced) | recent ROI ≤ −25% **and** hit-rate < 40% |
 | `volume_spike` | Today's BET count / `recommended_bet/100` vs that model's median of the last 14 days that had BETs | ≥3× median, ≥6 BETs today | ≥5× median, ≥6 BETs today |
 

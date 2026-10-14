@@ -20,7 +20,16 @@ export interface TrackRecordSummary {
   winRate: number; // wins / (wins + losses)
   clvSettled: number;
   clvBeat: number;
-  clvBeatRate: number | null; // clvBeat / clvSettled
+  clvBeatRate: number | null; // clvBeat / clvSettled, same-book price
+  clvGameSettled: number;
+  clvGameBeat: number;
+  clvGameBeatRate: number | null;
+  clvPropSettled: number;
+  clvPropBeat: number;
+  clvPropBeatRate: number | null;
+  marketClvSettled: number;
+  marketClvBeat: number;
+  marketClvBeatRate: number | null;
 }
 
 export const EMPTY_SUMMARY: TrackRecordSummary = {
@@ -35,6 +44,15 @@ export const EMPTY_SUMMARY: TrackRecordSummary = {
   clvSettled: 0,
   clvBeat: 0,
   clvBeatRate: null,
+  clvGameSettled: 0,
+  clvGameBeat: 0,
+  clvGameBeatRate: null,
+  clvPropSettled: 0,
+  clvPropBeat: 0,
+  clvPropBeatRate: null,
+  marketClvSettled: 0,
+  marketClvBeat: 0,
+  marketClvBeatRate: null,
 };
 
 export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
@@ -45,6 +63,12 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
   let stakedFlat = 0;
   let clvSettled = 0;
   let clvBeat = 0;
+  let clvGameSettled = 0;
+  let clvGameBeat = 0;
+  let clvPropSettled = 0;
+  let clvPropBeat = 0;
+  let marketClvSettled = 0;
+  let marketClvBeat = 0;
 
   for (const r of rows) {
     // The view drops a retired model once threshold_sync prunes its row; until
@@ -57,6 +81,12 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     stakedFlat += Number(r.staked_flat ?? 0);
     clvSettled += Number(r.clv_settled ?? 0);
     clvBeat += Number(r.clv_beat ?? 0);
+    clvGameSettled += Number(r.clv_game_settled ?? 0);
+    clvGameBeat += Number(r.clv_game_beat ?? 0);
+    clvPropSettled += Number(r.clv_prop_settled ?? 0);
+    clvPropBeat += Number(r.clv_prop_beat ?? 0);
+    marketClvSettled += Number(r.market_clv_settled ?? 0);
+    marketClvBeat += Number(r.market_clv_beat ?? 0);
   }
 
   const decided = wins + losses;
@@ -72,6 +102,15 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     clvSettled,
     clvBeat,
     clvBeatRate: clvSettled > 0 ? clvBeat / clvSettled : null,
+    clvGameSettled,
+    clvGameBeat,
+    clvGameBeatRate: clvGameSettled > 0 ? clvGameBeat / clvGameSettled : null,
+    clvPropSettled,
+    clvPropBeat,
+    clvPropBeatRate: clvPropSettled > 0 ? clvPropBeat / clvPropSettled : null,
+    marketClvSettled,
+    marketClvBeat,
+    marketClvBeatRate: marketClvSettled > 0 ? marketClvBeat / marketClvSettled : null,
   };
 }
 

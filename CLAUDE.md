@@ -466,7 +466,7 @@ is scoped to. In one line each, so you know they exist:
 - **A pick is decided, sized and settled at the best bettable price**, and the
   row records which price and whose line (`decision_*`, read as
   `COALESCE(decision_x, dk_x)`). DraftKings stays the REFERENCE for features;
-  CLV grades the locked bet against the no-vig sharp close (`docs/clv.md`).
+  CLV's headline is the bet book's own raw close; Pinnacle's no-vig close is the market-edge column (`docs/clv.md`).
 - **A player prop DraftKings does not list is scored off the first bettable book
   that does** — in `BEST_LINE_BOOKMAKERS` order, never by price. `line_book`
   names it. These picks are a NEW population; report them separately.

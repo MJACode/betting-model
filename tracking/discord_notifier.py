@@ -2031,7 +2031,8 @@ def notify_discord_free_pick(target_date: str | None = None,
 _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
                COALESCE(p.decision_odds, p.dk_odds),
-               p.clv_pct, p.is_live
+               CASE WHEN p.clv_method = 'standard_v2' THEN p.clv_pct END,
+               p.is_live
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'

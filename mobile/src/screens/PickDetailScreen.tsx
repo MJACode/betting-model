@@ -61,7 +61,7 @@ import {
 } from '@/lib/markets';
 import { stalePriceNote } from '@/lib/heroPriceText';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
 import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
 import { detailPresentation } from '@/lib/loadState';
@@ -577,66 +577,77 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   );
 }
 
-// Closing line value, captured at settlement from the last pre-game snapshot
-// on the pick side (Pinnacle when that snapshot exists — docs/clv.md).
+// Closing line value. The headline is the book we bet: did that book's own
+// closing price on the same side and line end worse than the price we took?
+// Both sides are raw. Pinnacle's de-vigged close is a second row when we
+// have it (docs/clv.md).
 //
-// TWO MEASURES, and which one applies depends on whether the number moved:
-//   - the number HELD  → clv_pct, the no-vig price delta in pp
-//   - the number MOVED → line_clv_pts, how far it moved toward our side
 // A price on a line we no longer hold is not a comparison (Over 44.5 at -110
 // and Over 46.5 at -110 are different bets), which is why clv_pct is NULL for
-// a moved line rather than misleading. `clv_beat_close` carries the single
-// verdict so this card can never pick the wrong one of the two.
+// a moved line. The card then quotes the move in points. That move is not a
+// beat. `clv_beat_close` is clv_pct > 0 only.
 //
-// The headline the card exists for is THE PRICE TAKEN vs THE CLOSING LINE:
-// the number and price the bet was taken at against the number the market
-// settled on. Since 2026-10-08 CLV is graded at the price taken, at the book it
-// was taken (mike: "grade CLV at the price taken"), so the card prints that
-// price at that book (lib/clvBet.ts), never DraftKings' price on a pick taken
-// elsewhere.
+// Only standard_v2 rows are shown. A pre-migration cache still holds the old
+// probability-point number, and printing it with a percent sign would lie.
+// A stamped row with no price, no line move and no market edge has nothing
+// to show — an old capture time is not a close.
 function ClvCard({ pick }: { pick: Pick }) {
-  // clv_captured_at is the "we have a close" flag. Gating on clv_pct instead
-  // would hide the card for exactly the picks whose line moved — the ones with
-  // the most to show.
-  if (pick.clv_captured_at == null) return null;
+  if (pick.clv_method !== 'standard_v2') return null;
 
   const market = pick.model_id.includes('prop')
     ? propMarketForModel(pick.model_id)
     : gameMarketForModel(pick.model_id);
   const lineCLV = pick.line_clv_pts;
   const lineMoved = lineCLV != null && lineCLV !== 0;
+  const hasPrice = !lineMoved && pick.clv_pct != null;
+  const marketEdge = pick.market_clv_pct;
+  if (!hasPrice && !lineMoved && marketEdge == null) return null;
+  const onlyMarket = !hasPrice && !lineMoved;
   const hasLines = pick.scored_line != null && pick.closing_line != null;
 
   const beat = pick.clv_beat_close;
-  // Flat means the headline PRINTS zero ("0.0pp" at 1 dp), not that the raw
+  // Flat means the headline PRINTS zero ("0.0%" at 1 dp), not that the raw
   // value is exactly 0: a CLV of −0.03 is "Matched the close" in grey, never a
-  // red "0.0pp · Closed worse" (Reviewer, audit PR 1).
+  // red "0.0% · Closed worse" (Reviewer, audit PR 1).
   const flat = !lineMoved && roundsToZero(pick.clv_pct, 1);
-  const valueColor = flat
-    ? colors.textSecondary
-    : beat == null
+  const marketFlat = onlyMarket && roundsToZero(marketEdge, 1);
+  const valueColor = onlyMarket
+    ? marketFlat
       ? colors.textSecondary
-      : beat
-        ? colors.betInk
-        : colors.avoidInk;
-  const verdict = flat
-    ? 'Matched the close'
-    : beat == null
-      ? 'Close recorded'
-      : beat
-        ? 'Beat the close'
-        : 'Closed worse';
+      : pnlColor(marketEdge, 1)
+    : flat
+      ? colors.textSecondary
+      : beat == null
+        ? colors.textSecondary
+        : beat
+          ? colors.betInk
+          : colors.avoidInk;
+  const verdict = onlyMarket
+    ? marketFlat
+      ? 'Matched Pinnacle'
+      : (marketEdge ?? 0) > 0
+        ? 'Beat Pinnacle’s fair close'
+        : 'Missed Pinnacle’s fair close'
+    : flat
+      ? 'Matched the close'
+      : beat == null
+        ? 'Close recorded'
+        : beat
+          ? 'Beat the close'
+          : 'Closed worse';
 
-  // The number moved → quote the move in points, the unit the bet is actually
-  // in. It held → quote the price move in pp, as before.
+  // The number moved → quote the move in points. It held → the raw price
+  // move at the book we bet, in percent. No same-book close → the Pinnacle
+  // percent is the headline, not an em dash.
   const headline = lineMoved
     ? formatSigned(lineCLV, 1, ' pts')
-    : pick.clv_pct != null
-      ? formatSigned(pick.clv_pct, 1, 'pp')
-      : '—';
+    : hasPrice
+      ? formatSigned(pick.clv_pct, 1, '%')
+      : formatSigned(marketEdge, 1, '%');
 
-  const closeBook = (pick.clv_close_book || 'draftkings').toLowerCase();
-  const closeName = bookName(closeBook);
+  const closeBook = pick.clv_close_book ? pick.clv_close_book.toLowerCase() : null;
+  const closeName = closeBook ? bookName(closeBook) : null;
+  const hasClose = closeName != null && pick.closing_dk_odds != null;
   // The book printed is the book whose price is printed: the price the bet was
   // taken at and graded at, from the same rule the capture uses
   // (paper_tracker._bet_price_and_book). Do not print dk_odds here: on a pick
@@ -661,7 +672,7 @@ function ClvCard({ pick }: { pick: Pick }) {
           </Text>
         </View>
       ) : null}
-      {hasLines ? (
+      {hasLines && hasClose ? (
         <View style={styles.clvRow}>
           <Text style={styles.clvRowLabel}>Closing line ({closeName})</Text>
           <Text style={styles.clvRowValue} numberOfLines={1}>
@@ -669,21 +680,46 @@ function ClvCard({ pick }: { pick: Pick }) {
             {formatAmerican(pick.closing_dk_odds)}
           </Text>
         </View>
-      ) : (
+      ) : !hasLines && hasClose ? (
         <Text style={styles.infoBody}>
           {betName} {formatAmerican(bet.price)} taken → {closeName}{' '}
           {formatAmerican(pick.closing_dk_odds)} at close
         </Text>
-      )}
+      ) : !hasLines ? (
+        <Text style={styles.infoBody}>
+          {betName} {formatAmerican(bet.price)} taken
+        </Text>
+      ) : null}
+
+      {marketEdge != null && !onlyMarket ? (
+        <View style={styles.clvRow}>
+          <Text style={styles.clvRowLabel}>Market edge (Pinnacle)</Text>
+          <Text style={[styles.clvRowValue, { color: pnlColor(marketEdge, 1) }]} numberOfLines={1}>
+            {formatSigned(marketEdge, 1, '%')}
+          </Text>
+        </View>
+      ) : null}
 
       <Text style={styles.clvNote}>
-        {lineMoved
-          ? `The number moved ${Math.abs(lineCLV).toFixed(1)} ${
-              Math.abs(lineCLV) === 1 ? 'point' : 'points'
-            } ${lineCLV > 0 ? 'in your favor' : 'against you'} after we posted this — ` +
-            `betting it later would have been ${lineCLV > 0 ? 'worse' : 'better'}. ` +
-            `The prices aren't compared here because they're quoted on different numbers.`
-          : `The number held. The pp is the fair (no-vig) ${closeName} close versus the ${betName} price taken — not a posted-price delta. Independent of whether the bet won.`}
+        {[
+          lineMoved
+            ? `The number moved ${Math.abs(lineCLV).toFixed(1)} ${
+                Math.abs(lineCLV) === 1 ? 'point' : 'points'
+              } ${lineCLV > 0 ? 'in your favor' : 'against you'} after we posted this — ` +
+              `betting it later would have been ${lineCLV > 0 ? 'worse' : 'better'}. ` +
+              `The prices aren't compared here because they're quoted on different numbers.`
+            : null,
+          hasPrice
+            ? `The number held. This is the raw ${betName} price we took versus that same book's close. Neither side is de-vigged. Independent of whether the bet won.`
+            : null,
+          marketEdge != null
+            ? lineMoved
+              ? 'Market edge is still that original number against Pinnacle’s fair close.'
+              : 'Market edge is the price we took against Pinnacle’s fair close.'
+            : null,
+        ]
+          .filter((part) => part != null)
+          .join(' ')}
       </Text>
     </View>
   );
