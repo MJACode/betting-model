@@ -141,3 +141,37 @@ def test_the_daily_recap_leaves_an_unpublished_graded_bet_out():
     assert "p.discordPublish === 'unpublished'" in src
     hook = (ROOT / "mobile" / "src" / "hooks" / "useDailyResults.ts").read_text(encoding="utf-8")
     assert "attachDiscordPublish" in hook
+
+
+def test_the_app_record_leaves_an_unpublished_graded_bet_out():
+    """The published view already locks on v_discord_published. These are the
+    client tallies that were still counting the unfiltered settled set."""
+    thresholds = (ROOT / "mobile/src/lib/thresholds.ts").read_text(encoding="utf-8")
+    record = thresholds.split("export function passesRecordFilter(")[1].split("\n}")[0]
+    assert "publishedRecordKeeps" not in record
+    assert "export function publishedRecordKeeps(" in thresholds
+    backtest = (ROOT / "mobile/src/lib/customModelBacktest.ts").read_text(encoding="utf-8")
+    custom = backtest.split("export function computeCustomModelStats(")[1].split("export function")[0]
+    built = backtest.split("export function computeBuiltInModelStats(")[1]
+    assert "publishedRecordKeeps(p)" in built
+    assert "publishedRecordKeeps" not in custom
+    screen = (ROOT / "mobile/src/screens/BuiltInModelDetailScreen.tsx").read_text(encoding="utf-8")
+    assert "publishedRecordKeeps(p)" in screen
+    assert "p.discordPublish === 'published'" in screen
+    assert "viewPresent && ledgerUnread" in screen
+    assert "The Discord check did not finish, so this list can be wider than the tiles." in screen
+    assert "both keep picks whose posting status is unknown" in screen
+    assert "useModelPickHistory" not in screen
+    assert "v_model_full_outcome_picks" not in screen
+    for rel in ("mobile/src/lib/teamDetail.ts", "mobile/src/lib/playerDetail.ts"):
+        assert "publishedRecordKeeps(p)" in (ROOT / rel).read_text(encoding="utf-8")
+    hook = (ROOT / "mobile/src/hooks/useCustomModelStats.ts").read_text(encoding="utf-8")
+    load = hook.split("export function useSettledPicksSincePaperStart(")[1].split("export function viewRecordToStats")[0]
+    assert load.index("writeSettledCache(merged)") < load.index("attachDiscordPublish(merged)")
+    queries = (ROOT / "mobile/src/lib/queries.ts").read_text(encoding="utf-8")
+    cols = queries.split("const SETTLED_PICK_COLUMNS =")[1].split(";")[0]
+    assert "player_key" in cols and "prop_market" in cols and "clv_method" in cols
+    assert queries.count("return attachDiscordPublish(") == 2
+    cache = (ROOT / "mobile/src/lib/settledPickCache.ts").read_text(encoding="utf-8")
+    assert "const KEY = 'settledPicks.v9';" in cache
+    assert "countsTowardViewClv" in screen

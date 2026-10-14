@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ALL_SPORTS, computeDailyResults, scopeDailyResults } from '../src/lib/dailyResults';
-import { countsTowardViewClv, isPostedSettledBet } from '../src/lib/publishedRecord';
+import { countsTowardViewClv } from '../src/lib/publishedRecord';
 import { flatPnl, isModelPaused } from '../src/lib/thresholds';
 import type { GameRow, Pick } from '../src/types';
 
@@ -392,21 +392,6 @@ check('a day of only unpublished bets reports that count and an empty record',
     && unpostedDay.gradedPicks.length === 0,
   JSON.stringify({ picks: unpostedDay.overall.picks, unpublished: unpostedDay.unpublished }));
 
-const postedBet = {
-  model_id: 'mlb_moneyline',
-  signal_type: 'BET' as const,
-  condition_status: null,
-  is_live: false,
-  downgrade_reason: null,
-  result: 'WIN' as const,
-};
-check('model detail counts a posted settled bet',
-  isPostedSettledBet({ ...postedBet, discordPublish: 'published' }));
-check('model detail drops an unpublished settled bet',
-  !isPostedSettledBet({ ...postedBet, discordPublish: 'unpublished' }));
-check('model detail does not treat an unread ledger as posted',
-  !isPostedSettledBet({ ...postedBet, discordPublish: 'unknown' })
-    && !isPostedSettledBet(postedBet));
 check('CLV counts no_vig and zero_vig only',
   countsTowardViewClv({ clv_pct: 1.5, clv_method: 'no_vig' })
     && countsTowardViewClv({ clv_pct: -0.2, clv_method: 'zero_vig' })
@@ -418,7 +403,7 @@ const detail = readFileSync(
   'utf8',
 );
 check('model detail does not list the re-graded full-outcome picks',
-  !detail.includes('useModelPickHistory') && detail.includes('isPostedSettledBet'));
+  !detail.includes('useModelPickHistory') && detail.includes("p.discordPublish === 'published'"));
 check('model detail CLV uses the record view methods',
   detail.includes('countsTowardViewClv'));
 check('the thresholds sentence is gone from model detail',

@@ -130,8 +130,7 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/filters/FilterSheet.tsx', 'pressed', 1], // 31.5pt
   ['src/components/filters/FilterSheet.tsx', 'showBtn,showBtnEmpty,pressed', 1], // 43.0pt
   ['src/components/filters/GameFilterSection.tsx', '', 1], // 32.0pt
-  ['src/screens/BuiltInModelDetailScreen.tsx', 'pickRow', 2], // 41.8, 41.8pt — HistoryPickRow removed; posted rows use FullOutcomeHistoryRow
-  ['src/screens/BuiltInModelDetailScreen.tsx', 'showMoreBtn', 3], // 39.5, 39.5, 39.5pt — the fallback history expander went with that row
+  ['src/screens/BuiltInModelDetailScreen.tsx', 'pickRow', 2], // 41.8, 41.8pt — the sweep row is gone
   ['src/screens/FeedbackScreen.tsx', 'chip,chipActive', 1], // 41.5pt
   ['src/screens/FeedbackScreen.tsx', 'pressed', 1], // 39.5pt
   ['src/screens/FeedbackScreen.tsx', 'sendBtn,sendBtnDisabled', 1], // 41.8pt

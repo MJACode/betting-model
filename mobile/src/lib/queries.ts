@@ -2018,9 +2018,10 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
     .from('v_model_full_outcome_picks')
     .select('*')
     // Bounded to the published window. The view itself keeps the longer
-    // sweep history (2026-04-14). The model detail screen no longer lists
-    // this view; it lists posted settled bets. The bound stays so a caller
-    // cannot put April rows under a September header.
+    // sweep history (2026-04-14), so without this the detail screen listed
+    // April-onward picks under a "since 2026-09-01" record and told the reader
+    // they were "the exact set behind the record above" — two counts a scroll
+    // apart, with copy insisting they matched.
     .gte('game_date', LIVE_RECORD_START)
     .eq('model_id', modelId)
     .order('game_date', { ascending: false })
@@ -2698,7 +2699,7 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       ...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p) && !isDuplicateCopy(p)),
     );
   }
-  return out;
+  return attachDiscordPublish(out);
 }
 
 /**
@@ -2737,10 +2738,11 @@ export async function fetchSettledPropPicksForPlayer(args: {
   if (error) throw error;
   // A game-level pick can never match a player_id; the label match could in
   // theory catch a team whose name starts a label, so keep prop rows only.
-  return ((data ?? []) as unknown as SettledPick[]).filter(
+  const rows = ((data ?? []) as unknown as SettledPick[]).filter(
     (p) =>
       (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p) && !isDuplicateCopy(p),
   );
+  return attachDiscordPublish(rows);
 }
 
 /**
