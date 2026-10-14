@@ -121,3 +121,45 @@ better than the market; the trees lose at every cut.
   and its own probability (in the first run, deciding the non-market version
   on the correction the live moneyline model uses lost at every cut up to
   0.10). Expected goals from the play-by-play is the next input group.
+
+## The production version, and two checks on it (2026-10-13/14)
+
+`models/nhl_moneyline_anchored.py` is the code production would run; its walk-forward
+(`scripts/nhl_moneyline_anchored_backtest.py`) first reproduced the research grade
+game by game (max probability difference 0.0). Then one fix: the goalie save rate
+was shrunk toward a league rate computed over ALL seasons, later ones included —
+a look-ahead that also made tonight's scoring differ from the training rows in the
+fourth decimal. As-of, serving matches training on 9,316 of 9,316 inputs checked.
+**The numbers it goes live on** (best bettable price, the production −200 floor,
+own probability):
+
+```
+EV>=  bets   units   roi   ci            clv   beat
+0.02  2752  +127.0  4.62  +1.0..+8.2    0.60  61.0
+0.04  2020   +93.5  4.63  +0.4..+8.8    0.63  61.7
+0.06  1326   +83.2  6.28  +1.1..+11.4   0.67  62.6
+0.08   863   +53.1  6.16  -0.3..+12.6   0.70  62.9
+```
+
+The −200 floor removes 238 of 1,564 bets at 0.06 and raises the return. Fit for
+production on all six priced seasons: 7,900 games, C = 0.003
+(`scripts/nhl_moneyline_anchored_train.py`).
+
+**Shot quality (expected goals) adds nothing.** Every NHL shot 2018-19 → 2026-10-12
+is now in `nhl_shot_events` (branch `nhl-shot-events`). Scored walk-forward (each
+season by an xG model that never saw it, level-corrected as-of) and added as a
+seven-input group, paired log loss on the same 6,973 games moves +0.00009
+(−0.00028..+0.00047); the betting grid is lower at EV 0.02-0.04 and higher at
+0.06-0.10 with lower CLV at four of five cuts, every interval overlapping. The xG
+inputs correlate 0.79-0.88 with the shot and save-rate inputs the model already
+has. Not adopted (branch `nhl-moneyline-xg-test`, not pushed).
+
+**How strongly it is held to the market matters.** The penalty sits on the edge of
+its pre-set grid (C = 0.003 every season). Widened to 0.0001-0.03, the module's own
+validation on the last three seasons prefers C = 0.001 (0.667110 against 0.667601;
+the market alone 0.667622) — but the walk-forward run with the wider grid is WORSE
+out of sample (log loss 0.66155 against 0.66098) and bets less well: EV 0.02 / 0.04
+/ 0.06 / 0.08 return +3.8% / +6.9% / +3.2% / +0.7% on 1,687 / 1,049 / 664 / 420
+bets with the floor. The grid was fixed before any result was seen and stays; the
+honest size of the edge is a range, roughly +3% to +6% a bet, not the single best
+row.
