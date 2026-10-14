@@ -1048,5 +1048,12 @@
     "requested_by": "owner",
     "note": "Owner, 2026-10-14: full record through Oct 13 in the standard recap embed (discord_notifier.all_time_embed). Discord results once, not X. push_sent full_record_std:2026-10-14 / discord_full_record.",
     "args": {}
+  },
+  {
+    "key": "delete-custom-record-2026-10-14",
+    "job_type": "delete_custom_record_post",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14 18:27 ET: delete the custom-format full record, Discord message 1560045816352079957, via the results webhook. Standard post 1560049598565715999 and X untouched.",
+    "args": {}
   }
 ]

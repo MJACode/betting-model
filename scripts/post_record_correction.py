@@ -547,3 +547,30 @@ def publish_full_record_standard(conn=None, *, post=None, place=None,
     finally:
         if own:
             conn.close()
+
+
+# Owner, 2026-10-14 18:27 ET: "Yes, delete the custom-format post." Only this
+# message id; the standard post 1560049598565715999 is never touched.
+DELETE_CUSTOM_ID = "1560045816352079957"
+KEEP_STANDARD_ID = "1560049598565715999"
+
+
+def delete_custom_record_post(*, http=None) -> dict:
+    """DELETE the custom-format full record via the results webhook, then GET
+    it to confirm 404. A webhook may delete its own messages."""
+    import requests
+    http = http or requests
+    if DELETE_CUSTOM_ID == KEEP_STANDARD_ID:
+        raise RuntimeError("refusing to delete the standard post")
+    url = _results_url()
+    if not url:
+        raise RuntimeError("DISCORD_WEBHOOK_RESULTS is not set")
+    base = url.split("?", 1)[0].rstrip("/")
+    target = f"{base}/messages/{DELETE_CUSTOM_ID}"
+    resp = http.delete(target, timeout=15)
+    check = http.get(target, timeout=15)
+    out = {"message_id": DELETE_CUSTOM_ID, "delete_status": resp.status_code,
+           "get_status": check.status_code}
+    if resp.status_code not in (204, 404) or check.status_code != 404:
+        raise RuntimeError(f"delete not confirmed: {out}")
+    return out

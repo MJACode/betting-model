@@ -59,3 +59,22 @@ def test_standard_post_uses_given_embed_once(monkeypatch):
     rc.publish_full_record_standard(c, post=lambda u, p: sent.append(p) or "9",
                                     place=lambda u: ("g", "c"), embed=emb)
     assert len(sent) == 1
+
+
+def test_delete_targets_only_custom_post(monkeypatch):
+    monkeypatch.setattr(rc, "_results_url", lambda: "https://hook/1/t")
+    calls = []
+
+    class R:
+        def __init__(self, c):
+            self.status_code = c
+
+    class H:
+        def delete(self, u, timeout):
+            calls.append(u); return R(204)
+
+        def get(self, u, timeout):
+            return R(404)
+    out = rc.delete_custom_record_post(http=H())
+    assert calls == ["https://hook/1/t/messages/1560045816352079957"]
+    assert out["delete_status"] == 204 and out["get_status"] == 404
