@@ -247,11 +247,39 @@ def starts_only(floor: float) -> None:
     show("... and its grid (best price, price floor)", g)
 
 
+def decompose(floor: float) -> None:
+    """Where (b)'s bets differ from (a)'s, cut by cut: the bets both make on the
+    same side, and the bets only one of them makes. Reads the predictions the
+    full run saved."""
+    with open(os.path.join(XG_DIR, "xg_test_predictions.pkl"), "rb") as fh:
+        pred = pickle.load(fh)
+    df = frame(with_xg=False)
+    cols = [c for c in df.columns if c not in ("p", "C")]
+    A = df[cols].merge(pred["(a) 34"][["game_id", "p"]], on="game_id")
+    B = df[cols].merge(pred["(b) 34 + xG"][["game_id", "p"]], on="game_id")
+    rows = []
+    for c in CUTS:
+        a = bets(A, c, "best")
+        a = a[a.price >= floor]
+        b = bets(B, c, "best")
+        b = b[b.price >= floor]
+        ka, kb = set(zip(a.game_id, a.side_home)), set(zip(b.game_id, b.side_home))
+        sets = (("both, same side", a[[k in kb for k in zip(a.game_id, a.side_home)]]),
+                ("only (a)", a[[k not in kb for k in zip(a.game_id, a.side_home)]]),
+                ("only (b)", b[[k not in ka for k in zip(b.game_id, b.side_home)]]))
+        for name, s in sets:
+            rows.append({"EV>=": c, "set": name, **summarise(s.profit.values, s.clv.values)})
+    show("(a) and (b) bets, split into shared and one-model-only (best price, price floor)", rows)
+
+
 def main() -> None:
     floor = config.min_odds_for(m.MODEL_ID)
     print(f"production price floor for {m.MODEL_ID}: {floor:+.0f}")
     if "--parity" in sys.argv:
         serve_parity()
+        return
+    if "--decompose" in sys.argv:
+        decompose(floor)
         return
     if "--starts-only" in sys.argv:
         starts_only(floor)
