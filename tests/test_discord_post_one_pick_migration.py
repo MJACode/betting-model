@@ -90,3 +90,5 @@ def test_a_second_standing_bet_and_a_second_live_row_are_blocked():
     assert "signal_type = 'BET'" in live_where
     assert "is_live IS TRUE" in live_where
     assert "DUPLICATE" in live_where
+    assert "VOID" in live_where
+    assert "NO_ACTION" in live_where

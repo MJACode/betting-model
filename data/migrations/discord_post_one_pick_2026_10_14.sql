@@ -33,16 +33,17 @@
 -- Discord extra; the NO_ACTION exclusion is what lets this index build.
 -- A new insert's result is NULL, so a second standing BET still conflicts.
 --
--- uq_picks_one_live_row: one non-DUPLICATE live BET per
+-- uq_picks_one_live_row: one standing live BET per
 -- tracking/publish_keys.unique_row_sql (game_date, model, game, player,
 -- side). The pregame unique index already has this identity and does not
 -- cover live rows. The first draft covered every signal type. The NFL live
 -- writer inserts the AVOID first and the BET with ON CONFLICT DO NOTHING,
 -- so that AVOID occupied the key and the BET was not written.
 -- signal_type = 'BET' is the dedupe (a second standing BET still conflicts)
--- and the AVOID stays. live_row_index_bets_only_2026_10_14.sql replaces an
--- index already created with the wider predicate. Different sides still
--- both insert.
+-- and the AVOID stays. VOID and result NO_ACTION are outside it, the same
+-- exclusions as the publish-lock index, so a voided live BET does not hold
+-- the lane. live_row_index_bets_only_2026_10_14.sql replaces an index
+-- already created with a wider predicate. Different sides still both insert.
 --
 -- Both creates NOTICE and skip when a duplicate of that identity is still
 -- present. They do not RAISE: this file is one transaction, and a failed
@@ -187,6 +188,8 @@ BEGIN
        WHERE is_live IS TRUE
          AND signal_type = 'BET'
          AND condition_status IS DISTINCT FROM 'DUPLICATE'
+         AND condition_status IS DISTINCT FROM 'VOID'
+         AND result IS DISTINCT FROM 'NO_ACTION'
        GROUP BY game_date, model_id, game_id,
                 COALESCE(player_id, ''), COALESCE(player_key, ''),
                 COALESCE(prop_market, ''), pick_side
@@ -203,7 +206,9 @@ BEGIN
                            pick_side)
        WHERE is_live IS TRUE
          AND signal_type = 'BET'
-         AND condition_status IS DISTINCT FROM 'DUPLICATE';
+         AND condition_status IS DISTINCT FROM 'DUPLICATE'
+         AND condition_status IS DISTINCT FROM 'VOID'
+         AND result IS DISTINCT FROM 'NO_ACTION';
       RAISE NOTICE 'uq_picks_one_live_row created';
     END IF;
   END IF;
