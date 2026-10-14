@@ -1155,9 +1155,10 @@ def test_clv_counts_only_picks_that_have_a_closing_price():
     without one is not a miss, it is not measured -- counting it as a miss
     would understate the rate."""
     rows = [
-        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, 2.4),    # beat close
-        ("MLB", "mlb_moneyline", "LOSS", 0.022, -110, -1.1),   # closed worse
-        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, None),   # not measured
+        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, 2.4, False, "no_vig"),
+        ("MLB", "mlb_moneyline", "LOSS", 0.022, -110, -1.1, False, "no_vig"),
+        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, None, False, "no_vig"),
+        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, 9.0, False, "raw_one_sided"),
     ]
     t = dn._tally(rows)
     assert (t["clv_n"], t["clv_beat"]) == (2, 1)
@@ -1173,13 +1174,13 @@ def test_clv_line_is_empty_when_nothing_was_measured():
 
 def test_exactly_flat_clv_is_not_a_beat():
     """Matching the close is not beating it."""
-    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 0.0)])
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 0.0, False, "no_vig")])
     assert (t["clv_n"], t["clv_beat"]) == (1, 0)
 
 
 def test_tally_line_omits_clv_unless_asked():
     """The signal cards do not carry CLV; only results messages do."""
-    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 3.0)])
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 3.0, False, "no_vig")])
     assert "beat close" not in dn._tally_line(t)
     assert "beat close" in dn._tally_line(t, with_clv=True)
 
@@ -1196,8 +1197,8 @@ def test_snapshot_rows_capture_every_published_figure():
     """Whatever the recap says must be reproducible from Supabase afterwards:
     live tables move (late settlements, a threshold sweep, a pause), so the
     published number has to be stored, not recomputed."""
-    daily = [("MLB", "mlb_moneyline", "WIN", 0.022, -110, 2.0),
-             ("WNBA", "wnba_moneyline", "LOSS", 0.022, -110, -3.0)]
+    daily = [("MLB", "mlb_moneyline", "WIN", 0.022, -110, 2.0, False, "no_vig"),
+             ("WNBA", "wnba_moneyline", "LOSS", 0.022, -110, -3.0, False, "zero_vig")]
     by_sport = {"MLB": daily[:1], "WNBA": daily[1:]}
     rows = dn.snapshot_rows(
         "2026-08-28", "2026-08-29T06:00:00-04:00",
@@ -1288,8 +1289,8 @@ def test_pregame_posts_do_not_carry_it(monkeypatch):
 # ── In-play picks count in the recap; CLV still does not (2026-08-30) ────────
 
 def _recap_row(sport="MLB", model="mlb_moneyline", result="WIN", kelly=0.02,
-         odds=-110, clv=None, live=False):
-    return (sport, model, result, kelly, odds, clv, live)
+         odds=-110, clv=None, live=False, method="no_vig"):
+    return (sport, model, result, kelly, odds, clv, live, method)
 
 
 def test_an_in_play_pick_counts_toward_the_record():
@@ -1305,18 +1306,21 @@ def test_an_in_play_pick_counts_toward_the_record():
     assert t["units"] > 0, "an in-play win must contribute units like any other"
 
 
-def test_clv_ignores_in_play_picks_even_when_one_carries_a_value():
-    """mike, 2026-08-30: "CLV does not apply to those picks." _capture_clv
-    already skips them, so a live row should never HAVE a clv_pct -- this pins
-    the recap against a stray one rather than trusting that upstream."""
+def test_clv_counts_the_same_picks_as_the_record_view():
+    """v_public_track_record counts clv_pct when clv_method is no_vig or
+    zero_vig. It does not drop is_live inside that aggregate. A legacy method
+    does not count. Capture still skips in-play prices, so a live row counts
+    only when both the value and an honest method are already stored."""
     t = dn._tally([
-        _recap_row(clv=1.5),                                   # pre-game, beat close
-        _recap_row(clv=-2.0),                                  # pre-game, worse
-        _recap_row(model="mlb_live_total_runs", clv=9.9, live=True),   # must not count
+        _recap_row(clv=1.5),
+        _recap_row(clv=-2.0),
+        _recap_row(clv=9.9, method="raw_one_sided"),
+        _recap_row(clv=4.0, method="graded_at_dk_legacy"),
+        _recap_row(clv=3.0, method=None),
+        _recap_row(model="mlb_live_total_runs", clv=1.0, live=True, method="no_vig"),
     ])
-    assert t["clv_n"] == 2, "the in-play row leaked into the CLV denominator"
-    assert t["clv_beat"] == 1
-    assert "1/2" in dn.clv_line(t)
+    assert (t["clv_n"], t["clv_beat"]) == (3, 2)
+    assert t["live"] == 1
 
 
 def test_the_recap_line_says_how_the_day_split():
@@ -1341,7 +1345,8 @@ def test_the_recap_query_no_longer_excludes_live():
     bare = [l.strip() for l in dn._SETTLED_SQL.splitlines()
             if l.strip() in ("AND p.is_live IS NOT TRUE", "AND p.is_live = FALSE")]
     assert not bare, f"bare live exclusion is back: {bare}"
-    assert "p.is_live" in dn._SETTLED_SQL, "is_live must still be selected for the CLV guard"
+    assert "p.is_live" in dn._SETTLED_SQL, "is_live must still be selected for the in-play split"
+    assert "p.clv_method" in dn._SETTLED_SQL
 
 
 def test_a_six_column_row_still_tallies():

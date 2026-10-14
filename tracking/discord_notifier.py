@@ -1957,9 +1957,11 @@ def notify_discord_free_pick(target_date: str | None = None,
 # pattern, and the string is RAW so the LIKE-escaped \_ survives verbatim (an
 # unescaped \_ is also an invalid Python escape on 3.12+).
 #
-# CLV is the one figure in-play picks stay out of, and p.is_live is selected so
-# that exclusion is EXPLICIT rather than resting on clv_pct happening to be
-# NULL. An in-play price has no meaningful closing line to be measured against.
+# CLV uses the same predicate as v_public_track_record: a pick counts when
+# clv_pct is present and clv_method is no_vig or zero_vig. is_live is still
+# selected so the recap can say how many of the bets were in-play. Capture
+# does not write CLV on an in-play price, and the view does not drop is_live
+# a second time inside the CLV aggregate.
 #
 # Retired models need no clause: the JOIN drops them, because a retirement
 # deletes the model_action_thresholds row.
@@ -2011,7 +2013,7 @@ def notify_discord_free_pick(target_date: str | None = None,
 _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
                COALESCE(p.decision_odds, p.dk_odds),
-               p.clv_pct, p.is_live
+               p.clv_pct, p.is_live, p.clv_method
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
@@ -2064,6 +2066,10 @@ def units_won(units_risked: float, american) -> float:
     return units_risked * (_decimal_odds(american) - 1.0)
 
 
+# v_public_track_record's CLV aggregate. Same two methods, nothing else.
+_VIEW_CLV_METHODS = frozenset({"no_vig", "zero_vig"})
+
+
 def _tally(rows: list[tuple]) -> dict:
     """Win-loss and units over the same graded picks.
 
@@ -2087,12 +2093,14 @@ def _tally(rows: list[tuple]) -> dict:
         if is_live:
             t["live"] += 1
         # CLV: did the price move TOWARD us after we bet? Positive clv_pct means
-        # we beat the close. IN-PLAY PICKS ARE EXCLUDED -- mike, 2026-08-30,
-        # "CLV does not apply to those picks", and he is right: an in-play price
-        # has no meaningful close to be measured against. _capture_clv already
-        # skips them at source, so this is belt-and-braces rather than the only
-        # guard -- but a figure this easy to misread deserves both.
-        if clv is not None and not is_live:
+        # we beat the close. The denominator is the app view's: clv_pct is
+        # present and clv_method is no_vig or zero_vig. A raw_one_sided,
+        # raw_one_way, graded_at_dk_legacy, or missing method does not count.
+        # is_live is not a second exclusion; v_public_track_record does not
+        # apply one. _capture_clv still skips in-play prices, so a live row
+        # counts only when a value and an honest method are already stored.
+        method = row[7] if len(row) > 7 else None
+        if clv is not None and method in _VIEW_CLV_METHODS:
             t["clv_n"] += 1
             if float(clv) > 0:
                 t["clv_beat"] += 1

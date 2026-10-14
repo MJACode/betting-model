@@ -27,6 +27,7 @@ import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
+import { countsTowardViewClv } from '@/lib/publishedRecord';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -502,16 +503,15 @@ function edgeColorStyle(edge: number) {
   return { color: pnlColor(edge, 1, 100) };
 }
 
-// Aggregate closing line value across this model's settled BET picks that
-// clear the current action thresholds — same pick set as the record above.
-// Positive avg CLV = the model consistently beats the closing price — the
-// strongest available evidence its edge is real.
+// Closing line value for the same posted bets as the list above.
+// v_public_track_record counts a pick when clv_pct is present and clv_method
+// is no_vig or zero_vig. Beat is clv_pct > 0 on that set.
 function computeClvStats(
   modelId: string,
   settled: SettledPick[],
 ): { avg: number; beatRate: number; count: number } | null {
   const vals = settled
-    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && p.clv_pct != null)
+    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && countsTowardViewClv(p))
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;

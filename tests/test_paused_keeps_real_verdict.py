@@ -318,7 +318,7 @@ def test_the_recap_excludes_a_settled_paused_bet_and_keeps_a_live_models_bet():
     db.execute("""CREATE TABLE picks (sport, model_id, result, kelly_fraction,
                   dk_odds, decision_odds, clv_pct, is_live, game_date, signal_type,
                   downgrade_reason, condition_status, game_id, pick_side,
-                  player_id, player_key, prop_market)""")
+                  player_id, player_key, prop_market, clv_method)""")
     db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
         ("MLB", "m_live", "WIN", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None, "g1"),
@@ -405,7 +405,8 @@ def test_the_app_filters_the_paused_row_out_of_signals_and_the_record():
     for const in ("const PICK_COLUMNS =", "const SETTLED_PICK_COLUMNS ="):
         block = q.split(const)[1].split(";")[0]
         assert "downgrade_reason" in block, const
-    assert "const KEY = 'settledPicks.v8';" in _src("mobile/src/lib/settledPickCache.ts")
+    # v9 still carries downgrade_reason. It also carries clv_method.
+    assert "const KEY = 'settledPicks.v9';" in _src("mobile/src/lib/settledPickCache.ts")
 
 
 # ── post-#850 review: the leaks the first pass missed ────────────────────────

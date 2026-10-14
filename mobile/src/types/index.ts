@@ -184,6 +184,10 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
+  // Selected with the settled columns. Optional like the lock tail: a
+  // hand-built row still type-checks. Detail CLV counts no_vig and zero_vig
+  // only, so a cache from before v9 (no method) must not be reused.
+  clv_method?: string | null;
 };
 
 export interface LiveGameState {

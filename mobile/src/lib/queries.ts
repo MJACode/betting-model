@@ -656,7 +656,7 @@ const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
-  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
+  'public_bet_pct, injury_flag, clv_pct, clv_method, decision_book, decision_odds, decision_edge, ' +
   'is_live, downgrade_reason, player_key, prop_market';
 
 const GAME_COLUMNS =

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, snapshot migrations stop mixing posted W-L with all-bets units: the units rewrite runs only while the old column exists; the published rewrite runs once and skips a matching row; CLV uses the record view's methods |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the app record matches the posted view: v_public_track_record already returns 8 for mlb_prop_batter_runs (the unfiltered settled count is 80); client tallies drop unpublished; detail list is the posted set; view rollup 808 / 431-375-2 |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Discord lock duplicates: 34 posts / 35 extra rows marked DUPLICATE (none graded); recap stores message_id; a posted void sends a notice; Oct 5 recap backfill is an explicit dry-run command |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the published record is the picks Discord still has: 109 never-posted settled bets (41-68) leave the recap and the snapshots; all-time as of 2026-10-13 goes from 472-443-2, -15.5373u to 431-375-2, +16.9240u; stake_for unchanged from #938; migration not applied here |
