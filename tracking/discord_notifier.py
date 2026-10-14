@@ -2272,6 +2272,41 @@ def _record_restate_exception(item: dict, exc: BaseException) -> None:
         conn.close()
 
 
+def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
+    """The recap's all-time block: one overall field, then one per sport.
+    The daily recap and the standalone full-record post both render this."""
+    all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
+    all_overall = _tally(all_rows)
+    all_by_sport: dict[str, list[tuple]] = {}
+    for r in all_rows:
+        all_by_sport.setdefault(r[0], []).append(r)
+    fields = [{
+        "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
+        "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
+                 f"{len(all_rows)} settled",
+        "inline": False,
+    }]
+    for sport, group in sorted(all_by_sport.items()):
+        fields.append({
+            "name": f"{sport} (all-time)",
+            "value": _tally_line(_tally(group), with_clv=True),
+            "inline": False,
+        })
+    return fields, all_overall, len(all_rows)
+
+
+def all_time_embed(conn, through: str) -> dict:
+    """The full record as its own recap-style embed (same builder, colours and
+    lines as the daily recap's all-time block)."""
+    fields, overall, _n = all_time_fields(conn, through)
+    pretty = datetime.fromisoformat(through).strftime("%a %b %d").replace(" 0", " ")
+    color = (_COLOR_RESULTS_UP if overall["units"] > 0
+             else _COLOR_RESULTS_DOWN if overall["units"] < 0
+             else _COLOR_RESULTS_FLAT)
+    return {"title": f"\U0001F4CA Results — All-time through {pretty}",
+            "color": color, "fields": fields}
+
+
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
                            restate=None) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
@@ -2340,23 +2375,12 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # whether the thing works -- 4-3 is noise either way -- so the running
         # record travels with it, broken out by sport for the same reason the
         # day is.
+        fields.extend(all_time_fields(conn, game_date)[0])
         all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, game_date)
         all_overall = _tally(all_rows)
         all_by_sport: dict[str, list[tuple]] = {}
         for r in all_rows:
             all_by_sport.setdefault(r[0], []).append(r)
-        fields.append({
-            "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
-            "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
-                     f"{len(all_rows)} settled",
-            "inline": False,
-        })
-        for sport, group in sorted(all_by_sport.items()):
-            fields.append({
-                "name": f"{sport} (all-time)",
-                "value": _tally_line(_tally(group), with_clv=True),
-                "inline": False,
-            })
 
         color = (_COLOR_RESULTS_UP if overall["units"] > 0
                  else _COLOR_RESULTS_DOWN if overall["units"] < 0

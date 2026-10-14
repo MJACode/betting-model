@@ -713,6 +713,18 @@ def _job_publish_oct13_nhl_line(**kw):
         conn.close()
 
 
+def _job_publish_full_record_standard(**kw):
+    """Full record in the standard recap embed, once, Discord only."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record_standard
+
+    conn = get_connection()
+    try:
+        return publish_full_record_standard(conn)
+    finally:
+        conn.close()
+
+
 def _validate_publish_full_record(args: dict) -> dict:
     """No arguments. The text is fixed in the script."""
     if args:
@@ -1853,6 +1865,8 @@ JOBS = {
     # Owner-approved full record, Discord only. See _job_publish_full_record.
     "publish_full_record": (_job_publish_full_record,
                             _validate_publish_full_record),
+    "publish_full_record_standard": (_job_publish_full_record_standard,
+                                     _validate_publish_full_record),
     # One line, after the 2026-10-14 correction. See _job_publish_oct13_nhl_line.
     "publish_oct13_nhl_line": (_job_publish_oct13_nhl_line,
                                _validate_publish_oct13_nhl_line),

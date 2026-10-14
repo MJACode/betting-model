@@ -45,3 +45,17 @@ def test_text_and_job_declared_once():
     entries = json.loads((config.ROOT / "jobs" / "declared_jobs.json").read_text())
     m = [e for e in entries if e["key"] == "full-record-2026-10-14"]
     assert len(m) == 1 and m[0]["job_type"] == "publish_full_record"
+
+
+def test_standard_post_uses_given_embed_once(monkeypatch):
+    monkeypatch.setattr(rc, "_results_url", lambda: "https://hook")
+    sent = []
+    c = Conn()
+    emb = {"title": "x", "fields": []}
+    out = rc.publish_full_record_standard(
+        c, post=lambda u, p: sent.append(p) or "55", place=lambda u: ("g", "c"),
+        embed=emb)
+    assert sent == [{"embeds": [emb]}] and out["discord_message_id"] == "55"
+    rc.publish_full_record_standard(c, post=lambda u, p: sent.append(p) or "9",
+                                    place=lambda u: ("g", "c"), embed=emb)
+    assert len(sent) == 1

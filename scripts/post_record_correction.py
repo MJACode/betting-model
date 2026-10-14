@@ -496,3 +496,54 @@ def publish_full_record(conn=None, *, post=None, place=None) -> dict:
     finally:
         if own:
             conn.close()
+
+
+# Owner, 2026-10-14: the full record in the standard recap format, through
+# Oct 13. Rendered by tracking.discord_notifier.all_time_embed, the same
+# builder as the daily recap's all-time block. Discord only.
+STD_RECORD_LOCK = "full_record_std:2026-10-14"
+KIND_STD_RECORD = "discord_full_record"
+STD_RECORD_THROUGH = "2026-10-13"
+
+
+def publish_full_record_standard(conn=None, *, post=None, place=None,
+                                 embed=None) -> dict:
+    own = conn is None
+    if own:
+        from data.db import get_connection
+        conn = get_connection()
+    place = place or _place
+    try:
+        if post is None:
+            from tracking.discord_notifier import _post
+            post = _post
+        if embed is None:
+            from tracking.discord_notifier import all_time_embed
+            embed = all_time_embed(conn, STD_RECORD_THROUGH)
+        sent, mid = _read(conn, KIND_STD_RECORD, STD_RECORD_LOCK)
+        url = _results_url()
+        out = {"lock_key": STD_RECORD_LOCK,
+               "discord_message_id": _stored_id(mid), "discord_url": None}
+        if not sent:
+            if not url:
+                raise RuntimeError("DISCORD_WEBHOOK_RESULTS is not set")
+            message_id = post(url, {"embeds": [embed]})
+            stored = _stored_id(message_id if isinstance(message_id, str) else None)
+            if not stored:
+                raise RuntimeError("Discord full-record post was not confirmed")
+            out["discord_message_id"] = stored
+            if not _write(conn, KIND_STD_RECORD, stored, STD_RECORD_LOCK):
+                out["ledger"] = "write failed"
+                return out
+            mid = stored
+        if _stored_id(mid) and url:
+            try:
+                g, c = place(url)
+            except Exception:
+                g, c = None, None
+            out["discord_url"] = _jump(g, c, _stored_id(mid))
+        out["embed"] = embed
+        return out
+    finally:
+        if own:
+            conn.close()
