@@ -37,7 +37,8 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import LIVE_MODELS, MODELS, RETIRED_MODELS, SHARP_BOOKMAKERS
-from data.db import get_connection, DBConnection
+from data.db import (DBConnection, call_in_savepoint, get_connection,
+                     statement_timeout)
 from models.scorer import american_to_decimal
 from tracking.clv_math import (
     CLV_METHOD_DK_GRADED_LEGACY,
@@ -618,12 +619,12 @@ def _nfl_prop_actual(row: dict, stat_col: str):
     return None if v is None else float(v)
 
 
-# Prop game logs can land after the morning settle (WNBA box scores are
-# ingested on Matt's machine, which may run after the Actions settle), and
-# settle_picks only runs for game_date = yesterday — a trailing window lets
-# late-arriving logs settle on subsequent mornings instead of lingering
-# unsettled forever. (UFC settlement has no window — it settles any unsettled
-# BET pick whose fight has scores, since UFC pick volume is tiny.)
+# Prop game logs can land after a settle pass. settle_picks pulls a missing
+# box before it grades (data/ingestors/prop_box_scores.py). The trailing
+# window is the backstop when that box is not posted yet, so the bet grades
+# on a later pass instead of lingering. (UFC settlement has no window — it
+# settles any unsettled BET pick whose fight has scores, since UFC pick
+# volume is tiny.)
 _PROP_SETTLE_WINDOW_DAYS = 14
 # Cap on the self-healing reach below. Bounds the work when something has been
 # broken for a long time, and stops a single bad row dragging the loop back to
@@ -696,7 +697,20 @@ def _settle_prop_picks_window(
     end = datetime.strptime(game_date, "%Y-%m-%d")
     for offset in range(_prop_settle_window_days(conn, game_date)):
         d = (end - timedelta(days=offset)).strftime("%Y-%m-%d")
-        day_results = _settle_prop_picks(conn, d, settled_at)
+        try:
+            # One date is one savepoint. A statement timeout aborts the
+            # transaction; rolling back to here leaves the earlier dates
+            # and lets the next date grade. The caller's commit is what
+            # persists them. A timeout is not a reason to skip the commit.
+            day_results = call_in_savepoint(
+                conn, "prop_settle_day",
+                lambda d=d: _settle_prop_picks(conn, d, settled_at),
+            )
+        except Exception as exc:
+            if statement_timeout(exc):
+                logger.warning(f"Prop settle {d} timed out — next date")
+                continue
+            raise
         for i, v in enumerate(day_results):
             totals[i] += v
     return tuple(totals)
@@ -2635,6 +2649,18 @@ def settle_picks(game_date: str = None) -> dict:
         _capture_clv(conn, game_date, clv_at)
         _backfill_clv(conn, clv_at)
         conn.commit()
+
+        # Props grade off the player log. Pull a missing box on a separate
+        # connection (the HTTP must not sit inside this transaction) before
+        # the grade writes. A failure leaves the pick unsettled; the next
+        # pass asks again. Game lines already grade off `games`.
+        try:
+            from data.ingestors.prop_box_scores import ensure_prop_box_scores
+            box = ensure_prop_box_scores(game_date)
+            logger.info(f"Prop box scores: {box}")
+        except Exception as exc:
+            logger.warning(
+                f"Prop box scores failed ({exc}) — props grade on whatever is stored")
 
         wins = losses = pushes = no_actions = 0
         total_profit_flat  = 0.0

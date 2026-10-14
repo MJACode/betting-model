@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, prop bets grade on the evening and hourly settle once the final's box is stored; NHL reads the game-center box inside `settle_picks`, and a statement timeout rolls back to a savepoint |
 | 2026-10-13 | [2026-10](./2026-10.md) | 2026-10-13, the 10-12 results recap never posted (its only counting bets, NHL props, graded at 07:24 ET, after the 6am recap; nothing retried); posted by hand at 08:50 ET; #933 retries a skipped day on later passes; 10-05 missed the same way |
 | 2026-10-13 | [2026-10](./2026-10.md) | 2026-10-12/13, a second in-game NFL season (2024, 161,940 credits) bought and graded: no clean cell survives pooled; late-leader moneyline at DraftKings pooled +9.4% on 167 bets, p 0.022, marginal |
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, the three standing health alarms investigated (UFC placeholder rows and one wrong winner; a paused WNBA model; two newly promoted FBS schools); the line poller has deleted player-prop no-bet rows since 08-30, so the prop evaluation window is not clean after that date; fixes in #922, #923, #927, #928 |
