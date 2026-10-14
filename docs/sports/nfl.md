@@ -288,21 +288,58 @@ its own is flat; and the shipped artifact is fitted on 2016-2025, so **both
 graded seasons are in-sample for it** — it has no out-of-sample record of its
 own. `--parity` rebuilds the two grading fits, checks them bit-for-bit against
 the study's own fit, and replays the bought 2024 and 2025 snapshots through the
-production decision function: 87 bets / +13.79u / 0 pushes and 80 bets / +1.84u
-/ 1 push, bet for bet.
+model's decision function: 87 bets / +13.79u / 0 pushes and 80 bets / +1.84u
+/ 1 push, bet for bet. That proves the decision function, on the study's own
+states. It does not prove the loop, which sees different states.
+
+**The population of record: what the loop would have bet.**
+`python -m scripts.build_nfl_live_leader_artifact --population` replays the
+same snapshots the way the loop sees them. It refuses a state straight after
+a touchdown, extra point, two-point try, made field goal or safety, and tries
+the game again at its next snapshot. It takes the favourite band from
+DraftKings' last pre-kickoff spread. And it lags the game state behind the
+quote. Grading fits, first bet per game:
+
+| State lag behind the quote | 2024 | 2025 | Pooled |
+|---|---|---|---|
+| 0 s | 83 bets, +10.91u | 80 bets, +2.17u | **163 bets, +13.08u, +8.0%** |
+| 15 s | 80 bets, +10.41u | 82 bets, +1.80u | 162 bets, +12.21u, +7.5% |
+| 30 s | 77 bets, +10.32u | 82 bets, +0.71u | 159 bets, +11.03u, +6.9% |
+| 45 s | 79 bets, +12.45u | 81 bets, −0.44u | 160 bets, +12.01u, +7.5% |
+| 60 s | 78 bets, +13.69u | 82 bets, +0.04u | 160 bets, +13.72u, +8.6% |
+
+The lag is real. ESPN core posted a play a median 23 s after its snap (10th to
+90th percentile 12 to 37 s; 40 plays in two college games read every 5 s,
+2026-10-14). The study timed each play from when it ended, a few seconds after
+the snap, and the loop reads ESPN every 20 s. So **the rows to expect are 15 to
+45 s, not 0 s.** The pooled return moves within noise across them. 2025, the
+season closest to out-of-sample, goes from +2.17u to −0.44u. Every EVAL log
+line carries `play_lag`, the seconds between the last play's ESPN stamp and the
+evaluation, so the first NFL Sunday measures the NFL figure directly.
+
+The shipped 2016-2025 fit is not the graded one. On the same lag-0 frames it
+keeps 154 of the 167 graded bets, drops 13 and adds 19: 173 bets, +16.13u on
+the study's states. Both seasons are in-sample for it, so that is not evidence.
 
 **How it runs.** `nfl_live_leader/` from the repo root (not `nfl/` — the import
 trap in `data/live_quote_guard.py`), scheduler job `nfl_live_leader` on the
 poller service, 9am-midnight ET every 10 minutes, `RUN_NFL_LIVE_LEADER` (default
 on). The loop reads ESPN's core API every 20 s (site.api is 403 from the
 worker) and exits after three idle ticks. A game in the window is evaluated
-when it enters, then every 300 s, to mirror the study's 5-minute snapshots.
+at most once per five-minute slot of the wall clock (:00, :05 ...), at the
+first read inside the slot, as the study's 5-minute snapshots were. A slot whose
+state is not evaluable is used up, not carried to the next read.
 Only then does it make ONE bulk DraftKings moneyline call for every due game:
 `x-requests-last` measured **1 credit per call** (2026-10-13). Capped at
-`NFL_LIVE_LEADER_CREDIT_CAP` (2000) per process. Each DraftKings quote it
-decides on is written to `odds` as `in_play`. Every pass re-asks the push and
-Discord notifiers about each slate date that carries a bet of record, so a
-failed post is retried (their ledgers make repeats no-ops). Only regular season
+`NFL_LIVE_LEADER_CREDIT_CAP` (2000) per process, and at
+`NFL_LIVE_LEADER_CALL_CAP` (400) calls, because a call that fails before its
+header is read moves no credit meter. A failed call backs off 60, then 120,
+then 300 s. A game is priced only at the DraftKings event with its own two
+teams AND its own kickoff (within six hours), so a later rematch listed in the
+same feed can never price it. Each DraftKings quote it decides on is written to
+`odds` as `in_play`. The push and Discord notifiers are called on the pass that
+writes a bet, then at most every 300 s for any slate date that carries a bet of
+record, so a failed post is retried (their ledgers make repeats no-ops). Only regular season
 and playoff games are priced (ESPN core season type 2 or 3); preseason and an
 unknown type are refused. After the final snap, before ESPN marks the game
 final, an end-of-game row or a 4th-quarter clock at 0:00 is a refusal.
@@ -315,9 +352,10 @@ play:
   plays, and `play.homeScore`/`awayScore` are the post-play score on 2,191 of
   2,191 — which is what the model was trained on. The running clock is never
   used.
-- A scoring play's clock is the END of the play (0 of 65 equal the snap) and
-  its score already includes the extra point (ESPN has no separate PAT play),
-  so the loop never evaluates straight after a score.
+- A scoring play's clock is the END of the play (0 of 65 equal the snap). In
+  the finished game document its score already includes the extra point; live
+  core instead posts "Extra Point Good" as its own play after the touchdown.
+  The loop refuses both, so it never evaluates straight after a score.
 - Timeouts, the two-minute warning and period ends are skipped when choosing
   the last play (the training data has no such rows).
 - Replaying those games' 4th quarters through the adapter (the situation taken
@@ -344,17 +382,20 @@ Dallas is 6 — would have read as having the ball on every play.
 `-spread_home` when the leader is home and `+spread_home` when away. No spread
 means no bet, never 0. The study used nflverse's consensus closing line, and
 the two differ: on TB @ DAL (2026 week 5) DraftKings' last pre-kickoff spread
-was -8.5 against nflverse's 9.5. How often that puts a game in a different
-3.5-point band is not measured.
+was -8.5 against nflverse's 9.5. Measured on the bought seasons
+(`--population`): DraftKings had a spread for 285 of 285 games each season; it
+equalled nflverse's on 196 (2024) and 220 (2025), and differed by a point or
+more on 17 and 34. Of the in-window snapshot states, 25 of 670 (2024) and 3 of
+693 (2025) land in a different band. The population of record above uses
+DraftKings' line.
 
 **What differs from the study, and is not measured.**
-- Entry timing: the first evaluation happens when the game enters the window,
-  not at the next 5-minute grid point, and after a score the loop waits for the
-  first snap of the next drive. 70 of the study's 167 entries were the game's
-  first eligible snapshot.
-- Latency: the study knew each play the instant it ended and could not see
-  DraftKings' own quote age. The loop skips a quote DraftKings stamped before
-  the last score change it saw; nothing else.
+- Timeouts: after a timeout live core's situation reads down 0 with no team,
+  which the loop refuses. The study cannot see timeouts, so how many of its
+  snapshots fell in one is unknown.
+- Quote age: the study could not see DraftKings' own quote age or its market
+  suspensions. The loop skips a quote DraftKings stamped before the last score
+  change it saw; nothing else.
 - No book-move, settled-state or edge-cap guard, and no price floor: none was
   in the study, so each would bet a population nobody graded. Platform floors
   are set not to bind (`config.MODEL_MIN_ODDS` -5000, `MODEL_OWN_EV_FLOOR`

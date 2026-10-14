@@ -338,9 +338,20 @@ the leader, vig included. It is the study's pre-registered cut, not a swept one.
 
 Source: `scripts/nfl_edge_inplay_2024.py` run 2 (`inplay2024_out_run2.txt`),
 reproduced bet for bet by `python -m scripts.build_nfl_live_leader_artifact
---parity` with the production decision function. **Marginal:** it did not
-survive the study's pre-registered multiple-testing family, 2025 alone is flat,
-and the shipped fit (2016-2025) has seen both graded seasons.
+--parity` with the model's decision function, on the study's own states.
+**Marginal:** it did not survive the study's pre-registered multiple-testing
+family, 2025 alone is flat, and the shipped fit (2016-2025) has seen both
+graded seasons. On the same frames the shipped fit keeps 154 of the 167 graded
+bets, drops 13 and adds 19.
+
+**The population of record is 163 bets, +13.08u, +8.0%** (`--population`): the
+same snapshots with the loop's refusals (no state straight after a score or a
+conversion try) and DraftKings' pre-kickoff spread for the favourite band.
+The game state reaches the loop some seconds after the quote. ESPN posted
+plays a median 23 s after the snap on the two games measured, and the loop
+reads every 20 s, so the 15 to 45 s rows are the ones to expect: 162 bets
++12.21u, 159 bets +11.03u, 160 bets +12.01u. 2025 alone falls from +2.17u at 0 s
+to −0.44u at 45 s. The full table is in `docs/sports/nfl.md`.
 
 Neighbouring cuts in the same study (pooled, DraftKings): 0.04 → 149 bets
 +16.40u +11.0% (p 0.017); 0.06 → 125 bets +11.70u +9.4% (p 0.061); 0.02 inside

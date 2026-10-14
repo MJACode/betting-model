@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-13/14, the NFL in-play leader moneyline's review fixes: a later rematch could have priced the live game (fixed); odds-call backoff and call cap; five-minute wall-clock grid; population of record 163 bets +13.08u +8.0%; ESPN posts plays a median 23 s after the snap; app Q4 chip, no live price shown after the bet |
 | 2026-10-13 | [2026-10](./2026-10.md) | 2026-10-13, the NFL in-play leader moneyline built LIVE (mike: "reenable the model"): late 4th-quarter leader up 4-16 on DraftKings' live moneyline at edge >= 0.02; the production scorer reproduces the study bet for bet (2024 87 bets +13.79u, 2025 80 bets +1.84u); ESPN core fields measured; two possession bugs in the old core parser fixed; 1 credit per odds call |
 | 2026-10-13 | [2026-10](./2026-10.md) | 2026-10-13, the 10-12 results recap never posted (its only counting bets, NHL props, graded at 07:24 ET, after the 6am recap; nothing retried); posted by hand at 08:50 ET; #933 retries a skipped day on later passes; 10-05 missed the same way |
 | 2026-10-13 | [2026-10](./2026-10.md) | 2026-10-12/13, a second in-game NFL season (2024, 161,940 credits) bought and graded: no clean cell survives pooled; late-leader moneyline at DraftKings pooled +9.4% on 167 bets, p 0.022, marginal |
