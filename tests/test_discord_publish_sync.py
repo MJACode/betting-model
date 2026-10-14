@@ -162,9 +162,15 @@ def test_the_view_exposes_the_ledger_without_the_message_id():
 
 
 def test_void_picks_does_not_retract_discord():
+    """A void does not edit or delete the original message. A posted pick
+    gets a notice after the void commits; an unposted void posts nothing."""
     src = (ROOT / "scripts/void_picks.py").read_text(encoding="utf-8")
     assert "_delete_message" not in src
-    assert "discord" not in src.lower()
+    assert "DELETE FROM" not in src
+    assert "notify_discord_void" in src
+    assert "dry_run=False" in src
+    main = src.split("def main(", 1)[1]
+    assert main.index("conn.commit()") < main.index("announce_posted_voids(")
 
 
 def test_the_app_predicate_matches():

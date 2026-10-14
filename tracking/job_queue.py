@@ -969,11 +969,13 @@ def _job_void_picks(**kw):
     `"allow_posted": true` (mike, 2026-10-09: "Change the rule, void them").
     That opt-in is for a posted pick decided on a price nobody could bet; the
     module docstring of scripts/void_picks.py says when, and why the lock
-    exists. It never makes a graded pick voidable, and nothing here touches
-    the channel the pick was posted in.
+    exists. It never makes a graded pick voidable. The original message is
+    not edited or deleted. After the void commits, a pick that was posted
+    gets a void notice with this reason. An unposted void posts nothing, and
+    a rejected notice does not undo the void.
     """
     from data.db import get_connection
-    from scripts.void_picks import _select, plan_voids, void
+    from scripts.void_picks import _select, announce_posted_voids, plan_voids, void
 
     conn = get_connection()
     try:
@@ -982,10 +984,14 @@ def _job_void_picks(**kw):
                                       allow_posted=bool(kw.get("allow_posted", False)))
         void(conn, to_void, kw["reason"])
         conn.commit()
+        notice = announce_posted_voids(to_void, kw["reason"])
         found = {r["pick_id"] for r in rows}
-        return {"voided":  [r["pick_id"] for r in to_void],
-                "refused": [[r["pick_id"], r["why"]] for r in refused],
-                "missing": [p for p in kw["pick_ids"] if p not in found]}
+        out = {"voided":  [r["pick_id"] for r in to_void],
+               "refused": [[r["pick_id"], r["why"]] for r in refused],
+               "missing": [p for p in kw["pick_ids"] if p not in found]}
+        if notice is not None:
+            out["void_notice"] = notice
+        return out
     finally:
         conn.close()
 

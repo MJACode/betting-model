@@ -274,6 +274,10 @@ def test_the_day_posts_once_on_both_surfaces_at_the_first_pass_that_can(monkeypa
     assert "2-0" in embed["description"] and "2 settled" in embed["description"]
     assert w.tweets[0].startswith("\U0001F4CA Oct 12 results: 2-0")
     assert w.ledger() == {f"discord_results:{DAY}", f"x_results:{DAY}"}
+    discord_id = w.db.execute(
+        "SELECT message_id FROM push_sent WHERE kind = 'discord_results'"
+    ).fetchone()
+    assert discord_id[0] == "msg-1"
     snap = w.db.execute(
         "SELECT wins, losses, settled, published_at FROM results_snapshots "
         "WHERE game_date = ? AND scope = 'daily' AND sport IS NULL",

@@ -125,6 +125,9 @@ jobs:
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
+            tests/test_discord_post_one_pick_migration.py \
+            tests/test_results_recap_message_id.py \
+            tests/test_backfill_results_recap.py \
             tests/test_job_queue.py \
             tests/test_voided_pick_not_rechosen.py \
             tests/test_mobile_stat_segments.py

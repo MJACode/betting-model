@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Discord lock duplicates: 34 posts / 35 extra rows marked DUPLICATE (none graded); recap stores message_id; a posted void sends a notice; Oct 5 recap backfill is an explicit dry-run command |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, graded picks are live money: the recap no longer leaves a pick out of the units; snapshots restate units at the taken price; all-time overall -38.4439 to -15.5373 as of 2026-10-13; NHL -8.4800 to +5.8762 |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, prop bets grade on the evening and hourly settle once the final's box is stored; NHL reads the game-center box inside `settle_picks`, and a statement timeout rolls back to a savepoint |
 | 2026-10-13 | [2026-10](./2026-10.md) | 2026-10-13, the 10-12 results recap never posted (its only counting bets, NHL props, graded at 07:24 ET, after the 6am recap; nothing retried); posted by hand at 08:50 ET; #933 retries a skipped day on later passes; 10-05 missed the same way |
