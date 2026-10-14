@@ -123,6 +123,18 @@ def test_a_conversion_try_is_skipped():
     assert not st.evaluable and "conversion" in st.reason
 
 
+def test_live_cores_separate_extra_point_play_is_skipped():
+    """Live core posts the PAT as its own lastPlay after the touchdown (the
+    finished document folds it in). Even without a scoring flag it is a
+    conversion, not a state to price."""
+    pat = copy.deepcopy(RUSH_442)
+    pat["type"] = {"id": "61", "text": "Extra Point Good"}
+    pat["scoringPlay"] = False
+    pat.pop("scoreValue", None)
+    st = S.state_from_docs(META, status(), situation(1, TB), [pat])
+    assert not st.evaluable and "conversion" in st.reason
+
+
 def test_no_scrimmage_down_is_transitional():
     for down in (0, -1, None, 5):
         st = S.state_from_docs(META, status(), situation(down, TB), [KICKOFF])

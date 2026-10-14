@@ -45,9 +45,16 @@ class Quote:
     last_update: str | None   # DraftKings' own publish time for this market
 
 
-def parse_h2h(events: list) -> dict[tuple[str, str], Quote]:
-    """{(home_team, away_team): Quote} for every event DraftKings prices."""
-    out: dict[tuple[str, str], Quote] = {}
+SESSION_CALL_CAP = int(os.environ.get("NFL_LIVE_LEADER_CALL_CAP", "400"))
+
+
+def parse_h2h(events: list) -> dict[tuple[str, str, str], Quote]:
+    """{(home_team, away_team, commence_time): Quote} for every event DraftKings
+    prices. Keyed on the KICKOFF as well as the teams: the bulk feed lists every
+    upcoming event, and a later meeting of the same two teams (a divisional
+    rematch) must not overwrite the game in progress (review of the build,
+    2026-10-13)."""
+    out: dict[tuple[str, str, str], Quote] = {}
     for ev in events or []:
         home, away = ev.get("home_team"), ev.get("away_team")
         if not home or not away:
@@ -64,7 +71,7 @@ def parse_h2h(events: list) -> dict[tuple[str, str], Quote]:
                         prices["home"] = o.get("price")
                     elif o.get("name") == away:
                         prices["away"] = o.get("price")
-                out[(home, away)] = Quote(home, away, ev.get("commence_time"),
+                out[(home, away, ev.get("commence_time") or "")] = Quote(home, away, ev.get("commence_time"),
                                           prices.get("home"), prices.get("away"),
                                           m.get("last_update") or bk.get("last_update"))
     return out
@@ -85,12 +92,18 @@ class LiveOddsFeed:
             log.error("live odds: session credit cap %d reached (%d used) - not fetching",
                       self.cap, self.credits_used)
             return None
+        if self.calls >= SESSION_CALL_CAP:
+            # A call that fails before the header is read moves no credit
+            # meter, so the call count is capped too.
+            log.error("live odds: session call cap %d reached - not fetching", SESSION_CALL_CAP)
+            return None
         key = _api_key()
         if not key:
             log.error("live odds: no ODDS_API_KEY / THE_ODDS_API_KEY set")
             return None
         import requests
         s = self._session or requests
+        self.calls += 1
         try:
             r = s.get(ODDS_URL, params={"apiKey": key, "regions": "us", "markets": "h2h",
                                         "bookmakers": BOOK, "oddsFormat": "american"},
@@ -99,7 +112,6 @@ class LiveOddsFeed:
             if used is not None:
                 self.last_credits = int(float(used))
                 self.credits_used += self.last_credits
-            self.calls += 1
             r.raise_for_status()
             payload = r.json()
             log.info("live odds: %d events, x-requests-last=%s (session %d of %d)",

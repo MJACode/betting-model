@@ -81,18 +81,29 @@ SEASON_TYPES = (2, 3)        # ESPN core: 1 preseason, 2 regular season, 3 posts
 # ─── the cadence ──────────────────────────────────────────────────────────────
 
 class Cadence:
-    """Per-game evaluation clock: due at first sight, then every `every` s."""
+    """Per-game evaluation slots on an EPOCH-ALIGNED wall-clock grid of
+    `every` seconds (:00, :05, :10 ... for 300 s).
+
+    The evidence was measured on the Odds API's own 5-minute snapshot grid,
+    which ignores game state. So a game is evaluated at most once per grid
+    slot, at the first tick inside it, and a slot whose state is not
+    evaluable (a score not yet followed by a snap, a timeout) is SPENT, not
+    carried forward to a later tick in the same slot -- carrying it would
+    bunch evaluations just after plays post, a population the study never
+    sampled (review of the build, 2026-10-13). `now` is wall-clock seconds."""
 
     def __init__(self, every: float = EVAL_EVERY_SEC):
         self.every = float(every)
         self._last: dict = {}
 
+    def slot(self, now: float) -> int:
+        return int(now // self.every)
+
     def due(self, key, now: float) -> bool:
-        last = self._last.get(key)
-        return last is None or now - last >= self.every
+        return self._last.get(key) != self.slot(now)
 
     def mark(self, key, now: float) -> None:
-        self._last[key] = now
+        self._last[key] = self.slot(now)
 
 
 # ─── platform context ─────────────────────────────────────────────────────────
@@ -208,18 +219,43 @@ def load_context(conn, meta: EventMeta) -> GameContext | None:
 
 # ─── quotes ───────────────────────────────────────────────────────────────────
 
-def quotes_by_teams(events: list) -> dict[frozenset, dict]:
-    """{frozenset({abbr, abbr}): {"prices": {abbr: price}, "ts": last_update}}.
-    Keyed on the PAIR and priced per TEAM, so a neutral-site game the two
-    feeds list with opposite home teams still gets the right price per side."""
-    out = {}
-    for (h, a), q in parse_h2h(events).items():
+QUOTE_KICKOFF_TOL = timedelta(hours=6)
+
+
+def quotes_by_teams(events: list) -> dict[frozenset, list]:
+    """{frozenset({abbr, abbr}): [{"prices": {abbr: price}, "ts": last_update,
+    "commence": datetime}, ...]}, one entry per EVENT. Priced per TEAM, so a
+    neutral-site game the two feeds list with opposite home teams still gets
+    the right price per side; a list, so a later meeting of the same two teams
+    in the feed never overwrites the game in progress."""
+    out: dict[frozenset, list] = {}
+    for (h, a, ct), q in parse_h2h(events).items():
         ha, aa = abbrev(h), abbrev(a)
         if not ha or not aa:
             continue
-        out[frozenset((ha, aa))] = {"prices": {ha: q.home_price, aa: q.away_price},
-                                    "ts": q.last_update, "quote": q}
+        out.setdefault(frozenset((ha, aa)), []).append(
+            {"prices": {ha: q.home_price, aa: q.away_price}, "ts": q.last_update,
+             "commence": _parse_ts(ct), "quote": q})
     return out
+
+
+def quote_for_game(quotes: dict, ctx: "GameContext") -> dict | None:
+    """The one event for THIS game: same two teams AND a kickoff within
+    QUOTE_KICKOFF_TOL of the game's own commence_time. Anything else -- no
+    match, or two -- is None: pricing a game at another game's line writes a
+    bet at a price that never existed for it."""
+    ct = _parse_ts(ctx.commence_time)
+    cands = quotes.get(frozenset((ctx.home, ctx.away))) or []
+    if ct is None:
+        return None
+    hits = [q for q in cands if q.get("commence") is not None
+            and abs(q["commence"] - ct) <= QUOTE_KICKOFF_TOL]
+    if len(hits) != 1:
+        if len(cands) > 1 or len(hits) > 1:
+            log.warning("%s: %d DraftKings events for %s/%s, %d at this kickoff - not priced",
+                        ctx.game_id, len(cands), ctx.away, ctx.home, len(hits))
+        return None
+    return hits[0]
 
 
 def side_prices(ctx: GameContext, q: dict | None) -> tuple:
@@ -373,6 +409,9 @@ def main(argv=None) -> int:
     last_list = 0.0
     idle = fails = 0
     bets_written = 0
+    fetch_backoff_until = 0.0                     # monotonic; after a failed odds call
+    fetch_failures = 0
+    last_notify = None                            # monotonic; standing-bet re-announce
 
     from data.db import get_connection
     conn = None
@@ -443,16 +482,20 @@ def main(argv=None) -> int:
             for s in live:
                 score_clock.observe(s.event_id, s.score, now)
 
-            mono = time.monotonic()
+            wall = time.time()
             due: list[LiveState] = []
             for s in live:
                 if not in_window(s):
                     continue
-                if not s.evaluable:
-                    log.info("%s in window but not evaluable: %s", s.event_id, s.reason)
+                if not cadence.due(s.event_id, wall):
                     continue
-                if cadence.due(s.event_id, mono):
-                    due.append(s)
+                if not s.evaluable:
+                    # The slot is spent: the evidence sampled a fixed grid and
+                    # a refused state there was simply no bet at that snapshot.
+                    cadence.mark(s.event_id, wall)
+                    log.info("%s in window, slot spent, not evaluable: %s", s.event_id, s.reason)
+                    continue
+                due.append(s)
 
             if due:
                 meta_by_id = {m.event_id: m for m in metas.values()}
@@ -478,17 +521,27 @@ def main(argv=None) -> int:
                         continue
                     ready.append((s, ctx))
 
-                payload = feed.fetch() if ready else None
-                if ready and payload is None:
-                    log.warning("no odds this pass for %d due game(s) - retrying next tick",
-                                len(ready))
+                payload = None
+                if ready and time.monotonic() < fetch_backoff_until:
+                    log.info("odds fetch backing off %.0fs more after %d failure(s)",
+                             fetch_backoff_until - time.monotonic(), fetch_failures)
                 elif ready:
+                    payload = feed.fetch()
+                    if payload is None:
+                        fetch_failures += 1
+                        wait = (60, 120, 300)[min(fetch_failures, 3) - 1]
+                        fetch_backoff_until = time.monotonic() + wait
+                        log.warning("no odds this pass for %d due game(s) - backing off %ds "
+                                    "(failure %d)", len(ready), wait, fetch_failures)
+                    else:
+                        fetch_failures = 0
+                if ready and payload is not None:
                     quotes = quotes_by_teams(payload)
                     priced_at = datetime.now(timezone.utc).isoformat()
                     price_rows = []
                     for s, ctx in ready:
-                        cadence.mark(s.event_id, mono)          # this slot is consumed
-                        q = quotes.get(frozenset((ctx.home, ctx.away)))
+                        cadence.mark(s.event_id, wall)          # this slot is consumed
+                        q = quote_for_game(quotes, ctx)
                         hp, apx, ts = side_prices(ctx, q)
                         if hp is not None or apx is not None:
                             from data.ingestors.live_price_log import rows_from_quote
@@ -497,10 +550,17 @@ def main(argv=None) -> int:
                                 SNAPSHOT_BOOK, priced_at))
                         d, note = evaluate(art, s, ctx, q, score_clock.last_change(s.event_id),
                                            edge_cut)
+                        # Posting delay, measured live: now minus ESPN's wallclock
+                        # for the last real play. The evidence assumed 0 s; the
+                        # 2025 return fell from +1.84u to -0.50u as the state
+                        # lagged the quote by 0 -> 45 s (review of the build).
+                        wc = _parse_ts(s.last_play_wallclock)
+                        lag = None if wc is None else (datetime.now(timezone.utc) - wc).total_seconds()
                         log.info("EVAL %s %s @ %s Q%s secs=%s score %s-%s poss=%s spread_home=%s "
-                                 "DK %s/%s: %s%s", ctx.game_id, ctx.away, ctx.home, s.period,
+                                 "DK %s/%s play_lag=%s: %s%s", ctx.game_id, ctx.away, ctx.home, s.period,
                                  s.secs, s.home_score, s.away_score, s.possession,
-                                 ctx.spread_home, hp, apx, note,
+                                 ctx.spread_home, hp, apx,
+                                 "?" if lag is None else f"{lag:.0f}s", note,
                                  "" if d is None or d.wp is None else
                                  f" (wp {d.wp:.4f} implied {d.implied:.4f} edge {d.edge:+.4f})")
                         if d is None or not d.bet:
@@ -537,9 +597,17 @@ def main(argv=None) -> int:
                             log.warning("live price log failed (non-fatal): %s", exc)
                             conn = _recycle(conn)
 
-            if not a.dry_run:
+            # Announce: right after a pass that wrote a bet, and otherwise
+            # re-ask at most every 5 minutes for the standing bets (a push 5xx
+            # or a webhook added mid-game). Both notifiers dedupe through their
+            # ledgers; the throttle keeps this loop from calling them every 20 s.
+            wrote_now = bets_written > getattr(main, "_announced", 0)
+            if not a.dry_run and bet_dates and (wrote_now or last_notify is None
+                                                or time.monotonic() - last_notify >= 300):
                 for d_ in sorted(bet_dates):
                     notify_live(d_)
+                last_notify = time.monotonic()
+                main._announced = bets_written
 
             if a.once:
                 log.info("--once: %d live, %d due, %d BETs written; ESPN calls %d, odds "

@@ -156,8 +156,10 @@ RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"
 # NFL in-play LEADER MONEYLINE loop (nfl_live_leader/, run from the repo root)
 # -- a different model and a different loop from the retired worker above,
 # which stays off. LIVE since 2026-10-13 (mike: "reenable the model"), so ON
-# by default; set RUN_NFL_LIVE_LEADER=0 to stop it without a deploy.
-RUN_NFL_LIVE_LEADER = os.environ.get("RUN_NFL_LIVE_LEADER", "1") != "0"
+# by default; set RUN_NFL_LIVE_LEADER=0 to stop it without a code change
+# (a Railway variable takes effect on the redeploy that applying it starts).
+RUN_NFL_LIVE_LEADER = (os.environ.get("RUN_NFL_LIVE_LEADER", "1").strip().lower()
+                       not in ("0", "false", "off", "no"))
 
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
@@ -678,10 +680,14 @@ def run_nfl_live_leader() -> None:
     # <= 10:00, lead 4-16) is due its 5-minute evaluation: one bulk
     # DraftKings h2h call covers every due game, capped per process by
     # NFL_LIVE_LEADER_CREDIT_CAP (default 2000).
-    _run(
+    outcome = _run(
         [sys.executable, "-m", "nfl_live_leader.gameday"],
         "nfl-live-leader",
     )
+    if outcome != "ok":
+        # A loop that dies on every launch (a bad import, a missing artifact)
+        # must not read as a healthy job: raising makes the heartbeat 'fail'.
+        raise RuntimeError(f"nfl-live-leader loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",

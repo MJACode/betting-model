@@ -55,12 +55,14 @@ def quote_payload(home_price, away_price, ts="2026-10-09T03:00:00Z",
 
 # ─── cadence ──────────────────────────────────────────────────────────────────
 
-def test_cadence_first_sight_then_every_300s():
+def test_cadence_is_an_epoch_aligned_five_minute_grid():
+    """One evaluation per wall-clock slot (:00, :05 ...), like the Odds API
+    snapshot grid the evidence was measured on -- not 300 s after first sight."""
     c = G.Cadence(300)
-    assert c.due("g", 1000.0)
+    assert c.due("g", 1000.0)               # slot 3 (900-1199)
     c.mark("g", 1000.0)
-    assert not c.due("g", 1299.9)
-    assert c.due("g", 1300.0)
+    assert not c.due("g", 1199.9)           # same slot
+    assert c.due("g", 1200.0)               # slot 4 opens at :20:00, not at 1300
     assert c.due("other", 1000.0)
 
 
@@ -69,13 +71,28 @@ def test_cadence_first_sight_then_every_300s():
 def test_quotes_are_priced_per_team_even_when_home_is_swapped():
     q = G.quotes_by_teams(quote_payload(-300, 240, home="Tampa Bay Buccaneers",
                                         away="Dallas Cowboys"))
-    hp, ap, ts = G.side_prices(CTX, q[frozenset(("DAL", "TB"))])
+    hp, ap, ts = G.side_prices(CTX, G.quote_for_game(q, CTX))
     assert (hp, ap) == (240, -300)          # DAL's price is DAL's, whoever the feed calls home
     assert ts == "2026-10-09T03:00:00Z"
 
 
+def test_a_later_game_between_the_same_teams_never_prices_this_one():
+    """The bulk feed lists every upcoming event. A rematch weeks later, listed
+    AFTER the game in progress, must not overwrite its price: the game is
+    priced at the event with its own kickoff, and an ambiguous pair is not
+    priced at all (review of the build, 2026-10-13)."""
+    live = quote_payload(450, -500)
+    later = quote_payload(-160, 140)
+    later[0]["commence_time"] = "2026-11-29T21:25:00Z"
+    q = G.quotes_by_teams(live + later)
+    hp, ap, _ = G.side_prices(CTX, G.quote_for_game(q, CTX))
+    assert (hp, ap) == (450, -500)
+    q = G.quotes_by_teams(later)                      # only the future game is listed
+    assert G.quote_for_game(q, CTX) is None
+
+
 def test_a_quote_older_than_the_last_score_is_skipped(art):
-    q = G.quotes_by_teams(quote_payload(450, -500))[frozenset(("DAL", "TB"))]
+    q = G.quote_for_game(G.quotes_by_teams(quote_payload(450, -500)), CTX)
     st = live_state(poss="away")
     seen = datetime(2026, 10, 9, 3, 0, 30, tzinfo=timezone.utc)      # we saw a score 30 s later
     d, note = G.evaluate(art, st, CTX, q, seen, 0.02)
@@ -222,6 +239,9 @@ class FakeClock:
     def monotonic(self):
         return self.t
 
+    def time(self):                         # wall clock: slot 0 opens at t=0
+        return self.t
+
     def sleep(self, s):
         self.t += 20.0
 
@@ -294,8 +314,9 @@ def _run_loop(monkeypatch, script, payload, locked=False, season_types=None):
 def test_one_bet_per_game_and_the_five_minute_cadence(monkeypatch):
     """E1 qualifies on its first evaluation; E2 (a game the cut never clears)
     is in the window throughout. E1 is written ONCE and never re-evaluated;
-    E2 is evaluated at t=0, 300, 600 ... -- never more often; a transitional
-    E2 state at t=300 delays that slot to the next evaluable tick."""
+    E2 is evaluated once per 5-minute wall-clock slot; a transitional E2 state
+    at the first tick of the t=300 slot SPENDS that slot (it is not carried to
+    t=320) -- the fixed grid the evidence sampled."""
     e1 = live_state(eid="E1", poss="away")                       # TB up 8, BET at -500
     e2 = live_state(eid="E2", home=20, away=14, poss="home")     # NYG up 6
     e2_trans = live_state(eid="E2", home=20, away=14, poss=None, evaluable=False,
@@ -312,14 +333,13 @@ def test_one_bet_per_game_and_the_five_minute_cadence(monkeypatch):
     rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, payload)
     assert rc == 0
     assert len(writes) == 1 and writes[0]["pick_label"] == "TB ML (live)"
-    # Announced on the pass that wrote it AND every live pass after, so a
-    # failed post is retried (the notifiers' ledgers make repeats no-ops).
-    assert set(notes) == {"2026-10-08"} and len(notes) > 1
+    # Announced on the pass that wrote it, then re-asked at most every 300 s
+    # so a failed post is retried (the notifiers' ledgers make repeats no-ops).
+    assert set(notes) == {"2026-10-08"} and 2 <= len(notes) <= 4
     e1_evals = [t for e, t in evals if e == "E1"]
     e2_evals = [t for e, t in evals if e == "E2"]
     assert e1_evals == [0.0]
-    assert e2_evals == [0.0, 320.0, 620.0, 920.0][: len(e2_evals)] and len(e2_evals) >= 3
-    assert all(b - a >= 300 for a, b in zip(e2_evals, e2_evals[1:]))
+    assert e2_evals == [0.0, 600.0, 900.0]
     assert feed.fetches == len(set(t for _, t in evals))      # one bulk call per due pass
     # every DraftKings quote decided on is logged to `odds` as in_play
     rows = _run_loop.prices
@@ -406,3 +426,44 @@ def test_the_pick_row_binds_every_parameter_of_the_real_insert(art):
     assert r["decision_book"] == "draftkings" and r["decision_odds"] == -500.0
     assert r["model_probability_cal"] == r["model_probability"]   # its own probability
     assert r["is_live"] is True and r["best_book"] is None
+
+
+def test_a_failed_odds_fetch_backs_off_instead_of_calling_every_tick(monkeypatch):
+    """A 401/429/5xx returns None. The loop must not call again on the next
+    20-second tick: 60 s, then 120 s, then 300 s."""
+    e1 = live_state(eid="E1", poss="away")
+    e2 = live_state(eid="E2", home=20, away=14, poss="home", evaluable=False, reason="x")
+    final = live_state(eid="E1", state="post", final=True, evaluable=False)
+    ticks = [{"E1": e1, "E2": e2}] * 15 + [{"E1": final, "E2": final}] * 4   # 0..280 s
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, None)
+    # without the backoff this is one call per tick: 15
+    assert 1 <= feed.fetches <= 3 and writes == []
+
+
+def test_the_session_call_cap_stops_calling(monkeypatch):
+    """A call that fails before any header is read moves no credit meter --
+    a connection error raises, a 5xx carries no x-requests-last -- so the
+    number of calls is capped on its own."""
+    import nfl_live_leader.odds as O
+
+    class R:
+        status_code = 500
+        headers = {}
+
+        def raise_for_status(self):
+            raise RuntimeError("500")
+
+    class S:
+        n = 0
+
+        def get(self, *a, **k):
+            S.n += 1
+            if S.n % 2:
+                raise ConnectionError("reset")
+            return R()
+
+    monkeypatch.setenv("ODDS_API_KEY", "x")
+    feed = O.LiveOddsFeed(cap=10, session=S())
+    for _ in range(O.SESSION_CALL_CAP + 5):
+        assert feed.fetch() is None
+    assert S.n == O.SESSION_CALL_CAP

@@ -29,9 +29,12 @@ text:
     misses are a muffed punt, a punt fumble and a kickoff penalty, where ESPN
     is right and the training rule is not;
   * SCORING plays break both rules: their clock is the END of the play (0 of
-    65 equal the snap, all 65 lower) and their score already includes the
-    PAT, which ESPN folds into the touchdown play (there is no separate PAT
-    document). So a scoring play is never the state we evaluate.
+    65 equal the snap, all 65 lower), and in the FINISHED game document their
+    score already includes the PAT, folded into the touchdown play. LIVE core
+    is different: it posts the touchdown first and "Extra Point Good" as its
+    own lastPlay afterwards (2 of 40 fresh posts on two college games read
+    every 5 s, 2026-10-14). Both are refused -- a scoring play, and a
+    conversion by its type text -- so neither is ever the state we evaluate.
   * administrative rows -- Timeout (type 21), Official Timeout (74),
     Two-minute warning (75), End Period (2), End of Half (65), End of Game
     (66), Coin Toss (70) -- carry the clock at the stoppage, not a snap. The
@@ -219,6 +222,7 @@ class LiveState:
     last_play_id: str | None = None
     last_play_seq: int | None = None
     last_play_type: str | None = None
+    last_play_wallclock: str | None = None   # ESPN's wallclock for the last real play
     evaluable: bool = False
     reason: str = ""
     notes: list = field(default_factory=list)
@@ -279,6 +283,7 @@ def state_from_docs(meta: EventMeta, status: dict | None, situation: dict | None
         st.last_play_id = str(play.get("id") or "")
         st.last_play_seq = play_seq(play)
         st.last_play_type = play_type_text(play)
+        st.last_play_wallclock = play.get("wallclock")
         st.play_period = _int((play.get("period") or {}).get("number"))
         st.home_score = _num(play.get("homeScore"))
         st.away_score = _num(play.get("awayScore"))

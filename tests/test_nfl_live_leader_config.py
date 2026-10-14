@@ -100,11 +100,32 @@ def test_the_scheduler_flag_turns_it_off(monkeypatch):
 
     import scheduler
 
-    monkeypatch.setenv("RUN_NFL_LIVE_LEADER", "0")
-    importlib.reload(scheduler)
-    assert scheduler.RUN_NFL_LIVE_LEADER is False
+    # Any of the ways a person types "off" turns it off; only those do.
+    for off in ("0", "false", "False", " off ", "NO"):
+        monkeypatch.setenv("RUN_NFL_LIVE_LEADER", off)
+        importlib.reload(scheduler)
+        assert scheduler.RUN_NFL_LIVE_LEADER is False, off
+    for on in ("1", "true", "yes"):
+        monkeypatch.setenv("RUN_NFL_LIVE_LEADER", on)
+        importlib.reload(scheduler)
+        assert scheduler.RUN_NFL_LIVE_LEADER is True, on
     monkeypatch.delenv("RUN_NFL_LIVE_LEADER")
     importlib.reload(scheduler)
+
+
+def test_a_loop_that_dies_fails_its_job(monkeypatch):
+    """_run reports a crash as a return value. The job must raise on it, or a
+    loop that dies on every launch reads as a healthy heartbeat."""
+    import pytest
+
+    import scheduler
+
+    for outcome in ("fail", "timeout", "error"):
+        monkeypatch.setattr(scheduler, "_run", lambda *a, **k: outcome)
+        with pytest.raises(RuntimeError):
+            scheduler.run_nfl_live_leader()
+    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: "ok")
+    scheduler.run_nfl_live_leader()
 
 
 def test_the_job_is_registered_once_with_its_cron(monkeypatch):
