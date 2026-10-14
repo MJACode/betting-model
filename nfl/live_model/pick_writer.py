@@ -230,10 +230,12 @@ def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> di
 # ON CONFLICT DO NOTHING for the same reason _insert_picks has it: a unique
 # index makes a duplicate an IntegrityError, which would abort the transaction
 # and cost the tick its pick. uq_picks_one_row_per_pick covers pregame rows.
-# uq_picks_one_live_row (discord_post_one_pick_2026_10_14.sql) covers a second
-# live row on the same game, model, player and side. The first-signal lock is
-# what PREVENTS the duplicate; this only makes the losing side of a race
-# harmless.
+# uq_picks_one_live_row is standing live BETs only
+# (live_row_index_bets_only_2026_10_14.sql). This writer records the AVOID
+# first. An index over every signal type made that AVOID occupy the key, and
+# DO NOTHING then dropped the BET. A second BET still conflicts. The
+# first-signal lock is what PREVENTS that duplicate; this only makes the
+# losing side of a race harmless. _write does not delete the AVOID.
 _INSERT_SQL = """
     INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
                        pick_side, pick_label, model_probability, dk_implied_prob,

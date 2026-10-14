@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, uq_picks_one_live_row narrowed to standing BETs so an AVOID no longer drops the later live BET; void notice skips a sideless lock that a posted sibling still holds; health check reads both index definitions. Migration not applied |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Discord lock duplicates: 34 posts / 35 extra rows marked DUPLICATE (none graded); recap stores message_id; a posted void sends a notice; Oct 5 recap backfill is an explicit dry-run command |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the published record is the picks Discord still has: 109 never-posted settled bets (41-68) leave the recap and the snapshots; all-time as of 2026-10-13 goes from 472-443-2, -15.5373u to 431-375-2, +16.9240u; stake_for unchanged from #938; migration not applied here |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, graded picks are live money: the recap no longer leaves a pick out of the units; snapshots restate units at the taken price; all-time overall -38.4439 to -15.5373 as of 2026-10-13; NHL -8.4800 to +5.8762 |

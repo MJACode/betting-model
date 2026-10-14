@@ -32,6 +32,7 @@ Every result row is upserted into `system_health_checks`
     ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END, check_name;
 """
 
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -945,6 +946,63 @@ def _report_model_calibration(r, conn, rows, bet_only_rows) -> None:
               f"{gaps[0][0]:+.1f}pp ({gaps[0][1]}{_tag(gaps[0][1])}).{tail}")
 
 
+def _norm_indexdef(defn: str) -> str:
+    """Postgres prints casts and parenthesized columns. Compare the words."""
+    text = (defn or "").lower().replace("::text", "").replace("public.", "")
+    text = re.sub(r"\(\s*(signal_type|is_live|condition_status|result)\s*\)",
+                  r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+# Fragments that survive _norm_indexdef on the catalog's indexdef.
+# uq_picks_one_live_row must be standing BETs only. The wider predicate
+# (every non-DUPLICATE live row) drops a BET inserted after an AVOID.
+_PICK_INDEX_NEEDLES = {
+    "uq_picks_one_bet_per_publish_lock": (
+        "create unique index uq_picks_one_bet_per_publish_lock",
+        "signal_type = 'bet'",
+        "condition_status is distinct from 'duplicate'",
+        "condition_status is distinct from 'void'",
+        "result is distinct from 'no_action'",
+        "'live:'",
+        "pick_side",
+        "player_key",
+        "prop_market",
+    ),
+    "uq_picks_one_live_row": (
+        "create unique index uq_picks_one_live_row",
+        "is_live is true",
+        "signal_type = 'bet'",
+        "condition_status is distinct from 'duplicate'",
+        "game_date",
+        "coalesce(player_id",
+        "coalesce(player_key",
+        "coalesce(prop_market",
+        "pick_side",
+    ),
+}
+
+
+def pick_unique_index_problems(rows) -> list[str]:
+    """What's wrong with the two pick unique indexes, given (name, indexdef).
+
+    Empty when both exist and the catalog text contains each expected
+    fragment. A missing index, or the live index without signal_type BET,
+    is a problem. This does not query; the health check does.
+    """
+    found = {name: _norm_indexdef(defn) for name, defn in rows}
+    problems = []
+    for name, needles in _PICK_INDEX_NEEDLES.items():
+        defn = found.get(name) or ""
+        if not defn:
+            problems.append(f"{name} is missing")
+            continue
+        for needle in needles:
+            if needle not in defn:
+                problems.append(f"{name} definition missing {needle}")
+    return problems
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -1353,6 +1411,34 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("schema_drift", SKIPPED, "CRIT",
                   f"could not read information_schema: {type(exc).__name__}")
+
+        # ── The two pick unique indexes, after the migration ────────────────
+        # uq_picks_one_bet_per_publish_lock is one standing BET per publish
+        # lock. uq_picks_one_live_row is one standing live BET per side.
+        # The live index first shipped over every non-DUPLICATE live row, and
+        # the NFL writer inserts AVOID then BET with ON CONFLICT DO NOTHING,
+        # so the BET was dropped. This reads pg_indexes.indexdef. A name that
+        # exists with the old predicate fails here the next morning.
+        try:
+            idx_rows = conn.execute("""
+                SELECT indexname, indexdef
+                  FROM pg_indexes
+                 WHERE schemaname = 'public'
+                   AND indexname IN ('uq_picks_one_bet_per_publish_lock',
+                                     'uq_picks_one_live_row')
+            """).fetchall()
+            problems = pick_unique_index_problems(idx_rows)
+            if problems:
+                r.add("pick_unique_indexes", STALE, "CRIT",
+                      "; ".join(problems))
+            else:
+                r.add("pick_unique_indexes", OK, "CRIT",
+                      "uq_picks_one_bet_per_publish_lock and "
+                      "uq_picks_one_live_row match their definitions")
+        except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
+            r.add("pick_unique_indexes", SKIPPED, "CRIT",
+                  f"could not read pg_indexes: {type(exc).__name__}")
 
         # ── Models + picks ───────────────────────────────────────────────────
         expected = (set(MODELS.keys()) | set(PROP_MODELS.keys())) - KNOWN_UNTRAINED
