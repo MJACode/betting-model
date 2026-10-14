@@ -111,8 +111,10 @@ better than the market; the trees lose at every cut.
   favourite blind.
 - **The latest season is the weak one**: 2025-26 is −0.7% to −3.3% at the
   middle cuts in every version. One season of ~300 bets carries about ±11
-  points, so it neither confirms nor kills the result; a live or paper run on
-  2026-27 is the next measurement.
+  points, so it neither confirms nor kills the result; the live run on
+  2026-27 is the next measurement. The NHL models are live with the go-live
+  gate waived (mike, 2026-10-01, `docs/sports/nhl.md`), so the rebuild goes
+  live when it is built, not to paper.
 - **Not yet in production.** It needs: the inputs computed by the scoring path
   for tonight's games; the listed starting goalie (the goalie wait); a
   game-day decision at a fixed time against DraftKings' price; its own EV floor
