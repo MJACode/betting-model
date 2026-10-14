@@ -557,11 +557,11 @@ def test_the_tweeted_record_carries_roi_like_the_embed():
     assert "+26.1% ROI" in text
 
 
-def test_a_record_only_day_says_so_rather_than_dividing_by_zero():
+def test_a_day_with_nothing_risked_states_units_and_does_not_divide():
     text = xp.render_results(
-        {"wins": 2, "losses": 1, "pushes": 0, "units": 0.0, "risked": 0.0,
+        {"wins": 0, "losses": 0, "pushes": 2, "units": 0.0, "risked": 0.0,
          "by_sport": []}, "2026-09-01")
-    assert "record only" in text
+    assert "+0.00u" in text
     assert "ROI" not in text
 
 

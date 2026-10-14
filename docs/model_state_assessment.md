@@ -91,8 +91,8 @@ by this model's own record.
 
 | model | settled (since 07-01) | ROI | note |
 |---|---|---|---|
-| `mlb_f5_moneyline` | 85 | −3.09% | retrained today; now paper-only |
-| `mlb_prop_pitcher_k` | 90 | −11.77% | retrained today; now paper-only |
+| `mlb_f5_moneyline` | 85 | −3.09% | retrained today; gate count reset |
+| `mlb_prop_pitcher_k` | 90 | −11.77% | retrained today; gate count reset |
 | `wnba_moneyline` | 28 | −16.11% | active, mismatched artifact |
 | `mlb_over_under` | 52 | −26.73% | paused today |
 
@@ -210,9 +210,10 @@ were inert. The rebuild revived them and both models immediately leant on them
 harder than on anything else. That is the clearest evidence the repair did what
 it was supposed to.
 
-**All three retrained models are PAPER ONLY.** §2's go-live gate is per model
-and a retrain RESETS it: ≥50 settled picks, positive flat ROI, calibration ≤5%.
-Calibration already passes for the two game models (2.4%); both need live picks.
+**All three retrains reset the gate count.** §2 reports that standing per
+model: ≥50 settled picks, positive flat ROI, calibration ≤5%. Calibration
+already passes for the two game models (2.4%); both need more settled picks.
+The bets are live money either way (2026-10-14).
 
 ### `mlb_prop_pitcher_k` — retrained, and it did not rescue the model
 

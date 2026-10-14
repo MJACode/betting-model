@@ -341,7 +341,7 @@ than the table:
   prob-only pick with no real DK price has `profit_units` NULL, so
   `mlb_prop_batter_hr` reads "20 of 252 priced" in amber: its 42-210 record is
   real and its ROI describes a twentieth of it. Fabricating −110 for the rest
-  is exactly how a record-only model grows invented P&L.
+  is exactly how a missing price grows invented P&L.
 
 **Roster** is every row in `model_action_thresholds` — the authority on whether
 a model FIRES, since it is what the app's action filter reads and what the
@@ -539,7 +539,7 @@ than implying "now".
   refreshed by `--step refresh-outcomes` after settle).
 - **ROI is over the PRICED subset only**, with the count shown beside it. A
   prob-only pick with no DK price has NULL `profit_units`, so `mlb_prop_batter_hr`
-  reads "20 of 252 priced" — the record-only rule (`docs/thresholds.md`), enforced
+  reads "20 of 252 priced" — ROI over the priced subset (`docs/thresholds.md`), enforced
   in the UI rather than by inventing −110.
 
 **Discord member counts need a BOT TOKEN, not a webhook.** An incoming webhook is

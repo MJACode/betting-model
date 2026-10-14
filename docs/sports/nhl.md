@@ -34,7 +34,7 @@
 
 > **THE NHL MODELS ARE LIVE, WITH THE GO-LIVE GATE NOT MET** (mike,
 > 2026-10-01: *"this is a live model"*). Raised with the grade below in front
-> of him, restated, his call. Do not describe them as paper-only, do not hold
+> of him, restated, his call. Do not describe them as held back, do not hold
 > their picks back, and do not restore the gate without asking him.
 >
 > **NHL HAS NO 10-GAME HOLD** (mike, same day, on a proposal to hold picks until

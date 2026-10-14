@@ -484,10 +484,9 @@ def model_performance(conn) -> list[dict]:
     to signal_type='BET' gives the operationally honest question: what did the
     model actually tell us to bet, and how did that do?
 
-    profit_units is NULL for prob-only picks with no real price (batter HR),
-    so units and ROI are computed over the PRICED subset and the count is
-    reported beside them. Fabricating a price for those is how a record-only
-    model ends up with invented P&L.
+    profit_units is NULL when a pick has no real price, so ROI is computed
+    over the priced subset and the count is reported beside it. A missing
+    price is not given a made-up -110.
 
     A MODEL THE MATVIEW DOES NOT GRADE TAKES ITS RECORD FROM `picks`.
     The matview grades what it can regrade from box scores, so it carries an

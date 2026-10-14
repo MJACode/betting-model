@@ -132,14 +132,14 @@ def _schema(db):
     db.execute("""CREATE TABLE picks (
         pick_id INTEGER PRIMARY KEY, game_date TEXT, sport TEXT, model_id TEXT,
         signal_type TEXT, result TEXT, kelly_fraction REAL, dk_odds REAL,
-        clv_pct REAL, is_live INTEGER, downgrade_reason TEXT,
+        decision_odds REAL, clv_pct REAL, is_live INTEGER, downgrade_reason TEXT,
         condition_status TEXT, settled_at TEXT)""")
     db.execute("""CREATE TABLE push_sent (
         lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
         UNIQUE (lock_key, kind))""")
     db.execute("""CREATE TABLE results_snapshots (
         game_date TEXT, scope TEXT, sport TEXT, wins INT, losses INT,
-        pushes INT, settled INT, record_only INT, units REAL, risked REAL,
+        pushes INT, settled INT, units REAL, risked REAL,
         roi_pct REAL, clv_graded INT, clv_beat INT, clv_pct REAL,
         published_at TEXT)""")
     db.execute("CREATE UNIQUE INDEX uq_snap ON results_snapshots "
@@ -149,7 +149,7 @@ def _schema(db):
 def _add_pick(db, row, *, graded: bool):
     pick_id, sport, model, result, reason, settled_at, odds = row
     db.execute(
-        "INSERT INTO picks VALUES (?,?,?,?,'BET',?,0.02,?,NULL,0,?,NULL,?)",
+        "INSERT INTO picks VALUES (?,?,?,?,'BET',?,0.02,?,NULL,NULL,0,?,NULL,?)",
         (pick_id, DAY, sport, model, result if graded else None, odds, reason,
          settled_at if graded else None))
 

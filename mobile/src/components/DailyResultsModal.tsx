@@ -15,7 +15,7 @@ import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { addDays, formatAmerican, formatPctSigned, formatSignedUnits } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
-import { RECORD_ONLY_MODELS } from '@/lib/thresholds';
+import { flatPnl } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import {
@@ -105,7 +105,7 @@ export function DailyResultsModal({
     !stale &&
     (results.overall.picks > 0 ||
       results.pending > 0 ||
-      results.gradedPicks.length > 0 || // record-only picks (HR) grade without counting
+      results.gradedPicks.length > 0 ||
       results.games.length > 0);
   const isYesterday = date === maxDate;
   const canPrev = date > minDate;
@@ -259,8 +259,11 @@ export function DailyResultsModal({
                 <Text style={styles.heroLabel}>
                   {sportFilter === 'ALL' ? 'All models' : sportFilter} — flat-bet ROI
                 </Text>
-                <Text style={[styles.heroRoi, { color: roiColor(scoped.record.roiFlat) }]}>
-                  {formatPctSigned(scoped.record.roiFlat)}
+                <Text
+                  style={[styles.heroRoi, { color: hasPricedStake(scoped.record) ? roiColor(scoped.record.roiFlat) : colors.textSecondary }]}
+                  accessibilityLabel={hasPricedStake(scoped.record) ? undefined : 'ROI unavailable, no priced picks'}
+                >
+                  {hasPricedStake(scoped.record) ? formatPctSigned(scoped.record.roiFlat) : '—'}
                 </Text>
                 <Text style={styles.heroRecord}>{recordLine(scoped.record)}</Text>
                 {/* How the day splits. Both halves count identically — a live
@@ -273,12 +276,17 @@ export function DailyResultsModal({
                     {scoped.record.picks - scoped.live} pre-game · {scoped.live} in-play
                   </Text>
                 ) : null}
+                {unpricedOf(scoped.record) > 0 ? (
+                  <Text style={styles.splitNote}>
+                    {unpricedOf(scoped.record)} unpriced · not in the money
+                  </Text>
+                ) : null}
                 <View style={styles.heroStats}>
                   <HeroStat label="Picks" value={String(scoped.record.picks)} />
                   <HeroStat
                     label="Units"
-                    value={formatSignedUnits(scoped.record.profitFlat / 100)}
-                    color={unitsColor(scoped.record.profitFlat / 100)}
+                    value={hasPricedStake(scoped.record) ? formatSignedUnits(scoped.record.profitFlat / 100) : '—'}
+                    color={hasPricedStake(scoped.record) ? unitsColor(scoped.record.profitFlat / 100) : colors.textSecondary}
                   />
                   <HeroStat
                     label="Win rate"
@@ -319,26 +327,30 @@ export function DailyResultsModal({
                   <View style={styles.sportHeader}>
                     <Text style={styles.sportName}>{s.sport}</Text>
                     {s.total.picks > 0 ? (
-                      <Text style={[styles.sportRoi, { color: roiColor(s.total.roiFlat) }]}>
-                        {formatPctSigned(s.total.roiFlat)}
+                      <Text style={[styles.sportRoi, { color: hasPricedStake(s.total) ? roiColor(s.total.roiFlat) : colors.textSecondary }]}>
+                        {hasPricedStake(s.total) ? formatPctSigned(s.total.roiFlat) : '—'}
                       </Text>
                     ) : s.pending > 0 ? (
                       <Text style={styles.sportEmptyNote}>
                         {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
                       </Text>
                     ) : (
-                      <Text style={styles.sportEmptyNote}>Record only</Text>
+                      <Text style={styles.sportEmptyNote}>
+                        {formatSignedUnits(s.total.profitFlat / 100)}
+                      </Text>
                     )}
                   </View>
                   {s.total.picks > 0 ? (
                     <Text style={styles.sportSub}>
-                      {recordLine(s.total)} · {formatSignedUnits(s.total.profitFlat / 100)}
+                      {recordLine(s.total)} · {stakeLine(s.total)}
                       {s.pending > 0 ? ` · ${s.pending} pending` : ''}
                     </Text>
                   ) : s.pending > 0 ? (
                     <Text style={styles.sportSub}>Signals fired — results not graded yet</Text>
                   ) : (
-                    <Text style={styles.sportSub}>Record-only picks — not counted in the totals</Text>
+                    <Text style={styles.sportSub}>
+                      {recordLine(s.total)} · {formatSignedUnits(s.total.profitFlat / 100)}
+                    </Text>
                   )}
                   {s.models.map((m) => (
                     <ModelRow key={m.modelId} model={m} />
@@ -382,8 +394,7 @@ export function DailyResultsModal({
 
             <Text style={styles.footer}>
               Settled BET picks, as posted. Results are in units — one
-              unit is one flat bet per pick. Open picks settle after their games go final. Home-run
-              picks are record-only — shown for transparency but never counted in the record or units.
+              unit is one flat bet per pick. Open picks settle after their games go final.
             </Text>
           </ScrollView>
         )}
@@ -403,6 +414,7 @@ function HeroStat({ label, value, color }: { label: string; value: string; color
 }
 
 function ModelRow({ model }: { model: ModelDayStats }) {
+  const priced = hasPricedStake(model);
   return (
     <View style={styles.modelRow}>
       <View style={styles.modelLeft}>
@@ -415,17 +427,13 @@ function ModelRow({ model }: { model: ModelDayStats }) {
           </Text>
           <Text style={styles.modelSub}>
             {recordLine(model)}
-            {model.recordOnly ? ' · record only' : ` · ${formatSignedUnits(model.profitFlat / 100)}`}
+            {` · ${stakeLine(model)}`}
           </Text>
         </View>
       </View>
-      {model.recordOnly ? (
-        <Text style={styles.recordOnlyLabel}>Not counted</Text>
-      ) : (
-        <Text style={[styles.modelRoi, { color: roiColor(model.roiFlat) }]}>
-          {formatPctSigned(model.roiFlat)}
-        </Text>
-      )}
+      <Text style={[styles.modelRoi, { color: priced ? roiColor(model.roiFlat) : colors.textSecondary }]}>
+        {priced ? formatPctSigned(model.roiFlat) : '—'}
+      </Text>
     </View>
   );
 }
@@ -440,14 +448,11 @@ const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }>
 
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
-  const profit = Number(pick.profit_flat ?? 0);
-  // A pick with no book price is record-only too: the model line above it
-  // sums through flatPnl, so showing the settled -110 here would print money
-  // the total just excluded.
-  // decisionOdds, not dk_odds (2026-09-12): the day's total counts a pick
-  // whose price came from another book, so a row keyed on dk_odds would
-  // print 'record only' beside units the total above it already added.
-  const recordOnly = RECORD_ONLY_MODELS.has(pick.model_id) || decisionOdds(pick) == null;
+  // The row shows the same money the day's total added: flatPnl(pick).profit
+  // at the taken price. A stake of 0 means both prices were null, so the
+  // stored profit was filled in and is not shown.
+  const profit = flatPnl(pick).profit;
+  const unpriced = flatPnl(pick).staked === 0;
   return (
     <View style={styles.modelRow}>
       <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>
@@ -459,16 +464,19 @@ function PickRow({ pick }: { pick: Pick }) {
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
-          {decisionOdds(pick) != null ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` : ''}
+          {unpriced
+            ? ' · unpriced'
+            : decisionOdds(pick) != null
+              ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`
+              : ''}
         </Text>
       </View>
-      {recordOnly ? (
-        <Text style={styles.recordOnlyLabel}>Record only</Text>
-      ) : (
-        <Text style={[styles.modelRoi, { color: unitsColor(profit / 100) }]}>
-          {formatSignedUnits(profit / 100)}
-        </Text>
-      )}
+      <Text
+        style={[styles.modelRoi, { color: unpriced ? colors.textSecondary : unitsColor(profit / 100) }]}
+        accessibilityLabel={unpriced ? 'unpriced' : undefined}
+      >
+        {unpriced ? '—' : formatSignedUnits(profit / 100)}
+      </Text>
     </View>
   );
 }
@@ -520,6 +528,22 @@ function GameScoreRow({ game, showSport }: { game: DayGameSummary; showSport: bo
 function recordLine(s: CustomModelStats): string {
   const base = `${s.wins}–${s.losses}`;
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
+}
+
+function unpricedOf(s: { picks: number; stakedFlat: number }): number {
+  return s.picks - Math.round(s.stakedFlat / 100);
+}
+
+function hasPricedStake(s: { stakedFlat: number }): boolean {
+  return s.stakedFlat > 0;
+}
+
+/** Units for a total that has graded picks. An all-unpriced total is an em
+ *  dash, the same as the Models row; a priced push stays 0.0u. */
+function stakeLine(s: CustomModelStats): string {
+  const units = hasPricedStake(s) ? formatSignedUnits(s.profitFlat / 100) : '—';
+  const n = unpricedOf(s);
+  return n > 0 ? `${units} · ${n} unpriced` : units;
 }
 
 // Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
@@ -788,12 +812,6 @@ const styles = StyleSheet.create({
   modelName: { fontSize: font.size.body, fontWeight: font.weight.medium, color: colors.textPrimary },
   modelSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 1 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.sm },
-  recordOnlyLabel: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    marginLeft: spacing.sm,
-  },
   openLabel: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,

@@ -282,6 +282,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-10-12 (mike: "5) yes"): the free data the NFL edge search fetched,
     # one gzipped row per file (scripts/nfl_research_backup.py).
     "add_nfl_research_data_backup_2026_10_12.sql",
+    # 2026-10-14: units and the W-L are the same graded picks, at the price
+    # the bet was taken at. Rewrites results_snapshots and drops the column
+    # that counted a pick in the record and left it out of the units.
+    # The view patch removes the one-model units zeroing. It reads the live
+    # view, so it runs after every migration that owns that view.
+    "recompute_snapshot_units_2026_10_14.sql",
+    "home_run_units_follow_graded_profit_2026_10_14.sql",
 ]
 
 

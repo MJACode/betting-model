@@ -325,21 +325,14 @@ primary sportsbook. The long-term goal is all major US sports with all player
 props. Seven sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL and NCAAF
 (§8). **GOLF was retired 2026-09-08** (mike) — `config.RETIRED_MODELS`.
 
-**The platform is LIVE — this is not a paper-trading system.** Do not describe
-it as paper trading in any user-facing surface (Discord, the app, email, the
-dashboard). It was framed that way through 2026 H1 and the wording lingered in
-copy long after it stopped being true; that is what produced a "Paper trading"
-footer on a real daily-results recap on 2026-08-29.
-
-**The go-live gate is per MODEL, not for the platform**: ≥ 50 settled picks,
-positive flat-bet ROI, calibration error ≤ 5%. A model explicitly held back
-is flagged PAPER ONLY in its own section (e.g. `ncaaf_spread`,
-`docs/sports/ncaaf.md`). Everything else is live.
-
-**NEVER PROPOSE PAPER.** (mike, 2026-10-08: *"stop asking about paper — what
-is the fucking point of paper."*) A model mike asks for is built LIVE, gate
-met or not. Report its gate standing; never offer a paper version or ask
-whether to hold it back.
+**Every model is live real money.** There is no second mode that counts a
+graded pick in the win-loss record and leaves it out of the units, and there
+is no hold-back ledger. Units and the record are the same graded set, at the
+stake and profit of the price the bet was taken at
+(`COALESCE(decision_odds, dk_odds)`). A pick with no price is not given a
+made-up price. (mike, 2026-10-14, and 2026-10-08: do not ask to hold a model
+back.) Report gate standing — ≥ 50 settled picks, positive flat-bet ROI,
+calibration error ≤ 5% — and build the model live.
 
 **`nfl_live_prop` (NFL in-play props) was RETIRED 2026-10-04 and its record
 STRUCK** (mike: *"It was never a good model. Remove this model."*) — 7-17,
@@ -562,7 +555,7 @@ to be known BEFORE deciding which file to open.
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline
   steps are left in place; reviving it starts with the key, not with config.
-- **The platform is LIVE, not paper trading**; the go-live gate is per MODEL (§2).
+- **Every model is live real money.** Units and the record are the same graded set (§2).
 - **Where it runs:** the Railway worker (`scheduler.py`) — 6am daily pipeline,
   intraday refresh passes, the MLB and NCAAF live loops, the NFL card poll.
   See `docs/cloud_worker.md`.
@@ -604,7 +597,7 @@ to be known BEFORE deciding which file to open.
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | **Model artifacts: present, tracked, and loadable** | `docs/artifact_integrity.md` |
 | **NFL wind: how far out it may fire, and the lead evidence** | `docs/nfl_wind_lead_evidence.md` |
-| **NFL 2026 paper-track (opener retire-if-flat, wind MAX_FIRE_LEAD=4, no unit bump)** | `docs/nfl_rule_2026_track.md` |
+| **NFL 2026 opener/wind track (retire-if-flat, wind MAX_FIRE_LEAD=4, no unit bump)** | `docs/nfl_rule_2026_track.md` |
 | **NFL props: near kickoff is the only well-evidenced regime** | `docs/nfl_prop_offset_evidence.md` |
 | Best line on pre-game picks | `docs/best_line.md` |
 | Which prop markets the feed actually serves | `docs/market_coverage.md` |

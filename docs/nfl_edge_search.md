@@ -165,7 +165,6 @@ operational subset, not because it is the best ROI cell.
 
 **What a forward test needs:**
 - a new model id (`nfl_live_prop` is struck);
-- paper only;
 - a scheduler job, because `RUN_NFL_LIVE` defaults off;
 - one live event-odds call per game at halftime, for one market in one region.
 
