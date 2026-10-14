@@ -155,9 +155,11 @@ def report(team: pd.DataFrame, goalie: pd.DataFrame, log: pd.DataFrame) -> None:
                                  xgf_5v5=("xgf_5v5", "sum"), gf_5v5=("gf_5v5", "sum"),
                                  unscored=("xg_unscored_for", "sum"))
     by["gf_vs_log"] = t.assign(ok=t["gf"] == t["goals_for"]).groupby("season")["ok"].mean().round(4)
+    by[["xgf", "xgf_5v5"]] = by[["xgf", "xgf_5v5"]].round(1)
     by["xgf_over_gf"] = (by["xgf"] / by["gf"]).round(4)
+    by["xgf_over_gf_5v5"] = (by["xgf_5v5"] / by["gf_5v5"]).round(4)
     logger.info("team-game sums by season (gf_vs_log = share of team-games whose "
-                "play-by-play goals equal the log's goals_for):\n" + by.round(1).to_string())
+                "play-by-play goals equal the log's goals_for):\n" + by.to_string())
 
     g = goalie.copy()
     has = g["goals_against"].notna()
