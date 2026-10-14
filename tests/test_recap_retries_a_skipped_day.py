@@ -133,7 +133,8 @@ def _schema(db):
         pick_id INTEGER PRIMARY KEY, game_date TEXT, sport TEXT, model_id TEXT,
         signal_type TEXT, result TEXT, kelly_fraction REAL, dk_odds REAL,
         decision_odds REAL, clv_pct REAL, is_live INTEGER, downgrade_reason TEXT,
-        condition_status TEXT, settled_at TEXT)""")
+        condition_status TEXT, settled_at TEXT, game_id TEXT, pick_side TEXT,
+        player_id TEXT, player_key TEXT, prop_market TEXT)""")
     db.execute("""CREATE TABLE push_sent (
         lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
         UNIQUE (lock_key, kind))""")
@@ -149,9 +150,18 @@ def _schema(db):
 def _add_pick(db, row, *, graded: bool):
     pick_id, sport, model, result, reason, settled_at, odds = row
     db.execute(
-        "INSERT INTO picks VALUES (?,?,?,?,'BET',?,0.02,?,NULL,NULL,0,?,NULL,?)",
+        "INSERT INTO picks (pick_id, game_date, sport, model_id, signal_type, "
+        "result, kelly_fraction, dk_odds, is_live, downgrade_reason, "
+        "settled_at, game_id) "
+        "VALUES (?,?,?,?,'BET',?,0.02,?,0,?,?,?)",
         (pick_id, DAY, sport, model, result if graded else None, odds, reason,
-         settled_at if graded else None))
+         settled_at if graded else None, str(pick_id)))
+    # A counting bet was posted. A paused-row bet was not.
+    if reason is None:
+        db.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (?,?,?)",
+            (f"{pick_id}:{model}", "discord_signal",
+             "2026-10-12T12:00:00-04:00"))
 
 
 def _grade(db, row):

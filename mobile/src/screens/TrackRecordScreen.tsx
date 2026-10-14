@@ -287,8 +287,8 @@ export function TrackRecordScreen() {
             {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
             happened and is still in our books, but the published record starts here — so it is
             short by design, and the percentages will move a lot for a while.{'\n\n'}
-            This is the real, unedited record — flat $100 bets at the DraftKings price we
-            scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
+            This is the record Discord still has — flat $100 bets at the DraftKings price we
+            scored, every posted pick since {LIVE_RECORD_START_SHORT}. Some models are
             profitable, some aren’t yet, and we show them all. Every sample here is still
             small, and a few dozen settled bets tells you very little in either direction —
             where a model has too few to read, its percentage is greyed out and labelled
@@ -336,7 +336,7 @@ export function TrackRecordScreen() {
         ) : null}
 
         <Text style={styles.footer}>
-          Every settled pick counts as it was posted — at the line and price we scored it,
+          Every pick Discord posted counts as it was posted — at the line and price we scored it,
           under the criteria that applied that day. Updated after each morning settlement. A
           pick only leaves the record if it was voided, meaning the model should never have
           produced it. If we pause a model, its past bets stay here; it just stops producing

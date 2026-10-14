@@ -78,14 +78,24 @@ def test_the_recap_query_counts_the_kept_copy_and_not_the_marked_one():
     db = sqlite3.connect(":memory:")
     db.execute("""CREATE TABLE picks (pick_id, sport, model_id, result,
                   kelly_fraction, dk_odds, decision_odds, clv_pct, is_live, game_date,
-                  signal_type, downgrade_reason, condition_status)""")
+                  signal_type, downgrade_reason, condition_status, game_id,
+                  pick_side, player_id, player_key, prop_market)""")
+    db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
-        (332605, "UFC", "ufc_total_rounds", "WIN", 0.02, -166, None, None, 0, "2026-06-20", "BET", None, None),
-        (332615, "UFC", "ufc_total_rounds", "WIN", 0.02, -130, None, None, 0, "2026-06-20", "BET", None, "DUPLICATE"),
-        (9, "UFC", "ufc_total_rounds", "NO_ACTION", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "VOID"),
-        (10, "NCAAF", "ncaaf_spread", "LOSS", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "GONE"),
+        (332605, "UFC", "ufc_total_rounds", "WIN", 0.02, -166, None, None, 0, "2026-06-20", "BET", None, None, "g605"),
+        (332615, "UFC", "ufc_total_rounds", "WIN", 0.02, -130, None, None, 0, "2026-06-20", "BET", None, "DUPLICATE", "g615"),
+        (9, "UFC", "ufc_total_rounds", "NO_ACTION", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "VOID", "g9"),
+        (10, "NCAAF", "ncaaf_spread", "LOSS", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "GONE", "g10"),
     ]
-    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany(
+        "INSERT INTO picks (pick_id, sport, model_id, result, kelly_fraction, "
+        "dk_odds, decision_odds, clv_pct, is_live, game_date, signal_type, "
+        "downgrade_reason, condition_status, game_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany(
+        "INSERT INTO push_sent VALUES (?, 'discord_signal', '2026-06-20T12:00:00')",
+        [("g605:ufc_total_rounds",), ("g615:ufc_total_rounds",),
+         ("g9:ufc_total_rounds",), ("g10:ncaaf_spread",)])
     sql = _SETTLED_SQL.format(window="= ?").replace("%%", "%")
     got = sorted((r[1], r[4]) for r in db.execute(sql, ("2026-06-20",)).fetchall())
     assert got == [("ncaaf_spread", -110), ("ufc_total_rounds", -166)]

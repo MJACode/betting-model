@@ -87,6 +87,7 @@ export function DailyResultsModal({
           models: [],
           live: 0,
           pending: 0,
+          unpublished: 0,
         },
     ),
     ...results.sports.filter((s) => !ALL_SPORTS.includes(s.sport)),
@@ -106,7 +107,8 @@ export function DailyResultsModal({
     (results.overall.picks > 0 ||
       results.pending > 0 ||
       results.gradedPicks.length > 0 ||
-      results.games.length > 0);
+      results.games.length > 0 ||
+      results.unpublished > 0);
   const isYesterday = date === maxDate;
   const canPrev = date > minDate;
   const canNext = date < maxDate;
@@ -308,14 +310,22 @@ export function DailyResultsModal({
                   color={colors.textTertiary}
                 />
                 <Text style={styles.heroEmptyTitle}>
-                  {scoped.pending > 0 ? 'Nothing graded yet' : 'No qualifying picks'}
+                  {scoped.pending > 0
+                    ? 'Nothing graded yet'
+                    : scoped.unpublished > 0
+                      ? 'Nothing posted'
+                      : 'No qualifying picks'}
                 </Text>
                 <Text style={styles.heroEmptyBody}>
                   {scoped.pending > 0
                     ? `${scoped.pending} ${scoped.pending === 1 ? 'pick is' : 'picks are'} still awaiting a result — check back once the games settle.`
-                    : sportFilter === 'ALL'
-                      ? 'No picks cleared the bar this day.'
-                      : `No ${sportFilter} picks cleared the bar this day.`}
+                    : scoped.unpublished > 0
+                      ? sportFilter === 'ALL'
+                        ? 'No picks were posted this day.'
+                        : `No ${sportFilter} picks were posted this day.`
+                      : sportFilter === 'ALL'
+                        ? 'No picks cleared the bar this day.'
+                        : `No ${sportFilter} picks cleared the bar this day.`}
                 </Text>
               </View>
             )}
@@ -360,7 +370,9 @@ export function DailyResultsModal({
                 <View key={s.sport} style={[styles.sportCard, styles.sportCardEmpty]}>
                   <View style={styles.sportHeader}>
                     <Text style={styles.sportNameEmpty}>{s.sport}</Text>
-                    <Text style={styles.sportEmptyNote}>No picks</Text>
+                    <Text style={styles.sportEmptyNote}>
+                      {s.unpublished > 0 ? 'Not posted' : 'No picks'}
+                    </Text>
                   </View>
                 </View>
               ),

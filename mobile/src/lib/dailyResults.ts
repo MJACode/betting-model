@@ -35,6 +35,8 @@ export interface SportDayBreakdown {
    *  so an unsettled day (e.g. WNBA finals not ingested yet) reads as "picks
    *  pending", never as "there were no picks". */
   pending: number;
+  /** Graded BETs that passed the record filter and Discord does not have. */
+  unpublished: number;
   /** How many of this sport's graded picks came from an in-play model. */
   live: number;
 }
@@ -62,6 +64,8 @@ export interface DailyResults {
    *  a prop whose player DNP, or a game not settled at fetch time). Surfaced so
    *  the recap reconciles with the number of picks the user actually placed. */
   pending: number;
+  /** Graded BETs left out because Discord does not have them. */
+  unpublished: number;
   /** The individual graded (WIN/LOSS/PUSH) picks behind the record, sorted by
    *  sport order then profit desc, so the recap can list what was actually bet. */
   gradedPicks: Pick[];
@@ -83,6 +87,7 @@ export function emptyDailyResults(date: string): DailyResults {
     overall: EMPTY_DAILY,
     sports: [],
     pending: 0,
+    unpublished: 0,
     gradedPicks: [],
     pendingPicks: [],
     live: 0,
@@ -171,6 +176,8 @@ export interface ScopedDailyResults {
    *  the per-sport breakdown instead). */
   models: ModelDayStats[] | null;
   pending: number;
+  /** Graded BETs in this scope that Discord does not have. */
+  unpublished: number;
   /** Graded picks in this scope that came from an in-play model. */
   live: number;
   gradedPicks: Pick[];
@@ -185,6 +192,7 @@ export function scopeDailyResults(r: DailyResults, sport: string): ScopedDailyRe
       record: r.overall,
       models: null,
       pending: r.pending,
+      unpublished: r.unpublished,
       live: r.live,
       gradedPicks: r.gradedPicks,
       pendingPicks: r.pendingPicks,
@@ -197,6 +205,7 @@ export function scopeDailyResults(r: DailyResults, sport: string): ScopedDailyRe
     record: section?.total ?? EMPTY_DAILY,
     models: section?.models ?? [],
     pending: section?.pending ?? 0,
+    unpublished: section?.unpublished ?? 0,
     live: section?.live ?? 0,
     gradedPicks: r.gradedPicks.filter((p) => p.sport === sport),
     pendingPicks: r.pendingPicks.filter((p) => p.sport === sport),
@@ -233,6 +242,8 @@ export function computeDailyResults(
   const bySport = new Map<string, Acc>();
   const byModel = new Map<string, { sport: string; acc: Acc; live: boolean }>();
   const pendingBySport = new Map<string, number>();
+  const unpublishedBySport = new Map<string, number>();
+  let unpublished = 0;
   const picksPerGame = new Map<string, number>();
   const gradedPicks: Pick[] = [];
   const pendingPicks: Pick[] = [];
@@ -281,6 +292,14 @@ export function computeDailyResults(
     const graded =
       p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH';
     if (!(graded ? passesRecordFilter(p) : passesActionFilter(p))) continue;
+    // A graded BET Discord does not have is not in the published record.
+    // Omitted means the ledger was not read (the pure tests). `unknown` is a
+    // failed read and stays, so a ledger outage does not paint 0-0.
+    if (graded && p.discordPublish === 'unpublished') {
+      unpublished += 1;
+      unpublishedBySport.set(p.sport, (unpublishedBySport.get(p.sport) ?? 0) + 1);
+      continue;
+    }
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') {
       if (p.result == null) {
         // Placed, not yet graded — track per sport so the breakdown can say
@@ -334,18 +353,20 @@ export function computeDailyResults(
   const sectionSports = new Set([
     ...bySport.keys(),
     ...pendingBySport.keys(),
+    ...unpublishedBySport.keys(),
     ...modelsBySport.keys(),
   ]);
   const sports: SportDayBreakdown[] = [];
   for (const sport of sectionSports) {
     const total = finalize(bySport.get(sport) ?? emptyAcc());
     const pendingCount = pendingBySport.get(sport) ?? 0;
+    const unpublishedCount = unpublishedBySport.get(sport) ?? 0;
     const models = (modelsBySport.get(sport) ?? []).sort(
       (a, b) => b.profitFlat - a.profitFlat,
     );
-    if (total.picks === 0 && pendingCount === 0 && models.length === 0) continue;
+    if (total.picks === 0 && pendingCount === 0 && unpublishedCount === 0 && models.length === 0) continue;
     sports.push({ sport, total, models, pending: pendingCount,
-                  live: liveBySport.get(sport) ?? 0 });
+                  unpublished: unpublishedCount, live: liveBySport.get(sport) ?? 0 });
   }
   sports.sort((a, b) => bySportOrder(a.sport, b.sport));
 
@@ -383,6 +404,7 @@ export function computeDailyResults(
     overall: finalize(overall),
     sports,
     pending: pendingPicks.length,
+    unpublished,
     gradedPicks,
     pendingPicks,
     live: liveGraded,

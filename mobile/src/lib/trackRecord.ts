@@ -1,6 +1,6 @@
 /**
  * Aggregation helpers for the public track record (v_public_track_record).
- * The view reports every settled pick AS POSTED — it does not re-apply today's
+ * The view reports every pick Discord still has. It does not re-apply today's
  * cut or paused flag to a bet already made (CLAUDE.md 1c) — so a paused model's
  * past bets are included and its row can appear here. We just roll the
  * per-model rows up to overall and per-sport summaries for display.

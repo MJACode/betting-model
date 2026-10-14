@@ -372,5 +372,22 @@ check('live day: real live bets are listed in gradedPicks, repair row is not',
     && liveDay.gradedPicks.every((p) => p.model_id.includes('_live_')),
   liveDay.gradedPicks.map((p) => p.model_id).join(','));
 
+const unpublished = computeDailyResults(DATE, [
+  mk({ result: 'WIN', profit_flat: WIN_PROFIT, discordPublish: 'unpublished' }),
+  mk({ result: 'LOSS', profit_flat: -100, discordPublish: 'published' }),
+]);
+check('an unpublished graded bet is left out of the day',
+  unpublished.overall.picks === 1 && unpublished.overall.losses === 1
+    && unpublished.gradedPicks.length === 1 && unpublished.unpublished === 1
+    && unpublished.sports.find((s) => s.sport === 'MLB')?.unpublished === 1,
+  JSON.stringify(unpublished.overall));
+const unpostedDay = computeDailyResults(DATE, [
+  mk({ result: 'WIN', profit_flat: WIN_PROFIT, discordPublish: 'unpublished' }),
+]);
+check('a day of only unpublished bets reports that count and an empty record',
+  unpostedDay.overall.picks === 0 && unpostedDay.unpublished === 1
+    && unpostedDay.gradedPicks.length === 0,
+  JSON.stringify({ picks: unpostedDay.overall.picks, unpublished: unpostedDay.unpublished }));
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

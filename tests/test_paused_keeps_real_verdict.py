@@ -317,14 +317,24 @@ def test_the_recap_excludes_a_settled_paused_bet_and_keeps_a_live_models_bet():
     # (config.DUPLICATE_STATUS, 2026-10-09); NULL here, as on almost every row.
     db.execute("""CREATE TABLE picks (sport, model_id, result, kelly_fraction,
                   dk_odds, decision_odds, clv_pct, is_live, game_date, signal_type,
-                  downgrade_reason, condition_status)""")
+                  downgrade_reason, condition_status, game_id, pick_side,
+                  player_id, player_key, prop_market)""")
+    db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
-        ("MLB", "m_live", "WIN", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None),
-        ("MLB", "m_now_paused", "LOSS", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None),
-        ("MLB", "m_paused_row", "WIN", 0.02, 250, None, None, 0, "2026-09-28", "BET", NOTE, None),
-        ("MLB", "m_capped", "WIN", 0.0, -110, None, None, 0, "2026-09-28", "NONE", "daily cap", None),
+        ("MLB", "m_live", "WIN", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None, "g1"),
+        ("MLB", "m_now_paused", "LOSS", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None, "g2"),
+        ("MLB", "m_paused_row", "WIN", 0.02, 250, None, None, 0, "2026-09-28", "BET", NOTE, None, "g3"),
+        ("MLB", "m_capped", "WIN", 0.0, -110, None, None, 0, "2026-09-28", "NONE", "daily cap", None, "g4"),
     ]
-    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany(
+        "INSERT INTO picks (sport, model_id, result, kelly_fraction, dk_odds, "
+        "decision_odds, clv_pct, is_live, game_date, signal_type, "
+        "downgrade_reason, condition_status, game_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    # The two bets that count were posted. The paused-row bet was not.
+    db.executemany(
+        "INSERT INTO push_sent VALUES (?, 'discord_signal', '2026-09-28T12:00:00')",
+        [("g1:m_live",), ("g2:m_now_paused",)])
     sql = _SETTLED_SQL.format(window="= ?").replace("%%", "%")
     got = sorted(r[1] for r in db.execute(sql, ("2026-09-28",)).fetchall())
     assert got == ["m_live", "m_now_paused"]

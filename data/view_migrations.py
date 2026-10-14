@@ -295,6 +295,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # publish lock and a second live row on the same side. Skips the
     # create, and does not raise, when a duplicate of that identity remains.
     "discord_post_one_pick_2026_10_14.sql",
+    # 2026-10-14: the published record is the picks Discord still has.
+    # Rewrites results_snapshots (W-L and stake_for units) and adds the
+    # same lock to the two app views. Reads the live view text, so it
+    # runs after every migration that owns those views, including the
+    # duplicate-row pass above. Does not post.
+    "published_picks_record_2026_10_14.sql",
 ]
 
 
