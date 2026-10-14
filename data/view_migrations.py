@@ -292,9 +292,17 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-10-14: 35 extra picks rows behind one Discord lock are marked
     # DUPLICATE (kept row untouched; none of the extras is a graded
     # WIN/LOSS/PUSH). Two unique indexes stop a second standing BET on a
-    # publish lock and a second live row on the same side. Skips the
+    # publish lock and a second live BET on the same side. Skips the
     # create, and does not raise, when a duplicate of that identity remains.
     "discord_post_one_pick_2026_10_14.sql",
+    # 2026-10-14: uq_picks_one_live_row, if already created, covers every
+    # non-DUPLICATE live row. The NFL writer inserts AVOID then BET with
+    # ON CONFLICT DO NOTHING, so the BET is dropped. This narrows the
+    # index to signal_type BET. Property-guarded (the file above skips
+    # once the name exists). Not CONCURRENTLY; the worker applies it.
+    # Does not post. Does not change a pick row. Before the published
+    # record pass, which must stay last because it reads the live views.
+    "live_row_index_bets_only_2026_10_14.sql",
     # 2026-10-14: the published record is the picks Discord still has.
     # Rewrites results_snapshots (W-L and stake_for units) and adds the
     # same lock to the two app views. Reads the live view text, so it

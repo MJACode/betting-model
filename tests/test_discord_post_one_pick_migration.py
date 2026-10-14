@@ -84,3 +84,9 @@ def test_a_second_standing_bet_and_a_second_live_row_are_blocked():
         "CREATE UNIQUE INDEX uq_picks_one_bet_per_publish_lock")
     assert "is_live IS NOT TRUE" not in CODE.split(
         "uq_picks_one_live_row", 1)[1].split("CREATE UNIQUE INDEX", 1)[0]
+    live_where = CODE.split(
+        "CREATE UNIQUE INDEX uq_picks_one_live_row", 1)[1].split(
+        "WHERE", 1)[1].split(";", 1)[0]
+    assert "signal_type = 'BET'" in live_where
+    assert "is_live IS TRUE" in live_where
+    assert "DUPLICATE" in live_where
