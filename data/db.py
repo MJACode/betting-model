@@ -252,6 +252,69 @@ def _is_write(sql: str) -> bool:
     return True
 
 
+def statement_timeout(exc: BaseException) -> bool:
+    """True when Postgres cancelled the statement (SQLSTATE 57014).
+
+    That error aborts the whole transaction. The next statement then fails
+    with InFailedSqlTransaction, which hides the timeout. Callers wrap the
+    statement in a savepoint and roll back to it — ROLLBACK TO SAVEPOINT is
+    still allowed in that state.
+    """
+    code = getattr(exc, "pgcode", None)
+    if code == "57014":
+        return True
+    return "statement timeout" in str(exc).lower()
+
+
+def rollback_savepoint(conn, name: str) -> None:
+    """Undo `name` and leave the connection usable. Falls back to a full
+    rollback when the savepoint itself cannot be restored."""
+    if not str(name).isidentifier():
+        raise ValueError(f"savepoint name must be an identifier, got {name!r}")
+    try:
+        conn.execute(f"ROLLBACK TO SAVEPOINT {name}")
+    except Exception:                                          # noqa: BLE001
+        rollback = getattr(conn, "rollback", None)
+        if rollback is not None:
+            try:
+                rollback()
+            except Exception:                                  # noqa: BLE001
+                pass
+        return
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {name}")
+    except Exception:                                          # noqa: BLE001
+        rollback = getattr(conn, "rollback", None)
+        if rollback is not None:
+            try:
+                rollback()
+            except Exception:                                  # noqa: BLE001
+                pass
+
+
+def call_in_savepoint(conn, name: str, fn):
+    """Run fn(). On failure, restore the transaction and re-raise.
+
+    `name` is a bare SQL identifier. A statement timeout aborts the
+    transaction; the rollback puts the connection back so the next date or
+    the next game can still run.
+    """
+    if not str(name).isidentifier():
+        raise ValueError(f"savepoint name must be an identifier, got {name!r}")
+    conn.execute(f"SAVEPOINT {name}")
+    try:
+        result = fn()
+    except Exception:
+        rollback_savepoint(conn, name)
+        raise
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {name}")
+    except Exception:
+        rollback_savepoint(conn, name)
+        raise
+    return result
+
+
 # ── Connection wrapper ────────────────────────────────────────────────────────
 
 class DBConnection:

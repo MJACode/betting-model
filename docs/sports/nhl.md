@@ -202,7 +202,7 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 | NHL team + goalie stats (`nhl_stats`) | GitHub Actions (`step_nhl_stats`) | daily 7am | season-to-date team metrics + probable-starter goalie rows (ESPN `probableStartingGoalie` overlay) |
 | NHL totals (`nhl-over-under`) | Railway worker (`step_nhl_over_under`) | 6am (right after the odds step) + every refresh pass (right after `par odds`) | `scripts/nhl_totals_card.py`: every unstarted NHL game, Pinnacle vs the bettable books in the newest fetch; writes at most one `nhl_over_under` BET a game, once, under the model's advisory lock. Logs a diagnostic line every pass (`no_sharp`, `pinnacle_withdrawn`, ...) so an empty card can be told from a broken one |
 | NHL scoring (`step_scoring`) | GitHub Actions | 6am + every refresh pass | `run_scorer` NHL branch → picks (incl. `_score_nhl_3way`); `nhl_over_under` is not in it |
-| Settlement | GitHub Actions (`settle`) | 7am | generic game-level settle (NHL is not excluded); 3-way draw handled in `_compute_result` |
+| Settlement | Railway worker (`settle`) | every refresh pass and the 6am run | Game lines grade off `games` once `nhl-results` has the final. Props grade in the same `settle_picks` once a final that is still missing its skater or goalie log has a box from `/gamecenter/{id}/boxscore`. The morning `top_up` still writes the full stats-API row; the box insert is `ON CONFLICT DO NOTHING`, so it does not blank that row. 3-way draw is handled in `_compute_result`. |
 
 NHL picks won't generate until the four models are trained and the `.pkl`
 artifacts are committed (like MLB/WNBA/UFC) — until then the NHL steps no-op

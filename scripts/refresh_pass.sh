@@ -202,6 +202,12 @@ step push-notifications
 # need nothing extra. Everything below supplies what the OTHER sports' picks —
 # and MLB props — settle against.
 #
+# Props also need the player log. settle_picks pulls that box itself, on its
+# own connection, for every final that still has an unsettled prop and no
+# log. NHL reads the game-center box; MLB reads the game log; WNBA, NBA and
+# NFL are attempted at most once per 50 minutes. A game already logged is
+# not fetched again. One game is one savepoint.
+#
 # Every-pass steps are the ones that cost nothing when there is nothing to do:
 #   game-log-today   skips per game; no boxscore call for games already stored
 #   nfl-results      returns without fetching unless a started NFL game is unscored
