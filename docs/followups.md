@@ -53,10 +53,12 @@ counted. The guard as written
 would end NHL game bets at early prices; the alternative is to keep the
 early decision and re-check it once the goalie row lands, which collides with
 the pick lock (CLAUDE.md §1c) and is mike's call either way.
-Related, also not in the model: rest. On 2025-26 the regulation model sat
-1.2-3.0 points above DraftKings' no-vig price on every back-to-back split
-and below it on the rested ones (`docs/sessions/2026-10.md`, 2026-10-13);
-a rest input is a retrain, so a candidate to grade, not a fix.
+Related: rest. Graded the same day — rest, back-to-back and road-trip
+inputs added to both NHL game models make neither more accurate on 2025-26,
+on all games or on the 350 back-to-back games, and move the Ottawa game by
+0.0001 (`docs/nhl_market_lab.md`, "Rest, back-to-back and road trip in the
+production models"; branch `nhl-rest-candidate`). The goalie is what moves
+a back-to-back game, which is why the timing above is the fix.
 
 ## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
 
