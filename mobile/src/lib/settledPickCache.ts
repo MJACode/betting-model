@@ -54,7 +54,12 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // scorer keeps a paused model's real verdict, a paused BET can settle, and
 // passesRecordFilter keeps it out by the row's 'model paused' marker. On a v6
 // envelope that field is undefined and the guard would never fire.
-const KEY = 'settledPicks.v7';
+// v8 (2026-10-14): player_key, prop_market, and clv_method. Model detail
+// counts a bet only when Discord still has its lock, and that lock includes
+// the two identity parts. CLV there counts no_vig and zero_vig only. A v7
+// envelope has none of the three, so every prop would read unpublished and
+// every CLV row would drop out.
+const KEY = 'settledPicks.v8';
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day

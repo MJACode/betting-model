@@ -167,7 +167,10 @@ export type SettledPickKey =
   | 'decision_edge'
   // Needed by passesRecordFilter: without it the contaminated-pre-game guard
   // is always false on a settled row, so session-114 repair rows would count.
-  | 'is_live';
+  | 'is_live'
+  // CLV on the model detail screen uses the record view's methods. Required
+  // on Pick, so a full Pick still assigns to SettledPick.
+  | 'clv_method';
 
 // A mapped type rather than Pick<Pick, …> because the `Pick` interface above
 // shadows TypeScript's built-in Pick<> utility inside this module. It stays
@@ -179,6 +182,13 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // row's 'model paused' marker is how it knows. Optional like Pick's, so a
   // full Pick still passes where a SettledPick is expected.
   downgrade_reason?: string | null;
+  // The publish lock includes these. Optional, same as on Pick: a required
+  // property here makes Pick not assignable to SettledPick (tsc). The SELECT
+  // still fetches them; a missing value is the game-level lock.
+  player_key?: string | null;
+  prop_market?: string | null;
+  // Client-only, set by attachDiscordPublish. Not a picks column.
+  discordPublish?: 'published' | 'unpublished' | 'unknown';
 };
 
 export interface LiveGameState {

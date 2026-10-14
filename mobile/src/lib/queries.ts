@@ -656,8 +656,8 @@ const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
-  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
-  'is_live, downgrade_reason';
+  'public_bet_pct, injury_flag, clv_pct, clv_method, decision_book, decision_odds, decision_edge, ' +
+  'is_live, downgrade_reason, player_key, prop_market';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -2018,10 +2018,9 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
     .from('v_model_full_outcome_picks')
     .select('*')
     // Bounded to the published window. The view itself keeps the longer
-    // sweep history (2026-04-14), so without this the detail screen listed
-    // April-onward picks under a "since 2026-09-01" record and told the reader
-    // they were "the exact set behind the record above" — two counts a scroll
-    // apart, with copy insisting they matched.
+    // sweep history (2026-04-14). The model detail screen no longer lists
+    // this view; it lists posted settled bets. The bound stays so a caller
+    // cannot put April rows under a September header.
     .gte('game_date', LIVE_RECORD_START)
     .eq('model_id', modelId)
     .order('game_date', { ascending: false })

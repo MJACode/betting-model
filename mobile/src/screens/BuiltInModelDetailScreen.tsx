@@ -9,8 +9,7 @@ import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { TagChip } from '@/components/TagChip';
-import { computeBuiltInModelStats, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
-import { useModelPickHistory } from '@/hooks/useModelPickHistory';
+import { computeBuiltInModelStats, EMPTY_STATS, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
@@ -26,6 +25,8 @@ import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
+import { attachDiscordPublish, type DiscordPublish } from '@/lib/discordPublish';
+import { countsTowardViewClv, isPostedSettledBet } from '@/lib/publishedRecord';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
@@ -74,51 +75,76 @@ export function BuiltInModelDetailScreen() {
     [todayRows, modelId],
   );
 
+  // Settled BETs for this model, before the Discord lock. The lock read is
+  // separate so a cached row is not treated as posted before the ledger answers.
+  const candidates = useMemo(
+    () =>
+      settledRows.filter(
+        (p) =>
+          p.model_id === modelId &&
+          passesRecordFilter(p) &&
+          (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH'),
+      ),
+    [modelId, settledRows],
+  );
+  const [ledger, setLedger] = useState<Map<number, DiscordPublish> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLedger(null);
+    if (candidates.length === 0) {
+      setLedger(new Map());
+      return;
+    }
+    attachDiscordPublish(candidates)
+      .then((rows) => {
+        if (cancelled) return;
+        setLedger(new Map(rows.map((r) => [r.pick_id, r.discordPublish ?? 'unknown'])));
+      })
+      .catch(() => {
+        if (!cancelled) setLedger(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [candidates]);
+  const posted = useMemo(
+    () =>
+      ledger == null
+        ? []
+        : candidates.filter((p) =>
+            isPostedSettledBet({ ...p, discordPublish: ledger.get(p.pick_id) }),
+          ),
+    [candidates, ledger],
+  );
   const stats = useMemo(
     () =>
       fullOutcomeRecords[modelId]
         ? viewRecordToStats(fullOutcomeRecords[modelId])
-        : computeBuiltInModelStats(modelId, settledRows),
-    [modelId, settledRows, fullOutcomeRecords],
+        : ledger == null
+          ? EMPTY_STATS
+          : computeBuiltInModelStats(modelId, posted),
+    [modelId, posted, fullOutcomeRecords, ledger],
   );
   const { registry } = useModelRegistry(modelId);
-  const clv = useMemo(() => computeClvStats(modelId, settledRows), [modelId, settledRows]);
-  // The pick-by-pick list behind the record above, bounded to the SAME
-  // published window (fetchModelFullOutcomePicks gates on LIVE_RECORD_START).
-  // Before that gate the list ran back to 2026-04-14 under a "since 09-01"
-  // header and claimed to be "the exact set behind the record above".
-  const pickHistory = useModelPickHistory(modelId);
+  const clv = useMemo(() => computeClvStats(posted), [posted]);
   const [historyShown, setHistoryShown] = useState(100);
   // Collapsed by default: only the most recent graded day is shown, with a
   // "See all" button to expand into the full history (which then pages 100
-  // at a time via Show more). Shared by both history sources below.
+  // at a time via Show more).
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const history = useMemo(
-    () =>
-      settledRows
-        .filter(
-          (p) =>
-            p.model_id === modelId &&
-            passesRecordFilter(p) &&
-            (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH'),
-        )
-        .sort((a, b) => b.game_date.localeCompare(a.game_date)),
-    [modelId, settledRows],
+    () => [...posted].sort((a, b) => b.game_date.localeCompare(a.game_date) || b.pick_id - a.pick_id),
+    [posted],
   );
   // Rows are sorted newest-first, so the first row's game_date is the latest
   // graded day (usually yesterday — picks grade after games finish).
-  const latestOutcomeDate = pickHistory.rows[0]?.game_date ?? null;
+  const latestOutcomeDate = history[0]?.game_date ?? null;
   const latestOutcomeRows = useMemo(
     () =>
       latestOutcomeDate
-        ? pickHistory.rows.filter((r) => r.game_date === latestOutcomeDate)
+        ? history.filter((r) => r.game_date === latestOutcomeDate)
         : [],
-    [pickHistory.rows, latestOutcomeDate],
-  );
-  const latestSettledDate = history[0]?.game_date ?? null;
-  const latestSettledRows = useMemo(
-    () => (latestSettledDate ? history.filter((p) => p.game_date === latestSettledDate) : []),
-    [history, latestSettledDate],
+    [history, latestOutcomeDate],
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
@@ -244,54 +270,54 @@ export function BuiltInModelDetailScreen() {
               />
             </View>
 
-            {pickHistory.rows.length > 0 ? (
+            {history.length > 0 ? (
               <>
                 <Text style={styles.sectionHeader}>
-                  Picks behind this record · {pickHistory.rows.length}
+                  Picks behind this record · {history.length}
                 </Text>
                 <Text style={styles.sectionNote}>
-                  {historyExpanded || pickHistory.rows.length === latestOutcomeRows.length
-                    ? "Every pick this model scored that clears today's thresholds, graded from final results — the exact set behind the record above. Tap a pick for detail."
-                    : `Showing the latest graded day (${latestOutcomeDate}). Tap a pick for detail, or expand to browse every pick behind the record above.`}
+                  {historyExpanded || history.length === latestOutcomeRows.length
+                    ? 'Posted bets behind the record above. Tap a pick for detail.'
+                    : `Showing the latest graded day (${latestOutcomeDate}). Tap a pick for detail, or expand to browse every posted bet behind the record above.`}
                 </Text>
                 {(historyExpanded
-                  ? pickHistory.rows.slice(0, historyShown)
+                  ? history.slice(0, historyShown)
                   : latestOutcomeRows
-                ).map((r) => (
+                ).map((p) => (
                   <FullOutcomeHistoryRow
-                    key={String(r.pick_id)}
-                    row={r}
+                    key={String(p.pick_id)}
+                    row={toHistoryRow(p)}
                     onPress={() =>
-                      navigation.navigate('PickDetail', { pickId: r.pick_id })
+                      navigation.navigate('PickDetail', { pickId: p.pick_id })
                     }
                   />
                 ))}
-                {!historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
+                {!historyExpanded && history.length > latestOutcomeRows.length ? (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`See all ${pickHistory.rows.length} picks`}
+                    accessibilityLabel={`See all ${history.length} picks`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryExpanded(true)}
                   >
                     <Text style={styles.showMoreText}>
-                      See all {pickHistory.rows.length} picks
+                      See all {history.length} picks
                     </Text>
                   </Pressable>
                 ) : null}
-                {historyExpanded && pickHistory.rows.length > historyShown ? (
+                {historyExpanded && history.length > historyShown ? (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Show ${Math.min(100, pickHistory.rows.length - historyShown)} more, ${pickHistory.rows.length - historyShown} remaining`}
+                    accessibilityLabel={`Show ${Math.min(100, history.length - historyShown)} more, ${history.length - historyShown} remaining`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryShown((n) => n + 100)}
                   >
                     <Text style={styles.showMoreText}>
-                      Show {Math.min(100, pickHistory.rows.length - historyShown)} more (
-                      {pickHistory.rows.length - historyShown} remaining)
+                      Show {Math.min(100, history.length - historyShown)} more (
+                      {history.length - historyShown} remaining)
                     </Text>
                   </Pressable>
                 ) : null}
-                {historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
+                {historyExpanded && history.length > latestOutcomeRows.length ? (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Show latest day only"
@@ -305,41 +331,7 @@ export function BuiltInModelDetailScreen() {
                   </Pressable>
                 ) : null}
               </>
-            ) : history.length > 0 ? (
-              <>
-                <Text style={styles.sectionHeader}>
-                  Pick history · {history.length} settled
-                </Text>
-                {!historyExpanded && history.length > latestSettledRows.length ? (
-                  <Text style={styles.sectionNote}>
-                    Showing the latest settled day ({latestSettledDate}).
-                  </Text>
-                ) : null}
-                {(historyExpanded ? history : latestSettledRows).map((p) => (
-                  <HistoryPickRow
-                    key={String(p.pick_id)}
-                    pick={p}
-                    onPress={() =>
-                      navigation.navigate('PickDetail', { pickId: p.pick_id })
-                    }
-                  />
-                ))}
-                {history.length > latestSettledRows.length ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={historyExpanded ? 'Show latest day only' : `See all ${history.length} picks`}
-                    style={styles.showMoreBtn}
-                    onPress={() => setHistoryExpanded((e) => !e)}
-                  >
-                    <Text style={styles.showMoreText}>
-                      {historyExpanded
-                        ? 'Show latest day only'
-                        : `See all ${history.length} picks`}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </>
-            ) : pickHistory.loading ? (
+            ) : ledger == null && candidates.length > 0 ? (
               <ActivityIndicator style={styles.loading} />
             ) : null}
 
@@ -467,12 +459,8 @@ function TodayPickRow({
   );
 }
 
-// One graded pick from the full-outcome view — the record's exact pick set.
-// No signal badge here: the record grades every scored pick at TODAY's cut, so
-// a row may have been a dead-zone NONE when it was scored; showing that badge
-// next to a W/L outcome would read as a contradiction. Shows date, DK odds,
-// outcome, and flat P&L at the $100-per-bet convention ('—' when the pick had
-// no real price, so no invented profit is shown).
+// One posted settled bet behind the record. Date, the price taken, the model
+// percent, the result, and flat P&L ('—' when the pick had no real price).
 function FullOutcomeHistoryRow({
   row,
   onPress,
@@ -516,61 +504,38 @@ function FullOutcomeHistoryRow({
   );
 }
 
-// One settled pick in the model's history — shows the outcome (WIN/LOSS/PUSH)
-// and its flat P&L, colored by result. Tap to open the pick detail.
-function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => void }) {
-  const resultColor =
-    pick.result === 'WIN'
-      ? colors.betInk
-      : pick.result === 'LOSS'
-        ? colors.avoidInk
-        : colors.textSecondary;
-  return (
-    <Pressable
-      style={styles.pickRow}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${pick.pick_label}, ${pick.result}${decisionOdds(pick) == null ? ', unpriced' : ''}`}
-    >
-      <View style={styles.pickLeft}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.pickLabel} numberOfLines={1}>
-            {pick.pick_label}
-          </Text>
-          <View style={styles.pickMeta}>
-            <SignalBadge signal={pick.signal_type} small />
-            <Text style={styles.pickMetaText}>{pick.game_date}</Text>
-            <Text style={styles.pickMetaText}>· {bookLabelShort(storedQuoteBook(pick))} {formatAmerican(decisionOdds(pick))}</Text>
-          </View>
-        </View>
-      </View>
-      <View style={styles.historyRight}>
-        <Text style={[styles.historyResult, { color: resultColor }]}>{pick.result}</Text>
-        <Text style={[styles.historyProfit, { color: resultColor }]}>
-          {/* No price, no money — the row's total excludes this pick, so the
-              list must not show the -110 that settlement invented for it. */}
-          {decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat)}
-        </Text>
-      </View>
-    </Pressable>
-  );
+function toHistoryRow(p: SettledPick): FullOutcomePickRow {
+  const priced = decisionOdds(p) != null;
+  return {
+    pick_id: p.pick_id,
+    model_id: p.model_id,
+    game_date: p.game_date,
+    game_id: p.game_id,
+    pick_label: p.pick_label,
+    pick_side: p.pick_side,
+    model_probability: p.model_probability,
+    edge: p.edge,
+    dk_odds: p.dk_odds,
+    scored_line: p.scored_line,
+    result: p.result as 'WIN' | 'LOSS' | 'PUSH',
+    profit_units: priced && p.profit_flat != null ? Number(p.profit_flat) / 100 : null,
+    decision_book: p.decision_book,
+    decision_odds: p.decision_odds,
+    decision_edge: p.decision_edge,
+  };
 }
 
 function edgeColorStyle(edge: number) {
   return { color: pnlColor(edge, 1, 100) };
 }
 
-// Aggregate closing line value across this model's settled BET picks that
-// clear the current action thresholds — same pick set as the record above.
-// Positive avg CLV = the model consistently beats the closing price — the
-// strongest available evidence its edge is real.
+// Closing line value for the posted bets already on screen. The denominator
+// is v_public_track_record's: clv_pct present and clv_method no_vig or
+// zero_vig. Positive avg CLV means those bets beat the close.
 function computeClvStats(
-  modelId: string,
   settled: SettledPick[],
 ): { avg: number; beatRate: number; count: number } | null {
-  const vals = settled
-    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && p.clv_pct != null)
-    .map((p) => Number(p.clv_pct));
+  const vals = settled.filter(countsTowardViewClv).map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
   const beatRate = vals.filter((v) => v > 0).length / vals.length;

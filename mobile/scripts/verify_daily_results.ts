@@ -10,7 +10,10 @@
  * all excluded (they would otherwise inflate the counts); and that a retired
  * model contributes nothing to any total.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ALL_SPORTS, computeDailyResults, scopeDailyResults } from '../src/lib/dailyResults';
+import { countsTowardViewClv, isPostedSettledBet } from '../src/lib/publishedRecord';
 import { flatPnl, isModelPaused } from '../src/lib/thresholds';
 import type { GameRow, Pick } from '../src/types';
 
@@ -388,6 +391,38 @@ check('a day of only unpublished bets reports that count and an empty record',
   unpostedDay.overall.picks === 0 && unpostedDay.unpublished === 1
     && unpostedDay.gradedPicks.length === 0,
   JSON.stringify({ picks: unpostedDay.overall.picks, unpublished: unpostedDay.unpublished }));
+
+const postedBet = {
+  model_id: 'mlb_moneyline',
+  signal_type: 'BET' as const,
+  condition_status: null,
+  is_live: false,
+  downgrade_reason: null,
+  result: 'WIN' as const,
+};
+check('model detail counts a posted settled bet',
+  isPostedSettledBet({ ...postedBet, discordPublish: 'published' }));
+check('model detail drops an unpublished settled bet',
+  !isPostedSettledBet({ ...postedBet, discordPublish: 'unpublished' }));
+check('model detail does not treat an unread ledger as posted',
+  !isPostedSettledBet({ ...postedBet, discordPublish: 'unknown' })
+    && !isPostedSettledBet(postedBet));
+check('CLV counts no_vig and zero_vig only',
+  countsTowardViewClv({ clv_pct: 1.5, clv_method: 'no_vig' })
+    && countsTowardViewClv({ clv_pct: -0.2, clv_method: 'zero_vig' })
+    && !countsTowardViewClv({ clv_pct: 9, clv_method: 'raw_one_sided' })
+    && !countsTowardViewClv({ clv_pct: 9, clv_method: null })
+    && !countsTowardViewClv({ clv_pct: null, clv_method: 'no_vig' }));
+const detail = readFileSync(
+  join(import.meta.dirname, '../src/screens/BuiltInModelDetailScreen.tsx'),
+  'utf8',
+);
+check('model detail does not list the re-graded full-outcome picks',
+  !detail.includes('useModelPickHistory') && detail.includes('isPostedSettledBet'));
+check('model detail CLV uses the record view methods',
+  detail.includes('countsTowardViewClv'));
+check('the thresholds sentence is gone from model detail',
+  !detail.includes("clears today's thresholds"));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
