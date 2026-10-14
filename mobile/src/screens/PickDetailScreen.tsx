@@ -397,9 +397,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             table below carries books at a different number and the reference
             books that cannot be bet. Not for live picks: they are DraftKings
             only, and the in-play rows are no longer fetched. With no chip left
-            (every book's price too old), no empty card either. */}
+            (every book's price too old), no empty card either. A live model
+            whose price we stop reading after the bet (hero.untracked) gets one
+            numberless "Open DK" chip, as on the card. */}
         {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
-          cta.handoff && lineQuotes.length > 0 ? (
+          cta.handoff && (lineQuotes.length > 0 || hero?.untracked) ? (
             <View style={styles.linesCard}>
               <BookLinesRow pick={pick} bookRows={bookRows} hero={hero} priceAge={priceAge} />
             </View>

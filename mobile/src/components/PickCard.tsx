@@ -265,7 +265,14 @@ export function PickCard({
   // iOS — VoiceOver groups the card — so Track, Betslip and the book hand-off
   // are also offered as custom actions (swipe up/down on the card).
   const a11yActions = [
-    ...(handoff ? [{ name: 'book', label: `${handoff.verb} at ${bookName(handoff.bookmaker)}` }] : []),
+    ...(handoff
+      ? [{
+          name: 'book',
+          label: handoff.price == null
+            ? `${handoff.verb} ${bookName(handoff.bookmaker)}`
+            : `${handoff.verb} at ${bookName(handoff.bookmaker)}`,
+        }]
+      : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
     ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
   ];
@@ -549,7 +556,11 @@ export function PickCard({
               }}
               hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
-              accessibilityLabel={`${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`}
+              accessibilityLabel={
+                handoff.price == null
+                  ? `${handoff.verb} ${bookName(handoff.bookmaker)} to check the live price`
+                  : `${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`
+              }
               style={({ pressed }) => [
                 styles.handoff,
                 handoff.bookmaker === 'draftkings' && styles.handoffDk,
@@ -560,7 +571,9 @@ export function PickCard({
                 style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
                 numberOfLines={1}
               >
-                {handoff.verb} {bookLabel(handoff.bookmaker)} {formatAmerican(handoff.price)}
+                {handoff.price == null
+                  ? `${handoff.verb} ${bookLabel(handoff.bookmaker)}`
+                  : `${handoff.verb} ${bookLabel(handoff.bookmaker)} ${formatAmerican(handoff.price)}`}
               </Text>
             </Pressable>
           ) : (

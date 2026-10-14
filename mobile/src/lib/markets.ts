@@ -189,6 +189,7 @@ export function marketClassForModel(modelId: string): MarketClass {
     return 'game_spread';
   }
   if (modelId.includes('moneyline') || modelId.includes('win_prob')) return 'game_ml';
+  if (modelId === 'nfl_live_leader_ml') return 'game_ml';
   return 'other';
 }
 
@@ -894,6 +895,14 @@ export function quoteIsCurrent(snapshotAt: string | null | undefined, now: numbe
   return t >= now - PREGAME_PRICE_MAX_AGE_MIN * 60_000;
 }
 
+/**
+ * In-play models whose loop stops reading the book once the bet is written
+ * (nfl_live_leader/gameday.py prices a game only until its bet). The card
+ * shows no live number for them after the bet, says why, and opens the book
+ * without quoting one.
+ */
+export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_leader_ml']);
+
 /** The newest stamp we hold for `book` on this pick's market, or null. */
 function bookSnapshotAt(
   book: string,
@@ -954,6 +963,12 @@ export interface HeroAmerican {
   showLockedCaption: boolean;
   /** The deciding book has not updated this price within PREGAME_PRICE_MAX_AGE_MIN. */
   stale?: boolean;
+  /**
+   * Live, for a model in LIVE_PRICE_STOPS_AT_BET: `price` is null because we
+   * stop reading the book after the bet, not because the book stopped
+   * pricing. Not stale: the stake and EV stay (they are the bet of record).
+   */
+  untracked?: boolean;
   /**
    * Set with `stale`: the deciding book's newest stamp we hold (either view),
    * so the card can say when it last priced the bet ("DK last priced Sat 9/5
@@ -1020,8 +1035,21 @@ export function heroAmericanForPick(
     }
   }
 
-  const current = currentAtBook(pick, book, latest, bookRows);
+  let current = currentAtBook(pick, book, latest, bookRows);
   const lockedLine = numOrNull(pick.scored_line);
+
+  // A model whose loop stops reading the book once its bet is written holds
+  // no live price after the bet: its newest in-play row IS the lock's own
+  // quote, which would otherwise read as the live price for the rest of the
+  // game. Every other in-play model keeps logging, and DraftKings simply has
+  // not republished yet (a median 43 s after the lock on the last 60 live
+  // bets, UX review 2026-10-14), so its row stays the live price.
+  const untracked = live && LIVE_PRICE_STOPS_AT_BET.has(pick.model_id ?? '');
+  if (untracked && current != null) {
+    const at = bookSnapshotAt(book, latest, bookRows);
+    const lockT = pick.created_at ? parseStamp(pick.created_at).getTime() : NaN;
+    if (at == null || Number.isNaN(lockT) || !(parseStamp(at).getTime() > lockT)) current = null;
+  }
 
   if (live && current == null) {
     return {
@@ -1032,6 +1060,7 @@ export function heroAmericanForPick(
       link: pick.dk_bet_link ?? null,
       lockedPrice: locked,
       showLockedCaption: true,
+      ...(untracked ? { untracked: true } : {}),
     };
   }
   if (current != null && current.price !== locked) {
@@ -1126,10 +1155,14 @@ export function currentLineQuotes(
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
 export interface BoardHandoff {
   bookmaker: string;
-  price: number;
+  /** Null only with verb "Open": a live pick whose price we stop reading after the bet. */
+  price: number | null;
   link: string | null;
-  /** "Best" when another book beats the record; "Bet" otherwise (and always on live). */
-  verb: 'Best' | 'Bet';
+  /**
+   * "Best" when another book beats the record; "Bet" otherwise (and on live);
+   * "Open" when there is no number to quote (LIVE_PRICE_STOPS_AT_BET).
+   */
+  verb: 'Best' | 'Bet' | 'Open';
 }
 
 export function bestHandoffForPick(
@@ -1139,6 +1172,11 @@ export function bestHandoffForPick(
   priceAge?: PriceAgeContext,
 ): BoardHandoff | null {
   if (pick.is_live === true) {
+    // No live number to quote after the bet: open the book without one,
+    // rather than print the lock as if it were still on offer.
+    if (hero?.untracked) {
+      return { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open' };
+    }
     const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
     if (price == null) return null;
     return {
@@ -1266,10 +1304,11 @@ export interface Movement {
 /**
  * NFL picks are published from the standalone card scripts, which line-shop —
  * their stored price is NOT a DraftKings quote, so movement vs the DK
- * snapshots must ignore the price and compare lines only.
+ * snapshots must ignore the price and compare lines only. The in-play leader
+ * moneyline is the exception: it is decided at DraftKings' own live price.
  */
 export function isNflLineOnly(modelId: string): boolean {
-  return modelId.startsWith('nfl_');
+  return modelId.startsWith('nfl_') && modelId !== 'nfl_live_leader_ml';
 }
 
 /**
@@ -1584,7 +1623,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (pick.is_live) {
     const period =
       pick.inning_at_pick != null
-        ? pick.sport === 'NCAAF'
+        ? pick.sport === 'NCAAF' || pick.sport === 'NFL'
           ? ` · Q${pick.inning_at_pick}`
           : ` · inning ${pick.inning_at_pick}`
         : '';
