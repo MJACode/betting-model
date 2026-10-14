@@ -289,6 +289,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # view, so it runs after every migration that owns that view.
     "recompute_snapshot_units_2026_10_14.sql",
     "home_run_units_follow_graded_profit_2026_10_14.sql",
+    # 2026-10-14: 35 extra picks rows behind one Discord lock are marked
+    # DUPLICATE (kept row untouched; none of the extras is a graded
+    # WIN/LOSS/PUSH). Two unique indexes stop a second standing BET on a
+    # publish lock and a second live row on the same side. Skips the
+    # create, and does not raise, when a duplicate of that identity remains.
+    "discord_post_one_pick_2026_10_14.sql",
 ]
 
 

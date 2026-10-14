@@ -2299,14 +2299,21 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             logger.info(f"[dry-run] discord(results) {game_date} → {_tally_line(overall)}")
             return 0
 
-        if not _post(url, {"embeds": [embed]}):
+        # _post appends ?wait=true and returns the message id. A 204 with no
+        # body comes back as _POST_OK_NO_ID; store NULL rather than that
+        # sentinel. Measured 2026-10-14: all 45 discord_results and all 16
+        # discord_results_restate rows had a null message_id because this
+        # insert never wrote the id _post already returned.
+        message_id = _post(url, {"embeds": [embed]})
+        if not message_id:
             return 0                      # un-ledgered: retried on the next pass
+        stored_id = None if message_id == _POST_OK_NO_ID else message_id
 
         published_at = datetime.now(ET).isoformat()
         conn.execute(
-            "INSERT INTO push_sent (lock_key, kind, sent_at) "
-            "VALUES (%s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (lock_key, kind, published_at),
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, kind, published_at, stored_id),
         )
         # The post has gone out, so its ledger row commits NOW, on its own.
         # It used to share one transaction with the snapshot below, which
