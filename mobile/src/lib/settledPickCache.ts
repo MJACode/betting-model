@@ -54,7 +54,11 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // scorer keeps a paused model's real verdict, a paused BET can settle, and
 // passesRecordFilter keeps it out by the row's 'model paused' marker. On a v6
 // envelope that field is undefined and the guard would never fire.
-const KEY = 'settledPicks.v7';
+// v8 (2026-10-14): SETTLED_PICK_COLUMNS gained player_key and prop_market.
+// The published-record stamp builds the Discord lock from those columns. On
+// a v7 envelope both are undefined, a posted prop's key is short, and the
+// stamp marks it unpublished.
+const KEY = 'settledPicks.v8';
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day

@@ -657,7 +657,7 @@ const SETTLED_PICK_COLUMNS =
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
   'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
-  'is_live, downgrade_reason';
+  'is_live, downgrade_reason, player_key, prop_market';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -2699,7 +2699,7 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       ...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p) && !isDuplicateCopy(p)),
     );
   }
-  return out;
+  return attachDiscordPublish(out);
 }
 
 /**
@@ -2738,10 +2738,11 @@ export async function fetchSettledPropPicksForPlayer(args: {
   if (error) throw error;
   // A game-level pick can never match a player_id; the label match could in
   // theory catch a team whose name starts a label, so keep prop rows only.
-  return ((data ?? []) as unknown as SettledPick[]).filter(
+  const rows = ((data ?? []) as unknown as SettledPick[]).filter(
     (p) =>
       (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p) && !isDuplicateCopy(p),
   );
+  return attachDiscordPublish(rows);
 }
 
 /**

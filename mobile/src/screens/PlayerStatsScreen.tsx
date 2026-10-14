@@ -1550,9 +1550,9 @@ function PickRecordCard({
       <SectionTitle
         title={`Our picks on ${playerName}`}
         tooltip={{
-          title: 'Settled bets only',
+          title: 'Posted bets only',
           body:
-            `Every settled BET our prop models made on ${playerName}, by market. Results are in units: one unit is one ` +
+            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units: one unit is one ` +
             'flat bet. A pick that carried no price counts in the record and not the units.',
         }}
       />
@@ -1566,7 +1566,7 @@ function PickRecordCard({
             {error
               ? `Couldn’t load our picks. ${friendlyCause(error)} Pull down to retry.`
               : sportHasPropModel
-                ? `No settled picks on ${playerName}.`
+                ? `No posted picks on ${playerName}.`
                 : `No prop model prices ${sport} players yet.`}
           </Text>
         </View>
@@ -1575,9 +1575,14 @@ function PickRecordCard({
           <View style={styles.recordTop}>
             <Text style={styles.recordTotal}>{formatRecordLine(record)}</Text>
             <Text style={styles.recordCount}>
-              {record.settled} settled {record.settled === 1 ? 'bet' : 'bets'}
+              {record.settled} posted {record.settled === 1 ? 'bet' : 'bets'}
               {record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}
             </Text>
+            {record.ledgerUnread ? (
+              <Text style={styles.muted}>
+                The Discord check did not finish, so this record can include picks whose posting status is unknown.
+              </Text>
+            ) : null}
           </View>
           {record.lines.map((l) => (
             <ReadRow
