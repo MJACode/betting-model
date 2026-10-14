@@ -300,7 +300,12 @@ when it enters, then every 300 s, to mirror the study's 5-minute snapshots.
 Only then does it make ONE bulk DraftKings moneyline call for every due game:
 `x-requests-last` measured **1 credit per call** (2026-10-13). Capped at
 `NFL_LIVE_LEADER_CREDIT_CAP` (2000) per process. Each DraftKings quote it
-decides on is written to `odds` as `in_play`.
+decides on is written to `odds` as `in_play`. Every pass re-asks the push and
+Discord notifiers about each slate date that carries a bet of record, so a
+failed post is retried (their ledgers make repeats no-ops). Only regular season
+and playoff games are priced (ESPN core season type 2 or 3); preseason and an
+unknown type are refused. After the final snap, before ESPN marks the game
+final, an end-of-game row or a 4th-quarter clock at 0:00 is a refusal.
 
 **The inputs are built to the training definitions, and were measured.**
 Against 17 finished 2026 games (weeks 4-5; core event 401872980, TB @ DAL, is
@@ -318,16 +323,20 @@ play:
 - Replaying those games' 4th quarters through the adapter (the situation taken
   as the next play's start): 270 of 270 evaluable states in the window match
   training on clock, score and possession.
-- The live `situation` document names the team with the ball as `team`, and
-  has no `possession` key (measured on a live core football game, college
-  event 401871067, 2026-10-13). It is blank after a score and for the first
-  ~40-60 s after a kickoff; the loop skips those reads.
+- The live `situation` document names the team with the ball as `team` and
+  never carries a `possession` key: a live core football game (college event
+  401871067), read every 20 s for 51 minutes on 2026-10-13, 146 in-progress
+  reads, `team` in 96, `possession` in 0. `team` is blank after a score and
+  after a kickoff until the next snap is posted (40, 40, 60 and 81 s on the
+  four kickoffs); the loop skips those reads.
 
 **Possession bugs in the old core parser, fixed here.**
-`nfl/live_model/feeds/espn_core.py` (retired worker, not used) matched the team
-id as a substring of the whole URL, which carries the season: Dallas (id 6) is
-inside ".../seasons/2026/...", so it read as having the ball on every play. It
-also read `situation.possession`, which core does not send.
+`nfl/live_model/feeds/espn_core.py` (retired worker, not used) read
+`situation.possession`, which core does not send, so it never found a
+possession at all. And it matched the team id as a substring of the whole
+reference URL. Core's team references carry the season
+(".../seasons/2026/teams/27"), so a home team whose id is part of "2026" —
+Dallas is 6 — would have read as having the ball on every play.
 
 **The spread.** DraftKings' last spread before kickoff from `odds`
 (`snapshot_type <> 'in_play'`, `snapshot_at <= commence_time`), else

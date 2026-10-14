@@ -49,16 +49,19 @@ skipped, never guessed.
 
 POSSESSION: TWO BUGS IN THE OLD CORE PARSER, BOTH FIXED HERE.
   1. espn_core.py matched `home_id in poss_ref`, a SUBSTRING test against the
-     whole URL. Team id "1" is inside ".../teams/12", and the URL also carries
-     the SEASON (".../seasons/2026/teams/27"), so a home team whose id is a
-     substring of "2026" -- Dallas is 6 -- read as having the ball on every
-     play of every game (tests/test_nfl_live_leader_state.py reproduces it on
-     TB @ DAL). Here the id is parsed out of '/teams/(\\d+)' and compared whole.
+     whole URL. Team id "1" is inside ".../teams/12", and core's team
+     references also carry the SEASON (".../seasons/2026/teams/27"), so a home
+     team whose id is part of "2026" -- Dallas is 6 -- would read as having
+     the ball on every play (tests/test_nfl_live_leader_state.py reproduces it
+     on TB @ DAL). Here the id is parsed out of '/teams/<digits>' and
+     compared whole.
   2. it read situation.possession, which the live core document does not
-     carry: measured on a live core football payload (college-football event
-     401871067, 2026-10-13), the possessing team is situation.team, and in 2
-     of the first 5 in-progress reads (around the opening kickoff) neither key
-     was present -- which is exactly when this module refuses.
+     carry. Measured on a live core football game (college-football event
+     401871067, read every 20 s from 23:02 to 23:53Z on 2026-10-13, 146
+     in-progress reads): `possession` appeared in 0; the possessing team was
+     situation.team in 96, every one with a scrimmage down; `team` was absent
+     after a scoring play (25), for the first reads after a kickoff (11) and
+     when there was no last play (14) -- exactly the reads this module refuses.
 """
 
 from __future__ import annotations
