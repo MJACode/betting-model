@@ -979,5 +979,12 @@
     "requested_by": "owner",
     "note": "Owner approved one post, 2026-10-14. Discord results channel, then a pin attempt, then X. The words are fixed in scripts/post_record_correction.py. push_sent kinds discord_correction, x_correction, and x_correction_reply on lock_key record_correction:2026-10-14. A retry skips a surface that already has a row.",
     "args": {}
+  },
+  {
+    "key": "full-record-2026-10-14",
+    "job_type": "publish_full_record",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14 17:36 ET: post the full current record to Discord results, once. Not X. Text fixed in scripts/post_record_correction.py. push_sent lock_key full_record:2026-10-14, kind discord_full_record.",
+    "args": {}
   }
 ]
