@@ -283,6 +283,8 @@ def _publish(conn, *, post, tweet, place, pin, can_post) -> dict:
 
 OCT13_LOCK = "record_correction:2026-10-13-nhl"
 OCT13_LINE = "Oct 13 corrected: NHL 7-2, +5.72u (+83.1% ROI)."
+# The per-sport reply of the record correction. This line is a reply under it.
+OCT13_REPLY_TO = "2110451858137641367"
 
 
 def publish_oct13_line(conn=None, *, post=None, tweet=None, place=None,
@@ -346,6 +348,74 @@ def publish_oct13_line(conn=None, *, post=None, tweet=None, place=None,
                 return out
             out["tweet_id"] = tweet_id
             out["tweet_url"] = _tweet_url(tweet_id)
+        return out
+    finally:
+        if own:
+            conn.close()
+
+
+def publish_oct13_reply(conn=None, *, post=None, tweet=None, place=None,
+                        can_post=None) -> dict:
+    """The same sentence, once, as a Discord follow-up and as a reply under
+    the correction's per-sport tweet. A surface already in push_sent is skipped."""
+    from tracking.x_publisher import _assert_no_link, results_can_post
+
+    own = conn is None
+    if own:
+        from data.db import get_connection
+        conn = get_connection()
+    post = post or _real_post
+    tweet = tweet or _real_tweet
+    place = place or _place
+    can_post = can_post or results_can_post
+    try:
+        _assert_no_link(OCT13_LINE)
+        if not OCT13_REPLY_TO.isdigit():
+            raise RuntimeError("the reply target is not a tweet id")
+        discord_sent, discord_id = _read(conn, KIND_DISCORD, OCT13_LOCK)
+        reply_sent, reply_id = _read(conn, KIND_X_REPLY, OCT13_LOCK)
+        url = _results_url()
+        out = {
+            "lock_key": OCT13_LOCK,
+            "reply_to": OCT13_REPLY_TO,
+            "discord_message_id": _stored_id(discord_id),
+            "discord_url": None,
+            "reply_id": reply_id if reply_sent else None,
+            "reply_url": _tweet_url(reply_id) if reply_sent else None,
+        }
+        if not discord_sent:
+            if not url:
+                raise RuntimeError("DISCORD_WEBHOOK_RESULTS is not set")
+            message_id = post(url, OCT13_LINE)
+            stored = _stored_id(message_id if isinstance(message_id, str) else None)
+            if not message_id:
+                raise RuntimeError("Discord follow-up was not confirmed")
+            if not _write(conn, KIND_DISCORD, stored, OCT13_LOCK):
+                out["discord_message_id"] = stored
+                out["ledger"] = "discord follow-up write failed; the reply was not sent"
+                return out
+            discord_id = stored
+            out["discord_message_id"] = stored
+        posted_id = _stored_id(discord_id)
+        if posted_id and url:
+            try:
+                guild_id, channel_id = place(url)
+            except Exception:
+                guild_id, channel_id = None, None
+            out["discord_url"] = _jump(guild_id, channel_id, posted_id)
+        if not reply_sent:
+            if not can_post():
+                raise RuntimeError("X publisher is off or its credentials are missing")
+            reply = tweet(OCT13_LINE, OCT13_REPLY_TO)
+            if not reply or reply == "dry-run":
+                raise RuntimeError("X reply was not confirmed")
+            if not _write(conn, KIND_X_REPLY, reply, OCT13_LOCK):
+                out["reply_id"] = reply
+                out["reply_url"] = _tweet_url(reply)
+                out["ledger"] = "x reply write failed"
+                return out
+            out["reply_id"] = reply
+            out["reply_url"] = _tweet_url(reply)
         return out
     finally:
         if own:

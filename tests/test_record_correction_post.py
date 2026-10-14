@@ -368,6 +368,54 @@ def test_the_oct13_line_does_not_tweet_when_x_is_off(monkeypatch):
     assert rc.KIND_X not in conn.rows
 
 
+def test_the_oct13_line_replies_under_the_correction_tweet(monkeypatch):
+    """Discord is already ledgered, so only the reply under the correction tweet goes out."""
+    conn = Ledger(rows={rc.KIND_DISCORD: "1560015617552027659"})
+    sent = []
+
+    def post(url, text):
+        sent.append(("discord", text))
+        return "nope"
+
+    def tweet(text, reply_to):
+        sent.append(("x", text, reply_to))
+        return "777"
+
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_RESULTS", WEBHOOK)
+    result = rc.publish_oct13_reply(
+        conn, post=post, tweet=tweet,
+        place=lambda url: ("guild", "chan"), can_post=lambda: True)
+    assert sent == [("x", rc.OCT13_LINE, "2110451858137641367")]
+    assert result["reply_to"] == "2110451858137641367"
+    assert result["reply_url"] == "https://x.com/signalbasepicks/status/777"
+    assert result["discord_message_id"] == "1560015617552027659"
+    assert result["discord_url"].endswith("/1560015617552027659")
+    again = []
+    rc.publish_oct13_reply(
+        conn, post=lambda *a: again.append("d"),
+        tweet=lambda *a: again.append("x"),
+        place=lambda url: ("guild", "chan"), can_post=lambda: True)
+    assert again == []
+
+
+def test_the_oct13_reply_job_takes_no_text_and_is_declared_once():
+    fn, validate = jq.JOBS["publish_oct13_nhl_reply"]
+    assert fn is jq._job_publish_oct13_nhl_reply
+    assert validate({}) == {}
+    with pytest.raises(ValueError, match="no arguments"):
+        validate({"tweet": "2110456890383880606"})
+    src = inspect.getsource(fn)
+    assert "publish_oct13_reply(conn)" in src
+    assert "kw[" not in src
+    entries = json.loads((config.ROOT / "jobs" / "declared_jobs.json").read_text(
+        encoding="utf-8"))
+    matches = [e for e in entries if e["key"] == "oct13-nhl-reply-2026-10-14"]
+    assert len(matches) == 1
+    assert matches[0]["job_type"] == "publish_oct13_nhl_reply"
+    assert matches[0]["args"] == {}
+    validate(matches[0]["args"])
+
+
 def test_the_oct13_job_takes_no_text_and_is_declared_once():
     fn, validate = jq.JOBS["publish_oct13_nhl_line"]
     assert fn is jq._job_publish_oct13_nhl_line
