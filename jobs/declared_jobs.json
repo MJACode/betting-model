@@ -960,6 +960,13 @@
     }
   },
   {
+    "key": "oct13-nhl-reply-2026-10-14",
+    "job_type": "publish_oct13_nhl_reply",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14: the Oct 13 line as a reply to tweet 2110451858137641367. Discord follow-up is skipped when record_correction:2026-10-13-nhl / discord_correction already exists. The reply is push_sent kind x_correction_reply on that lock.",
+    "args": {}
+  },
+  {
     "key": "oct13-nhl-line-2026-10-14",
     "job_type": "publish_oct13_nhl_line",
     "requested_by": "owner",
