@@ -433,3 +433,66 @@ def _with_place(out: dict, url: str, message_id: str | None, place, pin) -> dict
     except Exception as exc:  # noqa: BLE001 — a pin must not cause a second post
         out["pin"] = {"status": "failed", "reason": type(exc).__name__}
     return out
+
+
+# Owner, 2026-10-14 17:36 ET: "Post the full current record of results to the
+# discord." Discord results only, once. Not X. Figures computed from the
+# published record (_SETTLED_SQL + _tally) through 2026-10-13, the last
+# settled day; nothing on 2026-10-14 had settled when this was written.
+FULL_RECORD_LOCK = "full_record:2026-10-14"
+KIND_FULL_RECORD = "discord_full_record"
+FULL_RECORD_TEXT = (
+    "**Full record, corrected (through Oct 13)**\n"
+    "All-time since Sep 1: **431-375-2, +16.92u** (+1.9% ROI)\n"
+    "MLB 193-187-2 (\u221215.45u)\n"
+    "NCAAF 96-83 (+3.44u)\n"
+    "NFL 33-38 (\u221210.92u)\n"
+    "NHL 63-46 (+13.58u)\n"
+    "UFC 1-0 (+1.00u)\n"
+    "WNBA 45-21 (+25.27u)\n"
+    "Oct 13 NHL: 7-2, +5.72u\n"
+    "Beat the closing line on 54% of graded picks (247/457).\n"
+    "Only picks posted here count, sized by conviction."
+)
+
+
+def publish_full_record(conn=None, *, post=None, place=None) -> dict:
+    """Post FULL_RECORD_TEXT once to the Discord results channel. Read the
+    ledger first; an unread ledger sends nothing; a confirmed send is
+    committed before returning."""
+    own = conn is None
+    if own:
+        from data.db import get_connection
+        conn = get_connection()
+    post = post or _real_post
+    place = place or _place
+    try:
+        if len(FULL_RECORD_TEXT) > 2000:
+            raise RuntimeError("full record exceeds the Discord content limit")
+        sent, mid = _read(conn, KIND_FULL_RECORD, FULL_RECORD_LOCK)
+        url = _results_url()
+        out = {"lock_key": FULL_RECORD_LOCK,
+               "discord_message_id": _stored_id(mid), "discord_url": None}
+        if not sent:
+            if not url:
+                raise RuntimeError("DISCORD_WEBHOOK_RESULTS is not set")
+            message_id = post(url, FULL_RECORD_TEXT)
+            if not message_id:
+                raise RuntimeError("Discord full-record post was not confirmed")
+            stored = _stored_id(message_id if isinstance(message_id, str) else None)
+            out["discord_message_id"] = stored
+            if not _write(conn, KIND_FULL_RECORD, stored, FULL_RECORD_LOCK):
+                out["ledger"] = "discord_full_record write failed"
+                return out
+            mid = stored
+        posted = _stored_id(mid)
+        if posted and url:
+            try:
+                guild_id, channel_id = place(url)
+            except Exception:
+                guild_id, channel_id = None, None
+            out["discord_url"] = _jump(guild_id, channel_id, posted)
+        return out
+    finally:
+        if own:
+            conn.close()

@@ -713,6 +713,26 @@ def _job_publish_oct13_nhl_line(**kw):
         conn.close()
 
 
+def _validate_publish_full_record(args: dict) -> dict:
+    """No arguments. The text is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_full_record accepts no arguments; the text is fixed")
+    return {}
+
+
+def _job_publish_full_record(**kw):
+    """Post the 2026-10-14 full record once to Discord results. Not X."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record
+
+    conn = get_connection()
+    try:
+        return publish_full_record(conn)
+    finally:
+        conn.close()
+
+
 def _validate_publish_record_correction(args: dict) -> dict:
     """No arguments. The correction text is fixed in the script."""
     if args:
@@ -1830,6 +1850,9 @@ JOBS = {
     # scripts/post_record_correction.py. See _job_publish_record_correction.
     "publish_record_correction": (_job_publish_record_correction,
                                   _validate_publish_record_correction),
+    # Owner-approved full record, Discord only. See _job_publish_full_record.
+    "publish_full_record": (_job_publish_full_record,
+                            _validate_publish_full_record),
     # One line, after the 2026-10-14 correction. See _job_publish_oct13_nhl_line.
     "publish_oct13_nhl_line": (_job_publish_oct13_nhl_line,
                                _validate_publish_oct13_nhl_line),
