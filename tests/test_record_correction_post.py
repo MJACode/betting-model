@@ -341,6 +341,7 @@ def test_the_oct13_line_posts_once_on_each_surface(monkeypatch):
 
 
 def test_the_oct13_line_replies_under_the_correction_tweet(monkeypatch):
+    """Discord is already ledgered, so only the reply under the correction tweet goes out."""
     conn = Ledger(rows={rc.KIND_DISCORD: "1560015617552027659"})
     sent = []
 
