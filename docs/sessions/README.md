@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Oct 13 line is its own post; the 07:24 ET restatement was ledgered after a truthy webhook response and the id was discarded (all 16 restate rows null); a recap with no id is now an error row and retries |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, one record-correction post: fixed words, Discord results then a pin attempt, X as a 265-character tweet plus a 200-character reply, ledgered before each send; the worker runs it |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the app record matches the posted view: v_public_track_record already returns 8 for mlb_prop_batter_runs (the unfiltered settled count is 80); client tallies drop unpublished; detail list is the posted set; view rollup 808 / 431-375-2 |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Discord lock duplicates: 34 posts / 35 extra rows marked DUPLICATE (none graded); recap stores message_id; a posted void sends a notice; Oct 5 recap backfill is an explicit dry-run command |

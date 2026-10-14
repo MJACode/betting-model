@@ -70,11 +70,11 @@ def _results_url() -> str:
     return (config.DISCORD_WEBHOOK_RESULTS or "").strip()
 
 
-def _read(conn, kind: str) -> tuple[bool, str | None]:
+def _read(conn, kind: str, lock_key: str = LOCK_KEY) -> tuple[bool, str | None]:
     try:
         row = conn.execute(
             "SELECT message_id FROM push_sent WHERE lock_key = %s AND kind = %s",
-            (LOCK_KEY, kind),
+            (lock_key, kind),
         ).fetchone()
     except Exception as exc:  # noqa: BLE001 — an unread ledger must not post
         raise LedgerUnread(f"push_sent read failed for {kind}") from exc
@@ -84,7 +84,8 @@ def _read(conn, kind: str) -> tuple[bool, str | None]:
     return True, (str(message_id) if message_id else None)
 
 
-def _write(conn, kind: str, message_id: str | None) -> bool:
+def _write(conn, kind: str, message_id: str | None,
+           lock_key: str = LOCK_KEY) -> bool:
     """Commit the row before the caller does anything else. False means the
     row is still absent: the caller must not send this surface again and must
     not send the next one."""
@@ -92,13 +93,13 @@ def _write(conn, kind: str, message_id: str | None) -> bool:
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
             "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (LOCK_KEY, kind, datetime.now(_ET).isoformat(), message_id),
+            (lock_key, kind, datetime.now(_ET).isoformat(), message_id),
         )
         conn.commit()
     except Exception:
         return False
     try:
-        sent, _ = _read(conn, kind)
+        sent, _ = _read(conn, kind, lock_key)
     except LedgerUnread:
         return False
     return sent
@@ -278,6 +279,77 @@ def _publish(conn, *, post, tweet, place, pin, can_post) -> dict:
         out["reply_url"] = _tweet_url(reply)
 
     return out
+
+
+OCT13_LOCK = "record_correction:2026-10-13-nhl"
+OCT13_LINE = "Oct 13 corrected: NHL 7-2, +5.72u (+83.1% ROI)."
+
+
+def publish_oct13_line(conn=None, *, post=None, tweet=None, place=None,
+                       can_post=None) -> dict:
+    """The one-line follow-up. The correction itself has already been posted,
+    so this is only this sentence, once, on Discord and on X."""
+    from tracking.x_publisher import _assert_no_link, results_can_post
+
+    own = conn is None
+    if own:
+        from data.db import get_connection
+        conn = get_connection()
+    post = post or _real_post
+    tweet = tweet or _real_tweet
+    place = place or _place
+    can_post = can_post or results_can_post
+    try:
+        _assert_no_link(OCT13_LINE)
+        if len(OCT13_LINE) > _MAX_TWEET:
+            raise RuntimeError("the Oct 13 line does not fit in one tweet")
+        discord_sent, discord_id = _read(conn, KIND_DISCORD, OCT13_LOCK)
+        x_sent, x_id = _read(conn, KIND_X, OCT13_LOCK)
+        url = _results_url()
+        out = {
+            "lock_key": OCT13_LOCK,
+            "discord_message_id": _stored_id(discord_id),
+            "discord_url": None,
+            "tweet_id": x_id if x_sent else None,
+            "tweet_url": _tweet_url(x_id) if x_sent else None,
+        }
+        if not discord_sent:
+            if not url:
+                raise RuntimeError("DISCORD_WEBHOOK_RESULTS is not set")
+            message_id = post(url, OCT13_LINE)
+            stored = _stored_id(message_id if isinstance(message_id, str) else None)
+            if not message_id:
+                raise RuntimeError("Discord follow-up was not confirmed")
+            if not _write(conn, KIND_DISCORD, stored, OCT13_LOCK):
+                out["discord_message_id"] = stored
+                out["ledger"] = "discord follow-up write failed; X was not sent"
+                return out
+            discord_id = stored
+            out["discord_message_id"] = stored
+        posted_id = _stored_id(discord_id)
+        if posted_id and url:
+            try:
+                guild_id, channel_id = place(url)
+            except Exception:
+                guild_id, channel_id = None, None
+            out["discord_url"] = _jump(guild_id, channel_id, posted_id)
+        if not x_sent:
+            if not can_post():
+                raise RuntimeError("X publisher is off or its credentials are missing")
+            tweet_id = tweet(OCT13_LINE, None)
+            if not tweet_id or tweet_id == "dry-run":
+                raise RuntimeError("X follow-up was not confirmed")
+            if not _write(conn, KIND_X, tweet_id, OCT13_LOCK):
+                out["tweet_id"] = tweet_id
+                out["tweet_url"] = _tweet_url(tweet_id)
+                out["ledger"] = "x follow-up write failed"
+                return out
+            out["tweet_id"] = tweet_id
+            out["tweet_url"] = _tweet_url(tweet_id)
+        return out
+    finally:
+        if own:
+            conn.close()
 
 
 def _with_place(out: dict, url: str, message_id: str | None, place, pin) -> dict:

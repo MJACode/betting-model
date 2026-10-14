@@ -960,6 +960,13 @@
     }
   },
   {
+    "key": "oct13-nhl-line-2026-10-14",
+    "job_type": "publish_oct13_nhl_line",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14: the correction had already posted, so this one line goes out once on its own, Discord results and X. Words are fixed in scripts/post_record_correction.py. push_sent lock_key record_correction:2026-10-13-nhl, kinds discord_correction and x_correction.",
+    "args": {}
+  },
+  {
     "key": "record-correction-2026-10-14",
     "job_type": "publish_record_correction",
     "requested_by": "owner",
