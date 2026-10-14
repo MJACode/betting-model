@@ -179,6 +179,11 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // row's 'model paused' marker is how it knows. Optional like Pick's, so a
   // full Pick still passes where a SettledPick is expected.
   downgrade_reason?: string | null;
+  // Lock-key tail, selected by SETTLED_PICK_COLUMNS. Optional like
+  // downgrade_reason so a hand-built row still type-checks; a cached row
+  // from before v8 lacks them and is dropped by the cache-key bump.
+  player_key?: string | null;
+  prop_market?: string | null;
 };
 
 export interface LiveGameState {

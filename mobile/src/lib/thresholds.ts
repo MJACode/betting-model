@@ -370,6 +370,18 @@ export function passesRecordFilter(p: RecordFilterable): boolean {
 }
 
 /**
+ * The published record is the picks Discord still has.
+ *
+ * `unpublished` is the only state that leaves. Omitted and `unknown` stay:
+ * the ledger was not read, or the read failed, and either one must not wipe
+ * a settled bet. This is not inside passesRecordFilter. A custom backtest
+ * still sees every scored pick.
+ */
+export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null }): boolean {
+  return p.discordPublish !== 'unpublished';
+}
+
+/**
  * Stake is expressed in UNITS, not dollars — and in TWO numbers, because one
  * cannot carry both conviction and price (Matt, 2026-08-28):
  *
