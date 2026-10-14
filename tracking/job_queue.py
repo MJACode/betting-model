@@ -672,6 +672,27 @@ def _job_derive_first_pitch(**kw):
         conn.close()
 
 
+def _validate_publish_oct13_nhl_reply(args: dict) -> dict:
+    """No arguments. The line and the tweet it replies to are fixed."""
+    if args:
+        raise ValueError(
+            "publish_oct13_nhl_reply accepts no arguments; the line and reply target are fixed")
+    return {}
+
+
+def _job_publish_oct13_nhl_reply(**kw):
+    """Reply the Oct 13 line under the correction tweet. Discord is skipped
+    when that follow-up is already in push_sent."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_oct13_reply
+
+    conn = get_connection()
+    try:
+        return publish_oct13_reply(conn)
+    finally:
+        conn.close()
+
+
 def _validate_publish_oct13_nhl_line(args: dict) -> dict:
     """No arguments. The line is fixed in the script."""
     if args:
@@ -1812,6 +1833,10 @@ JOBS = {
     # One line, after the 2026-10-14 correction. See _job_publish_oct13_nhl_line.
     "publish_oct13_nhl_line": (_job_publish_oct13_nhl_line,
                                _validate_publish_oct13_nhl_line),
+    # Reply under the correction's per-sport tweet. See
+    # _job_publish_oct13_nhl_reply.
+    "publish_oct13_nhl_reply": (_job_publish_oct13_nhl_reply,
+                                _validate_publish_oct13_nhl_reply),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
