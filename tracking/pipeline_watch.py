@@ -70,6 +70,14 @@ WEEKLY_STALE_DAYS = 8
 SILENT_KIND_LOOKBACK_DAYS = 14
 SILENT_KIND_MIN_ACTIVE_DAYS = 7
 
+# A recap Discord answered without a message id, or a restatement that
+# raised. These are not successes, so the silence rule (successes only)
+# never shows them. The morning report has to.
+RECAP_ERROR_KINDS = (
+    "discord_results_error",
+    "discord_results_restate_error",
+)
+
 
 def _enabled() -> bool:
     return os.environ.get("RUN_PIPELINE_WATCH", "1") not in ("0", "false", "False")
@@ -173,6 +181,17 @@ def _step_regressions(conn, hours: int) -> list[str]:
             for s, now, base in rows]
 
 
+def findings_from_delivery(rows) -> list[str]:
+    """Recap failure rows. A success kind in the same window is not a finding."""
+    out = []
+    for r in rows or []:
+        kind, n, latest = (list(r) + [None] * 3)[:3]
+        if kind not in RECAP_ERROR_KINDS:
+            continue
+        out.append(f"`{kind}` has {n} delivery-failure row(s), latest {latest}")
+    return out
+
+
 def _silent_kinds(conn, hours: int) -> list[str]:
     rows = _rows(conn, """
         SELECT kind,
@@ -233,6 +252,7 @@ def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
     findings += findings_from_passes(data.get("recent_passes"))
     findings += findings_from_checks(data.get("failing_checks"))
     findings += findings_from_burn(data.get("api_burn_by_source"))
+    findings += findings_from_delivery(data.get("delivery"))
     findings += _step_regressions(conn, hours)
     findings += _silent_kinds(conn, hours)
     findings += _stale_weeklies(conn, today)

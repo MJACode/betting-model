@@ -340,6 +340,34 @@ def test_the_oct13_line_posts_once_on_each_surface(monkeypatch):
     assert result2["tweet_url"].endswith("/555")
 
 
+def test_the_oct13_line_does_not_tweet_when_the_discord_ledger_fails(monkeypatch):
+    conn = Ledger(fail_write_kinds={rc.KIND_DISCORD})
+    tweets = []
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_RESULTS", WEBHOOK)
+    result = rc.publish_oct13_line(
+        conn, post=lambda url, text: "444",
+        tweet=lambda *a: tweets.append("x") or "555",
+        place=lambda url: ("guild", "chan"), can_post=lambda: True)
+    assert tweets == []
+    assert result["ledger"] == "discord follow-up write failed; X was not sent"
+    assert result["discord_message_id"] == "444"
+    assert result["tweet_id"] is None
+
+
+def test_the_oct13_line_does_not_tweet_when_x_is_off(monkeypatch):
+    conn = Ledger()
+    tweets = []
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_RESULTS", WEBHOOK)
+    with pytest.raises(RuntimeError, match="X publisher is off"):
+        rc.publish_oct13_line(
+            conn, post=lambda url, text: "444",
+            tweet=lambda *a: tweets.append("x"),
+            place=lambda url: ("guild", "chan"), can_post=lambda: False)
+    assert tweets == []
+    assert conn.rows[rc.KIND_DISCORD] == "444"
+    assert rc.KIND_X not in conn.rows
+
+
 def test_the_oct13_job_takes_no_text_and_is_declared_once():
     fn, validate = jq.JOBS["publish_oct13_nhl_line"]
     assert fn is jq._job_publish_oct13_nhl_line

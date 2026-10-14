@@ -348,6 +348,19 @@ def test_an_occasional_kind_is_not_flagged_for_being_quiet(monkeypatch):
     assert "count(DISTINCT substring(sent_at, 1, 10)) >=" in src
 
 
+def test_recap_error_kinds_are_findings_and_a_success_is_not():
+    out = pw.findings_from_delivery([
+        ("discord_results", 1, "2026-10-14T06:00:00-04:00"),
+        ("discord_results_error", 1, "2026-10-14T06:01:00-04:00"),
+        ("discord_results_restate_error", 2, "2026-10-14T07:01:00-04:00"),
+    ])
+    assert any(f.startswith("`discord_results_error`") for f in out)
+    assert any(f.startswith("`discord_results_restate_error`") for f in out)
+    assert not any(f.startswith("`discord_results` ") for f in out)
+    assert pw.findings_from_delivery([]) == []
+    assert pw.findings_from_delivery(None) == []
+
+
 def test_the_silence_finding_says_how_regular_the_kind_was(monkeypatch):
     """"X is quiet" is unactionable without knowing it used to fire daily."""
     conn = _Conn(rows=[("live_signal", 14, "2026-08-20T00:00:00-04:00")])

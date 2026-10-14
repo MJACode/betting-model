@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, a recap Discord answers without a message id is posted once, then stopped; one ops alert; pipeline_watch shows the recap error kinds |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, same-book raw CLV is the headline: 1,971 priced pre-game BETs stamped standard_v2; pins 3114189 +8.50%, 2387645 +0.33%, 3114194 0.00%; since 2026-09-01 game lines beat the bet book 55.6% (avg +2.217%), props 49.9% (avg +2.780%); Pinnacle market edge is the secondary column |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Oct 13 line is its own post; the 07:24 ET restatement was ledgered after a truthy webhook response and the id was discarded (all 16 restate rows null); a recap with no id is now an error row and retries |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, one record-correction post: fixed words, Discord results then a pin attempt, X as a 265-character tweet plus a 200-character reply, ledgered before each send; the worker runs it |
