@@ -175,9 +175,9 @@ def test_high_public_pct_on_a_fade_publisher_counts_as_a_fade():
 # ── CLV / ROI / volume (synthetic) ───────────────────────────────────────────
 
 def test_clv_clear_negative_vs_baseline_is_flagged():
-    recent = [{"clv_method": "no_vig", "clv_pct": -2.5,
+    recent = [{"clv_method": "standard_v2", "clv_pct": -2.5,
                "clv_beat_close": False} for _ in range(20)]
-    baseline = [{"clv_method": "no_vig", "clv_pct": 1.0,
+    baseline = [{"clv_method": "standard_v2", "clv_pct": 1.0,
                  "clv_beat_close": True} for _ in range(20)]
     finding = mq.detect_clv_degradation(recent, baseline)
     assert finding["status"] == mq.FLAGGED

@@ -79,7 +79,7 @@ def test_the_recap_query_counts_the_kept_copy_and_not_the_marked_one():
     db.execute("""CREATE TABLE picks (pick_id, sport, model_id, result,
                   kelly_fraction, dk_odds, decision_odds, clv_pct, is_live, game_date,
                   signal_type, downgrade_reason, condition_status, game_id,
-                  pick_side, player_id, player_key, prop_market)""")
+                  pick_side, player_id, player_key, prop_market, clv_method)""")
     db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
         (332605, "UFC", "ufc_total_rounds", "WIN", 0.02, -166, None, None, 0, "2026-06-20", "BET", None, None, "g605"),

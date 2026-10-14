@@ -330,12 +330,12 @@ export function BuiltInModelDetailScreen() {
                 <View style={styles.statRow}>
                   <StatTile
                     label="Avg CLV"
-                    value={formatSigned(clv.avg, 1, 'pp')}
+                    value={formatSigned(clv.avg, 1, '%')}
                     tint={roundsToZero(clv.avg, 1) ? undefined : pnlColor(clv.avg, 1)}
                     caption={
                       ledgerUnread
                         ? 'Discord check did not finish, so this includes picks whose posting status is unknown'
-                        : 'vs the closing price'
+                        : 'vs the book we bet'
                     }
                   />
                   <StatTile
@@ -511,7 +511,7 @@ function computeClvStats(
   settled: SettledPick[],
 ): { avg: number; beatRate: number; count: number } | null {
   const vals = settled
-    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && p.clv_pct != null)
+    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && p.clv_method === 'standard_v2' && p.clv_pct != null)
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;

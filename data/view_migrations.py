@@ -301,6 +301,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # runs after every migration that owns those views, including the
     # duplicate-row pass above. Does not post.
     "published_picks_record_2026_10_14.sql",
+    # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
+    # is the market-edge column. Recomputes rows not yet standard_v2 and
+    # patches v_public_track_record. Reads the live view, so it runs after
+    # every migration that owns that view. Does not touch units or pauses.
+    "clv_standard_v2_2026_10_14.sql",
 ]
 
 

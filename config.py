@@ -3159,8 +3159,9 @@ PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
 # the pick as decision_book / decision_odds / decision_implied_prob /
 # decision_edge. DraftKings is still the reference: the line a pick is scored
 # at is DK's, the models are trained against DK's lines, `edge` / `dk_odds`
-# keep their DraftKings meaning. CLV grades that locked bet against the
-# no-vig sharp close (Pinnacle when a pre-game snapshot exists) — docs/clv.md.
+# keep their DraftKings meaning. CLV's headline is that locked bet against
+# the bet book's own raw close; Pinnacle's no-vig close is the market-edge
+# column — docs/clv.md.
 #
 # What it costs, measured rather than assumed: every cut in ACTION_THRESHOLDS
 # was swept on DK-implied edge. The best price is cheaper in implied
