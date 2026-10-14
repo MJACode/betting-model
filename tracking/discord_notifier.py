@@ -78,6 +78,10 @@ _MAX_429_WAIT = 30.0
 # 204). Keeps _post's boolean contract without pretending we can address
 # the message later -- the delete path ignores it.
 _POST_OK_NO_ID = "ok"
+# What the last _post call actually got back. The recap reads this so a
+# rejected post is a row, not only a log line that disappears with the
+# container. status is the HTTP code, or None when the request never got one.
+_last_delivery: dict = {"status": None, "detail": ""}
 _INTER_POST_SLEEP = 0.6         # webhooks allow ~5 req / 2s; stay well under
 
 _COLOR_SIGNAL = 0x2ECC71        # green
@@ -353,6 +357,13 @@ def _redact_delivery_error(exc: BaseException, url: str) -> str:
     return f"{type(exc).__name__}: {text}"
 
 
+def _remember_delivery(status, detail: str) -> None:
+    """Keep the last webhook outcome, with any webhook URL removed."""
+    text = _WEBHOOK_IN_TEXT.sub("[webhook]", detail or "")
+    _last_delivery["status"] = status
+    _last_delivery["detail"] = text[:180]
+
+
 def _post(url: str, payload: dict) -> str | None:
     """POST one webhook message. Returns the MESSAGE ID on a confirmed success
     and None on failure, so the caller knows both whether it is safe to ledger
@@ -376,9 +387,14 @@ def _post(url: str, payload: dict) -> str | None:
             resp = requests.post(wait_url, json=payload, timeout=_POST_TIMEOUT)
             if resp.status_code in (200, 204):
                 try:
-                    return str(resp.json().get("id") or _POST_OK_NO_ID)
+                    mid = str(resp.json().get("id") or "")
                 except Exception:  # noqa: BLE001 — 204, or a body we can't parse
-                    return _POST_OK_NO_ID
+                    mid = ""
+                if mid:
+                    _remember_delivery(resp.status_code, "")
+                    return mid
+                _remember_delivery(resp.status_code, "no message id")
+                return _POST_OK_NO_ID
             if resp.status_code == 429:
                 try:
                     wait = float(resp.json().get("retry_after", 1.0))
@@ -399,6 +415,7 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook rejected ({resp.status_code}): {resp.text[:200]}")
+            _remember_delivery(resp.status_code, resp.text[:180])
             return None
         except Exception as exc:  # noqa: BLE001 — delivery must never break a run
             # A timeout (or a dropped connection) can mean Discord already
@@ -410,8 +427,10 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook post failed: {_redact_delivery_error(exc, url)}")
+            _remember_delivery(None, _redact_delivery_error(exc, url))
             return False
     logger.error("Discord webhook still rate-limited after retries; will retry next pass")
+    _remember_delivery(429, "rate limited after retries")
     return None
 
 
@@ -1287,6 +1306,7 @@ def restate_published_recaps(through: str | None = None,
                                              restate=item)
         except Exception as exc:                          # noqa: BLE001
             logger.error(f"Discord restate {item['game_date']} failed: {exc}")
+            _record_restate_exception(item, exc)
         try:
             posted += notify_x_results(item["game_date"], dry_run=dry_run,
                                        restate=item)
@@ -2200,6 +2220,57 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
             pass
 
 
+def _record_delivery_failure(conn, lock_key: str, kind: str, detail: str) -> None:
+    """One row for the latest failed attempt. The success kind is untouched,
+    so the next pass tries again. message_id holds the reason: this table has
+    no other text column, and the reason is what a later read has to see."""
+    fail_kind = f"{kind}_error"
+    safe = _WEBHOOK_IN_TEXT.sub("[webhook]", (detail or "unconfirmed"))[:180]
+    try:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (lock_key, kind) DO UPDATE SET "
+            "sent_at = EXCLUDED.sent_at, message_id = EXCLUDED.message_id",
+            (lock_key, fail_kind, datetime.now(ET).isoformat(), safe),
+        )
+        conn.commit()
+    except Exception as exc:                              # noqa: BLE001
+        logger.error(f"Discord delivery failure was not recorded "
+                     f"({type(exc).__name__})")
+
+
+def _delivery_failure_reason(message_id) -> str:
+    status = _last_delivery.get("status")
+    detail = (_last_delivery.get("detail") or "").strip()
+    if message_id == _POST_OK_NO_ID:
+        reason = "Discord returned no message id"
+    else:
+        reason = "Discord post was not confirmed"
+    if status is not None:
+        reason = f"HTTP {status}: {reason}"
+    if detail and detail not in reason:
+        reason = f"{reason}; {detail}"
+    return reason[:180]
+
+
+def _record_restate_exception(item: dict, exc: BaseException) -> None:
+    """A restatement that raised still leaves a row. The log line alone is
+    gone when the container is."""
+    conn = get_connection()
+    try:
+        key = restate_lock_key("discord_results_restate", item["game_date"],
+                               item["published_at"])
+        _record_delivery_failure(
+            conn, key, "discord_results_restate",
+            f"{type(exc).__name__}: {exc}")
+    except Exception as inner:                            # noqa: BLE001
+        logger.error(f"Discord restate failure was not recorded "
+                     f"({type(inner).__name__})")
+    finally:
+        conn.close()
+
+
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
                            restate=None) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
@@ -2307,15 +2378,22 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             logger.info(f"[dry-run] discord(results) {game_date} → {_tally_line(overall)}")
             return 0
 
-        # _post appends ?wait=true and returns the message id. A 204 with no
-        # body comes back as _POST_OK_NO_ID; store NULL rather than that
-        # sentinel. Measured 2026-10-14: all 45 discord_results and all 16
-        # discord_results_restate rows had a null message_id because this
-        # insert never wrote the id _post already returned.
+        # _post appends ?wait=true and returns the message id. A 2xx with no
+        # id used to be ledgered as a success. The row then
+        # blocked every retry, and the message could not be opened. Measured
+        # 2026-10-14: the Oct 13 restatement is that row (null message_id)
+        # and it is not a message anyone can find. No id is not a delivery.
+        _last_delivery["status"] = None
+        _last_delivery["detail"] = ""
         message_id = _post(url, {"embeds": [embed]})
-        if not message_id:
-            return 0                      # un-ledgered: retried on the next pass
-        stored_id = None if message_id == _POST_OK_NO_ID else message_id
+        stored_id = (message_id if isinstance(message_id, str)
+                     and message_id not in ("", _POST_OK_NO_ID) else None)
+        if not stored_id:
+            reason = _delivery_failure_reason(message_id)
+            logger.error(f"Discord(results) {game_date} "
+                         f"{'restate ' if restate else ''}not confirmed ({reason})")
+            _record_delivery_failure(conn, lock_key, kind, reason)
+            return 0
 
         published_at = datetime.now(ET).isoformat()
         conn.execute(

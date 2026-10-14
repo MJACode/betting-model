@@ -304,6 +304,56 @@ def test_the_job_takes_no_text_and_is_declared_once():
     validate(matches[0]["args"])
 
 
+def test_the_oct13_line_posts_once_on_each_surface(monkeypatch):
+    assert rc.OCT13_LINE == "Oct 13 corrected: NHL 7-2, +5.72u (+83.1% ROI)."
+    assert len(rc.OCT13_LINE) <= 280
+    _assert_no_link(rc.OCT13_LINE)
+    conn = Ledger()
+    sent = []
+
+    def post(url, text):
+        sent.append(("discord", text))
+        assert conn.log[:2] == [
+            ("SELECT", rc.KIND_DISCORD),
+            ("SELECT", rc.KIND_X),
+        ]
+        return "444"
+
+    def tweet(text, reply_to):
+        sent.append(("x", text, reply_to))
+        return "555"
+
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_RESULTS", WEBHOOK)
+    result = rc.publish_oct13_line(
+        conn, post=post, tweet=tweet,
+        place=lambda url: ("guild", "chan"), can_post=lambda: True)
+    assert sent == [("discord", rc.OCT13_LINE), ("x", rc.OCT13_LINE, None)]
+    assert result["discord_url"] == "https://discord.com/channels/guild/chan/444"
+    assert result["tweet_url"] == "https://x.com/signalbasepicks/status/555"
+    assert "supersecretvalue" not in json.dumps(result)
+    again = []
+    result2 = rc.publish_oct13_line(
+        conn, post=lambda *a: again.append("d"),
+        tweet=lambda *a: again.append("x"),
+        place=lambda url: ("guild", "chan"), can_post=lambda: True)
+    assert again == []
+    assert result2["tweet_url"].endswith("/555")
+
+
+def test_the_oct13_job_takes_no_text_and_is_declared_once():
+    fn, validate = jq.JOBS["publish_oct13_nhl_line"]
+    assert fn is jq._job_publish_oct13_nhl_line
+    assert validate({}) == {}
+    with pytest.raises(ValueError, match="no arguments"):
+        validate({"text": "different"})
+    entries = json.loads((config.ROOT / "jobs" / "declared_jobs.json").read_text(
+        encoding="utf-8"))
+    matches = [e for e in entries if e["key"] == "oct13-nhl-line-2026-10-14"]
+    assert len(matches) == 1
+    assert matches[0]["args"] == {}
+    validate(matches[0]["args"])
+
+
 def test_the_job_calls_the_poster_and_closes_its_connection(monkeypatch):
     closed = []
 

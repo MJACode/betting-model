@@ -672,6 +672,26 @@ def _job_derive_first_pitch(**kw):
         conn.close()
 
 
+def _validate_publish_oct13_nhl_line(args: dict) -> dict:
+    """No arguments. The line is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_oct13_nhl_line accepts no arguments; the line is fixed")
+    return {}
+
+
+def _job_publish_oct13_nhl_line(**kw):
+    """Post the Oct 13 NHL line once. The longer correction has already gone."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_oct13_line
+
+    conn = get_connection()
+    try:
+        return publish_oct13_line(conn)
+    finally:
+        conn.close()
+
+
 def _validate_publish_record_correction(args: dict) -> dict:
     """No arguments. The correction text is fixed in the script."""
     if args:
@@ -1789,6 +1809,9 @@ JOBS = {
     # scripts/post_record_correction.py. See _job_publish_record_correction.
     "publish_record_correction": (_job_publish_record_correction,
                                   _validate_publish_record_correction),
+    # One line, after the 2026-10-14 correction. See _job_publish_oct13_nhl_line.
+    "publish_oct13_nhl_line": (_job_publish_oct13_nhl_line,
+                               _validate_publish_oct13_nhl_line),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
