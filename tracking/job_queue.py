@@ -672,6 +672,30 @@ def _job_derive_first_pitch(**kw):
         conn.close()
 
 
+def _validate_publish_record_correction(args: dict) -> dict:
+    """No arguments. The correction text is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_record_correction accepts no arguments; the correction text is fixed")
+    return {}
+
+
+def _job_publish_record_correction(**kw):
+    """Post the 2026-10-14 record correction once to Discord results and to X.
+
+    The words live in scripts/post_record_correction.py. This job does not
+    take a text argument, and a retry skips any surface already in push_sent.
+    """
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_record_correction
+
+    conn = get_connection()
+    try:
+        return publish_record_correction(conn)
+    finally:
+        conn.close()
+
+
 def _job_publish_x_results(**kw):
     """Post one settled day's recap to X, clearing a stale ledger row first.
 
@@ -1761,6 +1785,10 @@ JOBS = {
     # the original messages. See _job_publish_discord_void.
     "publish_discord_void": (_job_publish_discord_void,
                              _validate_publish_discord_void),
+    # One post of the 2026-10-14 record correction. Text is fixed in
+    # scripts/post_record_correction.py. See _job_publish_record_correction.
+    "publish_record_correction": (_job_publish_record_correction,
+                                  _validate_publish_record_correction),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),

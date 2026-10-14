@@ -21,7 +21,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Space or hyphen, not underscore: the published-window constant keeps its
 # historical name and is a date, not a mode.
 # "the record only two ways" and "the published record only" are the
-# settled-record rule, not this mode.
+# settled-record rule, not this mode. "the record only counts what you saw"
+# is the approved 2026-10-14 correction, which says the record is the posts.
 _PHRASES = (
     re.compile(r"record_only", re.IGNORECASE),
     re.compile(r"record-only", re.IGNORECASE),
@@ -31,7 +32,7 @@ _PHRASES = (
     re.compile(r"paper[ -]only", re.IGNORECASE),
 )
 _ENGLISH_NOT_A_MODE = re.compile(
-    r"record only two ways|published record only",
+    r"record only two ways|published record only|record only counts what you saw",
     re.IGNORECASE,
 )
 

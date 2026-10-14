@@ -958,5 +958,12 @@
       "allow_posted": true,
       "reason": "decided on a DraftKings price 15 to 28 days old: the newest DraftKings row for this game at or before the pick was stored 2026-09-05 and no book had a row for it between then and the pick (the odds feed had stopped listing the game), so the number was not one DraftKings was offering when the pick was made. It was posted to members. Voided by mike's decision of 2026-10-09 to lift the posted-pick lock for these picks: 'Change the rule, void them'."
     }
+  },
+  {
+    "key": "record-correction-2026-10-14",
+    "job_type": "publish_record_correction",
+    "requested_by": "owner",
+    "note": "Owner approved one post, 2026-10-14. Discord results channel, then a pin attempt, then X. The words are fixed in scripts/post_record_correction.py. push_sent kinds discord_correction, x_correction, and x_correction_reply on lock_key record_correction:2026-10-14. A retry skips a surface that already has a row.",
+    "args": {}
   }
 ]
