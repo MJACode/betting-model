@@ -27,7 +27,10 @@ If that book has no pre-start snapshot on the same line, both are NULL and
 the pick is left out of the average. No other book is filled in.
 
 **Secondary — market edge.** Raw taken versus Pinnacle's fair close, only
-when Pinnacle has a pre-start snapshot on the same line.
+when Pinnacle's latest pre-start main line is that same number. Game
+spreads and totals use the main-line read (MLB and NHL spreads stay on
+±1.5). If that close has left the number we bet, the market-edge columns
+are NULL.
 
 ```
 fair        = power de-vig of Pinnacle's close (power_3way when a draw is quoted)
@@ -68,6 +71,10 @@ Line movement uses the book's latest main line. MLB and NHL spreads stay on
 `ABS(spread_home) = 1.5` for that read, so an alternate is not the close.
 When that number has left `scored_line`, `clv_pct` is NULL and `line_clv_pts`
 is kept. The headline beat does not treat the point move as a beat.
+
+Pinnacle's market edge uses that same main-line close. It is NULL when the
+main line has left `scored_line`. The last snapshot that still showed our
+number is not the close.
 
 The bound is the earlier of `games.commence_time` and `picks.game_time`.
 Game rows require `snapshot_type <> 'in_play'` and

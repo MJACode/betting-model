@@ -21,6 +21,19 @@ jobs:
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +74,8 @@ jobs:
           ODDS_API_KEY: ""
           SUPABASE_URL: ""
           SUPABASE_KEY: ""
+          # Local Postgres for tests/test_clv_pinnacle_mainline.py. Not prod.
+          CLV_MIGRATION_TEST_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
         run: |
           python -m pytest -q \
             tests/test_config.py \
@@ -132,4 +147,5 @@ jobs:
             tests/test_job_queue.py \
             tests/test_record_correction_post.py \
             tests/test_voided_pick_not_rechosen.py \
-            tests/test_mobile_stat_segments.py
+            tests/test_mobile_stat_segments.py \
+            tests/test_clv_pinnacle_mainline.py
