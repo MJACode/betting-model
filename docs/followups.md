@@ -86,6 +86,17 @@ built from history the model can learn from — e.g. who dressed each game in
 the per-game skater logs, weighted by usage — which is a project, not a
 reader fix.
 
+## [ ] Nothing stops the test suite from reaching the production database (found 2026-10-14)
+
+`tests/conftest.py` sets no guard on `DATABASE_URL` or `ODDS_API_KEY`, and the
+local `.env` holds the production values, so any test that opens a connection
+or calls the feed during `python -m pytest -q tests/` does it against
+production. Found by a research agent that started the suite with `.env` in
+its worktree and stopped it after 46 file-only tests; whether any test in the
+suite actually connects has not been checked. Fix: an autouse fixture that
+unsets both for the session unless a test opts in, and a check that lists the
+tests that reach for either.
+
 ## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
 
 Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe
