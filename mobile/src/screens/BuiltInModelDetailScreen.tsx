@@ -280,7 +280,7 @@ export function BuiltInModelDetailScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`See all ${history.length} picks`}
-                    hitSlop={SHOW_MORE_HIT_SLOP}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryExpanded(true)}
                   >
@@ -293,7 +293,7 @@ export function BuiltInModelDetailScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`Show ${Math.min(100, history.length - historyShown)} more, ${history.length - historyShown} remaining`}
-                    hitSlop={SHOW_MORE_HIT_SLOP}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryShown((n) => n + 100)}
                   >
@@ -307,7 +307,7 @@ export function BuiltInModelDetailScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Show latest day only"
-                    hitSlop={SHOW_MORE_HIT_SLOP}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     style={styles.showMoreBtn}
                     onPress={() => {
                       setHistoryExpanded(false);
@@ -518,8 +518,6 @@ function computeClvStats(
   const beatRate = vals.filter((v) => v > 0).length / vals.length;
   return { avg, beatRate, count: vals.length };
 }
-
-const SHOW_MORE_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 } as const;
 
 function categoryLabel(type: 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop'): string {
   if (type === 'pitcher_prop') return 'pitcher prop';
