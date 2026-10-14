@@ -5,6 +5,7 @@ Build the artifact for the NFL in-play leader moneyline model
     PYTHONIOENCODING=utf-8 python -m scripts.build_nfl_live_leader_artifact
     PYTHONIOENCODING=utf-8 python -m scripts.build_nfl_live_leader_artifact --seasons 2016-2025
     PYTHONIOENCODING=utf-8 python -m scripts.build_nfl_live_leader_artifact --parity
+    PYTHONIOENCODING=utf-8 python -m scripts.build_nfl_live_leader_artifact --population
 
 WHAT IT FITS. The win-probability model of scripts/nfl_edge_inplay_2025.py
 (hypothesis H1, "leader ref=pbp"): one logistic regression per exact lead
@@ -45,6 +46,22 @@ and 2025: 80 bets / +1.84u / 1 push, bet for bet. The snapshot construction
 (the state at a served snapshot, the game-over flag, the DraftKings quote) is
 the 2024 study's own, imported from scripts/nfl_edge_inplay_2024.py, because
 that is the construction the numbers were graded on.
+
+PARITY IS ABOUT THE DECISION FUNCTION, NOT THE LOOP. It proves decide()
+reproduces the study on the study's own states. The live loop sees different
+states, so --population replays the same snapshots the way the loop would:
+
+  - a state whose last play was a touchdown, an extra point or two-point try,
+    a made field goal or a safety is refused (the loop waits for the next
+    snap), and the game is tried again at its next snapshot;
+  - the favourite band comes from DraftKings' last pre-kickoff spread (the
+    loop's source, cached as odds_hist_2020_2025.parquet), not nflverse's
+    consensus close;
+  - the state lags the quote by 0, 15, 30, 45 and 60 s (ESPN posts a play
+    some seconds after it ends; the quote is fresh);
+  - and the SHIPPED 2016-2025 fit is compared with the grading fits.
+
+Its lag-0 row is the population of record for this model.
 """
 from __future__ import annotations
 
@@ -92,6 +109,11 @@ PARITY_TARGETS = {2024: {"train": list(range(2016, 2024)), "bets": 87, "units": 
                   2025: {"train": list(range(2016, 2025)), "bets": 80, "units": 1.84,
                          "pushes": 1, "states": 43024, "games": 1912}}
 POSSESSION_AGREEMENT_PCT = 99.78
+POPULATION_LAGS = (0, 15, 30, 45, 60)
+# The play kinds the live loop refuses to price straight after (state.py).
+_PLAY_COLS = ["touchdown", "extra_point_attempt", "two_point_attempt",
+              "field_goal_result", "safety"]
+_STATE_COLS = ["qtr", "secs", "home_sc", "away_sc", "home_ball"]
 
 
 # ─── inputs ────────────────────────────────────────────────────────────────
@@ -465,6 +487,161 @@ def parity() -> bool:
     return ok
 
 
+def _first_bets(x: pd.DataFrame, art, spread_home=None, eligible=None) -> pd.DataFrame:
+    """One bet per game at the first snapshot decide() takes, in game and
+    time order. `spread_home` overrides the band source per row; `eligible`
+    False means the loop would refuse that state (the game is tried again at
+    its next snapshot)."""
+    bets, seen = [], set()
+    for i, r in enumerate(x.itertuples(index=False)):
+        if r.game_id in seen or (eligible is not None and not eligible[i]):
+            continue
+        poss = None if pd.isna(r.home_ball) else ("home" if int(r.home_ball) == 1 else "away")
+        if spread_home is None:
+            sp = None if pd.isna(r.spread_line) else -r.spread_line
+        else:
+            sp = None if pd.isna(spread_home[i]) else float(spread_home[i])
+        dcs = M.decide(art, period=r.qtr, secs=r.secs, home_score=r.home_sc,
+                       away_score=r.away_sc, possession=poss, spread_home=sp,
+                       home_price=r.price_home, away_price=r.price_away)
+        if dcs.bet:
+            seen.add(r.game_id)
+            fin = r.result if dcs.side == "home" else -r.result
+            bets.append({"game_id": r.game_id, "snapshot_at": r.snapshot_at,
+                         "dec": dcs.decimal, "v": 1.0 if fin > 0 else (0.0 if fin < 0 else 0.5)})
+    b = pd.DataFrame(bets, columns=["game_id", "snapshot_at", "dec", "v"])
+    b["pnl"] = _grade(b.v, b.dec)
+    return b
+
+
+def _summ(b: pd.DataFrame) -> str:
+    roi = 100 * b.pnl.mean() if len(b) else 0.0
+    return f"{len(b):3d} bets {b.pnl.sum():+7.2f}u {roi:+5.1f}%"
+
+
+def _dk_pregame_spread() -> pd.Series:
+    """DraftKings' last pre-kickoff spread per game: the home handicap, the
+    loop's band source (gameday.load_context reads the same rows from odds)."""
+    oh = pd.read_parquet(CACHE / "odds_hist_2020_2025.parquet",
+                         columns=["game_id", "bookmaker", "market", "point", "snapshot_at",
+                                  "commence_time"])
+    oh = oh[(oh.bookmaker == "draftkings") & (oh.market == "spreads")].copy()
+    oh["point"] = pd.to_numeric(oh.point, errors="coerce")
+    oh["snapshot_at"] = pd.to_datetime(oh.snapshot_at, utc=True)
+    oh["commence_time"] = pd.to_datetime(oh.commence_time, utc=True)
+    oh = oh[oh.snapshot_at <= oh.commence_time].sort_values("snapshot_at")
+    return oh.groupby("game_id").tail(1).set_index("game_id").point
+
+
+def population() -> bool:
+    """The live loop's population on the bought 2024/2025 snapshots (module
+    docstring). Prints one table; returns False if the state attachment does
+    not reproduce the study's states or lag 0 without the loop's refusals
+    does not reproduce parity."""
+    os.environ["NFL_EDGE_CACHE"] = str(CACHE)
+    from scripts import nfl_edge_inplay_2024 as B24
+    from scripts import nfl_edge_inplay_2025 as B25
+    from scripts.nfl_edge_lib import games as bt_games
+
+    g = bt_games()
+    dk_spread = _dk_pregame_spread()
+    shipped = M.load_artifact()
+    tr_all = attach_games(play_states(range(2016, 2025)), g)
+    ok = True
+    rows = {}
+    for season, tgt in PARITY_TARGETS.items():
+        coefs, _ = fit_block(tgt["train"], g, tr=tr_all[tr_all.season < season])
+        art = M.artifact_from_dict(json.loads(json.dumps(
+            {"coefficients": {str(L): [float(v) for v in coefs[L - 4]] for L in range(4, 17)},
+             "features": {"columns": list(M.COLUMNS)}, "rule": {}, "identity": {}})))
+        with redirect_stdout(io.StringIO()):
+            d = B24.load_inplay(season, g)
+            st, _ = B24.states(season, g)
+        snaps = d[["game_id", "snapshot_at"]].drop_duplicates(B24.KEYS)
+        ident = st[["game_id", "t_known"] + _STATE_COLS + _PLAY_COLS].sort_values("t_known")
+        for lag in POPULATION_LAGS:
+            with redirect_stdout(io.StringIO()):
+                sf = B24.snapshot_frame(d, g, st, lag)
+                q = B25.venue_quotes(d, sf)
+            # The last play behind each snapshot's state, attached the way the
+            # study attaches the state itself (known at snapshot - lag).
+            xi = snaps.copy()
+            xi["t_state"] = (xi.snapshot_at - pd.Timedelta(seconds=lag)) \
+                .astype("datetime64[ns, UTC]")
+            xi = pd.merge_asof(xi.sort_values("t_state"), ident, left_on="t_state",
+                               right_on="t_known", by="game_id", direction="backward",
+                               allow_exact_matches=True)
+            chk = sf[B24.KEYS + _STATE_COLS].merge(xi[B24.KEYS + _STATE_COLS], on=B24.KEYS,
+                                                    suffixes=("", "_x"))
+            same = all((chk[c].fillna(-9) == chk[c + "_x"].fillna(-9)).all()
+                       for c in _STATE_COLS)
+            if not same:
+                print(f"  [FAIL] {season} lag {lag}: the last-play attachment does not "
+                      f"reproduce the study's states")
+                ok = False
+            dk = q[(q.market == "h2h") & (q.bookmaker == "draftkings")][
+                B24.KEYS + ["price_home", "price_away"]]
+            x = sf[~sf.over.astype(bool)].merge(xi[B24.KEYS + _PLAY_COLS], on=B24.KEYS,
+                                                how="left") \
+                .merge(dk, on=B24.KEYS).sort_values(B24.KEYS).reset_index(drop=True)
+            flag = lambda c: x[c].fillna(0).values == 1                      # noqa: E731
+            scoring = (flag("touchdown") | flag("extra_point_attempt")
+                       | flag("two_point_attempt") | (x.field_goal_result == "made").values
+                       | flag("safety"))
+            sp = x.game_id.map(dk_spread).values
+            rows[(season, lag, "study")] = _first_bets(x, art)
+            rows[(season, lag, "loop")] = _first_bets(x, art, spread_home=sp, eligible=~scoring)
+            if lag == 0:
+                rows[(season, 0, "shipped_study")] = _first_bets(x, shipped)
+                rows[(season, 0, "shipped_loop")] = _first_bets(x, shipped, spread_home=sp,
+                                                                eligible=~scoring)
+                gs = x.groupby("game_id").spread_line.first()
+                diff = (gs + gs.index.to_series().map(dk_spread)).dropna()
+                lh = (x.home_sc - x.away_sc) > 0
+                m_nv = np.where(lh, x.spread_line, -x.spread_line)
+                m_dk = np.where(lh, -sp, sp)
+                band = lambda m: np.where(m >= 3.5, 0, np.where(m <= -3.5, 2, 1))  # noqa: E731
+                inwin = ((x.qtr == 4) & (x.secs <= 600)
+                         & (x.home_sc - x.away_sc).abs().between(4, 16) & ~np.isnan(sp))
+                rows[(season, "band")] = (len(gs), int(gs.index.to_series().map(dk_spread)
+                                                      .notna().sum()),
+                                          int((diff == 0).sum()), int((diff.abs() >= 1).sum()),
+                                          int((inwin & (band(m_nv) != band(m_dk))).sum()),
+                                          int(inwin.sum()))
+        b0 = rows[(season, 0, "study")]
+        if not (len(b0) == tgt["bets"] and round(float(b0.pnl.sum()), 2) == tgt["units"]):
+            print(f"  [FAIL] {season} lag 0, study states: {_summ(b0)} is not parity's "
+                  f"{tgt['bets']} bets {tgt['units']:+.2f}u")
+            ok = False
+
+    seasons = list(PARITY_TARGETS)
+    pooled = lambda lag, kind: pd.concat([rows[(s_, lag, kind)] for s_ in seasons])  # noqa: E731
+    print("\nThe live loop's population on the bought DraftKings snapshots "
+          "(grading fits; first bet per game)")
+    print(f"{'state lag':>10}  {'study states, nflverse band':>30}  "
+          f"{'loop refusals + DraftKings band':>32}")
+    for lag in POPULATION_LAGS:
+        for s_ in seasons + ["pooled"]:
+            st_ = pooled(lag, "study") if s_ == "pooled" else rows[(s_, lag, "study")]
+            lp_ = pooled(lag, "loop") if s_ == "pooled" else rows[(s_, lag, "loop")]
+            print(f"{lag:>8} s  {str(s_):>6}  {_summ(st_):>22}  {_summ(lp_):>30}")
+    print("\nThe shipped 2016-2025 fit on the same lag-0 frames (in-sample for both seasons)")
+    for kind, label in (("study", "study states"), ("loop", "loop refusals + DK band")):
+        for s_ in seasons:
+            a_ = rows[(s_, 0, kind)]
+            b_ = rows[(s_, 0, f"shipped_{kind}")]
+            ka, kb = set(zip(a_.game_id, a_.snapshot_at)), set(zip(b_.game_id, b_.snapshot_at))
+            print(f"  {s_} {label:>24}: grading fit {_summ(a_)} | shipped {_summ(b_)} | "
+                  f"shipped keeps {len(ka & kb)}, drops {len(ka - kb)}, adds {len(kb - ka)}")
+    print("\nFavourite band: DraftKings' last pre-kickoff spread vs nflverse's close")
+    for s_ in seasons:
+        n, have, eq, ge1, flips, inwin = rows[(s_, "band")]
+        print(f"  {s_}: DraftKings spread for {have} of {n} games; equal {eq}, differ by 1+ "
+              f"points {ge1}; in-window snapshot states in a different band: {flips} of {inwin}")
+    print(f"\nPOPULATION {'OK' if ok else 'FAILED'}")
+    return ok
+
+
 def parse_seasons(s: str) -> list[int]:
     if "-" in s:
         a, b = s.split("-")
@@ -479,14 +656,19 @@ def main() -> int:
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--parity", action="store_true",
                     help="rebuild the 2016-2023 / 2016-2024 fits and reproduce the backtest")
+    ap.add_argument("--population", action="store_true",
+                    help="replay the bought snapshots the way the live loop sees them")
     a = ap.parse_args()
     if a.parity:
         return 0 if parity() else 1
+    if a.population:
+        return 0 if population() else 1
     seasons = parse_seasons(a.seasons)
     art = build_artifact(seasons)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(art, indent=1) + "\n", encoding="utf-8")
+    # LF on every machine: models/saved is -text, so git stores the bytes as written.
+    out.write_text(json.dumps(art, indent=1) + "\n", encoding="utf-8", newline="\n")
     t = art["training"]
     print(f"wrote {out}: seasons {seasons[0]}-{seasons[-1]}, {t['states']:,} states, "
           f"{t['games']:,} games, possession agreement {t['possession_check']['agreement_pct']:.2f}%")
