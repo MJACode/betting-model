@@ -305,7 +305,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # is the market-edge column. Recomputes rows not yet standard_v2 and
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
+    # The row rewrite is once (clv_standard_v2_once).
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-14: game spread/total market edge was the last Pinnacle quote
+    # still on our number, not the latest main line. Nulls that column when
+    # the main line has moved, after copying the affected rows. Once.
+    "clv_pinnacle_mainline_2026_10_14.sql",
 ]
 
 

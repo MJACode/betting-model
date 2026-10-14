@@ -13,9 +13,12 @@
 --   fair_close from power de-vig (3-way when the close has a draw).
 --
 -- One statement. DDL is behind a catalog guard so a later pass fires no
--- pgrst_ddl_watch event. The recompute runs only while a row is still not
--- standard_v2. Worked picks 3114189, 2387645 and 3114194 are checked before
--- any row is written; a mismatch raises and the transaction rolls back.
+-- pgrst_ddl_watch event. The recompute runs once: public.clv_standard_v2_once
+-- is the marker, and a later pass does not write picks again. It also does
+-- not write when any row is already standard_v2 (the historical pass has
+-- landed; a later unstamped pick is the Python capture's job). Worked picks
+-- 3114189, 2387645 and 3114194 are checked before any row is written; a
+-- mismatch raises and the transaction rolls back.
 -- Puck-line rows are not rewritten: the close matches the stored HOME sign.
 -- results_snapshots is not touched.
 
@@ -356,6 +359,19 @@ BEGIN
       'clv-standard-v2-power-80-0.05-12';
   END IF;
 
+  IF to_regclass('public.clv_standard_v2_once') IS NULL THEN
+    CREATE TABLE public.clv_standard_v2_once (
+      applied_at timestamptz NOT NULL DEFAULT now()
+    );
+    ALTER TABLE public.clv_standard_v2_once ENABLE ROW LEVEL SECURITY;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon')
+       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+      REVOKE ALL ON public.clv_standard_v2_once FROM anon, authenticated;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM public.picks WHERE clv_method = 'standard_v2' LIMIT 1
+    ) THEN
   SELECT EXISTS (
     SELECT 1
     FROM public.picks p
@@ -833,6 +849,10 @@ BEGIN
     GET DIAGNOSTICS n_empty = ROW_COUNT;
 
     RAISE NOTICE 'clv standard_v2 wrote % rows, cleared %', n_full, n_empty;
+  END IF;
+    END IF;
+
+    INSERT INTO public.clv_standard_v2_once DEFAULT VALUES;
   END IF;
 
   def := pg_get_viewdef('public.v_public_track_record'::regclass, true);

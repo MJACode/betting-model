@@ -117,7 +117,10 @@ def test_the_snapshot_stake_is_stake_for_not_a_flat_unit():
 def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
-    assert ACTIVE_MIGRATIONS[-1] == "clv_standard_v2_2026_10_14.sql"
+    assert (ACTIVE_MIGRATIONS.index(MIG.name)
+            < ACTIVE_MIGRATIONS.index("clv_standard_v2_2026_10_14.sql"))
+    assert (ACTIVE_MIGRATIONS.index("clv_standard_v2_2026_10_14.sql")
+            < ACTIVE_MIGRATIONS.index("clv_pinnacle_mainline_2026_10_14.sql"))
     assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
     i = ACTIVE_MIGRATIONS.index(MIG.name)
     for owner in (
