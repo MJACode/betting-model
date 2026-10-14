@@ -76,8 +76,18 @@ GROUPS = {
     "workload": ["h_g_days", "a_g_days", "h_g_starts7", "a_g_starts7", "h_g_share", "a_g_share"],
     "venue":    ["h_home_gd", "a_road_gd"],
     "travel":   ["h_travel_km", "a_travel_km", "h_tz_shift", "a_tz_shift"],
+    # Shot quality (expected goals). RESEARCH ONLY, not in FEATURES: built only
+    # when `logs` carries "team_xg" / "goalie_xg" (per team-game and per
+    # goalie-game xG sums; scripts/nhl_xg_walkforward.py), NaN otherwise.
+    # Team: EWMA xGF / xGA all situations and 5-on-5, the 5-on-5 xG share,
+    # finishing above expected (goals - xG). Goalie: the starter's goals saved
+    # above expected per unblocked shot, shrunk toward 0 like g_sv.
+    "xg":       ["d_xgf", "d_xga", "d_xgf5", "d_xga5", "d_xg_share5", "d_xg_fin", "d_g_gsax"],
 }
-FEATURES = [f for g in GROUPS.values() for f in g]
+FEATURES = [f for name, g in GROUPS.items() if name != "xg" for f in g]   # the 34 production inputs
+FEATURES_XG = FEATURES + GROUPS["xg"]
+_XG_TEAM_COLS = ["xgf", "xga", "xgf_5v5", "xga_5v5", "gf"]
+_XG_GOALIE_COLS = ["unblocked_faced", "xg_faced", "goals_allowed"]
 
 _TEAM_COLS = ["nhl_game_id", "game_id", "team", "opponent", "season", "game_date", "is_home",
               "goals_for", "goals_against", "shots_for", "shots_against", "sat_for_5v5",
@@ -107,7 +117,8 @@ def load_logs(conn, before: str | None = None) -> dict:
 
 # ── inputs ───────────────────────────────────────────────────────────────────
 
-def _team_frame(team: pd.DataFrame, upcoming: pd.DataFrame | None) -> pd.DataFrame:
+def _team_frame(team: pd.DataFrame, upcoming: pd.DataFrame | None,
+                team_xg: pd.DataFrame | None = None) -> pd.DataFrame:
     t = team.copy()
     if upcoming is not None and len(upcoming):
         add = []
@@ -117,6 +128,15 @@ def _team_frame(team: pd.DataFrame, upcoming: pd.DataFrame | None) -> pd.DataFra
                             "opponent": opp, "season": r.season, "game_date": r.game_date, "is_home": home})
         t = pd.concat([t, pd.DataFrame(add)], ignore_index=True)
     t["nhl_game_id"] = pd.to_numeric(t.nhl_game_id)
+    if team_xg is not None:
+        # Onto the log's own rows (a left join: same rows, same order), so the
+        # xG EWMAs run over exactly the games the other team inputs do.
+        x = team_xg[["nhl_game_id", "team"] + _XG_TEAM_COLS].copy()
+        x["nhl_game_id"] = pd.to_numeric(x.nhl_game_id)
+        x["team"] = x.team.astype(t.team.dtype)
+        x = x.rename(columns={c: f"xg_{c}" for c in _XG_TEAM_COLS})
+        t = t.merge(x, on=["nhl_game_id", "team"], how="left", validate="m:1")
+        t["xg_fin_g"] = t["xg_gf"] - t["xg_xgf"]                  # goals above expected, this game
     t["game_date"] = pd.to_datetime(t.game_date.astype(str).str[:10])
     t = t.sort_values(["team", "game_date", "nhl_game_id"]).reset_index(drop=True)
     for c in _TEAM_COLS[7:]:
@@ -137,6 +157,14 @@ def _team_frame(team: pd.DataFrame, upcoming: pd.DataFrame | None) -> pd.DataFra
     t["pp_opp"], t["pk_opp"] = ew("pp_opportunities", 40), ew("times_shorthanded", 40)
     t["fo"] = ew("faceoff_win_pct", HALF_LIFE_LONG)
     t["sh_pct"] = ew("goals_for", HALF_LIFE_LONG) / t["sf"]
+    if team_xg is not None:
+        t["xgf"], t["xga"] = ew("xg_xgf", HALF_LIFE_LONG), ew("xg_xga", HALF_LIFE_LONG)
+        t["xgf5"], t["xga5"] = ew("xg_xgf_5v5", HALF_LIFE_LONG), ew("xg_xga_5v5", HALF_LIFE_LONG)
+        t["xg_share5"] = t["xgf5"] / (t["xgf5"] + t["xga5"])
+        t["xg_fin"] = ew("xg_fin_g", HALF_LIFE_LONG)
+    else:
+        for c in ("xgf", "xga", "xgf5", "xga5", "xg_share5", "xg_fin"):
+            t[c] = np.nan
     prev = g["game_date"].shift(1)
     t["rest"] = (t["game_date"] - prev).dt.days.clip(upper=6).fillna(6)
     t["b2b"] = (t["rest"] == 1).astype(int)
@@ -173,7 +201,7 @@ def _team_frame(team: pd.DataFrame, upcoming: pd.DataFrame | None) -> pd.DataFra
 
 
 def _goalie_frame(goalie: pd.DataFrame, upcoming: pd.DataFrame | None,
-                  last_starter: dict) -> pd.DataFrame:
+                  last_starter: dict, goalie_xg: pd.DataFrame | None = None) -> pd.DataFrame:
     gl = goalie.copy()
     if upcoming is not None and len(upcoming):
         add = []
@@ -191,6 +219,16 @@ def _goalie_frame(goalie: pd.DataFrame, upcoming: pd.DataFrame | None,
     gl["nhl_game_id"] = pd.to_numeric(gl.nhl_game_id)
     gl["started"] = pd.to_numeric(gl.started).fillna(0).astype(int)
     gl["game_date"] = pd.to_datetime(gl.game_date.astype(str).str[:10])
+    if goalie_xg is not None:
+        # Onto the log's own rows (left join: same rows), so the EWMA spans the
+        # same prior appearances g_sv's does. No row = faced nothing (or no shot
+        # data for that season): 0, as g_sv fills its shots and goals.
+        x = goalie_xg[["nhl_game_id", "player_id"] + _XG_GOALIE_COLS].copy()
+        x["nhl_game_id"] = pd.to_numeric(x.nhl_game_id)
+        x["player_id"] = x.player_id.astype("int64").astype(str)
+        gl = gl.merge(x, on=["nhl_game_id", "player_id"], how="left", validate="m:1")
+        for c in _XG_GOALIE_COLS:
+            gl[c] = pd.to_numeric(gl[c], errors="coerce").fillna(0)
     gl = gl.sort_values(["player_id", "game_date", "nhl_game_id"]).reset_index(drop=True)
     for c in ("shots_against", "goals_against"):
         gl[c] = pd.to_numeric(gl[c], errors="coerce").fillna(0)
@@ -208,6 +246,15 @@ def _goalie_frame(goalie: pd.DataFrame, upcoming: pd.DataFrame | None,
     ga = g["goals_against"].transform(lambda s: s.shift(1).ewm(halflife=GOALIE_HALF_LIFE, min_periods=1).sum())
     k = GOALIE_PRIOR_SHOTS
     gl["g_sv"] = 1 - (ga.fillna(0) + k * lg) / (sa.fillna(0) + k)
+    if goalie_xg is not None:
+        # Goals saved above expected per unblocked shot faced, over his prior
+        # appearances, shrunk toward 0 with the same 300-shot prior.
+        def ews(col):
+            return g[col].transform(lambda s: s.shift(1).ewm(halflife=GOALIE_HALF_LIFE, min_periods=1).sum())
+        ub, xg, gal = (ews(c) for c in _XG_GOALIE_COLS)
+        gl["g_gsax"] = (xg.fillna(0) - gal.fillna(0)) / (ub.fillna(0) + k)
+    else:
+        gl["g_gsax"] = np.nan
     gl["g_starts"] = g.cumcount()
     st = gl[gl.started == 1].drop_duplicates(["game_id", "team"]).copy()
 
@@ -229,7 +276,8 @@ def _goalie_frame(goalie: pd.DataFrame, upcoming: pd.DataFrame | None,
             window = pids[max(0, i - 20):i]
             shares.append(float(np.mean(window == pids[i])) if len(window) else np.nan)
     st["g_share"] = shares
-    return st[["game_id", "team", "player_id", "g_sv", "g_starts", "g_days", "g_starts7", "g_share"]]
+    return st[["game_id", "team", "player_id", "g_sv", "g_starts", "g_days", "g_starts7", "g_share",
+               "g_gsax"]]
 
 
 def _add_rating(games: pd.DataFrame) -> pd.DataFrame:
@@ -252,7 +300,8 @@ def build_inputs(logs: dict, upcoming: pd.DataFrame | None = None) -> pd.DataFra
     """One row per game with every input, as of the game. `upcoming`: games to
     score (game_id, game_date, season, home, away, home_goalie_id,
     away_goalie_id) -- rows with no result yet. The played games come back too,
-    which is the training frame."""
+    which is the training frame. The "xg" group is built only when `logs`
+    carries "team_xg" and "goalie_xg"; otherwise its columns are NaN."""
     games = logs["games"].copy()
     games[["hs", "as_"]] = games[["hs", "as_"]].astype(float)
     if upcoming is not None and len(upcoming):
@@ -267,18 +316,20 @@ def build_inputs(logs: dict, upcoming: pd.DataFrame | None = None) -> pd.DataFra
         s = gl[pd.to_numeric(gl.started) == 1].sort_values(["game_date", "nhl_game_id"])
         last_starter = s.groupby("team").player_id.last().to_dict()
 
-    t = _team_frame(team_log, upcoming)
-    gk = _goalie_frame(gl, upcoming, last_starter)
+    t = _team_frame(team_log, upcoming, logs.get("team_xg"))
+    gk = _goalie_frame(gl, upcoming, last_starter, logs.get("goalie_xg"))
     t = t.merge(gk, on=["game_id", "team"], how="left")
     keep = ["game_id", "gf_l", "ga_l", "gf_s", "ga_s", "sf", "sa", "sat_share", "sh_pct",
             "pp_pct", "pk_pct", "pp_opp", "pk_opp", "fo", "rest", "b2b", "road_trip",
             "g_sv", "g_starts", "g_days", "g_starts7", "g_share", "home_gd", "road_gd",
-            "travel_km", "tz_shift", "player_id"]
+            "travel_km", "tz_shift", "player_id",
+            "xgf", "xga", "xgf5", "xga5", "xg_share5", "xg_fin", "g_gsax"]
     h = t[t.is_home == 1][keep].add_prefix("h_").rename(columns={"h_game_id": "game_id"})
     a = t[t.is_home == 0][keep].add_prefix("a_").rename(columns={"a_game_id": "game_id"})
     df = _add_rating(games).merge(h, on="game_id").merge(a, on="game_id")
     for c in ("gf_l", "ga_l", "gf_s", "ga_s", "sf", "sa", "sat_share", "sh_pct", "pp_pct",
-              "pk_pct", "pp_opp", "pk_opp", "fo", "g_sv"):
+              "pk_pct", "pp_opp", "pk_opp", "fo", "g_sv",
+              "xgf", "xga", "xgf5", "xga5", "xg_share5", "xg_fin", "g_gsax"):
         df[f"d_{c}"] = df[f"h_{c}"] - df[f"a_{c}"]
     df["d_rate"] = df.rate_h - df.rate_a
     df["season"] = pd.to_numeric(df.season)
