@@ -595,6 +595,11 @@ def score_game(conn: DBConnection,
         for p in picks:
             if p.get("signal_type") == "AVOID":
                 p["signal_type"] = "NONE"
+            # The stock tier reads the DraftKings EDGE: for an EV rule it labels
+            # most bets LOW, and an underdog lower than a favourite at the same
+            # EV (UX review, 2026-10-15). The other EV rules (NHL props, NHL
+            # totals) write a fixed MED from their cards; so does this one.
+            p["confidence_tier"] = "MED"
 
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)

@@ -168,6 +168,9 @@ def test_in_the_window_it_bets_ev_and_never_writes_avoid(monkeypatch):
     assert picks["away"]["model_probability"] == pytest.approx(0.70, abs=1e-4)
     # home: 0.30 at +150 -> edge -0.10; the stock path calls that AVOID, this rule does not
     assert picks["home"]["signal_type"] == "NONE"
+    # the stock tier reads the DraftKings edge (the home row's -0.10 -> LOW);
+    # an EV rule carries a fixed MED on every row
+    assert {p["confidence_tier"] for p in picks.values()} == {"MED"}
 
 
 def test_outside_the_window_every_row_is_none_with_the_reason(monkeypatch):
