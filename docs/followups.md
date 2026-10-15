@@ -608,10 +608,10 @@ probabilities of a game sum to 1.144). mike: underdog plus-money bets are
 wanted. Not changed. The measurements stay in `docs/nhl_market_lab.md` as a
 record, not an open question.
 
-## [x] Paper-only for the NHL models — DECIDED 2026-10-01 (mike): they are LIVE
+## [x] Hold-back for the NHL models — DECIDED 2026-10-01 (mike): they are LIVE
 
 *"this is a live model."* Gate not met, his call; recorded in CLAUDE.md §2 and
-at the top of `docs/sports/nhl.md`. No paper-only switch was built.
+at the top of `docs/sports/nhl.md`. No hold-back switch was built.
 
 ## [x] NHL week-one inputs: blended toward last season — BUILT, BACKTESTED, NOT ADOPTED (2026-10-01)
 
@@ -883,9 +883,9 @@ they are untouched until someone measures them.
 so the MLB arm is a small change; MLB Pinnacle prop coverage starts 2026-08-27,
 so the window is thin.
 
-## [ ] Re-score nfl_opener_spread and nfl_wind_totals 2026 paper-track (October)
+## [ ] Re-score nfl_opener_spread and nfl_wind_totals 2026 live track (October)
 
-mike / design review 2026-09-14: paper-track through 2026 with **no unit bump**.
+mike / design review 2026-09-14: live track through 2026 with **no unit bump**.
 Opener retires if 2026 ≤ flat. Wind keeps the physical residual and
 `MAX_FIRE_LEAD=4` (deployed Open-Meteo population). Do not unpause paused XGB
 props. Command: `python -m scripts.nfl_rule_2026_track` (`--settle` runs the

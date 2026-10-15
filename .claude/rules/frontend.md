@@ -43,8 +43,8 @@ walks the import graph symbol by symbol from `BetslipBar` and is the tripwire.
 Add a new app-root component to that test's roots when you mount one.
 
 **A GUARD THAT GREPS FOR A BANNED WORD DOES NOT CATCH THE SAME CLAIM MADE AS A
-NUMBER.** (2026-09-06, Matt: *"Remove all paper trading. we are not doing paper
-trading."*) `mobile/scripts/verify_live_record_start.ts` has banned "paper" in
+NUMBER.** (2026-09-06, Matt: remove every line that tells a member the bets
+are not real money.) `mobile/scripts/verify_live_record_start.ts` has banned "paper" in
 `screens/` and `components/` since 2026-08-30 and passed on every run — while
 four surfaces told members a model was **"not backed for real money until 50+
 settled picks"**. That is CLAUDE.md §2's go-live gate quoted at them row by row:

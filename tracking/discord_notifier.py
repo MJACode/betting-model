@@ -58,7 +58,7 @@ from tracking.publish_filters import captured_not_voided_sql, live_publishable_s
 from tracking.publish_keys import (
     SIGNAL_LEDGER_SQL, channel_lock_held_sql, live_lock_key_sql,
 )
-from tracking.publish_keys import key_partition_sql, lock_key_sql
+from tracking.publish_keys import key_partition_sql, lock_key_sql, posted_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
 from tracking.pick_integrity import refuse_mismatched
@@ -78,6 +78,10 @@ _MAX_429_WAIT = 30.0
 # 204). Keeps _post's boolean contract without pretending we can address
 # the message later -- the delete path ignores it.
 _POST_OK_NO_ID = "ok"
+# What the last _post call actually got back. The recap reads this so a
+# rejected post is a row, not only a log line that disappears with the
+# container. status is the HTTP code, or None when the request never got one.
+_last_delivery: dict = {"status": None, "detail": ""}
 _INTER_POST_SLEEP = 0.6         # webhooks allow ~5 req / 2s; stay well under
 
 _COLOR_SIGNAL = 0x2ECC71        # green
@@ -86,11 +90,6 @@ _COLOR_RESULTS_UP = 0x2ECC71
 _COLOR_RESULTS_DOWN = 0xE74C3C
 _COLOR_RESULTS_FLAT = 0x95A5A6
 _COLOR_VOID = 0x95A5A6          # gray — a void notice is not a bet
-
-# Models whose record is tracked but whose money is not counted (mirrors the
-# mobile RECORD_ONLY_MODELS and the v_model_full_outcome_record zeroing).
-_RECORD_ONLY_MODELS = {"mlb_prop_batter_hr"}
-
 
 # ── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -358,6 +357,13 @@ def _redact_delivery_error(exc: BaseException, url: str) -> str:
     return f"{type(exc).__name__}: {text}"
 
 
+def _remember_delivery(status, detail: str) -> None:
+    """Keep the last webhook outcome, with any webhook URL removed."""
+    text = _WEBHOOK_IN_TEXT.sub("[webhook]", detail or "")
+    _last_delivery["status"] = status
+    _last_delivery["detail"] = text[:180]
+
+
 def _post(url: str, payload: dict) -> str | None:
     """POST one webhook message. Returns the MESSAGE ID on a confirmed success
     and None on failure, so the caller knows both whether it is safe to ledger
@@ -381,9 +387,14 @@ def _post(url: str, payload: dict) -> str | None:
             resp = requests.post(wait_url, json=payload, timeout=_POST_TIMEOUT)
             if resp.status_code in (200, 204):
                 try:
-                    return str(resp.json().get("id") or _POST_OK_NO_ID)
+                    mid = str(resp.json().get("id") or "")
                 except Exception:  # noqa: BLE001 — 204, or a body we can't parse
-                    return _POST_OK_NO_ID
+                    mid = ""
+                if mid:
+                    _remember_delivery(resp.status_code, "")
+                    return mid
+                _remember_delivery(resp.status_code, "no message id")
+                return _POST_OK_NO_ID
             if resp.status_code == 429:
                 try:
                     wait = float(resp.json().get("retry_after", 1.0))
@@ -404,6 +415,7 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook rejected ({resp.status_code}): {resp.text[:200]}")
+            _remember_delivery(resp.status_code, resp.text[:180])
             return None
         except Exception as exc:  # noqa: BLE001 — delivery must never break a run
             # A timeout (or a dropped connection) can mean Discord already
@@ -415,8 +427,10 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook post failed: {_redact_delivery_error(exc, url)}")
+            _remember_delivery(None, _redact_delivery_error(exc, url))
             return False
     logger.error("Discord webhook still rate-limited after retries; will retry next pass")
+    _remember_delivery(429, "rate limited after retries")
     return None
 
 
@@ -1039,18 +1053,10 @@ def _signal_field(s: dict) -> dict:
     # The price the reader should actually take, at the book that has it.
     odds, book = publish_price(s)
 
-    # A record-only model's money is zeroed in every record view and in the
-    # recap, so publishing a stake for it invites a bet we do not count. Say so
-    # instead. mlb_prop_batter_hr was the case: 103 settled picks, 19.4% win at
-    # +393 average odds -- a longshot ledger, not a staking plan.
-    #
     # The stake is grossed up by the price being PUBLISHED, not by DraftKings'.
     # Telling a reader to risk 1.39u at -139 while pointing them at BetMGM's
     # -120 would have them lay 16% more than the bet needs.
-    if s.get("model_id") in _RECORD_ONLY_MODELS:
-        stake = "record only"
-    else:
-        stake = fmt_stake(stake_for(s.get("kelly"), odds))
+    stake = fmt_stake(stake_for(s.get("kelly"), odds))
 
     price = _american(odds)
     if book:
@@ -1300,6 +1306,7 @@ def restate_published_recaps(through: str | None = None,
                                              restate=item)
         except Exception as exc:                          # noqa: BLE001
             logger.error(f"Discord restate {item['game_date']} failed: {exc}")
+            _record_restate_exception(item, exc)
         try:
             posted += notify_x_results(item["game_date"], dry_run=dry_run,
                                        restate=item)
@@ -2014,9 +2021,18 @@ def notify_discord_free_pick(target_date: str | None = None,
 # model bet one event under two game ids, the second copy carries
 # condition_status = config.DUPLICATE_STATUS and counts once, here and on
 # every other record surface. Its result is never touched.
+#
+# POSTED TO DISCORD (owner, 2026-10-14). Daily, the 7-day restatement, and
+# all-time all read this query, and X and the snapshot builder read it too.
+# A settled BET Discord never carried is not in that record. The lock is
+# posted_sql: push_sent discord_signal / discord_live, the same key
+# v_discord_published joins, dropped when a newer discord_void notice holds.
+# The row stays in picks. nfl_live_prop stays out through RECORD_EXCLUSIONS.
 _SETTLED_SQL = r"""
-        SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
-               p.clv_pct, p.is_live
+        SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
+               COALESCE(p.decision_odds, p.dk_odds),
+               CASE WHEN p.clv_method = 'standard_v2' THEN p.clv_pct END,
+               p.is_live
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
@@ -2025,7 +2041,8 @@ _SETTLED_SQL = r"""
           AND p.result IN ('WIN', 'LOSS', 'PUSH')""" \
     + config.record_exclusion_sql("p") \
     + config.paused_row_exclusion_sql("p") \
-    + config.duplicate_copy_exclusion_sql("p") + "\n"
+    + config.duplicate_copy_exclusion_sql("p") \
+    + "\n          AND " + posted_sql("p") + "\n"
 
 
 def _settled_rows(conn, game_date: str) -> list[tuple]:
@@ -2045,9 +2062,9 @@ def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
         (start_date, through)).fetchall()
 
 
-# Fallback for a malformed/zero price on a pick that DOES carry one. Picks with
-# NO price at all are now excluded from the units math entirely (see _tally) --
-# grading them at a -110 that was never available fabricates P&L.
+# Fallback for a malformed/zero price inside _decimal_odds only. The recap
+# tally does not use it: a pick with no taken price is staked at its bare
+# conviction (stake_for), never at a -110 that was not on the board.
 _NO_PRICE_FALLBACK = -110.0
 
 
@@ -2069,19 +2086,23 @@ def units_won(units_risked: float, american) -> float:
 
 
 def _tally(rows: list[tuple]) -> dict:
-    """Record over every graded pick; units over the ones that count.
+    """Win-loss and units over the same graded picks.
 
-    Units convention (Matt, 2026-08-28): a pick's CONVICTION is 1u-3u of units
-    TO WIN, and the stake is grossed up by the price -- risk 1.1u at -110 to win
-    1u -- capped so no single event ever lays more than MAX_RISK_UNITS. `stake`
-    below is therefore the units RISKED: a loss costs it in full and a win pays
-    stake x (decimal - 1), which is the conviction back (or the capped payout).
-    Record-only models (HR) contribute W-L but never units -- mirrors the app.
+    The price column is the price the bet was taken at:
+    COALESCE(decision_odds, dk_odds). Units use that price and the published
+    stake (stake_for): conviction is 1u to win, the stake is grossed up by the
+    price -- risk 1.1u at -110 to win 1u -- capped at MAX_RISK_UNITS. A loss
+    costs the stake. A win pays stake.win, which is the conviction back unless
+    the cap bound. A push returns the stake.
+
+    A pick with no taken price is still in both totals. stake_for stakes it at
+    the bare conviction. It is not dropped, and it is not given a -110 that
+    was never on the board.
     """
-    t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0,
+    t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0,
          "clv_n": 0, "clv_beat": 0, "live": 0}
     for row in rows:
-        _sport, model_id, result, kelly, dk_odds, clv = row[:6]
+        _sport, _model_id, result, kelly, price, clv = row[:6]
         # is_live is optional so a caller passing the older 6-tuple still works.
         is_live = bool(row[6]) if len(row) > 6 else False
         if is_live:
@@ -2102,24 +2123,14 @@ def _tally(rows: list[tuple]) -> dict:
             t["l"] += 1
         else:
             t["p"] += 1
-        # Record-only: counts toward W-L, never toward units.
-        #   - _RECORD_ONLY_MODELS (HR): most picks have no real price, so units
-        #     would be fabricated.
-        #   - ANY pick with no book price: settlement grades it at -110, but
-        #     that price never existed, so reporting units on it invents P&L.
-        #     config.REQUIRE_DK_PRICE stops NEW ones being created; this keeps
-        #     the historical ones out of the published numbers.
-        if model_id in _RECORD_ONLY_MODELS or dk_odds is None:
-            t["record_only"] += 1
-            continue
-        stake = units_for(kelly, dk_odds)
+        stake = stake_for(kelly, price)
         if result == "WIN":
-            t["units"] += units_won(stake, dk_odds)
+            t["units"] += stake.win
         elif result == "LOSS":
-            t["units"] -= stake
+            t["units"] -= stake.risk
         # PUSH returns the stake: no unit change.
         if result != "PUSH":
-            t["risked"] += stake
+            t["risked"] += stake.risk
     return t
 
 
@@ -2138,8 +2149,10 @@ def clv_line(t: dict) -> str:
 
 def _tally_line(t: dict, with_clv: bool = False) -> str:
     rec = f"{t['w']}-{t['l']}" + (f"-{t['p']}" if t["p"] else "")
+    # A push-only slate risked nothing, so there is no ROI to divide by.
+    # The units are still the units: zero, stated, on the same picks as the record.
     if t["risked"] <= 0:
-        base = f"{rec} · record only"
+        base = f"{rec} · {t['units']:+.2f}u"
     else:
         roi = t["units"] / t["risked"] * 100
         base = f"{rec} · {t['units']:+.2f}u · {roi:+.1f}% ROI"
@@ -2164,7 +2177,7 @@ def snapshot_rows(game_date: str, published_at: str,
         roi = (t["units"] / t["risked"] * 100) if t["risked"] > 0 else None
         clv = (t["clv_beat"] / t["clv_n"] * 100) if t.get("clv_n") else None
         out.append((game_date, scope, sport, t["w"], t["l"], t["p"], settled,
-                    t["record_only"], round(t["units"], 4),
+                    round(t["units"], 4),
                     round(t["risked"], 4), None if roi is None else round(roi, 4),
                     t.get("clv_n", 0), t.get("clv_beat", 0),
                     None if clv is None else round(clv, 4), published_at))
@@ -2187,14 +2200,14 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
         conn.executemany("""
             INSERT INTO results_snapshots (
                 game_date, scope, sport, wins, losses, pushes, settled,
-                record_only, units, risked, roi_pct, clv_graded, clv_beat,
+                units, risked, roi_pct, clv_graded, clv_beat,
                 clv_pct, published_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (game_date, scope, COALESCE(sport, ''))
             DO UPDATE SET
                 wins=EXCLUDED.wins, losses=EXCLUDED.losses,
                 pushes=EXCLUDED.pushes, settled=EXCLUDED.settled,
-                record_only=EXCLUDED.record_only, units=EXCLUDED.units,
+                units=EXCLUDED.units,
                 risked=EXCLUDED.risked, roi_pct=EXCLUDED.roi_pct,
                 clv_graded=EXCLUDED.clv_graded, clv_beat=EXCLUDED.clv_beat,
                 clv_pct=EXCLUDED.clv_pct, published_at=EXCLUDED.published_at
@@ -2206,6 +2219,92 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
             conn.rollback()          # clear an aborted transaction
         except Exception:                            # noqa: BLE001
             pass
+
+
+def _record_delivery_failure(conn, lock_key: str, kind: str, detail: str) -> None:
+    """One row for the latest failed attempt. The success kind is untouched,
+    so the next pass tries again. message_id holds the reason: this table has
+    no other text column, and the reason is what a later read has to see."""
+    fail_kind = f"{kind}_error"
+    safe = _WEBHOOK_IN_TEXT.sub("[webhook]", (detail or "unconfirmed"))[:180]
+    try:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (lock_key, kind) DO UPDATE SET "
+            "sent_at = EXCLUDED.sent_at, message_id = EXCLUDED.message_id",
+            (lock_key, fail_kind, datetime.now(ET).isoformat(), safe),
+        )
+        conn.commit()
+    except Exception as exc:                              # noqa: BLE001
+        logger.error(f"Discord delivery failure was not recorded "
+                     f"({type(exc).__name__})")
+
+
+def _delivery_failure_reason(message_id) -> str:
+    status = _last_delivery.get("status")
+    detail = (_last_delivery.get("detail") or "").strip()
+    if message_id == _POST_OK_NO_ID:
+        reason = "Discord returned no message id"
+    else:
+        reason = "Discord post was not confirmed"
+    if status is not None:
+        reason = f"HTTP {status}: {reason}"
+    if detail and detail not in reason:
+        reason = f"{reason}; {detail}"
+    return reason[:180]
+
+
+def _record_restate_exception(item: dict, exc: BaseException) -> None:
+    """A restatement that raised still leaves a row. The log line alone is
+    gone when the container is."""
+    conn = get_connection()
+    try:
+        key = restate_lock_key("discord_results_restate", item["game_date"],
+                               item["published_at"])
+        _record_delivery_failure(
+            conn, key, "discord_results_restate",
+            f"{type(exc).__name__}: {exc}")
+    except Exception as inner:                            # noqa: BLE001
+        logger.error(f"Discord restate failure was not recorded "
+                     f"({type(inner).__name__})")
+    finally:
+        conn.close()
+
+
+def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
+    """The recap's all-time block: one overall field, then one per sport.
+    The daily recap and the standalone full-record post both render this."""
+    all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
+    all_overall = _tally(all_rows)
+    all_by_sport: dict[str, list[tuple]] = {}
+    for r in all_rows:
+        all_by_sport.setdefault(r[0], []).append(r)
+    fields = [{
+        "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
+        "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
+                 f"{len(all_rows)} settled",
+        "inline": False,
+    }]
+    for sport, group in sorted(all_by_sport.items()):
+        fields.append({
+            "name": f"{sport} (all-time)",
+            "value": _tally_line(_tally(group), with_clv=True),
+            "inline": False,
+        })
+    return fields, all_overall, len(all_rows)
+
+
+def all_time_embed(conn, through: str) -> dict:
+    """The full record as its own recap-style embed (same builder, colours and
+    lines as the daily recap's all-time block)."""
+    fields, overall, _n = all_time_fields(conn, through)
+    pretty = datetime.fromisoformat(through).strftime("%a %b %d").replace(" 0", " ")
+    color = (_COLOR_RESULTS_UP if overall["units"] > 0
+             else _COLOR_RESULTS_DOWN if overall["units"] < 0
+             else _COLOR_RESULTS_FLAT)
+    return {"title": f"\U0001F4CA Results — All-time through {pretty}",
+            "color": color, "fields": fields}
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
@@ -2276,23 +2375,12 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # whether the thing works -- 4-3 is noise either way -- so the running
         # record travels with it, broken out by sport for the same reason the
         # day is.
+        fields.extend(all_time_fields(conn, game_date)[0])
         all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, game_date)
         all_overall = _tally(all_rows)
         all_by_sport: dict[str, list[tuple]] = {}
         for r in all_rows:
             all_by_sport.setdefault(r[0], []).append(r)
-        fields.append({
-            "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
-            "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
-                     f"{len(all_rows)} settled",
-            "inline": False,
-        })
-        for sport, group in sorted(all_by_sport.items()):
-            fields.append({
-                "name": f"{sport} (all-time)",
-                "value": _tally_line(_tally(group), with_clv=True),
-                "inline": False,
-            })
 
         color = (_COLOR_RESULTS_UP if overall["units"] > 0
                  else _COLOR_RESULTS_DOWN if overall["units"] < 0
@@ -2315,14 +2403,28 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             logger.info(f"[dry-run] discord(results) {game_date} → {_tally_line(overall)}")
             return 0
 
-        if not _post(url, {"embeds": [embed]}):
-            return 0                      # un-ledgered: retried on the next pass
+        # _post appends ?wait=true and returns the message id. A 2xx with no
+        # id used to be ledgered as a success. The row then
+        # blocked every retry, and the message could not be opened. Measured
+        # 2026-10-14: the Oct 13 restatement is that row (null message_id)
+        # and it is not a message anyone can find. No id is not a delivery.
+        _last_delivery["status"] = None
+        _last_delivery["detail"] = ""
+        message_id = _post(url, {"embeds": [embed]})
+        stored_id = (message_id if isinstance(message_id, str)
+                     and message_id not in ("", _POST_OK_NO_ID) else None)
+        if not stored_id:
+            reason = _delivery_failure_reason(message_id)
+            logger.error(f"Discord(results) {game_date} "
+                         f"{'restate ' if restate else ''}not confirmed ({reason})")
+            _record_delivery_failure(conn, lock_key, kind, reason)
+            return 0
 
         published_at = datetime.now(ET).isoformat()
         conn.execute(
-            "INSERT INTO push_sent (lock_key, kind, sent_at) "
-            "VALUES (%s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (lock_key, kind, published_at),
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, kind, published_at, stored_id),
         )
         # The post has gone out, so its ledger row commits NOW, on its own.
         # It used to share one transaction with the snapshot below, which

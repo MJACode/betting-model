@@ -538,6 +538,17 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The in-play NFL leader moneyline (nfl_live_leader/, LIVE 2026-10-13): late
+  // in the 4th quarter, the team up 4-16 on DraftKings' live moneyline when
+  // its win probability beats the price by 2 points. Same chip as the NCAAF
+  // live moneyline; its picks appear on the Live segment only.
+  nfl_live_leader_ml: {
+    shortLabel: 'LIVE ML',
+    longLabel: 'Live Leader Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // The in-play NFL prop model (nfl/live_model). LIVE since 2026-09-05 with the
   // §2 go-live gate deliberately not met (Matt's call).
   //

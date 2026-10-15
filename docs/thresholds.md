@@ -117,10 +117,10 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
-| `mlb_prop_batter_hr`     | — | — | **RETIRED 2026-09-02 (matt).** Removed from `PROP_MODELS`, the app and every model total. Final record 256 settled BETs 42-214 (a ~17%-hit longshot market; the +EV filter was anti-predictive against DK's efficient longshot line). Was 22.5% prob-only (2026-06-26), already record-only and already excluded from the public record since 2026-07-04. Picks stay in the DB and keep grading (§1c). |
+| `mlb_prop_batter_hr`     | — | — | **RETIRED 2026-09-02 (matt).** Removed from `PROP_MODELS`, the app and every model total. Final record 256 settled BETs 42-214 (a ~17%-hit longshot market; the +EV filter was anti-predictive against DK's efficient longshot line). Was 22.5% prob-only (2026-06-26). Full-outcome units were forced to 0 from 2026-07-05 until 2026-10-14, and it was already out of the public model totals. Picks stay in the DB and keep grading (§1c). |
 | `mlb_prop_batter_rbi`    | — | — | **RETIRED 2026-09-02 (matt).** Removed from `PROP_MODELS`, the app and every model total. Lifetime 293 settled BETs 214-79, but only ONE clears the 0.62/0.12 cut it was re-cut to on 2026-08-31 (mike), on the most floor-distorted sweep on the board (47.6% of rows refused by the -140 floor). Previously 47%/16% + -140 floor (2026-07-11); 2026-08-09 clean record after the is_live repair 30 bets 11-19 +14.8%. Picks stay in the DB and keep grading (§1c). |
 | `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** (Matt) — with the -140 floor grades 40 bets 21-19 +24.6%; robust edge≥0.16 band (+15..+25% across prob 0.45-0.50). Evidence is May-June (July/Aug dead-zone rows were destroyed by the retired NONE cleanup) — re-sweep after ~40 clean picks |
-| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
+| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, re-sweep after more settled picks |
 | `mlb_prop_batter_walks`  | 45% | 14% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 18 bets +37.0% vs +2.5% uncapped (thin, directional) |
 
 **Action filter** (`ACTION_THRESHOLDS`) — display filter for dashboard and Claude mobile:
@@ -146,10 +146,10 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hr`     | — | — | RETIRED 2026-09-02 (matt) — see the row above. |
 | `mlb_prop_batter_rbi`    | — | — | RETIRED 2026-09-02 (matt) — see the row above. |
 | `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** — with floor +24.6%/40 (May-June evidence; re-sweep after ~40 clean picks) |
-| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
+| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal |
 | `mlb_prop_batter_walks`  | 45% | 14% | + DK ≥ -140 price floor (2026-07-11): capped +37.0%/18 (thin) |
 
-*(Updated 2026-06-06 — MLB thresholds re-optimized from this season's settled BET picks (flat ROI at real DK odds) via a full prob×edge sweep, "pause nothing". 3 cuts changed vs 2026-06-03: over_under LOWERED to 68%/12% (+22.2%/18), batter_tb raised to 88%/12% (+6.9%/24), runline lowered to 68%/10% (only positive cut, +1.1%/12). In-sample tuning on small samples — forward ROI will regress; only the high-volume batter props (hits/runs/rbi), moneyline and f5_ml are statistically trustworthy. Pitcher props, SB, HR have no profitable cut — kept live at least-bad cut, flagged for a 2026 retrain. batter_sb v2 retrain (2026-06-12) lifted AUC 0.528→0.567 but stays paper-only. Prior values in git history.)*
+*(Updated 2026-06-06 — MLB thresholds re-optimized from this season's settled BET picks (flat ROI at real DK odds) via a full prob×edge sweep, "pause nothing". 3 cuts changed vs 2026-06-03: over_under LOWERED to 68%/12% (+22.2%/18), batter_tb raised to 88%/12% (+6.9%/24), runline lowered to 68%/10% (only positive cut, +1.1%/12). In-sample tuning on small samples — forward ROI will regress; only the high-volume batter props (hits/runs/rbi), moneyline and f5_ml are statistically trustworthy. Pitcher props, SB, HR have no profitable cut — kept live at least-bad cut, flagged for a 2026 retrain. batter_sb v2 retrain (2026-06-12) lifted AUC 0.528→0.567 but stays marginal. Prior values in git history.)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -316,11 +316,67 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ### Learning Log
 
-*(Paper trading evaluation starts 2026-04-14 (v8 models). First review after 10 settled filtered picks from that date.)*
+*(Evaluation starts 2026-04-14 (v8 models). First review after 10 settled filtered picks from that date.)*
 
 ---
 
 ---
+
+## `nfl_live_leader_ml` cut, 2026-10-13 (mike: "reenable the model"): edge ≥ 0.02 at DraftKings
+
+The NFL in-play leader moneyline (`nfl_live_leader/`, `docs/sports/nfl.md`).
+**Cut: edge ≥ 0.02, no probability floor** (`ACTION_THRESHOLDS` 0.0 / 0.02),
+where edge = the model's win probability − 1/decimal of DraftKings' price for
+the leader, vig included. It is the study's pre-registered cut, not a swept one.
+**Go-live gate: 0 settled of 50.**
+
+| Season | Graded with | Bets | Units | Return | Pushes |
+|---|---|---|---|---|---|
+| 2024 | 2016-2023 fit | 87 | +13.79 | +15.8% | 0 |
+| 2025 | 2016-2024 fit | 80 | +1.84 | +2.3% | 1 |
+| Pooled | | 167 | +15.62 | +9.4% (90% CI +1.8% to +16.8%, p 0.022) | 1 |
+
+Source: `scripts/nfl_edge_inplay_2024.py` run 2 (`inplay2024_out_run2.txt`),
+reproduced bet for bet by `python -m scripts.build_nfl_live_leader_artifact
+--parity` with the model's decision function, on the study's own states.
+**Marginal:** it did not survive the study's pre-registered multiple-testing
+family, 2025 alone is flat, and the shipped fit (2016-2025) has seen both
+graded seasons. On the same frames the shipped fit keeps 154 of the 167 graded
+bets, drops 13 and adds 19.
+
+**The population of record is 163 bets, +13.08u, +8.0%** (`--population`): the
+same snapshots with the loop's refusals (no state straight after a score or a
+conversion try) and DraftKings' pre-kickoff spread for the favourite band.
+The game state reaches the loop some seconds after the quote. ESPN posted
+plays a median 23 s after the snap on the two games measured, and the loop
+reads every 20 s, so the 15 to 45 s rows are the ones to expect: 162 bets
++12.21u, 159 bets +11.03u, 160 bets +12.01u. 2025 alone falls from +2.17u at 0 s
+to −0.44u at 45 s. At the published stake (1u to win, risk capped at 3u),
+which lays 2-3u on this model's short prices, the population of record is
++19.92u on 401.2u risked, +5.0%, falling to +2.1% at 45 s. The full tables are
+in `docs/sports/nfl.md`.
+
+Neighbouring cuts in the same study (pooled, DraftKings): 0.04 → 149 bets
++16.40u +11.0% (p 0.017); 0.06 → 125 bets +11.70u +9.4% (p 0.061); 0.02 inside
+5:00 instead of 10:00 → +3.9% to +5.3% (p 0.21-0.26). Not a plateau test — the
+cut grid was three values, fixed before grading.
+
+**The platform floors are set so they cannot bind** (`config.py`): price floor
+−5000 (the study's entries ran −4000 to +180, median −330), own EV floor 0.02
+(EV = edge × decimal ≥ edge, so every qualifying bet clears it; smallest EV in
+the 167 was 0.0205), and it decides on its own probability. Measured with the
+production decision function, applied inside the rule:
+
+| Gate | Bets | Units |
+|---|---|---|
+| none (the rule) | 167 | +15.62 |
+| price ≥ −200 (the platform default) | 67 | +16.19 |
+| EV ≥ 0.20 (the global floor) | 69 | +16.94 |
+| both | 56 | +12.60 |
+
+These are after-the-fact cuts on the same two seasons and are NOT the rule;
+2025 stays flat under all three (+3.02u, +1.73u, +0.71u). Re-read the cut on
+its own settled record at ~50 bets.
 
 ## NHL — every model's cut and the backtest behind it (2026-10-03)
 
@@ -696,7 +752,7 @@ app and Discord apply it before the 6am sync. The seven open Week-1 picks
 below 2.0 were voided (`scripts/void_picks.py`, reason on each row); the
 settled SF @ LA win stands; BUF @ HOU at |dev| 2.0 stands.
 
-**2026 paper-track:** no unit bump. Retire if 2026 finishes ≤ flat. Command:
+**2026 live track:** no unit bump. Retire if 2026 finishes ≤ flat. Command:
 `python -m scripts.nfl_rule_2026_track`. `docs/nfl_rule_2026_track.md`. Wind
 (`nfl_wind_totals`) is the sibling track: `MAX_FIRE_LEAD` stays 4, physical
 residual, deployed Open-Meteo population. Do not unpause paused XGB props.
@@ -955,7 +1011,7 @@ quote declined as stale on most passes -- pollers logs, 2026-09-11 01:25Z).
 
 Stopped BET emission for eleven `nfl_prop_*` entries in `PROP_MODELS` (still
 score NONE rows; cuts kept). Ten from #710, then `nfl_prop_sacks` the same
-day as a design-review follow-up (thin / paper-only; never a live BET lane).
+day as a design-review follow-up (thin market, paused; not a BET lane).
 **Not paused:** `nfl_prop_tackles_assists` (clean record after the gamebook
 TOT fix), plus the rule/market/live lanes `nfl_prop_market`,
 `nfl_wind_totals`, `nfl_live_prop`, `nfl_opener_spread`.

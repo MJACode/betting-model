@@ -1,5 +1,11 @@
 # AGENTS
 
+**Every model is live real money.** A graded pick counts in the win-loss
+record and in the units, at the stake and profit of the price it was taken
+at. There is no mode that keeps the record and drops the units, and no
+hold-back ledger. Do not add one. Thresholds, stake sizes, and pause state
+change only when someone asks for that change.
+
 **One subagent works. One scheduled agent does not, and the table below says so
 rather than describing what it was meant to do.**
 

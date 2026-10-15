@@ -768,7 +768,7 @@ totals vs DraftKings open          0.04   1,739    -9.0   -0.5%   4.7      -1.8 
   is the closing-line value**: the bets beat Pinnacle's close 61-67% of the
   time at 0.06 in every season, +0.5 to +0.9 points of no-vig probability.
   The model reads something the opening price lacks; it is not enough to
-  beat the price. **Not a model to bet.** A paper-only run at DraftKings'
+  beat the price. **Not a model to bet.** A measured run at DraftKings'
   open at 0.06 would be the honest next measurement, if any.
 - **Puck line: a peak, not a plateau.** +11.8% at 0.08 on 493 is two seasons
   (+19.9, +15.5) against two negative-or-flat, and 0.06 either side reads

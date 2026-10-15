@@ -88,10 +88,9 @@ export const MIN_PICKS_FOR_COLOURED_ROI = 10;
  * It says NOTHING about a go-live gate, and it takes no count. It used to read
  * "N of 50 settled · too few to judge", quoting the >= 50-settled bar from
  * CLAUDE.md §2 — which announced "this model is not backed yet" on every row
- * that had not reached it (Matt, 2026-09-06: *"Remove all paper trading ... we
- * are not doing paper trading"*, first on `ncaaf_live_win_prob`, then on
- * `ncaaf_spread` showing the same line). The platform is live; a
- * progress bar toward being backed described something it does not do.
+ * that had not reached it (Matt, 2026-09-06, first on `ncaaf_live_win_prob`,
+ * then on `ncaaf_spread` showing the same line). Every model is live real
+ * money; a progress bar toward being backed described something the app does not do.
  *
  * What survives is arithmetic, not status: below MIN_PICKS_FOR_COLOURED_ROI
  * decided bets a percentage is noise — `ncaaf_live_win_prob` is 0-1 and renders

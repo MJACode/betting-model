@@ -21,25 +21,26 @@ def _fn(name: str) -> str:
     return "\n".join(text.splitlines()[fn.lineno - 1:fn.end_lineno])
 
 
-def test_price_clv_uses_the_no_vig_helper_not_raw_implied():
+def test_capture_grades_raw_same_book_and_a_separate_pinnacle_edge():
     src = _fn("_capture_clv")
-    assert "price_clv_pct(" in src
+    assert "same_book_clv(" in src
+    assert "market_edge_clv(" in src
+    assert "price_clv_pct(" not in src
     assert "american_to_implied_prob" not in src
-    assert "if not line_moved:" in src
-    assert "bet_other_prices=" in src
-    assert "bet_book=bookmaker" in src
-    # Lock two-way comes from the pick-book snapshot at created_at, never
-    # from the close's other side (those are two timestamps).
-    assert "bet_other_prices=other_side_prices(closing" not in src
-    assert "_locked_other_prices(" in src
-    assert "market, created_at, bookmaker" in src
-    assert "prop_market, created_at" in src
+    assert "and not line_moved:" in src
+    assert "_locked_other_prices(" not in src
+    assert "bet_other_prices=" not in src
+    assert "pick_book=bookmaker" in src
+    assert "pick_book=sharp" in src
 
 
-def test_lock_two_way_is_only_used_when_the_snapshot_matches_dk_odds():
-    src = _fn("_locked_other_prices")
-    assert "int(side) != int(float(locked_price))" in src
-    assert "return []" in src
+def test_a_missing_bet_book_close_is_not_filled_from_another_book():
+    game = _fn("_first_game_close")
+    prop = _fn("_first_prop_close")
+    assert "close_book_candidates" not in game
+    assert "close_book_candidates" not in prop
+    assert "No other book is tried" in game
+    assert "No other book" in prop
 
 
 def test_game_close_never_falls_back_past_first_pitch():
@@ -57,29 +58,26 @@ def test_prop_close_stays_bounded_at_first_pitch():
     assert "snapshot_at::timestamptz <= %s::timestamptz" in src
 
 
-def test_sharp_close_is_tried_before_the_pick_book():
-    game = _fn("_first_game_close")
-    prop = _fn("_first_prop_close")
-    assert "close_book_candidates(pick_book, SHARP_BOOKMAKERS)" in game
-    assert "close_book_candidates(pick_book, SHARP_BOOKMAKERS)" in prop
+def test_pinnacle_is_a_second_lookup_not_the_headline_close():
     cap = _fn("_capture_clv")
+    assert "_sharp_close_book()" in cap
     assert "_first_prop_close(" in cap
     assert "_first_game_close(" in cap
+    sharp = _fn("_sharp_close_book")
+    assert "close_book_candidates(" in sharp
 
 
 def test_capture_stamps_method_and_close_book():
     src = _fn("_capture_clv")
-    assert "clv_method      = %s" in src
-    assert "clv_close_book  = %s" in src
+    assert "clv_method          = %s" in src
+    assert "clv_close_book      = %s" in src
 
 
-def test_backfill_revisits_legacy_raw_rows():
-    """Otherwise the pedigree view filters them out forever and the app
-    Sharp Score goes to zero until someone notices."""
+def test_backfill_revisits_anything_that_is_not_standard_v2():
     src = _fn("_backfill_clv")
-    assert "p.clv_method = %s" in src
+    assert "p.clv_method IS DISTINCT FROM %s" in src
     cap = _fn("_capture_clv")
-    assert "p.clv_method = %s" in cap
+    assert "p.clv_method IS DISTINCT FROM %s" in cap
 
 
 def test_pedigree_view_excludes_legacy_raw():
@@ -97,11 +95,12 @@ def test_column_migration_stamps_existing_rows_legacy():
     assert "ADD COLUMN IF NOT EXISTS clv_close_book" in sql
 
 
-def test_opening_signals_use_the_same_no_vig_formula_and_same_line_guard():
+def test_opening_signals_store_same_book_raw_pp_and_the_same_line_guard():
     src = (ROOT / "tracking" / "opening_signals.py").read_text(encoding="utf-8")
-    assert "from tracking.clv_math import other_side_prices, price_clv_pct" in src
+    assert "from tracking.clv_math import same_book_clv" in src
+    assert "price_clv_pct(" not in src
     assert "if close_price is not None and not line_moved:" in src
-    assert "price_clv_pct(" in src
+    assert "same_book_clv(" in src
     assert "_first_game_close(" in src
 
 

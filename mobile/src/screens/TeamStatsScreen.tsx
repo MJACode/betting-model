@@ -294,9 +294,9 @@ export function TeamStatsScreen() {
         <SectionTitle
           title="Our picks on this team"
           tooltip={{
-            title: 'Settled bets only',
+            title: 'Posted bets only',
             body:
-              `Every settled BET our models made in ${team}’s last ${RECORD_GAMES} games, split by side. ` +
+              `Posted settled bets in ${team}’s last ${RECORD_GAMES} games, split by side. A pick Discord did not post is left out. ` +
               'Results are in units: one unit is one flat bet. A pick that carried no price counts in the ' +
               'record but not the units, so nothing here is priced at an invented −110.',
           }}
@@ -308,7 +308,7 @@ export function TeamStatsScreen() {
             <Text style={styles.muted}>
               {d.picks.error
                 ? `Couldn’t load our picks. ${friendlyCause(d.picks.error)} Pull down to retry.`
-                : `No settled picks in ${team}’s last ${Math.min(RECORD_GAMES, d.recent.data.length) || RECORD_GAMES} games.`}
+                : `No posted picks in ${team}’s last ${Math.min(RECORD_GAMES, d.recent.data.length) || RECORD_GAMES} games.`}
             </Text>
           </Card>
         ) : (
@@ -322,9 +322,14 @@ export function TeamStatsScreen() {
               <RecordTile label="Unders" record={d.pickRecords.under} />
             </View>
             <Text style={styles.footnote}>
-              {d.pickRecords.settled} settled {d.pickRecords.settled === 1 ? 'bet' : 'bets'} in the last{' '}
-              {Math.min(RECORD_GAMES, d.recent.data.length)} games, live picks included.
+              {d.pickRecords.settled} posted {d.pickRecords.settled === 1 ? 'bet' : 'bets'} in the last{' '}
+              {Math.min(RECORD_GAMES, d.recent.data.length)} games, in-play bets included.
             </Text>
+            {d.pickRecords.ledgerUnread ? (
+              <Text style={styles.footnote}>
+                The Discord check did not finish, so this record can include picks whose posting status is unknown.
+              </Text>
+            ) : null}
           </>
         )}
 

@@ -44,7 +44,7 @@ python run_pipeline.py --step model-quality
 
 ---
 
-## NFL 2026 paper-track (opener + wind)
+## NFL 2026 live track (opener + wind)
 
 Not a retrain and not a unit bump. Re-score the two fragile §28 rules:
 

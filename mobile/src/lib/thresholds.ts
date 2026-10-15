@@ -120,30 +120,12 @@ export function isContaminatedPregamePick(pick: {
   return pick.is_live === true && !isLiveModel(pick.model_id);
 }
 
-// Record-only models — their picks still grade and their W-L record is shown,
-// but they NEVER count toward any displayed record, P&L, or ROI total. Mirrors
-// the DB views: v_public_track_record excludes HR entirely (2026-07-04) and
-// v_model_full_outcome_record forces units=0 / roi NULL for HR (2026-07-05).
-// Rationale: most HR picks carry no real DK price, so counting them adds pure
-// W-L drag with a fabricated -110 P&L.
-// 2026-09-02: HR is RETIRED, and passesActionFilter refuses a retired model
-// before this set is ever consulted — so no live model is record-only today.
-// The mechanism stays for the next prob-only longshot market.
-export const RECORD_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
-
-// A settled pick with NO book price contributes no money — no profit, no
-// stake. Its W-L still counts. Settlement grades an unpriced pick at a -110
-// that never existed (tracking/paper_tracker), so its profit_flat is
-// fabricated: +$90.91 on a win nobody could have placed. The DB side already
-// refuses that money — v_public_track_record / _daily keep the W-L and sum
-// profit and stake over priced picks only (migration
-// require_price_for_published_units, 2026-08-31) — and Discord's recap tallies
-// it as record-only. Every app tally goes through here so the Models tab, the
-// custom-model fallback and the daily recap can never price a pick the Record
-// tab refuses to. Found on the UFC card, 2026-09-03: the Models tab summed 11
-// unpriced picks and showed Total Rounds +13.0% on the same 8-5 the Record tab
-// printed at -26.6%. config.REQUIRE_DK_PRICE stops new unpriced BETs; this
-// covers the ones that already exist.
+// A settled pick's units are its stored profit at the price it was taken at.
+// Settlement writes profit_flat from COALESCE(decision_odds, dk_odds). When
+// both prices are null that stored profit was filled in at -110, which was
+// never on the board, so those units stay out. Every priced graded pick is
+// in the units. There is no second set that counts in the record and not
+// in the money.
 export function flatPnl(p: {
   dk_odds: number | null;
   profit_flat: number | null;
@@ -152,8 +134,6 @@ export function flatPnl(p: {
   profit: number;
   staked: number;
 } {
-  // "Priced" means a price the pick was decided at; settlement fabricates
-  // -110 only when there was none (decision_odds AND dk_odds both NULL).
   if (p.decision_odds == null && p.dk_odds == null) return { profit: 0, staked: 0 };
   return { profit: Number(p.profit_flat ?? 0), staked: 100 };
 }
@@ -387,6 +367,18 @@ export function passesRecordFilter(p: RecordFilterable): boolean {
   // of the record path uses, so this cannot drift from the DB views.
   if (isContaminatedPregamePick(p)) return false;
   return true;
+}
+
+/**
+ * The published record is the picks Discord still has.
+ *
+ * `unpublished` is the only state that leaves. Omitted and `unknown` stay:
+ * the ledger was not read, or the read failed, and either one must not wipe
+ * a settled bet. This is not inside passesRecordFilter. A custom backtest
+ * still sees every scored pick.
+ */
+export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null }): boolean {
+  return p.discordPublish !== 'unpublished';
 }
 
 /**

@@ -8,7 +8,7 @@ and the flow model's whole measured edge turned out to be harvesting that
 rather than forecasting better than the book.
 
 A bias that has since been corrected closes the lane. A bias that persists into
-a third season is worth paper trading. Either way no model is trained here, so
+a third season is worth running forward. Either way no model is trained here, so
 the answer cannot be an artifact of one.
 
     python -m live_model.backtest.flow_bias --seasons 2025
