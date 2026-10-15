@@ -328,6 +328,23 @@ def is_locked(conn, game_id: str) -> bool:
     return bool(_locked_live_lanes(conn, game_id, (MODEL_ID,)))
 
 
+def unsettled_bet_dates(conn) -> set[str]:
+    """Slate dates holding an unsettled live BET of this model. Every launch
+    announces them, so a post that failed -- a webhook error, the Discord live
+    lock held by another loop, or a deploy that killed the process between
+    the insert and the post -- is retried by the next launch until the pick is
+    graded (both notifiers then skip it). A posted bet is a no-op: the ledgers
+    dedupe. Bounded to the last few days."""
+    since = (datetime.now(timezone.utc) - timedelta(days=4)).date().isoformat()
+    rows = conn.execute("""
+        SELECT DISTINCT game_date FROM picks
+        WHERE model_id = %s AND is_live = TRUE
+          AND signal_type = 'BET' AND result IS NULL
+          AND game_date >= %s
+    """, (MODEL_ID, since)).fetchall()
+    return {str(r[0])[:10] for r in rows}
+
+
 def notify_live(target_date: str) -> None:
     """Push, then Discord live (DISCORD_WEBHOOK_LIVE_NFL for NFL) -- the
     ncaaf_live path. Both dedupe through their ledgers; neither may break the
@@ -422,6 +439,18 @@ def main(argv=None) -> int:
             conn = get_connection()
         return conn
 
+    if not a.dry_run:
+        # The published record counts a settled BET only while Discord holds
+        # its post (CLAUDE.md section 1c), so a bet that never posted is a bet
+        # that silently leaves the record. Pick up any this model still owes.
+        try:
+            bet_dates |= unsettled_bet_dates(_conn())
+            if bet_dates:
+                log.info("standing BETs to announce: %s", ", ".join(sorted(bet_dates)))
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("could not read standing BETs (non-fatal): %s", exc)
+            conn = _recycle(conn)
+
     try:
         while True:
             started = time.monotonic()
@@ -472,6 +501,12 @@ def main(argv=None) -> int:
             if not live:
                 idle += 1
                 if idle >= IDLE_EXIT_TICKS or a.once:
+                    if bet_dates and not a.dry_run:
+                        # Its game has left the board (final, or this process
+                        # started after it), so this is the bet's last chance in
+                        # this process; the next launch, ten minutes on, retries.
+                        for d_ in sorted(bet_dates):
+                            notify_live(d_)
                     log.info("no NFL game in progress for %d tick(s) - exiting (%d BETs written)",
                              idle, bets_written)
                     return 0

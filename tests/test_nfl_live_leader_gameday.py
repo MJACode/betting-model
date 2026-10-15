@@ -333,9 +333,10 @@ def test_one_bet_per_game_and_the_five_minute_cadence(monkeypatch):
     rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, payload)
     assert rc == 0
     assert len(writes) == 1 and writes[0]["pick_label"] == "TB ML (live)"
-    # Announced on the pass that wrote it, then re-asked at most every 300 s
-    # so a failed post is retried (the notifiers' ledgers make repeats no-ops).
-    assert set(notes) == {"2026-10-08"} and 2 <= len(notes) <= 4
+    # Announced on the pass that wrote it, re-asked at most every 300 s, and
+    # once more on the way out, so a failed post is retried (the notifiers'
+    # ledgers make repeats no-ops).
+    assert set(notes) == {"2026-10-08"} and 3 <= len(notes) <= 5
     e1_evals = [t for e, t in evals if e == "E1"]
     e2_evals = [t for e, t in evals if e == "E2"]
     assert e1_evals == [0.0]
@@ -467,3 +468,31 @@ def test_the_session_call_cap_stops_calling(monkeypatch):
     for _ in range(O.SESSION_CALL_CAP + 5):
         assert feed.fetch() is None
     assert S.n == O.SESSION_CALL_CAP
+
+
+def test_standing_bets_are_this_models_unsettled_live_bets():
+    conn = FakeConn([[("2026-10-08",)]])
+    assert G.unsettled_bet_dates(conn) == {"2026-10-08"}
+    sql, params = conn.sql[0]
+    assert "is_live = TRUE" in sql and "result IS NULL" in sql and "signal_type = 'BET'" in sql
+    assert params[0] == G.MODEL_ID
+
+
+def test_a_launch_reannounces_a_standing_bet_after_its_game_left_the_board(monkeypatch):
+    """A bet written by an earlier process whose post failed, or that a deploy
+    killed between the insert and the post, is re-announced by every later
+    launch until it is graded -- even when its game is already final, so the
+    slate has nothing in progress. No odds call is made for it."""
+    monkeypatch.setattr(G, "unsettled_bet_dates", lambda conn: {"2026-10-08"})
+    final = live_state(eid="E1", state="post", final=True, evaluable=False)
+    final2 = live_state(eid="E2", state="post", final=True, evaluable=False)
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, [{"E1": final, "E2": final2}] * 4, None)
+    assert rc == 0 and writes == [] and evals == []
+    assert notes == ["2026-10-08"] and feed.fetches == 0
+
+
+def test_a_slate_with_nothing_owed_announces_nothing(monkeypatch):
+    final = live_state(eid="E1", state="post", final=True, evaluable=False)
+    final2 = live_state(eid="E2", state="post", final=True, evaluable=False)
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, [{"E1": final, "E2": final2}] * 4, None)
+    assert rc == 0 and notes == []
