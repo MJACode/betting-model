@@ -317,6 +317,15 @@ season closest to out-of-sample, goes from +2.17u to −0.44u. Every EVAL log
 line carries `play_lag`, the seconds between the last play's ESPN stamp and the
 evaluation, so the first NFL Sunday measures the NFL figure directly.
 
+**At the published stake the return is lower.** The tables above risk 1 unit
+on every bet. Discord, X and `results_snapshots` publish 1 unit TO WIN with the
+risk capped at 3 units (`tracking/discord_notifier.stake_for`), so this
+model's short prices risk 2 to 3 units each. On the population of record that
+is +19.92u on 401.2u risked, +5.0%. At 15/30/45 s of lag: +4.6%, +3.6%, +2.1%.
+2025 alone at that stake: +2.77u, +2.47u, −0.28u, −5.28u at 0/15/30/45 s. The
+go-live gate and the 50-bet re-read are on the flat 1-unit basis
+(`tracking/live_calibration.py`), the same basis as the tables above.
+
 The shipped 2016-2025 fit is not the graded one. On the same lag-0 frames it
 keeps 154 of the 167 graded bets, drops 13 and adds 19: 173 bets, +16.13u on
 the study's states. Both seasons are in-sample for it, so that is not evidence.

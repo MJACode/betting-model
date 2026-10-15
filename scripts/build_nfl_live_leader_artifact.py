@@ -511,12 +511,29 @@ def _first_bets(x: pd.DataFrame, art, spread_home=None, eligible=None) -> pd.Dat
                          "dec": dcs.decimal, "v": 1.0 if fin > 0 else (0.0 if fin < 0 else 0.5)})
     b = pd.DataFrame(bets, columns=["game_id", "snapshot_at", "dec", "v"])
     b["pnl"] = _grade(b.v, b.dec)
+    # The PUBLISHED stake (Discord, X, results_snapshots): 1u to win, risk
+    # capped at 3u -- tracking.discord_notifier.stake_for, called, not copied.
+    from tracking.discord_notifier import stake_for
+    risk, win = [], []
+    for dec in b.dec:
+        american = (dec - 1) * 100 if dec >= 2 else -100 / (dec - 1)
+        st = stake_for(None, american)
+        risk.append(st.risk)
+        win.append(st.win)
+    b["risk_pub"] = risk
+    b["pnl_pub"] = np.where(b.v == 1, win, np.where(b.v == 0, -b.risk_pub, 0.0))
     return b
 
 
 def _summ(b: pd.DataFrame) -> str:
     roi = 100 * b.pnl.mean() if len(b) else 0.0
     return f"{len(b):3d} bets {b.pnl.sum():+7.2f}u {roi:+5.1f}%"
+
+
+def _summ_pub(b: pd.DataFrame) -> str:
+    """Units at the published stake, and the return on the units it risked."""
+    roi = 100 * b.pnl_pub.sum() / b.risk_pub.sum() if len(b) else 0.0
+    return f"{b.pnl_pub.sum():+7.2f}u on {b.risk_pub.sum():6.1f}u risked {roi:+5.1f}%"
 
 
 def _dk_pregame_spread() -> pd.Series:
@@ -625,6 +642,12 @@ def population() -> bool:
             st_ = pooled(lag, "study") if s_ == "pooled" else rows[(s_, lag, "study")]
             lp_ = pooled(lag, "loop") if s_ == "pooled" else rows[(s_, lag, "loop")]
             print(f"{lag:>8} s  {str(s_):>6}  {_summ(st_):>22}  {_summ(lp_):>30}")
+    print("\nAt the PUBLISHED stake (1u to win, risk capped at 3u), same bets as above")
+    for lag in POPULATION_LAGS:
+        for s_ in seasons + ["pooled"]:
+            st_ = pooled(lag, "study") if s_ == "pooled" else rows[(s_, lag, "study")]
+            lp_ = pooled(lag, "loop") if s_ == "pooled" else rows[(s_, lag, "loop")]
+            print(f"{lag:>8} s  {str(s_):>6}  {_summ_pub(st_):>36}  {_summ_pub(lp_):>36}")
     print("\nThe shipped 2016-2025 fit on the same lag-0 frames (in-sample for both seasons)")
     for kind, label in (("study", "study states"), ("loop", "loop refusals + DK band")):
         for s_ in seasons:

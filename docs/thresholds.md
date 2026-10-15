@@ -351,7 +351,10 @@ The game state reaches the loop some seconds after the quote. ESPN posted
 plays a median 23 s after the snap on the two games measured, and the loop
 reads every 20 s, so the 15 to 45 s rows are the ones to expect: 162 bets
 +12.21u, 159 bets +11.03u, 160 bets +12.01u. 2025 alone falls from +2.17u at 0 s
-to −0.44u at 45 s. The full table is in `docs/sports/nfl.md`.
+to −0.44u at 45 s. At the published stake (1u to win, risk capped at 3u),
+which lays 2-3u on this model's short prices, the population of record is
++19.92u on 401.2u risked, +5.0%, falling to +2.1% at 45 s. The full tables are
+in `docs/sports/nfl.md`.
 
 Neighbouring cuts in the same study (pooled, DraftKings): 0.04 → 149 bets
 +16.40u +11.0% (p 0.017); 0.06 → 125 bets +11.70u +9.4% (p 0.061); 0.02 inside
