@@ -193,6 +193,10 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
+  // Stamped by the record readers (#942) and read by teamDetail and the model
+  // detail screen; Pick carries it, this type did not, so master's type check
+  // failed and the over-the-air update stopped publishing (2026-10-14).
+  discordPublish?: 'published' | 'unpublished' | 'unknown';
 };
 
 export interface LiveGameState {

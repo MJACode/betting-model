@@ -723,6 +723,20 @@ ACTION_THRESHOLDS: dict = {
     # Pinned by tests/test_nfl_prop_thresholds.py so a placeholder reset cannot
     # silently loosen them again.
     "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
+    # NFL in-play leader moneyline (nfl_live_leader/, LIVE 2026-10-13, mike:
+    # "reenable the model"). Late 4th quarter (<= 10:00 on the last snap),
+    # leader up 4-16, bet the leader's DraftKings live moneyline when the
+    # per-lead win-probability model beats 1/decimal (vig included) by 0.02.
+    # Evidence: scripts/nfl_edge_inplay_2024.py, H1 'leader ref=pbp secs<=600 edge>=0.02' at
+    # DraftKings: 2024 graded with a 2016-2023 fit 87 bets +13.79u (+15.8%), 2025
+    # graded with a 2016-2024 fit 80 bets +1.84u (+2.3%); pooled 167 bets
+    # +15.62u (+9.4%, 90% CI +1.8% to +16.8%, p 0.022). MARGINAL: it did not
+    # survive the pre-registered multiple-testing family, 2025 alone is flat,
+    # and the shipped artifact is fitted on 2016-2025, so both graded seasons
+    # are in-sample for it.
+    # min_prob 0.0: the rule has no probability floor; the edge is the cut.
+    # Go-live gate standing: 0 settled of 50.
+    "nfl_live_leader_ml": {"min_prob": 0.0, "min_edge": 0.02},
     # MLB run-line market-relative rule (models/mlb_game_market). Replaces
     # the paused mlb_runline *publish path* — mlb_runline stays paused
     # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
@@ -1808,6 +1822,12 @@ MODEL_MIN_ODDS: dict = {
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
     "nhl_over_under":            -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
+    # NFL in-play leader moneyline (2026-10-13, mike). The backtest had NO
+    # price floor: its 167 entries ran -4000 to +180 (median -330), 61 of them
+    # at -500 or shorter. The -200 default, applied inside the rule, leaves 67
+    # bets (+16.19u) -- a population nobody graded -- so the floor sits below
+    # the most negative entry and never binds.
+    "nfl_live_leader_ml":        -5000,
 }
 
 
@@ -1970,6 +1990,13 @@ MODEL_OWN_EV_FLOOR: dict = {
     # 2026-10-11: "ev_below_floor:0.037<0.20"). In-sample, and 2026's five
     # weeks were 19-20, -2.49u over 39; re-read at ~50 settled.
     "nfl_prop_market":           0.07,
+    # NFL in-play leader moneyline (2026-10-13, mike). EV = edge x decimal,
+    # and decimal >= 1, so every bet with edge >= 0.02 has EV >= 0.02: a
+    # 0.02 floor can never bind and the 0.02 EDGE stays the cut. Under the
+    # 0.20 global floor, applied inside the rule, the backtest falls to 69 bets
+    # (+16.94u; a -500 favourite needs an edge of 0.167 to clear it) -- a
+    # population nobody graded. Smallest EV among the 167: 0.0205.
+    "nfl_live_leader_ml":        0.02,
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
@@ -2122,6 +2149,11 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # minutes after the model's last BET; it takes 0.573 to 0.506. Same
     # treatment as wind and opener: its own number until it has 50 graded bets.
     "nfl_prop_market",
+    # 2026-10-13 (mike: "reenable the model"). The in-play leader moneyline's
+    # cut was measured on its OWN win probability (the per-lead fit), and it
+    # has no graded bet to fit a map on: the pooled offset borrowed from other
+    # models would move every probability and with it the population.
+    "nfl_live_leader_ml",
 })
 
 
@@ -2189,6 +2221,9 @@ SCORING_METHODS: dict = {
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
     "ncaaf_live_total":    "engine",
+    # Per-lead logistic win probability, its own JSON artifact
+    # (models/saved/nfl_live_leader_ml_wp.json), no registry row.
+    "nfl_live_leader_ml":  "engine",  # nfl_live_leader/model.py
     # Trained AND registered, but scored by models/live_scorer.py rather than
     # the generic path, so it falls out of MODELS/PROP_MODELS. It DOES carry a
     # registry artifact (models/saved/mlb_live_total_runs_*.pkl) and a missing
@@ -2295,6 +2330,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # 27%, not 50%.
     "wnba_prop_market":            0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
+    "nfl_live_leader_ml":          0.02,   # 2026-10-13 mike; the backtest's cut, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -2404,6 +2440,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # 27%, not 50%.
     "wnba_prop_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
+    "nfl_live_leader_ml":          0.0,    # 2026-10-13 mike; edge is the cut, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -2652,6 +2689,19 @@ LIVE_MODELS = {
                             "P(home wins) from the live two-stage engine"),
     "ncaaf_live_total":    ("NCAAF", "totals", "engine",
                             "Live main-total from the remaining-points distribution"),
+    # NFL in-play leader moneyline (nfl_live_leader/, run from the repo root by
+    # scheduler job nfl_live_leader). Registered here for SETTLEMENT (h2h on
+    # the final incl. overtime; a tie leaves home_win NULL and settles at 0
+    # units) -- models/live_scorer.py skips 'engine' entries. Evidence:
+    # scripts/nfl_edge_inplay_2024.py, H1 'leader ref=pbp secs<=600 edge>=0.02' at
+    # DraftKings: 2024 graded with a 2016-2023 fit 87 bets +13.79u (+15.8%), 2025
+    # graded with a 2016-2024 fit 80 bets +1.84u (+2.3%); pooled 167 bets
+    # +15.62u (+9.4%, 90% CI +1.8% to +16.8%, p 0.022). MARGINAL: it did not
+    # survive the pre-registered multiple-testing family, 2025 alone is flat,
+    # and the shipped artifact is fitted on 2016-2025, so both graded seasons
+    # are in-sample for it.
+    "nfl_live_leader_ml":  ("NFL", "h2h", "engine",
+                            "Late 4th-quarter leader (4-16) on the DraftKings live moneyline, per-lead win probability"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────

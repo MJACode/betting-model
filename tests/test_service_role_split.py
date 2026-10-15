@@ -109,6 +109,9 @@ def test_the_always_on_jobs_run_on_every_role(monkeypatch):
 # mid-slate. Listed explicitly because this set is asserted exactly -- a
 # new loop has to be DECLARED here, which is the point of the test.
 _EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
+                     # 2026-10-13 (mike): the NFL in-play leader moneyline loop,
+                     # Supabase-only and volume-free like ncaaf_live_loop.
+                     "nfl_live_leader",
                      "dk_direct_feed", "bovada_feed"}
 
 

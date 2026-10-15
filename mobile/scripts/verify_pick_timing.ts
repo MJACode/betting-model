@@ -162,6 +162,15 @@ function mkPick(over: Partial<Pick>): Pick {
   );
   check('NCAAF live shows a quarter, not an inning', Boolean(ncaaf?.label.includes('· Q4')), ncaaf?.label);
 
+  const nflLive = pickTimingInfo(
+    mkPick({ sport: 'NFL', model_id: 'nfl_live_leader_ml', is_live: true, inning_at_pick: 4 }),
+  );
+  check(
+    'NFL live shows a quarter, not an inning',
+    Boolean(nflLive?.label.includes('· Q4')) && !nflLive?.label.includes('inning'),
+    nflLive?.label,
+  );
+
   const noPeriod = pickTimingInfo(mkPick({ is_live: true, inning_at_pick: null }));
   check(
     'live without a period still stamps the time',
