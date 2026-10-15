@@ -685,13 +685,18 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   REAL,
     closing_dk_odds    REAL,               -- close American on the pick side (book in clv_close_book)
     closing_line       REAL,               -- close total/spread on the pick side (NULL for ML)
-    clv_pct            REAL,               -- (fair_close_p - fair_bet_p) in pp, SAME-LINE ONLY. docs/clv.md
-    line_clv_pts       REAL,               -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for ML
-    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
-    clv_method         TEXT,               -- no_vig | zero_vig | raw_one_way | raw_one_sided (legacy)
-    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close
-    clv_bet_book       TEXT,               -- book the bet side was graded at: the book the pick was taken at
+    clv_pct            REAL,               -- same-book raw price CLV in percent. SAME-LINE ONLY. docs/clv.md
+    clv_pp             REAL,               -- same pair of raw prices, in probability points
+    line_clv_pts       REAL,               -- points the line moved toward the pick side; NULL for ML. Not a beat.
+    clv_beat_close     BOOLEAN,            -- clv_pct > 0. NULL when the primary price CLV is NULL
+    clv_captured_at    TEXT,               -- when a measurable CLV was recorded
+    clv_method         TEXT,               -- standard_v2 is the pedigree. Older stamps stay out of averages
+    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close (the bet book)
+    clv_bet_book       TEXT,               -- book the bet was taken at
+    market_clv_pct     REAL,               -- secondary: raw taken vs Pinnacle fair close, in percent
+    market_clv_pp      REAL,               -- that comparison in probability points
+    market_clv_method  TEXT,               -- power | power_3way | zero_vig
+    pinnacle_close_odds REAL,              -- Pinnacle American on our side, same line
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
     -- The model probability mapped to what it is actually worth
     -- (models/probability_calibration.py). DISPLAY ONLY: edge, the signal,
@@ -1140,7 +1145,7 @@ CREATE TABLE IF NOT EXISTS opening_signals (
     -- filled at settlement (game-level markets, Phase 1)
     closing_dk_odds    REAL,                 -- DK price on our side at close
     closing_line       REAL,                 -- DK total/spread on our side at close
-    clv_pct            REAL,                 -- no-vig close vs opening lock, SAME-LINE ONLY. docs/clv.md
+    clv_pct            REAL,                 -- same-book raw CLV in probability points vs the opening lock. Shadow track. docs/clv.md
     line_move_dir      TEXT,                 -- toward | against | flat
     public_side        TEXT,                 -- with_public | contrarian | even
     result             TEXT,                 -- WIN | LOSS | PUSH | NO_ACTION
@@ -1458,6 +1463,11 @@ _MIGRATIONS = [
     ("picks", "clv_method",          "TEXT"),
     ("picks", "clv_close_book",      "TEXT"),
     ("picks", "clv_bet_book",        "TEXT"),
+    ("picks", "clv_pp",              "NUMERIC"),
+    ("picks", "market_clv_pct",      "NUMERIC"),
+    ("picks", "market_clv_pp",       "NUMERIC"),
+    ("picks", "market_clv_method",   "TEXT"),
+    ("picks", "pinnacle_close_odds", "NUMERIC"),
     # DraftKings betslip deep links (The Odds API includeLinks/includeSids)
     ("odds", "home_link",  "TEXT"),
     ("odds", "away_link",  "TEXT"),

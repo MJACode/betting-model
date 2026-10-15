@@ -183,7 +183,7 @@ class TestAPostedSignalIsLocked:
 
     def test_the_worker_job_uses_the_same_plan(self):
         src = (ROOT / "tracking" / "job_queue.py").read_text(encoding="utf-8")
-        assert "from scripts.void_picks import _select, plan_voids, void" in src
+        assert "from scripts.void_picks import _select, announce_posted_voids, plan_voids, void" in src
 
 
 class TestVoidingAPostedPickIsAnExplicitOptIn:
@@ -274,6 +274,53 @@ class TestVoidingAPostedPickIsAnExplicitOptIn:
         vp.main()
         assert conn.updates == [], "a posted pick was written without the opt-in"
 
+        notices = []
+        monkeypatch.setattr(vp, "announce_posted_voids",
+                            lambda rows, reason: notices.append((rows, reason)) or {"posted": 1})
+
         monkeypatch.setattr(sys, "argv", base + ["--apply", "--allow-posted"])
         vp.main()
         assert [p[-1] for p in conn.updates] == [1]
+        assert [r["pick_id"] for item in notices for r in item[0]] == [1]
+        assert notices[0][1] == REASON
+
+
+class TestAPostedVoidAnnouncesAfterCommit:
+    """The original message stays. A posted pick gets a notice with the
+    reason once the void is committed. An unposted void posts nothing, and a
+    rejected notice does not raise."""
+
+    def test_an_unposted_void_does_not_call_discord(self, monkeypatch):
+        from scripts.void_picks import announce_posted_voids
+        called = []
+        monkeypatch.setattr(
+            "tracking.discord_notifier.notify_discord_void",
+            lambda *a, **k: called.append((a, k)))
+        assert announce_posted_voids([{**_row(), "posted": False}], REASON) is None
+        assert announce_posted_voids([], REASON) is None
+        assert called == []
+
+    def test_a_posted_void_sends_the_reason_and_does_not_dry_run(self, monkeypatch):
+        from scripts.void_picks import announce_posted_voids
+        seen = {}
+
+        def _notify(pick_ids, reason=None, dry_run=True):
+            seen.update(ids=list(pick_ids), reason=reason, dry_run=dry_run)
+            return {"dry_run": False, "posted": 1}
+
+        monkeypatch.setattr("tracking.discord_notifier.notify_discord_void", _notify)
+        out = announce_posted_voids([{**_row(), "posted": True}], REASON)
+        assert out["posted"] == 1
+        assert seen == {"ids": [1], "reason": REASON, "dry_run": False}
+
+    def test_a_rejected_notice_is_logged_and_does_not_raise(self, monkeypatch):
+        from tracking.discord_notifier import DiscordVoidRejected
+        from scripts.void_picks import announce_posted_voids
+
+        def _notify(*_a, **_k):
+            raise DiscordVoidRejected(["pick 1 has no discord_signal row"])
+
+        monkeypatch.setattr("tracking.discord_notifier.notify_discord_void", _notify)
+        out = announce_posted_voids([{**_row(), "posted": True}], REASON)
+        assert out["pick_ids"] == [1]
+        assert "discord_signal" in out["error"]

@@ -116,7 +116,7 @@ def test_twelve_are_live_and_none_is_paused():
     KEEP LIVE: tackles_assists (clean record after the gamebook TOT fix;
     docs/nfl_prop_profitability_search.md §4) and nfl_prop_market (rule
     lane, not these PROP_MODELS). nfl_prop_sacks joined the pause the
-    same day as a #710 design-review follow-up (thin / paper-only).
+    same day as a #710 design-review follow-up (thin market, paused).
     Pause ≠ retire: NONE rows still score; cuts stay in
     ACTION_THRESHOLDS for the unpause.
 

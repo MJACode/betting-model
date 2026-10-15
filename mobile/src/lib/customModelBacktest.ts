@@ -13,7 +13,7 @@
  */
 
 import { isOutcomeGraded, pickMatchesModel } from './customModelFilters';
-import { flatPnl, isDuplicateCopy, isModelRetired, passesRecordFilter } from './thresholds';
+import { flatPnl, isDuplicateCopy, isModelRetired, passesRecordFilter, publishedRecordKeeps } from './thresholds';
 import type { CustomModel, CustomModelRule, SettledPick, SignalType } from '@/types';
 
 export interface CustomModelStats {
@@ -203,6 +203,9 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
     // showed its settled bets. The custom-model callers keep passesActionFilter:
     // "what would this filter do" is a different question.
     if (!passesRecordFilter(p)) continue;
+    // Discord still has the lock. An omitted or unknown stamp stays, so a
+    // ledger outage does not zero the fallback behind the published view.
+    if (!publishedRecordKeeps(p)) continue;
     // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
     // would otherwise inflate the count vs the displayed record.
     if (p.result === 'WIN') wins++;

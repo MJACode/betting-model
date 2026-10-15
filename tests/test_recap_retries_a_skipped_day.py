@@ -132,14 +132,15 @@ def _schema(db):
     db.execute("""CREATE TABLE picks (
         pick_id INTEGER PRIMARY KEY, game_date TEXT, sport TEXT, model_id TEXT,
         signal_type TEXT, result TEXT, kelly_fraction REAL, dk_odds REAL,
-        clv_pct REAL, is_live INTEGER, downgrade_reason TEXT,
-        condition_status TEXT, settled_at TEXT)""")
+        decision_odds REAL, clv_pct REAL, is_live INTEGER, downgrade_reason TEXT,
+        condition_status TEXT, settled_at TEXT, game_id TEXT, pick_side TEXT,
+        player_id TEXT, player_key TEXT, prop_market TEXT)""")
     db.execute("""CREATE TABLE push_sent (
         lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
         UNIQUE (lock_key, kind))""")
     db.execute("""CREATE TABLE results_snapshots (
         game_date TEXT, scope TEXT, sport TEXT, wins INT, losses INT,
-        pushes INT, settled INT, record_only INT, units REAL, risked REAL,
+        pushes INT, settled INT, units REAL, risked REAL,
         roi_pct REAL, clv_graded INT, clv_beat INT, clv_pct REAL,
         published_at TEXT)""")
     db.execute("CREATE UNIQUE INDEX uq_snap ON results_snapshots "
@@ -149,9 +150,18 @@ def _schema(db):
 def _add_pick(db, row, *, graded: bool):
     pick_id, sport, model, result, reason, settled_at, odds = row
     db.execute(
-        "INSERT INTO picks VALUES (?,?,?,?,'BET',?,0.02,?,NULL,0,?,NULL,?)",
+        "INSERT INTO picks (pick_id, game_date, sport, model_id, signal_type, "
+        "result, kelly_fraction, dk_odds, is_live, downgrade_reason, "
+        "settled_at, game_id) "
+        "VALUES (?,?,?,?,'BET',?,0.02,?,0,?,?,?)",
         (pick_id, DAY, sport, model, result if graded else None, odds, reason,
-         settled_at if graded else None))
+         settled_at if graded else None, str(pick_id)))
+    # A counting bet was posted. A paused-row bet was not.
+    if reason is None:
+        db.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (?,?,?)",
+            (f"{pick_id}:{model}", "discord_signal",
+             "2026-10-12T12:00:00-04:00"))
 
 
 def _grade(db, row):
@@ -274,6 +284,10 @@ def test_the_day_posts_once_on_both_surfaces_at_the_first_pass_that_can(monkeypa
     assert "2-0" in embed["description"] and "2 settled" in embed["description"]
     assert w.tweets[0].startswith("\U0001F4CA Oct 12 results: 2-0")
     assert w.ledger() == {f"discord_results:{DAY}", f"x_results:{DAY}"}
+    discord_id = w.db.execute(
+        "SELECT message_id FROM push_sent WHERE kind = 'discord_results'"
+    ).fetchone()
+    assert discord_id[0] == "msg-1"
     snap = w.db.execute(
         "SELECT wins, losses, settled, published_at FROM results_snapshots "
         "WHERE game_date = ? AND scope = 'daily' AND sport IS NULL",

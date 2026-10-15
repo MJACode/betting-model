@@ -644,8 +644,9 @@ const PICK_COLUMNS =
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
   'is_live, inning_at_pick, score_diff_at_pick, player_key, prop_market, ' +
   'public_bet_pct, public_money_pct, ' +
-  'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
-  'clv_captured_at, clv_method, clv_close_book, clv_bet_book, dk_bet_link, ' +
+  'closing_dk_odds, closing_line, clv_pct, clv_pp, line_clv_pts, clv_beat_close, ' +
+  'clv_captured_at, clv_method, clv_close_book, clv_bet_book, ' +
+  'market_clv_pct, market_clv_pp, market_clv_method, pinnacle_close_odds, dk_bet_link, ' +
   'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, downgrade_reason, ' +
   'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 
@@ -656,8 +657,8 @@ const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
-  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
-  'is_live, downgrade_reason';
+  'public_bet_pct, injury_flag, clv_pct, clv_method, decision_book, decision_odds, decision_edge, ' +
+  'is_live, downgrade_reason, player_key, prop_market';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -1977,8 +1978,7 @@ export async function fetchPublishedModelRecord(): Promise<Record<string, FullOu
       pushes: Number(r.pushes ?? 0),
       priced_bets: staked / 100,
       units: profit / 100,
-      // Null rather than 0 when nothing was priced: 0.0% reads as break-even,
-      // and a record-only model has no ROI to report.
+      // Null rather than 0 when nothing was priced: 0.0% reads as break-even.
       roi_pct: staked > 0 ? (profit / staked) * 100 : null,
     };
   }
@@ -2186,7 +2186,10 @@ export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
     .from('v_public_track_record')
     .select(
       'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
-        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date',
+        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
+        'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
+        'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
+        'market_clv_settled, market_clv_beat, avg_market_clv_pct',
     );
   if (error) throw error;
   return (data ?? []) as TrackRecordRow[];
@@ -2700,7 +2703,7 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       ...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p) && !isDuplicateCopy(p)),
     );
   }
-  return out;
+  return attachDiscordPublish(out);
 }
 
 /**
@@ -2739,10 +2742,11 @@ export async function fetchSettledPropPicksForPlayer(args: {
   if (error) throw error;
   // A game-level pick can never match a player_id; the label match could in
   // theory catch a team whose name starts a label, so keep prop rows only.
-  return ((data ?? []) as unknown as SettledPick[]).filter(
+  const rows = ((data ?? []) as unknown as SettledPick[]).filter(
     (p) =>
       (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p) && !isDuplicateCopy(p),
   );
+  return attachDiscordPublish(rows);
 }
 
 /**
