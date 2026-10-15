@@ -182,7 +182,12 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "nhl_over_under",
          # 2026-10-12 (mike): the sharp reference's no-vig price; its map is
          # a borrowed offset fitted on 23 picks (docs/nfl_edge_search.md §5).
-         "nfl_prop_market"}
+         "nfl_prop_market",
+         # 2026-10-15 (mike, "Yes"): the rebuilt moneyline is anchored on
+         # DraftKings' price and graded on its own number; the correction
+         # never crosses 0.5 and would delete its underdogs
+         # (docs/nhl_moneyline_rebuild.md).
+         "nhl_moneyline"}
     )
 
 
@@ -245,5 +250,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
         "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
         "nhl_moneyline_regulation", "nhl_over_under", "nfl_prop_market",
+        "nhl_moneyline",            # 2026-10-15 (mike): the anchored rebuild
     }
     assert not not_named_here

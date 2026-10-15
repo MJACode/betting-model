@@ -363,9 +363,33 @@ Every season positive across 0.14-0.22. Chosen on the seasons it is graded on.
 > Every season positive at both. Full grid and caveats:
 > `docs/nhl_clv_ev_assessment.md`.
 
-**Team models** (`scripts/nhl_live_artifact_grade.py`, the live artifacts on
-2025-26, the one season neither saw, 1,352 games). Neither makes money at any
-cut. `nhl_moneyline` as it runs (corrected probability, 0.55 / 0.05, EV 0.20):
+**`nhl_moneyline`, rebuilt (mike, 2026-10-13; "Yes" to shipping it,
+2026-10-15).** DraftKings' game-day no-vig price, moved by 34 inputs built from
+the per-game logs (`models/nhl_moneyline_anchored.py`,
+`docs/nhl_moneyline_rebuild.md`). **The cut is EV ≥ 0.06** on the model's OWN
+probability (`MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY`), at the best
+bettable price, under the −200 price floor; the action cut is 0.0 / 0.0 so
+every surface shows what the scorer wrote. One decision a game, 16:00Z-18:00Z
+on game day with both listed goalies. Walk-forward 2021-22 → 2025-26
+(`scripts/nhl_moneyline_anchored_backtest.py`):
+
+| EV floor | bets | units | return | 95% interval | beat Pinnacle's close |
+|---|---|---|---|---|---|
+| 0.02 | 2,752 | +127.0 | +4.62% | +1.0..+8.2 | 61.0% |
+| 0.04 | 2,020 | +93.5 | +4.63% | +0.4..+8.8 | 61.7% |
+| **0.06 (live)** | **1,326** | **+83.2** | **+6.28%** | **+1.1..+11.4** | **62.6%** |
+| 0.08 | 863 | +53.1 | +6.16% | −0.3..+12.6 | 62.9% |
+
+2025-26 was the weak season (−3.0% at 0.06 on 257 bets). Taking the favourite
+blind on the same games: −2.2%. Held tighter to the market (a wider penalty
+grid, chosen on later seasons) the same walk-forward returns +3.2% at 0.06 on
+664: read the edge as a range of about +3% to +6% a bet. Re-sweep on its own
+record at ~250 settled bets.
+
+**The team models before the rebuild** (`scripts/nhl_live_artifact_grade.py`,
+the live artifacts on 2025-26, the one season neither saw, 1,352 games).
+Neither makes money at any cut. `nhl_moneyline` as it ran (corrected
+probability, 0.55 / 0.05, EV 0.20):
 41 bets, +5.0 units (+12.2%, interval -23.5..+47.9) at the best price; on its
 own probability, edge cuts 0.02-0.10 all lose (-0.3% to -19.5%).
 `nhl_moneyline_regulation` as it ran: 447 bets, -20.5 units (-4.6%); on its own

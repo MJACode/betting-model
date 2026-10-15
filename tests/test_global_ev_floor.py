@@ -371,7 +371,10 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-10-08 (mike): the NHL totals rule; its number IS Pinnacle's.
          "nhl_over_under",
          # 2026-10-12 (mike): the NFL prop rule; its number IS the sharp book's.
-         "nfl_prop_market"}
+         "nfl_prop_market",
+         # 2026-10-15 (mike, "Yes"): the rebuilt moneyline, anchored on
+         # DraftKings' price and graded on its own number.
+         "nhl_moneyline"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 
