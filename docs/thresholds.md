@@ -322,6 +322,62 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
+## `nfl_live_leader_ml` cut, 2026-10-13 (mike: "reenable the model"): edge ≥ 0.02 at DraftKings
+
+The NFL in-play leader moneyline (`nfl_live_leader/`, `docs/sports/nfl.md`).
+**Cut: edge ≥ 0.02, no probability floor** (`ACTION_THRESHOLDS` 0.0 / 0.02),
+where edge = the model's win probability − 1/decimal of DraftKings' price for
+the leader, vig included. It is the study's pre-registered cut, not a swept one.
+**Go-live gate: 0 settled of 50.**
+
+| Season | Graded with | Bets | Units | Return | Pushes |
+|---|---|---|---|---|---|
+| 2024 | 2016-2023 fit | 87 | +13.79 | +15.8% | 0 |
+| 2025 | 2016-2024 fit | 80 | +1.84 | +2.3% | 1 |
+| Pooled | | 167 | +15.62 | +9.4% (90% CI +1.8% to +16.8%, p 0.022) | 1 |
+
+Source: `scripts/nfl_edge_inplay_2024.py` run 2 (`inplay2024_out_run2.txt`),
+reproduced bet for bet by `python -m scripts.build_nfl_live_leader_artifact
+--parity` with the model's decision function, on the study's own states.
+**Marginal:** it did not survive the study's pre-registered multiple-testing
+family, 2025 alone is flat, and the shipped fit (2016-2025) has seen both
+graded seasons. On the same frames the shipped fit keeps 154 of the 167 graded
+bets, drops 13 and adds 19.
+
+**The population of record is 163 bets, +13.08u, +8.0%** (`--population`): the
+same snapshots with the loop's refusals (no state straight after a score or a
+conversion try) and DraftKings' pre-kickoff spread for the favourite band.
+The game state reaches the loop some seconds after the quote. ESPN posted
+plays a median 23 s after the snap on the two games measured, and the loop
+reads every 20 s, so the 15 to 45 s rows are the ones to expect: 162 bets
++12.21u, 159 bets +11.03u, 160 bets +12.01u. 2025 alone falls from +2.17u at 0 s
+to −0.44u at 45 s. At the published stake (1u to win, risk capped at 3u),
+which lays 2-3u on this model's short prices, the population of record is
++19.92u on 401.2u risked, +5.0%, falling to +2.1% at 45 s. The full tables are
+in `docs/sports/nfl.md`.
+
+Neighbouring cuts in the same study (pooled, DraftKings): 0.04 → 149 bets
++16.40u +11.0% (p 0.017); 0.06 → 125 bets +11.70u +9.4% (p 0.061); 0.02 inside
+5:00 instead of 10:00 → +3.9% to +5.3% (p 0.21-0.26). Not a plateau test — the
+cut grid was three values, fixed before grading.
+
+**The platform floors are set so they cannot bind** (`config.py`): price floor
+−5000 (the study's entries ran −4000 to +180, median −330), own EV floor 0.02
+(EV = edge × decimal ≥ edge, so every qualifying bet clears it; smallest EV in
+the 167 was 0.0205), and it decides on its own probability. Measured with the
+production decision function, applied inside the rule:
+
+| Gate | Bets | Units |
+|---|---|---|
+| none (the rule) | 167 | +15.62 |
+| price ≥ −200 (the platform default) | 67 | +16.19 |
+| EV ≥ 0.20 (the global floor) | 69 | +16.94 |
+| both | 56 | +12.60 |
+
+These are after-the-fact cuts on the same two seasons and are NOT the rule;
+2025 stays flat under all three (+3.02u, +1.73u, +0.71u). Re-read the cut on
+its own settled record at ~50 bets.
+
 ## NHL — every model's cut and the backtest behind it (2026-10-03)
 
 The grids live in `docs/nhl_market_lab.md`; this is the summary. Units are flat

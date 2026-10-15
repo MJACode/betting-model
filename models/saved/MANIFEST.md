@@ -95,6 +95,15 @@ models/saved/wnba_spread_20260719_113238.pkl
   remains on disk; the scorer does not load it. Do not drop it without
   rewriting those tests. The live assists path is `20260531_125558`.
 
+## Tracked artifacts that are not timestamped pkls
+
+- `nfl_prop_params.json` — see above.
+- `nfl_live_leader_ml_wp.json` — the NFL in-play leader moneyline's per-lead
+  win-probability fit (2016-2025, full-precision coefficients and a golden
+  grid). Read by `nfl_live_leader/model.py`, not `model_registry`; rebuilt by
+  `python -m scripts.build_nfl_live_leader_artifact`. Not under the dated-pkl
+  ignore pattern, so it is tracked like any source file.
+
 ## After a retrain
 
 1. `git add -f models/saved/<model_id>_<new>.pkl`

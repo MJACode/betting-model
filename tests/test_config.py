@@ -182,7 +182,11 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "nhl_over_under",
          # 2026-10-12 (mike): the sharp reference's no-vig price; its map is
          # a borrowed offset fitted on 23 picks (docs/nfl_edge_search.md §5).
-         "nfl_prop_market"}
+         "nfl_prop_market",
+         # 2026-10-13 (mike: "reenable the model"): the in-play leader
+         # moneyline's cut was measured on its own per-lead win probability,
+         # and it has no graded bet to fit a map on.
+         "nfl_live_leader_ml"}
     )
 
 
@@ -245,5 +249,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
         "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
         "nhl_moneyline_regulation", "nhl_over_under", "nfl_prop_market",
+        "nfl_live_leader_ml",
     }
     assert not not_named_here
