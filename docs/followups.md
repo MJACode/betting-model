@@ -86,6 +86,30 @@ built from history the model can learn from — e.g. who dressed each game in
 the per-game skater logs, weighted by usage — which is a project, not a
 reader fix.
 
+## [ ] App copy that EV-cut models contradict, and a dollars tile (found 2026-10-15, UX review)
+
+Raised by the front-end review of the NHL moneyline rebuild; declined in that
+PR because each was already wrong for the six models whose cut is EV
+(probability and edge bars 0.0 — NHL props, NHL totals, the MLB public fade).
+One front-end PR, with its own review:
+
+- `ExplainerScreen.tsx:108-109` says "moneyline needs ≥72% model prob and ≥12%
+  edge" (MLB's old bar; 11% today); :95-97 says a BET clears probability AND
+  edge; :190 says every BET carries a Sharp Score. Reword: a BET clears that
+  model's own bar — for some models expected value at the price, so it can be
+  an underdog under 50% — and drop the hard-coded numbers.
+- `ExplainerScreen.tsx:218-226` says a BET at noon can become AVOID at 6pm
+  and to honour the latest signal — the opposite of the pick rule (a BET is
+  locked); :84-90 says the probability shown is calibrated (it is the raw one).
+- The All board's and the model screen's tooltips (`PicksHomeScreen.tsx:609`,
+  `BuiltInModelDetailScreen.tsx:192`) say picks lock the first time they are
+  scored; they lock the first time they become a BET.
+- `ReasoningCard.tsx:93` explains a pick by edge only; an EV row would name
+  what an EV-cut model actually bet on.
+- **`BuiltInModelDetailScreen.tsx:246-250, :464` show results in DOLLARS**
+  ("vs $100 flat per bet", `formatCurrencySigned`) — against the units rule
+  (CLAUDE.md §4).
+
 ## [ ] Nothing stops the test suite from reaching the production database (found 2026-10-14)
 
 `tests/conftest.py` sets no guard on `DATABASE_URL` or `ODDS_API_KEY`, and the
