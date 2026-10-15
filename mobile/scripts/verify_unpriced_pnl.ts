@@ -6,8 +6,8 @@
  * (tracking/paper_tracker), so its profit_flat is fabricated: +$90.91 on a win
  * that could not have been placed. The DB side already refuses that money —
  * v_public_track_record / _daily count the W-L but sum profit and stake over
- * priced picks only (migration require_price_for_published_units, 2026-08-31),
- * and Discord's recap tallies them as record-only. The app's own tallies did
+ * priced picks only (migration require_price_for_published_units, 2026-08-31).
+ * The app's own tallies did
  * not, so on 2026-09-03 the Models tab showed UFC Total Rounds at +13.0% and
  * the Record tab showed the same 8-5 at -26.6%.
  *
@@ -183,6 +183,25 @@ check('Models tab moneyline (control): fully priced, unchanged at 2-1 +$57.40 / 
     && near(ml.roiFlat, 0.1913, 0.0005),
   `${ml.wins}-${ml.losses} profit=${ml.profitFlat} staked=${ml.stakedFlat} roi=${ml.roiFlat}`);
 
+const silentWin = mk({
+  model_id: 'ufc_moneyline', pick_side: 'home', scored_line: null,
+  model_probability: 0.7, edge: 0.15, dk_odds: -110, result: 'WIN', profit_flat: 90.91,
+  discordPublish: 'unpublished',
+});
+const mlSilent = computeBuiltInModelStats('ufc_moneyline', [...SETTLED, silentWin]);
+check('Models tab moneyline: an unpublished graded win stays out',
+  mlSilent.picks === 3 && mlSilent.wins === 2 && near(mlSilent.profitFlat, 57.4),
+  `${mlSilent.picks} picks, ${mlSilent.wins}-${mlSilent.losses}, profit=${mlSilent.profitFlat}`);
+const unknownLoss = mk({
+  model_id: 'ufc_moneyline', pick_side: 'away', scored_line: null,
+  model_probability: 0.7, edge: 0.15, dk_odds: -110, result: 'LOSS', profit_flat: -100,
+  discordPublish: 'unknown',
+});
+const mlUnknown = computeBuiltInModelStats('ufc_moneyline', [...ML, unknownLoss]);
+check('Models tab moneyline: an unread ledger stamp still counts',
+  mlUnknown.picks === 4 && mlUnknown.wins === 2 && mlUnknown.losses === 2,
+  `${mlUnknown.picks} picks, ${mlUnknown.wins}-${mlUnknown.losses}`);
+
 // ── Custom models on the settled fallback (computeCustomModelStats) ────────
 const custom: CustomModel = {
   id: 'c1', name: 'Rounds, any', rules: [{ model_id: 'ufc_total_rounds' }],
@@ -192,6 +211,13 @@ const cs = computeCustomModelStats(custom, SETTLED);
 check('Custom model on UFC rounds: same 13 picks, 8-5, -$185.92 on $700',
   cs.picks === 13 && cs.wins === 8 && cs.losses === 5 && near(cs.profitFlat, -185.92) && cs.stakedFlat === 700,
   `${cs.picks} picks, ${cs.wins}-${cs.losses}, profit=${cs.profitFlat} staked=${cs.stakedFlat}`);
+const customSilent = computeCustomModelStats(
+  { ...custom, rules: [{ model_id: 'ufc_moneyline' }] },
+  [...ML, silentWin],
+);
+check('Custom backtest still counts the unpublished win',
+  customSilent.picks === 4 && customSilent.wins === 3,
+  `${customSilent.picks} picks, ${customSilent.wins}-${customSilent.losses}`);
 
 // ── Yesterday's-results recap (computeDailyResults) ────────────────────────
 const DAY = '2026-08-22';

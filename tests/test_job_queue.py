@@ -718,10 +718,20 @@ def test_the_job_refuses_a_posted_pick_without_the_opt_in(monkeypatch):
 
 
 def test_the_job_voids_a_posted_pick_with_the_opt_in(monkeypatch):
+    notices = []
+
+    def _announce(rows, reason):
+        notices.append((rows, reason))
+        return {"dry_run": False, "posted": 1}
+
+    monkeypatch.setattr("scripts.void_picks.announce_posted_voids", _announce)
     conn, out = _run_void_job(monkeypatch, [_posted_row()], allow_posted=True)
-    assert out == {"voided": [2558703], "refused": [], "missing": []}
+    assert out["voided"] == [2558703] and out["refused"] == [] and out["missing"] == []
+    assert out["void_notice"] == {"dry_run": False, "posted": 1}
     (params,) = conn.writes
     assert params[0] == "NO_ACTION" and params[-1] == 2558703
+    assert [r["pick_id"] for item in notices for r in item[0]] == [2558703]
+    assert notices[0][1] == "decided on a price nobody could bet"
 
 
 def test_the_job_never_voids_a_graded_posted_pick(monkeypatch):

@@ -181,7 +181,7 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
   no live models yet).
 - **No ROI backtest for live models** — no historical in-play odds exist (Path A decision,
   session 31). The go/no-go proxy is holdout AUC/CalError (reported overall + by inning bucket)
-  plus live paper trading. Treat the first 50 live picks as the calibration set.
+  plus the first live picks. Treat the first 50 live picks as the calibration set.
 
 ### First-time setup (Matt's machine)
 

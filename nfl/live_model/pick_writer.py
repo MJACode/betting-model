@@ -227,11 +227,13 @@ def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> di
 # have written picks that never settle. Mirrors the column set
 # scripts/nfl_prop_market_card.py uses, plus the live flag.
 #
-# ON CONFLICT DO NOTHING for the same reason _insert_picks has it: the
-# uq_picks_one_row_per_pick index (migration picks_one_row_per_pick.sql) makes a
-# duplicate an IntegrityError, which would abort the transaction and cost the
-# tick its pick. The first-signal lock is what PREVENTS the duplicate; this only
-# makes the losing side of a race harmless.
+# ON CONFLICT DO NOTHING for the same reason _insert_picks has it: a unique
+# index makes a duplicate an IntegrityError, which would abort the transaction
+# and cost the tick its pick. uq_picks_one_row_per_pick covers pregame rows.
+# uq_picks_one_live_row (discord_post_one_pick_2026_10_14.sql) covers a second
+# live row on the same game, model, player and side. The first-signal lock is
+# what PREVENTS the duplicate; this only makes the losing side of a race
+# harmless.
 _INSERT_SQL = """
     INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
                        pick_side, pick_label, model_probability, dk_implied_prob,

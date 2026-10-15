@@ -347,8 +347,9 @@ app's card chip uses.
 **Recap units (2026-08-27)**: the recap reports **units, not dollars**. The
 wager is the units RISKED; what you win depends on the price — *risk 1.1u at
 −110 to win 1u*. WIN `+stake × (decimal − 1)`, LOSS `−stake`, PUSH `0` (and
-nothing counted as risked). Prob-only picks with no DK price grade at −110, the
-same fallback settlement uses. `mlb_prop_batter_hr` stays record-only.
+nothing counted as risked). The price is the one the bet was taken at. A
+pick with no taken price is staked at the bare conviction, not given a
+made-up −110.
 
 **Free pick of the day (2026-08-27)**: `DISCORD_WEBHOOK_FREE` gets ONE random
 qualifying signal per day, ledgered per date so only the first pass with a
@@ -418,10 +419,9 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   46 settle passes between 7am ET and midnight.
   The trade: a recap whose snapshot fails is ledgered with no snapshot, so
   that date can never be restated; the warning in the log is its only trace.
-- **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
-  toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
-  and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
-  price, so counting them fabricates P&L.
+- **Units and the record are the same graded picks.** A home-run bet with a
+  real price counts in both. One with no price is staked at the bare
+  conviction. Neither is left out of the units.
 - **Failures never propagate.** Discord gets its own try block in both the
   pipeline step and the live loop, so a broken webhook can't fail the step or
   mask the mobile push that already succeeded.
@@ -751,17 +751,15 @@ Two things this does not fix, both recorded rather than assumed:
   measured** — we had no `last_update` to look at. The guard is also the
   instrument: once it is running, a declined market is evidence.
 
-### "Paper trading" is banned from user-facing copy (2026-08-29)
+### A footer that says the bets are not real money is banned (2026-08-29)
 
-The daily recap posted a "Paper trading" footer under real settled numbers. The
-phrase came from `CLAUDE.md` §2, which was written when it was true and never
-revisited; every downstream surface inherited it. §2 now states the platform is
-live and that the go-live gate is **per model**. Removed from the Discord recap
-footer, the email footer, the dashboard, and the Track Record / Settings /
-Explainer / Opening Comparison screens. Still correct — and deliberately kept —
-where it describes a NEW model that must be paper-traded first
-(`scripts/ncaaf_margin_eval.py`, `docs/ncaaf_search_findings.md`,
-`nfl/live_model/`).
+The daily recap posted that footer under real settled numbers. The phrase
+came from `CLAUDE.md` §2, which was written when it was the framing and never
+revisited; every downstream surface inherited it. §2 now states that every
+model is live real money, and that gate standing is a report. Removed from
+the Discord recap footer, the email footer, the dashboard, and the Track
+Record / Settings / Explainer / Opening Comparison screens. Do not put it
+back, and do not tell a reader a new model has to be held off the record.
 ### Lesson: an absence is not the only delivery fault — a DUPLICATE is one too (2026-09-06)
 
 Every fault above was silence. This one was the opposite, and it hid in the same

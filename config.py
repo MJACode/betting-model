@@ -392,10 +392,10 @@ ACTION_THRESHOLDS: dict = {
     # the retrained model's MAXIMUM probability is 0.734 -- not few sides over
     # 0.74, none. That is mlb_runline's failure mode: a model that cannot reach
     # its own floor publishes nothing while looking live here, in
-    # model_action_thresholds and in the mobile fallback. And f5 is PAPER ONLY
-    # (a retrain resets §2's gate), so a cut that fires nothing can never reach
-    # the >=50 settled picks the gate needs -- 0.74 did not park f5, it
-    # stranded it. It was also swept on CALIBRATED probabilities while the
+    # model_action_thresholds and in the mobile fallback. A retrain resets
+    # the settled-pick count the gate reports, so a cut that fires nothing
+    # can never reach the >=50 settled picks that report needs -- 0.74 did
+    # not park f5, it stranded it. It was also swept on CALIBRATED probabilities while the
     # scorer decides on RAW ones (models/scorer.py: "DISPLAY ONLY for now"),
     # so it was the wrong number on the wrong scale.
     #
@@ -415,13 +415,13 @@ ACTION_THRESHOLDS: dict = {
     # looks like against vig (average DK implied 53.2%). The cell FAILS the
     # plateau test 0 of 8 -- the isolated-peak shape sessions 74 and 87 had to
     # retract. It survives a time split, which is the only check it passes.
-    # THESE PICKS ARE NOT LIVE, which is the whole reason a thin cell is
-    # shippable here. f5 is PAPER ONLY -- the retrain reset §2's gate -- so
-    # nothing is backed and no bankroll is exposed at 0.58/0.02. Pausing and
-    # shipping a paper cut therefore differ in exactly one respect: whether the
-    # model produces a record to judge. Pausing produces none, and a paused
-    # model cannot clear the gate that would unpause it. The weak grid argues
-    # against ever making this LIVE; it does not argue against measuring it.
+    # The cut stays at 0.58/0.02. The picks it writes are live money, the
+    # same as every other model. The weak grid is why the kill criterion
+    # below pauses the model at 50 settled picks if flat-bet ROI is negative.
+    # It is not a reason to leave those picks out of the units. Pausing
+    # produces no record, and a paused model cannot clear the review that
+    # would unpause it. The weak grid argues for that review; it does not
+    # argue against measuring the model.
     # (mike, 2026-09-03, correcting an earlier note here that framed this as a
     # disagreement about risk. It is not one.)
     #
@@ -532,7 +532,7 @@ ACTION_THRESHOLDS: dict = {
     # card-qualified pick. 0.52 ~ the -110 breakeven; calibrated under-probs
     # run 0.56-0.60.
     #
-    # 2026 paper-track (not a cut move): keep the physical residual. MAX_FIRE_LEAD stays 4.
+    # 2026 live track (not a cut move): keep the physical residual. MAX_FIRE_LEAD stays 4.
     # No unit bump (UNIT_PCT 0.01, MAX_UNITS 2). Measure the deployed
     # Open-Meteo issued-forecast population; 2024 and 2025 lost on observed wind.
     # Do not widen the fire window. docs/nfl_rule_2026_track.md.
@@ -546,7 +546,7 @@ ACTION_THRESHOLDS: dict = {
     # on 125 (CI spans zero — see the model file). edge >= 0 drops quotes
     # whose juice already eats the edge.
     #
-    # 2026 paper-track (no unit bump, not a cut move): paper-track through
+    # 2026 live track (no unit bump, not a cut move): live track through
     # 2026; retire if 2026 finishes <= flat. Six-season restatement spans zero.
     # Do not unpause paused XGB / distributional NFL props off this track.
     # python -m scripts.nfl_rule_2026_track. docs/nfl_rule_2026_track.md.
@@ -1518,9 +1518,9 @@ PAUSED_MODELS: set = {
     #   mlb_total_market  — MLB totals Pin-lean vs soft implied (not mlb_over_under)
     #   mlb_total_public_fade — MLB totals fade public OVER (not mlb_over_under)
     # nfl_prop_sacks joined the pause 2026-09-14 (mike, design-review follow-up
-    # to #710): thin / paper-only, never a live BET lane.
+    # to #710): thin market, paused, not a BET lane.
     #
-    # Do not unpause these because opener/wind are being paper-tracked through
+    # Do not unpause these because opener/wind are being tracked live through
     # 2026. The distributional pause is docs/nfl_props_model.md §5b, independent
     # of the two rules. docs/nfl_rule_2026_track.md.
     "nfl_prop_pass_yards",
@@ -2300,11 +2300,11 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_prop_shots_on_goal":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_assists":         0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
-                                       # 2026 paper-track: MAX_FIRE_LEAD stays 4; no unit bump
+                                       # 2026 live track: MAX_FIRE_LEAD stays 4; no unit bump
     "nfl_opener_spread":        0.55,   # mirrors the card's |dev| >= 2.0 (2026-09-11, mike): 0.5557 at
                                     # 2.0 clears, 0.5470 at 1.0 does not. Was lowered to 0.52 on
                                     # 2026-08-22, which let the 1-point picks through (§28)
-                                    # 2026 paper-track: no unit bump; retire if 2026 finishes <= flat
+                                    # 2026 live track: no unit bump; retire if 2026 finishes <= flat
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.58,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
     "mlb_prop_pitcher_hits":     0.54,  # 2026-08-31 (mike): UNPAUSED at 0.54/0.08 on the calibrated sweep = 49-46 +11.0%
@@ -3159,8 +3159,9 @@ PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
 # the pick as decision_book / decision_odds / decision_implied_prob /
 # decision_edge. DraftKings is still the reference: the line a pick is scored
 # at is DK's, the models are trained against DK's lines, `edge` / `dk_odds`
-# keep their DraftKings meaning. CLV grades that locked bet against the
-# no-vig sharp close (Pinnacle when a pre-game snapshot exists) — docs/clv.md.
+# keep their DraftKings meaning. CLV's headline is that locked bet against
+# the bet book's own raw close; Pinnacle's no-vig close is the market-edge
+# column — docs/clv.md.
 #
 # What it costs, measured rather than assumed: every cut in ACTION_THRESHOLDS
 # was swept on DK-implied edge. The best price is cheaper in implied
@@ -3801,8 +3802,8 @@ RUN_NHL_PROP_ODDS = os.environ.get("RUN_NHL_PROP_ODDS", "1") == "1"
 # Matt's call, 2026-09-02: remove both from the app and keep them out of every
 # model total. The record at the time: HR 256 settled BETs 42-214 (a ~17%-hit
 # longshot market whose +EV filter was anti-predictive against DK's efficient
-# longshot line; already record-only, already excluded from the public
-# record since 2026-07-04); RBI 293 settled BETs 214-79 lifetime, but only ONE
+# longshot line; full-outcome units were forced to 0 from 2026-07-05 until
+# 2026-10-14, and it was already out of the public model totals); RBI 293 settled BETs 214-79 lifetime, but only ONE
 # of them clears the cut it was re-cut to on 2026-08-31, and its sweep was the
 # most floor-distorted on the board (47.6% of the population refused by the
 # -140 floor).
@@ -3866,7 +3867,7 @@ PROP_MODELS = {
     "nfl_prop_rush_rec_yards":   ("NFL", "player_rush_reception_yds",  "gamma",    "highest R2 of any NFL yardage market"),
     "nfl_prop_anytime_td":       ("NFL", "player_anytime_td",          "logistic", "binary, over-only, heavily juiced"),
     "nfl_prop_tackles_assists":  ("NFL", "player_tackles_assists",     "nbinom",   "most out-of-sample signal in the sport"),
-    "nfl_prop_sacks":            ("NFL", "player_sacks",               "poisson",  "thin market — paper only"),
+    "nfl_prop_sacks":            ("NFL", "player_sacks",               "poisson",  "thin market"),
 }
 
 # Baseball Savant leaderboard CSV base URL

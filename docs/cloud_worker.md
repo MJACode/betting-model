@@ -27,8 +27,8 @@ crons had).
 | NFL poll — hourly | every :00 | `run_nfl_poll(fast=False)` — both NFL models, 10-day horizon |
 | NFL poll — fast | every :10 | `run_nfl_poll(fast=True)` — only inside 3h of a kickoff |
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
-| Kalshi NFL prop ladders (record only) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
-| Kalshi NCAAF game markets (record only) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
+| Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
+| Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
@@ -380,11 +380,9 @@ you win depends on the price — *risk 1.1u at −110 to win 1u*. So:
 | LOSS | `− stake` (the full amount risked) |
 | PUSH | `0`, and nothing counts as risked |
 
-ROI is units won over units risked. Prob-only picks (UFC method, some F5) carry
-no DK price, so they grade at −110 — the same fallback settlement already uses,
-rather than dropping them from the math. `mlb_prop_batter_hr` is record-only: it
-counts toward W-L but never toward units, because most HR picks have no real
-price and counting them would fabricate P&L.
+ROI is units won over units risked. The price is the one the bet was taken
+at. A pick with no taken price is staked at the bare conviction, not dropped
+and not given a made-up −110. Every graded pick in the record is in the units.
 
 The recap fires from the **6am daily run**, which settles *yesterday*. It refuses
 any date that is not already over, so the `--step settle` that runs on every

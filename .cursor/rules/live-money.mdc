@@ -1,0 +1,10 @@
+---
+description: Graded picks are live money. Units and the record are the same set.
+alwaysApply: true
+---
+
+Every model is live real money. There is no mode that counts a graded pick in the win-loss record and leaves it out of the units, and there is no hold-back ledger.
+
+Units and the record use the same graded picks. The price is the price the bet was taken at (`COALESCE(decision_odds, dk_odds)`). The stake and the profit are that pick's real stake and profit. A missing price is not filled in with a made-up number.
+
+Do not change thresholds, stake sizes, or pause state unless that change was asked for.

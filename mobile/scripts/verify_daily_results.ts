@@ -7,11 +7,11 @@
  *
  * Pins: overall + per-sport + per-model records and ROI are correct; that
  * off-date, NO_ACTION, sub-threshold, live, AVOID, and paused-model picks are
- * all excluded (they would otherwise inflate the counts); and that record-only
- * models (batter HR) are listed but never counted toward any total.
+ * all excluded (they would otherwise inflate the counts); and that a retired
+ * model contributes nothing to any total.
  */
 import { ALL_SPORTS, computeDailyResults, scopeDailyResults } from '../src/lib/dailyResults';
-import { isModelPaused } from '../src/lib/thresholds';
+import { flatPnl, isModelPaused } from '../src/lib/thresholds';
 import type { GameRow, Pick } from '../src/types';
 
 let failures = 0;
@@ -98,8 +98,7 @@ const picks: Pick[] = [
   mk({ model_id: 'wnba_prop_player_assists', sport: 'WNBA', model_probability: 0.72, edge: 0.12, result: 'LOSS', profit_flat: -100 }),
   mk({ model_id: 'wnba_prop_player_assists', sport: 'WNBA', model_probability: 0.72, edge: 0.12, result: 'PUSH', profit_flat: 0 }),
 
-  // ── RETIRED pre-game model (2026-09-02): batter HR. Was the record-only
-  // probe (graded and listed, never counted); now it must contribute NOTHING —
+  // ── RETIRED pre-game model (2026-09-02): batter HR. It must contribute NOTHING —
   // no row, no listing, no total — exactly like the retired live model below.
   mk({ model_id: 'mlb_prop_batter_hr', model_probability: 0.25, edge: 0, dk_odds: null, result: 'LOSS', profit_flat: -100 }),
 
@@ -241,13 +240,9 @@ check('the day reports its pre-game / in-play split',
   r.live === 1 && mlb.live === 1, `overall ${r.live}, MLB ${mlb.live}`);
 check('paused model excluded from MLB', !mlb.models.some((m) => m.modelId === 'mlb_prop_batter_tb'), '');
 
-// A retired PRE-GAME model contributes nothing — not even a record-only row.
-// (Until 2026-09-02 the retired guard was gated on is_live, so this pick would
-// have surfaced as a record-only row while the Discord recap dropped it.)
+// A retired pre-game model contributes nothing.
 check('a retired pre-game model contributes no row',
   mlb.models.find((m) => m.modelId === 'mlb_prop_batter_hr') === undefined, '');
-check('no live model is record-only today',
-  mlb.models.every((m) => m.recordOnly === false), '');
 
 // WNBA total: 0W-1L-1P, picks 2, profit -100, staked 200
 check('WNBA total 0-1-1', wnba.total.wins === 0 && wnba.total.losses === 1 && wnba.total.pushes === 1,
@@ -314,8 +309,8 @@ check('gradedPicks MLB before WNBA',
 check('gradedPicks profit desc within sport',
   r.gradedPicks.every((p, i) => i === 0
     || r.gradedPicks[i - 1].sport !== p.sport
-    || Number(r.gradedPicks[i - 1].profit_flat ?? 0) >= Number(p.profit_flat ?? 0)),
-  r.gradedPicks.map((p) => `${p.sport}:${p.profit_flat}`).join(','));
+    || flatPnl(r.gradedPicks[i - 1]).profit >= flatPnl(p).profit),
+  r.gradedPicks.map((p) => `${p.sport}:${flatPnl(p).profit}`).join(','));
 check('paused model absent from gradedPicks',
   !r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_tb'), '');
 
@@ -326,8 +321,7 @@ check('ALL_SPORTS is the full canonical order',
   ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,NFL,NCAAF,UFC,NHL,GOLF', ALL_SPORTS.join(','));
 
 // A day where ONLY a retired model's pick graded is an EMPTY day: no totals,
-// no sport section, nothing listed. (Before retirement this was the
-// record-only case: MLB section, zero totals, the pick listed.)
+// no sport section, nothing listed.
 const hrOnly = computeDailyResults(DATE, [
   mk({ model_id: 'mlb_prop_batter_hr', model_probability: 0.25, edge: 0, dk_odds: null, result: 'LOSS', profit_flat: -100 }),
 ]);
@@ -377,6 +371,23 @@ check('live day: real live bets are listed in gradedPicks, repair row is not',
   liveDay.gradedPicks.length === 2
     && liveDay.gradedPicks.every((p) => p.model_id.includes('_live_')),
   liveDay.gradedPicks.map((p) => p.model_id).join(','));
+
+const unpublished = computeDailyResults(DATE, [
+  mk({ result: 'WIN', profit_flat: WIN_PROFIT, discordPublish: 'unpublished' }),
+  mk({ result: 'LOSS', profit_flat: -100, discordPublish: 'published' }),
+]);
+check('an unpublished graded bet is left out of the day',
+  unpublished.overall.picks === 1 && unpublished.overall.losses === 1
+    && unpublished.gradedPicks.length === 1 && unpublished.unpublished === 1
+    && unpublished.sports.find((s) => s.sport === 'MLB')?.unpublished === 1,
+  JSON.stringify(unpublished.overall));
+const unpostedDay = computeDailyResults(DATE, [
+  mk({ result: 'WIN', profit_flat: WIN_PROFIT, discordPublish: 'unpublished' }),
+]);
+check('a day of only unpublished bets reports that count and an empty record',
+  unpostedDay.overall.picks === 0 && unpostedDay.unpublished === 1
+    && unpostedDay.gradedPicks.length === 0,
+  JSON.stringify({ picks: unpostedDay.overall.picks, unpublished: unpostedDay.unpublished }));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -282,6 +282,30 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-10-12 (mike: "5) yes"): the free data the NFL edge search fetched,
     # one gzipped row per file (scripts/nfl_research_backup.py).
     "add_nfl_research_data_backup_2026_10_12.sql",
+    # 2026-10-14: units and the W-L are the same graded picks, at the price
+    # the bet was taken at. Rewrites results_snapshots and drops the column
+    # that counted a pick in the record and left it out of the units.
+    # The view patch removes the one-model units zeroing. It reads the live
+    # view, so it runs after every migration that owns that view.
+    "recompute_snapshot_units_2026_10_14.sql",
+    "home_run_units_follow_graded_profit_2026_10_14.sql",
+    # 2026-10-14: 35 extra picks rows behind one Discord lock are marked
+    # DUPLICATE (kept row untouched; none of the extras is a graded
+    # WIN/LOSS/PUSH). Two unique indexes stop a second standing BET on a
+    # publish lock and a second live row on the same side. Skips the
+    # create, and does not raise, when a duplicate of that identity remains.
+    "discord_post_one_pick_2026_10_14.sql",
+    # 2026-10-14: the published record is the picks Discord still has.
+    # Rewrites results_snapshots (W-L and stake_for units) and adds the
+    # same lock to the two app views. Reads the live view text, so it
+    # runs after every migration that owns those views, including the
+    # duplicate-row pass above. Does not post.
+    "published_picks_record_2026_10_14.sql",
+    # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
+    # is the market-edge column. Recomputes rows not yet standard_v2 and
+    # patches v_public_track_record. Reads the live view, so it runs after
+    # every migration that owns that view. Does not touch units or pauses.
+    "clv_standard_v2_2026_10_14.sql",
 ]
 
 

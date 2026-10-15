@@ -342,10 +342,11 @@ and XGBoost cannot split on a constant. The Phase 1 rebuild revived them and the
 model immediately leant on them. The ERA pair that carried the old model has
 fallen out of the top five.
 
-**PAPER ONLY until it clears the go-live gate.** CLAUDE.md §2: ≥50 settled
-picks, positive flat-bet ROI, calibration ≤5% — per model, and **a retrain
-resets it**. CalError already passes at 2.4%; the other two need live settled
-picks. Until then f5 is surfaced but not backed.
+**The gate is a report, and the bets are live money.** CLAUDE.md §2: ≥50
+settled picks, positive flat-bet ROI, calibration ≤5% — per model, and **a
+retrain resets the count**. CalError already passes at 2.4%; the other two
+need more settled picks. The picks f5 writes are in the record and in the
+units either way.
 
 #### The threshold sweep, and why it does not produce a threshold
 
@@ -370,7 +371,7 @@ p >= 0.74      0 sides      <- the live cut
 This is `mlb_runline`'s failure mode exactly: a model that cannot reach its own
 floor publishes nothing while looking live in `config.py`,
 `model_action_thresholds` and the mobile fallback. **The status quo is not
-neutral** — a paper-only model that fires zero picks can never accumulate the
+neutral** — a live model that fires zero picks can never accumulate the
 ≥50 settled picks §2's gate requires, so 0.74 does not park f5, it strands it.
 
 **2. There is no cut to move it to.** Of 104 grid cells, 50 carry ≥30 bets and
@@ -390,16 +391,15 @@ Average DK implied probability across the sides is 53.2%, so that is the bar.
 
 #### What was shipped, and on whose call
 
-**0.58/0.02, as a PAPER cut (mike, 2026-09-03). These picks are NOT LIVE**, and
-that is the premise the whole decision rests on: the retrain reset §2's gate, so
-f5 is paper-only and nothing is backed at this cut.
+**0.58/0.02 (mike, 2026-09-03).** The retrain reset the settled-pick count
+the gate reports. The picks this cut writes are live money.
 
 The grid does not support a cut — one positive cell in fifty, failing the
-plateau test 0 of 8 — and that is a strong argument against ever making this
-**live**. It is not an argument against measuring it. Pausing and shipping a
-paper cut differ in exactly one respect: whether the model produces a record to
-judge. Pausing produces none, and a paused model cannot clear the gate that
-would unpause it. 0.74 had the same effect as pausing without saying so.
+plateau test 0 of 8 — and that is why the kill criterion pauses the model at
+50 settled picks if flat-bet ROI is negative. It is not a reason to leave
+the picks out of the units. Pausing produces no record, and a paused model
+cannot clear the review that would unpause it. 0.74 had the same effect as
+pausing without saying so.
 
 The numbers on the record are the FLOORED ones, with `config.MODEL_MIN_ODDS`
 applied inside the sweep, because a cell measured on bets below the floor is
@@ -574,7 +574,7 @@ Collect real DK prop lines via The Odds API daily (prop_odds_ingestor.py is live
 
 ### Bet Sizing
 
-Tenth-Kelly, capped at 5% of bankroll — same as game-level models. Tune thresholds after 50+ live paper trading picks per model.
+Tenth-Kelly, capped at 5% of bankroll — same as game-level models. Tune thresholds after 50+ settled picks per model.
 
 ### Umpire Data
 

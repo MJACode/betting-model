@@ -22,7 +22,7 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
-import { isDuplicateCopy, isPausedRow, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
+import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropModel, type StatDef } from '@/lib/statCatalog';
@@ -394,6 +394,8 @@ export interface PlayerPickRecord {
   pushes: number;
   units: number | null;
   unpriced: number;
+  /** A ledger read failed. Unknown stamps stayed in the counts. */
+  ledgerUnread: boolean;
 }
 
 /**
@@ -403,7 +405,9 @@ export interface PlayerPickRecord {
  */
 export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   const by = new Map<string, PlayerPickLine>();
-  const total: PlayerPickRecord = { lines: [], settled: 0, wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0 };
+  const total: PlayerPickRecord = {
+    lines: [], settled: 0, wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, ledgerUnread: false,
+  };
   for (const p of picks) {
     if (p.signal_type !== 'BET') continue;
     // Paused-model BETs were never bet (#850); same rule as passesRecordFilter.
@@ -412,6 +416,9 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     if (RECORD_EXCLUDED_MODELS.has(p.model_id)) continue;
     // The second copy of one bet under another game id counts once (2026-10-09).
     if (isDuplicateCopy(p)) continue;
+    // The published record is the picks Discord still has. Omitted and
+    // unknown stay; only an explicit unpublished stamp leaves.
+    if (!publishedRecordKeeps(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
     let line = by.get(p.model_id);
     if (!line) {
@@ -439,6 +446,7 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
       line.unpriced += 1;
       total.unpriced += 1;
     }
+    if (p.discordPublish === 'unknown') total.ledgerUnread = true;
     total.settled += 1;
   }
   total.lines = [...by.values()].sort((a, b) => (b.wins + b.losses + b.pushes) - (a.wins + a.losses + a.pushes));

@@ -388,9 +388,9 @@ def test_roi_denominator_excludes_pushes():
     assert m["roi_pct"] == pytest.approx(8.0 / 80 * 100)
 
 
-def test_a_record_only_model_reports_no_roi():
-    """batter HR settles hundreds of picks and prices almost none. An ROI over
-    the priced few, printed beside the full record, reads as the record's ROI."""
+def test_an_unpriced_model_reports_no_roi():
+    """A model that settled picks and priced none has no ROI. An ROI over a
+    priced handful, printed beside the full record, would not be that record."""
     m = store.model_performance(
         _perf_rows(("mlb_prop_batter_hr", "MLB", 252, 42, 210, 0, 0, 0, "x")))[0]
     assert m["roi_pct"] is None

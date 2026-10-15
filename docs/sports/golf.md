@@ -123,7 +123,7 @@ git add -f models/saved/golf_*.pkl && git commit -m "Add trained golf model arti
 Phase-0 verification — parsers in `datagolf_ingestor.py` document every assumption
 up top and are isolated for a one-line fix. (2) Real-odds backtest needs the
 DataGolf historical-odds archive (tier unverified) — until then golf is validated
-by holdout classification metrics + live paper trading. (3) Thresholds are
+by holdout classification metrics until historical odds exist. (3) Thresholds are
 placeholders on a market-relative prob scale (win ~3%, top-N ~15-25%, make-cut
 ~65%) — sweep after 50+ settled picks per model.
 

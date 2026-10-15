@@ -13,7 +13,6 @@ import {
   isModelRetired,
   passesActionFilter,
   passesRecordFilter,
-  RECORD_ONLY_MODELS,
 } from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
@@ -22,10 +21,6 @@ import { decisionEdge } from '@/lib/decisionPrice';
 
 export interface ModelDayStats extends CustomModelStats {
   modelId: string;
-  /** Record-only model (e.g. batter HR): its W-L is shown on the row, but it is
-   *  excluded from the overall/sport totals and its money fields are zeroed —
-   *  the same treatment as the Models tab and the public track record. */
-  recordOnly: boolean;
   /** In-play model. Its picks count exactly like a pre-game pick — they lock at
    *  first signal and settle the same way — but a reader deciding whether a day
    *  went well should be able to see which half of the book produced it. */
@@ -40,6 +35,8 @@ export interface SportDayBreakdown {
    *  so an unsettled day (e.g. WNBA finals not ingested yet) reads as "picks
    *  pending", never as "there were no picks". */
   pending: number;
+  /** Graded BETs that passed the record filter and Discord does not have. */
+  unpublished: number;
   /** How many of this sport's graded picks came from an in-play model. */
   live: number;
 }
@@ -67,6 +64,8 @@ export interface DailyResults {
    *  a prop whose player DNP, or a game not settled at fetch time). Surfaced so
    *  the recap reconciles with the number of picks the user actually placed. */
   pending: number;
+  /** Graded BETs left out because Discord does not have them. */
+  unpublished: number;
   /** The individual graded (WIN/LOSS/PUSH) picks behind the record, sorted by
    *  sport order then profit desc, so the recap can list what was actually bet. */
   gradedPicks: Pick[];
@@ -88,6 +87,7 @@ export function emptyDailyResults(date: string): DailyResults {
     overall: EMPTY_DAILY,
     sports: [],
     pending: 0,
+    unpublished: 0,
     gradedPicks: [],
     pendingPicks: [],
     live: 0,
@@ -176,6 +176,8 @@ export interface ScopedDailyResults {
    *  the per-sport breakdown instead). */
   models: ModelDayStats[] | null;
   pending: number;
+  /** Graded BETs in this scope that Discord does not have. */
+  unpublished: number;
   /** Graded picks in this scope that came from an in-play model. */
   live: number;
   gradedPicks: Pick[];
@@ -190,6 +192,7 @@ export function scopeDailyResults(r: DailyResults, sport: string): ScopedDailyRe
       record: r.overall,
       models: null,
       pending: r.pending,
+      unpublished: r.unpublished,
       live: r.live,
       gradedPicks: r.gradedPicks,
       pendingPicks: r.pendingPicks,
@@ -202,6 +205,7 @@ export function scopeDailyResults(r: DailyResults, sport: string): ScopedDailyRe
     record: section?.total ?? EMPTY_DAILY,
     models: section?.models ?? [],
     pending: section?.pending ?? 0,
+    unpublished: section?.unpublished ?? 0,
     live: section?.live ?? 0,
     gradedPicks: r.gradedPicks.filter((p) => p.sport === sport),
     pendingPicks: r.pendingPicks.filter((p) => p.sport === sport),
@@ -221,10 +225,9 @@ function gameMatchup(g: GameRow): string {
 
 /**
  * Group a day's picks into overall + per-sport + per-model records.
- * Only settled (WIN/LOSS/PUSH) BET picks that pass the current action filter
- * count toward the record; NO_ACTION rows, off-date rows, live picks, and
- * sub-threshold picks are excluded. Record-only models (RECORD_ONLY_MODELS —
- * batter HR) are listed but never counted. BET picks awaiting a result (result NULL)
+ * Only settled (WIN/LOSS/PUSH) BET picks that pass the record filter
+ * count toward the record and the units. NO_ACTION rows, off-date rows, and
+ * sub-threshold ungraded picks are excluded. BET picks awaiting a result (result NULL)
  * are tallied per-sport as `pending` and listed in `pendingPicks` — a sport
  * whose games haven't settled yet shows as "pending", never as absent.
  * `dayGames` (optional) yields `games`: every game with ≥1 scored pick row.
@@ -239,6 +242,8 @@ export function computeDailyResults(
   const bySport = new Map<string, Acc>();
   const byModel = new Map<string, { sport: string; acc: Acc; live: boolean }>();
   const pendingBySport = new Map<string, number>();
+  const unpublishedBySport = new Map<string, number>();
+  let unpublished = 0;
   const picksPerGame = new Map<string, number>();
   const gradedPicks: Pick[] = [];
   const pendingPicks: Pick[] = [];
@@ -287,6 +292,14 @@ export function computeDailyResults(
     const graded =
       p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH';
     if (!(graded ? passesRecordFilter(p) : passesActionFilter(p))) continue;
+    // A graded BET Discord does not have is not in the published record.
+    // Omitted means the ledger was not read (the pure tests). `unknown` is a
+    // failed read and stays, so a ledger outage does not paint 0-0.
+    if (graded && p.discordPublish === 'unpublished') {
+      unpublished += 1;
+      unpublishedBySport.set(p.sport, (unpublishedBySport.get(p.sport) ?? 0) + 1);
+      continue;
+    }
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') {
       if (p.result == null) {
         // Placed, not yet graded — track per sport so the breakdown can say
@@ -303,18 +316,14 @@ export function computeDailyResults(
       liveBySport.set(p.sport, (liveBySport.get(p.sport) ?? 0) + 1);
     }
 
-    // Record-only models (batter HR) are listed and get a per-model W-L row,
-    // but never count toward the overall or per-sport record/P&L.
-    if (!RECORD_ONLY_MODELS.has(p.model_id)) {
-      tally(overall, p);
+    tally(overall, p);
 
-      let sAcc = bySport.get(p.sport);
-      if (!sAcc) {
-        sAcc = emptyAcc();
-        bySport.set(p.sport, sAcc);
-      }
-      tally(sAcc, p);
+    let sAcc = bySport.get(p.sport);
+    if (!sAcc) {
+      sAcc = emptyAcc();
+      bySport.set(p.sport, sAcc);
     }
+    tally(sAcc, p);
 
     let mEntry = byModel.get(p.model_id);
     if (!mEntry) {
@@ -329,43 +338,42 @@ export function computeDailyResults(
     tally(mEntry.acc, p);
   }
 
-  // Per-model rows grouped under their sport. Record-only models keep their
-  // W-L but get zeroed money so the row can never read as counted P&L.
+  // Per-model rows grouped under their sport. Money is the same graded picks
+  // as the W-L on the row.
   const modelsBySport = new Map<string, ModelDayStats[]>();
   for (const [modelId, { sport, acc, live }] of byModel) {
-    const recordOnly = RECORD_ONLY_MODELS.has(modelId);
-    let stats = finalize(acc);
+    const stats = finalize(acc);
     if (stats.picks === 0) continue;
-    if (recordOnly) stats = { ...stats, profitFlat: 0, stakedFlat: 0, roiFlat: 0 };
     const arr = modelsBySport.get(sport) ?? [];
-    arr.push({ modelId, recordOnly, live, ...stats });
+    arr.push({ modelId, live, ...stats });
     modelsBySport.set(sport, arr);
   }
 
-  // A sport gets a section if it has counted picks, pending picks, OR
-  // record-only model rows — a day where only HR graded must still surface MLB.
+  // A sport gets a section if it has counted picks or pending picks.
   const sectionSports = new Set([
     ...bySport.keys(),
     ...pendingBySport.keys(),
+    ...unpublishedBySport.keys(),
     ...modelsBySport.keys(),
   ]);
   const sports: SportDayBreakdown[] = [];
   for (const sport of sectionSports) {
     const total = finalize(bySport.get(sport) ?? emptyAcc());
     const pendingCount = pendingBySport.get(sport) ?? 0;
+    const unpublishedCount = unpublishedBySport.get(sport) ?? 0;
     const models = (modelsBySport.get(sport) ?? []).sort(
       (a, b) => b.profitFlat - a.profitFlat,
     );
-    if (total.picks === 0 && pendingCount === 0 && models.length === 0) continue;
+    if (total.picks === 0 && pendingCount === 0 && unpublishedCount === 0 && models.length === 0) continue;
     sports.push({ sport, total, models, pending: pendingCount,
-                  live: liveBySport.get(sport) ?? 0 });
+                  unpublished: unpublishedCount, live: liveBySport.get(sport) ?? 0 });
   }
   sports.sort((a, b) => bySportOrder(a.sport, b.sport));
 
   gradedPicks.sort(
     (a, b) =>
       bySportOrder(a.sport, b.sport) ||
-      Number(b.profit_flat ?? 0) - Number(a.profit_flat ?? 0),
+      flatPnl(b).profit - flatPnl(a).profit,
   );
   pendingPicks.sort(
     (a, b) => bySportOrder(a.sport, b.sport) || decisionEdge(b) - decisionEdge(a),
@@ -396,6 +404,7 @@ export function computeDailyResults(
     overall: finalize(overall),
     sports,
     pending: pendingPicks.length,
+    unpublished,
     gradedPicks,
     pendingPicks,
     live: liveGraded,

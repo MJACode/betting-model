@@ -351,7 +351,7 @@ def render_results(recap: dict, game_date: str, restate: bool = False) -> str:
     if risked > 0:
         tally = f"{rec}, {units:+.2f}u, {units / risked * 100:+.1f}% ROI"
     else:
-        tally = f"{rec}, record only"
+        tally = f"{rec}, {units:+.2f}u"
     # "(restated)" when a late settlement invalidated the tweet before it --
     # the embed says "restated" in its title; the two must agree.
     head = f"{pretty} results (restated)" if restate else f"{pretty} results"
