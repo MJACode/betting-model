@@ -378,14 +378,30 @@ def listed_goalies(conn, game_ids) -> dict:
     return out
 
 
-def inputs_for_date(conn, game_date: str, now: datetime | None = None) -> tuple[pd.DataFrame, dict]:
+def stale_teams(conn, logs: dict, game_date: str) -> set:
+    """Teams with a game in the two days before `game_date` that the team log
+    does not hold yet. Last night's games land at ~10:05Z; if that ingest has
+    not run, rest, back-to-back and form would be read off stale logs -- a
+    state the walk-forward never graded -- so the model does not decide."""
+    d = datetime.fromisoformat(str(game_date)[:10])
+    lo = (d - timedelta(days=2)).strftime("%Y-%m-%d")
+    recent = conn.execute(
+        "SELECT game_id, home_team, away_team FROM games WHERE sport = 'NHL' "
+        "AND game_date >= %s AND game_date < %s", (lo, d.strftime("%Y-%m-%d"))).fetchall()
+    logged = set(logs["team"].game_id)
+    return {t for gid, h, a in recent if gid not in logged for t in (h, a)}
+
+
+def inputs_for_date(conn, game_date: str, now: datetime | None = None) -> tuple[pd.DataFrame, dict, set]:
     """Every input for the NHL games dated `game_date`, built exactly as the
-    training rows are (logs cut to the games before that date), and the listed
-    goalies. Built once per (date, listed goalies) per hour of logs."""
+    training rows are (logs cut to the games before that date), the listed
+    goalies, and the teams whose last game the logs do not hold yet. Built
+    once per (date, listed goalies) per hour of logs."""
     now = now or datetime.now(timezone.utc)
     if _CACHE["logs"] is None or now - _CACHE["logs_at"] > LOGS_TTL:
         _CACHE["logs"], _CACHE["logs_at"], _CACHE["rows"] = load_logs(conn), now, {}
     d = str(game_date)[:10]
+    stale = stale_teams(conn, _CACHE["logs"], d)
     up = pd.DataFrame(conn.execute(
         "SELECT game_id, game_date, season, home_team, away_team FROM games "
         "WHERE sport = 'NHL' AND game_date = %s", (d,)).fetchall(),
@@ -399,7 +415,7 @@ def inputs_for_date(conn, game_date: str, now: datetime | None = None) -> tuple[
         cut = {k: v[v.game_date.astype(str).str[:10] < d] for k, v in _CACHE["logs"].items()}
         built = build_inputs(cut, upcoming=up)
         _CACHE["rows"][key] = built[built.game_id.isin(up.game_id)].set_index("game_id")
-    return _CACHE["rows"][key], goalies
+    return _CACHE["rows"][key], goalies, stale
 
 
 # ── the decision window ──────────────────────────────────────────────────────

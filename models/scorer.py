@@ -844,7 +844,7 @@ def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
     if not hi or not ai:
         return None, None, None
     try:
-        rows, goalies = anc.inputs_for_date(conn, game_date)
+        rows, goalies, stale = anc.inputs_for_date(conn, game_date)
     except Exception as exc:  # noqa: BLE001 - one game's inputs must not stop the pass
         logger.error(f"  {game_id}/nhl_moneyline: inputs failed: {exc}")
         return None, None, None
@@ -861,6 +861,8 @@ def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
     reason = anc.decision_window(game_date, commence_time)
     if reason is None and ((game_id, home_team) not in goalies or (game_id, away_team) not in goalies):
         reason = "waiting for both listed goalies"
+    if reason is None and (home_team in stale or away_team in stale):
+        reason = "waiting for last night's game logs"
     return p_home, 1.0 - p_home, reason
 
 

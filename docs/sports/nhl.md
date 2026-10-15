@@ -167,8 +167,10 @@ rating, goalie workload, home ice, travel). It is NOT fit by
 `scripts/nhl_moneyline_anchored_train.py`, grade with
 `scripts/nhl_moneyline_anchored_backtest.py` (it must reproduce before a new
 artifact goes live). **One decision a game: 16:00Z-18:00Z on game day, with
-both teams' game-day goalie rows in `nhl_goalie_stats`**; every other run
-writes NONE with the reason, and it never writes AVOID. EV ≥ 0.06 on its own
+both teams' game-day goalie rows in `nhl_goalie_stats`, and both teams' games
+of the last two days already in `nhl_team_game_log`** (they land ~10:05Z; if
+that ingest is late the model waits rather than read stale rest and form);
+every other run writes NONE with the reason, and it never writes AVOID. EV ≥ 0.06 on its own
 probability at the best price, −200 floor; evidence in `docs/thresholds.md`
 and `docs/nhl_moneyline_rebuild.md`. Gate standing: 0 settled bets, live by
 mike's rule (CLAUDE.md §2, "never propose paper"). The regulation model below

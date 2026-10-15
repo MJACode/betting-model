@@ -140,7 +140,7 @@ class _Fixed:
         return np.array([[0.70, 0.30]])
 
 
-def _wire(monkeypatch, *, window=None, goalies=("OTT", "STL"), nan=False):
+def _wire(monkeypatch, *, window=None, goalies=("OTT", "STL"), nan=False, stale=()):
     import models.scorer as sc
     artifact = {"kind": anc.KIND, "model": _Fixed(), "feature_cols": list(anc.FEATURES)}
     monkeypatch.setattr(sc, "load_model", lambda mid: artifact)
@@ -154,7 +154,7 @@ def _wire(monkeypatch, *, window=None, goalies=("OTT", "STL"), nan=False):
     gid = "NHL_2026-10-16_STL_OTT"
     rows = pd.DataFrame([{f: (np.nan if nan else 0.0) for f in anc.FEATURES}], index=[gid])
     listed = {(gid, t): "1" for t in goalies}
-    monkeypatch.setattr(anc, "inputs_for_date", lambda conn, d: (rows, listed))
+    monkeypatch.setattr(anc, "inputs_for_date", lambda conn, d: (rows, listed, set(stale)))
     monkeypatch.setattr(anc, "decision_window", lambda d, ct, now=None: window)
     return sc.score_game(None, gid, "nhl_moneyline",
                          {"home_team": "OTT", "away_team": "STL", "game_date": "2026-10-16"},
@@ -180,6 +180,31 @@ def test_without_both_listed_goalies_it_does_not_decide(monkeypatch):
     picks = _wire(monkeypatch, goalies=("OTT",))
     assert picks and all(p["signal_type"] == "NONE" for p in picks)
     assert all("listed goalies" in (p.get("downgrade_reason") or "") for p in picks)
+
+
+def test_without_last_nights_logs_it_does_not_decide(monkeypatch):
+    picks = _wire(monkeypatch, stale=("STL",))
+    assert picks and all(p["signal_type"] == "NONE" for p in picks)
+    assert all("last night's game logs" in (p.get("downgrade_reason") or "") for p in picks)
+
+
+class _GamesConn:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def execute(self, sql, params=None):
+        rows = self.rows
+
+        class _R:
+            def fetchall(self_inner):
+                return rows
+        return _R()
+
+
+def test_a_scheduled_game_missing_from_the_logs_marks_both_teams_stale():
+    logs = {"team": pd.DataFrame({"game_id": ["NHL_2026-10-15_BOS_TOR", "NHL_2026-10-15_BOS_TOR"]})}
+    conn = _GamesConn([("NHL_2026-10-15_BOS_TOR", "TOR", "BOS"), ("NHL_2026-10-15_STL_OTT", "OTT", "STL")])
+    assert anc.stale_teams(conn, logs, "2026-10-16") == {"OTT", "STL"}
 
 
 def test_a_missing_input_skips_the_game(monkeypatch):
