@@ -143,8 +143,7 @@ def freshness(conn, today: date | datetime | None = None) -> dict:
     }
 
 
-def refresh(conn, apply: bool = False, today: date | datetime | None = None,
-            books: list[str] | None = None) -> dict:
+def refresh(conn, apply: bool = False, today: date | datetime | None = None) -> dict:
     """Freshness always. Writes only when apply is true, and only the due games."""
     report = freshness(conn, today=today)
     report["apply"] = bool(apply)
@@ -159,9 +158,9 @@ def refresh(conn, apply: bool = False, today: date | datetime | None = None,
     from byom.prop_load import build_season as build_props
 
     game = build_season(
-        conn, report["season"], apply=True, books=books, game_ids=ids)
+        conn, report["season"], apply=True, game_ids=ids)
     prop = build_props(
-        conn, report["season"], apply=True, books=books, game_ids=ids)
+        conn, report["season"], apply=True, game_ids=ids)
     conn.commit()
     report["written_game_facts"] = game["written"]
     report["written_prop_facts"] = prop["written"]

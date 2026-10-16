@@ -9,7 +9,8 @@
 -- non_participant, missing_log, unplayed, ambiguous. See byom/prop_facts.py.
 -- Anytime TD limits are not a column. They are the stat the builder sums.
 --
--- The 24h prop lock is UNCONFIRMED and is not in this file.
+-- The unit columns are results, not a stake. The 24h prop lock is
+-- UNCONFIRMED and is not in this file.
 -- One DO block. No CONCURRENTLY.
 
 DO $mig$
