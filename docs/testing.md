@@ -15,8 +15,9 @@ less useful since pure function tests don't need data, but integration is more m
 with a populated DB).
 
 ```bash
-# Install once
-python -m pip install "pytest>=8.0.0"
+# Install once: pytest plus a pip-packaged node for the 13 tests that run the
+# app's TypeScript (tests/_node.py finds it; a system node is used if present)
+python -m pip install -r requirements-test.txt
 
 # Run all tests
 python -m pytest tests/ -v
