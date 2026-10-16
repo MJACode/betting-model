@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import data.ingestors.nba_prop_close_ingestor as close_ing  # noqa: E402
 import models.nba_prop_market as mk  # noqa: E402
 import scripts.nba_prop_market_card as card  # noqa: E402
+import scripts.nba_prop_projection_card as projection_card  # noqa: E402
 from data.db import get_connection  # noqa: E402
 
 _ET = ZoneInfo("America/New_York")
@@ -59,22 +60,30 @@ LOOK_AHEAD_MIN = (40, 62)
 class Plan:
     decide: list[str] = field(default_factory=list)    # games to fetch and decide
     close: list[str] = field(default_factory=list)     # bet games owed a close
+    project: list[str] = field(default_factory=list)   # games due the projection model's frame
+    # An NBA game tips within LOOK_AHEAD_MIN: publish on this tick even with nothing else to do,
+    # so a bet a failed or capped Discord run held back still posts before its game starts.
+    publish: bool = False
 
 
 def plan(conn, now: datetime) -> Plan:
     """What this tick has to do, from what is stored. No API call."""
     card.ensure_decisions_table(conn)
     games = card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
+    publish = bool(games)                     # slate() keeps only games not yet tipped
     near = sorted(g for g, v in games.items()
                   if mk.minutes_to_tip(v["tip"], now) >= LOOK_AHEAD_MIN[0])
     if near:
-        done = card.decided_games(conn, near) | card.games_with_a_bet(conn, near)
-        near = [g for g in near if g not in done]
+        # a game is done only when BOTH NBA prop models have decided it
+        rule_done = card.decided_games(conn, near) | card.games_with_a_bet(conn, near)
+        proj_done = projection_card.decided_games(conn, near)
+        near = [g for g in near if not (g in rule_done and g in proj_done)]
     bet = close_ing.bet_games(conn, now)
     taken = close_ing.closes_taken(conn, sorted(bet)) if bet else set()
     owed = sorted(g for g, v in bet.items()
                   if close_ing.due(v["tip"], now, has_bet=True, close_taken=g in taken))
-    return Plan(decide=near, close=owed)
+    return Plan(decide=near, close=owed, project=projection_card.to_project(conn, now),
+                publish=publish)
 
 
 def plan_tick(now: datetime | None = None) -> Plan:

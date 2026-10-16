@@ -1001,35 +1001,47 @@ def run_nfl_prop_card() -> None:
     _publish_new_signals("nfl-prop-card")
 
 
-# Each step of an NBA prop window tick is bounded, and the three together fit
-# inside one five-minute tick (max_instances=1 turns one stuck step into
-# skipped ticks -- the 2026-10-11 NFL poll, see _run). The fetch is one event
-# call per game about to enter its window; the card and the close are a read
-# and a handful of writes, plus one event call per bet game owed a close.
-NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 150, "card": 90, "close": 60}
+# Each step of an NBA prop window tick is bounded, and the DECIDING steps
+# (fetch, both cards, close) fit inside one five-minute tick together
+# (max_instances=1 turns one stuck step into skipped ticks -- the 2026-10-11 NFL
+# poll, see _run). The fetch is one event call per game about to be decided;
+# the cards and the close are a read and a handful of writes, plus one event
+# call per bet game owed a close. The PROJECTING steps run after them, on the
+# tick about an hour before tip, so a slow frame never delays a decision: the
+# ESPN injury pull, then the frame over every box line since 2018-19.
+NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "card": 60, "projection_card": 60, "close": 60,
+                             "injuries": 60, "project": 240}
 
 
 def run_nba_prop_window() -> None:
     """One NBA prop window tick: every game decided inside its window.
 
-    nba_prop_market decides a game once, 45-57 minutes before tip. The refresh
-    passes cannot put a look there for any tip at or before 6pm ET (hourly at
-    :17 until 5pm), so this tick runs every five minutes, 24x7. It reads what
-    is stored first (scripts/nba_prop_window.plan) and returns without an API
-    call when no game is 40-62 minutes out and undecided and no bet game is
-    owed its closing snapshot -- most ticks of most days.
+    nba_prop_market and nba_prop_projection decide a game once, 45-57 minutes
+    before tip. The refresh passes cannot put a look there for any tip at or
+    before 6pm ET (hourly at :17 until 5pm), so this tick runs every five
+    minutes, 24x7. It reads what is stored first (scripts/nba_prop_window.plan)
+    and returns without an API call when no game is 40-62 minutes out and
+    undecided, no bet game is owed its closing snapshot and no game is due its
+    projection -- most ticks of most days.
 
-    Otherwise: fetch props for exactly those games, run the card on that fetch,
-    take any closing snapshot that is due (even on a tick with nothing to
-    decide), and publish what the card wrote. A step that fails or is killed
-    raises AFTER publishing, so the heartbeat records "error" and the failure
-    alerter reports it, while a bet that was written still goes out.
+    Otherwise: fetch props for exactly the games to decide, run nba_prop_market's
+    card and then the projection card on that fetch, take any closing snapshot
+    that is due, and publish what the cards wrote. THEN, for the games about 65
+    minutes from tip, pull the ESPN injury list and store their projections (the
+    projection card prices them two ticks later, inside the window). A step
+    that fails or is killed raises AFTER publishing, so the heartbeat records
+    "error" and the failure alerter reports it, while a bet that was written
+    still goes out.
     """
     from scripts.nba_prop_window import plan_tick
     plan = plan_tick()
-    if not plan.decide and not plan.close:
+    if not plan.decide and not plan.close and not plan.project:
+        if plan.publish:
+            # Only a game near its tip: post anything still unposted for it.
+            _publish_new_signals("nba-prop-window")
         return
-    log.info("NBA prop window: deciding %s; closes due %s", plan.decide, plan.close)
+    log.info("NBA prop window: deciding %s; closes due %s; projecting %s",
+             plan.decide, plan.close, plan.project)
     t = NBA_PROP_WINDOW_TIMEOUT_S
     outcomes: dict[str, str] = {}
     if plan.decide:
@@ -1039,11 +1051,21 @@ def run_nba_prop_window() -> None:
         outcomes["nba-prop-market"] = _run(
             [sys.executable, "run_pipeline.py", "--step", "nba-prop-market"],
             "nba-prop-market", timeout=t["card"])
+        outcomes["nba-prop-projection"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-projection"],
+            "nba-prop-projection", timeout=t["projection_card"])
     if plan.close:
         outcomes["nba-prop-close"] = _run(
             [sys.executable, "run_pipeline.py", "--step", "nba-prop-close"],
             "nba-prop-close", timeout=t["close"])
     _publish_new_signals("nba-prop-window")
+    if plan.project:
+        outcomes["nba-injuries"] = _run(
+            [sys.executable, "-m", "data.ingestors.injury_ingestor", "--sport", "NBA"],
+            "nba-injuries", timeout=t["injuries"])
+        outcomes["nba-prop-project"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_projection_card", "--project", *plan.project],
+            "nba-prop-project", timeout=t["project"])
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
         raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")

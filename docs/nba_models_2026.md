@@ -218,3 +218,121 @@ rates, negative binomial, every input as of the prop snapshot.
   researcher (bar 11 unmeasurable; variants of the model pick 50-76% of the same bets and
   return +2.9% to +5.0%). Strongest where Pinnacle does not quote: blocks unders +5.78% on
   7,878 (DraftKings alone +5.54%, every season positive). See §4.5 for its verification.
+
+### 4.5 The projection model on the worker's inputs only
+
+The live worker has the ESPN box line (whole minutes, starter flag, counting stats), the
+schedule, the props, and an injury table with two statuses (Out, Day-To-Day) — no usage, no
+fouls, no Probable, no official report. The model was re-fitted on exactly those inputs
+(`scripts/nba_prop_model_verify.py`, the "worker re-fit"): same frame code, the official
+report collapsed to the two ESPN statuses, a pre-game roster inferred from the log. The
+pooled one-under-a-game card on it: 3,630 bets, +5.57%, CI +2.45..+8.62, every season
+positive. That card was the starting point, not what ships: §5 calibrates it and bets
+every qualifying proposition.
+
+## 5. The projection model that ships — `nba_prop_projection` (2026-10-16, mike)
+
+mike, 2026-10-16: *"build the projection model"*, *"maximize units won"*. Code:
+`models/nba_prop_projection.py` (the rule), `scripts/nba_prop_projection_card.py` (the
+card), `scripts/nba_prop_projection_train.py` (the artifact); the search is
+`scripts/nba_prop_projection_lab.py`.
+
+**What it is.** The worker re-fit's means (minutes × per-minute rate) through a
+negative-binomial width fitted on the season before, then a per-market Platt map,
+`logit P(over) = a + b·logit(p_model)`, fitted on main-line (claimed, outcome) pairs of
+earlier seasons only. It bets every proposition whose calibrated EV at the best bettable
+price clears its market's floor, at the consensus main line only (DraftKings' two-sided
+line, else the line most bettable books hang), never a proposition `nba_prop_market`
+holds.
+
+**The search.** 546 cells: 13 markets × under / over / both × 14 calibrated-EV floors. Per
+market, the cell with the most units on 2023-24 + 2024-25 among cells positive in both;
+then bars 4–10 on all three seasons. Seven cells entered; one is dropped (below).
+
+**What ships — six cells:**
+
+| market | sides | floor | bets | units | ROI | 2025-26 alone (90% CI) |
+|---|---|---|---|---|---|---|
+| Steals | over + under | 0.02 | 19,367 | +848.5 | +4.48% | +4.09% (+1.95..+6.32) |
+| Rebounds | under | 0.01 | 19,406 | +610.8 | +3.19% | +2.59% (+0.67..+4.58) |
+| Blocks + Steals | over + under | 0.05 | 9,706 | +518.1 | +5.16% | +5.76% (+2.31..+9.36) |
+| Blocks | under | 0.02 | 8,526 | +542.4 | +5.79% | +6.87% (+3.41..+10.14) |
+| Reb + Ast | under | 0.04 | 9,605 | +393.9 | +4.22% | +3.86% (+0.58..+7.10) |
+| Threes | over + under | 0.04 | 16,750 | +496.5 | +3.11% | +4.60% (+2.34..+6.83) |
+
+The pooled card, 2023-24..2025-26, -200 floor, every qualifying proposition, 1 unit to win:
+
+| books | bets | units | ROI | 90% CI | by season (units) | a night (median / most) |
+|---|---|---|---|---|---|---|
+| the eight bettable | 83,360 | +3,410.1 | +4.12% | +3.49..+4.77 | +1,372.9 / +967.8 / +1,069.4 | 165 / 397 |
+| **the five the 2026-27 feed returns** | **66,588** | **+2,392.8** | **+3.60%** | **+2.93..+4.32** | **+1,125.2 / +433.3 / +834.4** | **131 / 362** |
+| DraftKings alone | 46,483 | +1,168.0 | +2.46% | +1.65..+3.28 | | |
+
+The feed has returned DraftKings, FanDuel, Fanatics, BetParx and BetRivers for 2026-27
+(BetMGM, Caesars and Hard Rock not yet), so the five-book row is the expectation, and
+less than that: the best cell of a 546-cell search runs high.
+
+**Prices it lays:** min −200, 5th percentile −166, median +108, 95th +170, max +3000;
+64% plus money, 9% at −150 or shorter. 558 bets are longer than +200 (they lose 4.9
+units); the +1,600..+3,000 tail is threes overs at 0.5 quoted by one book, at stakes of
+a few hundredths of a unit.
+
+**Assists overs are NOT shipped.** The search put them in (0.06 floor, +144.5 units). On
+2025-26, the season they were confirmed on, they made +0.74% (CI −2.88..+4.27); the
+neighbouring floor lost (−9.4 units) and the late half lost (−15.2). At the five feed
+books they are −1.29%, at DraftKings alone −3.51%. Dropping them costs +15.3 units of
+2025-26 at eight books and gains units at the books the worker sees.
+
+**What three independent verifiers found** (all three confirmed, 2026-10-16):
+
+- *Statistics.* Reproduced to the bet. Clustering by game, player, player-night or week
+  does not move the interval. Placebo (probabilities shuffled within night × market, 100
+  times): best −2.62%. Every market-side beats a blind bet on the same side at the card's
+  own price mix. Calibration still overclaims in the band bet — claimed 0.533, won 0.501,
+  price-implied 0.483 — so **the probability shown is an upper bound**. 85% of bets share a
+  player-night with another bet (Blocks + Steals is the sum of two other markets); the
+  interval already accounts for it.
+- *Prices.* **Most of the edge is the best price.** At the second-best book the card makes
+  +1.45%; keeping a bet only when the second-best price also clears its floor, +2.67%
+  (CI +1.94..+3.44). In 2025-26, 32% of units came from lines only one book (mostly
+  BetParx: steals and blocks) posted; without them the seven-cell research card is
+  +3.81% over three seasons. So the live card refuses a quote whose own clock is more than 10 minutes behind
+  the freshest book's for the same market in the same fetch — a live deviation the archive
+  could not grade (it stored no clock).
+- *Timing and leakage.* No input reads past the snapshot (outcome-scramble test: 0 of 57
+  inputs move on the first scrambled date). Two live facts: the feed did not request
+  blocks+steals or rebounds+assists until 2026-10-16, and the shared decision window put
+  the first look 66–70 minutes before tip (both fixed: PR #970). Reports read 60 minutes
+  late: +3.57%. The pre-game roster in place of the game's own box: +3.99%.
+
+**Live parity, measured.** The live code path (`scripts/nba_prop_projection_card.project_core`)
+replayed three past nights (2025-11-12, 2026-01-15, 2026-03-20; 17 tip-time groups) from the
+research cache with the fold-2026 models: 778 of 850 projected players (91.5%) equal the graded
+prediction exactly, the rest differ by 1.2% on average (the pre-game roster in place of the
+game's own box), and all 675 graded card bets' players were projected. The trainer rebuilds
+the graded frame (320,239 rows, no input differs) and refits the fold-2026 models to 0.0
+difference on 25,660 predictions. Built from 2022-23 on instead of 2018-19, the means moved
+5-7% for one player in a hundred, so the live frame reads every season: 72 seconds per group
+here (104 at most).
+
+**Where live differs from what was graded, measured by the pre-merge review (2026-10-16).**
+- The graded card excluded every proposition the Pinnacle rule bet at all eight books. Live,
+  the rule sees the five books the feed returns, so it holds fewer, and the projection model
+  may bet about 313 a season the grade never included (rebounds unders mostly); on the
+  archive those graded −1.94% (940 bets, −19.5 units over three seasons).
+- The research matched a book's player name against the whole season's rosters. Live only
+  knows box lines already played, so a player's first game for a new team (opening night,
+  a trade) cannot be matched or bet: 262 of the five-book bets, −8.2 units (−2.99%).
+- The live selection, replayed on January 2026's archived quotes with the stored means,
+  returns the graded bets bet for bet, and the live projection replays one 2025-26 night's
+  graded means exactly (`tests/test_nba_prop_projection_replay.py`, run where the research
+  cache exists).
+
+**How it runs.** The five-minute window job projects each game at the tick about 65
+minutes before tip (an ESPN injury pull, then the frame; 139 seconds for three games
+from this machine against production), storing every player's mean in
+`nba_prop_projections`; two ticks later, inside the 45–57 window and after
+`nba_prop_market` has decided the game, the card prices those projections on the newest
+fetch. Each game is decided once (`nba_prop_projection_decisions`). The injury list each
+game was projected with is kept in `nba_injury_asof`, which also holds the 2018-19..2025-26
+history from the official report.

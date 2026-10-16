@@ -572,6 +572,37 @@ other), the lead 87% of the graded bets were decided at
 Closing-line value is measured from the first night: each bet game gets a `'close'` prop snapshot 12-25
 minutes before tip (`data/ingestors/nba_prop_close_ingestor.py`).
 
+## NBA — `nba_prop_projection`, the projection model (2026-10-16, mike)
+
+Each player's projected count (minutes × per-minute rate, a negative-binomial
+width, a per-market calibration map), priced at the consensus main line, every
+qualifying proposition, never one `nba_prop_market` holds
+(`models/nba_prop_projection.py`, `scripts/nba_prop_projection_card.py`; the
+search and every check are in `docs/nba_models_2026.md` §5).
+
+| Setting | Value | Where |
+|---|---|---|
+| prob / edge cut | 0.0 / 0.0 — the cut is EV, per market | `ACTION_THRESHOLDS`, both threshold dicts |
+| the cells | steals over+under 0.02; rebounds under 0.01; blocks+steals over+under 0.05; blocks under 0.02; rebounds+assists under 0.04; threes over+under 0.04 | `models/nba_prop_projection.CARD` |
+| EV floor | 0.01 (the lowest cell's), each cell's own floor on top; on its own calibrated probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned | `MODEL_MIN_ODDS` |
+| caps | none: every qualifying proposition (mike, 2026-10-16: "maximize units won") | — |
+| decided once | the first look 45-57 min before tip, after `nba_prop_market` has decided the game (or alone from 50 min out); a row in `nba_prop_projection_decisions` | `scripts/nba_prop_projection_card.py` |
+| stale quote | refused when its clock is > 10 min behind the freshest book's for the same market in the same fetch | `models/nba_prop_projection.py` |
+| not bet | assists overs (chosen by the search, failed on 2025-26), points and the scoring combos, turnovers, double-doubles | `docs/nba_models_2026.md` §5 |
+
+Graded 2023-24..2025-26, -200 floor, every qualifying proposition: at the five
+books the 2026-27 feed returns, 66,588 bets, +2,392.8 units, +3.60% (90% CI
++2.93..+4.32), +1,125.2 / +433.3 / +834.4 units by season, about 130 bets a night
+(median 131, most 362); at all eight bettable books 83,360 bets, +3,410.1 units,
++4.12% (+3.49..+4.77); at DraftKings alone +2.46%. Expect less live (a 546-cell
+search; +1.45% at the second-best book).
+
+**Prices it lays:** min -200, 5th percentile -166, median +108, 95th +170, max
++3000; 64% plus money, 9% at -150 or shorter; the +1,600..+3,000 tail is threes
+overs at 0.5 from one book. The probability shown is an upper bound (claimed
+0.533, won 0.501 in the band bet).
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the
