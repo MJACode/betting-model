@@ -7,15 +7,14 @@ write nothing.
 from __future__ import annotations
 
 from byom.constants import DK_HISTORY_START_SEASON, LOCK_WINDOW_HOURS, SPORT
-from byom.game_facts import assemble_game, parse_date, parse_game_id, shop_windows
+from byom.game_facts import assemble_game, parse_date, parse_game_id
 
 # One game at a time. A season of nfl_odds_history is millions of rows
 # (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
-# measured 2026-10-16). The index is (game_id, market). DraftKings inside
-# the lock window comes first; other books are read only inside the shop
-# slices shop_windows() names, as stored reference. The grade is
-# DraftKings' own price on the lock snapshot. apply=false uses the same
-# reads and writes nothing.
+# measured 2026-10-16). The index is (game_id, market). This builder reads
+# DraftKings inside the lock window and nothing else. The lock-shop builder
+# is what stores other books. The grade is DraftKings' own price on the
+# lock snapshot. apply=false uses the same reads and writes nothing.
 _ODDS_SNAPSHOT = """
 CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
      THEN o.snapshot_at::timestamptz
@@ -147,55 +146,6 @@ def _dk_quotes(conn, ids: tuple[str, str]) -> list[dict]:
     return history + odds
 
 
-def _shop_quotes(conn, ids: tuple[str, str], windows: list[tuple]) -> list[dict]:
-    """Non-DraftKings rows inside the lock slices. No slices, no read."""
-    if not windows:
-        return []
-    bare, prefixed = ids
-    clauses = []
-    params: list = [bare, prefixed]
-    for market, floor, lock_at in windows:
-        clauses.append(
-            "(market = %s AND snapshot_at >= %s AND snapshot_at <= %s)")
-        params.extend([market, floor, lock_at])
-    arms = " OR ".join(clauses)
-    history_sql = f"""
-        SELECT game_id, bookmaker, market, snapshot_at, commence_time,
-               point, price_home, price_away
-          FROM nfl_odds_history
-         WHERE game_id IN (%s, %s)
-           AND bookmaker <> 'draftkings'
-           AND commence_time IS NOT NULL
-           AND snapshot_at <= commence_time
-           AND ({arms})
-    """
-    odds_sql = f"""
-        SELECT o.game_id, o.bookmaker, o.market,
-               {_ODDS_SNAPSHOT} AS snapshot_at,
-               g.commence_time::timestamptz AS commence_time,
-               CASE o.market
-                 WHEN 'spreads' THEN o.spread_home
-                 WHEN 'totals' THEN o.total_line
-                 ELSE NULL
-               END AS point,
-               CASE WHEN o.market = 'totals' THEN o.over_price ELSE o.home_price END
-                 AS price_home,
-               CASE WHEN o.market = 'totals' THEN o.under_price ELSE o.away_price END
-                 AS price_away
-          FROM odds o
-          JOIN games g ON g.game_id = o.game_id
-         WHERE o.game_id IN (%s, %s)
-           AND o.bookmaker <> 'draftkings'
-           AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
-           AND g.commence_time IS NOT NULL
-           AND {_ODDS_SNAPSHOT} IS NOT NULL
-           AND ({arms.replace("snapshot_at", _ODDS_SNAPSHOT)})
-           AND {_ODDS_SNAPSHOT} <= g.commence_time::timestamptz
-    """
-    return (_as_quotes(_fetch(conn, history_sql, params), "nfl_odds_history")
-            + _as_quotes(_fetch(conn, odds_sql, params), "odds"))
-
-
 def _played(games: list[dict]) -> dict:
     played: dict[str, list] = {}
     for game in games:
@@ -221,7 +171,6 @@ def facts_for_season(conn, season: int) -> list[dict]:
         if ids is None:
             continue
         quotes = _dk_quotes(conn, ids)
-        quotes += _shop_quotes(conn, ids, shop_windows(quotes))
         fact = assemble_game(game, quotes, played)
         if fact is not None:
             facts.append(fact)

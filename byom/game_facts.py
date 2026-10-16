@@ -9,7 +9,7 @@ dropped rows. There is no recommended stake.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
@@ -17,7 +17,6 @@ from byom.constants import (
     DK_HISTORY_START_SEASON,
     LOCK_WINDOW_HOURS,
     NEAR_LOCK_WINDOW_HOURS,
-    SHOP_LAG_MINUTES,
     SOURCE_HISTORY,
     SOURCE_ODDS,
 )
@@ -25,7 +24,6 @@ from byom.constants import (
 _KEY = re.compile(r"^(?:NFL_)?(\d{4})_(\d{2})_([A-Z]{2,3})_([A-Z]{2,3})$")
 _ET = ZoneInfo("America/New_York")
 _Q = Decimal("0.0001")
-_LINE = Decimal("0.001")
 
 
 def parse_ts(value):
@@ -235,46 +233,16 @@ def units_1u_to_win(result: str | None, american):
     return uncapped, capped
 
 
-def same_line(left, right) -> bool:
-    if left is None or right is None:
-        return False
-    return abs(Decimal(str(left)) - Decimal(str(right))) <= _LINE
-
-
-def quotes_at_lock(quotes, lock_at, point=None,
-                   lag_minutes: int = SHOP_LAG_MINUTES) -> list[dict]:
-    """Latest quote per (market, book) in [lock - lag, lock] at `point`.
-
-    A quote on a different number does not displace that book's quote on
-    DraftKings' number. h2h has no line, so those quotes are not filtered
-    by point.
-    """
-    target = parse_ts(lock_at)
-    if target is None:
-        return []
-    floor = target - timedelta(minutes=lag_minutes)
-    latest: dict[tuple, tuple] = {}
-    for quote in quotes:
-        snap = parse_ts(quote.get("snapshot_at"))
-        if snap is None or snap > target or snap < floor:
-            continue
-        market = quote.get("market")
-        if market != "h2h" and not same_line(quote.get("point"), point):
-            continue
-        key = (market, (quote.get("bookmaker") or "").lower())
-        prev = latest.get(key)
-        if prev is None or snap > prev[0]:
-            latest[key] = (snap, quote)
-    return [item[1] for item in latest.values()]
-
-
 def dk_lock_grade(slot, side: str):
     """DraftKings' own price on the lock snapshot.
 
-    (price, 'draftkings') or (None, None). Another book's price is not
-    the grade. Totals use price_home as over and price_away as under.
+    (price, 'draftkings') or (None, None). The slot's bookmaker has to be
+    DraftKings. Another book's price is not the grade. Totals use
+    price_home as over and price_away as under.
     """
     if slot is None:
+        return None, None
+    if (slot.get("bookmaker") or "").lower() != "draftkings":
         return None, None
     raw = slot.get("price_home") if side == "home" else slot.get("price_away")
     if raw is None:
@@ -296,31 +264,6 @@ def _prefer_history(quotes, market: str) -> tuple[list[dict], str | None]:
     if first_in_window(odds, LOCK_WINDOW_HOURS) is not None:
         return odds, SOURCE_ODDS
     return [], None
-
-
-def shop_windows(quotes) -> list[tuple]:
-    """(market, floor, lock_at) for the grade lock and the near lock.
-
-    The non-DraftKings fetch uses these slices as stored reference.
-    Those rows are not the grade.
-    """
-    out = []
-    seen = set()
-    for market in ("spreads", "totals", "h2h"):
-        pool, source = _prefer_history(quotes, market)
-        if source is None:
-            continue
-        for window in (LOCK_WINDOW_HOURS, NEAR_LOCK_WINDOW_HOURS):
-            slot = first_in_window(pool, window)
-            if slot is None:
-                continue
-            at = slot["snapshot_at"]
-            key = (market, at)
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append((market, at - timedelta(minutes=SHOP_LAG_MINUTES), at))
-    return out
 
 
 def _num(value):
