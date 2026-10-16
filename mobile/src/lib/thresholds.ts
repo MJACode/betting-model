@@ -296,13 +296,20 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // The cut is applied at the price the pick was DECIDED at (2026-09-09):
   // decision_* since the flip, DraftKings before it. Same clause the scorer,
   // the Discord and push producers and the record views apply.
+  //
+  // The price floor decides what a model may bet NEXT. A bet Discord has
+  // already posted keeps the floor it was written under: display follows
+  // Discord. Re-cutting it at today's floor dropped the posted -980
+  // SEA @ DEN bet from the day's pending list and greyed its edge when
+  // nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-16).
   const odds = decisionOdds(p);
   const edge = decisionEdge(p);
+  const posted = p.discordPublish === 'published';
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
     if (sv.paused) return false;
     if (p.model_probability < sv.min_prob) return false;
-    if (!passesMinOdds(odds, sv.min_odds)) return false;
+    if (!posted && !passesMinOdds(odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
     return edge >= sv.min_edge;
   }
@@ -311,7 +318,7 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
   if (p.model_probability < t.min_prob) return false;
-  if (!passesMinOdds(odds, t.min_odds)) return false;
+  if (!posted && !passesMinOdds(odds, t.min_odds)) return false;
   if (PROB_ONLY_MODELS.has(p.model_id)) return true;
   return edge >= t.min_edge;
 }
