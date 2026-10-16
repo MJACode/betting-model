@@ -22,6 +22,7 @@ SOURCE_ODDS = "odds"
 SPORT = "NFL"
 
 # How far before the DraftKings lock a book's own quote may be and still
-# count as the price at that lock. The same bound config.BEST_LINE_MAX_LAG_MIN
-# uses for a live decision. Not a spread, price, or line filter.
+# be stored as reference next to that lock. It is not the grade. The grade
+# is DraftKings' own price on the lock snapshot. Not a spread, price, or
+# line filter.
 SHOP_LAG_MINUTES = 30
