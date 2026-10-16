@@ -1602,7 +1602,13 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // goalie does not start, and so does settlement. The NHL totals card
   // (scripts/nhl_totals_card.py) posts on the first refresh that qualifies,
   // often the evening before, not at "the first scoring run of the day".
-  if (pick.model_id.startsWith('nhl_prop_') || pick.model_id === 'nhl_over_under') {
+  // The NBA prop rule (scripts/nba_prop_market_card.py) is the same: it posts
+  // once, 45-70 minutes before tip, off the books' prices, with no lineup check.
+  if (
+    pick.model_id.startsWith('nhl_prop_') ||
+    pick.model_id === 'nhl_over_under' ||
+    pick.model_id === 'nba_prop_market'
+  ) {
     return {
       kind: 'posted',
       verb: 'Posted',

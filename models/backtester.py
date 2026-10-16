@@ -52,7 +52,6 @@ from features.feature_engine import (
     _market_for_odds,
 )
 from features.wnba_feature_engine import build_wnba_game_features
-from features.nba_feature_engine import build_nba_game_features
 from models.trainer import load_model
 from models.scorer import (
     american_to_implied_prob,
@@ -200,11 +199,6 @@ def run_backtest(model_id: str, season: int,
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_context
                 )
-            elif sp == "NBA":
-                features = build_nba_game_features(
-                    conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_context
-                )
             elif sp == "UFC":
                 from features.ufc_feature_engine import build_ufc_features_from_bulk
                 features = build_ufc_features_from_bulk(
@@ -338,21 +332,20 @@ def run_backtest(model_id: str, season: int,
 
         if not dk_odds:
             # F5 models: no historical DK F5 odds — prob-only path.
-            # WNBA/NBA/NHL h2h: no historical DK odds for these sports yet —
+            # WNBA/NHL h2h: no historical DK odds for these sports yet —
             # same prob-only treatment (NHL games come from the NHL API without
             # prices; real odds apply automatically if SBR files are loaded).
             # Synthetic DK odds = -110.
             _is_wnba_h2h = (market == "h2h" and sport in ("WNBA", "NHL"))
-            _is_nba_h2h  = (sport == "NBA" and market == "h2h")
             if (market not in ("h2h_1st_5_innings", "totals_1st_5_innings", "spreads_1st_5_innings")
-                    and not _is_wnba_h2h and not _is_nba_h2h):
+                    and not _is_wnba_h2h):
                 continue
 
             prob_thresh    = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
             edge_thresh    = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
             synthetic_dk_odds = -110
 
-            if _is_wnba_h2h or _is_nba_h2h:
+            if _is_wnba_h2h:
                 sides = [("home", home_prob), ("away", away_prob)]
                 for pick_side, model_p in sides:
                     synthetic_edge = model_p - 0.50

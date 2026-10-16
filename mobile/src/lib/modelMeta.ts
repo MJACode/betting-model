@@ -371,6 +371,18 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'DD',
   },
+  // The 2026-27 NBA prop rule (models/nba_prop_market.py): unders at the best
+  // bettable book on Pinnacle's own line, decided 45-70 minutes before tip.
+  // ONE id across five markets (points, rebounds, assists, threes, PRA); the
+  // market travels on picks.prop_market and the stat is in each pick's label,
+  // so statLabel is empty, as for nfl_prop_market and wnba_prop_market.
+  nba_prop_market: {
+    shortLabel: 'Prop Mkt',
+    longLabel: 'NBA Props (vs Pinnacle)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {

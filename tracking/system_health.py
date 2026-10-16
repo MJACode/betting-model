@@ -54,7 +54,6 @@ KNOWN_UNTRAINED = {
     "nhl_puckline",                              # need historical NHL lines
     # nhl_over_under is a rule since 2026-10-08, out of MODELS: never expected.
     "wnba_over_under", "wnba_spread",            # need historical DK WNBA lines
-    "nba_over_under", "nba_spread",              # need historical DK NBA lines
     # golf_* RETIRED 2026-09-08 -- gone from config.MODELS, so never expected.
 }
 

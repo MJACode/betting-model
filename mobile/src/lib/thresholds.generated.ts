@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-10-09
+ * Last generated: 2026-10-16
  */
 
 export interface ModelThreshold {
@@ -34,18 +34,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_spread_market: { min_prob: 0, min_edge: 0.018, min_odds: -200 },
   mlb_total_market: { min_prob: 0, min_edge: 0.02, min_odds: -200 },
   mlb_total_public_fade: { min_prob: 0, min_edge: 0, min_odds: -200 },
-  nba_moneyline: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
-  nba_over_under: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
-  nba_prop_player_assists: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_blocks: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_dd: { min_prob: 0.55, min_edge: 0, min_odds: -200 },
-  nba_prop_player_points: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_pra: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_rebounds: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_steals: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_threes: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_turnovers: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_spread: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
+  nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200 },
   ncaaf_live_total: { min_prob: 0.73, min_edge: 0.12, min_odds: -200 },
   ncaaf_live_win_prob: { min_prob: 0.5, min_edge: 0.16, min_odds: -200 },
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 },
@@ -90,7 +79,6 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
-  'nba_prop_player_dd',
   'ufc_method_of_victory',
 ]);
 
@@ -140,6 +128,18 @@ export const RETIRED_MODELS = new Set<string>([
   'mlb_live_win_prob',
   'mlb_prop_batter_hr',
   'mlb_prop_batter_rbi',
+  'nba_moneyline',
+  'nba_over_under',
+  'nba_prop_player_assists',
+  'nba_prop_player_blocks',
+  'nba_prop_player_dd',
+  'nba_prop_player_points',
+  'nba_prop_player_pra',
+  'nba_prop_player_rebounds',
+  'nba_prop_player_steals',
+  'nba_prop_player_threes',
+  'nba_prop_player_turnovers',
+  'nba_spread',
   'nfl_live_prop',
 ]);
 

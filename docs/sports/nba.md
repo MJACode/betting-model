@@ -1,115 +1,105 @@
-# NBA — pipeline operations
+# NBA — models, data, pipeline
 
-> Moved out of CLAUDE.md on 2026-08-30 (that file had reached 909 KB and was
-> being re-read in full every session). Content is verbatim unless noted.
-> Session-by-session history: `docs/sessions/`.
+> **Rebuilt 2026-10-15/16 (mike: "build new nba models, remove any previous nba
+> models").** The twelve 2026-06-19 models are retired; one model replaces them.
+> Every market was graded at real prices against bars written before the first
+> grid ran: **`docs/nba_models_2026.md`** (the bars, the market grid, every
+> result and what failed). Thresholds: `docs/thresholds.md`, NBA section.
 
-## 23. NBA — Pipeline Operations
-NBA is the 5th sport, built by mirroring the WNBA architecture (same `nba_api`
-source, same basketball feature shape). It joins the global sport toggle
-(MLB | WNBA | NBA | UFC | GOLF) — no new mobile tab.
+## The model
 
-### Models (10 LIVE — trained 2026-06-19 on 2019-2024 / holdout-2025; 8,284 games backfilled)
-
-Holdout-2025 metrics (O/U acc for props, win-acc for ML; CalErr = calibration error):
-
-| Model ID | Type | Market | Holdout | Status |
-|---|---|---|---|---|
-| `nba_moneyline` | binary XGBoost + Platt | h2h (real DK) | acc 70.0% / AUC 0.757 / CalErr 3.04% | **LIVE** |
-| `nba_over_under` | binary XGBoost + Platt | totals (real DK) | — | BLOCKED — no historical DK lines for the target (trains once live odds accrue) |
-| `nba_spread` | binary XGBoost + Platt | spreads (real DK) | — | BLOCKED — same as O/U |
-| `nba_prop_player_points` | Poisson | DK player props | O/U 75.6% / CalErr 12.3% | **LIVE** (high CalErr = count variance, like WNBA) |
-| `nba_prop_player_rebounds` | Poisson | DK player props | O/U 73.8% / CalErr 3.7% | **LIVE** |
-| `nba_prop_player_assists` | Poisson | DK player props | O/U 73.6% / CalErr 4.7% | **LIVE** |
-| `nba_prop_player_threes` | Poisson | DK player props | O/U 75.8% / CalErr 3.7% | **LIVE** |
-| `nba_prop_player_pra` | Poisson | DK player props | O/U 77.2% / CalErr 16.0% | **LIVE** (high CalErr = count variance) |
-| `nba_prop_player_blocks` | Poisson | DK player props | O/U 71.8% / CalErr 1.2% | **LIVE** |
-| `nba_prop_player_steals` | Poisson | DK player props | O/U 62.1% / CalErr 2.6% | **LIVE** (weakest acc) |
-| `nba_prop_player_turnovers` | Poisson | DK player props | O/U 70.6% / CalErr 3.2% | **LIVE** |
-| `nba_prop_player_dd` | **logistic** + Platt | player_double_double (prob-only) | AUC 0.870 / CalErr 4.6% | **LIVE** (8.8% base rate) |
-
-The prop 5% CalErr gate does not apply (natural high-count variance) — points/pra mirror WNBA.
-**Off-season caveat:** NBA runs Oct–Jun, so the first LIVE picks won't fire until the 2026-27
-season tips off (~late Oct 2026). Until then the daily Basketball Daily Ingest job and the scoring
-steps no-op cleanly (no games).
-
-Thresholds (placeholder — tune after live odds accumulate): game models 66%/12%,
-props 60%/8%, double-double 55% prob-only. **NBA mainline markets (ML/totals/
-spread) are the sharpest in US sports** — treat their backtest ROI as directional
-only and expect the realistic edge to live in the props.
-
-### Conventions (load-bearing — don't break)
-
-- **Season label = ENDING year (the NHL convention):** season `2025` = the
-  2024-25 season (Oct 2024 – Jun 2025). The stats ingestor converts our int
-  season → the nba_api `"YYYY-YY"` string (`_nba_season_str`). Because games
-  straddle two calendar years, the season is **threaded explicitly**, never
-  derived from a game's date — `_nba_season_for_date` (Oct-Dec → year+1) is used
-  for the live/daily paths, and `odds_ingestor` already labels Oct+ NBA games
-  `year+1`.
-- **Backfill team-stat snapshot = `{season-1}-09-01`** (before any Oct game), so
-  the ASOF feature lookup (`as_of_date <= game_date`) always finds an in-season
-  row. (WNBA uses `{season}-01-01` because it's a summer league — do NOT copy
-  that for NBA or every Oct-Dec game falls back to the prior season.)
-- **30 teams** — `NBA_TEAMS`, `NBA_ODDS_API_MAP` in config. ESPN injury ids use
-  the static `ESPN_NBA_TEAM_IDS` (NBA franchises are stable) with a live-resolver
-  overlay (`_fetch_nba_espn_team_ids`) as a self-heal.
-- **Double-double** is a binary Yes/No market (≥10 in ≥2 of pts/reb/ast/stl/blk).
-  It's logistic + over-only + prob-only (`nba_prop_player_dd` in
-  `PROB_ONLY_MODELS`). The prop odds parser defaults its line to 0.5 (no `point`),
-  and settlement uses the `COMPUTE_DD` sentinel.
-
-### stats.nba.com constraint
-
-`nba_api` calls `stats.nba.com`, which blocks GitHub Actions datacenter IPs — so
-`nba_stats` and `nba-game-log` (team stats + box scores) must run on a residential
-IP. They were folded into the existing local Task Scheduler job
-(`scripts/wnba_daily_ingest.bat`, now a combined "Basketball Daily Ingest" running
-WNBA **and** NBA at 7am). NBA odds, prop odds, scoring, and settlement all run in
-GitHub Actions (The Odds API, reachable). NBA plays nightly, so the local job is
-load-bearing daily during the season.
-
-### Pipeline
-
-| Step | Runs where | What it does |
+| Model | What it bets | Status |
 |---|---|---|
-| NBA game odds | GitHub Actions (`step_odds`) | DK ML/totals/spread via The Odds API (NBA in the default sport list) |
-| NBA prop odds (`nba-prop-odds`) | GitHub Actions | 9 DK player-prop markets via the event-level endpoint |
-| NBA team stats (`nba_stats`) | **Local machine** | season-to-date team ratings → game scorer features |
-| NBA game log (`nba-game-log`) | **Local machine** | yesterday's box scores → settlement + rolling prop features |
-| NBA injuries | GitHub Actions (`step_injuries`) | ESPN hidden API (`run_injury_ingestor` defaults include NBA). Game-model star DNP gate: top-2 by recent minutes, Out with `status_ts` ≤ quote (`docs/game_injury_gate.md`) |
-| NBA game scoring | GitHub Actions (`step_scoring`) | `run_scorer` NBA branch → picks |
-| NBA prop scoring (`nba-prop-scoring`) | GitHub Actions | `run_nba_prop_scorer` (9 markets, Poisson + logistic DD) → picks |
-| Settlement | GitHub Actions (`settle`) | game picks via the generic path; props via `_settle_prop_picks` (`nba_player`, trailing 14-day window) |
+| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Decided 45-70 minutes before tip; one bet a game, four a night. | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-prop-market`) |
 
-### First-time setup (Matt's machine — pending)
+Graded on 2023-24 → 2025-26: one a game and four a night, 1,862 bets, +5.05%,
+90% CI +1.35..+8.76, positive every season; every proposition, 24,572 bets,
++2.96%. Expect about +2% per bet live. It only ever bets unders because that is
+where the books' margin sits in every sport this repo has measured: blind NBA
+overs lose 7.3%, blind unders 2.2% (505,932 propositions).
+
+**Retired 2026-10-15** (`config.RETIRED_MODELS`; no bet was ever written, so
+nothing is struck): `nba_moneyline`, `nba_over_under`, `nba_spread`,
+`nba_prop_player_{points,rebounds,assists,threes,pra,blocks,steals,turnovers,dd}`.
+Their feature engines (`features/nba_feature_engine.py`,
+`features/nba_prop_feature_engine.py`), artifacts and scorer loop are gone.
+
+## What the research found (one line each; numbers in `docs/nba_models_2026.md` §4)
+
+- **Schedule is already in the line.** Back-to-backs, road trips, travel, time
+  zones and altitude add nothing to Pinnacle's price; a home team on a
+  back-to-back is priced −1.71 points and did −2.04.
+- **Injuries are in the line by tip-60.** The spread moves 2.26 points per 48
+  player-minutes ruled out and results moved 2.21.
+- **Moneyline, spread, total, first half, first quarter, team totals:** closed
+  for 2026-27; nothing passes on a season it was not chosen on.
+- **Projection models** (`models/nba_props.py`, the NHL count recipe) beat naive
+  projections but not the books' price on the main markets; one under a game is
+  promising (+5.6% on worker-only inputs) and is a follow-up, not live
+  (`docs/followups.md`).
+
+## Conventions (load-bearing)
+
+- **Season label = ENDING year** (2026 = 2025-26). Threaded explicitly, never
+  derived from a date; `odds_ingestor` labels Oct-Dec games `year+1`.
+- **game_id = `NBA_<ET date>_<AWAY>_<HOME>`**, 3-letter codes (`config.NBA_TEAMS`).
+  ESPN codes differ (GS, NO, NY, SA, UTAH, WSH) and are mapped in
+  `data/ingestors/nba_espn_box.py`.
+- **Player id = the NBA.com person id.** The worker's ESPN box writer resolves
+  ESPN athlete ids through `player_positions` (the only crosswalk), then by name
+  on the same team, and stores a rookie it cannot resolve as `espn:<athleteId>`
+  so a game is never left unlogged. Do not run the local nba_api game-log job
+  over 2026-27: it would give such a rookie a second, numeric row.
+- **A player who does not take the court voids** (DraftKings house rule). A
+  player who checks in for any time is action.
+
+## Data (all in Supabase)
+
+| Table | What | Written by | Where it runs |
+|---|---|---|---|
+| `games` | scores, tip-off (`commence_time`), OT, neutral site | `nba_results_ingestor` (ESPN finals) / `nba_schedule_ingestor` | worker, every refresh pass before settle / this machine |
+| `nba_player_game_log` | every player's box line | `nba_results_ingestor` (ESPN) for 2026-27; nba_api for 2018-19 → 2025-26 | worker |
+| `nba_player_dnp` | ESPN did-not-play reasons | `nba_results_ingestor` | worker |
+| `nba_schedule` | NBA.com schedule: arenas, neutral sites, NBA Cup, national TV, OT | `nba_schedule_ingestor` | this machine (stats.nba.com blocks datacenter IPs) |
+| `nba_player_game_adv` | starters, exact minutes, +/-, fouls, usage, possessions, DNP reasons | `nba_box_enrich` (sportsdataverse bulk files + stats.nba.com) | this machine, 2018-19 → 2025-26 |
+| `nba_game_inactives`, `nba_game_officials` | inactive lists, referee crews | `nba_box_enrich` | this machine |
+| `nba_injury_report` | the official league injury report, every PDF since 2018-12-17, stamped with its printed time | `nba_injury_report` | this machine; `--today` exists, not wired on the worker |
+| `nba_period_scores` | points by quarter (settles half/quarter bets) | `nba_period_scores` (ESPN scoreboard) | either |
+| `odds` (`source='odds_api_historical'`) | game lines 2020-21 → 2025-26, 9 fetches a game date | `nba_odds_history --lines` | one-off purchase |
+| `player_prop_odds` | props 2023-24 → 2025-26 (one snapshot at tip-60); live every refresh pass | `nba_odds_history --props`; `prop_odds_ingestor` | purchase; worker |
+| `odds` (`source='odds_api_nba_derivative_history'`) | 1H / 1Q / team totals 2024-25 → 2025-26 | `nba_odds_history --derivatives` | one-off purchase |
+
+`player_prop_odds.book_last_update` (added 2026-10-16) stores each book's own
+clock for its market, for every sport; the NBA card refuses a soft quote more
+than 10 minutes behind Pinnacle's.
+
+## Pipeline (worker)
+
+| Step | When | What |
+|---|---|---|
+| `nba-prop-odds` | every refresh pass (`par`) | live props, 9 markets + 8 alternates, 7 days ahead |
+| `nba-prop-market` | right after `nba-prop-odds` | the card: games tipping in 45-70 minutes; one a game, four a night; BET rows only; a diagnostic line every pass |
+| `nba-prop-close` | after the card | a `close` prop snapshot 12-25 minutes before tip for every game holding a bet (CLV; `NBA_PROP_CLOSE_*` in config) |
+| `nba-results` | every pass, before settle | ESPN finals → `games`, every box line → `nba_player_game_log` |
+| `settle` | every pass | props via `_settle_prop_picks` (`FROM_PROP_MARKET`, `_NBA_MARKET_STAT`) |
+
+**Refresh cadence decides what can be bet:** passes run hourly at :17 until
+5pm ET and every 10 minutes from 6pm to midnight. A game tipping at or before
+6:00pm ET never has a pass 45-70 minutes out — 177 of 1,206 regular-season games
+in 2026-27 — and is logged `window_missed`, not widened. NBA is no longer in the
+30-second pre-game poller (no NBA game model exists to re-score).
+
+## Rebuilding the data (this machine)
 
 ```bash
-# 1. Games + scores + regulation outcomes (~27 schedule calls/season, ~3 min for 7 seasons)
-python -m data.ingestors.nhl_stats_ingestor --backfill-games 2019 2025
-# 2. Team + goalie season snapshots (season-start as_of_date)
-python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2025
-# 3. (optional) load historical NHL odds for O/U + puckline targets
-#    — SBR/datawarehouse files into data/raw/datawarehouse/nhl/, then:
-python -m data.ingestors.sbr_loader --sport NHL
-# 4. Train (multiclass branch handles nhl_moneyline_regulation automatically)
-python -m models.trainer --model nhl_moneyline
-python -m models.trainer --model nhl_moneyline_regulation
-python -m models.trainer --model nhl_puckline
-# (nhl_over_under is a rule since 2026-10-08; the trainer refuses it)
-# 5. Backtest (moneyline/regulation prob-only at synthetic -110 — directional)
-python -m models.backtester --model nhl_moneyline --season 2025
-# 6. Commit the trained artifacts so GitHub Actions scoring can load them:
-git add -f models/saved/nhl_*.pkl && git commit -m "Add trained NHL model artifacts"
+python -m data.ingestors.nba_schedule_ingestor --seasons 2019 2027
+python -m data.ingestors.nba_box_enrich --seasons 2019 2026
+python -m data.ingestors.nba_injury_report --backfill --seasons 2019 2026
+python -m data.ingestors.nba_period_scores --start 2018-10-16 --end 2026-04-12
+python -m scripts.nba_research_cache          # parquet cache in data/local/nba/ (git-ignored)
 ```
 
-### Mobile
-
-NHL is the fourth option in the global sport toggle (MLB | WNBA | UFC | NHL).
-Matchups render "A @ B" (standard). Model labels: ML / Reg 3-Way / O/U / PL.
-No NHL player-stat leaderboard (only team + goalie stats are ingested) — the
-Stats tab shows an empty state for NHL. The Claude-mobile `docs/mobile_picks_prompt.md` SQL already
-includes the four NHL models (regulation maps to the `h2h_3way` market in the
-odds-join CASE).
-
----
+Price history is bought with `python -m data.ingestors.nba_odds_history`
+(`--lines` / `--props` / `--derivatives`, `--max-credits`, stops at
+`--floor`, resumable). It cost ~900k credits on 2026-10-15; do not re-run it
+without a reason — every row is stored.

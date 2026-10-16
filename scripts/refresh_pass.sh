@@ -127,6 +127,16 @@ par_wait
 # writer to picks runs one at a time. Insert-once under the model's own lock,
 # so every later pass on a game already bet is a no-op.
 step nhl-over-under
+# NBA player props (nba_prop_market): same-line unders against Pinnacle IN THE
+# PROP FETCH `par nba-prop-odds` JUST STORED. It decides only games whose tip
+# is 45-70 minutes away, so it runs here, minutes after the fetch, rather than
+# in the scoring group. SEQUENTIAL, like every writer to picks; insert-once per
+# game under the model's own lock, at most four a night.
+step nba-prop-market
+# Its closing snapshot, for closing-line value only: one event call per bet
+# game, 12-25 minutes before tip, filed 'close' so no card decides on it. A
+# pass with no bet game in that window spends nothing.
+step nba-prop-close
 
 # MLB probable starters for today AND the look-ahead window. The scorer can
 # now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB game
@@ -171,7 +181,6 @@ step mlb-game-market
 step prop-scoring
 step wnba-prop-scoring
 step wnba-prop-market
-step nba-prop-scoring
 # Golf data + scoring run last so a DataGolf hiccup can never abort the
 # chain before game/prop picks are scored above.
 step golf-field

@@ -182,7 +182,8 @@ def line_snapshots(game_dates: list[str]) -> list[tuple[str, int]]:
     return sorted(pairs, reverse=True)
 
 
-def buy_lines(conn, meter: Meter, first_season: int, last_season: int) -> dict:
+def buy_lines(conn, meter: Meter, first_season: int, last_season: int,
+              oldest_first: bool = False) -> dict:
     conn.execute(PULL_LEDGER_DDL)
     lock_down(conn, "odds_history_pulls")
     conn.commit()
@@ -190,6 +191,11 @@ def buy_lines(conn, meter: Meter, first_season: int, last_season: int) -> dict:
     dates = sorted({g["game_date"] for g in games.values()
                     if g["game_date"] >= FIRST_LINES_DATE})
     pairs = line_snapshots(dates)
+    if oldest_first:
+        # A second process over the same season walks the other way; the
+        # per-snapshot ledger check below is what stops them double-buying
+        # where they meet.
+        pairs = pairs[::-1]
     done = {(r[0], int(r[1])) for r in conn.execute(
         "SELECT snapshot_date, hour_utc FROM odds_history_pulls WHERE sport = 'NBA'").fetchall()}
     todo = [p for p in pairs if p not in done]
@@ -198,6 +204,12 @@ def buy_lines(conn, meter: Meter, first_season: int, last_season: int) -> dict:
                 f"(~{30 * len(todo):,} credits)")
     stats = defaultdict(int)
     for snap_date, hour in todo:
+        if conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = 'NBA' "
+                        "AND snapshot_date = %s AND hour_utc = %s",
+                        (snap_date, hour)).fetchone():
+            conn.commit()
+            stats["skipped_by_sibling"] += 1
+            continue
         why = meter.stop_reason(30)
         if why:
             stats["stopped"] = why
@@ -502,6 +514,8 @@ def main() -> None:
     ap.add_argument("--probe-props", metavar="DATE", help="2 games on DATE, writes nothing")
     ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"))
     ap.add_argument("--lead-min", type=int, default=60)
+    ap.add_argument("--oldest-first", action="store_true",
+                    help="lines: walk the dates oldest first (run beside a newest-first sibling)")
     ap.add_argument("--max-credits", type=int)
     ap.add_argument("--floor", type=int, default=DEFAULT_FLOOR)
     ap.add_argument("--apply", action="store_true")
@@ -526,7 +540,7 @@ def main() -> None:
             ap.error("--apply needs --max-credits")
         meter = Meter(ceiling=a.max_credits, floor=a.floor)
         if a.lines:
-            print("lines:", buy_lines(conn, meter, *a.seasons))
+            print("lines:", buy_lines(conn, meter, *a.seasons, oldest_first=a.oldest_first))
         if a.props:
             print("props:", buy_props(conn, meter, *a.seasons, a.lead_min))
         if a.derivatives:

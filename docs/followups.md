@@ -21,6 +21,58 @@
 
 ---
 
+## [ ] NBA projection model: one under a game, on worker-only inputs (2026-10-16)
+
+The NHL count recipe for NBA (`models/nba_props.py`) re-fit on what the worker
+has in 2026-27 (ESPN box lines, schedule, odds, ESPN injury statuses):
+unders, one a game, 3,630 bets, +5.57%, 90% CI +2.45..+8.62, every season
+positive, DraftKings alone +5.28% (`docs/nba_models_2026.md` §4.4; verifier
+bet lists in `C:/Users/micha/AppData/Local/Temp/nba_rebuild/verify_model/` on
+the build machine). Strongest where Pinnacle does not quote: 1,045 bets,
++9.01%; blocks unders at EV ≥ 0.06 +6.55% on 7,701 (chosen after seeing
+results, so an extra search). Four a night does NOT hold (2024-25 +1.5 u).
+Before it can go live: a card on the live frame path (never run), the same
+roster rule as the backtest (log window + injury list), main lines only (the
+live feed carries alternates the backtest never saw), a calibrated published
+probability (the model claims 0.636 where it wins 0.464), and an owner rule for
+the 530 picks it shares with `nba_prop_market` (that rule keeps them).
+
+## [ ] NBA: 177 games a season can never be decided (tips at or before 6pm ET) (2026-10-16)
+
+`nba_prop_market` decides 45-70 minutes before tip. Refresh passes run hourly
+at :17 until 5pm ET, so every tip from 10:30am to 6:00pm ET (177 of 1,206 in
+2026-27) has no pass in its window and is logged `window_missed`. Reaching them
+needs extra afternoon passes (credits; not priced). Widening the window is not
+the fix: the edge was measured at tip-54, and assists before tip-60 lost.
+
+## [ ] NBA: the official injury report is not on the worker (2026-10-16)
+
+`data/ingestors/nba_injury_report.py --today` fetches the latest league PDF;
+it is not wired, and whether the worker reaches `ak-static.cms.nba.com` is not
+measured. The shipped rule does not read injuries. The projection model would
+(ESPN's Out ≈ the official Out; Probable and Questionable both read as
+Day-To-Day on ESPN, and Probable players lost −18.4% inside the model's card).
+
+## [ ] NBA: leads graded and not shipped (2026-10-16)
+
+Recorded so they are not re-derived (`docs/nba_models_2026.md` §4):
+- Moneyline outlier prices: each soft book against the other books' no-vig in
+  the same fetch, EV ≥ 0.035, 1,260 bets +17.5%. Looks like quotes that had not
+  updated; whether they could be bet live is unmeasured; DraftKings' lone
+  outliers are the opposite (it moves first on news; the long side won 16.8%).
+- Home team totals vs Pinnacle, same number, EV ≥ 0.01: 182 bets, +6.6%, CI
+  −6.3..+19.1 — re-grade when 2026-27 adds a season.
+- Kalshi carries NBA prop and game ladders with hourly history from 2025-26
+  (free, `api.elections.kalshi.com`); the repo maps only NFL series. Not built.
+
+## [ ] NBA prop fetch buys every game seven days ahead on every pass (2026-10-16)
+
+`nba-prop-odds` uses `GAME_SCORE_AHEAD_DAYS` (7) and pulls 9 markets + 8
+alternates for every NBA game in that window on every refresh pass; the 10-20
+BOS-DET game was bought on every pass from 10-13. The card only reads games
+45-70 minutes from tip. A same-day window for NBA props would cut the spend;
+the app's prop board may read the far-out rows — check before changing.
+
 ## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
 
 Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe

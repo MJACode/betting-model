@@ -277,6 +277,9 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     # picks.prop_market via _PROP_MARKET_STAT_BY_MODEL below.
     "nfl_prop_market":              ("nfl_player", "FROM_PROP_MARKET"),
     "wnba_prop_market":             ("wnba_player", "FROM_PROP_MARKET"),
+    # The NBA prop rule (2026-10-15): five markets under one id, settled from
+    # nba_player_game_log by (player_id, game_id).
+    "nba_prop_market":              ("nba_player", "FROM_PROP_MARKET"),
     # NHL skater props — resolved from nhl_skater_game_log by player_id
     "nhl_prop_blocked_shots":       ("nhl_skater", "blocked_shots"),
     "nhl_prop_assists":             ("nhl_skater", "assists"),
@@ -311,9 +314,9 @@ _WNBA_MARKET_STAT = {
 }
 
 # NBA analog: every Odds API NBA player market -> the column or the
-# _nba_prop_actual sentinel that settles it. NOT registered against any model
-# id below: a market-relative NBA model adds itself to
-# _PROP_MARKET_STAT_BY_MODEL when it ships.
+# _nba_prop_actual sentinel that settles it. nba_prop_market registered itself
+# against it below when it shipped (2026-10-15); it writes five of these
+# markets (models.nba_prop_market.MARKET_STAT, pinned to this map by test).
 _NBA_MARKET_STAT = {
     "player_points":                  "points",
     "player_rebounds":                "rebounds",
@@ -337,6 +340,7 @@ _PROP_MARKET_STAT_BY_MODEL = {
     "nfl_prop_market":  _NFL_MARKET_STAT,
     "nfl_live_prop":    _NFL_MARKET_STAT,
     "wnba_prop_market": _WNBA_MARKET_STAT,
+    "nba_prop_market":  _NBA_MARKET_STAT,
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -1561,6 +1565,10 @@ _PROP_MARKET_FOR_MODEL = {
     # travels on picks.prop_market (the same sentinel settlement uses).
     "nfl_prop_market":  "FROM_PROP_MARKET",
     "wnba_prop_market": "FROM_PROP_MARKET",
+    # nba_prop_market writes decision_book, so its close is read at that book
+    # (_bet_price_and_book) by the name in its label, which is that book's own
+    # spelling (scripts/nba_prop_market_card.pick_rows).
+    "nba_prop_market":  "FROM_PROP_MARKET",
     "nhl_prop_blocked_shots": "player_blocked_shots",
     "nhl_prop_saves": "player_total_saves",
     "nhl_prop_shots_on_goal": "player_shots_on_goal",

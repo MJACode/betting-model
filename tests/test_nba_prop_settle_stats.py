@@ -8,8 +8,8 @@ a did-not-play -- NO_ACTION on a player who played.
 
 The combo markets (points+rebounds, points+assists, rebounds+assists,
 blocks+steals, triple-double) must be computable from the same row. The helper
-exists so the lead can register models against it; no model id is registered
-here.
+exists so models can register against it; nba_prop_market did so when it shipped
+(2026-10-15).
 """
 from __future__ import annotations
 
@@ -117,7 +117,7 @@ def test_a_missing_stat_is_none_not_zero():
     assert pt._nba_prop_actual({"points": 12}, "turnovers") is None
 
 
-def test_combo_markets_are_mapped_to_helpers_without_registering_a_model():
+def test_combo_markets_are_mapped_to_helpers_and_only_the_nba_rule_uses_them():
     m = pt._NBA_MARKET_STAT
     assert m["player_turnovers"] == "turnovers"
     assert m["player_points_rebounds"] == "COMPUTE_PR"
@@ -127,8 +127,13 @@ def test_combo_markets_are_mapped_to_helpers_without_registering_a_model():
     assert m["player_triple_double"] == "COMPUTE_TD"
     assert m["player_double_double"] == "COMPUTE_DD"
     assert m["player_points_rebounds_assists"] == "COMPUTE_PRA"
-    for model_id, stat_map in pt._PROP_MARKET_STAT_BY_MODEL.items():
-        assert stat_map is not m, f"{model_id} registered against the NBA map"
+    # Until 2026-10-15 no model was registered against this map. The NBA prop
+    # rule (nba_prop_market) registered itself when it shipped; nothing else
+    # may share it -- another sport's market rule pointed here would settle
+    # its picks from the NBA box score.
+    users = sorted(mid for mid, stat_map in pt._PROP_MARKET_STAT_BY_MODEL.items()
+                   if stat_map is m)
+    assert users == ["nba_prop_market"], users
     for sentinel in set(m.values()):
         assert pt._nba_prop_actual(FULL_ROW, sentinel) is not None, sentinel
 

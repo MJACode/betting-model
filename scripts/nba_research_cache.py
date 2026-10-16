@@ -88,7 +88,8 @@ def cache_props(conn, games: pd.DataFrame) -> None:
 
 def cache_box(conn) -> None:
     for t in ("nba_player_game_log", "nba_player_game_adv", "nba_game_inactives",
-              "nba_game_officials", "nba_injury_report", "player_positions"):
+              "nba_game_officials", "nba_injury_report", "nba_period_scores",
+              "nba_player_dnp", "player_positions"):
         if not _table_exists(conn, t):
             logger.warning(f"{t}: not in the database yet")
             continue
