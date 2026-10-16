@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the 26 tests failing on master were all stale tests or Windows-only (recap fixture lacked `clv_method`; CLV capture literals; `node` absent; savepoint wrapper from #843; posix/backslash paths; `SOURCE` vs `SOURCE_PREFIX`); `tests/_node.py` finds node via the pip wheel so 10 more node-backed tests run here; `verify_a11y.ts` normalises separators and CRLF — 79/79, no app source touched |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM refresh: freshness reads no odds; apply true rebuilds yesterday through 7 days plus played games missing a fact; job enabled false and apply false |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM backtest RPC: SECURITY INVOKER, current season by default, both unit columns, no price or line filter, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL prop facts: 24h UNCONFIRMED lock, no alt ladders, log_status for missing log vs non-participant, anytime TD is rush+rec, job disabled, unapplied |
