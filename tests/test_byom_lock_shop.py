@@ -14,7 +14,7 @@ from byom.game_facts import (
     capture_game,
     shop_markets_to_replace,
 )
-from tests.test_byom_game_facts import _game, _quotes
+from tests.test_byom_game_facts import KICK, _game, _q, _quotes
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL = (ROOT / "data/migrations/byom_lock_shop_2026_10_16.sql").read_text(encoding="utf-8")
@@ -168,10 +168,128 @@ def test_a_moved_h2h_snapshot_replaces_that_market():
         ("2024_01_BAL_KC", 120, "h2h")]
 
 
+def test_fresh_h2h_books_without_draftkings_replace_a_stored_draftkings_row():
+    """A stale stored DraftKings h2h row does not stay when the fresh
+    rows for that market have no DraftKings quote."""
+    t1 = "2024-09-05T12:00:00+00:00"
+    t2 = "2024-09-05T18:00:00+00:00"
+    stored = {
+        "2024_01_BAL_KC": [
+            {"canonical_key": "2024_01_BAL_KC", "lock_window_hours": 120,
+             "market": "h2h", "bookmaker": "draftkings", "snapshot_at": t1},
+            {"canonical_key": "2024_01_BAL_KC", "lock_window_hours": 120,
+             "market": "h2h", "bookmaker": "fanduel", "snapshot_at": t1},
+        ],
+    }
+    fresh = [{
+        "canonical_key": "2024_01_BAL_KC", "lock_window_hours": 120,
+        "market": "h2h", "bookmaker": "fanduel", "snapshot_at": t2,
+        "dk_point": None,
+    }]
+    assert shop_markets_to_replace(fresh, stored) == [
+        ("2024_01_BAL_KC", 120, "h2h")]
+    stored["2024_01_BAL_KC"] = [
+        row for row in stored["2024_01_BAL_KC"]
+        if row["bookmaker"] != "draftkings"
+    ]
+    assert shop_markets_to_replace(fresh, stored) == []
+
+
+def test_a_moved_draftkings_h2h_snapshot_grades_the_new_price():
+    """The grade is the new DraftKings lock. The earlier shop price is
+    not the grade, and another book's price at the new snapshot is not
+    either. regrade_from_shop is not on this path."""
+    from datetime import timedelta
+
+    both = _quotes() + [
+        _q(80, "draftkings", "h2h", None, -160, 140),
+        _q(80, "fanduel", "h2h", None, -140, 120),
+    ]
+    fact, _shops = capture_game(_game(), both, {"BAL": [], "KC": []})
+    assert fact["grade_ml_home_book"] == "draftkings"
+    assert fact["grade_ml_home_price"] == Decimal("-150")
+    assert fact["lock_ml_at"] == KICK - timedelta(hours=100)
+    early = KICK - timedelta(hours=100)
+    moved_quotes = [
+        q for q in both
+        if not (q["bookmaker"] == "draftkings" and q["market"] == "h2h"
+                and q["snapshot_at"] == early)
+    ]
+    fact2, shops2 = capture_game(_game(), moved_quotes, {"BAL": [], "KC": []})
+    assert fact2["grade_ml_home_book"] == "draftkings"
+    assert fact2["grade_ml_home_price"] == Decimal("-160")
+    assert fact2["grade_ml_away_price"] == Decimal("140")
+    assert fact2["lock_ml_at"] == KICK - timedelta(hours=80)
+    dk = [
+        row for row in shops2
+        if row["market"] == "h2h" and row["bookmaker"] == "draftkings"
+        and row["lock_window_hours"] == 120
+    ]
+    assert len(dk) == 1
+    assert dk[0]["price_home"] == Decimal("-160")
+    assert dk[0]["snapshot_at"] == fact2["lock_ml_at"]
+    builder = (ROOT / "byom" / "game_facts.py").read_text(encoding="utf-8")
+    load = (ROOT / "byom" / "load.py").read_text(encoding="utf-8")
+    assert "regrade_from_shop" not in builder
+    assert "regrade_from_shop" not in load
+
+
+def test_the_shop_apply_warning_fires_only_after_the_date_with_no_rows(caplog):
+    import logging
+    from datetime import date
+
+    from byom.load import warn_if_shop_apply_window_missed
+
+    class Conn:
+        def __init__(self, reg, count):
+            self.reg = reg
+            self.count = count
+            self.sqls = []
+
+        def execute(self, sql, params=None):
+            self.sqls.append(sql)
+            self.sql = sql
+            return self
+
+        def fetchone(self):
+            if "count(*)" in self.sql:
+                return (self.count,)
+            return (self.reg,)
+
+    before = Conn("byom_lock_shop", 0)
+    assert warn_if_shop_apply_window_missed(before, today=date(2026, 10, 16)) is None
+    assert before.sqls == []
+    empty = Conn("byom_lock_shop", 0)
+    with caplog.at_level(logging.WARNING, logger="byom.load"):
+        missed = warn_if_shop_apply_window_missed(empty, today=date(2026, 10, 17))
+    assert missed is not None
+    assert "no rows" in missed
+    assert "empty table" in missed
+    assert "production write" in missed
+    assert any(missed in record.message for record in caplog.records)
+    assert any("to_regclass" in sql for sql in empty.sqls)
+    assert any("count(*)" in sql for sql in empty.sqls)
+    present = Conn("byom_lock_shop", 1)
+    assert warn_if_shop_apply_window_missed(present, today=date(2026, 10, 17)) is None
+    missing = Conn(None, 0)
+    assert warn_if_shop_apply_window_missed(
+        missing, today=date(2026, 10, 17)) is not None
+    assert all("count(*)" not in sql for sql in missing.sqls)
+    job = (ROOT / "tracking" / "job_queue.py").read_text(encoding="utf-8")
+    start = job.index("def _job_byom_game_facts")
+    body = job[start:job.index("\nJOBS =", start)]
+    warn_at = body.index("warn_if_shop_apply_window_missed(conn)")
+    build_at = body.index("return build_seasons(")
+    assert warn_at < build_at
+
+
 def test_scratch_shop_still_grades_after_the_book_is_deleted():
+    from datetime import date, timedelta
+
     psycopg2 = pytest.importorskip("psycopg2")
     from psycopg2.errors import InsufficientPrivilege
 
+    from byom.load import warn_if_shop_apply_window_missed
     from tests.byom_scratch import ScratchPostgres, pg_bin
     from tests.test_byom_game_facts import _load_fixture
 
@@ -218,6 +336,24 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
             text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
             cur.execute(text)
             cur.execute(text)
+
+        class Early:
+            def execute(self, sql, params=None):
+                c = raw.cursor()
+                c.execute(sql, params)
+                return c
+
+        early = Early()
+        assert warn_if_shop_apply_window_missed(
+            early, today=date(2026, 10, 16)) is None
+        empty_shop = warn_if_shop_apply_window_missed(
+            early, today=date(2026, 10, 17))
+        assert empty_shop is not None and "no rows" in empty_shop
+        cur.execute("ALTER TABLE byom_lock_shop RENAME TO byom_lock_shop_hidden")
+        missing_shop = warn_if_shop_apply_window_missed(
+            early, today=date(2026, 10, 17))
+        assert missing_shop is not None and "no rows" in missing_shop
+        cur.execute("ALTER TABLE byom_lock_shop_hidden RENAME TO byom_lock_shop")
         _load_fixture(cur)
         raw.autocommit = False
         from byom.load import build_season
@@ -257,6 +393,16 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
         graded_now = cur.fetchone()
         assert graded_now[0] == "draftkings"
         assert Decimal(str(graded_now[1])) == Decimal("-115")
+        assert warn_if_shop_apply_window_missed(
+            conn, today=date(2026, 10, 17)) is None
+        cur.execute("""
+            SELECT grade_ml_home_book, grade_ml_home_price, lock_ml_at
+              FROM byom_game_facts WHERE canonical_key = '2024_01_BAL_KC'
+        """)
+        ml_now = cur.fetchone()
+        assert ml_now[0] == "draftkings"
+        assert Decimal(str(ml_now[1])) == Decimal("-150")
+        assert ml_now[2] == KICK - timedelta(hours=100)
         cur.execute("""
             DELETE FROM nfl_odds_history
              WHERE bookmaker = 'fanduel' AND game_id = '2024_01_BAL_KC'
@@ -277,6 +423,56 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
                AND lock_window_hours = 120
         """)
         assert cur.fetchone()[0] == 1
+        later = KICK - timedelta(hours=80)
+        cur.execute("""
+            INSERT INTO nfl_odds_history
+              (snapshot_at, game_id, season, week, commence_time, bookmaker,
+               market, point, price_home, price_away, lead_hours)
+            VALUES
+              (%s, '2024_01_BAL_KC', 2024, NULL, %s, 'draftkings', 'h2h',
+               NULL, -160, 140, NULL),
+              (%s, '2024_01_BAL_KC', 2024, NULL, %s, 'fanduel', 'h2h',
+               NULL, -140, 120, NULL)
+        """, (later, KICK, later, KICK))
+        held = build_season(conn, 2024, apply=True)
+        assert held["written"] == 3
+        cur.execute("""
+            SELECT grade_ml_home_price, lock_ml_at
+              FROM byom_game_facts WHERE canonical_key = '2024_01_BAL_KC'
+        """)
+        held_ml = cur.fetchone()
+        assert Decimal(str(held_ml[0])) == Decimal("-150")
+        assert held_ml[1] == KICK - timedelta(hours=100)
+        cur.execute("""
+            DELETE FROM nfl_odds_history
+             WHERE game_id = '2024_01_BAL_KC'
+               AND bookmaker = 'draftkings'
+               AND market = 'h2h'
+               AND snapshot_at = %s
+        """, (KICK - timedelta(hours=100),))
+        moved = build_season(conn, 2024, apply=True)
+        assert moved["written"] == 3
+        cur.execute("""
+            SELECT grade_ml_home_book, grade_ml_home_price, grade_ml_away_price,
+                   lock_ml_at
+              FROM byom_game_facts WHERE canonical_key = '2024_01_BAL_KC'
+        """)
+        graded_ml = cur.fetchone()
+        assert graded_ml[0] == "draftkings"
+        assert Decimal(str(graded_ml[1])) == Decimal("-160")
+        assert Decimal(str(graded_ml[2])) == Decimal("140")
+        assert graded_ml[3] == later
+        cur.execute("""
+            SELECT price_home, snapshot_at
+              FROM byom_lock_shop
+             WHERE canonical_key = '2024_01_BAL_KC'
+               AND market = 'h2h' AND bookmaker = 'draftkings'
+               AND lock_window_hours = 120
+        """)
+        shop_ml = cur.fetchall()
+        assert len(shop_ml) == 1
+        assert Decimal(str(shop_ml[0][0])) == Decimal("-160")
+        assert shop_ml[0][1] == graded_ml[3]
         dry = build_season(conn, 2024, apply=False)
         assert dry["shop"] == 0 and dry["written"] == 0
         raw.commit()

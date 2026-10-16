@@ -362,48 +362,53 @@ def shop_rows(canonical_key: str, season: int, week: int, window_hours: int,
     return rows
 
 
+def _dk_rows(rows) -> list:
+    return [
+        row for row in rows
+        if (row.get("bookmaker") or "").lower() == "draftkings"
+    ]
+
+
 def shop_markets_to_replace(fresh: list[dict], stored_by_key: dict) -> list[tuple]:
     """Markets whose stored lock is not the lock being written.
 
-    A spread or total is replaced when a stored dk_point is not the line
+    A spread or total is replaced when a stored dk_point is not a line
     being written. h2h has no line. It is replaced when the fresh
-    DraftKings snapshot_at is not the stored DraftKings snapshot, or when
-    the stored rows have no DraftKings row. Other books may sit earlier
-    inside the shop lag, so their timestamps are not the check. A fresh
-    market with nothing stored yet is an insert, not a replace.
+    DraftKings snapshot set is not the stored DraftKings snapshot set,
+    when the stored rows have no DraftKings row and a fresh one is
+    present, or when a stored DraftKings row is present and the fresh
+    rows have no DraftKings row. Other books may sit earlier inside the
+    shop lag, so their timestamps are not the check. A fresh market with
+    nothing stored yet is an insert, not a replace.
     """
-    found = []
-    seen = set()
+    grouped: dict[tuple, list[dict]] = {}
     for row in fresh:
         ident = (row["canonical_key"], row["lock_window_hours"], row["market"])
-        if ident in seen:
-            continue
+        grouped.setdefault(ident, []).append(row)
+    found = []
+    for ident, rows in grouped.items():
+        key, window, market = ident
         olds = [
-            old for old in stored_by_key.get(row["canonical_key"], [])
-            if old.get("lock_window_hours") == row["lock_window_hours"]
-            and old.get("market") == row["market"]
+            old for old in stored_by_key.get(key, [])
+            if old.get("lock_window_hours") == window
+            and old.get("market") == market
         ]
         if not olds:
             continue
-        if row.get("market") == "h2h":
-            if (row.get("bookmaker") or "").lower() != "draftkings":
+        if market == "h2h":
+            fresh_dk = _dk_rows(rows)
+            stored_dk = _dk_rows(olds)
+            if not fresh_dk:
+                if stored_dk:
+                    found.append(ident)
                 continue
-            fresh_at = parse_ts(row.get("snapshot_at"))
-            stored_dk = [
-                old for old in olds
-                if (old.get("bookmaker") or "").lower() == "draftkings"
-            ]
-            if not stored_dk or any(
-                    parse_ts(old.get("snapshot_at")) != fresh_at
-                    for old in stored_dk):
-                seen.add(ident)
+            fresh_at = {parse_ts(row.get("snapshot_at")) for row in fresh_dk}
+            stored_at = {parse_ts(old.get("snapshot_at")) for old in stored_dk}
+            if not stored_dk or fresh_at != stored_at:
                 found.append(ident)
-            else:
-                seen.add(ident)
             continue
         if any(not same_line(old.get("dk_point"), row.get("dk_point"))
-               for old in olds):
-            seen.add(ident)
+               for old in olds for row in rows):
             found.append(ident)
     return found
 

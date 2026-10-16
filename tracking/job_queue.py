@@ -1847,12 +1847,17 @@ def _validate_byom_game_facts(args: dict) -> dict:
 
 
 def _job_byom_game_facts(**kw):
-    """Write byom_game_facts. Does not touch picks or a live model."""
+    """Write byom_game_facts. Does not touch picks or a live model.
+
+    Warns when the shop-apply window has passed and byom_lock_shop has
+    no rows. The warning does not write and does not turn the job on.
+    """
     from data.db import get_connection
-    from byom.load import build_seasons
+    from byom.load import build_seasons, warn_if_shop_apply_window_missed
 
     conn = get_connection()
     try:
+        warn_if_shop_apply_window_missed(conn)
         return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
     finally:
         conn.close()

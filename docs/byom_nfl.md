@@ -60,9 +60,10 @@ The grade stays DraftKings' own price on the lock snapshot, so a later
 prune of non-DraftKings quotes does not change it. A spread or
 total whose DraftKings number has moved replaces that market. h2h has no
 number: it is replaced when the stored DraftKings `snapshot_at` is not
-the lock being written, or when the stored rows have no DraftKings row.
-Another book's timestamp may be earlier inside the lag and is not the
-check. The shop is reference. It does not set the grade.
+the lock being written, when the stored rows have no DraftKings row, or
+when a stored DraftKings row is still there and the fresh rows have no
+DraftKings row. Another book's timestamp may be earlier inside the lag
+and is not the check. The shop is reference. It does not set the grade.
 `data/migrations/byom_lock_shop_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The windows are
 UNCONFIRMED and are not check constraints.
@@ -74,4 +75,7 @@ today, keeping the opener and the close. It does not delete from
 `nfl_odds_history`. A lock quote that lives only in `odds` is neither
 the opener nor the close. The first apply has to land before
 `2026-10-17`, the prune of games dated `2026-10-16`.
-`byom.constants.SHOP_FIRST_APPLY_BEFORE` is that date.
+`byom.constants.SHOP_FIRST_APPLY_BEFORE` is that date. Merging the
+migration only creates the empty table. The job logs a warning when the
+America/New_York date is on or after that date and `byom_lock_shop` has
+no rows. The first apply is a separate production write and was not run.

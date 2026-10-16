@@ -10,11 +10,22 @@ run it daily before prune-odds. The first apply has to land before
 byom.constants.SHOP_FIRST_APPLY_BEFORE (2026-10-17): prune deletes
 non-DraftKings rows from odds for games before today, and a lock quote
 that is only in odds is not the opener and not the close.
-nfl_odds_history is not that prune.
+nfl_odds_history is not that prune. Merging the migration only creates
+the empty table. The job warns when that date has passed and the shop
+has no rows. This module does not run that apply.
 """
 from __future__ import annotations
 
-from byom.constants import DK_HISTORY_START_SEASON, LOCK_WINDOW_HOURS, SPORT
+import logging
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from byom.constants import (
+    DK_HISTORY_START_SEASON,
+    LOCK_WINDOW_HOURS,
+    SHOP_FIRST_APPLY_BEFORE,
+    SPORT,
+)
 from byom.game_facts import (
     capture_game,
     parse_date,
@@ -309,8 +320,10 @@ def _write_shop(conn, season: int, shops: list[dict], stored: dict) -> int:
     """Insert shop rows. A book already captured at this lock stays.
 
     A spread or total whose DraftKings number moved, and an h2h market
-    whose DraftKings snapshot moved, are the previous lock. Those rows
-    are replaced by this one.
+    whose DraftKings snapshot moved, are the previous lock. A stored
+    DraftKings h2h row is also the previous lock when the fresh rows
+    have no DraftKings quote. Those rows are replaced by this one.
+    The shop is reference. It does not set the grade.
     """
     if not shops:
         return 0
@@ -370,3 +383,44 @@ def build_seasons(conn, seasons, apply: bool = False) -> dict:
     if apply:
         conn.commit()
     return {"apply": apply, "seasons": built}
+
+
+def warn_if_shop_apply_window_missed(conn, today=None) -> str | None:
+    """Warn when the first shop apply can no longer see 2026-10-16 odds.
+
+    The check is the America/New_York date. On or after
+    SHOP_FIRST_APPLY_BEFORE, an empty byom_lock_shop means lock quotes
+    that lived only in odds are gone. A missing table counts as no rows
+    and does not raise. Returns the warning text, or None. Does not
+    write and does not enqueue the job.
+    """
+    if today is None:
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+    elif isinstance(today, datetime):
+        today = today.astimezone(ZoneInfo("America/New_York")).date()
+    elif not isinstance(today, date):
+        today = date.fromisoformat(str(today))
+    cutoff = date.fromisoformat(SHOP_FIRST_APPLY_BEFORE)
+    if today < cutoff:
+        return None
+    # Two statements. A count in the same query as to_regclass is planned
+    # against the table even when that branch is not taken, and a missing
+    # table then raises.
+    cur = conn.execute("SELECT to_regclass('public.byom_lock_shop')")
+    row = cur.fetchone()
+    if row is None or row[0] is None:
+        count = None
+    else:
+        cur = conn.execute("SELECT count(*) FROM public.byom_lock_shop")
+        counted = cur.fetchone()
+        count = 0 if counted is None else int(counted[0])
+    if count is not None and count > 0:
+        return None
+    message = (
+        f"byom_lock_shop has no rows on or after {SHOP_FIRST_APPLY_BEFORE}. "
+        "Lock quotes that lived only in odds are gone after that prune. "
+        "Merging the migration only creates the empty table. "
+        "The first shop apply is a separate production write."
+    )
+    logging.getLogger(__name__).warning(message)
+    return message
