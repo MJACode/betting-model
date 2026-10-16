@@ -65,6 +65,19 @@ def test_results_keep_pushes_and_ties_and_carry_no_stake():
         assert banned not in code.lower(), banned
 
 
+def test_the_skip_guard_refuses_every_write_verb():
+    """authenticated INSERT was the only authenticated verb in the first cut.
+    A later GRANT of UPDATE or TRUNCATE would still take the early return."""
+    code = _code(SQL)
+    for role in ("anon", "authenticated"):
+        assert f"('{role}')" in code
+    for rel in ("public.byom_game_facts", "public.byom_prop_facts"):
+        assert f"('{rel}')" in code
+    for verb in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+        assert f"('{verb}')" in code
+    assert "has_table_privilege(role.name, rel.name, verb.name)" in code
+
+
 def test_both_tables_are_on_the_anon_read_list():
     from data.anon_readable import AHEAD_OF_THE_APP, ANON_READABLE
 
@@ -118,6 +131,14 @@ def test_schema_applies_twice_on_scratch_postgres_and_anon_can_only_read():
         assert cur.fetchone()[0] == 0
         cur.execute("SELECT count(*) FROM public.byom_prop_facts")
         assert cur.fetchone()[0] == 0
+        for rel in ("byom_game_facts", "byom_prop_facts"):
+            for role in ("anon", "authenticated"):
+                for verb in ("INSERT", "UPDATE", "DELETE", "TRUNCATE",
+                             "REFERENCES", "TRIGGER"):
+                    cur.execute(
+                        "SELECT has_table_privilege(%s, %s, %s)",
+                        (role, f"public.{rel}", verb))
+                    assert cur.fetchone()[0] is False, (rel, role, verb)
         cur.execute("SET ROLE anon")
         cur.execute("SELECT count(*) FROM public.byom_game_facts")
         assert cur.fetchone()[0] == 0

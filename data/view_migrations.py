@@ -350,10 +350,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # views, or a live model. Unapplied until the worker's next pass.
     # The 120h/24h windows are UNCONFIRMED and are not in this file.
     "byom_facts_schema_2026_10_16.sql",
+    # 2026-10-16: label uncapped and capped unit columns. The unlabelled
+    # names from the facts schema are dropped. Catalog return on the
+    # second pass. Unapplied. Does not touch picks or the record views.
+    "byom_game_facts_units_2026_10_16.sql",
     # 2026-10-16: the book shop at the DraftKings lock, so a rebuild grades
-    # 2026 the same way after non-DK quotes are pruned. Empty table, anon
-    # SELECT, catalog return on the second pass. Unapplied until the
-    # worker's next pass. Does not touch picks or the record views.
+    # 2026 the same way after non-DK quotes are pruned. Empty table.
+    # Catalog return on the second pass. Unapplied until the worker's
+    # next pass. Does not touch picks or the record views.
     # The lock windows are UNCONFIRMED and are not in this file.
     "byom_lock_shop_2026_10_16.sql",
 ]

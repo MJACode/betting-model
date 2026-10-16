@@ -22,8 +22,11 @@ The lock columns hold the first DraftKings pre-game snapshot at or under a
 are UNCONFIRMED placeholders.** They are columns the builder fills, not
 check constraints. The grade is the 120h DraftKings line at the best price
 on that same line. The closing DraftKings price is stored and is not the
-grade. Results are 1u-to-win units, with no risk cap and no stake. Pushes
-and ties are stored.
+grade. Each result stores two unit columns. `*_units_uncapped` is 1u-to-win
+with no risk ceiling. `*_units_capped` matches `stake_for`: risk above 3
+is cut to 3, and a win is recomputed from that risk. A -400 loss is -4
+uncapped and -3 capped. A missing price leaves both NULL. Pushes and ties
+are stored. There is no stake column.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
@@ -40,7 +43,11 @@ American price, per side, among `BEST_LINE_BOOKMAKERS` on DraftKings'
 number, from a quote in the 30 minutes up to that lock. A quote on a
 different number does not count. History is preferred over `odds` when
 both have a lock for that market. `line_source` records which table.
-Closing prices are stored and are not the grade. There is no 3u risk cap.
+Closing prices are stored and are not the grade. The builder reads one
+game at a time: DraftKings inside the lock window, then other books only
+inside that game's shop slices. A season is not loaded in one fetch.
+`byom_game_facts_units_2026_10_16.sql` renames the unit columns. It is
+registered and was not applied.
 
 `byom_lock_shop` stores every book's quote at DraftKings' line at the
 grade lock and at the near lock, inside that 30-minute lag. The first

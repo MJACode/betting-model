@@ -83,7 +83,8 @@ def test_a_stored_shop_is_the_grade_after_the_live_quote_is_gone():
     regrade_from_shop(rebuilt, stored, BOOKS)
     assert rebuilt["grade_spread_home_book"] == "fanduel"
     assert rebuilt["grade_spread_home_price"] == Decimal("-105")
-    assert rebuilt["ats_home_units"] == Decimal("1")
+    assert rebuilt["ats_home_units_uncapped"] == Decimal("1")
+    assert rebuilt["ats_home_units_capped"] == Decimal("1.0000")
 
 
 def test_a_moved_draftkings_line_replaces_that_market():
@@ -155,6 +156,7 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
               total_line numeric, over_price numeric, under_price numeric);
         """)
         for name in ("byom_facts_schema_2026_10_16.sql",
+                     "byom_game_facts_units_2026_10_16.sql",
                      "byom_lock_shop_2026_10_16.sql"):
             text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
             cur.execute(text)
