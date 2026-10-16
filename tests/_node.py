@@ -30,8 +30,23 @@ def node_exe() -> str | None:
     return None
 
 
+NODE = node_exe()
+
+
+def tsx_cmd(mobile: "os.PathLike[str] | str") -> list[str] | None:
+    """How to run the app's `tsx` scripts: node plus tsx's own CLI module.
+
+    The `.bin/tsx` shim is a shell script, which Windows cannot exec, and the
+    `.cmd` twin needs a node on PATH. Running the module through our own node
+    works everywhere, and None means `npm ci` has not been run in mobile/."""
+    if NODE is None:
+        return None
+    cli = os.path.join(os.fspath(mobile), "node_modules", "tsx", "dist", "cli.mjs")
+    return [NODE, cli] if os.path.isfile(cli) else None
+
+
 def node_strips_types() -> bool:
-    exe = node_exe()
+    exe = NODE
     if exe is None:
         return False
     out = subprocess.run([exe, "--version"], capture_output=True, text=True).stdout.strip()
