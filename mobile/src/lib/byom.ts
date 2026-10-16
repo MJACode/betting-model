@@ -8,17 +8,10 @@
  * 3-unit risk ceiling. There is no recommended stake.
  */
 
+import { byomFilters, type ByomFilters } from './byomFilters';
 import { supabase } from './supabase';
 
-export interface ByomFilters {
-  side?: 'home' | 'away';
-  role?: 'favorite' | 'underdog' | 'pickem';
-  weeks?: number[];
-  min_rest_days?: number;
-  max_rest_days?: number;
-  primetime?: boolean;
-  markets?: string[];
-}
+export { byomFilters, type ByomFilters };
 
 export interface ByomBacktestRow {
   market: string;
@@ -54,29 +47,6 @@ export interface ByomModel {
   created_at: string;
   updated_at: string;
   snapshots: ByomSnapshot[];
-}
-
-const FILTER_KEYS: (keyof ByomFilters)[] = [
-  'side',
-  'role',
-  'weeks',
-  'min_rest_days',
-  'max_rest_days',
-  'primetime',
-  'markets',
-];
-
-/** Keep the keys the RPC grades. Anything else is dropped. */
-export function byomFilters(input: ByomFilters | null | undefined): ByomFilters {
-  const src = input ?? {};
-  const out: ByomFilters = {};
-  for (const key of FILTER_KEYS) {
-    const value = src[key];
-    if (value !== undefined) {
-      Object.assign(out, { [key]: value });
-    }
-  }
-  return out;
 }
 
 function num(value: unknown): number {

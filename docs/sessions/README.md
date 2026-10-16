@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM reviewer pass: game facts read DraftKings only; prop rebuild deletes then inserts; backtest timeout 3s; incomplete and prop-missing games are due; save reads the backtest once; the mobile hook drops a stale response |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM lock shop: a moved DraftKings h2h lock writes the new price; fresh h2h with no DK row replaces a stored DK row; the job warns on or after 2026-10-17 when the shop has no rows |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM grades at DraftKings' own lock price; the lock shop stays reference and does not set the grade; unit columns stay results; no recommended stake |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM mobile data layer: types, fetchers, and hooks only; tsc message set matches origin/master d135a5ab; no screen, sign-in left off |
