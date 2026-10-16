@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM facts schema review: skip guard covers every write verb for anon and authenticated; grant sweep skips the tables until they exist; PR CI installs Postgres |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL game-facts builder: lock at the first DK snapshot inside 120h (UNCONFIRMED), grade at the best price on that line, 24h and close stored, no 2015-2019, job not declared, not run on production |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL facts schema: byom_game_facts and byom_prop_facts, anon SELECT, RLS read policy, unapplied, worker-registered; DK archive starts at 2020; games.week is NULL |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-15/16, NBA rebuilt: the twelve old models retired (no bet ever written); ~900k credits of price history, the official injury reports, box detail, schedule and quarter scores into Supabase; every game and prop market graded against pre-registered bars (docs/nba_models_2026.md); schedule and injuries are in the line; nba_prop_market (Pinnacle same-line unders, one a game, four a night) live |

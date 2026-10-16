@@ -114,6 +114,35 @@ def test_the_plan_revokes_before_it_grants():
     assert all(s.startswith("GRANT SELECT") for s in plan[1:]), plan[1:3]
 
 
+def test_unapplied_facts_tables_are_not_granted_until_they_exist():
+    """GRANT and has_table_privilege raise on a missing relation. The two
+    facts tables are in the dry-run plan and out of the apply plan until
+    the migration has created them."""
+    from scripts.apply_anon_grants import MAY_BE_UNAPPLIED, _anon_can_read
+
+    assert MAY_BE_UNAPPLIED == ("byom_game_facts", "byom_prop_facts")
+    dry = " | ".join(_plan())
+    for rel in MAY_BE_UNAPPLIED:
+        assert f'ON public."{rel}"' in dry
+
+    class Missing:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchall(self):
+            return []
+
+        def fetchone(self):
+            raise AssertionError("privilege check ran on a missing relation")
+
+    applied = " | ".join(_plan(Missing()))
+    for rel in MAY_BE_UNAPPLIED:
+        assert f'ON public."{rel}"' not in applied
+    assert 'ON public."picks"' in applied
+    assert _anon_can_read(Missing(), "byom_game_facts") is True
+    assert _anon_can_read(Missing(), "byom_prop_facts") is True
+
+
 def test_every_declared_relation_is_granted_exactly_once():
     plan = " | ".join(_plan())
     for rel in ANON_READABLE:
