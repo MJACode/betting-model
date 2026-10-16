@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM lock shop: a moved DraftKings h2h lock writes the new price; fresh h2h with no DK row replaces a stored DK row; the job warns on or after 2026-10-17 when the shop has no rows |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM grades at DraftKings' own lock price; the lock shop stays reference and does not set the grade; unit columns stay results; no recommended stake |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM mobile data layer: types, fetchers, and hooks only; tsc message set matches origin/master d135a5ab; no screen, sign-in left off |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM saved models: auth.uid() tables, cap 25, snapshot of byom_backtest at save time, migration not registered, sign-in left off |
