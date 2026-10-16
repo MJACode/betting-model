@@ -414,3 +414,101 @@ def test_pull_times_parse_with_a_bare_utc_offset():
     t = card.pull_time("2026-10-16 12:17:30.660504+00")
     assert t == datetime(2026, 10, 16, 12, 17, 30, 660504, tzinfo=UTC)
     assert card.pull_time("not a time") is None
+
+
+# ── every label publishes; every market settles, either side ─────────────────
+
+@pytest.mark.parametrize("market", sorted(pj.MARKETS))
+@pytest.mark.parametrize("side", ["over", "under"])
+def test_every_label_passes_the_publishing_check(market, side):
+    """A refused label is logged and the bet dropped, silently for the member."""
+    from tracking.pick_integrity import pick_problems
+    label = f"Victor Wembanyama {side.capitalize()} 2.5 {pj.MARKET_LABEL[market]}"
+    assert pick_problems(label, side, 2.5, pj.MODEL_ID, prop_market=market) == []
+
+
+_BOX = {"player_id": PID, "player_name": "Stephen Curry", "game_id": GID, "team": "GSW",
+        "minutes": 34.0, "points": 24, "rebounds": 5, "offensive_reb": 1, "defensive_reb": 4,
+        "assists": 7, "steals": 2, "blocks": 1, "turnovers": 3, "fg_made": 9, "fg_att": 19,
+        "fg3_made": 4, "fg3_att": 10, "ft_made": 2, "ft_att": 2}
+
+
+def _settle(side, line, market):
+    import re
+    import tracking.paper_tracker as pt
+
+    class _C:
+        def __init__(self, picks):
+            self.picks, self.updates = picks, []
+
+        def execute(self, sql, params=None):
+            s = " ".join(sql.split())
+            self._rows = []
+            if s.upper().startswith("UPDATE"):
+                self.updates.append((s, params))
+                return self
+            m = re.search(r"SELECT (.*?) FROM (\w+)", s, re.I)
+            table = m.group(2) if m else ""
+            if table == "picks":
+                self._rows = self.picks
+            elif table == "nba_player_game_log":
+                cols = [c.strip().split()[-1].split(".")[-1] for c in m.group(1).split(",")]
+                self._rows = [tuple(_BOX.get(c) for c in cols)]
+            return self
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return self._rows[0] if self._rows else None
+
+    label = f"Stephen Curry {side.capitalize()} {line:g} {pj.MARKET_LABEL[market]}"
+    conn = _C([("pk1", GID, pj.MODEL_ID, side, 110, 10.0, line, PID, label, market, "Stephen Curry")])
+    pt._settle_prop_picks(conn, "2026-10-21", "2026-10-22T06:00:00Z")
+    sql, params = [(s, p) for s, p in conn.updates if "SET result" in s][-1]
+    return "NO_ACTION" if "'NO_ACTION'" in sql else params[0]
+
+
+@pytest.mark.parametrize("side,line,market,expected", [
+    ("over", 2.5, "player_blocks_steals", "WIN"),        # 2 steals + 1 block = 3
+    ("under", 2.5, "player_blocks_steals", "LOSS"),
+    ("under", 12.5, "player_rebounds_assists", "WIN"),   # 5 + 7 = 12
+    ("over", 11.5, "player_rebounds_assists", "WIN"),
+    ("over", 1.5, "player_steals", "WIN"),
+    ("under", 3.5, "player_threes", "LOSS"),             # 4 threes
+    ("under", 1.5, "player_blocks", "WIN"),
+    ("under", 5.5, "player_rebounds", "WIN"),
+])
+def test_each_market_settles_either_side_from_the_box(side, line, market, expected):
+    assert _settle(side, line, market) == expected
+
+
+def test_publish_takes_the_rules_lock_before_its_own():
+    """Both cards read the other's holdings before writing. Without the rule's lock the
+    decide-alone path could race a late rule decision and bet one proposition twice."""
+    import scripts.nba_prop_projection_card as card
+    import scripts.nfl_wind_publisher as wp
+    bets, _, decisions = _run([_q("draftkings", 1.5, +105, -135)])
+    locks = []
+
+    class _C:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            return []
+
+        def fetchone(self):
+            return ("x",) if "INSERT" in self.sql else None
+
+        def commit(self):
+            pass
+
+    orig = wp._lock_model
+    wp._lock_model = lambda conn, mid: locks.append(mid)
+    try:
+        card.publish(_C(), card.pick_rows(bets, 1000.0), decisions)
+    finally:
+        wp._lock_model = orig
+    assert locks == ["nba_prop_market", "nba_prop_projection"]

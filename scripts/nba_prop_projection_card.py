@@ -70,11 +70,14 @@ SPORT = pj.SPORT
 RULE_ID = "nba_prop_market"
 _ET = ZoneInfo("America/New_York")
 
-# A game is projected at the window job's tick 58-62 minutes before its tip
-# (60 for any tip on a five-minute mark), so the projection is stored, with the
-# injury list as of that tick, when the decision lands at 55. A game inside its
-# window with no projection is projected at once (a failed or missed tick).
-PROJECT_AHEAD_MIN = (58, 62)
+# A game is projected at the window job's tick 63-67 minutes before its tip
+# (65 for any tip on a five-minute mark), two ticks before its decision at 55.
+# Measured 2026-10-16 from this machine against production: 139 seconds to read
+# every input and project three games. Projected at 60, a slow frame could hold
+# the job past the decision tick, which max_instances=1 would then skip. A game
+# 45-62 minutes out with no projection at all is projected at once (a failed or
+# missed tick).
+PROJECT_AHEAD_MIN = (63, 67)
 # A projection younger than this is not recomputed on the next tick.
 PROJECTION_FRESH_MIN = 8
 # The card prices a projection no older than this; older is no projection.
@@ -407,7 +410,7 @@ def project(conn, game_ids: list[str], now: datetime, art: dict) -> pd.DataFrame
 
 def to_project(conn, now: datetime) -> list[str]:
     """Games PROJECT_AHEAD_MIN from tip, not yet decided, with no fresh projection; and any game
-    already inside its window with no projection at all (a missed tick)."""
+    closer than that, down to the window's near end, with no projection at all (a missed tick)."""
     ensure_tables(conn)
     games = rule_card.slate(conn, now, horizon_min=PROJECT_AHEAD_MIN[1])
     near = sorted(g for g, v in games.items()
@@ -567,6 +570,11 @@ def publish(conn, rows: list[dict], decisions: list[dict]) -> tuple[int, int]:
     if not decisions:
         return 0, 0
     from scripts.nfl_wind_publisher import _lock_model
+    # nba_prop_market's lock FIRST, then this model's own. The two cards each read the other's
+    # holdings before writing; holding the rule's lock serializes this write with the rule's, so
+    # the decide-alone path (DECIDE_ALONE_BY_MIN) and a late rule decision cannot both bet one
+    # proposition. The rule's card never takes this model's lock, so the order cannot deadlock.
+    _lock_model(conn, RULE_ID)
     _lock_model(conn, MODEL_ID)
     gids = sorted({d["game_id"] for d in decisions})
     done = decided_games(conn, gids)

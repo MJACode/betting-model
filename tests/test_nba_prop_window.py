@@ -152,13 +152,14 @@ def test_the_plan_takes_games_40_to_62_minutes_out_not_yet_decided(monkeypatch):
 def test_the_plan_projects_games_about_an_hour_out_and_any_in_the_window_never_projected(monkeypatch):
     fresh = (NOW - timedelta(minutes=3)).isoformat()
     stale = (NOW - timedelta(minutes=20)).isoformat()
-    conn = _PlanConn([_game("AT57", 57), _game("AT58", 58), _game("AT60", 60), _game("AT62", 62),
-                      _game("AT63", 63), _game("FRESH", 60), _game("STALE", 61), _game("INWIN", 50),
-                      _game("INWIN_DONE", 50), _game("DECIDED", 60)],
-                     projected={"FRESH": fresh, "STALE": stale, "INWIN_DONE": stale},
+    conn = _PlanConn([_game("AT62", 62), _game("AT63", 63), _game("AT65", 65), _game("AT67", 67),
+                      _game("AT68", 68), _game("FRESH", 65), _game("STALE", 66), _game("INWIN", 50),
+                      _game("NEAR_DONE", 60), _game("DECIDED", 65)],
+                     projected={"FRESH": fresh, "STALE": stale, "NEAR_DONE": stale},
                      proj_decided={"DECIDED"})
     p = _plan(conn, monkeypatch)
-    assert sorted(p.project) == ["AT57", "AT58", "AT60", "AT62", "INWIN", "STALE"]
+    # 63-67 out: projected unless fresh; 45-62 out: projected only if it never was
+    assert sorted(p.project) == ["AT62", "AT63", "AT65", "AT67", "INWIN", "STALE"]
 
 
 def test_the_plan_owes_a_close_with_no_game_to_decide(monkeypatch):

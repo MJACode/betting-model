@@ -1010,7 +1010,7 @@ def run_nfl_prop_card() -> None:
 # tick about an hour before tip, so a slow frame never delays a decision: the
 # ESPN injury pull, then the frame over every box line since 2018-19.
 NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "card": 60, "projection_card": 60, "close": 60,
-                             "injuries": 60, "project": 210}
+                             "injuries": 60, "project": 240}
 
 
 def run_nba_prop_window() -> None:
@@ -1026,9 +1026,9 @@ def run_nba_prop_window() -> None:
 
     Otherwise: fetch props for exactly the games to decide, run nba_prop_market's
     card and then the projection card on that fetch, take any closing snapshot
-    that is due, and publish what the cards wrote. THEN, for the games about an
-    hour from tip, pull the ESPN injury list and store their projections (the
-    projection card prices them at the next tick, inside the window). A step
+    that is due, and publish what the cards wrote. THEN, for the games about 65
+    minutes from tip, pull the ESPN injury list and store their projections (the
+    projection card prices them two ticks later, inside the window). A step
     that fails or is killed raises AFTER publishing, so the heartbeat records
     "error" and the failure alerter reports it, while a bet that was written
     still goes out.

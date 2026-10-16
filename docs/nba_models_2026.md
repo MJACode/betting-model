@@ -306,13 +306,14 @@ books they are −1.29%, at DraftKings alone −3.51%. Dropping them costs +15.3
   late: +3.57%. The pre-game roster in place of the game's own box: +3.99%.
 
 **Live parity, measured.** The live code path (`scripts/nba_prop_projection_card.project_core`)
-replayed past nights from the research cache with the fold-2026 models: in two of three game
-groups replayed so far every projected mean equals the graded prediction exactly; in the third,
-two in three players match exactly and the rest move 0.5% on average (the pre-game roster
-in place of the box). Every graded card bet's player was projected. The trainer refits the
-fold-2026 models and reproduces every graded 2025-26 prediction to 0.0. Built from 2022-23
-on instead of 2018-19, the means moved 5–7% for one player in a hundred, so the live frame
-reads every season.
+replayed three past nights (2025-11-12, 2026-01-15, 2026-03-20; 17 tip-time groups) from the
+research cache with the fold-2026 models: 778 of 850 projected players (91.5%) equal the graded
+prediction exactly, the rest differ by 1.2% on average (the pre-game roster in place of the
+game's own box), and all 675 graded card bets' players were projected. The trainer rebuilds
+the graded frame (320,239 rows, no input differs) and refits the fold-2026 models to 0.0
+difference on 25,660 predictions. Built from 2022-23 on instead of 2018-19, the means moved
+5-7% for one player in a hundred, so the live frame reads every season: 72 seconds per group
+here (104 at most).
 
 **How it runs.** The five-minute window job projects each game at the tick about 60
 minutes before tip (an ESPN injury pull, then the frame), storing every player's mean
