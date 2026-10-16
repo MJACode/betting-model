@@ -367,6 +367,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # touch picks or the record views. The 24h prop lock is UNCONFIRMED
     # and is not in this file.
     "byom_prop_facts_units_2026_10_16.sql",
+    # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
+    # return when the function body already has the marker. Unapplied.
+    # Does not touch picks or the record views. No spread, price, or line
+    # filter. The lock windows are UNCONFIRMED and are not in this file.
+    "byom_backtest_rpc_2026_10_16.sql",
 ]
 
 
