@@ -7,7 +7,13 @@ write nothing.
 from __future__ import annotations
 
 from byom.constants import DK_HISTORY_START_SEASON, LOCK_WINDOW_HOURS, SPORT
-from byom.game_facts import assemble_game, parse_date, parse_game_id
+from byom.game_facts import (
+    capture_game,
+    parse_date,
+    parse_game_id,
+    regrade_from_shop,
+    shop_markets_to_replace,
+)
 
 _QUOTE_FROM_HISTORY = """
 SELECT game_id, bookmaker, market, snapshot_at, commence_time,
@@ -77,6 +83,14 @@ FACT_COLUMNS = (
     "line_source",
 )
 
+# The lock-time shop. First capture wins (ON CONFLICT DO NOTHING) so a
+# later rebuild still grades 2026 after the non-DraftKings quotes are gone.
+SHOP_COLUMNS = (
+    "canonical_key", "sport", "season", "week", "lock_window_hours",
+    "market", "bookmaker", "line_source", "snapshot_at", "point",
+    "dk_point", "price_home", "price_away",
+)
+
 
 def _fetch(conn, sql, params):
     cur = conn.execute(sql, params)
@@ -126,10 +140,35 @@ def _played(games: list[dict]) -> dict:
     return played
 
 
-def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
-    """The facts this season would write. No INSERT."""
+def _load_shop(conn, season: int) -> dict[str, list[dict]]:
+    rows = _fetch(conn, """
+        SELECT canonical_key, lock_window_hours, market, bookmaker,
+               point, dk_point, price_home, price_away, line_source
+          FROM byom_lock_shop
+         WHERE season = %s AND sport = %s
+    """, (season, SPORT))
+    out: dict[str, list[dict]] = {}
+    for row in rows:
+        out.setdefault(row[0], []).append({
+            "canonical_key": row[0],
+            "lock_window_hours": row[1],
+            "market": row[2],
+            "bookmaker": row[3],
+            "point": row[4],
+            "dk_point": row[5],
+            "price_home": row[6],
+            "price_away": row[7],
+            "line_source": row[8],
+        })
+    return out
+
+
+def season_facts_and_shop(conn, season: int, books: list[str]):
+    """Facts this season would write, and the shop rows from the quotes
+    still stored. No INSERT. Grades use the shop already captured when
+    that row is still at this DraftKings line."""
     if season < DK_HISTORY_START_SEASON:
-        return []
+        return [], []
     games = _games(conn, season)
     quotes = _quotes(conn, season, "nfl_odds_history", _QUOTE_FROM_HISTORY)
     quotes += _quotes(conn, season, "odds", _QUOTE_FROM_ODDS)
@@ -140,14 +179,26 @@ def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
             continue
         by_key.setdefault(parsed[0], []).append(quote)
     played = _played(games)
+    stored = _load_shop(conn, season)
     facts = []
+    shops = []
     for game in games:
         parsed = parse_game_id(game["game_id"])
         if parsed is None:
             continue
-        fact = assemble_game(game, by_key.get(parsed[0], []), played, books)
-        if fact is not None:
-            facts.append(fact)
+        fact, fresh = capture_game(
+            game, by_key.get(parsed[0], []), played, books)
+        if fact is None:
+            continue
+        regrade_from_shop(fact, stored.get(fact["canonical_key"], []), books)
+        facts.append(fact)
+        shops.extend(fresh)
+    return facts, shops
+
+
+def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
+    """The facts this season would write. No INSERT."""
+    facts, _shops = season_facts_and_shop(conn, season, books)
     return facts
 
 
@@ -168,6 +219,33 @@ def _upsert(conn, facts: list[dict]) -> int:
     return len(values)
 
 
+def _write_shop(conn, season: int, shops: list[dict], stored: dict) -> int:
+    """Insert shop rows. A book already captured at this line stays.
+
+    When the DraftKings line for a market has moved, that market's stored
+    rows are the previous lock. They are replaced by this one.
+    """
+    if not shops:
+        return 0
+    for key, window, market in shop_markets_to_replace(shops, stored):
+        conn.execute("""
+            DELETE FROM byom_lock_shop
+             WHERE canonical_key = %s
+               AND lock_window_hours = %s
+               AND market = %s
+        """, (key, window, market))
+    cols = ", ".join(SHOP_COLUMNS)
+    placeholders = ", ".join(["%s"] * len(SHOP_COLUMNS))
+    sql = (
+        f"INSERT INTO byom_lock_shop ({cols}) VALUES ({placeholders}) "
+        f"ON CONFLICT (canonical_key, lock_window_hours, market, bookmaker) "
+        f"DO NOTHING"
+    )
+    values = [tuple(row[col] for col in SHOP_COLUMNS) for row in shops]
+    conn.executemany(sql, values)
+    return len(values)
+
+
 def build_season(conn, season: int, apply: bool = False,
                  books: list[str] | None = None) -> dict:
     """One season. apply=False writes nothing."""
@@ -176,12 +254,19 @@ def build_season(conn, season: int, apply: bool = False,
         books = list(BEST_LINE_BOOKMAKERS)
     if season < DK_HISTORY_START_SEASON:
         return {
-            "season": season, "facts": 0, "written": 0,
+            "season": season, "facts": 0, "written": 0, "shop": 0,
             "skipped": "before DraftKings history",
         }
-    facts = facts_for_season(conn, season, books)
-    written = _upsert(conn, facts) if apply else 0
-    return {"season": season, "facts": len(facts), "written": written}
+    facts, shops = season_facts_and_shop(conn, season, books)
+    written = 0
+    if apply:
+        stored = _load_shop(conn, season)
+        _write_shop(conn, season, shops, stored)
+        written = _upsert(conn, facts)
+    return {
+        "season": season, "facts": len(facts), "written": written,
+        "shop": len(shops) if apply else 0,
+    }
 
 
 def seasons_in_games(conn) -> list[int]:

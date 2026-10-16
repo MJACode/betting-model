@@ -41,3 +41,13 @@ number, from a quote in the 30 minutes up to that lock. A quote on a
 different number does not count. History is preferred over `odds` when
 both have a lock for that market. `line_source` records which table.
 Closing prices are stored and are not the grade. There is no 3u risk cap.
+
+`byom_lock_shop` stores every book's quote at DraftKings' line at the
+grade lock and at the near lock, inside that 30-minute lag. The first
+capture is kept. A rebuild grades from those rows, so 2026 stays the
+same after the non-DraftKings quotes are pruned. A spread or total whose
+DraftKings number has moved replaces that market's shop. The grade still
+uses `BEST_LINE_BOOKMAKERS`; the other books are stored so the price can
+be recomputed. `data/migrations/byom_lock_shop_2026_10_16.sql` is
+registered for the worker and was not applied by the change that added
+it. The windows are UNCONFIRMED and are not check constraints.

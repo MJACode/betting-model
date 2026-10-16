@@ -71,7 +71,9 @@ ANON_READABLE: tuple[str, ...] = (
     # exists: an undeclared table arrives with no SELECT and the first read
     # is an empty error. Nothing in mobile/src names these yet, so they are
     # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
+    # byom_lock_shop is each book's price at DraftKings' line at the lock.
     "byom_game_facts",
+    "byom_lock_shop",
     "byom_prop_facts",
     "tracked_bets",
     "ufc_fight_log",
@@ -117,6 +119,7 @@ ANON_READABLE: tuple[str, ...] = (
 # Build Your Own Model facts: the NFL tables land before the screen.
 AHEAD_OF_THE_APP: tuple[str, ...] = (
     "byom_game_facts",
+    "byom_lock_shop",
     "byom_prop_facts",
 )
 

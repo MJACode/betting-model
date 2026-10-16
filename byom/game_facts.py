@@ -304,9 +304,124 @@ def _num(value):
     return Decimal(str(value))
 
 
+def shop_rows(canonical_key: str, season: int, week: int, window_hours: int,
+              slot: dict | None, quotes_in_shop: list[dict]) -> list[dict]:
+    """One stored row per book at this DraftKings snapshot's line.
+
+    Every book is kept, including ones the grade will ignore. The grade
+    chooses among them later. h2h has no point.
+    """
+    if slot is None:
+        return []
+    market = slot.get("market")
+    dk_point = None if market == "h2h" else _num(slot.get("point"))
+    rows = []
+    for quote in quotes_in_shop:
+        book = (quote.get("bookmaker") or "").lower()
+        if not book:
+            continue
+        rows.append({
+            "canonical_key": canonical_key,
+            "sport": "NFL",
+            "season": season,
+            "week": week,
+            "lock_window_hours": window_hours,
+            "market": market,
+            "bookmaker": book,
+            "line_source": quote.get("line_source") or slot.get("line_source"),
+            "snapshot_at": parse_ts(quote.get("snapshot_at")),
+            "point": None if market == "h2h" else _num(quote.get("point")),
+            "dk_point": dk_point,
+            "price_home": _num(quote.get("price_home")),
+            "price_away": _num(quote.get("price_away")),
+        })
+    return rows
+
+
+def regrade_from_shop(fact: dict, stored: list[dict], books: list[str]) -> dict:
+    """Overwrite the grade from shop rows already stored at this DK line.
+
+    Rows at a different number are not the lock that was captured. The
+    near window is stored and is not the grade. A market with no stored
+    row keeps the grade just computed from the quotes still on hand.
+    """
+    window = fact["lock_window_hours"]
+    sides = {
+        "spreads": (
+            ("home", "dk_spread_home", "grade_spread_home_price",
+             "grade_spread_home_book", "ats_home_result", "ats_home_units"),
+            ("away", "dk_spread_home", "grade_spread_away_price",
+             "grade_spread_away_book", "ats_away_result", "ats_away_units"),
+        ),
+        "totals": (
+            ("home", "dk_total", "grade_over_price", "grade_over_book",
+             "ou_over_result", "ou_over_units"),
+            ("away", "dk_total", "grade_under_price", "grade_under_book",
+             "ou_under_result", "ou_under_units"),
+        ),
+        "h2h": (
+            ("home", None, "grade_ml_home_price", "grade_ml_home_book",
+             "ml_home_result", "ml_home_units"),
+            ("away", None, "grade_ml_away_price", "grade_ml_away_book",
+             "ml_away_result", "ml_away_units"),
+        ),
+    }
+    for market, pairs in sides.items():
+        dk_point = None if market == "h2h" else fact.get(pairs[0][1])
+        rows = []
+        for row in stored:
+            if row.get("lock_window_hours") != window or row.get("market") != market:
+                continue
+            if market != "h2h" and not same_line(row.get("dk_point"), dk_point):
+                continue
+            rows.append(row)
+        if not rows:
+            continue
+        for side, _point_col, price_col, book_col, result_col, units_col in pairs:
+            price, book = best_price(rows, market, side, dk_point, books)
+            fact[price_col] = price
+            fact[book_col] = book
+            fact[units_col] = units_1u_to_win(fact.get(result_col), price)
+    return fact
+
+
+def shop_markets_to_replace(fresh: list[dict], stored_by_key: dict) -> list[tuple]:
+    """Markets whose stored DraftKings line is not the lock being written.
+
+    h2h has no line. Its first capture stays. A spread or total whose
+    number moved is replaced, so the stored shop is the lock in the row.
+    """
+    found = []
+    seen = set()
+    for row in fresh:
+        ident = (row["canonical_key"], row["lock_window_hours"], row["market"])
+        if ident in seen or row.get("market") == "h2h":
+            continue
+        olds = [
+            old for old in stored_by_key.get(row["canonical_key"], [])
+            if old.get("lock_window_hours") == row["lock_window_hours"]
+            and old.get("market") == row["market"]
+        ]
+        if olds and any(
+                not same_line(old.get("dk_point"), row.get("dk_point")) for old in olds):
+            seen.add(ident)
+            found.append(ident)
+    return found
+
+
 def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
                   books: list[str]) -> dict | None:
-    """One facts dict, or None when this game is not built.
+    """One facts dict, or None when this game is not built."""
+    fact, _shops = capture_game(game, quotes, played, books)
+    return fact
+
+
+def capture_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
+                 books: list[str]) -> tuple[dict | None, list[dict]]:
+    """The facts dict and the lock-time shop rows, or (None, []).
+
+    Shop rows are every book at DraftKings' line inside the lag, for the
+    grade window and the near window. The fact's grade uses `books`.
 
     Not built: the id does not parse, the season in the id is before
     DraftKings history, or no DraftKings market has a snapshot inside the
@@ -314,10 +429,10 @@ def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
     """
     parsed = parse_game_id(game.get("game_id") or "")
     if parsed is None:
-        return None
+        return None, []
     key, season, week, away, home = parsed
     if season < DK_HISTORY_START_SEASON:
-        return None
+        return None, []
 
     markets = {}
     sources = []
@@ -335,7 +450,7 @@ def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
             "close": closing_quote(pool),
         }
     if not any(markets[m] and markets[m]["lock"] for m in markets):
-        return None
+        return None, []
 
     def lock(market):
         slot = markets.get(market)
@@ -406,7 +521,7 @@ def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
     ou_o, ou_ou = pair(None if ou is None else ou[0], g_ov)
     ou_u, ou_uu = pair(None if ou is None else ou[1], g_un)
 
-    return {
+    fact = {
         "canonical_key": key,
         "sport": "NFL",
         "season": season,
@@ -486,3 +601,11 @@ def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
         "away_role": away_role,
         "line_source": "+".join(sorted(set(sources))),
     }
+    shops = []
+    for window, slots in (
+        (LOCK_WINDOW_HOURS, (spread, total, money)),
+        (NEAR_LOCK_WINDOW_HOURS, (near_spread, near_total, near_money)),
+    ):
+        for slot in slots:
+            shops.extend(shop_rows(key, season, week, window, slot, shop(slot)))
+    return fact, shops

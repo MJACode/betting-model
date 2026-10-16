@@ -267,8 +267,9 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
               home_price numeric, away_price numeric, spread_home numeric,
               total_line numeric, over_price numeric, under_price numeric);
         """)
-        cur.execute((ROOT / "data/migrations/byom_facts_schema_2026_10_16.sql")
-                    .read_text(encoding="utf-8"))
+        for name in ("byom_facts_schema_2026_10_16.sql",
+                     "byom_lock_shop_2026_10_16.sql"):
+            cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         _load_fixture(cur)
         raw.autocommit = False
         from byom.load import build_season
