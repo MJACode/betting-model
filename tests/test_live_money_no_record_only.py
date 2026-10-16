@@ -47,6 +47,8 @@ _SKIP_DIRS = {
     "dist",
     "build",
     ".expo",
+    # Derived knowledge graph (committed) and its cache (gitignored); `graphify update .` refreshes it.
+    "graphify-out",
 }
 
 # Changelog and the evidence file quote older instructions. They are not
