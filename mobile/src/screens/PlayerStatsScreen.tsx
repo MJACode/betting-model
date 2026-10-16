@@ -983,12 +983,15 @@ export function PlayerStatsScreen() {
                 yet (statCatalog.LOG_DERIVED_STATS), so the two cards above are
                 absent. Said where they were, rather than vanishing (UX
                 review, 2026-10-16). */}
-            {detail.serverReadsSkipped ? (
-              <View style={styles.card}>
-                <Text style={styles.muted}>
-                  Head-to-head and same-position reads aren’t available for combined stats yet.
-                </Text>
-              </View>
+            {detail.serverReadsSkipped && detail.nextGame ? (
+              <>
+                <SectionTitle title={`vs ${detail.nextGame.entry.opponent}`} />
+                <View style={styles.card}>
+                  <Text style={styles.muted}>
+                    No head-to-head or same-position numbers for combined stats yet. Pick a single stat to see them.
+                  </Text>
+                </View>
+              </>
             ) : null}
 
             {/* ── MLB context the prop models train on ─────────────────── */}

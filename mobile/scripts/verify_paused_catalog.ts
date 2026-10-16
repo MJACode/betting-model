@@ -80,8 +80,8 @@ check('the NBA projection model\'s short name is a word, not its id',
 // 2026-10-16).
 check('the projection model\'s probability note says upper bound, graded seasons, and the price',
   modelProbabilityNote('nba_prop_projection') ===
-    'What our model says is the chance this side hits. Read it as an upper bound: over the last three ' +
-    'NBA seasons it said 53% on average on the bets it picks, those bets won 50%, and the prices implied 48%.',
+    'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
+    'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
   modelProbabilityNote('nba_prop_projection'));
 check('every other model keeps the plain probability sentence',
   modelProbabilityNote('nba_prop_market') === 'What our model says is the chance this side hits.' &&

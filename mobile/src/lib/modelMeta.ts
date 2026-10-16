@@ -759,9 +759,8 @@ export function modelLong(modelId: string): string {
  */
 const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   nba_prop_projection:
-    'What our model says is the chance this side hits. Read it as an upper bound: over the last three ' +
-    'NBA seasons it said 53% on average on the bets it picks, those bets won 50%, and the prices ' +
-    'implied 48%.',
+    'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
+    'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
 };
 
 export function modelProbabilityNote(modelId: string): string {

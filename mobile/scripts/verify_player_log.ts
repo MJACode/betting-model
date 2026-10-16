@@ -142,11 +142,11 @@ check('their markets resolve with no per-stat model behind them',
     hook.includes('serverReadsSkipped: !serverStat && stat != null && opponent != null,'));
   const screenSrc = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
   check('the player page puts one muted line in a card where the two cards were',
-    /\{detail\.serverReadsSkipped \? \(\s*<View style=\{styles\.card\}>\s*<Text style=\{styles\.muted\}>\s*Head-to-head and same-position reads aren’t available for combined stats yet\.\s*<\/Text>\s*<\/View>\s*\) : null\}/
+    /\{detail\.serverReadsSkipped && detail\.nextGame \? \(\s*<>\s*<SectionTitle title=\{`vs \$\{detail\.nextGame\.entry\.opponent\}`\} \/>\s*<View style=\{styles\.card\}>\s*<Text style=\{styles\.muted\}>\s*No head-to-head or same-position numbers for combined stats yet\. Pick a single stat to see them\.\s*<\/Text>\s*<\/View>\s*<\/>\s*\) : null\}/
       .test(screenSrc));
   check('that line sits after the same-position card, before the MLB context',
-    screenSrc.indexOf('{detail.serverReadsSkipped ? (') > screenSrc.indexOf('<PositionVsOpponentPending') &&
-    screenSrc.indexOf('{detail.serverReadsSkipped ? (') < screenSrc.indexOf('<StatcastCard'));
+    screenSrc.indexOf('{detail.serverReadsSkipped && detail.nextGame ? (') > screenSrc.indexOf('<PositionVsOpponentPending') &&
+    screenSrc.indexOf('{detail.serverReadsSkipped && detail.nextGame ? (') < screenSrc.indexOf('<StatcastCard'));
 }
 
 // ── The selected stat chip is scrolled into view ────────────────────────────
