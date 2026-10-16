@@ -20,13 +20,14 @@ quote came from.
 The lock columns hold the first DraftKings pre-game snapshot at or under a
 120 hour lead, and a second snapshot at or under 24 hours. **Both numbers
 are UNCONFIRMED placeholders.** They are columns the builder fills, not
-check constraints. The grade is the 120h DraftKings line at the best price
-on that same line. The closing DraftKings price is stored and is not the
-grade. Each result stores two unit columns. `*_units_uncapped` is 1u-to-win
-with no risk ceiling. `*_units_capped` matches `stake_for`: risk above 3
+check constraints. The grade is DraftKings' own price on that 120h lock
+snapshot. `grade_*_book` is `draftkings`. The closing DraftKings price is
+stored and is not the grade. Each result stores two unit columns.
+`*_units_uncapped` is the 1u-to-win result with no risk ceiling.
+`*_units_capped` is the result after a 3-unit risk ceiling: risk above 3
 is cut to 3, and a win is recomputed from that risk. A -400 loss is -4
 uncapped and -3 capped. A missing price leaves both NULL. Pushes and ties
-are stored. There is no stake column.
+are stored. Both columns are results. There is no stake column.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
@@ -38,10 +39,9 @@ backfill production.
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
 `byom/constants.py` holds `LOCK_WINDOW_HOURS` (120) and
 `NEAR_LOCK_WINDOW_HOURS` (24). Both are UNCONFIRMED. Seasons before
-`DK_HISTORY_START_SEASON` (2020) are refused. The grade is the best
-American price, per side, among `BEST_LINE_BOOKMAKERS` on DraftKings'
-number, from a quote in the 30 minutes up to that lock. A quote on a
-different number does not count. History is preferred over `odds` when
+`DK_HISTORY_START_SEASON` (2020) are refused. The grade is DraftKings'
+own price on the lock snapshot. `grade_*_book` is `draftkings`. Another
+book's price is not the grade. History is preferred over `odds` when
 both have a lock for that market. `line_source` records which table.
 Closing prices are stored and are not the grade. The builder reads one
 game at a time: DraftKings inside the lock window, then other books only
