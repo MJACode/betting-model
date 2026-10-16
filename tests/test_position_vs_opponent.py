@@ -29,6 +29,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
 MIG = ROOT / "data/migrations/add_position_vs_opponent_nfl.sql"
 LIB = ROOT / "mobile/src/lib/positionVsOpponent.ts"
 QUERIES = ROOT / "mobile/src/lib/queries.ts"
@@ -229,11 +231,11 @@ def test_the_pure_layer_behaves():
 
     import pytest
 
-    tsx = ROOT / "mobile" / "node_modules" / ".bin" / "tsx"
-    if shutil.which("node") is None or not tsx.exists():
+    tsx = tsx_cmd(ROOT / "mobile")
+    if tsx is None:
         pytest.skip("mobile node_modules not installed")
     proc = subprocess.run(
-        [str(tsx), "scripts/verify_position_vs_opponent.ts"],
+        [*tsx, "scripts/verify_position_vs_opponent.ts"],
         cwd=ROOT / "mobile", capture_output=True, text=True, timeout=120,
     )
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
