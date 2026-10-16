@@ -149,3 +149,12 @@ models/saved/*_????????_??????.pkl
 nfl/data/live_model/prop_snaps/
 nfl/data/live_model/_quotes_graded.parquet
 nfl/data/live_model/_quotes_state.parquet
+
+# graphify rewrites .claude/settings.json on every `graphify claude install` and
+# leaves a rolling backup beside it; the backup is machine-local.
+.claude/settings.json.graphify-bak
+
+# graphify knowledge graph: 62 MB, rebuilt whole on every build, holds machine
+# paths (.graphify_python, .graphify_root). Rebuild with /graphify . in Claude
+# Code; .graphifyignore (committed) says what the graph leaves out.
+graphify-out/
