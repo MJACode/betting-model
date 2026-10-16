@@ -4,9 +4,10 @@
 -- adds the labelled columns and drops the unlabelled ones. A second pass
 -- returns before ALTER, so it does not take ACCESS EXCLUSIVE again.
 --
--- units_uncapped is 1u-to-win with no risk ceiling. units_capped matches
--- stake_for: risk above 3 is cut to 3, and a win is recomputed from that
--- risk. The 120h and 24h windows are UNCONFIRMED and are not in this file.
+-- units_uncapped is the 1u-to-win result with no risk ceiling.
+-- units_capped is the result after a 3-unit risk ceiling: risk above 3
+-- is cut to 3, and a win is recomputed from that risk. Both columns are
+-- results. The 120h and 24h windows are UNCONFIRMED and are not in this file.
 --
 -- One DO block. No CONCURRENTLY.
 

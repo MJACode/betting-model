@@ -86,8 +86,10 @@ def _as_quotes(rows) -> list[dict]:
 
 
 def _quotes_for_game(conn, game_id: str) -> list[dict]:
-    """DraftKings inside the prop window, then every other book in that
-    same window. One game. The cast sits in a CASE."""
+    """DraftKings inside the prop window. One game. The cast sits in a CASE.
+
+    The grade is DraftKings' own price. Other books are not read.
+    """
     sql = f"""
         SELECT p.player_name, p.team, p.market, p.bookmaker,
                {_SNAP} AS snapshot_at,
@@ -96,6 +98,7 @@ def _quotes_for_game(conn, game_id: str) -> list[dict]:
           FROM player_prop_odds p
           JOIN games g ON g.game_id = p.game_id
          WHERE p.game_id = %s
+           AND p.bookmaker = 'draftkings'
            AND p.market = ANY(%s)
            AND (p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play')
            AND g.commence_time IS NOT NULL
@@ -121,7 +124,7 @@ def _log_for_game(conn, game_id: str) -> list[dict]:
     return out
 
 
-def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
+def facts_for_season(conn, season: int) -> list[dict]:
     if season < PROP_HISTORY_START_SEASON:
         return []
     facts = []
@@ -132,7 +135,7 @@ def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
             continue
         quotes = _quotes_for_game(conn, game["game_id"])
         log_rows = _log_for_game(conn, game["game_id"])
-        facts.extend(facts_for_game(game, quotes, log_rows, books))
+        facts.extend(facts_for_game(game, quotes, log_rows))
     return facts
 
 
@@ -153,23 +156,18 @@ def _upsert(conn, facts: list[dict]) -> int:
     return len(values)
 
 
-def build_season(conn, season: int, apply: bool = False,
-                 books: list[str] | None = None) -> dict:
-    if books is None:
-        from config import BEST_LINE_BOOKMAKERS
-        books = list(BEST_LINE_BOOKMAKERS)
+def build_season(conn, season: int, apply: bool = False) -> dict:
     if season < PROP_HISTORY_START_SEASON:
         return {
             "season": season, "facts": 0, "written": 0,
             "skipped": "before player_prop_odds history",
         }
-    facts = facts_for_season(conn, season, books)
+    facts = facts_for_season(conn, season)
     written = _upsert(conn, facts) if apply else 0
     return {"season": season, "facts": len(facts), "written": written}
 
 
-def build_seasons(conn, seasons, apply: bool = False,
-                  books: list[str] | None = None) -> dict:
+def build_seasons(conn, seasons, apply: bool = False) -> dict:
     if seasons is None:
         rows = _fetch(conn, """
             SELECT DISTINCT season FROM games
@@ -179,7 +177,7 @@ def build_seasons(conn, seasons, apply: bool = False,
         seasons = [int(row[0]) for row in rows]
     elif isinstance(seasons, int):
         seasons = [seasons]
-    built = [build_season(conn, int(s), apply=apply, books=books) for s in seasons]
+    built = [build_season(conn, int(s), apply=apply) for s in seasons]
     if apply:
         conn.commit()
     return {"apply": apply, "seasons": built}
