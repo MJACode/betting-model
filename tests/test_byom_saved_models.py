@@ -38,6 +38,8 @@ def test_the_migration_is_not_registered_and_not_anon_granted():
     assert "byom_saved_models_v1" in sql
     assert "auth.uid()" in sql
     assert "byom model cap is 25" in sql
+    assert "filter keys must be lowercase" in sql
+    assert sql.count("FROM byom_backtest") == 1
     assert "NOT in data/view_migrations.ACTIVE_MIGRATIONS" in sql
     lowered = sql.lower()
     for banned in ("insert into picks", "discord"):
@@ -122,6 +124,13 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
                   '{"role":"favorite","side":"home","minOdds":-200}'::jsonb,
                   2026)
             """)
+        with pytest.raises(psycopg2.errors.RaiseException, match="lowercase"):
+            cur.execute("""
+                SELECT model_id FROM byom_save_model(
+                  'home fav',
+                  '{"Side":"home","role":"favorite"}'::jsonb,
+                  2026)
+            """)
 
         cur.execute("""
             SELECT model_id, season, bets, units_uncapped, units_capped
@@ -135,6 +144,15 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
         assert bets == 1
         assert Decimal(str(unc)) == Decimal("1")
         assert Decimal(str(cap)) == Decimal("1")
+        cur.execute("""
+            SELECT bets,
+                   (SELECT coalesce(sum((row->>'bets')::bigint), 0)
+                      FROM jsonb_array_elements(summary) AS row)
+              FROM byom_model_snapshots
+             WHERE model_id = %s
+        """, (model_id,))
+        snap_bets, summary_bets = cur.fetchone()
+        assert snap_bets == summary_bets == 1
         cur.execute("""
             SELECT season FROM byom_save_model('home fav', '{}'::jsonb, NULL)
         """)
@@ -190,6 +208,17 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
         cur.execute("SELECT count(*) FROM byom_models")
         assert cur.fetchone()[0] == 25
         cur.execute("RESET ROLE")
+
+        as_user(USER_A)
+        cur.execute("SELECT byom_delete_model(%s)", (model_id,))
+        assert str(cur.fetchone()[0]) == str(model_id)
+        cur.execute(
+            "SELECT count(*) FROM byom_models WHERE model_id = %s", (model_id,))
+        assert cur.fetchone()[0] == 0
+        cur.execute(
+            "SELECT count(*) FROM byom_model_snapshots WHERE model_id = %s",
+            (model_id,))
+        assert cur.fetchone()[0] == 0
 
         as_user("")
         with pytest.raises(psycopg2.errors.RaiseException, match="sign-in required"):

@@ -19,7 +19,10 @@
 -- and appends a snapshot. It does not count as a new model.
 --
 -- There is no spread-size, price, or line filter. A stake or kelly
--- filter key is rejected. The snapshot unit columns are results.
+-- filter key is rejected. An allowlisted key in the wrong case is
+-- rejected too; it is not stored under a different spelling. The
+-- snapshot totals and the per-market summary come from one
+-- byom_backtest read. The snapshot unit columns are results.
 --
 -- The 120h and 24h windows are UNCONFIRMED and are not in this file.
 -- One DO block. No CONCURRENTLY. Does not touch picks or the record views.
@@ -206,6 +209,17 @@ BEGIN
       THEN
         RAISE EXCEPTION 'price, line, and stake filters are not accepted';
       END IF;
+      IF EXISTS (
+        SELECT 1 FROM jsonb_object_keys(v_filters) AS k(key)
+         WHERE lower(k.key) IN (
+           'side', 'role', 'weeks', 'min_rest_days', 'max_rest_days',
+           'primetime', 'markets')
+           AND k.key NOT IN (
+           'side', 'role', 'weeks', 'min_rest_days', 'max_rest_days',
+           'primetime', 'markets'))
+      THEN
+        RAISE EXCEPTION 'filter keys must be lowercase';
+      END IF;
       SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
         INTO v_filters
         FROM jsonb_each(v_filters) AS e
@@ -225,17 +239,15 @@ BEGIN
         v_season := p_season;
       END IF;
 
+      -- One function call. The sums and the summary are that same row set.
       SELECT coalesce(sum(b.bets), 0)::bigint,
              coalesce(sum(b.wins), 0)::bigint,
              coalesce(sum(b.losses), 0)::bigint,
              coalesce(sum(b.pushes), 0)::bigint,
              coalesce(sum(b.ties), 0)::bigint,
              coalesce(sum(b.units_uncapped), 0),
-             coalesce(sum(b.units_capped), 0)
-        INTO v_bets, v_wins, v_losses, v_pushes, v_ties, v_unc, v_cap
-        FROM byom_backtest(v_season, v_filters) AS b;
-
-      SELECT coalesce(jsonb_agg(jsonb_build_object(
+             coalesce(sum(b.units_capped), 0),
+             coalesce(jsonb_agg(jsonb_build_object(
                'market', b.market,
                'bets', b.bets,
                'wins', b.wins,
@@ -245,7 +257,8 @@ BEGIN
                'units_uncapped', b.units_uncapped,
                'units_capped', b.units_capped
              ) ORDER BY b.market), '[]'::jsonb)
-        INTO v_summary
+        INTO v_bets, v_wins, v_losses, v_pushes, v_ties, v_unc, v_cap,
+             v_summary
         FROM byom_backtest(v_season, v_filters) AS b;
 
       SELECT m.model_id INTO v_model
