@@ -192,15 +192,18 @@ def test_the_dynamic_rpc_resolver_actually_finds_the_ternary_names():
 
 
 def test_every_rpc_the_app_calls_is_declared_or_known_absent():
-    from data.anon_readable import RPC_ANON_CALLABLE, RPC_MISSING_IN_PROD
+    from data.anon_readable import (
+        RPC_AFTER_SIGN_IN, RPC_ANON_CALLABLE, RPC_MISSING_IN_PROD)
 
-    known = set(RPC_ANON_CALLABLE) | set(RPC_MISSING_IN_PROD)
+    known = set(RPC_ANON_CALLABLE) | set(RPC_MISSING_IN_PROD) | set(RPC_AFTER_SIGN_IN)
     undeclared = sorted(_app_rpcs() - known)
     assert not undeclared, (
         f"mobile/src calls {undeclared}, which data/anon_readable.py does not "
         f"declare. After ALTER DEFAULT PRIVILEGES ... ON FUNCTIONS a new RPC "
         f"404s through PostgREST. Add it to RPC_ANON_CALLABLE and re-run "
-        f"`python -m scripts.apply_anon_grants --apply`.")
+        f"`python -m scripts.apply_anon_grants --apply`. A saved-model RPC "
+        f"goes in RPC_AFTER_SIGN_IN instead: the grant sweep must not name it "
+        f"before its migration is applied.")
 
 
 def test_the_transitive_helper_is_granted():

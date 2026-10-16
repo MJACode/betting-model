@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM saved models: auth.uid() tables, cap 25, snapshot of byom_backtest at save time, migration not registered, sign-in left off |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM refresh: freshness reads no odds; apply true rebuilds yesterday through 7 days plus played games missing a fact; job enabled false and apply false |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM backtest RPC: SECURITY INVOKER, current season by default, both unit columns, no price or line filter, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL prop facts: 24h UNCONFIRMED lock, no alt ladders, log_status for missing log vs non-participant, anytime TD is rush+rec, job disabled, unapplied |
