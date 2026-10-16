@@ -23,6 +23,7 @@ import {
   storedQuoteBook,
 } from '@/lib/markets';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
+import { modelProbabilityNote } from '@/lib/modelMeta';
 import { reasoningHeading } from '@/lib/pickCta';
 
 interface Props {
@@ -66,7 +67,7 @@ export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
       <Row
         label="Model probability"
         value={formatPct(pick.model_probability)}
-        sub="What our model says is the chance this side hits."
+        sub={modelProbabilityNote(pick.model_id)}
       />
 
       {odds != null ? (
