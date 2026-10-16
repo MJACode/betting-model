@@ -196,31 +196,20 @@ export function signalsTeamsSpeech(sport: string, away: string, home: string): s
   return `${away} ${sport === 'UFC' ? 'versus' : 'at'} ${home}`;
 }
 
-/**
- * How the Stake cell reads. Matt has not chosen (Designer, #965). The live
- * cell stays `Bet 1.5u · Win 0.4u` until he does. This constant is the only
- * switch:
- *   'bet-win'  — current: `Bet 1.5u · Win 0.4u`
- *   'risk-win' — `Risk 1.1u · Win 1u`, still under the Stake label
- *   'single'   — the risk figure alone, `1u`
- */
-export type SignalsStakeForm = 'bet-win' | 'risk-win' | 'single';
+export type SignalsStakeForm = 'bet-win' | 'risk-win';
 export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win';
 
 /**
  * The Stake cell. Both figures are `stakeFor`'s: units to bet (`risk`) and
- * units to win (`win`), already formatted ("1.5u", "0.4u"). The words come
+ * units to win (`win`), already formatted ("1.5u", "0.4u"). The word comes
  * from `SIGNALS_STAKE_FORM`. Never the "1.1u → 1u" arrow, never dollars.
  */
-function stakeWord(): 'Bet' | 'Risk' | null {
-  if (SIGNALS_STAKE_FORM === 'single') return null;
+function stakeWord(): 'Bet' | 'Risk' {
   return SIGNALS_STAKE_FORM === 'risk-win' ? 'Risk' : 'Bet';
 }
 
 export function signalsStakeLine(riskUnits: string, winUnits: string): string {
-  const word = stakeWord();
-  if (word == null) return riskUnits;
-  return `${word} ${riskUnits} · Win ${winUnits}`;
+  return `${stakeWord()} ${riskUnits} · Win ${winUnits}`;
 }
 
 /** "1u" → "1 unit". "0.4u" and "10u" stay plural. */
@@ -231,7 +220,5 @@ function unitsSpoken(shown: string): string {
 
 /** VoiceOver for the Stake cell. Same `SIGNALS_STAKE_FORM` as the line. */
 export function signalsStakeSpeech(riskUnits: string, winUnits: string): string {
-  const word = stakeWord();
-  if (word == null) return unitsSpoken(riskUnits);
-  return `${word} ${unitsSpoken(riskUnits)}, win ${unitsSpoken(winUnits)}`;
+  return `${stakeWord()} ${unitsSpoken(riskUnits)}, win ${unitsSpoken(winUnits)}`;
 }

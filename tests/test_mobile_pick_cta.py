@@ -611,8 +611,11 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "bestNow: handoff.verb === 'Best'" in card
     stake = _read(LIB / "signalsCard.ts")
     assert "export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win'" in stake
-    assert "SIGNALS_STAKE_FORM === 'single'" in stake
+    assert "SIGNALS_STAKE_FORM === 'single'" not in stake
     assert "SIGNALS_STAKE_FORM === 'risk-win'" in stake
+    differs = re.search(r"const buttonDiffers = Boolean\((.*?)\);", card, re.S)
+    assert differs and "ctaAtMovedLine" in differs.group(1)
+    assert "buttonNowSpoken" not in card
     assert "signalsMuted" in card and "tintSoft:" in _read(SRC / "lib" / "theme.ts")
     assert "colors.tintSoft" in _read(SRC / "components" / "TrackButton.tsx")
     assert "colors.tintSoft" in _read(SRC / "components" / "AddToPlayButton.tsx")

@@ -246,7 +246,7 @@ export function PickCard({
   // review). A leg already in the slip can still be taken out here.
   const canSlip =
     Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused &&
-    (!heroPrice?.stale || Boolean(inSlip)) && !signalsMuted && cta.slip;
+    (!heroPrice?.stale || Boolean(inSlip)) && (!signalsMuted || Boolean(inSlip)) && cta.slip;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
   // A flagged row carries "Price check" in the chip slot instead (H4).
@@ -332,13 +332,16 @@ export function PickCard({
     handoff.price != null &&
     handoff.price === heroPrice.price,
   );
-  // Open (no price) is not a different bet. A moved line at the same book
-  // and the same price stays "Bet …"; a different book or price is "Best now".
+  // Open (no price) is not a different bet. A different book, a different
+  // price, or a line this button names that is not the lock is "Best now".
+  // A line-only move keeps the locked price, so the named line is the difference.
   const buttonDiffers = Boolean(
     handoff &&
     handoff.price != null &&
     heroPrice &&
-    (handoff.bookmaker !== heroPrice.book || handoff.price !== heroPrice.lockedPrice),
+    (handoff.bookmaker !== heroPrice.book ||
+      handoff.price !== heroPrice.lockedPrice ||
+      ctaAtMovedLine),
   );
   const signalsCta = handoff
     ? signalsCtaLabel(
@@ -356,15 +359,6 @@ export function PickCard({
         { bestNow: buttonDiffers },
       )
     : null;
-  const buttonNowSpoken =
-    buttonDiffers && handoff && handoff.price != null
-      ? signalsNowLine({
-          line: ctaAtMovedLine ? signalsMovedLineText : null,
-          price: formatAmerican(handoff.price),
-          priceDiffers: true,
-          book: bookName(handoff.bookmaker),
-        })
-      : null;
   const signalsRiskUnits = formatUnits(stake.risk);
   const signalsWinUnits = formatUnits(stake.win);
   const signalsStakeShown = stakeCaption ? signalsStakeLine(signalsRiskUnits, signalsWinUnits) : null;
@@ -390,7 +384,7 @@ export function PickCard({
       ? signalsHeroSpeech({
           decisionPrice: lockedAmerican,
           book: bookName(quoteBookKey),
-          now: signalsNowSpoken ?? buttonNowSpoken,
+          now: signalsNowSpoken,
         })
       : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null),
     signals
@@ -725,6 +719,7 @@ export function PickCard({
             >
               <Text
                 style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
+                numberOfLines={1}
               >
                 {signalsCtaLabel(
                   bookLabel(handoff.bookmaker),

@@ -422,7 +422,7 @@ check('PickCard: started line is textSecondary', /startedText: \{[\s\S]*?color: 
 check('PickCard: the tag reads cta.priceTag (Now / Live price)', (card.match(/cta\.priceTag/g) ?? []).length >= 2 && !/kind === 'now' \? 'Now'/.test(card));
 check('PickCard: "Price check" / "Old price" chip on medSoft, medInk icon', /\{priceCheckChipText\(check\)\}/.test(card) && /priceCheckChip: \{[\s\S]*?colors\.medSoft/.test(card) && /alert-circle-outline"[\s\S]{0,80}colors\.medInk/.test(card));
 check('PickCard: no slip offer and no stake on a stale price (a slip leg can still come out)',
-  /const canSlip =[^;]*\(!heroPrice\?\.stale \|\| Boolean\(inSlip\)\) && !signalsMuted && cta\.slip;/.test(card) &&
+  /const canSlip =[^;]*\(!heroPrice\?\.stale \|\| Boolean\(inSlip\)\) && \(!signalsMuted \|\| Boolean\(inSlip\)\) && cta\.slip;/.test(card) &&
   /const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview \|\| paused \|\| heroPrice\?\.stale/.test(card));
 check('PickCard: the label speaks the reason and the lock (heroPriceText)',
   /flagged \? priceCheckSpeech\(check, heroPrice\) : `Edge \$\{edgeText\}`/.test(card) &&

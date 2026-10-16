@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals reviewer lows: a flagged or stale leg already in the slip can be removed; a line-only move is `Best now · DK −8.5 −110`; the single stake form is gone; the Today handoff is one line |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals re-check: stake wording waits on Matt (`SIGNALS_STAKE_FORM`), Picked-at line dropped, Now line is `MGM line now −4.5 (−110)`, Today Best matches Signals |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals designer fixes: Best now when the button differs, Picked at under the price, flagged and stale cards drop Bet and Slip, footnote book, 2×2 metrics, tintSoft on selected Slip and Track |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, a moved line is a Now handoff without requiring kind now: book still at the scored line, else the current slip link with the line named, else Open DK |
