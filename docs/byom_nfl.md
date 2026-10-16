@@ -134,6 +134,11 @@ market row sums `units_uncapped` and `units_capped`. Those columns are
 the stored DraftKings-lock results. There is no stake and no
 recommended stake.
 Game markets include both sides. Prop markets include the over and the
-under. `data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
+under. An empty filter object is the whole season. It is not a model
+record, and the UI must not present that unfiltered result as one.
+The function sets `statement_timeout` to 3 seconds. The season cutoff
+is the same rule as `byom/season.py`: month >= 9 keeps the calendar
+year, otherwise the label is the previous year.
+`data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
 and was not applied. The function is in `RPC_ANON_CALLABLE`. It reads
 the facts tables, not `picks`.
