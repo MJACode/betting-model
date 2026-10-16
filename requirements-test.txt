@@ -10,3 +10,8 @@ pytest>=8.0.0
 # without either those tests skip, which is how they went unrun on this
 # machine until 2026-10-16. Type stripping needs node >= 22.6.
 nodejs-wheel-binaries>=22.6
+# Postgres, as a pip wheel (18.x). Two test files drive the real triggers and
+# views on a throwaway cluster that tests/_pg.py starts from these binaries
+# when no system initdb and no LATEST_LINE_TEST_DSN exist. Without any of the
+# three, those 17 tests skip.
+embedded-postgres>=18
