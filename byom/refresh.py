@@ -3,7 +3,8 @@
 The report is read-only. It does not read odds. `apply=False` returns
 the report and writes nothing. `apply=True` rebuilds only the due games:
 the current season's games from yesterday through seven days ahead, plus
-current-season games already played that have no `byom_game_facts` row.
+a past game with no fact row, a past fact row that is still missing a
+score or a close, and a past game that has facts but no prop facts.
 
 Rest days still use the whole season's schedule. Quotes are fetched only
 for the due games.
@@ -58,19 +59,54 @@ def _aware(value) -> datetime | None:
     return None
 
 
-def due_games(conn, today: date | datetime | None = None) -> list[dict]:
-    """Games the refresh would rebuild. No odds read."""
-    as_of, _now = _clock(today)
-    season = current_nfl_season(as_of)
-    start = as_of - timedelta(days=REFRESH_LOOKBACK_DAYS)
-    end = as_of + timedelta(days=REFRESH_LOOKAHEAD_DAYS)
-    have = {
-        row[0]
+def _window(as_of: date) -> tuple[date, date]:
+    return (
+        as_of - timedelta(days=REFRESH_LOOKBACK_DAYS),
+        as_of + timedelta(days=REFRESH_LOOKAHEAD_DAYS),
+    )
+
+
+def _fact_rows(conn, season: int) -> dict[str, tuple]:
+    """canonical_key -> (home_score, away_score, close_spread_at)."""
+    return {
+        row[0]: (row[1], row[2], row[3])
         for row in _fetch(conn, """
-            SELECT canonical_key FROM byom_game_facts
+            SELECT canonical_key, home_score, away_score, close_spread_at
+              FROM byom_game_facts
              WHERE sport = %s AND season = %s
         """, (SPORT, season))
     }
+
+
+def _prop_keys(conn, season: int) -> set[str]:
+    return {
+        row[0]
+        for row in _fetch(conn, """
+            SELECT DISTINCT canonical_key FROM byom_prop_facts
+             WHERE sport = %s AND season = %s
+        """, (SPORT, season))
+    }
+
+
+def _incomplete(row: tuple | None) -> bool:
+    if row is None:
+        return False
+    return row[0] is None or row[1] is None or row[2] is None
+
+
+def due_games(conn, today: date | datetime | None = None) -> list[dict]:
+    """Games the refresh would rebuild. No odds read.
+
+    A past fact row with a null score or a null close is incomplete: the
+    row was written before the game finished and has since left the
+    window. A past game that already has a finished fact row and no prop
+    row is due so the prop backfill can run.
+    """
+    as_of, _now = _clock(today)
+    season = current_nfl_season(as_of)
+    start, end = _window(as_of)
+    facts = _fact_rows(conn, season)
+    props = _prop_keys(conn, season)
     due = []
     for game in _games(conn, season):
         parsed = parse_game_id(game["game_id"])
@@ -79,40 +115,49 @@ def due_games(conn, today: date | datetime | None = None) -> list[dict]:
             continue
         key = parsed[0]
         in_window = start <= day <= end
-        missing_past = day < as_of and key not in have
-        if not in_window and not missing_past:
+        past = day < as_of
+        stored = facts.get(key)
+        if in_window:
+            reason = "window"
+        elif past and stored is None:
+            reason = "missing"
+        elif past and _incomplete(stored):
+            reason = "incomplete"
+        elif past and key not in props:
+            reason = "props"
+        else:
             continue
         due.append({
             "game_id": game["game_id"],
             "canonical_key": key,
             "game_date": day.isoformat(),
-            "reason": "window" if in_window else "missing",
+            "reason": reason,
         })
     return due
 
 
-def freshness(conn, today: date | datetime | None = None) -> dict:
-    """Read-only counts. Does not read odds and does not write."""
+def freshness(conn, today: date | datetime | None = None,
+              due: list[dict] | None = None) -> dict:
+    """Read-only counts. Does not read odds and does not write.
+
+    Pass `due` when the caller already ran due_games, so the report and
+    the rebuild share one read.
+    """
     as_of, now = _clock(today)
     season = current_nfl_season(as_of)
-    start = as_of - timedelta(days=REFRESH_LOOKBACK_DAYS)
-    end = as_of + timedelta(days=REFRESH_LOOKAHEAD_DAYS)
+    start, end = _window(as_of)
     stale_before = now - timedelta(hours=FRESHNESS_MAX_AGE_HOURS)
+    facts = _fact_rows(conn, season)
     built = {}
     for key, built_at in _fetch(conn, """
         SELECT canonical_key, built_at FROM byom_game_facts
          WHERE sport = %s AND season = %s
     """, (SPORT, season)):
         built[key] = _aware(built_at)
-    prop_keys = {
-        row[0]
-        for row in _fetch(conn, """
-            SELECT DISTINCT canonical_key FROM byom_prop_facts
-             WHERE sport = %s AND season = %s
-        """, (SPORT, season))
-    }
+    prop_keys = _prop_keys(conn, season)
     in_window = 0
     missing_game_facts = 0
+    incomplete_game_facts = 0
     stale_game_facts = 0
     window_missing_prop_facts = 0
     for game in _games(conn, season):
@@ -129,14 +174,19 @@ def freshness(conn, today: date | datetime | None = None) -> dict:
             stamped = built.get(key)
             if stamped is not None and stamped < stale_before:
                 stale_game_facts += 1
-        if day < as_of and key not in built:
+        if key not in built and day <= end:
             missing_game_facts += 1
+        if day < as_of and _incomplete(facts.get(key)):
+            incomplete_game_facts += 1
+    if due is None:
+        due = due_games(conn, today=today)
     return {
         "season": season,
         "as_of": as_of.isoformat(),
-        "due": len(due_games(conn, today=today)),
+        "due": len(due),
         "in_window": in_window,
         "missing_game_facts": missing_game_facts,
+        "incomplete_game_facts": incomplete_game_facts,
         "stale_game_facts": stale_game_facts,
         "window_missing_prop_facts": window_missing_prop_facts,
         "writes": False,
@@ -145,13 +195,14 @@ def freshness(conn, today: date | datetime | None = None) -> dict:
 
 def refresh(conn, apply: bool = False, today: date | datetime | None = None) -> dict:
     """Freshness always. Writes only when apply is true, and only the due games."""
-    report = freshness(conn, today=today)
+    due = due_games(conn, today=today)
+    report = freshness(conn, today=today, due=due)
     report["apply"] = bool(apply)
     report["written_game_facts"] = 0
     report["written_prop_facts"] = 0
     if not apply:
         return report
-    ids = [row["game_id"] for row in due_games(conn, today=today)]
+    ids = [row["game_id"] for row in due]
     if not ids:
         return report
     from byom.load import build_season

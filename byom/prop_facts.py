@@ -23,8 +23,8 @@ Thin data, recorded on the row as log_status:
   ingest has not arrived. actual and both results stay NULL. A missing
   file is not a loss.
 - unplayed: the game has no final score. Results stay NULL.
-- ambiguous: two log rows normalise to the same name. No guess. Results
-  stay NULL.
+- ambiguous: two log rows normalise to the same name and the quote's
+  team does not pick exactly one of them. No guess. Results stay NULL.
 
 Anytime TD is rushing_tds + receiving_tds. Passing TDs are a different
 market. A return or defensive score is not in nfl_player_game_log, so a
@@ -177,8 +177,28 @@ def _group_dk(quotes: list[dict]) -> dict[tuple, list[dict]]:
     return grouped
 
 
-def _rows_for_player(log_rows: list[dict], key: str) -> list[dict]:
-    return [row for row in log_rows if player_key(row.get("player_name")) == key]
+def line_key(line) -> str:
+    """One text for a line. 220.50 and 220.5 are the same prop."""
+    text = format(Decimal(str(line)), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _rows_for_player(log_rows: list[dict], key: str, team: str | None = None) -> list[dict]:
+    """Name matches. When more than one remains, the quote's team breaks
+    the tie if it matches exactly one log row."""
+    matches = [row for row in log_rows if player_key(row.get("player_name")) == key]
+    if len(matches) <= 1 or not team:
+        return matches
+    wanted = str(team).strip().upper()
+    sided = [
+        row for row in matches
+        if str(row.get("team") or "").strip().upper() == wanted
+    ]
+    if len(sided) == 1:
+        return sided
+    return matches
 
 
 def facts_for_game(game: dict, quotes: list[dict],
@@ -211,7 +231,7 @@ def facts_for_game(game: dict, quotes: list[dict],
                 continue
             seen_lines.append(line)
             lines.append(line)
-        matches = _rows_for_player(log_rows, key)
+        matches = _rows_for_player(log_rows, key, lock.get("team"))
         status = log_status(played, game_rows, len(matches) if played else 0)
         for line in lines:
             out.append(_one(
@@ -235,6 +255,8 @@ def _one(canonical, season, week, game, pool,
     slot = _dk_slot(pool, lock, line)
     over_price, over_book = dk_lock_grade(slot, "home")
     under_price, under_book = dk_lock_grade(slot, "away")
+    # The close is the latest pre-game quote on this line. A later quote
+    # on a different number is that number's row, not this row's close.
     close_pool = [q for q in pool if same_line(q.get("point"), line)]
     close = closing_quote(close_pool)
     actual = None
@@ -250,9 +272,8 @@ def _one(canonical, season, week, game, pool,
         over_result, under_result = graded
     over_u, over_c = units_1u_to_win(over_result, over_price)
     under_u, under_c = units_1u_to_win(under_result, under_price)
-    line_text = format(line, "f")
     return {
-        "prop_key": f"{canonical}|{market}|{key}|{line_text}",
+        "prop_key": f"{canonical}|{market}|{key}|{line_key(line)}",
         "canonical_key": canonical,
         "sport": SPORT,
         "season": season,

@@ -37,10 +37,10 @@ from byom.game_facts import (
 # One game at a time. A season of nfl_odds_history is millions of rows
 # (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
 # measured 2026-10-16). The index is (game_id, market). DraftKings inside
-# the lock window comes first; other books are read only inside the shop
-# slices shop_windows() names, as stored reference. The grade is
-# DraftKings' own price on the lock snapshot. apply=false uses the same
-# reads and writes nothing.
+# the lock window is the grade. Other books are read only inside the shop
+# slices shop_windows() names, and those rows are stored reference. The
+# grade is DraftKings' own price on the lock snapshot. apply=false uses
+# the same reads and writes nothing.
 _ODDS_SNAPSHOT = """
 CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
      THEN o.snapshot_at::timestamptz
@@ -183,7 +183,10 @@ def _dk_quotes(conn, ids: tuple[str, str]) -> list[dict]:
 
 
 def _shop_quotes(conn, ids: tuple[str, str], windows: list[tuple]) -> list[dict]:
-    """Non-DraftKings rows inside the lock slices. No slices, no read."""
+    """Non-DraftKings rows inside the lock slices. No slices, no read.
+
+    Stored as reference. The grade does not read these rows.
+    """
     if not windows:
         return []
     bare, prefixed = ids

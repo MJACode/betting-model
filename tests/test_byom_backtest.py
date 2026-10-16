@@ -43,6 +43,11 @@ def test_the_function_is_invoker_and_has_no_price_or_line_filter():
                    "price_band", "kelly", "stake", "public.picks"):
         assert banned not in lowered, banned
     assert code.index("RETURN;") < code.index("CREATE OR REPLACE FUNCTION")
+    assert "SET statement_timeout = '3s'" in code
+    assert "v_month >= 9" in code
+    assert "v_season := v_year - 1" in code
+    assert "America/New_York" in code
+    assert "empty filter" in SQL.lower() or "An empty filter" in SQL
 
 
 def test_scratch_backtest_defaults_to_the_current_season_and_filters():
@@ -123,6 +128,106 @@ def test_scratch_backtest_defaults_to_the_current_season_and_filters():
               FROM byom_backtest(2025, '{}'::jsonb)
         """)
         assert Decimal(str(cur.fetchone()[0])) == Decimal("4")
+        cur.execute("RESET ROLE")
+        cur.execute("""
+            UPDATE byom_game_facts SET
+              ml_home_result = 'win',
+              ml_home_units_uncapped = 1, ml_home_units_capped = 1,
+              ml_away_result = 'loss',
+              ml_away_units_uncapped = -1.5, ml_away_units_capped = -1.5,
+              ou_over_result = 'loss',
+              ou_over_units_uncapped = -1.1, ou_over_units_capped = -1.1,
+              ou_under_result = 'win',
+              ou_under_units_uncapped = 1, ou_under_units_capped = 1
+             WHERE canonical_key = '2026_01_BAL_KC'
+        """)
+        cur.execute("""
+            INSERT INTO byom_game_facts (
+              canonical_key, sport, season, week, away_team, home_team,
+              lock_window_hours, near_window_hours, line_source,
+              ats_home_result, ats_home_units_uncapped, ats_home_units_capped,
+              ats_away_result, ats_away_units_uncapped, ats_away_units_capped,
+              home_role, away_role, home_rest_days, away_rest_days,
+              is_primetime)
+            VALUES
+              ('2026_02_DET_GB', 'NFL', 2026, 2, 'DET', 'GB', 120, 24, 'test',
+               'loss', -1.1, -1.1, 'win', 1, 1,
+               'favorite', 'underdog', 3, 10, false)
+        """)
+        cur.execute("SET ROLE anon")
+        cur.execute("""
+            SELECT bets, units_uncapped
+              FROM byom_backtest(2026, '{"markets":["totals"]}'::jsonb)
+        """)
+        totals = cur.fetchone()
+        assert totals[0] == 2
+        assert Decimal(str(totals[1])) == Decimal("-0.1")
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026, '{"markets":["h2h"]}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 2
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026, '{"markets":["spreads"],"weeks":[1]}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 2
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026, '{"markets":["spreads"],"weeks":[2]}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 2
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026,
+                '{"markets":["spreads"],"primetime":true}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 2
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026,
+                '{"markets":["spreads"],"primetime":false}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 2
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026,
+                '{"role":"underdog","min_rest_days":7,"markets":["spreads"]}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 2
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026,
+                '{"side":"away","markets":["player_pass_yds"]}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 2
+        cur.execute("""
+            SELECT coalesce(sum(bets), 0)
+              FROM byom_backtest(2026,
+                '{"side":"home","markets":["player_pass_yds"]}'::jsonb)
+        """)
+        assert cur.fetchone()[0] == 0
+        cur.execute("""
+            SELECT prosrc, proconfig::text
+              FROM pg_proc WHERE proname = 'byom_backtest'
+        """)
+        body, config = cur.fetchone()
+        assert "byom_backtest_v1" in body
+        assert "statement_timeout=3s" in config
+        for year, month, day in (
+                (2026, 9, 1), (2026, 10, 16), (2026, 8, 31), (2027, 2, 1)):
+            stamp = f"{year:04d}-{month:02d}-{day:02d}T16:00:00Z"
+            cur.execute("""
+                SELECT CASE
+                         WHEN EXTRACT(MONTH FROM (%s::timestamptz
+                              AT TIME ZONE 'America/New_York'))::int >= 9
+                         THEN EXTRACT(YEAR FROM (%s::timestamptz
+                              AT TIME ZONE 'America/New_York'))::int
+                         ELSE EXTRACT(YEAR FROM (%s::timestamptz
+                              AT TIME ZONE 'America/New_York'))::int - 1
+                       END
+            """, (stamp, stamp, stamp))
+            assert cur.fetchone()[0] == current_nfl_season(date(year, month, day))
         cur.execute("RESET ROLE")
     finally:
         if raw is not None:
