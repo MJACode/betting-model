@@ -232,9 +232,9 @@ def test_the_scheduler_sweeps_before_it_can_start_a_pass():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "scheduler.py").read_text(encoding="utf-8")
     main = src.split("def main(")[1]
-    assert "abort_orphaned_refresh_runs()" in main
-    assert main.index("abort_orphaned_refresh_runs()") < main.index("sched.start()")
-    assert main.index("abort_orphaned_refresh_runs()") < main.index("catch_up_refresh_pass")
+    call = main.index("\n    abort_orphaned_refresh_runs()\n")
+    assert call < main.index("\n        sched.start()\n")
+    assert call < main.index("\n        catch_up_refresh_pass,\n")
     body = src.split("def abort_orphaned_refresh_runs(")[1].split("\ndef ")[0]
     assert body.index('owns("hourly_refresh")') < body.index("get_connection")
 
