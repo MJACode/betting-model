@@ -34,6 +34,14 @@ from data.db import get_connection
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
+# A migration that cannot take its lock in this window fails this pass and
+# retries on the next one. Waiting out statement_timeout (120s) does not just
+# fail the statement: Postgres queues every later lock request on that table
+# behind the waiter, so live pick writes stall for the whole wait. 5s is long
+# enough for a lock a reader is about to drop, and short enough that one
+# blocked file cannot pin picks for the length of a pass.
+MIGRATION_LOCK_TIMEOUT = "5s"
+
 # Idempotent view migrations to keep applied. Order matters only if one
 # depends on another.
 ACTIVE_MIGRATIONS: list[str] = [
@@ -332,6 +340,13 @@ def apply_view_migrations(conn=None) -> int:
                 # fragments at every semicolon in its body. Each migration here
                 # must therefore be a SINGLE statement (a DO block), which is
                 # also what makes the idempotency check atomic.
+                #
+                # SET LOCAL dies with this transaction, so a passed-in
+                # connection (the CLV backfill job) does not keep the short
+                # lock timeout after the loop. It is set before the file so a
+                # lock wait fails here instead of at statement_timeout.
+                conn.execute(
+                    f"SET LOCAL lock_timeout = '{MIGRATION_LOCK_TIMEOUT}'")
                 conn.execute(path.read_text(encoding="utf-8"))
                 conn.commit()
                 applied += 1
