@@ -209,3 +209,100 @@ def test_a_rejected_alternate_call_keeps_the_featured_lines(monkeypatch):
     got = {m["key"] for _book, markets in books for m in markets}
     assert got == set(ing.PROP_MARKETS_NHL)
     assert cost == 8
+
+
+def _book(markets: list[str]) -> list[tuple[str, list[dict]]]:
+    return [("draftkings", [{"key": m, "outcomes": [
+        {"name": "Over", "description": "Cale Makar", "price": -165, "point": 2.5},
+        {"name": "Under", "description": "Cale Makar", "price": 120, "point": 2.5},
+    ]} for m in markets])]
+
+
+def test_a_200_on_both_calls_merges_the_alternate_lines(monkeypatch):
+    asked: list[str] = []
+
+    def fake_fetch(event_id, markets):
+        asked.append(",".join(markets))
+        return _book(markets), 6, 200
+
+    monkeypatch.setattr(ing, "_fetch_event_markets", fake_fetch)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+    books, cost = ing._event_props("ev")
+    assert asked == [",".join(ing.PROP_MARKETS_NHL), ",".join(ing.NHL_LIVE_ALT_MARKETS)]
+    got = {m["key"] for _book, markets in books for m in markets}
+    assert got == set(ing.PROP_MARKETS_NHL) | set(ing.NHL_LIVE_ALT_MARKETS)
+    assert cost == 12
+
+
+def test_an_exception_on_the_alternate_call_keeps_the_featured_lines(monkeypatch):
+    def fake_fetch(event_id, markets):
+        if any(m.endswith("_alternate") for m in markets):
+            raise ValueError("bad json")
+        return _book(markets), 4, 200
+
+    monkeypatch.setattr(ing, "_fetch_event_markets", fake_fetch)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+    books, cost = ing._event_props("ev")
+    got = {m["key"] for _book, markets in books for m in markets}
+    assert got == set(ing.PROP_MARKETS_NHL)
+    assert cost == 4
+
+
+def test_open_close_and_final_each_ask_for_the_alternate_lines(monkeypatch):
+    """The extra call is part of the snapshot, whichever of the three is due."""
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime(2026, 10, 17, 1, 10, tzinfo=timezone.utc)
+    asked: list[tuple[str, str]] = []
+    state = {"stored": [], "final": False}
+
+    class Conn:
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_fetch(event_id, markets):
+        kind = "alt" if any(m.endswith("_alternate") for m in markets) else "featured"
+        asked.append((state["phase"], kind))
+        return _book(list(markets)), 5, 200
+
+    def fake_stored(_conn, game_ids):
+        gid = game_ids[0]
+        finals = {gid} if state["final"] else set()
+        return {gid: list(state["stored"])}, finals
+
+    def fake_insert(_conn, rows):
+        return len(rows)
+
+    monkeypatch.setattr(ing, "ODDS_API_KEY", "test")
+    monkeypatch.setattr(ing, "_fetch_event_markets", fake_fetch)
+    monkeypatch.setattr(ing, "_events", lambda _today: ([{
+        "id": "ev", "home": "Colorado Avalanche", "away": "Pittsburgh Penguins", "start": start,
+    }], 0))
+    monkeypatch.setattr(ing, "_existing_game_ids", lambda _conn, ids: set(ids))
+    monkeypatch.setattr(ing, "_stored_snapshots", fake_stored)
+    monkeypatch.setattr(ing, "_insert_prop_odds", fake_insert)
+    monkeypatch.setattr(ing, "get_connection", lambda: Conn())
+    monkeypatch.setattr(ing, "persist_quota", lambda _conn: None)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+
+    state["phase"] = "open"
+    opened = ing.run_nhl_prop_odds_ingestor(now=datetime(2026, 10, 16, 14, 0, tzinfo=timezone.utc))
+    state["phase"] = "close"
+    state["stored"] = [datetime(2026, 10, 16, 14, 0, tzinfo=timezone.utc)]
+    closed = ing.run_nhl_prop_odds_ingestor(now=start - timedelta(minutes=65))
+    state["phase"] = "final"
+    state["stored"] = [
+        datetime(2026, 10, 16, 14, 0, tzinfo=timezone.utc),
+        start - timedelta(minutes=65),
+    ]
+    finaled = ing.run_nhl_prop_odds_ingestor(now=start - timedelta(minutes=20))
+
+    assert opened["open"] == 1 and closed["close"] == 1 and finaled["final"] == 1
+    assert asked == [
+        ("open", "featured"), ("open", "alt"),
+        ("close", "featured"), ("close", "alt"),
+        ("final", "featured"), ("final", "alt"),
+    ]

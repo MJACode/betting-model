@@ -205,14 +205,21 @@ def _event_props(event_id: str) -> tuple[list[tuple[str, list[dict]]], int]:
     The featured call is the one the cards score. The alternate call is stored
     beside it so a number the featured line has left still has a row. A
     non-200 on the alternate call — a 422 for a key this sport does not
-    serve — does not throw away the featured rows.
+    serve — does not throw away the featured rows. Neither does a timeout
+    or a body that is not JSON: those credits are already spent, and the
+    featured rows are what the cards lock.
     """
     books, cost, status = _fetch_event_markets(event_id, list(PROP_MARKETS_NHL))
     if status != 200:
         logger.warning(f"NHL prop odds: event {event_id} HTTP {status}")
         return [], cost
     time.sleep(REQUEST_SLEEP)
-    alt_books, alt_cost, alt_status = _fetch_event_markets(event_id, list(NHL_LIVE_ALT_MARKETS))
+    try:
+        alt_books, alt_cost, alt_status = _fetch_event_markets(event_id, list(NHL_LIVE_ALT_MARKETS))
+    except Exception as exc:
+        logger.warning(f"NHL prop odds: event {event_id} alternates failed ({exc}); "
+                       "featured lines kept")
+        return books, cost
     cost += alt_cost
     if alt_status != 200:
         logger.warning(f"NHL prop odds: event {event_id} alternates HTTP {alt_status}; "
