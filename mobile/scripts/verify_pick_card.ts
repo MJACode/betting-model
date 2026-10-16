@@ -36,8 +36,8 @@ import {
   signalsHeroSpeech,
   signalsNowLine,
   signalsPriceText,
-  signalsStakeUnits,
-  signalsToWinSpeech,
+  signalsStakeLine,
+  signalsStakeSpeech,
 } from '../src/lib/signalsCard';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
 
@@ -681,27 +681,34 @@ check(
   check('CTA names the line when that bet is at a moved line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`);
   check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
   check(
-    'stake cell is the to-win units only',
-    signalsStakeUnits({ priced: true, win: 1, conviction: 1 }) === 1 &&
-      signalsStakeUnits({ priced: true, win: 0.4, conviction: 1 }) === 0.4 &&
-      signalsStakeUnits({ priced: false, win: 1, conviction: 1 }) === 1,
+    'stake cell names units to bet and units to win',
+    signalsStakeLine('1.5u', '0.4u') === 'Bet 1.5u · Win 0.4u' &&
+      signalsStakeLine('1.1u', '1u') === 'Bet 1.1u · Win 1u' &&
+      !signalsStakeLine('1.1u', '1u').includes('→'),
   );
   check(
-    'To win speech is singular at exactly 1u',
-    signalsToWinSpeech('1u') === '1 unit' &&
-      signalsToWinSpeech('0.4u') === '0.4 units' &&
-      signalsToWinSpeech('1.5u') === '1.5 units' &&
-      signalsToWinSpeech('10u') === '10 units',
+    'stake speech says both amounts, singular only at 1u',
+    signalsStakeSpeech('1.5u', '0.4u') === 'Bet 1.5 units, win 0.4 units' &&
+      signalsStakeSpeech('1u', '1u') === 'Bet 1 unit, win 1 unit' &&
+      signalsStakeSpeech('10u', '1.5u') === 'Bet 10 units, win 1.5 units',
   );
   const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
   const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
   check('Signals board opts into the signals layout', /layout=\{view === 'signals' \? 'signals' : 'board'\}/.test(home));
   check('hero is 22pt', /betLeft: \{[\s\S]*?font\.size\.title2/.test(card) && /betRight: \{[\s\S]*?font\.size\.title2/.test(card));
-  check('four cells use the plain words', /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && />To win</.test(card));
+  check('four cells use the plain words', /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && />Stake</.test(card));
   const navy = /handoffNavy: \{[\s\S]*?\}/.exec(card)?.[0] ?? '';
   check('CTA fill is navy tint, not DK green or system blue', /backgroundColor: colors\.tint/.test(navy) && !/DK_GREEN|colors\.info/.test(navy));
   check('CTA label is textInverse', /handoffNavyText: \{[\s\S]*?color: colors\.textInverse/.test(card));
-  check('signals stake reads signalsStakeUnits', /signalsStakeUnits\(stake\)/.test(card));
+  check(
+    'signals stake is stakeFor risk and win, and the value is not line-capped',
+    /signalsStakeLine\(signalsRiskUnits, signalsWinUnits\)/.test(card) &&
+      /formatUnits\(stake\.risk\)/.test(card) &&
+      /formatUnits\(stake\.win\)/.test(card) &&
+      /Stake unavailable/.test(card) &&
+      !/numberOfLines=\{1\}/.test(card.slice(card.indexOf('metricStake'))) &&
+      /metricStake: \{[\s\S]*?flexBasis: '100%'[\s\S]*?maxWidth: '100%'/.test(card),
+  );
   check(
     'Signals movement chip uses a true minus; the board chip does not',
     card.includes('trueMinus(movementSummary.label)') &&

@@ -45,9 +45,9 @@ import {
   signalsHeroSpeech,
   signalsNowLine,
   signalsPriceText,
-  signalsStakeUnits,
+  signalsStakeLine,
+  signalsStakeSpeech,
   signalsTeamsSpeech,
-  signalsToWinSpeech,
   trueMinus,
 } from '@/lib/signalsCard';
 import {
@@ -332,7 +332,9 @@ export function PickCard({
         ctaAtMovedLine ? signalsMovedLineText : null,
       )
     : null;
-  const signalsStakeShown = stakeCaption ? formatUnits(signalsStakeUnits(stake)) : null;
+  const signalsRiskUnits = formatUnits(stake.risk);
+  const signalsWinUnits = formatUnits(stake.win);
+  const signalsStakeShown = stakeCaption ? signalsStakeLine(signalsRiskUnits, signalsWinUnits) : null;
   const signalsReturn =
     flagged || ev == null ? '—' : formatPctSigned(ev);
   const cardLabel = [
@@ -359,7 +361,7 @@ export function PickCard({
         })
       : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null),
     signals
-      ? (stakeCaption ? `To win ${signalsToWinSpeech(signalsStakeShown ?? '')}` : 'To win unavailable')
+      ? (signalsStakeShown ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}` : 'Stake unavailable')
       : (stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null),
     timing ? timing.label : null,
     startedSpoken,
@@ -812,11 +814,11 @@ export function PickCard({
           </Text>
           <Text style={styles.metricLabel}>Expected return</Text>
         </View>
-        <View style={styles.metric}>
-          <Text style={[styles.metricValue, signalsStakeShown == null ? styles.metricMuted : null]}>
+        <View style={[styles.metric, styles.metricStake]}>
+          <Text style={[styles.metricValue, styles.stakeValue, signalsStakeShown == null ? styles.metricMuted : null]}>
             {signalsStakeShown ?? '—'}
           </Text>
-          <Text style={styles.metricLabel}>To win</Text>
+          <Text style={styles.metricLabel}>Stake</Text>
         </View>
       </View>
 
@@ -1407,6 +1409,18 @@ const styles = StyleSheet.create({
   metric: {
     flexGrow: 1,
     flexShrink: 0,
+  },
+  // Own row. "Bet 1.5u · Win 0.4u" does not fit a quarter of the card, and
+  // at 2x it has to wrap inside the card instead of clipping.
+  metricStake: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '100%',
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  stakeValue: {
+    flexShrink: 1,
   },
   metricValue: {
     fontSize: font.size.callout,

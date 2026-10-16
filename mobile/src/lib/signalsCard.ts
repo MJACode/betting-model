@@ -165,24 +165,22 @@ export function signalsTeamsSpeech(sport: string, away: string, home: string): s
 }
 
 /**
- * The "To win" cell. One figure, the units to win (`stake.win` when a price
- * exists, otherwise the conviction). Never "1.1u → 1u", never dollars.
- * The cell is not labelled "Stake": a capped heavy favorite wins under 1u,
- * and that label made the biggest risk look like the smallest number.
+ * The Stake cell. Both figures are `stakeFor`'s: units to bet (`risk`) and
+ * units to win (`win`), already formatted ("1.5u", "0.4u"). A capped heavy
+ * favorite reads "Bet 1.5u · Win 0.4u", so the risk is not hidden behind the
+ * smaller win. Never the "1.1u → 1u" arrow, never dollars.
  */
-export function signalsStakeUnits(stake: {
-  priced: boolean;
-  win: number;
-  conviction: number;
-}): number {
-  return stake.priced ? stake.win : stake.conviction;
+export function signalsStakeLine(riskUnits: string, winUnits: string): string {
+  return `Bet ${riskUnits} · Win ${winUnits}`;
 }
 
-/**
- * VoiceOver for the "To win" cell. "1u" is "1 unit"; every other figure stays
- * plural ("0.4 units", "1.5 units"). The visible cell still prints "1u".
- */
-export function signalsToWinSpeech(shown: string): string {
+/** "1u" → "1 unit". "0.4u" and "10u" stay plural. */
+function unitsSpoken(shown: string): string {
   const spoken = shown.replace(/(\d)u\b/g, '$1 units');
   return spoken === '1 units' ? '1 unit' : spoken;
+}
+
+/** VoiceOver for the Stake cell. Both amounts, in the same order as the line. */
+export function signalsStakeSpeech(riskUnits: string, winUnits: string): string {
+  return `Bet ${unitsSpoken(riskUnits)}, win ${unitsSpoken(winUnits)}`;
 }

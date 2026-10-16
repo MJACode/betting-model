@@ -593,12 +593,14 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert navy and "backgroundColor: colors.tint" in navy.group(1)
     assert "DK_GREEN" not in navy.group(1) and "colors.info" not in navy.group(1)
     assert re.search(r"handoffNavyText: \{[^}]*color: colors\.textInverse", card)
-    assert "signalsStakeUnits(stake)" in card
+    assert "signalsStakeLine(signalsRiskUnits, signalsWinUnits)" in card
+    assert "formatUnits(stake.risk)" in card and "formatUnits(stake.win)" in card
     assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
     assert "signalsNowLine(" in card and "now: signalsNowSpoken" in card
     assert "heroPrice.stale || heroPrice.untracked" in card
-    assert "To win unavailable" in card and ">To win<" in card
-    assert "Stake unavailable" not in card
+    assert "Stake unavailable" in card and ">Stake<" in card
+    assert "To win unavailable" not in card and ">To win<" not in card
+    assert "flexBasis: '100%'" in card and "maxWidth: '100%'" in card
     assert "marginLeft: 'auto'" in card
     # The arrow form stays on the Today caption. The Signals cell does not use it.
     assert "formatUnits(stake.risk)} → ${formatUnits(stake.win)}" in card
@@ -625,7 +627,7 @@ def test_signals_card_copy(tmp_path):
         src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = r"""
-import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsHeroSpeech, signalsNowLine, signalsPriceText, signalsStakeUnits, signalsToWinSpeech } from './signalsCard.ts';
+import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsHeroSpeech, signalsNowLine, signalsPriceText, signalsStakeLine, signalsStakeSpeech } from './signalsCard.ts';
 const MINUS = '\u2212';
 const ok = (cond, what) => { if (!cond) throw new Error(what); };
 const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
@@ -656,11 +658,12 @@ ok(priced === `Now ${MINUS}105 DK`, 'moved price');
 ok(signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) === `Now ${MINUS}8.5 ${MINUS}105 DK`, 'line and price');
 ok(signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null, 'unchanged is quiet');
 ok(signalsNowLine({ line: '-8.5', price: null, priceDiffers: true, book: 'DK' }) === null, 'no price, no Now line');
-ok(signalsStakeUnits({ priced: true, win: 1, conviction: 1 }) === 1, '1u to win');
-ok(signalsStakeUnits({ priced: true, win: 0.4, conviction: 1 }) === 0.4, 'capped win, not the arrow');
-ok(signalsToWinSpeech('1u') === '1 unit', 'one unit');
-ok(signalsToWinSpeech('0.4u') === '0.4 units', 'fraction stays plural');
-ok(signalsToWinSpeech('10u') === '10 units', 'ten is not one');
+ok(signalsStakeLine('1.5u', '0.4u') === 'Bet 1.5u · Win 0.4u', 'capped favorite shows risk and win');
+ok(signalsStakeLine('1.1u', '1u') === 'Bet 1.1u · Win 1u', 'both amounts, no arrow');
+ok(!signalsStakeLine('1.1u', '1u').includes('\u2192'), 'arrow form is not the cell');
+ok(signalsStakeSpeech('1.5u', '0.4u') === 'Bet 1.5 units, win 0.4 units', 'speech says both');
+ok(signalsStakeSpeech('1u', '1u') === 'Bet 1 unit, win 1 unit', 'one unit is singular');
+ok(signalsStakeSpeech('10u', '1.5u') === 'Bet 10 units, win 1.5 units', 'ten stays plural');
 ok(signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET', 'today is the clock');
 ok(signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET', 'later day joins the clock');
 const locked = signalsPriceText('-110', 'BetMGM');
