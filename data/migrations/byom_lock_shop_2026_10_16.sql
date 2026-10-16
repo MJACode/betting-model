@@ -14,8 +14,9 @@
 -- lock. The windows are UNCONFIRMED placeholders and are not check
 -- constraints: the builder writes the window it used onto the row.
 --
--- The first capture is kept. A later rebuild grades from these rows after
--- the live quotes have been pruned. Nothing here is a pick or a stake.
+-- The first capture is kept. These rows are reference. The grade is
+-- DraftKings' own price on the lock snapshot, not a price from this table.
+-- Nothing here is a pick or a stake.
 --
 -- One DO block. data/view_migrations runs each file as one statement.
 -- No CONCURRENTLY.

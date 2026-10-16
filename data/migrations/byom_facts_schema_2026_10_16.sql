@@ -17,6 +17,8 @@
 -- season; week is parsed from the key.
 --
 -- Results are 1u-to-win units. A push and a tie are stored, not dropped.
+-- grade_*_price is DraftKings' own price on the lock snapshot.
+-- grade_*_book is draftkings. The unit columns are results, not a stake.
 -- No spread-size, price-band, or line-range constraint.
 --
 -- One DO block. data/view_migrations runs each file as one statement.

@@ -1,8 +1,10 @@
 """Pure grading for one NFL game's Build Your Own Model fact.
 
-No database. No stake. A win pays +1 unit uncapped. The capped pair cuts
-risk at 3 and recomputes the win. A missing price leaves both NULL.
-Pushes and ties are results, not dropped rows.
+No database. The grade is DraftKings' own price on the lock snapshot.
+A win pays +1 unit (1u to win). A loss is the risk that win required,
+stored as a result. The capped column cuts risk above 3. A missing
+price leaves both results NULL. Pushes and ties are results, not
+dropped rows. There is no recommended stake.
 """
 from __future__ import annotations
 
@@ -192,18 +194,17 @@ def grade_total(home_score, away_score, line) -> tuple[str, str] | None:
     return "push", "push"
 
 
-# Same ceiling as MAX_RISK_UNITS / stake_for. A loss at -400 is -4
-# uncapped and -3 capped, which is what the Record lays.
+# Result ceiling of 3 units of risk. A loss at -400 is -4 uncapped
+# and -3 capped. Both numbers are results.
 _MAX_RISK_UNITS = Decimal("3")
 
 
 def units_1u_to_win(result: str | None, american):
-    """(uncapped, capped) for a bet sized to win 1.
+    """(uncapped result, capped result) for 1u-to-win.
 
-    Uncapped has no risk ceiling. Capped matches stake_for: risk above 3
-    units is cut to 3, and a win is recomputed from that risk. Push and
-    tie are (0, 0). A missing or zero price is (None, None), not the
-    unpriced fallback stake_for publishes.
+    Both numbers are results. Uncapped has no risk ceiling. Capped cuts
+    risk above 3 and recomputes a win from that risk. Push and tie are
+    (0, 0). A missing or zero price is (None, None).
     """
     if result is None:
         return None, None
@@ -267,35 +268,21 @@ def quotes_at_lock(quotes, lock_at, point=None,
     return [item[1] for item in latest.values()]
 
 
-def best_price(quotes, market: str, side: str, dk_point, books: list[str]):
-    """(price, book) or (None, None).
+def dk_lock_grade(slot, side: str):
+    """DraftKings' own price on the lock snapshot.
 
-    Highest American price on `side` at DraftKings' line. `books` order
-    breaks a tie. h2h has no line. Totals use price_home as over and
-    price_away as under, which is how nfl_odds_history stores them.
+    (price, 'draftkings') or (None, None). Another book's price is not
+    the grade. Totals use price_home as over and price_away as under.
     """
-    order = {book: i for i, book in enumerate(books)}
-    best = None
-    for quote in quotes:
-        if quote.get("market") != market:
-            continue
-        book = (quote.get("bookmaker") or "").lower()
-        if book not in order:
-            continue
-        if market != "h2h" and not same_line(quote.get("point"), dk_point):
-            continue
-        raw = quote.get("price_home") if side == "home" else quote.get("price_away")
-        if raw is None:
-            continue
-        price = Decimal(str(raw))
-        if price == 0:
-            continue
-        rank = order[book]
-        if best is None or price > best[0] or (price == best[0] and rank < best[1]):
-            best = (price, rank, book)
-    if best is None:
+    if slot is None:
         return None, None
-    return best[0], best[2]
+    raw = slot.get("price_home") if side == "home" else slot.get("price_away")
+    if raw is None:
+        return None, None
+    price = Decimal(str(raw))
+    if price == 0:
+        return None, None
+    return price, "draftkings"
 
 
 def _prefer_history(quotes, market: str) -> tuple[list[dict], str | None]:
@@ -314,8 +301,8 @@ def _prefer_history(quotes, market: str) -> tuple[list[dict], str | None]:
 def shop_windows(quotes) -> list[tuple]:
     """(market, floor, lock_at) for the grade lock and the near lock.
 
-    The non-DraftKings fetch uses these slices. A season-wide read of
-    every book is not required to grade one game.
+    The non-DraftKings fetch uses these slices as stored reference.
+    Those rows are not the grade.
     """
     out = []
     seen = set()
@@ -346,8 +333,7 @@ def shop_rows(canonical_key: str, season: int, week: int, window_hours: int,
               slot: dict | None, quotes_in_shop: list[dict]) -> list[dict]:
     """One stored row per book at this DraftKings snapshot's line.
 
-    Every book is kept, including ones the grade will ignore. The grade
-    chooses among them later. h2h has no point.
+    Every book is kept. The grade does not read these rows. h2h has no point.
     """
     if slot is None:
         return []
@@ -374,58 +360,6 @@ def shop_rows(canonical_key: str, season: int, week: int, window_hours: int,
             "price_away": _num(quote.get("price_away")),
         })
     return rows
-
-
-def regrade_from_shop(fact: dict, stored: list[dict], books: list[str]) -> dict:
-    """Overwrite the grade from shop rows already stored at this DK line.
-
-    Rows at a different number are not the lock that was captured. The
-    near window is stored and is not the grade. A market with no stored
-    row keeps the grade just computed from the quotes still on hand.
-    """
-    window = fact["lock_window_hours"]
-    sides = {
-        "spreads": (
-            ("home", "dk_spread_home", "grade_spread_home_price",
-             "grade_spread_home_book", "ats_home_result",
-             "ats_home_units_uncapped", "ats_home_units_capped"),
-            ("away", "dk_spread_home", "grade_spread_away_price",
-             "grade_spread_away_book", "ats_away_result",
-             "ats_away_units_uncapped", "ats_away_units_capped"),
-        ),
-        "totals": (
-            ("home", "dk_total", "grade_over_price", "grade_over_book",
-             "ou_over_result", "ou_over_units_uncapped", "ou_over_units_capped"),
-            ("away", "dk_total", "grade_under_price", "grade_under_book",
-             "ou_under_result", "ou_under_units_uncapped", "ou_under_units_capped"),
-        ),
-        "h2h": (
-            ("home", None, "grade_ml_home_price", "grade_ml_home_book",
-             "ml_home_result", "ml_home_units_uncapped", "ml_home_units_capped"),
-            ("away", None, "grade_ml_away_price", "grade_ml_away_book",
-             "ml_away_result", "ml_away_units_uncapped", "ml_away_units_capped"),
-        ),
-    }
-    for market, pairs in sides.items():
-        dk_point = None if market == "h2h" else fact.get(pairs[0][1])
-        rows = []
-        for row in stored:
-            if row.get("lock_window_hours") != window or row.get("market") != market:
-                continue
-            if market != "h2h" and not same_line(row.get("dk_point"), dk_point):
-                continue
-            rows.append(row)
-        if not rows:
-            continue
-        for (side, _point_col, price_col, book_col, result_col,
-             uncapped_col, capped_col) in pairs:
-            price, book = best_price(rows, market, side, dk_point, books)
-            fact[price_col] = price
-            fact[book_col] = book
-            uncapped, capped = units_1u_to_win(fact.get(result_col), price)
-            fact[uncapped_col] = uncapped
-            fact[capped_col] = capped
-    return fact
 
 
 def shop_markets_to_replace(fresh: list[dict], stored_by_key: dict) -> list[tuple]:
@@ -474,19 +408,20 @@ def shop_markets_to_replace(fresh: list[dict], stored_by_key: dict) -> list[tupl
     return found
 
 
-def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
-                  books: list[str]) -> dict | None:
+def assemble_game(game: dict, quotes: list[dict],
+                  played: dict[str, list[date]]) -> dict | None:
     """One facts dict, or None when this game is not built."""
-    fact, _shops = capture_game(game, quotes, played, books)
+    fact, _shops = capture_game(game, quotes, played)
     return fact
 
 
-def capture_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
-                 books: list[str]) -> tuple[dict | None, list[dict]]:
+def capture_game(game: dict, quotes: list[dict],
+                 played: dict[str, list[date]]) -> tuple[dict | None, list[dict]]:
     """The facts dict and the lock-time shop rows, or (None, []).
 
     Shop rows are every book at DraftKings' line inside the lag, for the
-    grade window and the near window. The fact's grade uses `books`.
+    grade window and the near window. The grade is DraftKings' own price
+    on the lock snapshot. The shop is stored reference and is not the grade.
 
     Not built: the id does not parse, the season in the id is before
     DraftKings history, or no DraftKings market has a snapshot inside the
@@ -550,18 +485,15 @@ def capture_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
         point = None if slot.get("market") == "h2h" else slot.get("point")
         return quotes_at_lock(same, slot["snapshot_at"], point)
 
-    spread_shop = shop(spread)
-    total_shop = shop(total)
-    money_shop = shop(money)
     dk_spread = None if spread is None else spread.get("point")
     dk_total = None if total is None else total.get("point")
 
-    g_sh, g_sh_book = best_price(spread_shop, "spreads", "home", dk_spread, books)
-    g_sa, g_sa_book = best_price(spread_shop, "spreads", "away", dk_spread, books)
-    g_ov, g_ov_book = best_price(total_shop, "totals", "home", dk_total, books)
-    g_un, g_un_book = best_price(total_shop, "totals", "away", dk_total, books)
-    g_mh, g_mh_book = best_price(money_shop, "h2h", "home", None, books)
-    g_ma, g_ma_book = best_price(money_shop, "h2h", "away", None, books)
+    g_sh, g_sh_book = dk_lock_grade(spread, "home")
+    g_sa, g_sa_book = dk_lock_grade(spread, "away")
+    g_ov, g_ov_book = dk_lock_grade(total, "home")
+    g_un, g_un_book = dk_lock_grade(total, "away")
+    g_mh, g_mh_book = dk_lock_grade(money, "home")
+    g_ma, g_ma_book = dk_lock_grade(money, "away")
 
     home_score = game.get("home_score")
     away_score = game.get("away_score")
