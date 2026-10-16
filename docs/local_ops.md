@@ -200,6 +200,7 @@ unless you set `MONITOR_TOKEN`. Runbook: `docs/monitoring.md`.
 ```bash
 python -m pytest -q tests/            # was tests.yml, on every PR
 python -m pytest tests/test_discord_notifier.py -v   # one file
+python -m pip install -r requirements-test.txt       # once: pytest + node for the TS-backed tests
 ```
 
 Losing the PR check is the one real tradeoff in removing Actions: nothing now

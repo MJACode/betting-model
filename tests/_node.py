@@ -2,8 +2,9 @@
 
 `shutil.which` finds a system install. This machine has none (no node, no
 npm), so the fallback is the binary the `nodejs-wheel-binaries` pip package
-ships beside its module. Either way the tests get a real node >= 22.6, which
-is what `--experimental-strip-types` needs.
+ships beside its module (declared in requirements-test.txt). Either way the
+tests get a real node >= 22.6, which is what `--experimental-strip-types`
+needs; with neither, the node-backed tests skip.
 """
 from __future__ import annotations
 
