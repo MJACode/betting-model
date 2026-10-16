@@ -186,6 +186,9 @@ def test_the_nba_prop_card_reads_the_fetch_it_follows():
         "nba-prop-close must be a sequential step")
     assert _order("nba-prop-odds") < _order("nba-prop-market") < _order("scoring")
     assert _order("nba-prop-market") < _order("nba-prop-close") < _order("settle")
+    # the projection model decides after the rule, on the same fetch
+    assert re.search(r"^step nba-prop-projection$", SH, re.M)
+    assert _order("nba-prop-market") < _order("nba-prop-projection") < _order("settle")
     assert not re.search(r"^(step|par) nba-prop-scoring$", SH, re.M), (
         "the card would run twice a pass")
 

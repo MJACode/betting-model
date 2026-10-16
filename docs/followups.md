@@ -21,21 +21,17 @@
 
 ---
 
-## [ ] NBA projection model: one under a game, on worker-only inputs (2026-10-16)
+## [ ] NBA projection model: what to read after its first nights (2026-10-16)
 
-The NHL count recipe for NBA (`models/nba_props.py`) re-fit on what the worker
-has in 2026-27 (ESPN box lines, schedule, odds, ESPN injury statuses):
-unders, one a game, 3,630 bets, +5.57%, 90% CI +2.45..+8.62, every season
-positive, DraftKings alone +5.28% (`docs/nba_models_2026.md` §4.4; verifier
-bet lists in `C:/Users/micha/AppData/Local/Temp/nba_rebuild/verify_model/` on
-the build machine). Strongest where Pinnacle does not quote: 1,045 bets,
-+9.01%; blocks unders at EV ≥ 0.06 +6.55% on 7,701 (chosen after seeing
-results, so an extra search). Four a night does NOT hold (2024-25 +1.5 u).
-Before it can go live: a card on the live frame path (never run), the same
-roster rule as the backtest (log window + injury list), main lines only (the
-live feed carries alternates the backtest never saw), a calibrated published
-probability (the model claims 0.636 where it wins 0.464), and an owner rule for
-the 530 picks it shares with `nba_prop_market` (that rule keeps them).
+`nba_prop_projection` went live with three things the archive could not grade
+(`docs/nba_models_2026.md` §5): (1) which books quote steals, blocks and
+blocks+steals near tip — four days out only DraftKings and FanDuel did, and the
+timing verifier graded that case at +2.53% (its five-market version of the card); (2) the stale-quote guard, which refuses
+quotes the archive never stored a clock for — count `stale_rejected` in the card's
+diagnostic line against bets written; (3) closing-line value, from the 'close'
+snapshot each bet game now gets. After the first 250 settled bets, grade the
+record by market and by deciding book, and BetParx-only lines separately
+(32% of the graded 2025-26 units, uncheckable against another book).
 
 ## [ ] NBA: the official injury report is not on the worker (2026-10-16)
 

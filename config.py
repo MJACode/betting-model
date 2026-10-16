@@ -601,6 +601,13 @@ ACTION_THRESHOLDS: dict = {
     # every season positive -- every qualifying proposition, as the card
     # writes it (mike, 2026-10-16: "maximize units won"; no game or night cap).
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
+    # The NBA projection model (2026-10-16, mike: "build the projection model",
+    # "maximize units won"): minutes x per-minute rate, a negative-binomial width
+    # and a per-market calibration map; six cells, each with its own side(s) and
+    # calibrated-EV floor (models/nba_prop_projection.CARD). Graded walk-forward
+    # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
+    # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
+    "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1843,6 +1850,9 @@ MODEL_MIN_ODDS: dict = {
     # season; docs/nba_models_2026.md 4.3). Pinned for the same reason as
     # nhl_over_under: a Railway DEFAULT_MIN_ODDS override must not move it.
     "nba_prop_market":           -200,
+    # The projection model was graded at the same -200 floor; it lays -200 to
+    # +3000 (median +110; the long tail is threes overs at 0.5 from one book).
+    "nba_prop_projection":       -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2074,6 +2084,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     # newest season (never used to choose) +2.1%. Expect about +2% live: the
     # top cell of a 1,518-cell search carries winner's curse.
     "nba_prop_market":           0.00,
+    # The lowest of its six cells' floors (rebounds unders). Each market's own
+    # floor (0.01-0.05) is applied on top, in models/nba_prop_projection.CARD.
+    "nba_prop_projection":       0.01,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2196,6 +2209,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # other models, which pulls a near-even probability toward 0.5 -- the
     # same reason nhl_over_under and nfl_prop_market are here.
     "nba_prop_market",
+    # Its probability is already calibrated, per market, inside its own
+    # artifact (a Platt map fitted on the graded seasons' main-line pairs); a
+    # second, pooled map would move every number it was graded on.
+    "nba_prop_projection",
 })
 
 
@@ -2279,6 +2296,9 @@ SCORING_METHODS: dict = {
     "nhl_prop_saves": SCORING_ARTIFACT,
     "nhl_prop_shots_on_goal": SCORING_ARTIFACT,
     "nhl_prop_assists": SCORING_ARTIFACT,
+    # Trained and registered (scripts/nba_prop_projection_train.py), scored by
+    # scripts/nba_prop_projection_card.py.
+    "nba_prop_projection": SCORING_ARTIFACT,
 }
 
 
@@ -2305,6 +2325,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2392,6 +2413,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
+    "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS

@@ -689,9 +689,10 @@ def _X(rows: pd.DataFrame, cols: list[str]) -> np.ndarray:
     return rows[cols].astype(float).values
 
 
-def fit_minutes(train: pd.DataFrame, drop: tuple[str, ...] = ()):
+def fit_minutes(train: pd.DataFrame, drop: tuple[str, ...] = (), cols: list[str] | None = None):
+    """`cols` overrides the input list (models/nba_prop_projection fits on the worker's inputs)."""
     from xgboost import XGBRegressor
-    cols = minutes_features(drop)
+    cols = list(cols) if cols is not None else minutes_features(drop)
     m = XGBRegressor(**XGB_MIN).fit(_X(train, cols), train.minutes_exact.values)
     return {"model": m, "cols": cols}
 
@@ -700,10 +701,10 @@ def predict_minutes(fm: dict, rows: pd.DataFrame) -> np.ndarray:
     return np.clip(fm["model"].predict(_X(rows, fm["cols"])), 1.0, 48.0)
 
 
-def fit_rate(train: pd.DataFrame, stat: str, drop: tuple[str, ...] = ()):
+def fit_rate(train: pd.DataFrame, stat: str, drop: tuple[str, ...] = (), cols: list[str] | None = None):
     """Per-minute rate: Poisson on the count with log(minutes) as the exposure."""
     from xgboost import XGBRegressor
-    cols = minutes_features(drop) + rate_features(stat)
+    cols = list(cols) if cols is not None else minutes_features(drop) + rate_features(stat)
     tr = train[train.minutes_exact > 0]
     m = XGBRegressor(**XGB_COUNT)
     m.fit(_X(tr, cols), tr[stat].values, base_margin=np.log(tr.minutes_exact.clip(lower=0.5).values))

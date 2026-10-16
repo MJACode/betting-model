@@ -1,15 +1,16 @@
 # NBA — models, data, pipeline
 
 > **Rebuilt 2026-10-15/16 (mike: "build new nba models, remove any previous nba
-> models").** The twelve 2026-06-19 models are retired; one model replaces them.
+> models").** The twelve 2026-06-19 models are retired; two models replace them.
 > Every market was graded at real prices against bars written before the first
 > grid ran: **`docs/nba_models_2026.md`** (the bars, the market grid, every
 > result and what failed). Thresholds: `docs/thresholds.md`, NBA section.
 
-## The model
+## The models
 
 | Model | What it bets | Status |
 |---|---|---|
+| `nba_prop_projection` | Steals (over or under), rebounds (under), blocks+steals (over or under), blocks (under), rebounds+assists (under), threes (over or under): each player's projected count — minutes × per-minute rate, a negative-binomial width, a per-market calibration map — priced at the consensus main line, every proposition whose calibrated EV at the best bettable price clears its market's floor. Decided once, in the same 45-57 minute window, after `nba_prop_market`; never a proposition it holds. | **LIVE** (artifact — `models/nba_prop_projection.py`, card `scripts/nba_prop_projection_card.py`, steps `nba-prop-project` / `nba-prop-projection`) |
 | `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip; every qualifying proposition, no game or night cap. | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-prop-market`) |
 
 Graded on 2023-24 → 2025-26, the population it bets (every qualifying
@@ -25,6 +26,19 @@ every sport this repo has measured: blind NBA overs lose 7.3%, blind unders 2.2%
 **Prices it lays:** the −200 floor; on the graded bet list, min −200, 5th
 percentile −143, median −105, 95th +128, max +230. 38% of bets are plus money;
 3.5% are −150 or shorter.
+
+**`nba_prop_projection`** (2026-10-16, mike: *"build the projection model"*,
+*"maximize units won"*; the evidence is `docs/nba_models_2026.md` §5). Graded
+2023-24 → 2025-26, every qualifying proposition, −200 floor: at the five books the
+2026-27 feed returns, 66,588 bets, +2,392.8 units, +3.60%, 90% CI +2.93..+4.32,
+positive every season (+1,125.2 / +433.3 / +834.4) — about 130 bets on the median
+night (362 at most); at all eight bettable books +4.12%; at DraftKings alone +2.46%.
+Expect less live: the best cell of a 546-cell search runs high, and most of the edge
+is the best price (+1.45% at the second-best book). **Prices it lays:** min −200, 5th
+percentile −166, median +108, 95th +170, max +3000; 64% plus money; the +1,600..+3,000
+tail is threes overs at 0.5 quoted by one book. **The probability it shows is an upper
+bound**: in the band it bets it claimed 0.533 and won 0.501. Assists overs, which the
+search chose, are not bet (they failed on 2025-26 and lose at the feed's books).
 
 **Each game is decided once.** The first look 45-57 minutes before tip whose
 newest prop fetch holds Pinnacle is the game's decision, bets or none, and is
@@ -49,9 +63,9 @@ Their feature engines (`features/nba_feature_engine.py`,
 - **Moneyline, spread, total, first half, first quarter, team totals:** closed
   for 2026-27; nothing passes on a season it was not chosen on.
 - **Projection models** (`models/nba_props.py`, the NHL count recipe) beat naive
-  projections but not the books' price on the main markets; one under a game is
-  promising (+5.6% on worker-only inputs) and is a follow-up, not live
-  (`docs/followups.md`).
+  projections but not the books' price on points and the scoring combos; calibrated
+  and bet on every qualifying proposition they clear in steals, blocks, rebounds,
+  rebounds+assists and threes — `nba_prop_projection`, live (§5).
 
 ## Conventions (load-bearing)
 

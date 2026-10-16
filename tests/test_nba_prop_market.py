@@ -550,6 +550,24 @@ def test_publish_reads_under_the_lock_and_writes_once_in_one_transaction():
     assert [p["game_id"] for p in conn.inserted] == ["G2", "G2"]
 
 
+def test_publish_skips_a_proposition_the_projection_model_already_holds():
+    """nba_prop_projection decides a game alone when this card has not decided it 50 minutes
+    out. A later decision here must not bet the same (game, player, market) a second time;
+    the game's other propositions are still bet, and the game is still decided."""
+    class _Held(_PublishConn):
+        def execute(self, sql, params=None):
+            super().execute(sql, params)
+            if "model_id = 'nba_prop_projection'" in " ".join(sql.split()):
+                self._all = [(GID, "201939", "player_points")]
+            return self
+
+    conn = _Held()
+    rows = card.pick_rows([_bet(), _bet(market="player_rebounds", line=7.5)], bankroll=1000.0)
+    n, nd = card.publish(conn, rows, [_decision(GID, 2)])
+    assert (n, nd) == (1, 1)
+    assert [p["prop_market"] for p in conn.inserted] == ["player_rebounds"]
+
+
 def test_publish_writes_bet_rows_once_with_its_own_column_list():
     assert "prop_market" in card._INSERT and "player_key" in card._INSERT
     assert "ON CONFLICT DO NOTHING" in card._INSERT
