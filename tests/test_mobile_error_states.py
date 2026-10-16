@@ -22,6 +22,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+from tests._node import node_exe, node_strips_types  # noqa: E402
+
+NODE = node_exe() or "node"
 MOBILE = ROOT / "mobile"
 SRC = MOBILE / "src"
 
@@ -55,7 +59,7 @@ def test_scanner_probe():
 def test_no_raw_error_text_rendered():
     hits = []
     for path in SRC.rglob("*.tsx"):
-        rel = str(path.relative_to(MOBILE))
+        rel = path.relative_to(MOBILE).as_posix()  # ALLOW is posix; Windows is not
         if rel in ALLOW:
             continue
         hits += [f"{rel}:{n}" for n in _raw_error_lines(_read(path))]
@@ -107,11 +111,7 @@ def test_search_empty_prices_banner_and_vanished_pick():
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
@@ -134,7 +134,7 @@ if (/relation|42P01/.test(f.title + f.cause)) throw new Error('raw text leaked')
 if (/object Object/.test(friendlyCause({}))) throw new Error('[object Object]');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -142,7 +142,7 @@ if (/object Object/.test(friendlyCause({}))) throw new Error('[object Object]');
 
 def _run_node(script: str, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=cwd, capture_output=True, text=True,
     )
 

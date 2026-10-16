@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the 26 tests failing on master were all stale tests or Windows-only (recap fixture lacked `clv_method`; CLV capture literals; `node` absent; savepoint wrapper from #843; posix/backslash paths; `SOURCE` vs `SOURCE_PREFIX`); `tests/_node.py` finds node via the pip wheel so 10 more node-backed tests run here; `verify_a11y.ts` normalises separators and CRLF — 79/79, no app source touched |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-15/16, NBA rebuilt: the twelve old models retired (no bet ever written); ~900k credits of price history, the official injury reports, box detail, schedule and quarter scores into Supabase; every game and prop market graded against pre-registered bars (docs/nba_models_2026.md); schedule and injuries are in the line; nba_prop_market (Pinnacle same-line unders, one a game, four a night) live |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, deploy-killed evening `06b9db72a43c4323ad5ed84abf00b591` was the only unfinished `pipeline_runs` row and held `refresh_pass_completion` on the stuck branch; boot stamps prior hourly/evening orphans aborted, and a worker migration closes that row |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NHL prop odds age is the open-to-close gate (PIT_COL and BOS_ANA latest snapshot 2026-10-16T04:18:19Z); three SOG BETs 3160491, 3160496, 3462585 have no later quote at the bet's line; live fetch now stores the five alternate keys |
