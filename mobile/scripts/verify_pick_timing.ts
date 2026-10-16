@@ -149,10 +149,13 @@ function mkPick(over: Partial<Pick>): Pick {
     Boolean(nbaProp?.note.endsWith('Void if the player doesn’t play.')), nbaProp?.note);
   check('the NBA void line is not the goalie one', Boolean(nbaProp && !nbaProp.note.includes('goalie')));
   // The NBA projection model posts in the same window, the same way, and on
-  // either side: an over is as void as an under when the player sits.
-  for (const [side, label] of [
-    ['over', 'Stephen Curry Over 1.5 Steals'],
-    ['under', 'Nikola Jokic Under 13.5 Reb+Ast'],
+  // either side: an over is as void as an under when the player sits. Its
+  // labels use the rule's words for the shared markets ("Reb", "3PM").
+  for (const [side, label, market] of [
+    ['over', 'Stephen Curry Over 1.5 Steals', 'player_steals'],
+    ['under', 'Nikola Jokic Under 13.5 Reb+Ast', 'player_rebounds_assists'],
+    ['over', 'Karl-Anthony Towns Over 1.5 3PM', 'player_threes'],
+    ['under', 'Josh Hart Under 7.5 Reb', 'player_rebounds'],
   ] as const) {
     const proj = pickTimingInfo(
       mkPick({
@@ -161,17 +164,18 @@ function mkPick(over: Partial<Pick>): Pick {
         player_id: '201939',
         pick_label: label,
         pick_side: side as PickSide,
-        prop_market: side === 'over' ? 'player_steals' : 'player_rebounds_assists',
+        prop_market: market,
         created_at: NOW,
       }),
     );
-    check(`NBA projection ${side} stays on the posted timing`,
+    const name = `NBA projection ${side} (${label})`;
+    check(`${name} stays on the posted timing`,
       proj?.kind === 'posted' && proj.verb === 'Posted' && proj.label === `Posted ${formatStampET(NOW)}`,
       proj?.label);
-    check(`NBA projection ${side} note claims no confirmed lineup`, Boolean(proj && !proj.note.includes('lineup')));
-    check(`NBA projection ${side} note says it is void if he does not play`,
+    check(`${name}: note claims no confirmed lineup`, Boolean(proj && !proj.note.includes('lineup')));
+    check(`${name}: note says it is void if he does not play`,
       Boolean(proj?.note.endsWith('Void if the player doesn’t play.')), proj?.note);
-    check(`NBA projection ${side} note is the NBA rule's note, word for word`, proj?.note === nbaProp?.note);
+    check(`${name}: note is the NBA rule's note, word for word`, proj?.note === nbaProp?.note);
   }
   // NHL totals post on the first refresh that qualifies, often the night
   // before: not at the first scoring run of the day.

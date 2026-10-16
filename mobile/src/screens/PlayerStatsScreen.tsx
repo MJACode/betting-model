@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   InputAccessoryView,
@@ -35,6 +35,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   chipKey,
+  chipRowScrollX,
   chipsForLoadedPlayer,
   chipsForPlayer,
   chipsWithRequested,
@@ -491,6 +492,19 @@ export function PlayerStatsScreen() {
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
 
+  // The selected stat chip, scrolled into view once it lays out, the way
+  // SportToggle does it. A pick on Blocks+Steals or Reb+Ast opens on the 10th
+  // or 11th NBA chip, past the right edge on every iPhone (UX review,
+  // 2026-10-16). Layout only, never on a tap: a tapped chip is already on
+  // screen, and a load, a new player or a group tab remounts the chips.
+  const statRowRef = useRef<ScrollView>(null);
+  const statChipX = useRef<Record<string, number>>({});
+  const activeChipKey = stat ? chipKey(stat) : null;
+  const scrollToActiveChip = useCallback(() => {
+    const x = activeChipKey != null ? chipRowScrollX(statChipX.current[activeChipKey]) : null;
+    if (x != null) statRowRef.current?.scrollTo({ x, animated: false });
+  }, [activeChipKey]);
+
   // The pull spinner shows for a PULL only; each section has its own.
   const [pulled, setPulled] = useState(false);
   useEffect(() => {
@@ -602,6 +616,7 @@ export function PlayerStatsScreen() {
                 group tabs) the frame reaches 6pt into its bottom padding;
                 under the group tabs it can't — see statReach. */}
             <ScrollView
+              ref={statRowRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               style={statReach.frame}
@@ -614,6 +629,10 @@ export function PlayerStatsScreen() {
                     // In-bounds only: the row's 4pt padding (+ statReach above).
                     hitSlop={{ top: 4 + statReachAbove, bottom: 4, left: 2, right: 2 }}
                     key={chipKey(c)}
+                    onLayout={(e) => {
+                      statChipX.current[chipKey(c)] = e.nativeEvent.layout.x;
+                      if (active) scrollToActiveChip();
+                    }}
                     onPress={() => setPicked(c)}
                     // Pre-existing (ux_scan a11y-pressable, byte-identical to
                     // master): a chip whose only child is a Text announces as
@@ -957,6 +976,19 @@ export function PlayerStatsScreen() {
                 loading={detail.positionVsOpponentPending.loading}
                 error={detail.positionVsOpponentPending.error}
               />
+            ) : null}
+
+            {/* Blocks+Steals and Reb+Ast are summed from this page's log; the
+                server has no head-to-head or same-position read for either
+                yet (statCatalog.LOG_DERIVED_STATS), so the two cards above are
+                absent. Said where they were, rather than vanishing (UX
+                review, 2026-10-16). */}
+            {detail.serverReadsSkipped ? (
+              <View style={styles.card}>
+                <Text style={styles.muted}>
+                  Head-to-head and same-position reads aren’t available for combined stats yet.
+                </Text>
+              </View>
             ) : null}
 
             {/* ── MLB context the prop models train on ─────────────────── */}

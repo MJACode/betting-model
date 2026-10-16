@@ -545,6 +545,28 @@ export function measureStepperRow(fontScale: number): StepperRowMeasure {
   return { single, stacked, controls, mode, inner: STEPPER_ROW_INNER, layout };
 }
 
+/**
+ * Room left of a chip when its row is scrolled to it, so the chip before it
+ * still shows and the row reads as scrollable (components/SportToggle.tsx).
+ */
+export const CHIP_ROW_LEAD = 40;
+
+/**
+ * Where a horizontal chip row scrolls so its selected chip is on screen, from
+ * the chip's x inside the row; null before the chip has laid out.
+ *
+ * The player page's stat row runs past the right edge on every iPhone: NBA
+ * has 11 chips, and a projection pick on Blocks+Steals or Reb+Ast opens on
+ * the 10th or 11th, so nothing on screen said which stat the chart was
+ * (UX review, 2026-10-16). Zero is a real answer: on an NFL page a group tab
+ * remounts the row's chips and the new first chip can sit left of where the
+ * row is scrolled to, which is why SportToggle's `x > 0` guard is not here.
+ */
+export function chipRowScrollX(chipX: number | null | undefined): number | null {
+  if (chipX == null || !Number.isFinite(chipX)) return null;
+  return Math.max(0, chipX - CHIP_ROW_LEAD);
+}
+
 /** Where the stepper sits so the + stays on a 375pt card. */
 export function stepperRowLayout(fontScale: number): StepperRowLayout {
   return measureStepperRow(fontScale).layout;

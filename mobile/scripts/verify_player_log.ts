@@ -23,7 +23,9 @@ import {
   parseTypedLine,
   stepLineFrom,
   stepperRowLayout,
+  CHIP_ROW_LEAD,
   chipKey,
+  chipRowScrollX,
   chipsForLoadedPlayer,
   chipsForPlayer,
   defaultChipForPlayer,
@@ -134,6 +136,48 @@ check('their markets resolve with no per-stat model behind them',
     hook.includes('opponent && stat && serverStat && posGroup && pvoSeason != null') &&
     hook.includes('opponent && serverStat && posGroup && pvoSeason != null') &&
     hook.includes('serverStat && isRosterSport && opponent && stat && !posGroup'));
+  // …and the page says so where the cards were, instead of dropping them
+  // without a word (UX review, 2026-10-16).
+  check('the hook says when those reads were skipped and there was an opponent to read',
+    hook.includes('serverReadsSkipped: !serverStat && stat != null && opponent != null,'));
+  const screenSrc = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
+  check('the player page puts one muted line in a card where the two cards were',
+    /\{detail\.serverReadsSkipped \? \(\s*<View style=\{styles\.card\}>\s*<Text style=\{styles\.muted\}>\s*Head-to-head and same-position reads aren’t available for combined stats yet\.\s*<\/Text>\s*<\/View>\s*\) : null\}/
+      .test(screenSrc));
+  check('that line sits after the same-position card, before the MLB context',
+    screenSrc.indexOf('{detail.serverReadsSkipped ? (') > screenSrc.indexOf('<PositionVsOpponentPending') &&
+    screenSrc.indexOf('{detail.serverReadsSkipped ? (') < screenSrc.indexOf('<StatcastCard'));
+}
+
+// ── The selected stat chip is scrolled into view ────────────────────────────
+// NBA has 11 chips; a projection pick on Blocks+Steals or Reb+Ast opens on the
+// 10th or 11th, past the right edge on every iPhone, so nothing visible said
+// which stat the chart was (UX review, 2026-10-16). SportToggle's pattern:
+// offsets from each chip's onLayout, scroll when the active chip lays out.
+check('NBA Blocks+Steals and Reb+Ast are the 10th and 11th chips (why this matters)',
+  chipsForPlayer('NBA').findIndex((c) => c.label === 'Blocks+Steals') === 9 &&
+  chipsForPlayer('NBA').findIndex((c) => c.label === 'Reb+Ast') === 10 &&
+  chipsForPlayer('NBA').length === 11);
+check('the row scrolls to 40pt before the chip, as SportToggle does',
+  CHIP_ROW_LEAD === 40 && chipRowScrollX(600) === 560);
+check('a chip near the start scrolls the row back to 0, never negative',
+  chipRowScrollX(30) === 0 && chipRowScrollX(0) === 0);
+check('a chip that has not laid out yet does not scroll the row',
+  chipRowScrollX(undefined) === null && chipRowScrollX(null) === null && chipRowScrollX(NaN) === null);
+{
+  const screenSrc = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
+  check('the stat chip row carries a ref',
+    /<ScrollView\s+ref=\{statRowRef\}\s+horizontal/.test(screenSrc));
+  check('each stat chip records its x under its chip key, and the active one scrolls when it lays out',
+    /onLayout=\{\(e\) => \{\s*statChipX\.current\[chipKey\(c\)\] = e\.nativeEvent\.layout\.x;\s*if \(active\) scrollToActiveChip\(\);\s*\}\}/
+      .test(screenSrc));
+  check('the scroll is keyed on the resolved stat and goes through chipRowScrollX, not animated',
+    screenSrc.includes('const activeChipKey = stat ? chipKey(stat) : null;') &&
+    screenSrc.includes('chipRowScrollX(statChipX.current[activeChipKey])') &&
+    screenSrc.includes('statRowRef.current?.scrollTo({ x, animated: false });') &&
+    screenSrc.includes('}, [activeChipKey]);'));
+  check('it scrolls on layout only, never on a tap (a tapped chip is already on screen)',
+    screenSrc.split('scrollToActiveChip').length - 1 === 2);
 }
 
 const nflRow = normalizeLogRow('NFL', {
@@ -363,6 +407,22 @@ check('the projection model names no single stat of its own',
     steals?.overs === 1 && steals.unders === 1 && steals.wins === 1 && steals.losses === 1);
   check('the projection and the rule are separate lines even in one sport',
     new Set(proj.lines.map((l) => l.key)).size === proj.lines.length && proj.settled === 5);
+
+  // The projection's labels use the rule's words for the shared markets:
+  // rebounds is "Reb" and threes is "3PM" (models/nba_prop_projection.py
+  // MARKET_LABEL). The line is named from the row's prop_market, not the
+  // label's words, so both still land on their stat.
+  const words = playerPickRecord([
+    settled({ pick_id: 12, model_id: 'nba_prop_projection', prop_market: 'player_rebounds', pick_side: 'under',
+      pick_label: 'Josh Hart Under 7.5 Reb' }),
+    settled({ pick_id: 13, model_id: 'nba_prop_projection', prop_market: 'player_threes', pick_side: 'over',
+      pick_label: 'Karl-Anthony Towns Over 1.5 3PM' }),
+  ]);
+  check('a projection "Reb" pick is a Rebounds line, a "3PM" pick a 3PM line',
+    words.lines.map((l) => l.label).sort().join(',') === '3PM (Projection),Rebounds (Projection)');
+  check('…on its own side',
+    words.lines.find((l) => l.label === '3PM (Projection)')?.overs === 1 &&
+    words.lines.find((l) => l.label === 'Rebounds (Projection)')?.unders === 1);
 }
 
 // ── The tabs a player actually fills ────────────────────────────────────────

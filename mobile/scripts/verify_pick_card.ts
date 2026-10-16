@@ -486,6 +486,53 @@ check(
     projUnderBooks.modeledBook === 'betmgm' && projUnderBooks.note.includes('DraftKings doesn’t post this line'),
     projUnderBooks.note);
 
+  // The projection's labels use the NBA rule's words for the shared markets:
+  // "Reb" for rebounds and "3PM" for threes (models/nba_prop_projection.py
+  // MARKET_LABEL). The card's title, the player name the prop odds are keyed
+  // on, and the market (from prop_market, never the label) must all hold.
+  const threesOver = mkPick({
+    model_id: 'nba_prop_projection',
+    sport: 'NBA',
+    pick_side: 'over',
+    pick_label: 'Karl-Anthony Towns Over 1.5 3PM',
+    prop_market: 'player_threes',
+    scored_line: 1.5,
+    dk_odds: 110,
+    decision_odds: 125,
+    decision_book: 'fanduel',
+    line_book: null,
+  });
+  check('projection "3PM" label: the player name parses (hyphenated)',
+    playerNameFromPickLabel(threesOver.pick_label) === 'Karl-Anthony Towns');
+  {
+    const t = splitPickTitle(threesOver);
+    check('projection "3PM" label: the title splits into the bet and the player',
+      t.primary === 'Over 1.5 3PM' && t.secondary === 'Karl-Anthony Towns', `${t.primary} | ${t.secondary}`);
+  }
+  const threesUp = movementFromSameBookHistory(threesOver, { line: 2.5, over_price: 160, under_price: -200 }, 'player_threes');
+  check('projection "3PM" over: FanDuel moving to 2.5 is against it, not in its favor',
+    threesUp?.lineMovedAgainst === true && threesUp.severity !== 'good', `severity=${threesUp?.severity}`);
+  const rebUnder = mkPick({
+    model_id: 'nba_prop_projection',
+    sport: 'NBA',
+    pick_side: 'under',
+    pick_label: 'Josh Hart Under 7.5 Reb',
+    prop_market: 'player_rebounds',
+    scored_line: 7.5,
+    dk_odds: -115,
+    decision_odds: -105,
+    decision_book: 'betmgm',
+    line_book: null,
+  });
+  {
+    const t = splitPickTitle(rebUnder);
+    check('projection "Reb" label: the title splits into the bet and the player',
+      t.primary === 'Under 7.5 Reb' && t.secondary === 'Josh Hart', `${t.primary} | ${t.secondary}`);
+  }
+  check('projection "Reb" under: the BetMGM 7.5 row at the locked price matches the lock',
+    snapshotMatchesLock(rebUnder, { line: 7.5, under_price: -105 }, 'player_rebounds') &&
+    !snapshotMatchesLock(rebUnder, { line: 6.5, under_price: -105 }, 'player_rebounds'));
+
   // Other models keep the DraftKings line rule (the broad fix is separate):
   // an MLB prop decided at FanDuel with line_book NULL still skips line deltas.
   const mlb = mkPick({

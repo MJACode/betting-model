@@ -749,15 +749,19 @@ export function modelLong(modelId: string): string {
  * The line under "Model probability" on a pick's "Why this bet?" card.
  *
  * The NBA projection model's probability is its own calibrated number, and it
- * still runs high where it bets: on the graded seasons it claimed 0.533 and
- * won 0.501, against 0.483 implied by the prices (docs/nba_models_2026.md). So
- * its card says to read the number as an upper bound. Every other model keeps
- * the plain sentence.
+ * still runs high where it bets: graded walk-forward over 2023-24..2025-26 it
+ * claimed 0.533 and won 0.501, against 0.483 implied by the prices
+ * (docs/nba_models_2026.md; models/nba_prop_projection.py). So its card says
+ * to read the number as an upper bound, and gives the price comparison that
+ * shows the 50% still beat the price. Those are graded seasons, not a posted
+ * record: the model has none yet (UX review, 2026-10-16). Every other model
+ * keeps the plain sentence.
  */
 const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   nba_prop_projection:
-    'What our model says is the chance this side hits. Read it as an upper bound: on its graded ' +
-    'bets this model said 53% on average and won 50%.',
+    'What our model says is the chance this side hits. Read it as an upper bound: over the last three ' +
+    'NBA seasons it said 53% on average on the bets it picks, those bets won 50%, and the prices ' +
+    'implied 48%.',
 };
 
 export function modelProbabilityNote(modelId: string): string {

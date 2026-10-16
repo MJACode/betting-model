@@ -348,6 +348,9 @@ export function usePlayerDetail(args: {
     nextGame,
     h2h,
     h2hLoading: h2hRow.loading,
+    // Blocks+Steals or Reb+Ast with an opponent to read against: the two
+    // cards above are not shown, and the page says why in their place.
+    serverReadsSkipped: !serverStat && stat != null && opponent != null,
     // The card's place while a roster sport's position is read, or why it
     // failed; null once the read succeeds (row or no row) and elsewhere.
     positionVsOpponentPending:

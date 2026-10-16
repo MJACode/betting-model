@@ -27,6 +27,7 @@ import {
   betTypeStatusSuffix,
   choiceAddedLabel,
   modelLong,
+  modelProbabilityNote,
   withdrawnRulesEmpty,
 } from '../src/lib/modelMeta';
 import {
@@ -73,6 +74,21 @@ check('the NBA projection model is a player prop with no single stat',
   MODEL_META.nba_prop_projection?.type === 'player_prop' && MODEL_META.nba_prop_projection.statLabel === '');
 check('the NBA projection model\'s short name is a word, not its id',
   MODEL_META.nba_prop_projection?.shortLabel === 'Projection');
+// "Why this bet?": the projection model's probability is an upper bound. The
+// figures are its graded seasons, not a posted record (it has none yet), and
+// the 48% the prices implied is what shows the 50% beat them (UX review,
+// 2026-10-16).
+check('the projection model\'s probability note says upper bound, graded seasons, and the price',
+  modelProbabilityNote('nba_prop_projection') ===
+    'What our model says is the chance this side hits. Read it as an upper bound: over the last three ' +
+    'NBA seasons it said 53% on average on the bets it picks, those bets won 50%, and the prices implied 48%.',
+  modelProbabilityNote('nba_prop_projection'));
+check('every other model keeps the plain probability sentence',
+  modelProbabilityNote('nba_prop_market') === 'What our model says is the chance this side hits.' &&
+  modelProbabilityNote('mlb_moneyline') === 'What our model says is the chance this side hits.');
+check('the "Why this bet?" card reads that note for the pick\'s own model',
+  readFileSync(join(__dirname, '..', 'src/components/ReasoningCard.tsx'), 'utf-8')
+    .includes('sub={modelProbabilityNote(pick.model_id)}'));
 
 // ── The built-in model screen's title is the long name ──────────────────────
 // Titled with the short label, the three prop-rule screens all read
