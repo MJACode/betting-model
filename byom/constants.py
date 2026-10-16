@@ -48,4 +48,8 @@ SHOP_LAG_MINUTES = 30
 # nfl_odds_history. A lock quote that lives only in odds, and is neither
 # the opener nor the close, is gone after the prune. The first apply has
 # to land before this date: the 2026-10-17 prune of games dated 2026-10-16.
+# Merging the migration only creates the empty table. The job warns when
+# the America/New_York date is on or after this date and byom_lock_shop
+# has no rows. A missing table counts as no rows. The warning does not
+# write. The apply is a separate production write.
 SHOP_FIRST_APPLY_BEFORE = "2026-10-17"
