@@ -2185,7 +2185,7 @@ export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
   const { data, error } = await supabase
     .from('v_public_track_record')
     .select(
-      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
+      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked, ' +
         'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
         'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
         'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
@@ -2222,7 +2222,7 @@ export async function fetchActionThresholds(): Promise<Record<string, ServerThre
 export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
   const { data, error } = await supabase
     .from('v_public_track_record_daily')
-    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat')
+    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked')
     .order('game_date', { ascending: true });
   if (error) throw error;
   return (data ?? []) as TrackRecordDailyRow[];

@@ -16,7 +16,11 @@ export interface TrackRecordSummary {
   pushes: number;
   profitFlat: number;
   stakedFlat: number;
-  roiFlat: number; // profit / staked
+  /** Posted-stake units (published_pick_unit_profit). Same total as Discord. */
+  units?: number;
+  /** Units laid on wins and losses. Pushes add nothing. */
+  risked?: number;
+  roiFlat: number; // units / risked — the posted stake, not a flat $100 bet
   winRate: number; // wins / (wins + losses)
   clvSettled: number;
   clvBeat: number;
@@ -39,6 +43,8 @@ export const EMPTY_SUMMARY: TrackRecordSummary = {
   pushes: 0,
   profitFlat: 0,
   stakedFlat: 0,
+  units: 0,
+  risked: 0,
   roiFlat: 0,
   winRate: 0,
   clvSettled: 0,
@@ -61,6 +67,8 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
   let pushes = 0;
   let profitFlat = 0;
   let stakedFlat = 0;
+  let units = 0;
+  let risked = 0;
   let clvSettled = 0;
   let clvBeat = 0;
   let clvGameSettled = 0;
@@ -79,6 +87,8 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     pushes += Number(r.pushes ?? 0);
     profitFlat += Number(r.profit_flat ?? 0);
     stakedFlat += Number(r.staked_flat ?? 0);
+    units += Number(r.units ?? 0);
+    risked += Number(r.risked ?? 0);
     clvSettled += Number(r.clv_settled ?? 0);
     clvBeat += Number(r.clv_beat ?? 0);
     clvGameSettled += Number(r.clv_game_settled ?? 0);
@@ -97,7 +107,9 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     pushes,
     profitFlat,
     stakedFlat,
-    roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+    units,
+    risked,
+    roiFlat: risked > 0 ? units / risked : 0,
     winRate: decided > 0 ? wins / decided : 0,
     clvSettled,
     clvBeat,
@@ -117,7 +129,7 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
 export interface SportGroup {
   sport: string;
   summary: TrackRecordSummary;
-  models: TrackRecordRow[]; // sorted by profit desc
+  models: TrackRecordRow[]; // sorted by posted-stake units desc
 }
 
 /** Group per-model rows by sport, dropping models with no settled picks. */
@@ -134,7 +146,7 @@ export function groupBySport(rows: TrackRecordRow[]): SportGroup[] {
   const groups: SportGroup[] = [];
   for (const [sport, list] of bySport) {
     const models = [...list].sort(
-      (a, b) => Number(b.profit_flat ?? 0) - Number(a.profit_flat ?? 0),
+      (a, b) => Number(b.units ?? 0) - Number(a.units ?? 0),
     );
     groups.push({ sport, summary: summarize(list), models });
   }

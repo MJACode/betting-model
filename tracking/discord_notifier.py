@@ -2032,7 +2032,9 @@ _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
                COALESCE(p.decision_odds, p.dk_odds),
                CASE WHEN p.clv_method = 'standard_v2' THEN p.clv_pct END,
-               p.is_live
+               p.is_live,
+               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result),
+               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
@@ -2123,14 +2125,23 @@ def _tally(rows: list[tuple]) -> dict:
             t["l"] += 1
         else:
             t["p"] += 1
-        stake = stake_for(kelly, price)
-        if result == "WIN":
-            t["units"] += stake.win
-        elif result == "LOSS":
-            t["units"] -= stake.risk
-        # PUSH returns the stake: no unit change.
-        if result != "PUSH":
-            t["risked"] += stake.risk
+        # A row from _SETTLED_SQL carries the shared SQL functions in the
+        # last two columns (published_pick_unit_profit, published_pick_unit_risked).
+        # Those are the Record tab's units and risked. A shorter tuple is a
+        # unit test of this formatter; it uses stake_for, which the function
+        # body is pinned equal to.
+        if len(row) >= 9:
+            t["units"] += float(row[7] or 0)
+            t["risked"] += float(row[8] or 0)
+        else:
+            stake = stake_for(kelly, price)
+            if result == "WIN":
+                t["units"] += stake.win
+            elif result == "LOSS":
+                t["units"] -= stake.risk
+            # PUSH returns the stake: no unit change, and it was not risked.
+            if result != "PUSH":
+                t["risked"] += stake.risk
     return t
 
 

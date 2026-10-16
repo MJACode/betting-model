@@ -305,10 +305,10 @@ def test_group_tabs_selection_is_tint_not_green():
 
 def test_equity_total_share_text_and_no_picks_rows():
     eq = _read(SRC / "components" / "EquityCurve.tsx")
-    assert "<Text style={[styles.units, { color: pnlColor(last, 1) }]}>{formatSignedUnits(last)}</Text>" in eq
+    assert "<Text style={[styles.units, { color: pnlColor(last, 2) }]}>{formatSigned(last, 2, 'u')}</Text>" in eq
     assert "toFixed(1)}u" not in eq
     share = _read(SRC / "lib" / "shareRecord.ts")
-    assert "formatPctSigned(s.roiFlat)" in share and "formatSignedUnits(opts.endUnits)" in share
+    assert "formatPctSigned(s.roiFlat)" in share and "formatSigned(opts.endUnits, 2, 'u')" in share
     assert "? '+' : ''" not in share
     daily = _read(SRC / "components" / "DailyResultsModal.tsx")
     assert "sportCardEmpty: { paddingVertical: spacing.sm }," in daily

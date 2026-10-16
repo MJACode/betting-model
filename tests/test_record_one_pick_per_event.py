@@ -76,6 +76,8 @@ def test_the_recap_query_counts_the_kept_copy_and_not_the_marked_one():
     if sqlite3.sqlite_version_info < (3, 39):
         pytest.skip("IS DISTINCT FROM needs SQLite >= 3.39")
     db = sqlite3.connect(":memory:")
+    from tracking.published_units import install_sqlite
+    install_sqlite(db)
     db.execute("""CREATE TABLE picks (pick_id, sport, model_id, result,
                   kelly_fraction, dk_odds, decision_odds, clv_pct, is_live, game_date,
                   signal_type, downgrade_reason, condition_status, game_id,
