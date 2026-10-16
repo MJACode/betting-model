@@ -121,7 +121,9 @@ August stay on the previous year's label. A caller can pass an older
 season. Filters are side (home/away), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
 is left out. There is no spread-size, price, or line filter. Each
-market row sums `units_uncapped` and `units_capped`. There is no stake.
+market row sums `units_uncapped` and `units_capped`. Those columns are
+the stored DraftKings-lock results. There is no stake and no
+recommended stake.
 Game markets include both sides. Prop markets include the over and the
 under. `data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
 and was not applied. The function is in `RPC_ANON_CALLABLE`. It reads
