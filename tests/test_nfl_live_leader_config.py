@@ -49,9 +49,25 @@ def test_the_ev_floor_cannot_bind_with_the_live_global_floor(monkeypatch):
         assert ev >= config.min_ev_for(MID) - 1e-12, (american, ev)
 
 
-def test_the_price_floor_sits_below_every_backtest_entry():
-    assert config.min_odds_for(MID) == -5000
-    assert config.min_odds_for(MID) < -4000          # the backtest's most negative entry
+def test_the_price_floor_is_minus_140():
+    """mike, 2026-10-16: "Floor is -140 for this model" (after a -980 bet)."""
+    assert config.MODEL_MIN_ODDS[MID] == -140
+    assert config.min_odds_for(MID) == -140
+
+
+def test_the_loop_refuses_a_price_shorter_than_the_floor():
+    """The gate the live loop consults after the rule says BET: -150 and
+    -980 are refused (the game stays open and is tried again at its next
+    slot), -140 and plus money pass."""
+    from types import SimpleNamespace
+
+    from nfl_live_leader import gameday as G
+
+    for price in (-150, -980, -4000):
+        why = G.platform_gates(SimpleNamespace(price=price, wp=0.99))
+        assert why and "under the floor" in why, (price, why)
+    for price in (-140, -110, 150):
+        assert G.platform_gates(SimpleNamespace(price=price, wp=0.99)) is None, price
 
 
 def test_it_decides_on_its_own_probability():
