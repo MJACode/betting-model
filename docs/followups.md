@@ -65,6 +65,20 @@ Recorded so they are not re-derived (`docs/nba_models_2026.md` §4):
 - Kalshi carries NBA prop and game ladders with hourly history from 2025-26
   (free, `api.elections.kalshi.com`); the repo maps only NFL series. Not built.
 
+## [ ] App: a non-DraftKings pick's line move can read as a price move in the member's favour (found 2026-10-16)
+
+From the UX review of the NBA rebuild. `mobile/src/lib/markets.ts`
+`scoredLineBook` falls back to DraftKings while the movement history is the
+deciding book's, so when the book a pick was taken at moves its LINE, the app
+compares the new line's price with the locked line's price and can say "Moved
+3.6pp in your favor" when the line moved a point against the bet. Fixed for
+the three Pinnacle-reference prop rules in the NBA rebuild PR (they read
+`decision_book`, else the label book); every other pick decided at a book other
+than DraftKings still has it. The broad fix changes the movement chip across
+the whole board and wants its own reviewed PR. Same root: on NFL wind and
+opener picks the All books footnote says "The line is DraftKings'" when the
+line is the label book's.
+
 ## [ ] NBA prop fetch buys every game seven days ahead on every pass (2026-10-16)
 
 `nba-prop-odds` uses `GAME_SCORE_AHEAD_DAYS` (7) and pulls 9 markets + 8

@@ -13,7 +13,7 @@ import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, pars
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
-import { CLV_NFL_LABEL_MODELS, clvLabelBook } from './clvBet';
+import { CLV_NFL_LABEL_MODELS, CLV_SUFFIX_LABEL_MODELS, clvLabelBook } from './clvBet';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -368,6 +368,32 @@ export function bookLabel(key: string): string {
 /** Full book name for settings / detail rows. */
 export function bookName(key: string): string {
   return BOOK_NAMES[key] ?? key;
+}
+
+/**
+ * The All books card's line source: which book's row carries the "modeled"
+ * tag, and the sentence under the table that says whose line it is.
+ */
+export function allBooksLineSource(
+  pick: Pick,
+): { modeledBook: string; note: string } {
+  const named = lineBook(pick);
+  if (named) {
+    return {
+      modeledBook: named,
+      note: `The line is ${bookName(named)}’s — DraftKings doesn’t post this line, so it can’t go in a DraftKings slip. `,
+    };
+  }
+  // The NFL and WNBA rules name their book only in the label (decision_book
+  // NULL, dk_odds holding that book's price), and the line is that book's.
+  // Whether DraftKings posts it is unknown without line_book, so no claim.
+  if (CLV_SUFFIX_LABEL_MODELS.includes(pick.model_id) && decisionBook(pick) == null) {
+    const labelled = clvLabelBook(pick);
+    if (labelled !== MODEL_BOOK) {
+      return { modeledBook: labelled, note: `The line is ${bookName(labelled)}’s. ` };
+    }
+  }
+  return { modeledBook: MODEL_BOOK, note: 'The line is DraftKings’. Parlays are priced at DraftKings. ' };
 }
 
 /** "Bet on FanDuel" / "Bet on DraftKings" — the hand-off button's label. */
@@ -1415,8 +1441,19 @@ export function computeMovement(
  * own line (scripts/nfl_wind_publisher.py), so it is that book. Everything
  * else is scored at DraftKings' line. A line is compared only against the same
  * book's line: another book's number is a different bet, not movement.
+ *
+ * The three multi-market prop rules store the BET book's own line as
+ * scored_line (nba/nfl/wnba_prop_market_card.py), so their line is that
+ * book's: the deciding book, else the book their label names (the NFL and
+ * WNBA rows carry no decision_book). Read as DraftKings' line, a price at a
+ * new line was compared with the lock at the old one and shown as price
+ * movement in the bettor's favour (designer review, 2026-10-16). Narrow on
+ * purpose: every other model keeps the rule above.
  */
+const BET_BOOK_LINE_MODELS: readonly string[] = ['nba_prop_market', 'nfl_prop_market', 'wnba_prop_market'];
+
 function scoredLineBook(pick: Pick): string {
+  if (BET_BOOK_LINE_MODELS.includes(pick.model_id)) return clvLabelBook(pick);
   const named = lineBook(pick);
   if (named) return named;
   if (decisionBook(pick) == null && CLV_NFL_LABEL_MODELS.includes(pick.model_id)) {

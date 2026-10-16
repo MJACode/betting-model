@@ -3,14 +3,13 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   allBookPrices,
+  allBooksLineSource,
   bookName,
   formatSideLine,
   isBettableBook,
   marketForPick,
-  MODEL_BOOK,
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
-import { lineBook } from '@/lib/decisionPrice';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
@@ -43,6 +42,8 @@ export function AllBooksCard({
   // looking like the same bet.
   const market = marketForPick(pick);
   const quotes = allBookPrices(bookRows ?? [], pick.pick_side, market);
+  // Whose line it is: the "modeled" row and the footnote (allBooksLineSource).
+  const lineSource = allBooksLineSource(pick);
 
   // One book pricing a side isn't a comparison — nothing to shop.
   if (quotes.length < 2) return null;
@@ -94,7 +95,7 @@ export function AllBooksCard({
                 {bookName(q.bookmaker)}
               </Text>
               <View style={styles.tagRow}>
-                {q.bookmaker === (lineBook(pick) ?? MODEL_BOOK) ? (
+                {q.bookmaker === lineSource.modeledBook ? (
                   <Text style={styles.modelTag}>modeled</Text>
                 ) : null}
                 {reference ? <Text style={styles.modelTag}>reference</Text> : null}
@@ -120,9 +121,7 @@ export function AllBooksCard({
       })}
 
       <Text style={styles.footnote}>
-        {lineBook(pick)
-          ? `The line is ${bookName(lineBook(pick)!)}’s — DraftKings doesn’t post this line, so it can’t go in a DraftKings slip. `
-          : `The line is DraftKings’. Parlays are priced at DraftKings. `}
+        {lineSource.note}
         Edge and stake use the price the pick was decided at. Tap a book to
         open its betslip (reference books excluded).
       </Text>

@@ -38,6 +38,7 @@ import {
   logStatValue,
   normalizeLogRow,
   openingChip,
+  pagePlayerId,
   playerSubtitle,
   positionGroups,
   roundLineToStep,
@@ -244,13 +245,25 @@ check('statForPropMarket needs the sport: no NCAAF stat is priced in an NBA mark
     settled({ pick_id: 4, model_id: 'mlb_prop_batter_runs', sport: 'MLB', prop_market: null, pick_side: 'over' }),
   ]);
   const labels = rec.lines.map((l) => l.label).sort().join(',');
-  check('a multi-market rule gets one line per market, named for its stat',
-    labels === 'Points,Rebounds,Runs');
+  // A rule's line is named for its stat AND the rule, so it can never read as
+  // a per-stat model's line ("Assists 1-0" beside "Assists 0-1"; designer
+  // review, 2026-10-16). Per-stat models keep the bare stat name.
+  check('a multi-market rule gets one line per market, named for its stat and the rule',
+    labels === 'Points (vs Pinnacle),Rebounds (vs Pinnacle),Runs');
   check('each line has its own key, so two lines of one model never share a React key',
     new Set(rec.lines.map((l) => l.key)).size === rec.lines.length);
-  const pts = rec.lines.find((l) => l.label === 'Points');
+  const pts = rec.lines.find((l) => l.label === 'Points (vs Pinnacle)');
   check('the points line carries both its bets', pts?.wins === 1 && pts.losses === 1 && pts.unders === 2);
   check('the total still counts every bet once', rec.settled === 4);
+
+  // The same stat from a per-stat model and from the rule: two lines, two names.
+  const both = playerPickRecord([
+    settled({ pick_id: 5, model_id: 'wnba_prop_player_assists', sport: 'WNBA', prop_market: null }),
+    settled({ pick_id: 6, model_id: 'wnba_prop_market', sport: 'WNBA', prop_market: 'player_assists', result: 'LOSS', profit_flat: -100 }),
+  ]);
+  const bothLabels = both.lines.map((l) => l.label).sort().join(',');
+  check('a per-stat Assists line and the rule\'s Assists line read differently',
+    bothLabels === 'Assists,Assists (vs Pinnacle)');
 }
 
 // ── The tabs a player actually fills ────────────────────────────────────────
@@ -428,6 +441,29 @@ check('the mode control and the field stay 44pt, and the − / + keep their slop
   && /stepBtn: \{[\s\S]*?width: 30,\n\s*height: 30/.test(playerScreen)
   && (playerScreen.match(/hitSlop=\{8\}/g) ?? []).length >= 3);
 
+
+// ── A page opened by name keys its reads on the log's player id ─────────────
+// nfl_prop_market writes no player_id, so its pick opens the player page by
+// name. The head-to-head card matched r.player_id === null and always said
+// "no meetings"; today's-pick lookups found nothing (designer review,
+// 2026-10-16). The loaded log carries the id.
+check('a name-only page takes the id from the loaded log',
+  pagePlayerId('', [{ player_id: '00-0036322' }]) === '00-0036322');
+check('a route id wins over the log', pagePlayerId('660271', [{ player_id: '999' }]) === '660271');
+check('nothing loaded and no route id is null, never an empty string', pagePlayerId('', []) === null);
+check('the screen resolves the page id from the route id and the log',
+  /const pageId = pagePlayerId\(playerId, games\);/.test(playerScreen));
+check('usePlayerDetail keys on the resolved id',
+  /usePlayerDetail\(\{[\s\S]*?playerId: pageId,/.test(playerScreen));
+check('the betslip pick lookup keys on the resolved id',
+  /slipPickFor\(\{ player_id: pageId \}/.test(playerScreen));
+check('the pick-threshold lookup keys on the resolved id',
+  /buildPickIndex\(todayPicks, propModelForStat\(stat\)\)\.get\(pageId\)/.test(playerScreen));
+// The same-position card leaves the player himself out of "others at his
+// position"; keyed on the empty route id, a name-only page counted his own
+// games among them (NFL is the card's sport, and its rule picks have no id).
+check('the same-position card excludes the player by the resolved id',
+  /<PositionVsOpponentCard[\s\S]*?playerId=\{pageId\}/.test(playerScreen));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -432,10 +432,17 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     let line = by.get(key);
     if (!line) {
       const stat = modelStat ?? statForPropMarket(sportOfModel(p.model_id), market);
+      // A rule's line names the rule too: named for the stat alone, it read
+      // as a second per-stat line ("Assists 1-0" over "Assists 0-1").
+      const label = !stat
+        ? modelShort(p.model_id)
+        : market
+          ? `${stat.label} (vs Pinnacle)`
+          : stat.label;
       line = {
         key,
         modelId: p.model_id,
-        label: stat?.label ?? modelShort(p.model_id),
+        label,
         wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, overs: 0, unders: 0,
       };
       by.set(key, line);

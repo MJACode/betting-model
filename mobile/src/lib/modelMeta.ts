@@ -61,9 +61,11 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // Market-relative run line: de-vig Pinnacle, bet a bettable soft book
   // at the same ±1.5. Replaces the paused mlb_runline *publish path*;
   // mlb_runline itself stays paused. docs/mlb_runline_ou_edge_search.md.
+  // Named '(vs Pinnacle)' like the prop rules: the app explains Pinnacle, and
+  // never explained 'market-relative'.
   mlb_spread_market: {
     shortLabel: 'RL Mkt',
-    longLabel: 'Runline (market-relative)',
+    longLabel: 'Runline (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -73,7 +75,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // mlb_over_under itself stays paused. Paper until MLB_TOTAL_MARKET_PUBLISH=1.
   mlb_total_market: {
     shortLabel: 'O/U Mkt',
-    longLabel: 'Total Runs (market-relative)',
+    longLabel: 'Total Runs (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
