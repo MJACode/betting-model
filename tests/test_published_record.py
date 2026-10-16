@@ -117,8 +117,13 @@ def test_the_snapshot_stake_is_stake_for_not_a_flat_unit():
 def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
-    assert ACTIVE_MIGRATIONS[-1] == "clv_standard_v2_2026_10_14.sql"
-    assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
+    clv = "clv_standard_v2_2026_10_14.sql"
+    assert clv in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(MIG.name) < ACTIVE_MIGRATIONS.index(clv)
+    # Anything registered after the CLV stamp must not rewrite the record.
+    for name in ACTIVE_MIGRATIONS[ACTIVE_MIGRATIONS.index(clv) + 1:]:
+        body = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
+        assert "v_public_track_record" not in body, name
     i = ACTIVE_MIGRATIONS.index(MIG.name)
     for owner in (
         "record_strikes_nfl_live_prop_2026_10_04.sql",

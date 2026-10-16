@@ -337,6 +337,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-16: NHL Stats-tab reads (season totals, per-game value arrays,
+    # team totals, latest pre-game prop quote). Display only. Does not
+    # rewrite v_public_track_record and does not run before the CLV stamp.
+    "add_nhl_stats_views_2026_10_16.sql",
 ]
 
 
