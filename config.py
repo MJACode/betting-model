@@ -4331,6 +4331,15 @@ NCAAF_ODDS_API_MAP: dict = {
     # same commence_time 2026-09-19T20:30:00Z.
     "Southeastern Louisiana Lions": "SE Louisiana",
     "Southeastern Louisiana": "SE Louisiana",
+    # 2026-10-16: the pollers warned "Unresolved NCAAF school from Odds API:
+    # 'Citadel Bulldogs'" on every pregame pass. CFBD's school is "The
+    # Citadel" (mascot Bulldogs, FCS, alt_names NULL); The Odds API drops the
+    # article and _fold keeps it, so exact, "school mascot" and prefix all
+    # miss. The ingest had minted alias rows for five matchups back to 2023;
+    # the live one, Texas A&M 2026-10-17, held 605 odds rows the CFBD id
+    # would never see. ncaaf_citadel_alias_2026_10_16.sql consolidates them.
+    "Citadel Bulldogs": "The Citadel",
+    "Citadel": "The Citadel",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.
