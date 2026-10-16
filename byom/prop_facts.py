@@ -1,8 +1,9 @@
 """Grade one NFL player prop into a byom_prop_facts row.
 
-No database. No stake. Units are the pair units_1u_to_win already uses:
-uncapped 1u-to-win, and the same 3u risk cap. A missing price leaves
-both NULL.
+No database. The grade is DraftKings' own price on the lock snapshot.
+Units are results: uncapped 1u-to-win, and the result after a 3-unit
+risk ceiling. A missing price leaves both NULL. There is no recommended
+stake.
 
 The lock window is PROP_LOCK_WINDOW_HOURS (24). That number is
 UNCONFIRMED. It is not the live models' price and it is not a filter on
@@ -43,14 +44,13 @@ from decimal import Decimal
 
 from data.name_match import normalize_player_name
 
-from byom.constants import PROP_LOCK_WINDOW_HOURS, SHOP_LAG_MINUTES, SPORT
+from byom.constants import PROP_LOCK_WINDOW_HOURS, SPORT
 from byom.game_facts import (
     _priced,
-    best_price,
     closing_quote,
+    dk_lock_grade,
     first_in_window,
     parse_game_id,
-    quotes_at_lock,
     same_line,
     units_1u_to_win,
 )
@@ -181,8 +181,8 @@ def _rows_for_player(log_rows: list[dict], key: str) -> list[dict]:
     return [row for row in log_rows if player_key(row.get("player_name")) == key]
 
 
-def facts_for_game(game: dict, quotes: list[dict], log_rows: list[dict],
-                   books: list[str]) -> list[dict]:
+def facts_for_game(game: dict, quotes: list[dict],
+                   log_rows: list[dict]) -> list[dict]:
     """Prop facts for one game. Empty when the id does not parse or no
     DraftKings standard market locks inside the prop window."""
     parsed = parse_game_id(game.get("game_id") or "")
@@ -215,21 +215,26 @@ def facts_for_game(game: dict, quotes: list[dict], log_rows: list[dict],
         status = log_status(played, game_rows, len(matches) if played else 0)
         for line in lines:
             out.append(_one(
-                canonical, season, week, game, pool, quotes, books,
+                canonical, season, week, game, pool,
                 key, market, line, lock, status, matches, played,
             ))
     return out
 
 
-def _one(canonical, season, week, game, pool, quotes, books,
+def _dk_slot(pool, lock, line) -> dict:
+    """DraftKings' quote for this line at the lock timestamp."""
+    lock_at = lock["snapshot_at"]
+    for quote in pool:
+        if quote["snapshot_at"] == lock_at and same_line(quote.get("point"), line):
+            return quote
+    return lock
+
+
+def _one(canonical, season, week, game, pool,
          key, market, line, lock, status, matches, played) -> dict:
-    shop = quotes_at_lock(
-        [q for q in quotes if player_key(q.get("player_name")) == key
-         and q.get("market") == market],
-        lock["snapshot_at"], line, SHOP_LAG_MINUTES)
-    # quotes_at_lock reads `point`. Prop rows from the loader use `point`.
-    over_price, over_book = best_price(shop, market, "home", line, books)
-    under_price, under_book = best_price(shop, market, "away", line, books)
+    slot = _dk_slot(pool, lock, line)
+    over_price, over_book = dk_lock_grade(slot, "home")
+    under_price, under_book = dk_lock_grade(slot, "away")
     close_pool = [q for q in pool if same_line(q.get("point"), line)]
     close = closing_quote(close_pool)
     actual = None
@@ -259,8 +264,8 @@ def _one(canonical, season, week, game, pool, quotes, books,
         "line": line,
         "lock_window_hours": PROP_LOCK_WINDOW_HOURS,
         "lock_snapshot_at": lock["snapshot_at"],
-        "dk_over_price": _num(lock.get("price_home")),
-        "dk_under_price": _num(lock.get("price_away")),
+        "dk_over_price": _num(slot.get("price_home")),
+        "dk_under_price": _num(slot.get("price_away")),
         "grade_over_price": over_price,
         "grade_over_book": over_book,
         "grade_under_price": under_price,

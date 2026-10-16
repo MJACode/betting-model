@@ -21,7 +21,6 @@ from byom.prop_facts import (
 
 ROOT = Path(__file__).resolve().parents[1]
 KICK = datetime(2024, 9, 8, 17, 0, tzinfo=timezone.utc)
-BOOKS = ["draftkings", "fanduel"]
 
 
 def _game(played=True):
@@ -78,7 +77,7 @@ def test_alt_ladders_are_not_facts():
         _q("Lamar Jackson", "player_pass_yds_alternate", "draftkings",
            10, 300.5, -110, -110),
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -115, -105),
-    ], [_log("Lamar Jackson", passing_yards=250)], BOOKS)
+    ], [_log("Lamar Jackson", passing_yards=250)])
     assert [f["market"] for f in facts] == ["player_pass_yds"]
     assert facts[0]["line"] == Decimal("220.5")
 
@@ -86,12 +85,12 @@ def test_alt_ladders_are_not_facts():
 def test_a_quote_outside_24h_is_not_the_lock():
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 30, 199.5, -110, -110),
-    ], [_log("Lamar Jackson", passing_yards=250)], BOOKS)
+    ], [_log("Lamar Jackson", passing_yards=250)])
     assert facts == []
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 30, 199.5, -110, -110),
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 20, 220.5, -115, -105),
-    ], [_log("Lamar Jackson", passing_yards=250)], BOOKS)
+    ], [_log("Lamar Jackson", passing_yards=250)])
     fact = _one(facts, "player_pass_yds")
     assert fact["line"] == Decimal("220.5")
     assert fact["lock_window_hours"] == 24
@@ -102,14 +101,14 @@ def test_anytime_td_is_rush_plus_rec_and_ignores_passing_and_returns():
     A return TD is not in the log, so it cannot be added."""
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", ANYTIME_TD_MARKET, "draftkings", 10, None, -150, None),
-    ], [_log("Lamar Jackson", passing_tds=2, rushing_tds=0, receiving_tds=0)], BOOKS)
+    ], [_log("Lamar Jackson", passing_tds=2, rushing_tds=0, receiving_tds=0)])
     fact = _one(facts, ANYTIME_TD_MARKET)
     assert fact["line"] == Decimal("0.5")
     assert fact["actual"] == Decimal(0)
     assert fact["over_result"] == "loss"
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", ANYTIME_TD_MARKET, "draftkings", 10, None, -150, None),
-    ], [_log("Lamar Jackson", passing_tds=0, rushing_tds=1, receiving_tds=0)], BOOKS)
+    ], [_log("Lamar Jackson", passing_tds=0, rushing_tds=1, receiving_tds=0)])
     assert _one(facts, ANYTIME_TD_MARKET)["over_result"] == "win"
     text = (ROOT / "byom" / "prop_facts.py").read_text(encoding="utf-8")
     assert "Return" in text or "return" in text
@@ -121,11 +120,11 @@ def test_missing_log_is_not_a_loss_and_a_non_participant_is_zero():
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -110, -110),
         _q("Zay Flowers", "player_receptions", "draftkings", 10, 4.5, -120, 100),
     ]
-    missing = facts_for_game(_game(), quotes, [], BOOKS)
+    missing = facts_for_game(_game(), quotes, [])
     assert {f["log_status"] for f in missing} == {"missing_log"}
     assert all(f["over_result"] is None and f["actual"] is None for f in missing)
     logged = facts_for_game(
-        _game(), quotes, [_log("Lamar Jackson", passing_yards=180)], BOOKS)
+        _game(), quotes, [_log("Lamar Jackson", passing_yards=180)])
     lamar = _one(logged, "player_pass_yds")
     flowers = _one(logged, "player_receptions", "Zay Flowers")
     assert lamar["log_status"] == "logged"
@@ -139,7 +138,7 @@ def test_missing_log_is_not_a_loss_and_a_non_participant_is_zero():
 def test_an_unplayed_game_keeps_the_line_and_nulls_the_result():
     facts = facts_for_game(_game(played=False), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -110, -110),
-    ], [], BOOKS)
+    ], [])
     fact = _one(facts, "player_pass_yds")
     assert fact["log_status"] == "unplayed"
     assert fact["line"] == Decimal("220.5")
@@ -148,10 +147,25 @@ def test_an_unplayed_game_keeps_the_line_and_nulls_the_result():
     assert fact["over_units_capped"] is None
 
 
+def test_a_better_fanduel_price_is_not_the_grade():
+    facts = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -115, -105),
+        _q("Lamar Jackson", "player_pass_yds", "fanduel", 10 + 10 / 60,
+           220.5, -105, -115),
+    ], [_log("Lamar Jackson", passing_yards=250)])
+    fact = _one(facts, "player_pass_yds")
+    assert fact["grade_over_book"] == "draftkings"
+    assert fact["grade_over_price"] == Decimal("-115")
+    assert fact["grade_under_book"] == "draftkings"
+    assert fact["grade_under_price"] == Decimal("-105")
+    assert fact["dk_over_price"] == Decimal("-115")
+    assert fact["over_units_uncapped"] == Decimal("1")
+
+
 def test_a_long_price_stores_both_unit_columns():
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 300.5, -400, -110),
-    ], [_log("Lamar Jackson", passing_yards=100)], BOOKS)
+    ], [_log("Lamar Jackson", passing_yards=100)])
     fact = _one(facts, "player_pass_yds")
     assert fact["over_result"] == "loss"
     assert fact["over_units_uncapped"] == Decimal("-4.0000")
@@ -161,6 +175,8 @@ def test_a_long_price_stores_both_unit_columns():
 def test_the_builder_reads_one_game_and_casts_inside_a_case():
     text = (ROOT / "byom" / "prop_load.py").read_text(encoding="utf-8")
     assert "p.game_id = %s" in text
+    assert "bookmaker = 'draftkings'" in text
+    assert "BEST_LINE_BOOKMAKERS" not in text
     assert "ELSE NULL END" in text
     assert "snapshot_at::timestamptz" in text
     assert "AND p.snapshot_at::timestamptz" not in text
@@ -273,7 +289,7 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
             def commit(self):
                 raw.commit()
 
-        first = build_season(Conn(), 2024, apply=True, books=BOOKS)
+        first = build_season(Conn(), 2024, apply=True)
         assert first["written"] == 1
         cur = raw.cursor()
         cur.execute("""
@@ -286,7 +302,7 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
         assert Decimal(str(row[2])) == Decimal("250")
         assert row[3] == "win"
         assert row[4] == "logged"
-        again = build_season(Conn(), 2022, apply=True, books=BOOKS)
+        again = build_season(Conn(), 2022, apply=True)
         assert again["written"] == 0
     finally:
         if raw is not None:

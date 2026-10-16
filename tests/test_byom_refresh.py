@@ -13,8 +13,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 AS_OF = date(2026, 10, 16)
-BOOKS = ["draftkings"]
-
 
 def test_the_job_ships_disabled_and_does_not_write_by_default():
     from tracking.job_queue import JOBS, _validate_byom_refresh
@@ -125,7 +123,7 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         from byom.refresh import refresh
 
         conn = Conn()
-        dry = refresh(conn, apply=False, today=AS_OF, books=BOOKS)
+        dry = refresh(conn, apply=False, today=AS_OF)
         assert dry["season"] == 2026
         assert dry["as_of"] == "2026-10-16"
         assert dry["apply"] is False
@@ -145,7 +143,7 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         assert cur.fetchone()[0] == 2
 
         conn.calls.clear()
-        wrote = refresh(conn, apply=True, today=AS_OF, books=BOOKS)
+        wrote = refresh(conn, apply=True, today=AS_OF)
         assert wrote["written_game_facts"] == 3
         assert wrote["written_prop_facts"] == 1
         touched = set()

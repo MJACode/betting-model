@@ -19,7 +19,6 @@ from byom.game_facts import (
     capture_game,
     parse_date,
     parse_game_id,
-    regrade_from_shop,
     shop_markets_to_replace,
     shop_windows,
 )
@@ -28,8 +27,9 @@ from byom.game_facts import (
 # (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
 # measured 2026-10-16). The index is (game_id, market). DraftKings inside
 # the lock window comes first; other books are read only inside the shop
-# slices shop_windows() names. apply=false uses the same reads and writes
-# nothing.
+# slices shop_windows() names, as stored reference. The grade is
+# DraftKings' own price on the lock snapshot. apply=false uses the same
+# reads and writes nothing.
 _ODDS_SNAPSHOT = """
 CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
      THEN o.snapshot_at::timestamptz
@@ -258,11 +258,11 @@ def _load_shop(conn, season: int) -> dict[str, list[dict]]:
     return out
 
 
-def season_facts_and_shop(conn, season: int, books: list[str],
+def season_facts_and_shop(conn, season: int,
                           game_ids: list[str] | None = None):
     """Facts this season would write, and the shop rows from the quotes
-    still stored. No INSERT. Grades use the shop already captured when
-    that row is still at this DraftKings line.
+    still on hand. No INSERT. The grade is DraftKings' own price on the
+    lock snapshot. Stored shop rows are not the grade.
 
     `game_ids` None reads every game in the season. A list reads only
     those games. Rest days still come from the whole season's schedule.
@@ -277,7 +277,6 @@ def season_facts_and_shop(conn, season: int, books: list[str],
     else:
         wanted = set(game_ids)
         games = [game for game in schedule if game["game_id"] in wanted]
-    stored = _load_shop(conn, season)
     facts = []
     shops = []
     for game in games:
@@ -286,18 +285,18 @@ def season_facts_and_shop(conn, season: int, books: list[str],
             continue
         quotes = _dk_quotes(conn, ids)
         quotes += _shop_quotes(conn, ids, shop_windows(quotes))
-        fact, fresh = capture_game(game, quotes, played, books)
+        fact, fresh = capture_game(game, quotes, played)
         if fact is None:
             continue
-        regrade_from_shop(fact, stored.get(fact["canonical_key"], []), books)
         facts.append(fact)
         shops.extend(fresh)
     return facts, shops
 
 
-def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
+def facts_for_season(conn, season: int,
+                     game_ids: list[str] | None = None) -> list[dict]:
     """The facts this season would write. No INSERT."""
-    facts, _shops = season_facts_and_shop(conn, season, books)
+    facts, _shops = season_facts_and_shop(conn, season, game_ids=game_ids)
     return facts
 
 
@@ -347,21 +346,17 @@ def _write_shop(conn, season: int, shops: list[dict], stored: dict) -> int:
 
 
 def build_season(conn, season: int, apply: bool = False,
-                 books: list[str] | None = None,
                  game_ids: list[str] | None = None) -> dict:
     """One season. apply=False writes nothing.
 
     `game_ids` limits which games are read. None is the whole season.
     """
-    if books is None:
-        from config import BEST_LINE_BOOKMAKERS
-        books = list(BEST_LINE_BOOKMAKERS)
     if season < DK_HISTORY_START_SEASON:
         return {
             "season": season, "facts": 0, "written": 0, "shop": 0,
             "skipped": "before DraftKings history",
         }
-    facts, shops = season_facts_and_shop(conn, season, books, game_ids=game_ids)
+    facts, shops = season_facts_and_shop(conn, season, game_ids=game_ids)
     written = 0
     if apply:
         stored = _load_shop(conn, season)
@@ -382,13 +377,12 @@ def seasons_in_games(conn) -> list[int]:
     return [int(row[0]) for row in rows]
 
 
-def build_seasons(conn, seasons, apply: bool = False,
-                  books: list[str] | None = None) -> dict:
+def build_seasons(conn, seasons, apply: bool = False) -> dict:
     if seasons is None:
         seasons = seasons_in_games(conn)
     elif isinstance(seasons, int):
         seasons = [seasons]
-    built = [build_season(conn, int(s), apply=apply, books=books) for s in seasons]
+    built = [build_season(conn, int(s), apply=apply) for s in seasons]
     if apply:
         conn.commit()
     return {"apply": apply, "seasons": built}
