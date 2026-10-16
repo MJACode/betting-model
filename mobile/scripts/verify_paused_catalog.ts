@@ -19,6 +19,7 @@ import {
   MODEL_META,
   BET_TYPE_GROUPS,
   betTypeGroups,
+  sportHasLivePropModel,
   betTypeLabel,
   betTypePickerGroups,
   betTypeStatusSuffix,
@@ -89,8 +90,14 @@ check('an active batter prop is still a bet type you can build on',
       !mlbProps?.modelIds.includes('mlb_prop_batter_hr'));
   check('NFL has no moneyline model, so it does not invent an ML row',
     row('NFL').join(',') === 'Spread|Spread line,Player props|All player markets');
-  check('NBA keeps all three, with Spread rather than a strategy name',
-    row('NBA').join(',') === 'ML|Moneyline,Spread|Spread line,Player props|All player markets');
+  // The NBA rebuild retired nba_moneyline and nba_spread (config
+  // RETIRED_MODELS); the one live NBA model is the nba_prop_market rule, so
+  // the picker offers Player props and nothing else for NBA.
+  check('NBA is Player props only — its moneyline and spread are retired',
+    row('NBA').join(',') === 'Player props|All player markets');
+  const nbaProps = betTypePickerGroups().find((g) => g.sport === 'NBA')?.choices.find((c) => c.slot === 'props');
+  check('NBA Player props writes the live nba_prop_market rule, not a retired per-stat model',
+    nbaProps?.modelIds.join(',') === 'nba_prop_market');
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',
     row('NCAAF').join(',') === 'Spread|Spread line');
   const ncaafLine = betTypePickerGroups().find((g) => g.sport === 'NCAAF')?.choices.find((c) => c.slot === 'line');
@@ -145,6 +152,14 @@ check('propModelForStat still resolves a live batter prop (walks)',
   propModelForStat(walksStat) === 'mlb_prop_batter_walks');
 check('a pick a paused model already made still opens its player\'s stat page',
   statForPropModel('mlb_prop_batter_hits')?.key === 'hits');
+
+// ── "Our picks on <player>": does any live prop model price this sport? ─────
+// Read from the model catalog. The NBA and NFL live prop models are
+// multi-market rules with no single stat, so the old stat-catalog test told an
+// NBA or NFL player page that no prop model priced it.
+check('a live prop model prices NBA players (nba_prop_market)', sportHasLivePropModel('NBA'));
+check('a live prop model prices NFL players (nfl_prop_market)', sportHasLivePropModel('NFL'));
+check('no prop model prices NCAAF players', !sportHasLivePropModel('NCAAF'));
 
 // ── Server flag wins, same helper every surface uses ────────────────────────
 setServerThresholds({

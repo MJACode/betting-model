@@ -85,6 +85,7 @@ export const PROB_ONLY_MODELS = new Set<string>([
 
 export const RETIRED_PROB_ONLY_MODELS = new Set<string>([
   'mlb_prop_batter_hr',
+  'nba_prop_player_dd',
 ]);
 
 export const PAUSED_MODELS = new Set<string>([

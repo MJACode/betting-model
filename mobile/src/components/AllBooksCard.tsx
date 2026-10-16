@@ -5,9 +5,8 @@ import {
   allBookPrices,
   bookName,
   formatSideLine,
-  gameMarketForModel,
   isBettableBook,
-  propMarketForModel,
+  marketForPick,
   MODEL_BOOK,
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
@@ -39,7 +38,10 @@ export function AllBooksCard({
   pick: Pick;
   bookRows: BookPricedRow[] | undefined;
 }) {
-  const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
+  // marketForPick reads a multi-market rule's prop_market off the row; without
+  // it those picks' rows drew with no Line column, a price at another number
+  // looking like the same bet.
+  const market = marketForPick(pick);
   const quotes = allBookPrices(bookRows ?? [], pick.pick_side, market);
 
   // One book pricing a side isn't a comparison — nothing to shop.

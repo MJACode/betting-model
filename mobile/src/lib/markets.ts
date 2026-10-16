@@ -121,6 +121,18 @@ export function propMarketForModel(modelId: string): string | null {
 }
 
 /**
+ * The player_prop_odds market a prop PICK is priced in. One model id per
+ * market resolves through its model; the three multi-market rules
+ * (nba_prop_market, wnba_prop_market, nfl_prop_market) are ONE id across
+ * several markets, so the model says nothing and the row's own prop_market
+ * is the answer. Without the fallback those picks loaded no other books, no
+ * line history and no closing-line market.
+ */
+export function propMarketForPick(pick: { model_id: string; prop_market?: string | null }): string | null {
+  return propMarketForModel(pick.model_id) ?? pick.prop_market ?? null;
+}
+
+/**
  * Player name for a prop pick, parsed from its label. Prop odds are keyed by
  * player_name (not player_id), so this is how a prop pick is matched to its
  * lines. Label format is set by scorer._make_prop_pick:
@@ -501,7 +513,8 @@ export function bestPriceForSide(rows: BookPricedRow[], side: PickSide): BookPri
 export function marketForPick(pick: Pick): string | null {
   const id = pick.model_id;
   if (!id) return null;
-  return gameMarketForModel(id) ?? propMarketForModel(id);
+  // propMarketForPick, not the model: a multi-market rule's market is on the row.
+  return gameMarketForModel(id) ?? propMarketForPick(pick);
 }
 
 /**
@@ -623,7 +636,7 @@ export function displayQuoteForPick(
   // computed from, so it wins over any fresher snapshot (see the doc block above).
   if (book === MODEL_BOOK && storedBook === MODEL_BOOK) return storedQuote();
 
-  const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
+  const market = marketForPick(pick); // the row's prop_market for a multi-market rule
   const row = rows.find((r) => r.bookmaker === book);
   const price = row ? priceForSide(row, pick.pick_side) : null;
   if (row && price != null) {
@@ -1647,6 +1660,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // often the evening before, not at "the first scoring run of the day".
   // The NBA prop rule (scripts/nba_prop_market_card.py) is the same: it posts
   // once, 45-70 minutes before tip, off the books' prices, with no lineup check.
+  // Like saves, it carries a void line: the books void a player prop when he
+  // does not play, and settlement does too (paper_tracker's DNP branch writes
+  // NO_ACTION for an nba_player with no box-score row in a logged game).
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
@@ -1659,7 +1675,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
       note:
         'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
         'shown.' +
-        (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : ''),
+        (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
+        (pick.model_id === 'nba_prop_market' ? ' Void if the player doesn’t play.' : ''),
     };
   }
 

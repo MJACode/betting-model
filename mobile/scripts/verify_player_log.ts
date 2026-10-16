@@ -27,6 +27,7 @@ import {
   chipsForLoadedPlayer,
   chipsForPlayer,
   defaultChipForPlayer,
+  detailStatForPick,
   detailStatForPropModel,
   filledChipCounts,
   gameContextLine,
@@ -44,7 +45,9 @@ import {
   windowOptionsFor,
   type PlayerLogEntry,
 } from '../src/lib/playerLog';
-import { statForPropModel, type StatDef } from '../src/lib/statCatalog';
+import { statForPropMarket, statForPropModel, type StatDef } from '../src/lib/statCatalog';
+import { playerPickRecord } from '../src/lib/playerDetail';
+import type { SettledPick } from '../src/types';
 
 let failures = 0;
 function check(name: string, ok: boolean) {
@@ -191,6 +194,64 @@ check('the MLB outs prop swaps Innings for Outs',
 check('a game market has no player stat', detailStatForPropModel('mlb_moneyline') === null);
 check('the NFL market-relative rule has no single stat (one id spans eight markets)',
   detailStatForPropModel('nfl_prop_market') === null);
+
+// ── A multi-market rule's pick → the stat its row's prop_market is ──────────
+// nba_prop_market, wnba_prop_market and nfl_prop_market are one model id across
+// several markets, so the pick's own prop_market names the stat its chart and
+// "View stats" link open on. The NBA markets resolve through the retired
+// per-stat models' rows, which is why those rows stay in PROP_MARKET_BY_MODEL.
+check('an NBA rule pick on points opens Points',
+  detailStatForPick({ model_id: 'nba_prop_market', prop_market: 'player_points' })?.label === 'Points');
+check('an NBA rule pick on PRA opens PRA',
+  detailStatForPick({ model_id: 'nba_prop_market', prop_market: 'player_points_rebounds_assists' })?.label === 'PRA');
+check('an NBA rule pick resolves on the NBA board, not the WNBA one',
+  detailStatForPick({ model_id: 'nba_prop_market', prop_market: 'player_threes' })?.sport === 'NBA');
+check('a WNBA rule pick on assists opens the WNBA Assists stat',
+  (() => {
+    const d = detailStatForPick({ model_id: 'wnba_prop_market', prop_market: 'player_assists' });
+    return d?.label === 'Assists' && d.sport === 'WNBA';
+  })());
+check('an NFL rule pick on receptions opens Receptions',
+  detailStatForPick({ model_id: 'nfl_prop_market', prop_market: 'player_receptions' })?.label === 'Receptions');
+check('an NFL rule pick on receiving yards opens Rec Yards',
+  detailStatForPick({ model_id: 'nfl_prop_market', prop_market: 'player_reception_yds' })?.label === 'Rec Yards');
+check('a rule pick with no prop_market still has no single stat',
+  detailStatForPick({ model_id: 'nba_prop_market', prop_market: null }) === null);
+check('a market no stat is priced in has no stat',
+  detailStatForPick({ model_id: 'nba_prop_market', prop_market: 'player_nonsense' }) === null);
+check('a per-stat model ignores the row and keeps its own stat',
+  detailStatForPick({ model_id: 'mlb_prop_batter_hits', prop_market: 'player_points' })?.label === 'Hits');
+check('the outs swap holds on the pick path too',
+  detailStatForPick({ model_id: 'mlb_prop_pitcher_outs' })?.label === 'Outs');
+check('statForPropMarket needs the sport: no NCAAF stat is priced in an NBA market',
+  statForPropMarket('NCAAF', 'player_points') === null);
+
+// ── "Our picks on <player>": a multi-market rule splits by market ───────────
+{
+  const settled = (over: Partial<SettledPick>): SettledPick => ({
+    pick_id: 1, game_id: 'g', model_id: 'nba_prop_market', sport: 'NBA', game_date: '2026-10-20',
+    game_time: null, pick_side: 'under', pick_label: 'A Player Under 24.5 Pts', model_probability: 0.55,
+    edge: 0.05, dk_odds: -110, scored_line: 24.5, signal_type: 'BET', confidence_tier: null,
+    condition_status: null, result: 'WIN', profit_flat: 90.91, player_id: '1', public_bet_pct: null,
+    injury_flag: null, clv_pct: null, clv_method: null, decision_book: 'draftkings', decision_odds: -110,
+    decision_edge: 0.05, is_live: false, prop_market: 'player_points',
+    ...over,
+  } as SettledPick);
+  const rec = playerPickRecord([
+    settled({ pick_id: 1, prop_market: 'player_points' }),
+    settled({ pick_id: 2, prop_market: 'player_points', result: 'LOSS', profit_flat: -100 }),
+    settled({ pick_id: 3, prop_market: 'player_rebounds', pick_label: 'A Player Under 8.5 Reb' }),
+    settled({ pick_id: 4, model_id: 'mlb_prop_batter_runs', sport: 'MLB', prop_market: null, pick_side: 'over' }),
+  ]);
+  const labels = rec.lines.map((l) => l.label).sort().join(',');
+  check('a multi-market rule gets one line per market, named for its stat',
+    labels === 'Points,Rebounds,Runs');
+  check('each line has its own key, so two lines of one model never share a React key',
+    new Set(rec.lines.map((l) => l.key)).size === rec.lines.length);
+  const pts = rec.lines.find((l) => l.label === 'Points');
+  check('the points line carries both its bets', pts?.wins === 1 && pts.losses === 1 && pts.unders === 2);
+  check('the total still counts every bet once', rec.settled === 4);
+}
 
 // ── The tabs a player actually fills ────────────────────────────────────────
 // Matt, 2026-09-19: a quarterback was offered a Defense tab of ten zeroes.

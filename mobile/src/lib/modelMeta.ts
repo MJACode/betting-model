@@ -264,9 +264,12 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'Ast',
   },
+  // '(vs Pinnacle)', one name for the three multi-market prop rules: each bets
+  // a retail price against Pinnacle's, and the app already explains Pinnacle.
+  // 'market-relative' was explained nowhere.
   wnba_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'WNBA Props (market-relative)',
+    longLabel: 'WNBA Props (vs Pinnacle)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -543,9 +546,10 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // outlier. ONE id across every market it trades — the validated number is
   // pooled, and the market itself is on picks.prop_market, so per-market
   // breakdowns are a query rather than eight entries here.
+  // Named '(vs Pinnacle)' like nba_prop_market and wnba_prop_market.
   nfl_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'NFL Props (market-relative)',
+    longLabel: 'NFL Props (vs Pinnacle)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -769,6 +773,21 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('golf')) return 'GOLF';
   return 'MLB';
+}
+
+/**
+ * Does any prop model that is neither retired nor paused price this sport's
+ * players? Read from the model catalog, not the stat catalog: the three
+ * multi-market rules (nba_prop_market, nfl_prop_market, wnba_prop_market)
+ * map to no single stat, so the stat-catalog test said NBA and the NFL had no
+ * prop model while both had a live one. NCAAF has only game models, so its
+ * player page still says no prop model prices it. Call it at render: the
+ * pause flag can come from the server.
+ */
+export function sportHasLivePropModel(sport: BetTypeSport): boolean {
+  return Object.keys(MODEL_META).some(
+    (id) => sportOfModel(id) === sport && isPropModel(id) && !isModelRetired(id) && !isModelPaused(id),
+  );
 }
 
 export interface BetTypeOption {

@@ -419,3 +419,17 @@ export function statForPropModel(modelId: string): StatDef | null {
   }
   return null;
 }
+
+/**
+ * Inverse of propMarketForStat on one sport's board: the stat a book market
+ * is. For a pick from a multi-market rule (nba_prop_market, wnba_prop_market,
+ * nfl_prop_market) the model id names no stat, and the row's prop_market is
+ * the only thing that does. The sport is required because NBA and WNBA share
+ * both column keys and market names ('player_points'). Retirement-blind like
+ * propMarketForStat: the NBA market names come through the retired per-stat
+ * models' PROP_MARKET_BY_MODEL rows, which is why those rows stay.
+ */
+export function statForPropMarket(sport: Sport, market: string | null | undefined): StatDef | null {
+  if (!market) return null;
+  return STAT_CATALOG.find((d) => d.sport === sport && propMarketForStat(d) === market) ?? null;
+}

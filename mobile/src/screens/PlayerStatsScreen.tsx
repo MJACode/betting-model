@@ -86,7 +86,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
-import { STAT_CATALOG } from '@/lib/statCatalog';
+import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
   bookLineFromThreshold,
   formatRecordLine,
@@ -964,7 +964,10 @@ export function PlayerStatsScreen() {
               record={detail.record}
               loading={detail.picksLoading}
               error={detail.picksError}
-              sportHasPropModel={STAT_CATALOG.some((d) => d.sport === sport && propModelForStat(d) != null)}
+              // From the model catalog: NBA's and the NFL's live prop models are
+              // multi-market rules with no single stat, so a stat-catalog test
+              // said "No prop model prices NBA players yet" while one did.
+              sportHasPropModel={sportHasLivePropModel(sport)}
               sport={sport}
             />
 
@@ -1586,7 +1589,7 @@ function PickRecordCard({
           </View>
           {record.lines.map((l) => (
             <ReadRow
-              key={l.modelId}
+              key={l.key}
               label={l.label}
               value={formatRecordLine(l)}
               note={
