@@ -151,8 +151,13 @@ def test_every_buying_ingestor_keys_its_resume_on_a_source_marker(shape):
         src = p.read_text(encoding="utf-8")
         if "requests.get" not in src and "_insert_odds" not in src:
             continue
-        assert "SOURCE_PREFIX" in src, f"{p.name}: no source marker to resume on"
-        assert "source LIKE" in src or "source like" in src, (
+        # Either shape keys the resume on a `source` value the ingestor owns:
+        # a prefix matched with LIKE, or one exact marker matched with =.
+        assert "SOURCE_PREFIX" in src or "SOURCE = " in src, (
+            f"{p.name}: no source marker to resume on")
+        reads_back = any(k in src for k in (
+            "source LIKE", "source like", "source = %s", "source=%s"))
+        assert reads_back, (
             f"{p.name}: nothing reads the marker back, so a re-run re-buys")
 
 
