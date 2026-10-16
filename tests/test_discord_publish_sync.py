@@ -27,6 +27,11 @@ from tracking.discord_publish import (  # noqa: E402
     void_hidden_from_board,
 )
 from tracking.publish_keys import live_lock_key_sql, lock_key_sql  # noqa: E402
+from tests._node import node_exe, node_strips_types  # noqa: E402
+
+NODE = node_exe() or "node"
+needs_node = pytest.mark.skipif(not node_strips_types(),
+                                reason="node >= 22.6 not available")
 
 MIG = ROOT / "data/migrations/discord_publish_state_2026_09_23.sql"
 
@@ -173,6 +178,7 @@ def test_void_picks_does_not_retract_discord():
     assert main.index("conn.commit()") < main.index("announce_posted_voids(")
 
 
+@needs_node
 def test_the_app_predicate_matches():
     """The board and this module are one decision. Drift here is the desync."""
     script = r"""
@@ -266,7 +272,7 @@ if (discordPublishForPick("VOID", "G:m", published, present) !== "unpublished")
   throw new Error("a notice present stayed published");
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -276,6 +282,7 @@ if (discordPublishForPick("VOID", "G:m", published, present) !== "unpublished")
     assert "voidNoticeFromChunk(error" in body
 
 
+@needs_node
 def test_a_published_void_keeps_track_and_betslip():
     """2026-09-26: Ailin Perez ML (pick 2482412) was VOID + published. The
     board drew it, but Track and betslip gated on `result == null`, and a VOID
@@ -299,7 +306,7 @@ for (const [result, condition_status, discordPublish, want] of cases) {
 }
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -312,6 +319,7 @@ for (const [result, condition_status, discordPublish, want] of cases) {
         assert "hasPricedLine(pick) && pick.result == null" not in src
 
 
+@needs_node
 def test_a_tracked_void_reads_not_graded_and_detail_closes_when_over():
     """A VOID keeps result NO_ACTION for good. Tracked, it must not read as
     "No action" (a scratched fight) before the event, and PickDetail must
@@ -326,7 +334,7 @@ const win = trackedBetStatus({ result: "WIN", condition_status: null });
 if (win !== "won") throw new Error("win " + win);
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
