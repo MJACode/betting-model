@@ -84,10 +84,11 @@ the opener nor the close. The first apply has to land before
 the first DraftKings snapshot at or under `PROP_LOCK_WINDOW_HOURS` (24).
 **That window is UNCONFIRMED.** It is not the 120h game lock and it is
 not a check constraint. A market key ending in `_alternate` is an alt
-ladder and is not built. The grade is the best price at that line among
-`BEST_LINE_BOOKMAKERS`. Closing prices are stored and are not the grade.
-Each side stores `*_units_uncapped` and `*_units_capped`. There is no
-stake column.
+ladder and is not built. The grade is DraftKings' own price on that
+lock snapshot. `grade_*_book` is `draftkings`. Another book's price is
+not the grade. Closing prices are stored and are not the grade.
+Each side stores `*_units_uncapped` and `*_units_capped`. Both are
+results. There is no stake column.
 
 The stat is `nfl_player_game_log`. `log_status` says which rule fired:
 
