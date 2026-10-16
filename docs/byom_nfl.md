@@ -26,7 +26,18 @@ grade. Results are 1u-to-win units, with no risk cap and no stake. Pushes
 and ties are stored.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
-worker and was not applied by the change that added it. The tables are
-empty until a later change builds them. That change does not belong in
-`jobs/declared_jobs.json`: a merge of the schema must not backfill
-production.
+worker and was not applied by the change that added it. The tables stay
+empty until someone runs the builder with `--apply`. That job is
+`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false,
+and the job is not in `jobs/declared_jobs.json`, so a merge does not
+backfill production.
+
+The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
+`byom/constants.py` holds `LOCK_WINDOW_HOURS` (120) and
+`NEAR_LOCK_WINDOW_HOURS` (24). Both are UNCONFIRMED. Seasons before
+`DK_HISTORY_START_SEASON` (2020) are refused. The grade is the best
+American price, per side, among `BEST_LINE_BOOKMAKERS` on DraftKings'
+number, from a quote in the 30 minutes up to that lock. A quote on a
+different number does not count. History is preferred over `odds` when
+both have a lock for that market. `line_source` records which table.
+Closing prices are stored and are not the grade. There is no 3u risk cap.
