@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
+import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
@@ -35,8 +35,19 @@ import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
 import { openForAction } from '@/lib/discordPublish';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
-import { gameStatusSpeech, unitsSpeech } from '@/lib/a11y';
+import { gameStatusSpeech, sharpScoreSpeech, unitsSpeech } from '@/lib/a11y';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
+import {
+  signalsBetHeadline,
+  signalsContextLine,
+  signalsContextTime,
+  signalsCtaLabel,
+  signalsHeroSpeech,
+  signalsPriceText,
+  signalsStakeUnits,
+  signalsTeamsSpeech,
+  trueMinus,
+} from '@/lib/signalsCard';
 import {
   heroPriceSpeech,
   lockedCaptionText,
@@ -72,12 +83,19 @@ interface Props {
    * place of the signal badge, no stake, no Sharp Score, no book hand-off and no
    * betslip button (the slip resolves legs from active models only). */
   paused?: boolean;
+  /** Signals board (Designer Option A): the bet is the hero. Today and Live
+   * keep the board layout. */
+  layout?: 'board' | 'signals';
+  /** NCAAF school → abbreviation for the Signals compact line. */
+  teamAbbrevs?: ReadonlyMap<string, string> | null;
 }
 
 export function PickCard({
   item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
   showSignalBadge = false,
   paused = false,
+  layout = 'board',
+  teamAbbrevs = null,
 }: Props) {
   const { pick, game } = item;
   // Golf picks are per-player on one tournament row (home_team = event name,
@@ -241,23 +259,64 @@ export function PickCard({
   // VoiceOver (audit M8): the card is ONE accessible element, so its label has
   // to carry what the eye gets from the whole card — game status and time,
   // the stake, when it posted — not just matchup, pick and edge.
+  // Signals (Option A) reads the bet first, then the teams, the time, the
+  // edge, and the rest of the cells. Today / Live keep the old order.
   const startedSpoken = startedText
     ? gameStartedSpeech(decisionOdds(pick), bookName(storedQuoteBook(pick)))
     : null;
+  const signals = layout === 'signals';
+  const contextSport = game?.sport ?? pick.sport;
+  const contextWhen = game?.commence_time ?? pick.game_time;
+  const contextTime = signalsContextTime(gameDayLabelET(contextWhen), formatGameTimeET(contextWhen));
+  const decisionPrice = decisionOdds(pick);
+  const signalsPrice =
+    decisionPrice == null
+      ? null
+      : signalsPriceText(formatAmerican(decisionPrice), bookLabel(storedQuoteBook(pick)));
+  const signalsCta = handoff
+    ? signalsCtaLabel(
+        bookLabel(handoff.bookmaker),
+        handoff.price == null ? null : formatAmerican(handoff.price),
+      )
+    : null;
+  const signalsStakeShown = stakeCaption ? formatUnits(signalsStakeUnits(stake)) : null;
+  const signalsReturn =
+    flagged || ev == null ? '—' : formatPctSigned(ev);
   const cardLabel = [
-    matchup,
-    gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
-    pick.pick_label,
-    paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
+    signals ? signalsBetHeadline(pick.pick_label) : matchup,
+    signals
+      ? signalsTeamsSpeech(contextSport, game?.away_team ?? '', game?.home_team ?? '')
+      : gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
+    signals ? (contextTime || null) : pick.pick_label,
+    signals ? null : (paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type)),
     // The reason in words (lib/heroPriceText.ts): "looks off" for an
     // implausible edge or a moved price; for an old price, which book has not
     // updated it and since when.
     flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
+    signals ? `Model chance ${formatPct(pick.model_probability)}` : null,
+    signals ? (flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`) : null,
     // The full book name, and the lock whenever the eye sees "Locked".
-    heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
-    stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
+    // Signals speaks the decision price (that is the 22pt number). A moved
+    // price is the next sentence. Stale and untracked keep heroPriceSpeech.
+    signals && heroPrice && !heroPrice.stale && !heroPrice.untracked
+      ? signalsHeroSpeech({
+          decisionPrice: formatAmerican(heroPrice.lockedPrice),
+          book: bookName(heroPrice.book),
+          currentPrice:
+            heroPrice.kind === 'now' && heroPrice.price != null && heroPrice.price !== heroPrice.lockedPrice
+              ? formatAmerican(heroPrice.price)
+              : null,
+        })
+      : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null),
+    signals
+      ? (stakeCaption ? `Stake ${unitsSpeech(signalsStakeShown ?? '')}` : 'Stake unavailable')
+      : (stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null),
     timing ? timing.label : null,
     startedSpoken,
+    signals && sharp ? sharpScoreSpeech(sharp.score, sharp.band) : null,
+    signals && gameStatus(game, liveState).kind !== 'pre'
+      ? gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time))
+      : null,
   ]
     .filter((p): p is string => Boolean(p))
     .join('. ');
@@ -268,9 +327,11 @@ export function PickCard({
     ...(handoff
       ? [{
           name: 'book',
-          label: handoff.price == null
-            ? `${handoff.verb} ${bookName(handoff.bookmaker)}`
-            : `${handoff.verb} at ${bookName(handoff.bookmaker)}`,
+          label: signals && signalsCta
+            ? signalsCta
+            : handoff.price == null
+              ? `${handoff.verb} ${bookName(handoff.bookmaker)}`
+              : `${handoff.verb} at ${bookName(handoff.bookmaker)}`,
         }]
       : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
@@ -296,6 +357,8 @@ export function PickCard({
       accessibilityHint="Opens the full breakdown, including recent form and matchup context."
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
+      {layout !== 'signals' ? (
+      <>
       <View style={styles.headerRow}>
         <Text style={styles.matchup} numberOfLines={1}>
           {matchup}
@@ -611,6 +674,274 @@ export function PickCard({
           </Text>
         </View>
       ) : null}
+      </>
+      ) : (
+      <>
+      <View style={styles.contextRow}>
+        <Text style={styles.context}>
+          {signalsContextLine({
+            sport: contextSport,
+            away: game?.away_team ?? '',
+            home: game?.home_team ?? '',
+            timeLabel: contextTime,
+            abbrevs: teamAbbrevs,
+          })}
+        </Text>
+        <View style={styles.contextTrail}>
+          {preview ? (
+            <View style={[styles.labelChip, styles.previewBadge]}>
+              <Text style={styles.previewBadgeText}>PREVIEW</Text>
+            </View>
+          ) : paused ? (
+            <View style={[styles.labelChip, styles.previewBadge]}>
+              <Text style={styles.previewBadgeText}>PAUSED</Text>
+            </View>
+          ) : null}
+          {flagged ? (
+            <View
+              style={[styles.labelChip, styles.priceCheckChip]}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="alert-circle-outline"
+                size={12}
+                color={colors.medInk}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.priceCheckText}>{priceCheckChipText(check)}</Text>
+            </View>
+          ) : null}
+          {showSharp && sharp ? (
+            <View style={styles.labelChip}>
+              <SharpScorePill score={sharp.score} band={sharp.band} />
+            </View>
+          ) : null}
+          {showTier && pick.confidence_tier ? (
+            <View style={[styles.labelChip, styles.tierChip, tierBg(pick.confidence_tier)]}>
+              <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
+                {pick.confidence_tier}
+              </Text>
+            </View>
+          ) : null}
+          {gameStatus(game, liveState).kind !== 'pre' ? (
+            <GameStatusPill game={game} live={liveState} />
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.betRow}>
+        <Text style={styles.betLeft}>{signalsBetHeadline(pick.pick_label)}</Text>
+        {signalsPrice ? (
+          <Text style={styles.betRight}>{signalsPrice}</Text>
+        ) : null}
+      </View>
+      {heroPrice?.showLockedCaption && (heroPrice.stale || heroPrice.untracked) ? (
+        <Text style={styles.lockedCaption}>{trueMinus(lockedCaptionText(heroPrice))}</Text>
+      ) : null}
+
+      <View style={styles.metrics}>
+        <View style={styles.metric}>
+          <Text style={[styles.metricValue, { color: flagged ? colors.textSecondary : edgeColor }]}>
+            {edgeText}
+          </Text>
+          <Text style={styles.metricLabel}>Edge</Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={styles.metricValue}>{formatPct(pick.model_probability)}</Text>
+          <Text style={styles.metricLabel}>Model chance</Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={[styles.metricValue, signalsReturn === '—' ? styles.metricMuted : null]}>
+            {signalsReturn}
+          </Text>
+          <Text style={styles.metricLabel}>Expected return</Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={[styles.metricValue, signalsStakeShown == null ? styles.metricMuted : null]}>
+            {signalsStakeShown ?? '—'}
+          </Text>
+          <Text style={styles.metricLabel}>Stake</Text>
+        </View>
+      </View>
+
+      {hasExtras ? (
+        <View style={styles.extrasRow}>
+          {movementSummary && hero.has('movement') ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={movementSummary.icon}
+                size={13}
+                color={inkFor(movementSummary.color)}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[
+                  styles.extraText,
+                  { color: inkFor(movementSummary.color), fontWeight: font.weight.medium },
+                ]}
+              >
+                {movementSummary.label}
+              </Text>
+            </View>
+          ) : null}
+          {contra ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={contra.tone === 'sharp' ? 'shield-checkmark-outline' : 'people-outline'}
+                size={13}
+                color={contra.tone === 'sharp' ? colors.betInk : colors.medInk}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[
+                  styles.extraText,
+                  {
+                    color: contra.tone === 'sharp' ? colors.betInk : colors.medInk,
+                    fontWeight: font.weight.medium,
+                  },
+                ]}
+              >
+                {contra.label} · {Math.round(contra.betPct)}% public
+              </Text>
+            </View>
+          ) : null}
+          {crowd ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="people-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>
+                {Math.round(crowd.betPct)}% public on this side
+              </Text>
+            </View>
+          ) : null}
+          {showClv && hero.has('clv') ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={(clvRounded ?? 0) < 0 ? 'trending-down-outline' : 'trending-up-outline'}
+                size={13}
+                color={clvInk}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: clvInk, fontWeight: font.weight.medium }]}>
+                CLV {formatClv(pick.clv_pct!)}
+              </Text>
+            </View>
+          ) : null}
+          {previewLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="lock-open-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{previewLabel}</Text>
+            </View>
+          ) : null}
+          {pausedLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="pause-circle-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{pausedLabel}</Text>
+            </View>
+          ) : null}
+          {pick.injury_flag ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="medkit-outline"
+                size={13}
+                color={colors.medInk}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, styles.injuryText]}>
+                {pick.injury_flag}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {handoff || startedText || canTrack || canSlip ? (
+        <View style={styles.signalsActions}>
+          {startedText ? (
+            <View
+              style={styles.startedLine}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="lock-closed"
+                size={12}
+                color={colors.textSecondary}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.startedText}>
+                {trueMinus(startedText)}
+              </Text>
+            </View>
+          ) : signalsCta && handoff ? (
+            <Pressable
+              onPress={() => {
+                void openBookBetslip(handoff.bookmaker, handoff.link);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={signalsCta}
+              style={({ pressed }) => [styles.handoffNavy, pressed && styles.pressed]}
+            >
+              <Text style={styles.handoffNavyText}>
+                {signalsCta}
+              </Text>
+            </Pressable>
+          ) : (
+            <View />
+          )}
+          <View style={styles.actionsRight}>
+            {canSlip ? (
+              <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} tall />
+            ) : null}
+            {canTrack ? (
+              <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} tall />
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {timing ? (
+        <View style={styles.timingRow}>
+          <Ionicons
+            name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
+            size={13}
+            color={timing.kind === 'live' ? colors.betInk : colors.textTertiary}
+            style={styles.extraIcon}
+          />
+          <Text
+            style={[
+              styles.extraText,
+              styles.timingText,
+              timing.kind === 'live'
+                ? { color: colors.betInk, fontWeight: font.weight.medium }
+                : null,
+            ]}
+          >
+            {timing.label}
+          </Text>
+        </View>
+      ) : null}
+      </>
+      )}
     </Pressable>
   );
 }
@@ -947,5 +1278,112 @@ const styles = StyleSheet.create({
   // wrapping (UX review, 2026-09-03).
   timingText: {
     flexShrink: 1,
+  },
+  // Signals (Option A). The context line wraps at large text instead of
+  // truncating. The bet is 22pt (title2) and may wrap the price onto a
+  // second line. Metric cells shrink-wrap so "Expected return" is not clipped.
+  contextRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: spacing.sm,
+    rowGap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  context: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '60%',
+    minWidth: 0,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  contextTrail: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  betRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    columnGap: spacing.md,
+    rowGap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  betLeft: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '55%',
+    minWidth: 0,
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  betRight: {
+    flexGrow: 0,
+    flexShrink: 0,
+    marginLeft: 'auto',
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  metrics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    columnGap: spacing.sm,
+    rowGap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  metric: {
+    flexGrow: 1,
+    flexShrink: 0,
+  },
+  metricValue: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  metricMuted: {
+    color: colors.textSecondary,
+  },
+  metricLabel: {
+    marginTop: 1,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  signalsActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  // Filled navy. tint on its own is the mark's ink; the label is textInverse.
+  // Not the DraftKings green and not colors.info.
+  handoffNavy: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 44,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.tint,
+    justifyContent: 'center',
+  },
+  handoffNavyText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textInverse,
+    fontVariant: ['tabular-nums'],
   },
 });

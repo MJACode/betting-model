@@ -8,6 +8,8 @@ interface Props {
   onPress: () => void;
   /** Tighter padding + smaller text for dense pick cards. */
   compact?: boolean;
+  /** Signals card: 44pt tall, navy outline (tint, not system blue). */
+  tall?: boolean;
 }
 
 /**
@@ -18,7 +20,34 @@ interface Props {
  * notifier pings the user if the DK line moves big before game time. Its own
  * Pressable so a tap doesn't bubble to the enclosing card (RN responder model).
  */
-export function TrackButton({ tracked, onPress, compact }: Props) {
+export function TrackButton({ tracked, onPress, compact, tall }: Props) {
+  const label = tracked
+    ? 'Tracking this bet — we’ll alert you if the line moves a lot before game time. Tap to stop.'
+    : 'Track this bet — we’ll alert you if the line moves a lot before game time.';
+  const word = tracked ? 'Tracking' : 'Track';
+  // The Signals row is already 44pt. Extra slop would cover the posted-time
+  // line and the gap before the navy button (UX review, 2026-10-16).
+  if (tall) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ selected: tracked }}
+        accessibilityLabel={label}
+        style={({ pressed }) => [
+          styles.btn,
+          styles.btnTall,
+          tracked ? styles.on : styles.off,
+          pressed && styles.pressed,
+        ]}
+      >
+        <View style={styles.row}>
+          <Ionicons name={tracked ? 'checkmark' : 'notifications-outline'} size={16} color={colors.tint} />
+          <Text style={[styles.text, styles.textTall, { color: colors.tint }]}>{word}</Text>
+        </View>
+      </Pressable>
+    );
+  }
   return (
     <Pressable
       onPress={onPress}
@@ -29,11 +58,7 @@ export function TrackButton({ tracked, onPress, compact }: Props) {
       accessibilityRole="button"
       // VoiceOver says "selected" on the ON state, not only a changed label.
       accessibilityState={{ selected: tracked }}
-      accessibilityLabel={
-        tracked
-          ? 'Tracking this bet — we’ll alert you if the line moves a lot before game time. Tap to stop.'
-          : 'Track this bet — we’ll alert you if the line moves a lot before game time.'
-      }
+      accessibilityLabel={label}
       style={({ pressed }) => [
         styles.btn,
         compact && styles.btnCompact,
@@ -47,15 +72,7 @@ export function TrackButton({ tracked, onPress, compact }: Props) {
           size={compact ? 14 : 16}
           color={colors.tint}
         />
-        <Text
-          style={[
-            styles.text,
-            compact && styles.textCompact,
-            { color: colors.tint },
-          ]}
-        >
-          {tracked ? 'Tracking' : 'Track'}
-        </Text>
+        <Text style={[styles.text, compact && styles.textCompact, { color: colors.tint }]}>{word}</Text>
       </View>
     </Pressable>
   );
@@ -71,6 +88,14 @@ const styles = StyleSheet.create({
   btnCompact: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 3,
+  },
+  // Signals card. minHeight 44 (HIG). Outline is tint — brand navy, 18:1 on
+  // bgCard — not the system blue.
+  btnTall: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
   },
   on: {
     borderColor: colors.tint,
@@ -94,5 +119,8 @@ const styles = StyleSheet.create({
   },
   textCompact: {
     fontSize: font.size.caption,
+  },
+  textTall: {
+    fontSize: font.size.footnote,
   },
 });

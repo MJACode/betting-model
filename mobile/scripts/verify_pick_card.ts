@@ -25,6 +25,16 @@ import {
   MODEL_BOOK,
 } from '../src/lib/markets';
 import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
+import { MINUS } from '../src/lib/format';
+import {
+  signalsBetHeadline,
+  signalsContextLine,
+  signalsContextTime,
+  signalsCtaLabel,
+  signalsHeroSpeech,
+  signalsPriceText,
+  signalsStakeUnits,
+} from '../src/lib/signalsCard';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
 
 let failed = 0;
@@ -488,6 +498,100 @@ check(
     'labelRow aligns chips to the primary line, not the two-line mid-point',
     /alignItems:\s*'flex-start'/.test(labelRow) && !/alignItems:\s*'center'/.test(labelRow),
   );
+}
+
+// ── Signals card (Option A) ────────────────────────────────────────────────
+{
+  const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
+  check(
+    'context line is abbrev @ abbrev · sport · time',
+    signalsContextLine({
+      sport: 'NCAAF',
+      away: 'Western Kentucky',
+      home: 'Sam Houston',
+      timeLabel: '8:00 PM ET',
+      abbrevs,
+    }) === 'WKU @ SHSU · NCAAF · 8:00 PM ET',
+  );
+  check(
+    'unknown NCAAF school is not given an invented code',
+    signalsContextLine({
+      sport: 'NCAAF',
+      away: 'Western Kentucky',
+      home: 'Sam Houston',
+      timeLabel: '8:00 PM ET',
+      abbrevs: null,
+    }) === 'Western Kentucky @ Sam Houston · NCAAF · 8:00 PM ET',
+  );
+  check(
+    'spread headline quotes the label with a true minus',
+    signalsBetHeadline('Sam Houston -7.5') === `Sam Houston ${MINUS}7.5` &&
+      !signalsBetHeadline('Sam Houston -7.5').includes('-7.5'),
+  );
+  check(
+    'a hyphen inside a school name stays a hyphen',
+    signalsBetHeadline('Louisiana-Monroe -2.5') === `Louisiana-Monroe ${MINUS}2.5`,
+  );
+  check('moneyline headline is the stored label', signalsBetHeadline('Sam Houston ML') === 'Sam Houston ML');
+  check('total headline is the side and the line', signalsBetHeadline('NYY vs BOS Over 8.5') === 'Over 8.5');
+  check(
+    'prop headline keeps the player',
+    signalsBetHeadline('Roquan Smith Under 9.5 Tackles') === 'Roquan Smith Under 9.5 Tackles',
+  );
+  check(
+    'NFL card stake suffix is not the hero',
+    signalsBetHeadline('NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u') === 'Under 43.5 (Wind 14 mph, FD)',
+  );
+  check(
+    'price and book use a true minus',
+    signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`,
+  );
+  check('CTA names the best book, word is Bet', signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`);
+  check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
+  check(
+    'stake cell is the to-win units only',
+    signalsStakeUnits({ priced: true, win: 1, conviction: 1 }) === 1 &&
+      signalsStakeUnits({ priced: true, win: 0.4, conviction: 1 }) === 0.4 &&
+      signalsStakeUnits({ priced: false, win: 1, conviction: 1 }) === 1,
+  );
+  const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
+  const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
+  check('Signals board opts into the signals layout', /layout=\{view === 'signals' \? 'signals' : 'board'\}/.test(home));
+  check('hero is 22pt', /betLeft: \{[\s\S]*?font\.size\.title2/.test(card) && /betRight: \{[\s\S]*?font\.size\.title2/.test(card));
+  check('four cells use the plain words', /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && />Stake</.test(card));
+  const navy = /handoffNavy: \{[\s\S]*?\}/.exec(card)?.[0] ?? '';
+  check('CTA fill is navy tint, not DK green or system blue', /backgroundColor: colors\.tint/.test(navy) && !/DK_GREEN|colors\.info/.test(navy));
+  check('CTA label is textInverse', /handoffNavyText: \{[\s\S]*?color: colors\.textInverse/.test(card));
+  check('signals stake reads signalsStakeUnits', /signalsStakeUnits\(stake\)/.test(card));
+  check(
+    'a later day joins the clock; today stays the clock',
+    signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET' &&
+      signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET',
+  );
+  check(
+    'VoiceOver speaks the decision price, then a moved price',
+    signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === `${MINUS}110 BetMGM` &&
+      signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', currentPrice: '-105' }) ===
+        `${MINUS}110 BetMGM. Now ${MINUS}105 BetMGM`,
+  );
+  check(
+    'a plain moved price does not restate Locked under the decision hero',
+    /heroPrice\?\.showLockedCaption && \(heroPrice\.stale \|\| heroPrice\.untracked\)/.test(card),
+  );
+  check('wrapped price stays on the trailing edge', /betRight: \{[\s\S]*?marginLeft: 'auto'/.test(card));
+  const slip = readFileSync(join(__dirname, '../src/components/AddToPlayButton.tsx'), 'utf-8');
+  const track = readFileSync(join(__dirname, '../src/components/TrackButton.tsx'), 'utf-8');
+  const tallOmitsSlop = (src: string) => {
+    const start = src.indexOf('if (tall)');
+    const slop = src.indexOf('hitSlop=', start);
+    const between = start >= 0 && slop > start ? src.slice(start, slop) : '';
+    return between.includes('styles.btnTall') && between.includes('</Pressable>');
+  };
+  check('tall Slip and Track omit the compact hit slop', tallOmitsSlop(slip) && tallOmitsSlop(track));
+  check('Slip and Track can be 44pt with a checkmark and a tint outline',
+    /btnTall: \{[\s\S]*?minHeight: 44/.test(slip) && /btnTall: \{[\s\S]*?minHeight: 44/.test(track) &&
+    /inPlay \? 'checkmark'/.test(slip) && /tracked \? 'checkmark'/.test(track) &&
+    !/colors\.info/.test(slip) && !/colors\.info/.test(track));
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);

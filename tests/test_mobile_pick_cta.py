@@ -579,6 +579,74 @@ def test_price_check_is_display_only():
         assert not re.search(r"PRICE_CHECK_MAX_(EDGE|CENTS)\s*=", _read(SRC / rel)), rel
 
 
+def test_signals_card_quotes_the_bet_and_names_the_best_book():
+    """Signals (Designer Option A, Matt approved). The bet is the hero, the
+    compact line is abbreviations plus sport and time, the stake cell is one
+    unit figure, and the CTA is a navy Bet <book> button. Today and Live keep
+    the board layout."""
+    card = _read(SRC / "components" / "PickCard.tsx")
+    home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    assert "layout={view === 'signals' ? 'signals' : 'board'}" in home
+    assert "signalsBetHeadline(pick.pick_label)" in card
+    assert "Model chance" in card and "Expected return" in card
+    navy = re.search(r"handoffNavy: \{([^}]*)\}", card)
+    assert navy and "backgroundColor: colors.tint" in navy.group(1)
+    assert "DK_GREEN" not in navy.group(1) and "colors.info" not in navy.group(1)
+    assert re.search(r"handoffNavyText: \{[^}]*color: colors\.textInverse", card)
+    assert "signalsStakeUnits(stake)" in card
+    assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
+    assert "heroPrice.stale || heroPrice.untracked" in card
+    assert "Stake unavailable" in card
+    assert "marginLeft: 'auto'" in card
+    # The arrow form stays on the Today caption. The Signals cell does not use it.
+    assert "formatUnits(stake.risk)} → ${formatUnits(stake.win)}" in card
+    assert "minHeight: 44" in _read(SRC / "components" / "AddToPlayButton.tsx")
+    assert "minHeight: 44" in _read(SRC / "components" / "TrackButton.tsx")
+    for name in ("AddToPlayButton.tsx", "TrackButton.tsx"):
+        src = _read(SRC / "components" / name)
+        assert "colors.info" not in src
+        assert "? 'checkmark'" in src
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_signals_card_copy(tmp_path):
+    """The headline, the compact line and the CTA, including U+2212."""
+    for name in ("format.ts", "signalsCard.ts"):
+        src = _read(LIB / name)
+        src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = r"""
+import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsHeroSpeech, signalsPriceText, signalsStakeUnits } from './signalsCard.ts';
+const MINUS = '\u2212';
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
+ok(signalsContextLine({ sport: 'NCAAF', away: 'Western Kentucky', home: 'Sam Houston', timeLabel: '8:00 PM ET', abbrevs }) === 'WKU @ SHSU · NCAAF · 8:00 PM ET', 'abbrev line');
+ok(signalsContextLine({ sport: 'NCAAF', away: 'Western Kentucky', home: 'Sam Houston', timeLabel: '8:00 PM ET', abbrevs: null }) === 'Western Kentucky @ Sam Houston · NCAAF · 8:00 PM ET', 'no invented code');
+ok(signalsContextLine({ sport: 'MLB', away: 'NYY', home: 'BOS', timeLabel: '7:05 PM ET' }) === 'NYY @ BOS · MLB · 7:05 PM ET', 'mlb abbrevs pass through');
+ok(signalsContextLine({ sport: 'UFC', away: 'A', home: 'B', timeLabel: '10:00 PM ET' }) === 'A vs B · UFC · 10:00 PM ET', 'ufc vs');
+ok(signalsBetHeadline('Sam Houston -7.5') === `Sam Houston ${MINUS}7.5`, 'spread minus');
+ok(!signalsBetHeadline('Sam Houston -7.5').includes('-'), 'no ascii hyphen on the spread');
+ok(signalsBetHeadline('Louisiana-Monroe -2.5') === `Louisiana-Monroe ${MINUS}2.5`, 'name hyphen stays');
+ok(signalsBetHeadline('Sam Houston ML') === 'Sam Houston ML', 'moneyline');
+ok(signalsBetHeadline('NYY vs BOS Over 8.5') === 'Over 8.5', 'total');
+ok(signalsBetHeadline('Roquan Smith Under 9.5 Tackles') === 'Roquan Smith Under 9.5 Tackles', 'prop');
+ok(signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`, 'price book');
+ok(signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`, 'cta');
+ok(signalsCtaLabel('DK', null) === 'Open DK', 'no invented price');
+ok(signalsStakeUnits({ priced: true, win: 1, conviction: 1 }) === 1, '1u to win');
+ok(signalsStakeUnits({ priced: true, win: 0.4, conviction: 1 }) === 0.4, 'capped win, not the arrow');
+ok(signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET', 'today is the clock');
+ok(signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET', 'later day joins the clock');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === `${MINUS}110 BetMGM`, 'decision speech');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', currentPrice: '-105' }) === `${MINUS}110 BetMGM. Now ${MINUS}105 BetMGM`, 'moved speech');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_pick_cta_pins_are_on_the_pr_ci_subset():
     assert "tests/test_mobile_pick_cta.py" in _read(ROOT / ".github" / "workflows" / "pr-ci.yml")
 
