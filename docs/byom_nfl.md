@@ -20,10 +20,10 @@ quote came from.
 The lock columns hold the first DraftKings pre-game snapshot at or under a
 120 hour lead, and a second snapshot at or under 24 hours. **Both numbers
 are UNCONFIRMED placeholders.** They are columns the builder fills, not
-check constraints. The grade is the 120h DraftKings line at the best price
-on that same line. The closing DraftKings price is stored and is not the
-grade. Results are 1u-to-win units, with no risk cap and no stake. Pushes
-and ties are stored.
+check constraints. The grade is DraftKings' own price on that 120h lock snapshot.
+`grade_*_book` is `draftkings`. The closing DraftKings price is stored
+and is not the grade. Results are 1u-to-win units, with no risk cap and
+no stake. Pushes and ties are stored.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables are
