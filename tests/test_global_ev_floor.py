@@ -372,6 +372,12 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          "nhl_over_under",
          # 2026-10-12 (mike): the NFL prop rule; its number IS the sharp book's.
          "nfl_prop_market",
+         # 2026-10-13 (mike): the NFL in-play leader moneyline; its cut was
+         # measured on its own per-lead win probability.
+         "nfl_live_leader_ml",
+         # 2026-10-15 (mike, "Yes"): the rebuilt moneyline, anchored on
+         # DraftKings' price and graded on its own number.
+         "nhl_moneyline",
          # 2026-10-15 (mike: "use what you've learned in this repo"): the NBA
          # prop rule; its number IS Pinnacle's no-vig under.
          "nba_prop_market"}

@@ -59,6 +59,7 @@ models/saved/nfl_prop_rush_yards_20260907_001931.pkl
 models/saved/nfl_prop_sacks_20260907_052908.pkl
 models/saved/nfl_prop_tackles_assists_20260909_160911.pkl
 models/saved/nhl_moneyline_20260920_131606.pkl
+models/saved/nhl_moneyline_20261013_225002.pkl
 models/saved/nhl_moneyline_regulation_20260920_133544.pkl
 models/saved/nhl_prop_assists_20261001_193441.pkl
 models/saved/nhl_prop_blocked_shots_20261001_171818.pkl
@@ -84,6 +85,22 @@ models/saved/wnba_spread_20260719_113238.pkl
   Binomial head (`nb_r=13.56`). `tests/test_wnba_prop_market.py` asserts it
   remains on disk; the scorer does not load it. Do not drop it without
   rewriting those tests. The live assists path is `20260531_125558`.
+
+- `nhl_moneyline_20261013_225002.pkl` — the anchored rebuild
+  (`models/nhl_moneyline_anchored.py`), committed with the code that reads its
+  `kind`. It is registered AFTER that code deploys
+  (`scripts/nhl_moneyline_anchored_train.py --register --from-file`); until
+  then `nhl_moneyline_20260920_131606.pkl` is the active row and stays on this
+  list. Drop the old one (steps 3-4 below) once the new row is active.
+
+## Tracked artifacts that are not timestamped pkls
+
+- `nfl_prop_params.json` — see above.
+- `nfl_live_leader_ml_wp.json` — the NFL in-play leader moneyline's per-lead
+  win-probability fit (2016-2025, full-precision coefficients and a golden
+  grid). Read by `nfl_live_leader/model.py`, not `model_registry`; rebuilt by
+  `python -m scripts.build_nfl_live_leader_artifact`. Not under the dated-pkl
+  ignore pattern, so it is tracked like any source file.
 
 ## After a retrain
 

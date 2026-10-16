@@ -24,6 +24,7 @@ import {
   splitPickTitle,
   MODEL_BOOK,
 } from '../src/lib/markets';
+import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
 
 let failed = 0;
@@ -120,6 +121,56 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     'live Now equals lock → labeled Now, Locked caption still on',
     h?.kind === 'now' && h.price === -110 && h.showLockedCaption,
   );
+}
+
+{
+  // A model whose loop stops reading DraftKings after the bet: its newest
+  // in-play row is the lock's own quote, never shown as the live price.
+  const pick = mkPick({
+    model_id: 'nfl_live_leader_ml', sport: 'NFL', game_id: 'NFL_2026-09-13_TB_DAL',
+    pick_side: 'away' as PickSide, pick_label: 'TB ML (live)', scored_line: null,
+    dk_odds: -330, decision_odds: -330, is_live: true, created_at: '2026-09-13T17:05:00+00:00',
+  });
+  const row = (at: string, away: number) =>
+    latest({ market: 'h2h', home_price: 250, away_price: away, total_line: null,
+             over_price: null, under_price: null, snapshot_at: at });
+  for (const at of ['2026-09-13T17:00:00+00:00', '2026-09-13T17:05:00+00:00']) {
+    const h = heroAmericanForPick(pick, row(at, -330));
+    check(
+      `untracked model, row not newer than the lock (${at.slice(11, 16)}) → no live price, not stale`,
+      h?.kind === 'now' && h.price === null && h.untracked === true && !h.stale && h.lockedPrice === -330,
+    );
+    const ho = bestHandoffForPick(pick, [], h);
+    check('… and an Open DK hand-off with no number on it',
+      ho?.verb === 'Open' && ho.bookmaker === MODEL_BOOK && ho.price === null);
+    check('… and the caption says why',
+      h != null && lockedCaptionText(h) === 'Locked -330 · live price not tracked after the bet',
+      h ? lockedCaptionText(h) : '');
+    check('… and VoiceOver says to check the book',
+      h != null && heroPriceSpeech(h, 'Live price') ===
+        'Live price not shown after the bet. Locked -330. Check DraftKings for the live price',
+      h ? heroPriceSpeech(h, 'Live price') : '');
+  }
+  const none = heroAmericanForPick(pick, null, []);
+  check('untracked model with no in-play row → the same shape', none?.price === null && none.untracked === true);
+  const fresh = heroAmericanForPick(pick, row('2026-09-13T17:06:00+00:00', -500));
+  check('untracked model, a row after the lock → Now', fresh?.price === -500 && !fresh.untracked);
+  // Every other in-play model keeps logging: until DraftKings republishes,
+  // its lock quote IS the current price, and the card keeps it and the hand-off.
+  const other = mkPick({ is_live: true, created_at: '2026-09-13T17:05:00+00:00' });
+  const oh = heroAmericanForPick(other, latest({ over_price: -110, snapshot_at: '2026-09-13T17:00:00+00:00' }));
+  check('other in-play models: a row not newer than the lock is still the live price',
+    oh?.kind === 'now' && oh.price === -110 && !oh.untracked && !oh.stale);
+  const oho = bestHandoffForPick(other, [], oh);
+  check('… with its priced hand-off', oho?.verb === 'Bet' && oho.price === -110);
+  // Pick Detail's book row: the same numberless chip, never "Bet at DK -330".
+  const rowSrc = readFileSync(join(__dirname, '../src/components/BookLinesRow.tsx'), 'utf8');
+  const head = rowSrc.slice(rowSrc.indexOf('export function BookLinesRow'), rowSrc.indexOf('const quotes = currentLineQuotes'));
+  check('BookLinesRow: an untracked hero returns the numberless Open chip before any priced chip',
+    /if \(hero\?\.untracked\)/.test(head) && /to check the live price/.test(head) && !/formatAmerican/.test(head));
+  const detail = readFileSync(join(__dirname, '../src/screens/PickDetailScreen.tsx'), 'utf8');
+  check('PickDetail: the book row renders for an untracked hero',
+    /cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\)/.test(detail));
 }
 
 // ── bestHandoffForPick ──────────────────────────────────────────────────────

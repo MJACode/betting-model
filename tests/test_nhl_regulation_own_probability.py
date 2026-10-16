@@ -31,10 +31,14 @@ def test_the_correction_does_not_touch_a_regulation_probability(mapped):
     assert scorer._calibrated("nhl_moneyline_regulation", 0.380) == pytest.approx(0.380)
 
 
-def test_the_two_way_moneyline_keeps_its_correction(mapped):
-    """mike, 2026-10-01: the correction stays on the moneyline. Only the
-    three-way market was wrong."""
-    assert scorer._calibrated("nhl_moneyline", 0.380) == pytest.approx(0.4429, abs=1e-3)
+def test_the_rebuilt_moneyline_decides_on_its_own_probability(mapped):
+    """mike, 2026-10-01: the correction stayed on the moneyline. Superseded by
+    the rebuild (mike, "Yes", 2026-10-15): the moneyline is anchored on
+    DraftKings' own price and was graded on its own number, and the correction
+    -- which never crosses 0.5 -- would make it a favourite-only rule
+    (docs/nhl_moneyline_rebuild.md)."""
+    assert "nhl_moneyline" in config.MODELS_ON_OWN_PROBABILITY
+    assert scorer._calibrated("nhl_moneyline", 0.380) == pytest.approx(0.380)
 
 
 def test_nyr_regulation_2026_10_02_is_not_a_bet(mapped):

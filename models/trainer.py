@@ -192,6 +192,15 @@ def _xgb_multiclass_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
 
 # ── Model Trainer ─────────────────────────────────────────────────────────────
 
+# Game models fit by their own module, never by `train_model`: their artifact
+# is a different kind (models.scorer reads `kind`), and a generic run would fit
+# the retired design from FEATURE_MAP and activate it. The --all loop skips
+# them; train_model refuses them.
+OWN_FIT_PATH: dict = {
+    "nhl_moneyline": "scripts/nhl_moneyline_anchored_train.py (models/nhl_moneyline_anchored.py)",
+}
+
+
 def train_model(model_id: str,
                 train_seasons: list[int] = None,
                 holdout_season: int = None) -> dict:
@@ -209,6 +218,11 @@ def train_model(model_id: str,
     if model_id not in MODELS:
         raise ValueError(f"Unknown model_id '{model_id}'. "
                          f"Available: {list(MODELS.keys())}")
+    if model_id in OWN_FIT_PATH:
+        raise ValueError(
+            f"{model_id} is not trained here: it is fit by {OWN_FIT_PATH[model_id]}. "
+            f"This trainer would fit the retired FEATURE_MAP design and, on a normal "
+            f"run, ACTIVATE it in production.")
 
     sport, market, description = MODELS[model_id]
     from config import assert_retrain_allowed
@@ -1839,7 +1853,7 @@ if __name__ == "__main__":
         OPTUNA_TRIALS = args.trials
 
     if args.all:
-        models = list(MODELS.keys())
+        models = [m for m in MODELS if m not in OWN_FIT_PATH]
     elif args.all_props:
         models = list(PROP_MODELS.keys())
     elif args.all_live:

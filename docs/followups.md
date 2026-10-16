@@ -73,6 +73,106 @@ BOS-DET game was bought on every pass from 10-13. The card only reads games
 45-70 minutes from tip. A same-day window for NBA props would cut the spend;
 the app's prop board may read the far-out rows — check before changing.
 
+## [ ] [needs-decision] NHL game picks are decided before the night's goalie is known (found 2026-10-13)
+
+"OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am
+ET, on Linus Ullmark's goalie row: he started for Ottawa the night before.
+Tonight's probable-starter row, Samuel Ersson, landed in `nhl_goalie_stats`
+at 10:05Z. Re-scored with it, the model says 0.4606 (0.4549 on all of
+tonight's inputs) against the 0.4931 it bet on, and neither clears the 0.20
+EV floor at +145. The hourly overnight passes score every NHL game, and
+`_get_nhl_goalie_stats` falls back to the latest earlier row, so any game
+pick that first clears between midnight and ~6am ET is decided on the last
+start's goalie, which for Ottawa on 10-13 was not the listed starter. MLB already has
+the guard (`models/scorer.score_game`: no game-model score until both
+probable starters are loaded); NHL has none. The fix is the same guard for
+NHL — no game pick until that date's goalie row exists for both teams —
+which changes when NHL picks fire: mike's call, `Updated-By`.
+
+Measured the same day, it is not only overnight. **32 of the 35 NHL game
+BETs since 2026-10-01 were written before that game's first goalie row**,
+31 of them on an Eastern day before the game (up to six days ahead), because
+a game pick locks at the first run that clears and lines open days out. Re-scored with the game-day goalie
+row and everything else as of the pick (all 32 reproduced their stored
+probability exactly first): in **14 of 32** the goalie the model used was not
+the one listed on game day, and there the bet side fell 2.8 points on
+average. Five fall below today's bar at the price taken: WSH ML 10-03 (0.486
+→ 0.378), PIT ML 10-07 (0.498 → 0.484), "PIT (Regulation)" 10-07 (0.483 →
+0.387), "SEA (Regulation)" 10-13 (0.446 → 0.413), "OTT (Regulation)" 10-13
+(0.493 → 0.461). A sixth, FLA ML 10-04, flips only because its probability
+crossed the moneyline correction's 0.50 seam (0.4998 → 0.5002), so it is not
+counted. The guard as written
+would end NHL game bets at early prices; the alternative is to keep the
+early decision and re-check it once the goalie row lands, which collides with
+the pick lock (CLAUDE.md §1c) and is mike's call either way.
+Related: rest. Graded the same day — rest, back-to-back and road-trip
+inputs added to both NHL game models make neither more accurate on 2025-26,
+on all games or on the 350 back-to-back games, and move the Ottawa game by
+0.0001 (`docs/nhl_market_lab.md`, "Rest, back-to-back and road trip in the
+production models"; branch `nhl-rest-candidate`). The goalie is what moves
+a back-to-back game, which is why the timing above is the fix.
+
+## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
+
+`injuries` gets a full copy of each team's list on every ingest run
+(report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per
+player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). `query_injuries_for_game`
+reads every row for the latest report_date and `_compute_injury_adjustment`
+sums them, so `home_injury_adj` / `away_injury_adj` grow all day: Ottawa read
+11.2 at 07:22Z and 53.9 at 22:23Z, against 2.8 and 3.5 counting each player once
+(the docstring says 0-3). It is also the "Opponent injury burden: 79.80" note
+on picks. `nhl_moneyline_regulation` never splits on an injury input (0
+splits across all folds), so it changed nothing there. Before a fix (read
+only the latest snapshot), list which live artifacts DO split on injury
+inputs and what their inputs looked like in training, since the fix moves
+those models' inputs: mike's call.
+
+**For the NHL game models the six injury inputs are dead whatever the reader
+does.** NHL rows in `injuries` start 2026-04-05, so every training game
+(2018-19 → 2024-25) had none and the inputs were zero on every training row;
+that is why neither tree splits on them. And two of the six can never switch
+on for NHL even now: every NHL row is stored at `severity_weight` 0.7 and
+`scenario` 'A', while `_has_starter_out` needs severity ≥ 0.8 and
+`_has_returnee` needs scenario 'B'. A usable NHL injury input has to be
+built from history the model can learn from — e.g. who dressed each game in
+the per-game skater logs, weighted by usage — which is a project, not a
+reader fix.
+
+## [ ] App copy that EV-cut models contradict, and a dollars tile (found 2026-10-15, UX review)
+
+Raised by the front-end review of the NHL moneyline rebuild; declined in that
+PR because each was already wrong for the six models whose cut is EV
+(probability and edge bars 0.0 — NHL props, NHL totals, the MLB public fade).
+One front-end PR, with its own review:
+
+- `ExplainerScreen.tsx:108-109` says "moneyline needs ≥72% model prob and ≥12%
+  edge" (MLB's old bar; 11% today); :95-97 says a BET clears probability AND
+  edge; :190 says every BET carries a Sharp Score. Reword: a BET clears that
+  model's own bar — for some models expected value at the price, so it can be
+  an underdog under 50% — and drop the hard-coded numbers.
+- `ExplainerScreen.tsx:218-226` says a BET at noon can become AVOID at 6pm
+  and to honour the latest signal — the opposite of the pick rule (a BET is
+  locked); :84-90 says the probability shown is calibrated (it is the raw one).
+- The All board's and the model screen's tooltips (`PicksHomeScreen.tsx:609`,
+  `BuiltInModelDetailScreen.tsx:192`) say picks lock the first time they are
+  scored; they lock the first time they become a BET.
+- `ReasoningCard.tsx:93` explains a pick by edge only; an EV row would name
+  what an EV-cut model actually bet on.
+- **`BuiltInModelDetailScreen.tsx:246-250, :464` show results in DOLLARS**
+  ("vs $100 flat per bet", `formatCurrencySigned`) — against the units rule
+  (CLAUDE.md §4).
+
+## [ ] Nothing stops the test suite from reaching the production database (found 2026-10-14)
+
+`tests/conftest.py` sets no guard on `DATABASE_URL` or `ODDS_API_KEY`, and the
+local `.env` holds the production values, so any test that opens a connection
+or calls the feed during `python -m pytest -q tests/` does it against
+production. Found by a research agent that started the suite with `.env` in
+its worktree and stopped it after 46 file-only tests; whether any test in the
+suite actually connects has not been checked. Fix: an autouse fixture that
+unsets both for the session unless a test opts in, and a check that lists the
+tests that reach for either.
+
 ## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
 
 Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe

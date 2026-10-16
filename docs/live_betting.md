@@ -32,6 +32,7 @@ switch: `RUN_LIVE_LOOP=0` in Railway Variables. Manual runs on Matt's machine st
 | `mlb_live_total_runs` | Poisson | runs in the REMAINDER of the game | in-play DK total: P(over L) = P(rest > L − current) via Poisson CDF |
 | ~~`mlb_live_win_prob`~~ | binary + Platt | home wins | **RETIRED 2026-08-30** — 15 bets 6-9 / −34.1% |
 | ~~`mlb_live_runline`~~ | binary + Platt | home wins by 2+ | **RETIRED 2026-08-30** — 14 bets 5-9 / −39.9% |
+| `nfl_live_leader_ml` | per-lead logistic WP (JSON artifact) | the 4-16 point leader wins, 4th quarter, ≤ 10:00 on the last snap | DraftKings live moneyline, edge ≥ 0.02 vs 1/decimal with vig. **LIVE 2026-10-13** (mike); runs in `nfl_live_leader/`, not the MLB loop — `docs/sports/nfl.md` |
 
 **MLB live is ONE model now (2026-08-30).** Both binary models were paused on 2026-08-29 and
 retired the next day: they were negative at every cut AND got worse as the probability floor rose

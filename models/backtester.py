@@ -95,6 +95,13 @@ def run_backtest(model_id: str, season: int,
         conn.close()
         raise ValueError(f"No trained model found for {model_id}. "
                          f"Run: python -m models.trainer --model {model_id}")
+    if artifact.get("kind") == "anchored_logit":
+        # Scored around DraftKings' price (an offset this generic loop cannot
+        # supply); its walk-forward is scripts/nhl_moneyline_anchored_backtest.py.
+        conn.close()
+        logger.warning(f"{model_id}: anchored on the market price — backtest it with "
+                       f"scripts/nhl_moneyline_anchored_backtest.py")
+        return pd.DataFrame()
 
     # GOLF: rows are per-player (not per-game) and there are no historical DK
     # golf odds in the DB, so a flat-ROI backtest can't be computed without

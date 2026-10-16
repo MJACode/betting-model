@@ -56,6 +56,7 @@ function notUpdated(hero: HeroAmerican): string {
  */
 export function lockedCaptionText(hero: HeroAmerican): string {
   const locked = `Locked ${formatAmerican(hero.lockedPrice)}`;
+  if (hero.untracked) return `${locked} · live price not tracked after the bet`;
   if (!hero.stale || !hero.staleSince) return locked;
   return `${locked} · ${bookLabel(hero.book)} last priced ${formatStampET(hero.staleSince)}`;
 }
@@ -77,6 +78,10 @@ export function stalePriceNote(hero: HeroAmerican | null | undefined): string | 
  * loaded keeps "unavailable": that is not "no current price".
  */
 export function heroPriceSpeech(hero: HeroAmerican, priceTag: string): string {
+  if (hero.untracked) {
+    return `Live price not shown after the bet. Locked ${formatAmerican(hero.lockedPrice)}. ` +
+      `Check ${bookName(hero.book)} for the live price`;
+  }
   const parts: string[] = [];
   if (hero.stale) {
     parts.push(`No current ${bookName(hero.book)} price`);
