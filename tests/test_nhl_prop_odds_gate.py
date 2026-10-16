@@ -130,3 +130,82 @@ def test_the_markets_are_the_ones_the_priced_history_holds():
     import config
     from data.ingestors.nhl_prop_odds_history import PROP_MARKETS
     assert sorted(config.PROP_MARKETS_NHL) == sorted(PROP_MARKETS)
+    assert not any(m.endswith("_alternate") for m in config.PROP_MARKETS_NHL)
+
+
+def test_the_cards_still_read_the_featured_market_only():
+    """An alternate row is a different market key. The card's quote query is
+    equality on the featured key, so a second line cannot enter best_bet."""
+    import inspect
+
+    import scripts.nhl_prop_card as blocked_card
+    import scripts.nhl_props_card as props_card
+
+    for card in (props_card, blocked_card):
+        src = inspect.getsource(card.latest_quotes)
+        assert "AND market = %s" in src
+        assert "_alternate" not in src
+
+
+def test_a_moved_featured_line_keeps_the_old_number_under_the_alternate_key():
+    """Cale Makar Under 3.5 was the open. The next featured snapshot was 2.5
+    and 3.5 was gone, because this feed stores one featured line per player.
+    The alternate key is one row per line, and a duplicate of the featured
+    line is dropped so the card still sees a single featured number."""
+    import config
+    from data.ingestors.prop_odds_ingestor import _parse_prop_markets
+
+    markets = [
+        {"key": "player_shots_on_goal", "outcomes": [
+            {"name": "Over", "description": "Cale Makar", "price": -165, "point": 2.5},
+            {"name": "Under", "description": "Cale Makar", "price": 120, "point": 2.5},
+        ]},
+        {"key": "player_shots_on_goal_alternate", "outcomes": [
+            {"name": "Over", "description": "Cale Makar", "price": -165, "point": 2.5},
+            {"name": "Under", "description": "Cale Makar", "price": 120, "point": 2.5},
+            {"name": "Over", "description": "Cale Makar", "price": -110, "point": 3.5},
+            {"name": "Under", "description": "Cale Makar", "price": -120, "point": 3.5},
+        ]},
+    ]
+    rows = _parse_prop_markets(
+        markets, "NHL_2026-10-16_PIT_COL", "2026-10-16", "open",
+        "2026-10-16T04:18:19+00:00",
+        allowed_markets=set(config.PROP_MARKETS_NHL) | set(ing.NHL_LIVE_ALT_MARKETS),
+        bookmaker="hardrockbet")
+    featured = [(r["line"], r["under_price"]) for r in rows if r["market"] == "player_shots_on_goal"]
+    alt = [(r["line"], r["under_price"]) for r in rows if r["market"] == "player_shots_on_goal_alternate"]
+    assert featured == [(2.5, 120)]
+    assert alt == [(3.5, -120)]
+
+
+def test_a_rejected_alternate_call_keeps_the_featured_lines(monkeypatch):
+    asked: list[str] = []
+
+    class Resp:
+        def __init__(self, status, markets):
+            self.status_code = status
+            self.headers = {"x-requests-last": "4"}
+            self.text = "unsupported"
+            self._markets = markets
+
+        def json(self):
+            return {"bookmakers": [{
+                "key": "draftkings",
+                "markets": [{"key": m, "outcomes": []} for m in self._markets],
+            }]}
+
+    def fake_get(url, params, timeout=20):
+        markets = params["markets"]
+        asked.append(markets)
+        status = 422 if "_alternate" in markets else 200
+        return Resp(status, markets.split(","))
+
+    monkeypatch.setattr(ing.requests, "get", fake_get)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(ing, "record_quota_headers", lambda _resp: None)
+    books, cost = ing._event_props("ev")
+    assert asked[0] == ",".join(ing.PROP_MARKETS_NHL)
+    assert "_alternate" in asked[1]
+    got = {m["key"] for _book, markets in books for m in markets}
+    assert got == set(ing.PROP_MARKETS_NHL)
+    assert cost == 8
