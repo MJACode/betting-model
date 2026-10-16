@@ -12,6 +12,7 @@ import {
   type PlayerLogEntry,
   type PlayerLogSport,
 } from './playerLog';
+import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
 import {
   gameMarketForModel,
   lineShopForPick,
@@ -872,6 +873,49 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
       .order('market')
       .order('bookmaker')
       .range(from, to),
+  );
+}
+
+/**
+ * Today's NHL and NBA games for the Lines board — every game, not the ones
+ * a model picked. Measured 2026-10-16: 11 NHL games on 2026-10-15, 2 on
+ * 2026-10-16, 3 NBA games on 2026-10-20. Well under the 1,000-row cap.
+ */
+export async function fetchGamesForLinesBoard(date: string): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .in('sport', [...LINES_SPORTS])
+    .eq('game_date', date)
+    .order('commence_time')
+    .order('game_id');
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
+/**
+ * Every book's latest line for those games.
+ *
+ * Measured 2026-10-16 on v_latest_odds_all_books: NHL 2026-10-13 was 592
+ * rows, the largest NHL day from 2026-10-01 through that read; NBA
+ * 2026-10-21 was 363. A day with both full slates can pass the 1,000-row
+ * cap, so this is paged and narrowed to the board's game ids and to
+ * LINES_ODDS_MARKETS (h2h, h2h_3way, spreads, totals) — not the whole slate.
+ */
+export async function fetchLinesBoardOdds(gameIds: readonly string[]): Promise<OddsByBookRow[]> {
+  if (gameIds.length === 0) return [];
+  return fetchAllPages<OddsByBookRow>(
+    (from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .in('game_id', [...gameIds])
+        .in('market', [...LINES_ODDS_MARKETS])
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    (row) => `${row.game_id}|${row.market}|${row.bookmaker}`,
   );
 }
 
