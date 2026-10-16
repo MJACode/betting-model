@@ -86,6 +86,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 
+import config
 import models.nba_props as nb
 from models.honest_ev import gate
 from models.nba_prop_market import DECISION_WINDOW_MIN, minutes_to_tip, parse_ts
@@ -94,16 +95,25 @@ MODEL_ID = "nba_prop_projection"
 SPORT = "NBA"
 
 # market -> (sides it bets, calibrated-EV floor). docs/nba_models_2026.md 5.
+# The floors live in config.MODEL_MARKET_EV_FLOOR (thresholds are canonical in
+# config.py), so the card and the Discord "good to" price read one number.
+_SIDES: dict[str, tuple[str, ...]] = {
+    "player_steals":           ("over", "under"),
+    "player_rebounds":         ("under",),
+    "player_blocks_steals":    ("over", "under"),
+    "player_blocks":           ("under",),
+    "player_rebounds_assists": ("under",),
+    "player_threes":           ("over", "under"),
+}
 CARD: dict[str, tuple[tuple[str, ...], float]] = {
-    "player_steals":           (("over", "under"), 0.02),
-    "player_rebounds":         (("under",), 0.01),
-    "player_blocks_steals":    (("over", "under"), 0.05),
-    "player_blocks":           (("under",), 0.02),
-    "player_rebounds_assists": (("under",), 0.04),
-    "player_threes":           (("over", "under"), 0.04),
+    m: (sides, float(config.MODEL_MARKET_EV_FLOOR["nba_prop_projection"][m])) for m, sides in _SIDES.items()
 }
 MARKETS = tuple(CARD)
-MARKET_LABEL = {m: nb.BY_MARKET[m].label for m in MARKETS}
+# The words a pick label uses for each market. Rebounds and threes take
+# nba_prop_market's words ("Reb", "3PM") so one NBA board never says the same
+# market two ways; labels are permanent once a pick is written.
+MARKET_LABEL = {**{m: nb.BY_MARKET[m].label for m in MARKETS},
+                "player_rebounds": "Reb", "player_threes": "3PM"}
 # The base stats the card's markets sum: one per-minute rate model each.
 STATS = tuple(s for s in nb.BASE_STATS if any(s in nb.BY_MARKET[m].parts for m in MARKETS))
 
@@ -446,6 +456,7 @@ def find_bets(quotes: list[dict], projections: pd.DataFrame, games: dict[str, di
             for side in sides:
                 col = f"{side}_price"
                 cands = []
+                fresh_quotes = []                 # not refused as stale: DraftKings' reference comes from these
                 for q in at:
                     price = q.get(col)
                     if price is None:
@@ -457,6 +468,7 @@ def find_bets(quotes: list[dict], projections: pd.DataFrame, games: dict[str, di
                     elif lu < ref - timedelta(minutes=STALE_MAX_MIN):
                         diag["stale_rejected"] += 1
                         continue
+                    fresh_quotes.append(q)
                     if float(price) < price_floor:
                         diag["below_price_floor"] += 1
                         continue
@@ -476,7 +488,9 @@ def find_bets(quotes: list[dict], projections: pd.DataFrame, games: dict[str, di
                     diag["below_ev_floor"] += 1
                     continue
                 diag["qualifying"] += 1
-                dk = next((r for r in at if r["book"] == "draftkings" and r.get(col) is not None), None)
+                # DraftKings' own price on this side, unless the card refused it as stale: Discord
+                # posts dk_odds as the headline when it is no worse than the bet's price.
+                dk = next((r for r in fresh_quotes if r["book"] == "draftkings"), None)
                 bet = ProjectionBet(
                     game_id=gid, game_date=g["game_date"], tip=tip.isoformat(),
                     player=q.get("player") or "", player_id=pid, market=market, side=side,

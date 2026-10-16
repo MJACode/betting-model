@@ -343,6 +343,15 @@ DISCORD_FREE_PICK_PRIORITY: tuple = ("NFL",)
 # a webhook is added mid-day with a full slate already locked; anything over the
 # cap is left un-ledgered and posts on the next refresh pass.
 DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN", 20))
+# ...EXCEPT a pick whose game starts within this many minutes: it posts in this
+# run whatever the cap. A held pick only gets "the next pass", and the next
+# pass cannot post a game that has started (_new_signals), so near the tip the
+# cap stopped being a delay and became a loss. Measured on the NBA schedule
+# (2026-10-16): eight games tip together at 6pm ET on 2027-04-11, about 175
+# bets between the two NBA prop models, decided 55 minutes out, against three
+# publishing runs before the tip at 20 a run. The cap still bounds the blast
+# radius it was written for: a channel added mid-day with games hours away.
+DISCORD_UNCAPPED_WITHIN_MIN: int = int(os.environ.get("DISCORD_UNCAPPED_WITHIN_MIN", 120))
 
 # ── Price requirement ─────────────────────────────────────────────────────────
 # A BET must be placeable: no real book price, no bet. When True, any pick whose
@@ -2216,16 +2225,41 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
 })
 
 
-def min_ev_for(model_id: str) -> float:
+# A model that bets several markets under ONE id, each market with its own
+# EV floor (2026-10-16, mike: "build the projection model"). These ARE the
+# floors models/nba_prop_projection.CARD bets over (it reads them from here),
+# chosen per market on 2023-24 + 2024-25 and confirmed on 2025-26
+# (docs/nba_models_2026.md section 5). min_ev_for(model, market) returns the
+# market's floor, so the Discord "good to" price solves the cut the pick
+# actually cleared rather than the lowest of the six.
+MODEL_MARKET_EV_FLOOR: dict = {
+    "nba_prop_projection": {
+        "player_steals":           0.02,
+        "player_rebounds":         0.01,
+        "player_blocks_steals":    0.05,
+        "player_blocks":           0.02,
+        "player_rebounds_assists": 0.04,
+        "player_threes":           0.04,
+    },
+}
+
+
+def min_ev_for(model_id: str, prop_market: str | None = None) -> float:
     """The EV floor this model actually bets over: its OWN floor when it
     carries one (MODEL_OWN_EV_FLOOR, the two NFL rules), else the global
     floor, or the model's MODEL_MIN_EV when that is higher. ONE accessor, for
     the same reason min_odds_for is one: the scorer's gate, every card, both
-    live loops and the Discord "good to" bound have to agree on the number."""
+    live loops and the Discord "good to" bound have to agree on the number.
+
+    `prop_market`: for a model in MODEL_MARKET_EV_FLOOR, that market's own
+    floor when it is higher."""
     if model_id in MODEL_OWN_EV_FLOOR:
-        return float(MODEL_OWN_EV_FLOOR[model_id])
-    own = MODEL_MIN_EV.get(model_id)
-    return GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
+        base = float(MODEL_OWN_EV_FLOOR[model_id])
+    else:
+        own = MODEL_MIN_EV.get(model_id)
+        base = GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
+    market = MODEL_MARKET_EV_FLOOR.get(model_id, {}).get(prop_market or "")
+    return base if market is None else max(base, float(market))
 
 
 def expected_value(prob, american) -> float | None:

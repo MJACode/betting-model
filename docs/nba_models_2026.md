@@ -315,6 +315,19 @@ difference on 25,660 predictions. Built from 2022-23 on instead of 2018-19, the 
 5-7% for one player in a hundred, so the live frame reads every season: 72 seconds per group
 here (104 at most).
 
+**Where live differs from what was graded, measured by the pre-merge review (2026-10-16).**
+- The graded card excluded every proposition the Pinnacle rule bet at all eight books. Live,
+  the rule sees the five books the feed returns, so it holds fewer, and the projection model
+  may bet about 313 a season the grade never included (rebounds unders mostly); on the
+  archive those graded −1.94% (940 bets, −19.5 units over three seasons).
+- The research matched a book's player name against the whole season's rosters. Live only
+  knows box lines already played, so a player's first game for a new team (opening night,
+  a trade) cannot be matched or bet: 262 of the five-book bets, −8.2 units (−2.99%).
+- The live selection, replayed on January 2026's archived quotes with the stored means,
+  returns the graded bets bet for bet, and the live projection replays one 2025-26 night's
+  graded means exactly (`tests/test_nba_prop_projection_replay.py`, run where the research
+  cache exists).
+
 **How it runs.** The five-minute window job projects each game at the tick about 65
 minutes before tip (an ESPN injury pull, then the frame; 139 seconds for three games
 from this machine against production), storing every player's mean in

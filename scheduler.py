@@ -1036,6 +1036,9 @@ def run_nba_prop_window() -> None:
     from scripts.nba_prop_window import plan_tick
     plan = plan_tick()
     if not plan.decide and not plan.close and not plan.project:
+        if plan.publish:
+            # Only a game near its tip: post anything still unposted for it.
+            _publish_new_signals("nba-prop-window")
         return
     log.info("NBA prop window: deciding %s; closes due %s; projecting %s",
              plan.decide, plan.close, plan.project)

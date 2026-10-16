@@ -33,6 +33,33 @@ snapshot each bet game now gets. After the first 250 settled bets, grade the
 record by market and by deciding book, and BetParx-only lines separately
 (32% of the graded 2025-26 units, uncheckable against another book).
 
+## [ ] NBA: Blocks+Steals and Reb+Ast on the Stats leaderboard (2026-10-16)
+
+The app's NBA player pages show both combined stats, summed from the game log, and
+hide the head-to-head and same-position cards for them: the server has neither. To
+put them on the Stats leaderboard, add `blocks_steals` and `rebounds_assists`
+branches to `player_season_stat_values_nba`, `player_h2h_stat_values_nba` and
+`position_vs_opponent_nba`, and both columns to `v_player_season_totals_nba`; then
+move the two entries from `LOG_DERIVED_STATS` into `STAT_CATALOG`
+(`mobile/src/lib/statCatalog.ts`) and remove the gating in
+`mobile/src/hooks/usePlayerDetail.ts`.
+
+## [ ] App: the player record reads at most 200 settled bets (2026-10-16)
+
+"Our picks on <player>" (`mobile/src/lib/queries.ts`, `.limit(200)`) was sized for a
+busiest player of 50 settled bets. The NBA projection model can bet five markets on
+one player in one game. Measure once it has posted:
+`select player_id, count(*) from picks where model_id='nba_prop_projection' and
+signal_type='BET' group by 1 order by 2 desc limit 5`; if the top player nears 200,
+say "Latest 200 bets" on the card or page the read.
+
+## [ ] NBA: a partial ESPN injury pull looks complete (2026-10-16)
+
+`injury_ingestor.fetch_espn_injuries` stores nothing for a team whose ESPN call
+fails and writes the other 29, so the projection reads that team's Out players as
+available. Not observed since 2026-10-01 (no "injuries failed" warning in worker
+logs). The fix is a per-team failure marker the projection can refuse.
+
 ## [ ] NBA: the official injury report is not on the worker (2026-10-16)
 
 `data/ingestors/nba_injury_report.py --today` fetches the latest league PDF;

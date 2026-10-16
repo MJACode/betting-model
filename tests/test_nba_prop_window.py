@@ -158,8 +158,29 @@ def test_the_plan_projects_games_about_an_hour_out_and_any_in_the_window_never_p
                      projected={"FRESH": fresh, "STALE": stale, "NEAR_DONE": stale},
                      proj_decided={"DECIDED"})
     p = _plan(conn, monkeypatch)
-    # 63-67 out: projected unless fresh; 45-62 out: projected only if it never was
+    # 63-67 out: projected unless fresh; 45-62 out: projected if it never was or its only
+    # projection is too old to price (NEAR_DONE: 20 minutes old, still priceable)
     assert sorted(p.project) == ["AT62", "AT63", "AT65", "AT67", "INWIN", "STALE"]
+
+
+def test_a_projection_too_old_to_price_does_not_block_the_retry(monkeypatch):
+    """Production held 2026-10-16 rows for three opening-night games: if the 65-minute tick
+    failed, the old rows stopped every later tick from projecting, and the card cannot price
+    a row over 30 minutes old, so the game was never decided."""
+    old = (NOW - timedelta(days=4)).isoformat()
+    conn = _PlanConn([_game("OLD60", 60), _game("OLD50", 50)], projected={"OLD60": old, "OLD50": old})
+    assert sorted(_plan(conn, monkeypatch).project) == ["OLD50", "OLD60"]
+
+
+def test_a_tick_with_only_a_game_near_tip_publishes_and_spends_nothing(monkeypatch):
+    import scripts.nba_prop_window as win
+    ran, published = _tick(monkeypatch, win.Plan(decide=[], close=[], project=[], publish=True))
+    assert ran == [] and published == ["nba-prop-window"]
+
+
+def test_the_plan_says_publish_while_any_game_is_near(monkeypatch):
+    assert _plan(_PlanConn([_game("G", 30)], decided={"G"}, proj_decided={"G"}), monkeypatch).publish
+    assert not _plan(_PlanConn([]), monkeypatch).publish
 
 
 def test_the_plan_owes_a_close_with_no_game_to_decide(monkeypatch):

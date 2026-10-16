@@ -59,6 +59,14 @@ def _run(quotes, proj=None, art=None, now=None, rule_keys=(), decided=(), rule_d
 
 # ── the card ─────────────────────────────────────────────────────────────────
 
+def test_labels_use_the_live_nba_rules_words_for_shared_markets():
+    import models.nba_prop_market as mk
+    for m in set(pj.MARKETS) & set(mk.MARKET_LABEL):
+        assert pj.MARKET_LABEL[m] == mk.MARKET_LABEL[m], m
+    assert pj.MARKET_LABEL["player_blocks_steals"] == "Blocks+Steals"
+    assert pj.MARKET_LABEL["player_rebounds_assists"] == "Reb+Ast"
+
+
 def test_the_card_is_the_six_confirmed_cells_without_assists_overs():
     assert pj.CARD == {
         "player_steals": (("over", "under"), 0.02), "player_rebounds": (("under",), 0.01),
@@ -512,3 +520,85 @@ def test_publish_takes_the_rules_lock_before_its_own():
     finally:
         wp._lock_model = orig
     assert locks == ["nba_prop_market", "nba_prop_projection"]
+
+
+# ── what the review found (2026-10-16) ───────────────────────────────────────
+
+def test_a_stale_draftkings_quote_is_never_the_reference_price():
+    """Discord posts dk_odds as the headline when it is no worse than the bet's price; a DraftKings
+    quote the card refused as stale must not get there."""
+    fresh = (TIP - timedelta(minutes=56)).isoformat()
+    old = (TIP - timedelta(minutes=80)).isoformat()
+    bets, _, _ = _run([_q("draftkings", 1.5, +120, -150, lu=old), _q("fanduel", 1.5, +105, -135, lu=fresh)])
+    assert len(bets) == 1 and bets[0].book == "fanduel" and bets[0].dk_price is None
+
+
+def test_the_ev_floor_is_the_markets_own_through_one_accessor():
+    import config
+    assert config.min_ev_for("nba_prop_projection") == 0.01
+    for m, (_, floor) in pj.CARD.items():
+        assert config.min_ev_for("nba_prop_projection", m) == floor
+        assert floor == config.MODEL_MARKET_EV_FLOOR["nba_prop_projection"][m]
+    assert config.min_ev_for("nba_prop_market", "player_steals") == config.min_ev_for("nba_prop_market")
+
+
+def test_the_good_to_price_solves_the_markets_own_floor():
+    """Blocks+Steals at p=0.55 decided at -110 (EV 0.05, its floor): -115 would have been refused,
+    so 'good to' cannot reach it. The model-wide 0.01 floor said -119."""
+    from tracking.discord_notifier import price_bound
+    bound = price_bound(0.55, "nba_prop_projection", 0.0, -200, -110, "player_blocks_steals")
+    assert bound == -110
+    assert price_bound(0.55, "nba_prop_projection", 0.0, -200, -110) == -119
+    import config
+    p, dec = 0.55, 1 + 100 / 115
+    assert p * dec - 1 < config.min_ev_for("nba_prop_projection", "player_blocks_steals")
+
+
+def test_a_pick_near_its_tip_is_never_held_back_by_the_per_run_cap(monkeypatch):
+    import config
+    from tracking import discord_notifier as dn
+    monkeypatch.setattr(config, "DISCORD_MAX_EMBEDS_PER_RUN", 20)
+    monkeypatch.setattr(config, "DISCORD_UNCAPPED_WITHIN_MIN", 120)
+    now = datetime(2027, 4, 11, 21, 5, tzinfo=UTC)
+    soon = [{"k": f"soon{i}", "commence": "2027-04-11T22:00:00+00:00"} for i in range(30)]
+    later = [{"k": f"late{i}", "commence": "2027-04-12T02:00:00Z"} for i in range(10)]
+    got = dn._cap_for_run(later[:5] + soon + later[5:], now=now)
+    assert {s["k"] for s in got} == {s["k"] for s in soon}, "all 30 near-tip picks post; no room for later"
+    many_later = [{"k": f"far{i}", "commence": "2027-04-12T02:00:00Z"} for i in range(30)]
+    few = soon[:5]
+    got = dn._cap_for_run(many_later + few + [{"k": "nostart", "commence": None}], now=now)
+    assert len(got) == 20 and {s["k"] for s in few} <= {s["k"] for s in got}
+    assert [s["k"] for s in got] == [s["k"] for s in many_later[:15] + few], "oldest first, near-tip all"
+
+
+def test_the_free_pick_reads_the_price_of_its_own_bet():
+    """Two bets on one player in one transaction share created_at; the free pick must join on the
+    lock key (player AND market), not on player and side."""
+    import inspect
+    from tracking import discord_notifier as dn
+    src = inspect.getsource(dn._free_pick_candidates)
+    assert "{lock_key_sql('p')} = os.lock_key" in src
+
+
+def test_the_posting_run_sends_every_near_tip_pick_over_the_cap(monkeypatch):
+    """The run itself, not just the helper: 30 NBA bets for a game 55 minutes out all go out."""
+    import config
+    from tracking import discord_notifier as dn
+    monkeypatch.setattr(config, "DISCORD_MAX_EMBEDS_PER_RUN", 20)
+    tip = (datetime.now(UTC) + timedelta(minutes=55)).isoformat()
+    sigs = [{"lock_key": f"k{i}", "sport": "NBA", "label": f"L{i}", "commence": tip} for i in range(30)]
+    sent = []
+    monkeypatch.setattr(dn, "_new_signals", lambda conn, d: sigs)
+    monkeypatch.setattr(dn, "refuse_mismatched", lambda s, where: s)
+    monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: "https://example.invalid/hook")
+    monkeypatch.setattr(dn, "_post_picks", lambda url, sport, group, d: sent.extend(group) or [(group, "m1")])
+
+    class _C:
+        def execute(self, *a, **k):
+            return self
+
+        def commit(self):
+            pass
+
+    assert dn._post_new_signals(_C(), "2026-10-21", dry_run=False) == 30
+    assert len(sent) == 30

@@ -61,12 +61,16 @@ class Plan:
     decide: list[str] = field(default_factory=list)    # games to fetch and decide
     close: list[str] = field(default_factory=list)     # bet games owed a close
     project: list[str] = field(default_factory=list)   # games due the projection model's frame
+    # An NBA game tips within LOOK_AHEAD_MIN: publish on this tick even with nothing else to do,
+    # so a bet a failed or capped Discord run held back still posts before its game starts.
+    publish: bool = False
 
 
 def plan(conn, now: datetime) -> Plan:
     """What this tick has to do, from what is stored. No API call."""
     card.ensure_decisions_table(conn)
     games = card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
+    publish = bool(games)                     # slate() keeps only games not yet tipped
     near = sorted(g for g, v in games.items()
                   if mk.minutes_to_tip(v["tip"], now) >= LOOK_AHEAD_MIN[0])
     if near:
@@ -78,7 +82,8 @@ def plan(conn, now: datetime) -> Plan:
     taken = close_ing.closes_taken(conn, sorted(bet)) if bet else set()
     owed = sorted(g for g, v in bet.items()
                   if close_ing.due(v["tip"], now, has_bet=True, close_taken=g in taken))
-    return Plan(decide=near, close=owed, project=projection_card.to_project(conn, now))
+    return Plan(decide=near, close=owed, project=projection_card.to_project(conn, now),
+                publish=publish)
 
 
 def plan_tick(now: datetime | None = None) -> Plan:

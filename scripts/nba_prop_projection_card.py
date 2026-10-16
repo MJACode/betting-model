@@ -85,6 +85,9 @@ PROJECTION_MAX_AGE_MIN = 30
 # The newest ESPN pull a past game's injuries are read from: at least this
 # long before its tip (the graded decision sat 54 minutes before tip).
 ESPN_HISTORY_LEAD_MIN = 55
+# A projection built on an ESPN pull older than this logs a warning: the window
+# job pulls right before projecting, so an old pull means that pull failed.
+INJURY_PULL_WARN_MIN = 30
 FIRST_SEASON_LIVE = 2027           # 2026-27: injuries from ESPN, not the official report
 
 # ── the tables (worker-only: data/anon_readable.WORKER_ONLY_TABLES) ───────────
@@ -340,7 +343,7 @@ def upcoming_rows(hist: dict, box: pd.DataFrame, report: pd.DataFrame, decisions
 def project_core(hist: dict, tonight: pd.DataFrame, game_ids: list[str], now: datetime,
                  priced: pd.DataFrame, art: dict) -> tuple[pd.DataFrame, dict]:
     """The projection, from inputs already read. Pure: no database, so a past night can be replayed
-    from the research cache through exactly this code (tests/test_nba_prop_projection.py).
+    from the research cache through exactly this code (tests/test_nba_prop_projection_replay.py).
 
     `hist`: games, schedule, log (box lines strictly before tonight), asof (stored injury rows);
     `tonight`: tonight's compact injury rows; `priced`: game_id, player_name a book prices.
@@ -381,6 +384,14 @@ def project(conn, game_ids: list[str], now: datetime, art: dict) -> pd.DataFrame
     if pulls:
         pull_ts, raw_ts = pulls[-1]
         tonight = pj.espn_compact(espn_rows(conn, [raw_ts]), pull_ts, _game_teams(games, game_ids))
+        age = (now - pull_ts).total_seconds() / 60
+        if age > INJURY_PULL_WARN_MIN:
+            # Projected anyway: an older list beats none (reports read 60 minutes
+            # late still graded +3.57%, docs/nba_models_2026.md section 5), and the
+            # window's own pull runs right before this. The age is stored with the
+            # projection (injuries_at) and said here so a failing pull is seen.
+            logger.warning(f"nba-prop-projection: the newest ESPN injury pull is {age:.0f} minutes "
+                           f"old ({pull_ts.isoformat()}); projecting {game_ids} on it")
     else:
         pull_ts, tonight = None, pd.DataFrame(columns=list(ASOF_COLS[:-1]))
         logger.warning("nba-prop-projection: no ESPN injury pull today; tonight's games are uncovered")
@@ -428,8 +439,11 @@ def to_project(conn, now: datetime) -> list[str]:
         if lead >= PROJECT_AHEAD_MIN[0]:
             if t is None or (now - t) > timedelta(minutes=PROJECTION_FRESH_MIN):
                 out.append(gid)
-        elif t is None:
-            out.append(gid)                       # inside the window, never projected: do it now
+        elif t is None or (now - t) > timedelta(minutes=PROJECTION_MAX_AGE_MIN):
+            # closer than the projecting tick with nothing the card may price: the
+            # projecting tick failed or never ran, or the only row is too old to
+            # use (load_projections). Project now; the next tick decides.
+            out.append(gid)
     return out
 
 
