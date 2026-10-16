@@ -961,6 +961,13 @@ export interface HeroAmerican {
   link: string | null;
   lockedPrice: number;
   showLockedCaption: boolean;
+  /**
+   * The deciding book's line right now, home-relative, when it is not
+   * `scored_line`. Set even when the price has not moved. On that path
+   * `kind` stays `decision` and `line` stays the lock, so the board's price
+   * pill does not change. The Signals card prints it.
+   */
+  movedLine?: number;
   /** The deciding book has not updated this price within PREGAME_PRICE_MAX_AGE_MIN. */
   stale?: boolean;
   /**
@@ -1063,6 +1070,7 @@ export function heroAmericanForPick(
       ...(untracked ? { untracked: true } : {}),
     };
   }
+  const moved = movedLineField(current?.line, lockedLine);
   if (current != null && current.price !== locked) {
     return {
       kind: 'now',
@@ -1072,6 +1080,7 @@ export function heroAmericanForPick(
       link: current.link,
       lockedPrice: locked,
       showLockedCaption: true,
+      ...moved,
     };
   }
   if (live && current != null) {
@@ -1085,6 +1094,7 @@ export function heroAmericanForPick(
       // Live always restates the lock as a caption (designer contract), even
       // when Now equals it — the timing footer is not the price.
       showLockedCaption: true,
+      ...moved,
     };
   }
   return {
@@ -1095,7 +1105,17 @@ export function heroAmericanForPick(
     link: recordLink(pick, storedQuoteBook(pick)),
     lockedPrice: locked,
     showLockedCaption: false,
+    ...moved,
   };
+}
+
+/** Home-relative current line, only when it is not the lock. */
+function movedLineField(
+  currentLine: number | null | undefined,
+  lockedLine: number | null,
+): { movedLine: number } | Record<string, never> {
+  if (currentLine == null || lockedLine == null || currentLine === lockedLine) return {};
+  return { movedLine: currentLine };
 }
 
 /**

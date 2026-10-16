@@ -12,6 +12,8 @@ import { historyFrom, sincePick } from '../src/lib/lineHistory';
 import { lineMovementView } from '../src/lib/lineMovementView';
 import {
   bestHandoffForPick,
+  bookLabel,
+  bookName,
   canShowLineMovementHistory,
   computeMovement,
   formatSideLine,
@@ -25,15 +27,17 @@ import {
   MODEL_BOOK,
 } from '../src/lib/markets';
 import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
-import { MINUS } from '../src/lib/format';
+import { formatAmerican, MINUS } from '../src/lib/format';
 import {
   signalsBetHeadline,
   signalsContextLine,
   signalsContextTime,
   signalsCtaLabel,
   signalsHeroSpeech,
+  signalsNowLine,
   signalsPriceText,
   signalsStakeUnits,
+  signalsToWinSpeech,
 } from '../src/lib/signalsCard';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
 
@@ -102,6 +106,121 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   check(
     'pre-game moved → Now + Locked caption',
     h?.kind === 'now' && h.price === -115 && h.showLockedCaption && h.lockedPrice === -110,
+  );
+  check('a price move at the same line does not set movedLine', h?.movedLine == null && h?.line === 8.5);
+}
+{
+  // Line moved, price unchanged. The board pill stays the lock (kind
+  // decision, line is the scored line). Signals reads movedLine.
+  const pick = mkPick({
+    model_id: 'ncaaf_spread',
+    sport: 'NCAAF',
+    pick_side: 'home',
+    pick_label: 'Sam Houston -7.5',
+    scored_line: -7.5,
+    dk_odds: -110,
+    decision_odds: -110,
+    decision_book: 'draftkings',
+  });
+  const row = latest({
+    market: 'spreads',
+    spread_home: -8.5,
+    total_line: null,
+    home_price: -110,
+    away_price: -110,
+    over_price: null,
+    under_price: null,
+  });
+  const hero = heroAmericanForPick(pick, row, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
+  ]);
+  check(
+    'line-only move stays a decision hero and records the current line',
+    hero?.kind === 'decision' && hero.price === -110 && hero.line === -7.5 && hero.movedLine === -8.5,
+    JSON.stringify(hero),
+  );
+  const sideLine = formatSideLine(hero?.movedLine ?? null, pick.pick_side, 'spreads');
+  const screenNow = signalsNowLine({
+    line: sideLine,
+    price: formatAmerican(hero?.price),
+    priceDiffers: false,
+    book: bookLabel(hero?.book ?? ''),
+  });
+  const spokenNow = signalsNowLine({
+    line: sideLine,
+    price: formatAmerican(hero?.price),
+    priceDiffers: false,
+    book: bookName(hero?.book ?? ''),
+  });
+  check('Signals shows the moved line under the hero', screenNow === `Now ${MINUS}8.5 ${MINUS}110 DK`, screenNow ?? '');
+  const speech = signalsHeroSpeech({
+    decisionPrice: formatAmerican(hero?.lockedPrice),
+    book: bookName(hero?.book ?? ''),
+    now: spokenNow,
+  });
+  check(
+    'VoiceOver says that same Now line, with the full book name',
+    speech === `${MINUS}110 DraftKings. Now ${MINUS}8.5 ${MINUS}110 DraftKings` &&
+      speech.includes(spokenNow ?? 'missing'),
+    speech,
+  );
+  const handoff = bestHandoffForPick(pick, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
+  ], hero);
+  check(
+    'the record button is still the lock price when only the line moved',
+    handoff?.bookmaker === 'draftkings' && handoff.price === -110,
+    JSON.stringify(handoff),
+  );
+}
+{
+  // Price and line both moved, and the button is that current DK quote.
+  const pick = mkPick({
+    model_id: 'ncaaf_spread',
+    sport: 'NCAAF',
+    pick_side: 'home',
+    pick_label: 'Sam Houston -7.5',
+    scored_line: -7.5,
+    dk_odds: -110,
+    decision_odds: -110,
+    decision_book: 'draftkings',
+  });
+  const row = latest({
+    market: 'spreads',
+    spread_home: -8.5,
+    total_line: null,
+    home_price: -105,
+    away_price: -115,
+    over_price: null,
+    under_price: null,
+  });
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', home_price: -105, away_price: -115, spread_home: -8.5 },
+  ];
+  const hero = heroAmericanForPick(pick, row, rows);
+  check(
+    'price and line moved: Now price, and movedLine is the new line',
+    hero?.kind === 'now' && hero.price === -105 && hero.lockedPrice === -110 && hero.movedLine === -8.5,
+    JSON.stringify(hero),
+  );
+  const sideLine = formatSideLine(hero?.movedLine ?? null, pick.pick_side, 'spreads');
+  const screenNow = signalsNowLine({
+    line: sideLine,
+    price: formatAmerican(hero?.price),
+    priceDiffers: true,
+    book: bookLabel(hero?.book ?? ''),
+  });
+  check('Signals shows line and price together', screenNow === `Now ${MINUS}8.5 ${MINUS}105 DK`, screenNow ?? '');
+  const handoff = bestHandoffForPick(pick, rows, hero);
+  const buttonNamesLine = Boolean(
+    hero && handoff && hero.kind === 'now' && handoff.bookmaker === hero.book && handoff.price === hero.price,
+  );
+  check(
+    'the button is the current DK price at the moved line, so its label names the line',
+    buttonNamesLine && handoff?.price === -105 &&
+      signalsCtaLabel(bookLabel(handoff!.bookmaker), formatAmerican(handoff!.price), sideLine) ===
+        `Bet DK ${MINUS}8.5 ${MINUS}105`,
+    JSON.stringify(handoff),
   );
 }
 {
@@ -535,6 +654,18 @@ check(
   check('moneyline headline is the stored label', signalsBetHeadline('Sam Houston ML') === 'Sam Houston ML');
   check('total headline is the side and the line', signalsBetHeadline('NYY vs BOS Over 8.5') === 'Over 8.5');
   check(
+    'F5 stays on a total, a spread and a moneyline',
+    signalsBetHeadline('NYY vs BOS Over 4.5 F5') === 'Over 4.5 F5' &&
+      signalsBetHeadline('NYY -1.5 F5') === `NYY ${MINUS}1.5 F5` &&
+      signalsBetHeadline('NYY ML F5') === 'NYY ML F5',
+  );
+  check(
+    'a team-total qualifier stays in front of Over/Under',
+    signalsBetHeadline('BOS vs NYY Team Total Over 3.5') === 'Team Total Over 3.5' &&
+      signalsBetHeadline('New York vs Los Angeles Team Total Under 2.5') === 'Team Total Under 2.5' &&
+      signalsBetHeadline('Los Angeles vs New York Over 8.5') === 'Over 8.5',
+  );
+  check(
     'prop headline keeps the player',
     signalsBetHeadline('Roquan Smith Under 9.5 Tackles') === 'Roquan Smith Under 9.5 Tackles',
   );
@@ -547,6 +678,7 @@ check(
     signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`,
   );
   check('CTA names the best book, word is Bet', signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`);
+  check('CTA names the line when that bet is at a moved line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`);
   check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
   check(
     'stake cell is the to-win units only',
@@ -554,25 +686,51 @@ check(
       signalsStakeUnits({ priced: true, win: 0.4, conviction: 1 }) === 0.4 &&
       signalsStakeUnits({ priced: false, win: 1, conviction: 1 }) === 1,
   );
+  check(
+    'To win speech is singular at exactly 1u',
+    signalsToWinSpeech('1u') === '1 unit' &&
+      signalsToWinSpeech('0.4u') === '0.4 units' &&
+      signalsToWinSpeech('1.5u') === '1.5 units' &&
+      signalsToWinSpeech('10u') === '10 units',
+  );
   const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
   const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
   check('Signals board opts into the signals layout', /layout=\{view === 'signals' \? 'signals' : 'board'\}/.test(home));
   check('hero is 22pt', /betLeft: \{[\s\S]*?font\.size\.title2/.test(card) && /betRight: \{[\s\S]*?font\.size\.title2/.test(card));
-  check('four cells use the plain words', /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && />Stake</.test(card));
+  check('four cells use the plain words', /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && />To win</.test(card));
   const navy = /handoffNavy: \{[\s\S]*?\}/.exec(card)?.[0] ?? '';
   check('CTA fill is navy tint, not DK green or system blue', /backgroundColor: colors\.tint/.test(navy) && !/DK_GREEN|colors\.info/.test(navy));
   check('CTA label is textInverse', /handoffNavyText: \{[\s\S]*?color: colors\.textInverse/.test(card));
   check('signals stake reads signalsStakeUnits', /signalsStakeUnits\(stake\)/.test(card));
   check(
+    'Signals movement chip uses a true minus; the board chip does not',
+    card.includes('trueMinus(movementSummary.label)') &&
+      card.split('trueMinus(movementSummary.label)').length === 2,
+  );
+  check(
     'a later day joins the clock; today stays the clock',
     signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET' &&
       signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET',
   );
+  const samePrice = signalsPriceText('-110', 'DraftKings');
+  const movedNow = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DraftKings' });
+  const priceNow = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DraftKings' });
   check(
-    'VoiceOver speaks the decision price, then a moved price',
-    signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === `${MINUS}110 BetMGM` &&
-      signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', currentPrice: '-105' }) ===
-        `${MINUS}110 BetMGM. Now ${MINUS}105 BetMGM`,
+    'VoiceOver uses the same price text as the headline, then the Now line the screen shows',
+    signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings' }) === samePrice &&
+      signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings', now: null }) === samePrice &&
+      !signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings' }).includes('Now') &&
+      signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings', now: priceNow }) ===
+        `${samePrice}. ${priceNow}`,
+  );
+  check(
+    'a moved line is a Now line, and an unchanged card is not',
+    movedNow === `Now ${MINUS}8.5 ${MINUS}110 DraftKings` &&
+      priceNow === `Now ${MINUS}105 DraftKings` &&
+      signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) ===
+        `Now ${MINUS}8.5 ${MINUS}105 DK` &&
+      signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null &&
+      signalsNowLine({ line: '-8.5', price: null, priceDiffers: false, book: 'DK' }) === null,
   );
   check(
     'a plain moved price does not restate Locked under the decision hero',

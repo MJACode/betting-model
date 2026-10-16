@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals card review on #965: a Now line when the book's line or price differs, the Bet button names that line only when it is the current bet, the fourth cell is To win |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals pick card (Designer Option A, Matt approved): one compact line, 22pt bet as the hero, four cells, navy Bet button. Today and Live stay on the board layout |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, evening 03:30Z apply-view-migrations 59/60 (pipeline_log does not name the file; injuries.status_ts already exists). #857 rebased onto master after #958: CLV skip path kept, catalog returns added for the already-applied ALTER/index/policy files, discord_void return stays ahead of the full-definition guard |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the NFL leader moneyline's first live bet laid -980; its price floor (-5000, set so it never bound) is now -140 (mike); bets at -500 or shorter had made -0.10u in the backtest |

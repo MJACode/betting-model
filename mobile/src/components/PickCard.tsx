@@ -43,9 +43,11 @@ import {
   signalsContextTime,
   signalsCtaLabel,
   signalsHeroSpeech,
+  signalsNowLine,
   signalsPriceText,
   signalsStakeUnits,
   signalsTeamsSpeech,
+  signalsToWinSpeech,
   trueMinus,
 } from '@/lib/signalsCard';
 import {
@@ -269,14 +271,65 @@ export function PickCard({
   const contextWhen = game?.commence_time ?? pick.game_time;
   const contextTime = signalsContextTime(gameDayLabelET(contextWhen), formatGameTimeET(contextWhen));
   const decisionPrice = decisionOdds(pick);
+  // One formatted decision price for the 22pt number and for VoiceOver.
+  // hero.lockedPrice is decisionOdds; the book is the hero's book when we
+  // have one, which is the stored quote book before the start.
+  const lockedAmerican = heroPrice ? formatAmerican(heroPrice.lockedPrice) : null;
+  const quoteBookKey = heroPrice?.book ?? (decisionPrice == null ? null : storedQuoteBook(pick));
   const signalsPrice =
-    decisionPrice == null
-      ? null
-      : signalsPriceText(formatAmerican(decisionPrice), bookLabel(storedQuoteBook(pick)));
+    lockedAmerican && quoteBookKey
+      ? signalsPriceText(lockedAmerican, bookLabel(quoteBookKey))
+      : null;
+  // The book's line now, from the pick's side, when it is not the lock.
+  // `movedLine` is set even when the price has not moved (kind stays
+  // `decision`, so the board pill is unchanged).
+  const signalsMarket = gameMarketForModel(pick.model_id) ?? marketForPick(pick);
+  const signalsMovedLineText =
+    heroPrice?.movedLine != null
+      ? formatSideLine(heroPrice.movedLine, pick.pick_side, signalsMarket)
+      : null;
+  const nowPrice =
+    heroPrice && !heroPrice.stale && !heroPrice.untracked && heroPrice.price != null
+      ? formatAmerican(heroPrice.price)
+      : null;
+  const priceDiffers = Boolean(
+    nowPrice && heroPrice && heroPrice.kind === 'now' && heroPrice.price !== heroPrice.lockedPrice,
+  );
+  const signalsNow = quoteBookKey
+    ? signalsNowLine({
+        line: signalsMovedLineText,
+        price: nowPrice,
+        priceDiffers,
+        book: bookLabel(quoteBookKey),
+      })
+    : null;
+  // Same numbers as the screen. The spoken book is the full name.
+  const signalsNowSpoken = quoteBookKey
+    ? signalsNowLine({
+        line: signalsMovedLineText,
+        price: nowPrice,
+        priceDiffers,
+        book: bookName(quoteBookKey),
+      })
+    : null;
+  // The button names the line only when it is a bet at that moved line
+  // (same book, current price). A record chip at the lock does not.
+  const ctaAtMovedLine = Boolean(
+    signalsMovedLineText &&
+    handoff &&
+    heroPrice &&
+    heroPrice.kind === 'now' &&
+    !heroPrice.stale &&
+    !heroPrice.untracked &&
+    handoff.bookmaker === heroPrice.book &&
+    handoff.price != null &&
+    handoff.price === heroPrice.price,
+  );
   const signalsCta = handoff
     ? signalsCtaLabel(
         bookLabel(handoff.bookmaker),
         handoff.price == null ? null : formatAmerican(handoff.price),
+        ctaAtMovedLine ? signalsMovedLineText : null,
       )
     : null;
   const signalsStakeShown = stakeCaption ? formatUnits(signalsStakeUnits(stake)) : null;
@@ -296,20 +349,17 @@ export function PickCard({
     signals ? `Model chance ${formatPct(pick.model_probability)}` : null,
     signals ? (flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`) : null,
     // The full book name, and the lock whenever the eye sees "Locked".
-    // Signals speaks the decision price (that is the 22pt number). A moved
-    // price is the next sentence. Stale and untracked keep heroPriceSpeech.
-    signals && heroPrice && !heroPrice.stale && !heroPrice.untracked
+    // Signals speaks the same decision price the 22pt number shows, then the
+    // Now line when the screen shows one. Stale and untracked keep heroPriceSpeech.
+    signals && lockedAmerican && quoteBookKey && heroPrice && !heroPrice.stale && !heroPrice.untracked
       ? signalsHeroSpeech({
-          decisionPrice: formatAmerican(heroPrice.lockedPrice),
-          book: bookName(heroPrice.book),
-          currentPrice:
-            heroPrice.kind === 'now' && heroPrice.price != null && heroPrice.price !== heroPrice.lockedPrice
-              ? formatAmerican(heroPrice.price)
-              : null,
+          decisionPrice: lockedAmerican,
+          book: bookName(quoteBookKey),
+          now: signalsNowSpoken,
         })
       : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null),
     signals
-      ? (stakeCaption ? `Stake ${unitsSpeech(signalsStakeShown ?? '')}` : 'Stake unavailable')
+      ? (stakeCaption ? `To win ${signalsToWinSpeech(signalsStakeShown ?? '')}` : 'To win unavailable')
       : (stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null),
     timing ? timing.label : null,
     startedSpoken,
@@ -738,6 +788,9 @@ export function PickCard({
           <Text style={styles.betRight}>{signalsPrice}</Text>
         ) : null}
       </View>
+      {signalsNow ? (
+        <Text style={styles.nowLine}>{signalsNow}</Text>
+      ) : null}
       {heroPrice?.showLockedCaption && (heroPrice.stale || heroPrice.untracked) ? (
         <Text style={styles.lockedCaption}>{trueMinus(lockedCaptionText(heroPrice))}</Text>
       ) : null}
@@ -763,7 +816,7 @@ export function PickCard({
           <Text style={[styles.metricValue, signalsStakeShown == null ? styles.metricMuted : null]}>
             {signalsStakeShown ?? '—'}
           </Text>
-          <Text style={styles.metricLabel}>Stake</Text>
+          <Text style={styles.metricLabel}>To win</Text>
         </View>
       </View>
 
@@ -783,7 +836,7 @@ export function PickCard({
                   { color: inkFor(movementSummary.color), fontWeight: font.weight.medium },
                 ]}
               >
-                {movementSummary.label}
+                {trueMinus(movementSummary.label)}
               </Text>
             </View>
           ) : null}
@@ -1331,6 +1384,16 @@ const styles = StyleSheet.create({
     fontSize: font.size.title2,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  // The book's current line or price, when it is not the lock. Same "Now"
+  // ink as the board's tag (textSecondary, above 4.5:1). Wraps at large text.
+  nowLine: {
+    marginTop: 2,
+    marginBottom: spacing.xs,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
   },
   metrics: {

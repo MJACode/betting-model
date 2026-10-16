@@ -16,17 +16,34 @@ export function trueMinus(text: string): string {
 }
 
 /**
+ * A market tag that belongs to the bet, not to the team name. It stays on
+ * the hero when the matchup prefix is dropped: "Over 4.5 F5", "Team Total
+ * Over 3.5". A two-word school ("Los Angeles") is not in this list.
+ */
+const TOTAL_QUALIFIER = /(?:F5|Team Total|alternate total|1st-period total)$/i;
+
+/**
  * The bet the Signals card headlines.
  * "Sam Houston -7.5" → "Sam Houston −7.5".
  * "NYY vs BOS Over 8.5" → "Over 8.5" (the teams are the line above).
- * A prop keeps the stored label, player included.
+ * "NYY vs BOS Over 4.5 F5" keeps F5. "BOS vs NYY Team Total Over 3.5"
+ * keeps "Team Total". A prop keeps the stored label, player included.
  */
 export function signalsBetHeadline(pickLabel: string | null | undefined): string {
-  const label = (pickLabel ?? '').trim();
-  const total = label.match(/^(?:.+?)\s+(?:vs|@)\s+(?:.+?)\s+((?:Over|Under)\b.*)$/);
-  // NFL card labels append the stake ("· 1.00u"). The stake cell owns that
+  // NFL card labels append the stake ("· 1.00u"). The to-win cell owns that
   // number; the hero is the bet.
-  const bet = (total ? total[1] : label).replace(/\s·\s[\d.]+u$/, '');
+  const label = (pickLabel ?? '').trim().replace(/\s·\s[\d.]+u$/, '');
+  const split = label.match(/^(.*?)\s+(?:vs|@)\s+(.*)$/);
+  if (!split) return trueMinus(label);
+  const rest = split[2];
+  const at = rest.search(/(?:^|\s)(?:Over|Under)\b/);
+  if (at < 0) return trueMinus(label);
+  const betAt = at === 0 ? 0 : at + 1;
+  // "vs Over …" with no home team is not a game total. Leave the label.
+  if (betAt === 0) return trueMinus(label);
+  const before = rest.slice(0, betAt).trimEnd();
+  const qualifier = before.match(TOTAL_QUALIFIER);
+  const bet = qualifier ? rest.slice(betAt - qualifier[0].length - 1) : rest.slice(betAt);
   return trueMinus(bet);
 }
 
@@ -38,10 +55,17 @@ export function signalsPriceText(priceText: string, book: string): string {
 /**
  * "Bet MGM −110". The word is Bet (the best bettable book is named, not
  * implied to be DraftKings). No price → "Open <book>", never a made-up number.
+ * `lineText` is the book's current line when this button is a bet at that
+ * line and it is not the line in the headline ("Bet DK −8.5 −105").
  */
-export function signalsCtaLabel(book: string, priceText: string | null): string {
+export function signalsCtaLabel(
+  book: string,
+  priceText: string | null,
+  lineText?: string | null,
+): string {
   if (!priceText) return `Open ${book}`;
-  return `Bet ${book} ${trueMinus(priceText)}`;
+  const line = lineText ? `${trueMinus(lineText)} ` : '';
+  return `Bet ${book} ${line}${trueMinus(priceText)}`;
 }
 
 /**
@@ -57,18 +81,47 @@ export function signalsContextTime(
 }
 
 /**
+ * The small line under the hero when the book's current line or price is
+ * not the number the pick was written at. Null when nothing to show has
+ * been passed, so the screen and VoiceOver stay quiet together.
+ *
+ * `line` is already the pick's side ("-8.5", "+3.5", "9") and is null when
+ * the line has not moved. `price` is the current American. `priceDiffers`
+ * is that price against the decision price. A line move prints the line and
+ * the price; a price move with the same line prints the price. `book` is
+ * whatever this surface uses (the short label on screen, the full name
+ * when spoken) — the numbers are the same call either way.
+ */
+export function signalsNowLine(input: {
+  line: string | null;
+  price: string | null;
+  priceDiffers: boolean;
+  book: string;
+}): string | null {
+  if (input.price == null) return null;
+  if (!input.line && !input.priceDiffers) return null;
+  const parts = ['Now'];
+  if (input.line) parts.push(trueMinus(input.line));
+  parts.push(trueMinus(input.price));
+  if (input.book) parts.push(input.book);
+  return parts.join(' ');
+}
+
+/**
  * VoiceOver for the Signals hero. The 22pt number is the decision price, so
- * that is what is spoken, with the full book name. A moved current price is
- * the next sentence. Stale and untracked cards stay on `heroPriceSpeech`.
+ * that is what is spoken, with the full book name — the same `signalsPriceText`
+ * the screen uses, so the two cannot format the price differently. `now` is
+ * the Now line the screen is showing (built by `signalsNowLine`); null when
+ * the screen has none. Stale and untracked cards stay on `heroPriceSpeech`.
  */
 export function signalsHeroSpeech(input: {
   decisionPrice: string;
   book: string;
-  currentPrice?: string | null;
+  now?: string | null;
 }): string {
-  const locked = `${trueMinus(input.decisionPrice)} ${input.book}`.trim();
-  if (!input.currentPrice) return locked;
-  return `${locked}. Now ${trueMinus(input.currentPrice)} ${input.book}`.trim();
+  const locked = signalsPriceText(input.decisionPrice, input.book);
+  if (!input.now) return locked;
+  return `${locked}. ${input.now}`;
 }
 
 /**
@@ -112,8 +165,10 @@ export function signalsTeamsSpeech(sport: string, away: string, home: string): s
 }
 
 /**
- * The stake cell. One figure, the units to win (`stake.win` when a price
+ * The "To win" cell. One figure, the units to win (`stake.win` when a price
  * exists, otherwise the conviction). Never "1.1u → 1u", never dollars.
+ * The cell is not labelled "Stake": a capped heavy favorite wins under 1u,
+ * and that label made the biggest risk look like the smallest number.
  */
 export function signalsStakeUnits(stake: {
   priced: boolean;
@@ -121,4 +176,13 @@ export function signalsStakeUnits(stake: {
   conviction: number;
 }): number {
   return stake.priced ? stake.win : stake.conviction;
+}
+
+/**
+ * VoiceOver for the "To win" cell. "1u" is "1 unit"; every other figure stays
+ * plural ("0.4 units", "1.5 units"). The visible cell still prints "1u".
+ */
+export function signalsToWinSpeech(shown: string): string {
+  const spoken = shown.replace(/(\d)u\b/g, '$1 units');
+  return spoken === '1 units' ? '1 unit' : spoken;
 }

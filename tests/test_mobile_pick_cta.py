@@ -595,8 +595,10 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert re.search(r"handoffNavyText: \{[^}]*color: colors\.textInverse", card)
     assert "signalsStakeUnits(stake)" in card
     assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
+    assert "signalsNowLine(" in card and "now: signalsNowSpoken" in card
     assert "heroPrice.stale || heroPrice.untracked" in card
-    assert "Stake unavailable" in card
+    assert "To win unavailable" in card and ">To win<" in card
+    assert "Stake unavailable" not in card
     assert "marginLeft: 'auto'" in card
     # The arrow form stays on the Today caption. The Signals cell does not use it.
     assert "formatUnits(stake.risk)} → ${formatUnits(stake.win)}" in card
@@ -608,15 +610,22 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
         assert "? 'checkmark'" in src
 
 
-@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+@pytest.mark.skipif(
+    not _node_strips_types(),
+    reason="node copy test skips on node older than 22.6",
+)
 def test_signals_card_copy(tmp_path):
-    """The headline, the compact line and the CTA, including U+2212."""
+    """Behaviour of the Signals copy helpers, including a moved line.
+
+    Skips when node is older than 22.6 (no type stripping). The source pins
+    in test_signals_card_quotes_the_bet_and_names_the_best_book still run.
+    """
     for name in ("format.ts", "signalsCard.ts"):
         src = _read(LIB / name)
         src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = r"""
-import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsHeroSpeech, signalsPriceText, signalsStakeUnits } from './signalsCard.ts';
+import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsHeroSpeech, signalsNowLine, signalsPriceText, signalsStakeUnits, signalsToWinSpeech } from './signalsCard.ts';
 const MINUS = '\u2212';
 const ok = (cond, what) => { if (!cond) throw new Error(what); };
 const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
@@ -629,16 +638,36 @@ ok(!signalsBetHeadline('Sam Houston -7.5').includes('-'), 'no ascii hyphen on th
 ok(signalsBetHeadline('Louisiana-Monroe -2.5') === `Louisiana-Monroe ${MINUS}2.5`, 'name hyphen stays');
 ok(signalsBetHeadline('Sam Houston ML') === 'Sam Houston ML', 'moneyline');
 ok(signalsBetHeadline('NYY vs BOS Over 8.5') === 'Over 8.5', 'total');
+ok(signalsBetHeadline('NYY vs BOS Over 4.5 F5') === 'Over 4.5 F5', 'F5 total keeps the qualifier');
+ok(signalsBetHeadline('NYY -1.5 F5') === `NYY ${MINUS}1.5 F5`, 'F5 spread keeps the qualifier');
+ok(signalsBetHeadline('NYY ML F5') === 'NYY ML F5', 'F5 moneyline keeps the qualifier');
+ok(signalsBetHeadline('BOS vs NYY Team Total Over 3.5') === 'Team Total Over 3.5', 'team total stays');
+ok(signalsBetHeadline('New York vs Los Angeles Team Total Under 2.5') === 'Team Total Under 2.5', 'team total after a two-word team');
+ok(signalsBetHeadline('Los Angeles vs New York Over 8.5') === 'Over 8.5', 'two-word teams are not a qualifier');
 ok(signalsBetHeadline('Roquan Smith Under 9.5 Tackles') === 'Roquan Smith Under 9.5 Tackles', 'prop');
 ok(signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`, 'price book');
 ok(signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`, 'cta');
+ok(signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`, 'cta names a moved line');
 ok(signalsCtaLabel('DK', null) === 'Open DK', 'no invented price');
+const moved = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DK' });
+const priced = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DK' });
+ok(moved === `Now ${MINUS}8.5 ${MINUS}110 DK`, 'moved line');
+ok(priced === `Now ${MINUS}105 DK`, 'moved price');
+ok(signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) === `Now ${MINUS}8.5 ${MINUS}105 DK`, 'line and price');
+ok(signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null, 'unchanged is quiet');
+ok(signalsNowLine({ line: '-8.5', price: null, priceDiffers: true, book: 'DK' }) === null, 'no price, no Now line');
 ok(signalsStakeUnits({ priced: true, win: 1, conviction: 1 }) === 1, '1u to win');
 ok(signalsStakeUnits({ priced: true, win: 0.4, conviction: 1 }) === 0.4, 'capped win, not the arrow');
+ok(signalsToWinSpeech('1u') === '1 unit', 'one unit');
+ok(signalsToWinSpeech('0.4u') === '0.4 units', 'fraction stays plural');
+ok(signalsToWinSpeech('10u') === '10 units', 'ten is not one');
 ok(signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET', 'today is the clock');
 ok(signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET', 'later day joins the clock');
-ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === `${MINUS}110 BetMGM`, 'decision speech');
-ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', currentPrice: '-105' }) === `${MINUS}110 BetMGM. Now ${MINUS}105 BetMGM`, 'moved speech');
+const locked = signalsPriceText('-110', 'BetMGM');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === locked, 'decision speech is the headline price');
+ok(!signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }).includes('Now'), 'no Now when the screen has none');
+const spoken = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'BetMGM' });
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }) === `${locked}. ${spoken}`, 'speech repeats the Now line');
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
@@ -657,8 +686,9 @@ def test_pick_cta_pins_are_on_the_pr_ci_subset():
 )
 def test_the_behavioural_checks_pass():
     tsx = MOBILE / "node_modules" / ".bin" / "tsx"
-    proc = subprocess.run(
-        [str(tsx), "scripts/verify_pick_cta.ts"],
-        cwd=MOBILE, capture_output=True, text=True, timeout=300,
-    )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    for script in ("scripts/verify_pick_cta.ts", "scripts/verify_pick_card.ts"):
+        proc = subprocess.run(
+            [str(tsx), script],
+            cwd=MOBILE, capture_output=True, text=True, timeout=300,
+        )
+        assert proc.returncode == 0, script + "\n" + proc.stdout + proc.stderr
