@@ -63,19 +63,45 @@ export function signalsPriceText(priceText: string, book: string): string {
 }
 
 /**
- * "Bet MGM −110". The word is Bet (the best bettable book is named, not
- * implied to be DraftKings). No price → "Open <book>", never a made-up number.
- * `lineText` is the book's current line when this button is a bet at that
- * line and it is not the line in the headline ("Bet DK −8.5 −105").
+ * "Bet MGM −110" when the button is the decision book at the decision price.
+ * "Best now · FD −105" when the button's book or price is not that hero
+ * (`bestNow`): the same Best/Bet split as the Today card, with "now" because
+ * the 22pt number is still the lock. `lineText` is the book's current line
+ * when this button is a bet at that line and it is not the line in the
+ * headline. No price → "Open <book>", never a made-up number.
  */
 export function signalsCtaLabel(
   book: string,
   priceText: string | null,
   lineText?: string | null,
+  opts?: { bestNow?: boolean },
 ): string {
   if (!priceText) return `Open ${book}`;
   const line = lineText ? `${trueMinus(lineText)} ` : '';
-  return `Bet ${book} ${line}${trueMinus(priceText)}`;
+  const quote = `${book} ${line}${trueMinus(priceText)}`;
+  return opts?.bestNow ? `Best now · ${quote}` : `Bet ${quote}`;
+}
+
+/**
+ * The same button, as VoiceOver should say it. Full book name, no middle
+ * dot: "Best now, FanDuel, −105". `book` here is the spoken name.
+ */
+export function signalsCtaSpeech(
+  book: string,
+  priceText: string | null,
+  lineText?: string | null,
+  opts?: { bestNow?: boolean },
+): string {
+  if (!priceText) return `Open ${book}`;
+  const parts = [opts?.bestNow ? 'Best now' : 'Bet', book];
+  if (lineText) parts.push(trueMinus(lineText));
+  parts.push(trueMinus(priceText));
+  return parts.join(', ');
+}
+
+/** "Picked at −110 MGM" — the lock, on screen only when the button is not it. */
+export function signalsPickedAtLine(priceText: string, book: string): string {
+  return `Picked at ${trueMinus(priceText)} ${book}`;
 }
 
 /**
@@ -122,7 +148,9 @@ export function signalsNowLine(input: {
  * that is what is spoken, with the full book name — the same `signalsPriceText`
  * the screen uses, so the two cannot format the price differently. `now` is
  * the Now line the screen is showing (built by `signalsNowLine`); null when
- * the screen has none. Stale and untracked cards stay on `heroPriceSpeech`.
+ * the screen has none. The lock is this one price. The grey "Picked at"
+ * line is visual only, so it is not spoken again. Stale and untracked
+ * cards stay on `heroPriceSpeech`.
  */
 export function signalsHeroSpeech(input: {
   decisionPrice: string;

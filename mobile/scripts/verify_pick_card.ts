@@ -36,8 +36,10 @@ import {
   signalsContextLine,
   signalsContextTime,
   signalsCtaLabel,
+  signalsCtaSpeech,
   signalsHeroSpeech,
   signalsNowLine,
+  signalsPickedAtLine,
   signalsPriceText,
   signalsStakeLine,
   signalsStakeSpeech,
@@ -780,7 +782,7 @@ check(
     'PickCard a11y still announces the stored pick_label',
     // PR 4 (M8) builds the label as `cardLabel` so it can carry status, stake
     // and timing too; the stored pick_label is still in it.
-    /const cardLabel = \[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
+    /const cardLabel = joinCardSpeech\(\[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
   );
   check(
     'PickCard does not write pick_label',
@@ -864,6 +866,14 @@ check(
   check('CTA names the line when that bet is at a moved line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`);
   check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
   check(
+    'a different book or price is Best now, and the lock is named under the hero',
+    signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105` &&
+      signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105` &&
+      signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105` &&
+      !signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·') &&
+      signalsPickedAtLine('-110', 'MGM') === `Picked at ${MINUS}110 MGM`,
+  );
+  check(
     'stake cell names units to bet and units to win',
     signalsStakeLine('1.5u', '0.4u') === 'Bet 1.5u · Win 0.4u' &&
       signalsStakeLine('1.1u', '1u') === 'Bet 1.1u · Win 1u' &&
@@ -889,8 +899,10 @@ check(
       /formatUnits\(stake\.risk\)/.test(card) &&
       /formatUnits\(stake\.win\)/.test(card) &&
       /Stake unavailable/.test(card) &&
-      !/numberOfLines=\{1\}/.test(card.slice(card.indexOf('metricStake'))) &&
-      /metricStake: \{[\s\S]*?flexBasis: '100%'[\s\S]*?maxWidth: '100%'/.test(card),
+      /\{signalsStakeShown \?\? '—'\}/.test(card) &&
+      !/numberOfLines[\s\S]{0,120}signalsStakeShown \?\?/.test(card) &&
+      /metric: \{[\s\S]*?flexBasis: '46%'[\s\S]*?maxWidth: '48%'/.test(card) &&
+      !/flexBasis: '100%'/.test(card),
   );
   check(
     'Signals movement chip uses a true minus; the board chip does not',

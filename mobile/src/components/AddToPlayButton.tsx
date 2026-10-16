@@ -35,7 +35,7 @@ export function AddToPlayButton({ inPlay, onPress, compact, tall }: Props) {
         style={({ pressed }) => [
           styles.btn,
           styles.btnTall,
-          inPlay ? styles.inPlay : styles.add,
+          inPlay ? styles.inPlayTall : styles.add,
           pressed && styles.pressed,
         ]}
       >
@@ -100,6 +100,11 @@ const styles = StyleSheet.create({
   inPlay: {
     borderColor: colors.tint,
     backgroundColor: colors.bgCard,
+  },
+  // Tall (Signals) selected state. Compact pills stay on the card ground.
+  inPlayTall: {
+    borderColor: colors.tint,
+    backgroundColor: colors.tintSoft,
   },
   row: {
     flexDirection: 'row',

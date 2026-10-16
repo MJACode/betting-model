@@ -37,7 +37,7 @@ export function TrackButton({ tracked, onPress, compact, tall }: Props) {
         style={({ pressed }) => [
           styles.btn,
           styles.btnTall,
-          tracked ? styles.on : styles.off,
+          tracked ? styles.onTall : styles.off,
           pressed && styles.pressed,
         ]}
       >
@@ -100,6 +100,11 @@ const styles = StyleSheet.create({
   on: {
     borderColor: colors.tint,
     backgroundColor: 'transparent',
+  },
+  // Tall (Signals) selected state. Compact pills stay transparent.
+  onTall: {
+    borderColor: colors.tint,
+    backgroundColor: colors.tintSoft,
   },
   off: {
     borderColor: colors.tint,

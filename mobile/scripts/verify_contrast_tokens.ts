@@ -124,6 +124,7 @@ const PAIRS: Pair[] = [
   T('betInk', 'bg', 'Parlay stat row on the grouped ground (H2)'),
   T('betInk', 'betSoft', 'BET badge, HIGH tier, sharp pill, W letter (H1/H2/M5/M6)'),
   T('tint', 'bgCard', 'Tracking / In slip ON: tint outline, checkmark and label (Designer ruling)'),
+  T('tint', 'tintSoft', 'Signals Slip/Track selected wash (Designer, #965)'),
   W('betInk', 'bet', 'parlay "Great" grade (H2)'),
   T('avoidInk', 'bgCard', 'loss text, error text, destructive labels (H2/H8/M1)'),
   T('avoidInk', 'bg', 'loss text on the grouped ground (H2)'),

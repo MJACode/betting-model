@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals designer fixes: Best now when the button differs, Picked at under the price, flagged and stale cards drop Bet and Slip, footnote book, 2×2 metrics, tintSoft on selected Slip and Track |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, a moved line is a Now handoff without requiring kind now: book still at the scored line, else the current slip link with the line named, else Open DK |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals button after a moved line: a book still at the scored line, else the current slip link with the line named, else Open DK. Team Total headlines keep the club |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals Stake cell shows units to bet and units to win (`Bet 1.5u · Win 0.4u`) from stakeFor, on its own wrapping row |
