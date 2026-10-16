@@ -124,6 +124,172 @@ def test_cleanup_failure_cannot_break_the_pass(db, monkeypatch):
                       (run_id,)).fetchone()[0] == 1
 
 
+def _row(db, run_id):
+    return db.execute(
+        "SELECT finished_at, ok, failed_steps FROM pipeline_runs WHERE run_id=?",
+        (run_id,)).fetchone()
+
+
+def _insert_open(db, run_id, kind, started):
+    db.execute(
+        "INSERT INTO pipeline_runs (run_id, run_kind, started_at) VALUES (?,?,?)",
+        (run_id, kind, started))
+
+
+def test_hourly_start_leaves_a_deploy_killed_evening_open(db, monkeypatch):
+    """2026-10-16. Evening 06b9db72 stayed unfinished after the deploy because
+    later hourlies only abort hourly rows. This is the hole the boot sweep
+    closes; start_run must keep the same-kind scope."""
+    _insert_open(db, "06b9db72a43c4323ad5ed84abf00b591", "evening",
+                 "2026-10-16T03:50:00.440389+00:00")
+    db.execute(
+        "INSERT INTO pipeline_runs (run_id, run_kind, started_at, finished_at, ok) "
+        "VALUES ('hourly-ok','hourly','2026-10-16T11:17:00+00:00',"
+        "'2026-10-16T11:29:00+00:00', 1)")
+    db.commit()
+
+    rl = _ledger(monkeypatch, _Conn(db))
+    new_id = rl.start_run("hourly")
+
+    fin, ok, failed = _row(db, "06b9db72a43c4323ad5ed84abf00b591")
+    assert fin is None and ok is None and failed is None
+    hourly_fin, hourly_ok, hourly_failed = _row(db, "hourly-ok")
+    assert hourly_fin == "2026-10-16T11:29:00+00:00"
+    assert hourly_ok == 1 and hourly_failed is None
+    assert _row(db, new_id)[0] is None
+
+
+def test_boot_sweep_closes_the_evening_and_leaves_daily_and_finished_hourly(db, monkeypatch):
+    _insert_open(db, "06b9db72a43c4323ad5ed84abf00b591", "evening",
+                 "2026-10-16T03:50:00.440389+00:00")
+    _insert_open(db, "daily-open", "daily", "2026-10-16T10:00:00+00:00")
+    _insert_open(db, "manual-open", "manual", "2026-10-16T10:05:00+00:00")
+    db.execute(
+        "INSERT INTO pipeline_runs (run_id, run_kind, started_at, finished_at, ok) "
+        "VALUES ('hourly-ok','hourly','2026-10-16T11:17:00+00:00',"
+        "'2026-10-16T11:29:00+00:00', 1)")
+    db.commit()
+
+    rl = _ledger(monkeypatch, _Conn(db))
+    monkeypatch.setattr(rl, "_BOOT_CUTOFF", None)
+    n = rl.abort_prior_refresh_orphans(_Conn(db), started_before="2026-10-16T11:40:00+00:00")
+    assert n == 1
+
+    fin, ok, failed = _row(db, "06b9db72a43c4323ad5ed84abf00b591")
+    assert fin is not None and not ok and failed == "aborted"
+    assert _row(db, "daily-open")[0] is None
+    assert _row(db, "manual-open")[0] is None
+    hourly_fin, hourly_ok, hourly_failed = _row(db, "hourly-ok")
+    assert hourly_fin == "2026-10-16T11:29:00+00:00"
+    assert hourly_ok == 1 and hourly_failed is None
+
+
+def test_a_second_sweep_does_not_abort_the_pass_this_process_started(db, monkeypatch):
+    """The cutoff freezes on the first call. start_run of the same kind, then
+    a second sweep, must leave the new row open and must not restamp the
+    row the first sweep already closed."""
+    _insert_open(db, "evening-old", "evening", "2026-10-16T03:50:00.440389+00:00")
+    db.commit()
+    rl = _ledger(monkeypatch, _Conn(db))
+    monkeypatch.setattr(rl, "_BOOT_CUTOFF", None)
+
+    assert rl.abort_prior_refresh_orphans(_Conn(db)) == 1
+    first_finish = _row(db, "evening-old")[0]
+    assert first_finish is not None
+
+    new_id = rl.start_run("evening")
+    assert rl.abort_prior_refresh_orphans(_Conn(db)) == 0
+
+    assert _row(db, "evening-old")[0] == first_finish
+    fin, ok, failed = _row(db, new_id)
+    assert fin is None and failed is None
+
+
+def test_an_empty_cutoff_aborts_nothing(db, monkeypatch):
+    _insert_open(db, "evening-old", "evening", "2026-10-16T03:50:00+00:00")
+    db.commit()
+    rl = _ledger(monkeypatch, _Conn(db))
+    assert rl.abort_prior_refresh_orphans(_Conn(db), started_before="") == 0
+    assert _row(db, "evening-old")[0] is None
+
+
+def test_sweep_failure_cannot_raise(db, monkeypatch):
+    rl = _ledger(monkeypatch, _Conn(db, fail_on_cleanup=True))
+    assert rl.abort_prior_refresh_orphans(
+        _Conn(db, fail_on_cleanup=True),
+        started_before="2099-01-01T00:00:00+00:00") == 0
+
+
+def test_refresh_kinds_match_the_catch_up_and_exclude_daily():
+    from tracking.refresh_retry import REFRESH_KINDS
+    from tracking.run_ledger import REFRESH_RUN_KINDS
+    assert set(REFRESH_RUN_KINDS) == set(REFRESH_KINDS)
+    assert "daily" not in REFRESH_RUN_KINDS
+    assert "manual" not in REFRESH_RUN_KINDS
+
+
+def test_the_scheduler_sweeps_before_it_can_start_a_pass():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "scheduler.py").read_text(encoding="utf-8")
+    main = src.split("def main(")[1]
+    assert "abort_orphaned_refresh_runs()" in main
+    assert main.index("abort_orphaned_refresh_runs()") < main.index("sched.start()")
+    assert main.index("abort_orphaned_refresh_runs()") < main.index("catch_up_refresh_pass")
+    body = src.split("def abort_orphaned_refresh_runs(")[1].split("\ndef ")[0]
+    assert body.index('owns("hourly_refresh")') < body.index("get_connection")
+
+
+def test_pipeline_boot_closes_the_evening_and_poller_boot_does_not(db, monkeypatch):
+    import scheduler
+    from tracking import run_ledger
+
+    _insert_open(db, "06b9db72a43c4323ad5ed84abf00b591", "evening",
+                 "2026-10-16T03:50:00.440389+00:00")
+    _insert_open(db, "daily-open", "daily", "2026-10-16T10:00:00+00:00")
+    _insert_open(db, "hourly-live", "hourly", "2999-01-01T00:00:00+00:00")
+    db.commit()
+
+    monkeypatch.setattr(run_ledger, "_BOOT_CUTOFF", None)
+    monkeypatch.setattr(run_ledger, "_ensure_table", lambda c: None)
+    monkeypatch.setattr(run_ledger, "get_connection", lambda: _Conn(db))
+    import data.db as dbmod
+    monkeypatch.setattr(dbmod, "get_connection", lambda: _Conn(db))
+
+    monkeypatch.setattr(scheduler, "SERVICE_ROLE", "poller")
+    assert scheduler.abort_orphaned_refresh_runs() == 0
+    assert _row(db, "06b9db72a43c4323ad5ed84abf00b591")[0] is None
+
+    monkeypatch.setattr(scheduler, "SERVICE_ROLE", "pipeline")
+    assert scheduler.abort_orphaned_refresh_runs() == 1
+    fin, ok, failed = _row(db, "06b9db72a43c4323ad5ed84abf00b591")
+    assert fin is not None and not ok and failed == "aborted"
+    assert _row(db, "daily-open")[0] is None
+    # Started after the frozen cutoff: a pass this process opened.
+    assert _row(db, "hourly-live")[0] is None
+
+    new_id = run_ledger.start_run("evening")
+    assert scheduler.abort_orphaned_refresh_runs() == 0
+    assert _row(db, new_id)[0] is None
+    assert _row(db, "hourly-live")[0] is None
+
+
+def test_the_zombie_migration_is_one_idempotent_statement():
+    from data.view_migrations import ACTIVE_MIGRATIONS, MIGRATIONS_DIR
+    name = "abort_deploy_killed_evening_2026_10_16.sql"
+    assert name in ACTIVE_MIGRATIONS
+    text = (MIGRATIONS_DIR / name).read_text(encoding="utf-8")
+    code = "\n".join(ln.split("--", 1)[0] for ln in text.splitlines()).strip()
+    assert code.startswith("DO $mig$")
+    assert code.endswith("END $mig$;")
+    assert code.count("DO $mig$") == 1
+    update = code.split("UPDATE pipeline_runs", 1)[1]
+    assert "run_id = '06b9db72a43c4323ad5ed84abf00b591'" in update
+    assert "run_kind = 'evening'" in update
+    assert "finished_at IS NULL" in update
+    assert "failed_steps = 'aborted'" in update
+    assert "ok = FALSE" in update
+
+
 def test_hourly_start_does_not_abort_an_open_daily(db, monkeypatch):
     """Kind-scoped orphans. 2026-09-18: the 7:17 hourly closed the still-open
     daily as aborted. That is the right label when the daily process is

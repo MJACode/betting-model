@@ -1313,6 +1313,38 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         return {"status": "error", "reason": "catch-up raised"}
 
 
+def abort_orphaned_refresh_runs() -> int:
+    """Close refresh ledger rows the previous container left unfinished.
+
+    2026-10-16: evening run 06b9db72a43c4323ad5ed84abf00b591 was still open
+    at 11:25Z. The 04:17Z deploy killed it, later hourlies finished, and
+    `_abort_orphans` only closes the kind that is starting — so the evening
+    stayed unfinished until the next evening and `refresh_pass_completion`
+    counted it as stuck.
+
+    Once, before this process starts a pass. Only the service that owns the
+    refresh jobs: a poller restart must not stamp a pass the pipeline
+    service is still running. The cutoff freezes on the first call, so a
+    second call cannot abort a pass this process has since opened. Does not
+    touch `daily`. Best-effort: a ledger failure must not stop the scheduler.
+    """
+    if not owns("hourly_refresh"):
+        log.info("refresh orphan sweep: SERVICE_ROLE=%s does not own hourly_refresh",
+                 SERVICE_ROLE)
+        return 0
+    try:
+        from data.db import get_connection
+        from tracking.run_ledger import abort_prior_refresh_orphans
+        conn = get_connection()
+        try:
+            return abort_prior_refresh_orphans(conn)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — never block startup
+        log.exception("refresh orphan sweep failed (scheduler continues)")
+        return 0
+
+
 def catch_up_refresh_pass(*, source: str = "boot") -> dict:
     """Re-run the :17 refresh pass a deploy killed, rather than lose the hour.
 
@@ -1839,6 +1871,11 @@ def main() -> None:
         log.exception("Monitoring failed to start (pipeline continues)")
 
     sched = build_scheduler()
+
+    # Before any pass this process starts, and before sched.start() can fire
+    # the :17 cron. Same-kind orphan cleanup does not run again for an
+    # evening until the next evening window.
+    abort_orphaned_refresh_runs()
 
     # Before the first cron fires: run any weekly job whose data is already
     # stale. Ownership is checked per job INSIDE the catch-up rather than here:

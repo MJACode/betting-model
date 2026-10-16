@@ -337,6 +337,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-16: the 03:50Z evening pass was still unfinished after the
+    # deploy (the only open pipeline_runs row). Same aborted stamp as
+    # run_ledger._abort_orphans, this run_id only, and only while it is
+    # still unfinished. Boot closes the next one; this closes the one
+    # already open. Does not touch picks, thresholds, or pauses.
+    "abort_deploy_killed_evening_2026_10_16.sql",
 ]
 
 
