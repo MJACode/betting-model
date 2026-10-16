@@ -1822,12 +1822,14 @@ MODEL_MIN_ODDS: dict = {
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
     "nhl_over_under":            -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
-    # NFL in-play leader moneyline (2026-10-13, mike). The backtest had NO
-    # price floor: its 167 entries ran -4000 to +180 (median -330), 61 of them
-    # at -500 or shorter. The -200 default, applied inside the rule, leaves 67
-    # bets (+16.19u) -- a population nobody graded -- so the floor sits below
-    # the most negative entry and never binds.
-    "nfl_live_leader_ml":        -5000,
+    # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
+    # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
+    # floor never bound on its backtest (entries -4000 to +180, median -330).
+    # On the population of record the 58 bets at -500 or shorter made -0.10u
+    # flat over two seasons, and nearly all of the units came from -199 or
+    # longer. A bet shorter than the floor is refused and the game is tried
+    # again at its next slot (gameday.platform_gates). docs/thresholds.md.
+    "nfl_live_leader_ml":        -140,
 }
 
 

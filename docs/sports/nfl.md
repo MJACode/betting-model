@@ -405,11 +405,16 @@ DraftKings' line.
 - Quote age: the study could not see DraftKings' own quote age or its market
   suspensions. The loop skips a quote DraftKings stamped before the last score
   change it saw; nothing else.
-- No book-move, settled-state or edge-cap guard, and no price floor: none was
-  in the study, so each would bet a population nobody graded. Platform floors
-  are set not to bind (`config.MODEL_MIN_ODDS` -5000, `MODEL_OWN_EV_FLOOR`
-  0.02, its own probability). Applied inside the rule they would have cut the
-  167 bets to 67 (the -200 price floor) or 69 (the 0.20 EV floor).
+- **Price floor −140** (mike, 2026-10-15 ET, after the first live bet laid −980
+  on SEA @ DEN; `config.MODEL_MIN_ODDS`). A shorter price is refused and the
+  game is tried again at its next slot. On the population of record that
+  leaves 43-46 bets over two seasons (about 22 a season), +12.02u at no lag and
+  +15.40u to +19.85u at 15-45 s, against 163 bets and +13.08u with no floor;
+  the bets at −500 or shorter had made −0.10u. In-sample; table in
+  `docs/thresholds.md`.
+- No book-move, settled-state or edge-cap guard: none was in the study. The
+  EV floor is set not to bind (`MODEL_OWN_EV_FLOOR` 0.02, its own
+  probability).
 - The model knows no field position, down, distance or timeouts; DraftKings
   does.
 - Settlement: a tie leaves `games.home_win` NULL, which settles the pick at 0

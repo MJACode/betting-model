@@ -198,20 +198,26 @@ def test_the_pick_row(art):
         assert k in p
 
 
-def test_the_platform_gates_do_not_bind_on_the_rule(art, monkeypatch):
+def test_the_ev_gate_does_not_bind_inside_the_price_floor(art, monkeypatch):
     """With the LIVE global EV floor restored (conftest holds it at -1.0), the
-    smallest-EV kind of bet the rule makes -- edge 0.02 at -4000 -- still clears:
-    the model's own floor is 0.02 and its price floor -5000."""
+    smallest-EV bet the rule can make inside the -140 floor -- edge 0.02 at
+    -140 -- still clears: the model's own EV floor is 0.02. The same bet at
+    -150 is refused by the price floor (mike, 2026-10-15 ET)."""
     import os
 
     import config
 
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", float(os.environ.get("GLOBAL_MIN_EV", "0.20")))
-    imp = 1 / M.am_to_dec(-4000)
-    d = M.Decision(True, "BET", side="home", lead=10, secs=100, ball=1, band=0,
-                   wp=float(imp) + 0.0201, price=-4000.0, decimal=float(M.am_to_dec(-4000)),
-                   implied=float(imp), edge=0.0201)
+
+    def bet_at(american):
+        imp = 1 / M.am_to_dec(american)
+        return M.Decision(True, "BET", side="home", lead=10, secs=100, ball=1, band=0,
+                          wp=float(imp) + 0.0201, price=float(american),
+                          decimal=float(M.am_to_dec(american)), implied=float(imp), edge=0.0201)
+
+    d = bet_at(-140)
     assert G.platform_gates(d) is None
+    assert "under the floor" in G.platform_gates(bet_at(-150))
     monkeypatch.setattr(config, "PAUSED_MODELS", set(config.PAUSED_MODELS) | {M.MODEL_ID})
     assert "paused" in G.platform_gates(d)
 
@@ -279,10 +285,10 @@ class FakeFeed:
         return self.payload
 
 
-def _run_loop(monkeypatch, script, payload, locked=False, season_types=None):
+def _run_loop(monkeypatch, script, payload, locked=False, season_types=None, feed=None):
     clock = FakeClock()
     client = FakeClient(script, clock, season_types)
-    feed = FakeFeed(payload)
+    feed = feed or FakeFeed(payload)
     writes, notes, evals = [], [], []
     ctx2 = G.GameContext(game_id="NFL_E2", game_date="2026-10-08", home="NYG", away="WAS",
                          commence_time="2026-10-09T00:15:00+00:00", spread_home=-1.0,
@@ -317,7 +323,7 @@ def test_one_bet_per_game_and_the_five_minute_cadence(monkeypatch):
     E2 is evaluated once per 5-minute wall-clock slot; a transitional E2 state
     at the first tick of the t=300 slot SPENDS that slot (it is not carried to
     t=320) -- the fixed grid the evidence sampled."""
-    e1 = live_state(eid="E1", poss="away")                       # TB up 8, BET at -500
+    e1 = live_state(eid="E1", poss="away")                       # TB up 8, BET at -130
     e2 = live_state(eid="E2", home=20, away=14, poss="home")     # NYG up 6
     e2_trans = live_state(eid="E2", home=20, away=14, poss=None, evaluable=False,
                           reason="no scrimmage down (down=0): transitional")
@@ -328,7 +334,7 @@ def test_one_bet_per_game_and_the_five_minute_cadence(monkeypatch):
         t = i * 20
         ticks.append({"E1": e1, "E2": e2_trans if t == 300 else e2})
     ticks += [{"E1": final, "E2": final2}] * 4
-    payload = quote_payload(450, -500) + quote_payload(-100000, 99999, home="New York Giants",
+    payload = quote_payload(450, -130) + quote_payload(-100000, 99999, home="New York Giants",
                                                         away="Washington Commanders")
     rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, payload)
     assert rc == 0
@@ -347,7 +353,7 @@ def test_one_bet_per_game_and_the_five_minute_cadence(monkeypatch):
     assert rows and {r["snapshot_type"] for r in rows} == {"in_play"}
     assert {r["bookmaker"] for r in rows} == {"draftkings"} and {r["market"] for r in rows} == {"h2h"}
     tb = [r for r in rows if r["game_id"] == CTX.game_id]
-    assert len(tb) == 1 and (tb[0]["home_price"], tb[0]["away_price"]) == (450, -500)
+    assert len(tb) == 1 and (tb[0]["home_price"], tb[0]["away_price"]) == (450, -130)
     assert tb[0]["snapshot_at"] == "2026-10-09T03:00:00Z"     # the BOOK's publish time
 
 
@@ -356,7 +362,7 @@ def test_a_game_with_a_bet_from_an_earlier_process_is_not_rebet(monkeypatch):
     e2 = live_state(eid="E2", home=20, away=14, poss="home", evaluable=False, reason="x")
     final = live_state(eid="E1", state="post", final=True, evaluable=False)
     ticks = [{"E1": e1, "E2": e2}] * 5 + [{"E1": final, "E2": final}] * 4
-    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -500),
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -130),
                                                locked=True)
     assert writes == [] and evals == [] and feed.fetches == 0
 
@@ -374,7 +380,7 @@ def test_an_unanswered_status_feed_is_not_an_empty_slate(monkeypatch):
     final = live_state(eid="E1", state="post", final=True, evaluable=False)
     ticks = [{"E1": down, "E2": down2}] * 5 + [{"E1": e1, "E2": e2}] + \
         [{"E1": final, "E2": final}] * 4
-    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -500))
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -130))
     assert rc == 0 and len(writes) == 1
 
 
@@ -383,7 +389,7 @@ def test_preseason_and_unknown_season_types_are_never_priced(monkeypatch):
     e2 = live_state(eid="E2", home=20, away=14, poss="home")
     final = live_state(eid="E1", state="post", final=True, evaluable=False)
     ticks = [{"E1": e1, "E2": e2}] * 3 + [{"E1": final, "E2": final}] * 4
-    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -500),
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -130),
                                                season_types={"E1": 1, "E2": None})
     assert rc == 0 and writes == [] and evals == [] and feed.fetches == 0
 
@@ -393,7 +399,7 @@ def test_a_standing_bet_from_an_earlier_process_is_still_announced(monkeypatch):
     e2 = live_state(eid="E2", home=20, away=14, poss="home", evaluable=False, reason="x")
     final = live_state(eid="E1", state="post", final=True, evaluable=False)
     ticks = [{"E1": e1, "E2": e2}] * 3 + [{"E1": final, "E2": final}] * 4
-    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -500),
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, quote_payload(450, -130),
                                                locked=True)
     assert writes == [] and notes and set(notes) == {"2026-10-08"}
 
@@ -496,3 +502,22 @@ def test_a_slate_with_nothing_owed_announces_nothing(monkeypatch):
     final2 = live_state(eid="E2", state="post", final=True, evaluable=False)
     rc, writes, notes, evals, feed = _run_loop(monkeypatch, [{"E1": final, "E2": final2}] * 4, None)
     assert rc == 0 and notes == []
+
+
+def test_a_price_shorter_than_the_floor_is_refused_and_the_game_tried_again(monkeypatch):
+    """TB qualifies at -500 in the first slot: refused by the -140 floor, so
+    nothing is written and the game stays open. In the next slot DraftKings
+    has TB at -130: that is the bet of record (mike, 2026-10-15 ET)."""
+    class Drifting(FakeFeed):
+        def fetch(self):
+            self.fetches += 1
+            return quote_payload(450, -500) if self.fetches == 1 else quote_payload(450, -130)
+
+    e1 = live_state(eid="E1", poss="away")
+    e2 = live_state(eid="E2", home=20, away=14, poss="home", evaluable=False, reason="x")
+    final = live_state(eid="E1", state="post", final=True, evaluable=False)
+    ticks = [{"E1": e1, "E2": e2}] * 20 + [{"E1": final, "E2": final}] * 4   # 0..380 s
+    rc, writes, notes, evals, feed = _run_loop(monkeypatch, ticks, None, feed=Drifting(None))
+    assert rc == 0
+    assert [t for e, t in evals if e == "E1"] == [0.0, 300.0]
+    assert len(writes) == 1 and writes[0]["dk_odds"] == -130.0

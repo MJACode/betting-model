@@ -361,11 +361,34 @@ Neighbouring cuts in the same study (pooled, DraftKings): 0.04 → 149 bets
 5:00 instead of 10:00 → +3.9% to +5.3% (p 0.21-0.26). Not a plateau test — the
 cut grid was three values, fixed before grading.
 
-**The platform floors are set so they cannot bind** (`config.py`): price floor
-−5000 (the study's entries ran −4000 to +180, median −330), own EV floor 0.02
-(EV = edge × decimal ≥ edge, so every qualifying bet clears it; smallest EV in
-the 167 was 0.0205), and it decides on its own probability. Measured with the
-production decision function, applied inside the rule:
+**Price floor −140** (mike, 2026-10-15 ET: *"Floor is -140 for this model"*,
+after its first live bet laid −980 on SEA @ DEN). It shipped at −5000 so the
+floor would never bind on the backtest. A bet priced shorter than −140 is
+refused and the game is tried again at its next five-minute slot
+(`nfl_live_leader/gameday.platform_gates`), so the floor works inside the
+rule. On the population of record (grading fits, the loop's refusals,
+DraftKings' band), at 1u risked, then at the published stake:
+
+| State lag | Floor | Bets | Units | Published stake | 2025 alone |
+|---|---|---|---|---|---|
+| 0 s | none | 163 | +13.08 | +19.92u on 401.2 (+5.0%) | +2.17 |
+| 0 s | **−140** | **43** | **+12.02** | +10.26u on 47.0 (+21.8%) | +3.25 |
+| 15 s | −140 | 45 | +15.40 | +12.26u on 48.4 (+25.3%) | +6.63 |
+| 30 s | −140 | 45 | +15.88 | +12.26u on 48.0 (+25.6%) | +6.63 |
+| 45 s | −140 | 46 | +19.85 | +15.61u on 48.2 (+32.3%) | +7.50 |
+
+The neighbourhood is flat, not a peak: at 0 s, floors from −200 to −110 give
+28 to 64 bets and +11.43u to +13.73u. The price bands say why. The 58 bets at
+−500 or shorter made −0.10u, and the 45 at −199 or longer made +10.49u. Those
+are after-the-fact cuts on the two graded seasons, so they are in-sample. At
+about 22 bets a season, the 50-bet re-read is roughly two seasons away. Script:
+`python -m scripts.nfl_live_leader_price_floor_grid`.
+
+**The other platform floors are set so they cannot bind** (`config.py`): own
+EV floor 0.02 (EV = edge × decimal ≥ edge, so every qualifying bet clears it;
+smallest EV in the 167 was 0.0205), and it decides on its own probability.
+Measured with the production decision function, applied inside the rule (the
+study's 167 bets, before the −140 floor):
 
 | Gate | Bets | Units |
 |---|---|---|
