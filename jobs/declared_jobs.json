@@ -1055,5 +1055,16 @@
     "requested_by": "owner",
     "note": "Owner, 2026-10-14 18:27 ET: delete the custom-format full record, Discord message 1560045816352079957, via the results webhook. Standard post 1560049598565715999 and X untouched.",
     "args": {}
+  },
+  {
+    "key": "byom-nfl-game-facts-shop",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. Turning it on is the owner's call, and apply has to be set true in the same change or the run writes nothing. Once on, the cadence is daily, before prune-odds (run_pipeline step prune-odds). prune_odds deletes non-DraftKings rows from odds and player_prop_odds for games before today, keeping the opener and the close, and does not delete from nfl_odds_history. A lock quote that lives only in odds is neither the opener nor the close. The first apply has to land before the 2026-10-17 prune of games dated 2026-10-16. The 120h and 24h windows stay UNCONFIRMED.",
+    "args": {
+      "sport": "NFL",
+      "apply": false
+    }
   }
 ]

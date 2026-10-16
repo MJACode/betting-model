@@ -243,7 +243,8 @@ def test_the_builder_has_no_spread_price_or_line_filter_and_does_not_touch_picks
         assert banned not in lowered, banned
 
 
-def test_the_job_defaults_to_not_writing_and_is_not_declared():
+def test_the_job_defaults_to_not_writing_and_ships_disabled():
+    from byom.constants import SHOP_FIRST_APPLY_BEFORE
     from tracking.job_queue import JOBS, _validate_byom_game_facts
 
     assert "byom_game_facts" in JOBS
@@ -255,7 +256,13 @@ def test_the_job_defaults_to_not_writing_and_is_not_declared():
         _validate_byom_game_facts({"sport": "NBA"})
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
-    assert all(entry["job_type"] != "byom_game_facts" for entry in declared)
+    found = [entry for entry in declared if entry["job_type"] == "byom_game_facts"]
+    assert len(found) == 1
+    assert found[0]["enabled"] is False
+    assert found[0]["args"]["apply"] is False
+    assert found[0]["args"]["sport"] == "NFL"
+    assert SHOP_FIRST_APPLY_BEFORE == "2026-10-17"
+    assert SHOP_FIRST_APPLY_BEFORE in found[0]["note"]
 
 
 def test_build_on_scratch_postgres_grades_the_stored_lines():

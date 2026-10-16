@@ -31,9 +31,11 @@ are stored. There is no stake column.
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
 empty until someone runs the builder with `--apply`. That job is
-`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false,
-and the job is not in `jobs/declared_jobs.json`, so a merge does not
-backfill production.
+`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false.
+`jobs/declared_jobs.json` lists it as `byom-nfl-game-facts-shop` with
+`enabled` false and `apply` false. `sync_declared_jobs` does not enqueue
+`enabled: false`, so a merge does not backfill production. Turning it on
+is the owner's call, and `apply` has to be set true in that same change.
 
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
 `byom/constants.py` holds `LOCK_WINDOW_HOURS` (120) and
@@ -50,11 +52,26 @@ inside that game's shop slices. A season is not loaded in one fetch.
 registered and was not applied.
 
 `byom_lock_shop` stores every book's quote at DraftKings' line at the
-grade lock and at the near lock, inside that 30-minute lag. The first
-capture is kept. A rebuild grades from those rows, so 2026 stays the
-same after the non-DraftKings quotes are pruned. A spread or total whose
-DraftKings number has moved replaces that market's shop. The grade still
-uses `BEST_LINE_BOOKMAKERS`; the other books are stored so the price can
-be recomputed. `data/migrations/byom_lock_shop_2026_10_16.sql` is
-registered for the worker and was not applied by the change that added
-it. The windows are UNCONFIRMED and are not check constraints.
+grade lock and at the near lock, inside that 30-minute lag, including
+Pinnacle. The app does not read it. The migration revokes anon and
+authenticated and enables RLS with no policy. The worker owns the table.
+The first capture is kept. A rebuild grades from those rows, so 2026
+stays the same after the non-DraftKings quotes are pruned. A spread or
+total whose DraftKings number has moved replaces that market. h2h has no
+number: it is replaced when the stored DraftKings `snapshot_at` is not
+the lock being written, or when the stored rows have no DraftKings row.
+Another book's timestamp may be earlier inside the lag and is not the
+check. The grade still uses `BEST_LINE_BOOKMAKERS`; the other books are
+stored so the price can be recomputed.
+`data/migrations/byom_lock_shop_2026_10_16.sql` is registered for the
+worker and was not applied by the change that added it. The windows are
+UNCONFIRMED and are not check constraints.
+
+Once the owner sets the declared job `enabled` and `apply` true, the
+cadence is daily, before `prune-odds`. `data/prune_odds.py` deletes
+non-DraftKings rows from `odds` and `player_prop_odds` for games before
+today, keeping the opener and the close. It does not delete from
+`nfl_odds_history`. A lock quote that lives only in `odds` is neither
+the opener nor the close. The first apply has to land before
+`2026-10-17`, the prune of games dated `2026-10-16`.
+`byom.constants.SHOP_FIRST_APPLY_BEFORE` is that date.

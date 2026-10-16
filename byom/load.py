@@ -1,8 +1,16 @@
-"""Read NFL lines and write byom_game_facts.
+"""Read NFL lines and write byom_game_facts and byom_lock_shop.
 
-Reads games, nfl_odds_history and odds. Writes only byom_game_facts.
-Does not touch picks. `apply=False` is the default: count the rows and
-write nothing.
+Reads games, nfl_odds_history and odds. Does not touch picks.
+`apply=False` is the default: count the rows and write nothing.
+
+The shop capture is not scheduled to write. jobs/declared_jobs.json
+lists byom_game_facts with enabled false and apply false.
+sync_declared_jobs skips enabled false. The owner turns it on. Once on,
+run it daily before prune-odds. The first apply has to land before
+byom.constants.SHOP_FIRST_APPLY_BEFORE (2026-10-17): prune deletes
+non-DraftKings rows from odds for games before today, and a lock quote
+that is only in odds is not the opener and not the close.
+nfl_odds_history is not that prune.
 """
 from __future__ import annotations
 
@@ -100,8 +108,10 @@ FACT_COLUMNS = (
     "line_source",
 )
 
-# The lock-time shop. First capture wins (ON CONFLICT DO NOTHING) so a
-# later rebuild still grades 2026 after the non-DraftKings quotes are gone.
+# The lock-time shop. ON CONFLICT DO NOTHING keeps a book already stored
+# at this lock. A spread or total whose DraftKings number moved, and an
+# h2h market whose DraftKings snapshot moved, are deleted first
+# (shop_markets_to_replace) so the insert writes the new lock.
 SHOP_COLUMNS = (
     "canonical_key", "sport", "season", "week", "lock_window_hours",
     "market", "bookmaker", "line_source", "snapshot_at", "point",
@@ -226,7 +236,8 @@ def _played(games: list[dict]) -> dict:
 def _load_shop(conn, season: int) -> dict[str, list[dict]]:
     rows = _fetch(conn, """
         SELECT canonical_key, lock_window_hours, market, bookmaker,
-               point, dk_point, price_home, price_away, line_source
+               point, dk_point, price_home, price_away, line_source,
+               snapshot_at
           FROM byom_lock_shop
          WHERE season = %s AND sport = %s
     """, (season, SPORT))
@@ -242,6 +253,7 @@ def _load_shop(conn, season: int) -> dict[str, list[dict]]:
             "price_home": row[6],
             "price_away": row[7],
             "line_source": row[8],
+            "snapshot_at": row[9],
         })
     return out
 
@@ -296,10 +308,11 @@ def _upsert(conn, facts: list[dict]) -> int:
 
 
 def _write_shop(conn, season: int, shops: list[dict], stored: dict) -> int:
-    """Insert shop rows. A book already captured at this line stays.
+    """Insert shop rows. A book already captured at this lock stays.
 
-    When the DraftKings line for a market has moved, that market's stored
-    rows are the previous lock. They are replaced by this one.
+    A spread or total whose DraftKings number moved, and an h2h market
+    whose DraftKings snapshot moved, are the previous lock. Those rows
+    are replaced by this one.
     """
     if not shops:
         return 0

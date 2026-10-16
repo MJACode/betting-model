@@ -25,3 +25,14 @@ SPORT = "NFL"
 # count as the price at that lock. The same bound config.BEST_LINE_MAX_LAG_MIN
 # uses for a live decision. Not a spread, price, or line filter.
 SHOP_LAG_MINUTES = 30
+
+# The declared job byom-nfl-game-facts-shop is enabled false and apply
+# false, so a merge does not enqueue a writer. The owner turns it on by
+# setting both. Once on, the cadence is daily, before prune-odds
+# (run_pipeline step prune-odds, data/prune_odds.py). That prune deletes
+# non-DraftKings rows from odds and player_prop_odds for games before
+# today, keeping the opener and the close. It does not delete from
+# nfl_odds_history. A lock quote that lives only in odds, and is neither
+# the opener nor the close, is gone after the prune. The first apply has
+# to land before this date: the 2026-10-17 prune of games dated 2026-10-16.
+SHOP_FIRST_APPLY_BEFORE = "2026-10-17"

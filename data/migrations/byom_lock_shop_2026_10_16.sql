@@ -5,6 +5,11 @@
 -- table on the first pass after merge. A second pass returns on the
 -- catalog read below and does not take ACCESS EXCLUSIVE.
 --
+-- Worker-only. The rows are every book's price at DraftKings' line,
+-- including Pinnacle. The app does not read them. anon and authenticated
+-- hold no privilege. RLS is on with no policy. The worker owns the table
+-- and bypasses RLS. FORCE ROW LEVEL SECURITY is not used.
+--
 -- One row per book at DraftKings' line, at the grade lock and at the near
 -- lock. The windows are UNCONFIRMED placeholders and are not check
 -- constraints: the builder writes the window it used onto the row.
@@ -20,17 +25,17 @@ BEGIN
   IF to_regclass('public.byom_lock_shop') IS NOT NULL THEN
     IF (SELECT relrowsecurity FROM pg_class
          WHERE oid = 'public.byom_lock_shop'::regclass)
-       AND EXISTS (
+       AND NOT EXISTS (
          SELECT 1 FROM pg_policy
-          WHERE polrelid = 'public.byom_lock_shop'::regclass
-            AND polname = 'anon read byom_lock_shop')
-       AND has_table_privilege('anon', 'public.byom_lock_shop', 'SELECT')
-       AND has_table_privilege('authenticated', 'public.byom_lock_shop', 'SELECT')
-       AND NOT has_table_privilege('anon', 'public.byom_lock_shop', 'INSERT')
-       AND NOT has_table_privilege('anon', 'public.byom_lock_shop', 'UPDATE')
-       AND NOT has_table_privilege('anon', 'public.byom_lock_shop', 'DELETE')
-       AND NOT has_table_privilege('anon', 'public.byom_lock_shop', 'TRUNCATE')
-       AND NOT has_table_privilege('authenticated', 'public.byom_lock_shop', 'INSERT')
+          WHERE polrelid = 'public.byom_lock_shop'::regclass)
+       AND NOT EXISTS (
+         SELECT 1
+           FROM (VALUES ('anon'), ('authenticated')) AS role(name)
+           CROSS JOIN (VALUES
+             ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+             ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS verb(name)
+          WHERE has_table_privilege(
+            role.name, 'public.byom_lock_shop', verb.name))
     THEN
       RAISE NOTICE 'byom lock shop already present - skipping';
       RETURN;
@@ -61,17 +66,9 @@ BEGIN
   CREATE INDEX IF NOT EXISTS idx_byom_lock_shop_season
     ON public.byom_lock_shop (sport, season, week);
 
-  REVOKE ALL ON public.byom_lock_shop FROM PUBLIC, anon, authenticated;
-  GRANT SELECT ON public.byom_lock_shop TO anon, authenticated;
-  ALTER TABLE public.byom_lock_shop ENABLE ROW LEVEL SECURITY;
+  -- A copy applied while this table was readable still has the policy.
+  DROP POLICY IF EXISTS "anon read byom_lock_shop" ON public.byom_lock_shop;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy
-     WHERE polrelid = 'public.byom_lock_shop'::regclass
-       AND polname = 'anon read byom_lock_shop') THEN
-    CREATE POLICY "anon read byom_lock_shop"
-      ON public.byom_lock_shop
-      FOR SELECT TO anon, authenticated
-      USING (true);
-  END IF;
+  REVOKE ALL ON public.byom_lock_shop FROM PUBLIC, anon, authenticated;
+  ALTER TABLE public.byom_lock_shop ENABLE ROW LEVEL SECURITY;
 END $mig$;

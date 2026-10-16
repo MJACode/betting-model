@@ -360,6 +360,20 @@ def test_a_missing_declarations_file_is_silent(tmp_path):
     assert q.sync_declared_jobs(_DedupeConn(), tmp_path / "nope.json") == []
 
 
+def test_enabled_false_is_not_queued_and_a_missing_flag_still_is(tmp_path):
+    """Only the boolean false is off. A declaration with no flag is the
+    file's existing shape and still queues."""
+    path = _write_declared(tmp_path, [
+        {"key": "off", "job_type": "savant_refresh", "enabled": False,
+         "args": {"season": 2026}},
+        {"key": "on", "job_type": "savant_refresh", "args": {"season": 2026}},
+    ])
+    conn = _DedupeConn()
+    queued = q.sync_declared_jobs(conn, path)
+    assert conn.inserted == ["on"]
+    assert len(queued) == 1
+
+
 def test_the_shipped_declarations_file_validates():
     """Every entry in jobs/declared_jobs.json must pass its own validator, or
     the worker discovers it at 3am by logging a rejection nobody reads."""

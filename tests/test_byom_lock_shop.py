@@ -47,16 +47,34 @@ def test_the_migration_is_one_statement_and_unconfirmed_windows_are_not_checks()
     assert "public.picks" not in code
     assert "v_public_track_record" not in code
     ret = code.index("RETURN;")
-    for marker in ("CREATE TABLE", "REVOKE ALL", "ENABLE ROW LEVEL SECURITY",
-                   "CREATE POLICY"):
+    for marker in ("CREATE TABLE", "DROP POLICY", "REVOKE ALL",
+                   "ENABLE ROW LEVEL SECURITY"):
         assert ret < code.index(marker), marker
+    assert "CREATE POLICY" not in code
+    assert "GRANT " not in code
+    assert "FORCE ROW LEVEL SECURITY" not in code.upper()
 
 
-def test_the_shop_is_on_the_anon_read_list_ahead_of_the_app():
-    from data.anon_readable import AHEAD_OF_THE_APP, ANON_READABLE
+def test_the_skip_guard_refuses_select_and_every_write_verb():
+    """A later GRANT of SELECT or UPDATE would still take the early return
+    if the guard only named INSERT."""
+    code = _code(SQL)
+    for role in ("anon", "authenticated"):
+        assert f"('{role}')" in code
+    for verb in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE",
+                 "REFERENCES", "TRIGGER"):
+        assert f"('{verb}')" in code
+    assert "has_table_privilege(" in code
+    assert "public.byom_lock_shop" in code
 
-    assert "byom_lock_shop" in ANON_READABLE
-    assert "byom_lock_shop" in AHEAD_OF_THE_APP
+
+def test_the_shop_is_worker_only():
+    from data.anon_readable import (
+        AHEAD_OF_THE_APP, ANON_READABLE, WORKER_ONLY_TABLES)
+
+    assert "byom_lock_shop" not in ANON_READABLE
+    assert "byom_lock_shop" not in AHEAD_OF_THE_APP
+    assert "byom_lock_shop" in WORKER_ONLY_TABLES
 
 
 def test_the_shop_keeps_every_book_at_the_draftkings_line():
@@ -108,7 +126,43 @@ def test_a_moved_draftkings_line_replaces_that_market():
     assert shop_markets_to_replace(fresh, stored) == []
     fresh[0]["market"] = "h2h"
     fresh[0]["dk_point"] = None
+    # Stored rows are spreads. An h2h market with nothing stored is an insert.
     assert shop_markets_to_replace(fresh, stored) == []
+
+
+def test_a_moved_h2h_snapshot_replaces_that_market():
+    """h2h has no line. The DraftKings snapshot is the lock. Another book's
+    timestamp may be earlier inside the shop lag and is not the check."""
+    t1 = "2024-09-05T12:00:00+00:00"
+    t2 = "2024-09-05T18:00:00+00:00"
+    stored = {
+        "2024_01_BAL_KC": [
+            {"canonical_key": "2024_01_BAL_KC", "lock_window_hours": 120,
+             "market": "h2h", "bookmaker": "draftkings", "snapshot_at": t1},
+            {"canonical_key": "2024_01_BAL_KC", "lock_window_hours": 120,
+             "market": "h2h", "bookmaker": "fanduel", "snapshot_at": t1},
+        ],
+    }
+    fresh = [{
+        "canonical_key": "2024_01_BAL_KC", "lock_window_hours": 120,
+        "market": "h2h", "bookmaker": "fanduel", "snapshot_at": t2,
+        "dk_point": None,
+    }, {
+        "canonical_key": "2024_01_BAL_KC", "lock_window_hours": 120,
+        "market": "h2h", "bookmaker": "draftkings", "snapshot_at": t2,
+        "dk_point": None,
+    }]
+    assert shop_markets_to_replace(fresh, stored) == [
+        ("2024_01_BAL_KC", 120, "h2h")]
+    fresh[1]["snapshot_at"] = t1
+    assert shop_markets_to_replace(fresh, stored) == []
+    stored["2024_01_BAL_KC"] = [
+        row for row in stored["2024_01_BAL_KC"]
+        if row["bookmaker"] != "draftkings"
+    ]
+    fresh[1]["snapshot_at"] = t1
+    assert shop_markets_to_replace(fresh, stored) == [
+        ("2024_01_BAL_KC", 120, "h2h")]
 
 
 def test_scratch_shop_still_grades_after_the_book_is_deleted():
@@ -223,9 +277,26 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
         raw.commit()
         raw.autocommit = True
         cur = raw.cursor()
+        cur.execute("""
+            SELECT relrowsecurity FROM pg_class
+             WHERE oid = 'public.byom_lock_shop'::regclass
+        """)
+        assert cur.fetchone()[0] is True
+        cur.execute("""
+            SELECT count(*) FROM pg_policy
+             WHERE polrelid = 'public.byom_lock_shop'::regclass
+        """)
+        assert cur.fetchone()[0] == 0
+        for role in ("anon", "authenticated"):
+            for verb in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE",
+                         "REFERENCES", "TRIGGER"):
+                cur.execute(
+                    "SELECT has_table_privilege(%s, %s, %s)",
+                    (role, "public.byom_lock_shop", verb))
+                assert cur.fetchone()[0] is False, (role, verb)
         cur.execute("SET ROLE anon")
-        cur.execute("SELECT count(*) FROM public.byom_lock_shop")
-        assert cur.fetchone()[0] > 0
+        with pytest.raises(InsufficientPrivilege):
+            cur.execute("SELECT count(*) FROM public.byom_lock_shop")
         with pytest.raises(InsufficientPrivilege):
             cur.execute(
                 "INSERT INTO public.byom_lock_shop "

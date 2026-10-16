@@ -356,9 +356,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     "byom_game_facts_units_2026_10_16.sql",
     # 2026-10-16: the book shop at the DraftKings lock, so a rebuild grades
     # 2026 the same way after non-DK quotes are pruned. Empty table.
-    # Catalog return on the second pass. Unapplied until the worker's
-    # next pass. Does not touch picks or the record views.
-    # The lock windows are UNCONFIRMED and are not in this file.
+    # Worker-only: no anon grant, RLS with no policy. Catalog return on
+    # the second pass. Unapplied until the worker's next pass. Does not
+    # touch picks or the record views. The lock windows are UNCONFIRMED
+    # and are not in this file.
     "byom_lock_shop_2026_10_16.sql",
 ]
 

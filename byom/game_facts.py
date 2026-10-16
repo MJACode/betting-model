@@ -1,8 +1,8 @@
 """Pure grading for one NFL game's Build Your Own Model fact.
 
-No database. No stake. A win pays +1 unit (1u to win) and a loss costs the
-stake that win required. There is no risk cap. A missing price leaves the
-units NULL. Pushes and ties are results, not dropped rows.
+No database. No stake. A win pays +1 unit uncapped. The capped pair cuts
+risk at 3 and recomputes the win. A missing price leaves both NULL.
+Pushes and ties are results, not dropped rows.
 """
 from __future__ import annotations
 
@@ -429,24 +429,46 @@ def regrade_from_shop(fact: dict, stored: list[dict], books: list[str]) -> dict:
 
 
 def shop_markets_to_replace(fresh: list[dict], stored_by_key: dict) -> list[tuple]:
-    """Markets whose stored DraftKings line is not the lock being written.
+    """Markets whose stored lock is not the lock being written.
 
-    h2h has no line. Its first capture stays. A spread or total whose
-    number moved is replaced, so the stored shop is the lock in the row.
+    A spread or total is replaced when a stored dk_point is not the line
+    being written. h2h has no line. It is replaced when the fresh
+    DraftKings snapshot_at is not the stored DraftKings snapshot, or when
+    the stored rows have no DraftKings row. Other books may sit earlier
+    inside the shop lag, so their timestamps are not the check. A fresh
+    market with nothing stored yet is an insert, not a replace.
     """
     found = []
     seen = set()
     for row in fresh:
         ident = (row["canonical_key"], row["lock_window_hours"], row["market"])
-        if ident in seen or row.get("market") == "h2h":
+        if ident in seen:
             continue
         olds = [
             old for old in stored_by_key.get(row["canonical_key"], [])
             if old.get("lock_window_hours") == row["lock_window_hours"]
             and old.get("market") == row["market"]
         ]
-        if olds and any(
-                not same_line(old.get("dk_point"), row.get("dk_point")) for old in olds):
+        if not olds:
+            continue
+        if row.get("market") == "h2h":
+            if (row.get("bookmaker") or "").lower() != "draftkings":
+                continue
+            fresh_at = parse_ts(row.get("snapshot_at"))
+            stored_dk = [
+                old for old in olds
+                if (old.get("bookmaker") or "").lower() == "draftkings"
+            ]
+            if not stored_dk or any(
+                    parse_ts(old.get("snapshot_at")) != fresh_at
+                    for old in stored_dk):
+                seen.add(ident)
+                found.append(ident)
+            else:
+                seen.add(ident)
+            continue
+        if any(not same_line(old.get("dk_point"), row.get("dk_point"))
+               for old in olds):
             seen.add(ident)
             found.append(ident)
     return found

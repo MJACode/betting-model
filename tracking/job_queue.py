@@ -1945,9 +1945,12 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Not listed
-    # in jobs/declared_jobs.json, so a merge does not backfill production.
-    # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
+    # NFL Build Your Own Model game facts. apply defaults false. Listed in
+    # jobs/declared_jobs.json with enabled false and apply false, so a
+    # merge does not enqueue a writer. The owner turns it on. Once on, it
+    # runs daily before prune-odds; the first apply is before 2026-10-17
+    # (byom.constants.SHOP_FIRST_APPLY_BEFORE). The 120h and 24h windows
+    # are UNCONFIRMED (byom/constants.py).
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
 }
 
@@ -2025,6 +2028,12 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
     queued = []
     for entry in declared if isinstance(declared, list) else []:
         try:
+            # Missing `enabled` stays on. Only the boolean false is off, so
+            # a string or a 0 does not silently drop a job that was meant
+            # to run. The BYOM shop entry ships false until the owner sets
+            # it true and sets apply true in the same change.
+            if entry.get("enabled", True) is False:
+                continue
             key = str(entry["key"])
             job_id = enqueue(conn, entry["job_type"], entry.get("args") or {},
                              requested_by=entry.get("requested_by", "declared"),
