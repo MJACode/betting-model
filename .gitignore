@@ -149,3 +149,22 @@ models/saved/*_????????_??????.pkl
 nfl/data/live_model/prop_snaps/
 nfl/data/live_model/_quotes_graded.parquet
 nfl/data/live_model/_quotes_state.parquet
+
+# graphify rewrites .claude/settings.json on every `graphify claude install` and
+# leaves a rolling backup beside it; the backup is machine-local.
+.claude/settings.json.graphify-bak
+
+# graphify knowledge graph. The graph, its report, the hand-written community
+# names and the browser page are COMMITTED (2026-10-16) so every checkout has
+# them; graph.json is rewritten whole on every build, so a large diff to it in
+# a PR is expected. What stays local: the 36 MB extraction cache, the dated
+# backups, cost.json, and the two machine-path files (.graphify_python,
+# .graphify_root). Refresh with `graphify update .`; rebuild with /graphify .
+graphify-out/cache/
+graphify-out/20*/
+graphify-out/cost.json
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.graphify_*.json
+!graphify-out/.graphify_labels.json
+!graphify-out/.graphify_labels.pending.json
