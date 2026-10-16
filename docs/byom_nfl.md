@@ -155,8 +155,9 @@ does not add a schedule. It does not write `picks`.
 `byom_models` and `byom_model_snapshots` are keyed to `auth.uid()`. A
 user sees their own rows. The cap is 25 models. Saving an existing name
 updates that model and appends a snapshot of `byom_backtest` at that
-moment. The snapshot keeps both unit totals. There is no stake, and a
-price, line, or spread-size filter is rejected.
+moment. The snapshot keeps both unit totals. Those are results. A
+stake, kelly, price, line, or spread-size filter is rejected. There
+is no recommended stake.
 
 The RPCs are `SECURITY DEFINER`: `byom_save_model`, `byom_list_models`,
 `byom_delete_model`. The user id comes from `auth.uid()`, not from an
