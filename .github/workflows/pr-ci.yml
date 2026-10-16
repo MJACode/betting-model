@@ -65,7 +65,7 @@ jobs:
           SUPABASE_URL: ""
           SUPABASE_KEY: ""
         run: |
-          python -m pytest -q \
+          python -m pytest -q -rs \
             tests/test_config.py \
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
@@ -126,7 +126,6 @@ jobs:
             tests/test_discord_publish_sync.py \
             tests/test_discord_void_notice.py \
             tests/test_anon_readable.py \
-            tests/test_nhl_stats_views.py \
             tests/test_nhl_stats_views.py \
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
