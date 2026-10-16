@@ -1,0 +1,7 @@
+# graphify: data stores, not code. The NFL odds cache alone is 6,781 JSON files.
+nfl/data/
+models/saved/
+data/local/
+ncaaf_live/data/artifacts/
+docs/sessions/
+mobile/assets/
