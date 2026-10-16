@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM facts schema review: skip guard covers every write verb for anon and authenticated; grant sweep skips the tables until they exist; PR CI installs Postgres |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL facts schema: byom_game_facts and byom_prop_facts, anon SELECT, RLS read policy, unapplied, worker-registered; DK archive starts at 2020; games.week is NULL |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-15/16, NBA rebuilt: the twelve old models retired (no bet ever written); ~900k credits of price history, the official injury reports, box detail, schedule and quarter scores into Supabase; every game and prop market graded against pre-registered bars (docs/nba_models_2026.md); schedule and injuries are in the line; nba_prop_market (Pinnacle same-line unders, one a game, four a night) live |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, deploy-killed evening `06b9db72a43c4323ad5ed84abf00b591` was the only unfinished `pipeline_runs` row and held `refresh_pass_completion` on the stuck branch; boot stamps prior hourly/evening orphans aborted, and a worker migration closes that row |

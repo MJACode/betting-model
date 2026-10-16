@@ -42,13 +42,25 @@ BEGIN
        AND has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT')
        AND has_table_privilege('anon', 'public.byom_prop_facts', 'SELECT')
        AND has_table_privilege('authenticated', 'public.byom_prop_facts', 'SELECT')
-       AND NOT has_table_privilege('anon', 'public.byom_game_facts', 'INSERT')
-       AND NOT has_table_privilege('anon', 'public.byom_game_facts', 'UPDATE')
-       AND NOT has_table_privilege('anon', 'public.byom_game_facts', 'DELETE')
-       AND NOT has_table_privilege('anon', 'public.byom_game_facts', 'TRUNCATE')
-       AND NOT has_table_privilege('anon', 'public.byom_prop_facts', 'INSERT')
-       AND NOT has_table_privilege('authenticated', 'public.byom_game_facts', 'INSERT')
-       AND NOT has_table_privilege('authenticated', 'public.byom_prop_facts', 'INSERT')
+       AND NOT EXISTS (
+         SELECT 1
+           FROM (VALUES
+                  ('anon'),
+                  ('authenticated')
+                ) AS role(name)
+           CROSS JOIN (VALUES
+                  ('public.byom_game_facts'),
+                  ('public.byom_prop_facts')
+                ) AS rel(name)
+           CROSS JOIN (VALUES
+                  ('INSERT'),
+                  ('UPDATE'),
+                  ('DELETE'),
+                  ('TRUNCATE'),
+                  ('REFERENCES'),
+                  ('TRIGGER')
+                ) AS verb(name)
+          WHERE has_table_privilege(role.name, rel.name, verb.name))
     THEN
       RAISE NOTICE 'byom facts schema already present - skipping';
       RETURN;
