@@ -21,6 +21,81 @@
 
 ---
 
+## [ ] NBA projection model: one under a game, on worker-only inputs (2026-10-16)
+
+The NHL count recipe for NBA (`models/nba_props.py`) re-fit on what the worker
+has in 2026-27 (ESPN box lines, schedule, odds, ESPN injury statuses):
+unders, one a game, 3,630 bets, +5.57%, 90% CI +2.45..+8.62, every season
+positive, DraftKings alone +5.28% (`docs/nba_models_2026.md` §4.4; verifier
+bet lists in `C:/Users/micha/AppData/Local/Temp/nba_rebuild/verify_model/` on
+the build machine). Strongest where Pinnacle does not quote: 1,045 bets,
++9.01%; blocks unders at EV ≥ 0.06 +6.55% on 7,701 (chosen after seeing
+results, so an extra search). Four a night does NOT hold (2024-25 +1.5 u).
+Before it can go live: a card on the live frame path (never run), the same
+roster rule as the backtest (log window + injury list), main lines only (the
+live feed carries alternates the backtest never saw), a calibrated published
+probability (the model claims 0.636 where it wins 0.464), and an owner rule for
+the 530 picks it shares with `nba_prop_market` (that rule keeps them).
+
+## [ ] NBA: the official injury report is not on the worker (2026-10-16)
+
+`data/ingestors/nba_injury_report.py --today` fetches the latest league PDF;
+it is not wired, and whether the worker reaches `ak-static.cms.nba.com` is not
+measured. The shipped rule does not read injuries. The projection model would
+(ESPN's Out ≈ the official Out; Probable and Questionable both read as
+Day-To-Day on ESPN, and Probable players lost −18.4% inside the model's card).
+
+## [ ] NBA: leads graded and not shipped (2026-10-16)
+
+Recorded so they are not re-derived (`docs/nba_models_2026.md` §4):
+- Moneyline outlier prices: each soft book against the other books' no-vig in
+  the same fetch, EV ≥ 0.035, 1,260 bets +17.5%. Looks like quotes that had not
+  updated; whether they could be bet live is unmeasured; DraftKings' lone
+  outliers are the opposite (it moves first on news; the long side won 16.8%).
+- Home team totals vs Pinnacle, same number, EV ≥ 0.01: 182 bets, +6.6%, CI
+  −6.3..+19.1 — re-grade when 2026-27 adds a season.
+- Kalshi carries NBA prop and game ladders with hourly history from 2025-26
+  (free, `api.elections.kalshi.com`); the repo maps only NFL series. Not built.
+
+## [ ] App: a non-DraftKings pick's line move can read as a price move in the member's favour (found 2026-10-16)
+
+From the UX review of the NBA rebuild. `mobile/src/lib/markets.ts`
+`scoredLineBook` falls back to DraftKings while the movement history is the
+deciding book's, so when the book a pick was taken at moves its LINE, the app
+compares the new line's price with the locked line's price and can say "Moved
+3.6pp in your favor" when the line moved a point against the bet. Fixed for
+the three Pinnacle-reference prop rules in the NBA rebuild PR (they read
+`decision_book`, else the label book); every other pick decided at a book other
+than DraftKings still has it. The broad fix changes the movement chip across
+the whole board and wants its own reviewed PR. Same root: on NFL wind and
+opener picks the All books footnote says "The line is DraftKings'" when the
+line is the label book's.
+
+The other direction is open for every over/under model, the three rules
+included: when the bet book's line moves IN the member's favour (Under 4.5 at
+-110 -> 5.5 at -140), `computeMovement` still compares the two prices and the
+board chip reads "Steam -110 -> -140" in red, "Steamed 6.0pp against you" on
+the detail card. Only compute `priceShiftPp` when the current line equals the
+scored line; otherwise return a line-labelled result ("Line 4.5 -> 5.5"), as
+the NFL line-only branch does, and update `summarizeMovement`
+(PickCard.tsx) and the detail verdict (lineMovementView.ts) to match.
+Smaller items from the same review: one exported list of the three rule ids
+(four copies today), `allBooksLineSource` reading the same helper as
+`scoredLineBook`, ", modeled line" in the All books row's VoiceOver label, and
+"(vs Pinnacle)" so the record column never breaks inside the parenthesis.
+
+## [ ] App: a player page opened by name can show a namesake's data (found 2026-10-16)
+
+NFL rule picks carry no player id, so pick detail opens the player page by
+name (`playerId: pick.player_id ?? ''`), and the by-name log fetch is an exact
+name match ordered by date. `nfl_player_game_log` has 7 names since 2025 held
+by two player ids — Justin Jefferson is the Minnesota WR and a Cleveland LB,
+both with a game on 2026-10-11 — so `games[0]` (the page's team, next game,
+and since the NBA rebuild PR its head-to-head, today's picks and same-position
+card via `pagePlayerId`) can be the other player. Fix: pick detail passes the
+pick's game id or teams; when the by-name log holds more than one id, keep the
+rows whose team plays in that game.
+
 ## [ ] [needs-decision] NHL game picks are decided before the night's goalie is known (found 2026-10-13)
 
 "OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am

@@ -46,6 +46,7 @@ import {
   lineStepFor,
   logStatValue,
   openingChip,
+  pagePlayerId,
   playerSubtitle,
   requestedChip,
   roundLineToStep,
@@ -86,7 +87,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
-import { STAT_CATALOG } from '@/lib/statCatalog';
+import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
   bookLineFromThreshold,
   formatRecordLine,
@@ -254,9 +255,14 @@ export function PlayerStatsScreen() {
   // game-log dots were painting those same games the other colour.
   const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
 
+  // The route's id, else the loaded log's: a page opened by name (an
+  // nfl_prop_market pick has no player_id) still keys its id reads on the
+  // player (pagePlayerId).
+  const pageId = pagePlayerId(playerId, games);
+
   const detail = usePlayerDetail({
     sport,
-    playerId: playerId || null,
+    playerId: pageId,
     playerName,
     playerType,
     games,
@@ -297,9 +303,9 @@ export function PlayerStatsScreen() {
   const slipPick = useMemo(() => {
     if (line == null || mode === 'under') return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
-    const found = slipPickFor({ player_id: playerId }, idx, line - 0.5);
+    const found = slipPickFor({ player_id: pageId }, idx, line - 0.5);
     return found && found.pick.result == null ? found : null;
-  }, [todayPicks, stat, playerId, line, mode]);
+  }, [todayPicks, stat, pageId, line, mode]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
   const toggleSlip = () => {
@@ -370,11 +376,11 @@ export function PlayerStatsScreen() {
   // card beneath said 62.5 (UX review, 2026-09-20). The ± stepper still moves
   // in `step` increments from wherever the ruler sits.
   const pickThreshold = useMemo(() => {
-    if (!playerId) return null;
-    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(playerId);
+    if (!pageId) return null;
+    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(pageId);
     const sl = ep && ep.pick.result == null ? Number(ep.pick.scored_line) : NaN;
     return Number.isFinite(sl) ? thresholdFromBookLine(sl) : null;
-  }, [todayPicks, stat, playerId]);
+  }, [todayPicks, stat, pageId]);
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
   const snapThreshold = pickThreshold ?? postedThreshold;
   useEffect(() => {
@@ -938,7 +944,7 @@ export function PlayerStatsScreen() {
                 rows={detail.positionVsOpponent.rows}
                 loading={detail.positionVsOpponent.loading}
                 error={detail.positionVsOpponent.error}
-                playerId={playerId ?? null}
+                playerId={pageId}
                 statLabel={statLabel}
                 betLabel={modeLineLabel(selection.line, selection.side, mode)}
                 selection={selection}
@@ -964,7 +970,10 @@ export function PlayerStatsScreen() {
               record={detail.record}
               loading={detail.picksLoading}
               error={detail.picksError}
-              sportHasPropModel={STAT_CATALOG.some((d) => d.sport === sport && propModelForStat(d) != null)}
+              // From the model catalog: NBA's and the NFL's live prop models are
+              // multi-market rules with no single stat, so a stat-catalog test
+              // said "No prop model prices NBA players yet" while one did.
+              sportHasPropModel={sportHasLivePropModel(sport)}
               sport={sport}
             />
 
@@ -1586,7 +1595,7 @@ function PickRecordCard({
           </View>
           {record.lines.map((l) => (
             <ReadRow
-              key={l.modelId}
+              key={l.key}
               label={l.label}
               value={formatRecordLine(l)}
               note={

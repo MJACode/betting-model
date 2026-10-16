@@ -588,21 +588,19 @@ ACTION_THRESHOLDS: dict = {
     # the same overconfidence buy nothing. No thresholds because there is no
     # model left to threshold.
     "mlb_live_total_runs": {"min_prob": 0.72, "min_edge": 0.14},  # 2026-09-09 mike: 0.70 -> 0.72 on the 47-slate replay of the v20260908_230751 artifact. 2026-09-10: that replay paired without the stale-quote guard; on fresh quotes the same cut is 21 bets 12-9 (2026) / 92 bets 60.9% (2025) — docs/thresholds.md "The forward check on fresh quotes"
-    # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
-    # are the sharpest market we touch, so the game models run a higher edge gate
-    # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
-    "nba_moneyline":             {"min_prob": 0.66, "min_edge": 0.12},
-    "nba_over_under":            {"min_prob": 0.66, "min_edge": 0.12},
-    "nba_spread":                {"min_prob": 0.66, "min_edge": 0.12},
-    "nba_prop_player_points":    {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_rebounds":  {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_assists":   {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_threes":    {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_pra":       {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_blocks":    {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_steals":    {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_turnovers": {"min_prob": 0.60, "min_edge": 0.08},
-    "nba_prop_player_dd":        {"min_prob": 0.55, "min_edge": 0.0},   # prob-only
+    # NBA player props, the 2026-27 rule (mike, 2026-10-15: "build new nba
+    # models, remove any previous nba models"; "use what you've learned in this
+    # repo"). Same-line unders against Pinnacle: models/nba_prop_market.py,
+    # written by scripts/nba_prop_market_card.py. THE CUT IS EV, in
+    # MODEL_OWN_EV_FLOOR (0.00), on Pinnacle's own no-vig probability; prob /
+    # edge are 0.0 here so every publisher shows exactly what the card wrote,
+    # as for nhl_over_under. Measured on 2023-24..2025-26 at the best bettable
+    # price (scripts/nba_prop_market_lab.py, docs/nba_models_2026.md 4.3):
+    # 25,204 bets +2.85% (90% CI +1.75..+3.96); at -200 and no
+    # double/triple-double 24,572 bets +2.96% (+1.85..+4.05), +781.3 units,
+    # every season positive -- every qualifying proposition, as the card
+    # writes it (mike, 2026-10-16: "maximize units won"; no game or night cap).
+    "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -789,9 +787,6 @@ PROB_ONLY_MODELS: set = {
     # Method-of-victory odds are not carried by The Odds API — the model's
     # 3-class probability alone decides the BET signal.
     "ufc_method_of_victory",
-    # NBA double-double is a Yes/No market DK juices heavily (and there is no
-    # real "No" market to fade) — decide on model probability alone.
-    "nba_prop_player_dd",
 }
 
 # Models RETIRED — removed from their registry (MODELS / PROP_MODELS /
@@ -841,6 +836,28 @@ RETIRED_MODELS: frozenset = frozenset({
     # the same instruction. The worker loop is off (scheduler RUN_NFL_LIVE
     # defaults to 0 since this change; Railway RUN_NFL_LIVE=0 set the same day).
     "nfl_live_prop",
+    # 2026-10-15 (mike): "build new nba models, remove any previous nba models."
+    # The twelve NBA models built 2026-06-19 -- three game models and nine
+    # player props. They never wrote a BET: 25 NONE rows, all for 2026-27 games,
+    # and no settled record, so nothing is struck (RECORD_EXCLUSIONS untouched).
+    # Why they go rather than retrain: the moneyline artifact was fitted on the
+    # leaked season-final team stats (docs/team_stats_leak.md); the spread and
+    # total never trained (there was no NBA price history); the props were
+    # graded on holdout accuracy, never at a price. The rebuild that replaces
+    # them is docs/nba_models_2026.md. Their registry rows were switched off in
+    # production the same day (model_registry.is_active = 0).
+    "nba_moneyline",
+    "nba_over_under",
+    "nba_spread",
+    "nba_prop_player_points",
+    "nba_prop_player_rebounds",
+    "nba_prop_player_assists",
+    "nba_prop_player_threes",
+    "nba_prop_player_pra",
+    "nba_prop_player_blocks",
+    "nba_prop_player_steals",
+    "nba_prop_player_turnovers",
+    "nba_prop_player_dd",
 })
 # Models temporarily PAUSED — never emit a BET signal. They are still scored and
 # written as NONE rows (so the website can still show the game), but with no
@@ -1821,6 +1838,11 @@ MODEL_MIN_ODDS: dict = {
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
     "nhl_over_under":            -200,
+    # NBA prop rule (mike, 2026-10-15). -200 is the floor its evidence was
+    # regraded at (24,572 bets, +2.96%, 90% CI +1.85..+4.05, positive every
+    # season; docs/nba_models_2026.md 4.3). Pinned for the same reason as
+    # nhl_over_under: a Railway DEFAULT_MIN_ODDS override must not move it.
+    "nba_prop_market":           -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2041,6 +2063,17 @@ MODEL_OWN_EV_FLOOR: dict = {
     # was replicated on 2024-25 and 2025-26: same fetch every time, units
     # within 0.06 (models/nhl_totals_market.py).
     "nhl_over_under":            0.01,
+    # NBA prop rule (mike, 2026-10-15). Its own walk-forward grid on three
+    # priced seasons, pooled unders, one bet per player and market, at the
+    # best bettable book (scripts/nba_prop_market_lab.py):
+    #     EV>=    ROI
+    #    -0.01    +2.1%
+    #     0.00    +2.85%  25,204 bets, 90% CI +1.75..+3.96   <- live
+    #     0.01    +3.1%
+    # Both neighbours positive, both date halves positive (+3.5 / +2.2), the
+    # newest season (never used to choose) +2.1%. Expect about +2% live: the
+    # top cell of a 1,518-cell search carries winner's curse.
+    "nba_prop_market":           0.00,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2156,6 +2189,13 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # has no graded bet to fit a map on: the pooled offset borrowed from other
     # models would move every probability and with it the population.
     "nfl_live_leader_ml",
+    # 2026-10-15 (mike: "use what you've learned in this repo"). The NBA prop
+    # rule's probability IS Pinnacle's proportional no-vig under at the same
+    # line in the same fetch, which its EV >= 0.00 cut was measured on. It has
+    # no record, so its promoted map would be the pooled offset borrowed from
+    # other models, which pulls a near-even probability toward 0.5 -- the
+    # same reason nhl_over_under and nfl_prop_market are here.
+    "nba_prop_market",
 })
 
 
@@ -2220,6 +2260,7 @@ SCORING_METHODS: dict = {
     "mlb_total_market":    "rule",    # models/mlb_game_market.py — Pin-lean vs soft implied 2pp, INSERT gated
     "mlb_total_public_fade": "rule",  # models/mlb_total_public_fade.py — fade public OVER, bet UNDER, INSERT gated
     "nhl_over_under":      "rule",    # models/nhl_totals_market.py — Pinnacle no-vig vs bettable books, same fetch
+    "nba_prop_market":     "rule",    # models/nba_prop_market.py — Pinnacle no-vig under vs bettable books, same line, same fetch (mike, 2026-10-15)
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
     "ncaaf_live_total":    "engine",
@@ -2263,6 +2304,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline":            0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2290,19 +2332,6 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.10,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.50/0.10 = 35-22 +23.1%
     "wnba_prop_player_threes":   0.026,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      0.16,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
-    # NBA — placeholder; tune after live odds accumulate.
-    "nba_moneyline":             0.12,
-    "nba_over_under":            0.12,
-    "nba_spread":                0.12,
-    "nba_prop_player_points":    0.08,
-    "nba_prop_player_rebounds":  0.08,
-    "nba_prop_player_assists":   0.08,
-    "nba_prop_player_threes":    0.08,
-    "nba_prop_player_pra":       0.08,
-    "nba_prop_player_blocks":    0.08,
-    "nba_prop_player_steals":    0.08,
-    "nba_prop_player_turnovers": 0.08,
-    "nba_prop_player_dd":        0.0,    # prob-only — edge ignored at runtime
     # UFC — placeholder; tune after 50+ settled picks.
     "ufc_moneyline":         0.08,
     "ufc_total_rounds":      0.08,
@@ -2362,6 +2391,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline":            0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -2393,19 +2423,6 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.5,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.50/0.10 = 35-22 +23.1%
     "wnba_prop_player_threes":   0.706,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      0.68,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
-    # NBA — placeholder; tune after live odds accumulate.
-    "nba_moneyline":             0.66,
-    "nba_over_under":            0.66,
-    "nba_spread":                0.66,
-    "nba_prop_player_points":    0.60,
-    "nba_prop_player_rebounds":  0.60,
-    "nba_prop_player_assists":   0.60,
-    "nba_prop_player_threes":    0.60,
-    "nba_prop_player_pra":       0.60,
-    "nba_prop_player_blocks":    0.60,
-    "nba_prop_player_steals":    0.60,
-    "nba_prop_player_turnovers": 0.60,
-    "nba_prop_player_dd":        0.55,   # prob-only — P(double-double) for stars ~0.4-0.7
     # UFC — placeholder; tune after 50+ settled picks.
     "ufc_moneyline":         0.65,
     "ufc_total_rounds":      0.62,
@@ -2640,9 +2657,14 @@ PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
 # NFL joined 2026-09-09 (matt) with the game-line ingest -- until then the NFL
 # had no h2h or totals in `odds` at all and one book's spread, because
 # odds_ingestor.SPORT_KEYS had no NFL entry. One bulk call, 3 credits a pass.
+# NBA left the default 2026-10-15 (mike, the 2026-27 rebuild): the poller
+# only re-scores GAME models, and no NBA game model is registered (the three
+# were retired and every NBA game market closed, docs/nba_models_2026.md 4.1).
+# Polling NBA game lines every 30 seconds would buy prices nothing reads. The
+# NBA prop rule reads the refresh pass's prop fetch, not this poller.
 PREGAME_POLL_SPORTS: list = [
     s for s in os.environ.get(
-        "PREGAME_POLL_SPORTS", "MLB,WNBA,NBA,NCAAF,UFC,NFL").split(",") if s.strip()
+        "PREGAME_POLL_SPORTS", "MLB,WNBA,NCAAF,UFC,NFL").split(",") if s.strip()
 ]
 # Live game-state snapshots older than this mean the poller has stopped —
 # don't score from a frozen state.
@@ -2760,9 +2782,12 @@ SPORTS = {
         # season → the nba_api "YYYY-YY" string. Backfill team-stat snapshots are
         # stamped {season-1}-09-01 (before any Oct game) so the ASOF feature
         # lookup always finds an in-season row.
-        "seasons":       list(range(2019, 2026)),
-        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train (=2018-19 .. 2023-24)
-        "test_season":   2025,                      # 2025 (=2024-25) held out
+        # 2026-10-15 (mike, the 2026-27 rebuild): 2025-26 is fully scored and
+        # logged, so it is the holdout and 2024-25 joins training, as NHL did
+        # on 2026-09-20; 2027 (= 2026-27) is the current season.
+        "seasons":       list(range(2019, 2028)),
+        "train_seasons": list(range(2019, 2026)),  # 2019–2025 train (=2018-19 .. 2024-25)
+        "test_season":   2026,                      # 2026 (=2025-26) held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/nba",
     },
     "UFC": {
@@ -2841,9 +2866,6 @@ MODELS = {
     "wnba_moneyline":           ("WNBA", "h2h",     "Home team wins"),
     "wnba_over_under":          ("WNBA", "totals",  "Total points over/under"),
     "wnba_spread":              ("WNBA", "spreads", "Home team covers the spread"),
-    "nba_moneyline":            ("NBA",  "h2h",     "Home team wins"),
-    "nba_over_under":           ("NBA",  "totals",  "Total points over/under"),
-    "nba_spread":               ("NBA",  "spreads", "Home team covers the spread"),
     # UFC — fighter mapped to the Odds API "home_team" slot is our home side.
     "ufc_moneyline":            ("UFC", "h2h",    "Home-slot fighter wins the fight"),
     "ufc_total_rounds":         ("UFC", "totals", "Fight duration over/under the round line"),
@@ -3873,6 +3895,30 @@ NHL_PROP_FINAL_CLOSES_MIN = int(os.environ.get("NHL_PROP_FINAL_CLOSES_MIN", "12"
 NHL_PROP_MAX_CREDITS_PER_RUN = int(os.environ.get("NHL_PROP_MAX_CREDITS_PER_RUN", "400"))
 RUN_NHL_PROP_ODDS = os.environ.get("RUN_NHL_PROP_ODDS", "1") == "1"
 
+# The NBA prop rule's closing snapshot, for closing-line value only (mike,
+# 2026-10-15; bar 11 of docs/nba_models_2026.md could not be measured on the
+# archive). One event call per game holding an nba_prop_market BET, for the
+# markets bet on it, taken by the first pass between these many minutes before
+# the scheduled tip, filed snapshot_type='close' so no card decides on it
+# (data/ingestors/nba_prop_close_ingestor.py; the NHL final's mechanism). 12
+# is the inside edge: the tip is the league's scheduled start, and a later
+# fetch could hold in-play prices. Thirteen minutes wide, and the five-minute
+# NBA prop window job (scheduler.run_nba_prop_window) lands two or three looks
+# inside it for every bet game, at any tip time.
+# Cost: markets x regions on the feed's billing, so one market at the ten
+# fetched books is expected to bill 1 credit a game, five markets 5.
+NBA_PROP_CLOSE_OPENS_MIN = int(os.environ.get("NBA_PROP_CLOSE_OPENS_MIN", "25"))
+NBA_PROP_CLOSE_CLOSES_MIN = int(os.environ.get("NBA_PROP_CLOSE_CLOSES_MIN", "12"))
+# One run's ceiling, sized so it never stops a close the model is owed: with
+# no game or night cap (mike, 2026-10-16) most games carry a bet, and at most
+# 8 regular-season games tipped inside any 13-minute span in every season
+# 2018-19..2026-27 (nba_schedule), so a run can owe 8 games x 5 markets = 40
+# credits at the expected price. 100 holds that 2.5 times over; only a gate
+# that broke and fetched on every pass stops here. Was 40, sized on four bet
+# games a night.
+NBA_PROP_CLOSE_MAX_CREDITS_PER_RUN = int(os.environ.get("NBA_PROP_CLOSE_MAX_CREDITS_PER_RUN", "100"))
+RUN_NBA_PROP_CLOSE = os.environ.get("RUN_NBA_PROP_CLOSE", "1") == "1"
+
 # RETIRED 2026-09-02 (matt): mlb_prop_batter_hr (batter_home_runs) and
 # mlb_prop_batter_rbi (batter_rbis). Removing them from this registry is what
 # stops them: the prop scorer, the trainer, the calibration agent, the health
@@ -3919,18 +3965,6 @@ PROP_MODELS = {
     "wnba_prop_player_assists":  ("WNBA", "player_assists",                  "poisson", ""),
     "wnba_prop_player_threes":   ("WNBA", "player_threes",                   "poisson", ""),
     "wnba_prop_player_pra":      ("WNBA", "player_points_rebounds_assists",  "poisson", "P+R+A combo"),
-    # NBA player props — 5 WNBA-equivalents (Poisson) + 4 NBA-specific markets.
-    # Double-double is a binary Yes/No outcome (DK juices it heavily) → logistic +
-    # prob-only, same treatment as the MLB HR prop. The rest are Poisson counts.
-    "nba_prop_player_points":    ("NBA", "player_points",                   "poisson",  ""),
-    "nba_prop_player_rebounds":  ("NBA", "player_rebounds",                 "poisson",  ""),
-    "nba_prop_player_assists":   ("NBA", "player_assists",                  "poisson",  ""),
-    "nba_prop_player_threes":    ("NBA", "player_threes",                   "poisson",  ""),
-    "nba_prop_player_pra":       ("NBA", "player_points_rebounds_assists",  "poisson",  "P+R+A combo"),
-    "nba_prop_player_blocks":    ("NBA", "player_blocks",                   "poisson",  ""),
-    "nba_prop_player_steals":    ("NBA", "player_steals",                   "poisson",  ""),
-    "nba_prop_player_turnovers": ("NBA", "player_turnovers",                "poisson",  ""),
-    "nba_prop_player_dd":        ("NBA", "player_double_double",            "logistic", "double-double (binary, prob-only)"),
     # NFL player props. The response family is per-market and is NOT the
     # platform's usual Poisson — NFL yardage has a variance-to-mean ratio of
     # 27-36 and even the count markets are overdispersed (pass attempts 3.7).

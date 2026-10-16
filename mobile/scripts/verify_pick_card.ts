@@ -11,6 +11,7 @@ import { hasPricedLine } from '../src/lib/decisionPrice';
 import { historyFrom, sincePick } from '../src/lib/lineHistory';
 import { lineMovementView } from '../src/lib/lineMovementView';
 import {
+  allBooksLineSource,
   bestHandoffForPick,
   bookLabel,
   bookName,
@@ -22,7 +23,9 @@ import {
   isNflLineOnly,
   movementFromLatest,
   movementFromSameBookHistory,
+  lockedLineAtHistoryBook,
   playerNameFromPickLabel,
+  snapshotMatchesLock,
   splitPickTitle,
   MODEL_BOOK,
 } from '../src/lib/markets';
@@ -500,6 +503,152 @@ check(
   });
   check('unpriced pick has no history book', historyBookForPick(unpriced) === null);
   check('unpriced pick does not open the history card', !canShowLineMovementHistory(unpriced));
+}
+
+// ── multi-market prop rules: the scored line is the BET book's ─────────────
+// nba/nfl/wnba_prop_market store the bet book's own line as scored_line, and
+// their history is that book's. Read as DraftKings' line, a price at a NEW
+// line was compared with the lock at the OLD one: FanDuel moving Under 24.5
+// -110 to Under 23.5 +105 read "Moved 3.6pp in your favor" when the line had
+// moved a point against the bet (designer review, 2026-10-16).
+{
+  const nba = mkPick({
+    model_id: 'nba_prop_market',
+    sport: 'NBA',
+    pick_side: 'under',
+    pick_label: 'Jalen Brunson Under 24.5 Pts',
+    prop_market: 'player_points',
+    scored_line: 24.5,
+    dk_odds: -115, // DraftKings posts the same line, so line_book is NULL
+    decision_odds: -110,
+    decision_book: 'fanduel',
+    line_book: null,
+  });
+  const fdNow = { line: 23.5, under_price: 105, over_price: -125 };
+  const hist = movementFromSameBookHistory(nba, fdNow, 'player_points');
+  check('NBA rule: FanDuel Under 23.5 +105 against a 24.5 lock is not "in your favor"',
+    hist?.severity !== 'good', `severity=${hist?.severity}`);
+  check('NBA rule: that move is the line moving against the under',
+    hist?.lineMovedAgainst === true && hist.currentLine === 23.5, `lineMovedAgainst=${hist?.lineMovedAgainst}`);
+  const board = movementFromLatest(nba, null, [{ bookmaker: 'fanduel', ...fdNow }]);
+  check('NBA rule, board chip: the same move reads against the bet',
+    board?.severity === 'skip', `severity=${board?.severity}`);
+  check('NBA rule: a FanDuel 25.5 row does not match a 24.5 lock at the same price',
+    !snapshotMatchesLock(nba, { line: 25.5, under_price: -110 }, 'player_points'));
+  check('NBA rule: the FanDuel 24.5 row at the locked price does match',
+    snapshotMatchesLock(nba, { line: 24.5, under_price: -110 }, 'player_points'));
+  check('NBA rule: the locked line belongs to the history book',
+    lockedLineAtHistoryBook(nba, 'player_points') === 24.5);
+
+  // WNBA and NFL rows carry no decision_book: the book is only in the label,
+  // and dk_odds holds that book's price (wnba/nfl_prop_market_card.py).
+  const wnba = mkPick({
+    model_id: 'wnba_prop_market',
+    sport: 'WNBA',
+    pick_side: 'under',
+    pick_label: 'Jackie Young Under 15.5 Pts (FD)',
+    prop_market: 'player_points',
+    scored_line: 15.5,
+    dk_odds: -110,
+    decision_odds: null,
+    decision_book: null,
+    line_book: null,
+  });
+  check('WNBA rule: history is the label book', historyBookForPick(wnba) === 'fanduel');
+  const wHist = movementFromSameBookHistory(wnba, { line: 14.5, under_price: 105 }, 'player_points');
+  check('WNBA rule: FanDuel Under 14.5 +105 against a 15.5 lock is not "in your favor"',
+    wHist?.severity !== 'good' && wHist?.lineMovedAgainst === true, `severity=${wHist?.severity}`);
+  check('WNBA rule: a FanDuel 16.5 row does not match a 15.5 lock',
+    !snapshotMatchesLock(wnba, { line: 16.5, under_price: -110 }, 'player_points'));
+  check('WNBA rule: the FanDuel 15.5 row at the locked price does match',
+    snapshotMatchesLock(wnba, { line: 15.5, under_price: -110 }, 'player_points'));
+
+  const nfl = mkPick({
+    model_id: 'nfl_prop_market',
+    sport: 'NFL',
+    pick_side: 'under',
+    pick_label: 'Marvin Harrison Jr. Under 3.5 Rec (MGM)',
+    prop_market: 'player_receptions',
+    scored_line: 3.5,
+    dk_odds: -120,
+    decision_odds: null,
+    decision_book: null,
+    line_book: null,
+  });
+  check('NFL rule: the locked line is the label book\'s (BetMGM)',
+    historyBookForPick(nfl) === 'betmgm' && lockedLineAtHistoryBook(nfl, 'player_receptions') === 3.5);
+  check('NFL rule: a BetMGM 4.5 row does not match a 3.5 lock',
+    !snapshotMatchesLock(nfl, { line: 4.5, under_price: -120 }, 'player_receptions'));
+
+  // Other models keep the DraftKings line rule (the broad fix is separate):
+  // an MLB prop decided at FanDuel with line_book NULL still skips line deltas.
+  const mlb = mkPick({
+    model_id: 'mlb_prop_batter_runs',
+    pick_side: 'over',
+    scored_line: 0.5,
+    dk_odds: -110,
+    decision_odds: -105,
+    decision_book: 'fanduel',
+    line_book: null,
+  });
+  check('other models unchanged: an MLB prop at FanDuel with no line book compares no line',
+    lockedLineAtHistoryBook(mlb, 'batter_runs_scored') === null);
+}
+
+// ── All books: whose line it is, for a rule priced at its label book ───────
+// The NFL and WNBA rules name their book only in the label (decision_book
+// NULL). Their "modeled" row and footnote said DraftKings, under a FanDuel
+// line (designer review, 2026-10-16). Whether DraftKings posts the line is
+// only known when line_book is set, so that clause goes on this branch.
+{
+  const wnbaFd = mkPick({
+    model_id: 'wnba_prop_market',
+    pick_side: 'under',
+    pick_label: 'Jackie Young Under 15.5 Pts (FD)',
+    decision_book: null,
+    decision_odds: null,
+    line_book: null,
+  });
+  const w = allBooksLineSource(wnbaFd);
+  check('All books, WNBA rule: the modeled row is the label book', w.modeledBook === 'fanduel', w.modeledBook);
+  check('All books, WNBA rule: the footnote names that book', w.note.startsWith('The line is FanDuel’s.'), w.note);
+  check('All books, WNBA rule: no claim about what DraftKings posts', !w.note.includes('DraftKings doesn’t post'));
+  const nflMgm = allBooksLineSource(mkPick({
+    model_id: 'nfl_prop_market',
+    pick_side: 'under',
+    pick_label: 'Marvin Harrison Jr. Under 3.5 Rec (MGM)',
+    decision_book: null,
+    decision_odds: null,
+    line_book: null,
+  }));
+  check('All books, NFL rule: BetMGM row and BetMGM footnote',
+    nflMgm.modeledBook === 'betmgm' && nflMgm.note.startsWith('The line is BetMGM’s.'), nflMgm.note);
+  const wnbaDk = allBooksLineSource(mkPick({
+    model_id: 'wnba_prop_market',
+    pick_label: 'Jackie Young Under 15.5 Pts (DK)',
+    decision_book: null,
+    line_book: null,
+  }));
+  check('All books, a rule labelled (DK) keeps the DraftKings sentence',
+    wnbaDk.modeledBook === MODEL_BOOK && wnbaDk.note.startsWith('The line is DraftKings’.'), wnbaDk.note);
+  // NBA rows carry decision_book (and line_book when DraftKings has no line):
+  // the existing logic, unchanged.
+  const nbaAtDkLine = allBooksLineSource(mkPick({
+    model_id: 'nba_prop_market',
+    pick_label: 'Jalen Brunson Under 24.5 Pts',
+    decision_book: 'fanduel',
+    line_book: null,
+  }));
+  check('All books, NBA rule with no line book: DraftKings row, as before',
+    nbaAtDkLine.modeledBook === MODEL_BOOK && nbaAtDkLine.note.startsWith('The line is DraftKings’.'));
+  const nbaOffDk = allBooksLineSource(mkPick({
+    model_id: 'nba_prop_market',
+    pick_label: 'Jalen Brunson Under 24.5 Pts',
+    decision_book: 'fanduel',
+    line_book: 'fanduel',
+  }));
+  check('All books, NBA rule with a line book: that book, and the DraftKings clause, as before',
+    nbaOffDk.modeledBook === 'fanduel' && nbaOffDk.note.includes('DraftKings doesn’t post this line'));
 }
 
 {

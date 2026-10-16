@@ -531,6 +531,44 @@ for -1.908 units, EV at close +2.96% on the 5 that closed at the same number.
 On a whole number (6.0) the stated EV ignores the push, so it overstates the
 true EV by the push share; the lab did the same.
 
+## NBA — `nba_prop_market`, the 2026-27 rule (2026-10-15, mike)
+
+The twelve 2026-06-19 NBA models are retired (`config.RETIRED_MODELS`). One
+model replaces them: unders at the best bettable book on Pinnacle's own line,
+in the same fetch, decided 45-70 minutes before the scheduled tip
+(`models/nba_prop_market.py`, `scripts/nba_prop_market_card.py`; the grid and
+every bar are in `docs/nba_models_2026.md` 4.3).
+
+| Setting | Value | Where |
+|---|---|---|
+| prob / edge cut | 0.0 / 0.0 — the cut is EV | `ACTION_THRESHOLDS`, both threshold dicts |
+| EV floor | 0.00, on Pinnacle's proportional no-vig under | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned | `MODEL_MIN_ODDS` |
+| caps | none: every qualifying proposition, one bet per (game, player, market) (mike, 2026-10-16: "maximize units won") | `models/nba_prop_market.py` |
+| decided once | the first look 45-70 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions`, never looked at again | `scripts/nba_prop_market_card.py` |
+| looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-75 min from tip | `scheduler.run_nba_prop_window` |
+| stale soft quote | refused when its clock is > 10 min behind Pinnacle's | same |
+
+Graded on 2023-24..2025-26 at the best bettable price: every proposition
+25,204 bets +2.85% (90% CI +1.75..+3.96); at -200 with no double/triple-double
+-- the population the card bets -- 24,572 bets, +781.3 units, +2.96%
+(+1.85..+4.05), +393.6 / +220.5 / +167.1 units by season: about +260 units a
+season, about 50 bets a night (median 50, most 119). The one-a-game, four-a-night
+caps it shipped with on 10-15 made +94.9 units on 1,862 bets over the same seasons. Neighbouring floors:
++2.1% at EV -0.01, +3.1% at 0.01. Expect about +2% live.
+
+**Prices it lays:** the -200 floor; on the bet list, min -200, 5th percentile -143,
+median -105, 95th +128, max +230; 38% plus money, 3.5% at -150 or shorter.
+
+**Decision timing:** the graded snapshot sat 54.4 minutes before tip for 87% of
+bets and 64.4 for 13% (50-60 min +2.95% on 21,252; 60-70 min +2.97% on 3,146,
+CI +0.09..+5.85). With a look every five minutes the first look inside 45-70
+lands about 70 minutes before an on-the-hour tip, a lead nothing was graded at
+(`docs/nba_models_2026.md` 4.3).
+
+Closing-line value is measured from the first night: each bet game gets a `'close'` prop snapshot 12-25
+minutes before tip (`data/ingestors/nba_prop_close_ingestor.py`).
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the

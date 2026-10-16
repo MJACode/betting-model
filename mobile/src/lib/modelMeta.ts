@@ -61,9 +61,11 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // Market-relative run line: de-vig Pinnacle, bet a bettable soft book
   // at the same ±1.5. Replaces the paused mlb_runline *publish path*;
   // mlb_runline itself stays paused. docs/mlb_runline_ou_edge_search.md.
+  // Named '(vs Pinnacle)' like the prop rules: the app explains Pinnacle, and
+  // never explained 'market-relative'.
   mlb_spread_market: {
     shortLabel: 'RL Mkt',
-    longLabel: 'Runline (market-relative)',
+    longLabel: 'Runline (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -73,7 +75,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // mlb_over_under itself stays paused. Paper until MLB_TOTAL_MARKET_PUBLISH=1.
   mlb_total_market: {
     shortLabel: 'O/U Mkt',
-    longLabel: 'Total Runs (market-relative)',
+    longLabel: 'Total Runs (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -264,9 +266,12 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'Ast',
   },
+  // '(vs Pinnacle)', one name for the three multi-market prop rules: each bets
+  // a retail price against Pinnacle's, and the app already explains Pinnacle.
+  // 'market-relative' was explained nowhere.
   wnba_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'WNBA Props (market-relative)',
+    longLabel: 'WNBA Props (vs Pinnacle)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -370,6 +375,18 @@ export const MODEL_META: Record<string, ModelMeta> = {
     type: 'player_prop',
     statKey: null,
     statLabel: 'DD',
+  },
+  // The 2026-27 NBA prop rule (models/nba_prop_market.py): unders at the best
+  // bettable book on Pinnacle's own line, decided 45-70 minutes before tip.
+  // ONE id across five markets (points, rebounds, assists, threes, PRA); the
+  // market travels on picks.prop_market and the stat is in each pick's label,
+  // so statLabel is empty, as for nfl_prop_market and wnba_prop_market.
+  nba_prop_market: {
+    shortLabel: 'Prop Mkt',
+    longLabel: 'NBA Props (vs Pinnacle)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
   },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
@@ -531,9 +548,10 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // outlier. ONE id across every market it trades — the validated number is
   // pooled, and the market itself is on picks.prop_market, so per-market
   // breakdowns are a query rather than eight entries here.
+  // Named '(vs Pinnacle)' like nba_prop_market and wnba_prop_market.
   nfl_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'NFL Props (market-relative)',
+    longLabel: 'NFL Props (vs Pinnacle)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -757,6 +775,21 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('golf')) return 'GOLF';
   return 'MLB';
+}
+
+/**
+ * Does any prop model that is neither retired nor paused price this sport's
+ * players? Read from the model catalog, not the stat catalog: the three
+ * multi-market rules (nba_prop_market, nfl_prop_market, wnba_prop_market)
+ * map to no single stat, so the stat-catalog test said NBA and the NFL had no
+ * prop model while both had a live one. NCAAF has only game models, so its
+ * player page still says no prop model prices it. Call it at render: the
+ * pause flag can come from the server.
+ */
+export function sportHasLivePropModel(sport: BetTypeSport): boolean {
+  return Object.keys(MODEL_META).some(
+    (id) => sportOfModel(id) === sport && isPropModel(id) && !isModelRetired(id) && !isModelPaused(id),
+  );
 }
 
 export interface BetTypeOption {
