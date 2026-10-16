@@ -696,6 +696,28 @@ def step_wnba_results(run_date: str) -> bool:
         return False
 
 
+def step_nba_results(run_date: str) -> bool:
+    """
+    NBA final scores + player box scores from ESPN for the trailing 3 days
+    (data/ingestors/nba_results_ingestor.py). Must run BEFORE settlement: NBA
+    game picks settle off games.home_score and NBA props off
+    nba_player_game_log, and until 2026-10-15 nothing on the worker wrote
+    either (nba_api is blocked here). Self-limiting: no ESPN call unless a
+    started NBA game still lacks a score or a box. The NBA analog of
+    step_wnba_results.
+    """
+    try:
+        from data.ingestors.nba_results_ingestor import ingest_nba_results
+        result = ingest_nba_results(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in result.items()
+                   if k not in ("planned_scores", "planned_box")}
+        logger.success(f"✓ NBA results (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA results failed: {exc}")
+        return False
+
+
 def step_ncaaf_results(run_date: str) -> bool:
     """
     Fill NCAAF final scores from CFBD. Must run BEFORE settlement — the
@@ -1702,6 +1724,14 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["wnba_results"] = step_wnba_results(run_date)
     time.sleep(1)
 
+    # ── Step 0e2: NBA finals + box scores via ESPN (MUST precede settlement) ─
+    # The worker's only NBA results source: nba_api is blocked here, and the
+    # local job last ran 2026-08-30. No ESPN call unless a started game still
+    # lacks a score or a box (data/ingestors/nba_results_ingestor.py).
+    logger.info("Step 0e2: Ingesting NBA finals + box scores from ESPN (pre-settle)...")
+    results["nba_results"] = step_nba_results(run_date)
+    time.sleep(1)
+
     # ── Step 0f: NFL finals via nflverse (MUST precede settlement) ───────────
     # nfl_wind_totals picks (the §28 wind card) settle off games scores through
     # the generic totals path. Free no-op whenever no NFL finals are pending.
@@ -2142,7 +2172,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "nhl-over-under",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nfl-results",
+                                 "nhl-results", "wnba-results", "nba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
@@ -2224,6 +2254,7 @@ Examples:
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
+            "nba-results":  lambda: step_nba_results(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
             "ncaaf-results": lambda: step_ncaaf_results(run_date),
             "ncaaf-stats":  lambda: step_ncaaf_stats(run_date),

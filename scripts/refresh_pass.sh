@@ -219,6 +219,7 @@ par game-log-today
 par nfl-results
 par nhl-results
 par ufc-results-poll
+par nba-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute

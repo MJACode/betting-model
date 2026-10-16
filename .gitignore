@@ -65,6 +65,9 @@ ncaaf_live/data/artifacts/*
 models/saved/_baseline/
 # analysis dumps, never committed (2026-09-11)
 data/local/prop_dump/
+# The NBA research cache (scripts/nba_research_cache.py): millions of price
+# rows, regenerable from Supabase in one command, so it is not committed.
+data/local/nba/
 data/local/*.csv
 data/local/over_lean*.csv
 
