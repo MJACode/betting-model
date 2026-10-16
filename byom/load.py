@@ -7,22 +7,35 @@ write nothing.
 from __future__ import annotations
 
 from byom.constants import DK_HISTORY_START_SEASON, LOCK_WINDOW_HOURS, SPORT
-from byom.game_facts import assemble_game, parse_date, parse_game_id
+from byom.game_facts import assemble_game, parse_date, parse_game_id, shop_windows
+
+# One game at a time. A season of nfl_odds_history is millions of rows
+# (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
+# measured 2026-10-16). The index is (game_id, market). DraftKings inside
+# the lock window comes first; other books are read only inside the shop
+# slices shop_windows() names. apply=false uses the same reads and writes
+# nothing.
+_ODDS_SNAPSHOT = """
+CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
+     THEN o.snapshot_at::timestamptz
+     ELSE NULL END
+"""
 
 _QUOTE_FROM_HISTORY = """
 SELECT game_id, bookmaker, market, snapshot_at, commence_time,
        point, price_home, price_away
   FROM nfl_odds_history
- WHERE season = %s
+ WHERE game_id IN (%s, %s)
+   AND bookmaker = 'draftkings'
    AND market IN ('spreads', 'totals', 'h2h')
    AND commence_time IS NOT NULL
    AND snapshot_at <= commence_time
    AND snapshot_at >= commence_time - make_interval(hours => %s)
 """
 
-_QUOTE_FROM_ODDS = """
+_QUOTE_FROM_ODDS = f"""
 SELECT o.game_id, o.bookmaker, o.market,
-       o.snapshot_at::timestamptz AS snapshot_at,
+       {_ODDS_SNAPSHOT} AS snapshot_at,
        g.commence_time::timestamptz AS commence_time,
        CASE o.market
          WHEN 'spreads' THEN o.spread_home
@@ -35,14 +48,14 @@ SELECT o.game_id, o.bookmaker, o.market,
          AS price_away
   FROM odds o
   JOIN games g ON g.game_id = o.game_id
- WHERE g.sport = 'NFL'
-   AND g.season = %s
+ WHERE o.game_id IN (%s, %s)
+   AND o.bookmaker = 'draftkings'
    AND o.market IN ('spreads', 'totals', 'h2h')
    AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
    AND g.commence_time IS NOT NULL
-   AND o.snapshot_at ~ '^[0-9]{4}-'
-   AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
-   AND o.snapshot_at::timestamptz
+   AND {_ODDS_SNAPSHOT} IS NOT NULL
+   AND {_ODDS_SNAPSHOT} <= g.commence_time::timestamptz
+   AND {_ODDS_SNAPSHOT}
          >= g.commence_time::timestamptz - make_interval(hours => %s)
 """
 
@@ -70,9 +83,12 @@ FACT_COLUMNS = (
     "grade_under_price", "grade_under_book",
     "grade_ml_home_price", "grade_ml_home_book",
     "grade_ml_away_price", "grade_ml_away_book",
-    "ats_home_result", "ats_home_units", "ats_away_result", "ats_away_units",
-    "ml_home_result", "ml_home_units", "ml_away_result", "ml_away_units",
-    "ou_over_result", "ou_over_units", "ou_under_result", "ou_under_units",
+    "ats_home_result", "ats_home_units_uncapped", "ats_home_units_capped",
+    "ats_away_result", "ats_away_units_uncapped", "ats_away_units_capped",
+    "ml_home_result", "ml_home_units_uncapped", "ml_home_units_capped",
+    "ml_away_result", "ml_away_units_uncapped", "ml_away_units_capped",
+    "ou_over_result", "ou_over_units_uncapped", "ou_over_units_capped",
+    "ou_under_result", "ou_under_units_uncapped", "ou_under_units_capped",
     "home_rest_days", "away_rest_days", "is_primetime", "home_role", "away_role",
     "line_source",
 )
@@ -100,8 +116,7 @@ def _games(conn, season: int) -> list[dict]:
     return out
 
 
-def _quotes(conn, season: int, source: str, sql: str) -> list[dict]:
-    rows = _fetch(conn, sql, (season, LOCK_WINDOW_HOURS))
+def _as_quotes(rows, source: str) -> list[dict]:
     out = []
     for row in rows:
         out.append({
@@ -111,6 +126,73 @@ def _quotes(conn, season: int, source: str, sql: str) -> list[dict]:
             "line_source": source,
         })
     return out
+
+
+def _ids_for(game_id: str) -> tuple[str, str] | None:
+    parsed = parse_game_id(game_id)
+    if parsed is None:
+        return None
+    return parsed[0], "NFL_" + parsed[0]
+
+
+def _dk_quotes(conn, ids: tuple[str, str]) -> list[dict]:
+    bare, prefixed = ids
+    history = _as_quotes(_fetch(
+        conn, _QUOTE_FROM_HISTORY, (bare, prefixed, LOCK_WINDOW_HOURS)),
+        "nfl_odds_history")
+    odds = _as_quotes(_fetch(
+        conn, _QUOTE_FROM_ODDS, (bare, prefixed, LOCK_WINDOW_HOURS)),
+        "odds")
+    return history + odds
+
+
+def _shop_quotes(conn, ids: tuple[str, str], windows: list[tuple]) -> list[dict]:
+    """Non-DraftKings rows inside the lock slices. No slices, no read."""
+    if not windows:
+        return []
+    bare, prefixed = ids
+    clauses = []
+    params: list = [bare, prefixed]
+    for market, floor, lock_at in windows:
+        clauses.append(
+            "(market = %s AND snapshot_at >= %s AND snapshot_at <= %s)")
+        params.extend([market, floor, lock_at])
+    arms = " OR ".join(clauses)
+    history_sql = f"""
+        SELECT game_id, bookmaker, market, snapshot_at, commence_time,
+               point, price_home, price_away
+          FROM nfl_odds_history
+         WHERE game_id IN (%s, %s)
+           AND bookmaker <> 'draftkings'
+           AND commence_time IS NOT NULL
+           AND snapshot_at <= commence_time
+           AND ({arms})
+    """
+    odds_sql = f"""
+        SELECT o.game_id, o.bookmaker, o.market,
+               {_ODDS_SNAPSHOT} AS snapshot_at,
+               g.commence_time::timestamptz AS commence_time,
+               CASE o.market
+                 WHEN 'spreads' THEN o.spread_home
+                 WHEN 'totals' THEN o.total_line
+                 ELSE NULL
+               END AS point,
+               CASE WHEN o.market = 'totals' THEN o.over_price ELSE o.home_price END
+                 AS price_home,
+               CASE WHEN o.market = 'totals' THEN o.under_price ELSE o.away_price END
+                 AS price_away
+          FROM odds o
+          JOIN games g ON g.game_id = o.game_id
+         WHERE o.game_id IN (%s, %s)
+           AND o.bookmaker <> 'draftkings'
+           AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+           AND g.commence_time IS NOT NULL
+           AND {_ODDS_SNAPSHOT} IS NOT NULL
+           AND ({arms.replace("snapshot_at", _ODDS_SNAPSHOT)})
+           AND {_ODDS_SNAPSHOT} <= g.commence_time::timestamptz
+    """
+    return (_as_quotes(_fetch(conn, history_sql, params), "nfl_odds_history")
+            + _as_quotes(_fetch(conn, odds_sql, params), "odds"))
 
 
 def _played(games: list[dict]) -> dict:
@@ -131,21 +213,15 @@ def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
     if season < DK_HISTORY_START_SEASON:
         return []
     games = _games(conn, season)
-    quotes = _quotes(conn, season, "nfl_odds_history", _QUOTE_FROM_HISTORY)
-    quotes += _quotes(conn, season, "odds", _QUOTE_FROM_ODDS)
-    by_key: dict[str, list] = {}
-    for quote in quotes:
-        parsed = parse_game_id(quote["game_id"])
-        if parsed is None:
-            continue
-        by_key.setdefault(parsed[0], []).append(quote)
     played = _played(games)
     facts = []
     for game in games:
-        parsed = parse_game_id(game["game_id"])
-        if parsed is None:
+        ids = _ids_for(game["game_id"])
+        if ids is None:
             continue
-        fact = assemble_game(game, by_key.get(parsed[0], []), played, books)
+        quotes = _dk_quotes(conn, ids)
+        quotes += _shop_quotes(conn, ids, shop_windows(quotes))
+        fact = assemble_game(game, quotes, played, books)
         if fact is not None:
             facts.append(fact)
     return facts

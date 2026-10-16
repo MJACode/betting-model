@@ -192,33 +192,46 @@ def grade_total(home_score, away_score, line) -> tuple[str, str] | None:
     return "push", "push"
 
 
-def units_1u_to_win(result: str | None, american) -> Decimal | None:
-    """Units for a bet sized to win 1. No risk cap.
+# Same ceiling as MAX_RISK_UNITS / stake_for. A loss at -400 is -4
+# uncapped and -3 capped, which is what the Record lays.
+_MAX_RISK_UNITS = Decimal("3")
 
-    win -> +1. push or tie -> 0. loss -> minus the stake that 1 unit of
-    win required. A missing or zero price is None, not a made-up number.
+
+def units_1u_to_win(result: str | None, american):
+    """(uncapped, capped) for a bet sized to win 1.
+
+    Uncapped has no risk ceiling. Capped matches stake_for: risk above 3
+    units is cut to 3, and a win is recomputed from that risk. Push and
+    tie are (0, 0). A missing or zero price is (None, None), not the
+    unpriced fallback stake_for publishes.
     """
     if result is None:
-        return None
+        return None, None
     if result in ("push", "tie"):
-        return Decimal("0")
+        return Decimal("0"), Decimal("0")
     if result not in ("win", "loss"):
-        return None
+        return None, None
     if american is None:
-        return None
+        return None, None
     price = Decimal(str(american))
     if price == 0:
-        return None
+        return None, None
     if price > 0:
         decimal_odds = Decimal(1) + price / Decimal(100)
     else:
         decimal_odds = Decimal(1) + (Decimal(100) / abs(price))
     if decimal_odds <= 1:
-        return None
+        return None, None
+    profit_per_risk = decimal_odds - 1
+    risk = Decimal(1) / profit_per_risk
+    capped_risk = _MAX_RISK_UNITS if risk > _MAX_RISK_UNITS else risk
     if result == "win":
-        return Decimal("1")
-    risk = (Decimal(1) / (decimal_odds - 1)).quantize(_Q, rounding=ROUND_HALF_UP)
-    return -risk
+        uncapped = Decimal("1")
+        capped = (capped_risk * profit_per_risk).quantize(_Q, rounding=ROUND_HALF_UP)
+        return uncapped, capped
+    uncapped = -risk.quantize(_Q, rounding=ROUND_HALF_UP)
+    capped = -capped_risk.quantize(_Q, rounding=ROUND_HALF_UP)
+    return uncapped, capped
 
 
 def same_line(left, right) -> bool:
@@ -296,6 +309,31 @@ def _prefer_history(quotes, market: str) -> tuple[list[dict], str | None]:
     if first_in_window(odds, LOCK_WINDOW_HOURS) is not None:
         return odds, SOURCE_ODDS
     return [], None
+
+
+def shop_windows(quotes) -> list[tuple]:
+    """(market, floor, lock_at) for the grade lock and the near lock.
+
+    The non-DraftKings fetch uses these slices. A season-wide read of
+    every book is not required to grade one game.
+    """
+    out = []
+    seen = set()
+    for market in ("spreads", "totals", "h2h"):
+        pool, source = _prefer_history(quotes, market)
+        if source is None:
+            continue
+        for window in (LOCK_WINDOW_HOURS, NEAR_LOCK_WINDOW_HOURS):
+            slot = first_in_window(pool, window)
+            if slot is None:
+                continue
+            at = slot["snapshot_at"]
+            key = (market, at)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((market, at - timedelta(minutes=SHOP_LAG_MINUTES), at))
+    return out
 
 
 def _num(value):
@@ -396,15 +434,16 @@ def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
 
     def pair(result, price):
         if result is None:
-            return None, None
-        return result, units_1u_to_win(result, price)
+            return None, None, None
+        uncapped, capped = units_1u_to_win(result, price)
+        return result, uncapped, capped
 
-    ats_h, ats_hu = pair(None if ats is None else ats[0], g_sh)
-    ats_a, ats_au = pair(None if ats is None else ats[1], g_sa)
-    ml_h, ml_hu = pair(None if ml is None else ml[0], g_mh)
-    ml_a, ml_au = pair(None if ml is None else ml[1], g_ma)
-    ou_o, ou_ou = pair(None if ou is None else ou[0], g_ov)
-    ou_u, ou_uu = pair(None if ou is None else ou[1], g_un)
+    ats_h, ats_hu, ats_hc = pair(None if ats is None else ats[0], g_sh)
+    ats_a, ats_au, ats_ac = pair(None if ats is None else ats[1], g_sa)
+    ml_h, ml_hu, ml_hc = pair(None if ml is None else ml[0], g_mh)
+    ml_a, ml_au, ml_ac = pair(None if ml is None else ml[1], g_ma)
+    ou_o, ou_ou, ou_oc = pair(None if ou is None else ou[0], g_ov)
+    ou_u, ou_uu, ou_uc = pair(None if ou is None else ou[1], g_un)
 
     return {
         "canonical_key": key,
@@ -468,17 +507,23 @@ def assemble_game(game: dict, quotes: list[dict], played: dict[str, list[date]],
         "grade_ml_away_price": g_ma,
         "grade_ml_away_book": g_ma_book,
         "ats_home_result": ats_h,
-        "ats_home_units": ats_hu,
+        "ats_home_units_uncapped": ats_hu,
+        "ats_home_units_capped": ats_hc,
         "ats_away_result": ats_a,
-        "ats_away_units": ats_au,
+        "ats_away_units_uncapped": ats_au,
+        "ats_away_units_capped": ats_ac,
         "ml_home_result": ml_h,
-        "ml_home_units": ml_hu,
+        "ml_home_units_uncapped": ml_hu,
+        "ml_home_units_capped": ml_hc,
         "ml_away_result": ml_a,
-        "ml_away_units": ml_au,
+        "ml_away_units_uncapped": ml_au,
+        "ml_away_units_capped": ml_ac,
         "ou_over_result": ou_o,
-        "ou_over_units": ou_ou,
+        "ou_over_units_uncapped": ou_ou,
+        "ou_over_units_capped": ou_oc,
         "ou_under_result": ou_u,
-        "ou_under_units": ou_uu,
+        "ou_under_units_uncapped": ou_uu,
+        "ou_under_units_capped": ou_uc,
         "home_rest_days": rest_days(home, game_day, played),
         "away_rest_days": rest_days(away, game_day, played),
         "is_primetime": is_primetime(commence),

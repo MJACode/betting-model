@@ -350,6 +350,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # views, or a live model. Unapplied until the worker's next pass.
     # The 120h/24h windows are UNCONFIRMED and are not in this file.
     "byom_facts_schema_2026_10_16.sql",
+    # 2026-10-16: label uncapped and capped unit columns. The unlabelled
+    # names from the facts schema are dropped. Catalog return on the
+    # second pass. Unapplied. Does not touch picks or the record views.
+    "byom_game_facts_units_2026_10_16.sql",
 ]
 
 

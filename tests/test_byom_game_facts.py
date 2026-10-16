@@ -100,15 +100,34 @@ def test_week_comes_from_the_id_and_the_prefix_does_not_matter():
     assert parse_game_id("not-a-game") is None
 
 
-def test_units_are_1u_to_win_with_no_cap_and_no_invented_price():
-    assert units_1u_to_win("win", -400) == Decimal("1")
-    assert units_1u_to_win("loss", -110) == Decimal("-1.1000")
-    assert units_1u_to_win("loss", -400) == Decimal("-4.0000")
-    assert units_1u_to_win("loss", 150) == Decimal("-0.6667")
-    assert units_1u_to_win("push", -110) == Decimal("0")
-    assert units_1u_to_win("tie", -110) == Decimal("0")
-    assert units_1u_to_win("win", None) is None
-    assert units_1u_to_win("loss", None) is None
+def test_units_store_the_uncapped_and_the_3u_capped_pair():
+    # -400 lays 4 to win 1. The Record caps the lay at 3 and pays 0.75.
+    assert units_1u_to_win("win", -400) == (Decimal("1"), Decimal("0.7500"))
+    assert units_1u_to_win("loss", -400) == (Decimal("-4.0000"), Decimal("-3.0000"))
+    # -300 lays exactly 3, so the cap does not bind.
+    assert units_1u_to_win("loss", -300) == (Decimal("-3.0000"), Decimal("-3.0000"))
+    assert units_1u_to_win("win", -110) == (Decimal("1"), Decimal("1.0000"))
+    assert units_1u_to_win("loss", -110) == (Decimal("-1.1000"), Decimal("-1.1000"))
+    assert units_1u_to_win("loss", 150) == (Decimal("-0.6667"), Decimal("-0.6667"))
+    assert units_1u_to_win("push", -110) == (Decimal("0"), Decimal("0"))
+    assert units_1u_to_win("tie", -110) == (Decimal("0"), Decimal("0"))
+    assert units_1u_to_win("win", None) == (None, None)
+    assert units_1u_to_win("loss", None) == (None, None)
+
+
+def test_an_unplayed_game_keeps_the_line_and_nulls_the_result():
+    fact = assemble_game(
+        _game(home_score=None, away_score=None), _quotes(),
+        {"BAL": [], "KC": []}, BOOKS)
+    assert fact is not None
+    assert fact["dk_spread_home"] == Decimal("-3")
+    assert fact["ats_home_result"] is None
+    assert fact["ats_home_units_uncapped"] is None
+    assert fact["ats_home_units_capped"] is None
+    assert fact["ml_home_result"] is None
+    assert fact["ml_home_units_uncapped"] is None
+    assert fact["ou_over_result"] is None
+    assert fact["ou_over_units_uncapped"] is None
 
 
 def test_pushes_and_ties_are_results():
@@ -133,11 +152,13 @@ def test_the_lock_is_the_first_snapshot_inside_the_window():
     assert fact["grade_spread_home_book"] == "fanduel"
     assert fact["grade_spread_home_price"] == Decimal("-105")
     assert fact["ats_home_result"] == "win"
-    assert fact["ats_home_units"] == Decimal("1")
+    assert fact["ats_home_units_uncapped"] == Decimal("1")
+    assert fact["ats_home_units_capped"] == Decimal("1.0000")
     # Away is its own best price: DraftKings -105 beats Fanduel -115.
     assert fact["grade_spread_away_book"] == "draftkings"
     assert fact["grade_spread_away_price"] == Decimal("-105")
-    assert fact["ats_away_units"] == Decimal("-1.0500")
+    assert fact["ats_away_units_uncapped"] == Decimal("-1.0500")
+    assert fact["ats_away_units_capped"] == Decimal("-1.0500")
     assert fact["home_role"] == "favorite"
     assert fact["away_role"] == "underdog"
     assert fact["is_primetime"] is True
@@ -153,8 +174,10 @@ def test_a_short_price_and_a_large_spread_are_kept():
     fact = assemble_game(game, quotes, {"SF": [], "NYJ": []}, BOOKS)
     assert fact is not None
     assert fact["dk_spread_home"] == Decimal("-17.5")
-    assert fact["ats_home_units"] == Decimal("1")
-    assert fact["ats_away_units"] == Decimal("-0.1818")
+    assert fact["ats_home_units_uncapped"] == Decimal("1")
+    assert fact["ats_home_units_capped"] == Decimal("0.3750")
+    assert fact["ats_away_units_uncapped"] == Decimal("-0.1818")
+    assert fact["ats_away_units_capped"] == Decimal("-0.1818")
 
 
 def test_seasons_before_draftkings_history_are_not_built():
@@ -198,6 +221,15 @@ def test_rest_days_and_a_sunday_afternoon_is_not_primetime():
     assert fact["home_rest_days"] is None
     assert fact["is_primetime"] is False
     assert fact["home_role"] == "underdog"
+
+
+def test_quotes_are_read_per_game_and_the_odds_cast_is_inside_a_case():
+    text = (ROOT / "byom" / "load.py").read_text(encoding="utf-8")
+    assert "game_id IN (%s, %s)" in text
+    assert "bookmaker = 'draftkings'" in text
+    assert "FROM nfl_odds_history\n WHERE season = %s" not in text
+    assert "AND o.snapshot_at::timestamptz" not in text
+    assert "ELSE NULL END" in text
 
 
 def test_the_builder_has_no_spread_price_or_line_filter_and_does_not_touch_picks():
@@ -267,8 +299,11 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
               home_price numeric, away_price numeric, spread_home numeric,
               total_line numeric, over_price numeric, under_price numeric);
         """)
-        cur.execute((ROOT / "data/migrations/byom_facts_schema_2026_10_16.sql")
-                    .read_text(encoding="utf-8"))
+        for name in ("byom_facts_schema_2026_10_16.sql",
+                     "byom_game_facts_units_2026_10_16.sql"):
+            text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
+            cur.execute(text)
+            cur.execute(text)
         _load_fixture(cur)
         raw.autocommit = False
         from byom.load import build_season
@@ -287,6 +322,12 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
             def commit(self):
                 raw.commit()
 
+        cur.execute("""
+            INSERT INTO odds (game_id, sport, market, bookmaker, snapshot_type,
+                              snapshot_at, home_price, away_price, spread_home)
+            VALUES ('NFL_2024_01_BAL_KC', 'NFL', 'spreads', 'draftkings', 'open',
+                    'not-a-timestamp', -110, -110, -3)
+        """)
         conn = Conn()
         skipped = build_season(conn, 2019, apply=True, books=BOOKS)
         assert skipped["written"] == 0
@@ -301,7 +342,8 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
         assert cur.fetchone()[0] == 4
         cur.execute("""
             SELECT canonical_key, week, dk_spread_home, grade_spread_home_book,
-                   grade_spread_home_price, ats_home_result, ats_home_units,
+                   grade_spread_home_price, ats_home_result,
+                   ats_home_units_uncapped, ats_home_units_capped,
                    close_spread_home, near_spread_home, home_role, is_primetime,
                    line_source, away_rest_days
               FROM byom_game_facts
@@ -315,33 +357,42 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
         assert Decimal(str(row[4])) == Decimal("-105")
         assert row[5] == "win"
         assert Decimal(str(row[6])) == Decimal("1")
-        assert Decimal(str(row[7])) == Decimal("-4")
-        assert Decimal(str(row[8])) == Decimal("-3.5")
-        assert row[9] == "favorite"
-        assert row[10] is True
-        assert row[11] == "nfl_odds_history"
+        assert Decimal(str(row[7])) == Decimal("1.0000")
+        assert Decimal(str(row[8])) == Decimal("-4")
+        assert Decimal(str(row[9])) == Decimal("-3.5")
+        assert row[10] == "favorite"
+        assert row[11] is True
+        assert row[12] == "nfl_odds_history"
         cur.execute("""
-            SELECT ats_home_result, ats_home_units, ml_home_result, dk_spread_home
+            SELECT ats_home_result, ats_home_units_uncapped,
+                   ats_home_units_capped, dk_spread_home
               FROM byom_game_facts WHERE canonical_key = '2024_03_NYJ_SF'
         """)
         big = cur.fetchone()
         assert Decimal(str(big[3])) == Decimal("-17.5")
-        assert big[0] == "win" and Decimal(str(big[1])) == Decimal("1")
+        assert big[0] == "win"
+        assert Decimal(str(big[1])) == Decimal("1")
+        assert Decimal(str(big[2])) == Decimal("0.3750")
         cur.execute("""
-            SELECT ats_home_result, ats_home_units, ml_home_result, ml_home_units
+            SELECT ats_home_result, ats_home_units_uncapped,
+                   ats_home_units_capped, ml_home_result
               FROM byom_game_facts WHERE canonical_key = '2024_04_DET_GB'
         """)
         push = cur.fetchone()
-        assert push[0] == "push" and Decimal(str(push[1])) == Decimal("0")
+        assert push[0] == "push"
+        assert Decimal(str(push[1])) == Decimal("0")
+        assert Decimal(str(push[2])) == Decimal("0")
         cur.execute("""
-            SELECT ml_home_result, ml_home_units, line_source, week
+            SELECT ml_home_result, ml_home_units_uncapped,
+                   ml_home_units_capped, line_source, week
               FROM byom_game_facts WHERE canonical_key = '2026_01_NE_SEA'
         """)
         odds_only = cur.fetchone()
         assert odds_only[0] == "tie"
         assert Decimal(str(odds_only[1])) == Decimal("0")
-        assert odds_only[2] == "odds"
-        assert odds_only[3] == 1
+        assert Decimal(str(odds_only[2])) == Decimal("0")
+        assert odds_only[3] == "odds"
+        assert odds_only[4] == 1
         dry = build_season(conn, 2024, apply=False, books=BOOKS)
         assert dry["facts"] == 3 and dry["written"] == 0
     finally:
