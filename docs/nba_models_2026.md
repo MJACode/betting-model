@@ -315,9 +315,10 @@ difference on 25,660 predictions. Built from 2022-23 on instead of 2018-19, the 
 5-7% for one player in a hundred, so the live frame reads every season: 72 seconds per group
 here (104 at most).
 
-**How it runs.** The five-minute window job projects each game at the tick about 60
-minutes before tip (an ESPN injury pull, then the frame), storing every player's mean
-in `nba_prop_projections`; at the next tick, inside the 45–57 window and after
+**How it runs.** The five-minute window job projects each game at the tick about 65
+minutes before tip (an ESPN injury pull, then the frame; 139 seconds for three games
+from this machine against production), storing every player's mean in
+`nba_prop_projections`; two ticks later, inside the 45–57 window and after
 `nba_prop_market` has decided the game, the card prices those projections on the newest
 fetch. Each game is decided once (`nba_prop_projection_decisions`). The injury list each
 game was projected with is kept in `nba_injury_asof`, which also holds the 2018-19..2025-26

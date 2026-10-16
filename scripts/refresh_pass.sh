@@ -138,7 +138,7 @@ step nhl-over-under
 step nba-prop-market
 # The NBA projection model (nba_prop_projection), on the same fetch and AFTER
 # nba_prop_market, so it never takes a proposition the rule holds. It prices
-# the projections the window job stored about an hour before tip; a game with
+# the projections the window job stored about 65 minutes before tip; a game with
 # none is not decided here. SEQUENTIAL, a writer to picks.
 step nba-prop-projection
 # Its closing snapshot, for closing-line value only: one event call per bet

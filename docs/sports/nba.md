@@ -97,6 +97,9 @@ Their feature engines (`features/nba_feature_engine.py`,
 | `odds` (`source='odds_api_historical'`) | game lines 2020-21 → 2025-26, 9 fetches a game date | `nba_odds_history --lines` | one-off purchase |
 | `player_prop_odds` | props 2023-24 → 2025-26 (one snapshot at tip-60); live every refresh pass and every window-job tick with a game near | `nba_odds_history --props`; `prop_odds_ingestor` | purchase; worker |
 | `nba_prop_market_decisions` | one row per game the NBA prop card decided: when, on which fetch, quotes seen, bets written | `scripts/nba_prop_market_card.py` | worker |
+| `nba_prop_projection_decisions` | the same, for `nba_prop_projection`, with the projection it priced | `scripts/nba_prop_projection_card.py` | worker |
+| `nba_prop_projections` | each player's projected mean per card market, his status and projected minutes, for every game projected | `scripts/nba_prop_projection_card.py --project` | worker |
+| `nba_injury_asof` | the injury list each game was projected with: the official report 2018-19 → 2025-26 (90,629 rows, 9,076 games, loaded 2026-10-16), then the ESPN pull each 2026-27 projection used | `scripts/nba_prop_projection_card.py` | worker / this machine |
 | `odds` (`source='odds_api_nba_derivative_history'`) | 1H / 1Q / team totals 2024-25 → 2025-26 | `nba_odds_history --derivatives` | one-off purchase |
 
 `player_prop_odds.book_last_update` (added 2026-10-16) stores each book's own
@@ -109,8 +112,10 @@ than 10 minutes behind Pinnacle's.
 |---|---|---|
 | `nba-prop-odds` | every refresh pass (`par`) | live props, 11 markets + 8 alternates, 7 days ahead (blocks+steals and rebounds+assists added 2026-10-16) |
 | `nba-prop-market` | right after `nba-prop-odds`; also in the window job | the card: games tipping in 45-57 minutes and not yet decided; every qualifying proposition; a decision row per game decided; a diagnostic line every look |
+| `nba-prop-projection` | right after `nba-prop-market` (refresh pass, 6am run, window job) | the projection card: prices the stored projections for games in their window that `nba_prop_market` has decided (or alone from 50 minutes out); a decision row per game |
+| `nba-prop-project` | the window job, about 65 minutes before tip | an ESPN injury pull, then the frame over every box line since 2018-19, stored in `nba_prop_projections`; a game 45-62 minutes out with none is projected at once |
 | `nba-prop-close` | after the card; also in the window job | a `close` prop snapshot 12-25 minutes before tip for every game holding a bet (CLV; `NBA_PROP_CLOSE_*` in config) |
-| window job `nba_prop_window` | every 5 minutes, 24x7 (`scheduler.run_nba_prop_window`) | props for exactly the games 40-62 minutes from tip and not yet decided, then the card, then any close that is due, then publish; no API call when nothing is near |
+| window job `nba_prop_window` | every 5 minutes, 24x7 (`scheduler.run_nba_prop_window`) | props for exactly the games 40-62 minutes from tip that either NBA prop model has not decided, then both cards, then any close that is due, then publish, then the projections due; no API call when nothing is near |
 | `nba-results` | every pass, before settle | ESPN finals → `games`, every box line → `nba_player_game_log` |
 | `settle` | every pass | props via `_settle_prop_picks` (`FROM_PROP_MARKET`, `_NBA_MARKET_STAT`) |
 

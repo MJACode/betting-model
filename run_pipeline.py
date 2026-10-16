@@ -1349,7 +1349,7 @@ def step_nba_prop_projection(dry_run: bool = False) -> bool:
 
     Decides each game once, in the same window as nba_prop_market and after it
     (scripts/nba_prop_projection_card.py), on the projections the window job
-    stored about an hour before tip. Never a proposition nba_prop_market holds.
+    stored about 65 minutes before tip. Never a proposition nba_prop_market holds.
     LIVE, no write switch. A look with no game in its window writes nothing.
     """
     try:
