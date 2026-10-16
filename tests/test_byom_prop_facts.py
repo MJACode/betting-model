@@ -172,14 +172,93 @@ def test_a_long_price_stores_both_unit_columns():
     assert fact["over_units_capped"] == Decimal("-3.0000")
 
 
+def test_a_nickname_miss_is_a_non_participant():
+    """Josh and Joshua do not meet. The miss stays actual 0 until Matt
+    says otherwise."""
+    facts = facts_for_game(_game(), [
+        _q("Josh Allen", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,
+           team="BUF"),
+    ], [_log("Joshua Allen", team="BUF", passing_yards=300)])
+    fact = _one(facts, "player_pass_yds", "Josh Allen")
+    assert fact["log_status"] == "non_participant"
+    assert fact["actual"] == Decimal(0)
+    assert fact["over_result"] == "loss"
+    assert fact["under_result"] == "win"
+
+
+def test_an_offense_only_log_leaves_a_defender_as_a_non_participant():
+    facts = facts_for_game(_game(), [
+        _q("Kyle Hamilton", "player_sacks", "draftkings", 10, 0.5, -120, 100,
+           team="BAL"),
+    ], [_log("Lamar Jackson", passing_yards=250)])
+    fact = _one(facts, "player_sacks", "Kyle Hamilton")
+    assert fact["log_status"] == "non_participant"
+    assert fact["actual"] == Decimal(0)
+    assert fact["over_result"] == "loss"
+
+
+def test_the_quote_team_breaks_a_shared_name():
+    facts = facts_for_game(_game(), [
+        _q("Josh Allen", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,
+           team="BUF"),
+    ], [
+        _log("Josh Allen", team="BUF", passing_yards=280),
+        _log("Josh Allen", team="NYJ", passing_yards=40),
+    ])
+    fact = _one(facts, "player_pass_yds", "Josh Allen")
+    assert fact["log_status"] == "logged"
+    assert fact["actual"] == Decimal(280)
+    tied = facts_for_game(_game(), [
+        _q("Josh Allen", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,
+           team="BAL"),
+    ], [
+        _log("Josh Allen", team="BUF", passing_yards=280),
+        _log("Josh Allen", team="NYJ", passing_yards=40),
+    ])
+    assert _one(tied, "player_pass_yds", "Josh Allen")["log_status"] == "ambiguous"
+
+
+def test_220_50_and_220_5_are_one_prop_key():
+    from byom.prop_facts import line_key
+
+    assert line_key(Decimal("220.50")) == line_key(Decimal("220.5")) == "220.5"
+    first = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10,
+           Decimal("220.50"), -110, -110),
+    ], [_log("Lamar Jackson", passing_yards=250)])
+    second = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10,
+           Decimal("220.5"), -110, -110),
+    ], [_log("Lamar Jackson", passing_yards=250)])
+    assert first[0]["prop_key"] == second[0]["prop_key"]
+    assert first[0]["prop_key"].endswith("|220.5")
+
+
+def test_the_close_is_the_latest_quote_on_this_line():
+    """A later quote on a different number is not this row's close."""
+    facts = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 20, 220.5, -110, -110),
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 5, 220.5, -120, 100),
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 1, 240.5, -130, 110),
+    ], [_log("Lamar Jackson", passing_yards=250)])
+    assert len(facts) == 1
+    assert facts[0]["line"] == Decimal("220.5")
+    assert facts[0]["close_over_price"] == Decimal("-120")
+
+
 def test_the_builder_reads_one_game_and_casts_inside_a_case():
     text = (ROOT / "byom" / "prop_load.py").read_text(encoding="utf-8")
     assert "p.game_id = %s" in text
     assert "bookmaker = 'draftkings'" in text
     assert "BEST_LINE_BOOKMAKERS" not in text
     assert "ELSE NULL END" in text
-    assert "snapshot_at::timestamptz" in text
+    assert '_ts_case("p.snapshot_at")' in text
+    assert '_ts_case("g.commence_time")' in text
+    assert "THEN {expr}::timestamptz" in text
     assert "AND p.snapshot_at::timestamptz" not in text
+    assert "AND g.commence_time::timestamptz" not in text
+    assert "(0[1-9]|1[0-2])" in text
+    assert "DELETE FROM byom_prop_facts WHERE canonical_key" in text
     lowered = text.lower() + (ROOT / "byom" / "prop_facts.py").read_text(encoding="utf-8").lower()
     for banned in ("min_odds", "spread_size", "price_band", "insert into picks",
                    "discord"):
@@ -264,7 +343,20 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
                '2024-09-08T07:00:00+00:00', 300.5, -110, -110),
               ('NFL_2024_01_BAL_KC', '2024-09-08', 'Lamar Jackson', 'BAL',
                'player_pass_yds', 'draftkings', 'live', 'not-a-timestamp',
-               199.5, -110, -110);
+               199.5, -110, -110),
+              ('NFL_2024_01_BAL_KC', '2024-09-08', 'Lamar Jackson', 'BAL',
+               'player_pass_yds', 'draftkings', 'live', '2024-13-45',
+               188.5, -110, -110);
+            INSERT INTO games VALUES
+              ('NFL_2024_02_BUF_NYJ', 'NFL', 2024, 2, '2024-09-15', 'NYJ', 'BUF',
+               10, 20, '2024-13-45');
+            INSERT INTO player_prop_odds
+              (game_id, game_date, player_name, team, market, bookmaker,
+               snapshot_type, snapshot_at, line, over_price, under_price)
+            VALUES
+              ('NFL_2024_02_BUF_NYJ', '2024-09-15', 'Josh Allen', 'BUF',
+               'player_pass_yds', 'draftkings', 'live',
+               '2024-09-15T07:00:00+00:00', 220.5, -110, -110);
             INSERT INTO nfl_player_game_log
               (player_id, player_name, team, game_id, game_date, season,
                passing_yards)
@@ -302,6 +394,32 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
         assert Decimal(str(row[2])) == Decimal("250")
         assert row[3] == "win"
         assert row[4] == "logged"
+        cur.execute("""
+            INSERT INTO byom_prop_facts
+              (prop_key, canonical_key, sport, season, week, player_name,
+               player_key, market, line, lock_window_hours, line_source)
+            VALUES
+              ('2024_01_BAL_KC|player_pass_yds|lamar jackson|199.5',
+               '2024_01_BAL_KC', 'NFL', 2024, 1, 'Lamar Jackson',
+               'lamar jackson', 'player_pass_yds', 199.5, 24,
+               'player_prop_odds')
+        """)
+        cur.execute("""
+            UPDATE player_prop_odds
+               SET line = 240.5
+             WHERE game_id = 'NFL_2024_01_BAL_KC'
+               AND market = 'player_pass_yds'
+               AND line = 220.5
+        """)
+        rebuilt = build_season(Conn(), 2024, apply=True)
+        assert rebuilt["written"] == 1
+        cur.execute("""
+            SELECT line FROM byom_prop_facts
+             WHERE canonical_key = '2024_01_BAL_KC'
+             ORDER BY line
+        """)
+        lines = [Decimal(str(item[0])) for item in cur.fetchall()]
+        assert lines == [Decimal("240.5")]
         again = build_season(Conn(), 2022, apply=True)
         assert again["written"] == 0
     finally:

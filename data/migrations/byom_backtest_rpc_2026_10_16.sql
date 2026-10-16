@@ -26,6 +26,9 @@
 -- contribute the over and the under. A side or role filter uses the
 -- player's team on the game fact.
 --
+-- An empty filter object is the whole season. It is not a model record.
+-- The UI must not present that unfiltered result as a saved model.
+--
 -- The 120h and 24h windows are UNCONFIRMED and are not in this file.
 -- One DO block. No CONCURRENTLY.
 
@@ -60,6 +63,7 @@ BEGIN
     STABLE
     SECURITY INVOKER
     SET search_path = public, pg_temp
+    SET statement_timeout = '3s'
     AS $body$
     DECLARE
       -- byom_backtest_v1
@@ -113,7 +117,8 @@ BEGIN
       END IF;
 
       -- Output names are also plpgsql variables. The leg columns use
-      -- other names so `market` is not ambiguous.
+      -- other names so `market` is not ambiguous. statement_timeout is
+      -- set on the function (STABLE cannot SET LOCAL).
       RETURN QUERY
       WITH legs AS (
         SELECT 'spreads'::text AS mkt,

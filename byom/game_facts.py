@@ -247,7 +247,8 @@ def quotes_at_lock(quotes, lock_at, point=None,
 
     A quote on a different number does not displace that book's quote on
     DraftKings' number. h2h has no line, so those quotes are not filtered
-    by point.
+    by point. The lock-shop builder stores these rows. The grade does not
+    read them.
     """
     target = parse_ts(lock_at)
     if target is None:
@@ -271,10 +272,13 @@ def quotes_at_lock(quotes, lock_at, point=None,
 def dk_lock_grade(slot, side: str):
     """DraftKings' own price on the lock snapshot.
 
-    (price, 'draftkings') or (None, None). Another book's price is not
-    the grade. Totals use price_home as over and price_away as under.
+    (price, 'draftkings') or (None, None). The slot's bookmaker has to be
+    DraftKings. Another book's price is not the grade. Totals use
+    price_home as over and price_away as under.
     """
     if slot is None:
+        return None, None
+    if (slot.get("bookmaker") or "").lower() != "draftkings":
         return None, None
     raw = slot.get("price_home") if side == "home" else slot.get("price_away")
     if raw is None:

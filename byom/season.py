@@ -4,6 +4,10 @@ The label is the year the season starts. January and February belong to
 the previous year's label. March through August are the offseason and
 still name the season that just ended, so a default of "current" does
 not jump to a year that has not kicked off.
+
+byom_backtest copies this rule in SQL (month >= 9 keeps the year,
+otherwise year - 1, America/New_York). tests/test_byom_backtest.py
+checks the two against the same dates.
 """
 from __future__ import annotations
 
