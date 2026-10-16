@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { retryAccessibilityLabel } from '@/lib/a11y';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorAnnouncement, friendlyError, isAbortError, type FriendlyError } from '@/lib/errors';
 import { repeatFailureAnnounce } from '@/lib/loadState';
@@ -127,7 +128,7 @@ export function ErrorState({ what, error, onRetry, retrying, retryLabel = 'Retry
         }}
         disabled={retrying}
         accessibilityRole="button"
-        accessibilityLabel={`${retryLabel} loading ${what}`}
+        accessibilityLabel={retryAccessibilityLabel(retryLabel, what)}
         accessibilityState={{ disabled: Boolean(retrying), busy: Boolean(retrying) }}
         style={({ pressed }) => [styles.retryBtn, (pressed || retrying) && styles.pressed]}
       >
@@ -166,7 +167,7 @@ export function ErrorBanner({ what, error, onRetry, retrying, retryLabel = 'Retr
         disabled={retrying}
         hitSlop={{ left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel={`${retryLabel} loading ${what}`}
+        accessibilityLabel={retryAccessibilityLabel(retryLabel, what)}
         accessibilityState={{ disabled: Boolean(retrying), busy: Boolean(retrying) }}
         style={({ pressed }) => [styles.bannerRetry, (pressed || retrying) && styles.pressed]}
       >

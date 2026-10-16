@@ -112,6 +112,14 @@ check('FanDuel −140 is not Best when BetMGM −132 is the better home price', 
 check('BetMGM −132 is the green home price and FanDuel +130 is the green away price', side(mgmRow, 'home')?.isBestPrice === true && side(fdRow, 'home')?.isBestPrice === false && side(fdRow, 'away')?.isBestPrice === true && side(mgmRow, 'away')?.isBestPrice === false);
 check('MTL at FanDuel keeps the FanDuel link', side(fdRow, 'home')?.link === 'https://fd.example/mtl' && side(fdRow, 'home')?.label === 'MTL');
 
+const tiedRows: LinesOddsRow[] = [
+  { game_id: 'G', market: 'h2h', bookmaker: 'fanduel', home_price: -150, away_price: 130 },
+  { game_id: 'G', market: 'h2h', bookmaker: 'draftkings', home_price: -150, away_price: 130 },
+];
+const tiedSheet = linesSheetRows(tiedRows, 'G', 'h2h', teams, null);
+check('a tie on every side marks only the earlier shop book Best', tiedSheet.filter((r) => r.isBest).map((r) => r.bookmaker).join(',') === 'draftkings');
+check('a tied price stays green on both books', tiedSheet.every((r) => r.sides.every((s) => s.isBestPrice)));
+
 const regRows: LinesOddsRow[] = [
   { game_id: 'G', market: 'h2h_3way', bookmaker: 'draftkings', home_price: -125, away_price: 230, home_link: 'https://dk.example/reg' },
   { game_id: 'G', market: 'h2h', bookmaker: 'draftkings', home_price: -218, away_price: 180 },

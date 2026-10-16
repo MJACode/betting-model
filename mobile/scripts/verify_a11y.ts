@@ -658,6 +658,9 @@ check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
+const errorState = read('src/components/ErrorState.tsx');
+check('ErrorState speaks retryAccessibilityLabel, not "Try again loading"',
+  /retryAccessibilityLabel\(retryLabel, what\)/.test(errorState) && !/\$\{retryLabel\} loading \$\{what\}/.test(errorState));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
   ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);
@@ -694,6 +697,8 @@ async function behaviour() {
   check('unknownCountSpeech("Sep 28 · — bets · — scored") → "… bets count not available, …"',
     a.unknownCountSpeech('Sep 28 · — bets · — scored') === 'Sep 28, bets count not available, scored count not available', a.unknownCountSpeech('Sep 28 · — bets · — scored'));
   check('unknownCountSpeech leaves known counts, drops "·"', a.unknownCountSpeech('Sep 28 · 3 bets · 12 scored') === 'Sep 28, 3 bets, 12 scored' && a.unknownCountSpeech('— in play') === 'in play count not available');
+  check('Try again is spoken as a sentence', a.retryAccessibilityLabel('Try again', 'today’s lines') === 'Try loading today’s lines again');
+  check('Retry keeps the loading phrase', a.retryAccessibilityLabel('Retry', 'today’s picks') === 'Retry loading today’s picks');
 }
 
 behaviour()

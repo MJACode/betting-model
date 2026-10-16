@@ -501,8 +501,10 @@ function sideWins(price: number | null, bestDecimal: number | undefined): boolea
 
 /**
  * One row per bettable book at the modal line. A row is Best only when it
- * wins every side. Green is per price (`isBestPrice`), so a book that wins
- * one side does not paint the other side green. Each side keeps its own link.
+ * wins every side. Two books that tie on every side would both qualify;
+ * the earlier LINE_SHOP_BOOKS rank is the one Best row. Green is per price
+ * (`isBestPrice`), including a tied price, so a book that wins one side
+ * does not paint the other side green. Each side keeps its own link.
  */
 export function linesSheetRows(
   rows: readonly LinesOddsRow[],
@@ -546,6 +548,15 @@ export function linesSheetRows(
     const isBest = pricedSides.length > 0 && pricedSides.every((s) => s.isBestPrice);
     return { bookmaker: row.bookmaker, sides, isBest };
   });
+  const winners = marked.filter((r) => r.isBest);
+  if (winners.length > 1) {
+    const sole = winners.reduce((best, row) => {
+      const byShop = bookOrder(row.bookmaker) - bookOrder(best.bookmaker);
+      if (byShop !== 0) return byShop < 0 ? row : best;
+      return row.bookmaker < best.bookmaker ? row : best;
+    });
+    for (const row of marked) row.isBest = row.bookmaker === sole.bookmaker;
+  }
   marked.sort((a, b) => Number(b.isBest) - Number(a.isBest) || bookOrder(a.bookmaker) - bookOrder(b.bookmaker));
   return marked;
 }

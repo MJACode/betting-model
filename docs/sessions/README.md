@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Lines board reviewer follow-up. The Lines pytest is on PR CI. Missing draw_price is remembered, midnight ET reloads, one Best row on a full tie, Retry speech is a sentence |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Lines board designer fixes. Green is the winning price, each side has its own Bet, tie hidden until draw_price. Hand-applied view migration, not in ACTIVE_MIGRATIONS |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Picks Lines board (NHL/NBA/All). v_latest_odds_all_books anon SELECT already granted; no migration. Fliff Bet does not fall through to DraftKings |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, evening 03:30Z apply-view-migrations 59/60 (pipeline_log does not name the file; injuries.status_ts already exists). #857 rebased onto master after #958: CLV skip path kept, catalog returns added for the already-applied ALTER/index/policy files, discord_void return stays ahead of the full-definition guard |

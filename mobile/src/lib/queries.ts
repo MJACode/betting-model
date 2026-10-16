@@ -911,12 +911,19 @@ function drawPriceNotOnView(e: unknown): boolean {
   return /draw_price/i.test(msg);
 }
 
+/**
+ * Set after one select learns the view has no draw_price column. Later loads
+ * in this process skip that failing select. A new app session tries again,
+ * which is how the tie appears after the hand-applied view lands.
+ */
+let linesDrawPriceMissing = false;
+
 export async function fetchLinesBoardOdds(gameIds: readonly string[]): Promise<OddsByBookRow[]> {
   if (gameIds.length === 0) return [];
   // draw_price is on latest_odds and missing from the view until Matt applies
-  // add_draw_price_to_latest_odds_view_2026_10_16.sql. Selecting it before
-  // that fails the read; the retry is the same page without the column, so
-  // the board stays up and the tie stays hidden.
+  // add_draw_price_to_latest_odds_view_2026_10_16.sql. The first miss retries
+  // without the column. linesDrawPriceMissing keeps every later load off that
+  // failing select.
   const read = (columns: string) =>
     fetchAllPages<OddsByBookRow>(
       (from, to) =>
@@ -931,10 +938,12 @@ export async function fetchLinesBoardOdds(gameIds: readonly string[]): Promise<O
           .range(from, to),
       (row) => `${row.game_id}|${row.market}|${row.bookmaker}`,
     );
+  if (linesDrawPriceMissing) return read(ODDS_BY_BOOK_COLUMNS);
   try {
     return await read(`${ODDS_BY_BOOK_COLUMNS}, draw_price`);
   } catch (e: unknown) {
     if (!drawPriceNotOnView(e)) throw e;
+    linesDrawPriceMissing = true;
     return read(ODDS_BY_BOOK_COLUMNS);
   }
 }
