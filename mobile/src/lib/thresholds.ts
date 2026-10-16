@@ -301,7 +301,7 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // already posted keeps the floor it was written under: display follows
   // Discord. Re-cutting it at today's floor dropped the posted -980
   // SEA @ DEN bet from the day's pending list and greyed its edge when
-  // nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-16).
+  // nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-15 ET).
   const odds = decisionOdds(p);
   const edge = decisionEdge(p);
   const posted = p.discordPublish === 'published';

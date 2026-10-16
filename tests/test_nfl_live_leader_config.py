@@ -50,7 +50,7 @@ def test_the_ev_floor_cannot_bind_with_the_live_global_floor(monkeypatch):
 
 
 def test_the_price_floor_is_minus_140():
-    """mike, 2026-10-16: "Floor is -140 for this model" (after a -980 bet)."""
+    """mike, 2026-10-15 ET: "Floor is -140 for this model" (after a -980 bet)."""
     assert config.MODEL_MIN_ODDS[MID] == -140
     assert config.min_odds_for(MID) == -140
 

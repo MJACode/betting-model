@@ -361,7 +361,7 @@ Neighbouring cuts in the same study (pooled, DraftKings): 0.04 → 149 bets
 5:00 instead of 10:00 → +3.9% to +5.3% (p 0.21-0.26). Not a plateau test — the
 cut grid was three values, fixed before grading.
 
-**Price floor −140** (mike, 2026-10-16: *"Floor is -140 for this model"*,
+**Price floor −140** (mike, 2026-10-15 ET: *"Floor is -140 for this model"*,
 after its first live bet laid −980 on SEA @ DEN). It shipped at −5000 so the
 floor would never bind on the backtest. A bet priced shorter than −140 is
 refused and the game is tried again at its next five-minute slot

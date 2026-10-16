@@ -405,7 +405,7 @@ DraftKings' line.
 - Quote age: the study could not see DraftKings' own quote age or its market
   suspensions. The loop skips a quote DraftKings stamped before the last score
   change it saw; nothing else.
-- **Price floor −140** (mike, 2026-10-16, after the first live bet laid −980
+- **Price floor −140** (mike, 2026-10-15 ET, after the first live bet laid −980
   on SEA @ DEN; `config.MODEL_MIN_ODDS`). A shorter price is refused and the
   game is tried again at its next slot. On the population of record that
   leaves 43-46 bets over two seasons (about 22 a season), +12.02u at no lag and

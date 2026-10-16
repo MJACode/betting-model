@@ -3,7 +3,7 @@
  *
  *   npx tsx scripts/verify_posted_bet_keeps_its_floor.ts
  *
- * nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-16) the
+ * nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-15 ET) the
  * night its first live bet laid -980. Re-cut at the new floor, that posted
  * bet fell out of the day's pending list and its edge lost its green. The
  * floor decides what the model may bet next, never what it already posted.
@@ -39,11 +39,20 @@ for (const source of ['server', 'bundled'] as const) {
     !passesActionFilter({ ...bet, discordPublish: 'unpublished' }));
   check(`${source}: nor one whose ledger was not read`,
     !passesActionFilter({ ...bet }));
+  check(`${source}: nor one whose ledger read failed ('unknown')`,
+    !passesActionFilter({ ...bet, discordPublish: 'unknown' }));
   check(`${source}: a -130 bet qualifies either way`,
     passesActionFilter({ ...bet, dk_odds: -130, decision_odds: -130 }));
   check(`${source}: posting does not lift the edge cut`,
     !passesActionFilter({ ...bet, edge: 0.01, decision_edge: 0.01, discordPublish: 'published' }));
 }
+// Posting exempts the price floor only: a paused model's posted bet is still
+// not an action.
+setServerThresholds({
+  nfl_live_leader_ml: { min_prob: 0, min_edge: 0.02, min_odds: -140, prob_only: false, paused: true },
+});
+check('server: a posted bet of a paused model is still refused',
+  !passesActionFilter({ ...bet, dk_odds: -130, decision_odds: -130, discordPublish: 'published' }));
 setServerThresholds(null);
 
 if (failed) {

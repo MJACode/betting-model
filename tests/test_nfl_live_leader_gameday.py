@@ -202,7 +202,7 @@ def test_the_ev_gate_does_not_bind_inside_the_price_floor(art, monkeypatch):
     """With the LIVE global EV floor restored (conftest holds it at -1.0), the
     smallest-EV bet the rule can make inside the -140 floor -- edge 0.02 at
     -140 -- still clears: the model's own EV floor is 0.02. The same bet at
-    -150 is refused by the price floor (mike, 2026-10-16)."""
+    -150 is refused by the price floor (mike, 2026-10-15 ET)."""
     import os
 
     import config
@@ -507,7 +507,7 @@ def test_a_slate_with_nothing_owed_announces_nothing(monkeypatch):
 def test_a_price_shorter_than_the_floor_is_refused_and_the_game_tried_again(monkeypatch):
     """TB qualifies at -500 in the first slot: refused by the -140 floor, so
     nothing is written and the game stays open. In the next slot DraftKings
-    has TB at -130: that is the bet of record (mike, 2026-10-16)."""
+    has TB at -130: that is the bet of record (mike, 2026-10-15 ET)."""
     class Drifting(FakeFeed):
         def fetch(self):
             self.fetches += 1
