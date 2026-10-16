@@ -47,7 +47,7 @@ _SKIP_DIRS = {
     "dist",
     "build",
     ".expo",
-    # Derived knowledge graph and its cache: gitignored, rebuilt by /graphify.
+    # Derived knowledge graph (committed) and its cache (gitignored); `graphify update .` refreshes it.
     "graphify-out",
 }
 

@@ -75,7 +75,7 @@ ALLOWED = {
 
 # Derived build artifacts, not acquired data: every file here is re-derived
 # from the repo itself. graphify-out/ is the code knowledge graph and its
-# extraction cache (gitignored; rebuilt by `/graphify .`), the same kind of
+# extraction cache (graph committed, cache gitignored; `graphify update .`), the same kind of
 # thing as .pytest_cache, not a dataset that was bought or fetched.
 SKIP_PARTS = {".git", "node_modules", "__pycache__", ".venv", "venv",
               ".pytest_cache", ".expo", "build", "dist", ".claude",
