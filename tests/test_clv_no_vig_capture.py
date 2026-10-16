@@ -93,6 +93,15 @@ def test_column_migration_stamps_existing_rows_legacy():
     assert "clv_method = 'raw_one_sided'" in sql
     assert "ADD COLUMN IF NOT EXISTS clv_method" in sql
     assert "ADD COLUMN IF NOT EXISTS clv_close_book" in sql
+    # ALTER and COMMENT take locks even when the column is already there.
+    # Both sit behind the catalog check, and the stamp UPDATE sits behind
+    # its own "a NULL remains" check. A pass that finds the columns and no
+    # NULL does not run either.
+    guard = sql.index("IF NOT has_cols")
+    assert guard < sql.index("ADD COLUMN IF NOT EXISTS clv_method")
+    assert guard < sql.index("COMMENT ON COLUMN")
+    assert sql.index("INTO needs_stamp") < sql.index("IF needs_stamp")
+    assert sql.index("IF needs_stamp") < sql.index("clv_method = 'raw_one_sided'")
 
 
 def test_opening_signals_store_same_book_raw_pp_and_the_same_line_guard():

@@ -203,18 +203,26 @@ def pregame_spread(conn, game_id: str, commence_time: str | None) -> tuple[float
 
 
 def load_context(conn, meta: EventMeta) -> GameContext | None:
-    home, away = abbrev(meta.home_abbr), abbrev(meta.away_abbr)
-    got = resolve_game(conn, home, away, _parse_ts(meta.date))
-    if got is None:
-        return None
-    gid, gdate, ct = got
-    sp = pregame_spread(conn, gid, ct or meta.date)
-    if sp is None:
-        log.warning("%s: no DraftKings pre-kickoff spread - the game will not be priced", gid)
-    return GameContext(game_id=gid, game_date=gdate, home=home, away=away,
-                       commence_time=ct or meta.date,
-                       spread_home=None if sp is None else sp[0],
-                       spread_source=None if sp is None else sp[1])
+    # The reads below open a transaction on the loop's one connection
+    # (autocommit is off). End it before returning: this function runs once
+    # per game, often minutes before any write, and the AccessShareLocks
+    # would otherwise sit there until a bet commits or the process exits.
+    from data.db import release_read
+    try:
+        home, away = abbrev(meta.home_abbr), abbrev(meta.away_abbr)
+        got = resolve_game(conn, home, away, _parse_ts(meta.date))
+        if got is None:
+            return None
+        gid, gdate, ct = got
+        sp = pregame_spread(conn, gid, ct or meta.date)
+        if sp is None:
+            log.warning("%s: no DraftKings pre-kickoff spread - the game will not be priced", gid)
+        return GameContext(game_id=gid, game_date=gdate, home=home, away=away,
+                           commence_time=ct or meta.date,
+                           spread_home=None if sp is None else sp[0],
+                           spread_source=None if sp is None else sp[1])
+    finally:
+        release_read(conn)
 
 
 # ─── quotes ───────────────────────────────────────────────────────────────────
@@ -313,10 +321,14 @@ def write_bet(conn, pick: dict) -> bool:
     """Insert one BET under the first-signal lock. False when this game
     already carries an unsettled live BET for the model (the bet of record
     stands; nothing is deleted or replaced, ever)."""
+    from data.db import release_read
     from models.scorer import _insert_picks, _locked_live_lanes
     if _locked_live_lanes(conn, pick["game_id"], (MODEL_ID,)):
         log.info("SKIPPED %s %s - locked at its first BET (bet of record stands)",
                  MODEL_ID, pick["pick_label"])
+        # The lock check is a read. Leaving it open holds AccessShareLock on
+        # picks until something else commits, which on a locked game is never.
+        release_read(conn)
         return False
     _insert_picks(conn, [pick])
     conn.commit()
@@ -324,8 +336,12 @@ def write_bet(conn, pick: dict) -> bool:
 
 
 def is_locked(conn, game_id: str) -> bool:
+    from data.db import release_read
     from models.scorer import _locked_live_lanes
-    return bool(_locked_live_lanes(conn, game_id, (MODEL_ID,)))
+    try:
+        return bool(_locked_live_lanes(conn, game_id, (MODEL_ID,)))
+    finally:
+        release_read(conn)
 
 
 def unsettled_bet_dates(conn) -> set[str]:
@@ -334,15 +350,25 @@ def unsettled_bet_dates(conn) -> set[str]:
     lock held by another loop, or a deploy that killed the process between
     the insert and the post -- is retried by the next launch until the pick is
     graded (both notifiers then skip it). A posted bet is a no-op: the ledgers
-    dedupe. Bounded to the last few days."""
+    dedupe. Bounded to the last few days.
+
+    The read ends its own transaction. This loop keeps one connection for the
+    whole slate and often does not touch the database again until a 4th-quarter
+    window opens; an uncommitted SELECT would hold AccessShareLock on picks
+    from launch until that write, and the view-migration ALTER queues behind it.
+    """
+    from data.db import release_read
     since = (datetime.now(timezone.utc) - timedelta(days=4)).date().isoformat()
-    rows = conn.execute("""
-        SELECT DISTINCT game_date FROM picks
-        WHERE model_id = %s AND is_live = TRUE
-          AND signal_type = 'BET' AND result IS NULL
-          AND game_date >= %s
-    """, (MODEL_ID, since)).fetchall()
-    return {str(r[0])[:10] for r in rows}
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT game_date FROM picks
+            WHERE model_id = %s AND is_live = TRUE
+              AND signal_type = 'BET' AND result IS NULL
+              AND game_date >= %s
+        """, (MODEL_ID, since)).fetchall()
+        return {str(r[0])[:10] for r in rows}
+    finally:
+        release_read(conn)
 
 
 def notify_live(target_date: str) -> None:
@@ -430,7 +456,11 @@ def main(argv=None) -> int:
     fetch_failures = 0
     last_notify = None                            # monotonic; standing-bet re-announce
 
-    from data.db import get_connection
+    from data.db import get_connection, use_poller_session
+    # This process holds one connection across a whole slate. A read it forgets
+    # to close is killed after 60s idle instead of pinning AccessShareLock
+    # until the game ends. Reconnects in this process inherit it.
+    use_poller_session()
     conn = None
 
     def _conn():
