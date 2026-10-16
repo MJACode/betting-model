@@ -258,14 +258,25 @@ def _load_shop(conn, season: int) -> dict[str, list[dict]]:
     return out
 
 
-def season_facts_and_shop(conn, season: int, books: list[str]):
+def season_facts_and_shop(conn, season: int, books: list[str],
+                          game_ids: list[str] | None = None):
     """Facts this season would write, and the shop rows from the quotes
     still stored. No INSERT. Grades use the shop already captured when
-    that row is still at this DraftKings line."""
+    that row is still at this DraftKings line.
+
+    `game_ids` None reads every game in the season. A list reads only
+    those games. Rest days still come from the whole season's schedule.
+    Quotes are not fetched for a game outside the list.
+    """
     if season < DK_HISTORY_START_SEASON:
         return [], []
-    games = _games(conn, season)
-    played = _played(games)
+    schedule = _games(conn, season)
+    played = _played(schedule)
+    if game_ids is None:
+        games = schedule
+    else:
+        wanted = set(game_ids)
+        games = [game for game in schedule if game["game_id"] in wanted]
     stored = _load_shop(conn, season)
     facts = []
     shops = []
@@ -336,8 +347,12 @@ def _write_shop(conn, season: int, shops: list[dict], stored: dict) -> int:
 
 
 def build_season(conn, season: int, apply: bool = False,
-                 books: list[str] | None = None) -> dict:
-    """One season. apply=False writes nothing."""
+                 books: list[str] | None = None,
+                 game_ids: list[str] | None = None) -> dict:
+    """One season. apply=False writes nothing.
+
+    `game_ids` limits which games are read. None is the whole season.
+    """
     if books is None:
         from config import BEST_LINE_BOOKMAKERS
         books = list(BEST_LINE_BOOKMAKERS)
@@ -346,7 +361,7 @@ def build_season(conn, season: int, apply: bool = False,
             "season": season, "facts": 0, "written": 0, "shop": 0,
             "skipped": "before DraftKings history",
         }
-    facts, shops = season_facts_and_shop(conn, season, books)
+    facts, shops = season_facts_and_shop(conn, season, books, game_ids=game_ids)
     written = 0
     if apply:
         stored = _load_shop(conn, season)

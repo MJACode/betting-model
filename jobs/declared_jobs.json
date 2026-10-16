@@ -1077,5 +1077,16 @@
       "sport": "NFL",
       "apply": false
     }
+  },
+  {
+    "key": "byom-nfl-refresh",
+    "job_type": "byom_refresh",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. This is not a schedule: a declared job is enqueued once, and only after the owner sets enabled true. apply false reports freshness and does not read odds and does not write. apply true rebuilds the current season's games from yesterday through 7 days ahead, plus current-season games already played that have no game-fact row. The 120h and 24h locks stay UNCONFIRMED. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": false
+    }
   }
 ]

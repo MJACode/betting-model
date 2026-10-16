@@ -125,3 +125,23 @@ Game markets include both sides. Prop markets include the over and the
 under. `data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
 and was not applied. The function is in `RPC_ANON_CALLABLE`. It reads
 the facts tables, not `picks`.
+
+## Refresh
+
+`byom/refresh.py` reports freshness without reading odds. The due set
+is the current season only: games dated from yesterday through seven
+days ahead, plus current-season games already played that have no
+`byom_game_facts` row. A row in that window whose `built_at` is more
+than 24 hours before the report clock is stale. Those two day counts
+and the 24 hour age are the refresh's own bounds. They are not the
+lock windows. The 120h and 24h locks stay UNCONFIRMED.
+
+`apply` false returns the report and writes nothing. `apply` true
+rebuilds only the due games, game facts and prop facts, and commits
+once. Rest days still use the whole season's schedule. Quotes for a
+game outside the due set are not fetched.
+
+`byom_refresh` defaults `apply` to false. `jobs/declared_jobs.json`
+lists `byom-nfl-refresh` with `enabled` false and `apply` false, so a
+merge does not enqueue it. A declared job is enqueued once. This file
+does not add a schedule. It does not write `picks`.

@@ -121,11 +121,17 @@ def _log_for_game(conn, game_id: str) -> list[dict]:
     return out
 
 
-def facts_for_season(conn, season: int, books: list[str]) -> list[dict]:
+def facts_for_season(conn, season: int, books: list[str],
+                     game_ids: list[str] | None = None) -> list[dict]:
+    """`game_ids` None reads every game. A list reads only those games."""
     if season < PROP_HISTORY_START_SEASON:
         return []
+    games = _games(conn, season)
+    if game_ids is not None:
+        wanted = set(game_ids)
+        games = [game for game in games if game["game_id"] in wanted]
     facts = []
-    for game in _games(conn, season):
+    for game in games:
         if parse_game_id(game["game_id"]) is None:
             continue
         if parse_date(game.get("game_date")) is None:
@@ -154,7 +160,9 @@ def _upsert(conn, facts: list[dict]) -> int:
 
 
 def build_season(conn, season: int, apply: bool = False,
-                 books: list[str] | None = None) -> dict:
+                 books: list[str] | None = None,
+                 game_ids: list[str] | None = None) -> dict:
+    """One season. apply=False writes nothing. `game_ids` limits the read."""
     if books is None:
         from config import BEST_LINE_BOOKMAKERS
         books = list(BEST_LINE_BOOKMAKERS)
@@ -163,7 +171,7 @@ def build_season(conn, season: int, apply: bool = False,
             "season": season, "facts": 0, "written": 0,
             "skipped": "before player_prop_odds history",
         }
-    facts = facts_for_season(conn, season, books)
+    facts = facts_for_season(conn, season, books, game_ids=game_ids)
     written = _upsert(conn, facts) if apply else 0
     return {"season": season, "facts": len(facts), "written": written}
 
