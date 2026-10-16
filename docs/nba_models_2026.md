@@ -180,10 +180,10 @@ list): min −200, 5th percentile −143, median −105, 95th +128, max +230; 38
 are plus money, 3.5% are −150 or shorter (`C:/Users/micha/AppData/Local/Temp/nba_rebuild/uncapped_stats.py`).
 
 Each game is decided ONCE, as the backtest looked at it once: the first look inside
-the 45-70 minute window whose newest fetch holds Pinnacle is the decision, bets or
+the 45-57 minute window whose newest fetch holds Pinnacle is the decision, bets or
 none, written to `nba_prop_market_decisions`; a game with a row there is never looked
 at again. A five-minute job (`scheduler.run_nba_prop_window`) fetches props for the
-games 40-75 minutes from tip, so every tip time gets a look in its window.
+games 40-62 minutes from tip, so every tip time gets a look in its window.
 
 **Decision timing, measured against the graded snapshots.** The archive's snapshot
 sat 54.4 minutes before tip for 87% of bets and 64.4 for 13%. ROI by that lead, same
@@ -191,6 +191,10 @@ population: 50-60 minutes 21,252 bets +2.95% (CI +1.77..+4.10); 60-70 minutes 3,
 bets +2.97% (CI +0.09..+5.85; 2025-26 alone +0.25%); nothing was graded at 65-70.
 With a look every five minutes and tips on the hour or half hour, the first look
 inside 45-70 lands about 70 minutes before tip (`C:/Users/micha/AppData/Local/Temp/nba_rebuild/lead_roi.py`).
+The window shipped as 45-70 on 2026-10-16 and was narrowed to **45-57** the same day,
+before any NBA game, after the projection model's timing verifier measured it: the first
+look now lands 55 minutes before any tip on a five-minute mark, where 87% of the graded
+bets were decided.
 
 **Not shipped** (each refuted or not significant once graded on the season it was not chosen
 on, or after counting the 1,518 cells searched): the soft-book-consensus rule where Pinnacle

@@ -1,14 +1,14 @@
 """The NBA prop window job: put a look inside every game's decision window.
 
-WHY. nba_prop_market decides a game once, 45-70 minutes before tip
+WHY. nba_prop_market decides a game once, 45-57 minutes before tip
 (models/nba_prop_market.DECISION_WINDOW_MIN). The refresh passes run hourly at
-:17 until 5pm ET and every ten minutes from 6pm, so no pass ever landed 45-70
+:17 until 5pm ET and every ten minutes from 6pm, so no pass ever landed 45-57
 minutes before a tip at or before 6:00pm ET: 177 of 1,206 regular-season games
 in 2026-27 could never be decided. mike, 2026-10-16: "run the fucking thing
 more often ... we're not leaving our games."
 
 WHAT A TICK DOES (scheduler.run_nba_prop_window, every five minutes, 24x7):
-  1. plan(): the unstarted regular-season NBA games tipping 40-75 minutes from
+  1. plan(): the unstarted regular-season NBA games tipping 40-62 minutes from
      now (LOOK_AHEAD_MIN) that are not decided yet, and the bet games whose
      closing snapshot is due (12-25 minutes before tip, not yet taken). One
      database read; no API call.
@@ -21,7 +21,7 @@ WHAT A TICK DOES (scheduler.run_nba_prop_window, every five minutes, 24x7):
 
 LOOK_AHEAD_MIN is a little wider than the decision window on both ends, so the
 fetch of a game is never the reason it misses its window: a tick whose fetch
-lands just outside 45-70 is simply not a decision, and the next tick, five
+lands just outside 45-57 is simply not a decision, and the next tick, five
 minutes later, tries again. The card, not this job, applies the window.
 
 The refresh pass keeps its own NBA prop fetch (every game, seven days ahead),
@@ -51,8 +51,8 @@ from data.db import get_connection  # noqa: E402
 _ET = ZoneInfo("America/New_York")
 
 # Minutes before tip in which a game is fetched for a decision, both ends
-# inclusive. Five minutes wider than DECISION_WINDOW_MIN (45, 70) at each end.
-LOOK_AHEAD_MIN = (40, 75)
+# inclusive. Five minutes wider than DECISION_WINDOW_MIN (45, 57) at each end.
+LOOK_AHEAD_MIN = (40, 62)
 
 
 @dataclass
