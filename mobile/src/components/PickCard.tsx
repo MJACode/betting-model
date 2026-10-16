@@ -313,8 +313,8 @@ export function PickCard({
       })
     : null;
   // The button names the line when it is a bet at the deciding book's
-  // current line (same book, that price), including a line-only move.
-  // Open, and a book still at the scored line, do not.
+  // current line (same book, that price). movedLine is enough: a line-only
+  // move stays kind decision. Open, and a book still at the scored line, do not.
   const ctaAtMovedLine = Boolean(
     signalsMovedLineText &&
     handoff &&

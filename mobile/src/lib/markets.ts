@@ -1233,7 +1233,13 @@ export function bestHandoffForPick(
   // moved line is a different bet: DK −8.5 −105 does not outrank MGM
   // still at −7.5 −112.
   const scored = numOrNull(pick.scored_line);
-  const sameLine = hero == null || hero.line == null || scored == null || hero.line === scored;
+  // hero.line on a line-only move is the lock (kind stays decision, so the
+  // board pill does not change). movedLine is the current line. That is a
+  // different bet, so it does not enter the same-line re-rank.
+  const lineMoved = hero != null && hero.movedLine != null;
+  const sameLine =
+    !lineMoved &&
+    (hero == null || hero.line == null || scored == null || hero.line === scored);
   if (
     hero?.kind === 'now' && hero.price != null && sameLine &&
     quotes.some((q) => q.isRecord && q.bookmaker === hero.book)
@@ -1246,16 +1252,16 @@ export function bestHandoffForPick(
     );
     best = quotes.find((q) => q.isBest) ?? quotes[0];
   }
-  // The record book's current line is not the lock. Do not hand the member
-  // the lock's slip. A book still quoting the scored line wins; otherwise
-  // a side link on the current row is that quote, and with no such link
-  // the button opens the book without a price.
-  if (hero?.movedLine != null && best.isRecord && best.bookmaker === hero.book) {
+  // movedLine is a Now handoff whether or not kind is 'now'. A book still
+  // quoting the scored line wins. Otherwise a side link on the current row
+  // is that quote and the button names the line. With no such link the
+  // button opens the book and does not use the lock's slip.
+  if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book) {
     const stillThere = quotes.filter((q) => !(q.isRecord && q.bookmaker === hero.book));
     if (stillThere.length > 0) {
       const ranked = rankQuotes(stillThere.map(({ isBest: _isBest, ...q }) => q));
       best = ranked.find((q) => q.isBest) ?? ranked[0];
-    } else if (hero.kind !== 'now') {
+    } else {
       const currentLink = snapshotSideLink(pick, bookRows, hero.book);
       if (currentLink && hero.price != null) {
         return { bookmaker: hero.book, price: hero.price, link: currentLink, verb: 'Bet' };
@@ -1272,15 +1278,6 @@ export function bestHandoffForPick(
   // chip. "Now −115 DK" beside "Bet DK −110" was the lock next to the
   // live number (UX review). Narrow in the branch so price stays `number`.
   if (hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book) {
-    // A moved line's slip is the current row's side link. With none, do
-    // not open the lock's slip under a label that names the new line.
-    if (hero.movedLine != null) {
-      const currentLink = snapshotSideLink(pick, bookRows, hero.book);
-      if (!currentLink) {
-        return { bookmaker: best.bookmaker, price: null, link: null, verb: 'Open' };
-      }
-      return { bookmaker: best.bookmaker, price: hero.price, link: currentLink, verb };
-    }
     return {
       bookmaker: best.bookmaker,
       price: hero.price,

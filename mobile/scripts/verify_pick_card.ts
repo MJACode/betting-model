@@ -168,7 +168,7 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
   ], hero);
   check(
-    'line-only move does not bet the lock: no current slip link, so Open DK',
+    'line-only move is a Now handoff with kind still decision: no current slip link, so Open DK',
     handoff?.bookmaker === 'draftkings' && handoff.price == null && handoff.link == null && handoff.verb === 'Open' &&
       signalsCtaLabel(bookLabel(handoff.bookmaker), null) === 'Open DK',
     JSON.stringify(handoff),

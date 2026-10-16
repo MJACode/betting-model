@@ -597,6 +597,11 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "formatUnits(stake.risk)" in card and "formatUnits(stake.win)" in card
     assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
     assert "signalsNowLine(" in card and "now: signalsNowSpoken" in card
+    cta_block = re.search(r"const ctaAtMovedLine = Boolean\((.*?)\);", card, re.S)
+    assert cta_block and "kind === 'now'" not in cta_block.group(1)
+    markets = _read(LIB / "markets.ts")
+    assert "if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book)" in markets
+    assert "else if (hero.kind !== 'now')" not in markets
     assert "heroPrice.stale || heroPrice.untracked" in card
     assert "Stake unavailable" in card and ">Stake<" in card
     assert "To win unavailable" not in card and ">To win<" not in card
