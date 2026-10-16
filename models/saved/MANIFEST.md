@@ -42,16 +42,7 @@ models/saved/mlb_prop_pitcher_k_20260903_190319.pkl
 models/saved/mlb_prop_pitcher_outs_20260903_233111.pkl
 models/saved/mlb_prop_pitcher_walks_20260620_164336.pkl
 models/saved/mlb_runline_20260823_105841.pkl
-models/saved/nba_moneyline_20260619_120533.pkl
-models/saved/nba_prop_player_assists_20260619_140445.pkl
-models/saved/nba_prop_player_blocks_20260619_155307.pkl
-models/saved/nba_prop_player_dd_20260619_172853.pkl
-models/saved/nba_prop_player_points_20260619_124633.pkl
-models/saved/nba_prop_player_pra_20260619_152317.pkl
-models/saved/nba_prop_player_rebounds_20260619_132555.pkl
-models/saved/nba_prop_player_steals_20260619_162228.pkl
-models/saved/nba_prop_player_threes_20260619_143841.pkl
-models/saved/nba_prop_player_turnovers_20260619_165437.pkl
+models/saved/nba_prop_projection_20261016_091702.pkl
 models/saved/ncaaf_moneyline_20260821_113517.pkl
 models/saved/ncaaf_over_under_20260825_204305.pkl
 models/saved/ncaaf_spread_20260828_103438.pkl
@@ -102,6 +93,11 @@ models/saved/wnba_spread_20260719_113238.pkl
   (`scripts/nhl_moneyline_anchored_train.py --register --from-file`); until
   then `nhl_moneyline_20260920_131606.pkl` is the active row and stays on this
   list. Drop the old one (steps 3-4 below) once the new row is active.
+
+- `nba_prop_projection_20261016_091702.pkl` — the NBA projection model
+  (`models/nba_prop_projection.py`, fitted by `scripts/nba_prop_projection_train.py`
+  through 2025-26), committed with the code that reads it and registered with
+  `--register --from-file`. A new model id: no older file to drop.
 
 ## Tracked artifacts that are not timestamped pkls
 

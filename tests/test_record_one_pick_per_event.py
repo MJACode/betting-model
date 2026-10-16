@@ -28,6 +28,8 @@ import config
 from tracking import record_duplicates as rd
 
 ROOT = Path(__file__).resolve().parents[1]
+
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
 MIG_DIR = ROOT / "data" / "migrations"
 MARK = MIG_DIR / "record_counts_each_event_once_2026_10_09.sql"
 VIEWS = MIG_DIR / "record_views_count_each_event_once_2026_10_09.sql"
@@ -423,11 +425,7 @@ def test_the_team_and_player_record_reads_drop_the_extra_copy_on_the_server():
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
@@ -451,7 +449,7 @@ const out = {
 console.log(JSON.stringify(out));
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
     got = proc.stdout.strip().splitlines()[-1]
@@ -471,7 +469,7 @@ def _copy_for_node(tmp_path: Path, names: tuple[str, ...]) -> None:
 
 def _node(tmp_path: Path, script: str) -> str:
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
     return proc.stdout.strip().splitlines()[-1]

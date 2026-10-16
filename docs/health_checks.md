@@ -68,6 +68,12 @@ Load-bearing details:
 - **The health check runs as a step, i.e. before the pass calls `finish_run`.** So the first
   pass after this ships has a started row and no finished one; that reports SKIPPED, not a
   failure.
+- **A deploy does not leave a refresh row looking like a live hang.** Pipeline boot
+  (`scheduler.abort_orphaned_refresh_runs`) stamps unfinished `hourly` and `evening`
+  rows that started before this process, the same `failed_steps='aborted'` stamp
+  `_abort_orphans` writes. `daily` is left open. After that, an unfinished row older
+  than 2h is a pass this process may still be inside. Same-kind cleanup alone cannot
+  do this: an evening killed after the window does not start again until the next evening.
 - `refresh_pass_steps` ignores `run_kind='daily'` — the daily pipeline's failure semantics
   are different (it continues past failures by design).
 

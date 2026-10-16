@@ -37,7 +37,10 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+// Source is read with LF whatever the checkout: autocrlf gives CRLF on
+// Windows, and regexes below that end a match at a newline never matched.
+const readUtf8 = (p: string) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
+import { join, relative, sep } from 'node:path';
 
 import { errorAnnouncement, errorKind, friendlyCause, friendlyError, isAbortError, isNotFoundError } from '../src/lib/errors';
 import {
@@ -56,7 +59,9 @@ import {
 } from '../src/lib/loadState';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
+// Allowlists and labels use '/'; relative() yields '\\' on Windows.
+const relPosix = (f: string) => relative(ROOT, f).split(sep).join('/');
+const read = (p: string) => readUtf8(join(ROOT, p));
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -253,9 +258,9 @@ check('probe: the scanner passes friendly copy', rawErrorSites('<Text>{friendlyC
 const ALLOW = new Set(['src/screens/SignInScreen.tsx']); // auth form: the message IS the instruction
 const hits: string[] = [];
 for (const p of walk(join(ROOT, 'src'))) {
-  const rel = relative(ROOT, p);
+  const rel = relPosix(p);
   if (ALLOW.has(rel)) continue;
-  for (const l of rawErrorSites(readFileSync(p, 'utf-8'))) hits.push(`${rel}:${l}`);
+  for (const l of rawErrorSites(readUtf8(p))) hits.push(`${rel}:${l}`);
 }
 check('no raw error text rendered anywhere', hits.length === 0, hits.join(', '));
 
@@ -301,8 +306,8 @@ check('PicksHome passes the reassurance to both its error surfaces',
   /PICKS_REASSURANCE = 'Nothing is wrong with your picks\.'/.test(home) && (home.match(/reassurance=\{PICKS_REASSURANCE\}/g) ?? []).length === 2);
 const reassuranceElsewhere = walk(join(ROOT, 'src'))
   .filter((p) => !/PicksHomeScreen|ErrorState\.tsx/.test(p))
-  .filter((p) => /\breassurance=/.test(readFileSync(p, 'utf-8')));
-check('no other screen passes a reassurance', reassuranceElsewhere.length === 0, reassuranceElsewhere.map((p) => relative(ROOT, p)).join(', '));
+  .filter((p) => /\breassurance=/.test(readUtf8(p)));
+check('no other screen passes a reassurance', reassuranceElsewhere.length === 0, reassuranceElsewhere.map((p) => relPosix(p)).join(', '));
 check('PicksHome: failed / "—" / M2 banner come from lib/loadState',
   /loadPresentation\(/.test(home) && /knownCount\(/.test(home) && /showLivePricesBanner\(/.test(home));
 check('Models: the error surface comes from errorSurface(load, tab === \'builtin\')',
@@ -321,9 +326,9 @@ const tsFiles = (dir: string, out: string[] = []): string[] => {
 };
 const unguarded: string[] = [];
 for (const p of tsFiles(join(ROOT, 'src'))) {
-  const rel = relative(ROOT, p);
+  const rel = relPosix(p);
   if (/lib\/|SignInScreen/.test(rel)) continue;
-  readFileSync(p, 'utf-8').split('\n').forEach((line, i) => {
+  readUtf8(p).split('\n').forEach((line, i) => {
     if (/(setError\(|error: )errorText\(/.test(line) && !/isAbortError\(/.test(line)) unguarded.push(`${rel}:${i + 1}`);
   });
 }

@@ -1164,12 +1164,6 @@ def train_prop_model(model_id: str,
         )
         feature_cols     = WNBA_PROP_FEATURE_MAP[model_id]
         _build_prop_data = build_wnba_prop_training_dataset
-    elif sport == "NBA":
-        from features.nba_prop_feature_engine import (
-            NBA_PROP_FEATURE_MAP, build_nba_prop_training_dataset,
-        )
-        feature_cols     = NBA_PROP_FEATURE_MAP[model_id]
-        _build_prop_data = build_nba_prop_training_dataset
     elif sport == "NFL":
         from features.nfl_prop_feature_engine import (
             NFL_PROP_FEATURE_MAP, build_nfl_prop_training_dataset,
