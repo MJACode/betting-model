@@ -473,7 +473,25 @@ ACTION_THRESHOLDS: dict = {
     # puckline score vs real DK lines. moneyline_regulation scores
     # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
     # 0.40 floor vs 0.55 for the binary markets.
-    "nhl_moneyline":            {"min_prob": 0.55, "min_edge": 0.05},
+    # nhl_moneyline, REBUILT 2026-10-13 (mike: "Look at and rebuild the money
+    # line model"; "Yes" to shipping it, 2026-10-15): DraftKings' game-day
+    # no-vig price, moved by inputs built from the per-game logs
+    # (models/nhl_moneyline_anchored.py). THE CUT IS EV, in
+    # MODEL_OWN_EV_FLOOR, on the model's OWN probability; prob / edge are 0.0
+    # here so the publishers show exactly what the scorer wrote -- a 0.55
+    # floor would delete every underdog, the stronger half of the grade.
+    # Walk-forward 2021-22 .. 2025-26, best bettable price in DraftKings'
+    # first game-day snapshot, -200 floor
+    # (scripts/nhl_moneyline_anchored_backtest.py, docs/nhl_moneyline_rebuild.md):
+    #     EV>=   bets   units   ROI     95% interval   beat Pinnacle close
+    #     0.02   2,752  +127.0  +4.6%   +1.0..+8.2     61.0%
+    #     0.04   2,020   +93.5  +4.6%   +0.4..+8.8     61.7%
+    #     0.06   1,326   +83.2  +6.3%   +1.1..+11.4    62.6%
+    #     0.08     863   +53.1  +6.2%   -0.3..+12.6    62.9%
+    # 2025-26 was the weak season (-3.0% at 0.06). Taking the favourite blind
+    # on the same games: -2.2%. Held tighter to the market (a wider penalty
+    # grid) the same walk-forward returns +3.2% at 0.06: the edge is a range.
+    "nhl_moneyline":            {"min_prob": 0.0, "min_edge": 0.0},
     "nhl_moneyline_regulation": {"min_prob": 0.40, "min_edge": 0.05},
     # NHL full-game totals, a RULE since 2026-10-08 (mike: live, not paper):
     # Pinnacle's no-vig price against the bettable books in the same fetch,
@@ -1994,7 +2012,12 @@ MODEL_OWN_EV_FLOOR: dict = {
     # candidates in docs/nhl_market_lab.md are a DIFFERENT model (regularised
     # logistic on the per-game logs), not these artifacts, and were cut on a
     # probability edge, not EV.
-    "nhl_moneyline":             0.20,   # n=0, no written bet
+    # nhl_moneyline was REBUILT 2026-10-13 (mike; shipped on his "Yes",
+    # 2026-10-15) and swept on its own walk-forward: a plateau from EV 0.02 to
+    # 0.08 at the best price with the -200 floor (see ACTION_THRESHOLDS);
+    # 0.06 sits inside it (+6.3% on 1,326, interval +1.1..+11.4). Re-sweep on
+    # its own record at ~250 settled bets.
+    "nhl_moneyline":             0.06,
     "nhl_moneyline_regulation":  0.20,   # n=0, no written bet
     "nhl_puckline":              0.20,   # n=0, no written bet
     # NHL full-game totals, the Pinnacle rule (models/nhl_totals_market.py;
@@ -2076,6 +2099,13 @@ MODEL_OWN_EV_FLOOR: dict = {
 MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     "nfl_wind_totals",
     "nfl_opener_spread",
+    # 2026-10-13 (mike, the rebuild; "Yes", 2026-10-15). It is anchored on
+    # DraftKings' own price, so its number is already the market's plus what
+    # the logs add, and its cut was measured on that number. The borrowed
+    # correction never crosses 0.5, which would turn it into a favourite-only
+    # rule -- and its underdogs were the stronger half of the grade
+    # (docs/nhl_moneyline_rebuild.md).
+    "nhl_moneyline",
     # 2026-10-01 (mike). Its cut was measured on its own Poisson probability.
     # It has no record, so its map would be the offset borrowed from the other
     # models -- and on the same three seasons that offset turns +6.2% at EV
@@ -2228,7 +2258,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_f5_moneyline":         0.02,   # 2026-09-03 (mike): 0.00 -> 0.02 with the retrained artifact. See ACTION_THRESHOLDS for the sweep, the plateau failure, and the kill criterion.
     "mlb_f5_over_under":        0.15,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
     "mlb_f5_runline":           0.15,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
-    "nhl_moneyline":            0.05,   # placeholder — tune after 50+ settled picks
+    "nhl_moneyline":            0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
@@ -2327,7 +2357,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_f5_moneyline":         0.58,   # 2026-09-03 (mike): 0.74 -> 0.58. The old bar fired ZERO bets (max raw prob 0.734) and was swept on CALIBRATED probabilities while the scorer decides on RAW. See ACTION_THRESHOLDS.
     "mlb_f5_over_under":        0.65,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
     "mlb_f5_runline":           0.65,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
-    "nhl_moneyline":            0.55,
+    "nhl_moneyline":            0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,

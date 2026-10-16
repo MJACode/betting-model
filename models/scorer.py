@@ -379,6 +379,19 @@ def score_game(conn: DBConnection,
             conn, game_id, model_id, market, artifact)
         if home_prob is None:
             return []
+    elif artifact.get("kind") == "anchored_logit":
+        # nhl_moneyline, rebuilt 2026-10-13 (mike: "Look at and rebuild the
+        # money line model"; models/nhl_moneyline_anchored.py,
+        # docs/nhl_moneyline_rebuild.md): DraftKings' no-vig price, moved by
+        # inputs built from the per-game logs. It decides ONCE -- 16:00Z to
+        # 18:00Z on game day, with both teams' listed goalies -- because that is
+        # what the walk-forward graded; any other run writes its number as NONE
+        # with the reason. No DraftKings price, nothing to anchor on: skip,
+        # never prob-only.
+        home_prob, away_prob, no_signal = _anchored_probability(
+            conn, game_id, game_date, home_team, away_team, commence_time, artifact)
+        if home_prob is None:
+            return []
     elif artifact.get("kind") == "total_regression":
         # NCAAF totals regression (scripts/ncaaf_margin_eval --fit-totals).
         # Same shape as the margin artifact above: predict the TOTAL from
@@ -574,6 +587,19 @@ def score_game(conn: DBConnection,
     # otherwise fire a BET the walk-forward never validated.
     if no_signal:
         _apply_no_signal(picks, no_signal)
+
+    if artifact.get("kind") == "anchored_logit":
+        # Its rule is EV at the price and nothing else; AVOID is not part of
+        # it. With the edge cut at 0.0 the stock path would otherwise label the
+        # other side of nearly every game AVOID.
+        for p in picks:
+            if p.get("signal_type") == "AVOID":
+                p["signal_type"] = "NONE"
+            # The stock tier reads the DraftKings EDGE: for an EV rule it labels
+            # most bets LOW, and an underdog lower than a favourite at the same
+            # EV (UX review, 2026-10-15). The other EV rules (NHL props, NHL
+            # totals) write a fixed MED from their cards; so does this one.
+            p["confidence_tier"] = "MED"
 
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
@@ -800,6 +826,49 @@ def _score_f5_prob_only(
 
 
 _UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
+
+
+def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
+                          away_team: str, commence_time: str | None,
+                          artifact: dict) -> tuple:
+    """(home_prob, away_prob, no_signal) for the anchored NHL moneyline, or
+    (None, None, None) to skip the game: no DraftKings price to anchor on, or
+    an input the logs cannot supply.
+
+    `no_signal` is the reason this run may not decide (outside 16:00Z-18:00Z
+    on game day, or a team with no listed goalie yet). The number is still
+    written, as NONE -- an empty board and a broken pipeline look identical.
+    """
+    import models.nhl_moneyline_anchored as anc
+    odds = _get_dk_odds(conn, game_id, "h2h")
+    if not odds or odds.get("home_price") is None or odds.get("away_price") is None:
+        logger.debug(f"  {game_id}/nhl_moneyline: no DK moneyline — nothing to anchor on")
+        return None, None, None
+    hi = american_to_implied_prob(odds["home_price"])
+    ai = american_to_implied_prob(odds["away_price"])
+    if not hi or not ai:
+        return None, None, None
+    try:
+        rows, goalies, stale = anc.inputs_for_date(conn, game_date)
+    except Exception as exc:  # noqa: BLE001 - one game's inputs must not stop the pass
+        logger.error(f"  {game_id}/nhl_moneyline: inputs failed: {exc}")
+        return None, None, None
+    if game_id not in rows.index:
+        logger.debug(f"  {game_id}/nhl_moneyline: no input row")
+        return None, None, None
+    x = rows.loc[game_id, anc.FEATURES].astype(float).values
+    if np.isnan(x).any():
+        missing = [f for f, v in zip(anc.FEATURES, x) if np.isnan(v)]
+        logger.debug(f"  {game_id}/nhl_moneyline: inputs missing {missing}")
+        return None, None, None
+    offset = anc.market_logit([hi / (hi + ai)])
+    p_home = float(artifact["model"].predict_proba(x.reshape(1, -1), offset)[0, 1])
+    reason = anc.decision_window(game_date, commence_time)
+    if reason is None and ((game_id, home_team) not in goalies or (game_id, away_team) not in goalies):
+        reason = "waiting for both listed goalies"
+    if reason is None and (home_team in stale or away_team in stale):
+        reason = "waiting for last night's game logs"
+    return p_home, 1.0 - p_home, reason
 
 
 # Class index → pick_side for the NHL regulation 3-way model. Must match the

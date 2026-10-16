@@ -171,6 +171,12 @@ def ml_prices(conn):
 def moneyline(conn):
     mid = "nhl_moneyline"
     art = artifact(mid)
+    if art.get("kind") == "anchored_logit":
+        # Since 2026-10-15 the live moneyline is scored around DraftKings' own
+        # price; its grade is scripts/nhl_moneyline_anchored_backtest.py.
+        print(f"\n===== nhl_moneyline {art['version']}: anchored on the market price — "
+              f"graded by scripts/nhl_moneyline_anchored_backtest.py, not here =====")
+        return
     f = frame(mid).copy()
     f["p"] = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
     df = f[["game_id", "p", "is_early_season"]].merge(ml_prices(conn), on="game_id", how="inner")
@@ -361,18 +367,19 @@ def regulation(conn):
 def bands() -> None:
     """Claimed, corrected and realised, on every side of every holdout game."""
     art = artifact("nhl_moneyline")
-    f = frame("nhl_moneyline")
-    p = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
-    y = f.target.values.astype(int)
-    side = pd.DataFrame({"p": np.r_[p, 1 - p], "won": np.r_[y, 1 - y]})
-    side["cal"] = side.p.map(lambda v: apply_calibration(float(v), CAL["nhl_moneyline"]))
-    side["band"] = pd.cut(side.p, [0.0, 0.40, 0.435, 0.485, 0.50, 0.515, 0.565, 0.60, 0.65, 1.0], right=False)
-    t = side.groupby("band", observed=True).agg(sides=("won", "size"), model_says=("p", "mean"),
-                                                corrected_says=("cal", "mean"),
-                                                actually_won=("won", "mean")).round(3)
-    print("\n### nhl_moneyline: what the model says, what the correction says, what happened "
-          "(every side of every game)\n")
-    print(t.to_string())
+    if art.get("kind") != "anchored_logit":     # the anchored model decides on its own number
+        f = frame("nhl_moneyline")
+        p = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
+        y = f.target.values.astype(int)
+        side = pd.DataFrame({"p": np.r_[p, 1 - p], "won": np.r_[y, 1 - y]})
+        side["cal"] = side.p.map(lambda v: apply_calibration(float(v), CAL["nhl_moneyline"]))
+        side["band"] = pd.cut(side.p, [0.0, 0.40, 0.435, 0.485, 0.50, 0.515, 0.565, 0.60, 0.65, 1.0], right=False)
+        t = side.groupby("band", observed=True).agg(sides=("won", "size"), model_says=("p", "mean"),
+                                                    corrected_says=("cal", "mean"),
+                                                    actually_won=("won", "mean")).round(3)
+        print("\n### nhl_moneyline: what the model says, what the correction says, what happened "
+              "(every side of every game)\n")
+        print(t.to_string())
 
     mid = "nhl_moneyline_regulation"
     art = artifact(mid)
