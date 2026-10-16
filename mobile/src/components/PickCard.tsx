@@ -45,7 +45,6 @@ import {
   signalsCtaSpeech,
   signalsHeroSpeech,
   signalsNowLine,
-  signalsPickedAtLine,
   signalsStakeLine,
   signalsStakeSpeech,
   signalsTeamsSpeech,
@@ -349,10 +348,6 @@ export function PickCard({
         { bestNow: buttonDiffers },
       )
     : null;
-  const signalsPickedAt =
-    buttonDiffers && lockedAmerican && quoteBookKey
-      ? signalsPickedAtLine(lockedAmerican, bookLabel(quoteBookKey))
-      : null;
   const signalsCtaSpoken = handoff
     ? signalsCtaSpeech(
         bookName(handoff.bookmaker),
@@ -418,8 +413,13 @@ export function PickCard({
           label: signals && signalsCtaSpoken
             ? signalsCtaSpoken
             : handoff.price == null
-              ? `${handoff.verb} ${bookName(handoff.bookmaker)}`
-              : `${handoff.verb} at ${bookName(handoff.bookmaker)}`,
+              ? `Open ${bookName(handoff.bookmaker)} to check the live price`
+              : signalsCtaSpeech(
+                  bookName(handoff.bookmaker),
+                  formatAmerican(handoff.price),
+                  null,
+                  { bestNow: handoff.verb === 'Best' },
+                ),
         }]
       : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
@@ -709,8 +709,13 @@ export function PickCard({
               accessibilityRole="button"
               accessibilityLabel={
                 handoff.price == null
-                  ? `${handoff.verb} ${bookName(handoff.bookmaker)} to check the live price`
-                  : `${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`
+                  ? `Open ${bookName(handoff.bookmaker)} to check the live price`
+                  : signalsCtaSpeech(
+                      bookName(handoff.bookmaker),
+                      formatAmerican(handoff.price),
+                      null,
+                      { bestNow: handoff.verb === 'Best' },
+                    )
               }
               style={({ pressed }) => [
                 styles.handoff,
@@ -720,11 +725,13 @@ export function PickCard({
             >
               <Text
                 style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
-                numberOfLines={1}
               >
-                {handoff.price == null
-                  ? `${handoff.verb} ${bookLabel(handoff.bookmaker)}`
-                  : `${handoff.verb} ${bookLabel(handoff.bookmaker)} ${formatAmerican(handoff.price)}`}
+                {signalsCtaLabel(
+                  bookLabel(handoff.bookmaker),
+                  handoff.price == null ? null : formatAmerican(handoff.price),
+                  null,
+                  { bestNow: handoff.verb === 'Best' },
+                )}
               </Text>
             </Pressable>
           ) : (
@@ -827,9 +834,6 @@ export function PickCard({
           </Text>
         ) : null}
       </View>
-      {signalsPickedAt ? (
-        <Text style={styles.pickedAt}>{signalsPickedAt}</Text>
-      ) : null}
       {signalsNow ? (
         <Text style={styles.nowLine}>{signalsNow}</Text>
       ) : null}
@@ -1433,16 +1437,6 @@ const styles = StyleSheet.create({
   betMuted: {
     fontWeight: font.weight.regular,
     color: colors.textSecondary,
-  },
-  pickedAt: {
-    alignSelf: 'flex-end',
-    marginTop: 2,
-    maxWidth: '70%',
-    textAlign: 'right',
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.medium,
-    color: colors.textSecondary,
-    fontVariant: ['tabular-nums'],
   },
   // The book's current line or price, when it is not the lock. Same "Now"
   // ink as the board's tag (textSecondary, above 4.5:1). Wraps at large text.

@@ -99,11 +99,6 @@ export function signalsCtaSpeech(
   return parts.join(', ');
 }
 
-/** "Picked at −110 MGM" — the lock, on screen only when the button is not it. */
-export function signalsPickedAtLine(priceText: string, book: string): string {
-  return `Picked at ${trueMinus(priceText)} ${book}`;
-}
-
 /**
  * Clock for the compact line. `gameDayLabelET` is null on the ET day of the
  * game, so a today card stays "8:00 PM ET". A later day is "Sat 10/17 · 8:00
@@ -123,10 +118,11 @@ export function signalsContextTime(
  *
  * `line` is already the pick's side ("-8.5", "+3.5", "9") and is null when
  * the line has not moved. `price` is the current American. `priceDiffers`
- * is that price against the decision price. A line move prints the line and
- * the price; a price move with the same line prints the price. `book` is
- * whatever this surface uses (the short label on screen, the full name
- * when spoken) — the numbers are the same call either way.
+ * is that price against the decision price. A line move names the book
+ * first so the two numbers are not bare: "MGM line now −4.5 (−110)". A
+ * price move with the same line is "MGM now (−105)". `book` is whatever
+ * this surface uses (the short label on screen, the full name when
+ * spoken) — the numbers are the same call either way.
  */
 export function signalsNowLine(input: {
   line: string | null;
@@ -136,11 +132,10 @@ export function signalsNowLine(input: {
 }): string | null {
   if (input.price == null) return null;
   if (!input.line && !input.priceDiffers) return null;
-  const parts = ['Now'];
-  if (input.line) parts.push(trueMinus(input.line));
-  parts.push(trueMinus(input.price));
-  if (input.book) parts.push(input.book);
-  return parts.join(' ');
+  const price = `(${trueMinus(input.price)})`;
+  const who = input.book ? `${input.book} ` : '';
+  if (input.line) return `${who}line now ${trueMinus(input.line)} ${price}`;
+  return `${who}now ${price}`;
 }
 
 /**
@@ -148,8 +143,7 @@ export function signalsNowLine(input: {
  * that is what is spoken, with the full book name — the same `signalsPriceText`
  * the screen uses, so the two cannot format the price differently. `now` is
  * the Now line the screen is showing (built by `signalsNowLine`); null when
- * the screen has none. The lock is this one price. The grey "Picked at"
- * line is visual only, so it is not spoken again. Stale and untracked
+ * the screen has none. The lock is this one price. Stale and untracked
  * cards stay on `heroPriceSpeech`.
  */
 export function signalsHeroSpeech(input: {
@@ -203,13 +197,30 @@ export function signalsTeamsSpeech(sport: string, away: string, home: string): s
 }
 
 /**
- * The Stake cell. Both figures are `stakeFor`'s: units to bet (`risk`) and
- * units to win (`win`), already formatted ("1.5u", "0.4u"). A capped heavy
- * favorite reads "Bet 1.5u · Win 0.4u", so the risk is not hidden behind the
- * smaller win. Never the "1.1u → 1u" arrow, never dollars.
+ * How the Stake cell reads. Matt has not chosen (Designer, #965). The live
+ * cell stays `Bet 1.5u · Win 0.4u` until he does. This constant is the only
+ * switch:
+ *   'bet-win'  — current: `Bet 1.5u · Win 0.4u`
+ *   'risk-win' — `Risk 1.1u · Win 1u`, still under the Stake label
+ *   'single'   — the risk figure alone, `1u`
  */
+export type SignalsStakeForm = 'bet-win' | 'risk-win' | 'single';
+export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win';
+
+/**
+ * The Stake cell. Both figures are `stakeFor`'s: units to bet (`risk`) and
+ * units to win (`win`), already formatted ("1.5u", "0.4u"). The words come
+ * from `SIGNALS_STAKE_FORM`. Never the "1.1u → 1u" arrow, never dollars.
+ */
+function stakeWord(): 'Bet' | 'Risk' | null {
+  if (SIGNALS_STAKE_FORM === 'single') return null;
+  return SIGNALS_STAKE_FORM === 'risk-win' ? 'Risk' : 'Bet';
+}
+
 export function signalsStakeLine(riskUnits: string, winUnits: string): string {
-  return `Bet ${riskUnits} · Win ${winUnits}`;
+  const word = stakeWord();
+  if (word == null) return riskUnits;
+  return `${word} ${riskUnits} · Win ${winUnits}`;
 }
 
 /** "1u" → "1 unit". "0.4u" and "10u" stay plural. */
@@ -218,7 +229,9 @@ function unitsSpoken(shown: string): string {
   return spoken === '1 units' ? '1 unit' : spoken;
 }
 
-/** VoiceOver for the Stake cell. Both amounts, in the same order as the line. */
+/** VoiceOver for the Stake cell. Same `SIGNALS_STAKE_FORM` as the line. */
 export function signalsStakeSpeech(riskUnits: string, winUnits: string): string {
-  return `Bet ${unitsSpoken(riskUnits)}, win ${unitsSpoken(winUnits)}`;
+  const word = stakeWord();
+  if (word == null) return unitsSpoken(riskUnits);
+  return `${word} ${unitsSpoken(riskUnits)}, win ${unitsSpoken(winUnits)}`;
 }

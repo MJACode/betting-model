@@ -607,7 +607,12 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "To win unavailable" not in card and ">To win<" not in card
     assert "flexBasis: '46%'" in card and "maxWidth: '48%'" in card
     assert "flexBasis: '100%'" not in card
-    assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine(" in card
+    assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine" not in card
+    assert "bestNow: handoff.verb === 'Best'" in card
+    stake = _read(LIB / "signalsCard.ts")
+    assert "export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win'" in stake
+    assert "SIGNALS_STAKE_FORM === 'single'" in stake
+    assert "SIGNALS_STAKE_FORM === 'risk-win'" in stake
     assert "signalsMuted" in card and "tintSoft:" in _read(SRC / "lib" / "theme.ts")
     assert "colors.tintSoft" in _read(SRC / "components" / "TrackButton.tsx")
     assert "colors.tintSoft" in _read(SRC / "components" / "AddToPlayButton.tsx")
@@ -637,7 +642,7 @@ def test_signals_card_copy(tmp_path):
         src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = r"""
-import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsCtaSpeech, signalsHeroSpeech, signalsNowLine, signalsPickedAtLine, signalsPriceText, signalsStakeLine, signalsStakeSpeech } from './signalsCard.ts';
+import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsCtaSpeech, signalsHeroSpeech, signalsNowLine, signalsPriceText, signalsStakeLine, signalsStakeSpeech } from './signalsCard.ts';
 const MINUS = '\u2212';
 const ok = (cond, what) => { if (!cond) throw new Error(what); };
 const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
@@ -669,12 +674,12 @@ ok(signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, F
 ok(signalsCtaSpeech('DraftKings', '-105', '-8.5', { bestNow: true }) === `Best now, DraftKings, ${MINUS}8.5, ${MINUS}105`, 'spoken best now names the line');
 ok(signalsCtaSpeech('DraftKings', null) === 'Open DraftKings', 'spoken open');
 ok(!signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'), 'spoken label has no middle dot');
-ok(signalsPickedAtLine('-110', 'MGM') === `Picked at ${MINUS}110 MGM`, 'picked at');
 const moved = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DK' });
 const priced = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DK' });
-ok(moved === `Now ${MINUS}8.5 ${MINUS}110 DK`, 'moved line');
-ok(priced === `Now ${MINUS}105 DK`, 'moved price');
-ok(signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) === `Now ${MINUS}8.5 ${MINUS}105 DK`, 'line and price');
+ok(moved === `DK line now ${MINUS}8.5 (${MINUS}110)`, 'moved line');
+ok(priced === `DK now (${MINUS}105)`, 'moved price');
+ok(signalsNowLine({ line: '-4.5', price: '-110', priceDiffers: false, book: 'MGM' }) === `MGM line now ${MINUS}4.5 (${MINUS}110)`, 'book names the line');
+ok(signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) === `DK line now ${MINUS}8.5 (${MINUS}105)`, 'line and price');
 ok(signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null, 'unchanged is quiet');
 ok(signalsNowLine({ line: '-8.5', price: null, priceDiffers: true, book: 'DK' }) === null, 'no price, no Now line');
 ok(signalsStakeLine('1.5u', '0.4u') === 'Bet 1.5u · Win 0.4u', 'capped favorite shows risk and win');
@@ -690,7 +695,7 @@ ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === locked, 'dec
 ok(!signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }).includes('Now'), 'no Now when the screen has none');
 const spoken = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'BetMGM' });
 ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }) === `${locked}. ${spoken}`, 'speech repeats the Now line');
-ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }).includes('Now'), 'Now is in the label when the button differs');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }).includes(' now '), 'now is in the label when the button differs');
 ok(!signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }).includes('Picked at'), 'the lock is spoken once');
 """
     proc = subprocess.run(

@@ -39,7 +39,6 @@ import {
   signalsCtaSpeech,
   signalsHeroSpeech,
   signalsNowLine,
-  signalsPickedAtLine,
   signalsPriceText,
   signalsStakeLine,
   signalsStakeSpeech,
@@ -157,7 +156,7 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     priceDiffers: false,
     book: bookName(hero?.book ?? ''),
   });
-  check('Signals shows the moved line under the hero', screenNow === `Now ${MINUS}8.5 ${MINUS}110 DK`, screenNow ?? '');
+  check('Signals shows the moved line under the hero', screenNow === `DK line now ${MINUS}8.5 (${MINUS}110)`, screenNow ?? '');
   const speech = signalsHeroSpeech({
     decisionPrice: formatAmerican(hero?.lockedPrice),
     book: bookName(hero?.book ?? ''),
@@ -165,7 +164,7 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   });
   check(
     'VoiceOver says that same Now line, with the full book name',
-    speech === `${MINUS}110 DraftKings. Now ${MINUS}8.5 ${MINUS}110 DraftKings` &&
+    speech === `${MINUS}110 DraftKings. DraftKings line now ${MINUS}8.5 (${MINUS}110)` &&
       speech.includes(spokenNow ?? 'missing'),
     speech,
   );
@@ -235,7 +234,7 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     priceDiffers: true,
     book: bookLabel(hero?.book ?? ''),
   });
-  check('Signals shows line and price together', screenNow === `Now ${MINUS}8.5 ${MINUS}105 DK`, screenNow ?? '');
+  check('Signals shows line and price together', screenNow === `DK line now ${MINUS}8.5 (${MINUS}105)`, screenNow ?? '');
   const handoff = bestHandoffForPick(pick, rows, hero);
   check(
     'price and line moved, no current slip link: Open DK, not the lock slip',
@@ -866,12 +865,11 @@ check(
   check('CTA names the line when that bet is at a moved line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`);
   check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
   check(
-    'a different book or price is Best now, and the lock is named under the hero',
+    'a different book or price is Best now on the button',
     signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105` &&
       signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105` &&
       signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105` &&
-      !signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·') &&
-      signalsPickedAtLine('-110', 'MGM') === `Picked at ${MINUS}110 MGM`,
+      !signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'),
   );
   check(
     'stake cell names units to bet and units to win',
@@ -886,6 +884,8 @@ check(
       signalsStakeSpeech('10u', '1.5u') === 'Bet 10 units, win 1.5 units',
   );
   const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
+  check('the picked-at line is not under the hero', !card.includes('signalsPickedAtLine') && !/pickedAt:/.test(card));
+  check('Today uses the same Best now wording as Signals', /bestNow: handoff\.verb === 'Best'/.test(card));
   const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
   check('Signals board opts into the signals layout', /layout=\{view === 'signals' \? 'signals' : 'board'\}/.test(home));
   check('hero is 22pt', /betLeft: \{[\s\S]*?font\.size\.title2/.test(card) && /betRight: \{[\s\S]*?font\.size\.title2/.test(card));
@@ -927,10 +927,12 @@ check(
   );
   check(
     'a moved line is a Now line, and an unchanged card is not',
-    movedNow === `Now ${MINUS}8.5 ${MINUS}110 DraftKings` &&
-      priceNow === `Now ${MINUS}105 DraftKings` &&
+    movedNow === `DraftKings line now ${MINUS}8.5 (${MINUS}110)` &&
+      priceNow === `DraftKings now (${MINUS}105)` &&
+      signalsNowLine({ line: '-4.5', price: '-110', priceDiffers: false, book: 'MGM' }) ===
+        `MGM line now ${MINUS}4.5 (${MINUS}110)` &&
       signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) ===
-        `Now ${MINUS}8.5 ${MINUS}105 DK` &&
+        `DK line now ${MINUS}8.5 (${MINUS}105)` &&
       signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null &&
       signalsNowLine({ line: '-8.5', price: null, priceDiffers: false, book: 'DK' }) === null,
   );
