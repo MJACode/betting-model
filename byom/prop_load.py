@@ -18,11 +18,23 @@ from byom.constants import (
 from byom.game_facts import parse_date, parse_game_id
 from byom.prop_facts import MARKET_COLUMNS, SOURCE_PROPS, facts_for_game
 
-_SNAP = """
-CASE WHEN p.snapshot_at ~ '^[0-9]{4}-'
-     THEN p.snapshot_at::timestamptz
-     ELSE NULL END
-"""
+# Month 01-12 and day 01-31. '2024-13-45' matches a leading-year check
+# and the cast then aborts the game. A value that fails this pattern is
+# NULL instead of a cast.
+_TS_OK = (
+    "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])"
+)
+
+
+def _ts_case(expr: str) -> str:
+    return (
+        f"CASE WHEN {expr}::text ~ '{_TS_OK}' "
+        f"THEN {expr}::timestamptz ELSE NULL END"
+    )
+
+
+_SNAP = _ts_case("p.snapshot_at")
+_KICK = _ts_case("g.commence_time")
 
 _MARKETS = tuple(MARKET_COLUMNS)
 
@@ -93,7 +105,7 @@ def _quotes_for_game(conn, game_id: str) -> list[dict]:
     sql = f"""
         SELECT p.player_name, p.team, p.market, p.bookmaker,
                {_SNAP} AS snapshot_at,
-               g.commence_time::timestamptz AS commence_time,
+               {_KICK} AS commence_time,
                p.line, p.over_price, p.under_price
           FROM player_prop_odds p
           JOIN games g ON g.game_id = p.game_id
@@ -101,11 +113,10 @@ def _quotes_for_game(conn, game_id: str) -> list[dict]:
            AND p.bookmaker = 'draftkings'
            AND p.market = ANY(%s)
            AND (p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play')
-           AND g.commence_time IS NOT NULL
+           AND {_KICK} IS NOT NULL
            AND {_SNAP} IS NOT NULL
-           AND {_SNAP} <= g.commence_time::timestamptz
-           AND {_SNAP} >= g.commence_time::timestamptz
-                 - make_interval(hours => %s)
+           AND {_SNAP} <= {_KICK}
+           AND {_SNAP} >= {_KICK} - make_interval(hours => %s)
     """
     return _as_quotes(_fetch(
         conn, sql, (game_id, list(_MARKETS), PROP_LOCK_WINDOW_HOURS)))
@@ -124,22 +135,38 @@ def _log_for_game(conn, game_id: str) -> list[dict]:
     return out
 
 
-def facts_for_season(conn, season: int) -> list[dict]:
+def facts_for_season(conn, season: int) -> tuple[list[dict], list[str]]:
+    """Facts, and the canonical keys of the games this read considered.
+
+    A game with no lock is still in the key list so a rebuild can delete
+    the rows the previous window wrote.
+    """
     if season < PROP_HISTORY_START_SEASON:
-        return []
+        return [], []
     facts = []
+    keys = []
     for game in _games(conn, season):
-        if parse_game_id(game["game_id"]) is None:
+        parsed = parse_game_id(game["game_id"])
+        if parsed is None or parse_date(game.get("game_date")) is None:
             continue
-        if parse_date(game.get("game_date")) is None:
-            continue
+        keys.append(parsed[0])
         quotes = _quotes_for_game(conn, game["game_id"])
         log_rows = _log_for_game(conn, game["game_id"])
         facts.extend(facts_for_game(game, quotes, log_rows))
-    return facts
+    return facts, keys
 
 
-def _upsert(conn, facts: list[dict]) -> int:
+def _upsert(conn, facts: list[dict], canonical_keys: list[str]) -> int:
+    """Delete this build's games, then insert. Same transaction.
+
+    A prop_key from an earlier window is not left behind. Games with no
+    facts this pass are cleared too.
+    """
+    keys = list(dict.fromkeys(canonical_keys))
+    if keys:
+        conn.execute(
+            "DELETE FROM byom_prop_facts WHERE canonical_key = ANY(%s)",
+            (keys,))
     if not facts:
         return 0
     cols = ", ".join(FACT_COLUMNS)
@@ -162,8 +189,8 @@ def build_season(conn, season: int, apply: bool = False) -> dict:
             "season": season, "facts": 0, "written": 0,
             "skipped": "before player_prop_odds history",
         }
-    facts = facts_for_season(conn, season)
-    written = _upsert(conn, facts) if apply else 0
+    facts, keys = facts_for_season(conn, season)
+    written = _upsert(conn, facts, keys) if apply else 0
     return {"season": season, "facts": len(facts), "written": written}
 
 
