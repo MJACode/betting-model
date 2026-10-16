@@ -1,6 +1,6 @@
 /**
  * Loads one byom_backtest call. No screen. `season` null is the current
- * NFL season. The rows are unit totals, not a stake.
+ * NFL season. The rows are results, not a recommended stake.
  */
 
 import { useCallback, useEffect, useState } from 'react';

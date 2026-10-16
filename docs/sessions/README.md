@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM grades at DraftKings' own lock price; the lock shop stays reference and does not set the grade; unit columns stay results; no recommended stake |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM mobile data layer: types, fetchers, and hooks only; tsc message set matches origin/master d135a5ab; no screen, sign-in left off |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM saved models: auth.uid() tables, cap 25, snapshot of byom_backtest at save time, migration not registered, sign-in left off |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM refresh: freshness reads no odds; apply true rebuilds yesterday through 7 days plus played games missing a fact; job enabled false and apply false |

@@ -3,8 +3,9 @@
  *
  * byom_backtest reads the facts tables. The saved-model RPCs need a
  * signed-in session. This file does not turn sign-in on and it does not
- * render a screen. Results are 1u-to-win units, uncapped and capped.
- * There is no stake.
+ * render a screen. units_uncapped and units_capped are results of
+ * DraftKings' own lock price: 1u-to-win, and the same result after a
+ * 3-unit risk ceiling. There is no recommended stake.
  */
 
 import { supabase } from './supabase';
@@ -156,7 +157,7 @@ export function parseByomModel(value: unknown): ByomModel {
 
 /**
  * One season of facts. `season` null is the current NFL season.
- * The RPC grades both unit columns. It does not suggest a stake.
+ * The RPC returns both result columns. It does not suggest a stake.
  */
 export async function fetchByomBacktest(
   season: number | null,

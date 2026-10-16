@@ -176,5 +176,6 @@ not set it.
 `mobile/src/lib/byom.ts` types the backtest rows and the saved models,
 and calls `byom_backtest`, `byom_save_model`, `byom_list_models`, and
 `byom_delete_model`. `useByomBacktest` and `useByomModels` load those
-calls. No screen imports them. `package.json` is unchanged. Sign-in is
-unchanged.
+calls. No screen imports them. `units_uncapped` and `units_capped`
+are results of DraftKings' own lock price. There is no recommended
+stake. `package.json` is unchanged. Sign-in is unchanged.
