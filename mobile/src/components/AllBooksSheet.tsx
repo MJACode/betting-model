@@ -9,6 +9,7 @@ import {
   LINES_FULL_GAME_NOTE,
   LINES_NO_PRICE,
   LINES_REGULATION_NOTE,
+  LINES_REGULATION_NOTE_PRICED,
   linesMarketsStack,
   linesPriceText,
   type LinesMlMode,
@@ -18,15 +19,33 @@ import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * Every bettable book's price for one market. The best row — the book that
- * holds the best price on the most sides — is the only green row. A missing
- * price is "—", including the NHL regulation tie, which this read does not
- * carry (lib/linesBoard.ts).
+ * Every bettable book's price for one market. Green is a price that wins
+ * its side, and the word Best is on a row only when that book wins every
+ * side. Each side with a link has its own Bet. The tie is absent until a
+ * row carries draw_price (lib/linesBoard.ts).
  */
+function SidePrice({ price, best }: { price: string; best: boolean }) {
+  return (
+    <View style={styles.priceLine}>
+      <Text style={[styles.sidePrice, best && styles.sideBest]}>{price}</Text>
+      {best ? (
+        <Ionicons
+          name="checkmark"
+          size={16}
+          color={colors.betInk}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        />
+      ) : null}
+    </View>
+  );
+}
+
 export function AllBooksSheet({
   visible,
   title,
   matchup,
+  when,
   lineCaption,
   rows,
   showRegulationSwitch,
@@ -37,6 +56,7 @@ export function AllBooksSheet({
   visible: boolean;
   title: string;
   matchup: string;
+  when: string;
   lineCaption: string | null;
   rows: LinesSheetRow[];
   showRegulationSwitch: boolean;
@@ -46,6 +66,7 @@ export function AllBooksSheet({
 }) {
   const { fontScale } = useWindowDimensions();
   const stack = linesMarketsStack(fontScale);
+  const tieShown = rows.some((row) => row.sides.some((s) => s.key === 'tie'));
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -57,18 +78,15 @@ export function AllBooksSheet({
         />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element. VoiceOver must reach the rows and Bet buttons. */}
-        <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
+        <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <View style={styles.headerBody}>
               <Text style={styles.title} numberOfLines={2}>
                 {title}
               </Text>
-              {matchup ? (
-                <Text style={styles.matchup} numberOfLines={1}>
-                  {matchup}
-                </Text>
-              ) : null}
+              {matchup ? <Text style={styles.matchup}>{matchup}</Text> : null}
+              {when ? <Text style={styles.matchup}>{when}</Text> : null}
               {lineCaption ? <Text style={styles.lineCaption}>{lineCaption}</Text> : null}
             </View>
             <Pressable
@@ -90,7 +108,7 @@ export function AllBooksSheet({
                 fit
               />
               <Text style={styles.note}>
-                {mode === 'reg' ? LINES_REGULATION_NOTE : LINES_FULL_GAME_NOTE}
+                {mode === 'reg' ? (tieShown ? LINES_REGULATION_NOTE_PRICED : LINES_REGULATION_NOTE) : LINES_FULL_GAME_NOTE}
               </Text>
             </View>
           ) : null}
@@ -100,39 +118,59 @@ export function AllBooksSheet({
             <ScrollView style={styles.list} bounces={false}>
               <View style={styles.listCard}>
                 {rows.map((row, i) => (
-                  <View
-                    key={row.bookmaker}
-                    style={[styles.row, i > 0 && styles.rowDivider, row.isBest && styles.rowBest, stack && styles.rowStack]}
-                  >
-                    <View style={styles.rowBody}>
-                      <View style={styles.nameLine}>
-                        <Text style={styles.book} numberOfLines={1}>
-                          {bookName(row.bookmaker)}
-                        </Text>
-                        {row.isBest ? <Text style={styles.best}>Best</Text> : null}
-                      </View>
-                      {row.sides.map((s) => (
-                        <Text
-                          key={s.key}
-                          style={[styles.side, s.price == null && styles.sideMissing, row.isBest && s.price != null && styles.sideBest]}
-                          numberOfLines={1}
-                        >
-                          {s.label} {s.price == null ? LINES_NO_PRICE : linesPriceText(s.price)}
-                        </Text>
-                      ))}
+                  <View key={row.bookmaker} style={[styles.row, i > 0 && styles.rowDivider, stack && styles.rowStack]}>
+                    <View style={styles.nameLine}>
+                      <Text style={styles.book}>{bookName(row.bookmaker)}</Text>
+                      {row.isBest ? <Text style={styles.best}>Best</Text> : null}
                     </View>
-                    <Pressable
-                      onPress={() => {
-                        void openBookBetslip(row.bookmaker, row.betLink, { sameBookOnly: true });
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${row.betSideLabel ? `Bet ${row.betSideLabel}` : 'Bet'} at ${bookName(row.bookmaker)}${row.isBest ? ', best price' : ''}`}
-                      style={({ pressed }) => [styles.bet, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.betText} numberOfLines={2}>
-                        {row.betSideLabel ? `Bet ${row.betSideLabel}` : 'Bet'}
-                      </Text>
-                    </Pressable>
+                    {row.sides.map((s) => {
+                      const price = s.price == null ? LINES_NO_PRICE : linesPriceText(s.price);
+                      const book = bookName(row.bookmaker);
+                      const best = s.isBestPrice ? ', best price' : '';
+                      if (s.price == null) {
+                        return (
+                          <View key={s.key} style={styles.sideRow}>
+                            <View style={styles.sideBody}>
+                              <Text style={styles.side}>{s.label}</Text>
+                              <Text style={[styles.sidePrice, styles.sideMissing]}>{LINES_NO_PRICE}</Text>
+                            </View>
+                          </View>
+                        );
+                      }
+                      const quoted = `${s.label}, ${price} at ${book}${best}`;
+                      // A price with no link is not a bet. Opening the book
+                      // with an empty slip, or alerting that it could not open,
+                      // is a different action from the one the button names.
+                      if (!s.link || !s.link.trim()) {
+                        return (
+                          <View key={s.key} style={styles.sideRow} accessible accessibilityLabel={quoted}>
+                            <View style={styles.sideBody}>
+                              <Text style={styles.side}>{s.label}</Text>
+                              <SidePrice price={price} best={s.isBestPrice} />
+                            </View>
+                          </View>
+                        );
+                      }
+                      return (
+                        <Pressable
+                          key={s.key}
+                          onPress={() => {
+                            void openBookBetslip(row.bookmaker, s.link, { sameBookOnly: true });
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Bet ${quoted}`}
+                          style={({ pressed }) => [styles.sideRow, pressed && styles.pressed]}
+                        >
+                          <View style={styles.sideBody}>
+                            <Text style={styles.side}>{s.label}</Text>
+                            <SidePrice price={price} best={s.isBestPrice} />
+                          </View>
+                          <View style={styles.bet}>
+                            <Text style={styles.betText}>Bet</Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 ))}
               </View>
@@ -214,12 +252,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    minHeight: 44,
+    gap: spacing.xs,
   },
   rowStack: {
     alignItems: 'stretch',
@@ -228,16 +263,10 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
-  rowBest: {
-    backgroundColor: colors.betSoft,
-  },
-  rowBody: {
-    flex: 1,
-    gap: 2,
-  },
   nameLine: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   book: {
@@ -251,8 +280,28 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.betInk,
   },
+  sideRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    minHeight: 44,
+  },
+  sideBody: {
+    flex: 1,
+    gap: 2,
+  },
   side: {
     fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  priceLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  sidePrice: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
@@ -261,12 +310,12 @@ const styles = StyleSheet.create({
   },
   sideMissing: {
     color: colors.textSecondary,
+    fontWeight: font.weight.regular,
   },
   bet: {
     minHeight: 44,
-    maxWidth: 128,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    minWidth: 64,
+    paddingHorizontal: spacing.md,
     borderRadius: radii.sm,
     backgroundColor: colors.tint,
     alignItems: 'center',

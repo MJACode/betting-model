@@ -8,9 +8,10 @@
  * cell — the cells are the three game markets. A regulation BET marks the
  * moneyline cell, because 60 min lives inside that sheet.
  *
- * The tie on the 3-way regulation market is stored as latest_odds.draw_price.
- * v_latest_odds_all_books does not return that column (measured 2026-10-16),
- * so the tie side is "—" and the sheet says so. Home and away 60-min prices
+ * The tie on the 3-way regulation market is latest_odds.draw_price. The view
+ * does not return that column until the hand-applied migration
+ * add_draw_price_to_latest_odds_view_2026_10_16.sql. Until a row actually
+ * carries draw_price, the sheet hides the tie. Home and away 60-min prices
  * are the h2h_3way rows the view does return.
  */
 
@@ -47,9 +48,16 @@ export const LINES_EMPTY_GAMES_BODY = 'Today’s games show up here once they’
 export const LINES_EMPTY_LINES = 'No lines yet';
 export const LINES_EMPTY_LINES_BODY = 'Books haven’t posted a spread, moneyline or total for today’s games.';
 export const LINES_ERROR_RETRY = 'Try again';
+export const LINES_GAME_UNPRICED = 'No lines posted yet';
+export const LINES_PAUSED_CHIP = 'Paused pick';
+export const LINES_CELL_HINT = 'Opens every book’s price';
+/** Unicode minus. formatAmerican and formatLineValue print an ASCII hyphen. */
+export const LINES_MINUS = '\u2212';
 export const LINES_FULL_GAME_NOTE = 'Includes overtime and shootouts.';
 export const LINES_REGULATION_NOTE =
-  'Pays only if that team leads after 60 minutes. Overtime makes this a loss. The tie has its own price. That price isn’t in this list, so the tie shows as —.';
+  'Pays only if that team leads after 60 minutes. Overtime counts as a loss. The tie price isn’t shown yet.';
+export const LINES_REGULATION_NOTE_PRICED =
+  'Pays only if that team leads after 60 minutes. Overtime counts as a loss.';
 
 /** Stack the three markets once Dynamic Type reaches 2×. Below that they share a row. */
 export function linesMarketsStack(fontScale: number): boolean {
@@ -63,9 +71,14 @@ export function linesMarketLabel(sport: string, market: LinesMarket): string {
   return 'Total';
 }
 
+/** ASCII hyphen to U+2212, so a negative price is a minus and not a dash. */
+export function linesMinus(text: string): string {
+  return text.replace(/-/g, LINES_MINUS);
+}
+
 export function linesPriceText(price: number | null | undefined): string {
   if (price == null || !Number.isFinite(Number(price))) return LINES_NO_PRICE;
-  return formatAmerican(Number(price));
+  return linesMinus(formatAmerican(Number(price)));
 }
 
 export function linesOddsMarket(market: LinesMarket, mode: LinesMlMode): string {
@@ -97,6 +110,7 @@ export interface LinesOddsRow {
   away_price?: number | string | null;
   over_price?: number | string | null;
   under_price?: number | string | null;
+  draw_price?: number | string | null;
   spread_home?: number | string | null;
   total_line?: number | string | null;
   home_link?: string | null;
@@ -113,7 +127,12 @@ export interface LinesTeams {
 
 export interface LinesSideQuote {
   key: LinesSideKey;
+  /** Combined label. VoiceOver and the sheet use this. */
   label: string;
+  /** Team, or the short total. The card clips this line, not the number. */
+  name: string;
+  /** Signed spread, drawn under the team on the card. Null for moneyline and total. */
+  lineText: string | null;
   price: number | null;
   book: string | null;
 }
@@ -123,15 +142,15 @@ export interface LinesSheetSide {
   label: string;
   price: number | null;
   link: string | null;
+  /** This price is the best on its side. A row can win one side and lose the other. */
+  isBestPrice: boolean;
 }
 
 export interface LinesSheetRow {
   bookmaker: string;
   sides: LinesSheetSide[];
+  /** True only when this book wins every side. A split is not a best row. */
   isBest: boolean;
-  betLink: string | null;
-  /** The side that betLink opens, price included. Null when the row has no link. */
-  betSideLabel: string | null;
 }
 
 export interface LinesPickRef {
@@ -140,11 +159,20 @@ export interface LinesPickRef {
   signal_type: string;
   is_live: boolean | null;
   condition_status: string | null;
+  pick_id?: number;
+  pick_label?: string;
+}
+
+export interface LinesMarkPick {
+  pickId: number;
+  label: string;
 }
 
 export interface LinesMarks {
   chip: boolean;
   cells: ReadonlySet<LinesMarket>;
+  picks: LinesMarkPick[];
+  paused: LinesMarkPick[];
 }
 
 const MARKETS_ON_CARD: readonly LinesMarket[] = ['spreads', 'h2h', 'totals'];
@@ -198,25 +226,55 @@ export function linesEmptyGamesBody(sport: LinesSportFilter, otherSportHasGames:
   return LINES_EMPTY_GAMES_BODY;
 }
 
+/** '2026-10-16' → 'Friday'. Noon UTC, so the calendar day does not shift. */
+export function linesWeekday(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' }).format(d);
+}
+
+export function linesPickChipLabel(n: number): string {
+  return `${n} ${n === 1 ? 'pick' : 'picks'}`;
+}
+
+export function linesPausedChipLabel(n: number): string {
+  return n === 1 ? LINES_PAUSED_CHIP : `${n} paused picks`;
+}
+
+/** 'Friday · 3 NHL games · 2 NBA games'. Sports with no games are left out. */
+export function linesHeaderCount(date: string, games: readonly { sport: string }[]): string {
+  const parts: string[] = [];
+  for (const sport of ['NHL', 'NBA'] as const) {
+    const n = games.filter((g) => g.sport === sport).length;
+    if (n > 0) parts.push(`${n} ${sport} ${n === 1 ? 'game' : 'games'}`);
+  }
+  const other = games.length - parts.reduce((sum, part) => sum + Number(part.split(' ')[0]), 0);
+  if (other > 0) parts.push(`${other} ${other === 1 ? 'game' : 'games'}`);
+  return `${linesWeekday(date)} · ${parts.join(' · ')}`;
+}
+
 export function linesHeaderSubtitle(o: {
   loaded: boolean;
   error: boolean;
   date: string;
-  games: number;
+  games: readonly { sport: string }[];
   hasOdds: boolean;
   sport?: LinesSportFilter;
 }): string {
   if (!o.loaded) return o.error ? 'Lines unavailable' : '—';
-  if (o.games === 0) return linesEmptyGamesTitle(o.sport ?? 'all');
+  if (o.games.length === 0) return linesEmptyGamesTitle(o.sport ?? 'all');
   if (!o.hasOdds) return LINES_EMPTY_LINES;
-  return `${o.date} · ${o.games} ${o.games === 1 ? 'game' : 'games'}`;
+  return linesHeaderCount(o.date, o.games);
 }
 
-/** The number the sheet is comparing, when the market has one. */
-export function linesLineCaption(line: number | null, market: LinesMarket): string | null {
+/**
+ * The number the sheet is comparing, without the home-team sign.
+ * 'Puck line 1.5 · the line most books post'.
+ */
+export function linesLineCaption(line: number | null, market: LinesMarket, sport: string): string | null {
   if (line == null || market === 'h2h') return null;
-  const shown = market === 'spreads' ? formatLineValue(line, 'spreads') : String(line);
-  return `Showing ${shown}, the number most books have.`;
+  const name = linesMarketLabel(sport, market);
+  return `${name} ${String(Math.abs(line))} · the line most books post`;
 }
 
 /** Game-market cell a model marks, or null for a prop (chip only). */
@@ -234,17 +292,43 @@ export function linesCellForModel(modelId: string): LinesMarket | null {
  * second pick. VOID stays: the caller already dropped a void the channel
  * does not still show.
  */
-export function linesMarks(picks: readonly LinesPickRef[]): Map<string, LinesMarks> {
-  const out = new Map<string, { chip: boolean; cells: Set<LinesMarket> }>();
+function qualifyingBet(p: LinesPickRef): boolean {
+  return p.signal_type === 'BET' && !p.is_live && p.condition_status !== 'DUPLICATE';
+}
+
+function markPick(p: LinesPickRef): LinesMarkPick | null {
+  if (p.pick_id == null) return null;
+  return { pickId: p.pick_id, label: p.pick_label?.trim() || 'Pick' };
+}
+
+/**
+ * Active BETs mark the card and the market cell. Paused BETs are a separate
+ * grey chip and never a navy dot — a paused number is not a pick to place.
+ */
+export function linesMarks(
+  picks: readonly LinesPickRef[],
+  paused: readonly LinesPickRef[] = [],
+): Map<string, LinesMarks> {
+  const out = new Map<string, { chip: boolean; cells: Set<LinesMarket>; picks: LinesMarkPick[]; paused: LinesMarkPick[] }>();
+  const ensure = (gameId: string) => {
+    const cur = out.get(gameId) ?? { chip: false, cells: new Set<LinesMarket>(), picks: [], paused: [] };
+    out.set(gameId, cur);
+    return cur;
+  };
   for (const p of picks) {
-    if (p.signal_type !== 'BET') continue;
-    if (p.is_live) continue;
-    if (p.condition_status === 'DUPLICATE') continue;
-    const cur = out.get(p.game_id) ?? { chip: true, cells: new Set<LinesMarket>() };
+    if (!qualifyingBet(p)) continue;
+    const cur = ensure(p.game_id);
     cur.chip = true;
+    const listed = markPick(p);
+    if (listed) cur.picks.push(listed);
     const cell = linesCellForModel(p.model_id);
     if (cell) cur.cells.add(cell);
-    out.set(p.game_id, cur);
+  }
+  for (const p of paused) {
+    if (!qualifyingBet(p)) continue;
+    const cur = ensure(p.game_id);
+    const listed = markPick(p);
+    if (listed) cur.paused.push(listed);
   }
   return out;
 }
@@ -258,10 +342,14 @@ function numEq(a: number, b: number): boolean {
   return Math.abs(a - b) < 1e-9;
 }
 
-function sideKeys(market: LinesMarket, mode: LinesMlMode): LinesSideKey[] {
+function sideKeys(market: LinesMarket, mode: LinesMlMode, showTie: boolean): LinesSideKey[] {
   if (market === 'totals') return ['over', 'under'];
-  if (market === 'h2h' && mode === 'reg') return ['away', 'tie', 'home'];
+  if (market === 'h2h' && mode === 'reg' && showTie) return ['away', 'tie', 'home'];
   return ['away', 'home'];
+}
+
+function rowsIncludeTie(rows: readonly LinesOddsRow[]): boolean {
+  return rows.some((r) => numOrNull(r.draw_price) != null);
 }
 
 function lineField(market: LinesMarket): 'spread_home' | 'total_line' | null {
@@ -270,16 +358,23 @@ function lineField(market: LinesMarket): 'spread_home' | 'total_line' | null {
   return null;
 }
 
-function sideLabel(key: LinesSideKey, teams: LinesTeams, line: number | null, market: LinesMarket): string {
+function sideName(key: LinesSideKey, teams: LinesTeams, line: number | null): string {
   if (key === 'tie') return 'Tie';
   if (key === 'over') return line == null ? 'Over' : `O ${line}`;
   if (key === 'under') return line == null ? 'Under' : `U ${line}`;
-  const team = key === 'home' ? teams.home : teams.away;
-  if (market === 'spreads' && line != null) {
-    const n = key === 'home' ? line : -line;
-    return `${team} ${formatLineValue(n, 'spreads')}`;
-  }
-  return team;
+  return key === 'home' ? teams.home : teams.away;
+}
+
+function spreadLineText(key: LinesSideKey, line: number | null, market: LinesMarket): string | null {
+  if (market !== 'spreads' || line == null || (key !== 'home' && key !== 'away')) return null;
+  const n = key === 'home' ? line : -line;
+  return linesMinus(formatLineValue(n, 'spreads'));
+}
+
+function sideLabel(key: LinesSideKey, teams: LinesTeams, line: number | null, market: LinesMarket): string {
+  const name = sideName(key, teams, line);
+  const signed = spreadLineText(key, line, market);
+  return signed ? `${name} ${signed}` : name;
 }
 
 function priceOf(row: LinesOddsRow, key: LinesSideKey): number | null {
@@ -287,6 +382,7 @@ function priceOf(row: LinesOddsRow, key: LinesSideKey): number | null {
   if (key === 'away') return numOrNull(row.away_price);
   if (key === 'over') return numOrNull(row.over_price);
   if (key === 'under') return numOrNull(row.under_price);
+  if (key === 'tie') return numOrNull(row.draw_price);
   return null;
 }
 
@@ -380,7 +476,7 @@ export function linesSideQuotes(
 ): LinesSideQuote[] {
   const use = linesRowsFor(rows, gameId, market, mode, commenceTime);
   const line = modalLine(use, market);
-  return sideKeys(market, mode).map((key) => {
+  return sideKeys(market, mode, rowsIncludeTie(use)).map((key) => {
     let best: { book: string; price: number } | null = null;
     for (const r of use) {
       const price = priceOf(r, key);
@@ -390,6 +486,8 @@ export function linesSideQuotes(
     return {
       key,
       label: sideLabel(key, teams, line, market),
+      name: sideName(key, teams, line),
+      lineText: spreadLineText(key, line, market),
       price: best?.price ?? null,
       book: best?.book ?? null,
     };
@@ -402,9 +500,9 @@ function sideWins(price: number | null, bestDecimal: number | undefined): boolea
 }
 
 /**
- * One row per bettable book at the modal line. Exactly one row is the best
- * row: the book that holds the best price on the most sides, LINE_SHOP order
- * on a tie. A book with no price still gets a row so the sheet can print "—".
+ * One row per bettable book at the modal line. A row is Best only when it
+ * wins every side. Green is per price (`isBestPrice`), so a book that wins
+ * one side does not paint the other side green. Each side keeps its own link.
  */
 export function linesSheetRows(
   rows: readonly LinesOddsRow[],
@@ -416,7 +514,7 @@ export function linesSheetRows(
 ): LinesSheetRow[] {
   const use = linesRowsFor(rows, gameId, market, mode, commenceTime);
   const line = modalLine(use, market);
-  const keys = sideKeys(market, mode);
+  const keys = sideKeys(market, mode, rowsIncludeTie(use));
   const byBook = new Map<string, LinesOddsRow>();
   for (const r of use) {
     if (!byBook.has(r.bookmaker)) byBook.set(r.bookmaker, r);
@@ -439,30 +537,14 @@ export function linesSheetRows(
       if (cur == null || p > cur) bestDecimal.set(s.key, p);
     }
   }
-  let topScore = 0;
-  let topBook = '';
-  for (const row of draft) {
-    let score = 0;
-    for (const s of row.sides) {
-      if (sideWins(s.price, bestDecimal.get(s.key))) score += 1;
-    }
-    const better =
-      score > topScore ||
-      (score === topScore && score > 0 && (topBook === '' || bookOrder(row.bookmaker) < bookOrder(topBook)));
-    if (better) {
-      topScore = score;
-      topBook = row.bookmaker;
-    }
-  }
   const marked: LinesSheetRow[] = draft.map((row) => {
-    const isBest = topScore > 0 && row.bookmaker === topBook;
-    const winning = row.sides.find((s) => s.link && sideWins(s.price, bestDecimal.get(s.key)));
-    const any = row.sides.find((s) => s.link);
-    const betSide = winning ?? any ?? null;
-    const betSideLabel = betSide
-      ? `${betSide.label}${betSide.price == null ? '' : ` ${linesPriceText(betSide.price)}`}`
-      : null;
-    return { ...row, isBest, betLink: betSide?.link ?? null, betSideLabel };
+    const sides = row.sides.map((s) => ({
+      ...s,
+      isBestPrice: sideWins(s.price, bestDecimal.get(s.key)),
+    }));
+    const pricedSides = sides.filter((s) => bestDecimal.has(s.key));
+    const isBest = pricedSides.length > 0 && pricedSides.every((s) => s.isBestPrice);
+    return { bookmaker: row.bookmaker, sides, isBest };
   });
   marked.sort((a, b) => Number(b.isBest) - Number(a.isBest) || bookOrder(a.bookmaker) - bookOrder(b.bookmaker));
   return marked;

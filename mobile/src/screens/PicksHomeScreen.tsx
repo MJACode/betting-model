@@ -48,6 +48,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FlatList,
   type LayoutChangeEvent,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -361,10 +362,10 @@ export function PicksHomeScreen() {
   const { entitled } = useEntitlement();
   const signalsLocked = !entitled && view !== 'today' && view !== 'lines';
   const linesGames = filterLinesGames(lines.games, linesSport);
-  // Paused rows are on All, labelled PAUSED, and the tooltip says they are
-  // not a bet. The chip on this board says "Pick", so it takes the same
-  // rows All draws as a bet (posted paused picks stay in allData).
+  // Posted paused picks stay in allData and mark as a pick. The rest are a
+  // grey "Paused pick" chip, with no navy dot.
   const linesPicks: LinesPickRef[] = allData.map((d) => d.pick);
+  const linesPaused: LinesPickRef[] = pausedData.map((d) => d.pick);
 
   // Restrict the filter's Market options to what is on screen — on EVERY view,
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
@@ -592,7 +593,7 @@ export function PicksHomeScreen() {
         loaded: lines.loaded,
         error: lines.error != null,
         date: lines.date,
-        games: linesGames.length,
+        games: linesGames,
         hasOdds: linesHaveOdds(linesGames.map((g) => g.game_id), lines.odds),
         sport: linesSport,
       })
@@ -751,6 +752,7 @@ export function PicksHomeScreen() {
           games={lines.games}
           odds={lines.odds}
           picks={linesPicks}
+          pausedPicks={linesPaused}
           sport={linesSport}
           loading={lines.loading && !lines.loaded}
           loaded={lines.loaded}
@@ -758,6 +760,23 @@ export function PicksHomeScreen() {
           retrying={lines.loading}
           onRefresh={lines.refresh}
           showMarks={entitled}
+          onOpenPick={(rows, kind) => {
+            if (rows.length === 1) {
+              navigation.navigate('PickDetail', { pickId: rows[0]!.pickId });
+              return;
+            }
+            Alert.alert(
+              kind === 'paused' ? 'Paused picks on this game' : 'Picks on this game',
+              undefined,
+              [
+                ...rows.map((row) => ({
+                  text: row.label,
+                  onPress: () => navigation.navigate('PickDetail', { pickId: row.pickId }),
+                })),
+                { text: 'Cancel', style: 'cancel' as const },
+              ],
+            );
+          }}
         />
       ) : (
       <>
@@ -1232,9 +1251,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
     marginTop: spacing.sm,
-    // FilterChip reaches 8pt below. The segment tabs reach 6pt above. A 16pt
-    // margin keeps those two targets off the same point.
-    marginBottom: spacing.lg,
+    // 8pt, not 16. FilterChip's lower slop is 8pt and the segment scroller
+    // takes touches 6pt above itself. 8pt keeps that slop out of the scroller
+    // (the chip stays a 44pt target) and is half the gap that was trimmed.
+    marginBottom: spacing.sm,
   },
   firstDayHeader: { marginTop: 0 },
   list: {

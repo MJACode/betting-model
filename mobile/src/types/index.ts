@@ -303,6 +303,8 @@ export interface OddsByBookRow {
   over_link: string | null;
   under_link: string | null;
   snapshot_at: string;
+  /** NHL 60-min tie. Absent until the view migration is applied. */
+  draw_price?: number | null;
 }
 
 /** One row from v_latest_prop_odds_all_books — latest prop line per

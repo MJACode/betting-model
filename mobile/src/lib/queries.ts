@@ -902,21 +902,41 @@ export async function fetchGamesForLinesBoard(date: string): Promise<GameRow[]> 
  * cap, so this is paged and narrowed to the board's game ids and to
  * LINES_ODDS_MARKETS (h2h, h2h_3way, spreads, totals) — not the whole slate.
  */
+function drawPriceNotOnView(e: unknown): boolean {
+  const msg = e instanceof Error
+    ? e.message
+    : e && typeof e === 'object' && 'message' in e
+      ? String((e as { message: unknown }).message)
+      : '';
+  return /draw_price/i.test(msg);
+}
+
 export async function fetchLinesBoardOdds(gameIds: readonly string[]): Promise<OddsByBookRow[]> {
   if (gameIds.length === 0) return [];
-  return fetchAllPages<OddsByBookRow>(
-    (from, to) =>
-      supabase
-        .from('v_latest_odds_all_books')
-        .select(ODDS_BY_BOOK_COLUMNS)
-        .in('game_id', [...gameIds])
-        .in('market', [...LINES_ODDS_MARKETS])
-        .order('game_id')
-        .order('market')
-        .order('bookmaker')
-        .range(from, to),
-    (row) => `${row.game_id}|${row.market}|${row.bookmaker}`,
-  );
+  // draw_price is on latest_odds and missing from the view until Matt applies
+  // add_draw_price_to_latest_odds_view_2026_10_16.sql. Selecting it before
+  // that fails the read; the retry is the same page without the column, so
+  // the board stays up and the tie stays hidden.
+  const read = (columns: string) =>
+    fetchAllPages<OddsByBookRow>(
+      (from, to) =>
+        supabase
+          .from('v_latest_odds_all_books')
+          .select(columns)
+          .in('game_id', [...gameIds])
+          .in('market', [...LINES_ODDS_MARKETS])
+          .order('game_id')
+          .order('market')
+          .order('bookmaker')
+          .range(from, to),
+      (row) => `${row.game_id}|${row.market}|${row.bookmaker}`,
+    );
+  try {
+    return await read(`${ODDS_BY_BOOK_COLUMNS}, draw_price`);
+  } catch (e: unknown) {
+    if (!drawPriceNotOnView(e)) throw e;
+    return read(ODDS_BY_BOOK_COLUMNS);
+  }
 }
 
 /**

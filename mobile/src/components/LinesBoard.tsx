@@ -9,9 +9,11 @@ import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { formatGameTimeET } from '@/lib/format';
 import { bookLabelShort, bookName } from '@/lib/markets';
 import {
+  LINES_CELL_HINT,
   LINES_EMPTY_LINES,
   LINES_EMPTY_LINES_BODY,
   LINES_ERROR_RETRY,
+  LINES_GAME_UNPRICED,
   LINES_NO_PRICE,
   filterLinesGames,
   linesCardMarkets,
@@ -22,6 +24,8 @@ import {
   linesMarketLabel,
   linesMarketsStack,
   linesMarks,
+  linesPausedChipLabel,
+  linesPickChipLabel,
   linesPriceText,
   linesRowsFor,
   linesSheetRows,
@@ -29,6 +33,8 @@ import {
   modalLine,
   sortLinesGames,
   type LinesMarket,
+  type LinesMarkPick,
+  type LinesMarks,
   type LinesMlMode,
   type LinesOddsRow,
   type LinesPickRef,
@@ -47,6 +53,7 @@ export function LinesBoard({
   games,
   odds,
   picks,
+  pausedPicks,
   sport,
   loading,
   loaded,
@@ -54,10 +61,12 @@ export function LinesBoard({
   retrying,
   onRefresh,
   showMarks,
+  onOpenPick,
 }: {
   games: GameRow[];
   odds: LinesOddsRow[];
   picks: readonly LinesPickRef[];
+  pausedPicks: readonly LinesPickRef[];
   sport: LinesSportFilter;
   loading: boolean;
   loaded: boolean;
@@ -65,6 +74,7 @@ export function LinesBoard({
   retrying: boolean;
   onRefresh: () => Promise<void>;
   showMarks: boolean;
+  onOpenPick: (picks: readonly LinesMarkPick[], kind: 'pick' | 'paused') => void;
 }) {
   const { fontScale } = useWindowDimensions();
   const stack = linesMarketsStack(fontScale);
@@ -76,7 +86,10 @@ export function LinesBoard({
     () => sortLinesGames(filterLinesGames(games, sport)),
     [games, sport],
   );
-  const marks = useMemo(() => (showMarks ? linesMarks(picks) : new Map()), [picks, showMarks]);
+  const marks = useMemo(
+    () => (showMarks ? linesMarks(picks, pausedPicks) : new Map()),
+    [picks, pausedPicks, showMarks],
+  );
   const hasOdds = linesHaveOdds(shown.map((g) => g.game_id), odds);
 
   const openGame = shown.find((g) => g.game_id === open?.gameId) ?? null;
@@ -100,6 +113,7 @@ export function LinesBoard({
             open.market,
           ),
           open.market,
+          openGame.sport,
         )
       : null;
 
@@ -192,6 +206,7 @@ export function LinesBoard({
               setMode('full');
               setOpen({ gameId: item.game_id, market });
             }}
+            onOpenPick={onOpenPick}
           />
         )}
       />
@@ -199,6 +214,7 @@ export function LinesBoard({
         visible={openGame != null && open != null}
         title={open ? linesMarketLabel(openGame?.sport ?? '', open.market) : ''}
         matchup={openGame ? `${openGame.away_team} @ ${openGame.home_team}` : ''}
+        when={openGame ? formatGameTimeET(openGame.commence_time) : ''}
         lineCaption={lineCaption}
         rows={sheetRows}
         showRegulationSwitch={openGame?.sport === 'NHL' && open?.market === 'h2h'}
@@ -216,12 +232,14 @@ function GameCard({
   stack,
   picked,
   onOpen,
+  onOpenPick,
 }: {
   game: GameRow;
   odds: LinesOddsRow[];
   stack: boolean;
-  picked: { chip: boolean; cells: ReadonlySet<LinesMarket> } | undefined;
+  picked: LinesMarks | undefined;
   onOpen: (market: LinesMarket) => void;
+  onOpenPick: (picks: readonly LinesMarkPick[], kind: 'pick' | 'paused') => void;
 }) {
   const time = formatGameTimeET(game.commence_time);
   const teams = { away: game.away_team, home: game.home_team };
@@ -237,11 +255,37 @@ function GameCard({
           </Text>
         ) : null}
       </View>
-      {picked?.chip ? (
-        <View accessible accessibilityLabel="Pick on this game" style={styles.pickChip}>
-          <Text style={styles.pickChipText}>Pick</Text>
+      {picked && (picked.picks.length > 0 || picked.paused.length > 0) ? (
+        <View style={styles.chipRow}>
+          {picked.picks.length > 0 ? (
+            <Pressable
+              onPress={() => onOpenPick(picked.picks, 'pick')}
+              accessibilityRole="button"
+              accessibilityLabel={`${linesPickChipLabel(picked.picks.length)} on this game`}
+              accessibilityHint={picked.picks.length > 1 ? 'Choose a pick' : 'Opens pick detail'}
+              style={({ pressed }) => [styles.pickChip, pressed && styles.pressed]}
+            >
+              <Text style={styles.pickChipText}>{linesPickChipLabel(picked.picks.length)}</Text>
+            </Pressable>
+          ) : null}
+          {picked.paused.length > 0 ? (
+            <Pressable
+              onPress={() => onOpenPick(picked.paused, 'paused')}
+              accessibilityRole="button"
+              accessibilityLabel={`${linesPausedChipLabel(picked.paused.length)} on this game`}
+              accessibilityHint={picked.paused.length > 1 ? 'Choose a paused pick' : 'Opens pick detail'}
+              style={({ pressed }) => [styles.pausedChip, pressed && styles.pressed]}
+            >
+              <Text style={styles.pausedChipText}>{linesPausedChipLabel(picked.paused.length)}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
+      {linesCardMarkets().every((market) =>
+        linesSideQuotes(odds, game.game_id, market, teams, game.commence_time).every((q) => q.price == null),
+      ) ? (
+        <Text style={styles.unpriced}>{LINES_GAME_UNPRICED}</Text>
+      ) : (
       <View style={[styles.markets, stack && styles.marketsStack]}>
         {linesCardMarkets().map((market) => {
           const quotes = linesSideQuotes(odds, game.game_id, market, teams, game.commence_time);
@@ -260,6 +304,7 @@ function GameCard({
               onPress={() => onOpen(market)}
               accessibilityRole="button"
               accessibilityLabel={`${label}. ${spoken || 'No price'}.${marked ? ' Pick on this market.' : ''}`}
+              accessibilityHint={LINES_CELL_HINT}
               style={({ pressed }) => [
                 styles.cell,
                 !stack && styles.cellShare,
@@ -276,11 +321,12 @@ function GameCard({
               {quotes.map((q) => (
                 <View key={q.key}>
                   <Text style={styles.cellSide} numberOfLines={1}>
-                    {q.label}
+                    {q.name}
                   </Text>
+                  {q.lineText ? <Text style={styles.cellLine}>{q.lineText}</Text> : null}
                   <Text style={styles.cellPrice}>
                     {q.price == null ? LINES_NO_PRICE : linesPriceText(q.price)}
-                    {q.book ? ` ${bookLabelShort(q.book)}` : ''}
+                    {q.book ? <Text style={styles.cellBook}>{` ${bookLabelShort(q.book)}`}</Text> : null}
                   </Text>
                 </View>
               ))}
@@ -288,6 +334,7 @@ function GameCard({
           );
         })}
       </View>
+      )}
     </View>
   );
 }
@@ -332,17 +379,43 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
   pickChip: {
     alignSelf: 'flex-start',
     backgroundColor: colors.noneSoft,
     borderRadius: radii.pill,
-    paddingVertical: 2,
-    paddingHorizontal: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
   pickChipText: {
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     color: colors.textSecondary,
+  },
+  pausedChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  pausedChipText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+  },
+  unpriced: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    minHeight: 44,
   },
   markets: {
     flexDirection: 'row',
@@ -388,11 +461,22 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textSecondary,
   },
+  cellLine: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
   cellPrice: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
+  },
+  cellBook: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
   },
   pressed: {
     opacity: 0.6,
