@@ -147,8 +147,10 @@ the facts tables, not `picks`.
 
 `byom/refresh.py` reports freshness without reading odds. The due set
 is the current season only: games dated from yesterday through seven
-days ahead, plus current-season games already played that have no
-`byom_game_facts` row. A row in that window whose `built_at` is more
+days ahead, plus a past game with no fact row, a past fact row that
+still has a null score or a null close, and a past game that has facts
+but no prop facts. A game today or inside that forward window with no
+fact row counts as missing. A row in that window whose `built_at` is more
 than 24 hours before the report clock is stale. Those two day counts
 and the 24 hour age are the refresh's own bounds. They are not the
 lock windows. The 120h and 24h locks stay UNCONFIRMED.
