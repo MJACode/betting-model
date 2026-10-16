@@ -79,6 +79,31 @@ the whole board and wants its own reviewed PR. Same root: on NFL wind and
 opener picks the All books footnote says "The line is DraftKings'" when the
 line is the label book's.
 
+The other direction is open for every over/under model, the three rules
+included: when the bet book's line moves IN the member's favour (Under 4.5 at
+-110 -> 5.5 at -140), `computeMovement` still compares the two prices and the
+board chip reads "Steam -110 -> -140" in red, "Steamed 6.0pp against you" on
+the detail card. Only compute `priceShiftPp` when the current line equals the
+scored line; otherwise return a line-labelled result ("Line 4.5 -> 5.5"), as
+the NFL line-only branch does, and update `summarizeMovement`
+(PickCard.tsx) and the detail verdict (lineMovementView.ts) to match.
+Smaller items from the same review: one exported list of the three rule ids
+(four copies today), `allBooksLineSource` reading the same helper as
+`scoredLineBook`, ", modeled line" in the All books row's VoiceOver label, and
+"(vs Pinnacle)" so the record column never breaks inside the parenthesis.
+
+## [ ] App: a player page opened by name can show a namesake's data (found 2026-10-16)
+
+NFL rule picks carry no player id, so pick detail opens the player page by
+name (`playerId: pick.player_id ?? ''`), and the by-name log fetch is an exact
+name match ordered by date. `nfl_player_game_log` has 7 names since 2025 held
+by two player ids — Justin Jefferson is the Minnesota WR and a Cleveland LB,
+both with a game on 2026-10-11 — so `games[0]` (the page's team, next game,
+and since the NBA rebuild PR its head-to-head, today's picks and same-position
+card via `pagePlayerId`) can be the other player. Fix: pick detail passes the
+pick's game id or teams; when the by-name log holds more than one id, keep the
+rows whose team plays in that game.
+
 ## [ ] NBA prop fetch buys every game seven days ahead on every pass (2026-10-16)
 
 `nba-prop-odds` uses `GAME_SCORE_AHEAD_DAYS` (7) and pulls 9 markets + 8
