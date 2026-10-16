@@ -46,8 +46,9 @@ own price on the lock snapshot. `grade_*_book` is `draftkings`. Another
 book's price is not the grade. History is preferred over `odds` when
 both have a lock for that market. `line_source` records which table.
 Closing prices are stored and are not the grade. The builder reads one
-game at a time: DraftKings inside the lock window, then other books only
-inside that game's shop slices. A season is not loaded in one fetch.
+game at a time: DraftKings inside the lock window for the grade, then
+other books only inside that game's shop slices. Those rows are stored
+reference and are not the grade. A season is not loaded in one fetch.
 `byom_game_facts_units_2026_10_16.sql` renames the unit columns. It is
 registered and was not applied.
 
