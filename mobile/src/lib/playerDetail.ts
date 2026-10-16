@@ -25,8 +25,8 @@ import { hasPricedLine } from '@/lib/decisionPrice';
 import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
-import { statForPropModel, type StatDef } from '@/lib/statCatalog';
-import { modelShort } from '@/lib/modelMeta';
+import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
+import { modelShort, sportOfModel } from '@/lib/modelMeta';
 import type { GameRow, PropOddsByBookRow, PropOddsSnapshotRow, SettledPick } from '@/types';
 
 // ── Line conversions ─────────────────────────────────────────────────────────
@@ -373,6 +373,8 @@ export function statSplits(
 // ── Our record on this player ────────────────────────────────────────────────
 
 export interface PlayerPickLine {
+  /** Unique per line: the model id, plus the market for a multi-market rule. */
+  key: string;
   modelId: string;
   /** The stat the model prices ("Hits", "Points"), or the model's short label. */
   label: string;
@@ -420,15 +422,30 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     // unknown stay; only an explicit unpublished stamp leaves.
     if (!publishedRecordKeeps(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
-    let line = by.get(p.model_id);
+    // A multi-market rule (nba/wnba/nfl_prop_market) is one model id across
+    // several markets, so its picks are split by the row's prop_market and
+    // each line is named for that market's stat. Without this every one of
+    // its bets was one line labelled "Prop Mkt".
+    const modelStat = statForPropModel(p.model_id);
+    const market = modelStat ? null : (p.prop_market ?? null);
+    const key = market ? `${p.model_id}|${market}` : p.model_id;
+    let line = by.get(key);
     if (!line) {
-      const stat = statForPropModel(p.model_id);
+      const stat = modelStat ?? statForPropMarket(sportOfModel(p.model_id), market);
+      // A rule's line names the rule too: named for the stat alone, it read
+      // as a second per-stat line ("Assists 1-0" over "Assists 0-1").
+      const label = !stat
+        ? modelShort(p.model_id)
+        : market
+          ? `${stat.label} (vs Pinnacle)`
+          : stat.label;
       line = {
+        key,
         modelId: p.model_id,
-        label: stat?.label ?? modelShort(p.model_id),
+        label,
         wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, overs: 0, unders: 0,
       };
-      by.set(p.model_id, line);
+      by.set(key, line);
     }
     if (p.result === 'WIN') { line.wins += 1; total.wins += 1; }
     else if (p.result === 'LOSS') { line.losses += 1; total.losses += 1; }

@@ -444,7 +444,8 @@ check(
 
 check(
   'the betslip card is gated on the line the chart is showing (§1c)',
-  /slipPickFor\(\s*\{ player_id: playerId \}\s*,\s*idx\s*,\s*line - 0\.5\s*\)/.test(player),
+  // pageId: the route's id, else the loaded log's (a name-only page, 2026-10-16).
+  /slipPickFor\(\s*\{ player_id: pageId \}\s*,\s*idx\s*,\s*line - 0\.5\s*\)/.test(player),
 );
 check(
   'and slipPickFor is live code again, so its test guards something',

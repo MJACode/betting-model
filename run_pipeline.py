@@ -705,6 +705,28 @@ def step_wnba_results(run_date: str) -> bool:
         return False
 
 
+def step_nba_results(run_date: str) -> bool:
+    """
+    NBA final scores + player box scores from ESPN for the trailing 3 days
+    (data/ingestors/nba_results_ingestor.py). Must run BEFORE settlement: NBA
+    game picks settle off games.home_score and NBA props off
+    nba_player_game_log, and until 2026-10-15 nothing on the worker wrote
+    either (nba_api is blocked here). Self-limiting: no ESPN call unless a
+    started NBA game still lacks a score or a box. The NBA analog of
+    step_wnba_results.
+    """
+    try:
+        from data.ingestors.nba_results_ingestor import ingest_nba_results
+        result = ingest_nba_results(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in result.items()
+                   if k not in ("planned_scores", "planned_box")}
+        logger.success(f"✓ NBA results (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA results failed: {exc}")
+        return False
+
+
 def step_ncaaf_results(run_date: str) -> bool:
     """
     Fill NCAAF final scores from CFBD. Must run BEFORE settlement — the
@@ -1300,15 +1322,51 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
-def step_nba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
-    """Score NBA player props (9 markets incl. double-double) and write picks to DB."""
+def step_nba_prop_market(dry_run: bool = False) -> bool:
+    """NBA player props (`nba_prop_market`): same-line unders against Pinnacle.
+
+    Decides each game once, at the first look 45-70 minutes before its tip
+    whose newest prop fetch holds Pinnacle, and writes every qualifying
+    proposition with the game's decision row, under the model's lock
+    (scripts/nba_prop_market_card.py; no game or night cap, mike 2026-10-16).
+    Run by the refresh pass, the 6am run and the five-minute window job. LIVE,
+    no write switch (mike, 2026-10-15). A look with no game in its window
+    writes nothing and logs why.
+    """
     try:
-        from models.scorer import run_nba_prop_scorer
-        result = run_nba_prop_scorer(target_date=run_date, dry_run=dry_run)
-        logger.success(f"✓ NBA prop scoring: {result}")
+        from scripts.nba_prop_market_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA prop market card: "
+                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
         return True
     except Exception as exc:
-        logger.error(f"✗ NBA prop scoring failed: {exc}")
+        logger.error(f"✗ NBA prop market card failed: {exc}")
+        return False
+
+
+def step_nba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
+    """The old name, kept so existing callers keep working: it runs the NBA prop
+    card. The generic NBA prop scorer it used to run was retired with its nine
+    models on 2026-10-15 (config.RETIRED_MODELS)."""
+    return step_nba_prop_market(dry_run=dry_run)
+
+
+def step_nba_prop_close() -> bool:
+    """The closing prop snapshot for each game holding an nba_prop_market bet,
+    for closing-line value only (data/ingestors/nba_prop_close_ingestor.py).
+    Safe on every pass: a pass with no bet game 12-25 minutes from tip spends
+    nothing."""
+    from config import RUN_NBA_PROP_CLOSE
+    if not RUN_NBA_PROP_CLOSE:
+        logger.info("NBA prop close: RUN_NBA_PROP_CLOSE=0 — skipped")
+        return True
+    try:
+        from data.ingestors.nba_prop_close_ingestor import run_nba_prop_close_ingestor
+        result = run_nba_prop_close_ingestor()
+        logger.success(f"✓ NBA prop close: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA prop close failed: {exc}")
         return False
 
 
@@ -1711,6 +1769,14 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["wnba_results"] = step_wnba_results(run_date)
     time.sleep(1)
 
+    # ── Step 0e2: NBA finals + box scores via ESPN (MUST precede settlement) ─
+    # The worker's only NBA results source: nba_api is blocked here, and the
+    # local job last ran 2026-08-30. No ESPN call unless a started game still
+    # lacks a score or a box (data/ingestors/nba_results_ingestor.py).
+    logger.info("Step 0e2: Ingesting NBA finals + box scores from ESPN (pre-settle)...")
+    results["nba_results"] = step_nba_results(run_date)
+    time.sleep(1)
+
     # ── Step 0f: NFL finals via nflverse (MUST precede settlement) ───────────
     # nfl_wind_totals picks (the §28 wind card) settle off games scores through
     # the generic totals path. Free no-op whenever no NFL finals are pending.
@@ -1803,6 +1869,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # need a residential IP).
     logger.info("Step 2c2: Fetching DK NBA player prop lines...")
     results["nba_prop_odds"] = step_nba_prop_odds(run_date, snapshot_type="open")
+    # The NBA prop card reads the fetch just stored (it decides only games
+    # 45-70 minutes from tip, so at 6am it normally writes nothing), then the
+    # closing snapshot for any bet game whose close is due.
+    logger.info("Step 2c3: NBA prop card (same-line unders vs Pinnacle)...")
+    results["nba_prop_market"] = step_nba_prop_market(dry_run=dry_run)
+    if not dry_run:
+        results["nba_prop_close"] = step_nba_prop_close()
     time.sleep(2)
 
     # ── Step 2d: Golf field + odds (DataGolf) ────────────────────────────────
@@ -1895,9 +1968,9 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
     results["wnba_prop_market"]  = step_wnba_prop_market(run_date, dry_run=dry_run)
 
-    # ── Step 8b2: NBA prop scoring ─────────────────────────────────────────────
-    logger.info("Step 8b2: Generating NBA player prop picks...")
-    results["nba_prop_scoring"] = step_nba_prop_scoring(run_date, dry_run=dry_run)
+    # ── Step 8b2: NBA props ────────────────────────────────────────────────────
+    # The NBA prop card ran at Step 2c3, right after its fetch. The generic NBA
+    # prop scorer that ran here was retired with its models (2026-10-15).
 
     # ── Step 8c: Golf scoring ──────────────────────────────────────────────────
     logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
@@ -2149,9 +2222,10 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
+                                 "nba-prop-market", "nba-prop-close",
                                  "nhl-over-under",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nfl-results",
+                                 "nhl-results", "wnba-results", "nba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
@@ -2229,10 +2303,13 @@ Examples:
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
+            "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
+            "nba-prop-close": lambda: step_nba_prop_close(),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
+            "nba-results":  lambda: step_nba_results(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
             "ncaaf-results": lambda: step_ncaaf_results(run_date),
             "ncaaf-stats":  lambda: step_ncaaf_stats(run_date),

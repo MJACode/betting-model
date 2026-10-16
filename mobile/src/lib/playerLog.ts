@@ -12,7 +12,9 @@
  * ranks differently (or vice versa).
  */
 import type { Sport } from '@/hooks/useSportFilter';
+import { sportOfModel } from './modelMeta';
 import {
+  statForPropMarket,
   statForPropModel,
   statsForSport,
   statValue,
@@ -646,4 +648,32 @@ export function detailStatForPropModel(modelId: string): StatDef | null {
   const def = statForPropModel(modelId);
   if (!def) return null;
   return def.key === 'innings_pitched' ? OUTS_STAT : def;
+}
+
+/**
+ * The stat a prop PICK's player detail opens on. The model's own stat when it
+ * prices one; otherwise the pick is from a multi-market rule (one id across
+ * several markets, the market on the row) and the stat is the one its
+ * prop_market is priced in, on the model's sport's board.
+ */
+export function detailStatForPick(pick: { model_id: string; prop_market?: string | null }): StatDef | null {
+  const byModel = detailStatForPropModel(pick.model_id);
+  if (byModel) return byModel;
+  const def = statForPropMarket(sportOfModel(pick.model_id), pick.prop_market);
+  if (!def) return null;
+  return def.key === 'innings_pitched' ? OUTS_STAT : def;
+}
+
+/**
+ * The player id the page's reads key on: the route's, else the loaded log's.
+ * A pick from nfl_prop_market carries no player_id, so its player page opens
+ * by name, and every read keyed on the id (the head-to-head row, today's pick
+ * on this player) found nothing. The log the page loads by name carries the
+ * id, so the page uses it once the log is in.
+ */
+export function pagePlayerId(
+  routePlayerId: string | null | undefined,
+  games: ReadonlyArray<{ player_id?: string | null }>,
+): string | null {
+  return routePlayerId || games[0]?.player_id || null;
 }

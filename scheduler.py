@@ -18,6 +18,13 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * Daily full pipeline   6:00am ET            -> python run_pipeline.py
   * Hourly refresh        :17, 7am-5pm ET      -> bash scripts/refresh_pass.sh
   * Evening 10-min refresh every :00..:50, 6-11pm ET -> bash scripts/refresh_pass.sh
+  * NBA prop window       every 5 min, 24x7     -> run_nba_prop_window
+        (scripts/nba_prop_window.py: props for exactly the NBA games 40-75
+        minutes from tip and not yet decided, then the nba_prop_market card,
+        the closing snapshot for bet games 12-25 minutes out, and publish.
+        Returns without an API call when no game is in either range. mike,
+        2026-10-16: "we're not leaving our games" -- the hourly passes put no
+        look 45-70 minutes before any tip at or before 6pm ET.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -563,7 +570,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "failure_alerter",
                   "calibration_watch",
                   "model_quality",
-                  "kalshi_ladders", "kalshi_game_markets"}
+                  "kalshi_ladders", "kalshi_game_markets",
+                  # Writes picks through the same card as the refresh pass,
+                  # so it lives beside the passes, not with the loops.
+                  "nba_prop_window"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -989,6 +999,54 @@ def run_nfl_prop_card() -> None:
     # Getting that pick onto the app and into Discord is this call, and waiting
     # for the next refresh pass to do it is what lost a UFC bet on 2026-09-05.
     _publish_new_signals("nfl-prop-card")
+
+
+# Each step of an NBA prop window tick is bounded, and the three together fit
+# inside one five-minute tick (max_instances=1 turns one stuck step into
+# skipped ticks -- the 2026-10-11 NFL poll, see _run). The fetch is one event
+# call per game about to enter its window; the card and the close are a read
+# and a handful of writes, plus one event call per bet game owed a close.
+NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 150, "card": 90, "close": 60}
+
+
+def run_nba_prop_window() -> None:
+    """One NBA prop window tick: every game decided inside its window.
+
+    nba_prop_market decides a game once, 45-70 minutes before tip. The refresh
+    passes cannot put a look there for any tip at or before 6pm ET (hourly at
+    :17 until 5pm), so this tick runs every five minutes, 24x7. It reads what
+    is stored first (scripts/nba_prop_window.plan) and returns without an API
+    call when no game is 40-75 minutes out and undecided and no bet game is
+    owed its closing snapshot -- most ticks of most days.
+
+    Otherwise: fetch props for exactly those games, run the card on that fetch,
+    take any closing snapshot that is due (even on a tick with nothing to
+    decide), and publish what the card wrote. A step that fails or is killed
+    raises AFTER publishing, so the heartbeat records "error" and the failure
+    alerter reports it, while a bet that was written still goes out.
+    """
+    from scripts.nba_prop_window import plan_tick
+    plan = plan_tick()
+    if not plan.decide and not plan.close:
+        return
+    log.info("NBA prop window: deciding %s; closes due %s", plan.decide, plan.close)
+    t = NBA_PROP_WINDOW_TIMEOUT_S
+    outcomes: dict[str, str] = {}
+    if plan.decide:
+        outcomes["nba-prop-window-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
+            "nba-prop-window-fetch", timeout=t["fetch"])
+        outcomes["nba-prop-market"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-market"],
+            "nba-prop-market", timeout=t["card"])
+    if plan.close:
+        outcomes["nba-prop-close"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-close"],
+            "nba-prop-close", timeout=t["close"])
+    _publish_new_signals("nba-prop-window")
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    if bad:
+        raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")
 
 
 def run_nfl_opener_card() -> None:
@@ -1803,6 +1861,19 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_PROP_CARD=0 — NFL prop card NOT scheduled.")
+
+    # NBA prop window — every 5 minutes, 24x7 (run_nba_prop_window). Around
+    # the clock because the cost of an idle tick is one database read, and a
+    # schedule with hours in it is a schedule that can miss a tip: the hourly
+    # passes missed every one at or before 6pm ET. Unconditional: the card has
+    # no write switch (scripts/nba_prop_market_card.py) and neither does this.
+    sched.add_job(
+        run_nba_prop_window,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="nba_prop_window",
+        name="NBA prop window (every 5 min, 24x7: games 40-75 min from tip)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
 
     # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow
     # Kalshi response cannot delay anything that places a bet.

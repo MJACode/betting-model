@@ -131,6 +131,23 @@ function mkPick(over: Partial<Pick>): Pick {
     mkPick({ model_id: 'nhl_prop_blocked_shots', player_id: '8477488', created_at: NOW }),
   );
   check('blocked shots takes the NHL prop note too', Boolean(blocks && !blocks.note.includes('lineup')));
+  // The NBA prop rule posts once, 45-70 minutes before tip, off the books'
+  // prices: no lineup check to claim, and a player who sits voids the bet.
+  const nbaProp = pickTimingInfo(
+    mkPick({
+      sport: 'NBA',
+      model_id: 'nba_prop_market',
+      player_id: '1628983',
+      pick_label: 'Shai Gilgeous-Alexander Under 31.5 Pts',
+      pick_side: 'under' as PickSide,
+      created_at: NOW,
+    }),
+  );
+  check('NBA prop rule stays on the posted timing', nbaProp?.kind === 'posted' && nbaProp.verb === 'Posted');
+  check('NBA prop note claims no confirmed lineup', Boolean(nbaProp && !nbaProp.note.includes('lineup')));
+  check('NBA prop note says it is void if he does not play',
+    Boolean(nbaProp?.note.endsWith('Void if the player doesn’t play.')), nbaProp?.note);
+  check('the NBA void line is not the goalie one', Boolean(nbaProp && !nbaProp.note.includes('goalie')));
   // NHL totals post on the first refresh that qualifies, often the night
   // before: not at the first scoring run of the day.
   const totals = pickTimingInfo(mkPick({ sport: 'NHL', model_id: 'nhl_over_under', created_at: NOW }));

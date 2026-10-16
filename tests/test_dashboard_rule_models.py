@@ -33,6 +33,9 @@ KNOWN_RULES = {
     "wnba_prop_market", "mlb_spread_market",
     "mlb_total_market", "mlb_total_public_fade",
     "nhl_over_under",
+    # 2026-10-15 (mike): the NBA prop rule, Pinnacle's no-vig under vs the
+    # bettable books (models/nba_prop_market.py).
+    "nba_prop_market",
 }
 
 

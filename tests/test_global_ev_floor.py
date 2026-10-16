@@ -377,7 +377,10 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          "nfl_live_leader_ml",
          # 2026-10-15 (mike, "Yes"): the rebuilt moneyline, anchored on
          # DraftKings' price and graded on its own number.
-         "nhl_moneyline"}
+         "nhl_moneyline",
+         # 2026-10-15 (mike: "use what you've learned in this repo"): the NBA
+         # prop rule; its number IS Pinnacle's no-vig under.
+         "nba_prop_market"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

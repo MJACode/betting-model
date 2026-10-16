@@ -892,7 +892,8 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     under_link      TEXT,
     over_sid        TEXT,
     under_sid       TEXT,
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (datetime('now')),
+    book_last_update TEXT
 );
 
 -- 2026-08-30 Disk-IO fix: MAX(snapshot_at) freshness probes full-scanned the

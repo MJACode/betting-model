@@ -15,14 +15,18 @@
  * moment config.py moved.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   MODEL_META,
   BET_TYPE_GROUPS,
   betTypeGroups,
+  sportHasLivePropModel,
   betTypeLabel,
   betTypePickerGroups,
   betTypeStatusSuffix,
   choiceAddedLabel,
+  modelLong,
   withdrawnRulesEmpty,
 } from '../src/lib/modelMeta';
 import {
@@ -51,6 +55,28 @@ check('every bundled pause is isModelPaused when the server store is empty',
 check('paused models keep their MODEL_META labels for picks already made',
   PAUSED.every((m) => !!MODEL_META[m]?.shortLabel),
   PAUSED.filter((m) => !MODEL_META[m]?.shortLabel).join(','));
+
+// ── One explained name for the rules priced against Pinnacle ────────────────
+// '(market-relative)' was explained nowhere in the app; Pinnacle is (designer
+// review, 2026-10-16). Every rule that de-vigs Pinnacle and bets a soft book
+// says so the same way.
+for (const id of ['mlb_spread_market', 'mlb_total_market', 'nba_prop_market', 'nfl_prop_market', 'wnba_prop_market']) {
+  check(`${id} is named "(vs Pinnacle)"`, modelLong(id).endsWith('(vs Pinnacle)'), modelLong(id));
+}
+check('no model is called "market-relative" any more',
+  !Object.values(MODEL_META).some((m) => m.longLabel.includes('market-relative')));
+
+// ── The built-in model screen's title is the long name ──────────────────────
+// Titled with the short label, the three prop-rule screens all read
+// "Prop Mkt". The long names differ; the chip on the screen keeps the short one.
+{
+  const screen = readFileSync(join(__dirname, '..', 'src/screens/BuiltInModelDetailScreen.tsx'), 'utf-8');
+  check('the built-in model screen is titled with the long label',
+    /navigation\.setOptions\(\{ title: modelLong\(modelId\) \}\)/.test(screen));
+  check('its chip keeps the short label', /<Text style=\{styles\.modelChipText\}>\{modelShort\(modelId\)\}<\/Text>/.test(screen));
+  const titles = new Set(['nba_prop_market', 'nfl_prop_market', 'wnba_prop_market'].map(modelLong));
+  check('the three prop-rule screens have three different titles', titles.size === 3, [...titles].join(' / '));
+}
 
 // ── Bet-type picker ─────────────────────────────────────────────────────────
 const pickerIds = betTypeGroups().flatMap((g) => g.options.map((o) => o.id));
@@ -89,8 +115,14 @@ check('an active batter prop is still a bet type you can build on',
       !mlbProps?.modelIds.includes('mlb_prop_batter_hr'));
   check('NFL has no moneyline model, so it does not invent an ML row',
     row('NFL').join(',') === 'Spread|Spread line,Player props|All player markets');
-  check('NBA keeps all three, with Spread rather than a strategy name',
-    row('NBA').join(',') === 'ML|Moneyline,Spread|Spread line,Player props|All player markets');
+  // The NBA rebuild retired nba_moneyline and nba_spread (config
+  // RETIRED_MODELS); the one live NBA model is the nba_prop_market rule, so
+  // the picker offers Player props and nothing else for NBA.
+  check('NBA is Player props only — its moneyline and spread are retired',
+    row('NBA').join(',') === 'Player props|All player markets');
+  const nbaProps = betTypePickerGroups().find((g) => g.sport === 'NBA')?.choices.find((c) => c.slot === 'props');
+  check('NBA Player props writes the live nba_prop_market rule, not a retired per-stat model',
+    nbaProps?.modelIds.join(',') === 'nba_prop_market');
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',
     row('NCAAF').join(',') === 'Spread|Spread line');
   const ncaafLine = betTypePickerGroups().find((g) => g.sport === 'NCAAF')?.choices.find((c) => c.slot === 'line');
@@ -118,7 +150,7 @@ check('an active batter prop is still a bet type you can build on',
       !betTypeLabel('nfl_opener_spread').includes('('));
   check('a market the picker does not offer keeps its long name',
     betTypeLabel('mlb_f5_moneyline') === 'MLB · First 5 Moneyline' &&
-      betTypeLabel('mlb_total_market') === 'MLB · Total Runs (market-relative)' &&
+      betTypeLabel('mlb_total_market') === 'MLB · Total Runs (vs Pinnacle)' &&
       betTypeLabel('ncaaf_spread_premium') === 'NCAAF · Spread (Opener, High Conviction)');
   check('a slot is Added only when every model is already a rule',
     choiceAddedLabel(0, 9) === null &&
@@ -145,6 +177,14 @@ check('propModelForStat still resolves a live batter prop (walks)',
   propModelForStat(walksStat) === 'mlb_prop_batter_walks');
 check('a pick a paused model already made still opens its player\'s stat page',
   statForPropModel('mlb_prop_batter_hits')?.key === 'hits');
+
+// ── "Our picks on <player>": does any live prop model price this sport? ─────
+// Read from the model catalog. The NBA and NFL live prop models are
+// multi-market rules with no single stat, so the old stat-catalog test told an
+// NBA or NFL player page that no prop model priced it.
+check('a live prop model prices NBA players (nba_prop_market)', sportHasLivePropModel('NBA'));
+check('a live prop model prices NFL players (nfl_prop_market)', sportHasLivePropModel('NFL'));
+check('no prop model prices NCAAF players', !sportHasLivePropModel('NCAAF'));
 
 // ── Server flag wins, same helper every surface uses ────────────────────────
 setServerThresholds({
