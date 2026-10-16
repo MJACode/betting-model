@@ -5,8 +5,9 @@ Each test pins one property of the rule as it was graded
 (docs/nba_models_2026.md 4.3) or of the card that writes it: the same line and
 the same fetch, coherent two-way quotes, the EV floor on Pinnacle's own number,
 unders only, the best bettable price with Pinnacle and Bovada never taken, the
-45-70 minute window, one a game and four a night, insert-once under the lock,
-name refusal, the row shape, settlement and the closing-line path.
+45-70 minute window, every qualifying proposition (no game or night cap), each
+game decided once (the decisions ledger), insert-once under the lock, name
+refusal, the row shape, settlement and the closing-line path.
 """
 from __future__ import annotations
 
@@ -42,9 +43,16 @@ def q(book, over, under, line=24.5, player="Stephen Curry", market="player_point
             "snapshot_at": snap, "book_last_update": lu, "snapshot_type": kind}
 
 
-def run(quotes, now=NOW, games=None, roster=ROSTER, taken=None, soft_books=None):
+def run_full(quotes, now=NOW, games=None, roster=ROSTER, taken=None, soft_books=None,
+             decided=None):
+    """(bets, diag, decisions)."""
+    extra = {} if decided is None else {"decided": decided}
     return mk.find_bets(quotes, games or GAMES, roster, now, taken=taken,
-                        soft_books=soft_books)
+                        soft_books=soft_books, **extra)
+
+
+def run(quotes, now=NOW, games=None, roster=ROSTER, taken=None, soft_books=None):
+    return run_full(quotes, now, games, roster, taken, soft_books)[:2]
 
 
 def fair_under(over, under):
@@ -318,57 +326,165 @@ def test_a_books_initials_match_the_logs():
     assert roster.resolve("R.J. Barrett", "TOR", "CHI") == ("1629628", "ok")
 
 
-# ── one a game, four a night ─────────────────────────────────────────────────
+# ── every qualifying proposition, no game or night cap ───────────────────────
 
-def test_one_bet_a_game_the_best_ev():
-    quotes = [q("pinnacle", -115, -105), q("fanduel", -125, +105),
-              q("pinnacle", -110, -110, player="LeBron James", market="player_rebounds", line=7.5),
-              q("fanduel", -140, +120, player="LeBron James", market="player_rebounds", line=7.5)]
+def test_every_qualifying_proposition_is_bet_at_its_best_price():
+    """mike, 2026-10-16: "maximize units won". One bet per (game, player,
+    market) at the best bettable price; no game or night cap."""
+    reb = dict(player="LeBron James", market="player_rebounds", line=7.5)
+    ast = dict(player="LeBron James", market="player_assists", line=6.5)
+    quotes = [q("pinnacle", -115, -105), q("fanduel", -125, +105), q("betmgm", -130, +110),
+              q("draftkings", -120, +100),
+              q("pinnacle", -110, -110, **reb), q("fanduel", -140, +120, **reb),
+              q("pinnacle", -110, -110, **ast), q("betmgm", -130, +110, **ast)]
     bets, diag = run(quotes)
-    assert len(bets) == 1 and diag["qualifying"] == 2
-    assert (bets[0].player, bets[0].market) == ("LeBron James", "player_rebounds")
+    assert sorted((b.player, b.market, b.book, b.price) for b in bets) == [
+        ("LeBron James", "player_assists", "betmgm", 110.0),
+        ("LeBron James", "player_rebounds", "fanduel", 120.0),
+        ("Stephen Curry", "player_points", "betmgm", 110.0)]          # the best of two books
+    assert diag["bets"] == 3 and diag["qualifying"] == 4
 
 
-def _row(gid, ev, date="2026-10-21", tip="2026-10-22T00:00:00+00:00", pid="1"):
-    return {"game_id": gid, "_ev": ev, "game_date": date, "_tip": tip, "player_id": pid}
+def _decision(gid=GID, n_bets=0, n_quotes=2):
+    return mk.NbaPropDecision(game_id=gid, fetch_at=FETCH, n_quotes=n_quotes,
+                              n_bets=n_bets, detail="test")
 
 
-def test_four_a_night_counting_bets_already_written():
-    rows = [_row(f"G{i}", ev) for i, ev in enumerate([0.01, 0.05, 0.03, 0.02, 0.04, 0.06])]
-    kept = card.per_night(rows, {"2026-10-21": 1})
-    assert [r["game_id"] for r in kept] == ["G5", "G1", "G4"]           # best EV, 3 left
-    assert card.per_night(rows, {"2026-10-21": 4}) == []
-    assert len(card.per_night(rows)) == mk.MAX_BETS_PER_NIGHT == 4
-    assert mk.MAX_BETS_PER_GAME == 1
-    # another night has its own four
-    other = [_row("H1", 0.01, date="2026-10-22")]
-    assert [r["game_id"] for r in card.per_night(rows + other, {"2026-10-21": 4})] == ["H1"]
+def test_no_game_or_night_cap_is_left_anywhere():
+    """The caps are gone, not set high: nine bets over six games of one night,
+    three of them in one game, are all written."""
+    for name in ("MAX_BETS_PER_GAME", "MAX_BETS_PER_NIGHT"):
+        assert not hasattr(mk, name), name
+    for name in ("one_per_game", "per_night", "bets_by_night"):
+        assert not hasattr(card, name), name
+    bets = [_bet(f"G{i}", ev=0.01 * (i + 1)) for i in range(6)]
+    bets += [_bet("G0", market="player_rebounds", line=7.5),
+             _bet("G0", market="player_assists", line=6.5),
+             _bet("G1", market="player_threes", line=3.5)]
+    rows = card.pick_rows(bets, bankroll=1000.0)
+    decisions = [_decision(f"G{i}", n_bets=sum(r["game_id"] == f"G{i}" for r in rows))
+                 for i in range(6)]
+    conn = _PublishConn()
+    assert card.publish(conn, rows, decisions) == (9, 6)
+    assert len(conn.inserted) == 9 and len(conn.decisions) == 6
 
 
-def test_the_night_fills_in_tip_order_like_the_backtest():
-    """The four-a-night result (1,862 bets, +5.05%) took the first four games of
-    the night BY TIP. A pass that sees two games in its window must give the last
-    slot to the earlier tip even when the later one has the better EV."""
-    early = _row("EARLY", 0.01, tip="2026-10-21T23:00:00+00:00")
-    late = _row("LATE", 0.09, tip="2026-10-21T23:20:00+00:00")
-    assert [r["game_id"] for r in card.per_night([late, early], {"2026-10-21": 3})] == ["EARLY"]
-    # same tip: the better EV first
-    a, b = _row("A", 0.02), _row("B", 0.05)
-    assert [r["game_id"] for r in card.per_night([a, b], {"2026-10-21": 3})] == ["B"]
+# ── each game decided once ───────────────────────────────────────────────────
+
+def test_a_look_with_pinnacle_in_the_window_decides_the_game_even_with_no_bet():
+    """The backtest looked at every game once. A look whose newest fetch holds
+    Pinnacle inside the window IS that look, whether or not anything cleared."""
+    bets, diag, decisions = run_full([q("pinnacle", -110, -110), q("fanduel", -110, -110)])
+    assert bets == [] and diag["below_ev_floor"] == 1
+    assert [(d.game_id, d.fetch_at, d.n_quotes, d.n_bets) for d in decisions] == [(GID, FETCH, 2, 0)]
+    assert diag["decided"] == 1
+    bets, diag, decisions = run_full([q("pinnacle", -115, -105), q("fanduel", -125, +105)])
+    assert [(d.game_id, d.n_bets) for d in decisions] == [(GID, 1)] and len(bets) == 1
 
 
-def test_one_a_game_drops_a_game_already_bet():
-    rows = [_row("G1", 0.05, pid="1"), _row("G1", 0.02, pid="2"), _row("G2", 0.03)]
-    assert [(r["game_id"], r["player_id"]) for r in card.one_per_game(rows)] == [("G1", "1"), ("G2", "1")]
-    assert [r["game_id"] for r in card.one_per_game(rows, taken={"G1"})] == ["G2"]
+@pytest.mark.parametrize("why", ["no_sharp", "pinnacle_withdrawn", "stale_fetch", "too_early"])
+def test_a_look_that_cannot_price_the_game_is_not_a_decision(why):
+    """No Pinnacle, Pinnacle missing from the newest fetch, a fetch from before
+    the window, or a look before the window: the game is tried again next look."""
+    stale = (TIP - timedelta(minutes=80)).isoformat()
+    now = NOW
+    quotes = {
+        "no_sharp": [q("fanduel", -125, +105)],
+        "pinnacle_withdrawn": [q("pinnacle", -115, -105, snap=OLDER),
+                               q("fanduel", -125, +105, snap=OLDER), q("fanduel", -125, +105)],
+        "stale_fetch": [q("pinnacle", -115, -105, snap=stale), q("fanduel", -125, +105, snap=stale)],
+        "too_early": [q("pinnacle", -115, -105, snap=stale), q("fanduel", -125, +105, snap=stale)],
+    }[why]
+    if why == "too_early":
+        now = TIP - timedelta(minutes=78)
+    bets, diag, decisions = run_full(quotes, now=now)
+    assert bets == [] and decisions == [] and diag[why] == 1 and diag["decided"] == 0
+
+
+def test_a_game_already_decided_is_never_looked_at_again():
+    bets, diag, decisions = run_full([q("pinnacle", -115, -105), q("fanduel", -125, +105)],
+                                     decided={GID})
+    assert bets == [] and decisions == [] and diag["already_decided"] == 1
+    # past the window it is still a decided game, never a missed one
+    now = TIP - timedelta(minutes=30)
+    _, diag, _ = run_full([q("pinnacle", -115, -105, snap=(TIP - timedelta(minutes=100)).isoformat())],
+                          now=now, decided={GID})
+    assert diag["already_decided"] == 1 and diag["window_missed"] == 0
+
+
+def test_the_card_records_a_decision_when_nothing_qualifies(monkeypatch):
+    """A zero-bet decision is still a decision: the card must write it, or the
+    next look re-decides the game on a later price."""
+    seen = {}
+
+    class _Conn:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(card, "get_connection", lambda: _Conn())
+    monkeypatch.setattr(card, "ensure_decisions_table", lambda c: None)
+    monkeypatch.setattr(card, "slate", lambda c, now, skipped=None: dict(GAMES))
+    monkeypatch.setattr(card, "games_with_a_bet", lambda c, ids: set())
+    monkeypatch.setattr(card, "decided_games", lambda c, ids: set())
+    monkeypatch.setattr(card, "load_roster", lambda c, g: ROSTER)
+    monkeypatch.setattr(mk, "load_quotes",
+                        lambda c, g, now: [q("pinnacle", -110, -110), q("fanduel", -110, -110)])
+
+    def _publish(c, rows, decisions):
+        seen.update(rows=rows, decisions=decisions)
+        return 0, len(decisions)
+
+    monkeypatch.setattr(card, "publish", _publish)
+    out = card.run_card(do_publish=True, now=NOW)
+    assert seen["rows"] == [] and [d.game_id for d in seen["decisions"]] == [GID]
+    assert out["decided"] == 1 and out["published"] == 0
+
+
+def test_the_decisions_ledger_is_worker_only_and_created_behind_the_guard(monkeypatch):
+    from data.anon_readable import WORKER_ONLY_TABLES
+    assert card.DECISIONS_TABLE == "nba_prop_market_decisions"
+    assert card.DECISIONS_TABLE in WORKER_ONLY_TABLES
+
+    class _C:
+        def __init__(self):
+            self.sql, self.commits = [], 0
+
+        def execute(self, sql, params=None):
+            self.sql.append(" ".join(sql.split()))
+            return self
+
+        def fetchone(self):
+            return None
+
+        def rollback(self):
+            pass
+
+        def commit(self):
+            self.commits += 1
+
+    monkeypatch.setattr(card, "schema_is_current", lambda *a, **k: True)
+    c = _C()
+    card.ensure_decisions_table(c)
+    assert c.sql == [], "an existing ledger must cost no DDL (the PostgREST reload trap)"
+    monkeypatch.setattr(card, "schema_is_current", lambda *a, **k: False)
+    c = _C()
+    card.ensure_decisions_table(c)
+    ddl = [s for s in c.sql if "relrowsecurity" not in s]
+    assert ddl[0].startswith("CREATE TABLE IF NOT EXISTS nba_prop_market_decisions")
+    for col in ("game_id TEXT PRIMARY KEY", "decided_at TIMESTAMPTZ", "fetch_at TEXT",
+                "n_quotes INTEGER", "n_bets INTEGER", "detail TEXT"):
+        assert col in ddl[0], col
+    assert "REVOKE ALL ON nba_prop_market_decisions FROM anon, authenticated" in ddl
+    assert "ALTER TABLE nba_prop_market_decisions ENABLE ROW LEVEL SECURITY" in ddl
+    assert c.commits == 1
 
 
 # ── insert once, under the lock ──────────────────────────────────────────────
 
 class _PublishConn:
-    def __init__(self, taken=(), written=None):
-        self.taken, self.written = set(taken), dict(written or {})
-        self.sql, self.inserted, self.commits = [], [], 0
+    def __init__(self, taken=(), decided=()):
+        self.taken, self.decided = set(taken), set(decided)
+        self.sql, self.inserted, self.decisions, self.commits = [], [], [], 0
 
     def execute(self, sql, params=None):
         s = " ".join(sql.split())
@@ -376,8 +492,14 @@ class _PublishConn:
         self._one, self._all = None, []
         if "SELECT DISTINCT game_id FROM picks" in s:
             self._all = [(g,) for g in params[1] if g in self.taken]
-        elif "SELECT game_date, count(*) FROM picks" in s:
-            self._all = list(self.written.items())
+        elif "FROM nba_prop_market_decisions" in s and s.startswith("SELECT"):
+            self._all = [(g,) for g in params[0] if g in self.decided]
+        elif s.startswith("INSERT INTO nba_prop_market_decisions"):
+            gid = params["game_id"]
+            if gid not in self.decided:
+                self.decided.add(gid)
+                self.decisions.append(gid)
+                self._one = (gid,)
         elif s.startswith("INSERT INTO picks"):
             self.inserted.append(params)
             self._one = (len(self.inserted),)
@@ -390,6 +512,7 @@ class _PublishConn:
         return self._all
 
     def commit(self):
+        self.sql.append("COMMIT")
         self.commits += 1
 
 
@@ -404,23 +527,37 @@ def _bet(gid=GID, book="fanduel", price=105.0, dk=None, ev=0.03, player="Stephen
         dk_player=player if dk is not None else None)
 
 
-def test_publish_takes_the_lock_before_reading_and_counts_inside_it():
-    conn = _PublishConn(taken={"G_TAKEN"}, written={"2026-10-21": 3})
-    rows = card.pick_rows([_bet("G_TAKEN", ev=0.09), _bet("G2", ev=0.05),
-                           _bet("G3", ev=0.04)], bankroll=1000.0)
-    n = card.publish(conn, rows)
+def test_publish_reads_under_the_lock_and_writes_once_in_one_transaction():
+    """The ledger and the picks are read AFTER the lock, and the decision rows
+    and the bets land in ONE commit: two overlapping writers (the 6am run, a
+    refresh pass, the window job) can neither both decide a game nor leave a
+    decision without its bets."""
+    conn = _PublishConn(taken={"G_TAKEN"}, decided={"G_DONE"})
+    rows = card.pick_rows([_bet("G_TAKEN", ev=0.09), _bet("G_DONE", ev=0.07),
+                           _bet("G2", ev=0.05), _bet("G2", market="player_rebounds", line=7.5)],
+                          bankroll=1000.0)
+    decisions = [_decision("G_TAKEN", 1), _decision("G_DONE", 1), _decision("G2", 2),
+                 _decision("G3", 0)]
+    n, nd = card.publish(conn, rows, decisions)
     lock = next(i for i, s in enumerate(conn.sql) if "pg_advisory_xact_lock" in s)
-    reads = [i for i, s in enumerate(conn.sql) if "FROM picks" in s]
-    assert reads and lock < min(reads), "the caps must be counted under the lock"
-    assert n == 1 and [p["game_id"] for p in conn.inserted] == ["G2"]   # one left that night
-    assert conn.commits == 1
+    reads = [i for i, s in enumerate(conn.sql)
+             if s.startswith("SELECT") and ("FROM picks" in s or "FROM nba_prop_market_decisions" in s)]
+    writes = [i for i, s in enumerate(conn.sql) if s.startswith("INSERT")]
+    assert reads and lock < min(reads), "the ledger and the picks must be read under the lock"
+    assert conn.sql[-1] == "COMMIT" and conn.commits == 1 and max(writes) < len(conn.sql) - 1
+    assert (n, nd) == (2, 2)
+    assert sorted(conn.decisions) == ["G2", "G3"]                     # G3: decided, no bet
+    assert [p["game_id"] for p in conn.inserted] == ["G2", "G2"]
 
 
 def test_publish_writes_bet_rows_once_with_its_own_column_list():
     assert "prop_market" in card._INSERT and "player_key" in card._INSERT
     assert "ON CONFLICT DO NOTHING" in card._INSERT
     conn = _PublishConn(taken={GID})
-    assert card.publish(conn, card.pick_rows([_bet()], bankroll=1000.0)) == 0
+    assert card.publish(conn, card.pick_rows([_bet()], bankroll=1000.0), [_decision(GID, 1)]) == (0, 0)
+    assert conn.inserted == [] and conn.decisions == []
+    conn = _PublishConn(decided={GID})
+    assert card.publish(conn, card.pick_rows([_bet()], bankroll=1000.0), [_decision(GID, 1)]) == (0, 0)
     assert conn.inserted == []
 
 

@@ -37,14 +37,6 @@ live feed carries alternates the backtest never saw), a calibrated published
 probability (the model claims 0.636 where it wins 0.464), and an owner rule for
 the 530 picks it shares with `nba_prop_market` (that rule keeps them).
 
-## [ ] NBA: 177 games a season can never be decided (tips at or before 6pm ET) (2026-10-16)
-
-`nba_prop_market` decides 45-70 minutes before tip. Refresh passes run hourly
-at :17 until 5pm ET, so every tip from 10:30am to 6:00pm ET (177 of 1,206 in
-2026-27) has no pass in its window and is logged `window_missed`. Reaching them
-needs extra afternoon passes (credits; not priced). Widening the window is not
-the fix: the edge was measured at tip-54, and assists before tip-60 lost.
-
 ## [ ] NBA: the official injury report is not on the worker (2026-10-16)
 
 `data/ingestors/nba_injury_report.py --today` fetches the latest league PDF;
@@ -103,14 +95,6 @@ and since the NBA rebuild PR its head-to-head, today's picks and same-position
 card via `pagePlayerId`) can be the other player. Fix: pick detail passes the
 pick's game id or teams; when the by-name log holds more than one id, keep the
 rows whose team plays in that game.
-
-## [ ] NBA prop fetch buys every game seven days ahead on every pass (2026-10-16)
-
-`nba-prop-odds` uses `GAME_SCORE_AHEAD_DAYS` (7) and pulls 9 markets + 8
-alternates for every NBA game in that window on every refresh pass; the 10-20
-BOS-DET game was bought on every pass from 10-13. The card only reads games
-45-70 minutes from tip. A same-day window for NBA props would cut the spend;
-the app's prop board may read the far-out rows — check before changing.
 
 ## [ ] [needs-decision] NHL game picks are decided before the night's goalie is known (found 2026-10-13)
 

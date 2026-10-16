@@ -820,7 +820,8 @@ def _log_pipeline(conn: DBConnection, run_date: str, status: str,
 def run_prop_odds_ingestor(target_date: str = None,
                            snapshot_type: str = "open",
                            sport: str = "MLB",
-                           days_ahead: int = None) -> dict:
+                           days_ahead: int = None,
+                           only_game_ids=None) -> dict:
     """
     Pull DK player prop lines for all of a sport's games on target_date.
 
@@ -828,6 +829,11 @@ def run_prop_odds_ingestor(target_date: str = None,
         target_date:   ISO date YYYY-MM-DD (default: today ET)
         snapshot_type: 'open' | 'live'
         sport:         'MLB', 'WNBA', or 'NBA'
+        only_game_ids: when given, fetch ONLY these game ids (applied before
+                       the paid per-event call). The NBA window job
+                       (scheduler.run_nba_prop_window) uses it to fetch the
+                       games about to enter their decision window; None, the
+                       default, fetches every game as before.
 
     Returns:
         Summary dict.
@@ -892,6 +898,11 @@ def run_prop_odds_ingestor(target_date: str = None,
             identities.append(
                 (event, game_id, away_team, home_team, away_name, home_name)
             )
+        if only_game_ids is not None:
+            wanted = set(only_game_ids)
+            identities = [i for i in identities if i[1] in wanted]
+            logger.info(f"  {len(identities)} of {len(events)} {sport} event(s) asked for: "
+                        f"{sorted(wanted)}")
         known = _existing_game_ids(conn, [gid for _ev, gid, *_ in identities])
         skipped_unknown = 0
 

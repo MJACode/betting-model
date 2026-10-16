@@ -263,6 +263,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "nba_period_scores",
     "nba_player_dnp",
     "nba_schedule",
+    # The NBA prop card's decisions ledger: one row per game it has decided,
+    # so a game is decided once (scripts/nba_prop_market_card.py, which
+    # creates it on demand). Read by the card and the window job, never by
+    # the app.
+    "nba_prop_market_decisions",
     # NHL derivative-totals pull ledger. Created on demand by
     # data/ingestors/nhl_derivative_odds_history.py, same shape as
     # odds_history_pulls: a fixed name, never read by the app.

@@ -1325,11 +1325,13 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
 def step_nba_prop_market(dry_run: bool = False) -> bool:
     """NBA player props (`nba_prop_market`): same-line unders against Pinnacle.
 
-    Decides only games whose tip is 45-70 minutes away, on the prop fetch the
-    pass just stored, and writes at most one BET a game and four a night, once,
-    under the model's lock (scripts/nba_prop_market_card.py). LIVE, no write
-    switch (mike, 2026-10-15). A pass with no game in its window writes nothing
-    and logs why.
+    Decides each game once, at the first look 45-70 minutes before its tip
+    whose newest prop fetch holds Pinnacle, and writes every qualifying
+    proposition with the game's decision row, under the model's lock
+    (scripts/nba_prop_market_card.py; no game or night cap, mike 2026-10-16).
+    Run by the refresh pass, the 6am run and the five-minute window job. LIVE,
+    no write switch (mike, 2026-10-15). A look with no game in its window
+    writes nothing and logs why.
     """
     try:
         from scripts.nba_prop_market_card import run_card

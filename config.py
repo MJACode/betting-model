@@ -597,9 +597,9 @@ ACTION_THRESHOLDS: dict = {
     # as for nhl_over_under. Measured on 2023-24..2025-26 at the best bettable
     # price (scripts/nba_prop_market_lab.py, docs/nba_models_2026.md 4.3):
     # 25,204 bets +2.85% (90% CI +1.75..+3.96); at -200 and no
-    # double/triple-double 24,572 bets +2.96% (+1.85..+4.05); one a game and
-    # four a night, as the card writes, 1,862 bets +5.05% (+1.35..+8.76),
-    # every season positive.
+    # double/triple-double 24,572 bets +2.96% (+1.85..+4.05), +781.3 units,
+    # every season positive -- every qualifying proposition, as the card
+    # writes it (mike, 2026-10-16: "maximize units won"; no game or night cap).
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
@@ -3902,15 +3902,21 @@ RUN_NHL_PROP_ODDS = os.environ.get("RUN_NHL_PROP_ODDS", "1") == "1"
 # the scheduled tip, filed snapshot_type='close' so no card decides on it
 # (data/ingestors/nba_prop_close_ingestor.py; the NHL final's mechanism). 12
 # is the inside edge: the tip is the league's scheduled start, and a later
-# fetch could hold in-play prices. Thirteen minutes wide, so the ten-minute
-# evening passes land one inside it; the hourly daytime passes can miss it.
+# fetch could hold in-play prices. Thirteen minutes wide, and the five-minute
+# NBA prop window job (scheduler.run_nba_prop_window) lands two or three looks
+# inside it for every bet game, at any tip time.
 # Cost: markets x regions on the feed's billing, so one market at the ten
-# fetched books is expected to bill 1 credit a game (at most 4 games a night).
+# fetched books is expected to bill 1 credit a game, five markets 5.
 NBA_PROP_CLOSE_OPENS_MIN = int(os.environ.get("NBA_PROP_CLOSE_OPENS_MIN", "25"))
 NBA_PROP_CLOSE_CLOSES_MIN = int(os.environ.get("NBA_PROP_CLOSE_CLOSES_MIN", "12"))
-# One run's ceiling: four bet games a night at a few credits each fit with
-# room; a gate that broke and fetched on every pass stops here.
-NBA_PROP_CLOSE_MAX_CREDITS_PER_RUN = int(os.environ.get("NBA_PROP_CLOSE_MAX_CREDITS_PER_RUN", "40"))
+# One run's ceiling, sized so it never stops a close the model is owed: with
+# no game or night cap (mike, 2026-10-16) most games carry a bet, and at most
+# 8 regular-season games tipped inside any 13-minute span in every season
+# 2018-19..2026-27 (nba_schedule), so a run can owe 8 games x 5 markets = 40
+# credits at the expected price. 100 holds that 2.5 times over; only a gate
+# that broke and fetched on every pass stops here. Was 40, sized on four bet
+# games a night.
+NBA_PROP_CLOSE_MAX_CREDITS_PER_RUN = int(os.environ.get("NBA_PROP_CLOSE_MAX_CREDITS_PER_RUN", "100"))
 RUN_NBA_PROP_CLOSE = os.environ.get("RUN_NBA_PROP_CLOSE", "1") == "1"
 
 # RETIRED 2026-09-02 (matt): mlb_prop_batter_hr (batter_home_runs) and

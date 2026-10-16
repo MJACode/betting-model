@@ -10,13 +10,28 @@
 
 | Model | What it bets | Status |
 |---|---|---|
-| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Decided 45-70 minutes before tip; one bet a game, four a night. | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-prop-market`) |
+| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-70 minutes before tip; every qualifying proposition, no game or night cap. | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-prop-market`) |
 
-Graded on 2023-24 → 2025-26: one a game and four a night, 1,862 bets, +5.05%,
-90% CI +1.35..+8.76, positive every season; every proposition, 24,572 bets,
-+2.96%. Expect about +2% per bet live. It only ever bets unders because that is
-where the books' margin sits in every sport this repo has measured: blind NBA
-overs lose 7.3%, blind unders 2.2% (505,932 propositions).
+Graded on 2023-24 → 2025-26, the population it bets (every qualifying
+proposition, −200 floor, no double/triple-double): 24,572 bets, +781.3 units,
++2.96%, 90% CI +1.85..+4.05, positive every season (+393.6 / +220.5 / +167.1
+units) — about +260 units a season and about 50 bets a night. mike, 2026-10-16:
+*"maximize units won"*, so the one-a-game, four-a-night caps it shipped with on
+10-15 (+94.9 units over the same seasons) are gone. Expect about +2% per bet
+live. It only ever bets unders because that is where the books' margin sits in
+every sport this repo has measured: blind NBA overs lose 7.3%, blind unders 2.2%
+(505,932 propositions).
+
+**Prices it lays:** the −200 floor; on the graded bet list, min −200, 5th
+percentile −143, median −105, 95th +128, max +230. 38% of bets are plus money;
+3.5% are −150 or shorter.
+
+**Each game is decided once.** The first look 45-70 minutes before tip whose
+newest prop fetch holds Pinnacle is the game's decision, bets or none, and is
+written to `nba_prop_market_decisions` (worker-only) in the same transaction as
+its bets. A game with a row there is never looked at again — the backtest
+looked at every game once, and re-deciding at every look would bet a wider
+population than was graded. A look without Pinnacle is not a decision.
 
 **Retired 2026-10-15** (`config.RETIRED_MODELS`; no bet was ever written, so
 nothing is struck): `nba_moneyline`, `nba_over_under`, `nba_spread`,
@@ -66,7 +81,8 @@ Their feature engines (`features/nba_feature_engine.py`,
 | `nba_injury_report` | the official league injury report, every PDF since 2018-12-17, stamped with its printed time | `nba_injury_report` | this machine; `--today` exists, not wired on the worker |
 | `nba_period_scores` | points by quarter (settles half/quarter bets) | `nba_period_scores` (ESPN scoreboard) | either |
 | `odds` (`source='odds_api_historical'`) | game lines 2020-21 → 2025-26, 9 fetches a game date | `nba_odds_history --lines` | one-off purchase |
-| `player_prop_odds` | props 2023-24 → 2025-26 (one snapshot at tip-60); live every refresh pass | `nba_odds_history --props`; `prop_odds_ingestor` | purchase; worker |
+| `player_prop_odds` | props 2023-24 → 2025-26 (one snapshot at tip-60); live every refresh pass and every window-job tick with a game near | `nba_odds_history --props`; `prop_odds_ingestor` | purchase; worker |
+| `nba_prop_market_decisions` | one row per game the NBA prop card decided: when, on which fetch, quotes seen, bets written | `scripts/nba_prop_market_card.py` | worker |
 | `odds` (`source='odds_api_nba_derivative_history'`) | 1H / 1Q / team totals 2024-25 → 2025-26 | `nba_odds_history --derivatives` | one-off purchase |
 
 `player_prop_odds.book_last_update` (added 2026-10-16) stores each book's own
@@ -78,16 +94,22 @@ than 10 minutes behind Pinnacle's.
 | Step | When | What |
 |---|---|---|
 | `nba-prop-odds` | every refresh pass (`par`) | live props, 9 markets + 8 alternates, 7 days ahead |
-| `nba-prop-market` | right after `nba-prop-odds` | the card: games tipping in 45-70 minutes; one a game, four a night; BET rows only; a diagnostic line every pass |
-| `nba-prop-close` | after the card | a `close` prop snapshot 12-25 minutes before tip for every game holding a bet (CLV; `NBA_PROP_CLOSE_*` in config) |
+| `nba-prop-market` | right after `nba-prop-odds`; also in the window job | the card: games tipping in 45-70 minutes and not yet decided; every qualifying proposition; a decision row per game decided; a diagnostic line every look |
+| `nba-prop-close` | after the card; also in the window job | a `close` prop snapshot 12-25 minutes before tip for every game holding a bet (CLV; `NBA_PROP_CLOSE_*` in config) |
+| window job `nba_prop_window` | every 5 minutes, 24x7 (`scheduler.run_nba_prop_window`) | props for exactly the games 40-75 minutes from tip and not yet decided, then the card, then any close that is due, then publish; no API call when nothing is near |
 | `nba-results` | every pass, before settle | ESPN finals → `games`, every box line → `nba_player_game_log` |
 | `settle` | every pass | props via `_settle_prop_picks` (`FROM_PROP_MARKET`, `_NBA_MARKET_STAT`) |
 
-**Refresh cadence decides what can be bet:** passes run hourly at :17 until
-5pm ET and every 10 minutes from 6pm to midnight. A game tipping at or before
-6:00pm ET never has a pass 45-70 minutes out — 177 of 1,206 regular-season games
-in 2026-27 — and is logged `window_missed`, not widened. NBA is no longer in the
-30-second pre-game poller (no NBA game model exists to re-score).
+**Every tip time is reached.** The refresh passes (hourly at :17 until 5pm ET,
+every 10 minutes from 6pm) put no look 45-70 minutes before a tip at or before
+6:00pm ET, so the five-minute window job does: a tip at 1:00pm, 3:30pm, 6:00pm
+or 7:00pm ET each gets a look inside its window
+(`tests/test_nba_prop_window.py`). With looks every five minutes and tips on the
+hour or half hour, the first look inside the window — the decision — lands
+about 70 minutes before tip; the graded snapshots sat 54 (87%) or 64 (13%)
+minutes before tip (`docs/nba_models_2026.md` 4.3). A game no look reached is
+still logged `window_missed`, not widened. NBA is no longer in the 30-second
+pre-game poller (no NBA game model exists to re-score).
 
 ## Rebuilding the data (this machine)
 

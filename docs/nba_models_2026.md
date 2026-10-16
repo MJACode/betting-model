@@ -169,6 +169,29 @@ Caveats the verifiers carried, all disclosed rather than hidden:
 - **Hard Rock** carries ~37% of the units, decaying (+16 / +8 / +3% by season); the rule
   clears without it.
 
+**What ships live (2026-10-16; mike: *"maximize units won"*).** Every qualifying
+proposition, one bet per (game, player, market) at the best bettable price, with the
+−200 floor and no double/triple-double — no game or night cap. That is the population
+graded above: 24,572 bets, +781.3 units, +2.96%, 90% CI +1.85..+4.05, every season
+positive (+393.6 / +220.5 / +167.1 units), about +260 units a season, about 50 bets a
+night (median 50, most 119). The caps it shipped with on 10-15 (one a game, four a
+night) made +94.9 units over the same three seasons. Prices it lays (the same bet
+list): min −200, 5th percentile −143, median −105, 95th +128, max +230; 38% of bets
+are plus money, 3.5% are −150 or shorter (`C:/Users/micha/AppData/Local/Temp/nba_rebuild/uncapped_stats.py`).
+
+Each game is decided ONCE, as the backtest looked at it once: the first look inside
+the 45-70 minute window whose newest fetch holds Pinnacle is the decision, bets or
+none, written to `nba_prop_market_decisions`; a game with a row there is never looked
+at again. A five-minute job (`scheduler.run_nba_prop_window`) fetches props for the
+games 40-75 minutes from tip, so every tip time gets a look in its window.
+
+**Decision timing, measured against the graded snapshots.** The archive's snapshot
+sat 54.4 minutes before tip for 87% of bets and 64.4 for 13%. ROI by that lead, same
+population: 50-60 minutes 21,252 bets +2.95% (CI +1.77..+4.10); 60-70 minutes 3,146
+bets +2.97% (CI +0.09..+5.85; 2025-26 alone +0.25%); nothing was graded at 65-70.
+With a look every five minutes and tips on the hour or half hour, the first look
+inside 45-70 lands about 70 minutes before tip (`C:/Users/micha/AppData/Local/Temp/nba_rebuild/lead_roi.py`).
+
 **Not shipped** (each refuted or not significant once graded on the season it was not chosen
 on, or after counting the 1,518 cells searched): the soft-book-consensus rule where Pinnacle
 is absent (+1.8%, fails with Hard Rock or FanDuel removed, DraftKings alone −1.05%); the

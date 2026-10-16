@@ -7,7 +7,7 @@ remove any previous nba models"; "use what you've learned in this repo"). A
 frozen rule with no trained artifact. The card that writes its picks is
 scripts/nba_prop_market_card.py.
 
-THE RULE, per game, on every refresh pass:
+THE RULE, per game, ONCE (the first look that can price it; see DECIDED ONCE):
   1. Decide ONLY when the game's tip is 45 to 70 minutes away (DECISION_WINDOW_MIN).
      The edge was measured on one archived snapshot about an hour before
      each tip (median lead 54 minutes), and assists bet earlier than tip-60
@@ -19,8 +19,9 @@ THE RULE, per game, on every refresh pass:
      `snapshot_at` on every row it stores, and each game is one event call,
      so the rows of a game sharing one `snapshot_at` were quoted together.
      Pinnacle must be in that newest fetch; if a newer fetch lacks it, the
-     game is skipped this pass ("pinnacle_withdrawn"). A fetch from before
-     the decision window is not used ("stale_fetch").
+     game is skipped this look ("pinnacle_withdrawn"). A fetch from before
+     the decision window is not used ("stale_fetch"). Neither is a decision:
+     the game is looked at again.
   3. Pinnacle's two-way quote must be coherent: implied over + implied under
      between 1.00 and 1.15 inclusive (the lab's `between`). Its proportional
      no-vig under is the probability.
@@ -33,10 +34,20 @@ THE RULE, per game, on every refresh pass:
      counted, not refused (the convention of data/live_quote_guard.py).
   5. EV = fair under x decimal - 1, through models.honest_ev.gate (the
      model's own probability; floor config.MODEL_OWN_EV_FLOOR = 0.00).
-  6. One proposition per (player, market): the best EV among the books. One
-     BET per game: the best EV among the game's propositions. A tie goes to
-     the earlier book in SOFT_BOOKS (DraftKings first).
-  The card then writes at most MAX_BETS_PER_NIGHT a night, first come.
+  6. One BET per (game, player, market): the best EV among the books, a tie
+     to the earlier book in SOFT_BOOKS (DraftKings first). Every qualifying
+     proposition is bet; there is no game or night cap (mike, 2026-10-16:
+     "maximize units won").
+
+DECIDED ONCE. The backtest looked at every game exactly once, about 54
+minutes before tip. Live, a game is looked at on every refresh pass and every
+five-minute window tick, so a rule that re-decided a game at each look would
+draw a wider population than was graded (the NHL regulation model fired on
+18% of games live against 3.5% backtested for exactly that reason). So the
+FIRST look inside the window whose newest fetch holds Pinnacle for the game is
+its decision, bets or none, and the card records it in
+nba_prop_market_decisions; a game with a row there is never looked at again.
+A look with no Pinnacle in the window's newest fetch is not a decision.
 
 UNDERS ONLY. Blind overs lose 7.3% and blind unders 2.2% across 505,932
 propositions at the best bettable price -- the over-lean NFL, NHL and WNBA
@@ -55,7 +66,7 @@ before each tip, the best bettable price, units to win one):
     all three seasons            25,204 bets  +2.85%  90% CI +1.75..+3.96
     by season                    +4.1% / +2.2% / +2.1%  (2025-26 +0.34..+3.85)
     -200 floor, no DD / TD       24,572 bets  +2.96%  +1.85..+4.05, every season +
-    one a game, four a night      1,862 bets  +5.05%  +1.35..+8.76, every season +
+                                 (+781.3 units: the population this card bets)
     neighbouring floors          +2.1% (EV -0.01), +3.1% (EV 0.01)
     placebo (Pinnacle shuffled)  mean -1.5%, 95th percentile -1.0%
     blind under, same props      -1.5%
@@ -119,29 +130,34 @@ COHERENT = (1.00, 1.15)
 
 # Minutes before tip in which a game may be decided, both ends inclusive.
 # docs/nba_models_2026.md 4.3: the archive's snapshot sat a median 54 minutes
-# before tip, and assists bet before tip-60 lost. Not widened when a pass
-# misses it: the card logs the miss instead (window_missed).
+# before tip, and assists bet before tip-60 lost. Not widened when a look
+# misses it: the card logs the miss instead (window_missed). The five-minute
+# window job (scheduler.run_nba_prop_window) puts a look inside it for every
+# tip time.
 DECISION_WINDOW_MIN = (45, 70)
 
 # A soft quote whose own clock is more than this far behind Pinnacle's in the
 # same fetch is refused (mike's spec, 2026-10-15).
 STALE_SOFT_MAX_MIN = 10
 
-# ONE BET A GAME AND FOUR A NIGHT (the night is the game's ET date), first come
-# in the order games reach their window. Measured on the shipped rule's own bet
-# list (2023-24..2025-26, -200 floor, no double/triple-double; one a game = the
-# best EV in the game's snapshot; four a night = first four games by tip):
-#     every proposition       24,572 bets  +2.96%  90% CI +1.85..+4.05
-#     one a game, 4 a night    1,862 bets  +5.05%  90% CI +1.35..+8.76
-# both positive in every season. Live, the night is filled in tip order, then
-# EV -- the backtest's order (scripts/nba_prop_market_card.per_night) -- and a
-# later pass never replaces a bet.
-MAX_BETS_PER_GAME = 1
-MAX_BETS_PER_NIGHT = 4
+# NO GAME OR NIGHT CAP. mike, 2026-10-16: "maximize units won". Every
+# qualifying proposition is bet, one BET per (game, player, market) at the
+# best bettable price: the population the rule was graded on. Measured on the
+# rule's own bet list (2023-24..2025-26, -200 floor, no double/triple-double;
+# C:/Users/micha/AppData/Local/Temp/nba_rebuild/uncapped_stats.py on the build
+# machine):
+#     every qualifying proposition  24,572 bets  +781.3 units  +2.96%
+#                                   90% CI +1.85..+4.05 (whole-day bootstrap)
+#     by season                     +393.6 / +220.5 / +167.1 units, all positive
+#     about +260 units a season; about 50 bets a night (median 50, max 119)
+# against +94.9 units over the three seasons for the one-a-game, four-a-night
+# caps it shipped with on 2026-10-15. Prices laid: the -200 floor; min -200,
+# 5th percentile -143, median -105, 95th +128, max +230; 38% plus money.
 
 DIAG_KEYS = (
-    "games", "already_bet", "too_early", "in_window", "too_late", "window_missed",
-    "no_sharp", "pinnacle_withdrawn", "stale_fetch", "pinnacle_present",
+    "games", "already_bet", "already_decided", "too_early", "in_window", "too_late",
+    "window_missed", "no_sharp", "pinnacle_withdrawn", "stale_fetch", "pinnacle_present",
+    "decided",
     "unresolved", "ambiguous", "duplicate_name",
     "sharp_incoherent", "no_pair", "line_mismatch", "soft_incoherent",
     "stale_rejected", "last_update_unknown", "below_price_floor",
@@ -171,6 +187,17 @@ class NbaPropBet:
     dk_price: float | None     # DraftKings' own under at this line in this fetch
     dk_link: str | None
     dk_player: str | None
+
+
+@dataclass(frozen=True)
+class NbaPropDecision:
+    """One game's decision: the first look inside the window whose newest
+    fetch held Pinnacle. Written once to nba_prop_market_decisions, bets or none."""
+    game_id: str
+    fetch_at: str              # the deciding fetch's snapshot_at text
+    n_quotes: int              # rows of this game in that fetch (the five markets)
+    n_bets: int                # propositions that qualified
+    detail: str                # this game's non-zero diagnostic counts
 
 
 # ── time ──────────────────────────────────────────────────────────────────────
@@ -359,20 +386,24 @@ def window_was_fetched(rows: list[dict], tip: datetime) -> bool:
 
 def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
               now: datetime, taken: set[str] | None = None,
-              soft_books: tuple[str, ...] | None = None
-              ) -> tuple[list[NbaPropBet], dict]:
-    """At most one bet a game. Pure, given its inputs.
+              soft_books: tuple[str, ...] | None = None,
+              decided: set[str] | None = None,
+              ) -> tuple[list[NbaPropBet], dict, list[NbaPropDecision]]:
+    """Every qualifying proposition, and the games this look decides. Pure.
 
     `games` is {game_id: {"home", "away", "tip": datetime, "game_date"}} for
     every unstarted game the card is looking at; the window is applied here.
-    `taken` holds games that already carry an nba_prop_market BET: they are
-    never re-decided.
+    `taken` holds games that already carry an nba_prop_market BET and
+    `decided` games that already have a decision row: neither is looked at
+    again. Returns (bets, diag, decisions), one decision for each game whose
+    newest in-window fetch held Pinnacle.
     """
     from models.honest_ev import gate
 
     soft = tuple(soft_books) if soft_books is not None else SOFT_BOOKS
     soft = tuple(b for b in soft if b not in NEVER_BET)
     taken = taken or set()
+    decided = decided or set()
     floor = config.min_odds_for(MODEL_ID)
     stale_after = timedelta(minutes=STALE_SOFT_MAX_MIN)
     diag = dict.fromkeys(DIAG_KEYS, 0)
@@ -382,6 +413,7 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
         by_game[q["game_id"]].append(q)
 
     bets: list[NbaPropBet] = []
+    decisions: list[NbaPropDecision] = []
     for gid in sorted(games):
         g = games[gid]
         tip = g["tip"]
@@ -395,6 +427,9 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
             continue
         if gid in taken:
             diag["already_bet"] += 1
+            continue
+        if gid in decided:
+            diag["already_decided"] += 1
             continue
         if lead < DECISION_WINDOW_MIN[0]:
             diag["too_late"] += 1
@@ -418,6 +453,9 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
             continue
         diag["pinnacle_present"] += 1
         fetch = [r for r in rows if parse_ts(r["snapshot_at"]) == pin_fetch]
+        fetch_at = next(str(r["snapshot_at"]) for r in fetch if r.get("book") == SHARP_BOOK)
+        before = dict(diag)
+        n_game_bets = 0
 
         # Every row's player, by id. A name the roster cannot place on one
         # player is skipped, at every book.
@@ -435,7 +473,6 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
                 continue
             keyed[(pid, r["market"])][r["book"]].append(r)
 
-        best_in_game: NbaPropBet | None = None
         for (pid, market), by_book in sorted(keyed.items()):
             sharp_rows = by_book.get(SHARP_BOOK, [])
             if not sharp_rows:
@@ -508,9 +545,14 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
                 # Strictly greater: a tie keeps the earlier book (DraftKings first).
                 if best is None or cand.ev > best.ev:
                     best = cand
-            if best is not None and (best_in_game is None or best.ev > best_in_game.ev):
-                best_in_game = best
-        if best_in_game is not None:
-            bets.append(best_in_game)
-            diag["bets"] += 1
-    return bets, diag
+            if best is not None:
+                bets.append(best)
+                diag["bets"] += 1
+                n_game_bets += 1
+        diag["decided"] += 1
+        detail = " ".join(f"{k}={diag[k] - before[k]}" for k in DIAG_KEYS
+                          if diag[k] != before[k])
+        decisions.append(NbaPropDecision(game_id=gid, fetch_at=fetch_at,
+                                         n_quotes=len(fetch), n_bets=n_game_bets,
+                                         detail=detail))
+    return bets, diag, decisions
