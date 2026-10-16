@@ -30,9 +30,13 @@
 -- commence_time, in-play snapshots excluded. player_id is set only when
 -- exactly one regular-season log id on the home or away team, this season
 -- or last, matches the book's name. Zero or several leave it null.
+-- FILTER IT. A read with no game_id and no game_date scans player_prop_odds
+-- and hits statement_timeout. Every caller passes one game or one date.
 
 DO $mig$
 BEGIN
+    SET LOCAL lock_timeout = '10s';
+
     IF to_regclass('public.v_player_season_totals_nhl') IS NOT NULL
        AND to_regclass('public.v_team_season_totals_nhl') IS NOT NULL
        AND to_regclass('public.v_nhl_player_prop_odds') IS NOT NULL
@@ -166,6 +170,8 @@ BEGIN
     GROUP BY t.team, t.season
     $ddl$;
 
+    -- Callers filter on game_id or game_date. Unfiltered, this view scans
+    -- player_prop_odds and hits statement_timeout.
     EXECUTE $ddl$
     CREATE OR REPLACE VIEW public.v_nhl_player_prop_odds
     WITH (security_invoker = on) AS
@@ -313,6 +319,7 @@ BEGIN
                        ORDER BY raw.game_date DESC, raw.nhl_game_id DESC
                    ) AS rn
             FROM raw
+            WHERE raw.val IS NOT NULL
         )
         SELECT
             r.player_id,
