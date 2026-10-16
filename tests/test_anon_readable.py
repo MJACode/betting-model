@@ -46,9 +46,21 @@ def test_every_relation_the_app_reads_is_declared():
 
 def test_the_manifest_does_not_grow_stale_entries():
     """A relation nobody reads should not keep a grant. Not fatal -- a screen
-    may be mid-build -- but it must be deliberate, so it is asserted."""
+    may be mid-build -- but it must be deliberate, so it is asserted.
+
+    AHEAD_OF_THE_APP is the only exemption: tables granted before the screen
+    that reads them exists. Growing it without naming the new relation in
+    tests/test_byom_facts_schema.py is the failure this still catches.
+    """
+    from data.anon_readable import AHEAD_OF_THE_APP
+
     app = _app_relations()
-    unused = sorted(set(all_readable()) - app)
+    ahead = set(AHEAD_OF_THE_APP)
+    assert ahead <= set(ANON_READABLE)
+    assert ahead.isdisjoint(app), (
+        f"{sorted(ahead & app)} is read by the app now. Remove it from "
+        f"AHEAD_OF_THE_APP.")
+    unused = sorted(set(all_readable()) - app - ahead)
     assert not unused, (
         f"{unused} are granted but nothing in mobile/src reads them. Remove "
         f"them from data/anon_readable.py, or add the query that needs them.")

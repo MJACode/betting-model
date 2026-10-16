@@ -67,6 +67,12 @@ ANON_READABLE: tuple[str, ...] = (
     # NO policy -- deny-all -- so the grant alone read as an empty screen.
     # The policy is data/migrations/anon_read_public_betting_2026_09_20.sql.
     "public_betting",
+    # Build Your Own Model facts (2026-10-16). Granted before the screen
+    # exists: an undeclared table arrives with no SELECT and the first read
+    # is an empty error. Nothing in mobile/src names these yet, so they are
+    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
+    "byom_game_facts",
+    "byom_prop_facts",
     "tracked_bets",
     "ufc_fight_log",
     "umpires",
@@ -105,6 +111,15 @@ ANON_READABLE: tuple[str, ...] = (
     "v_public_track_record",
     "v_public_track_record_daily",
 )
+
+# In ANON_READABLE, and not yet named by a mobile `.from()`. The stale-entry
+# test subtracts this tuple and fails if anything else is granted unread.
+# Build Your Own Model facts: the NFL tables land before the screen.
+AHEAD_OF_THE_APP: tuple[str, ...] = (
+    "byom_game_facts",
+    "byom_prop_facts",
+)
+
 
 # Readable ONLY by a signed-in user. `anon` has never held SELECT on
 # subscriptions -- its grant was write-only until 2026-09-03, so revoking the
