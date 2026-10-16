@@ -46,8 +46,9 @@ own price on the lock snapshot. `grade_*_book` is `draftkings`. Another
 book's price is not the grade. History is preferred over `odds` when
 both have a lock for that market. `line_source` records which table.
 Closing prices are stored and are not the grade. The builder reads one
-game at a time: DraftKings inside the lock window, then other books only
-inside that game's shop slices. A season is not loaded in one fetch.
+game at a time: DraftKings inside the lock window for the grade, then
+other books only inside that game's shop slices. Those rows are stored
+reference and are not the grade. A season is not loaded in one fetch.
 `byom_game_facts_units_2026_10_16.sql` renames the unit columns. It is
 registered and was not applied.
 
@@ -90,7 +91,11 @@ the first DraftKings snapshot at or under `PROP_LOCK_WINDOW_HOURS` (24).
 not a check constraint. A market key ending in `_alternate` is an alt
 ladder and is not built. The grade is DraftKings' own price on that
 lock snapshot. `grade_*_book` is `draftkings`. Another book's price is
-not the grade. Closing prices are stored and are not the grade.
+not the grade. The close on a row is the latest pre-game quote on that
+row's line. A later quote on a different number is a different row.
+Closing prices are stored and are not the grade. A rebuild deletes that
+game's prop rows in the same transaction, then inserts the rows this
+window produced.
 Each side stores `*_units_uncapped` and `*_units_capped`. Both are
 results. There is no stake column.
 
@@ -102,7 +107,7 @@ The stat is `nfl_player_game_log`. `log_status` says which rule fired:
 | `non_participant` | the game's log has rows and this name is not among them; `actual` is 0. A player whose row never landed looks the same as a scratch |
 | `missing_log` | the game has a score and the log has zero rows. Results stay NULL. A missing file is not a loss |
 | `unplayed` | no final score. The line is kept. Results stay NULL |
-| `ambiguous` | two log rows normalise to the same name. No guess. Results stay NULL |
+| `ambiguous` | two log rows normalise to the same name and the quote's team does not pick exactly one. No guess. Results stay NULL |
 
 Anytime TD is `rushing_tds + receiving_tds`. Passing TDs are
 `player_pass_tds`. A return or defensive touchdown is not in the weekly
