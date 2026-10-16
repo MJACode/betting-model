@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM backtest RPC: SECURITY INVOKER, current season by default, both unit columns, no price or line filter, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL prop facts: 24h UNCONFIRMED lock, no alt ladders, log_status for missing log vs non-participant, anytime TD is rush+rec, job disabled, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM lock shop review: worker-only (no anon grant), h2h replaced when the DK snapshot moves, declared job enabled false and apply false, first apply before the 2026-10-17 prune |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL lock shop: every book at the DK line at the grade lock and the near lock, first capture kept, rebuild grades from it, migration unapplied |
