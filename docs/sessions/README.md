@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, deploy-killed evening `06b9db72a43c4323ad5ed84abf00b591` was the only unfinished `pipeline_runs` row and held `refresh_pass_completion` on the stuck branch; boot stamps prior hourly/evening orphans aborted, and a worker migration closes that row |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NHL prop odds age is the open-to-close gate (PIT_COL and BOS_ANA latest snapshot 2026-10-16T04:18:19Z); three SOG BETs 3160491, 3160496, 3462585 have no later quote at the bet's line; live fetch now stores the five alternate keys |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, evening 03:30Z apply-view-migrations 59/60 (pipeline_log does not name the file; injuries.status_ts already exists). #857 rebased onto master after #958: CLV skip path kept, catalog returns added for the already-applied ALTER/index/policy files, discord_void return stays ahead of the full-definition guard |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the NFL leader moneyline's first live bet laid -980; its price floor (-5000, set so it never bound) is now -140 (mike); bets at -500 or shorter had made -0.10u in the backtest |
