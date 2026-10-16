@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the 26 tests failing on master were all stale tests or Windows-only (recap fixture lacked `clv_method`; CLV capture literals; `node` absent; savepoint wrapper from #843; posix/backslash paths; `SOURCE` vs `SOURCE_PREFIX`); `tests/_node.py` finds node via the pip wheel so 10 more node-backed tests run here; `verify_a11y.ts` normalises separators and CRLF — 79/79, no app source touched |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM game facts review: per-game reads, CASE around the odds timestamp, uncapped and 3u-capped unit columns, null results when unplayed |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM facts schema review: skip guard covers every write verb for anon and authenticated; grant sweep skips the tables until they exist; PR CI installs Postgres |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL game-facts builder: lock at the first DK snapshot inside 120h (UNCONFIRMED), grade at the best price on that line, 24h and close stored, no 2015-2019, job not declared, not run on production |
