@@ -10,7 +10,7 @@
 
 | Model | What it bets | Status |
 |---|---|---|
-| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-70 minutes before tip; every qualifying proposition, no game or night cap. | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-prop-market`) |
+| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip; every qualifying proposition, no game or night cap. | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-prop-market`) |
 
 Graded on 2023-24 → 2025-26, the population it bets (every qualifying
 proposition, −200 floor, no double/triple-double): 24,572 bets, +781.3 units,
@@ -26,7 +26,7 @@ every sport this repo has measured: blind NBA overs lose 7.3%, blind unders 2.2%
 percentile −143, median −105, 95th +128, max +230. 38% of bets are plus money;
 3.5% are −150 or shorter.
 
-**Each game is decided once.** The first look 45-70 minutes before tip whose
+**Each game is decided once.** The first look 45-57 minutes before tip whose
 newest prop fetch holds Pinnacle is the game's decision, bets or none, and is
 written to `nba_prop_market_decisions` (worker-only) in the same transaction as
 its bets. A game with a row there is never looked at again — the backtest
@@ -93,21 +93,23 @@ than 10 minutes behind Pinnacle's.
 
 | Step | When | What |
 |---|---|---|
-| `nba-prop-odds` | every refresh pass (`par`) | live props, 9 markets + 8 alternates, 7 days ahead |
-| `nba-prop-market` | right after `nba-prop-odds`; also in the window job | the card: games tipping in 45-70 minutes and not yet decided; every qualifying proposition; a decision row per game decided; a diagnostic line every look |
+| `nba-prop-odds` | every refresh pass (`par`) | live props, 11 markets + 8 alternates, 7 days ahead (blocks+steals and rebounds+assists added 2026-10-16) |
+| `nba-prop-market` | right after `nba-prop-odds`; also in the window job | the card: games tipping in 45-57 minutes and not yet decided; every qualifying proposition; a decision row per game decided; a diagnostic line every look |
 | `nba-prop-close` | after the card; also in the window job | a `close` prop snapshot 12-25 minutes before tip for every game holding a bet (CLV; `NBA_PROP_CLOSE_*` in config) |
-| window job `nba_prop_window` | every 5 minutes, 24x7 (`scheduler.run_nba_prop_window`) | props for exactly the games 40-75 minutes from tip and not yet decided, then the card, then any close that is due, then publish; no API call when nothing is near |
+| window job `nba_prop_window` | every 5 minutes, 24x7 (`scheduler.run_nba_prop_window`) | props for exactly the games 40-62 minutes from tip and not yet decided, then the card, then any close that is due, then publish; no API call when nothing is near |
 | `nba-results` | every pass, before settle | ESPN finals → `games`, every box line → `nba_player_game_log` |
 | `settle` | every pass | props via `_settle_prop_picks` (`FROM_PROP_MARKET`, `_NBA_MARKET_STAT`) |
 
 **Every tip time is reached.** The refresh passes (hourly at :17 until 5pm ET,
-every 10 minutes from 6pm) put no look 45-70 minutes before a tip at or before
+every 10 minutes from 6pm) put no look 45-57 minutes before a tip at or before
 6:00pm ET, so the five-minute window job does: a tip at 1:00pm, 3:30pm, 6:00pm
 or 7:00pm ET each gets a look inside its window
 (`tests/test_nba_prop_window.py`). With looks every five minutes and tips on the
 hour or half hour, the first look inside the window — the decision — lands
-about 70 minutes before tip; the graded snapshots sat 54 (87%) or 64 (13%)
-minutes before tip (`docs/nba_models_2026.md` 4.3). A game no look reached is
+55 minutes before tip; the graded snapshots sat 54 (87%) or 64 (13%)
+minutes before tip (`docs/nba_models_2026.md` 4.3). Until 2026-10-16 the
+window was 45-70 and that first look landed about 70 minutes out, where
+nothing was graded. A game no look reached is
 still logged `window_missed`, not widened. NBA is no longer in the 30-second
 pre-game poller (no NBA game model exists to re-score).
 

@@ -19,12 +19,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * Hourly refresh        :17, 7am-5pm ET      -> bash scripts/refresh_pass.sh
   * Evening 10-min refresh every :00..:50, 6-11pm ET -> bash scripts/refresh_pass.sh
   * NBA prop window       every 5 min, 24x7     -> run_nba_prop_window
-        (scripts/nba_prop_window.py: props for exactly the NBA games 40-75
+        (scripts/nba_prop_window.py: props for exactly the NBA games 40-62
         minutes from tip and not yet decided, then the nba_prop_market card,
         the closing snapshot for bet games 12-25 minutes out, and publish.
         Returns without an API call when no game is in either range. mike,
         2026-10-16: "we're not leaving our games" -- the hourly passes put no
-        look 45-70 minutes before any tip at or before 6pm ET.)
+        look 45-57 minutes before any tip at or before 6pm ET.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -1012,11 +1012,11 @@ NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 150, "card": 90, "close": 60}
 def run_nba_prop_window() -> None:
     """One NBA prop window tick: every game decided inside its window.
 
-    nba_prop_market decides a game once, 45-70 minutes before tip. The refresh
+    nba_prop_market decides a game once, 45-57 minutes before tip. The refresh
     passes cannot put a look there for any tip at or before 6pm ET (hourly at
     :17 until 5pm), so this tick runs every five minutes, 24x7. It reads what
     is stored first (scripts/nba_prop_window.plan) and returns without an API
-    call when no game is 40-75 minutes out and undecided and no bet game is
+    call when no game is 40-62 minutes out and undecided and no bet game is
     owed its closing snapshot -- most ticks of most days.
 
     Otherwise: fetch props for exactly those games, run the card on that fetch,
@@ -1871,7 +1871,7 @@ def build_scheduler() -> BlockingScheduler:
         run_nba_prop_window,
         CronTrigger(minute="*/5", timezone=TIMEZONE),
         id="nba_prop_window",
-        name="NBA prop window (every 5 min, 24x7: games 40-75 min from tip)",
+        name="NBA prop window (every 5 min, 24x7: games 40-62 min from tip)",
         max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 

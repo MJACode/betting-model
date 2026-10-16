@@ -3765,6 +3765,13 @@ PROP_MARKETS_NBA = [
     "player_steals",
     "player_turnovers",
     "player_double_double",             # binary Yes/No (logistic, prob-only)
+    # Added 2026-10-16 for the NBA projection model, whose graded card bets
+    # both (blocks+steals both sides, rebounds+assists unders: +518.1 and
+    # +393.9 of its +3,554.6 units, 2023-24..2025-26). Nothing in the live
+    # feed held either market until they were asked for: the window job and
+    # the refresh pass both fetch exactly this list.
+    "player_blocks_steals",
+    "player_rebounds_assists",
 ]
 
 # NFL player prop markets (The Odds API americanfootball_nfl player-prop keys).

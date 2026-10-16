@@ -174,7 +174,7 @@ def test_the_nhl_totals_card_reads_the_fetch_it_follows():
 
 def test_the_nba_prop_card_reads_the_fetch_it_follows():
     """nba_prop_market pairs Pinnacle with the bettable books in ONE stored
-    prop fetch and decides only games 45-70 minutes from tip, so it must run
+    prop fetch and decides only games 45-57 minutes from tip, so it must run
     after `nba-prop-odds` has stored this pass's fetch and as soon after it as
     the pass allows (before the scoring group), and before settle. Sequential,
     like every writer to picks. Its closing snapshot follows it, and the

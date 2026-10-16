@@ -535,7 +535,7 @@ true EV by the push share; the lab did the same.
 
 The twelve 2026-06-19 NBA models are retired (`config.RETIRED_MODELS`). One
 model replaces them: unders at the best bettable book on Pinnacle's own line,
-in the same fetch, decided 45-70 minutes before the scheduled tip
+in the same fetch, decided 45-57 minutes before the scheduled tip
 (`models/nba_prop_market.py`, `scripts/nba_prop_market_card.py`; the grid and
 every bar are in `docs/nba_models_2026.md` 4.3).
 
@@ -545,8 +545,8 @@ every bar are in `docs/nba_models_2026.md` 4.3).
 | EV floor | 0.00, on Pinnacle's proportional no-vig under | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned | `MODEL_MIN_ODDS` |
 | caps | none: every qualifying proposition, one bet per (game, player, market) (mike, 2026-10-16: "maximize units won") | `models/nba_prop_market.py` |
-| decided once | the first look 45-70 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions`, never looked at again | `scripts/nba_prop_market_card.py` |
-| looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-75 min from tip | `scheduler.run_nba_prop_window` |
+| decided once | the first look 45-57 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions`, never looked at again | `scripts/nba_prop_market_card.py` |
+| looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-62 min from tip | `scheduler.run_nba_prop_window` |
 | stale soft quote | refused when its clock is > 10 min behind Pinnacle's | same |
 
 Graded on 2023-24..2025-26 at the best bettable price: every proposition
@@ -562,9 +562,12 @@ median -105, 95th +128, max +230; 38% plus money, 3.5% at -150 or shorter.
 
 **Decision timing:** the graded snapshot sat 54.4 minutes before tip for 87% of
 bets and 64.4 for 13% (50-60 min +2.95% on 21,252; 60-70 min +2.97% on 3,146,
-CI +0.09..+5.85). With a look every five minutes the first look inside 45-70
-lands about 70 minutes before an on-the-hour tip, a lead nothing was graded at
-(`docs/nba_models_2026.md` 4.3).
+CI +0.09..+5.85). It shipped deciding inside 45-70, and with a look every five
+minutes the first look inside 45-70 came about 70 minutes before an on-the-hour
+tip, a lead nothing was graded at. **From 2026-10-16 the window is 45-57**: the
+first look lands 55 minutes before any tip on a five-minute mark (53-57 for any
+other), the lead 87% of the graded bets were decided at
+(`docs/nba_models_2026.md` 4.3; `tests/test_nba_prop_window.py`).
 
 Closing-line value is measured from the first night: each bet game gets a `'close'` prop snapshot 12-25
 minutes before tip (`data/ingestors/nba_prop_close_ingestor.py`).

@@ -4,7 +4,7 @@ Runs on every refresh pass right after the prop fetch (`par nba-prop-odds`),
 in the 6am daily run right after its NBA prop step, and on the five-minute
 window job right after that job's fetch of the games about to enter their
 window (scheduler.run_nba_prop_window), so the fetch it reads is the one just
-stored. It decides only games whose tip is 45-70 minutes away; every other
+stored. It decides only games whose tip is 45-57 minutes away; every other
 game is counted in the diagnostic line and left alone.
 
 LIVE, with no default-off write switch: the MLB cards' switches flipped off on

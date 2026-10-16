@@ -1325,7 +1325,7 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
 def step_nba_prop_market(dry_run: bool = False) -> bool:
     """NBA player props (`nba_prop_market`): same-line unders against Pinnacle.
 
-    Decides each game once, at the first look 45-70 minutes before its tip
+    Decides each game once, at the first look 45-57 minutes before its tip
     whose newest prop fetch holds Pinnacle, and writes every qualifying
     proposition with the game's decision row, under the model's lock
     (scripts/nba_prop_market_card.py; no game or night cap, mike 2026-10-16).
@@ -1870,7 +1870,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 2c2: Fetching DK NBA player prop lines...")
     results["nba_prop_odds"] = step_nba_prop_odds(run_date, snapshot_type="open")
     # The NBA prop card reads the fetch just stored (it decides only games
-    # 45-70 minutes from tip, so at 6am it normally writes nothing), then the
+    # 45-57 minutes from tip, so at 6am it normally writes nothing), then the
     # closing snapshot for any bet game whose close is due.
     logger.info("Step 2c3: NBA prop card (same-line unders vs Pinnacle)...")
     results["nba_prop_market"] = step_nba_prop_market(dry_run=dry_run)

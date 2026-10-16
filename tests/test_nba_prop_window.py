@@ -1,7 +1,7 @@
 """The NBA prop window job: every game reached inside its decision window.
 
-nba_prop_market decides a game only 45-70 minutes before tip, once. The refresh
-passes ran hourly at :17 until 5pm ET, so no pass landed 45-70 minutes before a
+nba_prop_market decides a game only 45-57 minutes before tip, once. The refresh
+passes ran hourly at :17 until 5pm ET, so no pass landed 45-57 minutes before a
 tip at 1:00pm, 3:30pm or 6:00pm ET -- 177 of 1,206 games in 2026-27 could never
 be decided. mike, 2026-10-16: "run the fucking thing more often ... we're not
 leaving our games." The answer is a five-minute job, 24x7, that fetches props
@@ -131,13 +131,13 @@ def _plan(conn, monkeypatch):
     return win.plan(conn, NOW)
 
 
-def test_the_plan_takes_games_40_to_75_minutes_out_not_yet_decided(monkeypatch):
+def test_the_plan_takes_games_40_to_62_minutes_out_not_yet_decided(monkeypatch):
     conn = _PlanConn([_game("AT39", 39), _game("AT40", 40), _game("AT58", 58),
-                      _game("AT75", 75), _game("AT76", 76), _game("DONE", 55),
+                      _game("AT62", 62), _game("AT63", 63), _game("DONE", 55),
                       _game("BET", 60), _game("CUP", 55, "cup_final")],
                      decided={"DONE"}, taken={"BET"})
     p = _plan(conn, monkeypatch)
-    assert p.decide == ["AT40", "AT58", "AT75"] and p.close == []
+    assert p.decide == ["AT40", "AT58", "AT62"] and p.close == []
 
 
 def test_the_plan_owes_a_close_with_no_game_to_decide(monkeypatch):
@@ -243,10 +243,29 @@ def test_every_tip_time_gets_a_look_inside_its_window(monkeypatch, hh, mm):
     assert all(win.LOOK_AHEAD_MIN[0] <= x <= win.LOOK_AHEAD_MIN[1] for x in leads)
 
 
+@pytest.mark.parametrize("hh,mm", [(13, 0), (15, 30), (18, 0), (19, 0), (19, 30), (22, 10)])
+def test_the_first_look_inside_the_window_is_at_the_graded_lead(monkeypatch, hh, mm):
+    """The game is decided at the FIRST look inside the window. The graded bets
+    were decided 54 minutes before tip (87%) or 64 (13%); with 45-70 and a look
+    every five minutes the first look came 70 minutes out, where nothing was
+    graded. Every job that runs the card counts: the window job and the
+    refresh passes."""
+    import models.nba_prop_market as mk
+    tip = datetime(2026, 10, 21, hh, mm, tzinfo=ET)
+    lo, hi = mk.DECISION_WINDOW_MIN
+    jobs = _jobs(monkeypatch)
+    fires = sorted(f for jid in ("nba_prop_window", "hourly_refresh", "overnight_refresh",
+                                 "evening_refresh")
+                   for f in _fires(jobs[jid], tip - timedelta(minutes=hi), tip - timedelta(minutes=lo)))
+    assert fires, f"no look lands {lo}-{hi} minutes before a {hh}:{mm:02d} ET tip"
+    first = (tip - fires[0]).total_seconds() / 60
+    assert 50 <= first <= 57, f"first look {first:.0f} minutes before a {hh}:{mm:02d} ET tip"
+
+
 @pytest.mark.parametrize("hh,mm", [(13, 0), (15, 30), (18, 0)])
 def test_the_refresh_passes_alone_reached_none_of_these_tips(monkeypatch, hh, mm):
     """Why the job exists: the hourly :17 passes and the evening ten-minute
-    passes put no look 45-70 minutes before these tips."""
+    passes put no look 45-57 minutes before these tips."""
     import models.nba_prop_market as mk
     tip = datetime(2026, 10, 21, hh, mm, tzinfo=ET)
     lo, hi = mk.DECISION_WINDOW_MIN
