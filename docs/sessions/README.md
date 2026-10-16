@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, 9:30 PM ET pollers restart reopened both idle reads (read at 01:33Z): pid 1627157 `SELECT DISTINCT game_date FROM picks` for `nfl_live_leader_ml` since 01:30:00Z; pid 1627156 credit `SUM` on `api_call_log`, `query_start` 01:33:30Z inside the same transaction. The 30s tick is shorter than the 60s idle backstop, so the credit rollback is what ends it. The job-queue timeout test now reads `_session_options` |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, idle read transactions blocked add_clv_method: pregame credit SUM still idle in transaction since 22:32Z on api_call_log (read at 01:21Z); the NFL leader standing-bet transaction from 00:20Z was gone by 01:10Z, and apply-view-migrations failed 00:20–01:00Z then passed at 01:10Z |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the Oct 13 line replies under tweet 2110451858137641367; Discord is skipped because that follow-up is already ledgered; the restate fix remains #948 |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, same-book raw CLV is the headline: 1,971 priced pre-game BETs stamped standard_v2; pins 3114189 +8.50%, 2387645 +0.33%, 3114194 0.00%; since 2026-09-01 game lines beat the bet book 55.6% (avg +2.217%), props 49.9% (avg +2.780%); Pinnacle market edge is the secondary column |

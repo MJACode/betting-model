@@ -83,17 +83,50 @@ def test_a_poller_session_sets_the_idle_timeout_and_only_then(monkeypatch):
     assert "idle_in_transaction_session_timeout=" in both
 
 
+def _flat(sql: str) -> str:
+    return " ".join(sql.split())
+
+
+# pg_stat_activity at 2026-10-16 01:33Z, after the 01:30Z (9:30 PM ET)
+# pollers restart. Both backends were idle in transaction from xact_start
+# 01:30:00Z. Whitespace in the live query matched the deployed source;
+# these are that statement with the bind parameters left in.
+_LEADER_DATES_SQL = """
+    SELECT DISTINCT game_date FROM picks
+    WHERE model_id = %s AND is_live = TRUE
+      AND signal_type = 'BET' AND result IS NULL
+      AND game_date >= %s
+"""
+_CREDIT_SQL = """
+    SELECT COALESCE(SUM(credits), 0) FROM api_call_log
+    WHERE host = 'api.the-odds-api.com'
+      AND source = 'pregame_poller'
+      AND ts >= date_trunc('day', now() AT TIME ZONE 'America/New_York')
+"""
+
+
 def test_standing_bets_release_the_picks_read():
     conn = _Rec()
-    conn.fetchall = lambda: [("2026-10-08",)]
-    # execute returns self, and unsettled_bet_dates calls .fetchall() on that.
+    seen = {}
+
     class Rows:
         def fetchall(self_inner):
             return [("2026-10-08",)]
 
-    conn.execute = lambda sql, params=None: Rows()
+    def execute(sql, params=None):
+        seen["sql"] = sql
+        seen["params"] = params
+        return Rows()
+
+    conn.execute = execute
     assert G.unsettled_bet_dates(conn) == {"2026-10-08"}
     assert conn.rolls == 1
+    # The 01:30Z leader session's last query, pid 1627157.
+    assert _flat(seen["sql"]) == _flat(_LEADER_DATES_SQL)
+    assert seen["params"][0] == "nfl_live_leader_ml"
+    src = inspect.getsource(G.unsettled_bet_dates)
+    assert src.index("execute") < src.index("finally")
+    assert "release_read" in src[src.index("finally"):]
 
 
 def test_a_locked_bet_releases_the_lock_check(monkeypatch):
@@ -133,6 +166,33 @@ def test_the_credit_read_ends_before_the_caller_can_block_on_the_network():
     # The docstring names the fetch. The call order is what holds the lock
     # across the network, so match the calls.
     assert tick.index("used = _credits_used_today") < tick.index("fetched = fetch_pregame_rows")
+
+    conn = _Rec()
+    seen = {}
+
+    class Rows:
+        def fetchone(self_inner):
+            return (0,)
+
+    def execute(sql, params=None):
+        seen["sql"] = sql
+        return Rows()
+
+    conn.execute = execute
+    assert _credits_used_today(conn) == 0.0
+    assert conn.rolls == 1
+    # The 01:30Z pregame session's last query, pid 1627156. query_start had
+    # moved to 01:33:30Z inside the transaction opened at 01:30:00Z.
+    assert _flat(seen["sql"]) == _flat(_CREDIT_SQL)
+
+
+def test_the_credit_tick_is_shorter_than_the_idle_backstop():
+    """A quiet pregame tick re-runs the credit SUM every interval. At 30s
+    that session is never idle for the 60s backstop, so the timeout does
+    not end the transaction the 01:30Z restart reopened. The rollback in
+    _credits_used_today does."""
+    import config
+    assert config.PREGAME_POLL_INTERVAL_SEC * 1000 < db.POLLER_IDLE_IN_TRANSACTION_MS
 
 
 def test_a_quiet_tick_rolls_the_read_back(monkeypatch):
@@ -187,11 +247,13 @@ def test_a_tick_that_writes_does_not_roll_the_insert_back(monkeypatch):
 def test_the_other_long_lived_feeds_release_a_quiet_tick():
     import data.ingestors.bovada_direct_feed as bovada
     import data.ingestors.dk_direct_feed as dk
+    from data.ingestors.pregame_line_poller import run_forever
     for fn in (dk.poll_once, bovada.poll_once, dk._ensure_schema):
         src = inspect.getsource(fn)
         assert "release_read" in src
-    for fn in (dk.run, bovada.run, G.main):
-        assert "use_poller_session" in inspect.getsource(fn)
+    for fn in (dk.run, bovada.run, G.main, run_forever):
+        src = inspect.getsource(fn)
+        assert src.index("use_poller_session()") < src.index("get_connection()")
 
 
 def test_migration_lock_timeout_is_short_and_local():
