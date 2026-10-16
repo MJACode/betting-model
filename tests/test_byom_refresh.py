@@ -130,21 +130,31 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         assert dry["writes"] is False
         assert dry["written_game_facts"] == 0
         assert dry["written_prop_facts"] == 0
-        assert dry["due"] == 3
-        assert dry["in_window"] == 2
-        assert dry["missing_game_facts"] == 2
+        assert dry["due"] == 6
+        assert dry["in_window"] == 3
+        assert dry["missing_game_facts"] == 3
+        assert dry["incomplete_game_facts"] == 1
         assert dry["stale_game_facts"] == 1
-        assert dry["window_missing_prop_facts"] == 2
+        assert dry["window_missing_prop_facts"] == 3
+        from byom.refresh import due_games
+        reasons = {
+            row["canonical_key"]: row["reason"]
+            for row in due_games(conn, today=AS_OF)
+        }
+        assert reasons["2026_02_NYJ_SF"] == "incomplete"
+        assert reasons["2026_03_CIN_CLE"] == "props"
+        assert reasons["2026_07_NE_SEA"] == "window"
+        assert reasons["2026_01_DET_GB"] == "missing"
         joined = "\n".join(sql.lower() for sql, _params in conn.calls)
         for banned in ("nfl_odds_history", "player_prop_odds", "from odds"):
             assert banned not in joined, banned
         cur = raw.cursor()
         cur.execute("SELECT count(*) FROM byom_game_facts")
-        assert cur.fetchone()[0] == 2
+        assert cur.fetchone()[0] == 3
 
         conn.calls.clear()
         wrote = refresh(conn, apply=True, today=AS_OF)
-        assert wrote["written_game_facts"] == 3
+        assert wrote["written_game_facts"] == 6
         assert wrote["written_prop_facts"] == 1
         touched = set()
         for _sql, params in conn.calls:
@@ -160,14 +170,16 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         assert "NFL_2026_12_DAL_PHI" not in touched
         assert "NFL_2025_05_ATL_NO" not in touched
         assert "NFL_2026_05_BAL_KC" in touched
+        assert "NFL_2026_02_NYJ_SF" in touched
         cur = raw.cursor()
         cur.execute("SELECT canonical_key, built_at::text FROM byom_game_facts "
                     "ORDER BY canonical_key")
         rows = dict(cur.fetchall())
         assert set(rows) == {
-            "2026_01_DET_GB", "2026_02_NYJ_SF", "2026_05_BAL_KC", "2026_06_BUF_MIA",
+            "2026_01_DET_GB", "2026_02_NYJ_SF", "2026_03_CIN_CLE",
+            "2026_05_BAL_KC", "2026_06_BUF_MIA", "2026_07_NE_SEA",
         }
-        assert rows["2026_02_NYJ_SF"].startswith("2026-10-01")
+        assert rows["2026_02_NYJ_SF"].startswith("2026-10-01") is False
         assert rows["2026_06_BUF_MIA"].startswith("2026-10-14") is False
         cur.execute("SELECT canonical_key FROM byom_prop_facts")
         assert [row[0] for row in cur.fetchall()] == ["2026_05_BAL_KC"]
@@ -200,6 +212,8 @@ def _load(cur):
     _game(cur, "NFL_2026_01_DET_GB", 2026, "2026-09-10", "GB", "DET")
     _game(cur, "NFL_2026_02_NYJ_SF", 2026, "2026-09-17", "SF", "NYJ")
     _game(cur, "NFL_2026_12_DAL_PHI", 2026, "2026-11-26", "PHI", "DAL")
+    _game(cur, "NFL_2026_07_NE_SEA", 2026, "2026-10-18", "SEA", "NE")
+    _game(cur, "NFL_2026_03_CIN_CLE", 2026, "2026-09-24", "CLE", "CIN")
     _game(cur, "NFL_2025_05_ATL_NO", 2025, "2026-10-15", "NO", "ATL")
     cur.execute("""
         INSERT INTO byom_game_facts (
@@ -209,7 +223,16 @@ def _load(cur):
           ('2026_02_NYJ_SF', 'NFL', 2026, 2, 'NYJ', 'SF', 120, 24, 'test',
            '2026-10-01T00:00:00Z'),
           ('2026_06_BUF_MIA', 'NFL', 2026, 6, 'BUF', 'MIA', 120, 24, 'test',
-           '2026-10-14T00:00:00Z')
+           '2026-10-14T00:00:00Z'),
+          ('2026_03_CIN_CLE', 'NFL', 2026, 3, 'CIN', 'CLE', 120, 24, 'test',
+           '2026-09-24T00:00:00Z')
+    """)
+    cur.execute("""
+        UPDATE byom_game_facts
+           SET home_score = 27, away_score = 20,
+               close_spread_at = '2026-09-24T16:00:00Z',
+               close_spread_home = -3
+         WHERE canonical_key = '2026_03_CIN_CLE'
     """)
     cur.execute("""
         INSERT INTO player_prop_odds

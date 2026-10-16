@@ -233,9 +233,27 @@ def test_quotes_are_read_per_game_and_the_odds_cast_is_inside_a_case():
     text = (ROOT / "byom" / "load.py").read_text(encoding="utf-8")
     assert "game_id IN (%s, %s)" in text
     assert "bookmaker = 'draftkings'" in text
+    assert "_shop_quotes" in text
+    assert "bookmaker <> 'draftkings'" in text
     assert "FROM nfl_odds_history\n WHERE season = %s" not in text
     assert "AND o.snapshot_at::timestamptz" not in text
     assert "ELSE NULL END" in text
+
+
+def test_a_non_draftkings_slot_is_not_the_grade():
+    from byom.game_facts import dk_lock_grade
+
+    price, book = dk_lock_grade(
+        {"bookmaker": "fanduel", "price_home": -105, "price_away": -115},
+        "home")
+    assert price is None and book is None
+    price, book = dk_lock_grade(
+        {"bookmaker": "DraftKings", "price_home": -115, "price_away": -105},
+        "home")
+    assert price == Decimal("-115") and book == "draftkings"
+    price, book = dk_lock_grade(
+        {"price_home": -110, "price_away": -110}, "home")
+    assert price is None and book is None
 
 
 def test_the_builder_has_no_spread_price_or_line_filter_and_does_not_touch_picks():
