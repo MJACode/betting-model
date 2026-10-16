@@ -54,6 +54,9 @@ def test_the_stat_list_is_the_board_and_the_arrays_are_windows():
     assert 'FILTER (WHERE r.val IS NOT NULL)' in text
     assert "p_window IS NULL OR (p_window > 0 AND r.rn <= p_window)" in text
     assert "WHERE raw.val IS NOT NULL" in text
+    assert "p_window integer DEFAULT NULL" in text
+    assert text.count("AND g.toi_seconds > 0") == 2
+    assert "CASE WHEN g.player_name ~ '^[A-Za-z]\\. '" in text
     assert "3600.0" in text
     assert "/ 60.0" in text
 
@@ -63,6 +66,7 @@ def test_the_prop_quote_is_pre_game_and_refuses_an_ambiguous_player():
     assert "sport = 'NHL'" in text
     assert "snapshot_type <> 'in_play'" in text
     assert "snapshot_at::timestamptz <= g.commence_time::timestamptz" in text
+    assert "DISTINCT ON (p.game_date, p.game_id, p.market, p.player_name, p.bookmaker, p.line)" in text
     assert "WHEN ids.n = 1 THEN ids.player_id ELSE NULL" in text
 
 
@@ -76,7 +80,7 @@ def test_it_is_registered_after_the_clv_stamp_and_declared_for_anon():
     from tests.test_anon_readable import AHEAD_OF_THE_APP
 
     clv = "clv_standard_v2_2026_10_14.sql"
-    assert ACTIVE_MIGRATIONS[-1] == NAME
+    assert NAME in ACTIVE_MIGRATIONS
     assert ACTIVE_MIGRATIONS.index(clv) < ACTIVE_MIGRATIONS.index(NAME)
     for view in (
         "v_player_season_totals_nhl",
@@ -112,8 +116,49 @@ def _pg_bin(name: str) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    path = Path(f"/usr/lib/postgresql/16/bin/{name}")
-    return str(path) if path.is_file() else None
+    for version in ("17", "16", "15", "14"):
+        path = Path(f"/usr/lib/postgresql/{version}/bin/{name}")
+        if path.is_file():
+            return str(path)
+    return None
+
+
+def _date_filter_runs_before_dedupe(plan: list) -> bool:
+    """A game_date predicate that sits above Unique dedupes the whole table
+    and then throws the other dates away. The predicate has to be inside
+    Unique, on the scan."""
+    node = plan[0]["Plan"]
+
+    def blob(n: dict) -> str:
+        return " ".join(str(n.get(k) or "") for k in ("Filter", "Index Cond", "Recheck Cond"))
+
+    def pred(n: dict) -> bool:
+        return "game_date" in blob(n)
+
+    def anywhere(n: dict) -> bool:
+        if pred(n):
+            return True
+        return any(anywhere(c) for c in n.get("Plans") or [])
+
+    def has_unique(n: dict) -> bool:
+        if n.get("Node Type") == "Unique":
+            return True
+        return any(has_unique(c) for c in n.get("Plans") or [])
+
+    def filter_wraps_unique(n: dict) -> bool:
+        for child in n.get("Plans") or []:
+            if pred(n) and has_unique(child):
+                return True
+            if filter_wraps_unique(child):
+                return True
+        return False
+
+    def pred_inside_unique(n: dict) -> bool:
+        if n.get("Node Type") == "Unique":
+            return any(anywhere(c) for c in n.get("Plans") or [])
+        return any(pred_inside_unique(c) for c in n.get("Plans") or [])
+
+    return pred_inside_unique(node) and not filter_wraps_unique(node)
 
 
 def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
@@ -134,6 +179,8 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
         initdb = _pg_bin("initdb")
         pg_ctl = _pg_bin("pg_ctl")
         if not initdb or not pg_ctl:
+            if os.environ.get("GITHUB_ACTIONS"):
+                pytest.fail("initdb is missing in CI — the scratch Postgres test would skip")
             pytest.skip("LATEST_LINE_TEST_DSN not set and initdb is missing")
         owned = tempfile.mkdtemp(prefix="nhl-stats-pg-")
         subprocess.run(
@@ -234,7 +281,9 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
                team, opponent, is_home, started, saves, shots_against, goals_against, toi_seconds)
             VALUES
               (1, 99, 'Alexandar Georgiev', 'g1', 2027, 2, '2026-10-01', 'COL', 'PIT', 1, 1, 30, 33, 3, 3600),
-              (2, 99, 'Alexandar Georgiev', 'g2', 2027, 2, '2026-10-02', 'COL', 'PIT', 1, 0, NULL, 0, NULL, 0)
+              (2, 99, 'A. Georgiev', 'g2', 2027, 2, '2026-10-03', 'COL', 'PIT', 1, 0, 5, 6, 1, 1200),
+              (3, 99, 'A. Georgiev', 'g3', 2027, 2, '2026-10-04', 'COL', 'PIT', 1, 0, 0, 0, 0, 0),
+              (4, 80, 'I. Sorokin', 'g3', 2027, 2, '2026-10-04', 'NYI', 'COL', 0, 0, 0, 0, 0, 0)
         """)
         cur.execute("""
             INSERT INTO public.nhl_team_game_log
@@ -245,7 +294,8 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
             INSERT INTO public.games
               (game_id, sport, game_date, season, home_team, away_team, commence_time)
             VALUES
-              ('NHL_2026-10-16_PIT_COL', 'NHL', '2026-10-16', 2027, 'COL', 'PIT', '2026-10-17T01:10:00+00:00')
+              ('NHL_2026-10-16_PIT_COL', 'NHL', '2026-10-16', 2027, 'COL', 'PIT', '2026-10-17T01:10:00+00:00'),
+              ('NHL_2026-10-15_BOS_NYR', 'NHL', '2026-10-15', 2027, 'NYR', 'BOS', '2026-10-16T00:00:00+00:00')
         """)
         cur.execute("""
             INSERT INTO public.player_prop_odds
@@ -257,7 +307,9 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
               ('NHL_2026-10-16_PIT_COL', '2026-10-16', 'player_shots_on_goal', 'Cale Makar',
                'hardrockbet', 2.5, -200, 150, '2026-10-17T02:00:00+00:00', 'open'),
               ('NHL_2026-10-16_PIT_COL', '2026-10-16', 'player_shots_on_goal', 'Twin Player',
-               'hardrockbet', 1.5, -110, -110, '2026-10-16T04:18:19+00:00', 'open')
+               'hardrockbet', 1.5, -110, -110, '2026-10-16T04:18:19+00:00', 'open'),
+              ('NHL_2026-10-15_BOS_NYR', '2026-10-15', 'player_shots_on_goal', 'David Pastrnak',
+               'draftkings', 3.5, -120, 100, '2026-10-15T04:00:00+00:00', 'open')
         """)
 
         def as_anon(query, params=None):
@@ -283,13 +335,27 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
             (2027, "skater", "shots", 10))
         assert last10 == [([6.0, 5.0, 4.0, 3.0, 2.0, 1.0],)]
         goalie = as_anon(
-            "SELECT saves::float8, round(save_pct, 4)::float8, round(gaa, 2)::float8 "
+            "SELECT player_name, games_played, saves::float8, "
+            "round(save_pct, 4)::float8, round(gaa, 2)::float8 "
             "FROM public.v_player_season_totals_nhl WHERE player_id = '99'")
-        assert goalie == [(30.0, round(30 / 33, 4), 3.0)]
+        assert goalie == [("Alexandar Georgiev", 2, 35.0, round(35 / 39, 4), 3.0)]
+        dressed = as_anon(
+            "SELECT player_id FROM public.v_player_season_totals_nhl WHERE player_id = '80'")
+        assert dressed == []
+        saves_window = as_anon(
+            "SELECT player_name, \"values\"::float8[] "
+            "FROM public.player_stat_values_nhl(%s, %s, %s, %s) WHERE player_id = '99'",
+            (2027, "goalie", "saves", 5))
+        assert saves_window == [("Alexandar Georgiev", [5.0, 30.0])]
+        season_saves = as_anon(
+            "SELECT \"values\"::float8[] FROM public.player_stat_values_nhl(%s, %s, %s) "
+            "WHERE player_id = '99'",
+            (2027, "goalie", "saves"))
+        assert season_saves == [([5.0, 30.0],)]
         gaa_window = as_anon(
             "SELECT \"values\"::float8[] FROM public.player_stat_values_nhl(%s, %s, %s, %s)",
             (2027, "goalie", "gaa", 5))
-        assert gaa_window == [([3.0],)]
+        assert gaa_window == [([3.0, 3.0],)]
         team = as_anon(
             "SELECT goals_for FROM public.v_team_season_totals_nhl WHERE team = 'COL'")
         assert team == [(4,)]
@@ -303,6 +369,30 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
             "WHERE game_id = %s AND player_name = 'Twin Player'",
             ("NHL_2026-10-16_PIT_COL",))
         assert twin == [(None,)]
+        by_date = as_anon(
+            "SELECT game_id FROM public.v_nhl_player_prop_odds "
+            "WHERE game_date = %s ORDER BY 1",
+            ("2026-10-16",))
+        assert by_date == [("NHL_2026-10-16_PIT_COL",), ("NHL_2026-10-16_PIT_COL",)]
+        cur.execute("CREATE INDEX idx_prop_odds_date ON public.player_prop_odds (game_date)")
+        cur.execute("ANALYZE public.player_prop_odds")
+        cur.execute("ANALYZE public.games")
+        # Scratch tables are tiny, so the planner would seq-scan either way.
+        # Turning the seq scan off is what shows the date predicate can use
+        # idx_prop_odds_date before Unique. A filter that sits above Unique
+        # cannot.
+        cur.execute("SET enable_seqscan = off")
+        try:
+            plan_rows = as_anon(
+                "EXPLAIN (FORMAT JSON) SELECT game_id FROM public.v_nhl_player_prop_odds "
+                "WHERE game_date = '2026-10-16'")
+        finally:
+            cur.execute("SET enable_seqscan = on")
+        import json
+        plan = plan_rows[0][0]
+        if isinstance(plan, str):
+            plan = json.loads(plan)
+        assert _date_filter_runs_before_dedupe(plan), json.dumps(plan, indent=2)
     finally:
         if conn is not None:
             conn.close()

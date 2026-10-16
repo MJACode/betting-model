@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NHL stats views: game_date is in the prop DISTINCT ON so a date filter hits idx_prop_odds_date before Unique; goalie rows need toi_seconds > 0 (8 dressed backups on 10-15, 14 relief appearances kept); scratch EXPLAIN is on the PR subset |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NHL Stats views (season totals, L5/L10/season value arrays, team totals, pre-game prop quotes) registered after the CLV stamp and not applied; the three log tables are still anon-denied in prod until merge |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, evening 03:30Z apply-view-migrations 59/60 (pipeline_log does not name the file; injuries.status_ts already exists). #857 rebased onto master after #958: CLV skip path kept, catalog returns added for the already-applied ALTER/index/policy files, discord_void return stays ahead of the full-definition guard |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the NFL leader moneyline's first live bet laid -980; its price floor (-5000, set so it never bound) is now -140 (mike); bets at -500 or shorter had made -0.10u in the backtest |

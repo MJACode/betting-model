@@ -20,8 +20,9 @@
 -- Save% is saves / shots_against. Skater TOI minutes are toi_seconds / 60.
 --
 -- player_stat_values_nhl(p_season, p_kind, p_stat, p_window) returns one row
--- per player and a newest-first array of per-game values. p_window NULL is
--- the season, 5 is the last five games, 10 is the last ten. The array
+-- per player and a newest-first array of per-game values. p_window defaults
+-- to NULL, which is the season; 5 is the last five games, 10 is the last
+-- ten. The array
 -- elements are the per-game series the hit rate is counted from. An unknown
 -- p_stat or p_kind yields no rows.
 --
@@ -31,7 +32,16 @@
 -- exactly one regular-season log id on the home or away team, this season
 -- or last, matches the book's name. Zero or several leave it null.
 -- FILTER IT. A read with no game_id and no game_date scans player_prop_odds
--- and hits statement_timeout. Every caller passes one game or one date.
+-- and hits statement_timeout. game_date is part of the DISTINCT ON key so a
+-- `WHERE game_date = ...` is applied before the dedupe. Without it, Postgres
+-- dedupes every NHL prop row and filters the date afterwards (a parallel
+-- seq scan, then statement_timeout).
+--
+-- A goalie row with toi_seconds = 0 dressed and did not play (boxscore
+-- backups: started 0, saves 0, abbreviated names). Relief appearances have
+-- started 0 and toi_seconds > 0, so the cut is ice time, not the start.
+-- The name is taken from a full-name row. The abbreviated name lives on
+-- the dressed row.
 
 DO $mig$
 BEGIN
@@ -125,7 +135,9 @@ BEGIN
     UNION ALL
     SELECT
         g.player_id::text,
-        (array_agg(g.player_name ORDER BY g.game_date DESC, g.nhl_game_id DESC))[1],
+        (array_agg(g.player_name ORDER BY
+            CASE WHEN g.player_name ~ '^[A-Za-z]\. ' THEN 1 ELSE 0 END,
+            g.game_date DESC, g.nhl_game_id DESC))[1],
         'goalie'::text,
         g.season,
         (array_agg(g.team ORDER BY g.game_date DESC, g.nhl_game_id DESC))[1],
@@ -142,6 +154,7 @@ BEGIN
         SUM(g.goals_against)::numeric * 3600.0 / NULLIF(SUM(g.toi_seconds), 0)
     FROM public.nhl_goalie_game_log g
     WHERE g.game_type = 2
+      AND g.toi_seconds > 0
     GROUP BY g.player_id, g.season
     $ddl$;
 
@@ -181,7 +194,7 @@ BEGIN
         WHERE sport = 'NHL'
     ),
     quotes AS (
-        SELECT DISTINCT ON (p.game_id, p.market, p.player_name, p.bookmaker, p.line)
+        SELECT DISTINCT ON (p.game_date, p.game_id, p.market, p.player_name, p.bookmaker, p.line)
                p.game_id,
                p.game_date,
                p.market,
@@ -201,7 +214,7 @@ BEGIN
         WHERE (p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play')
           AND g.commence_time IS NOT NULL
           AND p.snapshot_at::timestamptz <= g.commence_time::timestamptz
-        ORDER BY p.game_id, p.market, p.player_name, p.bookmaker, p.line,
+        ORDER BY p.game_date, p.game_id, p.market, p.player_name, p.bookmaker, p.line,
                  p.snapshot_at::timestamptz DESC
     )
     SELECT
@@ -246,7 +259,7 @@ BEGIN
         p_season integer,
         p_kind text,
         p_stat text,
-        p_window integer
+        p_window integer DEFAULT NULL
     )
     RETURNS TABLE (
         player_id text,
@@ -306,6 +319,7 @@ BEGIN
             WHERE p_kind = 'goalie'
               AND g.season = p_season
               AND g.game_type = 2
+              AND g.toi_seconds > 0
         ),
         raw AS (
             SELECT * FROM sk
@@ -323,7 +337,9 @@ BEGIN
         )
         SELECT
             r.player_id,
-            (array_agg(r.player_name ORDER BY r.game_date DESC, r.nhl_game_id DESC))[1],
+            (array_agg(r.player_name ORDER BY
+                CASE WHEN r.player_name ~ '^[A-Za-z]\. ' THEN 1 ELSE 0 END,
+                r.game_date DESC, r.nhl_game_id DESC))[1],
             (array_agg(r.team ORDER BY r.game_date DESC, r.nhl_game_id DESC))[1],
             (array_agg(r.kind ORDER BY r.game_date DESC, r.nhl_game_id DESC))[1],
             count(r.val)::int,
