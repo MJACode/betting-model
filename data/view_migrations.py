@@ -172,6 +172,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # same PR. Guards on both names still being the measured split; no-ops
     # after once. Never deletes a pick.
     "ncaaf_se_louisiana_ul_monroe_alias_2026_09_14.sql",
+    # 2026-10-16: five Citadel matchups (2023-09-02 to 2026-10-17) each have a
+    # CFBD "The Citadel" row and a live "Citadel Bulldogs" alias the resolver
+    # minted because The Odds API drops the article. Moves odds, latest_odds
+    # and weather onto the CFBD id and deletes the unscored alias. Map entry
+    # in config.py in the same PR. Guards on the measured names; no-ops after
+    # once. Never deletes a pick.
+    "ncaaf_citadel_alias_2026_10_16.sql",
     # 2026-09-07: three MLB games rows that are the previous night's game filed
     # again under its UTC date. Relabelled data_source='duplicate_utc', never
     # deleted or scored (five voided picks point at them). No-ops after once.
