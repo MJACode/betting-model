@@ -258,30 +258,46 @@ def test_the_other_long_lived_feeds_release_a_quiet_tick():
 
 def test_migration_lock_timeout_is_short_and_local():
     """SET, not SET LOCAL, would leak onto the CLV backfill that shares
-    the connection. 120s is statement_timeout, which is the wait that
-    queued the writers."""
+    the connection. A separate execute would mark the transaction dirty
+    (data.db counts SET as a write), so the timeout travels in the same
+    statement as the file and a pooler drop replays both. 120s is
+    statement_timeout, which is the wait that queued the writers."""
+    import data.view_migrations as vm
     assert MIGRATION_LOCK_TIMEOUT == "5s"
-    src = inspect.getsource(apply_view_migrations)
+    assert vm.LOCK_TIMEOUT == MIGRATION_LOCK_TIMEOUT
+    src = inspect.getsource(vm._with_lock_timeout)
     assert "SET LOCAL lock_timeout" in src
-    assert src.index("SET LOCAL lock_timeout") < src.index("path.read_text")
+    assert "SET lock_timeout" not in src.replace("SET LOCAL lock_timeout", "")
+    apply_src = inspect.getsource(apply_view_migrations)
+    # The file text is an argument of _apply_one, which prefixes SET LOCAL
+    # in the same execute. Source order on that line is the call, then the read.
+    line = next(ln for ln in apply_src.splitlines() if "path.read_text" in ln)
+    assert "_apply_one" in line and "path.read_text" in line
 
 
 def test_a_lock_timeout_fails_that_file_and_the_next_still_runs(tmp_path, monkeypatch):
     (tmp_path / "a.sql").write_text("SELECT BOOM", encoding="utf-8")
     (tmp_path / "b.sql").write_text("SELECT 2", encoding="utf-8")
     import data.view_migrations as vm
+    monkeypatch.setattr(vm.time, "sleep", lambda _s: None)
     monkeypatch.setattr(vm, "MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(vm, "ACTIVE_MIGRATIONS", ["a.sql", "b.sql"])
     conn = _Rec()
-    n = apply_view_migrations(conn)
-    assert n == 1
-    assert conn.rolls >= 1
+    result = apply_view_migrations(conn)
+    assert result.applied == 1
+    assert result.failed_names == ("a.sql",)
+    assert conn.rolls == vm.LOCK_ATTEMPTS
     assert conn.commits == 1
-    assert any("lock_timeout" in s for s in conn.sql)
     assert any("SELECT 2" in s for s in conn.sql)
-    # The timeout is inside the file's own transaction, ahead of the file.
-    boom_at = next(i for i, s in enumerate(conn.sql) if "BOOM" in s)
-    assert "lock_timeout" in conn.sql[boom_at - 1]
+    # The timeout is in the same statement as the file, so a reconnect
+    # replays both. "lock timeout" in the error is retried; three misses
+    # fail the file and the next file still runs.
+    booms = [s for s in conn.sql if "BOOM" in s]
+    assert len(booms) == vm.LOCK_ATTEMPTS
+    for sent in booms:
+        assert sent.startswith(
+            f"SET LOCAL lock_timeout = '{MIGRATION_LOCK_TIMEOUT}';")
+        assert "SELECT BOOM" in sent
 
 
 def test_clv_method_migration_is_still_one_statement():
