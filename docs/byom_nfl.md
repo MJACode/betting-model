@@ -75,3 +75,38 @@ today, keeping the opener and the close. It does not delete from
 the opener nor the close. The first apply has to land before
 `2026-10-17`, the prune of games dated `2026-10-16`.
 `byom.constants.SHOP_FIRST_APPLY_BEFORE` is that date.
+
+## Prop facts
+
+`byom_prop_facts` is one standard prop at the DraftKings lock.
+`player_prop_odds` is the source, from `2023-09-01`
+(`PROP_HISTORY_START_DATE`). Seasons before 2023 are refused. The lock is
+the first DraftKings snapshot at or under `PROP_LOCK_WINDOW_HOURS` (24).
+**That window is UNCONFIRMED.** It is not the 120h game lock and it is
+not a check constraint. A market key ending in `_alternate` is an alt
+ladder and is not built. The grade is the best price at that line among
+`BEST_LINE_BOOKMAKERS`. Closing prices are stored and are not the grade.
+Each side stores `*_units_uncapped` and `*_units_capped`. There is no
+stake column.
+
+The stat is `nfl_player_game_log`. `log_status` says which rule fired:
+
+| status | meaning |
+|---|---|
+| `logged` | one log row matches the normalised name; `actual` is that stat |
+| `non_participant` | the game's log has rows and this name is not among them; `actual` is 0. A player whose row never landed looks the same as a scratch |
+| `missing_log` | the game has a score and the log has zero rows. Results stay NULL. A missing file is not a loss |
+| `unplayed` | no final score. The line is kept. Results stay NULL |
+| `ambiguous` | two log rows normalise to the same name. No guess. Results stay NULL |
+
+Anytime TD is `rushing_tds + receiving_tds`. Passing TDs are
+`player_pass_tds`. A return or defensive touchdown is not in the weekly
+file, so a score that is only a return grades as a loss. The name match
+does not expand nicknames, so Josh and Joshua do not meet.
+
+`byom_prop_facts_units_2026_10_16.sql` adds the labelled unit columns and
+`log_status`, and drops `over_units` / `under_units`. It is registered
+and was not applied. The job `byom_prop_facts` defaults `apply` to false.
+`jobs/declared_jobs.json` lists `byom-nfl-prop-facts` with `enabled`
+false and `apply` false, so a merge does not enqueue a writer. The
+builder reads one game at a time.

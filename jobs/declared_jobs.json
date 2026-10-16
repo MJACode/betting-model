@@ -1066,5 +1066,16 @@
       "sport": "NFL",
       "apply": false
     }
+  },
+  {
+    "key": "byom-nfl-prop-facts",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. Turning it on is the owner's call, and apply has to be set true in the same change or the run writes nothing. Builds byom_prop_facts from player_prop_odds (from 2023-09-01) and nfl_player_game_log. The 24h prop lock is UNCONFIRMED. No alt ladders. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": false
+    }
   }
 ]

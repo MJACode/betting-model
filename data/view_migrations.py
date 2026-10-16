@@ -361,6 +361,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # touch picks or the record views. The lock windows are UNCONFIRMED
     # and are not in this file.
     "byom_lock_shop_2026_10_16.sql",
+    # 2026-10-16: label prop unit columns and add log_status. The
+    # unlabelled over_units / under_units names from the facts schema are
+    # dropped. Catalog return on the second pass. Unapplied. Does not
+    # touch picks or the record views. The 24h prop lock is UNCONFIRMED
+    # and is not in this file.
+    "byom_prop_facts_units_2026_10_16.sql",
 ]
 
 

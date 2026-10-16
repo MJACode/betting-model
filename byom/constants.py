@@ -13,6 +13,18 @@ LOCK_WINDOW_HOURS = 120
 # it is not the grade.
 NEAR_LOCK_WINDOW_HOURS = 24
 
+# UNCONFIRMED. Props have no 120h DraftKings archive. The prop lock is the
+# first DraftKings pre-game snapshot at or under this many hours. It is a
+# proxy, separate from the live models, and it stays this number until it
+# is confirmed. Not a check constraint.
+PROP_LOCK_WINDOW_HOURS = 24
+
+# player_prop_odds NFL coverage used by this builder starts 2023-09-01.
+# Seasons before 2023 are refused. A 2023 game dated before that day is
+# not built.
+PROP_HISTORY_START_SEASON = 2023
+PROP_HISTORY_START_DATE = "2023-09-01"
+
 # Measured 2026-10-16: min(season) in nfl_odds_history for bookmaker
 # 'draftkings' is 2020. games holds 2015-2019. Those seasons are not built.
 DK_HISTORY_START_SEASON = 2020
