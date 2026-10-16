@@ -16,23 +16,33 @@ export function trueMinus(text: string): string {
 }
 
 /**
- * A market tag that belongs to the bet, not to the team name. It stays on
- * the hero when the matchup prefix is dropped: "Over 4.5 F5", "Team Total
- * Over 3.5". A two-word school ("Los Angeles") is not in this list.
+ * A game-market tag that belongs to the bet, not to the team name. It stays
+ * on the hero when the matchup prefix is dropped: "Over 4.5 F5". A two-word
+ * school ("Los Angeles") is not in this list. "Team Total" is handled apart
+ * from this list: that bet is per team, and stripping the matchup drops the
+ * club the total belongs to.
  */
-const TOTAL_QUALIFIER = /(?:F5|Team Total|alternate total|1st-period total)$/i;
+const TOTAL_QUALIFIER = /(?:F5|alternate total|1st-period total)$/i;
 
 /**
  * The bet the Signals card headlines.
  * "Sam Houston -7.5" → "Sam Houston −7.5".
- * "NYY vs BOS Over 8.5" → "Over 8.5" (the teams are the line above).
- * "NYY vs BOS Over 4.5 F5" keeps F5. "BOS vs NYY Team Total Over 3.5"
- * keeps "Team Total". A prop keeps the stored label, player included.
+ * "LAK vs EDM Under 6.0" → "Under 6.0" (the stored NHL game total; the
+ * teams are the line above). "NYY vs BOS Over 4.5 F5" keeps F5.
+ * A team total is quoted whole: picks has no such label (measured
+ * 2026-10-16, 0 rows), and the odds row stores the club as
+ * team_totals_home / team_totals_away with the feed description
+ * ("Boston Bruins"), not as a tag between two clubs. "Boston Bruins Over
+ * 3.5" and "BOS vs NYY Team Total Over 3.5" both keep every team word.
+ * A prop keeps the stored label, player included.
  */
 export function signalsBetHeadline(pickLabel: string | null | undefined): string {
-  // NFL card labels append the stake ("· 1.00u"). The to-win cell owns that
+  // NFL card labels append the stake ("· 1.00u"). The stake cell owns that
   // number; the hero is the bet.
   const label = (pickLabel ?? '').trim().replace(/\s·\s[\d.]+u$/, '');
+  // Per-team market. Quoting the label whole is the only way the club is
+  // not dropped: the words do not say which of the two sides the total is.
+  if (/\bteam total\b/i.test(label)) return trueMinus(label);
   const split = label.match(/^(.*?)\s+(?:vs|@)\s+(.*)$/);
   if (!split) return trueMinus(label);
   const rest = split[2];

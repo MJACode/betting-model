@@ -168,9 +168,29 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
   ], hero);
   check(
-    'the record button is still the lock price when only the line moved',
-    handoff?.bookmaker === 'draftkings' && handoff.price === -110,
+    'line-only move does not bet the lock: no current slip link, so Open DK',
+    handoff?.bookmaker === 'draftkings' && handoff.price == null && handoff.link == null && handoff.verb === 'Open' &&
+      signalsCtaLabel(bookLabel(handoff.bookmaker), null) === 'Open DK',
     JSON.stringify(handoff),
+  );
+  const linked = bestHandoffForPick(pick, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5, home_link: 'dk://now-8.5' },
+  ], hero);
+  check(
+    'line-only move with a current slip link names the line and uses that link',
+    linked?.bookmaker === 'draftkings' && linked.price === -110 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
+      signalsCtaLabel(bookLabel(linked.bookmaker), formatAmerican(linked.price), sideLine) ===
+        `Bet DK ${MINUS}8.5 ${MINUS}110`,
+    JSON.stringify(linked),
+  );
+  const shop = bestHandoffForPick(pick, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
+    { bookmaker: 'betmgm', home_price: -112, away_price: -108, spread_home: -7.5, home_link: 'mgm://7.5' },
+  ], hero);
+  check(
+    'line-only move prefers a book still at the scored line',
+    shop?.bookmaker === 'betmgm' && shop.price === -112 && shop.link === 'mgm://7.5',
+    JSON.stringify(shop),
   );
 }
 {
@@ -212,15 +232,24 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   });
   check('Signals shows line and price together', screenNow === `Now ${MINUS}8.5 ${MINUS}105 DK`, screenNow ?? '');
   const handoff = bestHandoffForPick(pick, rows, hero);
-  const buttonNamesLine = Boolean(
-    hero && handoff && hero.kind === 'now' && handoff.bookmaker === hero.book && handoff.price === hero.price,
-  );
   check(
-    'the button is the current DK price at the moved line, so its label names the line',
-    buttonNamesLine && handoff?.price === -105 &&
-      signalsCtaLabel(bookLabel(handoff!.bookmaker), formatAmerican(handoff!.price), sideLine) ===
-        `Bet DK ${MINUS}8.5 ${MINUS}105`,
+    'price and line moved, no current slip link: Open DK, not the lock slip',
+    handoff?.bookmaker === 'draftkings' && handoff.price == null && handoff.link == null &&
+      handoff.verb === 'Open' && handoff.link !== pick.dk_bet_link &&
+      signalsCtaLabel(bookLabel(handoff.bookmaker), null) === 'Open DK',
     JSON.stringify(handoff),
+  );
+  const linkedRows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', home_price: -105, away_price: -115, spread_home: -8.5, home_link: 'dk://now-8.5' },
+  ];
+  const linked = bestHandoffForPick(pick, linkedRows, heroAmericanForPick(pick, row, linkedRows));
+  check(
+    'price and line moved: the button names the line and uses the current row link',
+    linked?.price === -105 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
+      linked.link !== pick.dk_bet_link &&
+      signalsCtaLabel(bookLabel(linked!.bookmaker), formatAmerican(linked!.price), sideLine) ===
+        `Bet DK ${MINUS}8.5 ${MINUS}105`,
+    JSON.stringify(linked),
   );
 }
 {
@@ -660,9 +689,14 @@ check(
       signalsBetHeadline('NYY ML F5') === 'NYY ML F5',
   );
   check(
-    'a team-total qualifier stays in front of Over/Under',
-    signalsBetHeadline('BOS vs NYY Team Total Over 3.5') === 'Team Total Over 3.5' &&
-      signalsBetHeadline('New York vs Los Angeles Team Total Under 2.5') === 'Team Total Under 2.5' &&
+    'stored NHL game total drops the matchup',
+    signalsBetHeadline('LAK vs EDM Under 6.0') === 'Under 6.0',
+  );
+  check(
+    'a team total keeps the club: the stored odds row is per team, and picks has no Team Total label',
+    signalsBetHeadline('Boston Bruins Over 3.5') === 'Boston Bruins Over 3.5' &&
+      signalsBetHeadline('BOS vs NYY Team Total Over 3.5') === 'BOS vs NYY Team Total Over 3.5' &&
+      signalsBetHeadline('New York vs Los Angeles Team Total Under 2.5') === 'New York vs Los Angeles Team Total Under 2.5' &&
       signalsBetHeadline('Los Angeles vs New York Over 8.5') === 'Over 8.5',
   );
   check(

@@ -214,8 +214,9 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const hm = bestHandoffForPick(pick, moved, movedHero);
   check('DK better, moved line: DK −102 at 9 is not swapped in → "Best MGM −105"',
     hm?.bookmaker === 'betmgm' && hm.price === -105 && hm.verb === 'Best', JSON.stringify(hm));
-  // The M4 case at a moved line keeps its re-rank: record DK −110 ranks
-  // first, DK now −130 at 9, FD −115 at 8.5 → FD −115, never "Bet DK −130".
+  // The M4 case at a moved line does not re-rank DK's price into the
+  // same-line list. The record line is gone, so the book still at 8.5 wins:
+  // FD −115, never "Bet DK −130".
   const m4moved: BookPricedRow[] = [
     { bookmaker: 'draftkings', over_price: -130, total_line: 9 },
     { bookmaker: 'fanduel', over_price: -115, total_line: 8.5, over_link: 'fd://now' },
@@ -224,6 +225,27 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const h4 = bestHandoffForPick(pick, m4moved, m4Hero);
   check('M4, moved line: record DK −110 / now DK −130 at 9 / FD −115 → "Best FD −115"',
     h4?.bookmaker === 'fanduel' && h4.price === -115 && h4.verb === 'Best', JSON.stringify(h4));
+  // Reviewer #965: DK's current price at a moved line must not enter the
+  // same-line ranking, even when the record chip is the one that ranked first.
+  const stealPick = mkPick({
+    model_id: 'ncaaf_spread', sport: 'NCAAF', pick_side: 'home' as PickSide,
+    pick_label: 'Sam Houston -7.5', scored_line: -7.5, dk_odds: -110, decision_odds: -110,
+  });
+  const steal: BookPricedRow[] = [
+    { bookmaker: 'draftkings', home_price: -105, away_price: -115, spread_home: -8.5 },
+    { bookmaker: 'betmgm', home_price: -112, away_price: -108, spread_home: -7.5, home_link: 'mgm://line' },
+  ];
+  const stealHero = heroAmericanForPick(
+    stealPick,
+    latest({ market: 'spreads', spread_home: -8.5, total_line: null, home_price: -105, away_price: -115, over_price: null, under_price: null }),
+    steal,
+  );
+  const hs = bestHandoffForPick(stealPick, steal, stealHero);
+  check(
+    'moved line: DK −105 at −8.5 does not beat MGM −112 still at −7.5',
+    hs?.bookmaker === 'betmgm' && hs.price === -112 && hs.verb === 'Best' && hs.link === 'mgm://line',
+    JSON.stringify({ hero: stealHero, handoff: hs }),
+  );
 }
 
 // ── H4: price check ─────────────────────────────────────────────────────────

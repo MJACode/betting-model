@@ -312,13 +312,13 @@ export function PickCard({
         book: bookName(quoteBookKey),
       })
     : null;
-  // The button names the line only when it is a bet at that moved line
-  // (same book, current price). A record chip at the lock does not.
+  // The button names the line when it is a bet at the deciding book's
+  // current line (same book, that price), including a line-only move.
+  // Open, and a book still at the scored line, do not.
   const ctaAtMovedLine = Boolean(
     signalsMovedLineText &&
     handoff &&
     heroPrice &&
-    heroPrice.kind === 'now' &&
     !heroPrice.stale &&
     !heroPrice.untracked &&
     handoff.bookmaker === heroPrice.book &&
