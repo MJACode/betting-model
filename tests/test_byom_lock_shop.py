@@ -1,5 +1,6 @@
-"""The lock-time book shop: captured once, then the grade survives pruning.
+"""The lock-time book shop: captured once, stored as reference.
 
+The grade is DraftKings' own lock price. The shop does not set it.
 The migration is unapplied on production. The scratch cluster is local.
 """
 from __future__ import annotations
@@ -11,10 +12,9 @@ import pytest
 
 from byom.game_facts import (
     capture_game,
-    regrade_from_shop,
     shop_markets_to_replace,
 )
-from tests.test_byom_game_facts import BOOKS, _game, _quotes
+from tests.test_byom_game_facts import _game, _quotes
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL = (ROOT / "data/migrations/byom_lock_shop_2026_10_16.sql").read_text(encoding="utf-8")
@@ -25,7 +25,7 @@ def _code(sql: str) -> str:
 
 
 def _spread_shop(window: int):
-    _fact, shops = capture_game(_game(), _quotes(), {"BAL": [], "KC": []}, BOOKS)
+    _fact, shops = capture_game(_game(), _quotes(), {"BAL": [], "KC": []})
     return [
         row for row in shops
         if row["market"] == "spreads" and row["lock_window_hours"] == window
@@ -91,16 +91,19 @@ def test_the_shop_keeps_every_book_at_the_draftkings_line():
     assert near[0]["point"] == Decimal("-3.5")
 
 
-def test_a_stored_shop_is_the_grade_after_the_live_quote_is_gone():
-    fact, shops = capture_game(_game(), _quotes(), {"BAL": [], "KC": []}, BOOKS)
-    assert fact["grade_spread_home_book"] == "fanduel"
+def test_the_grade_stays_draftkings_when_a_better_shop_price_is_present():
+    fact, shops = capture_game(_game(), _quotes(), {"BAL": [], "KC": []})
+    assert fact["grade_spread_home_book"] == "draftkings"
+    assert fact["grade_spread_home_price"] == Decimal("-115")
+    books = {
+        row["bookmaker"] for row in shops
+        if row["market"] == "spreads" and row["lock_window_hours"] == 120
+    }
+    assert books == {"draftkings", "fanduel", "pinnacle"}
     kept = [q for q in _quotes() if q["bookmaker"] != "fanduel"]
-    rebuilt, _shops = capture_game(_game(), kept, {"BAL": [], "KC": []}, BOOKS)
+    rebuilt, _shops = capture_game(_game(), kept, {"BAL": [], "KC": []})
     assert rebuilt["grade_spread_home_book"] == "draftkings"
-    stored = [row for row in shops if row["lock_window_hours"] == 120]
-    regrade_from_shop(rebuilt, stored, BOOKS)
-    assert rebuilt["grade_spread_home_book"] == "fanduel"
-    assert rebuilt["grade_spread_home_price"] == Decimal("-105")
+    assert rebuilt["grade_spread_home_price"] == Decimal("-115")
     assert rebuilt["ats_home_units_uncapped"] == Decimal("1")
     assert rebuilt["ats_home_units_capped"] == Decimal("1.0000")
 
@@ -234,7 +237,7 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
                 raw.commit()
 
         conn = Conn()
-        first = build_season(conn, 2024, apply=True, books=BOOKS)
+        first = build_season(conn, 2024, apply=True)
         assert first["written"] == 3
         assert first["shop"] > 0
         cur = raw.cursor()
@@ -251,20 +254,22 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
             SELECT grade_spread_home_book, grade_spread_home_price
               FROM byom_game_facts WHERE canonical_key = '2024_01_BAL_KC'
         """)
-        assert cur.fetchone()[0] == "fanduel"
+        graded_now = cur.fetchone()
+        assert graded_now[0] == "draftkings"
+        assert Decimal(str(graded_now[1])) == Decimal("-115")
         cur.execute("""
             DELETE FROM nfl_odds_history
              WHERE bookmaker = 'fanduel' AND game_id = '2024_01_BAL_KC'
         """)
-        again = build_season(conn, 2024, apply=True, books=BOOKS)
+        again = build_season(conn, 2024, apply=True)
         assert again["written"] == 3
         cur.execute("""
             SELECT grade_spread_home_book, grade_spread_home_price
               FROM byom_game_facts WHERE canonical_key = '2024_01_BAL_KC'
         """)
         graded = cur.fetchone()
-        assert graded[0] == "fanduel"
-        assert Decimal(str(graded[1])) == Decimal("-105")
+        assert graded[0] == "draftkings"
+        assert Decimal(str(graded[1])) == Decimal("-115")
         cur.execute("""
             SELECT count(*) FROM byom_lock_shop
              WHERE canonical_key = '2024_01_BAL_KC'
@@ -272,7 +277,7 @@ def test_scratch_shop_still_grades_after_the_book_is_deleted():
                AND lock_window_hours = 120
         """)
         assert cur.fetchone()[0] == 1
-        dry = build_season(conn, 2024, apply=False, books=BOOKS)
+        dry = build_season(conn, 2024, apply=False)
         assert dry["shop"] == 0 and dry["written"] == 0
         raw.commit()
         raw.autocommit = True

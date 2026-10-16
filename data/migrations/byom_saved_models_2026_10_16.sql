@@ -18,8 +18,8 @@
 -- Cap is 25 models per user. Saving an existing name updates that model
 -- and appends a snapshot. It does not count as a new model.
 --
--- There is no spread-size, price, or line filter, and no stake. A filter
--- key for one of those is rejected.
+-- There is no spread-size, price, or line filter. A stake or kelly
+-- filter key is rejected. The snapshot unit columns are results.
 --
 -- The 120h and 24h windows are UNCONFIRMED and are not in this file.
 -- One DO block. No CONCURRENTLY. Does not touch picks or the record views.

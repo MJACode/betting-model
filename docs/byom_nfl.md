@@ -20,13 +20,14 @@ quote came from.
 The lock columns hold the first DraftKings pre-game snapshot at or under a
 120 hour lead, and a second snapshot at or under 24 hours. **Both numbers
 are UNCONFIRMED placeholders.** They are columns the builder fills, not
-check constraints. The grade is the 120h DraftKings line at the best price
-on that same line. The closing DraftKings price is stored and is not the
-grade. Each result stores two unit columns. `*_units_uncapped` is 1u-to-win
-with no risk ceiling. `*_units_capped` matches `stake_for`: risk above 3
+check constraints. The grade is DraftKings' own price on that 120h lock
+snapshot. `grade_*_book` is `draftkings`. The closing DraftKings price is
+stored and is not the grade. Each result stores two unit columns.
+`*_units_uncapped` is the 1u-to-win result with no risk ceiling.
+`*_units_capped` is the result after a 3-unit risk ceiling: risk above 3
 is cut to 3, and a win is recomputed from that risk. A -400 loss is -4
 uncapped and -3 capped. A missing price leaves both NULL. Pushes and ties
-are stored. There is no stake column.
+are stored. Both columns are results. There is no stake column.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
@@ -40,10 +41,9 @@ is the owner's call, and `apply` has to be set true in that same change.
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
 `byom/constants.py` holds `LOCK_WINDOW_HOURS` (120) and
 `NEAR_LOCK_WINDOW_HOURS` (24). Both are UNCONFIRMED. Seasons before
-`DK_HISTORY_START_SEASON` (2020) are refused. The grade is the best
-American price, per side, among `BEST_LINE_BOOKMAKERS` on DraftKings'
-number, from a quote in the 30 minutes up to that lock. A quote on a
-different number does not count. History is preferred over `odds` when
+`DK_HISTORY_START_SEASON` (2020) are refused. The grade is DraftKings'
+own price on the lock snapshot. `grade_*_book` is `draftkings`. Another
+book's price is not the grade. History is preferred over `odds` when
 both have a lock for that market. `line_source` records which table.
 Closing prices are stored and are not the grade. The builder reads one
 game at a time: DraftKings inside the lock window, then other books only
@@ -55,14 +55,14 @@ registered and was not applied.
 grade lock and at the near lock, inside that 30-minute lag, including
 Pinnacle. The app does not read it. The migration revokes anon and
 authenticated and enables RLS with no policy. The worker owns the table.
-The first capture is kept. A rebuild grades from those rows, so 2026
-stays the same after the non-DraftKings quotes are pruned. A spread or
+The first capture is kept. A rebuild does not grade from those rows.
+The grade stays DraftKings' own price on the lock snapshot, so a later
+prune of non-DraftKings quotes does not change it. A spread or
 total whose DraftKings number has moved replaces that market. h2h has no
 number: it is replaced when the stored DraftKings `snapshot_at` is not
 the lock being written, or when the stored rows have no DraftKings row.
 Another book's timestamp may be earlier inside the lag and is not the
-check. The grade still uses `BEST_LINE_BOOKMAKERS`; the other books are
-stored so the price can be recomputed.
+check. The shop is reference. It does not set the grade.
 `data/migrations/byom_lock_shop_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The windows are
 UNCONFIRMED and are not check constraints.
@@ -84,10 +84,11 @@ the opener nor the close. The first apply has to land before
 the first DraftKings snapshot at or under `PROP_LOCK_WINDOW_HOURS` (24).
 **That window is UNCONFIRMED.** It is not the 120h game lock and it is
 not a check constraint. A market key ending in `_alternate` is an alt
-ladder and is not built. The grade is the best price at that line among
-`BEST_LINE_BOOKMAKERS`. Closing prices are stored and are not the grade.
-Each side stores `*_units_uncapped` and `*_units_capped`. There is no
-stake column.
+ladder and is not built. The grade is DraftKings' own price on that
+lock snapshot. `grade_*_book` is `draftkings`. Another book's price is
+not the grade. Closing prices are stored and are not the grade.
+Each side stores `*_units_uncapped` and `*_units_capped`. Both are
+results. There is no stake column.
 
 The stat is `nfl_player_game_log`. `log_status` says which rule fired:
 
@@ -120,7 +121,9 @@ August stay on the previous year's label. A caller can pass an older
 season. Filters are side (home/away), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
 is left out. There is no spread-size, price, or line filter. Each
-market row sums `units_uncapped` and `units_capped`. There is no stake.
+market row sums `units_uncapped` and `units_capped`. Those columns are
+the stored DraftKings-lock results. There is no stake and no
+recommended stake.
 Game markets include both sides. Prop markets include the over and the
 under. `data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
 and was not applied. The function is in `RPC_ANON_CALLABLE`. It reads
@@ -138,8 +141,9 @@ lock windows. The 120h and 24h locks stay UNCONFIRMED.
 
 `apply` false returns the report and writes nothing. `apply` true
 rebuilds only the due games, game facts and prop facts, and commits
-once. Rest days still use the whole season's schedule. Quotes for a
-game outside the due set are not fetched.
+once. The grade on that rebuild is DraftKings' own lock price. Rest
+days still use the whole season's schedule. Quotes for a game outside
+the due set are not fetched.
 
 `byom_refresh` defaults `apply` to false. `jobs/declared_jobs.json`
 lists `byom-nfl-refresh` with `enabled` false and `apply` false, so a
@@ -151,8 +155,9 @@ does not add a schedule. It does not write `picks`.
 `byom_models` and `byom_model_snapshots` are keyed to `auth.uid()`. A
 user sees their own rows. The cap is 25 models. Saving an existing name
 updates that model and appends a snapshot of `byom_backtest` at that
-moment. The snapshot keeps both unit totals. There is no stake, and a
-price, line, or spread-size filter is rejected.
+moment. The snapshot keeps both unit totals. Those are results. A
+stake, kelly, price, line, or spread-size filter is rejected. There
+is no recommended stake.
 
 The RPCs are `SECURITY DEFINER`: `byom_save_model`, `byom_list_models`,
 `byom_delete_model`. The user id comes from `auth.uid()`, not from an

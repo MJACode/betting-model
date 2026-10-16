@@ -20,7 +20,7 @@
 --   markets: ["spreads", "totals", "h2h", "player_pass_yds"]
 -- A missing datum on a leg is excluded once that filter is set.
 -- There is no spread-size, price, or line filter. Both unit columns are
--- summed. There is no stake.
+-- summed. They are the stored DraftKings-lock results, not a stake.
 --
 -- Game markets contribute the home leg and the away leg. Prop markets
 -- contribute the over and the under. A side or role filter uses the
