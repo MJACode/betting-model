@@ -526,28 +526,36 @@ def _load_nhl_goalie_actuals(conn: DBConnection, game_date: str) -> tuple[dict, 
     Two things come back because the void rule needs both. DraftKings voids a
     saves bet when the goalie does not start, so only starters are graded --
     a backup who relieved the starter has a row and saves, and must NOT be
-    settled on them. The second value is every game with ANY goalie row: a
-    priced goalie absent from the first and present in the second did not
-    start (NO_ACTION); a game absent from both is not ingested yet (retry).
+    settled on them. The second value is every game whose log holds a start
+    for BOTH teams: a priced goalie absent from the first and present in the
+    second did not start (NO_ACTION); any other game is not ingested yet
+    (retry).
     This is the rule scripts/nhl_prop_backtest.py grades on -- only starts are
     rows in the model's frame -- so the record and the backtest cannot differ
     on who was a bet.
     """
     day = datetime.strptime(game_date, "%Y-%m-%d")
     rows = conn.execute("""
-        SELECT player_id, player_name, game_id, started, saves, shots_against
+        SELECT player_id, player_name, game_id, started, saves, shots_against, team
         FROM nhl_goalie_game_log
         WHERE game_date BETWEEN %s AND %s AND game_id IS NOT NULL
     """, ((day - timedelta(days=1)).strftime("%Y-%m-%d"),
           (day + timedelta(days=1)).strftime("%Y-%m-%d"))).fetchall()
-    cols = ["player_id", "player_name", "game_id", "started", "saves", "shots_against"]
+    cols = ["player_id", "player_name", "game_id", "started", "saves", "shots_against", "team"]
     starters: dict = {}
-    logged: set = set()
+    starting_teams: dict = {}
     for row in rows:
         d = dict(zip(cols, row))
-        logged.add(d["game_id"])
         if d["player_id"] is not None and int(d["started"] or 0) == 1:
             starters[(str(int(d["player_id"])), d["game_id"])] = d
+            starting_teams.setdefault(d["game_id"], set()).add(d["team"])
+    # A game is logged for the void rule only once BOTH starters are in it.
+    # Any goalie row was enough until 2026-10-16: the evening box score wrote
+    # BUF@TOR with no start for Ukko-Pekka Luukkonen, his Under 25.5 saves was
+    # voided at 9:57pm ET, and the morning stats showed he started and made
+    # 26 saves -- a loss. Every one of 11,988 stored games has exactly two
+    # starts, so a game with fewer is not finished loading; it waits.
+    logged = {gid for gid, teams in starting_teams.items() if len(teams) >= 2}
     logger.debug(f"NHL goalie actuals: {len(starters)} starts in {len(logged)} games for {game_date}")
     return starters, logged
 
