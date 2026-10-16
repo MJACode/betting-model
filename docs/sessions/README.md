@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Paused pick chip ink. `#5C5C62` on noneSoft is 5.79:1; textTertiary stays 4.56:1 |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Lines board reviewer follow-up. The Lines pytest is on PR CI. Missing draw_price is remembered, midnight ET reloads, one Best row on a full tie, Retry speech is a sentence |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Lines board designer fixes. Green is the winning price, each side has its own Bet, tie hidden until draw_price. Hand-applied view migration, not in ACTIVE_MIGRATIONS |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Picks Lines board (NHL/NBA/All). v_latest_odds_all_books anon SELECT already granted; no migration. Fliff Bet does not fall through to DraftKings |

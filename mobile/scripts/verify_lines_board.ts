@@ -204,7 +204,7 @@ check('green is the winning price, and Best is the word on a row that wins every
 check('the book name is allowed to wrap', /<Text style=\{styles\.book\}>\{bookName\(row\.bookmaker\)\}<\/Text>/.test(sheet));
 check('the sheet header shows the game time', /when=\{openGame \? formatGameTimeET\(openGame\.commence_time\) : ''\}/.test(card));
 check('a game with no prices is one line, not six cells', card.includes('LINES_GAME_UNPRICED') && card.includes('LINES_CELL_HINT'));
-check('the Pick chip opens detail and the paused chip is named', /onOpenPick\(picked\.picks, 'pick'\)/.test(card) && /linesPausedChipLabel/.test(card) && /colors\.textTertiary/.test(card));
+check('the Pick chip opens detail and the paused chip is named', /onOpenPick\(picked\.picks, 'pick'\)/.test(card) && /linesPausedChipLabel/.test(card) && /colors\.pausedInk/.test(card));
 check('the lines read is the all-books view, paged, for the board markets', /function fetchLinesBoardOdds[\s\S]*?\.from\('v_latest_odds_all_books'\)[\s\S]*?LINES_ODDS_MARKETS[\s\S]*?fetchAllPages/.test(queries) || /fetchAllPages<OddsByBookRow>\([\s\S]*?\.from\('v_latest_odds_all_books'\)[\s\S]*?LINES_ODDS_MARKETS/.test(queries));
 check('games are read for the lines sports, not only picked games', /function fetchGamesForLinesBoard[\s\S]*?\.from\('games'\)[\s\S]*?LINES_SPORTS/.test(queries));
 check('a paused-only row is not the Pick chip', /const linesPicks: LinesPickRef\[\] = allData\.map/.test(picksHome) && /const linesPaused: LinesPickRef\[\] = pausedData\.map/.test(picksHome));

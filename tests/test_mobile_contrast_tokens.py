@@ -86,7 +86,8 @@ def test_token_values_and_fills_unchanged():
     assert t["bet"] == t["positive"] == "#34C759"
     assert t["avoid"] == t["negative"] == "#FF3B30"
     assert t["med"] == "#FF9500"
-    assert _lum(t["textTertiary"]) > _lum(t["textSecondary"])  # hierarchy holds
+    assert t["pausedInk"] == "#5C5C62"  # Paused pick chip, #963
+    assert _lum(t["textTertiary"]) > _lum(t["pausedInk"]) > _lum(t["textSecondary"])
 
 
 # (text token, ground, minimum). The app is light-only: no dark palette exists.
@@ -102,6 +103,7 @@ PAIRS = [
     ("medInk", "bg", 4.5),
     ("medInk", "medSoft", 4.5),
     ("textSecondary", "noneSoft", 4.5),
+    ("pausedInk", "noneSoft", 4.5),  # Paused pick chip, #963
     ("textPrimary", "bet", 4.5),  # SportToggle count (H6)
     ("textPrimary", "med", 4.5),  # player hit-rate badge
     ("textPrimary", "avoid", 4.5),
@@ -131,6 +133,7 @@ def test_the_audit_ratios():
     assert round(_ratio(t["avoidInk"], t["avoidSoft"]), 2) == 5.01
     assert round(_ratio(t["medInk"], t["medSoft"]), 2) == 4.99
     assert round(_ratio(t["textPrimary"], t["bet"]), 2) == 9.46
+    assert round(_ratio(t["pausedInk"], t["noneSoft"]), 2) == 5.79
 
 
 def test_signal_badge_ink_and_glyph_mapping():

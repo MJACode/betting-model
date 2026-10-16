@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
   pausedChipText: {
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.pausedInk,
   },
   unpriced: {
     fontSize: font.size.footnote,
