@@ -386,8 +386,20 @@ def test_scorer_live_default_downgrades_steamed_and_public_steam(monkeypatch):
         "signal_type": "BET", "kelly_fraction": 0.03, "recommended_bet": 300,
         "downgrade_reason": None, "public_bet_pct": None, "public_money_pct": None,
     }
+    class _SavepointConn:
+        """Since 2026-09-28 (#843) the gate runs inside a savepoint, so the
+        connection must accept SAVEPOINT / RELEASE. A bare object() made
+        the gate fail open and this test pass vacuously... until the
+        verdict assertion, which it then failed for 18 days."""
+        statements: list[str] = []
+
+        def execute(self, sql, params=None):
+            self.statements.append(sql)
+            return None
+
+    conn = _SavepointConn()
     scorer._apply_game_market_gate(
-        object(), [steamed], "h2h",
+        conn, [steamed], "h2h",
         {"home_price": -150, "away_price": 130,
          "snapshot_at": "2026-09-15T20:00:00Z"},
         "2026-09-15T23:00:00Z")
@@ -403,7 +415,7 @@ def test_scorer_live_default_downgrades_steamed_and_public_steam(monkeypatch):
         "downgrade_reason": None, "public_bet_pct": 68.0, "public_money_pct": 55.0,
     }
     scorer._apply_game_market_gate(
-        object(), [public], "h2h",
+        conn, [public], "h2h",
         {"home_price": -125, "away_price": 105,
          "snapshot_at": "2026-09-15T20:00:00Z"},
         "2026-09-15T23:00:00Z")

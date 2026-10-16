@@ -5,6 +5,7 @@ beat-the-close rate rested on 240 of 3,422 settled bets (7%). A rate measured
 on 7% of the book says very little about the book.
 """
 import ast
+import re
 from pathlib import Path
 
 SRC = Path(__file__).parent.parent / "tracking/paper_tracker.py"
@@ -131,8 +132,10 @@ def test_clv_pct_never_compares_prices_across_a_moved_line():
     means."""
     src = _fn("_capture_clv")
     assert "_closing_line_for(" in src
-    assert "abs(float(closing_line) - float(scored_line))" in src
-    assert "if not line_moved:" in src, (
+    # 2026-10-14 (#949): the book's latest main line is `latest_line`; the
+    # snapshot at the number we bet is `same_line`. The guard is the same.
+    assert "abs(float(latest_line) - float(scored_line))" in src
+    assert "if closing_price is not None and not line_moved:" in src, (
         "clv_pct must be computed only on an unmoved line")
 
 
@@ -142,7 +145,7 @@ def test_line_moved_is_derived_from_the_numbers_not_from_the_points_helper():
     cross-line price comparison through -- the exact leak the guard exists to
     stop."""
     src = _fn("_capture_clv")
-    assert "line_moved = (closing_line is not None and scored_line is not None" in src
+    assert "line_moved = (latest_line is not None and scored_line is not None" in src
 
 
 def test_moneyline_has_no_line_and_is_never_skipped_by_the_guard():
@@ -150,7 +153,7 @@ def test_moneyline_has_no_line_and_is_never_skipped_by_the_guard():
     src = _fn("_closing_line_for")
     assert "return None" in src, "moneyline must fall through to no line"
     guard = _fn("_capture_clv")
-    assert "closing_line is not None and scored_line is not None" in guard
+    assert "latest_line is not None and scored_line is not None" in guard
 
 
 def test_the_close_is_recorded_even_when_the_line_moved():
@@ -160,9 +163,10 @@ def test_the_close_is_recorded_even_when_the_line_moved():
     thing a user most wants to see was structurally invisible."""
     src = _fn("_capture_clv")
     write = src.split("conn.execute(", 1)[1]
-    assert "closing_line    = %s" in write
-    assert "line_clv_pts    = %s" in write
-    assert "clv_beat_close  = %s" in write
+    # Column padding is cosmetic; the columns being written is the claim.
+    assert re.search(r"closing_line\s+= %s", write)
+    assert re.search(r"line_clv_pts\s+= %s", write)
+    assert re.search(r"clv_beat_close\s+= %s", write)
 
 
 def test_a_pick_is_only_stamped_captured_once_a_measure_resolved():
