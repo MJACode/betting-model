@@ -30,8 +30,8 @@ import {
 } from '@/lib/trackRecord';
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
-import { formatPct, formatPctSigned } from '@/lib/format';
-import { ROW_SLOP_PAD, unknownCountSpeech } from '@/lib/a11y';
+import { formatPct, formatPctSigned, formatSigned } from '@/lib/format';
+import { ROW_SLOP_PAD, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
@@ -127,6 +127,9 @@ export function TrackRecordScreen() {
   const canShare = rows.length > 0 && overall.picks > 0;
   // Nothing has loaded (still loading, or the load failed): unknown, not zero.
   const notLoaded = rows.length === 0 && (loading || Boolean(error));
+  // The hero number is the posted stake, the same units Discord #results prints.
+  const heroUnits = Number(overall.units ?? 0);
+  const heroRisked = Number(overall.risked ?? 0);
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
@@ -244,9 +247,17 @@ export function TrackRecordScreen() {
           </Skeleton>
         ) : (
         <View style={styles.heroCard}>
-          <Text style={styles.heroLabel}>ROI · 1 to win</Text>
-          <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
-            {Number(overall.risked ?? 0) > 0 ? formatPctSigned(overall.roiFlat) : '—'}
+          <Text style={styles.heroLabel}>Units · 1 to win</Text>
+          <Text
+            style={[
+              styles.heroRoi,
+              { color: heroRisked > 0 ? pnlColor(heroUnits, 2) : colors.textSecondary },
+            ]}
+            accessibilityLabel={
+              heroRisked > 0 ? unitsSpeech(formatSigned(heroUnits, 2, 'u')) : 'Units unavailable'
+            }
+          >
+            {heroRisked > 0 ? formatSigned(heroUnits, 2, 'u') : '—'}
           </Text>
           <Text
             style={styles.heroRecord}
@@ -256,6 +267,7 @@ export function TrackRecordScreen() {
               '— settled picks'
             ) : (
               <>
+                {heroRisked > 0 ? `${formatPctSigned(overall.roiFlat)} ROI · ` : ''}
                 {overall.wins}–{overall.losses}
                 {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
               </>
@@ -479,7 +491,13 @@ const styles = StyleSheet.create({
   },
   heroLabel: { fontSize: font.size.footnote, color: colors.textTertiary },
   heroRoi: { fontSize: font.size.largeTitle, fontWeight: font.weight.bold, marginVertical: 2 },
-  heroRecord: { fontSize: font.size.callout, color: colors.textSecondary, marginBottom: spacing.md },
+  heroRecord: {
+    fontSize: font.size.callout,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+    alignSelf: 'stretch',
+    textAlign: 'center',
+  },
   heroSplit: {
     fontSize: font.size.caption,
     color: colors.textSecondary,

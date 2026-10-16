@@ -136,7 +136,14 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "profit_flat" not in equity
     assert "/ 100" not in equity
     assert "Flat-bet ROI" not in screen
-    assert ">ROI · 1 to win<" in screen
+    assert ">Units · 1 to win<" in screen
+    assert "formatSigned(heroUnits, 2, 'u')" in screen
+    assert "pnlColor(heroUnits, 2)" in screen
+    assert "unitsSpeech(formatSigned(heroUnits, 2, 'u'))" in screen
+    assert "Units unavailable" in screen
+    assert "alignSelf: 'stretch'" in screen
+    assert "textAlign: 'center'" in screen.split("heroRecord:", 1)[1].split("heroSplit:", 1)[0]
+    assert "formatPctSigned(overall.roiFlat)} ROI" in screen
     assert "Yesterday and the Models tab still use a flat $100 bet" in screen
     assert "wins less than 1" in screen
     assert "unpriced, staked at 1u" in screen

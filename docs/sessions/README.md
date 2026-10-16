@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Record hero shows posted-stake units at two decimals (the Discord figure); ROI stays on the line under it; stacked on #964 |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, The Citadel: The Odds API's "Citadel Bulldogs" joins `NCAAF_ODDS_API_MAP` (CFBD says "The Citadel", the fold keeps the article); `ncaaf_citadel_alias_2026_10_16.sql` consolidates five alias rows (Texas A&M 2026-10-17 held 605 odds, Charlotte 2026-09-05 8,639; no picks) onto the CFBD ids; the migration is executed on a scratch Postgres in its test |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA projection model (`nba_prop_projection`) live: six calibrated cells, every qualifying proposition, never one the rule holds, projected about 65 minutes before tip and decided in the window; three verifiers and a pre-merge review confirmed; live-path replay matches the graded predictions; the shared window moved to 45-57 (#970) and two missing markets fetched |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, session close: #957, #977, #978, #980 merged (14:03Z to 17:05Z); worker and pollers SUCCESS, OTA run 38936964872 success; full suite on master 46ad3562 5,947 passed / 0 failed / 0 skipped in 257.65 s, no postgres.exe left; machine installs (node wheel, embedded-postgres, mobile/node_modules) and Matt's two commands |
