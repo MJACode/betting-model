@@ -703,3 +703,60 @@ numbers and its bets written out (`NBA_GAME2_BETS`). `python -m scripts.nba_game
   - F6c against eliminated teams: 371 bets, +6.3%, interval −3.5 .. +16.2, 3 of 5 seasons.
 
 **Shipped LIVE (CLAUDE.md §2):** F4 overs at C, gap ≥ 3. It is judged on its live record.
+
+## 7. Third search: in-game spread, moneyline and total (pre-registered 2026-10-17, before any grid)
+
+mike, 2026-10-17: *"Find it."* Every pre-game idea the outside sweep found repeats a closed family
+or rests on weak evidence (ranking: build machine,
+`C:/Users/micha/AppData/Local/Temp/nba_game_edge/scout3_ranked.md`).
+
+The new information is in-game. The archive already holds **380,349 in-play quotes** on 7,213
+regular-season games, 2020-21 → 2025-26 (Pinnacle on 7,156 of them). They come from the hourly
+fetches that land after tip, about two per game, and no cell has ever used them. The in-play
+models elsewhere in this repo were judged on calibration and lost (`docs/live_betting.md`), so
+this search must first show **information beyond Pinnacle's own live price at the same moment**.
+Only then does it run a betting grid.
+
+### 7.1 Data rules
+
+- **Game state at a quote** (score, period, clock, fouls, shooting so far) comes from the ESPN
+  play-by-play wall clock (`nba_pbp`) at the quote's stamp, never from `games.commence_time`.
+  On 17 games in late October 2025 the first play came more than 60 minutes after the listed
+  tip.
+- **Step 0, the staleness gate (free).** Test whether points scored in the 60–120 seconds before
+  a quote's stamp predict that quote's result, against Pinnacle's live no-vig price.
+  - If they do, a quote is used only when no point was scored since the book's last update, and
+    only when Pinnacle quoted within 60 seconds of it. This is the NCAAF in-play rule,
+    `scripts/ncaaf_inplay_history_backtest.py`.
+  - The gate's result is recorded here before any information test runs.
+- **Settlement:** full-game results. A live total is settled on the full-game score; the
+  remaining points are the live line minus the points already scored.
+- **Prices:** as §6.2, with the best of the 8 deciding books, the −200 floor, DraftKings alone
+  beside, and pushes out of the denominator.
+- **Seasons:** walk-forward. Choose on 2021-22 → 2024-25, confirm on 2025-26; 2020-21 is
+  reported only.
+
+### 7.2 Families (54 cells)
+
+| # | Family | Market × sides | Decision | Cut axis | Cells |
+|---|---|---|---|---|---|
+| IG-1 | **Totals after in-game shooting luck.** Luck points so far = (3PM − 3PA × expected 3P%) × 3 + (FTM − FTA × expected FT%), both teams, from each team's season-to-date rates before the date. Model remaining points = pace-scaled remainder of Pinnacle's pre-game close, with points so far luck-corrected. Bet under when shooting is hot, over when cold. The opposite direction ("hot halves keep scoring") is graded as a control. | live total × over, under | the first eligible quote in each of three windows: Q2, the halftime break, Q3 | luck gap ≥ 2 / 4 / 6 / 8 points | 24 |
+| IG-2 | **Game-state model against the live moneyline and spread.** A walk-forward win-probability and remaining-margin model. Inputs: margin, seconds left, Pinnacle's pre-game close spread as the prior (Stern 1994 variance), team fouls, foul counts of the top-minute players. | live moneyline (inside −200), live spread × the side the model favours | three phases: Q1–Q2, Q3, Q4 with ≥ 6 minutes left | EV ≥ 0.02 / 0.05 / 0.08 | 18 |
+| HT-1 | **Halftime.** Rest-of-game total and spread from first-half luck points, first-half pace against the pace the pre-game close implied, team fouls, and the halftime margin. Graded first on the held quotes stamped inside the break (103–271 games a season). | full-game live total and spread at halftime × 2 sides | one quote inside the break | model gap ≥ 1.5 / 3 / 4.5 points | 12 |
+
+### 7.3 Gates and bars
+
+1. **Information first.** For IG-1, IG-2 and HT-1, measure the change in log loss (moneyline)
+   or squared error (spread, total) when the family's model is added to Pinnacle's live no-vig
+   price at the same stamp. Walk-forward on 2021-22 → 2024-25, then 2025-26 alone. A family
+   whose 95% interval covers zero is **closed without a betting grid**.
+2. **Bars for a grid that runs:** the house standard of §6.7. The §6.4 bars and the
+   multiple-testing count (now 4,226 with these 54) are reported beside.
+3. **A cell that passes is built LIVE.** That needs an NBA in-play loop; `ncaaf_live/` is the
+   template.
+
+### 7.4 Purchases, only if a free test shows information
+
+- HT-1's full set of halftime snapshots: 117,270 credits for 2021-22 → 2025-26 (measured grid).
+- The 5-minute in-play archive, to replay a rule that bets the first time a price crosses its
+  cut: 586,710 credits for moneyline only, 1,760,130 for all three markets.
