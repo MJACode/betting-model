@@ -174,7 +174,7 @@ def test_the_nhl_totals_card_reads_the_fetch_it_follows():
 
 def test_the_nba_prop_card_reads_the_fetch_it_follows():
     """nba_prop_market pairs Pinnacle with the bettable books in ONE stored
-    prop fetch and decides only games 45-70 minutes from tip, so it must run
+    prop fetch and decides only games 45-57 minutes from tip, so it must run
     after `nba-prop-odds` has stored this pass's fetch and as soon after it as
     the pass allows (before the scoring group), and before settle. Sequential,
     like every writer to picks. Its closing snapshot follows it, and the
@@ -186,6 +186,9 @@ def test_the_nba_prop_card_reads_the_fetch_it_follows():
         "nba-prop-close must be a sequential step")
     assert _order("nba-prop-odds") < _order("nba-prop-market") < _order("scoring")
     assert _order("nba-prop-market") < _order("nba-prop-close") < _order("settle")
+    # the projection model decides after the rule, on the same fetch
+    assert re.search(r"^step nba-prop-projection$", SH, re.M)
+    assert _order("nba-prop-market") < _order("nba-prop-projection") < _order("settle")
     assert not re.search(r"^(step|par) nba-prop-scoring$", SH, re.M), (
         "the card would run twice a pass")
 

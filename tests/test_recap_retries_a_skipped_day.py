@@ -132,7 +132,8 @@ def _schema(db):
     db.execute("""CREATE TABLE picks (
         pick_id INTEGER PRIMARY KEY, game_date TEXT, sport TEXT, model_id TEXT,
         signal_type TEXT, result TEXT, kelly_fraction REAL, dk_odds REAL,
-        decision_odds REAL, clv_pct REAL, is_live INTEGER, downgrade_reason TEXT,
+        decision_odds REAL, clv_pct REAL, clv_method TEXT, is_live INTEGER,
+        downgrade_reason TEXT,
         condition_status TEXT, settled_at TEXT, game_id TEXT, pick_side TEXT,
         player_id TEXT, player_key TEXT, prop_market TEXT)""")
     db.execute("""CREATE TABLE push_sent (

@@ -377,13 +377,29 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: 'DD',
   },
   // The 2026-27 NBA prop rule (models/nba_prop_market.py): unders at the best
-  // bettable book on Pinnacle's own line, decided 45-70 minutes before tip.
+  // bettable book on Pinnacle's own line, decided 45-57 minutes before tip.
   // ONE id across five markets (points, rebounds, assists, threes, PRA); the
   // market travels on picks.prop_market and the stat is in each pick's label,
   // so statLabel is empty, as for nfl_prop_market and wnba_prop_market.
   nba_prop_market: {
     shortLabel: 'Prop Mkt',
     longLabel: 'NBA Props (vs Pinnacle)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
+  // The NBA projection model (models/nba_prop_projection.py): projects each
+  // player's count from his minutes and per-minute rates and bets the books'
+  // main line, in the same 45-57 minute window as the rule above. ONE id across six markets (steals,
+  // rebounds, blocks+steals, blocks, rebounds+assists, threes), the market on
+  // picks.prop_market, like nba_prop_market. Unlike that rule it bets BOTH
+  // sides: steals, blocks+steals and threes can be over or under; rebounds,
+  // blocks and rebounds+assists are unders. Not '(vs Pinnacle)': its number is
+  // its own projection, not Pinnacle's price. Its shown probability is an
+  // upper bound (graded: claimed 0.533, won 0.501; docs/nba_models_2026.md).
+  nba_prop_projection: {
+    shortLabel: 'Projection',
+    longLabel: 'NBA Props (Projection)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -730,6 +746,28 @@ export function modelLong(modelId: string): string {
 }
 
 /**
+ * The line under "Model probability" on a pick's "Why this bet?" card.
+ *
+ * The NBA projection model's probability is its own calibrated number, and it
+ * still runs high where it bets: graded walk-forward over 2023-24..2025-26 it
+ * claimed 0.533 and won 0.501, against 0.483 implied by the prices
+ * (docs/nba_models_2026.md; models/nba_prop_projection.py). So its card says
+ * to read the number as an upper bound, and gives the price comparison that
+ * shows the 50% still beat the price. Those are graded seasons, not a posted
+ * record: the model has none yet (UX review, 2026-10-16). Every other model
+ * keeps the plain sentence.
+ */
+const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
+  nba_prop_projection:
+    'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
+    'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
+};
+
+export function modelProbabilityNote(modelId: string): string {
+  return PROBABILITY_NOTE[modelId] ?? 'What our model says is the chance this side hits.';
+}
+
+/**
  * The market category of a model — MODEL_META when it has an entry, and the
  * MODEL ID when it does not.
  *
@@ -779,9 +817,9 @@ export function sportOfModel(modelId: string): BetTypeSport {
 
 /**
  * Does any prop model that is neither retired nor paused price this sport's
- * players? Read from the model catalog, not the stat catalog: the three
- * multi-market rules (nba_prop_market, nfl_prop_market, wnba_prop_market)
- * map to no single stat, so the stat-catalog test said NBA and the NFL had no
+ * players? Read from the model catalog, not the stat catalog: the
+ * multi-market models (nba_prop_market, nba_prop_projection, nfl_prop_market,
+ * wnba_prop_market) map to no single stat, so the stat-catalog test said NBA and the NFL had no
  * prop model while both had a live one. NCAAF has only game models, so its
  * player page still says no prop model prices it. Call it at render: the
  * pause flag can come from the server.

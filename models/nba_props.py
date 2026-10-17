@@ -689,9 +689,10 @@ def _X(rows: pd.DataFrame, cols: list[str]) -> np.ndarray:
     return rows[cols].astype(float).values
 
 
-def fit_minutes(train: pd.DataFrame, drop: tuple[str, ...] = ()):
+def fit_minutes(train: pd.DataFrame, drop: tuple[str, ...] = (), cols: list[str] | None = None):
+    """`cols` overrides the input list (models/nba_prop_projection fits on the worker's inputs)."""
     from xgboost import XGBRegressor
-    cols = minutes_features(drop)
+    cols = list(cols) if cols is not None else minutes_features(drop)
     m = XGBRegressor(**XGB_MIN).fit(_X(train, cols), train.minutes_exact.values)
     return {"model": m, "cols": cols}
 
@@ -700,10 +701,10 @@ def predict_minutes(fm: dict, rows: pd.DataFrame) -> np.ndarray:
     return np.clip(fm["model"].predict(_X(rows, fm["cols"])), 1.0, 48.0)
 
 
-def fit_rate(train: pd.DataFrame, stat: str, drop: tuple[str, ...] = ()):
+def fit_rate(train: pd.DataFrame, stat: str, drop: tuple[str, ...] = (), cols: list[str] | None = None):
     """Per-minute rate: Poisson on the count with log(minutes) as the exposure."""
     from xgboost import XGBRegressor
-    cols = minutes_features(drop) + rate_features(stat)
+    cols = list(cols) if cols is not None else minutes_features(drop) + rate_features(stat)
     tr = train[train.minutes_exact > 0]
     m = XGBRegressor(**XGB_COUNT)
     m.fit(_X(tr, cols), tr[stat].values, base_margin=np.log(tr.minutes_exact.clip(lower=0.5).values))
@@ -813,3 +814,75 @@ def stake(american) -> tuple[np.ndarray, np.ndarray]:
 def expected_value(p, american) -> np.ndarray:
     """EV per unit risked: p x decimal - 1 (pushes ignored; the history has no whole-number line)."""
     return np.asarray(p, dtype=float) * decimal(american) - 1.0
+
+
+# ── calibration (the probability the card prices and publishes) ─────────────
+#
+# The raw model overclaims: on the worker re-fit's one-a-game bets it claimed
+# 0.636 and won 0.464, and across every priced line it under-calls the over in
+# points and the combos (claimed 0.437, realised 0.485). A two-parameter logit
+# map per market, logit P(over) = a + b * logit(p_model), corrects a shift and
+# a slope, stays strictly monotone (no EV ties), and extrapolates sanely in the
+# tails. Season S is mapped ONLY by pairs from seasons before S (or, where no
+# priced season exists before it, by games strictly before the week's cutoff).
+#
+# THE MAP HOLDS AT THE CONSENSUS MAIN LINE ONLY. Fitted and checked on 2024-25:
+# at the main line it is right (over claimed 0.438, won 0.440); one point off
+# it the calibrated number barely moves while the outcome moves 4-8 points, in
+# the direction that favours the better-priced side. So the card decides only
+# at the main line (DraftKings' two-sided line, else the line most bettable
+# books hang) and the map is fitted on main-line pairs only.
+
+_EPS = 1e-4
+
+
+def _logit(p) -> np.ndarray:
+    p = np.clip(np.asarray(p, dtype=float), _EPS, 1 - _EPS)
+    return np.log(p / (1 - p))
+
+
+def fit_platt(p, y, iters: int = 50) -> tuple[float, float]:
+    """(a, b) maximising the likelihood of y under sigmoid(a + b * logit(p)); Newton steps."""
+    x, y = _logit(p), np.asarray(y, dtype=float)
+    ok = np.isfinite(x) & np.isfinite(y)
+    x, y = x[ok], y[ok]
+    X = np.column_stack([np.ones_like(x), x])
+    w = np.array([0.0, 1.0])
+    for _ in range(iters):
+        q = 1 / (1 + np.exp(-(X @ w)))
+        g = X.T @ (y - q)
+        H = (X * (q * (1 - q))[:, None]).T @ X
+        step = np.linalg.solve(H + 1e-9 * np.eye(2), g)
+        w = w + step
+        if np.abs(step).max() < 1e-10:
+            break
+    return float(w[0]), float(w[1])
+
+
+def apply_calibration(p, ab: tuple[float, float]) -> np.ndarray:
+    a, b = ab
+    return 1 / (1 + np.exp(-(a + b * _logit(p))))
+
+
+def fit_calibration(pairs: pd.DataFrame, season: int) -> dict[str, tuple[float, float]]:
+    """Per-market Platt maps for grading `season`, fitted on `pairs` (season, market, p, y) from EARLIER
+    seasons only. Refuses (ValueError) when no earlier pair exists: a season is never mapped by itself."""
+    prior = pairs[pairs.season < season]
+    if prior.empty:
+        raise ValueError(f"no calibration pairs before season {season}")
+    return {mk: fit_platt(g.p.values, g.y.values) for mk, g in prior.groupby("market")}
+
+
+def fit_calibration_before(pairs: pd.DataFrame, cutoff, min_pairs: int = 300) -> dict[str, tuple[float, float]]:
+    """Per-market Platt maps from pairs (market, p, y, game_date) of games played strictly BEFORE `cutoff`
+    (a game on the cutoff day has not finished when the map is fitted). A market with fewer than
+    `min_pairs` such pairs gets no map; the caller says what stands in for it."""
+    prior = pairs[pd.to_datetime(pairs.game_date) < pd.Timestamp(cutoff)]
+    return {mk: fit_platt(g.p.values, g.y.values) for mk, g in prior.groupby("market") if len(g) >= min_pairs}
+
+
+def exclude_taken(C: pd.DataFrame, taken: pd.DataFrame) -> pd.DataFrame:
+    """Drop every row of C whose (game, player, market) another model already bets -- every line, both
+    sides. One bet per proposition across all NBA prop models; ids compared as text."""
+    key = lambda d: d.game_id.astype(str) + "|" + d.player_id.astype(str) + "|" + d.market.astype(str)  # noqa: E731
+    return C[~key(C).isin(set(key(taken)))]
