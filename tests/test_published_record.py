@@ -34,6 +34,8 @@ def test_the_recap_query_drops_an_unposted_bet_and_a_voided_lock():
     if sqlite3.sqlite_version_info < (3, 39):
         pytest.skip("IS DISTINCT FROM needs SQLite >= 3.39")
     db = sqlite3.connect(":memory:")
+    from tracking.published_units import install_sqlite
+    install_sqlite(db)
     db.execute("""CREATE TABLE picks (
         sport, model_id, result, kelly_fraction, dk_odds, decision_odds,
         clv_pct, is_live, game_date, signal_type, downgrade_reason,
@@ -117,7 +119,8 @@ def test_the_snapshot_stake_is_stake_for_not_a_flat_unit():
 def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
-    assert ACTIVE_MIGRATIONS[-1] == "clv_standard_v2_2026_10_14.sql"
+    assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
+    assert ACTIVE_MIGRATIONS.index("clv_standard_v2_2026_10_14.sql") < len(ACTIVE_MIGRATIONS) - 1
     assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
     i = ACTIVE_MIGRATIONS.index(MIG.name)
     for owner in (
