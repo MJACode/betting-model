@@ -3,20 +3,19 @@
 One game at a time. player_prop_odds is large; a season is not one
 fetch. apply=False counts and writes nothing.
 
-The prop lock is PROP_LOCK_WINDOW_HOURS (24, UNCONFIRMED). Rows before
-PROP_HISTORY_START_DATE are not built. Alt-ladder market keys are not
-read. Does not touch picks.
+The line is the last DraftKings snapshot at or before kickoff. Rows
+before PROP_HISTORY_START_DATE are not built. Alt-ladder market keys
+are not read. Prices are not read. Does not touch picks.
 """
 from __future__ import annotations
 
 from byom.constants import (
     PROP_HISTORY_START_DATE,
     PROP_HISTORY_START_SEASON,
-    PROP_LOCK_WINDOW_HOURS,
     SPORT,
 )
 from byom.game_facts import parse_date, parse_game_id
-from byom.prop_facts import MARKET_COLUMNS, SOURCE_PROPS, facts_for_game
+from byom.prop_facts import MARKET_COLUMNS, facts_for_game
 
 # Month 01-12 and day 01-31. '2024-13-45' matches a leading-year check
 # and the cast then aborts the game. A value that fails this pattern is
@@ -41,14 +40,7 @@ _MARKETS = tuple(MARKET_COLUMNS)
 FACT_COLUMNS = (
     "prop_key", "canonical_key", "sport", "season", "week",
     "player_name", "player_key", "team", "market", "line",
-    "lock_window_hours", "lock_snapshot_at",
-    "dk_over_price", "dk_under_price",
-    "grade_over_price", "grade_over_book",
-    "grade_under_price", "grade_under_book",
-    "close_snapshot_at", "close_over_price", "close_under_price",
-    "actual", "over_result", "over_units_uncapped", "over_units_capped",
-    "under_result", "under_units_uncapped", "under_units_capped",
-    "log_status", "line_source",
+    "line_basis", "actual", "over_result", "under_result", "log_status",
 )
 
 _LOG_COLS = (
@@ -91,22 +83,20 @@ def _as_quotes(rows) -> list[dict]:
             "player_name": row[0], "team": row[1], "market": row[2],
             "bookmaker": row[3], "snapshot_at": row[4],
             "commence_time": row[5], "point": row[6],
-            "price_home": row[7], "price_away": row[8],
-            "line_source": SOURCE_PROPS,
         })
     return out
 
 
 def _quotes_for_game(conn, game_id: str) -> list[dict]:
-    """DraftKings inside the prop window. One game. The cast sits in a CASE.
+    """DraftKings at or before kickoff. One game. The cast sits in a CASE.
 
-    The grade is DraftKings' own price. Other books are not read.
+    Other books are not read. Prices are not read.
     """
     sql = f"""
         SELECT p.player_name, p.team, p.market, p.bookmaker,
                {_SNAP} AS snapshot_at,
                {_KICK} AS commence_time,
-               p.line, p.over_price, p.under_price
+               p.line
           FROM player_prop_odds p
           JOIN games g ON g.game_id = p.game_id
          WHERE p.game_id = %s
@@ -116,10 +106,8 @@ def _quotes_for_game(conn, game_id: str) -> list[dict]:
            AND {_KICK} IS NOT NULL
            AND {_SNAP} IS NOT NULL
            AND {_SNAP} <= {_KICK}
-           AND {_SNAP} >= {_KICK} - make_interval(hours => %s)
     """
-    return _as_quotes(_fetch(
-        conn, sql, (game_id, list(_MARKETS), PROP_LOCK_WINDOW_HOURS)))
+    return _as_quotes(_fetch(conn, sql, (game_id, list(_MARKETS))))
 
 
 def _log_for_game(conn, game_id: str) -> list[dict]:
@@ -140,8 +128,8 @@ def facts_for_season(conn, season: int,
     """Facts, and the canonical keys of the games this read considered.
 
     `game_ids` None reads every game. A list reads only those games.
-    A game with no lock is still in the key list so a rebuild can delete
-    the rows the previous window wrote.
+    A game with no line is still in the key list so a rebuild can delete
+    the rows a previous pass wrote.
     """
     if season < PROP_HISTORY_START_SEASON:
         return [], []
