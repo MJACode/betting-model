@@ -65,5 +65,5 @@ def test_the_zero_state_short_circuits_before_the_roi_row():
     which reads as a model that lost nothing rather than one that never ran."""
     html = (ROOT / "monitoring/static/dashboard.html").read_text(encoding="utf-8")
     body = html[html.index("function renderPerf()"):html.index("function renderLiveCal()")]
-    assert body.index("if(!settled){") < body.index('${roi==null?"record only"'), (
+    assert body.index("if(!settled){") < body.index('${roi==null?"\\u2014"'), (
         "the zero-state must return before the ROI row is rendered")

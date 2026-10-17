@@ -246,8 +246,9 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
     Reuses paper_tracker's result + closing-line helpers. For each locked signal
     whose game is final, writes:
       - result / profit_flat / profit_kelly (vs our OPENING dk_odds + scored_line)
-      - closing_dk_odds / closing_line / clv_pct (no-vig close vs our opening
-        price, SAME-LINE ONLY — same formula as picks.clv_pct; docs/clv.md)
+      - closing_dk_odds / closing_line / clv_pct (same-book raw probability
+        points vs our opening DraftKings price, SAME-LINE ONLY — the pp
+        return of same_book_clv, not picks.clv_pct's percent; docs/clv.md)
       - line_move_dir (toward | against | flat) — how the line moved after lock
       - public_side  (with_public | contrarian | even) — from the locked split
 
@@ -259,7 +260,7 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
         _compute_result, _first_game_close, _market_for_pick, _SIDE_PRICE_COL,
         _line_clv_pts,
     )
-    from tracking.clv_math import other_side_prices, price_clv_pct
+    from tracking.clv_math import same_book_clv
 
     # Trailing window (self-heal) — not just `game_date`. A day the morning settle
     # missed (pipeline hiccup, games not final yet) would otherwise stay pending
@@ -322,7 +323,7 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
             rec_bet or 0.0,
         )
 
-        # Line story: no-vig close vs our opening lock, same formula as picks.
+        # Line story: same-book raw pp vs our opening DraftKings lock.
         # Historical rows settled before 2026-09-14 used raw one-sided implied;
         # this table is a shadow track, not the public pedigree.
         closing_dk = closing_line = clv_pct = line_move_dir = None
@@ -340,10 +341,10 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
                     closing_line is not None and scored_line is not None
                     and abs(float(closing_line) - float(scored_line)) > 1e-9)
                 if close_price is not None and not line_moved:
-                    clv_pct, _method = price_clv_pct(
-                        dk_odds, close_price,
-                        other_side_prices(closing, pick_side),
-                        book=close_book)
+                    # Shadow track: same-book raw probability points, not the
+                    # public percent. The opening lock's book is the one
+                    # _first_game_close was asked for.
+                    _pct, clv_pct = same_book_clv(dk_odds, close_price)
                     if clv_pct is not None:
                         line_move_dir = ("toward" if clv_pct > 0.5
                                          else "against" if clv_pct < -0.5

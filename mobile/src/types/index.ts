@@ -71,25 +71,37 @@ export interface Pick {
   // full-game pick where splits weren't available at score time.
   public_bet_pct: number | null;
   public_money_pct: number | null;
-  // Closing line value (CLV) — last pre-game snapshot on the pick side
-  // (Pinnacle when present). NULL until the game has started and settled.
+  // Closing line value (CLV). closing_dk_odds is the bet book's American
+  // at the close (the column name is historical). NULL until captured.
   closing_dk_odds: number | null;
   closing_line: number | null;
-  // Price CLV, in pp: fair_close_p − fair_bet_p (positive = beat the
-  // close). SAME-LINE ONLY — NULL when the number moved. docs/clv.md.
+  // Primary CLV, in percent: (taken_decimal / that book's close_decimal − 1)
+  // × 100. Both sides raw, same book, same line. NULL when that book has no
+  // pre-start close on the line. docs/clv.md.
   clv_pct: number | null;
+  // Same pair of prices, in probability points. Optional on rows fetched
+  // before the column was selected.
+  clv_pp?: number | null;
   // Line CLV, in points: how far the number moved toward our side between the
-  // signal and the close (positive = we beat the close on the number). This is
-  // the measure that survives a moved line. NULL for moneyline, which has none.
+  // signal and the close (positive = the number moved our way). NULL for
+  // moneyline. A moved line does not count as a price beat.
   line_clv_pts: number | null;
-  // The one verdict, from whichever of the two applies: line_clv_pts > 0 where
-  // the number moved, clv_pct > 0 where it held.
+  // Headline beat: clv_pct > 0. NULL when the primary price CLV is NULL.
   clv_beat_close: boolean | null;
   clv_captured_at: string | null;
-  // How clv_pct was computed. Pedigree averages no_vig / zero_vig only.
+  // How clv_pct was computed. Pedigree averages standard_v2 only.
   clv_method: string | null;
   // Book whose snapshot is the close. closing_dk_odds is that book's American.
   clv_close_book: string | null;
+  // Book the bet was taken at (paper_tracker._bet_price_and_book). The
+  // primary close is this book's own last pre-start price.
+  clv_bet_book: string | null;
+  // Secondary market edge: raw taken vs Pinnacle's power-de-vigged close.
+  // NULL when Pinnacle has no pre-start close on the same line.
+  market_clv_pct?: number | null;
+  market_clv_pp?: number | null;
+  market_clv_method?: string | null;
+  pinnacle_close_odds?: number | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
   inning_at_pick: number | null;
@@ -158,6 +170,7 @@ export type SettledPickKey =
   | 'public_bet_pct'
   | 'injury_flag'
   | 'clv_pct'
+  | 'clv_method'
   | 'decision_book'
   | 'decision_odds'
   | 'decision_edge'
@@ -175,6 +188,15 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // row's 'model paused' marker is how it knows. Optional like Pick's, so a
   // full Pick still passes where a SettledPick is expected.
   downgrade_reason?: string | null;
+  // Lock-key tail, selected by SETTLED_PICK_COLUMNS. Optional like
+  // downgrade_reason so a hand-built row still type-checks; a cached row
+  // from before v8 lacks them and is dropped by the cache-key bump.
+  player_key?: string | null;
+  prop_market?: string | null;
+  // Stamped by the record readers (#942) and read by teamDetail and the model
+  // detail screen; Pick carries it, this type did not, so master's type check
+  // failed and the over-the-air update stopped publishing (2026-10-14).
+  discordPublish?: 'published' | 'unpublished' | 'unknown';
 };
 
 export interface LiveGameState {
@@ -319,6 +341,8 @@ export type BookPricedRow = {
   away_link?: string | null;
   over_link?: string | null;
   under_link?: string | null;
+  /** The book's update time. Both all-books views carry it; the price-age rule reads it. */
+  snapshot_at?: string | null;
 };
 
 /** One row from v_latest_dk_odds — the freshest DK snapshot per game+market. */
@@ -618,11 +642,22 @@ export interface TrackRecordRow {
   pushes: number;
   profit_flat: number;    // sum of profit_flat on $100 flat stakes
   staked_flat: number;    // 100 * picks
-  clv_settled: number;    // settled picks with a captured CLV
-  clv_beat: number;       // of those, how many beat the close (clv_pct > 0)
+  clv_settled: number;    // settled picks with a same-book price CLV
+  clv_beat: number;       // of those, how many beat that book's close (clv_pct > 0)
   avg_clv_pct: number | null;
   first_date: string;
   last_date: string;
+  // Appended by clv_standard_v2. Optional so a row from before that
+  // migration still type-checks; the track-record select asks for them.
+  clv_game_settled?: number | null;
+  clv_game_beat?: number | null;
+  avg_clv_game_pct?: number | null;
+  clv_prop_settled?: number | null;
+  clv_prop_beat?: number | null;
+  avg_clv_prop_pct?: number | null;
+  market_clv_settled?: number | null;
+  market_clv_beat?: number | null;
+  avg_market_clv_pct?: number | null;
 }
 
 /** One row from v_public_track_record_daily — daily settled totals (equity curve). */

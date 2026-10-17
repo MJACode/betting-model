@@ -37,6 +37,7 @@ Usage:
 """
 
 import argparse
+import difflib
 import re
 import sys
 import time
@@ -91,6 +92,41 @@ def slugify_fighter(name: str) -> str:
     s = s.lower()
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
     return s
+
+
+# How alike two slugs must be (name_resemblance) for the odds feed's spelling
+# of a fighter to be taken as the same person as ufcstats' spelling. Set from
+# a replay of every ufcstats fight from 2025-01-01 to 2026-10-10 against the
+# odds feed's rows (which start 2026-06-13). The 13 real spelling variants
+# scored 0.720 (Lupita/Loopy Godinez) to 1.000. The 14 other opponents a
+# fighter was also listed against in 11 fights (changed bookings, Jose Ochoa
+# for Eduardo Chapolin among them) scored 0.083 to 0.467 (Eduardo Henrique
+# for Eduardo Chapolin). 0.60 is near the middle of that gap: 0.13 above the
+# highest different opponent, 0.12 below the lowest real variant. Of all
+# 282,376 pairs of the 752 different names on ufcstats over the same span,
+# 434 (0.15%) score 0.60 or more — a rough guide to how often a replacement
+# fighter's name would still pass as a spelling variant of the booked
+# opponent's (102 of the 434 share a last name, which this check cannot tell
+# apart from a nickname).
+NAME_VARIANT_MIN_RESEMBLANCE = 0.60
+
+
+def name_resemblance(slug_a: str, slug_b: str) -> float:
+    """
+    0..1 similarity of two fighter slugs, ignoring word order and spacing:
+    difflib's ratio on each slug's words sorted and joined. Ignoring word
+    order is what lets three of the 13 real variants match at all — without
+    it 'zhu-rong'/'rongzhu' scores 0.57, 'jingnan-xiong'/'xiong-jingnan' 0.58
+    and 'heili-alateng'/'alatengheili' 0.58, below a different opponent who
+    shares a first name ('eduardo-henrique'/'eduardo-chapolin', 0.60).
+
+    It measures spelling only. A different fighter who shares the expected
+    opponent's surname ('Daniel Santos' vs 'Gabriel Santos' scores 0.80) is
+    indistinguishable from a nickname ('Lupita' vs 'Loopy' Godinez, 0.72).
+    """
+    def key(slug: str) -> str:
+        return "".join(sorted(slug.split("-")))
+    return difflib.SequenceMatcher(None, key(slug_a), key(slug_b)).ratio()
 
 
 def normalize_method(raw: str) -> str:
@@ -499,22 +535,50 @@ def _resolve_game_rows(conn: DBConnection, game_date: str,
     # sources slugify apart, so the odds-created row would never be scored and
     # its picks could never settle.
     #
-    # ANCHOR RULE: within the ±1 day window, a row where exactly ONE fighter's
-    # slug matches ours is the same fight — a fighter competes once per card,
-    # so a shared participant on the same date identifies the bout. Applied
-    # only when it resolves to exactly ONE row: if several rows share a
-    # fighter, the matchup genuinely changed (a replaced opponent is a
-    # DIFFERENT proposition and must not be silently settled), so we decline.
+    # ANCHOR RULE: within the ±1 day window, take a row where exactly ONE
+    # fighter's slug matches ours as this fight only when BOTH hold:
+    #   1. every such row is the SAME two fighters — one row, or the one fight
+    #      stored more than once (home/away swapped between odds fetches, or
+    #      ±1-day date drift; picks can sit on each, so each needs its score).
+    #      Rows naming DIFFERENT opponents are ambiguous: decline.
+    #   2. the row's other fighter RESEMBLES our other fighter
+    #      (name_resemblance >= NAME_VARIANT_MIN_RESEMBLANCE). A shared
+    #      fighter alone does not identify the bout: when an opponent is
+    #      replaced late, the odds feed may only ever have listed the original
+    #      booking, and that row shares a fighter with the result too. A
+    #      replaced opponent is a DIFFERENT proposition (the sportsbook voids
+    #      it), so a non-resembling row is declined and logged.
+    # What this cannot catch: a replacement whose name resembles the booked
+    # opponent's (e.g. the same surname) — name_resemblance measures spelling
+    # only. Declining leaves the odds rows unscored and creates a
+    # ufcstats-only row, which is the safe failure.
     anchored = [(game_id, home_team, away_team)
                 for game_id, home_team, away_team in rows
                 if len({slugify_fighter(home_team), slugify_fighter(away_team)} & want) == 1]
-    if len(anchored) == 1:
-        game_id, home_team, away_team = anchored[0]
-        logger.warning(
-            f"UFC name variant resolved by anchor: {away_team} vs {home_team} "
-            f"({game_id}) ← ufcstats {slug_a}/{slug_b}. Add the pair to "
-            f"config.UFC_NAME_ALIASES so both sources build the same game_id."
-        )
+    pairs = {frozenset((slugify_fighter(home_team), slugify_fighter(away_team)))
+             for _gid, home_team, away_team in anchored}
+    if anchored and len(pairs) == 1:
+        (pair,) = pairs
+        row_other, our_other = pair - want, want - pair
+        score = (name_resemblance(next(iter(row_other)), next(iter(our_other)))
+                 if len(row_other) == 1 and len(our_other) == 1 else 0.0)
+        if score < NAME_VARIANT_MIN_RESEMBLANCE:
+            logger.warning(
+                f"UFC: not matching {[g[0] for g in anchored]} to ufcstats "
+                f"{slug_a}/{slug_b} near {game_date} — the row's "
+                f"{'/'.join(sorted(row_other)) or '?'} does not resemble "
+                f"{'/'.join(sorted(our_other)) or '?'} (resemblance {score:.2f} "
+                f"< {NAME_VARIANT_MIN_RESEMBLANCE:.2f}); likely a replaced "
+                f"opponent, not a spelling variant."
+            )
+            return []
+        for game_id, home_team, away_team in anchored:
+            logger.warning(
+                f"UFC name variant resolved by anchor: {away_team} vs {home_team} "
+                f"({game_id}) ← ufcstats {slug_a}/{slug_b} (resemblance "
+                f"{score:.2f}). Add the pair to "
+                f"config.UFC_NAME_ALIASES so both sources build the same game_id."
+            )
         return anchored
     if len(anchored) > 1:
         logger.warning(
@@ -522,6 +586,34 @@ def _resolve_game_rows(conn: DBConnection, game_date: str,
             f"near {game_date} — matchup likely changed; not auto-resolving."
         )
     return []
+
+
+def _home_win_for_row(winner_name: str, loser_name: str,
+                      home_name: str, away_name: str) -> int | None:
+    """
+    Which side of a games row won: 1 = home, 0 = away, None = cannot tell.
+
+    The row's names come from the odds feed and may spell ONE fighter
+    differently from ufcstats (that is how the anchor rule matched it), so the
+    winner alone is not enough — a misspelled home winner matches neither
+    name, and treating "winner is not home" as "away won" credits the loser.
+    Each fighter is checked against each side, using the same slug
+    normalisation the matcher uses, in this order:
+        winner is home → home won;  loser is home → away won;
+        winner is away → away won;  loser is away → home won.
+    None when neither fighter matches either side (the caller skips the row).
+    """
+    winner, loser = slugify_fighter(winner_name), slugify_fighter(loser_name)
+    home, away = slugify_fighter(home_name), slugify_fighter(away_name)
+    if home and winner == home:
+        return 1
+    if home and loser == home:
+        return 0
+    if away and winner == away:
+        return 0
+    if away and loser == away:
+        return 1
+    return None
 
 
 def _upsert_fighter_stub(conn: DBConnection, fighter_id: str, name: str) -> None:
@@ -662,17 +754,26 @@ def _ingest_event(conn: DBConnection, event_id: str, event_meta: dict | None = N
         totals = detail.get("totals") or {}
 
         # ── games outcome (per matched row's own home/away convention) ─────
-        winner_slug = None
-        if fight["outcome"] == "first_won":
-            winner_slug = slugs[0]
-
-        for row_game_id, row_home_name, _row_away_name in matched:
+        # A row matched by the anchor rule spells one fighter differently from
+        # ufcstats, so the winner's name alone cannot say which side won: when
+        # the misspelled fighter is the home fighter and wins, the winner
+        # matches neither name. Both fighters' names are checked against both
+        # sides (_home_win_for_row); a row neither name places is left
+        # unscored rather than guessed.
+        for row_game_id, row_home_name, row_away_name in matched:
             if fight["outcome"] in ("draw", "nc"):
                 home_score, away_score, home_win = 0.5, 0.5, None
-            elif winner_slug == slugify_fighter(row_home_name):
-                home_score, away_score, home_win = 1, 0, 1
             else:
-                home_score, away_score, home_win = 0, 1, 0
+                home_win = _home_win_for_row(names[0], names[1],
+                                             row_home_name, row_away_name)
+                if home_win is None:
+                    logger.warning(
+                        f"UFC: cannot place {names[0]} (won) / {names[1]} on "
+                        f"{row_game_id} ({row_away_name} at {row_home_name}) "
+                        f"— neither name matches either side; not scored."
+                    )
+                    continue
+                home_score, away_score = (1, 0) if home_win == 1 else (0, 1)
 
             conn.execute("""
                 UPDATE games

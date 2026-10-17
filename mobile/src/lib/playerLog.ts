@@ -12,7 +12,10 @@
  * ranks differently (or vice versa).
  */
 import type { Sport } from '@/hooks/useSportFilter';
+import { sportOfModel } from './modelMeta';
 import {
+  logDerivedStatsFor,
+  statForPropMarket,
   statForPropModel,
   statsForSport,
   statValue,
@@ -118,6 +121,10 @@ export function logFetchLimit(sport: PlayerLogSport): number {
  *   basketball  threes = fg3_made, pra = points + rebounds + assists
  *   NFL         rush_rec_tds = rushing_tds + receiving_tds
  *   MLB pitcher outs — see `outs` note in `chipsForPlayer` below
+ * Plus two the leaderboard does not have, summed here only
+ * (statCatalog.LOG_DERIVED_STATS):
+ *   basketball  blocks_steals = blocks + steals,
+ *               rebounds_assists = rebounds + assists
  * Missing inputs stay missing rather than becoming 0: a null stat must read as
  * "no data" (excluded from the hit rate), never as a game with zero of it.
  */
@@ -126,6 +133,8 @@ export function normalizeLogRow(sport: PlayerLogSport, raw: Record<string, unkno
   if (sport === 'WNBA' || sport === 'NBA') {
     row.threes = num(raw.fg3_made);
     row.pra = sum(raw.points, raw.rebounds, raw.assists);
+    row.blocks_steals = sum(raw.blocks, raw.steals);
+    row.rebounds_assists = sum(raw.rebounds, raw.assists);
   } else if (FOOTBALL.has(sport)) {
     row.rush_rec_tds = sum(raw.rushing_tds, raw.receiving_tds);
   } else if (sport === 'MLB') {
@@ -181,14 +190,17 @@ const OUTS_STAT: StatDef = {
 /**
  * The stats a player's detail screen can chart, from the shared catalog.
  *
- * Two sport-specific adjustments:
+ * Three sport-specific adjustments:
  *  - MLB chips are split by player type, the way the leaderboard splits them.
  *  - MLB pitching swaps "Innings" for "Outs". The leaderboard SUMS innings so
  *    the notation quirk averages out there, but the detail screen compares a
  *    single game against a line, where 5.2 IP >= 5.5 is false and wrong.
+ *  - NBA adds Blocks+Steals and Reb+Ast after the leaderboard's chips
+ *    (statCatalog.LOG_DERIVED_STATS): markets the projection model bets, so
+ *    its pick's "View all stats" opens on the stat it is written on.
  */
 export function chipsForPlayer(sport: PlayerLogSport, playerType?: PlayerType | null): StatDef[] {
-  const all = statsForSport(sport);
+  const all = [...statsForSport(sport), ...logDerivedStatsFor(sport)];
   if (sport !== 'MLB') return all;
   const type = playerType ?? 'batter';
   return all
@@ -446,6 +458,151 @@ export function roundLineToStep(median: number, step: number): number {
   return Math.max(step, Math.round(median / step) * step);
 }
 
+/**
+ * One tap of the ± stepper from `prev`.
+ *
+ * The ruler opens on the book's line EXACTLY (a 50.5 line is "51+"), which is
+ * off a step-5 grid, and adding ±5 to it walked 46 → 51 → 56: 50 was
+ * unreachable (Matt, 2026-10-08). So a line off the grid lands on the
+ * neighbouring grid stop in the tapped direction first — 51 → 50 on minus,
+ * 55 on plus — and steps by `step` from there. Never below 0; never above
+ * `ceiling` when stepping up.
+ */
+export function stepLineFrom(prev: number, deltaSteps: number, step: number, ceiling = Infinity): number {
+  if (deltaSteps === 0) return prev;
+  const onGrid = Math.abs(prev / step - Math.round(prev / step)) < 1e-9;
+  let next: number;
+  if (onGrid) next = prev + deltaSteps * step;
+  else {
+    const first = deltaSteps > 0 ? Math.ceil(prev / step) * step : Math.floor(prev / step) * step;
+    next = first + (deltaSteps - Math.sign(deltaSteps)) * step;
+  }
+  // The ceiling caps STEPPING UP only: a typed line above it is the reader's
+  // own, and a − from 300 goes to 295, not back down to the cap.
+  if (deltaSteps > 0) next = Math.min(next, Math.max(prev, ceiling));
+  return Math.max(0, next);
+}
+
+/**
+ * A line the reader typed, as the whole-number threshold the card uses, or
+ * null when it is not one. Read in the face's own idiom:
+ *  - At Least: "50" or "50+" is 50+; a half-line "50.5" is the threshold that
+ *    clears it, 51+.
+ *  - Over / Under: the face prints the book line ("50.5"), so a typed "50.5"
+ *    is that line (51+ / 50 or fewer), and a whole "50" is the half-point
+ *    above it — the card only prices half-lines, which cannot push.
+ */
+/**
+ * The Avg | Median | ± line row on the player card, on a 375pt phone.
+ *
+ * Widths are Inter advances (a stand-in for the iOS system font), measured
+ * 2026-10-08 and scaled linearly with `fontScale`. The case is the one the
+ * card opens on for a yards prop: "At Least", a 50.5 line, averages 112.4
+ * and 98.6. Chrome that does not scale — the 12pt chevron, the 30pt − / +,
+ * the 8pt gaps, the field's 8pt padding and 48pt floor — is added on top.
+ *
+ * At fontScale 1 that row is 309pt of the card's 319 and fits. Above 1 it
+ * does not. The stepper's `flex: 1` basis is 0, so the row will not wrap by
+ * itself and the + button leaves the screen. Giving the stepper its own line
+ * still fits at fontScale 2 (287 of 319) and at Accessibility Large (2.143,
+ * the multiplier in RCTAccessibilityManager). From Accessibility Extra Large
+ * (2.643) that line overflows too. The mode control is what grows, so it
+ * takes the line above and − / field / + stay together; at the largest size
+ * (Accessibility Extra Extra Extra Large, 3.571) that group is 221pt.
+ * The − / + stay 30pt with 8pt of slop (46pt); the field and the mode
+ * control stay minHeight 44.
+ */
+export const STEPPER_ROW_INNER = 375 - 16 * 2 - 12 * 2;
+
+/** How the stepper sits in the Avg | Median row. */
+export type StepperRowLayout = 'inline' | 'stacked' | 'split';
+
+export interface StepperRowMeasure {
+  /** Avg, Median and the stepper on one line. */
+  single: number;
+  /** The stepper once it has the line to itself. */
+  stacked: number;
+  /** − / field / +, without the mode control. */
+  controls: number;
+  /** "At Least" plus the chevron. */
+  mode: number;
+  inner: number;
+  layout: StepperRowLayout;
+}
+
+export function measureStepperRow(fontScale: number): StepperRowMeasure {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  // Advances at fontScale 1, from the measurement above.
+  const avg = Math.max(40.039062, 18.652344) * scale;
+  const med = Math.max(36.539062, 34.931641) * scale;
+  const mode = 50.222656 * scale + 2 + 12 + 4;
+  const input = Math.max(48, 38.291504 * scale + 8);
+  const controls = 30 + 8 + input + 8 + 30;
+  const stacked = mode + 8 + controls;
+  const single = avg + 16 + med + 16 + stacked;
+  const layout: StepperRowLayout =
+    single <= STEPPER_ROW_INNER ? 'inline' : stacked <= STEPPER_ROW_INNER ? 'stacked' : 'split';
+  return { single, stacked, controls, mode, inner: STEPPER_ROW_INNER, layout };
+}
+
+/**
+ * Room left of a chip when its row is scrolled to it, so the chip before it
+ * still shows and the row reads as scrollable (components/SportToggle.tsx).
+ */
+export const CHIP_ROW_LEAD = 40;
+
+/**
+ * Where a horizontal chip row scrolls so its selected chip is on screen, from
+ * the chip's x inside the row; null before the chip has laid out.
+ *
+ * The player page's stat row runs past the right edge on every iPhone: NBA
+ * has 11 chips, and a projection pick on Blocks+Steals or Reb+Ast opens on
+ * the 10th or 11th, so nothing on screen said which stat the chart was
+ * (UX review, 2026-10-16). Zero is a real answer: on an NFL page a group tab
+ * remounts the row's chips and the new first chip can sit left of where the
+ * row is scrolled to, which is why SportToggle's `x > 0` guard is not here.
+ */
+export function chipRowScrollX(chipX: number | null | undefined): number | null {
+  if (chipX == null || !Number.isFinite(chipX)) return null;
+  return Math.max(0, chipX - CHIP_ROW_LEAD);
+}
+
+/** Where the stepper sits so the + stays on a 375pt card. */
+export function stepperRowLayout(fontScale: number): StepperRowLayout {
+  return measureStepperRow(fontScale).layout;
+}
+
+export function parseTypedLine(text: string, mode: 'atLeast' | 'over' | 'under' = 'atLeast'): number | null {
+  const t = text.trim().replace(/\+$/, '');
+  if (!/^\d{1,4}(\.\d+)?$/.test(t)) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  if (mode === 'atLeast') return Number.isInteger(n) ? n : Math.ceil(n);
+  return Math.floor(n) + 1;
+}
+
+/**
+ * Apply a typed line once when the return key and blur both fire.
+ *
+ * Android delivers `onSubmitEditing` and then `onEndEditing` for one Done
+ * press, in the same turn, with the same draft. The second call finds
+ * `taken` and applies nothing. A field that was never opened (`draft == null`)
+ * does not latch, so a later edit can still commit. iOS commits from blur
+ * alone; this runs there once.
+ */
+export function commitTypedLineOnce(
+  draft: string | null,
+  taken: boolean,
+  mode: 'atLeast' | 'over' | 'under',
+  current: number | null,
+): { line: number | null; taken: boolean } {
+  if (taken) return { line: null, taken: true };
+  if (draft == null) return { line: null, taken: false };
+  const typed = parseTypedLine(draft, mode);
+  if (typed == null || typed === current) return { line: null, taken: true };
+  return { line: typed, taken: true };
+}
+
 // ── Reading a stat off a row ────────────────────────────────────────────────
 
 /**
@@ -523,4 +680,32 @@ export function detailStatForPropModel(modelId: string): StatDef | null {
   const def = statForPropModel(modelId);
   if (!def) return null;
   return def.key === 'innings_pitched' ? OUTS_STAT : def;
+}
+
+/**
+ * The stat a prop PICK's player detail opens on. The model's own stat when it
+ * prices one; otherwise the pick is from a multi-market rule (one id across
+ * several markets, the market on the row) and the stat is the one its
+ * prop_market is priced in, on the model's sport's board.
+ */
+export function detailStatForPick(pick: { model_id: string; prop_market?: string | null }): StatDef | null {
+  const byModel = detailStatForPropModel(pick.model_id);
+  if (byModel) return byModel;
+  const def = statForPropMarket(sportOfModel(pick.model_id), pick.prop_market);
+  if (!def) return null;
+  return def.key === 'innings_pitched' ? OUTS_STAT : def;
+}
+
+/**
+ * The player id the page's reads key on: the route's, else the loaded log's.
+ * A pick from nfl_prop_market carries no player_id, so its player page opens
+ * by name, and every read keyed on the id (the head-to-head row, today's pick
+ * on this player) found nothing. The log the page loads by name carries the
+ * id, so the page uses it once the log is in.
+ */
+export function pagePlayerId(
+  routePlayerId: string | null | undefined,
+  games: ReadonlyArray<{ player_id?: string | null }>,
+): string | null {
+  return routePlayerId || games[0]?.player_id || null;
 }
