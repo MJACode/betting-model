@@ -8,10 +8,10 @@ frozen rule with no trained artifact. The card that writes its picks is
 scripts/nba_prop_market_card.py.
 
 THE RULE, per game, ONCE (the first look that can price it; see DECIDED ONCE):
-  1. Decide ONLY when the game's tip is 45 to 70 minutes away (DECISION_WINDOW_MIN).
+  1. Decide ONLY when the game's tip is 45 to 57 minutes away (DECISION_WINDOW_MIN).
      The edge was measured on one archived snapshot about an hour before
-     each tip (median lead 54 minutes), and assists bet earlier than tip-60
-     lost. Never earlier. The tip is the NBA's scheduled start
+     each tip (54 minutes for 87% of bets, 64 for the rest), and assists bet
+     earlier than tip-60 lost. Never earlier. The tip is the NBA's scheduled start
      (nba_schedule.commence_time, or games.commence_time when that is
      earlier): the odds feed rewrites games.commence_time, and it already
      reads 10 minutes later than the schedule on 35 of 1,206 season-2027 games.
@@ -129,12 +129,20 @@ SIDE = "under"
 COHERENT = (1.00, 1.15)
 
 # Minutes before tip in which a game may be decided, both ends inclusive.
-# docs/nba_models_2026.md 4.3: the archive's snapshot sat a median 54 minutes
-# before tip, and assists bet before tip-60 lost. Not widened when a look
-# misses it: the card logs the miss instead (window_missed). The five-minute
-# window job (scheduler.run_nba_prop_window) puts a look inside it for every
-# tip time.
-DECISION_WINDOW_MIN = (45, 70)
+# docs/nba_models_2026.md 4.3: the archive's snapshot sat 54 minutes before tip
+# for 87% of bets and 64 for 13%; nothing was graded 65-70 minutes out, and
+# assists bet before tip-60 lost. Not widened when a look misses it: the card
+# logs the miss instead (window_missed). The five-minute window job
+# (scheduler.run_nba_prop_window) puts a look inside it for every tip time.
+#
+# 57, not 70 (2026-10-16). The game is decided at the FIRST look inside the
+# window, and with a look every five minutes the first look inside 45-70 came
+# 66-70 minutes before tip -- 12-16 minutes earlier than the bets that were
+# graded, in the stretch nothing was graded on. With 57 the first look lands
+# 53-57 minutes out (55 for every tip on a five-minute mark): the lead 87% of
+# the graded bets were decided at. The window is still twelve minutes wide, so
+# two five-minute looks fall inside it whatever the tip time.
+DECISION_WINDOW_MIN = (45, 57)
 
 # A soft quote whose own clock is more than this far behind Pinnacle's in the
 # same fetch is refused (mike's spec, 2026-10-15).

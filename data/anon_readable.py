@@ -283,6 +283,13 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # creates it on demand). Read by the card and the window job, never by
     # the app.
     "nba_prop_market_decisions",
+    # The NBA projection model's three (scripts/nba_prop_projection_card.py,
+    # which creates them on demand): its decisions ledger, each player's
+    # stored projection, and the injury list each game was projected with.
+    # Read by the card and the window job, never by the app.
+    "nba_prop_projection_decisions",
+    "nba_prop_projections",
+    "nba_injury_asof",
     # NHL derivative-totals pull ledger. Created on demand by
     # data/ingestors/nhl_derivative_odds_history.py, same shape as
     # odds_history_pulls: a fixed name, never read by the app.

@@ -162,7 +162,7 @@ def test_every_prop_scorer_checks_it():
     """Three prop loops (MLB batter, WNBA, MLB pitcher) share one skip line. A
     loop that checks only the clock re-scores a finished doubleheader game 1
     all evening. The NBA loop left 2026-10-15 with the retired NBA prop models;
-    the NBA prop rule decides only games whose tip is still 45-70 minutes
+    the NBA prop rule decides only games whose tip is still 45-57 minutes
     away, so a finished game is never in its window
     (models/nba_prop_market.find_bets)."""
     assert SRC.count("or game_id in final_ids:") == 3
