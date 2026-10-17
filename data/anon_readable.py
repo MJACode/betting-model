@@ -267,6 +267,15 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "nba_period_scores",
     "nba_player_dnp",
     "nba_schedule",
+    # Free ESPN play-by-play (sportsdataverse release), its box scores, the
+    # ESPN -> NBA.com player id map and the lineup segments derived from them.
+    # Created on demand by data/ingestors/nba_pbp.py; research input for the
+    # NBA game-market search, never read by the app.
+    "nba_pbp",
+    "nba_pbp_box",
+    "nba_pbp_games",
+    "nba_player_id_map",
+    "nba_stints",
     # The NBA prop card's decisions ledger: one row per game it has decided,
     # so a game is decided once (scripts/nba_prop_market_card.py, which
     # creates it on demand). Read by the card and the window job, never by
@@ -284,6 +293,14 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # odds_history_pulls: a fixed name, never read by the app.
     "nhl_derivative_odds_pulls",
     "odds_history_pulls",
+    # NBA purchase fetches OFF the hour (a gap fill at 23:30Z): odds_history_pulls
+    # keys on an integer hour and cannot hold them. Created on demand by
+    # data/ingestors/nba_odds_history.py, never read by the app.
+    "odds_history_fetches",
+    # The NBA game-market search's graded cells and populations, stored by
+    # scripts/nba_game2_store.py before anything reads them; never read by the app.
+    "nba_game2_cells",
+    "nba_game2_population",
     "threshold_reviews",
     "worker_jobs",
 )

@@ -564,3 +564,13 @@ changed.**
   in `docs/nba_public_splits.md`). It is known only after tip, so the public-fade control has
   no pre-tip bets before 2026-27. The 2022-03-09 slate is reversed home-for-away at the source
   and is excluded.
+
+**Amendment, 2026-10-17 (fourth), before any priced season is graded.**
+
+- **A categorical cell is its own population for bar 9.** F6c's situations have no cut inside
+  a cell, so the blind comparison runs over the games in that situation only. It asks
+  whether betting against the team beats betting the dominant real side (home, away,
+  favourite, underdog) in those same games. Threshold families keep every game the rule
+  produced a number for. The placebo still moves the flag across every game on the date.
+- **Lab definition recorded:** F4's "expectation" for opponent three-point and free-throw
+  percentage is the league's rate so far that season, from games final before the date.
