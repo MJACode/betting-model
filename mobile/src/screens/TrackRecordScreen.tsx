@@ -273,7 +273,7 @@ export function TrackRecordScreen() {
           <EquityCurve points={equity} seriesId={sportSel} width={chartWidth} endUnits={heroUnits} />
         )}
 
-        {/* Honest framing — the record is not all green, and says so. */}
+        {/* Two sentences: when the published record starts, and where the percentage is explained. */}
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>Read this first</Text>
           <Text style={styles.noteBody}>

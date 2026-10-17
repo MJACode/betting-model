@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, Return on bets sheet names the 3-unit cap and unpriced 1u; VoiceOver scrub clears on a four-second timer |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, Designer fixes on #983: Return on bets, units caption, one-decimal win rate, chart dots and pad, scrub key includes the sport |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, Record hero review: VoiceOver scrub index resets on a shorter series and on blur; end pill is measured; grid says ROI; verify_record_hero.ts runs in PR CI |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Record headline rebuilt to Designer's Option B: Discord units beside a sparkline, 2×2 grid, equity end pill the same string, betInk line |

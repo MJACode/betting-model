@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PanResponder, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import {
@@ -6,6 +6,7 @@ import {
   chartDateLabel,
   equitySeriesKey,
   linePath,
+  scheduleScrubRelease,
   pillFrame,
   plotLayout,
   pointXY,
@@ -48,18 +49,25 @@ export function EquityCurve({
   const [a11yIndex, setA11yIndex] = useState<number | null>(null);
   const [bubbleW, setBubbleW] = useState(160);
   const [pillSize, setPillSize] = useState({ w: 76, h: 22 });
-  // Reset before paint when this curve is a different series. RN 0.81 does
-  // not tell the view when VoiceOver focus leaves, and onBlur does not
-  // fire for that, so focus-leave is not the release. The sport chip is:
-  // seriesId plus the dates. The render below also refuses an index past
-  // the array, because this render still sees the old state.
+  // RN 0.81 does not tell the view when VoiceOver focus leaves, and
+  // onBlur does not fire for that. After the last adjust, a timer drops
+  // the scrub so the end pill returns without a chip change. A different
+  // series (seriesId plus the dates) clears it immediately. This render
+  // also refuses an index past the array, because it still sees the old state.
   const seriesKey = equitySeriesKey(seriesId, points);
   const [seenKey, setSeenKey] = useState(seriesKey);
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearScrubRelease = () => {
+    if (releaseTimer.current != null) clearTimeout(releaseTimer.current);
+    releaseTimer.current = null;
+  };
   if (seenKey !== seriesKey) {
     setSeenKey(seriesKey);
     setA11yIndex(null);
     setFinger(null);
+    clearScrubRelease();
   }
+  useEffect(() => clearScrubRelease, []);
   const pointsRef = useRef(points);
   pointsRef.current = points;
   const widthRef = useRef(width);
@@ -119,6 +127,10 @@ export function EquityCurve({
     const cur = scrubIndexForSeries(a11yIndex, points.length) ?? points.length - 1;
     const next = Math.max(0, Math.min(points.length - 1, cur + dir));
     setA11yIndex(next);
+    releaseTimer.current = scheduleScrubRelease(releaseTimer.current, () => {
+      releaseTimer.current = null;
+      setA11yIndex(null);
+    });
   };
 
   return (

@@ -158,9 +158,12 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "Units · 1 to win" in hero
     assert "{UNITS_CAPTION}" in card
     assert "Each pick risks the amount needed to win 1 unit" in hero
+    assert "Risk is capped at 3 units" in hero
+    assert "a pick with no price counts as 1 unit" in hero
     assert "Nothing risks more than 3" not in hero
     assert "wins less than 1" not in hero
     assert "The info button on Return on bets" in screen
+    assert "not all green" not in screen
     assert "Beat the closing line" in card
     assert 'accessibilityRole="summary"' in card
     assert "accessibilityLabel={heroLabel}" in card
@@ -179,11 +182,14 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "equitySeriesKey(seriesId, points)" in curve
     assert "onBlur does not" in curve
     assert "onBlur={releaseScrub}" not in curve
+    assert "scheduleScrubRelease" in curve
     assert "seriesId={sportSel}" in screen
     assert curve.count("<Circle") >= 2
     assert "maxWidth: pill.maxWidth" in curve
     geometry = (ROOT / "mobile/src/lib/equityGeometry.ts").read_text(encoding="utf-8")
     assert "export function scrubIndexForSeries" in geometry
+    assert "SCRUB_RELEASE_MS" in geometry
+    assert "scheduleScrubRelease" in geometry
     assert "maxWidth: chartW" in geometry
     assert "strokeDasharray" in curve
     assert "unitAxisTicks" in curve

@@ -148,6 +148,24 @@ export function equitySeriesKey(seriesId: string, points: { date: string }[]): s
 }
 
 /**
+ * How long a VoiceOver scrub stays after the last adjust.
+ * This React Native does not report VoiceOver focus leaving the chart, so
+ * the end pill would stay hidden until a sport chip changed. Four seconds
+ * is long enough to hear the day and adjust again.
+ */
+export const SCRUB_RELEASE_MS = 4000;
+
+/** Replace any pending release and schedule the next one. */
+export function scheduleScrubRelease(
+  previous: ReturnType<typeof setTimeout> | null,
+  release: () => void,
+  delay = SCRUB_RELEASE_MS,
+): ReturnType<typeof setTimeout> {
+  if (previous != null) clearTimeout(previous);
+  return setTimeout(release, delay);
+}
+
+/**
  * End-of-line pill. Prefer above the point; drop below when the point is
  * already in the top gutter. `pillW` / `pillH` are the measured size.
  * A pill wider than the chart is clamped to the chart, and `maxWidth` is

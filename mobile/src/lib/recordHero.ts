@@ -129,6 +129,7 @@ export function roiSheetBody(): string {
   return (
     'Each pick risks the amount needed to win 1 unit. ' +
     'At −110 that\u2019s 1.1 units to win 1. ' +
+    'Risk is capped at 3 units, and a pick with no price counts as 1 unit. ' +
     'This number is units won or lost divided by units risked. ' +
     'It matches the percentage in Discord\u2019s all-time line. ' +
     'Yesterday and Models use a flat $100 bet, so their percentages won\u2019t match.'

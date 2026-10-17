@@ -8,8 +8,10 @@ import {
   CHART_PAD,
   scrubIndex,
   scrubIndexForSeries,
+  SCRUB_RELEASE_MS,
   equitySeriesKey,
   pillFrame,
+  scheduleScrubRelease,
   plotLayout,
   unitAxisTicks,
   scrubBubbleFrame,
@@ -77,10 +79,13 @@ check('units caption', UNITS_CAPTION === 'Units · 1 to win');
 check('spoken grid names the four cells',
   spoken.includes('Return on bets, 2.5 percent') && spoken.includes('439 wins') && spoken.includes('Win rate 53.8%') && spoken.includes('Beat the closing line 54%'));
 check('spoken grid does not use Yesterday\'s book name', !/flat-bet roi/i.test(spoken));
+const sheet = roiSheetBody();
 check('sheet title and body',
   ROI_SHEET_TITLE === 'Return on bets (ROI)' &&
-  roiSheetBody().includes('Each pick risks the amount needed to win 1 unit') &&
-  !roiSheetBody().includes('Nothing risks more than 3'));
+  sheet.includes('Each pick risks the amount needed to win 1 unit') &&
+  sheet.includes('Risk is capped at 3 units') &&
+  sheet.includes('a pick with no price counts as 1 unit') &&
+  !sheet.includes('Nothing risks more than 3'));
 
 const missing = heroAccessibilityLabel({
   notLoaded: true,
@@ -132,6 +137,18 @@ check('chart pad clears the bubble and the caption', CHART_PAD.top >= 44 && CHAR
 const bubble = scrubBubbleFrame(4, 320, 148, 48);
 check('bubble stays on the top edge, clear of the axis', bubble.top === 0 && bubble.left >= 48, String(bubble.left));
 check('chart date', chartDateLabel('2026-09-01') === 'Sep 1');
+check('scrub release waits four seconds', SCRUB_RELEASE_MS === 4000);
 
-console.log(failures === 0 ? '\nAll record-hero checks passed.' : `\n${failures} FAILED.`);
-process.exit(failures === 0 ? 0 : 1);
+let released = false;
+const quick = scheduleScrubRelease(null, () => { released = true; }, 20);
+let stale = false;
+const first = scheduleScrubRelease(null, () => { stale = true; }, 30);
+const second = scheduleScrubRelease(first, () => {}, 500);
+setTimeout(() => {
+  check('a scrub releases when its timer fires', released);
+  check('a new scrub cancels the previous release', !stale);
+  clearTimeout(quick);
+  clearTimeout(second);
+  console.log(failures === 0 ? '\nAll record-hero checks passed.' : `\n${failures} FAILED.`);
+  process.exit(failures === 0 ? 0 : 1);
+}, 60);
