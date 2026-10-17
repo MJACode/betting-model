@@ -364,17 +364,23 @@ def step_player_news(run_date: str, max_age_min: int | None = None) -> bool:
 
 
 def step_player_positions(run_date: str) -> bool:
-    """NBA / WNBA / NCAAF positions for the player page's "same position vs
+    """NBA, WNBA, and NCAAF positions for the player page's "same position vs
     the next opponent" card (data/ingestors/player_positions_ingestor.py).
+
+    Matt, 2026-10-17: this pass names every sport in SPORTS. Omitting
+    `sports` on ingest_player_positions is NBA only, so the daily step must
+    not use that default. Each sport keeps its own REQUEST_CAP (900) and
+    stops after BLOCK_STREAK (3) consecutive 403/429/404 responses.
 
     Once a day is enough: rosters change slowly, and the ESPN half re-fetches
     only athletes not stored in the last 7 days, so a steady-state pass is the
-    ~45 roster-list calls plus that week's signings (ESPN has IP-blocked this
-    worker twice). CFBD /roster is one call. Verified on the worker
+    roster lists plus that week's signings (ESPN has IP-blocked this worker
+    twice). CFBD /roster is one or two calls. Verified on the worker
     2026-10-06 by dry runs 405765 / 406072 before this was scheduled."""
     try:
-        from data.ingestors.player_positions_ingestor import ingest_player_positions
-        result = ingest_player_positions(dry_run=False)
+        from data.ingestors.player_positions_ingestor import (
+            SPORTS, ingest_player_positions)
+        result = ingest_player_positions(sports=list(SPORTS), dry_run=False)
         logger.success(f"✓ Player positions: {result}")
         return True
     except Exception as exc:

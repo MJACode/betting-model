@@ -67,8 +67,9 @@ docs + 30 roster lists + 609 athlete docs + a handful of position docs
 (about 675 HTTP calls; worker_jobs 406072 fetched 609 NBA athlete docs).
 The validator accepts a list of known sports: the basketball real run is
 NBA and WNBA together, and `dry_run` false is a real write. Omitting the
-list is NBA only. Each sport keeps its own cap and a failed sport rollbacks
-so the next one still runs.
+list is NBA only. The daily refresh names every sport in SPORTS. Each
+sport keeps its own cap and a failed sport rollbacks so the next one
+still runs.
 
 POLITENESS. ESPN has IP-blocked the worker twice; a third block also takes
 out player news and WNBA results.
@@ -1197,11 +1198,11 @@ def ingest_player_positions(sports=None, season: int | None = None,
                             cache_path: Path | None = None) -> dict:
     """Fetch and store positions. Returns a per-sport summary for the job card.
 
-    Default sport is NBA — one sport per call. Pass `sports` to run several;
-    each sport has its own request cap and a failed sport rollbacks so the
-    next one still runs. `season` is the NCAAF roster year. The basketball
+    Omitting `sports` is NBA only, so a job that leaves the list off does
+    not fan out. The daily refresh passes every sport in `SPORTS`. Each
+    sport has its own request cap and a failed sport rollbacks so the next
+    one still runs. `season` is the NCAAF roster year. The basketball
     fallback roster path uses `espn_basketball_season`, not this year.
-    The job passes one sport.
     """
     own_conn = conn is None
     if conn is None:

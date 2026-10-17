@@ -148,6 +148,36 @@ def test_the_ingestor_does_no_ddl_at_write_time():
     assert not re.search(r"\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|POLICY)", src)
 
 
+def test_the_daily_refresh_covers_every_sport(monkeypatch):
+    """Matt, 2026-10-17: the daily pass names NBA, WNBA, and NCAAF.
+
+    Omitting sports on the ingestor is NBA only. The 900-call cap and the
+    3-strike stop stay per sport.
+    """
+    import run_pipeline
+    from data.ingestors.player_positions_ingestor import (
+        BLOCK_STREAK, REQUEST_CAP, SPORTS)
+
+    assert tuple(SPORTS) == ("NBA", "WNBA", "NCAAF")
+    assert REQUEST_CAP == 900
+    assert BLOCK_STREAK == 3
+    calls = []
+
+    def fake(sports=None, dry_run=False, **kw):
+        calls.append({"sports": list(sports or []), "dry_run": dry_run, **kw})
+        return {}
+
+    monkeypatch.setattr(
+        "data.ingestors.player_positions_ingestor.ingest_player_positions",
+        fake,
+    )
+    assert run_pipeline.step_player_positions("2026-10-17") is True
+    assert calls == [{
+        "sports": ["NBA", "WNBA", "NCAAF"],
+        "dry_run": False,
+    }]
+
+
 def test_the_job_defaults_to_a_dry_run_and_one_sport():
     from tracking.job_queue import JOBS
 
