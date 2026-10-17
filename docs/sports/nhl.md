@@ -34,7 +34,7 @@
 
 > **THE NHL MODELS ARE LIVE, WITH THE GO-LIVE GATE NOT MET** (mike,
 > 2026-10-01: *"this is a live model"*). Raised with the grade below in front
-> of him, restated, his call. Do not describe them as paper-only, do not hold
+> of him, restated, his call. Do not describe them as held back, do not hold
 > their picks back, and do not restore the gate without asking him.
 >
 > **NHL HAS NO 10-GAME HOLD** (mike, same day, on a proposal to hold picks until
@@ -155,6 +155,27 @@
   the logs do (130 games).
 
 ## 24. NHL — Pipeline Operations
+### `nhl_moneyline` REBUILT (mike, 2026-10-13; shipped on his "Yes", 2026-10-15)
+
+`models/nhl_moneyline_anchored.py`, artifact `kind = "anchored_logit"`
+(`models/saved/nhl_moneyline_20261013_225002.pkl`, fit on 7,900 priced games
+2020-21 → 2025-26). DraftKings' no-vig price is an unpenalised offset; 34
+inputs built from `nhl_team_game_log` / `nhl_goalie_game_log` / `games` move
+it (form, shots, special teams, goalie, rest / back-to-back / road trip,
+rating, goalie workload, home ice, travel). It is NOT fit by
+`models.trainer` (`OWN_FIT_PATH` refuses it): refit with
+`scripts/nhl_moneyline_anchored_train.py`, grade with
+`scripts/nhl_moneyline_anchored_backtest.py` (it must reproduce before a new
+artifact goes live). **One decision a game: 16:00Z-18:00Z on game day, with
+both teams' game-day goalie rows in `nhl_goalie_stats`, and both teams' games
+of the last two days already in `nhl_team_game_log`** (they land ~10:05Z; if
+that ingest is late the model waits rather than read stale rest and form);
+every other run writes NONE with the reason, and it never writes AVOID. EV ≥ 0.06 on its own
+probability at the best price, −200 floor; evidence in `docs/thresholds.md`
+and `docs/nhl_moneyline_rebuild.md`. Gate standing: 0 settled bets, live by
+mike's rule (CLAUDE.md §2, "never propose paper"). The regulation model below
+is unchanged.
+
 ### Models (2026-09-20: moneyline + regulation RETRAINED on honest inputs; LIVE since 2026-10-01, gate not met — mike; O/U + puckline untrained)
 
 **Retrained 2026-09-20 (mike), train 2018-19 → 2024-25, holdout 2025-26, 1,352 games.** A retrain resets the go-live gate (≥ 50 settled picks, positive flat ROI, calibration ≤ 5%); **mike made both LIVE on 2026-10-01 with the gate not met** (top of this file).
@@ -202,7 +223,7 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 | NHL team + goalie stats (`nhl_stats`) | GitHub Actions (`step_nhl_stats`) | daily 7am | season-to-date team metrics + probable-starter goalie rows (ESPN `probableStartingGoalie` overlay) |
 | NHL totals (`nhl-over-under`) | Railway worker (`step_nhl_over_under`) | 6am (right after the odds step) + every refresh pass (right after `par odds`) | `scripts/nhl_totals_card.py`: every unstarted NHL game, Pinnacle vs the bettable books in the newest fetch; writes at most one `nhl_over_under` BET a game, once, under the model's advisory lock. Logs a diagnostic line every pass (`no_sharp`, `pinnacle_withdrawn`, ...) so an empty card can be told from a broken one |
 | NHL scoring (`step_scoring`) | GitHub Actions | 6am + every refresh pass | `run_scorer` NHL branch → picks (incl. `_score_nhl_3way`); `nhl_over_under` is not in it |
-| Settlement | GitHub Actions (`settle`) | 7am | generic game-level settle (NHL is not excluded); 3-way draw handled in `_compute_result` |
+| Settlement | Railway worker (`settle`) | every refresh pass and the 6am run | Game lines grade off `games` once `nhl-results` has the final. Props grade in the same `settle_picks` once a final that is still missing its skater or goalie log has a box from `/gamecenter/{id}/boxscore`. The morning `top_up` still writes the full stats-API row; the box insert is `ON CONFLICT DO NOTHING`, so it does not blank that row. 3-way draw is handled in `_compute_result`. |
 
 NHL picks won't generate until the four models are trained and the `.pkl`
 artifacts are committed (like MLB/WNBA/UFC) — until then the NHL steps no-op

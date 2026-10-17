@@ -672,6 +672,109 @@ def _job_derive_first_pitch(**kw):
         conn.close()
 
 
+def _validate_publish_oct13_nhl_reply(args: dict) -> dict:
+    """No arguments. The line and the tweet it replies to are fixed."""
+    if args:
+        raise ValueError(
+            "publish_oct13_nhl_reply accepts no arguments; the line and reply target are fixed")
+    return {}
+
+
+def _job_publish_oct13_nhl_reply(**kw):
+    """Reply the Oct 13 line under the correction tweet. Discord is skipped
+    when that follow-up is already in push_sent."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_oct13_reply
+
+    conn = get_connection()
+    try:
+        return publish_oct13_reply(conn)
+    finally:
+        conn.close()
+
+
+def _validate_publish_oct13_nhl_line(args: dict) -> dict:
+    """No arguments. The line is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_oct13_nhl_line accepts no arguments; the line is fixed")
+    return {}
+
+
+def _job_publish_oct13_nhl_line(**kw):
+    """Post the Oct 13 NHL line once. The longer correction has already gone."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_oct13_line
+
+    conn = get_connection()
+    try:
+        return publish_oct13_line(conn)
+    finally:
+        conn.close()
+
+
+def _job_publish_full_record_standard(**kw):
+    """Full record in the standard recap embed, once, Discord only."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record_standard
+
+    conn = get_connection()
+    try:
+        return publish_full_record_standard(conn)
+    finally:
+        conn.close()
+
+
+def _job_delete_custom_record_post(**kw):
+    """Delete Discord message 1560045816352079957 once (owner, 2026-10-14)."""
+    from scripts.post_record_correction import delete_custom_record_post
+    return delete_custom_record_post()
+
+
+def _validate_publish_full_record(args: dict) -> dict:
+    """No arguments. The text is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_full_record accepts no arguments; the text is fixed")
+    return {}
+
+
+def _job_publish_full_record(**kw):
+    """Post the 2026-10-14 full record once to Discord results. Not X."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record
+
+    conn = get_connection()
+    try:
+        return publish_full_record(conn)
+    finally:
+        conn.close()
+
+
+def _validate_publish_record_correction(args: dict) -> dict:
+    """No arguments. The correction text is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_record_correction accepts no arguments; the correction text is fixed")
+    return {}
+
+
+def _job_publish_record_correction(**kw):
+    """Post the 2026-10-14 record correction once to Discord results and to X.
+
+    The words live in scripts/post_record_correction.py. This job does not
+    take a text argument, and a retry skips any surface already in push_sent.
+    """
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_record_correction
+
+    conn = get_connection()
+    try:
+        return publish_record_correction(conn)
+    finally:
+        conn.close()
+
+
 def _job_publish_x_results(**kw):
     """Post one settled day's recap to X, clearing a stale ledger row first.
 
@@ -810,6 +913,66 @@ def _validate_publish_discord_signals(args: dict) -> dict:
     return {"target_date": raw}
 
 
+def _job_publish_discord_void(**kw):
+    """Post a one-off void notice for picks that are already VOID and posted.
+
+    Calls notify_discord_void. dry_run defaults to true, so a job that omits
+    the flag returns the payload and does not post. The real post is
+    dry_run false, run by a person after they have read the payload.
+
+    Does not edit or delete the original Discord messages. Does not update
+    pick rows. A lock already carrying discord_void is skipped.
+    """
+    from tracking.discord_notifier import notify_discord_void
+
+    return notify_discord_void(
+        pick_ids=kw["pick_ids"],
+        reason=kw.get("reason"),
+        dry_run=kw.get("dry_run", True),
+    )
+
+
+def _validate_publish_discord_void(args: dict) -> dict:
+    raw = args.get("pick_ids")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("pick_ids must be a non-empty list of pick ids")
+    try:
+        ids: list[int] = []
+        seen: set[int] = set()
+        for p in raw:
+            # bool is an int. A float or a numeric string must not be
+            # truncated or coerced: int(2.7) is 2 and int("8") is 8.
+            if isinstance(p, bool) or not isinstance(p, int):
+                raise ValueError("pick_ids must be integers")
+            if p <= 0:
+                raise ValueError(f"pick id {p} is not a pick")
+            if p not in seen:
+                seen.add(p)
+                ids.append(p)
+    except ValueError as exc:
+        if str(exc).startswith("pick id") or str(exc).startswith("pick_ids"):
+            raise
+        raise ValueError("pick_ids must be integers") from exc
+    if len(ids) > 100:
+        raise ValueError(f"{len(ids)} picks in one void notice; split it")
+    reason = args.get("reason")
+    if reason is not None:
+        reason = str(reason).strip()
+        if not reason:
+            reason = None
+        elif len(reason) > 4000:
+            raise ValueError("reason is longer than Discord's description cap")
+    dry_run = args.get("dry_run", True)
+    if not isinstance(dry_run, bool):
+        raise ValueError(
+            "dry_run must be true or false (a JSON boolean); "
+            f"got {dry_run!r}")
+    out: dict = {"pick_ids": ids, "dry_run": dry_run}
+    if reason:
+        out["reason"] = reason
+    return out
+
+
 def _job_discord_probe(**kw):
     """Ask Discord WHICH CHANNEL each configured webhook actually points at.
 
@@ -909,11 +1072,13 @@ def _job_void_picks(**kw):
     `"allow_posted": true` (mike, 2026-10-09: "Change the rule, void them").
     That opt-in is for a posted pick decided on a price nobody could bet; the
     module docstring of scripts/void_picks.py says when, and why the lock
-    exists. It never makes a graded pick voidable, and nothing here touches
-    the channel the pick was posted in.
+    exists. It never makes a graded pick voidable. The original message is
+    not edited or deleted. After the void commits, a pick that was posted
+    gets a void notice with this reason. An unposted void posts nothing, and
+    a rejected notice does not undo the void.
     """
     from data.db import get_connection
-    from scripts.void_picks import _select, plan_voids, void
+    from scripts.void_picks import _select, announce_posted_voids, plan_voids, void
 
     conn = get_connection()
     try:
@@ -922,10 +1087,14 @@ def _job_void_picks(**kw):
                                       allow_posted=bool(kw.get("allow_posted", False)))
         void(conn, to_void, kw["reason"])
         conn.commit()
+        notice = announce_posted_voids(to_void, kw["reason"])
         found = {r["pick_id"] for r in rows}
-        return {"voided":  [r["pick_id"] for r in to_void],
-                "refused": [[r["pick_id"], r["why"]] for r in refused],
-                "missing": [p for p in kw["pick_ids"] if p not in found]}
+        out = {"voided":  [r["pick_id"] for r in to_void],
+               "refused": [[r["pick_id"], r["why"]] for r in refused],
+               "missing": [p for p in kw["pick_ids"] if p not in found]}
+        if notice is not None:
+            out["void_notice"] = notice
+        return out
     finally:
         conn.close()
 
@@ -1691,6 +1860,28 @@ JOBS = {
     "publish_results": (_job_publish_results, _validate_publish_x_results),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
+    # One-off void notice. dry_run defaults true. Does not edit or delete
+    # the original messages. See _job_publish_discord_void.
+    "publish_discord_void": (_job_publish_discord_void,
+                             _validate_publish_discord_void),
+    # One post of the 2026-10-14 record correction. Text is fixed in
+    # scripts/post_record_correction.py. See _job_publish_record_correction.
+    "publish_record_correction": (_job_publish_record_correction,
+                                  _validate_publish_record_correction),
+    # Owner-approved full record, Discord only. See _job_publish_full_record.
+    "publish_full_record": (_job_publish_full_record,
+                            _validate_publish_full_record),
+    "delete_custom_record_post": (_job_delete_custom_record_post,
+                                  _validate_publish_full_record),
+    "publish_full_record_standard": (_job_publish_full_record_standard,
+                                     _validate_publish_full_record),
+    # One line, after the 2026-10-14 correction. See _job_publish_oct13_nhl_line.
+    "publish_oct13_nhl_line": (_job_publish_oct13_nhl_line,
+                               _validate_publish_oct13_nhl_line),
+    # Reply under the correction's per-sport tweet. See
+    # _job_publish_oct13_nhl_reply.
+    "publish_oct13_nhl_reply": (_job_publish_oct13_nhl_reply,
+                                _validate_publish_oct13_nhl_reply),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),

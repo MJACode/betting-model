@@ -14,6 +14,15 @@ python scripts/nfl_live_prop_staleness.py    # is it just catching stale prices?
 python scripts/nfl_live_prop_feasibility.py  # the fitted alternative, for contrast
 ```
 
+
+> **Correction, 2026-10-11 (docs/nfl_edge_search.md §4).** The archive is NOT a
+> snapshot every five minutes. The pull requested five fixed game-clock points
+> per game in 2023-24 (2100, 1800, 1500, 900 and 600 seconds left; a median 20
+> minutes apart), and exactly one per game, near halftime, in 2025. Read "five
+> minutes" below as "the next fixed clock point". An independent rebuild of the
+> rule gives 960 bets, +11.79% (90% CI +6.8, +16.8)
+> (`python -m scripts.nfl_edge_live_rush_pace`).
+
 ---
 
 ## 1. Why the old market was not fixable

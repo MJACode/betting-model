@@ -72,11 +72,17 @@ ANON_READABLE: tuple[str, ...] = (
     "umpires",
     # ── views ───────────────────────────────────────────────────────────────
     "v_fighter_season_totals_ufc",
-    # Which locks Discord still has (discord_signal / discord_live). The
-    # app joins it so a VOID-after-post stays on the board and a pick the
-    # channel never got is not an active Discord bet. push_sent itself
-    # stays closed; the view is lock_key + kind only.
+    # Which locks Discord still has (discord_signal / discord_live), minus
+    # a lock whose discord_void notice is strictly newer than the channel
+    # row. The app joins it so a VOID-after-post stays on the board until
+    # that notice, and a pick the channel never got is not an active Discord
+    # bet. The view returns lock_key + kind. Its security_invoker WHERE reads
+    # sent_at, so that column is granted on push_sent; message_id is not.
+    # The app does not read push_sent itself.
     "v_discord_published",
+    # Locks that have a void notice. A VOID pick on one stays unpublished
+    # after a later pick reholds the shared game:model key.
+    "v_discord_void_notice",
     "v_latest_dk_odds",
     "v_latest_inplay_odds_all_books",
     "v_latest_odds_all_books",
@@ -238,6 +244,41 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().
     "model_auto_pauses",
+    # The league's NBA injury report archive and its pull ledger. Created on
+    # demand by data/ingestors/nba_injury_report.py; model input, never read
+    # by the app.
+    "nba_injury_report",
+    "nba_injury_report_pulls",
+    # NBA box-score detail: starters, exact minutes, DNP reasons, usage; the
+    # referee crews; the inactive lists. Created on demand by
+    # data/ingestors/nba_box_enrich.py; model input, never read by the app.
+    "nba_game_inactives",
+    "nba_game_officials",
+    "nba_player_game_adv",
+    # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
+    # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
+    # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
+    # on demand by their writers; model and settlement input, never read by the
+    # app.
+    "nba_period_scores",
+    "nba_player_dnp",
+    "nba_schedule",
+    # The NBA prop card's decisions ledger: one row per game it has decided,
+    # so a game is decided once (scripts/nba_prop_market_card.py, which
+    # creates it on demand). Read by the card and the window job, never by
+    # the app.
+    "nba_prop_market_decisions",
+    # The NBA projection model's three (scripts/nba_prop_projection_card.py,
+    # which creates them on demand): its decisions ledger, each player's
+    # stored projection, and the injury list each game was projected with.
+    # Read by the card and the window job, never by the app.
+    "nba_prop_projection_decisions",
+    "nba_prop_projections",
+    "nba_injury_asof",
+    # NHL derivative-totals pull ledger. Created on demand by
+    # data/ingestors/nhl_derivative_odds_history.py, same shape as
+    # odds_history_pulls: a fixed name, never read by the app.
+    "nhl_derivative_odds_pulls",
     "odds_history_pulls",
     "threshold_reviews",
     "worker_jobs",

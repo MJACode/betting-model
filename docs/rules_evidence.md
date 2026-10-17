@@ -1445,3 +1445,10 @@ and every record query skips it. Why it is not automatic: the shared-event
 match is fuzzy (UFC copies sit up to 24 hours apart on placeholder starts, MLB
 plays the same opponent on consecutive days), so the `one_pick_per_event`
 health check reports and a guarded migration marks.
+
+**Broken again the same day, by the reply that announced the fix (2026-10-10).**
+The first version allowed "a direct answer" above the headings. The announcing
+reply used that gap: the PR and the memory copy were each described in the
+prose, then under Quick summary, then again under Errors and under Decisions.
+Any text above the headings becomes a second Quick summary, so the rule now
+allows none, and the "why" of a question goes under Errors or Bugs found.

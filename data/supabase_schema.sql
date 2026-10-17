@@ -948,7 +948,7 @@ ALTER TABLE golf_odds        ENABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "anon read golf_rounds"      ON golf_rounds      FOR SELECT TO anon, authenticated USING (true);
 
 
--- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
+-- ── PICKS — Picks Log ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS picks (
     pick_id            BIGSERIAL PRIMARY KEY,
@@ -975,13 +975,18 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
     closing_dk_odds    NUMERIC,            -- close American on the pick side (book in clv_close_book)
     closing_line       NUMERIC,            -- close total/spread on the pick side (NULL for moneyline)
-    clv_pct            NUMERIC,            -- (fair_close_p - fair_bet_p) in pp, SAME-LINE ONLY. docs/clv.md
-    line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for moneyline
-    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
-    clv_method         TEXT,               -- no_vig | zero_vig | raw_one_way | raw_one_sided (legacy)
-    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close
-    clv_bet_book       TEXT,               -- book the bet side was graded at: the book the pick was taken at
+    clv_pct            NUMERIC,            -- same-book raw price CLV in percent: (taken_decimal/close_decimal - 1)*100. SAME-LINE ONLY. docs/clv.md
+    clv_pp             NUMERIC,            -- same pair of raw prices, in probability points
+    line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close; NULL for moneyline. Not a beat.
+    clv_beat_close     BOOLEAN,            -- clv_pct > 0. NULL when the primary price CLV is NULL
+    clv_captured_at    TEXT,               -- when a measurable CLV was recorded
+    clv_method         TEXT,               -- standard_v2 is the pedigree. Older stamps stay out of averages
+    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close (the bet book)
+    clv_bet_book       TEXT,               -- book the bet was taken at
+    market_clv_pct     NUMERIC,            -- secondary: raw taken vs Pinnacle fair close, in percent
+    market_clv_pp      NUMERIC,            -- that comparison in probability points
+    market_clv_method  TEXT,               -- power | power_3way | zero_vig
+    pinnacle_close_odds NUMERIC,           -- Pinnacle American on our side, same line
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
@@ -1141,7 +1146,11 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     under_link      TEXT,                        -- DK betslip deep link (under)
     over_sid        TEXT,
     under_sid       TEXT,
-    created_at      TEXT DEFAULT (NOW()::TEXT)
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    -- The BOOK'S own last_update for the market (the feed's market clock),
+    -- added 2026-10-16. NULL on every row written before that, and on any
+    -- row the feed sent without one. snapshot_at is OUR fetch time.
+    book_last_update TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_prop_odds_game   ON player_prop_odds(game_id, market);
@@ -1998,7 +2007,7 @@ CREATE TABLE IF NOT EXISTS opening_signals (
     locked_at          TEXT NOT NULL,
     closing_dk_odds    NUMERIC,
     closing_line       NUMERIC,
-    clv_pct            NUMERIC,              -- no-vig close vs opening lock, SAME-LINE ONLY. docs/clv.md
+    clv_pct            NUMERIC,              -- same-book raw CLV in probability points vs the opening lock. Shadow track. docs/clv.md
     line_move_dir      TEXT,                 -- toward | against | flat
     public_side        TEXT,                 -- with_public | contrarian | even
     result             TEXT,                 -- WIN | LOSS | PUSH | NO_ACTION
@@ -2461,7 +2470,7 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- ── PUBLIC TRACK RECORD (session: competitor-analysis-disruption) ────────────
 -- Applied via migrations add_public_track_record_views + track_record_current_criteria.
 -- The verifiable, public-facing proof of performance: every settled BET pick
--- since paper-trading start (2026-04-14) that meets the CURRENT action criteria,
+-- since the evaluation start (2026-04-14) that meets the CURRENT action criteria,
 -- aggregated for the mobile Track Record screen and the website proof page.
 -- Nothing cherry-picked — losing models are included.
 --
@@ -2540,10 +2549,9 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   models, so it would be a no-op there. Mirrored in the app by
 --   thresholds.isLiveModel / isContaminatedPregamePick and in the Discord
 --   recap's _SETTLED_SQL, so all three publish the same population.
---   2026-07-05 (migration full_outcome_record_hr_record_only): HR is now
---   record-only in v_model_full_outcome_record too — units forced to 0 and
---   roi_pct to NULL (its 1-2 priced longshot bets rendered as "-100% ROI" on
---   the Models tab). The W-L record still displays; it just carries no money.
+--   2026-07-05: HR units in v_model_full_outcome_record were forced to 0.
+--   2026-10-14: that special case is removed. Units are the summed real
+--   profit of the graded picks, the same set as the W-L.
 --   2026-09-02 (migration track_record_reads_graded_matview): the MLB/WNBA
 --   full-outcome branch of v_model_full_outcome_record and
 --   v_public_track_record_daily (and so v_public_track_record, which reads the

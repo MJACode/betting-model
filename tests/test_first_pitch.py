@@ -172,7 +172,9 @@ _PREGAME_READERS = [
     "features/feature_engine.py",
     "features/ncaaf_feature_engine.py",
     "features/wnba_feature_engine.py",
-    "features/nba_feature_engine.py",
+    # features/nba_feature_engine.py was deleted 2026-10-15 with the retired NBA
+    # game models (tests/test_retired_models.py pins that it stays gone). The
+    # NBA prop rule bounds its own reads (models/nba_prop_market._pre_tip).
 ]
 
 

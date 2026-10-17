@@ -110,12 +110,14 @@ def test_retired_live_models_have_no_label():
 
 def test_every_mlb_live_model_has_a_feature_map():
     # LIVE_FEATURE_MAP serves the MLB live loop only; the NCAAF live models
-    # in LIVE_MODELS are served by the ncaaf_live/ package's own engine and
-    # are in the registry for SETTLEMENT market mapping, not for this map.
+    # in LIVE_MODELS are served by the ncaaf_live/ package's own engine, and
+    # the NFL in-play leader moneyline by nfl_live_leader/ (its own JSON
+    # artifact) -- both are in the registry for SETTLEMENT market mapping,
+    # not for this map.
     mlb_live = {m for m in LIVE_MODELS if m.startswith("mlb_live_")}
     assert mlb_live == set(LIVE_FEATURE_MAP.keys())
     for m in LIVE_MODELS:
-        assert m.startswith(("mlb_live_", "ncaaf_live_")), (
+        assert m.startswith(("mlb_live_", "ncaaf_live_", "nfl_live_leader_")), (
             f"{m}: unknown live-model family — decide which engine serves it")
 
 

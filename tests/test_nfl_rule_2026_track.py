@@ -1,4 +1,4 @@
-"""Pins the 2026 opener/wind paper-track: no unit bump, retire-if-flat, MAX_FIRE_LEAD=4.
+"""Pins the 2026 opener/wind live track: no unit bump, retire-if-flat, MAX_FIRE_LEAD=4.
 
 The tracker is a reader of `picks`. These tests pin the policy and the grading
 math so a later session cannot quietly raise a unit, widen the fire window, or
@@ -32,7 +32,7 @@ def _row(**kw):
 
 
 def test_live_cuts_did_not_move():
-    """Paper-track is comments + a reader. Emission thresholds stay put."""
+    """Live track is comments + a reader. Emission thresholds stay put."""
     assert config.ACTION_THRESHOLDS["nfl_opener_spread"] == {
         "min_prob": 0.55, "min_edge": 0.00}
     assert config.ACTION_THRESHOLDS["nfl_wind_totals"] == {
@@ -125,7 +125,7 @@ def test_config_comments_state_the_policy():
 
 
 def test_paused_xgb_props_stay_paused():
-    """Paper-tracking opener/wind is not an unpause of the distributional props."""
+    """A live track opener/wind is not an unpause of the distributional props."""
     from tests.test_retired_models import NFL_DISTRIBUTIONAL_PAUSED, NFL_KEEP_LIVE
     assert NFL_DISTRIBUTIONAL_PAUSED <= set(config.PAUSED_MODELS)
     for mid in NFL_KEEP_LIVE:

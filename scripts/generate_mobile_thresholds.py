@@ -27,6 +27,10 @@ import config  # noqa: E402
 
 OUT = ROOT / "mobile" / "src" / "lib" / "thresholds.generated.ts"
 
+# Prob-only at retirement (see render). Add a model here when a prob-only
+# model is retired; it is history, so it never shrinks.
+RETIRED_PROB_ONLY_MODELS = frozenset({"mlb_prop_batter_hr", "nba_prop_player_dd"})
+
 
 def _fmt(x: float) -> str:
     if isinstance(x, float) and x == int(x):
@@ -70,8 +74,15 @@ def render() -> str:
         lines.append(f"  '{m}',")
     lines.append("]);")
     lines.append("")
+    # Models that were prob-only when they were retired. config drops a model
+    # from PROB_ONLY_MODELS when it retires, so this cannot be derived; the app
+    # still needs it, because a retired prob-only pick must keep being shown
+    # the way it was made (isProbOnlyModel). mlb_prop_batter_hr retired
+    # 2026-09-02; nba_prop_player_dd retired with the NBA rebuild.
     lines.append("export const RETIRED_PROB_ONLY_MODELS = new Set<string>([")
-    lines.append("  'mlb_prop_batter_hr',")
+    for m in sorted(RETIRED_PROB_ONLY_MODELS):
+        assert m in config.RETIRED_MODELS, f"{m} is listed as retired prob-only but is not retired"
+        lines.append(f"  '{m}',")
     lines.append("]);")
     lines.append("")
     lines.append("export const PAUSED_MODELS = new Set<string>([")

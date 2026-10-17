@@ -76,9 +76,9 @@ Outstanding tasks
 ```
 
 **SAY EACH THING ONCE.** (mike, 2026-10-09: *"Why do you keep restating
-results?"*) The headings ARE the reply: above them only what no heading holds
-(a direct answer, a table), never a recap they repeat. Only what is new since
-the last reply; an unchanged item is not restated. Evidence:
+results?"*, and 10-10 after the fix's own reply broke it.) NOTHING goes above
+the headings. Each fact under one heading, once; "why" goes under Errors.
+Only what is new since the last reply. Evidence:
 `docs/rules_evidence.md`.
 
 Notes on each:
@@ -285,7 +285,10 @@ one point, which is why timing is key."*
 Once a model produces a BET at a line and a price, **that pick existed** and is
 the bet of record. If the line then moves so the model would no longer take it,
 that is LINE MOVEMENT: it does not retract the bet, does not change the number
-that was given, and **must never delete or overwrite the row**. Every model locks
+that was given, and **must never delete or overwrite the row**. The published
+record (Discord, X, `results_snapshots`, the two app views) counts a settled
+BET only while Discord still holds its lock (`v_discord_published`). An
+unposted row stays in `picks`. Every model locks
 its pick — game-level at the first scoring run, props at the first signal on a
 confirmed lineup, live at the first BET per lane, NFL wind/opener by
 construction. **Timing is data, not metadata:** `created_at` is when the number
@@ -325,21 +328,13 @@ primary sportsbook. The long-term goal is all major US sports with all player
 props. Seven sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL and NCAAF
 (§8). **GOLF was retired 2026-09-08** (mike) — `config.RETIRED_MODELS`.
 
-**The platform is LIVE — this is not a paper-trading system.** Do not describe
-it as paper trading in any user-facing surface (Discord, the app, email, the
-dashboard). It was framed that way through 2026 H1 and the wording lingered in
-copy long after it stopped being true; that is what produced a "Paper trading"
-footer on a real daily-results recap on 2026-08-29.
-
-**The go-live gate is per MODEL, not for the platform**: ≥ 50 settled picks,
-positive flat-bet ROI, calibration error ≤ 5%. A model explicitly held back
-is flagged PAPER ONLY in its own section (e.g. `ncaaf_spread`,
-`docs/sports/ncaaf.md`). Everything else is live.
-
-**NEVER PROPOSE PAPER.** (mike, 2026-10-08: *"stop asking about paper — what
-is the fucking point of paper."*) A model mike asks for is built LIVE, gate
-met or not. Report its gate standing; never offer a paper version or ask
-whether to hold it back.
+**Every model is live real money.** There is no second mode that counts a
+graded pick in the win-loss record and leaves it out of the units, and there
+is no hold-back ledger. Units and the record are the same graded set, sized by `stake_for`
+(1u to win, risk capped at 3) at `COALESCE(decision_odds, dk_odds)`. A pick with no price is not given a
+made-up price. (mike, 2026-10-14, and 2026-10-08: do not ask to hold a model
+back.) Report gate standing — ≥ 50 settled picks, positive flat-bet ROI,
+calibration error ≤ 5% — and build the model live.
 
 **`nfl_live_prop` (NFL in-play props) was RETIRED 2026-10-04 and its record
 STRUCK** (mike: *"It was never a good model. Remove this model."*) — 7-17,
@@ -439,6 +434,7 @@ python -m data.threshold_sync               # config.py -> model_action_threshol
 python -m scripts.emit_threshold_sql        # the action-filter SQL, generated
 python -m models.trainer --model <id>       # retrain (then COMMIT the .pkl)
 python -m pytest -q tests/                  # the only quality gate
+pip install -r requirements-test.txt        # pytest + node for the TS tests, not on the worker
 pip install -r requirements-dashboard.txt   # dashboard deps, not on the worker
 streamlit run dashboard/app.py
 ```
@@ -471,7 +467,7 @@ is scoped to. In one line each, so you know they exist:
 - **A pick is decided, sized and settled at the best bettable price**, and the
   row records which price and whose line (`decision_*`, read as
   `COALESCE(decision_x, dk_x)`). DraftKings stays the REFERENCE for features;
-  CLV grades the locked bet against the no-vig sharp close (`docs/clv.md`).
+  CLV's headline is the bet book's own raw close; Pinnacle's no-vig close is the market-edge column (`docs/clv.md`).
 - **A player prop DraftKings does not list is scored off the first bettable book
   that does** — in `BEST_LINE_BOOKMAKERS` order, never by price. `line_book`
   names it. These picks are a NEW population; report them separately.
@@ -505,7 +501,7 @@ your case; the rules below are complete as stated, the evidence is why.
   Three coverage traps to check FIRST: `NONE` rows only exist from 2026-05-12;
   they were **deleted ~2026-06-26 → 2026-08-09**; and a game where `abs(edge) >
   MAX_EDGE_CAP` gets **no row at all**. Clean windows: 2026-05-12→06-25 and
-  2026-08-09→present. Re-verify by month; never assume.
+  2026-08-09→present (props: only to 08-29). Re-verify by month.
   Full version: `docs/signal_timing.md`.
 - **The method rules — validate the grading before moving a cut, require a
   plateau and not a peak, split early/late, in-sample is in-sample** — are in
@@ -556,13 +552,13 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 74 models carry their
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 64 models carry their
   own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline
   steps are left in place; reviving it starts with the key, not with config.
-- **The platform is LIVE, not paper trading**; the go-live gate is per MODEL (§2).
+- **Every model is live real money.** Units and the record are the same graded set (§2).
 - **Where it runs:** the Railway worker (`scheduler.py`) — 6am daily pipeline,
   intraday refresh passes, the MLB and NCAAF live loops, the NFL card poll.
   See `docs/cloud_worker.md`.
@@ -604,7 +600,7 @@ to be known BEFORE deciding which file to open.
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | **Model artifacts: present, tracked, and loadable** | `docs/artifact_integrity.md` |
 | **NFL wind: how far out it may fire, and the lead evidence** | `docs/nfl_wind_lead_evidence.md` |
-| **NFL 2026 paper-track (opener retire-if-flat, wind MAX_FIRE_LEAD=4, no unit bump)** | `docs/nfl_rule_2026_track.md` |
+| **NFL 2026 opener/wind track (retire-if-flat, wind MAX_FIRE_LEAD=4, no unit bump)** | `docs/nfl_rule_2026_track.md` |
 | **NFL props: near kickoff is the only well-evidenced regime** | `docs/nfl_prop_offset_evidence.md` |
 | Best line on pre-game picks | `docs/best_line.md` |
 | Which prop markets the feed actually serves | `docs/market_coverage.md` |
@@ -678,3 +674,14 @@ does: a cap on this file, a cap on this file PLUS the session-start hook (so
 moving prose between them cannot game it), a per-file cap on each rules file, and
 a check that every rules file is pointed at from here. It fails once, at merge
 time, for whoever grew it — which is why no session needs to spend a reply on it.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.

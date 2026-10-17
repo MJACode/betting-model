@@ -252,6 +252,69 @@ def _is_write(sql: str) -> bool:
     return True
 
 
+def statement_timeout(exc: BaseException) -> bool:
+    """True when Postgres cancelled the statement (SQLSTATE 57014).
+
+    That error aborts the whole transaction. The next statement then fails
+    with InFailedSqlTransaction, which hides the timeout. Callers wrap the
+    statement in a savepoint and roll back to it — ROLLBACK TO SAVEPOINT is
+    still allowed in that state.
+    """
+    code = getattr(exc, "pgcode", None)
+    if code == "57014":
+        return True
+    return "statement timeout" in str(exc).lower()
+
+
+def rollback_savepoint(conn, name: str) -> None:
+    """Undo `name` and leave the connection usable. Falls back to a full
+    rollback when the savepoint itself cannot be restored."""
+    if not str(name).isidentifier():
+        raise ValueError(f"savepoint name must be an identifier, got {name!r}")
+    try:
+        conn.execute(f"ROLLBACK TO SAVEPOINT {name}")
+    except Exception:                                          # noqa: BLE001
+        rollback = getattr(conn, "rollback", None)
+        if rollback is not None:
+            try:
+                rollback()
+            except Exception:                                  # noqa: BLE001
+                pass
+        return
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {name}")
+    except Exception:                                          # noqa: BLE001
+        rollback = getattr(conn, "rollback", None)
+        if rollback is not None:
+            try:
+                rollback()
+            except Exception:                                  # noqa: BLE001
+                pass
+
+
+def call_in_savepoint(conn, name: str, fn):
+    """Run fn(). On failure, restore the transaction and re-raise.
+
+    `name` is a bare SQL identifier. A statement timeout aborts the
+    transaction; the rollback puts the connection back so the next date or
+    the next game can still run.
+    """
+    if not str(name).isidentifier():
+        raise ValueError(f"savepoint name must be an identifier, got {name!r}")
+    conn.execute(f"SAVEPOINT {name}")
+    try:
+        result = fn()
+    except Exception:
+        rollback_savepoint(conn, name)
+        raise
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {name}")
+    except Exception:
+        rollback_savepoint(conn, name)
+        raise
+    return result
+
+
 # ── Connection wrapper ────────────────────────────────────────────────────────
 
 class DBConnection:
@@ -510,6 +573,59 @@ def _transaction_endpoint(url: str) -> str:
     return url.replace(_SESSION_POOLER_PORT, _TXN_POOLER_PORT, 1)
 
 
+# Long-lived pollers set this on their own process before opening a
+# connection (use_poller_session). 60s is longer than one tick's database
+# work and shorter than a game: a forgotten read transaction cannot sit
+# idle holding AccessShareLock until the process exits. Not the default.
+# A scorer may pause inside one transaction on purpose, and a role-level
+# idle_in_transaction_session_timeout would kill that too.
+POLLER_IDLE_IN_TRANSACTION_MS = 60_000
+
+
+def use_poller_session() -> None:
+    """Arm the idle-in-transaction backstop for this process's connections.
+
+    Read by `_session_options` at connect and again on every reconnect, so a
+    session Postgres has already killed comes back with the same limit.
+    Call it once, at the start of a long-lived poller, before get_connection.
+    """
+    os.environ["DB_IDLE_IN_TRANSACTION_TIMEOUT_MS"] = str(POLLER_IDLE_IN_TRANSACTION_MS)
+
+
+def _session_options() -> str | None:
+    """libpq `-c` options for one connection, from the process environment."""
+    parts: list[str] = []
+    timeout_ms = os.environ.get("DB_STATEMENT_TIMEOUT_MS", "").strip()
+    if timeout_ms.isdigit():
+        parts.append(f"-c statement_timeout={int(timeout_ms)}")
+    idle_ms = os.environ.get("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", "").strip()
+    if idle_ms.isdigit() and int(idle_ms) > 0:
+        parts.append(f"-c idle_in_transaction_session_timeout={int(idle_ms)}")
+    return " ".join(parts) or None
+
+
+def release_read(conn) -> None:
+    """End a transaction that holds only reads, so its locks die with the query.
+
+    get_connection() leaves autocommit off. A SELECT therefore opens a
+    transaction and holds AccessShareLock until commit or rollback. A poller
+    that keeps one connection and then sleeps, or calls the network, sits
+    `idle in transaction` for the life of the process. The next ALTER TABLE
+    on that relation waits out statement_timeout, and while it waits Postgres
+    queues every later lock request behind it — including live pick writes.
+
+    A connection with uncommitted writes (`_dirty`) is left alone: that
+    transaction belongs to the caller. A rollback of a clean or aborted
+    transaction is a no-op when nothing is open.
+    """
+    if conn is None or getattr(conn, "_dirty", False):
+        return
+    try:
+        conn.rollback()
+    except Exception:                                      # noqa: BLE001
+        pass
+
+
 def _connect(url: str) -> DBConnection:
     """Open one wrapped connection to `url`. Shared by both modes."""
     # Per-session statement timeout, opt-in via DB_STATEMENT_TIMEOUT_MS.
@@ -525,24 +641,19 @@ def _connect(url: str) -> DBConnection:
     # env var around the training call. Not raised globally, and not raised in
     # config: a longer timeout is a licence to hold a connection longer, and
     # that licence should be held by the one job that has earned it.
-    options = None
-    timeout_ms = os.environ.get("DB_STATEMENT_TIMEOUT_MS", "").strip()
-    if timeout_ms.isdigit():
-        options = f"-c statement_timeout={int(timeout_ms)}"
-
+    #
     # Autocommit off — callers manage transactions with conn.commit() / conn.rollback()
-    pg_conn = _open(url, options)
+    pg_conn = _open(url, _session_options())
     return DBConnection(pg_conn, url=url)
 
 
 def _open(url: str, options: str | None = None) -> psycopg2.extensions.connection:
     """One raw psycopg2 connection to `url`; the reconnect path dials this too.
-    A reconnect re-derives `options` from the same env var the first connect
-    read, so a retrain's raised statement timeout survives its reconnect."""
+    A reconnect re-derives `options` from the same env vars the first connect
+    read, so a retrain's raised statement timeout and a poller's idle-in-
+    transaction limit both survive its reconnect."""
     if options is None:
-        timeout_ms = os.environ.get("DB_STATEMENT_TIMEOUT_MS", "").strip()
-        if timeout_ms.isdigit():
-            options = f"-c statement_timeout={int(timeout_ms)}"
+        options = _session_options()
     pg_conn = psycopg2.connect(
         url,
         keepalives=1,

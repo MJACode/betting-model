@@ -30,7 +30,7 @@ import pytest
 
 from tracking import clv_math
 from tracking import paper_tracker as pt
-from tracking.clv_math import price_clv_pct
+from tracking.clv_math import CLV_METHOD_STANDARD, same_book_clv
 
 ROOT = Path(__file__).parent.parent
 LEGACY = "graded_at_dk_legacy"
@@ -75,18 +75,39 @@ class _Conn:
             return _Res([tuple(p[c] for c in cols) for p in self.picks
                          if p["game_date"] == params[0]])
         if "FROM odds" in s:
-            game_id, market, book, bound = params
+            if "spread_home = %s" in s or "total_line = %s" in s:
+                game_id, market, book, bound, line = params
+            else:
+                game_id, market, book, bound = params
+                line = None
             rows = sorted((q for q in self.quotes
                            if q[0] == book and q[1] == market and _ts(q[2]) <= _ts(bound)),
                           key=lambda q: _ts(q[2]), reverse=True)
-            if "ABS(spread_home) = 1.5" in s:
+            if line is not None and "spreads" in market:
+                rows = [q for q in rows if q[3].get("spread_home") == line]
+            elif line is not None:
+                rows = [q for q in rows if q[3].get("total_line") == line]
+            elif "ABS(spread_home) = 1.5" in s:
                 rows = [q for q in rows if abs(q[3].get("spread_home") or 0) == 1.5]
             return _Res([tuple(q[3].get(c) for c in _GAME_COLS) for q in rows[:1]])
         if s.startswith("UPDATE picks"):
             set_part = s[s.index(" SET ") + 5:s.index(" WHERE ")]
-            keys = [a.split("=")[0].strip() for a in set_part.split(",")] + ["pick_id"]
-            assert len(keys) == len(params), s
-            self.updates.append(dict(zip(keys, params)))
+            keys, values, pi = [], [], 0
+            params = list(params)
+            for assign in set_part.split(","):
+                key, expr = assign.split("=", 1)
+                keys.append(key.strip())
+                if "%s" in expr:
+                    values.append(params[pi])
+                    pi += 1
+                elif expr.strip().upper() == "NULL":
+                    values.append(None)
+                else:
+                    raise AssertionError(expr)
+            keys.append("pick_id")
+            values.append(params[pi])
+            assert pi + 1 == len(params), s
+            self.updates.append(dict(zip(keys, values)))
             return _Res([])
         raise AssertionError(f"unexpected statement: {s[:80]}")
 
@@ -164,28 +185,32 @@ def test_the_nfl_label_map_is_the_inverse_of_the_nfl_publisher():
 
 # ── capture, by row shape ─────────────────────────────────────────────────────
 
-def test_group_a_grades_the_deciding_price_against_the_deciding_books_lock():
+def test_group_a_grades_the_deciding_price_against_that_books_close():
+    """Primary is BetMGM −105 vs BetMGM's own −118, raw. Pinnacle −120 is
+    the market-edge column, not the headline, and DraftKings −125 is neither."""
     conn = _Conn([_pick()], TOTALS)
     assert pt._capture_clv(conn, "2026-09-20", "TS") == 1
     (u,) = conn.updates
-    want, _ = price_clv_pct(-105.0, -120, [104], book="pinnacle",
-                            bet_other_prices=[-115], bet_book="betmgm")
-    master, _ = price_clv_pct(-115.0, -120, [104], book="pinnacle",
-                              bet_other_prices=[-105], bet_book="draftkings")
-    assert want != master
-    assert (u["clv_pct"], u["clv_close_book"], u["clv_bet_book"]) == (want, "pinnacle", "betmgm")
+    want, _pp = same_book_clv(-105.0, -118)
+    dk, _ = same_book_clv(-105.0, -125)
+    assert want != dk
+    assert (u["clv_pct"], u["clv_close_book"], u["clv_bet_book"], u["clv_method"],
+            u["closing_dk_odds"]) == (want, "betmgm", "betmgm", CLV_METHOD_STANDARD, -118)
+    assert u["pinnacle_close_odds"] == -120
+    assert u["market_clv_pct"] is not None
+    assert u["clv_beat_close"] is (want > 0)
 
 
-def test_without_pinnacle_the_close_stays_draftkings_only_the_bet_side_moved():
-    """Only the BET moved to the price taken. A soft book's "close" is
-    junk-prone (pick 2899429: Fanatics -110/-130 against DraftKings +380/-600),
-    so a pick at DraftKings' line still closes Pinnacle, else DraftKings."""
+def test_without_pinnacle_the_primary_is_still_the_bet_book():
+    """No soft-book substitute and no DraftKings substitute. The bet was
+    BetMGM −105; BetMGM's close is the primary, and the market edge is NULL."""
     conn = _Conn([_pick()], [q for q in TOTALS if q[0] != "pinnacle"])
     assert pt._capture_clv(conn, "2026-09-20", "TS") == 1
     (u,) = conn.updates
-    want, _ = price_clv_pct(-105.0, -125, [105], book="draftkings",
-                            bet_other_prices=[-115], bet_book="betmgm")
-    assert (u["clv_close_book"], u["closing_dk_odds"], u["clv_pct"], u["clv_bet_book"]) ==         ("draftkings", -125, want, "betmgm")
+    want, _pp = same_book_clv(-105.0, -118)
+    assert (u["clv_close_book"], u["closing_dk_odds"], u["clv_pct"], u["clv_bet_book"],
+            u["market_clv_pct"], u["pinnacle_close_odds"]) == (
+                "betmgm", -118, want, "betmgm", None, None)
 
 
 def test_the_close_is_bounded_by_the_start_the_pick_was_written_against():
@@ -198,7 +223,10 @@ def test_the_close_is_bounded_by_the_start_the_pick_was_written_against():
     conn = _Conn([pick], quotes)
     assert pt._capture_clv(conn, "2026-09-20", "TS") == 1
     (u,) = conn.updates
-    assert u["closing_dk_odds"] == -120      # Pinnacle at 23:00, not the 23:10 in-play quote
+    # BetMGM's 23:00 close, not Pinnacle's 23:10 quote past the start the
+    # pick was written against. Pinnacle's 23:00 quote is the market edge.
+    assert u["closing_dk_odds"] == -118
+    assert u["pinnacle_close_odds"] == -120
 
 
 def test_group_b_same_price_reads_the_lock_at_the_line_book():
@@ -219,11 +247,11 @@ def test_group_b_same_price_reads_the_lock_at_the_line_book():
     conn = _Conn([pick], quotes)
     assert pt._capture_clv(conn, "2026-09-17", "TS") == 1
     (u,) = conn.updates
-    want, _ = price_clv_pct(130.0, 136, [-150], book="pinnacle",
-                            bet_other_prices=[-155], bet_book="fanduel")
-    raw, _ = price_clv_pct(130.0, 136, [-150], book="pinnacle")
-    assert want != raw
-    assert (u["clv_pct"], u["clv_bet_book"]) == (want, "fanduel")
+    # FanDuel's last pre-start quote is the +130 we took. That is the
+    # primary (zero). Pinnacle +136 is the market edge and is not the headline.
+    assert (u["clv_pct"], u["clv_bet_book"], u["clv_close_book"]) == (0.0, "fanduel", "fanduel")
+    assert u["pinnacle_close_odds"] == 136
+    assert u["market_clv_pct"] < 0
 
 
 def test_group_e_reads_the_nfl_cards_book_out_of_the_label():
@@ -243,7 +271,11 @@ def test_group_e_reads_the_nfl_cards_book_out_of_the_label():
     conn = _Conn([pick], quotes)
     assert pt._capture_clv(conn, "2026-09-27", "TS") == 1
     (u,) = conn.updates
-    assert (u["clv_pct"], u["clv_bet_book"], u["clv_close_book"]) == (1.69, "betmgm", "pinnacle")
+    # BetMGM's last quote is the −110 we took, so the primary is zero.
+    # Pinnacle −116 is the market edge, not a substitute close.
+    assert (u["clv_pct"], u["clv_bet_book"], u["clv_close_book"]) == (0.0, "betmgm", "betmgm")
+    assert u["pinnacle_close_odds"] == -116
+    assert u["clv_method"] == CLV_METHOD_STANDARD
 
 
 def test_a_draftkings_decided_row_is_unchanged():
@@ -251,9 +283,9 @@ def test_a_draftkings_decided_row_is_unchanged():
     conn = _Conn([pick], TOTALS)
     assert pt._capture_clv(conn, "2026-09-20", "TS") == 1
     (u,) = conn.updates
-    want, _ = price_clv_pct(-115.0, -120, [104], book="pinnacle",
-                            bet_other_prices=[-105], bet_book="draftkings")
-    assert (u["clv_pct"], u["clv_bet_book"]) == (want, "draftkings")
+    want, _pp = same_book_clv(-115.0, -125)
+    assert (u["clv_pct"], u["clv_bet_book"], u["clv_close_book"]) == (
+        want, "draftkings", "draftkings")
 
 
 # ── the recompute of rows graded under the DraftKings rule ───────────────────
@@ -263,20 +295,21 @@ def test_a_legacy_stamped_row_is_re_measured_and_leaves_the_queue():
     conn = _Conn([pick], TOTALS)
     assert pt._capture_clv(conn, "2026-09-20", "TS") == 1
     (u,) = conn.updates
-    assert (u["clv_method"], u["clv_bet_book"]) == ("no_vig", "betmgm")
+    assert (u["clv_method"], u["clv_bet_book"]) == (CLV_METHOD_STANDARD, "betmgm")
 
 
-def test_a_legacy_row_that_cannot_be_re_measured_is_marked_visited_not_requeued():
-    """No close at any book (a pruned history, a renamed player). The old
-    number stays on the row, stamped legacy so the pedigree keeps excluding
-    it, and clv_bet_book marks it visited so the backfill does not re-walk
-    its date forever (the self-healing-backfill rule)."""
+def test_a_legacy_row_that_cannot_be_re_measured_leaves_the_old_method():
+    """No close at the bet book and no Pinnacle close. The old number is
+    cleared, the method becomes standard_v2, and the row leaves the queue.
+    A NULL primary stays out of the average."""
     pick = _pick(clv_method=LEGACY)
-    # Only BetMGM quoted: neither Pinnacle nor DraftKings has a close.
-    conn = _Conn([pick], [q for q in TOTALS if q[0] == "betmgm"])
-    assert pt._capture_clv(conn, "2026-09-20", "TS") == 0
+    conn = _Conn([pick], [])
+    assert pt._capture_clv(conn, "2026-09-20", "TS") == 1
     (u,) = conn.updates
-    assert u == {"clv_bet_book": "betmgm", "pick_id": 1}
+    assert u["clv_method"] == CLV_METHOD_STANDARD
+    assert u["clv_bet_book"] == "betmgm"
+    assert u["clv_pct"] is None
+    assert u["market_clv_pct"] is None
 
 
 def test_an_ordinary_row_with_no_close_is_left_for_a_later_pass():
@@ -294,12 +327,11 @@ def _fn(name: str) -> str:
     return "\n".join(text.splitlines()[fn.lineno - 1:fn.end_lineno])
 
 
-def test_both_queues_revisit_the_legacy_stamp_once():
-    clause = "OR (p.clv_method = %s AND p.clv_bet_book IS NULL)"
+def test_both_queues_revisit_anything_that_is_not_standard_v2():
     for name in ("_backfill_clv", "_capture_clv"):
-        src = _fn(name)
-        assert clause in " ".join(src.split()), name
-        assert "CLV_METHOD_DK_GRADED_LEGACY" in src, name
+        src = " ".join(_fn(name).split())
+        assert "p.clv_method IS DISTINCT FROM %s" in src, name
+        assert "CLV_METHOD_STANDARD" in src, name
 
 
 def test_the_legacy_stamp_never_enters_the_pedigree():
