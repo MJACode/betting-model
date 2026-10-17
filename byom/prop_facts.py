@@ -1,16 +1,9 @@
 """Grade one NFL player prop into a byom_prop_facts row.
 
-No database. The grade is DraftKings' own price on the lock snapshot.
-Units are results: uncapped 1u-to-win, and the result after a 3-unit
-risk ceiling. A missing price leaves both NULL. There is no recommended
-stake.
-
-The lock window is PROP_LOCK_WINDOW_HOURS (24). That number is
-UNCONFIRMED. It is not the live models' price and it is not a filter on
-the line or the price.
-
-Standard markets only. A key ending in `_alternate` is an alt ladder and
-is not a fact.
+No database. The line is the last DraftKings snapshot at or before
+game start. A missing line is not a prop. There is no price and no
+unit. Standard markets only. A key ending in `_alternate` is an alt
+ladder and is not a fact.
 
 Thin data, recorded on the row as log_status:
 
@@ -44,16 +37,8 @@ from decimal import Decimal
 
 from data.name_match import normalize_player_name
 
-from byom.constants import PROP_LOCK_WINDOW_HOURS, SPORT
-from byom.game_facts import (
-    _priced,
-    closing_quote,
-    dk_lock_grade,
-    first_in_window,
-    parse_game_id,
-    same_line,
-    units_1u_to_win,
-)
+from byom.constants import LINE_BASIS, SPORT
+from byom.game_facts import lead_hours, parse_game_id, parse_ts
 
 # Odds API market -> nfl_player_game_log columns summed into actual.
 # Alternates are absent on purpose.
@@ -75,8 +60,7 @@ MARKET_COLUMNS: dict[str, tuple[str, ...]] = {
 ANYTIME_TD_MARKET = "player_anytime_td"
 # Yes/No anytime rows are stored at 0.5 when the feed omits a point.
 ANYTIME_TD_LINE = Decimal("0.5")
-
-SOURCE_PROPS = "player_prop_odds"
+_LINE = Decimal("0.001")
 
 
 def is_standard_market(market: str | None) -> bool:
@@ -94,6 +78,12 @@ def _num(value) -> Decimal | None:
     if value is None or value == "":
         return None
     return Decimal(str(value))
+
+
+def same_line(left, right) -> bool:
+    if left is None or right is None:
+        return False
+    return abs(Decimal(str(left)) - Decimal(str(right))) <= _LINE
 
 
 def actual_from_log(row: dict, market: str) -> Decimal:
@@ -141,42 +131,6 @@ def _line_of(quote: dict, market: str):
     return line
 
 
-def _normalize(quote: dict) -> dict:
-    """One shape: point, price_home = over, price_away = under."""
-    row = dict(quote)
-    market = row.get("market")
-    row["point"] = _line_of(row, market)
-    if row.get("price_home") is None:
-        row["price_home"] = row.get("over_price")
-    if row.get("price_away") is None:
-        row["price_away"] = row.get("under_price")
-    return row
-
-
-def _group_dk(quotes: list[dict]) -> dict[tuple, list[dict]]:
-    """(player_key, market) -> priced DraftKings quotes inside the window."""
-    grouped: dict[tuple, list[dict]] = {}
-    for quote in quotes:
-        market = quote.get("market")
-        if (quote.get("bookmaker") or "").lower() != "draftkings":
-            continue
-        if not is_standard_market(market):
-            continue
-        key = player_key(quote.get("player_name"))
-        if not key:
-            continue
-        priced = _priced([quote], market, "draftkings")
-        if not priced:
-            continue
-        row = priced[0]
-        row["player_key"] = key
-        row["player_name"] = quote.get("player_name")
-        row["team"] = quote.get("team")
-        row["point"] = _line_of(row, market)
-        grouped.setdefault((key, market), []).append(row)
-    return grouped
-
-
 def line_key(line) -> str:
     """One text for a line. 220.50 and 220.5 are the same prop."""
     text = format(Decimal(str(line)), "f")
@@ -201,64 +155,75 @@ def _rows_for_player(log_rows: list[dict], key: str, team: str | None = None) ->
     return matches
 
 
+def _pre_start(quote: dict) -> dict | None:
+    """One DraftKings quote at or before kickoff, or None."""
+    market = quote.get("market")
+    if (quote.get("bookmaker") or "").lower() != "draftkings":
+        return None
+    if not is_standard_market(market):
+        return None
+    key = player_key(quote.get("player_name"))
+    if not key:
+        return None
+    lead = lead_hours(quote.get("snapshot_at"), quote.get("commence_time"))
+    if lead is None or lead < 0:
+        return None
+    snap = parse_ts(quote.get("snapshot_at"))
+    if snap is None:
+        return None
+    row = dict(quote)
+    row["player_key"] = key
+    row["market"] = market
+    row["lead_hours"] = lead
+    row["snapshot_at"] = snap
+    row["point"] = _line_of(row, market)
+    return row
+
+
 def facts_for_game(game: dict, quotes: list[dict],
                    log_rows: list[dict]) -> list[dict]:
-    """Prop facts for one game. Empty when the id does not parse or no
-    DraftKings standard market locks inside the prop window."""
+    """Prop facts for one game.
+
+    Empty when the id does not parse or no DraftKings standard market has
+    a snapshot at or before kickoff. The line is the latest such snapshot.
+    An earlier number is not a second fact.
+    """
     parsed = parse_game_id(game.get("game_id") or "")
     if parsed is None:
         return []
     canonical, season, week, _away, _home = parsed
     played = game.get("home_score") is not None and game.get("away_score") is not None
-    quotes = [
-        _normalize(quote) for quote in quotes
-        if is_standard_market(quote.get("market"))
-    ]
+    grouped: dict[tuple, list[dict]] = {}
+    for quote in quotes:
+        row = _pre_start(quote)
+        if row is None or row.get("point") is None:
+            continue
+        grouped.setdefault((row["player_key"], row["market"]), []).append(row)
     game_rows = len(log_rows)
     out = []
-    for (key, market), pool in _group_dk(quotes).items():
-        lock = first_in_window(pool, PROP_LOCK_WINDOW_HOURS)
-        if lock is None:
-            continue
-        lock_at = lock["snapshot_at"]
+    for (key, market), pool in grouped.items():
+        latest = max(quote["snapshot_at"] for quote in pool)
+        at_line = [quote for quote in pool if quote["snapshot_at"] == latest]
+        seen: list = []
         lines = []
-        seen_lines = []
-        for quote in pool:
-            if quote["snapshot_at"] != lock_at:
-                continue
+        for quote in at_line:
             line = quote.get("point")
-            if line is None or any(same_line(line, prev) for prev in seen_lines):
+            if line is None or any(same_line(line, prev) for prev in seen):
                 continue
-            seen_lines.append(line)
-            lines.append(line)
-        matches = _rows_for_player(log_rows, key, lock.get("team"))
-        status = log_status(played, game_rows, len(matches) if played else 0)
-        for line in lines:
+            seen.append(line)
+            lines.append((line, quote))
+        for line, quote in lines:
+            matches = _rows_for_player(log_rows, key, quote.get("team"))
+            status = log_status(played, game_rows, len(matches) if played else 0)
             out.append(_one(
-                canonical, season, week, game, pool,
-                key, market, line, lock, status, matches, played,
+                canonical, season, week, key, market, line, quote,
+                status, matches,
             ))
     return out
 
 
-def _dk_slot(pool, lock, line) -> dict:
-    """DraftKings' quote for this line at the lock timestamp."""
-    lock_at = lock["snapshot_at"]
-    for quote in pool:
-        if quote["snapshot_at"] == lock_at and same_line(quote.get("point"), line):
-            return quote
-    return lock
-
-
-def _one(canonical, season, week, game, pool,
-         key, market, line, lock, status, matches, played) -> dict:
-    slot = _dk_slot(pool, lock, line)
-    over_price, over_book = dk_lock_grade(slot, "home")
-    under_price, under_book = dk_lock_grade(slot, "away")
-    # The close is the latest pre-game quote on this line. A later quote
-    # on a different number is that number's row, not this row's close.
-    close_pool = [q for q in pool if same_line(q.get("point"), line)]
-    close = closing_quote(close_pool)
+def _one(canonical, season, week, key, market, line, quote,
+         status, matches) -> dict:
     actual = None
     graded = None
     if status == "logged" and matches:
@@ -270,38 +235,20 @@ def _one(canonical, season, week, game, pool,
     over_result = under_result = None
     if graded is not None:
         over_result, under_result = graded
-    over_u, over_c = units_1u_to_win(over_result, over_price)
-    under_u, under_c = units_1u_to_win(under_result, under_price)
     return {
         "prop_key": f"{canonical}|{market}|{key}|{line_key(line)}",
         "canonical_key": canonical,
         "sport": SPORT,
         "season": season,
         "week": week,
-        "player_name": lock.get("player_name") or key,
+        "player_name": quote.get("player_name") or key,
         "player_key": key,
-        "team": lock.get("team"),
+        "team": quote.get("team"),
         "market": market,
         "line": line,
-        "lock_window_hours": PROP_LOCK_WINDOW_HOURS,
-        "lock_snapshot_at": lock["snapshot_at"],
-        "dk_over_price": _num(slot.get("price_home")),
-        "dk_under_price": _num(slot.get("price_away")),
-        "grade_over_price": over_price,
-        "grade_over_book": over_book,
-        "grade_under_price": under_price,
-        "grade_under_book": under_book,
-        "close_snapshot_at": None if close is None else close["snapshot_at"],
-        "close_over_price": None if close is None else _num(close.get("price_home")),
-        "close_under_price": None if close is None else _num(close.get("price_away")),
+        "line_basis": LINE_BASIS,
         "actual": actual,
         "over_result": over_result,
-        "over_units_uncapped": over_u,
-        "over_units_capped": over_c,
         "under_result": under_result,
-        "under_units_uncapped": under_u,
-        "under_units_capped": under_c,
         "log_status": status,
-        "line_source": lock.get("line_source") or SOURCE_PROPS,
-        "game_date": game.get("game_date"),
     }

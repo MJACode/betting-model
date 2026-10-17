@@ -4,14 +4,13 @@ The report is read-only. It does not read odds. `apply=False` returns
 the report and writes nothing. `apply=True` rebuilds only the due games:
 the current season's games from yesterday through seven days ahead, plus
 a past game with no fact row, a past fact row that is still missing a
-score or a close, and a past game that has facts but no prop facts.
+score, and a past game that has facts but no prop facts.
 
 Rest days still use the whole season's schedule. Quotes are fetched only
 for the due games.
 
 This is not a schedule. `jobs/declared_jobs.json` lists `byom_refresh`
-with enabled false and apply false, so a merge enqueues nothing. The
-120h and 24h locks are unchanged and stay UNCONFIRMED.
+with enabled false and apply false, so a merge enqueues nothing.
 """
 from __future__ import annotations
 
@@ -67,11 +66,11 @@ def _window(as_of: date) -> tuple[date, date]:
 
 
 def _fact_rows(conn, season: int) -> dict[str, tuple]:
-    """canonical_key -> (home_score, away_score, close_spread_at)."""
+    """canonical_key -> (home_score, away_score)."""
     return {
-        row[0]: (row[1], row[2], row[3])
+        row[0]: (row[1], row[2])
         for row in _fetch(conn, """
-            SELECT canonical_key, home_score, away_score, close_spread_at
+            SELECT canonical_key, home_score, away_score
               FROM byom_game_facts
              WHERE sport = %s AND season = %s
         """, (SPORT, season))
@@ -89,18 +88,19 @@ def _prop_keys(conn, season: int) -> set[str]:
 
 
 def _incomplete(row: tuple | None) -> bool:
+    """A null score is unfinished. A null line is not."""
     if row is None:
         return False
-    return row[0] is None or row[1] is None or row[2] is None
+    return row[0] is None or row[1] is None
 
 
 def due_games(conn, today: date | datetime | None = None) -> list[dict]:
     """Games the refresh would rebuild. No odds read.
 
-    A past fact row with a null score or a null close is incomplete: the
-    row was written before the game finished and has since left the
-    window. A past game that already has a finished fact row and no prop
-    row is due so the prop backfill can run.
+    A past fact row with a null score is incomplete: the row was written
+    before the game finished and has since left the window. A null line
+    is not incomplete. A past game that already has a finished fact row
+    and no prop row is due so the prop backfill can run.
     """
     as_of, _now = _clock(today)
     season = current_nfl_season(as_of)

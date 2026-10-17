@@ -19,8 +19,8 @@
 --   primetime: true | false
 --   markets: ["spreads", "totals", "h2h", "player_pass_yds"]
 -- A missing datum on a leg is excluded once that filter is set.
--- There is no spread-size, price, or line filter. Both unit columns are
--- summed. They are the stored DraftKings-lock results, not a stake.
+-- There is no spread-size, price, or line filter. Each market counts
+-- wins, losses, pushes, and ties. There is no unit column.
 --
 -- Game markets contribute the home leg and the away leg. Prop markets
 -- contribute the over and the under. A side or role filter uses the
@@ -29,7 +29,6 @@
 -- An empty filter object is the whole season. It is not a model record.
 -- The UI must not present that unfiltered result as a saved model.
 --
--- The 120h and 24h windows are UNCONFIRMED and are not in this file.
 -- One DO block. No CONCURRENTLY.
 
 DO $mig$
@@ -55,9 +54,7 @@ BEGIN
       wins bigint,
       losses bigint,
       pushes bigint,
-      ties bigint,
-      units_uncapped numeric,
-      units_capped numeric
+      ties bigint
     )
     LANGUAGE plpgsql
     STABLE
@@ -123,45 +120,37 @@ BEGIN
       WITH legs AS (
         SELECT 'spreads'::text AS mkt,
                g.ats_home_result AS res,
-               g.ats_home_units_uncapped AS unc,
-               g.ats_home_units_capped AS cap,
                g.week AS wk, g.home_rest_days AS rest_days, g.is_primetime AS prime,
                g.home_role AS leg_role, 'home'::text AS leg_side
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
-        SELECT 'spreads', g.ats_away_result, g.ats_away_units_uncapped,
-               g.ats_away_units_capped, g.week, g.away_rest_days,
+        SELECT 'spreads', g.ats_away_result, g.week, g.away_rest_days,
                g.is_primetime, g.away_role, 'away'
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
-        SELECT 'h2h', g.ml_home_result, g.ml_home_units_uncapped,
-               g.ml_home_units_capped, g.week, g.home_rest_days,
+        SELECT 'h2h', g.ml_home_result, g.week, g.home_rest_days,
                g.is_primetime, g.home_role, 'home'
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
-        SELECT 'h2h', g.ml_away_result, g.ml_away_units_uncapped,
-               g.ml_away_units_capped, g.week, g.away_rest_days,
+        SELECT 'h2h', g.ml_away_result, g.week, g.away_rest_days,
                g.is_primetime, g.away_role, 'away'
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
-        SELECT 'totals', g.ou_over_result, g.ou_over_units_uncapped,
-               g.ou_over_units_capped, g.week, NULL::integer,
+        SELECT 'totals', g.ou_over_result, g.week, NULL::integer,
                g.is_primetime, NULL::text, NULL::text
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
-        SELECT 'totals', g.ou_under_result, g.ou_under_units_uncapped,
-               g.ou_under_units_capped, g.week, NULL::integer,
+        SELECT 'totals', g.ou_under_result, g.week, NULL::integer,
                g.is_primetime, NULL::text, NULL::text
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
-        SELECT p.market, p.over_result, p.over_units_uncapped,
-               p.over_units_capped, p.week,
+        SELECT p.market, p.over_result, p.week,
                CASE WHEN p.team = g.home_team THEN g.home_rest_days
                     WHEN p.team = g.away_team THEN g.away_rest_days
                     ELSE NULL END,
@@ -176,8 +165,7 @@ BEGIN
           LEFT JOIN byom_game_facts g ON g.canonical_key = p.canonical_key
          WHERE p.sport = 'NFL' AND p.season = v_season
         UNION ALL
-        SELECT p.market, p.under_result, p.under_units_uncapped,
-               p.under_units_capped, p.week,
+        SELECT p.market, p.under_result, p.week,
                CASE WHEN p.team = g.home_team THEN g.home_rest_days
                     WHEN p.team = g.away_team THEN g.away_rest_days
                     ELSE NULL END,
@@ -208,9 +196,7 @@ BEGIN
              count(*) FILTER (WHERE kept.res = 'win')::bigint,
              count(*) FILTER (WHERE kept.res = 'loss')::bigint,
              count(*) FILTER (WHERE kept.res = 'push')::bigint,
-             count(*) FILTER (WHERE kept.res = 'tie')::bigint,
-             COALESCE(sum(kept.unc), 0),
-             COALESCE(sum(kept.cap), 0)
+             count(*) FILTER (WHERE kept.res = 'tie')::bigint
         FROM kept
        GROUP BY kept.mkt
        ORDER BY kept.mkt;

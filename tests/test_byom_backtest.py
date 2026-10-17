@@ -1,11 +1,10 @@
-"""byom_backtest: current season, both unit columns, no price filter.
+"""byom_backtest: current season, win/loss/push counts, no price filter.
 
 The migration is unapplied on production. Scratch Postgres is local.
 """
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -36,8 +35,10 @@ def test_the_function_is_invoker_and_has_no_price_or_line_filter():
     code = _code(SQL)
     assert "SECURITY INVOKER" in code
     assert "byom_backtest_v1" in SQL
-    assert "units_uncapped" in code
-    assert "units_capped" in code
+    assert "units_uncapped" not in code
+    assert "units_capped" not in code
+    assert "wins bigint" in code
+    assert "pushes bigint" in code
     lowered = code.lower()
     for banned in ("minodds", "maxodds", "minline", "maxline", "spread_size",
                    "price_band", "kelly", "stake", "public.picks"):
@@ -74,8 +75,6 @@ def test_scratch_backtest_defaults_to_the_current_season_and_filters():
             END $$
         """)
         for name in ("byom_facts_schema_2026_10_16.sql",
-                     "byom_game_facts_units_2026_10_16.sql",
-                     "byom_prop_facts_units_2026_10_16.sql",
                      "byom_backtest_rpc_2026_10_16.sql"):
             text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
             cur.execute(text)
@@ -83,85 +82,84 @@ def test_scratch_backtest_defaults_to_the_current_season_and_filters():
         cur.execute("""
             INSERT INTO byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team,
-              lock_window_hours, near_window_hours, line_source,
-              ats_home_result, ats_home_units_uncapped, ats_home_units_capped,
-              ats_away_result, ats_away_units_uncapped, ats_away_units_capped,
+              line_basis,
+              ats_home_result, ats_away_result,
               home_role, away_role, home_rest_days, away_rest_days,
               is_primetime)
             VALUES
-              ('2026_01_BAL_KC', 'NFL', 2026, 1, 'BAL', 'KC', 120, 24, 'test',
-               'win', 1, 1, 'loss', -1.1, -1.1,
+              ('2026_01_BAL_KC', 'NFL', 2026, 1, 'BAL', 'KC',
+               'DraftKings line at game start',
+               'win', 'loss',
                'favorite', 'underdog', 7, 7, true),
-              ('2025_01_BUF_NYJ', 'NFL', 2025, 1, 'BUF', 'NYJ', 120, 24, 'test',
-               'win', 5, 5, 'loss', -1, -1,
+              ('2025_01_BUF_NYJ', 'NFL', 2025, 1, 'BUF', 'NYJ',
+               'DraftKings line at game start',
+               'win', 'loss',
                'favorite', 'underdog', 10, 10, false);
             INSERT INTO byom_prop_facts (
               prop_key, canonical_key, sport, season, week, player_name,
-              team, market, lock_window_hours, line_source,
-              over_result, over_units_uncapped, over_units_capped,
-              under_result, under_units_uncapped, under_units_capped)
+              team, market, line, line_basis,
+              over_result, under_result)
             VALUES
               ('2026_01_BAL_KC|player_pass_yds|lamar jackson|220.5',
                '2026_01_BAL_KC', 'NFL', 2026, 1, 'Lamar Jackson', 'BAL',
-               'player_pass_yds', 24, 'player_prop_odds',
-               'loss', -4, -3, 'win', 1, 0.75);
+               'player_pass_yds', 220.5, 'DraftKings line at game start',
+               'loss', 'win');
         """)
         cur.execute("SET statement_timeout = '3s'")
         cur.execute("SET ROLE anon")
-        cur.execute("SELECT market, bets, wins, units_uncapped, units_capped "
+        cur.execute("SELECT market, bets, wins, losses, pushes, ties "
                     "FROM byom_backtest(NULL, '{}'::jsonb) ORDER BY market")
         rows = cur.fetchall()
         markets = {row[0]: row for row in rows}
         assert "2025" not in str(rows)
         assert markets["spreads"][1] == 2
-        assert Decimal(str(markets["spreads"][3])) == Decimal("1") + Decimal("-1.1")
+        assert markets["spreads"][2] == 1
+        assert markets["spreads"][3] == 1
         assert markets["player_pass_yds"][1] == 2
-        assert Decimal(str(markets["player_pass_yds"][3])) == Decimal("-3")
-        assert Decimal(str(markets["player_pass_yds"][4])) == Decimal("-2.25")
+        assert markets["player_pass_yds"][2] == 1
+        assert markets["player_pass_yds"][3] == 1
         cur.execute("""
             SELECT coalesce(sum(bets), 0)
               FROM byom_backtest(2026, '{"role":"favorite","side":"home"}'::jsonb)
         """)
         assert cur.fetchone()[0] == 1
         cur.execute("""
-            SELECT coalesce(sum(units_uncapped), 0)
+            SELECT coalesce(sum(wins), 0), coalesce(sum(losses), 0)
               FROM byom_backtest(2025, '{}'::jsonb)
         """)
-        assert Decimal(str(cur.fetchone()[0])) == Decimal("4")
+        prior = cur.fetchone()
+        assert prior[0] == 1 and prior[1] == 1
         cur.execute("RESET ROLE")
         cur.execute("""
             UPDATE byom_game_facts SET
               ml_home_result = 'win',
-              ml_home_units_uncapped = 1, ml_home_units_capped = 1,
               ml_away_result = 'loss',
-              ml_away_units_uncapped = -1.5, ml_away_units_capped = -1.5,
               ou_over_result = 'loss',
-              ou_over_units_uncapped = -1.1, ou_over_units_capped = -1.1,
-              ou_under_result = 'win',
-              ou_under_units_uncapped = 1, ou_under_units_capped = 1
+              ou_under_result = 'win'
              WHERE canonical_key = '2026_01_BAL_KC'
         """)
         cur.execute("""
             INSERT INTO byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team,
-              lock_window_hours, near_window_hours, line_source,
-              ats_home_result, ats_home_units_uncapped, ats_home_units_capped,
-              ats_away_result, ats_away_units_uncapped, ats_away_units_capped,
+              line_basis,
+              ats_home_result, ats_away_result,
               home_role, away_role, home_rest_days, away_rest_days,
               is_primetime)
             VALUES
-              ('2026_02_DET_GB', 'NFL', 2026, 2, 'DET', 'GB', 120, 24, 'test',
-               'loss', -1.1, -1.1, 'win', 1, 1,
+              ('2026_02_DET_GB', 'NFL', 2026, 2, 'DET', 'GB',
+               'DraftKings line at game start',
+               'loss', 'win',
                'favorite', 'underdog', 3, 10, false)
         """)
         cur.execute("SET ROLE anon")
         cur.execute("""
-            SELECT bets, units_uncapped
+            SELECT bets, wins, losses
               FROM byom_backtest(2026, '{"markets":["totals"]}'::jsonb)
         """)
         totals = cur.fetchone()
         assert totals[0] == 2
-        assert Decimal(str(totals[1])) == Decimal("-0.1")
+        assert totals[1] == 1
+        assert totals[2] == 1
         cur.execute("""
             SELECT coalesce(sum(bets), 0)
               FROM byom_backtest(2026, '{"markets":["h2h"]}'::jsonb)
