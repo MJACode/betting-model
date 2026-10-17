@@ -96,12 +96,17 @@ def test_baseline_keys_do_not_pin_a_count() -> None:
 def test_pr_ci_documents_the_stricter_gate() -> None:
     yml = PR_CI.read_text(encoding="utf-8")
     checker = CHECKER.read_text(encoding="utf-8")
-    assert "npx tsc --noEmit" in yml
-    assert "scripts/check_tsc_baseline.py tsc.log tsc-baseline.txt" in yml
-    assert "tests/test_mobile_tsc_baseline.py" in yml
-    assert "Stricter than mobile-ota.yml" in yml
-    assert "file + TS code only" in yml
-    assert "mobile/ci/tsc-baseline.txt" in yml
+    assert "\n  mobile-tsc:" in yml
+    mobile, pytest_job = yml.split("\n  mobile-tsc:", 1)[1].split("\n  pytest-subset:", 1)
+    assert "npx tsc --noEmit" in mobile
+    assert "scripts/check_tsc_baseline.py tsc.log tsc-baseline.txt" in mobile
+    assert "cache: npm" in mobile
+    assert "cache-dependency-path: mobile/package-lock.json" in mobile
+    assert "Stricter than mobile-ota.yml" in mobile
+    assert "file + TS code only" in mobile
+    assert "mobile/ci/tsc-baseline.txt" in mobile
+    assert "check_tsc_baseline.py" not in pytest_job
+    assert "tests/test_mobile_tsc_baseline.py" in pytest_job
     assert "file and TS code only" in checker
     assert "mobile/ci/tsc-baseline.txt" in checker
 
