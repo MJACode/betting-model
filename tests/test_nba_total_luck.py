@@ -346,10 +346,21 @@ def _fires(job, start, end):
 def test_the_model_knows_the_scheduler_s_refresh_cadence(monkeypatch):
     """RULE: 'the last pass' is computed from the cadence the scheduler really
     runs. A change to the refresh crons fails here until the model follows."""
-    start, end = _et(2026, 11, 2, 0, 0), _et(2026, 11, 9, 0, 0)    # a week, across a DST change
+    start, end = _et(2026, 11, 2, 0, 0), _et(2026, 11, 9, 0, 0)    # a week
     sched = sorted(f for job in _refresh_jobs(monkeypatch) for f in _fires(job, start, end))
     ours = tl.pass_starts(start - timedelta(seconds=1), end)
     assert ours == sched
+
+
+def test_the_cadence_holds_on_both_clock_change_days():
+    """The evening passes keep their Eastern minutes on the days the clocks
+    change, and the repeated 1 am hour in November is a real hour."""
+    for day in ((2026, 11, 1), (2027, 3, 14)):
+        got = [t.astimezone(ET).strftime("%H:%M") for t in
+               tl.pass_starts(_et(*day, 17, 0), _et(*day, 23, 59))]
+        assert got == ["17:17"] + [f"{h}:{m:02d}" for h in range(18, 24) for m in range(0, 60, 10)]
+    fall = tl.pass_starts(_et(2026, 11, 1, 0, 30), _et(2026, 11, 1, 3, 0))
+    assert [t.strftime("%H:%M") for t in fall] == ["05:17", "06:17", "07:17"]   # 1:17 twice, 2:17
 
 
 @pytest.mark.parametrize("hh,mm", [(12, 0), (13, 0), (15, 30), (17, 0), (18, 0), (19, 0),

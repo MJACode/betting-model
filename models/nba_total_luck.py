@@ -325,13 +325,15 @@ def pass_starts(after: datetime, until: datetime) -> list[datetime]:
     """Every refresh pass start strictly after `after` and at or before
     `until` (REFRESH_PASS_CRON, Eastern time), as aware UTC."""
     out = []
-    t = after.astimezone(_ET).replace(second=0, microsecond=0)
+    # Step in UTC: adding a minute to an Eastern wall time skips the repeated
+    # hour when the clocks go back.
+    t = after.astimezone(timezone.utc).replace(second=0, microsecond=0)
     if t <= after:
         t += timedelta(minutes=1)
     while t <= until:
         et = t.astimezone(_ET)
         if any(et.hour in hours and et.minute in minutes for _, hours, minutes in REFRESH_PASS_CRON):
-            out.append(t.astimezone(timezone.utc))
+            out.append(t)
         t += timedelta(minutes=1)
     return out
 
