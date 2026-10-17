@@ -73,9 +73,68 @@ def test_the_cron_is_about_to_run_the_same_pass():
     assert d.action == "skip" and "8 minute(s) away" in d.reason
 
 
-def test_an_evening_pass_is_never_replaced():
-    d = _decide([_run(kind="evening", started=NOW - timedelta(minutes=3))])
-    assert d.action == "skip" and "ten minutes" in d.reason
+def test_an_evening_pass_a_deploy_killed_is_replaced_before_the_next_tick():
+    """2026-10-09 23:11:47 UTC: the worker had just booted after #910, the
+    23:10 pass was already dead, and the next tick was 23:20. Waiting was the
+    gap with no health-check."""
+    now = datetime(2026, 10, 9, 23, 11, 47, tzinfo=UTC)
+    started = now - timedelta(minutes=11, seconds=20)  # 23:00:27 UTC
+    d = _decide([_run(kind="evening", started=started)], now=now)
+    assert d.action == "run", d.reason
+    assert d.mode == "evening"
+    assert "23:00 UTC evening pass was interrupted" in d.reason
+
+
+def test_an_evening_tick_under_three_minutes_away_is_left_to_the_cron():
+    now = datetime(2026, 10, 9, 23, 18, tzinfo=UTC)  # 19:18 ET, tick at 19:20
+    d = _decide([_run(kind="evening", started=now - timedelta(minutes=8))], now=now)
+    assert d.action == "skip", d.reason
+    assert "2 minute(s) away" in d.reason
+
+
+def test_an_evening_pass_killed_after_the_window_is_replaced_before_the_hourly():
+    """23:50 ET is the last evening tick. A deploy that kills it does not
+    get another evening fire until 18:00 ET; the overnight :17 is the next
+    run of this chain, and it is far enough to replace now."""
+    now = datetime(2026, 10, 10, 4, 5, tzinfo=UTC)  # 00:05 ET
+    started = datetime(2026, 10, 10, 3, 50, tzinfo=UTC)  # 23:50 ET
+    d = _decide([_run(kind="evening", started=started)], now=now)
+    assert d.action == "run", d.reason
+    assert d.mode == "evening"
+
+
+def test_a_killed_1150_inside_ten_minutes_of_the_overnight_is_left_to_it():
+    """A boot at 12:08-12:14 AM ET is inside 10 minutes of the 12:17
+    overnight pass. The orphan is evening, but the next fire is a :17,
+    so the 3-minute evening lead does not apply. An 8-11 minute evening
+    replacement started here still holds the refresh lock at 12:17, and
+    that hourly is the one that pulls ESPN results — it would slip to
+    1:17. 12:14 ET is 3 minutes out: the evening lead would still start
+    it. 12:07 ET is exactly 10 minutes, the same strict `<` the hourly
+    uses, so that boot still replaces."""
+    started = datetime(2026, 10, 10, 3, 50, tzinfo=UTC)  # 23:50 ET
+    on_the_line = _decide(
+        [_run(kind="evening", started=started)],
+        now=datetime(2026, 10, 10, 4, 7, tzinfo=UTC))  # 00:07 ET
+    assert on_the_line.action == "run", on_the_line.reason
+    assert on_the_line.mode == "evening"
+    for now, minutes in (
+        (datetime(2026, 10, 10, 4, 8, tzinfo=UTC), 9),    # 00:08 ET
+        (datetime(2026, 10, 10, 4, 10, tzinfo=UTC), 7),   # 00:10 ET
+        (datetime(2026, 10, 10, 4, 14, tzinfo=UTC), 3),   # 00:14 ET
+    ):
+        d = _decide([_run(kind="evening", started=started)], now=now)
+        assert d.action == "skip", d.reason
+        assert f"the next :17 pass is {minutes} minute(s) away" in d.reason
+
+
+def test_an_evening_restart_loop_does_not_buy_odds_on_every_boot():
+    now = datetime(2026, 10, 9, 23, 11, tzinfo=UTC)
+    runs = [_run(kind="evening", started=now - timedelta(minutes=m))
+            for m in (40, 25, 8)]
+    d = _decide(runs, now=now)
+    assert d.action == "skip" and "not buying odds again" in d.reason
+    assert _decide(runs[1:], now=now).action == "run"
 
 
 def test_a_restart_loop_does_not_buy_odds_on_every_boot():
@@ -118,7 +177,82 @@ def test_the_scheduler_runs_one_pass_at_a_time_and_asks_at_boot():
     main = src.split("def main(")[1]
     assert "catch_up_refresh_pass" in main and '"date"' in main
     catch_up = src.split("def catch_up_refresh_pass(")[1].split("\ndef ")[0]
-    assert "decide_refresh_retry" in catch_up and "run_refresh_pass()" in catch_up
+    assert "decide_refresh_retry" in catch_up
+    subset = (REPO / ".github" / "workflows" / "pr-ci.yml").read_text(encoding="utf-8")
+    for name in (
+        "tests/test_refresh_retry.py",
+        "tests/test_daily_retry.py",
+        "tests/test_run_ledger_orphans.py",
+    ):
+        assert name in subset
+
+
+class _Ledger:
+    def __init__(self, rows):
+        self.rows = rows
+        self.closed = False
+
+    def execute(self, sql, params=None):
+        return self
+
+    def fetchall(self):
+        return self.rows
+
+    def close(self):
+        self.closed = True
+
+    def rollback(self):
+        return None
+
+
+def _freeze(moment):
+    class _FrozenDatetime(datetime):
+        _frozen = moment
+
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return cls._frozen.replace(tzinfo=None)
+            return cls._frozen.astimezone(tz)
+
+    return _FrozenDatetime
+
+
+def test_the_catch_up_runs_the_pass_in_the_mode_the_decision_names(monkeypatch):
+    """Calling the catch-up, not reading its source: an evening orphan
+    re-runs evening, and a hourly orphan re-runs hourly. Evening is the
+    mode that leaves the ESPN results pull to the hourly."""
+    import data.db
+    import scheduler
+
+    def _boot(now, row):
+        modes = []
+        monkeypatch.setattr(scheduler, "datetime", _freeze(now))
+        monkeypatch.setattr(scheduler, "owns", lambda job_id: True)
+        monkeypatch.setattr(
+            data.db, "get_connection", lambda *a, **k: _Ledger([row]))
+        monkeypatch.setattr(
+            scheduler, "run_refresh_pass",
+            lambda mode="hourly": modes.append(mode))
+        return scheduler.catch_up_refresh_pass(source="test"), modes
+
+    evening_now = datetime(2026, 10, 9, 23, 11, 47, tzinfo=UTC)
+    evening_started = datetime(2026, 10, 9, 23, 0, 27, tzinfo=UTC)
+    result, modes = _boot(
+        evening_now,
+        ("evening", evening_started.isoformat(), None, None, None))
+    assert result["status"] == "run", result
+    assert result["mode"] == "evening"
+    assert modes == ["evening"]
+
+    hourly_now = datetime(2026, 9, 20, 18, 24, tzinfo=UTC)
+    hourly_started = datetime(2026, 9, 20, 18, 17, tzinfo=UTC)
+    result, modes = _boot(
+        hourly_now,
+        ("hourly", hourly_started.isoformat(), None, None, None))
+    assert result["status"] == "run", result
+    assert result["mode"] == "hourly"
+    assert modes == ["hourly"]
 
 
 # ── a step that swallowed its own failures ───────────────────────────────────

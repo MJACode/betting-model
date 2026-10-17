@@ -73,6 +73,10 @@ class DailyRun:
 class Decision:
     action: str  # "run" | "skip"
     reason: str
+    # Which refresh_pass.sh mode a refresh catch-up should re-run. The daily
+    # retry never reads it. "evening" skips the ESPN-heavy steps the 10-minute
+    # pass deliberately leaves to the hourly.
+    mode: str = "hourly"
 
 
 def _enabled() -> bool:

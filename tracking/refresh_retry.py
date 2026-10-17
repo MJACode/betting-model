@@ -38,14 +38,47 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-from tracking.daily_retry import Decision, _as_dt
+from tracking.daily_retry import ET, Decision, _as_dt
 
 # The :17 passes (hourly 7am-5pm ET, overnight midnight-6am ET) both ledger as
-# `hourly`. The evening pass fires every ten minutes, so the next one is never
-# further away than a catch-up would take to start.
-CATCH_UP_KINDS = frozenset({"hourly"})
+# `hourly`. The evening pass ledgers as `evening` and fires every ten minutes,
+# 6:00-11:50pm ET.
+#
+# Evening used to be excluded: "the next one is never further away than a
+# catch-up would take to start." Measured 2026-10-09 22:00-23:20 UTC, that
+# wait is the outage. Three merges (#908 22:24 UTC, #909 22:59, #910 23:07)
+# each replaced the worker mid-pass. The next tick's start_run then closed
+# the open row as failed_steps='aborted' with finished_at equal to that
+# tick (22:20→22:30, 23:00→23:10, 23:10→23:20), steps_total NULL. The same
+# evening, a pass that actually overran the cadence (22:00, 10.78 min) was
+# left alone: no 22:10 row, and it finished ok at 22:10:47. Oct 7 22:00-23:00
+# UTC averaged 10.6-10.9 min with zero aborts and half the ticks absent.
+# The abort stamp is the next start_run, not a 10-minute kill, and not the
+# in-process lock (scheduler._REFRESH_LOCK plus max_instances=1) giving up.
+#
+# What did not run: health-check. pipeline_log's last dispatch:health-check
+# before the streak was 22:58:34; the 23:20 pass wrote the next batch at
+# 23:28:56. job_heartbeats.nfl_poll_hourly was re-seeded "registered" at
+# 23:10:43, which is scheduler boot, 60s before refresh_catch_up beat at
+# 23:11:47 — and that catch-up skipped because this module refused evening.
+CATCH_UP_KINDS = frozenset({"hourly", "evening"})
 REFRESH_KINDS = frozenset({"hourly", "evening"})
 PASS_MINUTE = 17
+# Evening cron is hour 18-23 ET, minute */10. Last fire is 23:50 ET.
+EVENING_HOUR_START = 18
+EVENING_HOUR_END = 23
+# Under this, the */10 cron is close enough that starting a second pass
+# would only buy odds twice. The in-process lock still collapses a catch-up
+# that is still running when the tick arrives into one pass.
+# This lead is only for a */10 fire. A :17 — the hourly, and the overnight
+# that follows a killed 23:50 ET evening — uses MIN_LEAD_TO_NEXT_PASS.
+# An 8-11 minute evening replacement started at 12:07-12:14 ET still holds
+# _REFRESH_LOCK at 12:17, and that hourly is the one that pulls ESPN
+# results, so the pull would slip to 1:17.
+# A */10 more than about 9 minutes away lets the replacement finish and
+# the tick run as well: one extra evening pass of odds credits per deploy,
+# still inside MAX_INTERRUPTED_IN_LOOKBACK.
+EVENING_MIN_LEAD = timedelta(minutes=3)
 
 # Only a pass from this hour is worth replacing; an older orphan belongs to a
 # worker that was down, and the cron has the schedule from here.
@@ -102,6 +135,60 @@ def _next_pass(now: datetime) -> datetime:
     return nxt if nxt > now else nxt + timedelta(hours=1)
 
 
+def _next_ten_minutes(now: datetime) -> datetime:
+    """The next */10 boundary strictly after `now`, in the same timezone.
+
+    A time that lands on a boundary (19:10:00) advances to the following one.
+    Seconds past a boundary (19:10:47) do too: that fire has already happened.
+    """
+    base = now.replace(second=0, microsecond=0)
+    remainder = base.minute % 10
+    if remainder == 0:
+        return base + timedelta(minutes=10)
+    return base + timedelta(minutes=(10 - remainder))
+
+
+def _in_evening_window(et: datetime) -> bool:
+    return EVENING_HOUR_START <= et.hour <= EVENING_HOUR_END
+
+
+def next_refresh_fire(now: datetime, kind: str) -> datetime:
+    """When the cron will next run the same chain this catch-up would run.
+
+    Hourly (and the overnight :17, which ledgers as hourly) is the next :17.
+    Evening is the next */10 inside 18:00-23:50 ET; after 23:50 the next
+    refresh of this chain is the overnight :17, not tomorrow's 18:00.
+    The caller applies the 10-minute lead whenever this returns a :17,
+    including that overnight, even though the orphan's kind is evening.
+    """
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if kind != "evening":
+        return _next_pass(now)
+    et = now.astimezone(ET)
+    nxt_et = _next_ten_minutes(et)
+    if _in_evening_window(nxt_et):
+        return nxt_et.astimezone(timezone.utc)
+    return _next_pass(now)
+
+
+def _fire_is_colon_17(when: datetime) -> bool:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(ET).minute == PASS_MINUTE
+
+
+def _min_lead(kind: str, nxt: datetime) -> timedelta:
+    """3 minutes before a */10 evening tick; 10 before any :17.
+
+    The orphan's kind is not the next fire. A killed 23:50 ET evening's
+    next fire is 00:17, and that pass is hourly.
+    """
+    if kind != "evening" or _fire_is_colon_17(nxt):
+        return MIN_LEAD_TO_NEXT_PASS
+    return EVENING_MIN_LEAD
+
+
 def decide_refresh_retry(
     *,
     now: datetime,
@@ -134,14 +221,19 @@ def decide_refresh_retry(
         return Decision("skip", "the latest refresh pass ran to its end")
     if latest.run_kind not in CATCH_UP_KINDS:
         return Decision(
-            "skip", f"a {latest.run_kind} pass was interrupted; the next one "
-                    "is at most ten minutes away")
+            "skip", f"a {latest.run_kind} pass was interrupted; not a "
+                    "refresh this catch-up replaces")
 
-    lead = _next_pass(now) - now
-    if lead < MIN_LEAD_TO_NEXT_PASS:
+    nxt = next_refresh_fire(now, latest.run_kind)
+    lead = nxt - now
+    if lead < _min_lead(latest.run_kind, nxt):
+        minutes = int(lead.total_seconds() // 60)
+        if _fire_is_colon_17(nxt):
+            return Decision(
+                "skip", f"the next :{PASS_MINUTE} pass is {minutes} "
+                        "minute(s) away")
         return Decision(
-            "skip", f"the next :{PASS_MINUTE} pass is {int(lead.total_seconds() // 60)} "
-                    "minute(s) away")
+            "skip", f"the next evening tick is {minutes} minute(s) away")
 
     broken = sum(1 for r in recent if interrupted(r))
     if broken > MAX_INTERRUPTED_IN_LOOKBACK:
@@ -150,9 +242,11 @@ def decide_refresh_retry(
                     f"(cap {MAX_INTERRUPTED_IN_LOOKBACK}; not buying odds again)")
 
     started = latest.started_at.astimezone(timezone.utc).strftime("%H:%M UTC")
+    mode = latest.run_kind if latest.run_kind in ("hourly", "evening") else "hourly"
     return Decision(
         "run", f"the {started} {latest.run_kind} pass was interrupted "
-               "— the worker was replaced mid-run")
+               "— the worker was replaced mid-run",
+        mode=mode)
 
 
 def load_recent_refreshes(conn, now: datetime) -> list[RefreshRun] | None:
