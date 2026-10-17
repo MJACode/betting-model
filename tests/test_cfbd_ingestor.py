@@ -1054,3 +1054,51 @@ def test_odds_ingest_builds_the_cfbd_id_for_this_matchup(
     assert games[0]["home_team"] == "UL Monroe"
     assert {o["game_id"] for o in odds} == {
         "NCAAF_2026-09-19_se-louisiana_ul-monroe"}
+
+
+# ── The Citadel / Citadel Bulldogs (2026-10-16) ─────────────────────────────
+#
+# The pollers warned "Unresolved NCAAF school from Odds API: 'Citadel
+# Bulldogs'" on every pregame pass. CFBD's school is "The Citadel" (mascot
+# Bulldogs, FCS, alt_names NULL); The Odds API drops the article. _fold keeps
+# it, so exact ("the citadel" != "citadel bulldogs"), school+mascot ("the
+# citadel bulldogs" != "citadel bulldogs") and prefix ("The Citadel" does not
+# start "Citadel ...") all miss, and the ingest had minted a live alias row for
+# Texas A&M 2026-10-17 holding 605 odds rows the CFBD id would never see.
+
+
+@pytest.fixture
+def citadel_registry(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "The Citadel", "mascot": "Bulldogs", "alt": []},
+        {"school": "Texas A&M", "mascot": "Aggies", "alt": []},
+    ])
+    return cf
+
+
+def test_no_resolver_rule_bridges_citadel_bulldogs_to_the_citadel(
+        citadel_registry, monkeypatch):
+    """Watched failing shape: school in the registry, map empty, identity."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert citadel_registry.resolve_odds_api_school("Citadel Bulldogs") == \
+        "Citadel Bulldogs"
+    assert citadel_registry.resolve_odds_api_school("Citadel") == "Citadel"
+    # The article-carrying form resolves by the school+mascot rule already;
+    # the map is only for the forms The Odds API actually writes.
+    assert citadel_registry.resolve_odds_api_school("The Citadel Bulldogs") == \
+        "The Citadel"
+
+
+def test_the_map_resolves_citadel_bulldogs_to_the_cfbd_school(citadel_registry):
+    """This assertion fails if the map entry is removed."""
+    assert citadel_registry.resolve_odds_api_school("Citadel Bulldogs") == \
+        "The Citadel"
+    assert citadel_registry.resolve_odds_api_school("Citadel") == "The Citadel"
+
+
+def test_the_resolved_id_is_the_cfbd_texas_am_row(citadel_registry):
+    away = citadel_registry.resolve_odds_api_school("Citadel Bulldogs")
+    home = citadel_registry.resolve_odds_api_school("Texas A&M Aggies")
+    assert build_ncaaf_game_id("2026-10-17", away, home) == \
+        "NCAAF_2026-10-17_the-citadel_texas-a-m"

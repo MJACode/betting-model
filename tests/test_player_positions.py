@@ -126,14 +126,14 @@ def test_ncaaf_groups_match_the_nfl_card():
 
 
 def test_the_table_is_migrated_guarded_and_read_only_to_anon():
-    from data.anon_readable import VIEW_BASE_TABLES
+    from data.anon_readable import ANON_READABLE
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     code = MIG.read_text(encoding="utf-8")
     sql = "\n".join(ln for ln in code.splitlines() if not ln.lstrip().startswith("--"))
     assert MIG.name in ACTIVE_MIGRATIONS
-    # Read through the security-invoker functions, never a direct .from().
-    assert "player_positions" in VIEW_BASE_TABLES
+    # The player page reads one row by key; the card functions join it.
+    assert "player_positions" in ANON_READABLE
     assert sql.strip().startswith("DO $mig$") and sql.strip().endswith("$mig$;")
     assert "IF to_regclass('public.player_positions') IS NOT NULL THEN" in code
     assert "REVOKE ALL ON public.player_positions FROM anon, authenticated;" in code
@@ -154,51 +154,63 @@ def test_the_job_defaults_to_a_dry_run_and_one_sport():
     _, validate = JOBS["player_positions"]
     assert validate({})["dry_run"] is True
     assert validate({"dry_run": False})["dry_run"] is False
-    # One sport per job. Omitting the list is NBA, not every league.
+    # Omitting the list is NBA, not every league. An explicit list of known
+    # sports is accepted; an empty list and an unknown sport are not.
     assert validate({})["sports"] == ["NBA"]
     assert validate({"sport": "wnba"})["sports"] == ["WNBA"]
     assert validate({"sports": ["NCAAF"]})["sports"] == ["NCAAF"]
+    both = validate({"sports": ["NBA", "WNBA"], "dry_run": False})
+    assert both["sports"] == ["NBA", "WNBA"]
+    assert both["dry_run"] is False
     with pytest.raises(ValueError):
-        validate({"sports": ["NBA", "WNBA"]})
+        validate({"sports": []})
     with pytest.raises(ValueError):
         validate({"sports": ["MLB"]})
     with pytest.raises(ValueError):
         validate({"dry_run": "no"})
 
 
-# worker_jobs 406073 is already pending. The declaration matches master:
-# one sport, so the validator accepts it. It is a real run, so it is
-# outside the dry-run rule. The two-sport basketball key from #889 is
-# not declared here; the validator rejects a list of sports.
-HISTORICAL_PLAYER_POSITION_JOBS = {
+# worker_jobs 406073 is already pending. The NCAAF declaration matches
+# master: one sport, dry_run false, run_after 12:30Z. Master's basketball
+# real run stays NBA+WNBA, dry_run false. The two-sport dry run from #889
+# is not declared here.
+REAL_PLAYER_POSITION_JOBS = {
     "player-positions-ncaaf-2026-10-06",
+    "player-positions-basketball-2026-10-06",
 }
 
 
 def test_every_declared_player_positions_job_is_a_dry_run():
-    """WNBA is not declared (offseason). NCAAF waits on run_after so it
-    does not start the moment the NBA ESPN pass ends.
+    """WNBA is not a dry-run sport (offseason). NCAAF's dry run waits on
+    run_after so it does not start the moment the NBA ESPN pass ends.
 
-    The NCAAF real run from #889 stays, one sport, dry_run false, run_after
-    12:30Z. The two-sport basketball dry run is not in the file. This
-    branch's NBA dry run and the NCAAF dry run at 18:00Z are unchanged.
+    Two real runs stay. NCAAF from #889 is one sport, dry_run false,
+    run_after 12:30Z. Master's basketball job is NBA and WNBA, dry_run
+    false. The two-sport dry run is not in the file. This branch's NBA
+    dry run and the NCAAF dry run at 18:00Z are unchanged.
     """
     jobs = json.loads((ROOT / "jobs/declared_jobs.json").read_text(encoding="utf-8"))
     ours = [j for j in jobs if j["job_type"] == "player_positions"]
     keys = {j["key"] for j in ours}
+    by = {j["key"]: j for j in ours}
     assert "player-positions-basketball-dry-run-2-2026-10-06" not in keys
-    historical = [j for j in ours if j["key"] in HISTORICAL_PLAYER_POSITION_JOBS]
-    assert {j["key"] for j in historical} == HISTORICAL_PLAYER_POSITION_JOBS
-    real = historical[0]
+    assert REAL_PLAYER_POSITION_JOBS <= keys
+    real = by["player-positions-ncaaf-2026-10-06"]
     assert real["args"]["sports"] == ["NCAAF"]
     assert real["args"]["season"] == 2026
     assert real["args"]["dry_run"] is False
     assert real["run_after"] == "2026-10-06T12:30:00+00:00"
+    ball = by["player-positions-basketball-2026-10-06"]
+    assert ball["args"]["sports"] == ["NBA", "WNBA"]
+    assert ball["args"]["dry_run"] is False
+    assert "season" not in ball["args"]
     from tracking.job_queue import _validate_player_positions
     assert _validate_player_positions(real["args"])["sports"] == ["NCAAF"]
-    with pytest.raises(ValueError, match="one sport"):
-        _validate_player_positions({"sports": ["NBA", "WNBA"], "dry_run": True})
-    current = [j for j in ours if j["key"] not in HISTORICAL_PLAYER_POSITION_JOBS]
+    validated = _validate_player_positions(ball["args"])
+    assert validated["sports"] == ["NBA", "WNBA"]
+    assert validated["dry_run"] is False
+    assert validated["season"] is None
+    current = [j for j in ours if j["key"] not in REAL_PLAYER_POSITION_JOBS]
     assert len(current) >= 1
     sports = []
     for job in current:

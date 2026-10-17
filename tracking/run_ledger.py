@@ -120,6 +120,26 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Scheduled refresh passes. The overnight :17 job calls refresh_pass.sh with
+# the default mode, so it ledgers as hourly; evening is the 10-minute pass.
+# `manual` is a CLI choice, not a scheduled pass. `daily` is absent on
+# purpose: a boot sweep must not assassinate a live daily (the 2026-09-18
+# hourly-aborts-daily bug).
+REFRESH_RUN_KINDS = ("hourly", "evening")
+
+# Frozen at the first boot sweep. A later call must not stamp a pass this
+# process opened after that. Rows from the previous container started
+# before this process reached the sweep.
+_BOOT_CUTOFF: str | None = None
+
+
+def _boot_cutoff() -> str:
+    global _BOOT_CUTOFF
+    if not _BOOT_CUTOFF:
+        _BOOT_CUTOFF = _now()
+    return _BOOT_CUTOFF
+
+
 def _abort_orphans(conn, run_kind: str) -> int:
     """Close out SAME-KIND runs that started but never finished.
 
@@ -147,6 +167,11 @@ def _abort_orphans(conn, run_kind: str) -> int:
     pass that is hanging right now. The stuck check keeps its meaning too: after
     this, an unfinished row older than 2h can only be the CURRENTLY running
     pass of that kind, which is exactly the case that check exists to catch.
+
+    Kind-scoping is what left the 2026-10-16 03:50Z evening open after the
+    deploy: no further evening start_run runs until the next evening, so the
+    row stayed unfinished while hourlies completed. That cross-kind close
+    belongs in abort_prior_refresh_orphans, at boot, not here.
     """
     try:
         cur = conn.execute(
@@ -170,6 +195,62 @@ def _abort_orphans(conn, run_kind: str) -> int:
     except Exception as exc:
         # Never block the pass that is starting.
         logger.warning(f"run_ledger: could not close orphaned runs ({exc})")
+        return 0
+
+
+def abort_prior_refresh_orphans(conn, *, started_before: str | None = None) -> int:
+    """Close unfinished hourly/evening rows a previous process left open.
+
+    Called once from scheduler boot, before this process starts a pass.
+    Railway replaces the container; the process that owned the open row is
+    gone. ``_abort_orphans`` cannot do this, because it only runs for the
+    kind that is starting and an evening does not start again until the
+    next evening window.
+
+    ``started_before`` defaults to the first call's timestamp and stays
+    there. A pass this process opens afterwards has a later ``started_at``
+    and is left unfinished — a second sweep must not abort it. An empty
+    cutoff aborts nothing. ``daily`` and ``manual`` are not in
+    ``REFRESH_RUN_KINDS`` and are not updated.
+
+    Same stamp as ``_abort_orphans``: ``finished_at`` now, ``ok`` false,
+    ``failed_steps`` ``aborted``. Commits. Never raises.
+    """
+    if started_before is None:
+        started_before = _boot_cutoff()
+    elif not started_before:
+        return 0
+    placeholders = ", ".join("?" for _ in REFRESH_RUN_KINDS)
+    try:
+        cur = conn.execute(
+            f"""
+            UPDATE pipeline_runs
+               SET finished_at  = ?,
+                   ok           = FALSE,
+                   failed_steps = 'aborted'
+             WHERE finished_at IS NULL
+               AND run_kind IN ({placeholders})
+               AND started_at < ?
+            """,
+            (_now(), *REFRESH_RUN_KINDS, started_before),
+        )
+        n = getattr(cur, "rowcount", 0) or 0
+        if n < 0:
+            n = 0
+        conn.commit()
+        if n:
+            logger.warning(
+                f"run_ledger: closed {n} prior refresh run(s) as aborted — "
+                f"started before this process "
+                f"({', '.join(REFRESH_RUN_KINDS)})"
+            )
+        return n
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:                            # noqa: BLE001
+            pass
+        logger.warning(f"run_ledger: could not close prior refresh runs ({exc})")
         return 0
 
 

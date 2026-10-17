@@ -10,7 +10,7 @@
  *
  * Numbers come from lib/positionVsOpponent; this file only draws them.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SectionTitle } from '@/components/SectionTitle';
@@ -19,6 +19,7 @@ import { dayLabelET, dayLabelSpokenET, formatPct } from '@/lib/format';
 import type { HitDirection } from '@/lib/hitRate';
 import {
   groupPlural,
+  groupProse,
   groupShort,
   footnoteText,
   groupSingular,
@@ -67,6 +68,7 @@ export function PositionVsOpponentCard({
   betLabel,
   selection,
   groupBasis,
+  sport,
 }: {
   opponent: string;
   group: PositionGroup;
@@ -81,6 +83,8 @@ export function PositionVsOpponentCard({
    * when the lineup posts (UX review, 2026-10-06). null elsewhere.
    */
   groupBasis?: { source: 'tonight' | 'last_start'; slot: number } | null;
+  /** The sport, where a role cut differs by sport (NCAAF receivers). */
+  sport?: string;
   /** The page's own player — left out: the card is about the OTHERS. */
   playerId: string | null;
   statLabel: string;
@@ -91,6 +95,20 @@ export function PositionVsOpponentCard({
 }) {
   const [choice, setChoice] = useState<SeasonChoice>('this');
   const season = choice === 'this' ? seasonThis : seasonThis - 1;
+  // Open on LAST season when this one has no games yet and last season does
+  // — the NBA in October, the NFL and NCAAF in their off-seasons — so the
+  // card is not an empty state plus a tap for every player. Once only, and
+  // never after the reader has picked a season themselves (UX review,
+  // 2026-10-06).
+  const picked = useRef(false);
+  useEffect(() => {
+    if (picked.current || loading || rows.length === 0) return;
+    const others = rows.filter((r) => !playerId || r.player_id !== playerId);
+    const hasThis = others.some((r) => Number(r.season) === seasonThis);
+    const hasLast = others.some((r) => Number(r.season) === seasonThis - 1);
+    if (!hasThis && hasLast) setChoice('last');
+    picked.current = true;
+  }, [loading, rows, playerId, seasonThis]);
   const [visible, setVisible] = useState(ROWS_SHOWN);
   const card = useMemo(
     () =>
@@ -119,6 +137,7 @@ export function PositionVsOpponentCard({
   const unit = summary ? 'players' : 'games';
   const seasonText = choice === 'this' ? 'this season' : 'last season';
   const pick = (c: SeasonChoice) => {
+    picked.current = true;
     setChoice(c);
     setVisible(ROWS_SHOWN);
   };
@@ -128,11 +147,11 @@ export function PositionVsOpponentCard({
       <SectionTitle
         title={`${plural} vs ${opponent}`}
         tooltip={{
-          title: `How ${plural.toLowerCase()} have done against ${opponent}`,
+          title: `How ${groupProse(group)} have done against ${opponent}`,
           body:
             `Every game ${groupSingular(group)} with a real role played against ${opponent} ${seasonText}, ` +
             `and how often they reached ${betLabel} ${statLabel} — this player's line, applied to each of ` +
-            `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group)} in that game. ` +
+            `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group, sport)} in that game. ` +
             `The rank compares ${opponent} with the other ${opponentNoun(group)} on the average ` +
             `${statLabel} per ${short}: ` +
             `${rankPhrase(group)}.` +
@@ -304,7 +323,7 @@ export function PositionVsOpponentCard({
           ) : null}
 
           <Text style={styles.footnote}>
-            {footnoteText(group)}
+            {footnoteText(group, sport)}
             {groupBasis
               ? groupBasis.source === 'tonight'
                 ? ` Grouped by tonight's lineup: batting ${ordinal(groupBasis.slot)}.`
@@ -313,6 +332,36 @@ export function PositionVsOpponentCard({
           </Text>
         </>
       )}
+    </>
+  );
+}
+
+/**
+ * The section's place while the player's position is being read, or the
+ * reason it could not be (NBA / WNBA / NCAAF read it from player_positions).
+ * Not rendered when the read succeeds with no row: a player the roster pull
+ * has not placed simply has no card. A failed read must not look like that
+ * (UX_REVIEW §3), so it says so and points at pull-to-refresh.
+ */
+export function PositionVsOpponentPending({
+  opponent,
+  loading,
+  error,
+}: {
+  opponent: string;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <>
+      <SectionTitle title={`Same position vs ${opponent}`} />
+      <View style={styles.card}>
+        {error ? (
+          <Text style={styles.muted}>Couldn't load this player's position. Pull down to retry.</Text>
+        ) : loading ? (
+          <ActivityIndicator />
+        ) : null}
+      </View>
     </>
   );
 }

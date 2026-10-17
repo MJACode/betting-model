@@ -57,6 +57,12 @@ interface Props {
   busy?: boolean;
   /** Singular noun for the footer, e.g. "pick" → "Show 24 picks". */
   itemNoun: string;
+  /**
+   * Replaces "No matches — adjust filters" when the count is zero because the
+   * list failed to load, not because the filters excluded everyone. Spoken as
+   * written. Omit it and the zero-count sentence stays.
+   */
+  emptyLabel?: string;
   /** Clears every filter. "Clear all" is dimmed + inert when `canReset` is false. */
   onReset: () => void;
   canReset: boolean;
@@ -72,6 +78,7 @@ export function FilterSheet({
   onReset,
   canReset,
   busy = false,
+  emptyLabel,
   children,
 }: Props) {
   /**
@@ -143,7 +150,7 @@ export function FilterSheet({
                   worse trade. It is announced busy rather than disabled, the
                   same call the slate chip made on the board (UX_REVIEW §5). */}
               <Pressable
-                accessibilityLabel={busy ? 'Updating results' : resultCount === 0 ? 'No matches. Adjust filters' : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
+                accessibilityLabel={busy ? 'Updating results' : resultCount === 0 ? (emptyLabel ?? 'No matches. Adjust filters') : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityState={{ busy }}
@@ -157,7 +164,7 @@ export function FilterSheet({
                   {busy
                     ? 'Updating…'
                     : resultCount === 0
-                      ? 'No matches — adjust filters'
+                      ? (emptyLabel ?? 'No matches — adjust filters')
                       : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
                 </Text>
               </Pressable>

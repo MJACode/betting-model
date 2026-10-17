@@ -109,7 +109,9 @@ def test_a_model_sql_error_does_not_poison_the_next_model(monkeypatch):
 
     assert scored[0] == "nhl_moneyline"
     assert "nhl_moneyline_regulation" in scored
-    assert "nhl_over_under" in scored
+    # nhl_over_under is a rule card since 2026-10-08; the generic loop
+    # must not score it.
+    assert "nhl_over_under" not in scored
     assert "nhl_puckline" in scored
     assert any(ev[0] == "savepoint_rollback" for ev in conn.events)
     reset_at = next(i for i, ev in enumerate(conn.events) if ev[0] == "savepoint_rollback")

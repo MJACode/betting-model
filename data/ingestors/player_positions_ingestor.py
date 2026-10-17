@@ -62,13 +62,13 @@ document's athletes $ref is used when it returns items. Otherwise the one
 season path from `espn_basketball_season` is fetched. A real run raises
 if player_positions does not exist yet, so the queue retries it.
 
-ONE SPORT PER JOB. A cold NBA pass is on the order of 1 team list + 30 team
+PER-SPORT CAP. A cold NBA pass is on the order of 1 team list + 30 team
 docs + 30 roster lists + 609 athlete docs + a handful of position docs
 (about 675 HTTP calls; worker_jobs 406072 fetched 609 NBA athlete docs).
-Both leagues in one invocation was the 1,000–2,000 call burst. The job
-rejects a list of sports; queue one job per sport.
-`ingest_player_positions` still isolates a multi-sport call (its own cap,
-its own rollback) so a direct caller cannot poison the next sport.
+The validator accepts a list of known sports: the basketball real run is
+NBA and WNBA together, and `dry_run` false is a real write. Omitting the
+list is NBA only. Each sport keeps its own cap and a failed sport rollbacks
+so the next one still runs.
 
 POLITENESS. ESPN has IP-blocked the worker twice; a third block also takes
 out player news and WNBA results.
