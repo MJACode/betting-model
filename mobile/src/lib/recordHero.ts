@@ -88,7 +88,7 @@ export function heroAccessibilityLabel(o: {
     ? 'Units unavailable'
     : o.picks <= 0
       ? 'No settled picks'
-      : unitsSpeech(heroUnitsText(o.units, false));
+      : `${unitsSpeech(heroUnitsText(o.units, false))}, 1 to win`;
   const quiet = o.notLoaded || o.picks <= 0;
   const roi = returnOnBetsSpeech(roiText(o.roiFlat, o.risked, quiet));
   const record = o.notLoaded

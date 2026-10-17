@@ -244,6 +244,7 @@ export function TrackRecordScreen() {
               <View>
                 <SkeletonBlock width={70} height={12} />
                 <SkeletonBlock width={140} height={34} style={styles.skelGap} />
+                <SkeletonBlock width={100} height={12} style={styles.skelGap} />
                 <SkeletonBlock width={110} height={12} style={styles.skelGap} />
               </View>
               <SkeletonBlock width={104} height={56} />

@@ -70,7 +70,7 @@ const spoken = heroAccessibilityLabel({
   winRate: 439 / (439 + 377),
   clvBeatRate: 0.54,
 });
-check('one stop starts with the units', spoken.startsWith('+22.65 units'), spoken.slice(0, 40));
+check('one stop starts with the units', spoken.startsWith('+22.65 units, 1 to win'), spoken.slice(0, 48));
 check('spoken label names All-time and the date', spoken.includes('All-time') && spoken.includes('September 1, 2026') && !spoken.includes('Total profit'));
 check('visible title is not the VoiceOver label', heroVisibleLabel(DISCORD_ALL_TIME_LABEL) === HERO_VISIBLE_ALL_TIME && heroVisibleLabel('NFL') === 'Total profit · NFL');
 check('units caption', UNITS_CAPTION === 'Units · 1 to win');

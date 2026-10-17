@@ -5,7 +5,7 @@
  * (a native module → full rebuild) and is a deliberate follow-up.
  */
 
-import { formatPctSigned, formatSigned } from '@/lib/format';
+import { formatPct, formatPctSigned, formatSigned } from '@/lib/format';
 import type { TrackRecordSummary } from '@/lib/trackRecord';
 
 export const APP_URL = 'https://signalbase-ai.com';
@@ -22,7 +22,7 @@ export function buildShareMessage(
       ? // Same sign and 2-decimal rounding as the hero and the equity curve.
         `${formatSigned(opts.endUnits, 2, 'u').replace(/u$/, '')} units, 1 to win`
       : null,
-    `${formatPctSigned(s.roiFlat)} ROI · ${record} (${Math.round(s.winRate * 100)}% win rate)`,
+    `${formatPctSigned(s.roiFlat)} ROI · ${record} (${formatPct(s.winRate, 1)} win rate)`,
     s.clvBeatRate != null
       ? `Beat the closing price at the book we bet, ${Math.round(s.clvBeatRate * 100)}% of the time`
       : null,

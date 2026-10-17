@@ -21,7 +21,7 @@ const base: TrackRecordSummary = {
 const msg = buildShareMessage(base, { endUnits: 11.2, since: '2026-04-14' });
 check('includes signed ROI', msg.includes('+4.3%'), msg.split('\n')[2]);
 check('includes record', msg.includes('150-109'));
-check('includes win rate', msg.includes('58% win rate'));
+check('includes win rate', msg.includes('57.9% win rate'));
 check('includes units', msg.includes('+11.20 units'));
 check('includes beat-the-close', msg.includes('58% of the time'));
 check('includes settled count + since', msg.includes('259 settled picks since 2026-04-14'));
