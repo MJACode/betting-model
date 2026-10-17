@@ -183,7 +183,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
-  ['src/screens/StatsScreen.tsx', 'retryBtn,pressed', 1], // 39.5pt
 ];
 
 function walk(d: string, out: string[] = []): string[] {

@@ -79,6 +79,7 @@ import {
 } from '@/lib/gameFilter';
 import { computeHitRate, hitRateBandOf, hitRateColorDiscriminates } from '@/lib/hitRate';
 import {
+  bookLineLabel,
   hitModeHeadline,
   hitModeLabel,
   hitModeLineLabel,
@@ -101,7 +102,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, etDate, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -130,6 +131,8 @@ import {
   startedForGame,
   pricedPlayers,
   type PricedPlayer,
+  listsPricedWithoutLog,
+  rankedBoardChrome,
   needsTouchSet,
   seasonTouchFlag,
   shouldFetchTouchSet,
@@ -148,6 +151,15 @@ import {
   type TonightSlate,
 } from '@/lib/statsBoard';
 import { normalizePlayerName } from '@/lib/playerNews';
+import {
+  mostCommonPostedLine,
+  nhlBetCaption,
+  nhlEmptyBoardText,
+  nhlLineOnlyTitle,
+  nhlOffLineCount,
+  shouldOpenShotsLine,
+  stopForPostedLine,
+} from '@/lib/nhlBoard';
 import {
   defaultStatFor,
   propMarketForStat,
@@ -567,7 +579,13 @@ export function StatsScreen() {
     // for those sports below; this is the other half, for a user who picked it
     // on the NFL and then switched to the NHL. The window is the board's
     // default, not the one carried over.
-    if (!supportsHitRate(sport)) setTimeWindow((w) => (w === 'h2h' ? 10 : w));
+    if (!supportsHitRate(sport)) {
+      setTimeWindow((w) => (w === 'h2h' ? 10 : w));
+      // NHL is the sport that prices a side and has no ruler to name it.
+      // Resetting every other sport without hit rate (UFC, golf) would throw
+      // away an Under the user set on the NFL the moment they passed through.
+      if (sport === 'NHL') setHitMode('atLeast');
+    }
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
     // Drop the previous sport's slate in the same commit as the chip reset.
@@ -1014,6 +1032,27 @@ export function StatsScreen() {
   // reads a model for anything — the betslip button lives one tap deeper, on
   // the player's detail screen, which is where a researcher lands anyway.
   const propMarket = propMarketForStat(stat);
+
+  // Shots opens on the line the most players are posted at tonight.
+  // 2.5 (stop 3, "3 or more") is the fallback when nothing is posted.
+  // Once per NHL visit: a refetch and a return to the chip leave the
+  // number the user already set.
+  const postedShotsLine = useMemo(() => {
+    if (sport !== 'NHL' || stat?.key !== 'shots') return null;
+    if (!propMarket || propLines.market !== propMarket) return null;
+    return mostCommonPostedLine(propLines.rows);
+  }, [sport, stat, propMarket, propLines]);
+  const shotsOpenKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (sport !== 'NHL') shotsOpenKey.current = null;
+  }, [sport]);
+  useEffect(() => {
+    const key = stat ? String(stat.key) : null;
+    const posted = postedShotsLine;
+    if (!shouldOpenShotsLine(sport, key, posted, shotsOpenKey.current) || posted == null) return;
+    shotsOpenKey.current = sport;
+    setLineN(snapStop(stopForPostedLine(posted), rulerScale));
+  }, [sport, stat, postedShotsLine, rulerScale]);
 
   // Prop lines for the WHOLE forward window, not one date. The board is no
   // longer cut to the slate (Matt, 2026-09-12), so a player whose next game is
@@ -1538,7 +1577,7 @@ export function StatsScreen() {
                   : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}.`,
                 canSwitch: !oneWayMarket(propMarket, side),
               }
-            : dirLockNote
+            : canHitRate && dirLockNote
               ? { text: dirLockNote, canSwitch: true }
               : null;
 
@@ -1579,7 +1618,7 @@ export function StatsScreen() {
   // no row for at all is listed after the ranked rows, with no number.
   const pricedByKey = useMemo(
     () =>
-      stat && propMarket != null && propLines.market === propMarket && needsTouchSet(sport, String(stat.key))
+      stat && propMarket != null && propLines.market === propMarket && listsPricedWithoutLog(sport, String(stat.key))
         ? pricedPlayers(propLines.rows, propMarket, slateGameIds)
         : EMPTY_PRICED,
     [stat, sport, propMarket, propLines, slateGameIds],
@@ -1782,11 +1821,29 @@ export function StatsScreen() {
         : recentRows.map((r) => r.player_name),
     );
   }, [pricedByKey, activePositions, loading, error, rowsAreStale, shownKey, readKey, effectiveMode, rows, touchView, timeWindow, seasonValues, recentRows, lineOnlyFor]);
+  // Football Anytime TD keeps master's header, empty state, and filter count.
+  // NHL's empty log is the only board the tail replaces.
+  const boardChrome = rankedBoardChrome(
+    sport,
+    effectiveMode === 'hitRate' ? hitData.length : ranked.length,
+    lineOnlyList.length,
+  );
   const slateGameById = useMemo(() => new Map(slateGames.map((g) => [g.game_id, g] as const)), [slateGames]);
+  // Declared here, above the line-only rows. The map reads it, and a later
+  // const is a temporal dead zone: the empty-log board throws before paint.
+  const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
+  // Football keeps "Has a line · no games logged". NHL does not: an empty
+  // read is the unapplied game-log grant, and a name the fold missed is
+  // not a player with no games.
+  const nhlLogEmpty =
+    sport === 'NHL' && effectiveMode === 'totals' && rows.length === 0 && lineOnlyList.length > 0;
+  const nhlLinesOnly = sport === 'NHL' && lineOnlyList.length > 0 && effectiveMode === 'totals';
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
       <View>
-        <SectionTitle title="Has a line · no games logged" />
+        <SectionTitle
+          title={nhlLinesOnly ? nhlLineOnlyTitle(nhlLogEmpty) : 'Has a line · no games logged'}
+        />
         {lineOnlyList.map((p) => {
           const game = slateGameById.get(p.gameId) ?? null;
           const started = game ? startedForGame(game) : null;
@@ -1802,8 +1859,10 @@ export function StatsScreen() {
               showMatchup={showMatchupCol}
               statLabel={betLabel}
               hitMode={hitMode}
+              sport={sport}
               oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
               onOddsPress={quote ? () => openBook(quote) : undefined}
+              omitNoGames={nhlLinesOnly}
             />
           );
         })}
@@ -1907,13 +1966,13 @@ export function StatsScreen() {
   // tree, and a stale flag here is a clipped control.
   const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
-  // The headline under the ruler, in the mode's own idiom: "25+ Points" in
-  // At Least, "Over 0.5 Hits" in Over (lib/hitMode.ts).
+  // NHL says the bet once, in words ("3 or more shots"), on the caption and
+  // on the sheet. Every other sport keeps the ruler's idiom ("25+ Points",
+  // "Over 0.5 Hits").
   const lineHeadline =
-    hitModeHeadline(lineN, hitMode, stat?.label ?? '');
-  // What a BET made from this column is called. Almost always the column's own
-  // name; the market's where the two differ (markets.ts propDisplayLabel).
-  const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
+    sport === 'NHL' && stat
+      ? (nhlBetCaption(line, String(stat.key)) ?? '')
+      : hitModeHeadline(lineN, hitMode, betLabel);
 
   // What the tapped pill hands the add-to-betslip sheet: the proposition,
   // every book's price for it, and the off-line explainer when the book's own
@@ -1921,11 +1980,22 @@ export function StatsScreen() {
   const lineSheetInput = useMemo(
     () =>
       lineSheet
-        ? propLineSheetInput(lineSheet, sport, betLabel, lineHeadline, (l, sd) =>
-            modeLineLabel(l, sd, hitMode),
-          )
+        ? {
+            ...propLineSheetInput(
+              lineSheet,
+              sport,
+              betLabel,
+              lineHeadline,
+              sport === 'NHL' && stat
+                ? (l, sd) => nhlBetCaption(l, String(stat.key)) ?? bookLineLabel(l, sd)
+                : (l, sd) => modeLineLabel(l, sd, hitMode),
+            ),
+            ...(sport === 'NHL' && stat && nhlBetCaption(lineSheet.line, String(stat.key))
+              ? { title: `${lineSheet.playerName} ${nhlBetCaption(lineSheet.line, String(stat.key))}` }
+              : {}),
+          }
         : null,
-    [lineSheet, sport, betLabel, lineHeadline, hitMode],
+    [lineSheet, sport, betLabel, lineHeadline, hitMode, stat],
   );
 
   /**
@@ -2071,13 +2141,22 @@ export function StatsScreen() {
         ? `No upcoming ${sport} games, so there is no opponent to compare against yet.`
         : `No ${sport} ${stat?.label ?? ''} in the last 2 seasons against each player's next opponent.`;
     }
+    if (sport === 'NHL') {
+      const hasLines =
+        propMarket != null &&
+        propLines.market === propMarket &&
+        propLines.status !== 'loading' &&
+        propLines.rows.some((r) => r.market === propMarket);
+      const missing = nhlEmptyBoardText(hasLines, betLabel || (stat?.label ?? 'lines'));
+      if (missing && rows.length === 0) return missing;
+    }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
-  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment]);
+  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment, propMarket, propLines, betLabel, rows.length]);
 
-  // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
-  // have no player leaderboard at all, and they are two of the sports where
-  // team stats matter most — gating this behind `stat` would hide it there.
+  // Teams board. Ahead of the empty-catalog guard below so a sport with no
+  // player stat still reaches it, and so NHL's Teams/Goalies view stays one
+  // tap away on the Players | Teams row while the skater board is showing.
   if (boardMode === 'teams' && supportsTeamBoard(sport)) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -2109,11 +2188,9 @@ export function StatsScreen() {
     );
   }
 
-  // Sports with no per-player leaderboard (NHL: team+goalie only).
-  // The golf branch went with the sport on 2026-09-08: its copy promised
-  // leaderboards that are not coming and pointed at Picks/Signals for golf picks
-  // that no longer render, and GOLF is no longer a chip, so it was unreachable
-  // copy that could only ever mislead.
+  // A sport whose catalog is empty. Golf is no longer a chip. NHL is not this
+  // branch: it has a skater board, and its Teams/Goalies view is the Players |
+  // Teams segment above, which returns before this guard.
   if (!stat) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -2261,6 +2338,21 @@ export function StatsScreen() {
         </View>
       </View>
 
+      {/* Averages on a sport with no hit-rate ruler. The pill still prices a
+          side, and nothing else on the board names it. Same quiet caption as
+          the no-lines note. The Goals chip stays "Goals"; the bet is Anytime
+          Goal (markets.ts propDisplayLabel).
+          The pill does not also say the snapshot is old. Prop rows carry
+          snapshot_at, and the game-line age rule (markets.priceAgeApplies)
+          does not cover props — their normal age is hours. A second caption
+          on this shared cell would be a new flag on every sport's board. */}
+      {!canHitRate && showOdds && lineHeadline ? (
+        <View style={styles.noLinesRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>{lineHeadline}</Text>
+        </View>
+      ) : null}
+
       {/* The position row picked a position the board cannot filter by: say
           so once, in the same quiet caption as the no-lines note, rather than
           label a list of every position "QB" (Designer + Reviewer, #830). */}
@@ -2375,6 +2467,7 @@ export function StatsScreen() {
           that child now and carries the pin; the scroller inside it flexes on
           the horizontal axis, which cannot crush anything. The FlatList below
           stays the one flexible region. */}
+      {sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0 ? null : (
       <View style={[styles.fixedRow, styles.windowStrip]}>
         <ScrollView
           horizontal
@@ -2419,6 +2512,7 @@ export function StatsScreen() {
           </View>
         ) : null}
       </View>
+      )}
       {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
           row and nothing in the strip can shrink (tabCompact is flex: 0, and a
           plain View defaults to flexShrink: 0 in RN), so the time-window chips
@@ -2440,14 +2534,14 @@ export function StatsScreen() {
           tab and come back. */}
       {error ? (
         <View style={styles.errorBanner}>
-          <Text style={styles.errorText} numberOfLines={3}>
+          <Text style={styles.errorText}>
             Couldn’t load the board. {friendlyCause(error)}
           </Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => void load()}
             disabled={loading}
-            hitSlop={8}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
             accessibilityLabel="Retry loading the board"
             style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
           >
@@ -2533,9 +2627,10 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
-      {(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0 ? (
+      {boardChrome.showHeader ? (
         <ColumnHeader
           rightLabel={rightLabel}
+          sorted={boardChrome.headerSorted}
           showOdds={showOdds}
           // Named for the book it prints — "FD", "DK", "MGM" — so a FanDuel
           // user never reads an unlabelled number as someone else's. With
@@ -2577,6 +2672,7 @@ export function StatsScreen() {
                 showOdds={showOdds}
                 statLabel={betLabel}
                 hitMode={hitMode}
+                sport={sport}
                 colorful={colorful}
                 thinSample={timeWindow === 'h2h'}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
@@ -2638,6 +2734,7 @@ export function StatsScreen() {
                 showOdds={showOdds}
                 statLabel={betLabel}
                 hitMode={hitMode}
+                sport={sport}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail && canOpenPlayerDetail(item.row.player_id)}
@@ -2646,7 +2743,11 @@ export function StatsScreen() {
             );
           }}
           ListEmptyComponent={
-            loading ? (
+            // A priced player with no log row is the board, not an empty one.
+            // Hold the skeleton while those lines are still loading so the
+            // first paint does not say "no data" and then fill in.
+            boardChrome.suppressEmpty ? null
+              : loading || (listsPricedWithoutLog(sport, stat ? String(stat.key) : null) && propLines.status === 'loading') ? (
               <BoardSkeleton />
             ) : (
               <EmptyState
@@ -2694,7 +2795,7 @@ export function StatsScreen() {
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         title="Filter players"
-        resultCount={effectiveMode === 'hitRate' ? hitData.length : ranked.length}
+        resultCount={boardChrome.resultCount}
         itemNoun="player"
         emptyLabel={touchView === 'error' ? 'Couldn’t load this list. Pull down to retry.' : undefined}
         // The Availability toggle re-READS the board (the server is narrowed to
@@ -3336,7 +3437,16 @@ function fmtValue(value: number, basis: Basis): string {
  *  this sits in a 62pt column: "Under 224.5" wrapped to two lines and made one
  *  row of a 25-row board taller than its neighbours (UX review, 2026-09-06).
  *  The pill's accessibilityLabel keeps the full words. */
-export function offLineCaption(line: number, side: StatsOddsSide, mode: HitMode): string {
+export function offLineCaption(
+  line: number,
+  side: StatsOddsSide,
+  mode: HitMode,
+  sport?: string,
+): string {
+  if (sport === 'NHL') {
+    const plain = nhlOffLineCount(line, side);
+    if (plain != null) return plain;
+  }
   return modeLineLabel(line, side, mode, true);
 }
 
@@ -3346,6 +3456,7 @@ function OddsCell({
   playerName,
   statLabel,
   hitMode,
+  sport,
   dayLabel,
   onPress,
 }: {
@@ -3355,6 +3466,8 @@ function OddsCell({
   statLabel: string;
   /** Which idiom the board is speaking, for the off-line caption. */
   hitMode: HitMode;
+  /** NHL names an off-line number "3 or more". Other sports keep "3+". */
+  sport?: string;
   /** "MON" — the day of THIS quote's game, when it is not the day the column
    *  header names. Null on the common row, so an all-Sunday board is silent
    *  about the day exactly as it was before the odds window widened. */
@@ -3390,20 +3503,20 @@ function OddsCell({
   // inherits nothing from the row — without the player and the stat it is 25
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  const priceText = formatAmerican(quote.price).replace(/-/g, MINUS);
+  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
   // translation (UX review). statsOdds offLine.
   //
-  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first because the
-  // caption is `numberOfLines={1}` inside a container fixed at 62-93pt while
-  // the text scales with Dynamic Type: at accessibility sizes the tail is what
-  // truncates. Losing "MON" costs the reader a schedule fact; losing "3+" hides
-  // that the price is for a DIFFERENT LINE than the ruler's, i.e. a different
-  // bet. Order the sacrifice deliberately (UX review, 2026-09-12). VoiceOver
-  // reads both regardless — see `label` above.
-  const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;
+  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first. The column
+  // is 62-93pt and the text scales with Dynamic Type. NHL may use a second
+  // line so "3 or fewer" is not ellipsized. Other sports stay on one line:
+  // "Under 224.5" wrapping made one row taller than its neighbours (UX review,
+  // 2026-09-12). The day is what a third line would have carried.
+  // VoiceOver reads both regardless — see `label` above.
+  const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   return (
     <Pressable
@@ -3427,7 +3540,7 @@ function OddsCell({
           style={[styles.oddsText, { color: filled ? c.fg : colors.textPrimary }]}
           numberOfLines={1}
         >
-          {formatAmerican(quote.price)}
+          {priceText}
         </Text>
         <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>
@@ -3437,7 +3550,7 @@ function OddsCell({
         // present, regular when the caption is only a day.
         <Text
           style={[styles.oddsCaption, !lineCaption && styles.oddsCaptionDay]}
-          numberOfLines={1}
+          numberOfLines={sport === 'NHL' ? 2 : 1}
         >
           {caption}
         </Text>
@@ -3515,6 +3628,7 @@ function MatchupCell({
 /** Compact column header sitting flush above the leaderboard (HOF-style). */
 function ColumnHeader({
   rightLabel,
+  sorted = true,
   showOdds,
   oddsLabel,
   oddsDateLabel,
@@ -3522,6 +3636,8 @@ function ColumnHeader({
   matchupTooltip,
 }: {
   rightLabel: string;
+  /** False when the ranked list is empty. A line-only board is not sorted. */
+  sorted?: boolean;
   showOdds: boolean;
   /** Short name of the book the column prints ("FD", "DK"). */
   oddsLabel: string;
@@ -3547,12 +3663,13 @@ function ColumnHeader({
           not. */}
       <View
         style={styles.colHeaderSorted}
-        accessibilityLabel={`${rightLabel}, sorted highest first`}
+        accessible={!sorted}
+        accessibilityLabel={sorted ? `${rightLabel}, sorted highest first` : rightLabel}
       >
         <Text style={[styles.colHeaderRight, styles.colHeaderSortLabel]} numberOfLines={1}>
           {rightLabel.toUpperCase()}
         </Text>
-        <Ionicons name="arrow-down" size={9} color={colors.textTertiary} />
+        {sorted ? <Ionicons name="arrow-down" size={9} color={colors.textTertiary} /> : null}
       </View>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
@@ -3596,6 +3713,7 @@ function LeaderRow({
   showOdds,
   statLabel,
   hitMode,
+  sport,
   oddsDay,
   onOddsPress,
   tappable,
@@ -3619,6 +3737,7 @@ function LeaderRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  sport?: string;
   /** Weekday of the quote's game, when it is not the day the header names. */
   oddsDay?: string | null;
   onOddsPress?: () => void;
@@ -3667,6 +3786,7 @@ function LeaderRow({
           playerName={row.player_name ?? ''}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -3706,8 +3826,10 @@ function LineOnlyRow({
   showMatchup,
   statLabel,
   hitMode,
+  sport,
   oddsDay,
   onOddsPress,
+  omitNoGames = false,
 }: {
   name: string;
   subline: string | null;
@@ -3717,8 +3839,11 @@ function LineOnlyRow({
   showMatchup: boolean;
   statLabel: string;
   hitMode: HitMode;
+  sport?: string;
   oddsDay?: string | null;
   onOddsPress?: () => void;
+  /** The log itself is empty. "no games" would describe the feed as the player. */
+  omitNoGames?: boolean;
 }) {
   const body = (
     <>
@@ -3726,7 +3851,11 @@ function LineOnlyRow({
       <View
         style={styles.rowMain}
         accessible
-        accessibilityLabel={lineOnlyRowLabel(name, subline ? sublineSpoken(subline) : null)}
+        accessibilityLabel={lineOnlyRowLabel(
+          name,
+          subline ? sublineSpoken(subline) : null,
+          omitNoGames ? '' : undefined,
+        )}
       >
         <Text style={styles.rowName} numberOfLines={1}>
           {name}
@@ -3737,9 +3866,13 @@ function LineOnlyRow({
           </Text>
         ) : null}
       </View>
-      <View style={styles.valueWrap}>
+      <View
+        style={styles.valueWrap}
+        accessibilityElementsHidden={omitNoGames}
+        importantForAccessibility={omitNoGames ? 'no-hide-descendants' : 'auto'}
+      >
         <Text style={[styles.value, { color: colors.textSecondary }]}>—</Text>
-        <Text style={styles.valueLabel}>no games</Text>
+        {omitNoGames ? null : <Text style={styles.valueLabel}>no games</Text>}
       </View>
       {showOdds ? (
         <OddsCell
@@ -3748,6 +3881,7 @@ function LineOnlyRow({
           playerName={name}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -3772,6 +3906,7 @@ function HitRateRow({
   showOdds,
   statLabel,
   hitMode,
+  sport,
   colorful,
   thinSample,
   oddsDay,
@@ -3798,6 +3933,7 @@ function HitRateRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  sport?: string;
   /** Weekday of the quote's game, when it is not the day the header names. */
   oddsDay?: string | null;
   onOddsPress?: () => void;
@@ -3856,6 +3992,7 @@ function HitRateRow({
           playerName={player.player_name}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -4490,7 +4627,7 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.sm,
     backgroundColor: colors.avoidSoft,

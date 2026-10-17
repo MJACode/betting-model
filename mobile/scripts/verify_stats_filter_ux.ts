@@ -15,6 +15,7 @@ import { join } from 'node:path';
 const ROOT = join(import.meta.dirname, '..');
 const stats = readFileSync(join(ROOT, 'src/screens/StatsScreen.tsx'), 'utf-8');
 const teams = readFileSync(join(ROOT, 'src/components/TeamsBoard.tsx'), 'utf-8');
+const board = readFileSync(join(ROOT, 'src/lib/statsBoard.ts'), 'utf-8');
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -72,7 +73,8 @@ check('the Players slate refetches when the ET date changes and on pull-to-refre
 const lineOnlyFn = stats.slice(stats.indexOf('function LineOnlyRow'), stats.indexOf('function HitRateRow'));
 check('a line-only row is not a button, and the label ends with no games logged yet',
   /canOpenPlayerDetail\(p\.player_id\)/.test(stats) &&
-    /lineOnlyRowLabel\(name, subline \? sublineSpoken\(subline\) : null\)/.test(lineOnlyFn) &&
+    /lineOnlyRowLabel\(\s*name,\s*subline \? sublineSpoken\(subline\) : null,\s*omitNoGames \? '' : undefined,\s*\)/.test(lineOnlyFn) &&
+    /tail: string = LINE_ONLY_ROW_TAIL/.test(board) &&
     !/No logged games, so this row does not open/.test(stats) &&
     !/accessibilityHint/.test(lineOnlyFn) &&
     !/accessibilityRole/.test(lineOnlyFn) &&

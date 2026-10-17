@@ -479,6 +479,10 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_ncaaf",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
+    # NHL Players board. Reads nhl_skater_game_log (shots, ending-year
+    # season, game_type 2). The table's anon SELECT and RLS policy are
+    # #962, still unapplied; this grant is EXECUTE on the function only.
+    "player_window_totals_nhl",
     "fighter_window_totals_ufc",
     "team_stats_board",
     # custom model builder
