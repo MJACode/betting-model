@@ -101,6 +101,7 @@ Their feature engines (`features/nba_feature_engine.py`,
 | `nba_prop_projections` | each player's projected mean per card market, his status and projected minutes, for every game projected | `scripts/nba_prop_projection_card.py --project` | worker |
 | `nba_injury_asof` | the injury list each game was projected with: the official report 2018-19 → 2025-26 (90,629 rows, 9,076 games, loaded 2026-10-16), then the ESPN pull each 2026-27 projection used | `scripts/nba_prop_projection_card.py` | worker / this machine |
 | `odds` (`source='odds_api_nba_derivative_history'`) | 1H / 1Q / team totals 2024-25 → 2025-26 | `nba_odds_history --derivatives` | one-off purchase |
+| `odds` (`source='sbr_archive_nba'`, bookmaker `sbr_consensus`) | 2018-19 and 2019-20 regular seasons (every game in `games`): spread and total at the open and the close, the closing moneyline. No spread or total price (the page has none, stored NULL); `snapshot_at` is synthetic — open = game date 12:00Z, close = tip − 1 minute. Supporting evidence for closing-line checks, never a bar | `nba_sbr_archive --apply` (free Sportsbook Reviews archive, loaded 2026-10-16) | either |
 
 `player_prop_odds.book_last_update` (added 2026-10-16) stores each book's own
 clock for its market, for every sport; the NBA card refuses a soft quote more
@@ -139,6 +140,7 @@ python -m data.ingestors.nba_schedule_ingestor --seasons 2019 2027
 python -m data.ingestors.nba_box_enrich --seasons 2019 2026
 python -m data.ingestors.nba_injury_report --backfill --seasons 2019 2026
 python -m data.ingestors.nba_period_scores --start 2018-10-16 --end 2026-04-12
+python -m data.ingestors.nba_sbr_archive --apply   # free 2018-19 / 2019-20 lines; a re-run writes nothing
 python -m scripts.nba_research_cache          # parquet cache in data/local/nba/ (git-ignored)
 ```
 
