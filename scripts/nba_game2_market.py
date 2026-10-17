@@ -40,7 +40,9 @@ FAMILIES AND CELLS (120, asserted)
        not move a game between cells and a home and an away favourite of the
        same size are treated alike. A RULE: offers are priced at the market's
        own fair total, strength = 1e-9 - abs(posted), cut = -k, so strength
-       >= cut is abs(posted) <= k with a 1e-9 tolerance. Points B, C x
+       >= cut is abs(posted) <= k with a 1e-9 tolerance. A game with no
+       posted spread at T has no rule number and is outside the cell's
+       population, its blind bets included (§6.5). Points B, C x
        k = 1, 2, 3, 4 = 8.
   F6d  One book against itself. (i) moneyline: each deciding book's moneyline
        priced against THAT book's own spread (spread -> p_home as in F2). Both
@@ -52,8 +54,10 @@ FAMILIES AND CELLS (120, asserted)
        total), each solved at the team total's no-vig price through
        team_total_dist, the full total then priced through the market's
        totals distribution. Team totals are per-game purchases
-       (H.load_per_event), 2024-25 on, and count only at D (H.per_event_times);
-       they are a second purchase, so (ii) cannot share a fetch with the slate
+       (H.load_per_event), 2024-25 on, and count only at D: only the
+       purchase H.per_event_times keeps (inside 45-75 minutes) joins the
+       quotes, so one bought 76-135 minutes out is never priced in a D cell
+       even though it is under an hour old at T. They are a second purchase, so (ii) cannot share a fetch with the slate
        total and T is the later of the two. Markets moneyline, total x 2 sides
        x C, D x EV cuts .01, .03 = 16. The four total cells at C have no
        team-total quote by rule and are emitted empty. Total cells choose on
@@ -327,7 +331,7 @@ def f6a_placebo(neutral: pd.DataFrame, st: pd.DataFrame, games: pd.DataFrame,
     """Placebo run `run`: the strength column shuffled between games on the same
     date; every offer keeps its price at the market's own fair line."""
     sh = H.shuffle_within_date(st.assign(market="totals"), games, np.random.default_rng(run))
-    return neutral.merge(sh[["game_id", "strength"]], on="game_id", how="left")
+    return neutral.merge(sh[["game_id", "strength"]], on="game_id", how="inner")
 
 
 def combine_times(t_slate: pd.DataFrame, t_pe: pd.DataFrame) -> pd.DataFrame:
@@ -337,6 +341,16 @@ def combine_times(t_slate: pd.DataFrame, t_pe: pd.DataFrame) -> pd.DataFrame:
                                         suffixes=("_slate", "_pe"))
     x["T"] = x[["T_slate", "T_pe"]].max(axis=1)
     return x[["game_id", "T"]].reset_index(drop=True)
+
+
+def in_window_purchases(tt: pd.DataFrame, t_pe: pd.DataFrame) -> pd.DataFrame:
+    """The team-total rows of the purchases H.per_event_times kept (one per
+    game, inside D's 45-75-minute window), matched on the purchase instant.
+    A purchase outside the window is dropped before it joins the quotes: left
+    in, a total bought 76-135 minutes out is still visible at T (under an hour
+    old) and would be priced in a D cell the gate counts as not reaching D."""
+    keep = t_pe[["game_id", "T"]].rename(columns={"T": "fetch_at"})
+    return tt.merge(keep, on=["game_id", "fetch_at"]).reset_index(drop=True)
 
 
 def own_book_ml_fair(vis: pd.DataFrame, sig: dict) -> dict:
@@ -447,12 +461,15 @@ def f6a_point(data: H.Data, point: str, sig: dict, runs: int = PLACEBO_RUNS) -> 
     st = f6a_strength(vis)
     off = H.offers(vis)
     off = off[off["market"] == "totals"]
-    neutral = H.fair_offers(off, mf)
-    cand = neutral.merge(st, on="game_id", how="left")
-    placebo = [f6a_placebo(neutral, st, data.games, r) for r in range(runs)]
-    priced = set(neutral.loc[neutral["book"].isin(H.BETTABLE), "game_id"])
-    return {"times": t, "cand": cand, "neutral": neutral, "placebo": placebo,
-            "priced": priced, "modelled": set(st["game_id"]) & set(neutral["game_id"])}
+    fair = H.fair_offers(off, mf)
+    priced = set(fair.loc[fair["book"].isin(H.BETTABLE), "game_id"])
+    # §6.5: the population is the games the rule produced a number for (a
+    # posted spread at T); like the move lab, that one frame is both the
+    # candidate and the neutral frame, so every blind bet reads it too.
+    cand = fair.merge(st, on="game_id", how="inner")
+    placebo = [f6a_placebo(fair, st, data.games, r) for r in range(runs)]
+    return {"times": t, "cand": cand, "neutral": cand, "placebo": placebo,
+            "priced": priced, "modelled": set(st["game_id"]) & set(fair["game_id"])}
 
 
 def f6d_ml_point(data: H.Data, point: str, sig: dict, runs: int = PLACEBO_RUNS) -> dict:
@@ -487,6 +504,8 @@ def f6d_total_point(data: H.Data, point: str, sig: dict, sig_tt: dict, pe: pd.Da
     if point == "D":
         t_pe = H.per_event_times(tt, "D") if len(tt) else NO_TIMES
         gate_times = t_pe
+        if len(tt):
+            tt = in_window_purchases(tt, t_pe)
     if point == "D" and len(tt):
         t = combine_times(t_slate, t_pe)
         quotes = pd.concat([data.quotes, tt], ignore_index=True)

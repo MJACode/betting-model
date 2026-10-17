@@ -242,6 +242,24 @@ def test_f6a_reads_the_posted_spread_both_ways_and_not_a_solved_centre():
     assert M.F6A_CUTS == (-1.0, -2.0, -3.0, -4.0)
 
 
+def test_the_f6a_population_is_only_the_games_with_a_posted_spread():
+    # two games with a total at T; only "a" has a spread posted, so only "a"
+    # has a rule number. The cell's population (bar 9's blind bets) is "a".
+    ga, gb = _game("a", 0, 110, 108), _game("b", 0, 101, 99)
+    q = [_q(ga, "fanduel", "totals", 120, 220.5, -110, -110),
+         _q(gb, "fanduel", "totals", 120, 200.5, -110, -110),
+         _q(ga, "pinnacle", "spreads", 120, -2.0, -110, -110)]
+    data = _data([ga, gb], q)
+    b = M.f6a_point(data, "C", SIG, runs=3)
+    assert set(b["cand"]["game_id"]) == {"a"}
+    assert set(b["neutral"]["game_id"]) == {"a"}
+    assert all(set(p["game_id"]) == {"a"} for p in b["placebo"])
+    assert b["priced"] == {"a", "b"} and b["modelled"] == {"a"}   # coverage counts unchanged
+    rows = H.run_cells(data, "F6a", "C", b["cand"], b["neutral"], M.F6A_CUTS,
+                       {"totals": ["over"]}, placebo=b["placebo"], strength="strength")
+    assert len(rows) == 4 and all(r["population_games"] == 1 for r in rows)
+
+
 def test_the_f6a_placebo_shuffles_strength_and_keeps_the_price():
     games = pd.DataFrame({"game_id": list("abcd"),
                           "game_date": ["2024-01-15"] * 3 + ["2024-01-16"]})
@@ -338,6 +356,30 @@ def test_the_team_total_gate_at_d_reads_the_team_total_purchases():
     assert len(rows) == 4
     assert all(r["gate_cov_2025"] == 0.5 and r["gate_dropped"] == "2025" for r in rows)
     assert all(r["choose_seasons"] == "" for r in rows)
+
+
+def test_a_team_total_bought_outside_d_is_never_priced_in_a_d_cell():
+    # G's slate reaches D (60 minutes out) but its team totals were bought 90
+    # minutes out only: still within an hour of T, yet outside D's window, so
+    # the D cell must not price it (and the gate counts G as not reaching D).
+    # G2 has two purchases, 90 and 62 minutes out, at different books: only
+    # the purchase inside D (fanduel's, 62 minutes out) may be priced.
+    g, g2 = _game("G", 0, 115, 110, season=2025), _game("G2", 1, 100, 104, season=2025)
+    q = [_q(x, b, "totals", 60, 220.5, -110, -110) for x in (g, g2) for b in ("fanduel", "betmgm")]
+    pe = pd.DataFrame([_pe(g, "fanduel", "team_totals_home", 90, 112.5),
+                       _pe(g, "fanduel", "team_totals_away", 90, 107.5),
+                       _pe(g2, "betmgm", "team_totals_home", 90, 104.5),
+                       _pe(g2, "betmgm", "team_totals_away", 90, 101.5),
+                       _pe(g2, "fanduel", "team_totals_home", 62, 103.5),
+                       _pe(g2, "fanduel", "team_totals_away", 62, 100.5)])
+    b = M.f6d_total_point(_data([g, g2], q), "D", SIG, SIG_TT, pe, runs=1)
+    assert set(b["gate_times"]["game_id"]) == {"G2"}
+    assert set(b["neutral"]["game_id"]) == {"G", "G2"}
+    c = b["cand"]
+    assert set(c["game_id"]) == {"G2"}
+    assert set(c["book"]) == {"fanduel"}
+    assert c["mu"].iloc[0] == pytest.approx(204.0, abs=1e-3)      # 103.5 + 100.5
+    assert all(set(p["book"]) <= {"fanduel"} for p in b["placebo"])
 
 
 def test_the_team_total_cells_decide_when_both_quotes_are_in_hand():
