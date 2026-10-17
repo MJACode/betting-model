@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -293,3 +294,38 @@ def test_the_fallback_rollback_is_only_safe_because_callers_read_first():
     for name in ("recaps_needing_restatement", "post_missed_recap", "_restate_x_if_behind"):
         other = src.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
         assert "INSERT" not in other
+
+
+def test_the_share_text_drops_a_zero_from_before_the_migration():
+    """verify_share_record.ts is the check. The hero calls the same function."""
+    from tests._node import NODE, node_strips_types
+    if not node_strips_types():
+        pytest.skip("node >= 22.6 not available")
+    assert NODE is not None
+    mobile = ROOT / "mobile"
+    script = (mobile / "scripts" / "verify_share_record.ts").read_text(encoding="utf-8")
+    script = re.sub(r"from '(?:\.\./)+src/lib/(\w+)';", r"from './\1.ts';", script)
+    script = re.sub(r"^import type .*;\n", "", script, flags=re.M)
+    share = (mobile / "src" / "lib" / "shareRecord.ts").read_text(encoding="utf-8")
+    share = re.sub(r"from '@/lib/(\w+)';", r"from './\1.ts';", share)
+    share = re.sub(r"^import type .*;\n", "", share, flags=re.M)
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        (folder / "verify_share_record.ts").write_text(script, encoding="utf-8")
+        (folder / "shareRecord.ts").write_text(share, encoding="utf-8")
+        (folder / "format.ts").write_text(
+            (mobile / "src" / "lib" / "format.ts").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (folder / "package.json").write_text('{"type": "module"}\n', encoding="utf-8")
+        proc = subprocess.run(
+            [NODE, "--experimental-strip-types", "verify_share_record.ts"],
+            cwd=folder,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
+    assert "[PASS] missing stake drops the ROI line" in proc.stdout
+    assert "[PASS] missing stake drops the units line" in proc.stdout
