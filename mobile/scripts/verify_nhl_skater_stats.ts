@@ -30,7 +30,7 @@ import {
   shouldOpenShotsLine,
   stopForPostedLine,
 } from '../src/lib/nhlBoard';
-import { lineLegLabel, nhlBookListing, propLineSheetInput } from '../src/lib/lineLegs';
+import { lineLegLabel, nhlBookListing, nhlLegPhrase, propLineSheetInput } from '../src/lib/lineLegs';
 import type { StatsOddsQuote } from '../src/lib/statsOdds';
 import { lineOnlyRowLabel, listsPricedWithoutLog, needsTouchSet, rankedBoardChrome } from '../src/lib/statsBoard';
 import { hitModeHeadline, selectionFor } from '../src/lib/hitMode';
@@ -135,7 +135,14 @@ check('a baseball leg is unchanged',
 check('the sheet explainer names the book line',
   nhlBookListing('draftkings', 1.5, 'over') === 'DraftKings lists this as Over 1.5.');
 check('an off-line pill says 3 or more',
-  nhlOffLineCount(2.5, 'over') === '3 or more' && nhlOffLineCount(1.5, 'over') === '2 or more');
+  nhlOffLineCount(2.5, 'over') === '3 or more' && nhlOffLineCount(1.5, 'over') === '2 or more'
+  && nhlOffLineCount(1.5, 'under') === '1 or fewer');
+check('a whole number and Under 0.5 keep the old wording',
+  nhlLegPhrase(2, 'over', 'player_shots_on_goal') === null
+  && lineLegLabel({ ...shotsLeg, line: 2 }) === 'Auston Matthews Over 2 Shots'
+  && nhlLegPhrase(0.5, 'under', 'player_shots_on_goal') === null
+  && nhlOffLineCount(2, 'over') === null
+  && nhlOffLineCount(0.5, 'under') === null);
 const sheetQuote: StatsOddsQuote = {
   playerKey: 'auston matthews',
   playerName: 'Auston Matthews',
@@ -151,6 +158,15 @@ const sheetQuote: StatsOddsQuote = {
 const sheet = propLineSheetInput(sheetQuote, 'NHL', 'Shots', '2 or more shots');
 check('the NHL sheet keeps the plain title and puts the book line under it',
   sheet.explainer === 'DraftKings lists this as Over 1.5. Add it to your betslip now — you’ll choose the sportsbook there.');
+const offSheet = propLineSheetInput(
+  { ...sheetQuote, offLine: true, book: 'fanduel' },
+  'NHL',
+  'Shots',
+  '3 or more shots',
+  (l) => nhlBetCaption(l, 'shots') ?? `Over ${l}`,
+);
+check('an off-line NHL sheet says the bet differs, then how the book lists it',
+  offSheet.explainer === 'The board is on 3 or more shots; FanDuel only posts 2 or more shots. FanDuel lists this as Over 1.5. Add it to your betslip now — you’ll choose the sportsbook there.');
 check('Shots opens on the posted line once per NHL visit',
   shouldOpenShotsLine('NHL', 'shots', 1.5, null)
   && !shouldOpenShotsLine('NHL', 'shots', 1.5, 'NHL')
@@ -225,7 +241,9 @@ check('the sort claim is withheld when nothing is ranked',
 check('the filter count goes through the same chrome',
   screen.includes('resultCount={boardChrome.resultCount}'));
 check('an NHL off-line pill uses the plain count',
-  screen.includes('if (sport === \'NHL\') return nhlOffLineCount(line, side);'));
+  screen.includes('const plain = nhlOffLineCount(line, side);')
+  && screen.includes('if (plain != null) return plain;')
+  && screen.includes('numberOfLines={2}'));
 check('the load error is not capped at three lines',
   screen.includes('Couldn’t load the board.') && !screen.includes('numberOfLines={3}'));
 const sheetSrc = read('src/components/AddLineSheet.tsx');

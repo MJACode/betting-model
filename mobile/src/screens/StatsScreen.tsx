@@ -3442,7 +3442,10 @@ export function offLineCaption(
   mode: HitMode,
   sport?: string,
 ): string {
-  if (sport === 'NHL') return nhlOffLineCount(line, side);
+  if (sport === 'NHL') {
+    const plain = nhlOffLineCount(line, side);
+    if (plain != null) return plain;
+  }
   return modeLineLabel(line, side, mode, true);
 }
 
@@ -3506,13 +3509,12 @@ function OddsCell({
   // book's own "O 2.5" in Over/Under — so it reads against the header without
   // translation (UX review). statsOdds offLine.
   //
-  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first because the
-  // caption is `numberOfLines={1}` inside a container fixed at 62-93pt while
-  // the text scales with Dynamic Type: at accessibility sizes the tail is what
-  // truncates. Losing "MON" costs the reader a schedule fact; losing "3+" hides
-  // that the price is for a DIFFERENT LINE than the ruler's, i.e. a different
-  // bet. Order the sacrifice deliberately (UX review, 2026-09-12). VoiceOver
-  // reads both regardless — see `label` above.
+  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first. The column
+  // is 62-93pt and the text scales with Dynamic Type. Two lines, not one:
+  // "3 or fewer" was ellipsized at large text, and losing the count hides that
+  // the price is a different bet (UX review, 2026-09-12, and the follow-up on
+  // the longer NHL words). The day is what a third line would have carried.
+  // VoiceOver reads both regardless — see `label` above.
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   return (
@@ -3547,7 +3549,7 @@ function OddsCell({
         // present, regular when the caption is only a day.
         <Text
           style={[styles.oddsCaption, !lineCaption && styles.oddsCaptionDay]}
-          numberOfLines={1}
+          numberOfLines={2}
         >
           {caption}
         </Text>

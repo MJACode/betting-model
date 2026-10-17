@@ -60,9 +60,25 @@ export function nhlBetCaption(line: number, statKey: string): string | null {
   return `${n} or more ${noun}`;
 }
 
+/**
+ * The whole-number count behind a half-point line, when that count is at least 1.
+ *
+ * 2.5 over is 3. 1.5 under is 1. A whole number is not that sentence
+ * ("Over 2" is not "2.5 or more"), and Under 0.5 is 0, which is not "or fewer".
+ */
+export function nhlPlainCount(line: number, side: 'over' | 'under'): number | null {
+  if (!Number.isFinite(line)) return null;
+  const doubled = Math.round(line * 2);
+  if (Math.abs(line * 2 - doubled) > 1e-6 || doubled % 2 === 0) return null;
+  const count = side === 'under' ? (doubled - 1) / 2 : (doubled + 1) / 2;
+  if (count < 1) return null;
+  return count;
+}
+
 /** The off-line pill caption. The board says "3 or more", so the pill does too. */
-export function nhlOffLineCount(line: number, side: 'over' | 'under'): string {
-  const count = side === 'under' ? line - 0.5 : line + 0.5;
+export function nhlOffLineCount(line: number, side: 'over' | 'under'): string | null {
+  const count = nhlPlainCount(line, side);
+  if (count == null) return null;
   const how = side === 'under' ? 'or fewer' : 'or more';
   return `${count} ${how}`;
 }

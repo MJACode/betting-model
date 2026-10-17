@@ -449,7 +449,7 @@ check(
   // capped at one line: "Under 224.5" wrapped inside the 62pt odds column and
   // made one row of a 25-row board taller than its neighbours (UX review).
   check('the pill prints the off-line number under the price, in the board\'s idiom',
-    stats.includes('const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;')
+    stats.includes('const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;')
       && /styles\.oddsCaption, !lineCaption && styles\.oddsCaptionDay\]/.test(stats)
       && /numberOfLines=\{1\}/.test(stats)
       && modeLineLabel(1.5, 'over', 'atLeast', true) === '2+'

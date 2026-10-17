@@ -44,6 +44,7 @@
 
 import { americanToDecimal } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
+import { nhlOffLineCount } from '@/lib/nhlBoard';
 import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
@@ -163,14 +164,13 @@ const NHL_COUNT_NOUN: Record<string, string> = {
   player_goal_scorer_anytime: 'goals',
 };
 
-/** "Over 2.5 shots (3 or more)". The book's line and the board's sentence. */
+/** "Over 2.5 shots (3 or more)". A line that is not a half-point keeps the old label. */
 export function nhlLegPhrase(line: number, side: LineSide, market: string): string | null {
   const noun = NHL_COUNT_NOUN[market];
-  if (!noun || !Number.isFinite(line)) return null;
+  const words = nhlOffLineCount(line, side);
+  if (!noun || !words) return null;
   const word = side === 'under' ? 'Under' : 'Over';
-  const count = side === 'under' ? line - 0.5 : line + 0.5;
-  const how = side === 'under' ? 'or fewer' : 'or more';
-  return `${word} ${line} ${noun} (${count} ${how})`;
+  return `${word} ${line} ${noun} (${words})`;
 }
 
 /** "DraftKings lists this as Over 1.5." The sheet title keeps the plain sentence. */
@@ -355,14 +355,17 @@ export function propLineSheetInput(
   };
   const prices = bettablePrices(rows, (r) => num(quote.side === 'under' ? r.under_price : r.over_price));
   const choose = 'Add it to your betslip now — you’ll choose the sportsbook there.';
+  // An off-line quote is a different bet from the ruler. Say that first, then
+  // how the book prints the number. NHL says the book line on every sheet.
+  const offLineClause =
+    quote.offLine && boardHeadline
+      ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${
+          numberLabel(quote.line, quote.side)
+        }.`
+      : null;
+  const listing = sport === 'NHL' ? nhlBookListing(quote.book, quote.line, quote.side) : null;
   const explainer =
-    sport === 'NHL'
-      ? `${nhlBookListing(quote.book, quote.line, quote.side)} ${choose}`
-      : quote.offLine && boardHeadline
-        ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${
-            numberLabel(quote.line, quote.side)
-          }. ${choose}`
-        : undefined;
+    offLineClause || listing ? [offLineClause, listing, choose].filter(Boolean).join(' ') : undefined;
   return { spec, prices, explainer };
 }
 
