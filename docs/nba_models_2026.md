@@ -873,6 +873,27 @@ the model helped.
   only. Games per season with a decision (both teams ≥ 10 games): Q2 410–524, halftime
   89–253, Q3 224–408.
 
+#### IG-1: the grid (2026-10-17) — closed for 2026-27
+
+Same command; cells in `cells_IG-1.parquet`, the verdict in `verdict_house_IG-1.parquet`.
+
+- **0 of 24 cells pass the house standard (§6.7), and none clears its 95% interval**
+  (24 × 0.025 = 0.6 expected by chance). 0 of 24 pass the §6.4 bars either (multiple-testing
+  count 4,226). None of the 24 control cells ("hot halves keep scoring") clears its interval.
+- **The nearest cell is the under in Q3 when shooting has run 4 or more points hot:** 661
+  bets 2021-22 → 2025-26, +43.8 units, +5.8%, interval −1.6% to +12.7%.
+  - It fails the interval and the seasons bar: 2021-22 −7.6%, 2022-23 −1.9%, 2023-24
+    +11.6%, 2024-25 +21.8%, 2025-26 +5.5% (172 bets). 2020-21, reported only: +13.9% on 84.
+  - It beats the blind under in the same games (+2.9%), its neighbours are positive (+4.0%
+    at 2 points, +2.2% at 6), and it clears the placebo (+5.9% against a 95th percentile of
+    +5.3%).
+  - DraftKings alone: +1.4% on 409 bets in the choosing seasons, −1.1% in 2025-26.
+  - Prices −140 to +110, median −115; 372-289, no pushes.
+- **The same direction loses in the other windows:** the Q2 unders lose 1.8% to 4.1% at
+  every cut, the halftime unders 4.0% to 11.1%.
+- **Verdict:** IG-1 is closed for 2026-27. The information test was passed by Pinnacle's
+  lag, not by luck, and the betting grid finds no cell.
+
 ### 7.3 Gates and bars
 
 1. **Information first.** For IG-1, IG-2 and HT-1, measure the change in log loss (moneyline)
@@ -999,6 +1020,46 @@ the model helped.
          −0.15) in 2025-26.
        - The model fit on 89,650–102,036 game states per season; 17 games whose play-by-play
          final differs from the official score were left out of fitting.
+     - **IG-2's grid result (2026-10-17): 6 of 18 cells pass the house standard. Every warning
+       sign written down beforehand is present, so the profit may be stale soft-book quotes
+       rather than a price a bettor could take.** `python -m scripts.nba_ingame_ig2 --grid`
+       (log `ig2_grid_log.txt`; cells `cells_IG-2.parquet`; verdict
+       `verdict_house_IG-2.parquet`), and `--detail` for the beside-numbers
+       (`ig2_passing_detail.json`). Pooled 2021-22 → 2025-26; 2020-21 is in-sample and left out.
+
+       | Cell | Bets | Units | ROI | 95% interval | Seasons positive | 2025-26 | DraftKings alone, 2021-22 → 2024-25 / 2025-26 | Prices (min / median / max) |
+       |---|---|---|---|---|---|---|---|---|
+       | spread, Q1–Q2, EV ≥ 0.05 | 1,475 | +103.6 | +6.2% | +1.4 .. +11.1 | 4 of 5 | +6.0% on 334 | +3.9% / −1.3% | −160 / −114 / +114 |
+       | spread, Q1–Q2, EV ≥ 0.08 | 948 | +69.5 | +6.5% | +0.4 .. +12.7 | 5 of 5 | +0.2% on 210 | +1.0% / −1.4% | −152 / −114 / +114 |
+       | moneyline, Q3, EV ≥ 0.05 | 651 | +40.1 | +10.0% | +0.1 .. +19.9 | 5 of 5 | +6.7% on 159 | −1.5% / −1.1% | −200 / +210 / +3500 |
+       | moneyline, Q3, EV ≥ 0.08 | 545 | +49.6 | +15.8% | +3.8 .. +27.4 | 5 of 5 | +13.0% on 134 | +2.1% / −5.1% | −200 / +230 / +3500 |
+       | spread, Q3, EV ≥ 0.05 | 1,055 | +79.6 | +6.7% | +1.2 .. +12.6 | 5 of 5 | +5.5% on 286 | +7.3% / −3.6% | −144 / −114 / +125 |
+       | spread, Q3, EV ≥ 0.08 | 751 | +76.8 | +9.2% | +2.5 .. +16.2 | 5 of 5 | +2.3% on 227 | +10.6% / −11.9% | −144 / −113 / +125 |
+
+       - The other 12 fail: Q1–Q2 moneyline and Q4 moneyline on the interval and the season
+         count; Q1–Q2 and Q3 at EV ≥ 0.02 on the interval; Q4 spreads on the placebo. 7 of the
+         18 cells clear the 95% interval, against about 0.5 expected by chance. So the effect is
+         systematic. What it is, these say:
+       - **Without outlier prices** (a price more than 20 cents better than the next book's, or a
+         number no other book hangs; about half of every passing cell's bets), the units fall to
+         +21.7 and +22.0 (Q1–Q2 spreads), −4.1 and +8.0 (Q3 moneylines), +42.7 and +41.0 (Q3
+         spreads).
+       - **Bets on the side that had just outscored its opponent** in the 2 minutes before the
+         quote earn more in every cell: Q1–Q2 spread at EV ≥ 0.05, +8.0% on 727 bets against
+         +4.5% on 748; Q3 moneyline at EV ≥ 0.05, +18.7% on 277 against +2.5% on 374; Q3 spread
+         at EV ≥ 0.05, +8.9% on 507 against +4.7% on 548. That is the deciding books' own lag
+         that the freshness rule does not remove (7.1).
+       - **DraftKings alone** is flat or negative in 2025-26 in all six. The best of 8 books,
+         quoted up to 60 s apart during play, picks the price that has moved least.
+       - **The Q3 moneyline cells are underdog bets** (516 of 651, and 446 of 545). The blind
+         Q3 underdog at the best price earns +6.5% pooled. FanDuel carries the most units in
+         every passing cell (+21.5 to +69.6).
+       - The information test above already showed that the foul inputs add nothing and that
+         against the deciding books' own moneyline prices the model adds nothing.
+       - Whether any of these prices could be bet cannot be measured from hourly purchases. A
+         book's stamp is its last update, not the moment it set the price, and books suspend
+         betting after a score. Section 7.3 item 3 says a passing cell is built LIVE. That needs
+         an NBA in-play loop, which does not exist; the decision is the owner's.
 2. **Bars for a grid that runs:** the house standard of §6.7. The §6.4 bars and the
    multiple-testing count (now 4,226 with these 54) are reported beside.
 3. **A cell that passes is built LIVE.** That needs an NBA in-play loop; `ncaaf_live/` is the
