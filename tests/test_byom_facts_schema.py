@@ -47,14 +47,20 @@ def test_the_second_pass_returns_before_it_locks():
     assert "anon read byom_prop_facts" in SQL
 
 
-def test_the_windows_are_not_check_constraints():
-    """120 and 24 are UNCONFIRMED. A constraint would freeze the placeholder."""
+def test_there_is_no_lock_price_or_unit_column():
+    """Win/loss/push only. The line basis is a label, not a window."""
     code = _code(SQL)
+    assert "line_basis" in code
+    assert "log_status" in code
+    for gone in (
+        "lock_window_hours", "near_window_hours", "lock_spread_at",
+        "close_spread_at", "dk_spread_home_price", "grade_ml_home_price",
+        "grade_ml_home_book", "line_source", "ats_home_units",
+        "over_units", "dk_over_price",
+    ):
+        assert gone not in code, gone
     assert "120" not in code
     assert "24" not in code
-    assert "lock_window_hours" in code
-    assert "near_window_hours" in code
-    assert "UNCONFIRMED" in SQL
 
 
 def test_results_keep_pushes_and_ties_and_carry_no_stake():
@@ -146,19 +152,17 @@ def test_schema_applies_twice_on_scratch_postgres_and_anon_can_only_read():
         with pytest.raises(InsufficientPrivilege):
             cur.execute(
                 "INSERT INTO public.byom_game_facts (canonical_key, sport, "
-                "season, week, away_team, home_team, lock_window_hours, "
-                "near_window_hours, line_source) "
+                "season, week, away_team, home_team, line_basis) "
                 "VALUES ('2024_01_BAL_KC', 'NFL', 2024, 1, 'BAL', 'KC', "
-                "120, 24, 'test')")
+                "'DraftKings line at game start')")
         cur.execute("RESET ROLE")
         # A push and a tie are legal result values. A stake column is not.
         cur.execute("""
             INSERT INTO public.byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team,
-              lock_window_hours, near_window_hours, line_source,
-              ats_home_result, ats_home_units, ml_home_result, ml_home_units)
+              line_basis, ats_home_result, ml_home_result)
             VALUES ('2024_01_BAL_KC', 'NFL', 2024, 1, 'BAL', 'KC',
-                    120, 24, 'nfl_odds_history', 'push', 0, 'tie', 0)
+                    'DraftKings line at game start', 'push', 'tie')
         """)
         cur.execute(
             "SELECT ats_home_result, ml_home_result FROM public.byom_game_facts")
