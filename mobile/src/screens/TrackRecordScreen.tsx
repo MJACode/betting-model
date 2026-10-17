@@ -112,8 +112,8 @@ export function TrackRecordScreen() {
   const groups: SportGroup[] = useMemo(() => groupBySport(visibleRows), [visibleRows]);
 
   // Cumulative posted-stake units (the same units Discord #results books).
-  // A select that predates the units column has no daily units. A zero
-  // series would draw a flat line and call it the record.
+  // A select from before the units column has daily rows and no units.
+  // Treating the gap as zero draws a flat line that ends at +0.00u.
   const equity: EquityPoint[] = useMemo(() => {
     if (!visibleDaily.some((d) => d.units != null)) return [];
     const byDate = new Map<string, number>();
@@ -138,7 +138,10 @@ export function TrackRecordScreen() {
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
-        endUnits: equity.length ? equity[equity.length - 1]!.cumUnits : null,
+        endUnits:
+          overall.risked != null && equity.length
+            ? equity[equity.length - 1]!.cumUnits
+            : null,
         since: RECORD_START,
       }),
     }).catch(() => {});
@@ -271,8 +274,10 @@ export function TrackRecordScreen() {
         {/* Unconditional once loaded: EquityCurve carries its own "not enough
             settled days" copy. Held back on the first load so it cannot assert
             there are too few settled days while the data is still in flight.
-            endUnits is the hero's posted-stake total, so the pill matches it. */}
-        {rows.length === 0 && (loading || error) ? null : overall.units == null ? null : (
+            Daily rows with no units column are not that case: the curve stays
+            off rather than drawing +0.00u. endUnits is the hero's posted-stake
+            total, so the pill matches it. */}
+        {rows.length === 0 && (loading || error) ? null : overall.units == null || (visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null)) ? null : (
           <EquityCurve points={equity} seriesId={sportSel} width={chartWidth} endUnits={heroUnits} />
         )}
 

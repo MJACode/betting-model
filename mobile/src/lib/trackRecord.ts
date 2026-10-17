@@ -133,7 +133,7 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
 export interface SportGroup {
   sport: string;
   summary: TrackRecordSummary;
-  models: TrackRecordRow[]; // sorted by posted-stake units desc
+  models: TrackRecordRow[]; // posted-stake units desc, or model id when units are absent
 }
 
 /** Group per-model rows by sport, dropping models with no settled picks. */
@@ -149,8 +149,13 @@ export function groupBySport(rows: TrackRecordRow[]): SportGroup[] {
 
   const groups: SportGroup[] = [];
   for (const [sport, list] of bySport) {
-    const models = [...list].sort(
-      (a, b) => Number(b.units ?? 0) - Number(a.units ?? 0),
+    // Without the units column every row sorts as 0, which is just the
+    // order the query returned. The model id does not move between loads.
+    const unitsKnown = list.some((r) => r.units != null);
+    const models = [...list].sort((a, b) =>
+      unitsKnown
+        ? Number(b.units ?? 0) - Number(a.units ?? 0)
+        : String(a.model_id).localeCompare(String(b.model_id)),
     );
     groups.push({ sport, summary: summarize(list), models });
   }

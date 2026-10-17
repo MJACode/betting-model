@@ -2130,8 +2130,13 @@ def _execute_settled(conn, sql: str, params: tuple):
         if not _unit_functions_missing(exc):
             raise
         # Postgres aborts the transaction on the error, so the retry needs a
-        # rollback. sqlite3.rollback undoes the open inserts instead, and the
-        # statement error did not abort that connection.
+        # rollback. That rollback is safe only because every caller reads
+        # here and writes afterwards: notify_discord_results inserts
+        # push_sent after both tallies return, and the scan, the missed
+        # recap, and the X catch-up select and then close. An uncommitted
+        # insert already on `conn` would be lost. sqlite3.rollback undoes
+        # the test's open inserts instead, and the statement error did not
+        # abort that connection.
         if type(exc).__module__.startswith("psycopg"):
             try:
                 conn.rollback()

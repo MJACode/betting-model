@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -191,9 +192,12 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "Number(r.risked ?? 0)" in summary
     assert "risked > 0 ? units / risked" in summary
     equity = screen.split("const equity", 1)[1].split("}, [visibleDaily]);", 1)[0]
-    assert "d.units" in equity
+    assert "d.units != null" in equity
+    assert "return []" in equity
     assert "profit_flat" not in equity
     assert "/ 100" not in equity
+    assert "overall.risked != null" in screen
+    assert "visibleDaily.some((d) => d.units != null)" in screen
     # Option B: Discord's all-time label, the units number, the same pill.
     assert "DISCORD_ALL_TIME_LABEL" in screen
     assert "endUnits={heroUnits}" in screen
@@ -255,10 +259,12 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "colors.positive" not in spark
     assert "units, 1 to win" in share
     assert "formatPctSigned(s.roi)" in share
+    assert "s.risked != null" in share
     assert "s.roiFlat" not in share
     assert "flat-bet ROI" not in share
     assert "flat $100" not in share
     assert "roi:" in summary
+    assert "localeCompare(String(b.model_id))" in summary
     assert "roiFlat:" not in summary.split("export interface ParlaySummary")[0]
 
 
@@ -329,3 +335,51 @@ def test_a_missing_function_tallies_with_stake_for():
     assert tallied["w"] == 1
     assert tallied["units"] == pytest.approx(stake_for(None, -110).win)
     assert tallied["risked"] == pytest.approx(stake_for(None, -110).risk)
+
+
+def test_the_fallback_rollback_is_only_safe_because_callers_read_first():
+    """An uncommitted insert on the same connection would not survive it."""
+    src = (ROOT / "tracking/discord_notifier.py").read_text(encoding="utf-8")
+    fn = src.split("def _execute_settled", 1)[1].split("\ndef ", 1)[0]
+    assert "writes afterwards" in fn
+    body = src.split("def notify_discord_results", 1)[1].split("\ndef ", 1)[0]
+    assert body.index("_settled_rows(") < body.index("INSERT INTO push_sent")
+    assert body.index("_settled_rows_since(") < body.index("INSERT INTO push_sent")
+    for name in ("recaps_needing_restatement", "post_missed_recap", "_restate_x_if_behind"):
+        other = src.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
+        assert "INSERT" not in other
+
+
+def test_the_share_text_drops_a_zero_from_before_the_migration():
+    """verify_share_record.ts is the check. The hero calls the same function."""
+    from tests._node import NODE, node_strips_types
+    if not node_strips_types():
+        pytest.skip("node >= 22.6 not available")
+    assert NODE is not None
+    mobile = ROOT / "mobile"
+    script = (mobile / "scripts" / "verify_share_record.ts").read_text(encoding="utf-8")
+    script = re.sub(r"from '(?:\.\./)+src/lib/(\w+)';", r"from './\1.ts';", script)
+    script = re.sub(r"^import type .*;\n", "", script, flags=re.M)
+    share = (mobile / "src" / "lib" / "shareRecord.ts").read_text(encoding="utf-8")
+    share = re.sub(r"from '@/lib/(\w+)';", r"from './\1.ts';", share)
+    share = re.sub(r"^import type .*;\n", "", share, flags=re.M)
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        (folder / "verify_share_record.ts").write_text(script, encoding="utf-8")
+        (folder / "shareRecord.ts").write_text(share, encoding="utf-8")
+        (folder / "format.ts").write_text(
+            (mobile / "src" / "lib" / "format.ts").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (folder / "package.json").write_text('{"type": "module"}\n', encoding="utf-8")
+        proc = subprocess.run(
+            [NODE, "--experimental-strip-types", "verify_share_record.ts"],
+            cwd=folder,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
+    assert "[PASS] missing stake drops the ROI line" in proc.stdout
+    assert "[PASS] missing stake drops the units line" in proc.stdout

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, a select from before the units column leaves the curve off and drops the ROI and units lines from the share; the hero uses that share; model rows sort by model id; the tally rollback is a read-then-write |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #964's risked fix (`cc017a11`) merged into the hero branch; the return cell reads `roi`; a missing units column dashes the hero and hides the curve |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, posted risked is WIN/LOSS only: snapshot through 2026-10-15 is 918.2090 (the 917.1090 figure is one −110 loss earlier); 106 NO_ACTION and 30 ungraded would have made 1071.8475; functions are their own migration; the app select falls back if the columns are missing |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master merged into #964 (`07c994cb`); that branch merged into #983 so the hero diff is the hero files; both stay drafts |
