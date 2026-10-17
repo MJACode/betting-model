@@ -522,3 +522,20 @@ and all land before any cell is graded:
   deadline dates; F6b's points distribution (the spread of a player's points around his
   season average on earlier seasons); F1's roster, minutes and injury-probability settings
   (in the lab's docstring).
+
+**Coverage after the purchase, 2026-10-17 03:46Z** (before any cell is graded). The purchase
+bought 5,736 extra-hour fetches and 1,552 gap fetches: 218,670 credits, balance 2,300,945
+afterwards. Measured on the refreshed cache with `python -m scripts.nba_game_harness
+--coverage`: the share of each season's games with a decision at each point.
+
+| Season | A (15Z) | B (3–6 h) | C (60–180 min) | D (45–75 min) |
+|---|---|---|---|---|
+| 2020-21 | 0.996 | 1.000 | 1.000 | 0.996 |
+| 2021-22 | 1.000 | 1.000 | 1.000 | 0.994 |
+| 2022-23 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2023-24 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2024-25 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2025-26 | 0.999 | 1.000 | 1.000 | 1.000 |
+
+The D gate (≥ 95% in every choosing season) passes in all four. Of 2,733,316 full-game rows,
+2,732,723 join their purchase record exactly; 593 (0.02%) were placed by their stamp.
