@@ -438,3 +438,32 @@ def test_a_past_average_miss_does_not_move_the_centre():
     w, _, _ = dist.probs(np.array([0.0]), np.array([0.5]))
     wn, _, _ = H.probs_at(np.array([0.0]), np.array([12.0]), np.array([0.5]))
     assert abs(w[0] - wn[0]) < 0.02 and abs(dist.mean - 5.0) < 0.5
+
+
+def test_a_cell_reports_its_pooled_walk_forward_and_writes_its_bets(tmp_path, monkeypatch):
+    # the two-game fixture from the whole-cell test, run with the bet write-out on
+    monkeypatch.setenv("NBA_GAME2_BETS", str(tmp_path))
+    games = pd.DataFrame([
+        {"game_id": "G", "season": 2024, "game_date": "2024-01-15", "tip": TIP,
+         "home_team": "BOS", "away_team": "NYK", "home_score": 110, "away_score": 100},
+        {"game_id": "G2", "season": 2026, "game_date": "2024-01-16", "tip": TIP + pd.Timedelta(days=1),
+         "home_team": "LAL", "away_team": "DEN", "home_score": 102, "away_score": 100}])
+    q = pd.DataFrame([_q("fanduel", "spreads", 60, 66, -4.5, -110, -110)])
+    q2 = q.assign(game_id="G2", season=2026, tip=TIP + pd.Timedelta(days=1),
+                  fetch_at=q["fetch_at"] + pd.Timedelta(days=1),
+                  snapshot_at=q["snapshot_at"] + pd.Timedelta(days=1))
+    quotes = pd.concat([q, q2], ignore_index=True)
+    f = quotes[["game_id", "tip", "fetch_at"]].drop_duplicates()
+    f = f.assign(lead_min=(f["tip"] - f["fetch_at"]).dt.total_seconds() / 60)
+    data = H.Data(games=games, quotes=quotes, fetches=f)
+    t, off = H.point_offers(data, "D")
+    model = pd.DataFrame({"game_id": ["G", "G2"], "market": "spreads", "mu": [9.0, 9.0],
+                          "sigma": 12.0, "p_home": np.nan})
+    cand = H.fair_offers(off, model)
+    r = H.run_cells(data, "test", "D", cand, cand, cuts=[0.0], sides_by_market={"spreads": ["home"]})[0]
+    # 2024 is a choosing season and 2026 the confirmation: pooled, both count
+    assert r["n_choose"] == 1 and r["n_confirm"] == 1 and r["pool_n"] == 2
+    assert r["pool_units"] == pytest.approx(1.0 - 1.1)
+    assert r["pool_seasons_counted"] == 0               # neither season has 30 bets
+    files = list(tmp_path.glob("bets_test_D_spreads_*.parquet"))
+    assert len(files) == 1 and len(pd.read_parquet(files[0])) == 2

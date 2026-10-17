@@ -500,6 +500,14 @@ def p_one_sided(b: pd.DataFrame) -> float:
     return p
 
 
+def ci95(b: pd.DataFrame) -> tuple[float, float]:
+    """Whole-day bootstrap 95% interval of ROI (the house standard, §6.7)."""
+    if len(b) == 0 or b["risk"].sum() == 0:
+        return (np.nan, np.nan)
+    x = boot(b)
+    return float(np.percentile(x, 2.5)), float(np.percentile(x, 97.5))
+
+
 def ci90(b: pd.DataFrame) -> tuple[float, float]:
     if len(b) == 0 or b["risk"].sum() == 0:
         return (np.nan, np.nan)
@@ -662,6 +670,18 @@ def cell_report(bets_all: pd.DataFrame, data: Data, cand: pd.DataFrame | None = 
             if (ch["season"] == s).sum() >= 30)
         sides = ch["side"].value_counts(normalize=True)
         r["top_side"], r["top_share"] = str(sides.index[0]), float(sides.iloc[0])
+    # §6.7: every graded season pooled (the choosing seasons and 2025-26).
+    pool_seasons = tuple(choose_seasons) + (CONFIRM,)
+    pl = bets_all[bets_all["season"].isin(pool_seasons)]
+    r["pool"] = summarise(pl)
+    r["pool"]["ci95"] = ci95(pl)
+    per = [(s, pl[pl["season"] == s]) for s in pool_seasons]
+    counted = [(s, x) for s, x in per if len(x) >= 30]
+    r["pool"]["seasons_counted"] = len(counted)
+    r["pool"]["seasons_positive"] = sum(1 for _, x in counted if roi(x) > 0)
+    if close is not None and sig is not None and len(pl):
+        ev = clv(pl, close, sig)
+        r["pool"]["clv_median"] = float(np.nanmedian(ev)) if ev.notna().any() else np.nan
     if len(bets_all):
         still = next_fetch_check(bets_all, data)
         r["units_still_offered"] = float(bets_all.loc[still, "units"].sum())
@@ -812,6 +832,41 @@ def blind_by_real_side(nm: pd.DataFrame, population: set, games: pd.DataFrame,
     return out
 
 
+def blind_pool(nm: pd.DataFrame, population: set, games: pd.DataFrame, seasons,
+               close=None, sig=None) -> dict:
+    """Pooled blind bets per real side (§6.7): ROI and, where a close exists,
+    the median closing-line value, so a cell's own late drift can be told from
+    the market's."""
+    pop = nm[nm["game_id"].isin(population)].drop(columns="side_pick", errors="ignore")
+    out = {}
+    if pop.empty:
+        return out
+    fv = fav_sides(pop)
+    for split, (a, b) in SPLITS.items():
+        for side in (a, b):
+            if split == "fav":
+                if fv.empty:
+                    continue
+                c = pop.merge(fv[["game_id", "market", side]].rename(columns={side: "side_pick"}),
+                              on=["game_id", "market"])
+                bets = choose(c, -np.inf, sides=[side])
+            else:
+                bets = choose(pop, -np.inf, sides=[side])
+            g = grade(bets, games)
+            g = g[g["season"].isin(seasons)] if len(g) else g
+            if not len(g):
+                continue
+            out[f"blind_pool_{side}"] = roi(g)
+            if close is not None and sig is not None:
+                ev = clv(g, close, sig)
+                out[f"blind_pool_clv_{side}"] = (float(np.nanmedian(ev))
+                                                 if ev.notna().any() else np.nan)
+    return out
+
+
+_BET_FILES = [0]
+
+
 def real_side_shares(bets: pd.DataFrame, neutral: pd.DataFrame) -> dict:
     """Shares of a cell's bets on the first side of each split, real sides."""
     out = {}
@@ -855,6 +910,9 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
         nm = neutral[neutral["market"] == market]
         population = set(cm["game_id"])
         blinds = blind_by_real_side(nm, population, data.games, choose_seasons)
+        bpool = blind_pool(nm, population, data.games, tuple(choose_seasons) + (CONFIRM,),
+                           close, sig)
+        dump = []
         for side in sides:
             blind = blind_side(nm, side, data.games)
             blind_ch = (roi(blind[blind["season"].isin(choose_seasons)])
@@ -873,6 +931,12 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                     pl.append(roi(gp[gp["season"].isin(choose_seasons)]) if len(gp) else np.nan)
                 ch, cf = rep["choose"], rep["confirm"]
                 shares = real_side_shares(g[g["season"].isin(choose_seasons)] if len(g) else g, nm)
+                pool_shares = real_side_shares(
+                    g[g["season"].isin(tuple(choose_seasons) + (CONFIRM,))] if len(g) else g, nm)
+                if os.environ.get("NBA_GAME2_BETS") and len(g):
+                    dump.append(g.assign(family=family, point=point, cell_side=side,
+                                         cut_index=k, cut=cut))
+                po = rep["pool"]
                 rows.append({
                     "family": family, "point": point, "market": market, "side": side,
                     "cut_index": k, "cut": cut,
@@ -908,7 +972,27 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                     "clv_median": rep.get("clv_median", np.nan),
                     "clv_share_positive": rep.get("clv_share_positive", np.nan),
                     "clv_n": rep.get("clv_n", 0),
+                    # §6.7, the house standard: every graded season pooled
+                    "pool_seasons": ",".join(str(x) for x in tuple(choose_seasons) + (CONFIRM,)),
+                    "pool_n": po["bets"], "pool_units": po["units"], "pool_roi": po["roi"],
+                    "pool_ci95_lo": po["ci95"][0], "pool_ci95_hi": po["ci95"][1],
+                    "pool_seasons_counted": po["seasons_counted"],
+                    "pool_seasons_positive": po["seasons_positive"],
+                    "pool_clv_median": po.get("clv_median", np.nan),
+                    **{f"pool_share_{k2}": pool_shares.get(k2, np.nan) for k2 in SPLITS},
+                    **{k2: bpool.get(k2, np.nan) for k2 in
+                       [f"blind_pool_{s2}" for pair in SPLITS.values() for s2 in pair]
+                       + [f"blind_pool_clv_{s2}" for pair in SPLITS.values() for s2 in pair]},
                 })
+        if dump:
+            d = Path(os.environ["NBA_GAME2_BETS"])
+            d.mkdir(parents=True, exist_ok=True)
+            _BET_FILES[0] += 1
+            keep = [c for c in ("game_id", "season", "game_date", "T", "market", "side", "book",
+                                "line", "price", "ev", "p_win", "result", "units", "risk",
+                                "family", "point", "cell_side", "cut_index", "cut") if c in dump[0]]
+            pd.concat([x[keep] for x in dump], ignore_index=True).to_parquet(
+                d / f"bets_{family}_{point}_{market}_{_BET_FILES[0]:04d}.parquet")
     return rows
 
 
