@@ -56,7 +56,6 @@ import {
   fetchTeamStats,
   fetchTonightMatchups,
   fetchWindowTotals,
-  invalidateNhlSkaterCache,
 } from '@/lib/queries';
 import { bookLabel, bookName, booksLabel, booksName, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
@@ -102,7 +101,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, etDate, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -151,6 +150,13 @@ import {
   type TonightSlate,
 } from '@/lib/statsBoard';
 import { normalizePlayerName } from '@/lib/playerNews';
+import {
+  mostCommonPostedLine,
+  nhlBetCaption,
+  nhlEmptyBoardText,
+  nhlLineOnlyTitle,
+  stopForPostedLine,
+} from '@/lib/nhlBoard';
 import {
   defaultStatFor,
   propMarketForStat,
@@ -906,7 +912,6 @@ export function StatsScreen() {
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey, h2hKey]);
 
   const refreshBoard = useCallback(() => {
-    invalidateNhlSkaterCache();
     setSlateReload((n) => n + 1);
     void load();
   }, [load]);
@@ -1024,6 +1029,18 @@ export function StatsScreen() {
   // reads a model for anything — the betslip button lives one tap deeper, on
   // the player's detail screen, which is where a researcher lands anyway.
   const propMarket = propMarketForStat(stat);
+
+  // Shots opens on the line the most players are posted at tonight.
+  // 2.5 (stop 3, "3 or more") is the fallback when nothing is posted.
+  const postedShotsLine = useMemo(() => {
+    if (sport !== 'NHL' || stat?.key !== 'shots') return null;
+    if (!propMarket || propLines.market !== propMarket) return null;
+    return mostCommonPostedLine(propLines.rows);
+  }, [sport, stat, propMarket, propLines]);
+  useEffect(() => {
+    if (postedShotsLine == null) return;
+    setLineN(snapStop(stopForPostedLine(postedShotsLine), rulerScale));
+  }, [postedShotsLine, rulerScale]);
 
   // Prop lines for the WHOLE forward window, not one date. The board is no
   // longer cut to the slate (Matt, 2026-09-12), so a player whose next game is
@@ -1800,20 +1817,20 @@ export function StatsScreen() {
     lineOnlyList.length,
   );
   const slateGameById = useMemo(() => new Map(slateGames.map((g) => [g.game_id, g] as const)), [slateGames]);
-  // The log itself came back empty (nhl_skater_stats can), which is not the
-  // Anytime TD case of a few names the log has no game for. Those keep the
-  // "no games" row. This one says the totals aren't in.
-  const seasonLogEmpty =
-    effectiveMode === 'totals' && rows.length === 0 && lineOnlyList.length > 0;
+  // Declared here, above the line-only rows. The map reads it, and a later
+  // const is a temporal dead zone: the empty-log board throws before paint.
+  const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
+  // Football keeps "Has a line · no games logged". NHL does not: an empty
+  // read is the unapplied game-log grant, and a name the fold missed is
+  // not a player with no games.
+  const nhlLogEmpty =
+    sport === 'NHL' && effectiveMode === 'totals' && rows.length === 0 && lineOnlyList.length > 0;
+  const nhlLinesOnly = sport === 'NHL' && lineOnlyList.length > 0 && effectiveMode === 'totals';
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
       <View>
         <SectionTitle
-          title={
-            seasonLogEmpty
-              ? 'Lines are up. Season totals aren’t in yet.'
-              : 'Has a line · no games logged'
-          }
+          title={nhlLinesOnly ? nhlLineOnlyTitle(nhlLogEmpty) : 'Has a line · no games logged'}
         />
         {lineOnlyList.map((p) => {
           const game = slateGameById.get(p.gameId) ?? null;
@@ -1832,7 +1849,7 @@ export function StatsScreen() {
               hitMode={hitMode}
               oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
               onOddsPress={quote ? () => openBook(quote) : undefined}
-              omitNoGames={seasonLogEmpty}
+              omitNoGames={nhlLinesOnly}
             />
           );
         })}
@@ -1936,14 +1953,13 @@ export function StatsScreen() {
   // tree, and a stale flag here is a clipped control.
   const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
-  // What a BET made from this column is called. Almost always the column's own
-  // name; the market's where the two differ (markets.ts propDisplayLabel).
-  const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
-  // The headline under the ruler, in the mode's own idiom: "25+ Points" in
-  // At Least, "Over 0.5 Hits" in Over (lib/hitMode.ts). Uses the bet name, so
-  // a Goals board says "1+ Anytime Goal" in the caption and in the off-line
-  // explainer, not "1+ Goals".
-  const lineHeadline = hitModeHeadline(lineN, hitMode, betLabel);
+  // NHL says the bet once, in words ("3 or more shots"), on the caption and
+  // on the sheet. Every other sport keeps the ruler's idiom ("25+ Points",
+  // "Over 0.5 Hits").
+  const lineHeadline =
+    sport === 'NHL' && stat
+      ? nhlBetCaption(line, String(stat.key))
+      : hitModeHeadline(lineN, hitMode, betLabel);
 
   // What the tapped pill hands the add-to-betslip sheet: the proposition,
   // every book's price for it, and the off-line explainer when the book's own
@@ -1951,11 +1967,22 @@ export function StatsScreen() {
   const lineSheetInput = useMemo(
     () =>
       lineSheet
-        ? propLineSheetInput(lineSheet, sport, betLabel, lineHeadline, (l, sd) =>
-            modeLineLabel(l, sd, hitMode),
-          )
+        ? {
+            ...propLineSheetInput(
+              lineSheet,
+              sport,
+              betLabel,
+              lineHeadline,
+              sport === 'NHL' && stat
+                ? (l) => nhlBetCaption(l, String(stat.key))
+                : (l, sd) => modeLineLabel(l, sd, hitMode),
+            ),
+            ...(sport === 'NHL' && stat
+              ? { title: `${lineSheet.playerName} ${nhlBetCaption(lineSheet.line, String(stat.key))}` }
+              : {}),
+          }
         : null,
-    [lineSheet, sport, betLabel, lineHeadline, hitMode],
+    [lineSheet, sport, betLabel, lineHeadline, hitMode, stat],
   );
 
   /**
@@ -2101,9 +2128,18 @@ export function StatsScreen() {
         ? `No upcoming ${sport} games, so there is no opponent to compare against yet.`
         : `No ${sport} ${stat?.label ?? ''} in the last 2 seasons against each player's next opponent.`;
     }
+    if (sport === 'NHL') {
+      const hasLines =
+        propMarket != null &&
+        propLines.market === propMarket &&
+        propLines.status !== 'loading' &&
+        propLines.rows.some((r) => r.market === propMarket);
+      const missing = nhlEmptyBoardText(hasLines, betLabel || (stat?.label ?? 'lines'));
+      if (missing && rows.length === 0) return missing;
+    }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
-  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment]);
+  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment, propMarket, propLines, betLabel, rows.length]);
 
   // Teams board. Ahead of the empty-catalog guard below so a sport with no
   // player stat still reaches it, and so NHL's Teams/Goalies view stays one
@@ -2300,7 +2336,7 @@ export function StatsScreen() {
       {!canHitRate && showOdds ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{hitModeHeadline(lineN, hitMode, betLabel)}</Text>
+          <Text style={styles.noLinesText}>{lineHeadline}</Text>
         </View>
       ) : null}
 
@@ -2418,6 +2454,7 @@ export function StatsScreen() {
           that child now and carries the pin; the scroller inside it flexes on
           the horizontal axis, which cannot crush anything. The FlatList below
           stays the one flexible region. */}
+      {sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0 ? null : (
       <View style={[styles.fixedRow, styles.windowStrip]}>
         <ScrollView
           horizontal
@@ -2462,6 +2499,7 @@ export function StatsScreen() {
           </View>
         ) : null}
       </View>
+      )}
       {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
           row and nothing in the strip can shrink (tabCompact is flex: 0, and a
           plain View defaults to flexShrink: 0 in RN), so the time-window chips
@@ -3438,7 +3476,8 @@ function OddsCell({
   // inherits nothing from the row — without the player and the stat it is 25
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  const priceText = formatAmerican(quote.price).replace(/-/g, MINUS);
+  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
@@ -3475,7 +3514,7 @@ function OddsCell({
           style={[styles.oddsText, { color: filled ? c.fg : colors.textPrimary }]}
           numberOfLines={1}
         >
-          {formatAmerican(quote.price)}
+          {priceText}
         </Text>
         <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>

@@ -344,14 +344,19 @@ ACTIVE_MIGRATIONS: list[str] = [
     # run_ledger._abort_orphans, this run_id only, and only while it is
     # still unfinished. Boot closes the next one; this closes the one
     # already open. Does not touch picks, thresholds, or pauses.
-    # Sits before clv_standard_v2: that file reads the live view and stays
-    # last (tests/test_published_record.py).
+    # Sits before clv_standard_v2: that file reads the live view.
+    # Files after it must not rewrite v_public_track_record
+    # (tests/test_published_record.py).
     "abort_deploy_killed_evening_2026_10_16.sql",
     # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
     # is the market-edge column. Recomputes rows not yet standard_v2 and
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-17: NHL Players board sums, same RPC shape as the other
+    # sports. Does not grant the game log and does not rewrite the record.
+    # The log grant is #962.
+    "add_nhl_skater_window_totals_2026_10_17.sql",
 ]
 
 

@@ -131,7 +131,8 @@ export function needsTouchSet(sport: string, statKey: string | null | undefined)
  * List a priced player the board's read has no row for.
  *
  * Football Anytime TD already does this (the touch set). NHL does it for
- * every skater chip: the log is `nhl_skater_stats`, which can be empty while
+ * every skater chip: the log read can come back empty (the anon grant on
+ * nhl_skater_game_log is #962 and is not applied) while
  * the books have still posted a line, and that player is the row.
  */
 export function listsPricedWithoutLog(sport: string, statKey: string | null | undefined): boolean {

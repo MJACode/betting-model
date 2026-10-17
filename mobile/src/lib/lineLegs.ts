@@ -278,6 +278,9 @@ export interface LineSheetInput {
   spec: LineLegSpec;
   prices: { book: string; price: number }[];
   explainer?: string;
+  /** Sheet title when it should match the board's sentence. The betslip leg
+   *  still uses lineLegLabel. */
+  title?: string;
 }
 
 function bettablePrices<R extends { bookmaker: string }>(

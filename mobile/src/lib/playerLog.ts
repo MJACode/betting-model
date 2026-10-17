@@ -35,7 +35,7 @@ const FOOTBALL = new Set<PlayerLogSport>(['NFL', 'NCAAF']);
 /**
  * Whether a sport has per-player game logs, and therefore a player detail
  * screen. UFC (fight-level, no per-game stat log), NHL (the Stats tab reads
- * nhl_skater_stats; this screen stays closed until the game-log grants
+ * nhl_skater_game_log; this screen stays closed until the game-log grants
  * land) and Golf (v1 has no player leaderboard) do not.
  */
 export function supportsPlayerDetail(sport: Sport): sport is PlayerLogSport {

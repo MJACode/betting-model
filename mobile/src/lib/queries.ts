@@ -1,4 +1,4 @@
-import { createNhlSkaterReader, type NhlSkaterGame } from '@/lib/nhlSkaterTotals';
+import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
 import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
@@ -123,56 +123,31 @@ const UFC_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, wins, ko_wins, sub_wins, ' +
   'sig_strikes, takedowns, knockdowns, sub_attempts';
 
-// The four skater columns the board chips on. Named here, not `*`, so a new
-// column on the table cannot widen the download. Measured 2026-10-16: these
-// four exist; the table held 0 rows.
-const NHL_SKATER_COLUMNS =
-  'player_id, player_name, team, position, season, game_date, game_id, ' +
-  'goals, assists, points, shots_on_goal';
-
 /**
- * One season of nhl_skater_stats, paged. The read is per GAME, so a team
- * filter does not belong on the request — the reader keeps a skater by his
- * newest team after the window is cut.
+ * Season or last-N skater totals from player_window_totals_nhl.
  *
- * Row count on 2026-10-16: 0. A filled season is tens of thousands of rows.
- * `nhlSkaters` remembers the pages per season so a window change does not
- * page them again. A server-side sum needs a migration; there isn't one.
+ * The same shape as the other sports: one row per player, summed in SQL,
+ * p_window null for the season. The function reads nhl_skater_game_log
+ * (`shots`, regular season, season = the ending year). The first label
+ * with rows wins. The log's anon grant is #962 and is not applied; until
+ * it is, this read comes back empty.
  */
-function fetchNhlSkaterGames(season: number): Promise<NhlSkaterGame[]> {
-  return fetchAllPages<NhlSkaterGame>(
-    (from, to) =>
-      supabase
-        .from('nhl_skater_stats')
-        .select(NHL_SKATER_COLUMNS)
-        .eq('season', season)
-        .order('player_id')
-        .order('game_date')
-        .order('game_id')
-        .range(from, to),
-    (r) => `${r.player_id ?? ''}:${r.game_date}:${r.game_id ?? ''}`,
-  );
-}
-
-const nhlSkaters = createNhlSkaterReader({ fetchGames: fetchNhlSkaterGames });
-
-/** Drop the remembered season pages. Pull-to-refresh calls this. */
-export function invalidateNhlSkaterCache(): void {
-  nhlSkaters.invalidate();
-}
-
-/** Season or last-N skater totals. First season label that has any games. */
-function fetchNhlSkaterBoard(
+async function fetchNhlSkaterBoard(
   calendarYear: number,
   window: number | null,
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  return nhlSkaters.board(
-    calendarYear,
-    monthET(),
-    window,
-    hasTeams(teams) ? teams : null,
-  );
+  const fn = 'player_window_totals_nhl';
+  for (const s of nhlSeasonCandidates(calendarYear, monthET())) {
+    const rows = await pageRpc<SeasonTotalsRow>(
+      fn,
+      { p_season: s, p_window: window },
+      teams,
+      totalsRowKey,
+    );
+    if (rows.length) return rows;
+  }
+  return [];
 }
 
 /**
@@ -438,8 +413,8 @@ export async function fetchRecentGames(
     }
     return [];
   }
-  // UFC / GOLF have no log. NHL hit rate stays off (no game-log grant);
-  // the averages board reads nhl_skater_stats in fetchWindowTotals.
+  // UFC / GOLF have no log. NHL hit rate stays off. The averages board
+  // reads player_window_totals_nhl in fetchWindowTotals.
   return [];
 }
 

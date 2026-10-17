@@ -106,11 +106,13 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'def_tfl', label: 'TFL', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_pd', label: 'Passes Defended', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_interceptions', label: 'Interceptions', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
-  // ── NHL skaters (nhl_skater_stats). Columns checked 2026-10-16:
-  //    goals, assists, points, shots_on_goal all exist. Blocked shots does
-  //    not, so it is not a chip. Goals is the book's anytime-scorer market
-  //    (player_goal_scorer_anytime), stored as over 0.5.
-  { key: 'shots_on_goal', label: 'Shots', sport: 'NHL', group: 'NHL', defaultLine: 2.5 },
+  // ── NHL skaters. player_window_totals_nhl reads nhl_skater_game_log.
+  //    The shots column is `shots` (not shots_on_goal). Season on that
+  //    table is the ending year. Blocked shots is not a chip. Goals is
+  //    the book's anytime-scorer market, stored as over 0.5. defaultLine
+  //    2.5 is the fallback when no shots line is posted; the board uses
+  //    tonight's most common posted line when there is one.
+  { key: 'shots', label: 'Shots', sport: 'NHL', group: 'NHL', defaultLine: 2.5 },
   { key: 'points', label: 'Points', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },
   { key: 'goals', label: 'Goals', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },
   { key: 'assists', label: 'Assists', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },
@@ -185,7 +187,7 @@ export function defaultStatFor(sport: Sport): StatDef | null {
     sport === 'WNBA' || sport === 'NBA' ? 'points'
     : sport === 'UFC' ? 'wins'
     : sport === 'NFL' || sport === 'NCAAF' ? 'passing_yards'
-    : sport === 'NHL' ? 'shots_on_goal'
+    : sport === 'NHL' ? 'shots'
     : 'hits';
   const list = statsForSport(sport);
   return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
@@ -392,7 +394,7 @@ const STAT_KEY_TO_MARKET: Record<string, string> = {
   // NHL skater chips. Keyed sport:key so `points` and `assists` cannot
   // resolve a basketball column onto an NHL market. Goals is the anytime
   // scorer (config.PROP_MARKETS_NHL), not a numbered player_goals market.
-  'NHL:shots_on_goal': 'player_shots_on_goal',
+  'NHL:shots': 'player_shots_on_goal',
   'NHL:points': 'player_points',
   'NHL:goals': 'player_goal_scorer_anytime',
   'NHL:assists': 'player_assists',

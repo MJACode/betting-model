@@ -71,7 +71,7 @@ export function AddLineSheet({
 
   // The title IS the proposition — the exact string the betslip's leg card
   // will show, so the slip entry is recognisable from here.
-  const title = spec ? lineLegLabel(spec) : '';
+  const title = input?.title ?? (spec ? lineLegLabel(spec) : '');
   const matchup = matchupForLeg(game);
 
   const act = () => {
