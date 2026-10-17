@@ -2074,6 +2074,13 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }
 
+/**
+ * Recent finished games for a team with no sport filter.
+ *
+ * Do not use this for a form strip. 'PHI' is the Phillies, the Eagles and the
+ * Flyers, and the newest rows mix all three. The pick-detail strip uses
+ * fetchTeamRecentGamesForSport.
+ */
 export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
   const { data, error } = await supabase
     .from('games')

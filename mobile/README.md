@@ -65,7 +65,7 @@ src/hooks/
   usePlacedPicks         AsyncStorage map<pick_id, override>
   useTodayPicks          Today's picks joined with games + weather
   usePerformance         Settled picks × placed-flags rolled up by day
-  useTeamTrends          Last 25 games per team, bucketed L3/5/10/20/season
+  useTeamTrends          Last 25 finished games in the pick's sport, L3/5/10/20/season
   usePlayerTrends        Last 25 player_game_log rows for one player
 src/screens/
   PicksScreen            Tab 1: ALL picks today

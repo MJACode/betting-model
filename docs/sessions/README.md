@@ -19,6 +19,10 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master (`233c891c`, NHL skater prop lines #984) merged into the form-strip branch; session logs keep both sides, newest first |
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master (`9175740c`, NHL Stats-tab views #962, after Record headline #983) merged into the form-strip branch; session logs keep both sides, newest first |
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, form strip: 20 cross-season games are L20 and All; 11–19 are L11–L19 and All; an unknown season says "Only 4 games. Every column after L3 uses those 4." and does not say so far |
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, pick detail form strip: the fifth column says Season only when the games are the whole current season, and L25 only when they are the last 25 |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984 merged origin/master `9175740c` (#962, with #964/#983 already in that history); skater window totals follow the NHL stats views; published_record_units stays last |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: the two-line odds caption is NHL only; a whole-number off-line sentence says Over 2, not 2.5 or more |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: an off-line NHL sheet keeps the different-bet warning and then says how the book lists the line; half-point wording only; the pill caption may wrap to two lines |
@@ -112,6 +116,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, a late Anytime TD touch set cannot replace the board on screen; the player stepper stays on the card at the largest type size |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, every NHL model assessed for CLV and expected value: a name defect inflated the prop backtests (35% of the two-a-night case); game models clear no cut; four NHL prop bets a night (mike); a CLV-only final prop snapshot; CLV for picks at a line DraftKings never hung; `nhl_research` worker job |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, Anytime TD board keeps every ball-carrier (16 hidden on TB@DAL); player stepper snaps 51→50, typed line entry |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail form strip: one sport, scoring unit by sport, short-window count in the note, VoiceOver per cell, season note under the strip |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card for NBA/WNBA (G/F/C, 15+ min) and NCAAF; daily position refresh; basketball dry run 2: 496/609 NBA, 213/243 WNBA matched |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
