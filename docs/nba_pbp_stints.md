@@ -75,6 +75,11 @@ and join to `nba_player_game_adv` the same way, but are not in `games`.
   within 30 seconds), and 29 are raised or lowered because the running score lags or leads by a
   play or two (worst: NBA_2024-02-14_SAS_DAL's 4th quarter). That is the price of those games
   summing to their final: a few points sit on the neighbouring scoring play of the same side.
+  **Only the points are corrected.** In those 18 games the segments' attempts, makes and
+  possessions still count ESPN's duplicated plays (checked 2026-10-17 against NBA.com's box on
+  the 21 team-games affected: threes made differ on 8, free throws made on 8, field-goal
+  attempts on 16; a control of 762 other team-games differs on none for makes). A shot-level
+  or three-point-luck reader should exclude `points_source = 'espn_running_score'` games.
   **Not everywhere:** the running score lags the play that scored often enough that crediting
   each scoring row with the rise on that row broke the total in 179 of 2018-19's 1,305 games
   whose plays add up, and 63 of 2025-26's 1,319. Where the running score is short too (9
