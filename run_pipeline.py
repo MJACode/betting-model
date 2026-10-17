@@ -1383,13 +1383,14 @@ def step_nba_prop_projection(dry_run: bool = False) -> bool:
 def step_nba_total_luck(dry_run: bool = False) -> bool:
     """NBA full-game totals, overs (`nba_total_luck`): the shooting-luck gap.
 
-    Decides each regular-season game once, on the last refresh pass whose
-    odds fetch is 60-180 minutes before tip, and writes the over at the best
-    bettable price when the luck-adjusted projected total is at least 3 points
-    above the raw one (scripts/nba_total_luck_card.py). LIVE, no write switch
-    (mike, 2026-10-17). Runs only in the refresh pass, right after the odds
-    fetch, under a time limit there (scripts/refresh_pass.sh STEP_TIMEOUT_S).
-    A pass with no game to decide writes nothing and logs why.
+    Decides each regular-season game once, on an odds fetch that landed 60-66
+    minutes before tip, and writes the over at the best bettable price when
+    the luck-adjusted projected total is at least 3 points above the raw one
+    (scripts/nba_total_luck_card.py). LIVE, no write switch (mike,
+    2026-10-17). Runs only in the NBA totals window job, right after that
+    job's own fetch, under a time limit there
+    (scheduler.run_nba_total_luck_window). A run with no game to decide
+    writes nothing and logs why.
     """
     try:
         from scripts.nba_total_luck_card import run_card

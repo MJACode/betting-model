@@ -44,24 +44,36 @@ THE RULE, per regular-season game:
      throws with their attempts times the league's 3P% and FT% over the same
      season's games before the date. The offence is left as played.
      EVERY scheduled game of the season before the date must have its final
-     score and both teams' box scores, as every game did in the lab; else the
-     game is declined, 'score_missing' or 'box_missing' (missing_inputs).
+     score and both teams' box scores, and each team's box points must add up
+     to its final score, as every game did in the lab; else the game is
+     declined, 'score_missing', 'box_missing' or 'box_mismatch'
+     (missing_inputs). Only regular-season games count, as in the lab: a game
+     the schedule does not list counts only on a regular-season day with no
+     other kind of game on it, so the NBA Cup final never does
+     (regular_season).
   2. PROJECTION: pace = mean of the two teams' possessions per game;
        total = pace/100 x [ORtg_H + DRtg_A + ORtg_A + DRtg_H - 2 x league rating]
      gap = adjusted total - raw total, in points.
   3. BOTH TEAMS NEED 10+ GAMES this season (CLAUDE.md section 3). The first
      bets therefore come in mid-November.
   4. DECISION TIME (decision point C: "the newest fetch 60-180 minutes before
-     tip"): the LAST scheduled refresh pass that starts at least 60 minutes
-     before tip (timing / is_last_look below), on the fetch that pass stored.
-     The lab's C fetch sat at exactly 60 minutes on 609 of 611 bets. Over the
-     1,206 scheduled 2026-27 regular-season games (the research cache's
-     nba_schedule, read 2026-10-17): 1,029 are decided by the pass exactly 60
-     minutes out (every tip from 7:00 pm ET on: the evening passes run every
-     ten minutes), 35 by one 73 minutes out (afternoon half-hour tips) and 142
-     by one 103 minutes out (tips on the hour from noon to 6:00 pm: the
-     hourly passes run at :17). Each game is decided ONCE (the card's
-     ledger); a later pass, a moved line or a better price writes nothing.
+     tip"): the newest fetch, when it landed 60 to 66 minutes before tip and
+     is at most 5 minutes old (timing below). A job of its own makes that
+     fetch: scheduler.run_nba_total_luck_window runs every minute, 24x7, and
+     when an undecided game is 61-66 minutes from tip it fetches the NBA board
+     and runs the card (scripts/nba_total_luck_window.py). The first tick in
+     the window decides, so a game on a whole-minute tip is decided on a fetch
+     about 66 minutes out, and five more ticks follow if that one is skipped
+     or fails. Until 2026-10-17 the card rode the refresh pass and decided
+     only on the pass exactly 60 minutes out (73 or 103 minutes for afternoon
+     tips), so a pass that never started lost the game: 27 of the 504 evening
+     ticks over 2026-10-03..16 never started (production pipeline_runs, read
+     2026-10-17). The lab's C fetch sat at exactly 60 minutes on 609 of
+     611 bets; the same cell decided 45-75 minutes out (decision point D) made
+     506 bets at +9.7% against C's +10.1% (docs/nba_models_2026.md 6.7), so a
+     fetch 66 minutes out stays inside the graded effect. Each game is decided
+     ONCE (the card's ledger); a later tick, a moved line or a better price
+     writes nothing.
   5. THE OFFER (exactly the harness's): at decision time T, each book's newest
      quote from a fetch at or before T and no older than 60 minutes; the
      market's fair line is Pinnacle's no-vig total when Pinnacle quotes it
@@ -82,11 +94,14 @@ pushes counted in the denominator. For 2026-27 it is fitted on 2021-22 through
 0.5050, so the uplift is +0.0659 (scripts/nba_total_luck_build.py stores both
 per season). The model decides on that number (config.MODELS_ON_OWN_PROBABILITY):
 it has no record, so a promoted map would be the offset borrowed from other
-models. Its EV floor (config.MODEL_OWN_EV_FLOOR, 0.00) is not a second cut:
-on the 508 graded bets the written EV is +0.090 at the median and +0.030 at
-the second smallest; the one bet under zero (-0.012, a loss of 1.1 units) is
-the only one it removes. A negative smallest is floored at 0.00, the house
-rule for every model's own floor.
+models. Its EV floor (config.MODEL_OWN_EV_FLOOR, 0.00) is applied to the EV
+WITH THE PUSH REFUNDED (p x decimal - 1 + P(push), the card's gate), because
+the probability counts pushes in its denominator and a push on a whole-number
+total returns the stake. On the 508 graded bets, at the 2026-27 uplift, that
+EV is +0.011 at the smallest, +0.038 at the second smallest and +0.100 at the
+median: the floor removes none of them. Counted the other way (a push as a
+loss) one bet fell under zero, 2023-01-24 DEN at NOP, over 232.0 at -110:
+-0.012 only because its 0.024 chance of a push was scored as a loss.
 
 THE ARTIFACT (models/saved/, ARTIFACT_PATH): the residual sample (final total
 minus Pinnacle's closing total, per season, 2020-21 to 2025-26) and the
@@ -98,9 +113,8 @@ from __future__ import annotations
 
 import pickle
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -118,36 +132,19 @@ ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_PATH = "models/saved/nba_total_luck_20261017_090305.pkl"
 ARTIFACT_KIND = "nba_total_luck"
 
-# Decision point C: the newest fetch 60-180 minutes before tip, the lead read
-# at the fetch's REQUESTED instant. In the archive that is the purchase
-# ledger's requested_at (the lab's C sat at exactly 60 minutes on 609 of 611
-# bets); live it is the refresh pass's scheduled start, because the pass asks
-# for the slate at its cron minute and the rows land seconds later (measured
-# 2026-10-17 on NBA totals: created_at 8-12 seconds after the minute). Read
-# from created_at instead, the pass exactly 60 minutes out would read 59.8 and
-# every tip on a ten-minute mark would be decided one pass (10 minutes) early,
-# and a 7:00 pm ET tip at the 5:17 pm pass, 43 minutes early.
-DECISION_LEAD_MIN = (60.0, 180.0)
-# A fetch is attributed to the scheduled pass that started at most this long
-# before it; a fetch with no scheduled start that close (a boot catch-up pass)
-# is its own instant.
-PASS_FETCH_MAX_LAG_MIN = 5.0
-# A fetch older than this is not this pass's: the odds step failed. Nothing is
-# decided on it.
-STALE_FETCH_MAX_MIN = 15.0
-
-_ET = ZoneInfo("America/New_York")
-
-# The refresh passes the card runs in (scheduler.py: hourly_refresh,
-# overnight_refresh, evening_refresh), as (ET hours, minutes). Pinned to the
-# scheduler's own triggers by tests/test_nba_total_luck.py, so a cadence change
-# there fails the suite until this is updated with it.
-REFRESH_PASS_CRON = (
-    ("hourly_refresh", tuple(range(7, 18)), (17,)),
-    ("overnight_refresh", tuple(range(0, 6)), (17,)),
-    ("evening_refresh", tuple(range(18, 24)), (0, 10, 20, 30, 40, 50)),
-)
-
+# Decision point C is "the newest fetch 60-180 minutes before tip". Live, the
+# game is decided on the newest fetch when it landed in [60, 66) minutes before
+# tip, read at the rows' own created_at (the instant the fetch was stored, a few
+# seconds after it was asked for, so the lead is never overstated). The window
+# job (scripts/nba_total_luck_window.py) fetches when a game is 61-66 minutes
+# out (a minute above the bottom, so a fetch that takes up to a minute to land
+# still counts), so the first tick in the window decides and up to five more
+# can. Pinned by tests/test_nba_total_luck.py against the job's own trigger:
+# the window is at least two ticks wide.
+DECISION_LEAD_MIN = (60.0, 66.0)
+# A fetch older than this is not this tick's: the fetch step failed. Nothing is
+# decided on it; the next tick fetches again.
+STALE_FETCH_MAX_MIN = 5.0
 
 # ── F4: team box scores and as-of ratings (moved from scripts/nba_game2_luck.py) ──
 
@@ -324,66 +321,28 @@ def newest_season(art: dict) -> int:
 
 # ── decision timing ──────────────────────────────────────────────────────────
 
-def pass_starts(after: datetime, until: datetime) -> list[datetime]:
-    """Every refresh pass start strictly after `after` and at or before
-    `until` (REFRESH_PASS_CRON, Eastern time), as aware UTC."""
-    out = []
-    # Step in UTC: adding a minute to an Eastern wall time skips the repeated
-    # hour when the clocks go back.
-    t = after.astimezone(timezone.utc).replace(second=0, microsecond=0)
-    if t <= after:
-        t += timedelta(minutes=1)
-    while t <= until:
-        et = t.astimezone(_ET)
-        if any(et.hour in hours and et.minute in minutes for _, hours, minutes in REFRESH_PASS_CRON):
-            out.append(t)
-        t += timedelta(minutes=1)
-    return out
-
-
-def next_pass_start(after: datetime) -> datetime:
-    got = pass_starts(after, after + timedelta(days=1))
-    return got[0]
-
-
 def lead_minutes(tip: datetime, at: datetime) -> float:
     return (tip - at).total_seconds() / 60.0
 
 
-def requested_at(fetch_at: datetime) -> datetime:
-    """The instant a stored fetch was asked for: the latest scheduled refresh
-    pass start at most PASS_FETCH_MAX_LAG_MIN before it, else the fetch
-    itself (a pass off the schedule)."""
-    got = pass_starts(fetch_at - timedelta(minutes=PASS_FETCH_MAX_LAG_MIN), fetch_at)
-    return got[-1] if got else fetch_at
-
-
-def is_last_look(tip: datetime, asked: datetime) -> bool:
-    """True when the next scheduled refresh pass after `asked` starts under
-    60 minutes before tip: no later pass can decide the game."""
-    return lead_minutes(tip, next_pass_start(asked)) < DECISION_LEAD_MIN[0]
-
-
 def timing(tip: datetime, fetch_at: datetime, now: datetime) -> str:
-    """Where a game stands at this pass: 'decide', or why not. The lead is
-    read at the fetch's requested instant (requested_at).
+    """Where a game stands on this run: 'decide', or why not. `fetch_at` is the
+    game's newest stored fetch (odds.created_at).
 
-    'too_early'   the newest fetch was asked for more than 180 minutes out
-    'too_late'    under 60 minutes out (or the rows landed after tip): no
-                  decision is possible
-    'stale_fetch' the newest fetch is not this pass's (the odds step failed)
-    'deferred'    inside C, but a later scheduled pass is still 60+ minutes out
+    'too_late'    the fetch landed under 60 minutes before tip (or after it):
+                  no decision is possible any more
+    'too_early'   the fetch landed 66 or more minutes before tip: a later tick
+                  fetches inside the window
+    'stale_fetch' the fetch is more than 5 minutes old (the fetch step failed):
+                  the next tick fetches again
     """
-    asked = requested_at(fetch_at)
-    lead = lead_minutes(tip, asked)
+    lead = lead_minutes(tip, fetch_at)
     if lead < DECISION_LEAD_MIN[0] or fetch_at >= tip:
         return "too_late"
-    if lead > DECISION_LEAD_MIN[1]:
+    if lead >= DECISION_LEAD_MIN[1]:
         return "too_early"
     if (now - fetch_at).total_seconds() / 60.0 > STALE_FETCH_MAX_MIN:
         return "stale_fetch"
-    if not is_last_look(tip, asked):
-        return "deferred"
     return "decide"
 
 
@@ -398,8 +357,8 @@ def quote_frame(rows: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
     """Stored `odds` rows (QUOTE_ROW_COLS; the links may be absent) -> the
     harness's quote frame, through scripts.nba_game_harness.frame_quotes.
 
-    The fetch instant is `created_at`: one refresh pass stores every book of
-    its fetch in one transaction, stamped with that transaction's start. In
+    The fetch instant is `created_at`: one odds fetch stores every book in
+    one transaction, stamped with that transaction's start. In
     the archive the same instant comes from the purchase ledger, which the
     replay of the lab writes into created_at before calling this.
     Pre-game totals only ('open'); `games` carries season, game_date and tip.
@@ -450,8 +409,8 @@ class Decision:
     detail: str
 
 
-DIAG_KEYS = ("games", "score_missing", "box_missing", "early_season", "gap_below_cut",
-             "no_fair_line", "no_offer", "bets")
+DIAG_KEYS = ("games", "score_missing", "box_missing", "box_mismatch", "early_season",
+             "gap_below_cut", "no_fair_line", "no_offer", "bets")
 
 # ── completeness: the gap is the lab's only when every input game is present ─
 #
@@ -465,8 +424,15 @@ DIAG_KEYS = ("games", "score_missing", "box_missing", "early_season", "gap_below
 # 2.992 (no bet) to 3.008 (a bet), and a missing previous night moved gaps by
 # up to 0.68 points. So a game is decided only when, for EVERY scheduled
 # regular-season game of its season before its Eastern date:
-#   * the game has a final score (else 'score_missing'), and
-#   * a scored game has a box score for both teams (else 'box_missing').
+#   * the game has a final score (else 'score_missing'),
+#   * a scored game has a box score for both teams (else 'box_missing'), and
+#   * each team's box points add up to its final score (else 'box_mismatch').
+#     A player-game stored twice (the results ingestor's 'espn:<id>' fallback
+#     row and a later NBA.com row for the same player) or a box ESPN never
+#     finished is summed into the team's possessions and ratings and into the
+#     league's rates for the rest of the season. In the lab every team's box
+#     added up: 19,038 of 19,038 team-games, 2018-19..2025-26 (research cache,
+#     measured 2026-10-17), so this declines nothing the lab bet.
 # A game ESPN reported postponed or cancelled (nba_schedule.status_text,
 # written by data/ingestors/nba_results_ingestor.py or stats.nba.com's "PPD")
 # was not played and is not owed. A game still unscored more than
@@ -486,6 +452,52 @@ def _known_team(x) -> bool:
     return isinstance(x, str) and x.strip().upper() not in _NOT_A_TEAM
 
 
+# ── the regular season: the lab's population, and nothing else ──────────────
+#
+# The lab's games are nba_games' regular-season rows: 1,230 a full season, the
+# NBA Cup quarterfinals and semifinals included (they count in the standings),
+# the Cup final never (it does not). Live, the `games` table also holds every
+# event the odds feed quoted, under NBA_<date>_<away>_<home>, and nba_schedule
+# (loaded by hand from a residential machine) lists the knockout games only as
+# placeholders with no teams. For 2026-27 (production, read 2026-10-17):
+# regular-season days 2026-10-20..2027-04-11, four quarterfinal and two
+# semifinal placeholders typed 'regular' on 12-04, 12-05 and 12-08, and the
+# final as 'cup_final' on 12-11. So a `games` row the schedule does not list
+# counts as a regular-season game only when its date lies between the season's
+# first and last regular-season days and no other kind of game is scheduled
+# that day. No past date carried both (research cache, 2018-19..2026-27), so
+# the rule drops no game the lab had; it drops the Cup final, and a preseason,
+# play-in or playoff row the schedule has not caught up with.
+
+def regular_season(rows: pd.DataFrame, days: pd.DataFrame) -> pd.DataFrame:
+    """The rows of `games` that are regular-season games.
+
+    rows  game_id, season, game_date and game_type: the type of the matching
+          nba_schedule row, None when the schedule does not list the game
+    days  season, game_date, game_type: the season's nba_schedule rows, of
+          every type (placeholders included)
+    A listed game counts when the schedule calls it 'regular'; an unlisted one
+    as the comment above says. With no schedule for the season, nothing counts.
+    """
+    if rows is None or rows.empty:
+        return rows
+    d = days.assign(_d=days["game_date"].astype(str).str[:10],
+                    season=pd.to_numeric(days["season"], errors="coerce"))
+    reg = d[d["game_type"] == "regular"].groupby("season")["_d"].agg(["min", "max"])
+    other = {(int(a), b) for a, b in
+             d.loc[d["game_type"] != "regular", ["season", "_d"]].itertuples(index=False)}
+    season = pd.to_numeric(rows["season"], errors="coerce")
+    day = rows["game_date"].astype(str).str[:10]
+    listed = rows["game_type"].notna()
+    lo = season.map(reg["min"]).fillna("9999-12-31")
+    hi = season.map(reg["max"]).fillna("0000-01-01")
+    on_other = pd.Series([(int(a), b) in other if a == a else True
+                          for a, b in zip(season, day)], index=rows.index, dtype=bool)
+    keep = (listed & (rows["game_type"] == "regular")) | (
+        ~listed & season.notna() & (day >= lo) & (day <= hi) & ~on_other)
+    return rows[keep]
+
+
 def scheduled_games(rows: pd.DataFrame) -> pd.DataFrame:
     """The season's scheduled regular-season games, one row per game_id:
     (game_id, game_date, postponed). `rows` may list a game twice (nba_schedule
@@ -503,23 +515,43 @@ def scheduled_games(rows: pd.DataFrame) -> pd.DataFrame:
     return out[cols]
 
 
+def box_mismatches(final_games: pd.DataFrame, tb: pd.DataFrame) -> set[str]:
+    """Boxed games where either team's summed box points differ from its final
+    score (final_games' home_score / away_score)."""
+    if tb.empty:
+        return set()
+    f = final_games[["game_id", "home_team", "away_team", "home_score", "away_score"]]
+    m = tb[["game_id", "team", "pts"]].merge(f, on="game_id")
+    score = pd.to_numeric(np.where(m["team"] == m["home_team"], m["home_score"],
+                                   m["away_score"]), errors="coerce")
+    bad = ~np.isclose(pd.to_numeric(m["pts"], errors="coerce"), score)
+    return set(m.loc[bad, "game_id"])
+
+
 def missing_inputs(targets: pd.DataFrame, scheduled: pd.DataFrame, final_games: pd.DataFrame,
                    tb: pd.DataFrame) -> dict[str, dict[str, list[str]]]:
-    """game_id -> {'score_missing', 'box_missing', 'presumed_unplayed'}: the
-    game ids of its season, before its Eastern date, that are owed and absent.
+    """game_id -> {'score_missing', 'box_missing', 'box_mismatch',
+    'presumed_unplayed'}: the game ids of its season, before its Eastern date,
+    that are owed and absent, or boxed wrong.
 
     scheduled    scheduled_games(...) for the season (every game, scored or not)
-    final_games  the season's scored regular-season games
+    final_games  the season's scored regular-season games, with their scores
     tb           team_box(box, final_games): a game is boxed only when both
                  teams' rows are there"""
+    for c in ("home_score", "away_score"):
+        if c not in final_games:
+            raise ValueError(f"{MODEL_ID}: final_games needs {c} (the box-integrity check)")
     played = set(final_games["game_id"])
     boxed = set(tb["game_id"])
+    wrong = box_mismatches(final_games, tb)
     sch = scheduled[~scheduled["game_id"].isin(played) & ~scheduled["postponed"]]
     sch_d = pd.to_datetime(sch["game_date"])
     # _d from the subset itself: assigning a Series to an EMPTY frame adopts the
     # Series' index (pandas 3), which filled this with the whole season as NaN.
     unboxed = final_games[~final_games["game_id"].isin(boxed)]
     unboxed = unboxed.assign(_d=unboxed["game_date"].astype(str).str[:10])
+    mism = final_games[final_games["game_id"].isin(wrong)]
+    mism = mism.assign(_d=mism["game_date"].astype(str).str[:10])
     out = {}
     for r in targets.itertuples(index=False):
         d = pd.Timestamp(str(r.game_date)[:10])
@@ -529,6 +561,7 @@ def missing_inputs(targets: pd.DataFrame, scheduled: pd.DataFrame, final_games: 
             "score_missing": sorted(before.loc[~old, "game_id"]),
             "presumed_unplayed": sorted(before.loc[old, "game_id"]),
             "box_missing": sorted(unboxed.loc[unboxed["_d"] < str(d.date()), "game_id"]),
+            "box_mismatch": sorted(mism.loc[mism["_d"] < str(d.date()), "game_id"]),
         }
     return out
 
@@ -551,7 +584,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
                  totals, with link_a / link_b when the card has them
     box          nba_player_game_log rows (game_id, team and the BOX_COLS)
     final_games  the season's final regular-season games (game_id, season,
-                 game_date, home_team, away_team)
+                 game_date, home_team, away_team, home_score, away_score)
     times        game_id, T: each game's decision instant
     scheduled    every scheduled regular-season game of the season, scored or
                  not (scheduled_games(...)): what the completeness check owes.
@@ -617,6 +650,11 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
             diag["box_missing"] += 1
             decisions.append(Decision(gid, T, None, 0,
                                       f"box_missing:{_named(miss['box_missing'])}"))
+            continue
+        if miss["box_mismatch"]:
+            diag["box_mismatch"] += 1
+            decisions.append(Decision(gid, T, None, 0,
+                                      f"box_mismatch:{_named(miss['box_mismatch'])}"))
             continue
         if gap is None:
             diag["early_season"] += 1

@@ -7,10 +7,7 @@ research cache is tests/test_nba_total_luck_replay.py.
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -55,7 +52,10 @@ def _season(n_games: int, opp_fg3m: int = 10, hot_fg3m: int = 18, start="2026-10
         for home, away in pairs:
             gid = f"NBA_{day}_{away}_{home}"
             games.append({"game_id": gid, "season": 2027, "game_date": day,
-                          "home_team": home, "away_team": away})
+                          "home_team": home, "away_team": away,
+                          # each team's final = its box points below
+                          "home_score": 110 if home in ("HOM", "AWY") else 100,
+                          "away_score": 110 if away in ("HOM", "AWY") else 100})
             for team in (home, away):
                 ours = team in ("HOM", "AWY")
                 box.append({"game_id": gid, "team": team, "points": 110 if ours else 100,
@@ -99,11 +99,12 @@ def _decide(art, quotes, gap, tip=None, monkeypatch=None, **kw):
     proj = t.assign(gap_total=gap, gap_margin=0.0)
     monkeypatch.setattr(tl, "f4_projections", lambda targets, tb: proj)
     monkeypatch.setattr(tl, "missing_inputs", lambda targets, *a: {
-        g: {"score_missing": [], "box_missing": [], "presumed_unplayed": []}
+        g: {"score_missing": [], "box_missing": [], "box_mismatch": [], "presumed_unplayed": []}
         for g in targets["game_id"]})
     times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
     empty = pd.DataFrame(columns=["game_id", "team", *tl.BOX_COLS])
-    final = pd.DataFrame(columns=["game_id", "season", "game_date", "home_team", "away_team"])
+    final = pd.DataFrame(columns=["game_id", "season", "game_date", "home_team", "away_team",
+                                  "home_score", "away_score"])
     return tl.decide(t, q, empty, final, times, art, scheduled=final, **kw)
 
 
@@ -283,38 +284,163 @@ def test_the_schedule_is_a_required_input(art):
         tl.decide(_target(), pd.DataFrame(), box, games, pd.DataFrame(), art)
 
 
-def test_the_card_owes_every_scheduled_game_and_every_games_row_the_schedule_lacks():
-    """load_season's owed set: nba_schedule's regular-season rows (scored or
-    not) plus `games` rows the schedule does not list (games added after the
-    schedule was loaded). The scored set no longer needs a start time."""
+def _SeasonConn(games, schedule, box):
+    """load_season's reads answered from frames shaped like the production
+    tables: the replay's own FrameConn, so the unit tests and the replay of the
+    lab read through one copy."""
+    from scripts.nba_total_luck_replay import FrameConn
+    return FrameConn(games, schedule, box)
+
+
+def _cup_world(n_days=50):
+    """A season with every game listed in nba_schedule, plus what the live
+    `games` table holds in December: a quarterfinal the schedule lists only as
+    a placeholder, and the Cup final, which the schedule lists only as a
+    'cup_final' placeholder. Both scored and boxed, the final from a wild
+    night that moves the league's three-point rate."""
+    games, box = _season(n_days, others=True)
+    sched = games.assign(game_type="regular", status_text="Final")
+    qf = {"game_id": "NBA_2026-12-04_OT3_OT1", "season": 2027, "game_date": "2026-12-04",
+          "home_team": "OT1", "away_team": "OT3", "home_score": 100, "away_score": 100}
+    final = {"game_id": "NBA_2026-12-11_OT4_OT2", "season": 2027, "game_date": "2026-12-11",
+             "home_team": "OT2", "away_team": "OT4", "home_score": 100, "away_score": 100}
+    holders = pd.DataFrame([
+        {"game_id": "NBA_2026-12-04_nan_nan", "season": 2027, "game_date": "2026-12-04",
+         "home_team": "NaN", "away_team": "NaN", "game_type": "regular", "status_text": "TBD"},
+        {"game_id": "NBA_2026-12-11_nan_nan", "season": 2027, "game_date": "2026-12-11",
+         "home_team": "NaN", "away_team": "NaN", "game_type": "cup_final", "status_text": "8:00 pm ET"},
+        # the last regular-season day, so December is inside the season
+        {"game_id": "NBA_2027-04-11_OT1_OT2", "season": 2027, "game_date": "2027-04-11",
+         "home_team": "OT2", "away_team": "OT1", "game_type": "regular", "status_text": "8:00 pm ET"},
+    ])
+    extra_box = []
+    for g, fg3 in ((qf, 12), (final, 30)):
+        for team in (g["home_team"], g["away_team"]):
+            extra_box.append({"game_id": g["game_id"], "team": team, "points": 100, "fg_att": 88,
+                              "fg3_made": fg3, "fg3_att": 40, "ft_made": 16, "ft_att": 20,
+                              "offensive_reb": 10, "turnovers": 13})
+    all_games = pd.concat([games, pd.DataFrame([qf, final])], ignore_index=True)
+    all_box = pd.concat([box, pd.DataFrame(extra_box)], ignore_index=True)
+    return all_games, pd.concat([sched, holders], ignore_index=True), all_box
+
+
+def test_the_cup_final_never_enters_the_ratings_and_a_quarterfinal_does():
+    """RULE (the lab's population): regular-season games only. The Cup final
+    is a `games` row the schedule cannot match (its row is a 'cup_final'
+    placeholder with no teams), on a day with a non-regular schedule row: it is
+    in neither the scored set nor the owed set. A quarterfinal, unlisted the
+    same way but on a regular-season day, counts, as it did in the lab."""
     from scripts import nba_total_luck_card as card
+    games, sched, box = _cup_world()
+    final, bx, owed = card.load_season(_SeasonConn(games, sched, box), 2027, "2026-12-20")
+    assert "NBA_2026-12-11_OT4_OT2" not in set(final["game_id"])
+    assert "NBA_2026-12-11_OT4_OT2" not in set(owed["game_id"])
+    assert "NBA_2026-12-11_OT4_OT2" not in set(bx["game_id"])
+    assert "NBA_2026-12-04_OT3_OT1" in set(final["game_id"])
+    assert "NBA_2026-12-04_OT3_OT1" in set(owed["game_id"])
+    # and the final would have moved the gap: the case is not vacuous
+    t = _target("2026-12-15")
+    with_final = tl.f4_projections(t, tl.team_box(box, games))["gap_total"].iloc[0]
+    without = tl.f4_projections(t, tl.team_box(bx, final))["gap_total"].iloc[0]
+    assert with_final != pytest.approx(without)
+
+
+@pytest.mark.parametrize("day,kind,counts", [
+    ("2026-10-15", "preseason", False),    # before the first regular-season day
+    ("2027-04-20", "playoff", False),      # after the last one
+    ("2026-12-11", "cup_final", False),    # a day the schedule gives another kind of game
+    ("2026-12-05", None, True),            # a regular-season day: a game added after the load
+])
+def test_an_unlisted_games_row_counts_only_on_a_regular_season_day(day, kind, counts):
+    days = pd.DataFrame([
+        {"season": 2027, "game_date": "2026-10-20", "game_type": "regular"},
+        {"season": 2027, "game_date": "2027-04-11", "game_type": "regular"},
+        {"season": 2027, "game_date": "2026-10-15", "game_type": "preseason"},
+        {"season": 2027, "game_date": "2026-12-11", "game_type": "cup_final"},
+    ])
+    rows = pd.DataFrame([{"game_id": f"NBA_{day}_AAA_BBB", "season": 2027, "game_date": day,
+                          "game_type": None}])
+    assert (len(tl.regular_season(rows, days)) == 1) is counts, (day, kind)
+    listed = rows.assign(game_type="regular")
+    assert len(tl.regular_season(listed, days)) == 1, "a listed regular game always counts"
+    other = rows.assign(game_type="cup_final")
+    assert tl.regular_season(other, days).empty, "a listed non-regular game never counts"
+    assert tl.regular_season(rows, days.iloc[0:0]).empty, "no schedule, nothing counts"
+
+
+def test_the_slate_prices_an_unlisted_quarterfinal_and_skips_the_cup_final():
+    """The slate applies the same rule: the lab bet Cup quarterfinals and
+    semifinals; the final is not a regular-season game."""
+    from scripts import nba_total_luck_card as card
+    now = _et(2026, 12, 11, 18, 55)
+    tip = _et(2026, 12, 11, 20, 0)
+    qf_now, qf_tip = _et(2026, 12, 4, 18, 55), _et(2026, 12, 4, 20, 0)
 
     class C:
-        def __init__(self):
-            self.sql = []
+        def __init__(self, rows):
+            self.rows = rows
 
         def execute(self, sql, params=None):
-            self.sql.append(" ".join(sql.split()))
-            s = self.sql[-1]
-            if s.startswith("SELECT g.game_id, g.season"):
-                rows = [("G1", 2027, "2026-10-21", "HOM", "AWY")]
-            elif s.startswith("SELECT s.game_id, s.game_date"):
-                rows = [("G1", "2026-10-21", "HOM", "AWY", "Final"),
-                        ("G2", "2026-10-22", "OT1", "OT2", None),
-                        ("G3", "2026-10-22", "OT3", "OT4", None)]
+            q = " ".join(sql.split())
+            if q.startswith("SELECT g.game_id, g.home_team"):
+                out = self.rows
+            elif q.startswith("SELECT DISTINCT season, game_date, game_type"):
+                out = [(2027, "2026-10-20", "regular"), (2027, "2027-04-11", "regular"),
+                       (2027, "2026-12-04", "regular"), (2027, "2026-12-11", "cup_final")]
             else:
-                rows = []
-            return type("R", (), {"fetchall": lambda self_: rows})()
+                raise AssertionError(q[:60])
+            return type("R", (), {"fetchall": lambda self_: list(out)})()
 
-    c = C()
-    final, box, sched = card.load_season(c, 2027, "2026-10-23")
-    assert final["game_id"].tolist() == ["G1"] and list(box.columns)[:2] == ["game_id", "team"]
-    assert sched["game_id"].tolist() == ["G1", "G2", "G3"]
-    owed = next(s for s in c.sql if s.startswith("SELECT s.game_id, s.game_date"))
-    assert "FROM nba_schedule s" in owed and "s.game_type = 'regular'" in owed
-    assert "UNION ALL" in owed and "NOT EXISTS (SELECT 1 FROM nba_schedule" in owed
-    scored = next(s for s in c.sql if s.startswith("SELECT g.game_id, g.season"))
-    assert "commence_time" not in scored
+    skipped = []
+    got = card.slate(C([("NBA_2026-12-11_OT4_OT2", "OT2", "OT4", "2026-12-11", 2027,
+                         tip.isoformat(), None, None)]), now, skipped)
+    assert got == {} and skipped and "NBA_2026-12-11_OT4_OT2" in skipped[0]
+    got = card.slate(C([("NBA_2026-12-04_OT3_OT1", "OT1", "OT3", "2026-12-04", 2027,
+                         qf_tip.isoformat(), None, None)]), qf_now)
+    assert list(got) == ["NBA_2026-12-04_OT3_OT1"]
+
+
+def test_the_card_owes_every_scheduled_game_and_every_unlisted_regular_season_game():
+    """load_season's owed set: nba_schedule's regular-season rows (scored or
+    not) plus the `games` rows the schedule does not list on a regular-season
+    day (games added after the schedule was loaded)."""
+    from scripts import nba_total_luck_card as card
+    games, sched, box = _cup_world()
+    unscored = sched[sched["game_date"] == "2026-11-01"]["game_id"].iloc[0]
+    games = games[games["game_id"] != unscored]
+    final, _, owed = card.load_season(_SeasonConn(games, sched, box), 2027, "2026-12-20")
+    assert unscored in set(owed["game_id"]) and unscored not in set(final["game_id"])
+    assert {"home_score", "away_score"} <= set(final.columns)
+    assert tl.scheduled_games(owed)["game_id"].is_unique
+
+
+def test_a_box_that_does_not_add_up_to_the_final_declines_the_game(art):
+    """RULE (box integrity): each team's box points must equal its final score.
+    A player-game stored twice (an 'espn:<id>' fallback row and a later
+    NBA.com row) adds his line twice to the team's possessions and ratings and
+    to the league's rates; both teams' rows are present, so only the sum shows
+    it. The lab's box added up on 19,038 of 19,038 team-games."""
+    games, box = _season(14, others=True)
+    gid = games[games["home_team"] == "OT3"]["game_id"].iloc[2]
+    dup = box[(box["game_id"] == gid) & (box["team"] == "OT3")].assign(points=0, fg_att=20)
+    doubled = pd.concat([box, dup.assign(points=12)], ignore_index=True)
+    _, _, diag = _complete_case(games, box, games, art)
+    assert diag["box_mismatch"] == 0, "an intact season must not decline"
+    bets, decisions, diag = _complete_case(games, doubled, games, art)
+    assert not bets and diag["box_mismatch"] == 1, decisions
+    assert decisions[0].detail.startswith(f"box_mismatch:1 ({gid})")
+    short = box.copy()
+    short.loc[(short["game_id"] == gid) & (short["team"] == "OT4"), "points"] -= 9
+    _, decisions, diag = _complete_case(games, short, games, art)
+    assert diag["box_mismatch"] == 1, "a short box declines too"
+
+
+def test_the_box_check_needs_the_scores():
+    games, box = _season(12)
+    with pytest.raises(ValueError, match="home_score"):
+        tl.missing_inputs(_target(), tl.scheduled_games(games),
+                          games.drop(columns=["home_score", "away_score"]),
+                          tl.team_box(box, games))
 
 
 # ── the offer: exactly the harness's choice ──────────────────────────────────
@@ -444,12 +570,11 @@ def test_the_artifact_prices_each_season_from_the_seasons_before_it(art):
 
 def test_the_ev_floor_is_not_a_second_cut():
     """RULE (CLAUDE.md 1b): the model carries its own EV floor, and it is not a
-    second cut. Written EV on the 508 graded bets: smallest -0.012 (one bet),
-    next +0.030. A negative smallest is floored at 0.00 (the house rule), so
-    the floor removes that one bet and none other; and every bet it lets
-    through passes the publishers' edge cut (edge = EV / decimal >= 0)."""
+    second cut. The EV the floor reads refunds a push (the gate's p_push). On
+    the 508 graded bets at the 2026-27 uplift that EV is +0.011 at the
+    smallest, +0.038 next, +0.100 at the median, so 0.00 removes none."""
     floor = config.min_ev_for(tl.MODEL_ID)
-    assert floor == 0.0 and floor < 0.030
+    assert floor == 0.0 and floor < 0.011
     assert tl.MODEL_ID in config.MODEL_OWN_EV_FLOOR
     assert config.ACTION_THRESHOLDS[tl.MODEL_ID]["min_edge"] <= floor
     assert config.ACTION_THRESHOLDS[tl.MODEL_ID]["min_prob"] == 0.0
@@ -457,16 +582,15 @@ def test_the_ev_floor_is_not_a_second_cut():
     assert config.scoring_method(tl.MODEL_ID) == "rule"
 
 
-# ── timing: the last refresh pass at least 60 minutes out ────────────────────
+# ── timing: a fetch 60-66 minutes before tip, from the window job ───────────
 
-def _refresh_jobs(monkeypatch):
+def _window_job(monkeypatch):
     import scheduler
     from tracking import job_heartbeat as jh
     monkeypatch.setattr(jh, "seed", lambda jid: None)
     monkeypatch.setattr(jh, "mark_disabled", lambda jid, *a, **k: None)
     monkeypatch.setattr(scheduler, "SERVICE_ROLE", "all")
-    jobs = {j.id: j for j in scheduler.build_scheduler().get_jobs()}
-    return [jobs[name] for name, _, _ in tl.REFRESH_PASS_CRON]
+    return {j.id: j for j in scheduler.build_scheduler().get_jobs()}["nba_total_luck_window"]
 
 
 def _fires(job, start, end):
@@ -479,69 +603,65 @@ def _fires(job, start, end):
         prev, t = nxt, nxt + timedelta(seconds=1)
 
 
-def test_the_model_knows_the_scheduler_s_refresh_cadence(monkeypatch):
-    """RULE: 'the last pass' is computed from the cadence the scheduler really
-    runs. A change to the refresh crons fails here until the model follows."""
-    start, end = _et(2026, 11, 2, 0, 0), _et(2026, 11, 9, 0, 0)    # a week
-    sched = sorted(f for job in _refresh_jobs(monkeypatch) for f in _fires(job, start, end))
-    ours = tl.pass_starts(start - timedelta(seconds=1), end)
-    assert ours == sched
+def test_the_window_holds_at_least_two_of_the_job_s_ticks(monkeypatch):
+    """RULE: one skipped tick cannot lose a game. The window the job fetches
+    in is at least two of its ticks wide, it sits inside the card's decision
+    window, and its bottom leaves a minute for the fetch to land."""
+    from scripts import nba_total_luck_window as win
+    job = _window_job(monkeypatch)
+    day = _et(2026, 11, 5, 0, 0)
+    fires = _fires(job, day, day + timedelta(hours=24) - timedelta(seconds=1))
+    gaps = {(b - a).total_seconds() / 60 for a, b in zip(fires, fires[1:])}
+    cadence = max(gaps)
+    assert len(fires) == 1440 and cadence == 1.0, "every minute, around the clock"
+    lo, hi = win.LOOK_AHEAD_MIN
+    assert hi - lo >= 2 * cadence
+    assert lo >= tl.DECISION_LEAD_MIN[0] + 1 and hi <= tl.DECISION_LEAD_MIN[1]
 
 
-def test_the_cadence_holds_on_both_clock_change_days():
-    """The evening passes keep their Eastern minutes on the days the clocks
-    change, and the repeated 1 am hour in November is a real hour."""
-    for day in ((2026, 11, 1), (2027, 3, 14)):
-        got = [t.astimezone(ET).strftime("%H:%M") for t in
-               tl.pass_starts(_et(*day, 17, 0), _et(*day, 23, 59))]
-        assert got == ["17:17"] + [f"{h}:{m:02d}" for h in range(18, 24) for m in range(0, 60, 10)]
-    fall = tl.pass_starts(_et(2026, 11, 1, 0, 30), _et(2026, 11, 1, 3, 0))
-    assert [t.strftime("%H:%M") for t in fall] == ["05:17", "06:17", "07:17"]   # 1:17 twice, 2:17
+def _simulate(tip, ticks, skip=(), lag_s=10):
+    """The window job's ticks: plan (the game is in LOOK_AHEAD_MIN), fetch
+    (rows land `lag_s` later), card (timing on that fetch). -> the lead of the
+    fetch that decided, or None."""
+    from scripts import nba_total_luck_window as win
+    lo, hi = win.LOOK_AHEAD_MIN
+    for i, t in enumerate(ticks):
+        if i in skip or not lo <= tl.lead_minutes(tip, t) <= hi:
+            continue
+        fetch = t + timedelta(seconds=lag_s)
+        if tl.timing(tip, fetch, fetch + timedelta(seconds=20)) == "decide":
+            return tl.lead_minutes(tip, fetch)
+    return None
 
 
 @pytest.mark.parametrize("hh,mm", [(12, 0), (13, 0), (15, 30), (17, 0), (18, 0), (19, 0),
-                                   (19, 30), (20, 0), (21, 30), (22, 0), (22, 30)])
-def test_every_tip_is_decided_by_exactly_one_pass_at_60_to_120_minutes(hh, mm):
-    """RULE: decide on the LAST scheduled refresh pass that starts 60+ minutes
-    before tip, on the fetch it stored. The rows land seconds after the pass
-    starts (measured 8-12 s), so the lead is read at the pass's start, the
-    fetch's requested instant, as the lab read it at the purchase's."""
+                                   (19, 30), (20, 0), (21, 30), (22, 0), (22, 10), (22, 30)])
+def test_every_tip_is_decided_on_a_fetch_60_to_66_minutes_out(monkeypatch, hh, mm):
+    """RULE (decision point C, 60-180 minutes): every tip time, afternoon or
+    evening, is decided by the first window tick, on a fetch 60-66 minutes out;
+    with that tick skipped, the next one decides; with every tick in the
+    window skipped, nothing is decided (and the card logs it)."""
     tip = _et(2026, 11, 5, hh, mm)
-    decided = []
-    for start in tl.pass_starts(tip - timedelta(minutes=200), tip):
-        fetch = start + timedelta(seconds=10)
-        now = fetch + timedelta(seconds=90)               # the card runs after group 1
-        if tl.timing(tip, fetch, now) == "decide":
-            decided.append(tl.lead_minutes(tip, start))
-    assert len(decided) == 1, decided
-    assert 60 <= decided[0] < 120, decided
+    ticks = _fires(_window_job(monkeypatch), tip - timedelta(minutes=200), tip)
+    first = _simulate(tip, ticks)
+    assert first is not None and 60 <= first < 66, first
+    in_window = [i for i, t in enumerate(ticks) if 61 <= tl.lead_minutes(tip, t) <= 66]
+    assert len(in_window) >= 2
+    second = _simulate(tip, ticks, skip={in_window[0]})
+    assert second is not None and 60 <= second < first, (first, second)
+    assert _simulate(tip, ticks, skip=set(in_window)) is None
 
 
-def test_a_7pm_tip_is_decided_by_the_6pm_pass_and_a_6pm_tip_by_the_417_pass():
-    """The pass exactly 60 minutes out decides, though its rows land 10 s later
-    (the lab's C sat at exactly 60 on 609 of 611 bets). A 6:00 pm tip has no
-    pass between 5:17 (43 minutes out) and 4:17, so 4:17 decides."""
-    tip = _et(2026, 11, 5, 19, 0)
-    assert tl.timing(tip, _et(2026, 11, 5, 17, 17, 10), _et(2026, 11, 5, 17, 19)) == "deferred"
-    assert tl.timing(tip, _et(2026, 11, 5, 18, 0, 10), _et(2026, 11, 5, 18, 2)) == "decide"
-    assert tl.timing(tip, _et(2026, 11, 5, 18, 10, 10), _et(2026, 11, 5, 18, 12)) == "too_late"
+def test_the_card_decides_only_on_a_fresh_fetch_60_to_66_minutes_out():
     tip = _et(2026, 11, 5, 19, 30)
-    assert tl.timing(tip, _et(2026, 11, 5, 18, 20, 10), _et(2026, 11, 5, 18, 22)) == "deferred"
-    assert tl.timing(tip, _et(2026, 11, 5, 18, 30, 10), _et(2026, 11, 5, 18, 32)) == "decide"
-    tip = _et(2026, 11, 5, 18, 0)
-    assert tl.timing(tip, _et(2026, 11, 5, 15, 17, 10), _et(2026, 11, 5, 15, 19)) == "deferred"
-    assert tl.timing(tip, _et(2026, 11, 5, 16, 17, 10), _et(2026, 11, 5, 16, 19)) == "decide"
-    assert tl.timing(tip, _et(2026, 11, 5, 17, 17, 10), _et(2026, 11, 5, 17, 19)) == "too_late"
-
-
-def test_outside_the_window_and_on_a_stale_fetch_nothing_is_decided():
-    tip = _et(2026, 11, 5, 19, 30)
-    assert tl.timing(tip, _et(2026, 11, 5, 16, 17, 10), _et(2026, 11, 5, 16, 19)) == "too_early"
-    # the newest fetch is an hour old: this pass's odds step failed
-    assert tl.timing(tip, _et(2026, 11, 5, 17, 17, 10), _et(2026, 11, 5, 18, 32)) == "stale_fetch"
-    # a pass off the schedule (a boot catch-up) is its own instant
-    assert tl.requested_at(_et(2026, 11, 5, 18, 37)) == _et(2026, 11, 5, 18, 37)
-    assert tl.requested_at(_et(2026, 11, 5, 18, 30, 10)) == _et(2026, 11, 5, 18, 30)
+    assert tl.timing(tip, _et(2026, 11, 5, 18, 24, 10), _et(2026, 11, 5, 18, 24, 30)) == "decide"
+    assert tl.timing(tip, _et(2026, 11, 5, 18, 29, 50), _et(2026, 11, 5, 18, 30)) == "decide"
+    # a refresh pass's fetch 70 minutes out: the window job fetches later
+    assert tl.timing(tip, _et(2026, 11, 5, 18, 20, 10), _et(2026, 11, 5, 18, 21)) == "too_early"
+    # rows that landed 59.8 minutes out are past C
+    assert tl.timing(tip, _et(2026, 11, 5, 18, 30, 10), _et(2026, 11, 5, 18, 31)) == "too_late"
+    # the newest fetch is 6 minutes old: this tick's fetch failed, the next tries again
+    assert tl.timing(tip, _et(2026, 11, 5, 18, 24, 10), _et(2026, 11, 5, 18, 30, 11)) == "stale_fetch"
 
 
 # ── the card: decided once, under the lock ───────────────────────────────────
@@ -630,7 +750,7 @@ def test_a_no_bet_decision_is_recorded_so_a_later_offer_cannot_bet_it():
 
 def test_run_card_decides_only_games_due_and_not_already_decided(monkeypatch):
     from scripts import nba_total_luck_card as card
-    now = _et(2026, 11, 5, 18, 32)
+    now = _et(2026, 11, 5, 18, 25)
     games = {
         "G_DUE": {"home": "HOM", "away": "AWY", "game_date": "2026-11-05", "season": 2027,
                   "tip": _et(2026, 11, 5, 19, 30)},
@@ -639,7 +759,7 @@ def test_run_card_decides_only_games_due_and_not_already_decided(monkeypatch):
         "G_LATER": {"home": "AAA", "away": "BBB", "game_date": "2026-11-05", "season": 2027,
                     "tip": _et(2026, 11, 5, 20, 30)},
     }
-    fetch = _et(2026, 11, 5, 18, 30, 10)
+    fetch = _et(2026, 11, 5, 18, 24, 10)
     conn = _Conn(decided={"G_DONE"})
     monkeypatch.setattr(card, "get_connection", lambda: type("C", (), {
         "execute": conn.execute, "commit": conn.commit, "close": lambda self: None})())
@@ -658,7 +778,7 @@ def test_run_card_decides_only_games_due_and_not_already_decided(monkeypatch):
         columns=list(tl.QUOTE_ROW_COLS)))
     out = card.run_card(do_publish=False, now=now)
     assert seen["games"] == ["G_DUE"]
-    assert out["timing"]["already_decided"] == 1 and out["timing"]["deferred"] == 1
+    assert out["timing"]["already_decided"] == 1 and out["timing"]["too_early"] == 1
 
 
 def test_a_dry_run_creates_no_ledger_and_writes_nothing(monkeypatch):
@@ -684,11 +804,11 @@ def test_the_card_refuses_a_season_the_artifact_does_not_end_just_before(monkeyp
         "execute": conn.execute, "commit": conn.commit, "close": lambda self: None})())
     monkeypatch.setattr(card, "slate", lambda c, n, s=None: games)
     monkeypatch.setattr(card, "ensure_decisions_table", lambda c: None)
-    monkeypatch.setattr(card, "newest_fetch", lambda c, g, n: {"G": _et(2027, 11, 5, 18, 30, 10)})
+    monkeypatch.setattr(card, "newest_fetch", lambda c, g, n: {"G": _et(2027, 11, 5, 18, 25, 10)})
     called = []
     monkeypatch.setattr(tl, "decide", lambda *a, **k: called.append(1))
-    out = card.run_card(do_publish=True, now=_et(2027, 11, 5, 18, 32))
-    assert out["timing"]["deferred"] == 0, "the game must be due, or this proves nothing"
+    out = card.run_card(do_publish=True, now=_et(2027, 11, 5, 18, 26))
+    assert sum(out["timing"].values()) == 0, "the game must be due, or this proves nothing"
     assert called == [] and out["decided"] == 0 and conn.ledger == [] and conn.picks == []
 
 
@@ -723,6 +843,50 @@ def test_a_bet_under_the_ev_floor_is_refused():
     assert rows == [] and refused["NBA_2026-11-05_AWY_HOM"].startswith("ev_below_floor")
 
 
+def test_the_ev_floor_refunds_a_push():
+    """RULE: model_probability is P(the over WINS), pushes in its denominator,
+    so the EV the floor reads is p x decimal - 1 + P(push). The graded bet
+    this decides: 2023-01-24 DEN at NOP, over 232.0 at -110, P(push) 0.024:
+    -0.012 with the push counted as a loss, +0.011 refunded. Here: p x decimal
+    - 1 = -0.010 with a 0.030 chance of a push."""
+    from scripts import nba_total_luck_card as card
+    p_model = 0.99 / (1 + 100 / 110)                     # p x decimal - 1 = -0.010
+    whole = _bet(p_fair=p_model - 0.0659)
+    whole = tl.TotalLuckBet(**{**whole.__dict__, "line": 224.0, "p_push": 0.030})
+    rows, refused = card.pick_rows([whole], GAMES, 1000.0)
+    assert refused == {} and len(rows) == 1, refused
+    half = tl.TotalLuckBet(**{**whole.__dict__, "line": 224.5, "p_push": 0.0})
+    rows, refused = card.pick_rows([half], GAMES, 1000.0)
+    assert rows == [] and refused["NBA_2026-11-05_AWY_HOM"].startswith("ev_below_floor")
+
+
+def test_the_shared_gate_is_unchanged_for_every_other_caller():
+    from models.honest_ev import gate
+    g = gate("nhl_over_under", 0.55, -110)
+    assert g.ev == pytest.approx(config.expected_value(g.cal_prob, -110))
+    assert gate("nhl_over_under", 0.55, -110, p_push=0.02).ev == pytest.approx(g.ev + 0.02)
+    assert gate("nhl_over_under", 0.55, None, p_push=0.02).ev is None
+
+
+@pytest.mark.parametrize("paused", [False, True])
+def test_a_paused_model_s_rows_carry_the_paused_marker(monkeypatch, paused):
+    """RULE (config.PAUSED_NOTE): a row written while the model is paused says
+    so itself, so it stays unannounced after an unpause; a live row carries no
+    marker. The marker is written: it is in the insert's column list."""
+    from models import scorer
+    from scripts import nba_total_luck_card as card
+    monkeypatch.setattr(scorer, "_auto_paused_models", lambda: set())
+    monkeypatch.setattr(scorer, "PAUSED_MODELS",
+                        {tl.MODEL_ID} if paused else set())
+    rows, _ = card.pick_rows([_bet()], GAMES, 1000.0)
+    assert rows[0]["downgrade_reason"] == (config.PAUSED_NOTE if paused else None)
+    assert "downgrade_reason" in card._COLS
+    conn = _Conn()
+    card.publish(conn, rows, [tl.Decision(rows[0]["game_id"], _bet().fetch_at, 4.2, 1, "bet")],
+                 {}, {})
+    assert conn.picks[0]["downgrade_reason"] == (config.PAUSED_NOTE if paused else None)
+
+
 # ── wiring ───────────────────────────────────────────────────────────────────
 
 def test_it_settles_as_a_total():
@@ -730,38 +894,9 @@ def test_it_settles_as_a_total():
     assert _market_for_pick(tl.MODEL_ID) == "totals"
 
 
-def test_the_refresh_pass_runs_it_after_the_odds_fetch_with_a_time_limit():
+def test_the_refresh_pass_does_not_run_it():
+    """RULE: one producer, the window job. On the refresh pass a skipped tick
+    lost every game it would have decided, and the card made the pass longer."""
     import re
     sh = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
-    m = re.search(r"^step nba-total-luck$", sh, re.M)
-    assert m, "the card is not in the refresh pass"
-    first_wait = sh.index("\npar_wait\n")
-    assert sh.index("\npar odds\n") < first_wait < m.start() < sh.index("\nstep scoring\n")
-    assert re.search(r"^\s*\[nba-total-luck\]=\d+$", sh, re.M), "no time limit"
-
-
-@pytest.mark.skipif(shutil.which("bash") is None or shutil.which("timeout") is None,
-                    reason="needs bash and coreutils timeout")
-def test_a_step_past_its_time_limit_is_killed_and_recorded():
-    """The shipped step() under its table: a step over its limit is killed and
-    counted failed; the pass goes on."""
-    sh_path = (ROOT / "scripts" / "refresh_pass.sh").as_posix()
-    with tempfile.TemporaryDirectory() as tmp:
-        fake = Path(tmp) / "fake.sh"
-        fake.write_text('#!/usr/bin/env bash\ncase "$1" in slow) sleep 5;; esac\nexit 0\n')
-        harness = f'''
-set -uo pipefail
-FAILED_STEPS=()
-STEPS_TOTAL=0
-declare -A STEP_TIMEOUT_S=([slow]=1 [quick]=3)
-eval "$(sed -n '/^step() {{/,/^}}/p' "{sh_path}" \
-        | sed 's|python run_pipeline.py --step "$1"|bash "{fake.as_posix()}" "$1"|')"
-step slow
-step quick
-echo "TOTAL=$STEPS_TOTAL"
-echo "FAILED=${{FAILED_STEPS[*]:-none}}"
-'''
-        r = subprocess.run(["bash", "-c", harness], capture_output=True, text=True, timeout=60)
-    assert "TOTAL=2" in r.stdout, (r.stdout, r.stderr)
-    assert "FAILED=slow" in r.stdout, (r.stdout, r.stderr)
-    assert "killed after its 1s limit" in r.stderr
+    assert not re.search(r"^\s*step nba-total-luck\s*$", sh, re.M)

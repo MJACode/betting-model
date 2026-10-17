@@ -20,6 +20,15 @@ league-wide completeness check (the season's schedule as an input): the same
 611 of 611 bets and 6,294 identical gaps, no game declined for a missing score
 or box.
 
+Since the review of 2026-10-17 the season's games, box scores and owed games
+come through the CARD'S OWN load (scripts.nba_total_luck_card.load_season, its
+SQL answered from the cache), not the lab's game list: the regular-season rule
+and the box-integrity check are inside the replay. Re-run that day over
+2020-21 .. 2025-26: load_season returned exactly the lab's games and scores in
+every season (1,080, then 1,230 a season), 611 of 611 bets and 6,294 gaps
+identical (largest difference 0.0), no game declined for a missing score, a
+missing box or a box that does not add up.
+
 Needs the research cache (NBA_RESEARCH_CACHE, written by
 scripts/nba_research_cache.py) and the lab's bet file; SKIPS where either is
 absent. About 25 seconds on the build machine.
@@ -55,3 +64,6 @@ def test_the_live_code_reproduces_the_lab_on_2025_26():
     # and boxed) declines nothing on the lab's own data, where every game was.
     d = r["diag"]
     assert d["score_missing"] == 0 and d["box_missing"] == 0 and d["presumed_unplayed"] == [], d
+    assert d["box_mismatch"] == 0, d
+    # the card's own season load returns the lab's population, scores included
+    assert r["load_season_is_the_lab_population"], (r["load_season_games"], r["lab_games"])

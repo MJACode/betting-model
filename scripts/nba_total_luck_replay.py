@@ -8,9 +8,12 @@ minutes before tip, scripts.nba_game_harness.decision_times), with:
            (models.nba_total_luck.quote_frame) after their fetch instant is
            read from the purchase ledger (the live odds table carries it in
            created_at; the archive's created_at is the purchase time)
-  box      nba_player_game_log, and the season's final games from nba_games
-  schedule nba_schedule's regular-season rows: what the completeness check
-           (models.nba_total_luck.missing_inputs) owes before each date
+  games    the season's final games, box scores and owed games read by the
+           CARD'S OWN load (scripts.nba_total_luck_card.load_season), its SQL
+           answered from the cache's nba_games, nba_schedule and
+           nba_player_game_log (FrameConn): the regular-season rule, the
+           scores for the box-integrity check and the owed set are the live
+           ones
   pricing  the committed artifact (models.nba_total_luck.ARTIFACT_PATH)
 
 and compared, game by game, with what the lab graded:
@@ -63,9 +66,53 @@ def load(cache: Path = H.CACHE, seasons=LAB_SEASONS) -> dict:
     sched = pd.read_parquet(cache / "nba_schedule.parquet",
                             columns=["game_id", "season", "game_type", "game_date",
                                      "home_team", "away_team", "status_text"])
-    sched = sched[sched["game_type"] == "regular"]
+    games = pd.read_parquet(cache / "nba_games.parquet",
+                            columns=["game_id", "season", "game_date", "home_team", "away_team",
+                                     "home_score", "away_score"])
     return {"data": data, "rows": o.drop(columns="fetch_at"), "box": box,
-            "schedule": sched, "seasons": tuple(seasons)}
+            "schedule": sched, "games": games, "seasons": tuple(seasons)}
+
+
+class FrameConn:
+    """The four reads scripts.nba_total_luck_card.load_season makes, answered
+    from frames shaped like the production tables (games, nba_schedule,
+    nba_player_game_log), the way Postgres answers them. Anything else is
+    refused, so a new read cannot slip past the replay unanswered."""
+
+    def __init__(self, games: pd.DataFrame, schedule: pd.DataFrame, box: pd.DataFrame):
+        g = games.copy()
+        g["game_date"] = g["game_date"].astype(str).str[:10]
+        sc = schedule.copy()
+        sc["game_date"] = sc["game_date"].astype(str).str[:10]
+        self.games, self.schedule, self.box = g, sc, box
+
+    def execute(self, sql, params=None):
+        q = " ".join(sql.split())
+        if q.startswith("SELECT g.game_id, g.season, g.game_date"):
+            season, before = params
+            g = self.games[(self.games["season"].astype(int) == season)
+                           & (self.games["game_date"] < before)]
+            m = g.merge(self.schedule[["game_id", "game_type"]], on="game_id", how="left")
+            m["game_type"] = m["game_type"].astype(object).where(m["game_type"].notna(), None)
+            rows = m[["game_id", "season", "game_date", "home_team", "away_team",
+                      "home_score", "away_score", "game_type"]].itertuples(index=False)
+        elif q.startswith("SELECT DISTINCT season, game_date, game_type FROM nba_schedule"):
+            sc = self.schedule[self.schedule["season"].astype(int).isin(params[0])]
+            rows = sc[["season", "game_date", "game_type"]].drop_duplicates().itertuples(index=False)
+        elif q.startswith("SELECT s.game_id, s.game_date"):
+            season, before = params
+            sc = self.schedule[(self.schedule["season"].astype(int) == season)
+                               & (self.schedule["game_type"] == "regular")
+                               & (self.schedule["game_date"] < before)]
+            rows = sc[["game_id", "game_date", "home_team", "away_team",
+                       "status_text"]].itertuples(index=False)
+        elif "FROM nba_player_game_log" in q:
+            bx = self.box[self.box["game_id"].isin(params[0])]
+            rows = bx[["game_id", "team", *tl.BOX_COLS]].itertuples(index=False)
+        else:
+            raise AssertionError(f"FrameConn: unexpected read: {q[:80]}")
+        out = [tuple(r) for r in rows]
+        return type("R", (), {"fetchall": lambda self_: out})()
 
 
 def lab_gaps(data: H.Data, box: pd.DataFrame) -> pd.Series:
@@ -85,13 +132,19 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
     quotes = tl.quote_frame(ld["rows"], games)
     targets = games[games["game_id"].isin(set(times["game_id"]))][
         ["game_id", "season", "game_date", "home_team", "away_team"]]
-    final = games[["game_id", "season", "game_date", "home_team", "away_team"]]
+    # The card's own load of the season, every game before the season's end.
+    from scripts.nba_total_luck_card import load_season
+    final, season_box, sched = load_season(FrameConn(ld["games"], ld["schedule"], box),
+                                           season, "9999-12-31")
+    lab_final = games[["game_id", "home_score", "away_score"]].sort_values("game_id")
+    live_final = final[["game_id", "home_score", "away_score"]].sort_values("game_id")
+    same_population = (lab_final["game_id"].tolist() == live_final["game_id"].tolist()
+                       and np.allclose(lab_final[["home_score", "away_score"]].to_numpy(float),
+                                       live_final[["home_score", "away_score"]].to_numpy(float)))
     # 2020-21 and 2021-22 have no graded season before them to fit an uplift on;
     # it moves only the written probability, never the bet, so 0 is used there.
     prior = [s for s in art["bucket"] if int(s) < season]
-    sched = ld["schedule"]
-    sched = sched[sched["season"].astype(int) == season]
-    bets, decisions, diag = tl.decide(targets, quotes, box, final, times, art,
+    bets, decisions, diag = tl.decide(targets, quotes, season_box, final, times, art,
                                       scheduled=sched,
                                       bucket_uplift=None if prior else 0.0)
 
@@ -114,6 +167,8 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
     p_ok = bool(np.allclose(same_t["p_win"], same_t["p_fair"], atol=1e-9)) if len(same_t) else True
     return {
         "season": season, "games_decided": int(diag["games"]), "diag": diag,
+        "load_season_is_the_lab_population": bool(same_population),
+        "load_season_games": int(len(final)), "lab_games": int(len(lab_final)),
         "gap_compared": len(common), "gap_max_abs_diff": float(diff.max()) if len(diff) else 0.0,
         "gap_only_lab": only_lab, "gap_only_live": only_live,
         "lab_bets": int(len(lb)), "live_bets": int(len(live)),

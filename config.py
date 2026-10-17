@@ -2112,12 +2112,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # floor (0.01-0.05) is applied on top, in models/nba_prop_projection.CARD.
     "nba_prop_projection":       0.01,
     # NBA totals overs (2026-10-17, mike). The cut is the gap, not EV, so this
-    # floor must not become a second cut. Written EV on its 508 graded bets, on
-    # the probability it writes (market-fair P(over) + the bucket's uplift):
-    # smallest -0.012 (one bet, NBA_2023-01-24_DEN_NOP at FanDuel 232.0, lost
-    # 1.1 units), next +0.030, median +0.090. A negative smallest is floored at
-    # 0.00, as for mlb_spread_market and the pitcher props (tests/test_config.py
-    # allows no other negative floor), so it removes that one bet and no other.
+    # floor must not become a second cut. The card applies it to the EV with a
+    # push refunded (p x decimal - 1 + P(push), models.honest_ev.gate p_push):
+    # the probability it writes is P(the over WINS), pushes in its denominator,
+    # and a whole-number total returns the stake on a push. On its 508 graded
+    # bets, at the 2026-27 uplift (+0.0659), that EV is +0.011 at the smallest,
+    # +0.038 next, +0.100 at the median: 0.00 sits under all of them and
+    # removes none. (Scored as a loss, the push put one bet at -0.012:
+    # NBA_2023-01-24_DEN_NOP, FanDuel over 232.0, P(push) 0.024.)
     "nba_total_luck":           0.00,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).

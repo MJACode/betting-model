@@ -1,33 +1,42 @@
 """NBA totals card: write `nba_total_luck` bets (models/nba_total_luck.py).
 
-Runs on every refresh pass right after the odds fetch (step nba-total-luck in
-scripts/refresh_pass.sh, under a time limit), so the fetch it reads is the one
-the pass just stored. LIVE, with no default-off write switch: the MLB cards'
-switches flipped off on a redeploy and those models went dark without a trace
-(config.py, MLB_*_PUBLISH).
+Runs in its own job, right after that job's odds fetch: the NBA totals window
+(scheduler.run_nba_total_luck_window, every minute, 24x7; step nba-total-luck,
+under a time limit there). It is NOT in the refresh pass: a pass that runs past
+ten minutes makes the scheduler skip the next tick, and a game whose deciding
+tick was skipped was lost. LIVE, with no default-off write switch: the MLB
+cards' switches flipped off on a redeploy and those models went dark without a
+trace (config.py, MLB_*_PUBLISH).
 
 WHEN A GAME IS DECIDED. Decision point C is "the newest fetch 60-180 minutes
-before tip". A pass decides a game only when its newest odds fetch is 60-180
-minutes out AND no later scheduled refresh pass can still fetch it 60 or more
-minutes out (models.nba_total_luck.timing / is_last_look). Every earlier pass
-in the window defers; every pass after it is too late.
+before tip". A run decides a game when its newest odds fetch landed 60-66
+minutes before tip and is at most 5 minutes old
+(models.nba_total_luck.timing). The window job fetches when a game is 61-66
+minutes out, so the first tick inside the window decides; a game it misses is
+logged as never decided.
 
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 nba_total_luck_decisions in the same transaction as the game's bet, under the
-model's transaction-scoped advisory lock (the refresh pass and a boot catch-up
-pass can overlap). A game with a decision row, or with any nba_total_luck BET,
-is never looked at again: a later pass, a moved line or a better price writes
-nothing.
+model's transaction-scoped advisory lock (a run by hand can overlap the job's).
+A game with a decision row, or with any nba_total_luck BET, is never looked at
+again: a later tick, a moved line or a better price writes nothing.
 
 EVERY GAME PRESENT. The gap reads every game of the season before the date
 (the league's shooting rates), so a game is declined, and the ledger says why,
-while any of them lacks its final score or its box score (load_season ->
-models.nba_total_luck.missing_inputs). Each such decline is logged as an
-ERROR naming the missing games; a game presumed not played is a WARNING.
+while any of them lacks its final score or its box score, or its box does not
+add up to its final score (load_season -> models.nba_total_luck.missing_inputs).
+Each such decline is logged as an ERROR naming the games and the command that
+repairs a box; a game presumed not played is a WARNING. Only regular-season
+games count, the lab's population (models.nba_total_luck.regular_season): the
+NBA Cup final never does, the quarterfinals and semifinals do.
+
+A PAUSED MODEL'S ROWS carry downgrade_reason = config.PAUSED_NOTE (models.scorer
+_pause_note, the marker every publisher and record query keys on), so a pick
+written while paused stays unannounced after an unpause.
 
 BET ROWS ONLY in picks. The scorer deletes every model's unsettled non-BET
 rows on each pass, so a "declined" row would not survive there. A decision
-with no bet lives in the ledger with its reason; the per-pass diagnostic line
+with no bet lives in the ledger with its reason; the per-run diagnostic line
 in the worker log is how an empty card is told apart from a broken one.
 
 ROW SHAPE: the NHL totals card's (scripts/nhl_totals_card.py). dk_odds /
@@ -47,6 +56,7 @@ import argparse
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from loguru import logger
@@ -101,13 +111,67 @@ def ensure_decisions_table(conn) -> None:
 
 # ── reads ─────────────────────────────────────────────────────────────────────
 
-def slate(conn, now: datetime, skipped: list | None = None) -> dict[str, dict]:
-    """Regular-season NBA games that have not tipped and tip within the far end
-    of the decision window. The NBA prop card's slate: the tip is the earlier of
-    nba_schedule's and games' start, and a game the schedule does not list as
-    'regular' (the NBA Cup final, play-in, playoffs) is skipped and named."""
-    from scripts.nba_prop_market_card import slate as nba_slate
-    return nba_slate(conn, now, skipped, horizon_min=int(tl.DECISION_LEAD_MIN[1]) + 5)
+_ET = ZoneInfo("America/New_York")
+
+
+def schedule_days(conn, seasons) -> pd.DataFrame:
+    """(season, game_date, game_type) of every nba_schedule row of these
+    seasons, deduplicated: what models.nba_total_luck.regular_season reads."""
+    seasons = sorted({int(x) for x in seasons})
+    if not seasons:
+        return pd.DataFrame(columns=["season", "game_date", "game_type"])
+    return pd.DataFrame(conn.execute("""
+        SELECT DISTINCT season, game_date, game_type FROM nba_schedule
+        WHERE season = ANY(%s)
+    """, (seasons,)).fetchall(), columns=["season", "game_date", "game_type"])
+
+
+def slate(conn, now: datetime, skipped: list | None = None,
+          horizon_min: float | None = None) -> dict[str, dict]:
+    """Regular-season NBA games that have not tipped and tip within
+    `horizon_min` (default the far end of the decision window, plus 5).
+
+    The tip is the earlier of nba_schedule's and games' start
+    (models.nba_prop_market.tip_of, as the NBA prop cards read it). Regular
+    season by models.nba_total_luck.regular_season, so a game the schedule
+    does not list yet (an NBA Cup quarterfinal or semifinal, a game scheduled
+    around them) is priced, as the lab priced it, and the Cup final, play-in
+    and playoffs are skipped and named in `skipped`."""
+    from models.nba_prop_market import tip_of
+    today = now.astimezone(_ET).date()
+    dates = [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)]
+    rows = conn.execute("""
+        SELECT g.game_id, g.home_team, g.away_team, g.game_date, g.season,
+               g.commence_time, s.commence_time, s.game_type
+        FROM games g
+        LEFT JOIN nba_schedule s ON s.game_id = g.game_id
+        WHERE g.sport = 'NBA' AND g.game_date = ANY(%s)
+    """, (dates,)).fetchall()
+    horizon = now + timedelta(minutes=horizon_min if horizon_min is not None
+                              else tl.DECISION_LEAD_MIN[1] + 5)
+    cand = {}
+    for gid, home, away, gd, season, g_ct, s_ct, game_type in rows:
+        tip = tip_of(s_ct, g_ct)
+        if tip is None or tip <= now or tip > horizon or gid in cand:
+            continue
+        cand[gid] = {"home": home, "away": away, "game_date": str(gd)[:10],
+                     "season": int(season) if season is not None else None, "tip": tip,
+                     "game_type": game_type}
+    if not cand:
+        return {}
+    frame = pd.DataFrame([{"game_id": g, "season": v["season"], "game_date": v["game_date"],
+                           "game_type": v["game_type"]} for g, v in cand.items()])
+    days = schedule_days(conn, [v["season"] for v in cand.values() if v["season"] is not None])
+    keep = set(tl.regular_season(frame, days)["game_id"])
+    out = {}
+    for gid, v in sorted(cand.items()):
+        game_type = v.pop("game_type")
+        if gid not in keep:
+            if skipped is not None:
+                skipped.append(f"{gid} ({game_type or 'not a regular-season day'})")
+            continue
+        out[gid] = v
+    return out
 
 
 # The books the rule reads: the deciding books and Pinnacle, whose no-vig line
@@ -190,6 +254,8 @@ def load_quote_rows(conn, game_ids: list[str], since: datetime) -> pd.DataFrame:
 
 
 SCHEDULED_COLS = ["game_id", "game_date", "home_team", "away_team", "status_text"]
+FINAL_COLS = ["game_id", "season", "game_date", "home_team", "away_team",
+              "home_score", "away_score"]
 
 
 def load_season(conn, season: int, before: str
@@ -197,47 +263,51 @@ def load_season(conn, season: int, before: str
     """(final_games, box, scheduled) for one season, games before the Eastern
     date `before`.
 
-    final_games: the season's NBA games with a final score (the lab's
-    population, scripts.nba_game_harness.load_games, every one of which had a
-    start time), less any game nba_schedule names as something other than a
-    regular-season game. box: their nba_player_game_log rows.
+    The season's games are its `games` rows that are regular-season games by
+    models.nba_total_luck.regular_season: a game nba_schedule lists as
+    'regular', or one it does not list (a game added after the schedule was
+    loaded: the NBA Cup quarterfinals and semifinals and the games scheduled
+    around them) on a regular-season day with no other kind of game. The Cup
+    final is on such a day, so it never enters the ratings, as it never
+    entered the lab's.
+
+    final_games: those games with a final score, the scores included (the
+    box-integrity check). box: their nba_player_game_log rows.
     scheduled: every game the season OWES before the date, scored or not, for
     the completeness check (models.nba_total_luck.missing_inputs): the
-    regular-season rows of nba_schedule, plus any `games` row the schedule does
-    not list (a game added after the schedule was loaded: the NBA Cup knockout
-    games and the 24 games scheduled around them). Placeholder rows with no
-    teams yet are dropped by models.nba_total_luck.scheduled_games."""
-    g = pd.DataFrame(conn.execute("""
-        SELECT g.game_id, g.season, g.game_date, g.home_team, g.away_team
+    regular-season rows of nba_schedule plus the unlisted regular-season
+    `games` rows. Placeholder rows with no teams yet are dropped by
+    models.nba_total_luck.scheduled_games."""
+    rows = pd.DataFrame(conn.execute("""
+        SELECT g.game_id, g.season, g.game_date, g.home_team, g.away_team,
+               g.home_score, g.away_score, s.game_type
         FROM games g
         LEFT JOIN nba_schedule s ON s.game_id = g.game_id
         WHERE g.sport = 'NBA' AND g.season = %s AND g.game_date < %s
-          AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-          AND (s.game_type IS NULL OR s.game_type = 'regular')
-    """, (int(season), before)).fetchall(),
-        columns=["game_id", "season", "game_date", "home_team", "away_team"])
-    g = g.drop_duplicates("game_id")
-    g["game_date"] = g["game_date"].astype(str).str[:10]
+    """, (int(season), before)).fetchall(), columns=[*FINAL_COLS, "game_type"])
+    rows = rows.drop_duplicates("game_id")
+    rows["game_date"] = rows["game_date"].astype(str).str[:10]
+    games = tl.regular_season(rows, schedule_days(conn, [season]))
+    g = games[games["home_score"].notna() & games["away_score"].notna()][FINAL_COLS].copy()
     g["season"] = g["season"].astype(int)
-    sched = pd.DataFrame(conn.execute("""
+    for c in ("home_score", "away_score"):
+        g[c] = pd.to_numeric(g[c])
+    listed = pd.DataFrame(conn.execute("""
         SELECT s.game_id, s.game_date, s.home_team, s.away_team, s.status_text
         FROM nba_schedule s
         WHERE s.season = %s AND s.game_type = 'regular' AND s.game_date < %s
-        UNION ALL
-        SELECT g.game_id, g.game_date, g.home_team, g.away_team, NULL
-        FROM games g
-        WHERE g.sport = 'NBA' AND g.season = %s AND g.game_date < %s
-          AND NOT EXISTS (SELECT 1 FROM nba_schedule s WHERE s.game_id = g.game_id)
-    """, (int(season), before, int(season), before)).fetchall(), columns=SCHEDULED_COLS)
+    """, (int(season), before)).fetchall(), columns=SCHEDULED_COLS)
+    unlisted = games[games["game_type"].isna()][SCHEDULED_COLS[:-1]].assign(status_text=None)
+    sched = pd.concat([listed, unlisted], ignore_index=True)
     cols = ["game_id", "team", *tl.BOX_COLS]
     if g.empty:
-        return g, pd.DataFrame(columns=cols), sched
+        return g.reset_index(drop=True), pd.DataFrame(columns=cols), sched
     box = pd.DataFrame(conn.execute(f"""
         SELECT {', '.join(cols)} FROM nba_player_game_log WHERE game_id = ANY(%s)
     """, (g["game_id"].tolist(),)).fetchall(), columns=cols)
     for c in tl.BOX_COLS:
         box[c] = pd.to_numeric(box[c], errors="coerce")
-    return g, box, sched
+    return g.reset_index(drop=True), box, sched
 
 
 # ── rows ──────────────────────────────────────────────────────────────────────
@@ -252,7 +322,8 @@ def pick_rows(bets: list[tl.TotalLuckBet], games: dict[str, dict],
     """Card bets -> picks rows, and {game_id: why} for a bet refused here.
     Pure given its inputs, so it is testable."""
     from models.honest_ev import gate
-    from models.scorer import quarter_kelly
+    from models.scorer import _pause_note, quarter_kelly
+    pause = _pause_note(MODEL_ID)
     rows, refused = [], {}
     for b in bets:
         g = games.get(b.game_id, {})
@@ -260,7 +331,10 @@ def pick_rows(bets: list[tl.TotalLuckBet], games: dict[str, dict],
         if b.price < (tl.config.min_odds_for(MODEL_ID) or -1e9):
             refused[b.game_id] = f"below_price_floor:{b.price:+.0f}"
             continue
-        ev = gate(MODEL_ID, b.p_model, b.price)
+        # p_model is P(the over WINS), pushes in its denominator; a push on a
+        # whole-number total returns the stake, so the EV the floor reads
+        # counts it back (models/nba_total_luck.py, THE PROBABILITY).
+        ev = gate(MODEL_ID, b.p_model, b.price, p_push=b.p_push)
         if not ev.clears:
             logger.info(f"{MODEL_ID}: {ev.reason} - dropped {b.game_id} over @{b.book}")
             refused[b.game_id] = ev.reason
@@ -308,6 +382,9 @@ def pick_rows(bets: list[tl.TotalLuckBet], games: dict[str, dict],
             "best_implied_prob": None if at_dk else round(dec_implied, 4),
             "best_edge": None if at_dk else decision_edge,
             "best_bet_link": None if at_dk else b.link,
+            # config.PAUSED_NOTE while the model is paused: the row's own
+            # marker, which every publisher and record query keys on.
+            "downgrade_reason": pause,
         })
     return rows, refused
 
@@ -317,7 +394,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "scored_line", "kelly_fraction", "recommended_bet", "bankroll_at_pick", "signal_type",
          "confidence_tier", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
-         "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link")
+         "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
+         "downgrade_reason")
 # Its own column list, NOT models.scorer._insert_picks: that one stamps
 # model_probability_cal from the promoted map, and this model decides on its
 # own number (config.MODELS_ON_OWN_PROBABILITY).
@@ -358,7 +436,7 @@ def publish(conn, rows: list[dict], decisions: list[tl.Decision], leads: dict[st
     return n_bets, n_decided
 
 
-# ── the pass ──────────────────────────────────────────────────────────────────
+# ── the run ───────────────────────────────────────────────────────────────────
 
 _ART: dict = {}
 
@@ -384,7 +462,7 @@ def render(bets, diag: dict, written: int | None = None,
     return "\n".join(lines)
 
 
-TIMING_KEYS = ("too_early", "deferred", "stale_fetch", "too_late", "no_fetch", "already_decided")
+TIMING_KEYS = ("too_early", "stale_fetch", "too_late", "no_fetch", "already_decided")
 
 
 def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
@@ -423,10 +501,11 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             timing[why] += 1
             if why == "too_late":
                 logger.warning(f"nba-total-luck: {gid} tips {g['tip'].isoformat()} and was never "
-                               f"decided: no pass fetched it {tl.DECISION_LEAD_MIN[0]:.0f}+ "
-                               f"minutes out at its last look")
+                               f"decided: no fetch landed {tl.DECISION_LEAD_MIN[0]:.0f}-"
+                               f"{tl.DECISION_LEAD_MIN[1]:.0f} minutes before tip (the window "
+                               f"job, scheduler.run_nba_total_luck_window, missed every tick)")
         if not due:
-            logger.info(f"NBA totals card ({MODEL_ID}): nothing to decide this pass; {timing}")
+            logger.info(f"NBA totals card ({MODEL_ID}): nothing to decide this run; {timing}")
             return {"games": len(games), "bets": 0, "published": 0, "decided": 0,
                     "timing": timing}
 
@@ -464,14 +543,17 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                     f"not played (a postponement nothing recorded): {presumed}. If one WAS "
                     f"played, its score and box are missing and every gap since is off.")
             for d in decisions:
-                if d.detail.startswith(("score_missing", "box_missing")):
+                if d.detail.startswith(("score_missing", "box_missing", "box_mismatch")):
                     logger.error(f"nba-total-luck: {d.game_id} declined, {d.detail}: the gap "
                                  f"would not be the lab's. The results step "
-                                 f"(nba-results) retries every started game all season; a box "
-                                 f"ESPN never completes (its points never add up to the final) "
-                                 f"needs the NBA.com box for that date, from a residential "
-                                 f"machine: python -m data.ingestors.nba_stats_ingestor "
-                                 f"--game-log-date <date>")
+                                 f"(nba-results) retries every started game all season. A box "
+                                 f"that never lands, or does not add up to the final score "
+                                 f"(a player stored twice, a box ESPN never finished), is "
+                                 f"replaced with NBA.com's for exactly the games affected, "
+                                 f"from a residential machine: python -m "
+                                 f"data.ingestors.nba_stats_ingestor --repair-boxes {season} "
+                                 f"(a game is written only when NBA.com's box adds up to its "
+                                 f"final score)")
             for k, v in diag.items():
                 diag_all[k] += v
         published = n_decided = 0
