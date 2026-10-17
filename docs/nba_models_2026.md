@@ -896,6 +896,39 @@ The row leaves these open, so they are the lab's definitions, not registered one
        fair price (the harness's `run_cells`). The placebo shuffles the strength within date,
        20 runs. The house standard (§6.7) judges. "Still offered at the next purchase" and
        closing-line value cannot be measured at halftime and are reported as not measured.
+   - **How IG-2 is scored (2026-10-17, fixed before any IG-2 number was computed;
+     `scripts/nba_ingame_ig2.py`, whose docstring holds every definition).**
+     - *Decision.* Per game, market and phase (Q1–Q2, Q3, Q4 with 6:00 or more left; halftime
+       is not an IG-2 phase), the first purchase holding a deciding book's moneyline or spread
+       quote that passes 7.1's rule. Every such quote in that purchase is an offer. A later
+       purchase in the same phase is never used.
+     - *The model* (Stern 1994), fit on earlier seasons only: the final home margin is Normal,
+       centred on the current margin plus the time-scaled margin Pinnacle's pre-game close
+       implies, with adjustments for the current margin, team fouls in the period (and who is
+       in the penalty), and the fouls of each side's three top-minute starters. Its variance
+       grows with the time left. It is fit on every game's state every 30 s of game time, from
+       the play-by-play. 2020-21 has no earlier season, so it is fit on itself and reported only.
+     - *The test, per market.* Rows: Pinnacle's own quote at each decision, with the game state
+       at its stamp. For each season S, two fits on earlier seasons' rows: Pinnacle's live
+       no-vig alone, and Pinnacle plus the model. Moneyline: log loss of the home win. Spread:
+       squared error of the final home margin, Pinnacle's margin solved from its own number and
+       no-vig. The statistic is the change (with the model minus without), whole-day bootstrap
+       95% interval, 4,000 resamples, seed 7, on 2021-22 → 2024-25 pooled and on 2025-26 alone.
+       **A market has information only when both intervals lie wholly below zero;** otherwise
+       its nine cells close without a grid.
+     - *Reported beside, never the gate:* the same test against each deciding book's own
+       no-vig price (the prices that would be bet); the same test for the score-and-time model
+       alone, without fouls (if it passes too, the gain is Pinnacle's lag from 7.1, not IG-2's
+       inputs); and, for each cell that passes the house standard, its price range and its
+       units split by whether the bet's side had outscored its opponent in the 2 minutes before
+       the quote (the deciding books' own moneyline lag, which the rule does not remove).
+     - *The grid, only for a market with information.* The side the model favours (its best
+       offer's expected value is the higher), best of the 8 deciding books, −200 floor,
+       DraftKings alone beside, expected value ≥ 0.02 / 0.05 / 0.08 (the harness's
+       `run_cells`). The blind bets use Pinnacle's live no-vig as the fair price. The placebo
+       shuffles the model's disagreement with Pinnacle between games on the same date, 20 runs,
+       and adds it back to each game's own Pinnacle price. "Still offered at the next purchase"
+       and closing-line value are not measured in play.
 2. **Bars for a grid that runs:** the house standard of §6.7. The §6.4 bars and the
    multiple-testing count (now 4,226 with these 54) are reported beside.
 3. **A cell that passes is built LIVE.** That needs an NBA in-play loop; `ncaaf_live/` is the
