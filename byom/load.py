@@ -126,12 +126,22 @@ def _played(games: list[dict]) -> dict:
     return played
 
 
-def facts_for_season(conn, season: int) -> list[dict]:
-    """The facts this season would write. No INSERT."""
+def facts_for_season(conn, season: int,
+                     game_ids: list[str] | None = None) -> list[dict]:
+    """The facts this season would write. No INSERT.
+
+    `game_ids` None reads every game. A list reads only those games.
+    Rest days still come from the whole season's schedule.
+    """
     if season < DK_HISTORY_START_SEASON:
         return []
-    games = _games(conn, season)
-    played = _played(games)
+    schedule = _games(conn, season)
+    played = _played(schedule)
+    if game_ids is None:
+        games = schedule
+    else:
+        wanted = set(game_ids)
+        games = [game for game in schedule if game["game_id"] in wanted]
     facts = []
     for game in games:
         ids = _ids_for(game["game_id"])
@@ -161,14 +171,18 @@ def _upsert(conn, facts: list[dict]) -> int:
     return len(values)
 
 
-def build_season(conn, season: int, apply: bool = False) -> dict:
-    """One season. apply=False writes nothing."""
+def build_season(conn, season: int, apply: bool = False,
+                 game_ids: list[str] | None = None) -> dict:
+    """One season. apply=False writes nothing.
+
+    `game_ids` limits which games are read. None is the whole season.
+    """
     if season < DK_HISTORY_START_SEASON:
         return {
             "season": season, "facts": 0, "written": 0,
             "skipped": "before DraftKings history",
         }
-    facts = facts_for_season(conn, season)
+    facts = facts_for_season(conn, season, game_ids=game_ids)
     written = _upsert(conn, facts) if apply else 0
     return {"season": season, "facts": len(facts), "written": written}
 
