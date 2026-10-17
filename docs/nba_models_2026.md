@@ -729,6 +729,21 @@ Only then does it run a betting grid.
     only when Pinnacle quoted within 60 seconds of it. This is the NCAAF in-play rule,
     `scripts/ncaaf_inplay_history_backtest.py`.
   - The gate's result is recorded here before any information test runs.
+  - **How "predict" is scored (2026-10-17, fixed before the test ran;
+    `scripts/nba_ingame_staleness.py`).** Rows: in-play quotes by the play-by-play clock, all
+    six seasons, with a Pinnacle quote on the same game and market in the same purchase,
+    stamped within 60 seconds. The result is side A (home or over) at the quote's own number on
+    the full-game score; pushes are left out. The benchmark is Pinnacle's no-vig probability;
+    for spreads and totals only quotes at Pinnacle's own number are used. The predictor is the
+    points scored in the 60–120 seconds before the stamp, signed toward side A (home minus
+    away; both teams for a total). The statistic is the slope of (result − benchmark) on those
+    points, with a whole-day bootstrap 95% interval, per market and pooled. Four panels: every
+    book against Pinnacle (the test as written); Pinnacle alone; the 8 deciding books alone;
+    the 8 deciding books against their own no-vig price. The rule is imposed when any panel's
+    interval, in any market or pooled, lies wholly above zero. An interval wholly below zero is
+    over-reaction, not staleness, and imposes nothing. When imposed, the rule covers the
+    deciding quote and the Pinnacle quote it is measured against: no point scored between each
+    one's stamp and the moment the feed served it.
 - **Settlement:** full-game results. A live total is settled on the full-game score; the
   remaining points are the live line minus the points already scored.
 - **Prices:** as §6.2, with the best of the 8 deciding books, the −200 floor, DraftKings alone
