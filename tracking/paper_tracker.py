@@ -1672,64 +1672,25 @@ _CLV_BACKFILL_WINDOW_DAYS = 7
 _CLV_SAVE_POINT = "clv_backfill_window"
 
 
-def _is_statement_timeout(exc: BaseException) -> bool:
-    """True for Postgres 57014 / `canceling statement due to statement timeout`."""
-    if getattr(exc, "pgcode", None) == "57014":
-        return True
-    return "statement timeout" in str(exc).lower()
-
-
-def _rollback_clv_savepoint(conn) -> None:
-    """Undo the aborted statement and drop the savepoint.
-
-    Postgres rejects every later command on the connection until the
-    transaction is restored. ROLLBACK TO SAVEPOINT is allowed in that state;
-    a full rollback is the fallback when the savepoint itself is gone, so
-    the rest of settle is not stuck on `current transaction is aborted`.
-    """
-    try:
-        conn.execute(f"ROLLBACK TO SAVEPOINT {_CLV_SAVE_POINT}")
-        conn.execute(f"RELEASE SAVEPOINT {_CLV_SAVE_POINT}")
-    except Exception:                                          # noqa: BLE001
-        try:
-            conn.rollback()
-        except Exception:                                      # noqa: BLE001
-            logger.exception("CLV backfill: rollback failed")
-
-
-def _in_clv_savepoint(conn, fn):
-    """Run fn(). On failure, restore the transaction and re-raise."""
-    try:
-        conn.execute(f"SAVEPOINT {_CLV_SAVE_POINT}")
-    except Exception:
-        _rollback_clv_savepoint(conn)
-        raise
-    try:
-        result = fn()
-    except Exception:
-        _rollback_clv_savepoint(conn)
-        raise
-    try:
-        conn.execute(f"RELEASE SAVEPOINT {_CLV_SAVE_POINT}")
-    except Exception:
-        _rollback_clv_savepoint(conn)
-        raise
-    return result
-
-
 def _clv_attempt(conn, label: str, fn):
     """Run fn in a savepoint. A statement timeout is rolled back and retried
     once. Any other error, or a second timeout, is logged and returns None
-    with the transaction usable again."""
+    with the transaction usable again.
+
+    call_in_savepoint is data.db's savepoint wrapper. It rolls the failed
+    statement back through rollback_savepoint. statement_timeout is the
+    same module's 57014 check. A second rollback here would find the
+    savepoint already released and fall through to a full ROLLBACK.
+    """
     try:
-        return _in_clv_savepoint(conn, fn)
+        return call_in_savepoint(conn, _CLV_SAVE_POINT, fn)
     except Exception as exc:                                   # noqa: BLE001
-        if not _is_statement_timeout(exc):
+        if not statement_timeout(exc):
             logger.warning(f"{label} failed (non-fatal): {exc}")
             return None
         logger.warning(f"{label} hit statement timeout; retrying once")
         try:
-            return _in_clv_savepoint(conn, fn)
+            return call_in_savepoint(conn, _CLV_SAVE_POINT, fn)
         except Exception as exc2:                              # noqa: BLE001
             logger.warning(f"{label} failed (non-fatal): {exc2}")
             return None
@@ -2822,11 +2783,22 @@ def settle_picks(game_date: str = None) -> dict:
             logger.warning(f"NCAAF stored-final mirror failed: {_exc}")
             conn.rollback()
 
+        # The heal and the mirror are committed before CLV. rollback_savepoint
+        # falls back to a full ROLLBACK when the savepoint cannot be restored,
+        # and that must not discard the writes above.
+        conn.commit()
+
         # Record closing line value now that all pre-game odds snapshots have
         # accumulated. Independent of settlement — runs even for picks whose
         # game can't be settled yet (e.g. postponed) and is idempotent.
+        # The day's capture uses the same savepoint as the backfill. A timeout
+        # on this call used to raise out of settle_picks and fail dispatch:settle.
         clv_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-        _capture_clv(conn, game_date, clv_at)
+        if _clv_attempt(
+            conn, f"CLV {game_date}",
+            lambda: _capture_clv(conn, game_date, clv_at),
+        ) is None:
+            logger.warning(f"CLV {game_date} failed (non-fatal)")
         _backfill_clv(conn, clv_at)
         conn.commit()
 

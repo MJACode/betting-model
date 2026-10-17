@@ -27,6 +27,7 @@ from pathlib import Path
 
 import psycopg2
 
+from data.db import statement_timeout
 from tracking import paper_tracker as pt
 
 _TIMEOUT = "canceling statement due to statement timeout"
@@ -37,12 +38,15 @@ _ABORTED = (
 _SRC = Path(__file__).parent.parent / "tracking" / "paper_tracker.py"
 
 
-def _fn(name: str) -> str:
-    text = _SRC.read_text(encoding="utf-8")
+def _fn(name: str, path: Path = _SRC) -> str:
+    text = path.read_text(encoding="utf-8")
     tree = ast.parse(text)
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == name)
     return "\n".join(text.splitlines()[fn.lineno - 1:fn.end_lineno])
+
+
+_DB = Path(__file__).parent.parent / "data" / "db.py"
 
 
 class _Conn:
@@ -123,8 +127,17 @@ def test_the_date_scan_is_bounded_on_game_date():
     assert "statement_timeout" not in src
     assert "session_mode" not in src
     assert "DB_STATEMENT_TIMEOUT_MS" not in _fn("_clv_backfill_dates")
-    assert "ROLLBACK TO SAVEPOINT" in _fn("_rollback_clv_savepoint")
-    assert "retrying once" in _fn("_clv_attempt")
+    attempt = _fn("_clv_attempt")
+    assert "call_in_savepoint(conn, _CLV_SAVE_POINT, fn)" in attempt
+    assert "statement_timeout(exc)" in attempt
+    assert "retrying once" in attempt
+    text = _SRC.read_text(encoding="utf-8")
+    assert "def _rollback_clv_savepoint" not in text
+    assert "def _in_clv_savepoint" not in text
+    assert "def _is_statement_timeout" not in text
+    # The rollback is data.db.rollback_savepoint, called by call_in_savepoint.
+    assert "rollback_savepoint(conn, name)" in _fn("call_in_savepoint", _DB)
+    assert "ROLLBACK TO SAVEPOINT" in _fn("rollback_savepoint", _DB)
 
 
 def test_a_timeout_is_rolled_back_and_retried_once():
@@ -188,6 +201,22 @@ def test_windows_walk_oldest_first_and_stop_at_the_cap(monkeypatch):
     assert conn.selects == ["2026-08-01", "2026-08-08"]
 
 
+def test_settle_commits_the_heal_before_clv_and_wraps_the_day_capture():
+    """The heal and the NCAAF mirror commit before CLV. The day's capture
+    runs inside the same savepoint as the backfill."""
+    body = _fn("settle_picks")
+    mirror = body.index("mirror_stored_finals(conn, game_date)")
+    after = body[mirror:]
+    commit = after.index("conn.commit()")
+    attempt = after.index("_clv_attempt(")
+    capture = after.index("_capture_clv(")
+    backfill = after.index("_backfill_clv(")
+    assert commit < attempt < capture < backfill
+    between = after[attempt:backfill]
+    assert between.count("_capture_clv(") == 1
+    assert "lambda" in between
+
+
 def test_settle_still_returns_when_the_scan_times_out(monkeypatch):
     """The scan used to raise out of settle_picks. A double timeout is empty."""
     captured = []
@@ -231,7 +260,7 @@ def test_query_canceled_with_sqlstate_is_a_timeout():
     is a stand-in with that attribute. The message branch uses the real class.
     """
     by_message = psycopg2.errors.QueryCanceled(_TIMEOUT)
-    assert pt._is_statement_timeout(by_message)
+    assert statement_timeout(by_message)
 
     class _Sqlstate:
         pgcode = "57014"
@@ -239,5 +268,5 @@ def test_query_canceled_with_sqlstate_is_a_timeout():
         def __str__(self):
             return "canceling statement"
 
-    assert pt._is_statement_timeout(_Sqlstate())
-    assert not pt._is_statement_timeout(psycopg2.errors.SyntaxError("nope"))
+    assert statement_timeout(_Sqlstate())
+    assert not statement_timeout(psycopg2.errors.SyntaxError("nope"))
