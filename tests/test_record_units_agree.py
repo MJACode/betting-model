@@ -193,7 +193,9 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "return []" in equity
     assert "profit_flat" not in equity
     assert "/ 100" not in equity
-    assert "overall.risked != null" in screen
+    on_share = screen.split("const onShare", 1)[1].split("}, [overall, equity]);", 1)[0]
+    assert "(overall.risked ?? 0) > 0" in on_share
+    assert "notLoaded || dailyLacksUnits" in screen
     assert "visibleDaily.some((d) => d.units != null)" in screen
     assert "Flat-bet ROI" not in screen
     assert ">ROI · 1 to win<" in screen
@@ -205,7 +207,7 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "formatSigned(last, 2, 'u')" in curve
     assert "units, 1 to win" in share
     assert "formatPctSigned(s.roi)" in share
-    assert "s.risked != null" in share
+    assert "(s.risked ?? 0) > 0" in share
     assert "s.roiFlat" not in share
     assert "flat-bet ROI" not in share
     assert "flat $100" not in share
@@ -329,3 +331,8 @@ def test_the_share_text_drops_a_zero_from_before_the_migration():
     assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
     assert "[PASS] missing stake drops the ROI line" in proc.stdout
     assert "[PASS] missing stake drops the units line" in proc.stdout
+    assert "[PASS] missing stake keeps the record" in proc.stdout
+    assert "[PASS] missing stake keeps the win rate" in proc.stdout
+    assert "[PASS] all-void drops the ROI line" in proc.stdout
+    assert "[PASS] all-void keeps the record" in proc.stdout
+    assert "[PASS] all-void keeps the win rate" in proc.stdout

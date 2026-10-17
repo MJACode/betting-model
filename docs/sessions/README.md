@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, the share keeps the record and the win rate when ROI is unknown; ROI and the units line require risked > 0, the same gate the cards use, so an all-void selection is not shared as 0.0% |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, a select from before the units column leaves the curve off and drops the ROI and units lines from the share; model rows sort by model id; the tally rollback is a read-then-write |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, posted risked is WIN/LOSS only: snapshot through 2026-10-15 is 918.2090 (the 917.1090 figure is one −110 loss earlier); 106 NO_ACTION and 30 ungraded would have made 1071.8475; functions are their own migration; the app select falls back if the columns are missing |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Luukkonen Under 25.5 Saves (pick 3628128) voided on the evening box pass with no start logged for him; goalie void now needs both teams' starts; regraded LOSS, 2026-10-15 restates |

@@ -130,11 +130,15 @@ export function TrackRecordScreen() {
   const canShare = rows.length > 0 && overall.picks > 0;
   // Nothing has loaded (still loading, or the load failed): unknown, not zero.
   const notLoaded = rows.length === 0 && (loading || Boolean(error));
+  // Daily rows arrived without a units column. Drawing them as zero is a flat
+  // line that ends at +0.00u.
+  const dailyLacksUnits =
+    visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null);
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
         endUnits:
-          overall.risked != null && equity.length
+          (overall.risked ?? 0) > 0 && equity.length
             ? equity[equity.length - 1]!.cumUnits
             : null,
         since: RECORD_START,
@@ -298,11 +302,10 @@ export function TrackRecordScreen() {
         </View>
         )}
 
-        {/* Unconditional once loaded: EquityCurve carries its own "not enough
-            settled days" copy, and it is the only thing between the hero and the
-            prose now. Held back on the first load so it cannot assert there are
-            too few settled days while the data is still in flight. */}
-        {rows.length === 0 && (loading || error) ? null : visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null) ? null : (
+        {/* EquityCurve carries its own "not enough settled days" copy. Held
+            back while nothing has loaded, and while the daily rows have no
+            units column, so that copy is not what a missing column says. */}
+        {notLoaded || dailyLacksUnits ? null : (
           <EquityCurve points={equity} width={chartWidth} />
         )}
 

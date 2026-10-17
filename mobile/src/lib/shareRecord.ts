@@ -15,17 +15,16 @@ export function buildShareMessage(
   opts: { endUnits?: number | null; since?: string } = {},
 ): string {
   const record = `${s.wins}-${s.losses}${s.pushes > 0 ? `-${s.pushes}` : ''}`;
-  // risked is unset when the select ran before the units column existed.
-  // roi is then 0, and a caller can still pass endUnits 0. Neither number
-  // is the record, so both lines stay out of the public text.
-  const stakeKnown = s.risked != null;
+  const recordLine = `${record} (${Math.round(s.winRate * 100)}% win rate)`;
+  // Same gate as the cards: ROI is known only when something was risked.
+  // An unset column (the select ran before the migration) and an all-void
+  // selection (risked 0) both leave roi at 0. The record and the win rate stay.
+  const roiKnown = (s.risked ?? 0) > 0;
   const lines: (string | null)[] = [
     '📊 Signalbase — verified sports-betting model',
     '',
-    stakeKnown
-      ? `${formatPctSigned(s.roi)} ROI · ${record} (${Math.round(s.winRate * 100)}% win rate)`
-      : null,
-    opts.endUnits != null && stakeKnown
+    roiKnown ? `${formatPctSigned(s.roi)} ROI · ${recordLine}` : recordLine,
+    opts.endUnits != null && roiKnown
       ? // Same sign and 2-decimal rounding as the equity curve (U+2212 for a loss).
         `${formatSigned(opts.endUnits, 2, 'u').replace(/u$/, '')} units, 1 to win`
       : null,
