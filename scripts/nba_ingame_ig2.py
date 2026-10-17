@@ -641,16 +641,25 @@ def passing_detail(q: pd.DataFrame, train: pd.DataFrame, prior: pd.DataFrame, pa
             pin_m, on=["game_id", "market", "phase_ig2"], how="inner")
         cand, _, _ = grid_frames(dec, models, games, n_placebo=0)
         b = H.grade(H.choose(cand, c["cut"], sides=["model"]), games)
-        b = b[b["season"].isin(GRADED)]
+        b = b[b["season"].isin(GRADED)].reset_index(drop=True)
         side_pts = np.where(b["side"] == "home", b["pts120_h"] - b["pts120_a"], b["pts120_a"] - b["pts120_h"])
         hot = side_pts > 0
+        outl = H.outlier_flag(b, cand).to_numpy()
+        dog = (b["price"] > 0).to_numpy()
+        res = b["result"]
         out.append({"cell": f"{c['point']}|{c['market']}|ev>={c['cut']}", "bets": int(len(b)),
+                    "units": float(b["units"].sum()), "roi": H.roi(b),
+                    "won_lost_push": f"{int((res == 'W').sum())}-{int((res == 'L').sum())}-{int((res == 'P').sum())}",
                     "price_min": float(b["price"].min()), "price_median": float(b["price"].median()),
                     "price_max": float(b["price"].max()),
                     "units_side_outscored_last_120s": float(b.loc[hot, "units"].sum()), "n_hot": int(hot.sum()),
                     "units_otherwise": float(b.loc[~hot, "units"].sum()), "n_other": int((~hot).sum()),
                     "roi_hot": H.roi(b[hot]) if hot.any() else np.nan,
-                    "roi_other": H.roi(b[~hot]) if (~hot).any() else np.nan})
+                    "roi_other": H.roi(b[~hot]) if (~hot).any() else np.nan,
+                    "share_outlier": float(outl.mean()), "units_without_outliers": float(b.loc[~outl, "units"].sum()),
+                    "n_underdog": int(dog.sum()), "units_underdog": float(b.loc[dog, "units"].sum()),
+                    "units_by_book": {k: round(float(v), 2) for k, v in b.groupby("book")["units"].sum().items()},
+                    "bets_by_book": {k: int(v) for k, v in b["book"].value_counts().items()}})
     return out
 
 
@@ -660,6 +669,8 @@ def main() -> None:
     ap.add_argument("--grid", action="store_true", help="the 18 cells, for markets with information")
     ap.add_argument("--markets", default=None, help="override: comma list (default: from --info result)")
     ap.add_argument("--refresh", action="store_true", help="rebuild the training-state and prior caches")
+    ap.add_argument("--detail", action="store_true",
+                    help="beside-numbers for the cells that passed (reads the saved verdict)")
     a = ap.parse_args()
     H.check()
     pd.set_option("display.width", 250)
@@ -681,6 +692,13 @@ def main() -> None:
         print("\nINFORMATION (both intervals wholly below zero):", verdict)
         print("calibration (moneyline, graded seasons):", res["calibration_h2h"])
         print("decisions:", res["decisions"], " without a pre-game prior:", res["decisions_no_prior"])
+    if a.detail:
+        h = pd.read_parquet(OUT_DIR / "verdict_house_IG-2.parquet")
+        det = passing_detail(q, train, prior, h[h["house_passes"]])
+        for d in det:
+            print(json.dumps(d, default=float))
+        (OUT_DIR / "ig2_passing_detail.json").write_text(json.dumps(det, indent=1, default=float),
+                                                         encoding="utf-8")
     if a.grid:
         if a.markets:
             markets = tuple(a.markets.split(","))

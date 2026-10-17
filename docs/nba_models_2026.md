@@ -1033,13 +1033,14 @@ Same command; cells in `cells_IG-1.parquet`, the verdict in `verdict_house_IG-1.
        | spread, Q1–Q2, EV ≥ 0.08 | 948 | +69.5 | +6.5% | +0.4 .. +12.7 | 5 of 5 | +0.2% on 210 | +1.0% / −1.4% | −152 / −114 / +114 |
        | moneyline, Q3, EV ≥ 0.05 | 651 | +40.1 | +10.0% | +0.1 .. +19.9 | 5 of 5 | +6.7% on 159 | −1.5% / −1.1% | −200 / +210 / +3500 |
        | moneyline, Q3, EV ≥ 0.08 | 545 | +49.6 | +15.8% | +3.8 .. +27.4 | 5 of 5 | +13.0% on 134 | +2.1% / −5.1% | −200 / +230 / +3500 |
-       | spread, Q3, EV ≥ 0.05 | 1,055 | +79.6 | +6.7% | +1.2 .. +12.6 | 5 of 5 | +5.5% on 286 | +7.3% / −3.6% | −144 / −114 / +125 |
+       | spread, Q3, EV ≥ 0.05 | 1,055 | +79.6 | +6.7% | +1.2 .. +12.6 | 5 of 5 | +5.5% on 286 | +7.2% / −3.6% | −144 / −114 / +125 |
        | spread, Q3, EV ≥ 0.08 | 751 | +76.8 | +9.2% | +2.5 .. +16.2 | 5 of 5 | +2.3% on 227 | +10.6% / −11.9% | −144 / −113 / +125 |
 
-       - The other 12 fail: Q1–Q2 moneyline and Q4 moneyline on the interval and the season
-         count; Q1–Q2 and Q3 at EV ≥ 0.02 on the interval; Q4 spreads on the placebo. 7 of the
-         18 cells clear the 95% interval, against about 0.5 expected by chance. So the effect is
-         systematic. What it is, these say:
+       - The other 12 fail. Every Q1–Q2 and Q4 moneyline cell fails the interval and the season
+         count. The Q1–Q2 spread, Q3 moneyline and Q3 spread cells at EV ≥ 0.02 fail the interval
+         alone. The Q4 spread cells fail the placebo, two of them the interval as well.
+       - 7 of the 18 cells clear the 95% interval, against about 0.5 expected by chance. So the
+         effect is systematic. What it is, these say:
        - **Without outlier prices** (a price more than 20 cents better than the next book's, or a
          number no other book hangs; about half of every passing cell's bets), the units fall to
          +21.7 and +22.0 (Q1–Q2 spreads), −4.1 and +8.0 (Q3 moneylines), +42.7 and +41.0 (Q3
@@ -1049,7 +1050,7 @@ Same command; cells in `cells_IG-1.parquet`, the verdict in `verdict_house_IG-1.
          +4.5% on 748; Q3 moneyline at EV ≥ 0.05, +18.7% on 277 against +2.5% on 374; Q3 spread
          at EV ≥ 0.05, +8.9% on 507 against +4.7% on 548. That is the deciding books' own lag
          that the freshness rule does not remove (7.1).
-       - **DraftKings alone** is flat or negative in 2025-26 in all six. The best of 8 books,
+       - **DraftKings alone** loses in 2025-26 in all six (−1.1% to −11.9%). The best of 8 books,
          quoted up to 60 s apart during play, picks the price that has moved least.
        - **The Q3 moneyline cells are underdog bets** (516 of 651, and 446 of 545). The blind
          Q3 underdog at the best price earns +6.5% pooled. FanDuel carries the most units in
