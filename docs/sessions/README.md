@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, `nba_total_luck` LIVE: NBA totals overs when the shooting-luck-adjusted projected total is 3+ above the raw one; the lab's gap functions moved into the model (one copy); live code replays 611 of 611 lab bets; decided on the last refresh pass 60+ minutes before tip; artifact committed, no production write |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master (`0d3b58b3`, #988) merged into the record-units branch; session logs keep both sides, newest first |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA public betting splits: Action Network v1/v2 archive 2020-21..2025-26 into `nba_public_splits` (64,027 rows, 7,230 of 7,230 regular-season games); the archived number is the split at the close (MLB calibration, 20 Wayback captures, a tip-off poll); `pregame_poll` capture in the refresh pass from 2026-27; `docs/nba_public_splits.md` |

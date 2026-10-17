@@ -603,6 +603,81 @@ search; +1.45% at the second-best book).
 overs at 0.5 from one book. The probability shown is an upper bound (claimed
 0.533, won 0.501 in the band bet).
 
+## NBA — `nba_total_luck`, full-game totals, overs (2026-10-17, mike)
+
+A team's points allowed include how well its opponents happened to shoot threes
+and free throws, which a defence barely controls. Replace those two percentages
+with the league's rate so far this season, and when the projected total rises
+by at least 3 points, bet the over (`models/nba_total_luck.py`,
+`scripts/nba_total_luck_card.py`; the search, the house standard it passed and
+everything it failed are `docs/nba_models_2026.md` 6.6 and 6.7).
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | luck-adjusted minus raw projected total ≥ 3.0 points; overs only | `models/nba_total_luck.GAP_CUT` |
+| prob / edge cut | 0.0 / 0.0 — the publishers show every bet the card writes | `ACTION_THRESHOLDS`, both threshold dicts |
+| EV floor | 0.00, on its own probability (below); not a second cut | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned, and passed to the offer choice itself | `MODEL_MIN_ODDS` |
+| the offer | the over at the deciding book with the best EV under the market's fair line (Pinnacle's no-vig, else the deciding books' median), priced through the empirical spread of final totals around Pinnacle's close on every earlier season | `scripts/nba_game_harness` (one copy) + the artifact |
+| early season | both teams 10+ games: the first bets come in mid-November | `models/nba_total_luck.MIN_GAMES` |
+| decided once | the last scheduled refresh pass at least 60 minutes before tip; a row in `nba_total_luck_decisions`, bet or not, never looked at again | `scripts/nba_total_luck_card.py` |
+| artifact | the residual sample and the bucket's per-season counts | `models/saved/nba_total_luck_20261017_090305.pkl` |
+
+**The evidence** (decision point C, gap ≥ 3, the over; graded walk-forward at
+bought prices by the lab, `scripts/nba_game2_luck.py`):
+
+| Season | Bets | W-L-P | Units | ROI |
+|---|---|---|---|---|
+| 2020-21 (reported, never chosen on) | 103 | 48-54-1 | -11.7 | -10.4% |
+| 2021-22 | 109 | 64-45-0 | +14.6 | +12.2% |
+| 2022-23 | 76 | 42-34-0 | +4.4 | +5.2% |
+| 2023-24 | 137 | 74-63-0 | +5.1 | +3.4% |
+| 2024-25 | 104 | 64-37-3 | +23.8 | +21.6% |
+| 2025-26 | 82 | 46-35-1 | +7.7 | +8.7% |
+| **2021-22 → 2025-26** | **508** | **290-214-4** | **+55.6** | **+10.1%**, 95% interval +2.0..+18.3 |
+
+Neighbours: gap ≥ 2 +5.9%, gap ≥ 4 +13.6% (210 bets). DraftKings alone +8.2% on
+425 bets (2021-22 → 2024-25) and +7.0% in 2025-26. Without BetRivers +6.2% on
+430. Closing-line value -2.23% at the median, against -2.41% for the blind over
+at the same moment. Only 6 of 422 cells cleared the 95% interval against about
+10.6 expected by chance: what makes this one credible is its shape (the return
+rises with the gap, every graded season is positive), not the interval. Expect
+less than +10% live.
+
+**The probability it writes** is the market-fair chance that the over wins at
+the line and price taken, plus the gap ≥ 3 bucket's uplift fitted on the
+seasons before the live one: on 2021-22 → 2025-26, 290 wins in 508 bets (0.5709)
+against a mean fair chance of 0.5050, so **+0.0659** for 2026-27. Fitted the
+same way on the seasons before each, the uplift was +0.085 (2022-23), +0.070,
++0.054 and +0.068 (2025-26). The written EV on the 508 graded bets: median
++0.090, second smallest +0.030; the one bet under zero (-0.012, 2023-01-24
+DEN at NOP, FanDuel over 232.0, lost 1.1 units) is the only one the 0.00 floor
+removes — 507 bets, +56.7 units, +10.3% without it.
+
+**Prices it lays:** min -115, 5th percentile -114, median -110, 95th -105, max
++100; 1% plus money. Totals bet from 198.5 to 253.5 (median 225.5).
+
+**Decision timing:** the lab's decision sat exactly 60 minutes before tip on 609
+of its 611 bets. Live, the lead is read at the refresh pass's scheduled start
+(its rows land 8-12 seconds later). On the 1,206 scheduled 2026-27
+regular-season games: 1,029 are decided by the pass exactly 60 minutes out
+(every tip from 7:00 pm ET on), 35 by one 73 minutes out (afternoon half-hour
+tips) and 142 by one 103 minutes out (tips on the hour, noon to 6:00 pm, which
+the hourly :17 passes reach only then). The research found the edge at the
+morning fetch too (+10.3%) and at 45-75 minutes (+9.7%), so the earlier
+afternoon decisions are inside the evidence, not outside it.
+
+**The replay** (`tests/test_nba_total_luck_replay.py`,
+`scripts/nba_total_luck_replay.py`): the live code, run on the research cache at
+the lab's decision instants, reproduces every lab bet — 611 of 611 across
+2020-21 → 2025-26 (82 of 82 in 2025-26) — and 6,294 gaps to the last digit.
+
+**Review:** re-sweep the gap cut, on its own settled record and the graded
+seasons together, at about 250 settled bets (about two and a half seasons at
+roughly 100 bets a season). The artifact must be refitted through 2026-27 before
+2027-28 (`python -m scripts.nba_total_luck_build`); the card refuses a season it
+does not end just before.
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the

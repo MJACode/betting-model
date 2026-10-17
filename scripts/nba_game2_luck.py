@@ -154,6 +154,12 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from scripts import nba_game_harness as H  # noqa: E402
+# F4's ratings, projection and signal live in the live model, ONE copy: the
+# lab grades exactly the gap that models/nba_total_luck.py bets
+# (docs/nba_models_2026.md section 6.7, shipped LIVE 2026-10-17).
+from models.nba_total_luck import (  # noqa: E402,F401
+    BOX_COLS, FTA_POSS, LEAGUE_SUMS, MIN_GAMES, STATS, TEAM_SUMS, _before, as_of_ratings,
+    f4_projections, f4_signal, side_strength, team_box)
 
 RESULTS = Path(os.environ.get("NBA_GAME2_RESULTS",
                               "C:/Users/micha/AppData/Local/Temp/nba_game_edge/results"))
@@ -162,9 +168,7 @@ FULL_SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)     # 2021-2026: every season --
 QUALITY_SEASONS = (2022, 2023, 2024, 2025)          # never 2026
 N_PLACEBO = 20
 
-# F4
-FTA_POSS = 0.44              # Oliver / Hollinger possession estimate
-MIN_GAMES = 10               # CLAUDE.md section 3 early-season rule
+# F4 (FTA_POSS, MIN_GAMES and the box columns are imported from the live model above)
 F4_POINTS = ("A", "C")
 F4_CUTS = (1.0, 2.0, 3.0, 4.0)
 F4_SIDES = {"spreads": ["home", "away"], "totals": ["over", "under"]}
@@ -188,113 +192,6 @@ EXPECTED_CELLS = {
     "F6c": len(F6C_POINTS) * len(SITUATIONS) * sum(len(s) for s in F6C_SIDES.values()) * len(F6C_CUTS),
 }
 assert EXPECTED_CELLS == {"F4": 32, "F6c": 6}, EXPECTED_CELLS
-
-
-# ── F4: team box scores and as-of ratings ───────────────────────────────────
-
-BOX_COLS = {"points": "pts", "fg_att": "fga", "fg3_made": "fg3m", "fg3_att": "fg3a",
-            "ft_made": "ftm", "ft_att": "fta", "offensive_reb": "oreb", "turnovers": "tov"}
-STATS = list(BOX_COLS.values())
-
-
-def team_box(box: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
-    """One row per (game, team): its box totals, its opponent's (opp_*), and the
-    game's possessions. Only games in `games` (regular season, final)."""
-    b = box[box["team"].notna() & (box["team"] != "NaN")]
-    t = b.groupby(["game_id", "team"], as_index=False)[list(BOX_COLS)].sum().rename(columns=BOX_COLS)
-    t = t.merge(games[["game_id", "season", "game_date", "home_team", "away_team"]], on="game_id")
-    t = t[(t["team"] == t["home_team"]) | (t["team"] == t["away_team"])].copy()
-    t["opp"] = np.where(t["team"] == t["home_team"], t["away_team"], t["home_team"])
-    o = t[["game_id", "team", *STATS]].rename(columns={"team": "opp", **{c: f"opp_{c}" for c in STATS}})
-    t = t.merge(o, on=["game_id", "opp"])
-
-    def one(p):
-        return t[f"{p}fga"] - t[f"{p}oreb"] + t[f"{p}tov"] + FTA_POSS * t[f"{p}fta"]
-
-    t["poss"] = 0.5 * (one("") + one("opp_"))
-    return t.drop(columns=["home_team", "away_team"]).reset_index(drop=True)
-
-
-TEAM_SUMS = ["pts", "opp_pts", "opp_fg3m", "opp_fg3a", "opp_ftm", "opp_fta", "poss"]
-LEAGUE_SUMS = ["pts", "fg3m", "fg3a", "ftm", "fta", "poss"]
-
-
-def _before(targets: pd.DataFrame, cum: pd.DataFrame, by: list[str]) -> pd.DataFrame:
-    """For each target row the last cumulative row with game_date STRICTLY
-    before the target's date (same `by` keys)."""
-    t = targets.assign(_d=pd.to_datetime(targets["game_date"])).sort_values("_d")
-    c = cum.assign(_d=pd.to_datetime(cum["game_date"])).drop(columns="game_date").sort_values("_d")
-    out = pd.merge_asof(t, c, on="_d", by=by, allow_exact_matches=False)
-    return out.drop(columns="_d")
-
-
-def as_of_ratings(tb: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
-    """Raw and luck-adjusted ratings for (season, team, game_date) targets, from
-    that team's games in the same season with game_date < the target's date,
-    and league averages over the same season's games before that date. Only
-    the opponents' 3P% and FT% are replaced (section 6.3): the offence is
-    left as played, so ortg_adj equals ortg_raw."""
-    team = tb.groupby(["season", "team", "game_date"], as_index=False)[TEAM_SUMS].sum()
-    team["n"] = 1.0
-    team = team.sort_values(["season", "team", "game_date"])
-    team[TEAM_SUMS + ["n"]] = team.groupby(["season", "team"])[TEAM_SUMS + ["n"]].cumsum()
-    lg = tb.groupby(["season", "game_date"], as_index=False)[LEAGUE_SUMS].sum().sort_values(
-        ["season", "game_date"])
-    lg[LEAGUE_SUMS] = lg.groupby("season")[LEAGUE_SUMS].cumsum()
-    lg = lg.rename(columns={c: f"lg_{c}" for c in LEAGUE_SUMS})
-    x = _before(targets[["season", "team", "game_date"]], team, ["season", "team"])
-    x = _before(x, lg, ["season"])
-    x["n"] = x["n"].fillna(0.0)
-    lg3 = x["lg_fg3m"] / x["lg_fg3a"]
-    lgft = x["lg_ftm"] / x["lg_fta"]
-    adj_opp = (x["opp_pts"] + 3.0 * (x["opp_fg3a"] * lg3 - x["opp_fg3m"])
-               + (x["opp_fta"] * lgft - x["opp_ftm"]))
-    x["ortg_raw"] = 100.0 * x["pts"] / x["poss"]
-    x["drtg_raw"] = 100.0 * x["opp_pts"] / x["poss"]
-    x["ortg_adj"] = x["ortg_raw"]
-    x["drtg_adj"] = 100.0 * adj_opp / x["poss"]
-    x["pace"] = x["poss"] / x["n"]
-    x["lg_rtg"] = 100.0 * x["lg_pts"] / x["lg_poss"]
-    return x[["season", "team", "game_date", "n", "pace", "lg_rtg",
-              "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"]]
-
-
-def f4_projections(games: pd.DataFrame, tb: pd.DataFrame) -> pd.DataFrame:
-    """Per game: raw and adjusted projected margin (no home court) and total,
-    and the gaps. Games where either team has < MIN_GAMES are dropped."""
-    g = games[["game_id", "season", "game_date", "home_team", "away_team"]]
-    tg = pd.concat([g[["season", "game_date", "home_team"]].rename(columns={"home_team": "team"}),
-                    g[["season", "game_date", "away_team"]].rename(columns={"away_team": "team"})])
-    r = as_of_ratings(tb, tg.drop_duplicates())
-    cols = ["n", "pace", "lg_rtg", "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"]
-    h = r.rename(columns={"team": "home_team", **{c: f"h_{c}" for c in cols}})
-    a = r.rename(columns={"team": "away_team", **{c: f"a_{c}" for c in cols}}).drop(columns="a_lg_rtg")
-    x = g.merge(h, on=["season", "game_date", "home_team"]).merge(a, on=["season", "game_date", "away_team"])
-    x = x[(x["h_n"] >= MIN_GAMES) & (x["a_n"] >= MIN_GAMES)].copy()
-    pace = 0.5 * (x["h_pace"] + x["a_pace"]) / 100.0
-    for k in ("raw", "adj"):
-        x[f"margin_{k}"] = pace * ((x[f"h_ortg_{k}"] - x[f"h_drtg_{k}"]) - (x[f"a_ortg_{k}"] - x[f"a_drtg_{k}"]))
-        x[f"total_{k}"] = pace * (x[f"h_ortg_{k}"] + x[f"a_drtg_{k}"] + x[f"a_ortg_{k}"]
-                                  + x[f"h_drtg_{k}"] - 2.0 * x["h_lg_rtg"])
-    x["gap_margin"] = x["margin_adj"] - x["margin_raw"]
-    x["gap_total"] = x["total_adj"] - x["total_raw"]
-    return x.dropna(subset=["gap_margin", "gap_total"]).reset_index(drop=True)
-
-
-def f4_signal(proj: pd.DataFrame) -> pd.DataFrame:
-    """One row per (game, market): `strength` = the gap toward side A (home, over)."""
-    s = proj[["game_id"]].assign(market="spreads", strength=proj["gap_margin"])
-    t = proj[["game_id"]].assign(market="totals", strength=proj["gap_total"])
-    return pd.concat([s, t], ignore_index=True)
-
-
-def side_strength(off: pd.DataFrame, signal: pd.DataFrame) -> pd.DataFrame:
-    """Offers carrying the family's number in THAT side's favour: +signal for
-    home / over, -signal for away / under. Offers without a number are dropped."""
-    x = off.drop(columns=[c for c in ("strength",) if c in off]).merge(
-        signal[["game_id", "market", "strength"]], on=["game_id", "market"], how="inner")
-    a = x["side"].isin(["home", "over"])
-    return x.assign(strength=np.where(a, x["strength"], -x["strength"]))
 
 
 # ── F6c: as-of standings and situations ─────────────────────────────────────

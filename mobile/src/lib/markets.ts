@@ -1720,10 +1720,13 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // NO_ACTION for an nba_player with no box-score row in a logged game).
   // The NBA projection model (scripts/nba_prop_projection_card.py) posts in
   // the same window, the same way, and voids the same way, over or under.
+  // The NBA totals overs card (scripts/nba_total_luck_card.py) posts each game
+  // once, about an hour before tip, and is a game line: nothing to void.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
+    pick.model_id === 'nba_total_luck' ||
     nbaPosted
   ) {
     return {

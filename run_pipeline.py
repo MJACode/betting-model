@@ -1380,6 +1380,28 @@ def step_nba_prop_projection(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_total_luck(dry_run: bool = False) -> bool:
+    """NBA full-game totals, overs (`nba_total_luck`): the shooting-luck gap.
+
+    Decides each regular-season game once, on the last refresh pass whose
+    odds fetch is 60-180 minutes before tip, and writes the over at the best
+    bettable price when the luck-adjusted projected total is at least 3 points
+    above the raw one (scripts/nba_total_luck_card.py). LIVE, no write switch
+    (mike, 2026-10-17). Runs only in the refresh pass, right after the odds
+    fetch, under a time limit there (scripts/refresh_pass.sh STEP_TIMEOUT_S).
+    A pass with no game to decide writes nothing and logs why.
+    """
+    try:
+        from scripts.nba_total_luck_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA totals card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA totals card failed: {exc}")
+        return False
+
+
 def step_nba_prop_project() -> bool:
     """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
     --project): the frame over every box line since 2018-19, the newest ESPN injury
@@ -2275,6 +2297,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
+                                 "nba-total-luck",
                                  "nhl-over-under",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nfl-results",
@@ -2360,6 +2383,7 @@ Examples:
             "nba-prop-close": lambda: step_nba_prop_close(),
             "nba-prop-projection": lambda: step_nba_prop_projection(dry_run=args.dry_run),
             "nba-prop-project": lambda: step_nba_prop_project(),
+            "nba-total-luck": lambda: step_nba_total_luck(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),

@@ -404,6 +404,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA full-game totals, overs only (models/nba_total_luck.py, 2026-10-17).
+  // A team's points allowed include how well its opponents happened to shoot
+  // threes and free throws, which is mostly luck. When a total projected with
+  // that luck taken out is at least 3 points above the plain projection, it
+  // bets the over, once, about an hour before tip, at the best price. The
+  // label is the platform's "BOS vs NYK Over 225.5". A game line, not a
+  // picker slot: totals are not one (betSlotForModel).
+  nba_total_luck: {
+    shortLabel: 'Over',
+    longLabel: 'Total Points (Overs)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {

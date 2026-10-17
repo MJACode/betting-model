@@ -21,6 +21,22 @@
 
 ---
 
+## [ ] NBA totals overs (`nba_total_luck`): first decisions, and the refit before 2027-28 (2026-10-17)
+
+Live from 2026-10-17; the first bet needs both teams at 10 games, so mid-November.
+Read after the first slates: (1) `nba_total_luck_decisions` — every regular-season
+game should get exactly one row, on the pass 60 minutes out (103 for an afternoon
+tip on the hour); a game with no row before tip means its last pass's odds step
+failed (the card logs "was never decided"); (2) `box_missing` in the detail column:
+a final game the results ingest did not log, which declines both teams' games;
+(3) the artifact's copy in Supabase's `model_artifacts` — not written yet (the
+committed file is what the worker loads); `python -m scripts.nba_total_luck_build
+--store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the
+2027-28 season** refit the artifact through 2026-27
+(`python -m scripts.nba_total_luck_build`): the card refuses a season the artifact
+does not end just before. Re-sweep the gap cut at about 250 settled bets
+(`docs/thresholds.md`, NBA — `nba_total_luck`).
+
 ## [ ] NBA projection model: what to read after its first nights (2026-10-16)
 
 `nba_prop_projection` went live with three things the archive could not grade

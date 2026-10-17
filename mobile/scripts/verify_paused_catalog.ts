@@ -22,6 +22,7 @@ import {
   BET_TYPE_GROUPS,
   betTypeGroups,
   sportHasLivePropModel,
+  betSlotForModel,
   betTypeLabel,
   betTypePickerGroups,
   betTypeStatusSuffix,
@@ -150,6 +151,8 @@ check('an active batter prop is still a bet type you can build on',
   const nbaProps = betTypePickerGroups().find((g) => g.sport === 'NBA')?.choices.find((c) => c.slot === 'props');
   check('NBA Player props writes the two live NBA prop models, not a retired per-stat model',
     nbaProps?.modelIds.join(',') === 'nba_prop_market,nba_prop_projection', nbaProps?.modelIds.join(','));
+  check('the NBA totals overs are a game line the picker does not offer as a slot',
+    MODEL_META.nba_total_luck?.type === 'game' && betSlotForModel('nba_total_luck', 'game') === null);
   check('the NBA projection model is titled in picker language',
     betTypeLabel('nba_prop_projection') === 'NBA · Player props', betTypeLabel('nba_prop_projection'));
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',

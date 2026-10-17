@@ -141,6 +141,36 @@ def attach_fetch(quotes: pd.DataFrame, ledger: pd.DataFrame) -> tuple[pd.DataFra
 
 MIN_PRICED_SHARE, MAX_PLACED_SHARE = 0.90, 0.05
 
+QUOTE_COLS = ["game_id", "season", "game_date", "tip", "market", "book", "snapshot_at",
+              "fetch_at", "line", "price_a", "price_b", "coherent"]
+
+
+def frame_quotes(o: pd.DataFrame, extra=()) -> pd.DataFrame:
+    """Stored odds rows -> the quote frame every cell reads (QUOTE_COLS).
+
+    `o` carries the odds columns (bookmaker, market, spread_home, total_line,
+    the four prices), the game's season / game_date / tip, a parsed
+    snapshot_at and the fetch instant `fetch_at`. Kept: rows from a fetch
+    before tip whose own stamp is before tip, with both prices. `line` is the
+    side-A number (spread_home or the total), price_a / price_b the side-A /
+    side-B prices, `coherent` the 1.00-1.15 implied-sum test.
+
+    ONE copy: load() runs it on the archive (fetch_at from the purchase
+    ledger), and models/nba_total_luck.py runs it on the live odds table
+    (fetch_at = created_at, the moment the refresh pass stored the fetch), so
+    the live model and the graded cells see the same quotes. `extra` names
+    further columns to keep (the live model's betslip links)."""
+    o = o[o["fetch_at"].notna() & (o["snapshot_at"] < o["tip"]) & (o["fetch_at"] < o["tip"])]
+    o = o.rename(columns={"bookmaker": "book"})
+    o["line"] = np.where(o["market"] == "spreads", o["spread_home"],
+                         np.where(o["market"] == "totals", o["total_line"], np.nan))
+    o["price_a"] = np.where(o["market"] == "totals", o["over_price"], o["home_price"])
+    o["price_b"] = np.where(o["market"] == "totals", o["under_price"], o["away_price"])
+    o = o[o["price_a"].notna() & o["price_b"].notna()]
+    s = imp(o["price_a"]) + imp(o["price_b"])
+    o["coherent"] = (s >= COHERENT[0]) & (s <= COHERENT[1])
+    return o[QUOTE_COLS + list(extra)].reset_index(drop=True)
+
 
 def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
     """Games, full-game quotes and the fetches that bought them.
@@ -159,18 +189,7 @@ def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
     o = o.merge(g[["game_id", "season", "game_date", "tip"]], on="game_id")
     led = pd.read_parquet(cache / "nba_fetch_ledger.parquet")
     o, notes = attach_fetch(o, led)
-    o = o[o["fetch_at"].notna() & (o["snapshot_at"] < o["tip"]) & (o["fetch_at"] < o["tip"])]
-    o = o.rename(columns={"bookmaker": "book"})
-    o["line"] = np.where(o["market"] == "spreads", o["spread_home"],
-                         np.where(o["market"] == "totals", o["total_line"], np.nan))
-    o["price_a"] = np.where(o["market"] == "totals", o["over_price"], o["home_price"])
-    o["price_b"] = np.where(o["market"] == "totals", o["under_price"], o["away_price"])
-    o = o[o["price_a"].notna() & o["price_b"].notna()]
-    s = imp(o["price_a"]) + imp(o["price_b"])
-    o["coherent"] = (s >= COHERENT[0]) & (s <= COHERENT[1])
-    keep = ["game_id", "season", "game_date", "tip", "market", "book", "snapshot_at",
-            "fetch_at", "line", "price_a", "price_b", "coherent"]
-    o = o[keep].reset_index(drop=True)
+    o = frame_quotes(o)
     f = o[["game_id", "tip", "fetch_at"]].drop_duplicates(["game_id", "fetch_at"]).copy()
     f["lead_min"] = (f["tip"] - f["fetch_at"]).dt.total_seconds() / 60.0
     notes["games"] = int(g["game_id"].nunique())
@@ -440,12 +459,17 @@ def side_mask(c: pd.DataFrame, sides) -> pd.Series:
     return keep
 
 
-def choose(cand: pd.DataFrame, cut: float, books=BETTABLE, sides=None) -> pd.DataFrame:
+def choose(cand: pd.DataFrame, cut: float, books=BETTABLE, sides=None,
+           floor: float | None = None) -> pd.DataFrame:
     """One bet per (game, market): the best-EV offer at an allowed book.
 
     `cand` holds offers with p_win, p_push (with_ev adds ev). Ties go to the
-    earlier book in BEST_LINE_BOOKMAKERS. `sides`: see side_mask."""
-    c = cand[cand["book"].isin(books) & (cand["price"] >= PRICE_FLOOR)]
+    earlier book in BEST_LINE_BOOKMAKERS. `sides`: see side_mask. `floor`:
+    the price floor, PRICE_FLOOR (config.DEFAULT_MIN_ODDS at import) unless
+    given; a live model passes its own config.min_odds_for, so an override of
+    the platform default cannot move it off the floor it was graded at."""
+    floor = PRICE_FLOOR if floor is None else float(floor)
+    c = cand[cand["book"].isin(books) & (cand["price"] >= floor)]
     if sides is not None:
         c = c[side_mask(c, sides)]
     if "ev" not in c:
