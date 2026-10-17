@@ -285,11 +285,18 @@ def test_a_team_with_no_final_game_this_season_has_no_model_number():
 
 # ── the gap ─────────────────────────────────────────────────────────────────
 
+def _vis(rows):
+    """rows: (game_id, market, book, line, coherent): full-game quotes visible at T."""
+    return pd.DataFrame([{"game_id": g, "market": m, "book": b, "line": ln, "coherent": c}
+                         for g, m, b, ln, c in rows])
+
+
 def test_the_gap_is_in_the_side_s_favour_and_agrees_with_settlement():
     model = pd.DataFrame({"game_id": ["G", "G"], "market": ["spreads", "totals"], "mu": [8.0, 230.0]})
     off = pd.DataFrame({"game_id": "G", "market": ["spreads", "spreads", "totals", "totals"],
                         "side": ["home", "away", "over", "under"], "line": [-5.5, -5.5, 225.5, 225.5]})
-    gap = L.with_gap(off, model).set_index("side")["gap"]
+    cons = pd.DataFrame({"game_id": "G", "market": ["spreads", "totals"], "cons": [-5.5, 225.5]})
+    gap = L.with_gap(off, model, cons).set_index("side")["gap"]
     assert gap.to_dict() == {"home": 2.5, "away": -2.5, "over": 4.5, "under": -4.5}
     # a game that lands exactly on the model's numbers (119-111) pays the positive-gap sides
     res = H.settle(np.array(["spreads", "spreads", "totals", "totals"]),
@@ -298,12 +305,72 @@ def test_the_gap_is_in_the_side_s_favour_and_agrees_with_settlement():
     assert res.tolist() == ["W", "L", "W", "L"]
 
 
+def test_the_consensus_number_is_pinnacle_s_else_the_deciding_books_median():
+    vis = _vis([
+        # G: Pinnacle quotes both markets coherently; a soft book is off it
+        ("G", "spreads", "pinnacle", -5.5, True), ("G", "spreads", "draftkings", -5.5, True),
+        ("G", "spreads", "fanduel", -3.5, True),
+        ("G", "totals", "pinnacle", 225.5, True), ("G", "totals", "fanduel", 228.5, True),
+        # H2: Pinnacle's spread is incoherent and it has no total: the deciding books' median,
+        # Bovada (never a deciding book) and an incoherent deciding quote setting nothing
+        ("H2", "spreads", "pinnacle", -1.0, False), ("H2", "spreads", "fanduel", -3.5, True),
+        ("H2", "spreads", "draftkings", -5.5, True), ("H2", "spreads", "betmgm", -6.5, True),
+        ("H2", "spreads", "bovada", 9.5, True), ("H2", "spreads", "caesars", 30.0, False),
+        ("H2", "totals", "fanduel", 210.5, True), ("H2", "totals", "draftkings", 212.5, True),
+        ("H2", "totals", "bovada", 250.5, True),
+    ])
+    c = L.consensus_number(vis).set_index(["game_id", "market"])["cons"]
+    assert c.to_dict() == {("G", "spreads"): -5.5, ("G", "totals"): 225.5,
+                           ("H2", "spreads"): -5.5, ("H2", "totals"): 211.5}
+
+
+def test_the_gap_is_measured_against_the_consensus_number_not_each_book_s_own():
+    """Third amendment: a soft book's off-consensus number must not raise the gap
+    (the refuted outlier mechanism). Every book's offer on a side carries ONE gap."""
+    vis = _vis([("G", "spreads", "pinnacle", -5.5, True), ("G", "spreads", "draftkings", -5.5, True),
+                ("G", "spreads", "fanduel", -3.5, True),
+                ("G", "totals", "pinnacle", 225.5, True), ("G", "totals", "draftkings", 225.5, True),
+                ("G", "totals", "fanduel", 221.5, True)])
+    off = pd.DataFrame([{"game_id": "G", "market": m, "book": b, "side": s, "line": ln}
+                        for m, b, ln in zip(vis["market"], vis["book"], vis["line"])
+                        for s in (("home", "away") if m == "spreads" else ("over", "under"))])
+    model = pd.DataFrame({"game_id": ["G", "G"], "market": ["spreads", "totals"], "mu": [8.0, 230.0]})
+    g = L.with_gap(off, model, L.consensus_number(vis)).set_index(["book", "side"])["gap"]
+    for b in ("pinnacle", "draftkings", "fanduel"):
+        assert g[(b, "home")] == 2.5 and g[(b, "away")] == -2.5, b       # FanDuel's -3.5 is not a 4.5 gap
+        assert g[(b, "over")] == 4.5 and g[(b, "under")] == -4.5, b      # nor its 221.5 an 8.5 one
+
+
+def test_an_off_consensus_soft_number_does_not_clear_a_cut_but_is_still_the_best_offer():
+    """End to end: FanDuel hangs home -1.5 against Pinnacle's -3.5. The model has
+    home by 6, so the gap is 2.5 at every book: it clears 2 and not 4. At 2 the
+    bet is the best offer under the market's fair line -- FanDuel's -1.5."""
+    s = L.synthetic_case()
+    q = s["data"].quotes
+    soft = (q["game_id"] == "G1") & (q["market"] == "spreads") & (q["book"] == "fanduel")
+    data = H.Data(games=s["data"].games, quotes=q.assign(line=np.where(soft, -1.5, q["line"])),
+                  fetches=s["data"].fetches)
+    props = s["props"].assign(line=np.where(s["props"]["player_name"] == "Gus Hay", 33.5, s["props"]["line"]))
+    out = _run(s, props=props, data=data)
+    assert out["model"].set_index("market").loc["spreads", "mu"] == 6.0      # 39.5 - 33.5
+    assert out["cons"].set_index(["game_id", "market"]).loc[("G1", "spreads"), "cons"] == -3.5
+    home = out["cand"][(out["cand"]["market"] == "spreads") & (out["cand"]["side"] == "home")]
+    assert set(home["gap"]) == {2.5}
+    cells = out["cells"].set_index(["market", "side", "cut"])
+    assert cells.loc[("spreads", "home", 2.0), "n_choose"] == 1
+    assert cells.loc[("spreads", "home", 4.0), "n_choose"] == 0     # FanDuel's own number would say 4.5
+    bet = L.pick(out["cand"], 2.0, "home", "spreads")
+    assert bet["book"].tolist() == ["fanduel"] and bet["line"].tolist() == [-1.5]
+
+
 def test_the_placebo_moves_model_numbers_only_between_games_on_one_date_and_regaps():
     games = pd.DataFrame({"game_id": ["a", "b", "c"], "game_date": ["2024-01-15", "2024-01-15", "2024-01-16"]})
     model = pd.DataFrame({"game_id": ["a", "b", "c"], "market": "totals", "mu": [200.0, 240.0, 220.0]})
-    off = pd.DataFrame({"game_id": ["a", "b", "c"], "market": "totals", "side": "over", "line": 220.0})
+    # the offers hang 215; the market's number is 220: the placebo regaps against 220
+    off = pd.DataFrame({"game_id": ["a", "b", "c"], "market": "totals", "side": "over", "line": 215.0})
+    cons = pd.DataFrame({"game_id": ["a", "b", "c"], "market": "totals", "cons": 220.0})
     seen = set()
-    for c in L.placebo_frames(off, model, games):
+    for c in L.placebo_frames(off, model, cons, games):
         g = c.set_index("game_id")["gap"]
         assert g["c"] == 0.0
         assert {g["a"], g["b"]} == {-20.0, 20.0}
@@ -390,6 +457,10 @@ def test_the_population_is_the_games_with_a_model_number():
     # P0 is reached and priced at D but has no final game before it: no model number
     assert out["per_game"].set_index("game_id").loc["P0", "refused"] == "no_final_game_this_season"
     assert set(out["neutral"]["game_id"]) == {"P0", "G1"}
+    # the consensus number exists wherever the market's fair line does (same books),
+    # so measuring the gap against it drops no game from the population
+    assert set(zip(out["cons"]["game_id"], out["cons"]["market"])) == \
+        set(zip(out["neutral"]["game_id"], out["neutral"]["market"]))
     # the harness's bar-9 population (the games in the cells' offers) is G1 alone
     assert (out["cells"]["population_games"] == 1).all()
     assert set(out["cand"]["game_id"]) == {"G1"}
@@ -421,7 +492,7 @@ class _Stop(Exception):
     pass
 
 
-def test_full_loads_every_priced_season_and_requires_the_prop_seasons(monkeypatch):
+def test_full_loads_and_requires_every_season_the_market_pricing_is_fit_on(monkeypatch):
     monkeypatch.setenv("NBA_GAME2_GO", "1")
     monkeypatch.setattr("sys.argv", ["nba_game2_props", "--full"])
     seen = {}
@@ -432,9 +503,11 @@ def test_full_loads_every_priced_season_and_requires_the_prop_seasons(monkeypatc
     monkeypatch.setattr(H, "load", fake_load)
     with pytest.raises(_Stop):
         L.main()
-    assert seen["require_seasons"] == (2024, 2025, 2026)
     # the seasons before 2024 are loaded for the market's pricing; 2026-27 never is
     assert seen["seasons"] == (2021, 2022, 2023, 2024, 2025, 2026)
+    # and each is REQUIRED priced: a cache that lost most of 2022's quotes would
+    # otherwise price 2024 from 2021 and 2023 and nothing would refuse it
+    assert seen["require_seasons"] == (2021, 2022, 2023, 2024, 2025, 2026)
 
 
 def test_full_fits_a_shape_only_for_the_seasons_with_props(monkeypatch):

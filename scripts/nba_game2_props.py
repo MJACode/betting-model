@@ -97,12 +97,18 @@ THE MODEL NUMBER, PER GAME AT DECISION POINT D
   IMPLIED    team points = sum of priced means + bench; implied total = home +
              away; implied margin = home - away (the side-A quantity of the
              harness: spreads are the HOME number).
-  GAP        per offer, in the bet side's favour against that offer's number:
-               spread home: margin + spread_home      away: -(margin + spread_home)
-               total over:  total - line              under: line - total
-             A cell bets its side when gap >= g (g = 2, 4, 6), at the best
-             offer under the market's own fair line among the offers clearing
-             g (run_cells strength="gap").
+  CONSENSUS  the market's number at T per (game, market): Pinnacle's coherent
+             spread_home / total where it quotes one, else the median of the
+             deciding books' coherent numbers (consensus_number; section 6.5,
+             third amendment). Never one book's offered number: measured
+             against each book's own line, a soft book's off-consensus number
+             raises the gap, which is the refuted outlier mechanism.
+  GAP        per game and side, in the bet side's favour against CONSENSUS (C):
+               spread home: margin + C                away: -(margin + C)
+               total over:  total - C                 under: C - total
+             Every offer on a side carries that one gap. A cell bets its side
+             when gap >= g (g = 2, 4, 6), at the best offer under the market's
+             own fair line (run_cells strength="gap").
 
 POPULATION  the games this rule produced a model number for (refused games are
             not in it): the cell's own priced population, over which the
@@ -119,7 +125,8 @@ MARKET      the market's fair line, the blind bet and closing value are
 PLACEBO     20 runs: the model numbers (implied margin, implied total) shuffled
             between games on the same date in the same market
             (H.shuffle_within_date, rng seed = run number 0-19), the gap
-            recomputed against each game's own offers, graded at the same cuts.
+            recomputed against each game's own consensus number, graded at the
+            same cuts on each game's own offers.
 CLOSE       H.pinnacle_close / H.close_dist (reported only at D).
 
 NO LOOK-AHEAD: prop quotes at or before T and within 60 minutes (H.visible);
@@ -159,9 +166,10 @@ CUTS = (2.0, 4.0, 6.0)
 SIDES = {"spreads": ["home", "away"], "totals": ["over", "under"]}
 CHOOSE_SEASONS = (2024, 2025)
 PROP_SEASONS = (2024, 2025, 2026)     # the seasons with props: --full grades and fits shapes for these
-# --full loads every PRICED season through 2025-26: the market's pricing for
-# 2024 is fit on 2021-2023's closes. Named, not "every season", so 2026-27
-# (untouched, section 6.5) never enters a graded run once its games are scored.
+# --full loads and REQUIRES every priced season through 2025-26: the market's
+# pricing for 2024 is fit on 2021-2023's closes, so each must pass H.load's
+# stale-cache refusal too. Named, not "every season", so 2026-27 (untouched,
+# section 6.5) never enters a graded run once its games are scored.
 FULL_LOAD_SEASONS = (2021, 2022, 2023, 2024, 2025, 2026)
 SMOKE_SEASONS = (2021,)
 EXPECTED_CELLS = 12
@@ -564,15 +572,38 @@ def model_numbers(times: pd.DataFrame, props: pd.DataFrame, games_all: pd.DataFr
 
 # ── the gap and the cells ───────────────────────────────────────────────────
 
-def with_gap(neutral: pd.DataFrame, model: pd.DataFrame) -> pd.DataFrame:
-    """Every market-fair offer, plus `gap` in the side's favour against the offer's
-    own number (NaN where the game has no model number)."""
-    x = neutral.merge(model[["game_id", "market", "mu"]].rename(columns={"mu": "model_mu"}),
-                      on=["game_id", "market"], how="left")
-    m, s, ln, mm = x["market"], x["side"], x["line"], x["model_mu"]
+def consensus_number(vis: pd.DataFrame) -> pd.DataFrame:
+    """(game_id, market, cons): the market's number at T per game and market --
+    Pinnacle's coherent spread_home / total where it quotes one, else the median
+    over the deciding books' (H.BETTABLE) coherent numbers. The same books and
+    order as H.market_fair, but the POSTED number, not a centre solved from the
+    price. Bovada and incoherent quotes set nothing."""
+    v = vis[vis["coherent"] & vis["market"].isin(list(SIDES))]
+    if v.empty:
+        return pd.DataFrame({"game_id": pd.Series([], dtype=object), "market": pd.Series([], dtype=object),
+                             "cons": pd.Series([], dtype=float)})
+    k = ["game_id", "market"]
+    pin = v[v["book"] == H.SHARP].drop_duplicates(k).set_index(k)["line"]
+    med = v[v["book"].isin(H.BETTABLE)].groupby(k)["line"].median()
+    return pin.combine_first(med).astype(float).rename("cons").reset_index()
+
+
+def with_gap(neutral: pd.DataFrame, model: pd.DataFrame, cons: pd.DataFrame) -> pd.DataFrame:
+    """Every market-fair offer, plus `gap` in the side's favour against the
+    CONSENSUS number at T (consensus_number), never the offer's own number
+    (section 6.5, third amendment: measured against each book's number, a soft
+    book's off-consensus line raises the gap -- the refuted outlier mechanism).
+    Every offer on one side of a game carries one gap; the harness then takes
+    the best of them under the market's fair line. NaN where the game has no
+    model number or no consensus number."""
+    x = neutral.drop(columns=[c for c in ("model_mu", "cons") if c in neutral]).merge(
+        model[["game_id", "market", "mu"]].rename(columns={"mu": "model_mu"}),
+        on=["game_id", "market"], how="left").merge(
+        cons[["game_id", "market", "cons"]], on=["game_id", "market"], how="left")
+    m, s, c, mm = x["market"], x["side"], x["cons"], x["model_mu"]
     gap = np.select([(m == "spreads") & (s == "home"), (m == "spreads") & (s == "away"),
                      (m == "totals") & (s == "over"), (m == "totals") & (s == "under")],
-                    [mm + ln, -(mm + ln), mm - ln, ln - mm], default=np.nan)
+                    [mm + c, -(mm + c), mm - c, c - mm], default=np.nan)
     return x.assign(gap=gap)
 
 
@@ -583,12 +614,14 @@ def modelled(cand: pd.DataFrame) -> pd.DataFrame:
     return cand[cand["gap"].notna()].reset_index(drop=True)
 
 
-def placebo_frames(neutral: pd.DataFrame, model: pd.DataFrame, games: pd.DataFrame,
-                   n: int = N_PLACEBO) -> list[pd.DataFrame]:
+def placebo_frames(neutral: pd.DataFrame, model: pd.DataFrame, cons: pd.DataFrame,
+                   games: pd.DataFrame, n: int = N_PLACEBO) -> list[pd.DataFrame]:
+    """The model numbers shuffled within date and market; each game keeps its own
+    consensus number and offers, and the gap is recomputed against them."""
     out = []
     for run in range(n):
         sh = H.shuffle_within_date(model, games, np.random.default_rng(run)) if len(model) else model
-        out.append(modelled(with_gap(neutral, sh)))
+        out.append(modelled(with_gap(neutral, sh, cons)))
     return out
 
 
@@ -658,14 +691,16 @@ def box_tables(cache: Path = H.CACHE) -> dict:
 
 def build(data: H.Data, games_all: pd.DataFrame, props: pd.DataFrame, app: pd.DataFrame,
           inj: pd.DataFrame | None, shape_by_season: dict, sig: dict) -> dict:
-    """Everything up to the cells: times, model numbers, market-fair offers with gap."""
+    """Everything up to the cells: times, model numbers, the consensus number at
+    T, market-fair offers with gap."""
     times = H.per_event_times(props, POINT) if len(props) else empty_times()
     times = times[times["game_id"].isin(data.games["game_id"])].reset_index(drop=True)
     model, per_game, names = model_numbers(times, props, games_all, app, inj, shape_by_season)
-    _, neutral = offers_at(data, times, sig)
-    cand = modelled(with_gap(neutral, model))
+    vis, neutral = offers_at(data, times, sig)
+    cons = consensus_number(vis)
+    cand = modelled(with_gap(neutral, model, cons))
     return {"times": times, "model": model, "per_game": per_game, "names": names,
-            "neutral": neutral, "cand": cand}
+            "neutral": neutral, "cons": cons, "cand": cand}
 
 
 def check_close_prior(sig: dict, seasons) -> None:
@@ -688,7 +723,7 @@ def run(data: H.Data, games_all: pd.DataFrame, props: pd.DataFrame, app: pd.Data
     sig = H.close_dist(close, data.games)
     check_close_prior(sig, [s for s in PROP_SEASONS if s in set(data.games["season"].astype(int))])
     b = build(data, games_all, props, app, inj, shape_by_season, sig)
-    placebo = placebo_frames(b["neutral"], b["model"], data.games)
+    placebo = placebo_frames(b["neutral"], b["model"], b["cons"], data.games)
     rows = H.run_cells(data, FAMILY, POINT, b["cand"], b["neutral"], cuts=list(CUTS),
                        sides_by_market=SIDES, close=close, sig=sig, placebo=placebo,
                        strength="gap", choose_seasons=CHOOSE_SEASONS, times=b["times"])
@@ -719,9 +754,10 @@ def shape_offset(shape: Shape, line: float, p: float = 0.5) -> float:
 def load_all(seasons, cache: Path = H.CACHE, require_seasons=None):
     """`seasons`: what H.load keeps. The market's pricing for 2024-2026 is fit
     on the priced seasons before them (2020-21 on), so a graded run loads those
-    too (FULL_LOAD_SEASONS). `require_seasons`: a graded run's seasons; H.load
-    refuses a cache that prices too few of their games or whose rows match no
-    purchase."""
+    too (FULL_LOAD_SEASONS). `require_seasons`: every season a graded run
+    needs priced -- the graded ones AND the ones their market pricing is fit
+    on (FULL_LOAD_SEASONS for --full); H.load refuses a cache that prices too
+    few of their games or whose rows match no purchase."""
     data = H.load(cache, seasons=seasons, require_seasons=require_seasons)
     games_all = H.load_games(cache)
     t = box_tables(cache)
@@ -927,11 +963,12 @@ def main() -> None:
         data, games_all, app, inj, props = load_all(list(SMOKE_SEASONS))
         graded = SMOKE_SEASONS
     else:
-        # every priced season loaded (the market's pricing reads the seasons
-        # before 2024); the seasons with props are the ones graded and
-        # required, and the only ones a shape is fit for (2019 has no box
-        # season before it to fit on)
-        data, games_all, app, inj, props = load_all(FULL_LOAD_SEASONS, require_seasons=PROP_SEASONS)
+        # every priced season loaded AND required (the market's pricing for
+        # 2024 is fit on 2021-2023's closes, so a season it reads that is
+        # mostly unpriced must stop the run, not thin the fit); the seasons
+        # with props are the ones graded, and the only ones a shape is fit for
+        # (2019 has no box season before it to fit on)
+        data, games_all, app, inj, props = load_all(FULL_LOAD_SEASONS, require_seasons=FULL_LOAD_SEASONS)
         graded = PROP_SEASONS
     results = RESULTS / "smoke" if a.smoke else RESULTS     # a smoke run never sits beside real cells
     out = run(data, games_all, props, app, inj, shapes(app, graded), results)
