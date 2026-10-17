@@ -518,18 +518,118 @@ def test_the_projections_error_distribution_is_read_from_earlier_seasons_only():
     assert "own season" in d[(2021, "spreads")].label
 
 
+def test_a_biased_earlier_season_still_prices_around_the_projection():
+    # re-review, third amendment: 2021-22's F1 price is built from 2020-21's
+    # misses alone, which averaged about -1 (margin) and -2 (total). Uncentred,
+    # that average moved every price a second time. Here the earlier season's
+    # results sit 5 points above the projection on average: the next season's
+    # price must keep the spread of those misses and drop their average.
+    rng = np.random.default_rng(8)
+    games, proj = [], []
+    for s in (2021, 2022):
+        for i in range(600):
+            hs, as_ = int(rng.integers(95, 126)), int(rng.integers(95, 126))
+            games.append({"game_id": f"{s}_{i}", "home_score": hs, "away_score": as_})
+            proj.append({"game_id": f"{s}_{i}", "season": s,
+                         "margin": hs - as_ - 5.0 - rng.normal(0, 13), "total": hs + as_ - 5.0 - rng.normal(0, 18)})
+    games, proj = pd.DataFrame(games), pd.DataFrame(proj)
+    r = P.projection_resid(games, proj)
+    prior = r[r["season"] == 2021]
+    bias = prior.groupby("market")["resid"].mean()
+    assert bias["spreads"] == pytest.approx(5.0, abs=1.5) and bias["totals"] == pytest.approx(5.0, abs=1.5)
+    d = P.projection_dist(games, proj)
+    for m, mu in (("spreads", 3.0), ("totals", 220.0)):
+        dist = d[(2022, m)]
+        assert "prior" in dist.label
+        w, push, _ = dist.probs(mu, mu + 0.5)
+        res = prior.loc[prior["market"] == m, "resid"].to_numpy()
+        w0, _, _ = H.ResidDist(res - res.mean()).probs(mu, mu + 0.5)
+        # half a point above the centre: a little under one half, no push
+        assert float(w) == pytest.approx(float(w0), abs=1e-9) and abs(float(w) - 0.5) < 0.03
+        assert float(push) == 0.0
+    # and through the moneyline: a level projection is close to a coin flip
+    f = P.fair_frame(pd.DataFrame({"game_id": ["x"], "season": [2022], "margin": [0.0], "total": [220.0]}), d)
+    assert abs(float(f.loc[f["market"] == "h2h", "p_home"].iloc[0]) - 0.5) < 0.03
+
+
 def _neutral(rows):
     return pd.DataFrame([{"game_id": "G", "market": m, "side": s, "line": l, "book": "fanduel",
                           "price": -110.0, "p_win": 0.5, "p_push": 0.0, "ev": -0.05}
                          for m, s, l in rows])
 
 
+def _cons(spread, total, game="G"):
+    return pd.DataFrame({"game_id": game, "market": ["spreads", "totals"], "cons": [spread, total]})
+
+
 def test_the_f5_gap_reads_the_home_number():
     n = _neutral([("spreads", "home", -6.5), ("spreads", "away", -6.5),
                   ("totals", "over", 220.5), ("totals", "under", 220.5)])
     mu = pd.DataFrame({"game_id": "G", "market": ["spreads", "totals"], "mu": [9.0, 225.0]})
-    g = P.gap_strength(n, mu)["strength"].tolist()
+    g = P.gap_strength(n, mu, _cons(-6.5, 220.5))["strength"].tolist()
     assert g == pytest.approx([2.5, -2.5, 4.5, -4.5])
+
+
+def test_the_f5_gap_is_measured_against_the_consensus_not_each_books_number():
+    # third amendment: against each book's own number, a soft book hanging
+    # home -5.5 against a -6.5 consensus scored a point more for home with the
+    # projection unchanged (the refuted outlier mechanism)
+    n = _neutral([("spreads", "home", -6.5), ("spreads", "home", -5.5), ("spreads", "away", -7.5),
+                  ("totals", "over", 218.5), ("totals", "under", 222.5)])
+    mu = pd.DataFrame({"game_id": "G", "market": ["spreads", "totals"], "mu": [9.0, 225.0]})
+    s = P.gap_strength(n, mu, _cons(-6.5, 220.5))["strength"].tolist()
+    assert s == pytest.approx([2.5, 2.5, -2.5, 4.5, -4.5])
+    # a game with no consensus number has no gap, so it is outside the population
+    assert P.gap_strength(n, mu, _cons(-6.5, 220.5).iloc[0:0])["strength"].isna().all()
+
+
+def _vis_rows(rows):
+    return pd.DataFrame([{"game_id": g, "market": m, "book": b, "line": l, "coherent": c}
+                         for g, m, b, l, c in rows])
+
+
+def test_the_consensus_number_is_pinnacles_else_the_deciding_books_median():
+    v = _vis_rows([
+        ("G1", "spreads", "pinnacle", -4.0, True), ("G1", "spreads", "fanduel", -5.0, True),
+        ("G1", "spreads", "draftkings", -5.0, True), ("G1", "spreads", "betmgm", -6.0, True),
+        ("G1", "totals", "pinnacle", 221.0, False),              # incoherent: not a number to read
+        ("G1", "totals", "fanduel", 219.0, True), ("G1", "totals", "betmgm", 220.0, True),
+        ("G1", "totals", "bovada", 230.0, True),                 # never a deciding book
+        ("G2", "spreads", "fanduel", 3.0, True), ("G2", "spreads", "draftkings", 2.0, True),
+        ("G2", "h2h", "pinnacle", np.nan, True)])
+    c = P.consensus(v).set_index(["game_id", "market"])["cons"]
+    assert c.to_dict() == {("G1", "spreads"): -4.0, ("G1", "totals"): 219.5, ("G2", "spreads"): 2.5}
+    ref = P.consensus(v).set_index(["game_id", "market"])["ref"]
+    assert ref.to_dict() == {("G1", "spreads"): "pinnacle", ("G1", "totals"): "median",
+                             ("G2", "spreads"): "median"}
+
+
+def test_f5_and_f1b_read_the_consensus_number_at_t_through_the_lab():
+    data = P.synthetic_market(per_season=4, seasons=(2022,))
+    sig = {(2022, m): 12.0 for m in ("spreads", "totals")}
+    t, off = H.point_offers(data, "C")
+    vis = H.visible(data.quotes, t)
+    neutral = H.fair_offers(off, H.market_fair(vis, sig))
+    g = data.games
+    proj = pd.DataFrame({"game_id": g["game_id"], "season": g["season"], "margin": 7.0, "total": 225.0,
+                         "margin5": 7.0, "total5": 225.0})
+    pi = P.PointInputs("C", t, off, vis, neutral, proj)
+    pin = vis[vis["book"] == "pinnacle"].set_index(["game_id", "market"])["line"]
+    med = vis[vis["book"].isin(H.BETTABLE)].groupby(["game_id", "market"])["line"].median()
+    assert (pin.reindex(med.index) != med).any()          # the fixture tells Pinnacle from the median
+    cand, _ = P.family_frames("F5", pi, g, None, n_placebo=0)
+    p_line = pin.reindex(pd.MultiIndex.from_frame(cand[["game_id", "market"]])).to_numpy()
+    a_gap = np.where(cand["market"] == "spreads", 7.0 + p_line, 225.0 - p_line)
+    assert np.allclose(cand["strength"], np.where(cand["side"].isin(["home", "over"]), a_gap, -a_gap))
+    # every book's offer on a side carries the same gap
+    assert (cand.groupby(["game_id", "market", "side"])["strength"].nunique() == 1).all()
+    # F1b: the predicted move a + b (projection's number - Pinnacle's number at T)
+    coef = {2022: {"spreads": (0.0, 0.5), "totals": (0.0, 0.5)}}
+    c1, _ = P.family_frames("F1b", pi, g, coef, n_placebo=0)
+    p1 = pin.reindex(pd.MultiIndex.from_frame(c1[["game_id", "market"]])).to_numpy()
+    move = 0.5 * (np.where(c1["market"] == "spreads", -7.0, 225.0) - p1)
+    fav_a = np.where(c1["market"] == "spreads", -move, move)
+    assert np.allclose(c1["strength"], np.where(c1["side"].isin(["home", "over"]), fav_a, -fav_a))
 
 
 def test_f1b_strength_is_the_predicted_move_in_the_sides_favour():
@@ -629,6 +729,153 @@ def test_population_counts_games_prices_model_numbers_and_bets():
     assert r["bets"] == 3                                  # home by 30 clears every spread
     assert pop.loc[(2022, "spreads", "home", 1.0), "games_with_model"] == 3   # one game had no number
     assert pop.loc[(2022, "spreads", "away", 1.0), "bets"] == 0
+
+
+def test_the_f1_placebo_shuffles_the_projection_between_games_on_a_date():
+    # re-review: an F1 placebo left unshuffled passed every test
+    data = P.synthetic_market(per_season=4, seasons=(2022,))
+    sig = {(2022, m): 12.0 for m in ("spreads", "totals")}
+    t, off = H.point_offers(data, "C")
+    vis = H.visible(data.quotes, t)
+    neutral = H.fair_offers(off, H.market_fair(vis, sig))
+    g = data.games
+    proj = pd.DataFrame({"game_id": g["game_id"], "season": g["season"],
+                         "margin": [-8.0, 9.0, -2.0, 6.0], "total": [205.0, 232.0, 214.0, 228.0]})
+    own = {(2022, "spreads"): _dist(14.0), (2022, "totals"): _dist(19.0, seed=12)}
+    pi = P.PointInputs("C", t, off, vis, neutral, proj, own)
+    cand, pl = P.family_frames("F1", pi, g, None, n_placebo=4)
+    key = ["game_id", "market", "side", "book", "line"]
+    a = cand.sort_values(key).reset_index(drop=True)
+    date = g.set_index("game_id")["game_date"]
+    moved = 0
+    for p in pl:
+        b = p.sort_values(key).reset_index(drop=True)
+        assert (a[key].fillna(0) == b[key].fillna(0)).all().all() and np.allclose(a["price"], b["price"])
+        moved += int(not np.allclose(a["p_win"], b["p_win"]))
+        # a game only ever takes the number of a game on its own date
+        for (d_, m), x in a.assign(d=a["game_id"].map(date)).groupby(["d", "market"]):
+            y = b.loc[x.index]
+            col = "p_home" if m == "h2h" else "mu"
+            assert sorted(x[col].unique()) == pytest.approx(sorted(y[col].unique()))
+    assert moved >= 1
+
+
+def _emit_world(drop_at_d=None):
+    """A synthetic priced world for emit_family: every choosing season and the
+    confirmation season, the market priced through an EMPIRICAL distribution,
+    and the projection far from every line so each home cell bets."""
+    seasons = (2022, 2023, 2024, 2025, 2026)
+    data = P.synthetic_market(per_season=4, seasons=seasons)
+    rng = np.random.default_rng(2)
+    emp = {m: H.ResidDist(rng.normal(0.0, 12.0 if m == "spreads" else 18.0, 2000), f"market {m}")
+           for m in ("spreads", "totals")}
+    market_sig = {(s, m): emp[m] for s in seasons for m in emp}
+    g = data.games
+    proj = pd.DataFrame({"game_id": g["game_id"], "season": g["season"], "margin": 30.0, "total": 260.0,
+                         "margin5": 30.0, "total5": 260.0})
+    inputs = {}
+    for p in H.POINTS:
+        times, off = H.point_offers(data, p)
+        if p == "D" and drop_at_d is not None:
+            times = times[times["game_id"] != drop_at_d].reset_index(drop=True)
+            off = off[off["game_id"] != drop_at_d]
+        vis = H.visible(data.quotes, times)
+        neutral = H.fair_offers(off, H.market_fair(vis, market_sig))
+        inputs[p] = P.PointInputs(p, times, off, vis, neutral, proj)
+    return data, inputs, market_sig
+
+
+def _spy_run_cells(monkeypatch):
+    real_boot = H.boot
+    monkeypatch.setattr(H, "boot", lambda b, n=H.N_BOOT, seed=H.SEED: real_boot(b, n=20, seed=seed))
+    monkeypatch.setattr(H, "P_REFINE_BELOW", -1.0)
+    seen, real = [], H.run_cells
+
+    def spy(*a, **k):
+        seen.append({"point": a[2], **k})
+        return real(*a, **k)
+
+    monkeypatch.setattr(H, "run_cells", spy)
+    return seen
+
+
+def test_closing_value_is_priced_with_the_markets_empirical_distribution(monkeypatch):
+    # re-review: passing no pricing (sig=None) to run_cells silently drops
+    # closing-line value from every cell, and no test noticed
+    seen = _spy_run_cells(monkeypatch)
+    data, inputs, market_sig = _emit_world()
+    rows, _ = P.emit_family("F5", data, inputs, market_sig, H.pinnacle_close(data), None, n_placebo=1)
+    # every home and over cell bets (3 points x 3 cuts each), and every one of
+    # them carries a closing value
+    bet = [r for r in rows if r["side"] in ("home", "over") and r["n_choose"] > 0]
+    assert len(bet) == 18 and all(r["clv_n"] > 0 and np.isfinite(r["clv_median"]) for r in bet)
+    # priced with the market's own empirical distribution, the one the lab was given
+    assert len(seen) == 3 and all(k["sig"] is market_sig for k in seen)
+    assert all(isinstance(v, H.ResidDist) for v in market_sig.values())
+
+
+def test_the_d_cells_are_gated_on_the_points_own_decision_times(monkeypatch):
+    # re-review: the 95% gate at D reads the decision times the lab passes;
+    # passed empty, every choosing season is dropped, and passed none, the
+    # harness falls back to the slate fetches. One 2023 game never reaches D
+    # here, so 2023's coverage at D is 3 of 4 games and 2023 is not chosen on.
+    seen = _spy_run_cells(monkeypatch)
+    data, inputs, market_sig = _emit_world(drop_at_d="S2023_3")
+    rows, _ = P.emit_family("F5", data, inputs, market_sig, H.pinnacle_close(data), None, n_placebo=1)
+    d_rows = [r for r in rows if r["point"] == "D"]
+    assert len(d_rows) == 12
+    assert [(r["gate_cov_2022"], r["gate_cov_2023"]) for r in d_rows] == [(1.0, 0.75)] * 12
+    assert {(r["gate_dropped"], r["choose_seasons"]) for r in d_rows} == {("2023", "2022,2024,2025")}
+    assert all(r["gate_dropped"] == "" for r in rows if r["point"] != "D")
+    at_d = [k for k in seen if k["point"] == "D"]
+    assert len(at_d) == 1 and at_d[0]["times"] is inputs["D"].times and len(at_d[0]["times"]) == 19
+
+
+def test_the_ratings_label_says_which_ratings_were_used():
+    # re-review: quality() printed "box-score only" whatever the cache held
+    g = _games(n_per_season=30)
+    adv, log = _box(g)
+    ina = pd.DataFrame(columns=["game_id", "team", "player_id"])
+    w = P.build_world(g, adv, log, ina, _inj(), stints=_segment_rows(g))
+    st = _state(w)
+    box = P.fit_box(w, st, [2020])
+    table, info = P.rapm_table(w, st, box, 2021)
+    play = P.fit_play(pd.DataFrame(columns=["season", "bucket", "status", "role", "played"]), 2021)
+    seg = P.Model(season=2021, box=box, play=play, cap=40.0, rapm=table, info={"rapm": info})
+    u = P.ratings_used(w, {2021: seg}, [2021])
+    assert u["label"] == f"{P.SEGMENTS_USED}, every season"
+    assert u["by_season"][2021].startswith(P.SEGMENTS_USED) and f"{info['refits']} refits" in u["by_season"][2021]
+    # a season whose model has no refit is named as box-score only
+    bare = P.Model(season=2020, box=box, play=play, cap=40.0, info={"rapm": {"lambda": 2000.0, "refits": 0}})
+    mixed = P.ratings_used(w, {2020: bare, 2021: seg}, [2020, 2021])
+    assert mixed["label"] == f"{P.SEGMENTS_USED} in 2021; {P.BOX_ONLY} in 2020"
+    assert mixed["by_season"][2020].startswith(P.BOX_ONLY)
+    # no segment file at all
+    plain = P.ratings_used(_world(), {2021: P.Model(season=2021, box=box, play=play, cap=40.0)}, [2021])
+    assert plain["label"] == f"{P.BOX_ONLY} (no lineup segment file in the cache)"
+
+
+def test_the_quality_run_reports_the_ratings_it_used(tmp_path, monkeypatch):
+    # re-review: the label was a hard-coded string in quality() itself
+    g = _games(n_per_season=30)
+    adv, log = _box(g)
+    ina = pd.DataFrame(columns=["game_id", "team", "player_id"])
+    w = P.build_world(g, adv, log, ina, _inj(), stints=_segment_rows(g))
+    st = _state(w, fit=[2019], scored=2020, mse={})
+    box = P.fit_box(w, st, [2020])
+    table, info = P.rapm_table(w, st, box, 2021)
+    play = P.fit_play(pd.DataFrame(columns=["season", "bucket", "status", "role", "played"]), 2021)
+    models = {2021: P.Model(season=2021, box=box, play=play, cap=40.0, rapm=table, info={"rapm": info}, st=st)}
+    refs = {2020: P.project(w, st, P.Model(season=2020, box=box, play=play, cap=40.0, st=st), P.ref_games(w, 2020))}
+    obs = pd.DataFrame(columns=["season", "status", "role", "bucket", "played"])
+    monkeypatch.setattr(P, "QUALITY_SEASONS", (2021,))
+    monkeypatch.setattr(P, "RESULTS", tmp_path)
+    monkeypatch.setattr(P, "load_world", lambda cache, max_season: w)
+    monkeypatch.setattr(P, "run_projection_setup",
+                        lambda w_, last, log=print, obs_seasons=(): (st.hp, st, models, refs, obs))
+    res = P.quality(tmp_path)
+    assert res["ratings"] == f"{P.SEGMENTS_USED}, every season"
+    assert res["seasons"][2021]["fit"]["ratings"].startswith(P.SEGMENTS_USED)
 
 
 # ── run modes ───────────────────────────────────────────────────────────────

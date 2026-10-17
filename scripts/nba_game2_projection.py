@@ -39,7 +39,10 @@ THE PROJECTION (every input dated at or before the decision time T)
   price     (F1) the projection's OWN empirical error distribution (section 6.5
             amendment, second): result minus the same projection at the same
             decision point, on seasons before S (H.dist_by_season), never the
-            market's error. 2020-21 has no earlier priced season at a decision
+            market's error. The harness re-centres it on zero (third
+            amendment: the spread, not the average miss), so an earlier
+            season's average miss never moves the centre a second time on
+            top of the calibration. 2020-21 has no earlier priced season at a decision
             point, so it is priced on its own residuals (the harness's
             fallback): reported, never chosen on. The moneyline is the margin
             distribution's P(home margin > 0) with the tie mass removed.
@@ -48,6 +51,9 @@ THE PROJECTION (every input dated at or before the decision time T)
 
 FAMILIES (section 6.3; 228 cells)
   F1   spread, total, moneyline x 2 sides x A,B,C,D x EV >= 0,.01,.02,.03,.05,.08   144
+  The CONSENSUS number at T (third amendment) is Pinnacle's number where it
+  quotes, else the deciding books' median (consensus()). Every gap against
+  the line below is measured against it, never against a book's own number.
   F1b  the projection predicting the consensus line's move: OLS of
        (closing consensus - decision consensus) on (projection - decision
        consensus), prior priced seasons, per market and decision point; the
@@ -57,8 +63,10 @@ FAMILIES (section 6.3; 228 cells)
        spread, total x 2 x A,B,C x k = 0.5, 1, 1.5, 2                                 48
   F5   absences valued beyond minutes: the F1 projection plus an OLS of its
        prior-season residual on tiered absences, starters out, Questionable /
-       Doubtful exposure and first games back; bet the gap between that
-       projection and the offered number: spread, total x 2 x B,C,D x gap >= 1,2,3  36
+       Doubtful exposure and first games back; the strength is the gap between
+       that projection and the consensus number at T, the same for every book;
+       a side is bet when it is >= the cut, at its best offer under the
+       market's fair line: spread, total x 2 x B,C,D x gap >= 1,2,3                 36
   A cell's population is the games its projection produced a number for. The
   95% gate at D, the real-side shares and the blind bet per real side are the
   harness's (H.run_cells); every bet carries its real side.
@@ -1143,6 +1151,9 @@ def projection_dist(games: pd.DataFrame, proj: pd.DataFrame, margin: str = "marg
     """(season, market) -> the projection's OWN empirical error distribution at
     this decision point (§6.5 amendment, second): residuals of the same
     projection at the same point on seasons BEFORE S (H.dist_by_season). The
+    residuals are passed uncentred; H.ResidDist re-centres them on zero (§6.5
+    amendment, third), so the price keeps their spread and not their average
+    miss, which the calibration already corrects. The
     first priced season has no earlier one at the point, so 2020-21 is priced
     on its own residuals (the harness's fallback); it is reported, never
     chosen on."""
@@ -1183,19 +1194,39 @@ def mu_frame(proj: pd.DataFrame, margin: str, total: str) -> pd.DataFrame:
     return f[f["mu"].notna()].reset_index(drop=True)
 
 
-def gap_strength(neutral: pd.DataFrame, mu: pd.DataFrame) -> pd.DataFrame:
-    """F5: the gap, in points, between the projection and the offered number, from
-    the side's view (home -6.5 with a projected home margin of 9: +2.5)."""
+def gap_strength(neutral: pd.DataFrame, mu: pd.DataFrame, cons: pd.DataFrame) -> pd.DataFrame:
+    """F5 (§6.5 amendment, third): the gap, in points, between the projection
+    and the CONSENSUS number at T (`cons`, from consensus(): Pinnacle's number,
+    else the deciding books' median), from the side's view (a consensus home
+    -6.5 with a projected home margin of 9: +2.5 for home, -2.5 for away).
+
+    The offered number plays no part: every book's offer on a side carries the
+    same gap, and the harness then takes that side's best offer under the
+    MARKET's fair line (run_cells with strength="strength"). Measured against
+    each book's own number, a soft book's off-consensus line raised the gap:
+    the refuted outlier mechanism. A game with no consensus number has no gap."""
     x = neutral.merge(mu.rename(columns={"mu": "proj"}), on=["game_id", "market"], how="left")
+    x = x.merge(cons[["game_id", "market", "cons"]], on=["game_id", "market"], how="left")
     side_a = x["side"].isin(["home", "over"]).to_numpy()
-    a_gap = np.where(x["market"] == "spreads", x["proj"] + x["line"], x["proj"] - x["line"])
-    return x.assign(strength=np.where(side_a, a_gap, -a_gap)).drop(columns="proj")
+    a_gap = np.where(x["market"] == "spreads", x["proj"] + x["cons"], x["proj"] - x["cons"])
+    return x.assign(strength=np.where(side_a, a_gap, -a_gap)).drop(columns=["proj", "cons"])
 
 
 def consensus(vis: pd.DataFrame) -> pd.DataFrame:
-    """Median stored number over the deciding books per (game, market)."""
-    v = vis[vis["coherent"] & vis["book"].isin(H.BETTABLE) & vis["market"].isin(["spreads", "totals"])]
-    return v.groupby(["game_id", "market"], as_index=False)["line"].median().rename(columns={"line": "cons"})
+    """(game_id, market, cons, ref): the consensus number at T for spreads and
+    totals (§6.5 amendment, third): Pinnacle's coherent number where it quotes
+    one (ref "pinnacle"), else the median of the deciding books' coherent
+    numbers (ref "median"). Spreads carry the home number. Every gap against
+    the line is measured against it: F5's gap, F1b's projection-minus-line and
+    predicted move, and F1b's close (the same number at the last pre-tip fetch).
+    The first build took the deciding books' median even where Pinnacle quoted."""
+    v = vis[vis["coherent"] & vis["market"].isin(["spreads", "totals"])]
+    pin = v[v["book"] == H.SHARP].drop_duplicates(["game_id", "market"])[["game_id", "market", "line"]]
+    med = v[v["book"].isin(H.BETTABLE)].groupby(["game_id", "market"], as_index=False)["line"].median()
+    med = med.merge(pin[["game_id", "market"]], on=["game_id", "market"], how="left", indicator=True)
+    med = med[med["_merge"] == "left_only"].drop(columns="_merge")
+    out = pd.concat([pin.assign(ref="pinnacle"), med.assign(ref="median")], ignore_index=True)
+    return out.rename(columns={"line": "cons"})[["game_id", "market", "cons", "ref"]]
 
 
 def close_times(data: H.Data) -> pd.DataFrame:
@@ -1288,8 +1319,9 @@ def family_frames(fam: str, pi: PointInputs, games: pd.DataFrame, f1b_coef: dict
         return cand, pl
     if fam == "F5":
         mu = mu_frame(pi.proj, "margin5", "total5")
-        cand = scored_only(gap_strength(pi.neutral, mu))
-        pl = [scored_only(gap_strength(pi.neutral, H.shuffle_within_date(mu, games, rng(r))))
+        dec = consensus(pi.vis)
+        cand = scored_only(gap_strength(pi.neutral, mu, dec))
+        pl = [scored_only(gap_strength(pi.neutral, H.shuffle_within_date(mu, games, rng(r)), dec))
               for r in range(n_placebo)]
         return cand, pl
     if fam == "F1b":
@@ -1566,6 +1598,7 @@ def smoke(cache: Path) -> dict:
     # what each distribution was built from (count and source, not its spread)
     label = lambda d: {f"{s} {m}": {"n": v.n, "from": v.label} for (s, m), v in sorted(d.items())}  # noqa: E731
     summary = {"hyper": {k: v for k, v in hp.items() if k != "mse"}, "price_note": note,
+               "ratings": ratings_used(w, models, list(SMOKE_SEASONS))["by_season"],
                "price_rows": data.notes, "market_pricing": label(market_sig), "points": {}}
     for fam in FAMILIES:
         pops = []
@@ -1614,6 +1647,42 @@ def pd_baseline(w: World, season_rows: pd.DataFrame) -> pd.DataFrame:
     return x.assign(pd_diff=x["pd_h"] - x["pd_a"], tt_mean=(x["tt_asof_h"] + x["tt_asof_a"]) / 2.0)
 
 
+SEGMENTS_USED = "box-score prior plus adjusted plus-minus from lineup segments"
+BOX_ONLY = "box-score only"
+
+
+def ratings_used(w: World, models: dict, seasons) -> dict:
+    """What each season's player ratings were actually built from, read from
+    the world and the fitted models, never assumed: {"label": one line for
+    the run, "by_season": {S: line}}. A season uses the segments when its
+    model carries at least one adjusted plus-minus refit (rapm_table); the
+    first build hard-coded "box-score only" whatever the cache held."""
+    per = {}
+    for S in seasons:
+        m = models[S]
+        info = (m.info or {}).get("rapm") or {}
+        if w.stints is None:
+            per[S] = f"{BOX_ONLY} (no lineup segment file in the cache)"
+        elif m.rapm is not None and len(m.rapm):
+            extra = f"; {info['note']}" if info.get("note") else ""
+            per[S] = (f"{SEGMENTS_USED} ({info.get('refits', 'unknown')} refits, "
+                      f"penalty {info.get('lambda', 'unknown')}{extra})")
+        else:
+            why = info.get("note") or f"{info.get('refits', 0)} refits had 200 or more segments"
+            per[S] = f"{BOX_ONLY} (segment file present, but {why})"
+    used = [S for S in seasons if per[S].startswith(SEGMENTS_USED)]
+    if w.stints is None:
+        label = per[seasons[0]] if len(seasons) else f"{BOX_ONLY} (no lineup segment file in the cache)"
+    elif len(used) == len(seasons):
+        label = f"{SEGMENTS_USED}, every season"
+    elif not used:
+        label = f"{BOX_ONLY} every season (segment file present, no season had a refit)"
+    else:
+        label = (f"{SEGMENTS_USED} in {', '.join(str(s) for s in used)}; {BOX_ONLY} in "
+                 f"{', '.join(str(s) for s in seasons if s not in used)}")
+    return {"label": label, "by_season": per}
+
+
 def quality(cache: Path) -> dict:
     """Price-free accuracy, 2021-22..2024-25, every number walk-forward. Never 2025-26."""
     w = load_world(cache, max_season=max(QUALITY_SEASONS))
@@ -1624,9 +1693,10 @@ def quality(cache: Path) -> dict:
     s_last = max(QUALITY_SEASONS)
     refs[s_last] = project(w, st, raw_model(models[s_last]), ref_games(w, s_last))
     base = pd_baseline(w, pd.concat([ref_games(w, s) for s in range(FIRST_REF, s_last + 1)]))
+    used = ratings_used(w, models, list(QUALITY_SEASONS))
     res = {"hyper": {s: {k: v for k, v in models[s].st.hp.items() if k != "mse"} for s in QUALITY_SEASONS},
            "hyper_mse_first": hp["mse"],
-           "ratings": "box-score only (no lineup segments yet)", "seasons": {}}
+           "ratings": used["label"], "seasons": {}}
     for S in QUALITY_SEASONS:
         m = models[S]
         r = apply_models(refs[S], m)
@@ -1649,7 +1719,8 @@ def quality(cache: Path) -> dict:
             "total_projection": e(r["total"].to_numpy(), a["total"].to_numpy()),
             "total_point_diff": e(b_t, a["total"].to_numpy()),
             "fit": {"box": m.box["seasons"], "calibration": m.calib["seasons"] if m.calib else None,
-                    "p_plays": m.play["seasons"], "hyperparameters": [m.st.hp["fit"], m.st.hp["scored"]]}}
+                    "p_plays": m.play["seasons"], "hyperparameters": [m.st.hp["fit"], m.st.hp["scored"]],
+                    "ratings": used["by_season"][S]}}
     cal = []
     for S in QUALITY_SEASONS:
         play = models[S].play
