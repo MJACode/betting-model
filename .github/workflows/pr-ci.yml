@@ -148,4 +148,7 @@ jobs:
             tests/test_view_migration_lock_noop.py \
             tests/test_record_correction_post.py \
             tests/test_voided_pick_not_rechosen.py \
-            tests/test_mobile_stat_segments.py
+            tests/test_mobile_stat_segments.py \
+            tests/test_refresh_retry.py \
+            tests/test_daily_retry.py \
+            tests/test_run_ledger_orphans.py

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, the refresh catch-up tests (`test_refresh_retry`, `test_daily_retry`, `test_run_ledger_orphans`) are on the PR `pytest-subset` |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, a killed 11:50pm evening pass uses the 10-minute lead when the next fire is the 12:17 overnight, so that hourly (the ESPN results pull) is not locked out; the catch-up mode is a behaviour test |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA public betting splits: Action Network v1/v2 archive 2020-21..2025-26 into `nba_public_splits` (64,027 rows, 7,230 of 7,230 regular-season games); the archived number is the split at the close (MLB calibration, 20 Wayback captures, a tip-off poll); `pregame_poll` capture in the refresh pass from 2026-27; `docs/nba_public_splits.md` |

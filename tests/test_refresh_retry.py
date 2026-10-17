@@ -178,6 +178,13 @@ def test_the_scheduler_runs_one_pass_at_a_time_and_asks_at_boot():
     assert "catch_up_refresh_pass" in main and '"date"' in main
     catch_up = src.split("def catch_up_refresh_pass(")[1].split("\ndef ")[0]
     assert "decide_refresh_retry" in catch_up
+    subset = (REPO / ".github" / "workflows" / "pr-ci.yml").read_text(encoding="utf-8")
+    for name in (
+        "tests/test_refresh_retry.py",
+        "tests/test_daily_retry.py",
+        "tests/test_run_ledger_orphans.py",
+    ):
+        assert name in subset
 
 
 class _Ledger:
