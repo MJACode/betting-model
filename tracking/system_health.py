@@ -54,7 +54,6 @@ KNOWN_UNTRAINED = {
     "nhl_puckline",                              # need historical NHL lines
     # nhl_over_under is a rule since 2026-10-08, out of MODELS: never expected.
     "wnba_over_under", "wnba_spread",            # need historical DK WNBA lines
-    "nba_over_under", "nba_spread",              # need historical DK NBA lines
     # golf_* RETIRED 2026-09-08 -- gone from config.MODELS, so never expected.
 }
 
@@ -1551,6 +1550,10 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # A run that started long ago and never finished = hang / OOM / killed
         # worker. Absence of finished_at is the only way that becomes visible.
+        # Deploy-killed hourly/evening rows are stamped aborted at pipeline
+        # boot (run_ledger.abort_prior_refresh_orphans), so a row still open
+        # past 2h is a pass this process may still be inside. A daily is not
+        # closed by that sweep.
         stuck = 0
         if ledger_readable:
             stuck = _scalar(conn, """

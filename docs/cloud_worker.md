@@ -62,6 +62,22 @@ this hour, it runs `refresh_pass.sh` once. The evening pass is never replaced
 credits a re-run** (1,018 measured on the 09-20 19:17 UTC pass). Kill switch:
 `RUN_REFRESH_RETRY=0`. See `tracking/refresh_retry.py`.
 
+**A deploy-killed refresh row is closed at boot (2026-10-16).**
+`_abort_orphans` only stamps the kind that is starting. Evening
+`06b9db72a43c4323ad5ed84abf00b591` (started 03:50Z) was still the only
+unfinished `pipeline_runs` row later that morning: later hourlies finished,
+and the next evening `start_run` is the next evening, so
+`refresh_pass_completion` stayed on its stuck branch.
+`scheduler.abort_orphaned_refresh_runs` runs once before the scheduler
+starts, on the service that owns `hourly_refresh`, and stamps unfinished
+`hourly` and `evening` rows that started before this process
+(`finished_at`, `ok=false`, `failed_steps='aborted'`). It does not touch
+`daily`. The cutoff freezes on the first call, so a second call cannot
+abort a pass this process has opened. The one-off
+`abort_deploy_killed_evening_2026_10_16.sql` closes that row on the next
+view-migration pass if boot has not already. This sweep does not re-run
+the pass.
+
 ### NFL polling (changed 2026-08-22)
 
 The four fixed wind-card slots and the daily opener card were replaced by one poll

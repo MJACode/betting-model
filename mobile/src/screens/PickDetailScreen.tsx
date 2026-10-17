@@ -26,7 +26,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useLiveGameState } from '@/hooks/useLiveGameStates';
 import { usePlayerTrends } from '@/hooks/usePlayerTrends';
 import {
-  detailStatForPropModel,
+  detailStatForPick,
   supportsPlayerDetail,
   type PlayerLogSport,
 } from '@/lib/playerLog';
@@ -55,7 +55,7 @@ import {
   numOrNull,
   playerNameFromPickLabel,
   priceAgeFor,
-  propMarketForModel,
+  propMarketForPick,
   storedQuoteBook,
   MODEL_BOOK,
 } from '@/lib/markets';
@@ -258,11 +258,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // queries.ts so both use one parser.
   const playerName = isPlayerProp ? playerNameFromPickLabel(pick.pick_label) : null;
 
-  // The stat this pick is about, and the log it lives in. Null for a prop model
-  // with no leaderboard stat behind it — today that is the NFL market-relative
-  // rule, which is ONE model id spanning eight markets (the market is on
-  // pick.prop_market, not the model), so there is no single stat to chart.
-  const propStat = isPlayerProp ? detailStatForPropModel(pick.model_id) : null;
+  // The stat this pick is about, and the log it lives in. The three
+  // multi-market rules (nba/wnba/nfl_prop_market) are ONE model id across
+  // several markets, so their stat comes from the row's prop_market rather
+  // than the model (detailStatForPick); without it their picks had no chart
+  // and no stats link. Null for a prop with no leaderboard stat behind it.
+  const propStat = isPlayerProp ? detailStatForPick(pick) : null;
   const modelSport = sportOfModel(pick.model_id) as Sport;
   const propSport =
     propStat && supportsPlayerDetail(modelSport) ? (modelSport as PlayerLogSport) : null;
@@ -282,7 +283,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   );
   // Recent news about the player this prop is on. Keyed on the model's sport
   // rather than the chartable stat: a prop with no leaderboard stat behind it
-  // (the NFL market-relative rule) still has a player, and still has news.
+  // still has a player, and still has news.
   const playerNews = usePlayerNews({
     sport: isPlayerProp ? pick.sport ?? modelSport : null,
     playerId: pick.player_id,
@@ -596,8 +597,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
 function ClvCard({ pick }: { pick: Pick }) {
   if (pick.clv_method !== 'standard_v2') return null;
 
+  // propMarketForPick: a multi-market rule's market is on the row, not the model.
   const market = pick.model_id.includes('prop')
-    ? propMarketForModel(pick.model_id)
+    ? propMarketForPick(pick)
     : gameMarketForModel(pick.model_id);
   const lineCLV = pick.line_clv_pts;
   const lineMoved = lineCLV != null && lineCLV !== 0;

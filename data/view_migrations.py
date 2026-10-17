@@ -172,6 +172,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # same PR. Guards on both names still being the measured split; no-ops
     # after once. Never deletes a pick.
     "ncaaf_se_louisiana_ul_monroe_alias_2026_09_14.sql",
+    # 2026-10-16: five Citadel matchups (2023-09-02 to 2026-10-17) each have a
+    # CFBD "The Citadel" row and a live "Citadel Bulldogs" alias the resolver
+    # minted because The Odds API drops the article. Moves odds, latest_odds
+    # and weather onto the CFBD id and deletes the unscored alias. Map entry
+    # in config.py in the same PR. Guards on the measured names; no-ops after
+    # once. Never deletes a pick.
+    "ncaaf_citadel_alias_2026_10_16.sql",
     # 2026-09-07: three MLB games rows that are the previous night's game filed
     # again under its UTC date. Relabelled data_source='duplicate_utc', never
     # deleted or scored (five voided picks point at them). No-ops after once.
@@ -332,6 +339,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # runs after every migration that owns those views, including the
     # duplicate-row pass above. Does not post.
     "published_picks_record_2026_10_14.sql",
+    # 2026-10-16: the 03:50Z evening pass was still unfinished after the
+    # deploy (the only open pipeline_runs row). Same aborted stamp as
+    # run_ledger._abort_orphans, this run_id only, and only while it is
+    # still unfinished. Boot closes the next one; this closes the one
+    # already open. Does not touch picks, thresholds, or pauses.
+    # Sits before clv_standard_v2: that file reads the live view and stays
+    # last (tests/test_published_record.py).
+    "abort_deploy_killed_evening_2026_10_16.sql",
     # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
     # is the market-edge column. Recomputes rows not yet standard_v2 and
     # patches v_public_track_record. Reads the live view, so it runs after

@@ -479,7 +479,8 @@ def _honest(model_id, prob):
         return prob
 
 
-def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds) -> int | None:
+def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds,
+                prop_market: str | None = None) -> int | None:
     """The WORST price at which this pick would still have been generated.
 
     Matt, 2026-08-30: "use the model to give a range of odds the bet is good
@@ -520,7 +521,9 @@ def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds) -> int | N
     # The platform's global EV floor or the model's own, whichever is higher
     # (config.min_ev_for, 2026-09-19). `prob` is the CALIBRATED probability
     # where the pick carries one -- the number the floor was applied to.
-    ev_floor = config.min_ev_for(model_id)
+    # A model with a floor per market (config.MODEL_MARKET_EV_FLOOR) is bounded
+    # at the pick's own market's floor, the cut it actually cleared.
+    ev_floor = config.min_ev_for(model_id, prop_market)
     if ev_floor > 0:
         required.append((1.0 + float(ev_floor)) / p)
     floor_dec = _decimal_or_none(min_odds)
@@ -747,7 +750,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-                   p.pick_side, p.scored_line
+                   p.pick_side, p.scored_line, p.prop_market
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -810,7 +813,8 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19]),
+        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+                               r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
         # (2026-09-06) a pass can post picks for more than one day, and the
@@ -870,7 +874,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-                   p.pick_side, p.scored_line
+                   p.pick_side, p.scored_line, p.prop_market
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -923,7 +927,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19]),
+        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+                               r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
         # (2026-09-06) a pass can post picks for more than one day, and the
@@ -1607,6 +1612,40 @@ def notify_discord_signals(target_date: str | None = None, dry_run: bool = False
         conn.close()
 
 
+def _cap_for_run(group: list[dict], now: datetime | None = None) -> list[dict]:
+    """The signals this run posts: every one whose game starts within
+    config.DISCORD_UNCAPPED_WITHIN_MIN, then the rest up to
+    config.DISCORD_MAX_EMBEDS_PER_RUN, in the order they came (oldest first).
+
+    A held signal posts "next pass", and no pass can post a game that has
+    started, so holding a pick close to its tip loses it from Discord and from
+    the published record (CLAUDE.md 1c). Two NBA prop models decide every game
+    55 minutes before tip, up to about 175 bets in one tip slot.
+    """
+    now = now or datetime.now(timezone.utc)
+    soon = now + timedelta(minutes=config.DISCORD_UNCAPPED_WITHIN_MIN)
+    due, later = [], []
+    for s in group:
+        t = _parse_commence(s.get("commence"))
+        (due if t is not None and t <= soon else later).append(s)
+    room = max(0, config.DISCORD_MAX_EMBEDS_PER_RUN - len(due))
+    keep = {id(s) for s in due + later[:room]}
+    return [s for s in group if id(s) in keep]
+
+
+def _parse_commence(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        t = value
+    else:
+        try:
+            t = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
 def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_discord_signals, under the publisher lock."""
     # Refused picks are not ledgered, so they retry and keep logging until the
@@ -1632,7 +1671,7 @@ def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
             logger.info(f"Discord: no webhook for {sport}; skipped {len(group)} signal(s)")
             continue
 
-        capped = group[:config.DISCORD_MAX_EMBEDS_PER_RUN]
+        capped = _cap_for_run(group)
         held = len(group) - len(capped)
         if held:
             logger.info(f"Discord[{sport}]: capped at {len(capped)}; "
@@ -1810,17 +1849,21 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
                pk.created_at, pk.best_book, pk.best_odds,
                os.model_id, os.model_probability, t.min_edge, t.min_odds,
-               os.pick_side, os.scored_line
+               os.pick_side, os.scored_line, pk.prop_market
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
         LEFT JOIN LATERAL (
-            SELECT p.created_at, p.best_book, p.best_odds
+            -- The bet's own row, by the lock key the signal was captured
+            -- under: it carries player AND market, so a player bet in two
+            -- markets in one transaction (same created_at) cannot lend one
+            -- bet the other's price and book.
+            SELECT p.created_at, p.best_book, p.best_odds, p.prop_market
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
               AND p.pick_side = os.pick_side
-              AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
+              AND {lock_key_sql('p')} = os.lock_key
               AND p.game_date = os.game_date
             ORDER BY p.created_at
             LIMIT 1
@@ -1840,7 +1883,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "posted_at": r[8], "best_book": r[9], "best_odds": r[10],
         "model_id": r[11], "side": r[15], "line": r[16],
         # Same "good to" the paid channels publish, from the same gates.
-        "good_to": price_bound(r[12], r[11], r[13], r[14], r[3]),
+        "good_to": price_bound(r[12], r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
     } for r in rows], "Discord(free)")
 
 

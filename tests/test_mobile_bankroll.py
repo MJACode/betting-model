@@ -24,6 +24,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
+
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
 LIB = MOBILE / "src/lib/bankroll.ts"
 HOOK = MOBILE / "src/hooks/useBankroll.ts"
 SETTINGS = MOBILE / "src/screens/SettingsScreen.tsx"
@@ -173,13 +175,12 @@ def test_runs_in_pr_ci():
 
 
 @pytest.mark.skipif(
-    not (MOBILE / "node_modules" / ".bin").exists() or shutil.which("node") is None,
+    tsx_cmd(MOBILE) is None,
     reason="mobile node modules not installed",
 )
 def test_the_behavioural_checks_pass():
-    tsx = MOBILE / "node_modules" / ".bin" / "tsx"
     proc = subprocess.run(
-        [str(tsx), "scripts/verify_bankroll.ts"],
+        [*tsx_cmd(MOBILE), "scripts/verify_bankroll.ts"],
         cwd=MOBILE,
         capture_output=True,
         text=True,

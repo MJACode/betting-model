@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   InputAccessoryView,
@@ -35,6 +35,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   chipKey,
+  chipRowScrollX,
   chipsForLoadedPlayer,
   chipsForPlayer,
   chipsWithRequested,
@@ -46,6 +47,7 @@ import {
   lineStepFor,
   logStatValue,
   openingChip,
+  pagePlayerId,
   playerSubtitle,
   requestedChip,
   roundLineToStep,
@@ -86,7 +88,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
-import { STAT_CATALOG } from '@/lib/statCatalog';
+import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
   bookLineFromThreshold,
   formatRecordLine,
@@ -254,9 +256,14 @@ export function PlayerStatsScreen() {
   // game-log dots were painting those same games the other colour.
   const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
 
+  // The route's id, else the loaded log's: a page opened by name (an
+  // nfl_prop_market pick has no player_id) still keys its id reads on the
+  // player (pagePlayerId).
+  const pageId = pagePlayerId(playerId, games);
+
   const detail = usePlayerDetail({
     sport,
-    playerId: playerId || null,
+    playerId: pageId,
     playerName,
     playerType,
     games,
@@ -297,9 +304,9 @@ export function PlayerStatsScreen() {
   const slipPick = useMemo(() => {
     if (line == null || mode === 'under') return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
-    const found = slipPickFor({ player_id: playerId }, idx, line - 0.5);
+    const found = slipPickFor({ player_id: pageId }, idx, line - 0.5);
     return found && found.pick.result == null ? found : null;
-  }, [todayPicks, stat, playerId, line, mode]);
+  }, [todayPicks, stat, pageId, line, mode]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
   const toggleSlip = () => {
@@ -370,11 +377,11 @@ export function PlayerStatsScreen() {
   // card beneath said 62.5 (UX review, 2026-09-20). The ± stepper still moves
   // in `step` increments from wherever the ruler sits.
   const pickThreshold = useMemo(() => {
-    if (!playerId) return null;
-    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(playerId);
+    if (!pageId) return null;
+    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(pageId);
     const sl = ep && ep.pick.result == null ? Number(ep.pick.scored_line) : NaN;
     return Number.isFinite(sl) ? thresholdFromBookLine(sl) : null;
-  }, [todayPicks, stat, playerId]);
+  }, [todayPicks, stat, pageId]);
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
   const snapThreshold = pickThreshold ?? postedThreshold;
   useEffect(() => {
@@ -484,6 +491,19 @@ export function PlayerStatsScreen() {
   const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
+
+  // The selected stat chip, scrolled into view once it lays out, the way
+  // SportToggle does it. A pick on Blocks+Steals or Reb+Ast opens on the 10th
+  // or 11th NBA chip, past the right edge on every iPhone (UX review,
+  // 2026-10-16). Layout only, never on a tap: a tapped chip is already on
+  // screen, and a load, a new player or a group tab remounts the chips.
+  const statRowRef = useRef<ScrollView>(null);
+  const statChipX = useRef<Record<string, number>>({});
+  const activeChipKey = stat ? chipKey(stat) : null;
+  const scrollToActiveChip = useCallback(() => {
+    const x = activeChipKey != null ? chipRowScrollX(statChipX.current[activeChipKey]) : null;
+    if (x != null) statRowRef.current?.scrollTo({ x, animated: false });
+  }, [activeChipKey]);
 
   // The pull spinner shows for a PULL only; each section has its own.
   const [pulled, setPulled] = useState(false);
@@ -596,6 +616,7 @@ export function PlayerStatsScreen() {
                 group tabs) the frame reaches 6pt into its bottom padding;
                 under the group tabs it can't — see statReach. */}
             <ScrollView
+              ref={statRowRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               style={statReach.frame}
@@ -608,6 +629,10 @@ export function PlayerStatsScreen() {
                     // In-bounds only: the row's 4pt padding (+ statReach above).
                     hitSlop={{ top: 4 + statReachAbove, bottom: 4, left: 2, right: 2 }}
                     key={chipKey(c)}
+                    onLayout={(e) => {
+                      statChipX.current[chipKey(c)] = e.nativeEvent.layout.x;
+                      if (active) scrollToActiveChip();
+                    }}
                     onPress={() => setPicked(c)}
                     // Pre-existing (ux_scan a11y-pressable, byte-identical to
                     // master): a chip whose only child is a Text announces as
@@ -938,7 +963,7 @@ export function PlayerStatsScreen() {
                 rows={detail.positionVsOpponent.rows}
                 loading={detail.positionVsOpponent.loading}
                 error={detail.positionVsOpponent.error}
-                playerId={playerId ?? null}
+                playerId={pageId}
                 statLabel={statLabel}
                 betLabel={modeLineLabel(selection.line, selection.side, mode)}
                 selection={selection}
@@ -953,6 +978,22 @@ export function PlayerStatsScreen() {
               />
             ) : null}
 
+            {/* Blocks+Steals and Reb+Ast are summed from this page's log; the
+                server has no head-to-head or same-position read for either
+                yet (statCatalog.LOG_DERIVED_STATS), so the two cards above are
+                absent. Said where they were, rather than vanishing (UX
+                review, 2026-10-16). */}
+            {detail.serverReadsSkipped && detail.nextGame ? (
+              <>
+                <SectionTitle title={`vs ${detail.nextGame.entry.opponent}`} />
+                <View style={styles.card}>
+                  <Text style={styles.muted}>
+                    No head-to-head or same-position numbers for combined stats yet. Pick a single stat to see them.
+                  </Text>
+                </View>
+              </>
+            ) : null}
+
             {/* ── MLB context the prop models train on ─────────────────── */}
             {sport === 'MLB' && detail.savant ? (
               <StatcastCard savant={detail.savant} playerType={playerType ?? null} />
@@ -964,7 +1005,10 @@ export function PlayerStatsScreen() {
               record={detail.record}
               loading={detail.picksLoading}
               error={detail.picksError}
-              sportHasPropModel={STAT_CATALOG.some((d) => d.sport === sport && propModelForStat(d) != null)}
+              // From the model catalog: NBA's and the NFL's live prop models are
+              // multi-market rules with no single stat, so a stat-catalog test
+              // said "No prop model prices NBA players yet" while one did.
+              sportHasPropModel={sportHasLivePropModel(sport)}
               sport={sport}
             />
 
@@ -1586,7 +1630,7 @@ function PickRecordCard({
           </View>
           {record.lines.map((l) => (
             <ReadRow
-              key={l.modelId}
+              key={l.key}
               label={l.label}
               value={formatRecordLine(l)}
               note={

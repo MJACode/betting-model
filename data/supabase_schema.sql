@@ -1146,7 +1146,11 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     under_link      TEXT,                        -- DK betslip deep link (under)
     over_sid        TEXT,
     under_sid       TEXT,
-    created_at      TEXT DEFAULT (NOW()::TEXT)
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    -- The BOOK'S own last_update for the market (the feed's market clock),
+    -- added 2026-10-16. NULL on every row written before that, and on any
+    -- row the feed sent without one. snapshot_at is OUR fetch time.
+    book_last_update TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_prop_odds_game   ON player_prop_odds(game_id, market);

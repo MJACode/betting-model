@@ -65,8 +65,10 @@ SPORTS = [
      ("models.scorer", "build_mlb_game_features")),
     ("WNBA", "wnba_moneyline", "wnba_prop_player_points",
      ("features.wnba_feature_engine", "build_wnba_game_features")),
-    ("NBA", "nba_moneyline", "nba_prop_player_points",
-     ("features.nba_feature_engine", "build_nba_game_features")),
+    # NBA left 2026-10-15: nba_moneyline and the nine generic NBA prop models
+    # were retired, so run_scorer has no NBA game model to re-score and no NBA
+    # prop scorer writes NONE/AVOID rows. The NBA prop rule writes BET rows
+    # only (scripts/nba_prop_market_card.py).
 ]
 
 
