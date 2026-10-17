@@ -293,6 +293,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # keys on an integer hour and cannot hold them. Created on demand by
     # data/ingestors/nba_odds_history.py, never read by the app.
     "odds_history_fetches",
+    # The NBA game-market search's graded cells and populations, stored by
+    # scripts/nba_game2_store.py before anything reads them; never read by the app.
+    "nba_game2_cells",
+    "nba_game2_population",
     "threshold_reviews",
     "worker_jobs",
 )
