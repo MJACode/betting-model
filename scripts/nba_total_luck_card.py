@@ -467,7 +467,11 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 if d.detail.startswith(("score_missing", "box_missing")):
                     logger.error(f"nba-total-luck: {d.game_id} declined, {d.detail}: the gap "
                                  f"would not be the lab's. The results step "
-                                 f"(nba-results) retries every started game all season.")
+                                 f"(nba-results) retries every started game all season; a box "
+                                 f"ESPN never completes (its points never add up to the final) "
+                                 f"needs the NBA.com box for that date, from a residential "
+                                 f"machine: python -m data.ingestors.nba_stats_ingestor "
+                                 f"--game-log-date <date>")
             for k, v in diag.items():
                 diag_all[k] += v
         published = n_decided = 0

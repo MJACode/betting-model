@@ -30,7 +30,11 @@ tip on the hour); a game with no row before tip means its last pass's odds step
 failed (the card logs "was never decided"); (2) `score_missing` / `box_missing` in
 the detail column: a game of the season before the date with no final score or no
 box score, which declines EVERY later game until it lands (the card logs an ERROR
-naming it; the results step retries it back to the season's opening). A
+naming it; the results step retries it back to the season's opening). A box
+ESPN never completes (the worker log says "box incomplete" for the same game
+pass after pass) cannot be fixed on the worker: run
+`python -m data.ingestors.nba_stats_ingestor --game-log-date <date>` on a
+residential machine (stats.nba.com blocks datacenter addresses). A
 "presumed not played" WARNING names a game still unscored two weeks on: if it was
 in fact played, its score and box are missing and every gap since is off;
 (3) the artifact's copy in Supabase's `model_artifacts` — not written yet (the
