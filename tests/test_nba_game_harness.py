@@ -276,3 +276,138 @@ def test_a_per_game_side_takes_each_games_side_pick_and_settles_on_the_real_side
     assert g["result"].to_dict() == {"G": "L", "G2": "W"}
     with pytest.raises(KeyError):
         H.choose(off.drop(columns="side_pick"), cut=-np.inf, sides=["fade"])
+
+
+# ── the empirical distribution, the D gate, bar 9 by real side, stale caches ──
+
+def test_the_empirical_model_matches_the_normal_one_on_normal_residuals():
+    rng = np.random.default_rng(3)
+    r = np.round(rng.normal(0, 12, 8000) * 2) / 2           # half-point residuals
+    dist = H.ResidDist(r, "test")
+    mu = np.array([0.0, 3.3, -5.1, 7.9])
+    for t in (np.array([0.5, 2.5, -4.5, 8.5]), np.array([0.0, 3.0, -5.0, 8.0])):
+        we, pe, _ = dist.probs(mu, t)
+        wn, pn, _ = H.probs_at(mu, np.full(4, 12.0), t)
+        assert np.allclose(we, wn, atol=0.015) and np.allclose(pe, pn, atol=0.01)
+
+
+def test_whole_lines_carry_push_mass_and_half_lines_none():
+    dist = H.ResidDist(np.random.default_rng(1).normal(0, 12, 5000), "t")
+    _, p_whole, _ = dist.probs(np.array([0.3]), np.array([0.0]))
+    _, p_half, _ = dist.probs(np.array([0.3]), np.array([0.5]))
+    assert 0.015 < p_whole[0] < 0.05 and p_half[0] == 0.0
+
+
+def test_a_skewed_distribution_is_not_read_as_normal():
+    # results land 4 above the centre 70% of the time and 9 below otherwise
+    dist = H.ResidDist(np.r_[np.full(700, 4.0), np.full(300, -9.0)], "skew")
+    w, _, _ = dist.probs(np.array([0.0]), np.array([0.5]))
+    assert w[0] == pytest.approx(0.70, abs=1e-6)
+
+
+def test_the_centre_solver_inverts_either_model():
+    dist = H.ResidDist(np.random.default_rng(2).normal(0, 12, 8000), "t")
+    sig = np.array([dist, dist, 12.0, 12.0], dtype=object)
+    t = np.array([-4.5, 6.0, -4.5, 6.0])
+    p = np.array([0.6, 0.35, 0.6, 0.35])
+    mu = H.solve_any(t, p, sig)
+    w, _, l = H.probs_any(mu, sig, t)
+    assert np.allclose(w / (w + l), p, atol=1e-4)
+
+
+def test_the_placebo_moves_a_distribution_by_reference():
+    d1, d2 = (H.ResidDist(np.random.default_rng(i).normal(0, 12, 500), f"d{i}") for i in (1, 2))
+    games = pd.DataFrame({"game_id": ["a", "b"], "game_date": ["2024-01-15"] * 2})
+    fair = pd.DataFrame({"game_id": ["a", "b"], "market": "spreads", "mu": [1.0, 2.0],
+                         "sigma": pd.Series([d1, d2], dtype=object), "p_home": np.nan})
+    for seed in range(10):
+        sh = H.shuffle_within_date(fair, games, np.random.default_rng(seed)).set_index("game_id")
+        assert {id(sh.loc["a", "sigma"]), id(sh.loc["b", "sigma"])} == {id(d1), id(d2)}
+        assert sh["mu"].dtype == float
+        # a game's centre and its distribution travel together
+        assert (sh.loc["a", "mu"] == 1.0) == (sh.loc["a", "sigma"] is d1)
+
+
+def _cov_data(reached_2022, n=40):
+    """Games in 2022 and 2023; D reached on `reached_2022` of 2022's n, all of 2023's."""
+    rows, fetch = [], []
+    for s in (2022, 2023):
+        for i in range(n):
+            gid = f"{s}_{i}"
+            tip = pd.Timestamp(f"{s - 1}-12-01T00:00:00Z") + pd.Timedelta(days=i)
+            rows.append({"game_id": gid, "season": s, "game_date": str((tip - pd.Timedelta(hours=5)).date()),
+                         "tip": tip, "home_team": "BOS", "away_team": "NYK",
+                         "home_score": 100, "away_score": 90})
+            lead = 60 if (s == 2023 or i < reached_2022) else 90
+            fetch.append({"game_id": gid, "tip": tip, "fetch_at": tip - pd.Timedelta(minutes=lead),
+                          "lead_min": float(lead)})
+    return H.Data(games=pd.DataFrame(rows), quotes=pd.DataFrame(), fetches=pd.DataFrame(fetch))
+
+
+def test_a_season_short_of_95_percent_at_d_is_not_chosen_on():
+    data = _cov_data(reached_2022=37)                       # 92.5%
+    cov = H.point_coverage(data, "D")
+    assert cov[2022] == pytest.approx(0.925) and cov[2023] == 1.0
+    assert H.gated_seasons(cov, (2022, 2023), "D") == ((2023,), [2022])
+    # the gate is the D point's alone
+    assert H.gated_seasons(cov, (2022, 2023), "C") == ((2022, 2023), [])
+    assert H.gated_seasons(H.point_coverage(_cov_data(38), "D"), (2022, 2023), "D")[1] == []
+
+
+def test_the_favourite_comes_from_the_market_fair_line():
+    neutral = pd.DataFrame({"game_id": ["a", "b", "c", "d"], "market": ["h2h", "h2h", "spreads", "spreads"],
+                            "mu": [np.nan, np.nan, 3.0, 0.0], "p_home": [0.62, 0.40, np.nan, np.nan]})
+    f = H.fav_sides(neutral).set_index("game_id")
+    assert f.loc["a", "fav"] == "home" and f.loc["b", "fav"] == "away" and f.loc["c", "fav"] == "home"
+    assert "d" not in f.index                                # a level line has no favourite
+
+
+def test_bar_9_compares_a_one_sided_cell_with_that_side_over_its_own_population():
+    off = _offers()
+    off = off[off["book"].isin(["fanduel", "draftkings"])]
+    away = off.iloc[[1]].assign(side="away", price=-105.0, p_win=0.40)
+    off = pd.concat([off, away], ignore_index=True).assign(mu=4.0, p_home=np.nan)
+    pop_other = off.assign(game_id="OUTSIDE")
+    nm = pd.concat([off, pop_other], ignore_index=True)
+    games = pd.concat([_games(), _games().assign(game_id="OUTSIDE", home_score=90)], ignore_index=True)
+    b = H.blind_by_real_side(nm, {"G"}, games, seasons=(2024,))
+    # only G is in the population: home covers -4.5 there (by 10), so blind home wins
+    assert b["home"] > 0 and b["fav"] == b["home"] and b["away"] < 0
+    bets = H.grade(H.choose(off, -np.inf, sides=["home"]), _games())
+    sh = H.real_side_shares(bets, off)
+    assert sh["home"] == 1.0 and sh["fav"] == 1.0
+
+
+def _stale_cache(tmp_path, odds_seasons, ledger):
+    games = pd.DataFrame([{"game_id": f"G{s}", "sport": "NBA", "season": s, "game_date": f"{s - 1}-12-01",
+                           "home_team": "BOS", "away_team": "NYK", "home_score": 110.0, "away_score": 100.0,
+                           "commence_time": f"{s - 1}-12-02T00:00:00Z"} for s in (2022, 2023)])
+    games.to_parquet(tmp_path / "nba_games.parquet")
+    pd.DataFrame([{"game_id": f"G{s}", "market": "h2h", "bookmaker": "fanduel",
+                   "snapshot_type": "open", "snapshot_at": f"{s - 1}-12-01T22:55:00Z",
+                   "source": "odds_api_historical", "created_at": f"2026-10-1{s - 2016} 00:00:00+00",
+                   "home_price": -150.0, "away_price": 130.0, "spread_home": None,
+                   "total_line": None, "over_price": None, "under_price": None}
+                  for s in odds_seasons]).to_parquet(tmp_path / "nba_odds.parquet")
+    pd.DataFrame({"requested_at": pd.to_datetime([r[0] for r in ledger], utc=True),
+                  "pulled_at": pd.to_datetime([r[1] for r in ledger], utc=True),
+                  "rows": 1, "why": "hourly"}).to_parquet(tmp_path / "nba_fetch_ledger.parquet")
+
+
+def test_a_graded_load_refuses_a_season_the_cache_does_not_price(tmp_path):
+    # every stored row matches its purchase, but 2023 has no rows at all
+    _stale_cache(tmp_path, (2022,), [("2021-12-01T23:00:00Z", "2026-10-16 00:00:00+00")])
+    with pytest.raises(RuntimeError, match="too few games"):
+        H.load(cache=tmp_path, require_seasons=(2022, 2023))
+    d = H.load(cache=tmp_path, require_seasons=(2022,))
+    assert d.notes["games_priced_share"] == {2022: 1.0, 2023: 0.0}
+
+
+def test_a_graded_load_refuses_rows_that_match_no_purchase(tmp_path):
+    # both seasons priced, but 2023's row matches no purchase record: it is
+    # only placed by its stamp, which is what a stale ledger looks like
+    _stale_cache(tmp_path, (2022, 2023), [("2021-12-01T23:00:00Z", "2026-10-16 00:00:00+00"),
+                                          ("2022-12-01T23:00:00Z", "2026-10-30 00:00:00+00")])
+    with pytest.raises(RuntimeError, match="no purchase"):
+        H.load(cache=tmp_path, require_seasons=(2022, 2023))
+    assert H.load(cache=tmp_path).notes["placed_by_snapshot_share"] == 0.5

@@ -139,7 +139,16 @@ def attach_fetch(quotes: pd.DataFrame, ledger: pd.DataFrame) -> tuple[pd.DataFra
     return q, notes
 
 
-def load(cache: Path = CACHE, seasons=None) -> Data:
+MIN_PRICED_SHARE, MAX_PLACED_SHARE = 0.90, 0.05
+
+
+def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
+    """Games, full-game quotes and the fetches that bought them.
+
+    `require_seasons`: a graded run names the seasons it needs; the load
+    refuses when any of them has a price on fewer than 90% of its games, or
+    when more than 5% of rows match no purchase record (both mean the cache
+    predates the purchases or the ledger)."""
     g = load_games(cache)
     if seasons is not None:
         g = g[g["season"].isin(list(seasons))]
@@ -165,6 +174,21 @@ def load(cache: Path = CACHE, seasons=None) -> Data:
     f = o[["game_id", "tip", "fetch_at"]].drop_duplicates(["game_id", "fetch_at"]).copy()
     f["lead_min"] = (f["tip"] - f["fetch_at"]).dt.total_seconds() / 60.0
     notes["games"] = int(g["game_id"].nunique())
+    priced = g["game_id"].isin(set(o["game_id"])).groupby(g["season"]).mean()
+    notes["games_priced_share"] = {int(k): round(float(v), 4) for k, v in priced.items()}
+    notes["placed_by_snapshot_share"] = (notes["rows_placed_by_snapshot"] / notes["rows"]
+                                         if notes["rows"] else 0.0)
+    if require_seasons is not None:
+        # A stale or partial cache (a ledger that misses a season) drops that
+        # season's quotes without a sound; a graded run must refuse instead.
+        short = {int(s): notes["games_priced_share"].get(int(s), 0.0) for s in require_seasons
+                 if notes["games_priced_share"].get(int(s), 0.0) < MIN_PRICED_SHARE}
+        if short:
+            raise RuntimeError(f"cache prices too few games in {short} (need {MIN_PRICED_SHARE:.0%}); "
+                               "refresh it with scripts.nba_research_cache --only lines")
+        if notes["placed_by_snapshot_share"] > MAX_PLACED_SHARE:
+            raise RuntimeError(f"{notes['placed_by_snapshot_share']:.1%} of rows matched no purchase "
+                               f"record (limit {MAX_PLACED_SHARE:.0%}): the ledger cache is stale")
     return Data(games=g.reset_index(drop=True), quotes=o, fetches=f.reset_index(drop=True),
                 notes=notes)
 
@@ -245,6 +269,123 @@ def offers(vis: pd.DataFrame) -> pd.DataFrame:
 
 # ── fair probabilities ──────────────────────────────────────────────────────
 
+class ResidDist:
+    """The EMPIRICAL distribution of a side-A quantity around its centre (§6.3:
+    "priced ... through the empirical margin/total distribution").
+
+    Built from residuals r = result - centre on seasons BEFORE the graded one:
+    for the market's own pricing (market_fair, the blind bet, closing value,
+    F2, F6a, F6d) the centre is Pinnacle's closing number (close_dist); for a
+    market-independent projection (F1, F1b, F5) it is that projection, so the
+    model is priced with its own error, never the market's (dist_by_season).
+
+    The result is an integer; a centre is not. Each residual placed at mu + r
+    is split between the two integers around it in proportion to distance,
+    which keeps push mass at whole-number lines and none at half-point ones.
+    P(win) depends only on d = t - mu (whole t and half t tabulated apart), so
+    both are tabulated once on a 0.01 grid and read by interpolation."""
+
+    STEP, LIM = 0.01, 80.0
+
+    def __init__(self, resid, label: str = ""):
+        r = np.asarray(resid, float)
+        r = r[np.isfinite(r)]
+        if len(r) < 50:
+            raise ValueError(f"{label}: {len(r)} residuals is too few for an empirical distribution")
+        self.n, self.sd, self.label = len(r), float(r.std()), label
+        self.d = np.arange(-self.LIM, self.LIM + self.STEP / 2, self.STEP)
+        self.win_whole, self.push_whole = self._table(r, 0.0)
+        self.win_half, _ = self._table(r, 0.5)
+
+    def _table(self, r, t):
+        win, push = np.empty(len(self.d)), np.empty(len(self.d))
+        for i in range(0, len(self.d), 400):
+            mu = t - self.d[i:i + 400, None]
+            x = mu + r[None, :]
+            lo = np.floor(x)
+            fr = x - lo
+            win[i:i + 400] = ((1 - fr) * (lo > t) + fr * (lo + 1 > t)).mean(1)
+            push[i:i + 400] = ((1 - fr) * (lo == t) + fr * (lo + 1 == t)).mean(1)
+        return win, push
+
+    def probs(self, mu, t):
+        """(P side A wins, P push, P side A loses) at threshold t, centre mu."""
+        mu, t = np.asarray(mu, float), np.asarray(t, float)
+        d = t - mu
+        whole = np.isclose(t, np.round(t))
+        win = np.where(whole, np.interp(d, self.d, self.win_whole), np.interp(d, self.d, self.win_half))
+        push = np.where(whole, np.interp(d, self.d, self.push_whole), 0.0)
+        return win, push, np.clip(1.0 - win - push, 0.0, 1.0)
+
+    def __repr__(self):
+        return f"ResidDist({self.label}, n={self.n}, sd={self.sd:.2f})"
+
+
+def _groups(sigma):
+    """Row groups by pricing model: (mask, None, float sigmas) for the normal
+    model, (mask, ResidDist, None) for each empirical distribution present."""
+    s = np.asarray(sigma, dtype=object)
+    emp = np.array([isinstance(v, ResidDist) for v in s], bool)
+    out = []
+    if (~emp).any():
+        fl = np.array([np.nan if (v is None or isinstance(v, ResidDist)) else float(v) for v in s])
+        out.append((~emp, None, fl))
+    if emp.any():
+        ids = np.array([id(v) if isinstance(v, ResidDist) else 0 for v in s])
+        for i in np.unique(ids[emp]):
+            m = ids == i
+            out.append((m, s[np.argmax(m)], None))
+    return out
+
+
+def probs_any(mu, sigma, t):
+    """probs_at for float sigmas, the empirical table where sigma is a ResidDist."""
+    mu, t = np.asarray(mu, float), np.asarray(t, float)
+    w, p, l = (np.full(mu.shape, np.nan) for _ in range(3))
+    for m, dist, fl in _groups(sigma):
+        if dist is None:
+            w[m], p[m], l[m] = probs_at(mu[m], fl[m], t[m])
+        else:
+            w[m], p[m], l[m] = dist.probs(mu[m], t[m])
+    return w, p, l
+
+
+def solve_any(t, p_cond, sigma, iters: int = 60):
+    """The centre mu at which side A's no-push win share is p_cond, either model."""
+    t, p_cond = np.asarray(t, float), np.asarray(p_cond, float)
+    out = np.full(t.shape, np.nan)
+    for m, dist, fl in _groups(sigma):
+        if dist is None:
+            out[m] = solve_mu(t[m], p_cond[m], fl[m])
+            continue
+        lo, hi = t[m] - 60.0, t[m] + 60.0
+        for _ in range(iters):
+            mid = 0.5 * (lo + hi)
+            w, _, l = dist.probs(mid, t[m])
+            c = w / np.maximum(w + l, 1e-12)
+            lo = np.where(c < p_cond[m], mid, lo)
+            hi = np.where(c >= p_cond[m], mid, hi)
+        out[m] = 0.5 * (lo + hi)
+    return out
+
+
+def dist_by_season(resid: pd.DataFrame, seasons, min_prior: int = 300) -> dict:
+    """(season, market) -> ResidDist from `resid` (season, market, resid) on the
+    seasons BEFORE each one; the season's own rows only when fewer than
+    `min_prior` earlier rows exist (2020-21, which is reported, never chosen)."""
+    out = {}
+    for s in sorted(int(x) for x in seasons):
+        for m in sorted(set(resid["market"])):
+            rm = resid[resid["market"] == m]
+            prior = rm[rm["season"] < s]
+            src = "prior"
+            if len(prior) < min_prior:
+                prior, src = rm[rm["season"] == s], "own season"
+            if len(prior) >= 50:
+                out[(s, m)] = ResidDist(prior["resid"].to_numpy(), f"{s} {m} ({src})")
+    return out
+
+
 def side_probs(market, side, line, mu=None, sigma=None, p_home=None):
     """(P win, P push) for a side at a stored side-A number.
 
@@ -260,7 +401,7 @@ def side_probs(market, side, line, mu=None, sigma=None, p_home=None):
         pw = np.where(ml, np.where(a_side, ph, 1.0 - ph), pw)
     if mu is not None:
         t = threshold(market, line)
-        w, push, lose = probs_at(np.asarray(mu, float), np.asarray(sigma, float), t)
+        w, push, lose = probs_any(np.asarray(mu, float), sigma, t)
         pw = np.where(~ml, np.where(a_side, w, lose), pw)
         pp = np.where(~ml, push, pp)
     return pw, pp
@@ -437,20 +578,39 @@ def close_sigma(close: pd.DataFrame, games: pd.DataFrame) -> dict:
     return sig
 
 
+def close_resid(close: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+    """(season, market, resid): result minus Pinnacle's closing number, side A."""
+    c = close[close["market"] != "h2h"].merge(games[["game_id", "home_score", "away_score"]],
+                                               on="game_id")
+    margin, total = c["home_score"] - c["away_score"], c["home_score"] + c["away_score"]
+    return pd.DataFrame({"season": c["season"].astype(int), "market": c["market"],
+                         "resid": np.where(c["market"] == "spreads", margin + c["close_line"],
+                                           total - c["close_line"])})
+
+
+def close_dist(close: pd.DataFrame, games: pd.DataFrame) -> dict:
+    """(season, market) -> the EMPIRICAL distribution of the result around
+    Pinnacle's close, from seasons before S: the market's own pricing (§6.3).
+    A drop-in for close_sigma wherever a `sig` dict is taken."""
+    return dist_by_season(close_resid(close, games), games["season"].unique())
+
+
 def clv(bets: pd.DataFrame, close: pd.DataFrame, sig: dict) -> pd.Series:
-    """EV of the bet's price at Pinnacle's no-vig close (moved number: normal model)."""
+    """EV of the bet's price at Pinnacle's no-vig close (moved number: the
+    pricing model in `sig`, normal or empirical)."""
     if len(bets) == 0:
         return pd.Series([], dtype=float)
     x = bets.reset_index().merge(close.drop(columns="season"), on=["game_id", "market"], how="left")
     x = x[x["close_at"] > x["T"]]
     a_side = x["side"].isin(["home", "over"])
     p_a = x["close_fa"].to_numpy()
-    sigma = np.array([sig.get((int(s), m), np.nan) for s, m in zip(x["season"], x["market"])])
+    sigma = np.array([sig.get((int(s), m), 1.0) for s, m in zip(x["season"], x["market"])],
+                     dtype=object)
     ml = (x["market"] == "h2h").to_numpy()
     same = ml | np.isclose(x["line"].fillna(0), x["close_line"].fillna(np.inf))
     tc = threshold(x["market"], x["close_line"])
-    mu = solve_mu(tc, p_a, np.where(np.isnan(sigma), 1.0, sigma))
-    w, push, lose = probs_at(mu, np.where(np.isnan(sigma), 1.0, sigma), threshold(x["market"], x["line"]))
+    mu = solve_any(tc, p_a, sigma)
+    w, push, lose = probs_any(mu, sigma, threshold(x["market"], x["line"]))
     pw_same = np.where(a_side, p_a, 1 - p_a)
     pw = np.where(same, pw_same, np.where(a_side, w, lose))
     pp = np.where(same, 0.0, push)
@@ -526,13 +686,14 @@ def market_fair(vis: pd.DataFrame, sig: dict) -> pd.DataFrame:
         return pd.DataFrame(columns=["game_id", "market", "mu", "sigma", "p_home", "ref"])
     ia, ib = imp(v["price_a"]), imp(v["price_b"])
     v["fa"] = ia / (ia + ib)
-    v["sigma"] = [sig.get((int(se), m), np.nan) if m != "h2h" else np.nan
-                  for se, m in zip(v["season"], v["market"])]
+    v["sigma"] = pd.Series([sig.get((int(se), m), np.nan) if m != "h2h" else np.nan
+                            for se, m in zip(v["season"], v["market"])], index=v.index, dtype=object)
     sp = (v["market"] != "h2h").to_numpy()
     mu = np.full(len(v), np.nan)
     if sp.any():
         x = v[sp]
-        mu[sp] = solve_mu(threshold(x["market"], x["line"]), x["fa"], x["sigma"])
+        mu[sp] = solve_any(threshold(x["market"], x["line"]), x["fa"].to_numpy(),
+                           x["sigma"].to_numpy())
     v["mu"] = mu
     sharp = v[v["book"] == SHARP].drop_duplicates(["game_id", "market"])
     rest = v[v["book"] != SHARP].groupby(["game_id", "market"]).agg(
@@ -562,7 +723,12 @@ def shuffle_within_date(fair: pd.DataFrame, games: pd.DataFrame, rng) -> pd.Data
     out = []
     for _, grp in f.groupby(["game_date", "market"], sort=False):
         g2 = grp.copy()
-        g2[cols] = grp[cols].to_numpy()[rng.permutation(len(grp))]
+        perm = rng.permutation(len(grp))
+        # one permutation for every column (a game's numbers move together),
+        # applied column by column so each keeps its own dtype and an
+        # empirical distribution is moved by reference, never copied
+        for c in cols:
+            g2[c] = grp[c].to_numpy()[perm]
         out.append(g2)
     return pd.concat(out, ignore_index=True).drop(columns="game_date") if out else fair
 
@@ -573,9 +739,90 @@ def blind_side(neutral: pd.DataFrame, side: str, games: pd.DataFrame) -> pd.Data
     return grade(choose(neutral, cut=-np.inf, sides=[side]), games)
 
 
+GATE_POINT, GATE_MIN = "D", 0.95
+
+
+def point_coverage(data: Data, point: str, times: pd.DataFrame | None = None) -> dict:
+    """season -> share of the season's games with a decision at `point`."""
+    t = decision_times(data.fetches, data.games, point) if times is None else times
+    has = data.games["game_id"].isin(set(t["game_id"]))
+    return {int(s): float(v) for s, v in has.groupby(data.games["season"]).mean().items()}
+
+
+def gated_seasons(cov: dict, choose_seasons, point: str) -> tuple[tuple, list]:
+    """§6.5 amendment: at D, a choosing season reached on fewer than 95% of its
+    games is reported and not chosen on. (kept, dropped)."""
+    if point != GATE_POINT:
+        return tuple(choose_seasons), []
+    kept = tuple(s for s in choose_seasons if cov.get(int(s), 0.0) >= GATE_MIN)
+    return kept, [s for s in choose_seasons if s not in kept]
+
+
+SPLITS = {"home": ("home", "away"), "fav": ("fav", "dog"), "over": ("over", "under")}
+
+
+def fav_sides(neutral: pd.DataFrame) -> pd.DataFrame:
+    """(game_id, market, fav, dog): the favourite by the MARKET's fair line at T
+    (h2h: p_home > 0.5; spreads: the home margin's centre above 0). Totals have
+    none. Read from `neutral`, never from a result."""
+    f = neutral.drop_duplicates(["game_id", "market"])[["game_id", "market", "mu", "p_home"]]
+    f = f[f["market"] != "totals"]
+    home_fav = np.where(f["market"] == "h2h", f["p_home"] > 0.5, f["mu"] > 0)
+    level = np.where(f["market"] == "h2h", np.isclose(f["p_home"], 0.5), np.isclose(f["mu"], 0.0))
+    f = f.assign(fav=np.where(home_fav, "home", "away"), dog=np.where(home_fav, "away", "home"))
+    return f[~level][["game_id", "market", "fav", "dog"]]
+
+
+def blind_by_real_side(nm: pd.DataFrame, population: set, games: pd.DataFrame,
+                       seasons) -> dict:
+    """Bar 9 as §1 words it: for each real side, that side bet on every game in
+    the cell's own priced population at that point (no model, no cut), at the
+    best deciding offer under the market's fair line. ROI on `seasons`."""
+    pop = nm[nm["game_id"].isin(population)]
+    out = {}
+    if pop.empty:
+        return out
+    fv = fav_sides(pop)
+    for split, (a, b) in SPLITS.items():
+        for s in (a, b):
+            if split == "fav":
+                if fv.empty:
+                    continue
+                c = pop.merge(fv[["game_id", "market", s]].rename(columns={s: "side_pick"}),
+                              on=["game_id", "market"])
+                bets = choose(c, -np.inf, sides=[s])
+            else:
+                bets = choose(pop, -np.inf, sides=[s])
+            g = grade(bets, games)
+            g = g[g["season"].isin(seasons)] if len(g) else g
+            if len(g):
+                out[s] = roi(g)
+    return out
+
+
+def real_side_shares(bets: pd.DataFrame, neutral: pd.DataFrame) -> dict:
+    """Shares of a cell's bets on the first side of each split, real sides."""
+    out = {}
+    if bets.empty:
+        return out
+    sides = bets["side"]
+    ha = sides.isin(["home", "away"])
+    if ha.any():
+        out["home"] = float((sides[ha] == "home").mean())
+    ou = sides.isin(["over", "under"])
+    if ou.any():
+        out["over"] = float((sides[ou] == "over").mean())
+    fv = fav_sides(neutral[neutral["game_id"].isin(set(bets["game_id"]))])
+    x = bets[ha].merge(fv, on=["game_id", "market"])
+    if len(x):
+        out["fav"] = float((x["side"] == x["fav"]).mean())
+    return out
+
+
 def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: pd.DataFrame,
               cuts, sides_by_market: dict, close=None, sig=None, placebo=None,
-              strength: str = "ev", choose_seasons=CHOOSE) -> list[dict]:
+              strength: str = "ev", choose_seasons=CHOOSE,
+              times: pd.DataFrame | None = None) -> list[dict]:
     """Grade one family at one decision point over its cut axis and sides.
 
     `cand`: offers with p_win / p_push / ev. A model family leaves strength="ev"
@@ -583,11 +830,19 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
     offers priced at the MARKET's fair line plus a `strength` column; the cut
     then applies to strength, and the best market-fair offer is taken.
     `placebo`: re-priced `cand` frames graded at the same cuts.
+    `times`: the decision times the cells used (default: the slate fetches);
+    at D any choosing season they reach on fewer than 95% of games is dropped
+    from `choose_seasons` and named in the row (§6.5 amendment).
     One row per (market, side, cut) with every number section 6 reports."""
     rows = []
+    cov = point_coverage(data, point, times)
+    asked = tuple(choose_seasons)
+    choose_seasons, dropped = gated_seasons(cov, asked, point)
     for market, sides in sides_by_market.items():
         cm = cand[cand["market"] == market]
         nm = neutral[neutral["market"] == market]
+        population = set(cm["game_id"])
+        blinds = blind_by_real_side(nm, population, data.games, choose_seasons)
         for side in sides:
             blind = blind_side(nm, side, data.games)
             blind_ch = (roi(blind[blind["season"].isin(choose_seasons)])
@@ -605,9 +860,17 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                     gp = grade(pick(pc[pc["market"] == market]), data.games)
                     pl.append(roi(gp[gp["season"].isin(choose_seasons)]) if len(gp) else np.nan)
                 ch, cf = rep["choose"], rep["confirm"]
+                shares = real_side_shares(g[g["season"].isin(choose_seasons)] if len(g) else g, nm)
                 rows.append({
                     "family": family, "point": point, "market": market, "side": side,
                     "cut_index": k, "cut": cut,
+                    "choose_seasons_asked": ",".join(str(x) for x in asked),
+                    "gate_dropped": ",".join(str(x) for x in dropped),
+                    **{f"gate_cov_{s}": cov.get(s, 0.0) for s in (REGIME, *CHOOSE, CONFIRM)},
+                    "population_games": len(population),
+                    **{f"share_{k2}": shares.get(k2, np.nan) for k2 in SPLITS},
+                    **{f"blind_{s}": blinds.get(s, np.nan)
+                       for pair in SPLITS.values() for s in pair},
                     "n_choose": ch["bets"], "units_choose": ch["units"], "roi_choose": ch["roi"],
                     "roi_kept_choose": ch["roi_kept"],
                     "ci_lo_choose": ch["ci90"][0], "ci_hi_choose": ch["ci90"][1],
