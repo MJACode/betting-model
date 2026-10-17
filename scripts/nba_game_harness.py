@@ -273,14 +273,33 @@ def with_ev(off: pd.DataFrame) -> pd.DataFrame:
     return off.assign(ev=off["p_win"] * (d - 1.0) - p_lose)
 
 
+REAL_SIDES = ("home", "away", "over", "under")
+
+
+def side_mask(c: pd.DataFrame, sides) -> pd.Series:
+    """Offers on the requested sides. A real side (home/away/over/under) keeps
+    that side. Any other label -- a rule's "fade", "favourite", "against" --
+    is a PER-GAME side: it keeps the offers whose real `side` equals the row's
+    `side_pick` (a rule family's column; shuffle_within_date moves it with the
+    rule's strength). The real side stays on every row, so pricing and
+    settlement never see the label."""
+    real = [s for s in sides if s in REAL_SIDES]
+    keep = c["side"].isin(real)
+    if len(real) < len(sides):
+        if "side_pick" not in c:
+            raise KeyError(f"per-game side {sorted(set(sides) - set(real))} needs a side_pick column")
+        keep = keep | c["side"].eq(c["side_pick"])
+    return keep
+
+
 def choose(cand: pd.DataFrame, cut: float, books=BETTABLE, sides=None) -> pd.DataFrame:
     """One bet per (game, market): the best-EV offer at an allowed book.
 
     `cand` holds offers with p_win, p_push (with_ev adds ev). Ties go to the
-    earlier book in BEST_LINE_BOOKMAKERS."""
+    earlier book in BEST_LINE_BOOKMAKERS. `sides`: see side_mask."""
     c = cand[cand["book"].isin(books) & (cand["price"] >= PRICE_FLOOR)]
     if sides is not None:
-        c = c[c["side"].isin(sides)]
+        c = c[side_mask(c, sides)]
     if "ev" not in c:
         c = with_ev(c)
     c = c[c["ev"] >= cut]
