@@ -289,6 +289,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # odds_history_pulls: a fixed name, never read by the app.
     "nhl_derivative_odds_pulls",
     "odds_history_pulls",
+    # NBA purchase fetches OFF the hour (a gap fill at 23:30Z): odds_history_pulls
+    # keys on an integer hour and cannot hold them. Created on demand by
+    # data/ingestors/nba_odds_history.py, never read by the app.
+    "odds_history_fetches",
     "threshold_reviews",
     "worker_jobs",
 )
