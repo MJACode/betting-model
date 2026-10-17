@@ -263,6 +263,15 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "nba_period_scores",
     "nba_player_dnp",
     "nba_schedule",
+    # Free ESPN play-by-play (sportsdataverse release), its box scores, the
+    # ESPN -> NBA.com player id map and the lineup segments derived from them.
+    # Created on demand by data/ingestors/nba_pbp.py; research input for the
+    # NBA game-market search, never read by the app.
+    "nba_pbp",
+    "nba_pbp_box",
+    "nba_pbp_games",
+    "nba_player_id_map",
+    "nba_stints",
     # The NBA prop card's decisions ledger: one row per game it has decided,
     # so a game is decided once (scripts/nba_prop_market_card.py, which
     # creates it on demand). Read by the card and the window job, never by
