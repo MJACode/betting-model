@@ -70,6 +70,14 @@ EVENING_HOUR_END = 23
 # Under this, the */10 cron is close enough that starting a second pass
 # would only buy odds twice. The in-process lock still collapses a catch-up
 # that is still running when the tick arrives into one pass.
+# This lead is only for a */10 fire. A :17 — the hourly, and the overnight
+# that follows a killed 23:50 ET evening — uses MIN_LEAD_TO_NEXT_PASS.
+# An 8-11 minute evening replacement started at 12:07-12:14 ET still holds
+# _REFRESH_LOCK at 12:17, and that hourly is the one that pulls ESPN
+# results, so the pull would slip to 1:17.
+# A */10 more than about 9 minutes away lets the replacement finish and
+# the tick run as well: one extra evening pass of odds credits per deploy,
+# still inside MAX_INTERRUPTED_IN_LOOKBACK.
 EVENING_MIN_LEAD = timedelta(minutes=3)
 
 # Only a pass from this hour is worth replacing; an older orphan belongs to a
@@ -150,6 +158,8 @@ def next_refresh_fire(now: datetime, kind: str) -> datetime:
     Hourly (and the overnight :17, which ledgers as hourly) is the next :17.
     Evening is the next */10 inside 18:00-23:50 ET; after 23:50 the next
     refresh of this chain is the overnight :17, not tomorrow's 18:00.
+    The caller applies the 10-minute lead whenever this returns a :17,
+    including that overnight, even though the orphan's kind is evening.
     """
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
@@ -162,8 +172,21 @@ def next_refresh_fire(now: datetime, kind: str) -> datetime:
     return _next_pass(now)
 
 
-def _min_lead(kind: str) -> timedelta:
-    return EVENING_MIN_LEAD if kind == "evening" else MIN_LEAD_TO_NEXT_PASS
+def _fire_is_colon_17(when: datetime) -> bool:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(ET).minute == PASS_MINUTE
+
+
+def _min_lead(kind: str, nxt: datetime) -> timedelta:
+    """3 minutes before a */10 evening tick; 10 before any :17.
+
+    The orphan's kind is not the next fire. A killed 23:50 ET evening's
+    next fire is 00:17, and that pass is hourly.
+    """
+    if kind != "evening" or _fire_is_colon_17(nxt):
+        return MIN_LEAD_TO_NEXT_PASS
+    return EVENING_MIN_LEAD
 
 
 def decide_refresh_retry(
@@ -201,15 +224,16 @@ def decide_refresh_retry(
             "skip", f"a {latest.run_kind} pass was interrupted; not a "
                     "refresh this catch-up replaces")
 
-    lead = next_refresh_fire(now, latest.run_kind) - now
-    if lead < _min_lead(latest.run_kind):
-        if latest.run_kind == "evening":
+    nxt = next_refresh_fire(now, latest.run_kind)
+    lead = nxt - now
+    if lead < _min_lead(latest.run_kind, nxt):
+        minutes = int(lead.total_seconds() // 60)
+        if _fire_is_colon_17(nxt):
             return Decision(
-                "skip", f"the next evening tick is "
-                        f"{int(lead.total_seconds() // 60)} minute(s) away")
+                "skip", f"the next :{PASS_MINUTE} pass is {minutes} "
+                        "minute(s) away")
         return Decision(
-            "skip", f"the next :{PASS_MINUTE} pass is {int(lead.total_seconds() // 60)} "
-                    "minute(s) away")
+            "skip", f"the next evening tick is {minutes} minute(s) away")
 
     broken = sum(1 for r in recent if interrupted(r))
     if broken > MAX_INTERRUPTED_IN_LOOKBACK:
