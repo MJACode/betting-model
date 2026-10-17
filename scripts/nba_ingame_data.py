@@ -32,14 +32,31 @@ DEFINITIONS (stated once, used everywhere):
              by the same code that wrote that table (nba_pbp.slim_plays), so
              team sides are already in OUR home/away and the running score
              follows its POINTS rule.
-  PHASE      live; break (between a period's End Period row and the next
-             period's first play); halftime (that gap after period 2);
-             pregame; postgame (at or after the end of the final period).
+  PHASE      live; break (from a period's end to the next period's start);
+             halftime (that gap after period 2); pregame; postgame (at or
+             after the end of the final period).
+  PERIODS    a period ends at its End Period row. It starts at its first play
+             with the game clock running (or the jump ball), backed off by the
+             game time that play shows; ESPN logs the next period's opening
+             substitutions at 12:00 as the previous period ends, so the
+             earliest row is not the start (phase_bounds).
   FOULS      a personal foul (PF) is a foul row other than technicals and "No
              Foul"; an "Offensive Foul Turnover" counts as one only when no
              "Offensive Foul" row by the same player sits at the same period
              and clock (ESPN logs a charge either way). A TEAM foul (toward
              the bonus) is a PF that is not offensive and not a double foul.
+  SHOOTING   3PA, 3PM, FTA, FTM by team so far. A missed end-of-period heave
+             (3 s or less on the clock, 36 ft or more by the text's distance,
+             else the shot coordinates) is left out of 3PA in EVERY season and
+             counted in `heave3`: from 2025-26 the official count leaves it
+             out (measured: the play-by-play matches ESPN's box on 97.3% of
+             2025-26 team-games without them, 62% with them; through 2024-25
+             it matches with them). A made heave stays a make.
+  WALLCLOCK  a game with any play logged more than 4 h from the game's median
+             wallclock is left out whole. In 13 games of late October 2025
+             ESPN stamped a whole half about 24 h off, and in others one late
+             play 11-24 h off; dropping only the far plays would delete a real
+             half from the score whenever the wrong half is the larger one.
   TOP PLAYERS each side's three starters (known at tip) with the most minutes
              per game in their earlier games this season (else last season's
              average, else 0) -- never this game's minutes.
@@ -62,6 +79,7 @@ Supabase, so the output is regenerable and is written to the temp dir only.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tempfile
 import time
@@ -84,6 +102,10 @@ PIN_WINDOW_S = 60
 GRID_Q = 0.01              # the feed grid's offset: 1st percentile of fetch_at - newest stamp
 PREFILTER_MIN = 90          # quotes stamped > 90 min before the listed tip cannot be in play
 HOME, AWAY = "H", "A"
+HEAVE_CLOCK_S, HEAVE_FEET = 3.0, 36.0
+HEAVE_RULE_SEASON = 2026     # the first season whose official 3PA leaves missed heaves out
+WILD_HOURS = 4.0
+_FEET_RE = re.compile(r"(\d+)-foot")
 
 PF_EXCLUDE = ("Technical", "No Foul")
 OFFENSIVE = ("Offensive Foul", "Offensive Charge Foul")
@@ -117,6 +139,23 @@ def foul_flags(plays: pd.DataFrame) -> pd.DataFrame:
     return plays.assign(pf=pf.astype(int), tf=tf.astype(int))
 
 
+def shot_feet(text, x, y) -> float:
+    """A shot's distance in feet: the text's "N-foot", else the raw ESPN
+    coordinates (basket at (25, 0), as nba_stints.classify_field_goal reads
+    them), else NaN."""
+    m = _FEET_RE.search(text or "")
+    if m:
+        return float(m.group(1))
+    if x is None or y is None or x != x or y != y:
+        return float("nan")
+    return float(((float(x) - 25.0) ** 2 + float(y) ** 2) ** 0.5)
+
+
+def is_heave(made: bool, value, clock_s, feet) -> bool:
+    """A missed end-of-period heave (HEAVES in the module docstring)."""
+    return (not made) and value == 3 and clock_s is not None and clock_s <= HEAVE_CLOCK_S         and feet == feet and feet >= HEAVE_FEET
+
+
 def plays_frame(rows: list[dict]) -> pd.DataFrame:
     """nba_pbp-shaped rows (nba_pbp.slim_plays) -> the per-play frame this
     module counts from: wallclock, period, clock, side, points, shots, fouls."""
@@ -126,26 +165,67 @@ def plays_frame(rows: list[dict]) -> pd.DataFrame:
         sv = p.get("shot_value")
         ft = st.is_ft(p)
         fga = (not ft) and st.is_fga(p)
+        made = p["points"] > 0
+        heave = fga and is_heave(made, sv, p["clock_s"],
+                                 shot_feet(p.get("text"), p.get("coord_x"), p.get("coord_y")))
         out.append((p["game_id"], p["play_no"], p.get("wallclock"), p["period"], p["clock_s"],
                     p["game_s"], p.get("type_text"), p.get("team_side"), p["points"],
-                    int(fga and sv == 3), int(fga and sv == 3 and p["points"] > 0),
-                    int(ft), int(ft and p["points"] > 0), p.get("athlete_id_1")))
+                    int(fga and sv == 3 and not heave), int(fga and sv == 3 and made), int(heave),
+                    int(ft), int(ft and made), p.get("athlete_id_1")))
     df = pd.DataFrame(out, columns=["game_id", "play_no", "wallclock", "period", "clock_s", "game_s",
-                                    "type_text", "team_side", "points", "fg3a", "fg3m", "fta", "ftm",
-                                    "athlete_id_1"])
+                                    "type_text", "team_side", "points", "fg3a", "fg3m", "heave3",
+                                    "fta", "ftm", "athlete_id_1"])
     df["wc"] = pd.to_datetime(df["wallclock"], utc=True, errors="coerce")
     return foul_flags(df.drop(columns="wallclock"))
 
 
+def drop_wild_wallclocks(plays: pd.DataFrame, hours: float = WILD_HOURS) -> tuple[pd.DataFrame, list]:
+    """Drop every game with a play logged more than `hours` from the game's
+    median wallclock (WALLCLOCK in the module docstring). Returns (kept plays,
+    the dropped game ids)."""
+    med = plays.groupby("game_id")["wc"].transform("median")
+    wild = (plays["wc"] - med).abs() > pd.Timedelta(hours=hours)
+    bad = sorted(set(plays.loc[wild, "game_id"]))
+    return plays[~plays["game_id"].isin(bad)].copy(), bad
+
+
+NOT_ACTION = ("Substitution", "Timeout", "Technical", "End Period", "End Game", "Ejection")
+
+
+def period_length(period) -> np.ndarray:
+    return np.where(np.asarray(period) <= 4, 720.0, 300.0)
+
+
 def phase_bounds(plays: pd.DataFrame) -> pd.DataFrame:
-    """Per (game, period): start = earliest wallclock of the period's plays;
-    end = its End Period row's wallclock (latest, if logged twice), else the
-    period's latest wallclock."""
+    """Per (game, period): START and END (PERIODS in the module docstring).
+
+    start: the period's first ACTION play by wallclock -- the jump ball, or a
+    play with the game clock already running that is not a substitution,
+    timeout, technical or period marker -- backed off by the game time it shows
+    (wallclock - (period length - clock)). ESPN logs the next period's opening
+    substitutions at 12:00 the moment a period ends, so the period's earliest
+    row is not its start. Wall time never runs slower than the game clock, so
+    this estimate is never before the true start. No action play: the period's
+    earliest wallclock.
+    end: the period's End Period row (latest, if logged twice), else its latest
+    wallclock."""
     p = plays.dropna(subset=["wc"])
-    b = p.groupby(["game_id", "period"])["wc"].agg(start="min", last="max").reset_index()
-    ep = p[p["type_text"] == "End Period"].groupby(["game_id", "period"])["wc"].max().rename("ep")
+    t = p["type_text"].fillna("")
+    na = np.zeros(len(p), bool)
+    for w in NOT_ACTION:
+        na |= t.str.contains(w).to_numpy()
+    act = ((t == "Jumpball") | (p["clock_s"] < period_length(p["period"]))) & ~na
+    a = p[act].sort_values(["game_id", "period", "wc"]).drop_duplicates(["game_id", "period"])
+    a = a.assign(start_act=a["wc"] - pd.to_timedelta(period_length(a["period"]) - a["clock_s"], unit="s"))
+    b = p.groupby(["game_id", "period"])["wc"].agg(first="min", last="max").reset_index()
+    b = b.merge(a[["game_id", "period", "start_act"]], on=["game_id", "period"], how="left")
+    ep = p[t == "End Period"].groupby(["game_id", "period"])["wc"].max().rename("ep")
     b = b.merge(ep.reset_index(), on=["game_id", "period"], how="left")
     b["end"] = b["ep"].fillna(b["last"])
+    b["start"] = b["start_act"].fillna(b["first"])
+    # never before the previous period ended
+    prev_end = b.sort_values(["game_id", "period"]).groupby("game_id")["end"].shift(1)
+    b["start"] = b["start"].where(prev_end.isna() | (b["start"] >= prev_end), prev_end)
     return b[["game_id", "period", "start", "end"]]
 
 
@@ -192,7 +272,7 @@ def timeline(plays: pd.DataFrame, top: pd.DataFrame | None = None) -> pd.DataFra
     out = p[["game_id", "wc", "play_no", "period", "clock_s", "game_s", "type_text"]].copy()
     for side, pre in ((HOME, "h"), (AWAY, "a")):
         m = (p["team_side"] == side)
-        for c in ("points", "fg3a", "fg3m", "fta", "ftm", "pf"):
+        for c in ("points", "fg3a", "fg3m", "heave3", "fta", "ftm", "pf"):
             name = f"{pre}_{'pts' if c == 'points' else c}"
             out[name] = (p[c] * m).groupby(gk).cumsum()
         tf = p["tf"] * m
@@ -329,17 +409,18 @@ def season_plays(season: int, want: pd.DataFrame, games: pd.DataFrame):
         swaps[gid] = sw
         rows.extend(P.slim_plays(recs, espn_game_id=eid, game_id=gid, season=season,
                                  season_type=2, swapped=sw))
-    plays = plays_frame(rows)
+    plays, wild = drop_wild_wallclocks(plays_frame(rows))
     plays["espn_game_id"] = plays["game_id"].map(want.set_index("game_id")["espn_game_id"])
     box = pd.read_parquet(bpath, columns=BOX_COLS)
     box = box[box["season_type"] == 2].copy()
     box["espn_game_id"] = box["game_id"].astype(int)
     box = box.merge(want, on="espn_game_id", suffixes=("_espn", ""))
+    box = box[~box["game_id"].isin(wild)]
     sw = box["game_id"].map(swaps)
     ha = box["home_away"].str.lower()
     box["side"] = np.where((ha == "home") ^ sw.fillna(False).astype(bool), HOME, AWAY)
     notes = {"games_pbp": int(plays["game_id"].nunique()), "games_swapped": int(sum(swaps.values())),
-             "games_team_mismatch": len(bad), "plays": int(len(plays)),
+             "games_team_mismatch": len(bad), "plays": int(len(plays)), "games_clock_broken": len(wild),
              "wallclock_null": int(plays["wc"].isna().sum())}
     return plays, box, notes
 
@@ -383,7 +464,7 @@ def top_players(box: pd.DataFrame, prior: pd.DataFrame, k: int = 3) -> pd.DataFr
     return s[["game_id", "side", "rank", "athlete_id"]].assign(athlete_id=lambda d: d["athlete_id"].astype(float))
 
 
-def box_checks(plays: pd.DataFrame, box: pd.DataFrame, games: pd.DataFrame) -> dict:
+def box_checks(plays: pd.DataFrame, box: pd.DataFrame, games: pd.DataFrame, season: int) -> dict:
     """Game-end counts from the plays against ESPN's box score and our final."""
     b = box.copy()
     for c in ("fouls", "three_point_field_goals_made", "three_point_field_goals_attempted",
@@ -392,8 +473,10 @@ def box_checks(plays: pd.DataFrame, box: pd.DataFrame, games: pd.DataFrame) -> d
     bt = b.groupby(["game_id", "side"]).agg(
         fg3m=("three_point_field_goals_made", "sum"), fg3a=("three_point_field_goals_attempted", "sum"),
         ftm=("free_throws_made", "sum"), fta=("free_throws_attempted", "sum"), pf=("fouls", "sum"))
-    pt = plays.groupby(["game_id", "team_side"])[["fg3m", "fg3a", "ftm", "fta", "pf"]].sum()
+    pt = plays.groupby(["game_id", "team_side"])[["fg3m", "fg3a", "heave3", "ftm", "fta", "pf"]].sum()
     pt.index = pt.index.set_names(["game_id", "side"])
+    if season < HEAVE_RULE_SEASON:      # the official count still included missed heaves
+        pt["fg3a"] = pt["fg3a"] + pt["heave3"]
     j = bt.join(pt, rsuffix="_pbp", how="inner")
     out = {f"team_{c}_exact": round(float((j[c] == j[f"{c}_pbp"]).mean()), 4)
            for c in ("fg3m", "fg3a", "ftm", "fta", "pf")}
@@ -429,12 +512,18 @@ def build(cache: Path = H.CACHE, seasons=SEASONS) -> tuple[pd.DataFrame, pd.Data
         tl = timeline(plays, top)
         tls.append(tl)
         bounds_all.append(phase_bounds(plays))
-        checks[s] = {**n, **box_checks(plays, box, games)}
+        checks[s] = {**n, **box_checks(plays, box, games, s)}
         plays_all.append(plays[["game_id", "wc", "period", "type_text"]])
         print(f"season {s}: {checks[s]} ({time.time() - t0:.0f}s)", flush=True)
     tl = pd.concat(tls, ignore_index=True)
     bounds = pd.concat(bounds_all, ignore_index=True)
     notes["season_checks"] = checks
+    e2 = bounds[bounds["period"] == 2].set_index("game_id")["end"]
+    s3 = bounds[bounds["period"] == 3].set_index("game_id")["start"]
+    ht = ((s3 - e2).dt.total_seconds() / 60).dropna()
+    hs = ht.groupby(ht.index.map(games.set_index("game_id")["season"])).describe(
+        percentiles=[.01, .05, .5, .95, .99]).round(1)
+    notes["halftime_minutes_by_season"] = hs.to_dict("index")
     # listed tip vs first play
     first = bounds.groupby("game_id")["start"].min().rename("first_play_at")
     last = bounds.sort_values("period").groupby("game_id").tail(1).set_index("game_id")["end"].rename("final_end_at")
@@ -482,6 +571,16 @@ def report(q: pd.DataFrame, notes: dict) -> None:
     print(d.groupby(fp["season"]).describe(percentiles=[0.01, .05, .5, .95, .99]).round(1).to_string())
     print("games with first play > 60 min after listed tip:", int((d > 60).sum()),
           " before listed tip:", int((d < 0).sum()))
+    # clock check (reported, filters nothing): Pinnacle's live total against
+    # points so far + its pre-game close scaled by the game time left
+    close = H.pinnacle_close(H.load(H.CACHE))
+    ct = close[close["market"] == "totals"].set_index("game_id")["close_line"]
+    p = q[(q["book"] == H.SHARP) & (q["market"] == "totals") & (q["phase"] == "live") & (q["period"] <= 4)]
+    resid = p["line"] - p["h_pts"] - p["a_pts"] - p["game_id"].map(ct) * p["secs_left"] / 2880.0
+    gm = resid.groupby(p["game_id"]).median().dropna()
+    print("\nclock check, per game median of (Pinnacle live total - points so far - pre-game close x time "
+          "left share):", gm.describe(percentiles=[.01, .5, .99]).round(1).to_dict(),
+          " games beyond 25 points:", int((gm.abs() > 25).sum()))
     pin = q[q["book"] == H.SHARP]
     print("\nPinnacle in-play implied sum:", pin["implied_sum"].describe(percentiles=[.01, .5, .99]).round(4).to_dict(),
           " coherent share:", round(float(pin["coherent"].mean()), 4))

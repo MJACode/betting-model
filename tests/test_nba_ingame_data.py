@@ -7,8 +7,9 @@ What each test pins:
   - the state at a stamp counts only plays ESPN logged at or before it, by
     wallclock (a play one second later is not counted; a correction logged
     later is not counted even when its play number is earlier);
-  - a quote stamped between the End Period row of period 2 and the first play
-    of period 3 is labelled halftime; the gap after period 1 is a break;
+  - a quote stamped between the End Period row of period 2 and the start of
+    period 3 is labelled halftime, including after the substitutions ESPN logs
+    for period 3 as the half ends; the gap after period 1 is a break;
   - Pinnacle is attached within 60 seconds in the same fetch, not at 61;
   - the foul rule (charges logged only as turnovers count once; offensive and
     technical fouls are not team fouls).
@@ -31,7 +32,7 @@ def play(n, sec, period, clock, type_text="Jump Shot", side=None, points=0, athl
          fg3a=0, fg3m=0, fta=0, ftm=0):
     return {"game_id": "G", "play_no": n, "wc": ts(sec), "period": period, "clock_s": clock,
             "game_s": D_elapsed(period, clock), "type_text": type_text, "team_side": side,
-            "points": points, "fg3a": fg3a, "fg3m": fg3m, "fta": fta, "ftm": ftm,
+            "points": points, "fg3a": fg3a, "fg3m": fg3m, "heave3": 0, "fta": fta, "ftm": ftm,
             "athlete_id_1": athlete}
 
 
@@ -49,9 +50,10 @@ def plays():
         play(5, 700, 2, 720, "Substitution"),
         play(6, 720, 2, 700, "Jump Shot", "H", 2, 11.0),
         play(7, 1500, 2, 0, "End Period"),
-        play(8, 2400, 3, 720, "Jump Shot", "A", 2, 21.0),
+        play(7.5, 1510, 3, 720, "Substitution"),      # logged as the half ends
+        play(8, 2420, 3, 700, "Jump Shot", "A", 2, 21.0),   # 20 s in: the half ended at 2400
         play(9, 3000, 3, 0, "End Period"),
-        play(10, 3100, 4, 720, "Jump Shot", "H", 2, 11.0),
+        play(10, 3120, 4, 700, "Jump Shot", "H", 2, 11.0),
         play(11, 4000, 4, 0, "End Period"),
         play(12, 4005, 4, 0, "End Game"),
     ]
@@ -103,9 +105,9 @@ def test_a_correction_logged_later_is_not_known_earlier(plays):
 
 def test_halftime_and_breaks_are_labelled_from_the_play_clock(plays):
     b = D.phase_bounds(plays)
-    q = quotes([1499, 1500, 2000, 2399, 2400, 650, 3050])
+    q = quotes([1499, 1500, 1520, 2000, 2399, 2400, 650, 3050])
     ph = D.label_phase(q, b)
-    assert list(ph) == ["live", "halftime", "halftime", "halftime", "live", "break", "break"]
+    assert list(ph) == ["live", "halftime", "halftime", "halftime", "halftime", "live", "break", "break"]
 
 
 def test_pinnacle_within_60_seconds_in_the_same_fetch():
@@ -143,3 +145,24 @@ def test_the_foul_rule():
     f = D.foul_flags(pd.DataFrame(rows))
     assert list(f["pf"]) == [1, 0, 1, 1, 0, 0, 1]
     assert list(f["tf"]) == [0, 0, 0, 1, 0, 0, 1]
+
+
+def test_a_missed_end_of_period_heave_is_not_a_three_point_attempt():
+    from scripts.nba_ingame_data import is_heave, shot_feet
+    assert is_heave(False, 3, 1.5, shot_feet("misses 40-foot three point jumper", None, None))
+    assert not is_heave(True, 3, 1.5, 40.0)               # a made heave is a make
+    assert not is_heave(False, 3, 3.5, 40.0)              # too much clock left
+    assert not is_heave(False, 3, 1.5, 30.0)              # an ordinary three
+    assert is_heave(False, 3, 0.4, shot_feet("misses jumper", 25.0, 50.0))   # distance from coordinates
+
+
+def test_a_game_with_a_play_logged_hours_off_is_left_out(plays):
+    wild = pd.DataFrame([play(99, -18 * 3600, 4, 3.7, "Jump Shot", "A", 2, 21.0)])
+    other = pd.DataFrame([{**play(1, 0, 1, 720, "Jumpball"), "game_id": "OK"}])
+    p = D.foul_flags(pd.concat([plays, wild, other], ignore_index=True))
+    kept, dropped = D.drop_wild_wallclocks(p)
+    assert dropped == ["G"]
+    assert set(kept["game_id"]) == {"OK"}
+    # its quotes then have no play-by-play and are not in play
+    k, _ = D.keep_in_play(quotes([45]), D.phase_bounds(kept))
+    assert len(k) == 0
