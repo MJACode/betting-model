@@ -480,7 +480,7 @@ def test_every_worker_only_create_site_goes_through_the_gated_helper():
         if rel in EXEMPT:
             continue
         for table in WORKER_ONLY_TABLES:
-            # Migrations qualify the name (`public.byom_lock_shop`). A Python
+            # Migrations qualify the name (`public.<table>`). A Python
             # create site does not. Both are the create.
             if re.search(rf"CREATE TABLE IF NOT EXISTS (?:public\.)?{table}\b", src):
                 creators.setdefault(table, []).append(rel)

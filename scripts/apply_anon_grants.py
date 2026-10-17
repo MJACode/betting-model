@@ -116,8 +116,8 @@ def _function_signature(conn, name: str) -> str | None:
 
 # In ANON_READABLE before the worker has applied their migration. A GRANT or
 # has_table_privilege on a missing name raises and rolls the whole sweep back.
-# Once the table exists the normal checks apply. byom_lock_shop is not here:
-# it is worker-only and the closed-table path already skips an absent relation.
+# Once the table exists the normal checks apply. An absent relation is
+# skipped rather than failing the sweep.
 MAY_BE_UNAPPLIED = (
     "byom_game_facts",
     "byom_prop_facts",

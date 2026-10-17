@@ -1,4 +1,4 @@
-"""NFL prop facts: 24h lock, log status, no alt ladders.
+"""NFL prop facts: the line at game start, log status, no alt ladders.
 
 Pure tests always run. The scratch cluster is local. Nothing here writes
 production.
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from byom.constants import PROP_LOCK_WINDOW_HOURS
+from byom.constants import LINE_BASIS
 from byom.prop_facts import (
     ANYTIME_TD_MARKET,
     facts_for_game,
@@ -63,11 +63,11 @@ def _one(facts, market, name="Lamar Jackson"):
     return hits[0]
 
 
-def test_the_prop_lock_is_the_named_unconfirmed_24h_constant():
+def test_the_line_basis_is_a_label():
     text = (ROOT / "byom" / "constants.py").read_text(encoding="utf-8")
-    assert PROP_LOCK_WINDOW_HOURS == 24
-    assert "PROP_LOCK_WINDOW_HOURS = 24" in text
-    assert "UNCONFIRMED" in text.split("PROP_LOCK_WINDOW_HOURS")[0][-400:]
+    assert LINE_BASIS == "DraftKings line at game start"
+    assert "PROP_LOCK_WINDOW" not in text
+    assert "24" not in text
 
 
 def test_alt_ladders_are_not_facts():
@@ -82,18 +82,28 @@ def test_alt_ladders_are_not_facts():
     assert facts[0]["line"] == Decimal("220.5")
 
 
-def test_a_quote_outside_24h_is_not_the_lock():
+def test_the_line_is_the_last_pre_start_snapshot():
+    """A quote older than any former window is the line when it is the
+    latest one. A later snapshot replaces it. An in-play quote does not."""
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 30, 199.5, -110, -110),
     ], [_log("Lamar Jackson", passing_yards=250)])
-    assert facts == []
+    fact = _one(facts, "player_pass_yds")
+    assert fact["line"] == Decimal("199.5")
+    assert fact["line_basis"] == LINE_BASIS
+    assert fact["over_result"] == "win"
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 30, 199.5, -110, -110),
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 20, 220.5, -115, -105),
     ], [_log("Lamar Jackson", passing_yards=250)])
     fact = _one(facts, "player_pass_yds")
     assert fact["line"] == Decimal("220.5")
-    assert fact["lock_window_hours"] == 24
+    assert len(facts) == 1
+    in_play = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 20, 220.5, -115, -105),
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", -1, 280.5, -110, -110),
+    ], [_log("Lamar Jackson", passing_yards=250)])
+    assert _one(in_play, "player_pass_yds")["line"] == Decimal("220.5")
 
 
 def test_anytime_td_is_rush_plus_rec_and_ignores_passing_and_returns():
@@ -142,34 +152,32 @@ def test_an_unplayed_game_keeps_the_line_and_nulls_the_result():
     fact = _one(facts, "player_pass_yds")
     assert fact["log_status"] == "unplayed"
     assert fact["line"] == Decimal("220.5")
+    assert fact["line_basis"] == LINE_BASIS
     assert fact["over_result"] is None
-    assert fact["over_units_uncapped"] is None
-    assert fact["over_units_capped"] is None
+    for key in ("over_units_uncapped", "grade_over_price", "dk_over_price",
+                "lock_window_hours", "line_source", "close_over_price"):
+        assert key not in fact
 
 
-def test_a_better_fanduel_price_is_not_the_grade():
+def test_another_book_does_not_set_the_line():
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -115, -105),
-        _q("Lamar Jackson", "player_pass_yds", "fanduel", 10 + 10 / 60,
-           220.5, -105, -115),
+        _q("Lamar Jackson", "player_pass_yds", "fanduel", 1, 300.5, -105, -115),
     ], [_log("Lamar Jackson", passing_yards=250)])
     fact = _one(facts, "player_pass_yds")
-    assert fact["grade_over_book"] == "draftkings"
-    assert fact["grade_over_price"] == Decimal("-115")
-    assert fact["grade_under_book"] == "draftkings"
-    assert fact["grade_under_price"] == Decimal("-105")
-    assert fact["dk_over_price"] == Decimal("-115")
-    assert fact["over_units_uncapped"] == Decimal("1")
+    assert fact["line"] == Decimal("220.5")
+    assert fact["over_result"] == "win"
+    assert fact["line_basis"] == LINE_BASIS
 
 
-def test_a_long_price_stores_both_unit_columns():
+def test_a_long_line_is_still_graded():
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 300.5, -400, -110),
     ], [_log("Lamar Jackson", passing_yards=100)])
     fact = _one(facts, "player_pass_yds")
     assert fact["over_result"] == "loss"
-    assert fact["over_units_uncapped"] == Decimal("-4.0000")
-    assert fact["over_units_capped"] == Decimal("-3.0000")
+    assert fact["under_result"] == "win"
+    assert "over_units_uncapped" not in fact
 
 
 def test_a_nickname_miss_is_a_non_participant():
@@ -234,16 +242,17 @@ def test_220_50_and_220_5_are_one_prop_key():
     assert first[0]["prop_key"].endswith("|220.5")
 
 
-def test_the_close_is_the_latest_quote_on_this_line():
-    """A later quote on a different number is not this row's close."""
+def test_a_later_number_replaces_the_earlier_line():
+    """One line. The last pre-start snapshot is the fact."""
     facts = facts_for_game(_game(), [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 20, 220.5, -110, -110),
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 5, 220.5, -120, 100),
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 1, 240.5, -130, 110),
     ], [_log("Lamar Jackson", passing_yards=250)])
     assert len(facts) == 1
-    assert facts[0]["line"] == Decimal("220.5")
-    assert facts[0]["close_over_price"] == Decimal("-120")
+    assert facts[0]["line"] == Decimal("240.5")
+    assert facts[0]["over_result"] == "win"
+    assert "close_over_price" not in facts[0]
 
 
 def test_the_builder_reads_one_game_and_casts_inside_a_case():
@@ -259,6 +268,8 @@ def test_the_builder_reads_one_game_and_casts_inside_a_case():
     assert "AND g.commence_time::timestamptz" not in text
     assert "(0[1-9]|1[0-2])" in text
     assert "DELETE FROM byom_prop_facts WHERE canonical_key" in text
+    assert "make_interval" not in text
+    assert "over_price" not in text
     lowered = text.lower() + (ROOT / "byom" / "prop_facts.py").read_text(encoding="utf-8").lower()
     for banned in ("min_odds", "spread_size", "price_band", "insert into picks",
                    "discord"):
@@ -278,6 +289,10 @@ def test_the_job_ships_disabled():
     assert len(found) == 1
     assert found[0]["enabled"] is False
     assert found[0]["args"]["apply"] is False
+    assert all(e["key"] != "byom-nfl-game-facts-shop" for e in declared)
+    assert not (ROOT / "tests" / "test_byom_lock_shop.py").exists()
+    assert not (ROOT / "data" / "migrations" / "byom_lock_shop_2026_10_16.sql").exists()
+    assert not (ROOT / "data" / "migrations" / "byom_prop_facts_units_2026_10_16.sql").exists()
 
 
 def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
@@ -322,11 +337,10 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
               receiving_tds int, def_sacks numeric, def_tackles_solo numeric,
               def_tackle_assists numeric);
         """)
-        for name in ("byom_facts_schema_2026_10_16.sql",
-                     "byom_prop_facts_units_2026_10_16.sql"):
-            text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
-            cur.execute(text)
-            cur.execute(text)
+        text = (ROOT / "data/migrations" / "byom_facts_schema_2026_10_16.sql").read_text(
+            encoding="utf-8")
+        cur.execute(text)
+        cur.execute(text)
         cur.execute("""
             INSERT INTO games VALUES
               ('NFL_2024_01_BAL_KC', 'NFL', 2024, 1, '2024-09-08', 'KC', 'BAL',
@@ -385,7 +399,7 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
         assert first["written"] == 1
         cur = raw.cursor()
         cur.execute("""
-            SELECT market, line, actual, over_result, log_status
+            SELECT market, line, actual, over_result, log_status, line_basis
               FROM byom_prop_facts
         """)
         row = cur.fetchone()
@@ -394,15 +408,16 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
         assert Decimal(str(row[2])) == Decimal("250")
         assert row[3] == "win"
         assert row[4] == "logged"
+        assert row[5] == "DraftKings line at game start"
         cur.execute("""
             INSERT INTO byom_prop_facts
               (prop_key, canonical_key, sport, season, week, player_name,
-               player_key, market, line, lock_window_hours, line_source)
+               player_key, market, line, line_basis)
             VALUES
               ('2024_01_BAL_KC|player_pass_yds|lamar jackson|199.5',
                '2024_01_BAL_KC', 'NFL', 2024, 1, 'Lamar Jackson',
-               'lamar jackson', 'player_pass_yds', 199.5, 24,
-               'player_prop_odds')
+               'lamar jackson', 'player_pass_yds', 199.5,
+               'DraftKings line at game start')
         """)
         cur.execute("""
             UPDATE player_prop_odds

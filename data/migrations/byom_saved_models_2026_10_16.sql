@@ -22,9 +22,8 @@
 -- filter key is rejected. An allowlisted key in the wrong case is
 -- rejected too; it is not stored under a different spelling. The
 -- snapshot totals and the per-market summary come from one
--- byom_backtest read. The snapshot unit columns are results.
+-- byom_backtest read. A snapshot stores wins, losses, pushes, and ties.
 --
--- The 120h and 24h windows are UNCONFIRMED and are not in this file.
 -- One DO block. No CONCURRENTLY. Does not touch picks or the record views.
 
 DO $mig$
@@ -111,9 +110,7 @@ BEGIN
     wins            BIGINT NOT NULL,
     losses          BIGINT NOT NULL,
     pushes          BIGINT NOT NULL,
-    ties            BIGINT NOT NULL,
-    units_uncapped  NUMERIC NOT NULL,
-    units_capped    NUMERIC NOT NULL
+    ties            BIGINT NOT NULL
   );
 
   CREATE INDEX IF NOT EXISTS idx_byom_models_user
@@ -156,9 +153,7 @@ BEGIN
       wins bigint,
       losses bigint,
       pushes bigint,
-      ties bigint,
-      units_uncapped numeric,
-      units_capped numeric
+      ties bigint
     )
     LANGUAGE plpgsql
     VOLATILE
@@ -181,8 +176,6 @@ BEGIN
       v_losses bigint;
       v_pushes bigint;
       v_ties bigint;
-      v_unc numeric;
-      v_cap numeric;
       v_summary jsonb;
     BEGIN
       v_uid := auth.uid();
@@ -245,19 +238,15 @@ BEGIN
              coalesce(sum(b.losses), 0)::bigint,
              coalesce(sum(b.pushes), 0)::bigint,
              coalesce(sum(b.ties), 0)::bigint,
-             coalesce(sum(b.units_uncapped), 0),
-             coalesce(sum(b.units_capped), 0),
              coalesce(jsonb_agg(jsonb_build_object(
                'market', b.market,
                'bets', b.bets,
                'wins', b.wins,
                'losses', b.losses,
                'pushes', b.pushes,
-               'ties', b.ties,
-               'units_uncapped', b.units_uncapped,
-               'units_capped', b.units_capped
+               'ties', b.ties
              ) ORDER BY b.market), '[]'::jsonb)
-        INTO v_bets, v_wins, v_losses, v_pushes, v_ties, v_unc, v_cap,
+        INTO v_bets, v_wins, v_losses, v_pushes, v_ties,
              v_summary
         FROM byom_backtest(v_season, v_filters) AS b;
 
@@ -283,14 +272,14 @@ BEGIN
 
       INSERT INTO byom_model_snapshots (
         model_id, user_id, season, filters, summary,
-        bets, wins, losses, pushes, ties, units_uncapped, units_capped)
+        bets, wins, losses, pushes, ties)
       VALUES (
         v_model, v_uid, v_season, v_filters, v_summary,
-        v_bets, v_wins, v_losses, v_pushes, v_ties, v_unc, v_cap);
+        v_bets, v_wins, v_losses, v_pushes, v_ties);
 
       RETURN QUERY
       SELECT v_model, v_name, v_season, v_bets, v_wins, v_losses,
-             v_pushes, v_ties, v_unc, v_cap;
+             v_pushes, v_ties;
     END
     $body$
   $fn$;
@@ -333,8 +322,6 @@ BEGIN
                         'losses', s.losses,
                         'pushes', s.pushes,
                         'ties', s.ties,
-                        'units_uncapped', s.units_uncapped,
-                        'units_capped', s.units_capped,
                         'summary', s.summary
                       ) ORDER BY s.saved_at DESC)
                  FROM byom_model_snapshots s

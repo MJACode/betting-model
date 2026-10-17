@@ -1910,17 +1910,12 @@ def _job_byom_refresh(**kw):
 
 
 def _job_byom_game_facts(**kw):
-    """Write byom_game_facts. Does not touch picks or a live model.
-
-    Warns when the shop-apply window has passed and byom_lock_shop has
-    no rows. The warning does not write and does not turn the job on.
-    """
+    """Write byom_game_facts. Does not touch picks or a live model."""
     from data.db import get_connection
-    from byom.load import build_seasons, warn_if_shop_apply_window_missed
+    from byom.load import build_seasons
 
     conn = get_connection()
     try:
-        warn_if_shop_apply_window_missed(conn)
         return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
     finally:
         conn.close()
@@ -2013,16 +2008,12 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Listed in
-    # jobs/declared_jobs.json with enabled false and apply false, so a
-    # merge does not enqueue a writer. The owner turns it on. Once on, it
-    # runs daily before prune-odds; the first apply is before 2026-10-17
-    # (byom.constants.SHOP_FIRST_APPLY_BEFORE). The 120h and 24h windows
-    # are UNCONFIRMED (byom/constants.py).
+    # NFL Build Your Own Model game facts. apply defaults false. Not in
+    # jobs/declared_jobs.json, so a merge does not enqueue a writer.
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
     # NFL prop facts. apply defaults false. Listed in declared_jobs.json
     # with enabled false and apply false, so a merge does not enqueue a
-    # writer. The 24h prop lock is UNCONFIRMED (byom/constants.py).
+    # writer.
     "byom_prop_facts": (_job_byom_prop_facts, _validate_byom_prop_facts),
     # Current-season refresh. apply defaults false. Listed in
     # declared_jobs.json with enabled false and apply false, so a merge
@@ -2108,7 +2099,7 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
         try:
             # Missing `enabled` stays on. Only the boolean false is off, so
             # a string or a 0 does not silently drop a job that was meant
-            # to run. The BYOM shop entry ships false until the owner sets
+            # to run. A declared BYOM entry ships false until the owner sets
             # it true and sets apply true in the same change.
             if entry.get("enabled", True) is False:
                 continue

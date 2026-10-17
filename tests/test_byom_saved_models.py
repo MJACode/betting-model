@@ -5,7 +5,6 @@ the tables or the RPCs. Scratch Postgres is local.
 """
 from __future__ import annotations
 
-from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -40,6 +39,8 @@ def test_the_migration_is_not_registered_and_not_anon_granted():
     assert "byom model cap is 25" in sql
     assert "filter keys must be lowercase" in sql
     assert sql.count("FROM byom_backtest") == 1
+    assert "units_uncapped" not in sql
+    assert "units_capped" not in sql
     assert "NOT in data/view_migrations.ACTIVE_MIGRATIONS" in sql
     lowered = sql.lower()
     for banned in ("insert into picks", "discord"):
@@ -93,8 +94,6 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
             GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated;
         """)
         for name in ("byom_facts_schema_2026_10_16.sql",
-                     "byom_game_facts_units_2026_10_16.sql",
-                     "byom_prop_facts_units_2026_10_16.sql",
                      "byom_backtest_rpc_2026_10_16.sql",
                      SQL_NAME):
             text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
@@ -103,13 +102,13 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
         cur.execute("""
             INSERT INTO byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team,
-              lock_window_hours, near_window_hours, line_source,
-              ats_home_result, ats_home_units_uncapped, ats_home_units_capped,
-              ats_away_result, ats_away_units_uncapped, ats_away_units_capped,
+              line_basis,
+              ats_home_result, ats_away_result,
               home_role, away_role)
             VALUES
-              ('2026_01_BAL_KC', 'NFL', 2026, 1, 'BAL', 'KC', 120, 24, 'test',
-               'win', 1, 1, 'loss', -1.1, -1.1,
+              ('2026_01_BAL_KC', 'NFL', 2026, 1, 'BAL', 'KC',
+               'DraftKings line at game start',
+               'win', 'loss',
                'favorite', 'underdog')
         """)
 
@@ -133,17 +132,17 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
             """)
 
         cur.execute("""
-            SELECT model_id, season, bets, units_uncapped, units_capped
+            SELECT model_id, season, bets, wins, losses
               FROM byom_save_model(
                 'home fav',
                 '{"role":"favorite","side":"home"}'::jsonb,
                 2026)
         """)
-        model_id, season, bets, unc, cap = cur.fetchone()
+        model_id, season, bets, wins, losses = cur.fetchone()
         assert season == 2026
         assert bets == 1
-        assert Decimal(str(unc)) == Decimal("1")
-        assert Decimal(str(cap)) == Decimal("1")
+        assert wins == 1
+        assert losses == 0
         cur.execute("""
             SELECT bets,
                    (SELECT coalesce(sum((row->>'bets')::bigint), 0)

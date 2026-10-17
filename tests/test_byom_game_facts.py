@@ -1,4 +1,4 @@
-"""NFL game facts: lock, grade, and the backfill that writes them.
+"""NFL game facts: the line at game start, and the backfill that writes them.
 
 Pure tests always run. The scratch-Postgres test applies the unapplied
 migration and builds a handful of rows. It does not touch production.
@@ -12,26 +12,28 @@ from pathlib import Path
 
 import pytest
 
-from byom.constants import (
-    DK_HISTORY_START_SEASON,
-    LOCK_WINDOW_HOURS,
-    NEAR_LOCK_WINDOW_HOURS,
-)
+from byom.constants import DK_HISTORY_START_SEASON, LINE_BASIS
 from byom.game_facts import (
     assemble_game,
     grade_ats,
     grade_ml,
     grade_total,
     parse_game_id,
-    units_1u_to_win,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 KICK = datetime(2024, 9, 6, 0, 20, tzinfo=timezone.utc)
+_BANNED_KEYS = (
+    "lock_window_hours", "near_window_hours", "lock_spread_at",
+    "close_spread_home", "near_spread_home", "line_source",
+    "grade_spread_home_price", "grade_spread_home_book",
+    "dk_spread_home_price", "ats_home_units_uncapped",
+    "ats_home_units_capped", "ml_home_units_uncapped",
+)
 
 
-def _q(hours_before, book, market, point, home, away, source="nfl_odds_history",
-       game_id="2024_01_BAL_KC"):
+def _q(hours_before, book, market, point, home=None, away=None,
+       source="nfl_odds_history", game_id="2024_01_BAL_KC"):
     return {
         "game_id": game_id,
         "bookmaker": book,
@@ -62,32 +64,32 @@ def _game(**over):
 
 def _quotes():
     return [
-        # Outside the 120h window. A different number, and it must not lock.
-        _q(130, "draftkings", "spreads", -2.5, -110, -110),
-        # Lock. Fanduel 10 minutes earlier is a better price and is not the
-        # grade. A still-better Fanduel quote 90 minutes earlier is not either.
-        _q(100, "draftkings", "spreads", -3, -115, -105),
-        _q(100 + 10 / 60, "fanduel", "spreads", -3, -105, -115),
-        _q(100 + 1.5, "fanduel", "spreads", -3, -101, -120),
-        _q(100, "pinnacle", "spreads", -3, -100, -120),
-        _q(100, "fanduel", "spreads", -2.5, 200, -250),
-        _q(100, "draftkings", "totals", 47.5, -110, -110),
-        _q(100, "draftkings", "h2h", None, -150, 130),
-        # 24h window, then the close, then an in-play quote.
-        _q(20, "draftkings", "spreads", -3.5, -108, -112),
-        _q(2, "draftkings", "spreads", -4, -112, -108),
-        _q(-1, "draftkings", "spreads", -14, -800, 600),
+        # Older than any former window. It is a candidate, and it loses
+        # only because a later pre-start snapshot exists.
+        _q(130, "draftkings", "spreads", -2.5),
+        _q(100, "draftkings", "spreads", -3),
+        # Other books, including a later one, are not the line.
+        _q(100 + 10 / 60, "fanduel", "spreads", -3),
+        _q(1, "fanduel", "spreads", -9),
+        _q(100, "pinnacle", "spreads", -3),
+        _q(100, "draftkings", "totals", 47.5),
+        _q(100, "draftkings", "h2h", None),
+        _q(20, "draftkings", "spreads", -3.5),
+        # Last pre-start DraftKings spread.
+        _q(2, "draftkings", "spreads", -4),
+        # In-play is not the line.
+        _q(-1, "draftkings", "spreads", -14),
     ]
 
 
-def test_the_windows_are_named_and_unconfirmed():
+def test_the_line_basis_is_a_label():
     text = (ROOT / "byom" / "constants.py").read_text(encoding="utf-8")
-    assert LOCK_WINDOW_HOURS == 120
-    assert NEAR_LOCK_WINDOW_HOURS == 24
+    assert LINE_BASIS == "DraftKings line at game start"
     assert DK_HISTORY_START_SEASON == 2020
-    assert text.count("UNCONFIRMED") >= 2
-    assert "LOCK_WINDOW_HOURS = 120" in text
-    assert "NEAR_LOCK_WINDOW_HOURS = 24" in text
+    assert "LOCK_WINDOW" not in text
+    assert "SHOP_LAG" not in text
+    assert "120" not in text
+    assert "24" not in text
 
 
 def test_week_comes_from_the_id_and_the_prefix_does_not_matter():
@@ -99,34 +101,19 @@ def test_week_comes_from_the_id_and_the_prefix_does_not_matter():
     assert parse_game_id("not-a-game") is None
 
 
-def test_units_store_the_uncapped_and_the_3u_capped_pair():
-    # -400 lays 4 to win 1. The Record caps the lay at 3 and pays 0.75.
-    assert units_1u_to_win("win", -400) == (Decimal("1"), Decimal("0.7500"))
-    assert units_1u_to_win("loss", -400) == (Decimal("-4.0000"), Decimal("-3.0000"))
-    # -300 lays exactly 3, so the cap does not bind.
-    assert units_1u_to_win("loss", -300) == (Decimal("-3.0000"), Decimal("-3.0000"))
-    assert units_1u_to_win("win", -110) == (Decimal("1"), Decimal("1.0000"))
-    assert units_1u_to_win("loss", -110) == (Decimal("-1.1000"), Decimal("-1.1000"))
-    assert units_1u_to_win("loss", 150) == (Decimal("-0.6667"), Decimal("-0.6667"))
-    assert units_1u_to_win("push", -110) == (Decimal("0"), Decimal("0"))
-    assert units_1u_to_win("tie", -110) == (Decimal("0"), Decimal("0"))
-    assert units_1u_to_win("win", None) == (None, None)
-    assert units_1u_to_win("loss", None) == (None, None)
-
-
 def test_an_unplayed_game_keeps_the_line_and_nulls_the_result():
     fact = assemble_game(
         _game(home_score=None, away_score=None), _quotes(),
         {"BAL": [], "KC": []})
     assert fact is not None
-    assert fact["dk_spread_home"] == Decimal("-3")
+    assert fact["line_basis"] == LINE_BASIS
+    assert fact["dk_spread_home"] == Decimal("-4")
+    assert fact["dk_total"] == Decimal("47.5")
     assert fact["ats_home_result"] is None
-    assert fact["ats_home_units_uncapped"] is None
-    assert fact["ats_home_units_capped"] is None
     assert fact["ml_home_result"] is None
-    assert fact["ml_home_units_uncapped"] is None
     assert fact["ou_over_result"] is None
-    assert fact["ou_over_units_uncapped"] is None
+    for key in _BANNED_KEYS:
+        assert key not in fact
 
 
 def test_pushes_and_ties_are_results():
@@ -137,76 +124,89 @@ def test_pushes_and_ties_are_results():
     assert grade_total(27, 20, 47.5) == ("loss", "win")
 
 
-def test_the_lock_is_the_first_snapshot_inside_the_window():
-    played = {"BAL": [], "KC": []}
-    fact = assemble_game(_game(), _quotes(), played)
+def test_the_line_is_the_last_pre_start_draftkings_snapshot():
+    fact = assemble_game(_game(), _quotes(), {"BAL": [], "KC": []})
     assert fact["week"] == 1
-    assert fact["lock_window_hours"] == 120
-    assert fact["near_window_hours"] == 24
-    assert fact["dk_spread_home"] == Decimal("-3")
-    assert fact["lock_spread_at"] == KICK - timedelta(hours=100)
-    assert fact["near_spread_home"] == Decimal("-3.5")
-    assert fact["close_spread_home"] == Decimal("-4")
-    # Graded at DraftKings' own -115 on the -3. Fanduel's -105 is not the grade.
-    assert fact["grade_spread_home_book"] == "draftkings"
-    assert fact["grade_spread_home_price"] == Decimal("-115")
+    assert fact["line_basis"] == LINE_BASIS
+    # 2h before kickoff, not the 100h -3, not the 130h -2.5, not in-play -14.
+    assert fact["dk_spread_home"] == Decimal("-4")
+    assert fact["dk_total"] == Decimal("47.5")
+    # 27 - 20 + (-4) = 3, so home covers. Moneyline is the score only.
     assert fact["ats_home_result"] == "win"
-    assert fact["ats_home_units_uncapped"] == Decimal("1")
-    assert fact["ats_home_units_capped"] == Decimal("1.0000")
-    # Away is DraftKings' own -105. Fanduel's -115 is not the grade.
-    assert fact["grade_spread_away_book"] == "draftkings"
-    assert fact["grade_spread_away_price"] == Decimal("-105")
-    assert fact["ats_away_units_uncapped"] == Decimal("-1.0500")
-    assert fact["ats_away_units_capped"] == Decimal("-1.0500")
-    assert fact["grade_over_book"] == "draftkings"
-    assert fact["grade_over_price"] == Decimal("-110")
-    assert fact["grade_under_book"] == "draftkings"
-    assert fact["grade_ml_home_book"] == "draftkings"
-    assert fact["grade_ml_home_price"] == Decimal("-150")
-    assert fact["grade_ml_away_book"] == "draftkings"
-    assert fact["grade_ml_away_price"] == Decimal("130")
+    assert fact["ats_away_result"] == "loss"
+    assert fact["ml_home_result"] == "win"
+    assert fact["ml_away_result"] == "loss"
+    assert fact["ou_over_result"] == "loss"
+    assert fact["ou_under_result"] == "win"
     assert fact["home_role"] == "favorite"
     assert fact["away_role"] == "underdog"
     assert fact["is_primetime"] is True
-    assert fact["line_source"] == "nfl_odds_history"
-    assert fact["ou_over_result"] == "loss"
+    for key in _BANNED_KEYS:
+        assert key not in fact
 
 
-def test_a_short_price_and_a_large_spread_are_kept():
+def test_a_snapshot_older_than_any_former_window_is_still_the_line():
+    quotes = [_q(200, "draftkings", "spreads", -2.5)]
+    fact = assemble_game(_game(), quotes, {"BAL": [], "KC": []})
+    assert fact is not None
+    assert fact["dk_spread_home"] == Decimal("-2.5")
+    assert fact["line_basis"] == LINE_BASIS
+
+
+def test_a_missing_line_does_not_skip_the_game():
+    quotes = [_q(1, "fanduel", "spreads", -9)]
+    fact = assemble_game(_game(), quotes, {"BAL": [], "KC": []})
+    assert fact is not None
+    assert fact["dk_spread_home"] is None
+    assert fact["dk_total"] is None
+    assert fact["ats_home_result"] is None
+    assert fact["ou_over_result"] is None
+    assert fact["ml_home_result"] == "win"
+    assert fact["home_role"] is None
+    assert fact["line_basis"] == LINE_BASIS
+
+
+def test_a_large_spread_is_kept():
     game = _game(game_id="NFL_2024_03_NYJ_SF", home_score=30, away_score=10,
                  game_date="2024-09-22", commence_time=KICK)
-    quotes = [_q(80, "draftkings", "spreads", -17.5, -800, 550,
-                 game_id="2024_03_NYJ_SF")]
+    quotes = [_q(80, "draftkings", "spreads", -17.5, game_id="2024_03_NYJ_SF")]
     fact = assemble_game(game, quotes, {"SF": [], "NYJ": []})
     assert fact is not None
     assert fact["dk_spread_home"] == Decimal("-17.5")
-    assert fact["ats_home_units_uncapped"] == Decimal("1")
-    assert fact["ats_home_units_capped"] == Decimal("0.3750")
-    assert fact["ats_away_units_uncapped"] == Decimal("-0.1818")
-    assert fact["ats_away_units_capped"] == Decimal("-0.1818")
+    assert fact["ats_home_result"] == "win"
+    assert fact["line_basis"] == LINE_BASIS
 
 
 def test_seasons_before_draftkings_history_are_not_built():
     game = _game(game_id="NFL_2019_01_ATL_MIN")
-    quotes = [_q(80, "draftkings", "spreads", -3, -110, -110,
-                 game_id="2019_01_ATL_MIN")]
+    quotes = [_q(80, "draftkings", "spreads", -3, game_id="2019_01_ATL_MIN")]
     assert assemble_game(game, quotes, {}) is None
+    assert assemble_game(_game(game_id="not-a-game"), _quotes(), {}) is None
 
 
-def test_odds_is_the_source_when_history_has_no_lock():
-    quotes = [_q(48, "draftkings", "spreads", -6, -110, -110, source="odds")]
-    fact = assemble_game(_game(), quotes, {"BAL": [], "KC": []})
-    assert fact["line_source"] == "odds"
-    assert fact["dk_spread_home"] == Decimal("-6")
-
-
-def test_history_wins_when_both_sources_have_a_lock():
-    quotes = _quotes() + [
-        _q(48, "draftkings", "spreads", -7, -110, -110, source="odds"),
+def test_the_later_snapshot_wins_across_both_stores():
+    quotes = [
+        _q(100, "draftkings", "spreads", -3, source="nfl_odds_history"),
+        _q(48, "draftkings", "spreads", -7, source="odds"),
     ]
-    fact = assemble_game(_game(), _quotes() and quotes, {"BAL": [], "KC": []})
+    fact = assemble_game(_game(), quotes, {"BAL": [], "KC": []})
+    assert fact["dk_spread_home"] == Decimal("-7")
+
+    flipped = [
+        _q(2, "draftkings", "spreads", -4, source="nfl_odds_history"),
+        _q(48, "draftkings", "spreads", -7, source="odds"),
+    ]
+    fact = assemble_game(_game(), flipped, {"BAL": [], "KC": []})
+    assert fact["dk_spread_home"] == Decimal("-4")
+
+
+def test_an_in_play_quote_is_not_the_line():
+    quotes = [
+        _q(10, "draftkings", "spreads", -3),
+        _q(-0.5, "draftkings", "spreads", -14),
+    ]
+    fact = assemble_game(_game(), quotes, {"BAL": [], "KC": []})
     assert fact["dk_spread_home"] == Decimal("-3")
-    assert fact["line_source"] == "nfl_odds_history"
 
 
 def test_rest_days_and_a_sunday_afternoon_is_not_primetime():
@@ -218,8 +218,7 @@ def test_rest_days_and_a_sunday_afternoon_is_not_primetime():
     game = _game(game_id="NFL_2024_02_BAL_NYJ", game_date="2024-09-15",
                  home_team="NYJ", away_team="BAL", commence_time=kick,
                  home_score=10, away_score=24)
-    quotes = [_q(30, "draftkings", "spreads", 3, -110, -110,
-                 game_id="2024_02_BAL_NYJ")]
+    quotes = [_q(30, "draftkings", "spreads", 3, game_id="2024_02_BAL_NYJ")]
     quotes[0]["snapshot_at"] = kick - timedelta(hours=30)
     quotes[0]["commence_time"] = kick
     fact = assemble_game(game, quotes, played)
@@ -227,48 +226,38 @@ def test_rest_days_and_a_sunday_afternoon_is_not_primetime():
     assert fact["home_rest_days"] is None
     assert fact["is_primetime"] is False
     assert fact["home_role"] == "underdog"
+    assert fact["ml_home_result"] == "loss"
 
 
 def test_quotes_are_read_per_game_and_the_odds_cast_is_inside_a_case():
     text = (ROOT / "byom" / "load.py").read_text(encoding="utf-8")
     assert "game_id IN (%s, %s)" in text
     assert "bookmaker = 'draftkings'" in text
-    assert "_shop_quotes" in text
-    assert "bookmaker <> 'draftkings'" in text
+    assert "market IN ('spreads', 'totals')" in text
+    assert "'h2h'" not in text
+    assert "make_interval" not in text
+    assert "price_home" not in text
+    assert "_shop_quotes" not in text
+    assert "bookmaker <> 'draftkings'" not in text
     assert "FROM nfl_odds_history\n WHERE season = %s" not in text
     assert "AND o.snapshot_at::timestamptz" not in text
     assert "ELSE NULL END" in text
 
 
-def test_a_non_draftkings_slot_is_not_the_grade():
-    from byom.game_facts import dk_lock_grade
-
-    price, book = dk_lock_grade(
-        {"bookmaker": "fanduel", "price_home": -105, "price_away": -115},
-        "home")
-    assert price is None and book is None
-    price, book = dk_lock_grade(
-        {"bookmaker": "DraftKings", "price_home": -115, "price_away": -105},
-        "home")
-    assert price == Decimal("-115") and book == "draftkings"
-    price, book = dk_lock_grade(
-        {"price_home": -110, "price_away": -110}, "home")
-    assert price is None and book is None
-
-
 def test_the_builder_has_no_spread_price_or_line_filter_and_does_not_touch_picks():
     text = "\n".join(
         (ROOT / name).read_text(encoding="utf-8")
-        for name in ("byom/game_facts.py", "byom/load.py", "scripts/byom_game_facts.py")
+        for name in ("byom/game_facts.py", "byom/load.py",
+                     "byom/constants.py", "scripts/byom_game_facts.py")
     )
     lowered = text.lower()
     for banned in ("min_odds", "max_edge", "spread_size", "price_band",
-                   "insert into picks", "models.scorer", "discord"):
+                   "insert into picks", "models.scorer", "discord",
+                   "lock_window", "units_1u", "grade_spread", "line_source"):
         assert banned not in lowered, banned
 
 
-def test_the_job_defaults_to_not_writing_and_ships_disabled():
-    from byom.constants import SHOP_FIRST_APPLY_BEFORE
+def test_the_job_defaults_to_not_writing_and_is_not_declared():
     from tracking.job_queue import JOBS, _validate_byom_game_facts
 
     assert "byom_game_facts" in JOBS
@@ -280,13 +269,10 @@ def test_the_job_defaults_to_not_writing_and_ships_disabled():
         _validate_byom_game_facts({"sport": "NBA"})
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
-    found = [entry for entry in declared if entry["job_type"] == "byom_game_facts"]
-    assert len(found) == 1
-    assert found[0]["enabled"] is False
-    assert found[0]["args"]["apply"] is False
-    assert found[0]["args"]["sport"] == "NFL"
-    assert SHOP_FIRST_APPLY_BEFORE == "2026-10-17"
-    assert SHOP_FIRST_APPLY_BEFORE in found[0]["note"]
+    assert all(entry["job_type"] != "byom_game_facts" for entry in declared)
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    assert "byom_game_facts_units_2026_10_16.sql" not in ACTIVE_MIGRATIONS
+    assert not (ROOT / "data" / "migrations" / "byom_game_facts_units_2026_10_16.sql").exists()
 
 
 def test_build_on_scratch_postgres_grades_the_stored_lines():
@@ -330,12 +316,10 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
               home_price numeric, away_price numeric, spread_home numeric,
               total_line numeric, over_price numeric, under_price numeric);
         """)
-        for name in ("byom_facts_schema_2026_10_16.sql",
-                     "byom_game_facts_units_2026_10_16.sql",
-                     "byom_lock_shop_2026_10_16.sql"):
-            text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
-            cur.execute(text)
-            cur.execute(text)
+        text = (ROOT / "data/migrations" / "byom_facts_schema_2026_10_16.sql").read_text(
+            encoding="utf-8")
+        cur.execute(text)
+        cur.execute(text)
         _load_fixture(cur)
         raw.autocommit = False
         from byom.load import build_season
@@ -364,69 +348,74 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
         skipped = build_season(conn, 2019, apply=True)
         assert skipped["written"] == 0
         first = build_season(conn, 2024, apply=True)
-        assert first["written"] == 3
+        assert first["written"] == 5
         again = build_season(conn, 2024, apply=True)
-        assert again["written"] == 3
+        assert again["written"] == 5
         season_2026 = build_season(conn, 2026, apply=True)
         assert season_2026["written"] == 1
         cur = raw.cursor()
         cur.execute("SELECT count(*) FROM byom_game_facts")
-        assert cur.fetchone()[0] == 4
+        assert cur.fetchone()[0] == 6
         cur.execute("""
-            SELECT canonical_key, week, dk_spread_home, grade_spread_home_book,
-                   grade_spread_home_price, ats_home_result,
-                   ats_home_units_uncapped, ats_home_units_capped,
-                   close_spread_home, near_spread_home, home_role, is_primetime,
-                   line_source, away_rest_days
+            SELECT canonical_key, week, line_basis, dk_spread_home, dk_total,
+                   ats_home_result, ml_home_result, ou_over_result,
+                   home_role, is_primetime
               FROM byom_game_facts
              WHERE canonical_key = '2024_01_BAL_KC'
         """)
         row = cur.fetchone()
         assert row[0] == "2024_01_BAL_KC"
         assert row[1] == 1
-        assert Decimal(str(row[2])) == Decimal("-3")
-        assert row[3] == "draftkings"
-        assert Decimal(str(row[4])) == Decimal("-115")
+        assert row[2] == "DraftKings line at game start"
+        assert Decimal(str(row[3])) == Decimal("-4")
+        assert Decimal(str(row[4])) == Decimal("47.5")
         assert row[5] == "win"
-        assert Decimal(str(row[6])) == Decimal("1")
-        assert Decimal(str(row[7])) == Decimal("1.0000")
-        assert Decimal(str(row[8])) == Decimal("-4")
-        assert Decimal(str(row[9])) == Decimal("-3.5")
-        assert row[10] == "favorite"
-        assert row[11] is True
-        assert row[12] == "nfl_odds_history"
+        assert row[6] == "win"
+        assert row[7] == "loss"
+        assert row[8] == "favorite"
+        assert row[9] is True
         cur.execute("""
-            SELECT ats_home_result, ats_home_units_uncapped,
-                   ats_home_units_capped, dk_spread_home
+            SELECT dk_spread_home, ats_home_result, ml_home_result, line_basis
               FROM byom_game_facts WHERE canonical_key = '2024_03_NYJ_SF'
         """)
         big = cur.fetchone()
-        assert Decimal(str(big[3])) == Decimal("-17.5")
-        assert big[0] == "win"
-        assert Decimal(str(big[1])) == Decimal("1")
-        assert Decimal(str(big[2])) == Decimal("0.3750")
+        assert Decimal(str(big[0])) == Decimal("-17.5")
+        assert big[1] == "win"
+        assert big[2] == "win"
+        assert big[3] == "DraftKings line at game start"
         cur.execute("""
-            SELECT ats_home_result, ats_home_units_uncapped,
-                   ats_home_units_capped, ml_home_result
+            SELECT ats_home_result, ml_home_result
               FROM byom_game_facts WHERE canonical_key = '2024_04_DET_GB'
         """)
         push = cur.fetchone()
         assert push[0] == "push"
-        assert Decimal(str(push[1])) == Decimal("0")
-        assert Decimal(str(push[2])) == Decimal("0")
+        assert push[1] == "win"
         cur.execute("""
-            SELECT ml_home_result, ml_home_units_uncapped,
-                   ml_home_units_capped, line_source, week
+            SELECT dk_spread_home, ats_home_result, ml_home_result, line_basis
+              FROM byom_game_facts WHERE canonical_key = '2024_05_DAL_PHI'
+        """)
+        bare = cur.fetchone()
+        assert bare[0] is None
+        assert bare[1] is None
+        assert bare[2] == "win"
+        assert bare[3] == "DraftKings line at game start"
+        cur.execute("""
+            SELECT dk_spread_home FROM byom_game_facts
+             WHERE canonical_key = '2024_06_CHI_GB'
+        """)
+        old = cur.fetchone()
+        assert Decimal(str(old[0])) == Decimal("-1.5")
+        cur.execute("""
+            SELECT ml_home_result, ats_home_result, line_basis, week
               FROM byom_game_facts WHERE canonical_key = '2026_01_NE_SEA'
         """)
         odds_only = cur.fetchone()
         assert odds_only[0] == "tie"
-        assert Decimal(str(odds_only[1])) == Decimal("0")
-        assert Decimal(str(odds_only[2])) == Decimal("0")
-        assert odds_only[3] == "odds"
-        assert odds_only[4] == 1
+        assert odds_only[1] == "loss"
+        assert odds_only[2] == "DraftKings line at game start"
+        assert odds_only[3] == 1
         dry = build_season(conn, 2024, apply=False)
-        assert dry["facts"] == 3 and dry["written"] == 0
+        assert dry["facts"] == 5 and dry["written"] == 0
     finally:
         if raw is not None:
             raw.close()
@@ -444,6 +433,10 @@ def _load_fixture(cur):
          "2024-09-22T20:25:00Z"),
         ("NFL_2024_04_DET_GB", 2024, "2024-09-29", "GB", "DET", 24, 21,
          "2024-09-29T17:00:00Z"),
+        ("NFL_2024_05_DAL_PHI", 2024, "2024-10-06", "PHI", "DAL", 21, 14,
+         "2024-10-06T17:00:00Z"),
+        ("NFL_2024_06_CHI_GB", 2024, "2024-10-13", "GB", "CHI", 24, 20,
+         "2024-10-13T17:00:00Z"),
         ("NFL_2026_01_NE_SEA", 2026, "2026-09-09", "SEA", "NE", 17, 17,
          "2026-09-10T00:20:00Z"),
     ]
@@ -469,15 +462,14 @@ def _load_fixture(cur):
     hist(130, "2024_01_BAL_KC", 2024, "draftkings", "spreads", -2.5, -110, -110, commence)
     hist(100, "2024_01_BAL_KC", 2024, "draftkings", "spreads", -3, -115, -105, commence)
     hist(100 + 10 / 60, "2024_01_BAL_KC", 2024, "fanduel", "spreads", -3, -105, -115, commence)
-    hist(100 + 1.5, "2024_01_BAL_KC", 2024, "fanduel", "spreads", -3, -101, -120, commence)
+    hist(1, "2024_01_BAL_KC", 2024, "fanduel", "spreads", -9, -110, -110, commence)
     hist(100, "2024_01_BAL_KC", 2024, "pinnacle", "spreads", -3, -100, -120, commence)
-    hist(100, "2024_01_BAL_KC", 2024, "fanduel", "spreads", -2.5, 200, -250, commence)
     hist(100, "2024_01_BAL_KC", 2024, "draftkings", "totals", 47.5, -110, -110, commence)
     hist(100, "2024_01_BAL_KC", 2024, "draftkings", "h2h", None, -150, 130, commence)
     hist(20, "2024_01_BAL_KC", 2024, "draftkings", "spreads", -3.5, -108, -112, commence)
     hist(2, "2024_01_BAL_KC", 2024, "draftkings", "spreads", -4, -112, -108, commence)
     hist(-1, "2024_01_BAL_KC", 2024, "draftkings", "spreads", -14, -800, 600, commence)
-    # A different number in odds must not replace the history lock.
+    # An earlier odds number must not replace the later history line.
     cur.execute("""
         INSERT INTO odds (game_id, sport, market, bookmaker, snapshot_type,
                           snapshot_at, home_price, away_price, spread_home)
@@ -488,6 +480,8 @@ def _load_fixture(cur):
          "2024-09-22T20:25:00Z")
     hist(40, "2024_04_DET_GB", 2024, "draftkings", "spreads", -3, -110, -110,
          "2024-09-29T17:00:00Z")
+    hist(200, "2024_06_CHI_GB", 2024, "draftkings", "spreads", -1.5, -110, -110,
+         "2024-10-13T17:00:00Z")
     hist(40, "2019_01_ATL_MIN", 2019, "draftkings", "spreads", -3, -110, -110,
          "2019-09-08T17:00:00Z")
     cur.execute("""

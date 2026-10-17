@@ -7,19 +7,18 @@
 -- tables on the first pass after merge. A second pass returns on the
 -- catalog read below and does not take ACCESS EXCLUSIVE.
 --
--- The 120h and 24h lock windows are UNCONFIRMED placeholders. They are
--- not check constraints: the builder writes the window it used onto the
--- row. Changing the window does not need a new migration.
+-- Win, loss, push, and a moneyline tie. No price, no units, no lock
+-- window. line_basis names the one line the row used: the last DraftKings
+-- snapshot at or before game start. The line is not a filter and not a
+-- reason to skip a game. A moneyline result is the score only.
 --
 -- canonical_key is season_WW_away_home (2024_01_BAL_KC). games.game_id is
 -- that key with an NFL_ prefix. nfl_odds_history uses the bare key through
 -- 2025 and the prefixed key in 2026. games.week is NULL for every NFL
 -- season; week is parsed from the key.
 --
--- Results are 1u-to-win units. A push and a tie are stored, not dropped.
--- grade_*_price is DraftKings' own price on the lock snapshot.
--- grade_*_book is draftkings. The unit columns are results, not a stake.
--- No spread-size, price-band, or line-range constraint.
+-- No spread-size, price-band, or line-range constraint. A push and a tie
+-- are stored, not dropped.
 --
 -- One DO block. data/view_migrations runs each file as one statement.
 -- No CONCURRENTLY.
@@ -80,75 +79,21 @@ BEGIN
     commence_time           TIMESTAMPTZ,
     home_score              NUMERIC,
     away_score              NUMERIC,
-    -- UNCONFIRMED windows, recorded so a row says which placeholder built it.
-    lock_window_hours       INTEGER NOT NULL,
-    near_window_hours       INTEGER NOT NULL,
-    lock_spread_at          TIMESTAMPTZ,
-    lock_spread_lead_hours  NUMERIC,
+    -- The last DraftKings snapshot at or before game start. Not a filter.
+    line_basis              TEXT NOT NULL,
     dk_spread_home          NUMERIC,
-    dk_spread_home_price    NUMERIC,
-    dk_spread_away_price    NUMERIC,
-    lock_total_at           TIMESTAMPTZ,
-    lock_total_lead_hours   NUMERIC,
     dk_total                NUMERIC,
-    dk_over_price           NUMERIC,
-    dk_under_price          NUMERIC,
-    lock_ml_at              TIMESTAMPTZ,
-    lock_ml_lead_hours      NUMERIC,
-    dk_ml_home_price        NUMERIC,
-    dk_ml_away_price        NUMERIC,
-    near_spread_at          TIMESTAMPTZ,
-    near_spread_home        NUMERIC,
-    near_spread_home_price  NUMERIC,
-    near_spread_away_price  NUMERIC,
-    near_total_at           TIMESTAMPTZ,
-    near_total              NUMERIC,
-    near_over_price         NUMERIC,
-    near_under_price        NUMERIC,
-    near_ml_at              TIMESTAMPTZ,
-    near_ml_home_price      NUMERIC,
-    near_ml_away_price      NUMERIC,
-    close_spread_at         TIMESTAMPTZ,
-    close_spread_home       NUMERIC,
-    close_spread_home_price NUMERIC,
-    close_spread_away_price NUMERIC,
-    close_total_at          TIMESTAMPTZ,
-    close_total             NUMERIC,
-    close_over_price        NUMERIC,
-    close_under_price       NUMERIC,
-    close_ml_at             TIMESTAMPTZ,
-    close_ml_home_price     NUMERIC,
-    close_ml_away_price     NUMERIC,
-    grade_spread_home_price NUMERIC,
-    grade_spread_home_book  TEXT,
-    grade_spread_away_price NUMERIC,
-    grade_spread_away_book  TEXT,
-    grade_over_price        NUMERIC,
-    grade_over_book         TEXT,
-    grade_under_price       NUMERIC,
-    grade_under_book        TEXT,
-    grade_ml_home_price     NUMERIC,
-    grade_ml_home_book      TEXT,
-    grade_ml_away_price     NUMERIC,
-    grade_ml_away_book      TEXT,
     ats_home_result         TEXT,
-    ats_home_units          NUMERIC,
     ats_away_result         TEXT,
-    ats_away_units          NUMERIC,
     ml_home_result          TEXT,
-    ml_home_units           NUMERIC,
     ml_away_result          TEXT,
-    ml_away_units           NUMERIC,
     ou_over_result          TEXT,
-    ou_over_units           NUMERIC,
     ou_under_result         TEXT,
-    ou_under_units          NUMERIC,
     home_rest_days          INTEGER,
     away_rest_days          INTEGER,
     is_primetime            BOOLEAN,
     home_role               TEXT,
     away_role               TEXT,
-    line_source             TEXT NOT NULL,
     built_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT byom_game_facts_ats_home CHECK (
       ats_home_result IS NULL OR ats_home_result IN ('win', 'loss', 'push')),
@@ -179,28 +124,19 @@ BEGIN
     team                TEXT,
     market              TEXT NOT NULL,
     line                NUMERIC,
-    lock_window_hours   INTEGER NOT NULL,
-    lock_snapshot_at    TIMESTAMPTZ,
-    dk_over_price       NUMERIC,
-    dk_under_price      NUMERIC,
-    grade_over_price    NUMERIC,
-    grade_over_book     TEXT,
-    grade_under_price   NUMERIC,
-    grade_under_book    TEXT,
-    close_snapshot_at   TIMESTAMPTZ,
-    close_over_price    NUMERIC,
-    close_under_price   NUMERIC,
+    line_basis          TEXT NOT NULL,
     actual              NUMERIC,
     over_result         TEXT,
-    over_units          NUMERIC,
     under_result        TEXT,
-    under_units         NUMERIC,
-    line_source         TEXT NOT NULL,
+    log_status          TEXT,
     built_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT byom_prop_facts_over_result CHECK (
       over_result IS NULL OR over_result IN ('win', 'loss', 'push')),
     CONSTRAINT byom_prop_facts_under_result CHECK (
-      under_result IS NULL OR under_result IN ('win', 'loss', 'push'))
+      under_result IS NULL OR under_result IN ('win', 'loss', 'push')),
+    CONSTRAINT byom_prop_facts_log_status CHECK (
+      log_status IS NULL OR log_status IN (
+        'logged', 'non_participant', 'missing_log', 'unplayed', 'ambiguous'))
   );
 
   CREATE INDEX IF NOT EXISTS idx_byom_game_facts_season

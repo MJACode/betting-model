@@ -33,8 +33,12 @@ def test_the_job_ships_disabled_and_does_not_write_by_default():
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()
     for banned in ("min_odds", "spread_size", "price_band", "insert into picks",
-                   "discord"):
+                   "discord", "close_spread_at"):
         assert banned not in text, banned
+    from byom.refresh import _incomplete
+    assert _incomplete((None, 20)) is True
+    assert _incomplete((27, None)) is True
+    assert _incomplete((27, 20)) is False
 
 
 def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
@@ -91,13 +95,10 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
               receiving_tds int, def_sacks numeric, def_tackles_solo numeric,
               def_tackle_assists numeric);
         """)
-        for name in ("byom_facts_schema_2026_10_16.sql",
-                     "byom_game_facts_units_2026_10_16.sql",
-                     "byom_lock_shop_2026_10_16.sql",
-                     "byom_prop_facts_units_2026_10_16.sql"):
-            text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
-            cur.execute(text)
-            cur.execute(text)
+        text = (ROOT / "data/migrations" / "byom_facts_schema_2026_10_16.sql").read_text(
+            encoding="utf-8")
+        cur.execute(text)
+        cur.execute(text)
         _load(cur)
         raw.autocommit = False
 
@@ -218,20 +219,18 @@ def _load(cur):
     cur.execute("""
         INSERT INTO byom_game_facts (
           canonical_key, sport, season, week, away_team, home_team,
-          lock_window_hours, near_window_hours, line_source, built_at)
+          line_basis, built_at)
         VALUES
-          ('2026_02_NYJ_SF', 'NFL', 2026, 2, 'NYJ', 'SF', 120, 24, 'test',
-           '2026-10-01T00:00:00Z'),
-          ('2026_06_BUF_MIA', 'NFL', 2026, 6, 'BUF', 'MIA', 120, 24, 'test',
-           '2026-10-14T00:00:00Z'),
-          ('2026_03_CIN_CLE', 'NFL', 2026, 3, 'CIN', 'CLE', 120, 24, 'test',
-           '2026-09-24T00:00:00Z')
+          ('2026_02_NYJ_SF', 'NFL', 2026, 2, 'NYJ', 'SF',
+           'DraftKings line at game start', '2026-10-01T00:00:00Z'),
+          ('2026_06_BUF_MIA', 'NFL', 2026, 6, 'BUF', 'MIA',
+           'DraftKings line at game start', '2026-10-14T00:00:00Z'),
+          ('2026_03_CIN_CLE', 'NFL', 2026, 3, 'CIN', 'CLE',
+           'DraftKings line at game start', '2026-09-24T00:00:00Z')
     """)
     cur.execute("""
         UPDATE byom_game_facts
-           SET home_score = 27, away_score = 20,
-               close_spread_at = '2026-09-24T16:00:00Z',
-               close_spread_home = -3
+           SET home_score = 27, away_score = 20
          WHERE canonical_key = '2026_03_CIN_CLE'
     """)
     cur.execute("""
