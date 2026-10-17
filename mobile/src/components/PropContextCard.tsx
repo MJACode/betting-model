@@ -73,7 +73,7 @@ export function PropContextCard({ pick, context }: Props) {
       rows.push({
         label: 'Platoon',
         value: `Bats ${batHand} vs ${throwHand}HP${advantage ? ' — edge' : ''}`,
-        tint: advantage ? colors.bet : undefined,
+        tint: advantage ? colors.betInk : undefined,
       });
     }
 
@@ -94,9 +94,9 @@ export function PropContextCard({ pick, context }: Props) {
       value: `${umpire.umpire_name} · ${pmStr}`,
       tint:
         pm != null && pm >= 0.5 && pick.pick_side === 'over'
-          ? colors.bet
+          ? colors.betInk
           : pm != null && pm <= -0.5 && pick.pick_side === 'over'
-            ? colors.avoid
+            ? colors.avoidInk
             : undefined,
     });
   }

@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.team_stats_rebuild import (MIN_SNAPSHOTS_PER_SEASON,
                                      impossible_games_played,
+                                     live_season_snapshot_grace,
                                      seasons_with_too_few_snapshots)
 
 
@@ -394,8 +395,9 @@ def test_every_emitted_column_exists_in_the_real_table():
 
 def test_verify_skips_live_season_for_impossible_but_keeps_thin_check():
     """Current max season is live ingest; comparing GP to scored games alone
-    false-CRITs (stats ahead of games). Thin snapshots still cover every season
-    so a 1–2 row leak in the live year would still fail."""
+    false-CRITs (stats ahead of games). Thin snapshots still cover a live
+    year we cannot see finals for — no completed dates is not a grace — and
+    they still cover every historical season."""
     from data.team_stats_rebuild import verify
 
     class _Conn:
@@ -435,6 +437,10 @@ def test_verify_skips_live_season_for_impossible_but_keeps_thin_check():
     assert v["skipped_live_season"] == 2026
     assert not any(r["season"] == 2026 for r in v["impossible"])
     assert (2024, 2) in v["thin_seasons"]
+    # One 2026 snapshot, and the fixture returns no 2026 finals. Grace must
+    # not fire on an empty games read.
+    assert (2026, 1) in v["thin_seasons"]
+    assert v["live_snapshot_grace"] is None
     assert v["impossible"] == []
 
 
@@ -533,3 +539,133 @@ def test_verify_aliases_mlb_twins_and_still_catches_april_leak():
     assert was == [], was
     assert len(chw) == 1 and chw[0]["claimed"] == 162 and chw[0]["actual"] == 0
     assert (2019, 2) in v["thin_seasons"]
+
+
+# ── 7. opening week of the live season is not the historical leak ────────────
+
+def test_snapshot_grace_is_opening_night_not_a_finished_season():
+    """Measured 2026-09-30: NHL 2027 finals are one date (2026-09-29). The
+    exclusive day count stays inside the floor until finals span it."""
+    assert live_season_snapshot_grace([]) is False
+    assert live_season_snapshot_grace(["2026-09-29"]) is True
+    assert live_season_snapshot_grace(["2026-09-29", "2026-09-29"]) is True
+    # Sep 29 → Oct 3 is 4 days: the writer, starting the next morning, holds
+    # four snapshots and has not cleared the floor yet.
+    assert live_season_snapshot_grace(["2026-09-29", "2026-10-03"]) is True
+    # Sep 29 → Oct 4 is 5 days: a healthy daily writer has five snapshots.
+    assert live_season_snapshot_grace(["2026-09-29", "2026-10-04"]) is False
+    assert live_season_snapshot_grace(
+        ["2026-10-07", "2027-04-16"]) is False
+
+
+class _SeasonConn:
+    """verify() fake that honors the season bind on the games query."""
+
+    def __init__(self, stats, games):
+        self._stats = stats
+        self._games = games
+        self._q = None
+
+    def execute(self, sql, params=None):
+        self._q = (sql, params)
+        return self
+
+    def fetchall(self):
+        sql, params = self._q
+        if "games_played" in sql and "FROM games" not in sql:
+            return self._stats
+        if "FROM games" in sql:
+            seasons = set(params[1:]) if params else set()
+            return [g for g in self._games if g[1] in seasons]
+        return []
+
+
+def test_verify_opening_live_season_is_not_thin():
+    """NHL 2027 on 2026-09-30: one as-of date, one final date, GP=1.
+    The historical 1–2 snapshot leak on the prior season still CRITs."""
+    from data.team_stats_rebuild import verify
+
+    stats = [
+        ("BOS", 2027, "2026-09-30", 1),
+        ("BOS", 2026, "2026-01-01", 0),
+        ("BOS", 2026, "2026-10-01", 0),
+    ]
+    games = [
+        ("2026-09-29", 2027, "BOS", "MTL", 3, 1, 1, None, None),
+        ("2026-11-01", 2026, "BOS", "MTL", 2, 1, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NHL", [2026, 2027])
+    assert v["skipped_live_season"] == 2027
+    assert v["live_snapshot_grace"] == 2027
+    assert not any(s == 2027 for s, _n in v["thin_seasons"])
+    assert (2026, 2) in v["thin_seasons"]
+    assert v["impossible"] == []
+
+
+def test_verify_short_historical_season_is_still_thin():
+    """A finished season with one final date and one snapshot is the leak,
+    even when the live season beside it is inside the opening grace."""
+    from data.team_stats_rebuild import verify
+
+    stats = [
+        ("BOS", 2019, "2019-01-01", 82),
+        ("BOS", 2027, "2026-09-30", 1),
+    ]
+    games = [
+        ("2019-04-01", 2019, "BOS", "MTL", 2, 1, 1, None, None),
+        ("2026-09-29", 2027, "BOS", "MTL", 3, 1, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NHL", [2019, 2027])
+    assert (2019, 1) in v["thin_seasons"]
+    assert v["live_snapshot_grace"] == 2027
+    assert not any(s == 2027 for s, _n in v["thin_seasons"])
+    # Season-final GP on the historical row is still impossible.
+    assert any(r["season"] == 2019 and r["claimed"] == 82 for r in v["impossible"])
+
+
+def test_verify_established_live_season_with_two_snapshots_stays_thin():
+    """Once finals span the floor, 1–2 as-of dates on the live season is the
+    same leak the historical check exists for."""
+    from data.team_stats_rebuild import verify
+
+    stats = [
+        ("BOS", 2027, "2026-10-01", 5),
+        ("BOS", 2027, "2027-04-01", 82),
+    ]
+    games = [
+        ("2026-10-07", 2027, "BOS", "MTL", 3, 1, 1, None, None),
+        ("2027-04-10", 2027, "BOS", "MTL", 2, 1, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NHL", [2026, 2027])
+    assert v["live_snapshot_grace"] is None
+    assert (2027, 2) in v["thin_seasons"]
+    assert v["impossible"] == []
+
+
+def test_verify_four_day_opening_span_is_still_grace():
+    """Sep 29 through Oct 3 is four days. The floor is five."""
+    from data.team_stats_rebuild import verify
+
+    stats = [("BOS", 2027, "2026-09-30", 1), ("BOS", 2027, "2026-10-03", 3)]
+    games = [
+        ("2026-09-29", 2027, "BOS", "MTL", 3, 1, 1, None, None),
+        ("2026-10-03", 2027, "BOS", "MTL", 2, 1, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NHL", [2027])
+    assert v["live_snapshot_grace"] == 2027
+    assert v["thin_seasons"] == []
+
+
+def test_verify_five_day_span_with_one_snapshot_is_thin():
+    """Sep 29 through Oct 4 is five days. One snapshot is a stuck writer,
+    which is the leak shape on a season that should already be a series."""
+    from data.team_stats_rebuild import verify
+
+    stats = [("BOS", 2027, "2026-09-30", 1)]
+    games = [
+        ("2026-09-29", 2027, "BOS", "MTL", 3, 1, 1, None, None),
+        ("2026-10-04", 2027, "BOS", "MTL", 2, 1, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NHL", [2027])
+    assert v["live_snapshot_grace"] is None
+    assert (2027, 1) in v["thin_seasons"]

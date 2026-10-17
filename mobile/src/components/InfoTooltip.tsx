@@ -48,7 +48,8 @@ export function InfoTooltip({
     <>
       <Pressable
         onPress={() => setOpen(true)}
-        hitSlop={10}
+        // Bare icon: 20pt glyph + 12 + 12 = 44pt (audit M18; 10 reached 40).
+        hitSlop={12}
         accessibilityRole="button"
         // Voice Control matches the label against what is on screen, and the
         // visible word is "Details" — "More info" made "tap Details" miss.
@@ -97,12 +98,17 @@ export function InfoTooltip({
             and the card is a modal container VoiceOver cannot wander out of.
             `accessible={false}` on the card so its children stay individually
             reachable rather than collapsing into one element. */}
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => setOpen(false)}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-        >
+        <View style={styles.backdrop}>
+          {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+              parent: an accessible Pressable groups everything inside it into
+              one VoiceOver element, so a backdrop that wrapped the sheet hid the
+              sheet's rows and buttons from VoiceOver (audit PR 4). */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel={`Close ${title}`}
+          />
           {/* Inner Pressable swallows taps so touching the card doesn't dismiss. */}
           <Pressable
             style={styles.card}
@@ -120,6 +126,8 @@ export function InfoTooltip({
             </View>
             <Text style={styles.cardBody}>{body}</Text>
             <Pressable
+              // ~40pt button: 4pt slop each way reaches 44.
+              hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
               onPress={() => setOpen(false)}
               accessibilityRole="button"
               accessibilityLabel="Got it"
@@ -128,7 +136,7 @@ export function InfoTooltip({
               <Text style={styles.dismissText}>Got it</Text>
             </Pressable>
           </Pressable>
-        </Pressable>
+        </View>
       </Modal>
     </>
   );

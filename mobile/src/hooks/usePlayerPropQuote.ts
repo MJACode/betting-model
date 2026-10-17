@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchPropLinesForGames, fetchSlateGames } from '@/lib/queries';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import { addDays, todayET } from '@/lib/format';
 import { normalizePlayerName } from '@/lib/playerNews';
 import {
@@ -134,7 +134,7 @@ export function usePlayerPropQuote(opts: {
         setError(null);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(errorText(e));
+        if (!cancelled && !isAbortError(e)) setError(errorText(e));
       })
       .finally(() => {
         if (!cancelled) setGamesLoading(false);
@@ -208,7 +208,7 @@ export function usePlayerPropQuote(opts: {
       })
       .catch((e: unknown) => {
         if (cancelled || latest.current !== readKey) return;
-        setError(errorText(e));
+        if (!isAbortError(e)) setError(errorText(e));
         setRows({ market: '', rows: [] });
       })
       .finally(() => {

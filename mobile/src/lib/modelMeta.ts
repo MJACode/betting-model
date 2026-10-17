@@ -61,9 +61,11 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // Market-relative run line: de-vig Pinnacle, bet a bettable soft book
   // at the same ±1.5. Replaces the paused mlb_runline *publish path*;
   // mlb_runline itself stays paused. docs/mlb_runline_ou_edge_search.md.
+  // Named '(vs Pinnacle)' like the prop rules: the app explains Pinnacle, and
+  // never explained 'market-relative'.
   mlb_spread_market: {
     shortLabel: 'RL Mkt',
-    longLabel: 'Runline (market-relative)',
+    longLabel: 'Runline (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -73,7 +75,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // mlb_over_under itself stays paused. Paper until MLB_TOTAL_MARKET_PUBLISH=1.
   mlb_total_market: {
     shortLabel: 'O/U Mkt',
-    longLabel: 'Total Runs (market-relative)',
+    longLabel: 'Total Runs (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -264,9 +266,12 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'Ast',
   },
+  // '(vs Pinnacle)', one name for the three multi-market prop rules: each bets
+  // a retail price against Pinnacle's, and the app already explains Pinnacle.
+  // 'market-relative' was explained nowhere.
   wnba_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'WNBA Props (market-relative)',
+    longLabel: 'WNBA Props (vs Pinnacle)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -371,6 +376,34 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'DD',
   },
+  // The 2026-27 NBA prop rule (models/nba_prop_market.py): unders at the best
+  // bettable book on Pinnacle's own line, decided 45-57 minutes before tip.
+  // ONE id across five markets (points, rebounds, assists, threes, PRA); the
+  // market travels on picks.prop_market and the stat is in each pick's label,
+  // so statLabel is empty, as for nfl_prop_market and wnba_prop_market.
+  nba_prop_market: {
+    shortLabel: 'Prop Mkt',
+    longLabel: 'NBA Props (vs Pinnacle)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
+  // The NBA projection model (models/nba_prop_projection.py): projects each
+  // player's count from his minutes and per-minute rates and bets the books'
+  // main line, in the same 45-57 minute window as the rule above. ONE id across six markets (steals,
+  // rebounds, blocks+steals, blocks, rebounds+assists, threes), the market on
+  // picks.prop_market, like nba_prop_market. Unlike that rule it bets BOTH
+  // sides: steals, blocks+steals and threes can be over or under; rebounds,
+  // blocks and rebounds+assists are unders. Not '(vs Pinnacle)': its number is
+  // its own projection, not Pinnacle's price. Its shown probability is an
+  // upper bound (graded: claimed 0.533, won 0.501; docs/nba_models_2026.md).
+  nba_prop_projection: {
+    shortLabel: 'Projection',
+    longLabel: 'NBA Props (Projection)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -421,6 +454,39 @@ export const MODEL_META: Record<string, ModelMeta> = {
     type: 'game',
     statKey: null,
     statLabel: '',
+  },
+  // Blocked shots at DraftKings (models/nhl_prop_blocked_shots.py). The stat
+  // label is the wording the server writes into pick_label.
+  nhl_prop_blocked_shots: {
+    shortLabel: 'BLK',
+    longLabel: 'Player Blocked Shots',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Blocked Shots',
+  },
+  // Goalie saves, shots on goal and assists (models/nhl_props.py), each
+  // priced at the best book on offer. The stat labels are the wording the
+  // server writes into pick_label.
+  nhl_prop_saves: {
+    shortLabel: 'SV',
+    longLabel: 'Goalie Saves',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Saves',
+  },
+  nhl_prop_shots_on_goal: {
+    shortLabel: 'SOG',
+    longLabel: 'Player Shots on Goal',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Shots on Goal',
+  },
+  nhl_prop_assists: {
+    shortLabel: 'AST',
+    longLabel: 'Player Assists',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Assists',
   },
 
   // ── NFL ───────────────────────────────────────────────────────────────────
@@ -498,24 +564,46 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // outlier. ONE id across every market it trades — the validated number is
   // pooled, and the market itself is on picks.prop_market, so per-market
   // breakdowns are a query rather than eight entries here.
+  // Named '(vs Pinnacle)' like nba_prop_market and wnba_prop_market.
   nfl_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'NFL Props (market-relative)',
+    longLabel: 'NFL Props (vs Pinnacle)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
   },
-  // The in-play NFL prop lane (nfl/live_model — the frozen pass-attempt bias
-  // rule). LIVE since 2026-09-05 with the §2 go-live gate deliberately not met
-  // (Matt's call), and it has written zero picks so far — so its missing label
-  // has never been SEEN, which is the only reason it is not the same bug as the
-  // twelve below. Its first pick would have rendered "nfl_live_prop" on a card.
+  // The in-play NFL leader moneyline (nfl_live_leader/, LIVE 2026-10-13): late
+  // in the 4th quarter, the team up 4-16 on DraftKings' live moneyline when
+  // its win probability beats the price by 2 points. Same chip as the NCAAF
+  // live moneyline; its picks appear on the Live segment only.
+  nfl_live_leader_ml: {
+    shortLabel: 'LIVE ML',
+    longLabel: 'Live Leader Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The in-play NFL prop model (nfl/live_model). LIVE since 2026-09-05 with the
+  // §2 go-live gate deliberately not met (Matt's call).
+  //
+  // IT TRADES RUSHING ATTEMPTS, NOT PASSING, since 2026-09-21 — pass attempts
+  // carried no edge in any season, so the model changed market rather than
+  // threshold (docs/nfl_live_rush_attempts.md). These three strings said
+  // "Pass Attempts" for a day after that switch, which is how the first rushing
+  // pick reached Discord as "Blake Corum Under 11.5 Pass Attempts" — a running
+  // back on a passing line, with a correct bet underneath it. The stat is named
+  // "Carries" here to match the platform (models/scorer._NFL_PROP_CONFIG) and
+  // the pre-game nfl_prop_rush_attempts model, so one stat has one name.
   nfl_live_prop: {
-    shortLabel: 'LIVE Att',
-    longLabel: 'Live Pass Attempts',
+    // NOT 'LIVE Car'. On the Models list and the parlay leg card this chip sits
+    // beside a matchup line, and CAR is Carolina -- a stat abbreviation that
+    // reads as a team is worse than a long one. The chips carry no maxWidth and
+    // no numberOfLines, so the full word fits.
+    shortLabel: 'LIVE Carries',
+    longLabel: 'Live Rush Attempts',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Att',
+    statLabel: 'Carries',
   },
   // The twelve per-stat NFL prop models. They were unpaused server-side
   // (model_action_thresholds.paused = false for all thirteen NFL prop ids on
@@ -563,7 +651,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
     longLabel: 'Rush Attempts',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Rush Att',
+    statLabel: 'Carries',
   },
   nfl_prop_rec_yards: {
     shortLabel: 'Rec Yds',
@@ -658,6 +746,28 @@ export function modelLong(modelId: string): string {
 }
 
 /**
+ * The line under "Model probability" on a pick's "Why this bet?" card.
+ *
+ * The NBA projection model's probability is its own calibrated number, and it
+ * still runs high where it bets: graded walk-forward over 2023-24..2025-26 it
+ * claimed 0.533 and won 0.501, against 0.483 implied by the prices
+ * (docs/nba_models_2026.md; models/nba_prop_projection.py). So its card says
+ * to read the number as an upper bound, and gives the price comparison that
+ * shows the 50% still beat the price. Those are graded seasons, not a posted
+ * record: the model has none yet (UX review, 2026-10-16). Every other model
+ * keeps the plain sentence.
+ */
+const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
+  nba_prop_projection:
+    'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
+    'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
+};
+
+export function modelProbabilityNote(modelId: string): string {
+  return PROBABILITY_NOTE[modelId] ?? 'What our model says is the chance this side hits.';
+}
+
+/**
  * The market category of a model — MODEL_META when it has an entry, and the
  * MODEL ID when it does not.
  *
@@ -705,6 +815,21 @@ export function sportOfModel(modelId: string): BetTypeSport {
   return 'MLB';
 }
 
+/**
+ * Does any prop model that is neither retired nor paused price this sport's
+ * players? Read from the model catalog, not the stat catalog: the
+ * multi-market models (nba_prop_market, nba_prop_projection, nfl_prop_market,
+ * wnba_prop_market) map to no single stat, so the stat-catalog test said NBA and the NFL had no
+ * prop model while both had a live one. NCAAF has only game models, so its
+ * player page still says no prop model prices it. Call it at render: the
+ * pause flag can come from the server.
+ */
+export function sportHasLivePropModel(sport: BetTypeSport): boolean {
+  return Object.keys(MODEL_META).some(
+    (id) => sportOfModel(id) === sport && isPropModel(id) && !isModelRetired(id) && !isModelPaused(id),
+  );
+}
+
 export interface BetTypeOption {
   /** The underlying model_id — one model prices each market. */
   id: string;
@@ -749,12 +874,103 @@ export function betTypeGroups(): Array<{ sport: BetTypeSport; options: BetTypeOp
   })).filter((g) => g.options.length > 0);
 }
 
+/**
+ * The three bet types the custom-model picker offers. One row per slot, not
+ * one row per model_id — `betTypeGroups()` stays the per-model catalog (pause
+ * and retirement still drop ids there) and the picker collapses it.
+ *
+ * Totals, First-5, live, regulation 3-way and golf outrights are not a slot.
+ * A sport that has no active model for a slot omits that row (WNBA's spread
+ * is paused, so WNBA has no Spread row; NFL has no moneyline model at all).
+ */
+export type BetTypeSlot = 'ml' | 'line' | 'props';
+
+export interface BetTypeChoice {
+  /** Stable row key: sport + slot, not a model_id. */
+  key: string;
+  sport: BetTypeSport;
+  slot: BetTypeSlot;
+  /** Short label. Never MODEL_META.longLabel. */
+  label: string;
+  subtitle: string;
+  /** Active model_ids this choice writes as rules, in catalog order. */
+  modelIds: string[];
+}
+
+const BET_TYPE_SLOT_ORDER: BetTypeSlot[] = ['ml', 'line', 'props'];
+
+/**
+ * Which picker slot a model belongs to, or null when the picker does not
+ * offer it. `betTypeGroups` has already dropped paused, retired and live ids;
+ * the `_f5_` / `_live_` checks here are the second line so a caller that
+ * passes a raw id still cannot surface those markets.
+ */
+export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | null {
+  if (id.includes('_live_') || id.includes('_f5_')) return null;
+  // NCAAF Spread writes ncaaf_spread only. The premium band is the same
+  // market at a higher cut; adding it made a second rule with the same
+  // title. Chief of Staff, 2026-09-24.
+  if (id === 'ncaaf_spread_premium') return null;
+  if (type !== 'game') return 'props';
+  if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
+  if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';
+  return null;
+}
+
+function choiceCopy(sport: BetTypeSport, slot: BetTypeSlot): { label: string; subtitle: string } {
+  if (slot === 'ml') return { label: 'ML', subtitle: 'Moneyline' };
+  if (slot === 'props') return { label: 'Player props', subtitle: 'All player markets' };
+  if (sport === 'MLB') return { label: 'Run line', subtitle: '±1.5' };
+  if (sport === 'NHL') return { label: 'Puck line', subtitle: '±1.5' };
+  return { label: 'Spread', subtitle: 'Spread line' };
+}
+
+/**
+ * Status on a picker row. Null when none of the slot's models are rules yet.
+ * "Added" only when every one is. A partial slot stays tappable.
+ */
+export function choiceAddedLabel(present: number, total: number): string | null {
+  if (present <= 0 || total <= 0) return null;
+  if (present >= total) return 'Added';
+  return `${present} of ${total} added`;
+}
+
+/** Picker rows: at most ML, the sport's line, and Player props. */
+export function betTypePickerGroups(): Array<{ sport: BetTypeSport; choices: BetTypeChoice[] }> {
+  return betTypeGroups()
+    .map((group) => {
+      const bySlot = new Map<BetTypeSlot, string[]>();
+      for (const opt of group.options) {
+        const slot = betSlotForModel(opt.id, opt.type);
+        if (!slot) continue;
+        const list = bySlot.get(slot) ?? [];
+        list.push(opt.id);
+        bySlot.set(slot, list);
+      }
+      const choices: BetTypeChoice[] = [];
+      for (const slot of BET_TYPE_SLOT_ORDER) {
+        const modelIds = bySlot.get(slot);
+        if (!modelIds || modelIds.length === 0) continue;
+        const copy = choiceCopy(group.sport, slot);
+        choices.push({
+          key: `${group.sport}:${slot}`,
+          sport: group.sport,
+          slot,
+          label: copy.label,
+          subtitle: copy.subtitle,
+          modelIds,
+        });
+      }
+      return { sport: group.sport, choices };
+    })
+    .filter((g) => g.choices.length > 0);
+}
+
 /** Module-load snapshot of `betTypeGroups()` (bundled pause set). Prefer the
  *  function at a render site so a server-flag pause lands without a rebuild. */
 export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOption[] }> =
   betTypeGroups();
 
-/** "MLB · Moneyline" — how a bet-type rule is titled everywhere it renders. */
 /** The one sentence every surface uses for a rule on a retired bet type — the
  *  Models card, the editor's RuleRow, the detail rule line and its empties —
  *  so they cannot drift into three phrasings of the same state. */
@@ -788,6 +1004,15 @@ export function withdrawnRulesEmpty(
   return null;
 }
 
+/**
+ * How a custom-model rule is titled on the editor, the detail screen, and the
+ * Models list. A model the picker offers uses that row's short name
+ * ("MLB · Run line"), never MODEL_META.longLabel. A market the picker does
+ * not offer keeps its long name.
+ */
 export function betTypeLabel(modelId: string): string {
-  return `${sportOfModel(modelId)} · ${modelLong(modelId)}`;
+  const sport = sportOfModel(modelId);
+  const slot = betSlotForModel(modelId, modelCategory(modelId));
+  if (!slot) return `${sport} · ${modelLong(modelId)}`;
+  return `${sport} · ${choiceCopy(sport, slot).label}`;
 }

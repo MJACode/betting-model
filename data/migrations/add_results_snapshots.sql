@@ -21,7 +21,6 @@ BEGIN
       losses        INTEGER NOT NULL DEFAULT 0,
       pushes        INTEGER NOT NULL DEFAULT 0,
       settled       INTEGER NOT NULL DEFAULT 0,
-      record_only   INTEGER NOT NULL DEFAULT 0,
       units         NUMERIC,
       risked        NUMERIC,
       roi_pct       NUMERIC,

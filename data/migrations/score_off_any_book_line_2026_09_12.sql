@@ -32,14 +32,18 @@ DO $mig$
 DECLARE
   d text;
   v text;
-  dk_profit CONSTANT text :=
-    'COALESCE(sum(p.profit_flat) FILTER (WHERE (p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AND p.dk_odds IS NOT NULL), 0::numeric)';
-  new_profit CONSTANT text :=
-    'COALESCE(sum(p.profit_flat) FILTER (WHERE (p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AND COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL), 0::numeric)';
-  dk_stake CONSTANT text :=
-    '100 * count(*) FILTER (WHERE (p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AND p.dk_odds IS NOT NULL) AS staked_flat';
-  new_stake CONSTANT text :=
-    '100 * count(*) FILTER (WHERE (p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AND COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL) AS staked_flat';
+  -- THE GATE IS MATCHED BY WHAT IT SAYS, NOT BY THE WHOLE EXPRESSION AROUND IT
+  -- (2026-09-21). This file used to replace one literal `p.`-prefixed
+  -- expression. settled_record_survives_a_pause (2026-09-12) took the join out
+  -- of both views, pg_get_viewdef stopped printing the `p.` prefix on a
+  -- single-table view, and from then on neither literal matched: this block
+  -- raised on EVERY pass (logged "View migration FAILED", the step still
+  -- reported success) and the published record went back to gating units on
+  -- DraftKings' price alone. Zero bets were affected when it was found -- no
+  -- BET had yet been decided off another book's line with a NULL dk_odds --
+  -- but the first one would have been bet and never counted.
+  dk_gate CONSTANT text := '(p\.)?dk_odds IS NOT NULL';
+  new_gate CONSTANT text := 'COALESCE(\1decision_odds, \1dk_odds) IS NOT NULL';
 BEGIN
   -- ── 1. the column, on the table and its audit log ────────────────────────
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns
@@ -101,18 +105,16 @@ BEGIN
   FOREACH v IN ARRAY ARRAY['v_public_track_record', 'v_public_track_record_daily'] LOOP
     d := pg_get_viewdef(('public.' || v)::regclass, true);
 
-    IF position(new_profit in d) > 0 THEN
+    IF position('decision_odds' in d) > 0 THEN
       CONTINUE;                          -- already reading the deciding price
     END IF;
 
-    IF position(dk_profit in d) = 0 THEN
-      RAISE EXCEPTION '%: the DraftKings-only units gate is not present in the '
-                      'shape require_price_for_published_units.sql leaves — '
-                      're-derive both files together', v;
+    IF d !~ dk_gate THEN
+      RAISE EXCEPTION '%: no price gate on the published units at all — '
+                      'require_price_for_published_units.sql must run first', v;
     END IF;
 
-    d := replace(d, dk_profit, new_profit);
-    d := replace(d, dk_stake,  new_stake);
+    d := regexp_replace(d, dk_gate, new_gate, 'g');
     EXECUTE format('CREATE OR REPLACE VIEW public.%I AS %s', v, d);
     -- security_invoker survives CREATE OR REPLACE; re-asserted so a reviewer
     -- does not have to check.

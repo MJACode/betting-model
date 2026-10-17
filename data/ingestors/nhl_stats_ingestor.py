@@ -632,6 +632,11 @@ def _build_goalie_rows(season: int, as_of_date: str,
                     if _same_goalie_name(g.get("goalieFullName"), goalie_name):
                         goalie_id = _goalie_id(g)
                         break
+                # The summary only lists goalies who have played THIS season.
+                # A returning starter is in the log under the same name.
+                if not goalie_id and book:
+                    pid = book.player_named(goalie_name, season, as_of_date)
+                    goalie_id = str(pid) if pid else ""
 
             # No probable named: the goalie the team has actually been using
             # (log, this season weighted double), then the summary's leader.
@@ -811,6 +816,12 @@ def _upsert_goalie_stats(conn: DBConnection, rows: list[dict]) -> int:
     without_id = [r for r in rows if not r.get("player_id")]
 
     if with_id:
+        # A row written for this team and date BEFORE its goalie could be named
+        # to an id is keyed on NULL, so the upsert below lands beside it rather
+        # than on it, and the feature engine reads whichever is newer.
+        conn.executemany(
+            "DELETE FROM nhl_goalie_stats WHERE team = %(team)s AND game_date = %(game_date)s "
+            "AND player_id IS NULL", [{"team": r["team"], "game_date": r["game_date"]} for r in with_id])
         conn.executemany(sql, [{**defaults, **r} for r in with_id])
     if without_id:
         conn.executemany(no_conflict_sql, [{**defaults, **r} for r in without_id])

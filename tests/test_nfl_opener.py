@@ -525,3 +525,376 @@ class TestFireWindow:
         # corrected and the backtest says nothing about that region.
         assert opener_model.LEAD_LO_DAYS == 2.0
         assert opener_model.LEAD_HI_DAYS >= 10.0
+
+
+# ---------------------------------------------------------------------------
+# THE NUMBER-AGE LABEL (2026-09-22). The measured case, rebuilt from the Odds
+# API's own historical snapshot: BetMGM at NYG -1 (-105) / TEN +1 (-115) from
+# 21:28:26Z after hours at -3.0, every other book at -3.0. The 21:29Z tick
+# locked "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u". The first
+# fix gated such numbers for an hour; mike: "You do realize you're trying to
+# win bets and money right?" -- a book error is the best case if placeable.
+# So the age is measured and put on the pick, and nothing is skipped.
+# ---------------------------------------------------------------------------
+
+def _ts(s):
+    return pd.Timestamp(s, tz="UTC")
+
+
+def _obs(book, point, start, end, home="NYG", away="TEN", step_min=1):
+    """One observation per `step_min` minutes, [start, end]."""
+    times = pd.date_range(_ts(start), _ts(end), freq=f"{step_min}min")
+    return pd.DataFrame({"observed_at": times, "home": home, "away": away,
+                         "book": book, "point": float(point)})
+
+
+def _giants_sched():
+    return pd.DataFrame([{
+        "game_id": "2026_03_TEN_NYG", "home_team": "NYG", "away_team": "TEN",
+        "matchup": "TEN @ NYG", "kick_utc": "2026-09-27 17:00:00+00:00",
+        "lead_days": 4.8}])
+
+
+def _giants_board(mgm_point, mgm_px_home, mgm_px_away):
+    g = dict(home="NYG", away="TEN", event="ten_nyg")
+    return _frame(_both_sides("pinnacle", -3.0, 103, -115, **g)
+                  + _both_sides("draftkings", -3.0, -102, -118, **g)
+                  + _both_sides("fanduel", -3.0, -108, -112, **g)
+                  + _both_sides("betrivers", -3.0, -112, -109, **g)
+                  + _both_sides("fanatics", -3.0, -105, -115, **g)
+                  + _both_sides("betmgm", mgm_point, mgm_px_home, mgm_px_away, **g))
+
+
+def _giants_prior_at_2129():
+    """Every book at -3.0 since the 17:37Z deploy; MGM -2.5 from 21:24:26Z and
+    -1.0 on the 21:29 tick itself (the card dumps the board before selecting)."""
+    steady = pd.concat([_obs(b, -3.0, "2026-09-22 17:37", "2026-09-22 21:29")
+                        for b in ("pinnacle", "draftkings", "fanduel",
+                                  "betrivers", "fanatics")])
+    mgm = pd.concat([_obs("betmgm", -3.0, "2026-09-22 17:37", "2026-09-22 21:23"),
+                     _obs("betmgm", -2.5, "2026-09-22 21:24:26", "2026-09-22 21:28"),
+                     _obs("betmgm", -1.0, "2026-09-22 21:29:01", "2026-09-22 21:29:01")])
+    return pd.concat([steady, mgm], ignore_index=True)
+
+
+class TestHeldMinutes:
+    def test_never_seen_at_this_point_is_none(self):
+        prior = _obs("betmgm", -3.0, "2026-09-22 17:00", "2026-09-22 21:00")
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+
+    def test_no_history_for_the_book_is_none(self):
+        prior = _obs("fanduel", -1.0, "2026-09-22 17:00", "2026-09-22 21:00")
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+        assert opener_model.held_minutes(None, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+        empty = pd.DataFrame(columns=["observed_at", "home", "away", "book", "point"])
+        assert opener_model.held_minutes(empty, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+
+    def test_seen_at_this_point_but_last_seen_elsewhere_is_zero(self):
+        # Was -1.0 two hours ago, then -3.0 since: a -1.0 now is a NEW number.
+        prior = pd.concat([_obs("betmgm", -1.0, "2026-09-22 17:00", "2026-09-22 18:00"),
+                           _obs("betmgm", -3.0, "2026-09-22 18:01", "2026-09-22 21:28")])
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) == 0.0
+
+    def test_measures_from_the_last_move(self):
+        prior = pd.concat([_obs("betmgm", -3.0, "2026-09-22 17:00", "2026-09-22 19:59"),
+                           _obs("betmgm", -1.0, "2026-09-22 20:00", "2026-09-22 21:00")])
+        held = opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29"))
+        assert held == 89.0
+        # A different number in between resets the run.
+        prior = pd.concat([prior,
+                           _obs("betmgm", -2.5, "2026-09-22 21:10", "2026-09-22 21:10"),
+                           _obs("betmgm", -1.0, "2026-09-22 21:11", "2026-09-22 21:28")])
+        held = opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29"))
+        assert held == 18.0
+
+    def test_observations_after_now_and_other_games_are_ignored(self):
+        prior = pd.concat([_obs("betmgm", -1.0, "2026-09-22 21:30", "2026-09-22 23:00"),
+                           _obs("betmgm", -1.0, "2026-09-22 17:00", "2026-09-22 21:00",
+                                home="KC", away="DEN")])
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+
+    def test_mixed_timestamp_shapes_all_count(self):
+        # The archive stamps microseconds, the refresh pass does not, and the
+        # local dump writes isoformat. Inferring one format from the first row
+        # coerced every other shape to NaT -- measured on the first loader run,
+        # which dropped every archive row and left the gate seeing only the
+        # hourly refresh pass.
+        prior = pd.DataFrame({
+            "observed_at": ["2026-09-21T22:40:02+00:00",
+                            "2026-09-22 11:59:01.022234+00",
+                            "2026-09-22T13:00:01.447268+00:00",
+                            "2026-09-22T22:19:40Z"],
+            "home": "NYG", "away": "TEN", "book": "betmgm",
+            "point": [-6.0, -3.5, -3.0, -3.0]})
+        held = opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -3.0,
+                                         _ts("2026-09-22 22:29:01"))
+        assert held is not None and abs(held - (9 * 60 + 29)) < 0.1
+
+    def test_sparse_observations_are_fine(self):
+        # The archive is hourly at best; one quote three hours ago and nothing
+        # since is a number that has been up for three hours.
+        prior = _obs("betmgm", -1.0, "2026-09-22 18:29", "2026-09-22 18:29")
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) == 180.0
+
+
+class TestFreshNumberLabel:
+    def test_the_giants_number_fires_and_is_labelled_new(self):
+        # The published row, exactly, with its age on it. Nothing is skipped.
+        bets = card.select_opener_bets(
+            _giants_board(-1.0, -105, -115), _giants_sched(),
+            prior=_giants_prior_at_2129(), now=_ts("2026-09-22 21:29:01"))
+        assert len(bets) == 1
+        b = bets.iloc[0]
+        assert (b.bet_team, b.side_line, b.book, b.price, b.dev) == \
+            ("NYG", -1.0, "betmgm", -105, 2.0)
+        assert b.model_prob == 0.5557 and b.units == 1.958
+        assert b.held_min == 0.0
+        assert opener_model.age_tag(b.held_min) == "NEW 0m"
+
+    def test_the_second_phase_fires_with_its_age(self):
+        # 21:31Z-21:43Z: MGM at NYG +1 (-108), dev 4.0. Twelve minutes old at
+        # 21:43 and the pick says so.
+        prior = pd.concat([_giants_prior_at_2129(),
+                           _obs("betmgm", 1.0, "2026-09-22 21:31", "2026-09-22 21:43")])
+        bets = card.select_opener_bets(_giants_board(1.0, -108, -112), _giants_sched(),
+                                       prior=prior, now=_ts("2026-09-22 21:43"))
+        assert len(bets) == 1 and bets.iloc[0].dev == 4.0
+        assert bets.iloc[0].held_min == 12.0
+        assert opener_model.age_tag(bets.iloc[0].held_min) == "NEW 12m"
+
+    def test_a_number_held_a_day_carries_no_new_tag(self):
+        prior = pd.concat([_obs("betmgm", -1.0, "2026-09-21 21:00", "2026-09-22 21:29"),
+                           _obs("pinnacle", -3.0, "2026-09-22 21:20", "2026-09-22 21:29")])
+        bets = card.select_opener_bets(
+            _giants_board(-1.0, -105, -115), _giants_sched(),
+            prior=prior, now=_ts("2026-09-22 21:29:01"))
+        assert len(bets) == 1
+        assert bets.iloc[0].held_min >= 24 * 60
+        assert opener_model.age_tag(bets.iloc[0].held_min) == "up 24h"
+
+    def test_no_history_still_fires_and_reads_age_unknown(self):
+        board, sched = _giants_board(-1.0, -105, -115), _giants_sched()
+        empty = pd.DataFrame(columns=["observed_at", "home", "away", "book", "point"])
+        for prior in (None, empty):
+            bets = card.select_opener_bets(board, sched, prior=prior,
+                                           now=_ts("2026-09-22 21:29:01"))
+            assert len(bets) == 1
+            assert bets.iloc[0].held_min is None or bets.iloc[0].held_min != bets.iloc[0].held_min
+            assert opener_model.age_tag(bets.iloc[0].held_min) == "age unknown"
+
+    def test_age_tag_boundaries(self):
+        tag = opener_model.age_tag
+        assert tag(None) == "age unknown"
+        assert tag(float("nan")) == "age unknown"
+        assert tag(0.0) == "NEW 0m"
+        assert tag(59.0) == "NEW 59m"
+        assert tag(opener_model.FRESH_MINUTES) == "up 1h"
+        assert tag(47 * 60) == "up 47h"
+        assert tag(48 * 60) == "up 2d"
+        assert tag(5 * 1440) == "up 5d"
+
+    def test_the_selection_is_the_same_with_and_without_history(self):
+        # The age never changes WHICH bet is taken -- that is the whole point
+        # of a label over a gate. Two soft books, the fresher one deviating
+        # more: it is still the one taken.
+        g = dict(home="NYG", away="TEN", event="ten_nyg")
+        board = _frame(_both_sides("pinnacle", -3.5, -110, -110, **g)
+                       + _both_sides("betmgm", -1.0, -105, -115, **g)
+                       + _both_sides("fanatics", -1.5, -108, -112, **g))
+        prior = pd.concat([_obs("betmgm", -3.5, "2026-09-21 21:00", "2026-09-22 21:28"),
+                           _obs("betmgm", -1.0, "2026-09-22 21:29", "2026-09-22 21:29"),
+                           _obs("fanatics", -1.5, "2026-09-21 21:00", "2026-09-22 21:29")])
+        now = _ts("2026-09-22 21:29:01")
+        with_hist = card.select_opener_bets(board, _giants_sched(), prior=prior, now=now)
+        without = card.select_opener_bets(board, _giants_sched())
+        assert with_hist.iloc[0].book == without.iloc[0].book == "betmgm"
+        assert with_hist.iloc[0].held_min == 0.0 and without.iloc[0].held_min is None
+
+    def test_evaluate_board_carries_the_same_age(self):
+        board, sched = _giants_board(-1.0, -105, -115), _giants_sched()
+        now = _ts("2026-09-22 21:29:01")
+        ev = opener_model.evaluate_board(board, sched, prior=_giants_prior_at_2129(), now=now)
+        assert int(ev[0]["qualifies"]) == 1
+        assert ev[0]["reason"] == "deviation +2.00 pts vs Pinnacle -3.0 · NEW 0m"
+        old = _obs("betmgm", -1.0, "2026-09-21 21:00", "2026-09-22 21:29")
+        ev = opener_model.evaluate_board(board, sched, prior=old, now=now)
+        assert ev[0]["reason"].endswith("· up 24h")
+        ev = opener_model.evaluate_board(board, sched)
+        assert ev[0]["reason"] == "deviation +2.00 pts vs Pinnacle -3.0"
+
+    def test_the_publisher_puts_the_age_on_the_label(self):
+        base = dict(game_id="2026_03_TEN_NYG", matchup="TEN @ NYG",
+                    kick_utc="2026-09-27 17:00:00+00:00", side="home", bet_team="NYG",
+                    side_line="-1.0", soft_home_line="-1.0", price="-105",
+                    model_prob="0.5557", market_prob="0.5122", edge="0.0435",
+                    dev="2.0", book="betmgm", stake_pct="1.958")
+        _, picks = build_opener_rows([dict(base, held_min="0.0")], 1000.0)
+        assert picks[0]["pick_label"] == \
+            "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u · NEW 0m"
+        _, picks = build_opener_rows([dict(base, held_min="")], 1000.0)
+        assert picks[0]["pick_label"].endswith("· 1.96u · age unknown")
+        _, picks = build_opener_rows([dict(base, held_min="1500")], 1000.0)
+        assert picks[0]["pick_label"].endswith("· 1.96u · up 25h")
+        # A card written before the column existed: the label is unchanged.
+        _, picks = build_opener_rows([base], 1000.0)
+        assert picks[0]["pick_label"].endswith("· 1.96u")
+
+    def test_the_label_still_names_its_book_and_its_line(self):
+        # Discord reads the book out of the parenthesised group and the
+        # integrity check reads the side and line; the suffix must not move
+        # either. (The regexes are the notifier's and the checker's own.)
+        from tracking.discord_notifier import book_for_pick
+        from tracking.pick_integrity import refuse_mismatched
+        label = "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u · NEW 0m"
+        assert book_for_pick({"model_id": "nfl_opener_spread", "label": label}) == "BetMGM"
+        kept = refuse_mismatched(
+            [{"pick_id": 1, "label": label, "side": "home", "line": -1.0,
+              "model_id": "nfl_opener_spread", "sport": "NFL"}], "test")
+        assert len(kept) == 1
+
+    def test_the_card_passes_its_history_to_both_the_selection_and_the_evaluation(
+            self, tmp_path, monkeypatch):
+        # A label the card does not feed is dead code. Run main() end to end
+        # with the feed faked and record what reaches the model.
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+        import data_ingest.odds_api as odds_api
+
+        k = (datetime.now(timezone.utc) + timedelta(days=4)).astimezone(
+            ZoneInfo("America/New_York"))
+        d = tmp_path / "data"
+        d.mkdir()
+        (d / "games.csv").write_text(
+            "season,week,gameday,gametime,away_team,home_team\n"
+            f"2026,3,{k:%Y-%m-%d},{k:%H:%M},TEN,NYG\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("THE_ODDS_API_KEY", "test")
+
+        class _Res:
+            payload = {"timestamp": None, "data": []}
+            cost = 0
+
+        class _FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+
+            def live_odds(self, **kw):
+                return _Res()
+
+        monkeypatch.setattr(odds_api, "OddsAPIClient", _FakeClient)
+        monkeypatch.setattr(odds_api, "ledger_status", lambda: {})
+
+        history = _obs("betmgm", -1.0, "2026-09-22 17:00", "2026-09-22 21:00")
+        seen = {}
+        monkeypatch.setattr(card, "load_prior_observations",
+                            lambda sched, now=None, hours=None: history)
+
+        def _select(frame, sched, threshold, prior=None, now=None):
+            seen["select"] = (prior, now)
+            return pd.DataFrame()
+
+        def _evaluate(frame, sched, threshold, prior=None, now=None):
+            seen["evaluate"] = (prior, now)
+            return []
+
+        monkeypatch.setattr(card, "select_opener_bets", _select)
+        monkeypatch.setattr(card.opener_spread, "evaluate_board", _evaluate)
+        monkeypatch.setattr(sys, "argv", ["daily_opener_card.py"])
+        assert card.main() == 0
+        assert seen["select"][0] is history and seen["evaluate"][0] is history
+        assert seen["select"][1] is not None and seen["select"][1] == seen["evaluate"][1]
+
+
+class TestTickLatency:
+    """The number lives minutes; the tick must not take a minute."""
+
+    def test_line_snapshot_flush_is_incremental(self, tmp_path, monkeypatch):
+        # 3,024 rows re-inserted every minute made the publish step take 75 s
+        # and the one-minute poll run every two. Only rows past the marker go
+        # to the database now.
+        import scripts.nfl_wind_publisher as pub
+        import data.db as db
+
+        monkeypatch.setattr(pub, "CARDS_DIR", tmp_path)
+        path = tmp_path / "line_snapshots_2026-09-22.csv"
+        hdr = "game_id,market,snapshot_at,home_price,away_price,spread_home,total_line,over_price,under_price\n"
+        row = "2026_03_TEN_NYG,spreads,2026-09-22T21:{m:02d}:00Z,-105,-115,-1.0,,,\n"
+        path.write_text(hdr + "".join(row.format(m=m) for m in (1, 3, 5)), encoding="utf-8")
+
+        class _Conn:
+            def __init__(self):
+                self.executed = []
+
+            def execute(self, sql, params=None):
+                self.executed.append(params)
+
+            def commit(self):
+                pass
+
+            def close(self):
+                pass
+
+        conns = []
+
+        def _get():
+            c = _Conn()
+            conns.append(c)
+            return c
+
+        monkeypatch.setattr(db, "get_connection", _get)
+        assert pub.publish_line_snapshots("2026-09-22") == 3
+        assert len(conns[0].executed) == 3
+        assert (tmp_path / "line_snapshots_2026-09-22.flushed").read_text() == "3"
+        # Nothing new: no connection is even opened.
+        assert pub.publish_line_snapshots("2026-09-22") == 0
+        assert len(conns) == 1
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(row.format(m=7) + row.format(m=9))
+        assert pub.publish_line_snapshots("2026-09-22") == 2
+        assert [p["snapshot_at"] for p in conns[1].executed] == \
+            ["2026-09-22T21:07:00Z", "2026-09-22T21:09:00Z"]
+        assert (tmp_path / "line_snapshots_2026-09-22.flushed").read_text() == "5"
+        # A rewritten (shorter) file starts over rather than skipping rows.
+        path.write_text(hdr + row.format(m=11), encoding="utf-8")
+        assert pub.publish_line_snapshots("2026-09-22") == 1
+
+    def test_discord_is_posted_inside_the_tick_before_the_full_publish(self, monkeypatch):
+        import scheduler
+        import tracking.discord_notifier as dn
+
+        order = []
+        monkeypatch.setattr(scheduler, "BASE_ENV", {"THE_ODDS_API_KEY": "k"})
+        monkeypatch.setattr(scheduler, "_run",
+                            lambda cmd, label, **kw: order.append(label))
+        monkeypatch.setattr(dn, "notify_discord_signals",
+                            lambda *a, **kw: order.append("discord") or 1)
+        monkeypatch.setattr(scheduler, "_publish_new_signals",
+                            lambda label: order.append("full-publish"))
+        scheduler.run_nfl_opener_card()
+        assert order == ["nfl-opener-card", "nfl-opener-publish", "discord", "full-publish"]
+
+    def test_a_discord_failure_does_not_stop_the_publish_chain(self, monkeypatch):
+        import scheduler
+        import tracking.discord_notifier as dn
+
+        order = []
+        monkeypatch.setattr(scheduler, "BASE_ENV", {"THE_ODDS_API_KEY": "k"})
+        monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw: order.append(label))
+
+        def _boom(*a, **kw):
+            raise RuntimeError("webhook down")
+
+        monkeypatch.setattr(dn, "notify_discord_signals", _boom)
+        monkeypatch.setattr(scheduler, "_publish_new_signals",
+                            lambda label: order.append("full-publish"))
+        scheduler.run_nfl_opener_card()
+        assert order[-1] == "full-publish"

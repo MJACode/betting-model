@@ -66,8 +66,14 @@ BEGIN
   -- version marker is deliberate — tests/test_live_record_start_views.py
   -- records a migration that reverted itself every pass because its guard
   -- tested something other than the thing it was meant to assert.
+  -- 't.paused', not 'paused' (2026-09-28): the join to model_action_thresholds
+  -- is the thing this file removes, and every definition that carried it said
+  -- `t.paused IS NOT TRUE`. The bare word now appears legitimately in the
+  -- current definition (record_excludes_paused_rows_2026_09_28.sql filters on
+  -- the row's 'model paused' marker), and a bare-'paused' guard would read
+  -- that as "not applied" and revert it on every pass.
   d := pg_get_viewdef('public.v_public_track_record'::regclass, true);
-  IF position('min_prob' in d) = 0 AND position('paused' in d) = 0 THEN
+  IF position('min_prob' in d) = 0 AND position('t.paused' in d) = 0 THEN
     RAISE NOTICE 'v_public_track_record already reports the record as fired - skipping';
   ELSE
     EXECUTE $v$
@@ -110,7 +116,7 @@ BEGIN
   -- The same population grouped by day: the equity curve must total to the
   -- hero card, or the screen contradicts itself.
   d := pg_get_viewdef('public.v_public_track_record_daily'::regclass, true);
-  IF position('min_prob' in d) = 0 AND position('paused' in d) = 0 THEN
+  IF position('min_prob' in d) = 0 AND position('t.paused' in d) = 0 THEN
     RAISE NOTICE 'v_public_track_record_daily already reports the record as fired - skipping';
   ELSE
     EXECUTE $v$

@@ -161,6 +161,35 @@ def seasons_with_too_few_snapshots(rows: list[dict]) -> list[tuple[int, int]]:
                   if len(d) < MIN_SNAPSHOTS_PER_SEASON)
 
 
+def live_season_snapshot_grace(game_dates: list[str],
+                               floor: int = MIN_SNAPSHOTS_PER_SEASON) -> bool:
+    """True when the current season has not been going long enough to owe
+    `floor` daily as-of snapshots.
+
+    The ingestor writes one `as_of_date` per pipeline day. NHL 2027's first
+    finals are all 2026-09-29 (5 games); the 2026-09-30 pipeline wrote the
+    only snapshot, `games_played=1`. That is the series, not the leak. The
+    leak is 1–2 snapshots across a finished multi-month season, and this
+    function does not apply to those seasons — `verify` calls it only for
+    the current max season.
+
+    No completed dates is not a grace. A games read that returns nothing
+    must not hide a collapsed live series. One final date is opening night.
+    The day count is exclusive (`max - min`): the first snapshot lands the
+    morning after the first final, so a healthy writer has cleared `floor`
+    snapshots once finals span `floor` days. A shorter span with one or two
+    snapshots is still opening week.
+    """
+    dates = sorted({str(d)[:10] for d in game_dates if d})
+    if not dates:
+        return False
+    if len(dates) == 1:
+        return True
+    d0 = datetime.strptime(dates[0], "%Y-%m-%d")
+    d1 = datetime.strptime(dates[-1], "%Y-%m-%d")
+    return (d1 - d0).days < floor
+
+
 # ── building the series ──────────────────────────────────────────────────────
 
 
@@ -331,8 +360,17 @@ def verify(conn: DBConnection, sport: str, seasons: list[int]) -> dict:
     live daily ingest with real rate stats (see `already_a_series`), and the
     stats feed is routinely ahead of `games` final scores. Comparing it to
     scored rows alone yields thousands of false CRITs (e.g. MIN 2026-05-05
-    claimed 35 / scored 27). Thin-snapshot detection still covers every
-    season — that is what catches the original 1–2 row leak shape.
+    claimed 35 / scored 27).
+
+    Thin-snapshot detection still covers every historical season, and it
+    still covers the live season once that season's finals span
+    MIN_SNAPSHOTS_PER_SEASON days. A shorter span is opening week: one
+    as-of date per pipeline day is expected (NHL 2027 on 2026-09-30 was
+    one snapshot and one final date, and the health gate marked it
+    STALE/CRIT). A live season that already spans the floor and still has
+    1–2 snapshots is the original leak shape and stays thin.
+    `live_snapshot_grace` is that season when the thin hit was excused,
+    else None.
     """
     table = SPORTS[sport]["table"]
     marks = ",".join("?" for _ in seasons)
@@ -356,10 +394,20 @@ def verify(conn: DBConnection, sport: str, seasons: list[int]) -> dict:
             for d in dates:
                 played[(team, season, d)] = sum(1 for x in tg if x["date"] < d)
 
+    thin = seasons_with_too_few_snapshots(stored)
+    grace_season = None
+    if live_season is not None and any(s == live_season for s, _n in thin):
+        live_dates = [g["date"] for g in _games(conn, sport, [live_season])
+                      if int(g["season"]) == int(live_season)]
+        if live_season_snapshot_grace(live_dates):
+            grace_season = live_season
+            thin = [(s, n) for s, n in thin if s != live_season]
+
     return {"sport": sport, "rows": len(stored),
             "impossible": impossible_games_played(hist_stored, played),
-            "thin_seasons": seasons_with_too_few_snapshots(stored),
-            "skipped_live_season": live_season}
+            "thin_seasons": thin,
+            "skipped_live_season": live_season,
+            "live_snapshot_grace": grace_season}
 
 
 def main() -> None:
@@ -405,6 +453,11 @@ def main() -> None:
                 if thin:
                     logger.error(f"{sport}: seasons with too few snapshots: {thin}")
                     failed = True
+                elif v.get("live_snapshot_grace") is not None:
+                    logger.info(
+                        f"{sport}: live season {v['live_snapshot_grace']} is "
+                        f"inside the opening snapshot grace "
+                        f"(<{MIN_SNAPSHOTS_PER_SEASON} days of finals)")
                 if not bad and not thin:
                     logger.success(f"{sport}: {v['rows']} rows pass both invariants")
     finally:

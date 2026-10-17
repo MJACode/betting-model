@@ -15,8 +15,15 @@ less useful since pure function tests don't need data, but integration is more m
 with a populated DB).
 
 ```bash
-# Install once
-python -m pip install "pytest>=8.0.0"
+# Install once: pytest, a pip-packaged node for the tests that run the app's
+# TypeScript (tests/_node.py), and a pip-packaged Postgres for the two files
+# that drive real triggers on a throwaway cluster (tests/_pg.py). System
+# installs are used first when present.
+python -m pip install -r requirements-test.txt
+
+# Once more, for the app's own verify scripts (they need mobile/node_modules):
+# scripts/npm.py runs npm through the pip node when there is no system npm.
+cd mobile && python ../scripts/npm.py ci --no-audit --no-fund && cd ..
 
 # Run all tests
 python -m pytest tests/ -v

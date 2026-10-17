@@ -448,16 +448,26 @@ def test_the_connection_only_sets_a_timeout_when_asked(monkeypatch):
 
     import data.db
 
-    # The timeout logic moved into data.db._connect on 2026-09-06 when
-    # get_connection gained a session_mode branch; both modes route through it,
-    # so the property is unchanged and this reads the function that now owns it.
-    src = inspect.getsource(data.db._connect)
+    # The env read moved from _connect into _session_options on 2026-10-16.
+    # _connect and _open pass that string into the DSN, and a reconnect
+    # re-reads it. Both get_connection modes still route through _connect.
+    src = inspect.getsource(data.db._session_options)
     assert 'os.environ.get("DB_STATEMENT_TIMEOUT_MS"' in src
     assert "isdigit()" in src, "a non-numeric value must not reach the DSN"
-    # ...and both modes must actually go through it, or one of them silently
-    # loses the timeout opt-in.
+    assert "_session_options(" in inspect.getsource(data.db._connect)
+    assert "_session_options(" in inspect.getsource(data.db._open)
     outer = inspect.getsource(data.db.get_connection)
     assert outer.count("_connect(") >= 2
+
+    # Absent or non-numeric: the database's own timeout. A number is the
+    # only value that sets one.
+    monkeypatch.delenv("DB_STATEMENT_TIMEOUT_MS", raising=False)
+    monkeypatch.delenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", raising=False)
+    assert data.db._session_options() is None
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT_MS", "nope")
+    assert data.db._session_options() is None
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT_MS", "120000")
+    assert data.db._session_options() == "-c statement_timeout=120000"
 
 
 def test_a_reclaim_gives_the_attempt_back():
@@ -616,7 +626,8 @@ def test_void_dedupes_sorts_and_trims():
     cleaned = q._validate_void_picks({"pick_ids": [661, "661", 12],
                                       "reason": "  phantom games row, never scheduled  "})
     assert cleaned == {"pick_ids": [12, 661],
-                       "reason": "phantom games row, never scheduled"}
+                       "reason": "phantom games row, never scheduled",
+                       "allow_posted": False}
 
 
 class _VoidConn:
@@ -675,6 +686,68 @@ def test_a_pick_that_does_not_exist_is_reported_as_missing(monkeypatch):
     conn, out = _run_void(monkeypatch, [], pick_ids=(661, 999999))
     assert out == {"voided": [], "refused": [], "missing": [661, 999999]}
     assert conn.writes == []
+
+
+# mike, 2026-10-09: "Change the rule, void them". A posted pick is voided only
+# when the job says so in so many words: "allow_posted": true.
+
+def test_void_allow_posted_defaults_off_and_must_be_a_real_boolean():
+    base = {"pick_ids": [2558703], "reason": "decided on a price nobody could bet"}
+    assert q._validate_void_picks(base)["allow_posted"] is False
+    assert q._validate_void_picks({**base, "allow_posted": True})["allow_posted"] is True
+    assert q._validate_void_picks({**base, "allow_posted": False})["allow_posted"] is False
+    for bad in ("true", 1, "yes", None):
+        with pytest.raises(ValueError, match="allow_posted"):
+            q._validate_void_picks({**base, "allow_posted": bad})
+
+
+def _posted_row(result=None):
+    # Eight columns: _select's last one is `posted`.
+    return (2558703, "NCAAF_2026-11-07_oregon_ohio-state", "ncaaf_over_under",
+            "Ohio State vs Oregon Under 52.5", "BET", result,
+            "2026-09-20 18:22:12+00", True)
+
+
+def _run_void_job(monkeypatch, rows, **args):
+    conn = _VoidConn(rows)
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+    cleaned = q._validate_void_picks({"pick_ids": [2558703],
+                                      "reason": "decided on a price nobody could bet",
+                                      **args})
+    # The opt-in must survive validation, or the job never sees it.
+    assert cleaned["allow_posted"] is args.get("allow_posted", False)
+    return conn, q._job_void_picks(**cleaned)
+
+
+def test_the_job_refuses_a_posted_pick_without_the_opt_in(monkeypatch):
+    conn, out = _run_void_job(monkeypatch, [_posted_row()])
+    assert out["voided"] == [] and conn.writes == []
+    why = out["refused"][0][1]
+    assert "posted as a signal" in why and "allow_posted" in why
+
+
+def test_the_job_voids_a_posted_pick_with_the_opt_in(monkeypatch):
+    notices = []
+
+    def _announce(rows, reason):
+        notices.append((rows, reason))
+        return {"dry_run": False, "posted": 1}
+
+    monkeypatch.setattr("scripts.void_picks.announce_posted_voids", _announce)
+    conn, out = _run_void_job(monkeypatch, [_posted_row()], allow_posted=True)
+    assert out["voided"] == [2558703] and out["refused"] == [] and out["missing"] == []
+    assert out["void_notice"] == {"dry_run": False, "posted": 1}
+    (params,) = conn.writes
+    assert params[0] == "NO_ACTION" and params[-1] == 2558703
+    assert [r["pick_id"] for item in notices for r in item[0]] == [2558703]
+    assert notices[0][1] == "decided on a price nobody could bet"
+
+
+def test_the_job_never_voids_a_graded_posted_pick(monkeypatch):
+    conn, out = _run_void_job(monkeypatch, [_posted_row("LOSS")], allow_posted=True)
+    assert out["voided"] == [] and conn.writes == []
+    assert out["refused"] == [[2558703, "already graded LOSS"]]
 
 
 # ── ncaaf_teams_refresh ──────────────────────────────────────────────────────

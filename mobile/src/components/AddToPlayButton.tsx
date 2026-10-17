@@ -24,6 +24,8 @@ export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
       // taps meant for its neighbour (UX review, 2026-09-05).
       hitSlop={{ top: 11, bottom: 11, left: 6, right: 6 }}
       accessibilityRole="button"
+      // VoiceOver says "selected" on the ON state, not only a changed label.
+      accessibilityState={{ selected: inPlay }}
       accessibilityLabel={
         inPlay
           ? 'In your betslip. Tap to remove.'
@@ -40,13 +42,13 @@ export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
         <Ionicons
           name={inPlay ? 'checkmark' : 'add'}
           size={compact ? 14 : 16}
-          color={inPlay ? colors.bet : colors.tint}
+          color={colors.tint}
         />
         <Text
           style={[
             styles.text,
             compact && styles.textCompact,
-            { color: inPlay ? colors.bet : colors.tint },
+            { color: colors.tint },
           ]}
         >
           {inPlay ? (compact ? 'In slip' : 'In betslip') : compact ? 'Slip' : 'Add to betslip'}
@@ -71,9 +73,11 @@ const styles = StyleSheet.create({
     borderColor: colors.tint,
     backgroundColor: colors.bgCard,
   },
+  // ON is outlined in tint with a checkmark, not green: green means only
+  // "good for the user" (UX_REVIEW §2; Designer ruling, 2026-09-25).
   inPlay: {
-    borderColor: colors.bet,
-    backgroundColor: colors.betSoft,
+    borderColor: colors.tint,
+    backgroundColor: colors.bgCard,
   },
   row: {
     flexDirection: 'row',

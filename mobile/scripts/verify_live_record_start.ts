@@ -128,7 +128,7 @@ check('custom-model copy names the BACKTEST window, not the live one',
 
 // CLAUDE.md §2: the platform is LIVE. "paper" must not appear in user copy, and
 // after the reset every model is under the 50-pick gate, so a sentence about
-// staying "paper-only" until 50 reads as "all of this is paper".
+// staying "live" until 50 reads as "all of this is paper".
 const PAPER = /\bpaper[- ]?(only|trading)?\b/i;
 const paperCopy = FILES.filter((f) => {
   const rel = relative(SRC, f).replace(/\\/g, '/');

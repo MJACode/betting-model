@@ -60,7 +60,8 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
 
 type ParlayNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -288,8 +289,10 @@ export function ParlayScreen() {
           </View>
           <View style={styles.rightActions}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Saved parlays${savedParlays.count > 0 ? `, ${savedParlays.count}` : ''}`}
               onPress={() => navigation.navigate('SavedParlays')}
-              hitSlop={8}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
               style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
             >
               <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
@@ -320,9 +323,13 @@ export function ParlayScreen() {
         </Text>
 
         {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {error}</Text>
-          </View>
+          <ErrorBanner
+            what="today’s picks for the slip"
+            error={error}
+            onRetry={() => void refresh()}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
         ) : null}
 
         {resolving ? (
@@ -363,7 +370,7 @@ export function ParlayScreen() {
                 onPress={closeCustom}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Close"
+                accessibilityLabel="Close custom leg"
               >
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>
@@ -371,6 +378,7 @@ export function ParlayScreen() {
 
             <Text style={styles.panelTitle}>Pick</Text>
             <TextInput
+              accessibilityLabel="Pick"
               style={styles.customInput}
               value={customLabel}
               onChangeText={setCustomLabel}
@@ -381,6 +389,7 @@ export function ParlayScreen() {
 
             <Text style={styles.panelTitle}>American odds</Text>
             <TextInput
+              accessibilityLabel="Odds, American"
               style={styles.customInput}
               value={customOddsText}
               onChangeText={setCustomOddsText}
@@ -397,6 +406,9 @@ export function ParlayScreen() {
             </Text>
 
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add leg"
+              accessibilityState={{ disabled: !customValid }}
               onPress={handleSaveCustom}
               disabled={!customValid}
               style={({ pressed }) => [
@@ -597,12 +609,22 @@ const GRADE_COLOR: Record<ParlayGrade, string> = {
   bad: colors.avoid,
 };
 
+// The WORD's colour. The hues above stay on the wash and the border; as text
+// they were 2.0 / 3.4 / 2.0 / 3.0:1 on their own wash (audit H2). `good` has
+// no blue ink, so its word is textPrimary and the blue wash carries the tone.
+const GRADE_INK: Record<ParlayGrade, string> = {
+  great: colors.betInk,
+  good: colors.textPrimary,
+  fair: colors.medInk,
+  bad: colors.avoidInk,
+};
+
 /** Great / Good / Fair / Bad pill, graded on the correlated EV. */
 function GradeBadge({ grade, small }: { grade: ParlayGrade; small?: boolean }) {
   const c = GRADE_COLOR[grade];
   return (
     <View style={[styles.gradeBadge, small && styles.gradeBadgeSmall, { backgroundColor: `${c}22`, borderColor: c }]}>
-      <Text style={[styles.gradeBadgeText, small && styles.gradeBadgeTextSmall, { color: c }]}>
+      <Text style={[styles.gradeBadgeText, small && styles.gradeBadgeTextSmall, { color: GRADE_INK[grade] }]}>
         {GRADE_LABEL[grade]}
       </Text>
     </View>
@@ -626,7 +648,7 @@ function CorrelatedExtras({ m, allDk }: { m: CorrelatedMetrics; allDk: boolean }
       </View>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>{holdPositive ? (allDk ? 'DK hold on this slip' : 'Hold on this slip') : 'Your edge on this slip'}</Text>
-        <Text style={[styles.corrValue, { color: holdPositive ? colors.avoid : colors.bet }]}>
+        <Text style={[styles.corrValue, { color: holdPositive ? colors.avoidInk : colors.betInk }]}>
           {formatPct(Math.abs(m.dkHoldPct))}
         </Text>
       </View>
@@ -658,18 +680,18 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
   return (
     <View style={styles.lineShop}>
       <View style={styles.lineShopHeader}>
-        <Ionicons name="pricetag-outline" size={13} color={colors.bet} />
+        <Ionicons name="pricetag-outline" size={13} color={colors.tint} />
         <Text style={styles.lineShopTitle}>Line shop</Text>
       </View>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>Best-book odds</Text>
-        <Text style={[styles.corrValue, { color: colors.bet }]}>
+        <Text style={[styles.corrValue, { color: colors.betInk }]}>
           {formatAmerican(lineShop.americanOdds)} vs DK {formatAmerican(dkAmerican)}
         </Text>
       </View>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>EV at best books</Text>
-        <Text style={[styles.corrValue, { color: lineShop.ev >= 0 ? colors.bet : colors.avoid }]}>
+        <Text style={[styles.corrValue, { color: pnlColor(lineShop.ev, 1, 100) }]}>
           {formatPctSigned(lineShop.ev)} ({formatPctSigned(lineShop.evDelta)})
         </Text>
       </View>
@@ -756,6 +778,9 @@ function SlipBody({
   const staleNote =
     staleCount > 0 ? (
       <Pressable
+        hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+        accessibilityRole="button"
+        accessibilityLabel={`${staleCount} selection${staleCount === 1 ? '' : 's'} can't be priced right now. Tap to remove ${staleCount === 1 ? 'it' : 'them'}.`}
         onPress={onClearStale}
         style={({ pressed }) => [styles.missingNote, pressed && styles.pressed]}
       >
@@ -782,6 +807,8 @@ function SlipBody({
           subtitle={'Find a player you want to bet and tap "Add to betslip" — you\'ll come right back here. Picks from the Picks tab work too, or enter a custom leg.'}
         />
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Find players to add"
           onPress={onFindPlayers}
           style={({ pressed }) => [styles.buildBtn, styles.manualBtn, pressed && styles.pressed]}
         >
@@ -789,6 +816,8 @@ function SlipBody({
           <Text style={styles.buildBtnText}>Find players to add</Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add a custom leg"
           onPress={onAddCustom}
           style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
         >
@@ -806,7 +835,7 @@ function SlipBody({
     <View>
       {!valid ? (
         <View style={styles.warnBanner}>
-          <Ionicons name="warning-outline" size={16} color={colors.med} />
+          <Ionicons name="warning-outline" size={16} color={colors.medInk} />
           <Text style={styles.warnText}>
             Two game-line legs from the same game can't be parlayed together — remove one.
           </Text>
@@ -832,12 +861,12 @@ function SlipBody({
           <Stat
             label="EV"
             value={formatPctSigned(metrics.ev)}
-            color={metrics.ev >= 0 ? colors.bet : colors.avoid}
+            color={pnlColor(metrics.ev, 1, 100)}
           />
           <Stat
             label="Edge"
             value={formatPctSigned(metrics.edgeVsDk)}
-            color={metrics.edgeVsDk >= 0 ? colors.bet : colors.avoid}
+            color={pnlColor(metrics.edgeVsDk, 1, 100)}
           />
           <Stat label={allDk ? 'DK imp.' : 'Implied'} value={formatPct(metrics.dkImpliedProb)} />
         </View>
@@ -854,7 +883,7 @@ function SlipBody({
             only when a live leg is actually in the slip. */}
         {legs.some((l) => l.isLive) ? (
           <View style={styles.liveLegNote}>
-            <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+            <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.liveLegNoteText}>
               This slip has an in-play leg. Live prices are DraftKings’ and can be up to
               ~45s old — check the number at DK before you place it.
@@ -910,7 +939,7 @@ function SlipBody({
           banner as a fifth grid cell splits the two rows apart. */}
       {editingId && staleCount + removedCount > 0 ? (
         <View style={styles.warnBanner}>
-          <Ionicons name="warning-outline" size={16} color={colors.med} />
+          <Ionicons name="warning-outline" size={16} color={colors.medInk} />
           <Text style={styles.warnText}>
             {staleCount + removedCount} leg{staleCount + removedCount === 1 ? '' : 's'}{' '}
             {staleCount + removedCount === 1 ? 'is' : 'are'} no longer on the board —
@@ -940,6 +969,7 @@ function SlipBody({
           onSaved={onSaved}
         />
         <Pressable
+          accessibilityLabel="Find players"
           onPress={onFindPlayers}
           accessibilityRole="button"
           style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
@@ -948,6 +978,7 @@ function SlipBody({
           <Text style={styles.gridBtnText}>Find players</Text>
         </Pressable>
         <Pressable
+          accessibilityLabel="Custom leg"
           onPress={onAddCustom}
           accessibilityRole="button"
           style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
@@ -1067,19 +1098,8 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  errorBanner: {
-    marginTop: spacing.md,
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: {
-    color: colors.avoid,
-    fontSize: font.size.footnote,
-  },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: spacing.md, marginBottom: spacing.sm },
   panelTitle: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
@@ -1180,7 +1200,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   clearBtnText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
@@ -1196,15 +1216,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     borderRadius: radii.md,
     padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
   },
+  // medInk 4.99:1 on medSoft; `med` was 1.97:1. The icon keeps amber (M24).
   warnText: {
     flex: 1,
-    color: colors.med,
+    color: colors.medInk,
     fontSize: font.size.footnote,
     fontWeight: font.weight.medium,
   },
@@ -1325,7 +1346,7 @@ const styles = StyleSheet.create({
   lineShopTitle: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: colors.bet,
+    color: colors.betInk,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },

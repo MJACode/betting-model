@@ -23,12 +23,22 @@ import {
   storedQuoteBook,
 } from '@/lib/markets';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
+import { modelProbabilityNote } from '@/lib/modelMeta';
+import { reasoningHeading } from '@/lib/pickCta';
 
 interface Props {
   pick: Pick;
+  /** Paused model, never posted (isPausedForDisplay): no stake row — the
+   *  model's number is shown, but nothing sizes it as a bet. */
+  paused?: boolean;
+  /** The deciding book has not updated this price within the 3-hour bound
+   *  (markets.heroAmericanForPick `stale`; the card's "Old price"): no stake
+   *  row and no edge, as on the card. A stake is an instruction to bet at a
+   *  number the book no longer offers. */
+  stale?: boolean;
 }
 
-export function ReasoningCard({ pick }: Props) {
+export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
   // Everything here is at the price the pick was DECIDED at (2026-09-09):
   // the best bettable price at the DraftKings line, DraftKings itself on
   // rows from before the flip.
@@ -49,12 +59,15 @@ export function ReasoningCard({ pick }: Props) {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.heading}>Why this bet?</Text>
+      {/* M14: "Why this bet?" only on a bet (lib/pickCta reasoningHeading). */}
+      <Text style={styles.heading}>
+        {reasoningHeading(pick.signal_type, { paused, preview: isUnlockedPreview(pick) })}
+      </Text>
 
       <Row
         label="Model probability"
         value={formatPct(pick.model_probability)}
-        sub="What our model says is the chance this side hits."
+        sub={modelProbabilityNote(pick.model_id)}
       />
 
       {odds != null ? (
@@ -71,11 +84,17 @@ export function ReasoningCard({ pick }: Props) {
         />
       )}
 
-      {!isProbOnly ? (
+      {!isProbOnly && stale ? (
+        <Row
+          label="Edge"
+          value="—"
+          sub={`${bookFull} has not updated this price since the time shown above, so edge is not shown.`}
+        />
+      ) : !isProbOnly ? (
         <Row
           label="Edge"
           value={formatPctSigned(edge)}
-          tint={passesActionFilter(pick) ? colors.bet : pick.signal_type === 'AVOID' ? colors.avoid : undefined}
+          tint={passesActionFilter(pick) ? colors.betInk : pick.signal_type === 'AVOID' ? colors.avoidInk : undefined}
           sub={`= model ${formatPct(pick.model_probability)} − ${book} ${formatPct(implied)}. Positive means we think the side is mispriced in our favor.`}
         />
       ) : (
@@ -86,7 +105,7 @@ export function ReasoningCard({ pick }: Props) {
         />
       )}
 
-      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) ? (
+      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) && !paused && !stale ? (
         <Row
           label="Stake"
           value={

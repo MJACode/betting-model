@@ -11,7 +11,8 @@ import {
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import type { LinkedAccount } from '@/lib/sharpsports';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** Books we don't yet support connecting — shown as "Coming soon". */
 const COMING_SOON: { abbrev: string; name: string }[] = [
@@ -49,7 +50,7 @@ export function ConnectSportsbookScreen() {
       // If no account came back, the user likely cancelled the Booklink flow —
       // stay silent rather than claiming a connection.
     } catch (e) {
-      Alert.alert('Could not start linking', errorText(e));
+      if (!isAbortError(e)) Alert.alert('Couldn’t start linking', friendlyCause(e));
     } finally {
       setPending(null);
     }
@@ -115,6 +116,8 @@ export function ConnectSportsbookScreen() {
 
               {linked && !unverified ? (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Disconnect ${book.name}`}
                   onPress={() => onDisconnect(book)}
                   style={({ pressed }) => [styles.btnSecondary, pressed && styles.btnPressed]}
                 >
@@ -122,6 +125,9 @@ export function ConnectSportsbookScreen() {
                 </Pressable>
               ) : (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={unverified ? `Reconnect ${book.name}` : `Connect ${book.name}`}
+                  accessibilityState={{ busy: isPending, disabled: isPending }}
                   onPress={() => onConnect(book)}
                   disabled={isPending}
                   style={({ pressed }) => [
@@ -176,6 +182,7 @@ export function ConnectSportsbookScreen() {
           We never see or store your sportsbook password. You log in through SharpSports' secure
           hosted flow, and the app only ever receives read-only bet history.
         </Text>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -278,14 +285,14 @@ const styles = StyleSheet.create({
   },
   statusPillText: {
     fontSize: font.size.caption,
-    color: colors.bet,
+    color: colors.betInk,
     fontWeight: font.weight.semibold,
   },
   statusPillWarn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: radii.pill,
@@ -296,9 +303,10 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: colors.med,
   },
+  // medInk 4.99:1 on medSoft; `med` was 1.97:1. The dot keeps amber (M24).
   statusPillWarnText: {
     fontSize: font.size.caption,
-    color: colors.med,
+    color: colors.medInk,
     fontWeight: font.weight.semibold,
   },
   btnPrimary: {
@@ -319,7 +327,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   btnSecondaryText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
   },

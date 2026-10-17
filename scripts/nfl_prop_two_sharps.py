@@ -29,6 +29,11 @@ per proposition, real DraftKings-side prices, and the same 5pp starting point.
 
     python -m scripts.nfl_prop_two_sharps
     python -m scripts.nfl_prop_two_sharps --min-edge 0.04
+
+NOT THE CARD'S POPULATION SINCE 2026-10-12. This grader keeps each key's newest
+row however old it is. The live card now drops rows a book had stopped
+quoting (models.nfl_prop_market.drop_pulled_quotes), so a figure from here can
+include props the card would not bet.
 """
 from __future__ import annotations
 

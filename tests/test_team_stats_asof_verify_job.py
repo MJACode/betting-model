@@ -55,8 +55,12 @@ def test_job_calls_verify_and_never_rebuilds():
     assert "rebuild_sport" not in src
     assert "DELETE FROM" not in src
     assert "RuntimeError" in src
-    # Surfaces verify()'s live-season skip in the job summary (not a rebuild).
+    # Surfaces verify()'s live-season skip and opening grace in the job
+    # summary (not a rebuild). The grace is not itself a failure.
     assert "skipped_live_season" in src
+    assert "live_snapshot_grace" in src
+    fail_block = src[src.index("if v[\"impossible\"]"):]
+    assert "live_snapshot_grace" not in fail_block
 
 
 def test_declared_job_is_present_and_validates():

@@ -53,6 +53,8 @@ import { FilterField } from './FilterField';
 import { FilterSection, FilterSheet } from './FilterSheet';
 import { GameFilterSection } from './GameFilterSection';
 import { gameFilterSummary, type SelectableGame } from '@/lib/gameFilter';
+import { dateFilterSummary, datesAreNarrowed, type DateOption } from '@/lib/dateFilter';
+import { signalDisplayName } from '@/lib/tone';
 import type { SignalType } from '@/types';
 
 // Re-exported so the screens keep one import site for the whole filter surface.
@@ -66,6 +68,7 @@ export {
 export type { ModelCategory, PicksFilterState } from '@/lib/pickFilterState';
 
 const EMPTY_SELECTION: Set<string> = new Set();
+const EMPTY_DATES: DateOption[] = [];
 
 interface Props {
   state: PicksFilterState;
@@ -101,6 +104,15 @@ interface Props {
   selectedGames?: Set<string>;
   onToggleGame?: (gameId: string) => void;
   onClearGames?: () => void;
+  /**
+   * The days the board's picks fall on, and which the user has picked (Matt,
+   * 2026-09-26: "games could be on different days"). Empty selection = every
+   * date. The section only renders when there is more than one day to choose.
+   */
+  dateOptions?: DateOption[];
+  selectedDates?: Set<string>;
+  onToggleDate?: (date: string) => void;
+  onClearDates?: () => void;
   /** Hide the Signal section (Signals are all BET — the chips are noise). */
   showSignals?: boolean;
   /** Noun for counts and the sheet footer, e.g. "pick" / "signal". */
@@ -122,6 +134,10 @@ export function PickFilters({
   selectedGames = EMPTY_SELECTION,
   onToggleGame,
   onClearGames,
+  dateOptions = EMPTY_DATES,
+  selectedDates = EMPTY_SELECTION,
+  onToggleDate,
+  onClearDates,
   showSignals = true,
   itemNoun = 'pick',
 }: Props) {
@@ -182,6 +198,22 @@ export function PickFilters({
   // Clear all — the exact blindness the pill row was added to end. It also made
   // Reset look like it cleared something that had never been shown as set.
   const gamesNarrowed = selectedGames.size > 0;
+  // The Date cut, in the bar for the same reason as Games: a narrowed board
+  // with no badge and no pill reads as a board that lost its picks.
+  const datesNarrowed = datesAreNarrowed(selectedDates, dateOptions);
+  const dateSummary = dateFilterSummary(selectedDates, dateOptions);
+  // One day on the board is nothing to cut — hide the section, as Market does.
+  const dateCutBites = !!onToggleDate && (dateOptions.length > 1 || datesNarrowed);
+  const dateChips = dateOptions.map((o) => (
+    <FilterChip
+      key={o.date}
+      label={o.label}
+      count={o.count}
+      active={selectedDates.has(o.date)}
+      onPress={() => onToggleDate!(o.date)}
+      accessibilityLabel={`${o.spoken}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
+    />
+  ));
   const searchActive = search.trim().length > 0;
   const pills = useMemo(() => {
     const out = buildPills(state, onChange, presentCategories);
@@ -191,6 +223,9 @@ export function PickFilters({
         label: `"${search.trim()}"`,
         onRemove: () => onSearchChange(''),
       });
+    }
+    if (datesNarrowed && onClearDates) {
+      out.push({ key: 'dates', label: dateSummary, onRemove: onClearDates });
     }
     if (gamesNarrowed && onClearGames) {
       out.push({
@@ -207,6 +242,9 @@ export function PickFilters({
     searchActive,
     search,
     onSearchChange,
+    datesNarrowed,
+    dateSummary,
+    onClearDates,
     gamesNarrowed,
     games,
     selectedGames,
@@ -215,11 +253,13 @@ export function PickFilters({
 
   const count =
     activeFilterCount(state, presentCategories) +
+    (datesNarrowed ? 1 : 0) +
     (gamesNarrowed ? 1 : 0) +
     (searchActive ? 1 : 0);
 
   const clearAll = () => {
     onChange(freshFilter());
+    onClearDates?.();
     onClearGames?.();
     onSearchChange('');
   };
@@ -284,7 +324,24 @@ export function PickFilters({
           </View>
         </FilterSection>
 
-        {/* GAMES first among CUTS — the widest cut on the sheet, and the same
+        {/* DATE before Games: it is the wider cut, and picking a day narrows
+            the Games list below it to that day's fixtures (the screen passes
+            the date-filtered slate). Multi-select, so "Today + Tomorrow" is
+            one tap each; the count says how many picks are behind a day
+            before the user commits to it. */}
+        {dateCutBites ? (
+          <FilterSection
+            title="Date"
+            subtitle="Kickoff date, ET. Pick one or more."
+            summary={dateSummary}
+            defaultOpen={datesNarrowed}
+            onClear={datesNarrowed ? onClearDates : undefined}
+          >
+            <View style={styles.chipWrap}>{dateChips}</View>
+          </FilterSection>
+        ) : null}
+
+        {/* GAMES after Date — the per-fixture cut, and the same
             control the Stats tab renders from the same selection (Matt,
             2026-09-09). Only where there are fixtures to pick: a UFC card is
             fighters, and the section would be an empty box. */}
@@ -307,18 +364,18 @@ export function PickFilters({
         {showSignals ? (
           <FilterSection
             title="Signal"
-            subtitle="BET, AVOID or no-signal picks."
+            subtitle="BET, AVOID or NEUTRAL picks."
             summary={
               state.signals.size === ALL_SIGNALS.length
                 ? 'All'
-                : ALL_SIGNALS.filter((s) => state.signals.has(s)).join(', ') || 'None'
+                : ALL_SIGNALS.filter((s) => state.signals.has(s)).map(signalDisplayName).join(', ') || 'None'
             }
           >
             <View style={styles.chipWrap}>
               {ALL_SIGNALS.map((s) => (
                 <FilterChip
                   key={s}
-                  label={s}
+                  label={signalDisplayName(s)}
                   active={state.signals.has(s)}
                   onPress={() => toggleSignal(s)}
                 />
@@ -414,7 +471,7 @@ function buildPills(
   if (state.signals.size < ALL_SIGNALS.length) {
     out.push({
       key: 'signals',
-      label: Array.from(state.signals).join(', ') || 'No signals',
+      label: Array.from(state.signals).map(signalDisplayName).join(', ') || 'No signals',
       onRemove: () => patch((d) => (d.signals = new Set(ALL_SIGNALS))),
     });
   }

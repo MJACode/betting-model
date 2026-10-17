@@ -46,6 +46,7 @@ _ROW = (
     -110.0,                                  # decision_odds = COALESCE(decision, dk)
     None,                                    # decision_book
     50.5,                                    # scored_line     (2026-09-12)
+    None,                                    # prop_market     (2026-09-21)
 )
 
 

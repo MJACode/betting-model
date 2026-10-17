@@ -62,10 +62,7 @@ whose label and fields disagree (`tracking/pick_integrity.py`).
 ---
 
 ## 0. HOW TO REPLY — every response, every session, no exceptions
-**This is the first rule in the file because it applies to every single reply,
-including this sentence's session.** Matt asked for it three times across
-different chats before it got written down (2026-08-30). It is not a
-suggestion, it is the required shape of a response.
+Matt asked for it three times before it was written down (2026-08-30).
 
 Every substantive reply ends with these four headings, in this order, always
 present even when a section is empty (say "None" — an omitted heading reads as
@@ -78,13 +75,19 @@ Decisions needed from you
 Outstanding tasks
 ```
 
+**SAY EACH THING ONCE.** (mike, 2026-10-09: *"Why do you keep restating
+results?"*, and 10-10 after the fix's own reply broke it.) NOTHING goes above
+the headings. Each fact under one heading, once; "why" goes under Errors.
+Only what is new since the last reply. Evidence:
+`docs/rules_evidence.md`.
+
 Notes on each:
 
 - **Quick summary of what was done** — what actually changed, not what was
   explored. Past tense, concrete.
-- **Errors or Bugs found and status** — everything found, each with a status
-  (fixed / not fixed / pre-existing / flagged only). Bugs found in passing and
-  deliberately NOT fixed belong here too, with the reason. "None" if none.
+- **Errors or Bugs found and status** — each with a status (fixed / not fixed /
+  pre-existing / flagged only), including ones deliberately not fixed, with the
+  reason.
 - **Decisions needed from you** — anything blocked on the reader, and anything
   where a judgement call was made that they might want reversed. If nothing is
   blocked, say so explicitly. **Second person, never first** (mike,
@@ -97,8 +100,7 @@ Short factual answers to direct questions ("is the worker up?") do not need the
 four headings. Anything involving work done, a change made, or an
 investigation does.
 
-**If you are reading this at the start of a session: this rule survives context
-compaction. Re-read it before the first substantive reply.**
+**This rule survives compaction. Re-read it before the first substantive reply.**
 
 ---
 
@@ -283,7 +285,10 @@ one point, which is why timing is key."*
 Once a model produces a BET at a line and a price, **that pick existed** and is
 the bet of record. If the line then moves so the model would no longer take it,
 that is LINE MOVEMENT: it does not retract the bet, does not change the number
-that was given, and **must never delete or overwrite the row**. Every model locks
+that was given, and **must never delete or overwrite the row**. The published
+record (Discord, X, `results_snapshots`, the two app views) counts a settled
+BET only while Discord still holds its lock (`v_discord_published`). An
+unposted row stays in `picks`. Every model locks
 its pick — game-level at the first scoring run, props at the first signal on a
 confirmed lineup, live at the first BET per lane, NFL wind/opener by
 construction. **Timing is data, not metadata:** `created_at` is when the number
@@ -293,21 +298,21 @@ was available and is part of the pick's meaning.
   (mike, 2026-09-12: *"Pausing a model should not erase settled record unless I
   explicitly say so."*) A pick is in the record because it was WRITTEN as a
   BET; no pause, threshold change or retrain reaches back and removes one.
-  One query answering both "may bet next" and "did bet" moves the number with
-  nothing deleted — 55 settled NCAAF bets, overnight. A record query filters on
-  what the pick WAS (`signal_type='BET'`, a real result, in the window), never
-  joining `model_action_thresholds`. The exits: **VOID** — a row the model should never
+  A record query filters on what the pick WAS (`signal_type='BET'`, a real
+  result, in the window), never joining `model_action_thresholds`. One event
+  bet twice under two game ids counts once: the extra copy is
+  `condition_status='DUPLICATE'`, result kept (mike 10-09). The exits: **VOID** — a row the model should never
   have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
   sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
-  the line, the price and the lock, and REFUSES a graded pick (deleting
-  destroys the evidence) — and **`config.RECORD_EXCLUSIONS`**, naming who
+  line, price and lock. REFUSES graded picks; posted ones (Matt 09-28) need
+  `--allow-posted` (mike 10-09) — and **`config.RECORD_EXCLUSIONS`**, naming who
   asked. Sweep views DO re-cut (§7). Test:
   `tests/test_settled_record_is_immutable.py`.
   **A paused model is LISTED, not hidden** on the Record tab (mike, same day:
   *"Don't hide detail of paused models unless I say so"*) — its settled bets
   stay in the published record. Matt, 2026-09-19: hide paused models from the
-  mobile *catalog* (Models list, bet-type builder, Stats add-pick, Today /
-  Signals / Live boards and their Market chips). Hiding the settled record is
+  mobile *catalog* (Models list, bet-type builder, Stats add-pick, Signals /
+  Live boards; All marks them PAUSED, Matt 09-26). Hiding the settled record is
   still the bug; hiding an unactionable model from a follow-list is not.
   RETIRED differs: nothing will score for it again.
 
@@ -323,27 +328,20 @@ primary sportsbook. The long-term goal is all major US sports with all player
 props. Seven sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL and NCAAF
 (§8). **GOLF was retired 2026-09-08** (mike) — `config.RETIRED_MODELS`.
 
-**The platform is LIVE — this is not a paper-trading system.** Do not describe
-it as paper trading in any user-facing surface (Discord, the app, email, the
-dashboard). It was framed that way through 2026 H1 and the wording lingered in
-copy long after it stopped being true; that is what produced a "Paper trading"
-footer on a real daily-results recap on 2026-08-29.
+**Every model is live real money.** There is no second mode that counts a
+graded pick in the win-loss record and leaves it out of the units, and there
+is no hold-back ledger. Units and the record are the same graded set, sized by `stake_for`
+(1u to win, risk capped at 3) at `COALESCE(decision_odds, dk_odds)`. A pick with no price is not given a
+made-up price. (mike, 2026-10-14, and 2026-10-08: do not ask to hold a model
+back.) Report gate standing — ≥ 50 settled picks, positive flat-bet ROI,
+calibration error ≤ 5% — and build the model live.
 
-**The go-live gate is per MODEL, not for the platform.** A NEW or retrained
-model is paper-only — surfaced but not backed — until it clears:
-- ≥ 50 settled picks
-- Positive flat-bet ROI
-- Calibration error ≤ 5%
+**`nfl_live_prop` (NFL in-play props) was RETIRED 2026-10-04 and its record
+STRUCK** (mike: *"It was never a good model. Remove this model."*) — 7-17,
+-10.27 units over 24 settled bets. `config.RETIRED_MODELS` + `RECORD_EXCLUSIONS`;
+the worker loop is off unless `RUN_NFL_LIVE=1`. Do not revive it under that id.
 
-Models currently in that state are flagged as PAPER ONLY in their own section
-(e.g. `ncaaf_spread` — see `docs/sports/ncaaf.md`). Everything else is live.
-
-**`nfl_live_prop` is LIVE with the gate deliberately NOT met** (Matt,
-2026-09-05). Settled record at go-live: zero — it wrote to a JSONL file, so it
-could never have cleared the gate by waiting. Raised, restated, his call. **Do
-not pause it or restore the gate without asking him.** Re-sweep its cut at ~50
-settled bets; it runs 0.0/0.0 because the cut is EV, in
-`nfl/live_model/config.EV_THRESHOLDS`. Detail: `docs/rules_evidence.md`.
+**The NHL models are LIVE this way**: `docs/sports/nhl.md`.
 
 ---
 
@@ -379,7 +377,8 @@ flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
 ### Early Season Rule
 No picks until a team has played >= 10 games; prior-season stats are the
 baseline in that window. Season-to-date rates are noise early — blend toward
-the prior season by games played.
+the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
+`docs/sports/nhl.md`).
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
@@ -435,6 +434,7 @@ python -m data.threshold_sync               # config.py -> model_action_threshol
 python -m scripts.emit_threshold_sql        # the action-filter SQL, generated
 python -m models.trainer --model <id>       # retrain (then COMMIT the .pkl)
 python -m pytest -q tests/                  # the only quality gate
+pip install -r requirements-test.txt        # pytest + node for the TS tests, not on the worker
 pip install -r requirements-dashboard.txt   # dashboard deps, not on the worker
 streamlit run dashboard/app.py
 ```
@@ -467,7 +467,7 @@ is scoped to. In one line each, so you know they exist:
 - **A pick is decided, sized and settled at the best bettable price**, and the
   row records which price and whose line (`decision_*`, read as
   `COALESCE(decision_x, dk_x)`). DraftKings stays the REFERENCE for features;
-  CLV grades the locked bet against the no-vig sharp close (`docs/clv.md`).
+  CLV's headline is the bet book's own raw close; Pinnacle's no-vig close is the market-edge column (`docs/clv.md`).
 - **A player prop DraftKings does not list is scored off the first bettable book
   that does** — in `BEST_LINE_BOOKMAKERS` order, never by price. `line_book`
   names it. These picks are a NEW population; report them separately.
@@ -501,7 +501,7 @@ your case; the rules below are complete as stated, the evidence is why.
   Three coverage traps to check FIRST: `NONE` rows only exist from 2026-05-12;
   they were **deleted ~2026-06-26 → 2026-08-09**; and a game where `abs(edge) >
   MAX_EDGE_CAP` gets **no row at all**. Clean windows: 2026-05-12→06-25 and
-  2026-08-09→present. Re-verify by month; never assume.
+  2026-08-09→present (props: only to 08-29). Re-verify by month.
   Full version: `docs/signal_timing.md`.
 - **The method rules — validate the grading before moving a cut, require a
   plateau and not a peak, split early/late, in-sample is in-sample** — are in
@@ -552,15 +552,13 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 65 models carry their
-  own prob/edge cut in `config.ACTION_THRESHOLDS`; 24 are paused.
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 64 models carry their
+  own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline
   steps are left in place; reviving it starts with the key, not with config.
-- **The platform is LIVE, not paper trading.** The go-live gate (≥50 settled
-  picks, positive flat ROI, calibration ≤5%) is per MODEL — a new or retrained
-  model is paper-only until it clears, and that is stated in its own doc.
+- **Every model is live real money.** Units and the record are the same graded set (§2).
 - **Where it runs:** the Railway worker (`scheduler.py`) — 6am daily pipeline,
   intraday refresh passes, the MLB and NCAAF live loops, the NFL card poll.
   See `docs/cloud_worker.md`.
@@ -602,7 +600,7 @@ to be known BEFORE deciding which file to open.
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | **Model artifacts: present, tracked, and loadable** | `docs/artifact_integrity.md` |
 | **NFL wind: how far out it may fire, and the lead evidence** | `docs/nfl_wind_lead_evidence.md` |
-| **NFL 2026 paper-track (opener retire-if-flat, wind MAX_FIRE_LEAD=4, no unit bump)** | `docs/nfl_rule_2026_track.md` |
+| **NFL 2026 opener/wind track (retire-if-flat, wind MAX_FIRE_LEAD=4, no unit bump)** | `docs/nfl_rule_2026_track.md` |
 | **NFL props: near kickoff is the only well-evidenced regime** | `docs/nfl_prop_offset_evidence.md` |
 | Best line on pre-game picks | `docs/best_line.md` |
 | Which prop markets the feed actually serves | `docs/market_coverage.md` |
@@ -676,3 +674,14 @@ does: a cap on this file, a cap on this file PLUS the session-start hook (so
 moving prose between them cannot game it), a per-file cap on each rules file, and
 a check that every rules file is pointed at from here. It fails once, at merge
 time, for whoever grew it — which is why no session needs to spend a reply on it.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.

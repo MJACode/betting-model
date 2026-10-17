@@ -41,6 +41,7 @@ import { bookName, booksNoneName, sideNotPostedNote } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { friendlyCause } from '@/lib/errors';
 import type { StatsOddsQuote } from '@/lib/statsOdds';
 import type { GameRow } from '@/types';
 
@@ -97,7 +98,7 @@ export function PlayerBetBar({
   if (error) {
     return (
       <View style={[styles.card, styles.cardQuiet]}>
-        <Text style={styles.emptyText}>{error}</Text>
+        <Text style={styles.emptyText}>Couldn’t load the odds. {friendlyCause(error)}</Text>
         <Pressable
           onPress={onRetry}
           accessibilityRole="button"
@@ -173,22 +174,6 @@ export function PlayerBetBar({
 
       <View style={styles.actions}>
         <Pressable
-          onPress={onCompare}
-          accessibilityRole="button"
-          accessibilityLabel="Compare odds at every sportsbook, and add to betslip"
-          style={({ pressed }) => [styles.compare, pressed && styles.pressed]}
-        >
-          <Ionicons name="git-compare-outline" size={16} color={colors.textPrimary} />
-          {/* "Compare", not "Compare odds": the secondary is what gives way
-              when the primary needs room, and the short form buys ~38pt — the
-              difference between "Bet +1200 at Hard Rock Bet" fitting and the
-              one word that names WHO takes the bet being truncated. */}
-          <Text style={styles.compareText} numberOfLines={1}>
-            Compare
-          </Text>
-        </Pressable>
-
-        <Pressable
           onPress={() => {
             void openBookBetslip(quote.book, quote.link);
           }}
@@ -212,18 +197,36 @@ export function PlayerBetBar({
           </Text>
           <Ionicons name="open-outline" size={16} color={fg} />
         </Pressable>
+        <Pressable
+          onPress={onCompare}
+          accessibilityRole="button"
+          accessibilityLabel="Compare odds at every sportsbook, and add to betslip"
+          style={({ pressed }) => [styles.compare, pressed && styles.pressed]}
+        >
+          <Ionicons name="git-compare-outline" size={16} color={colors.textPrimary} />
+          <Text style={styles.compareText} numberOfLines={1}>
+            Compare odds
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // A SECTION of the hit card it sits in, not a card of its own. It was a
+  // bgCard box with its own side margin and padding inside a bgCard box that
+  // already had both, so the bet read indented by a second gutter and had
+  // ~70% of the row to fit "Bet +3400 at DraftKings" in, which it could not
+  // (Matt, 2026-09-25: "Draft kings UI looks bad"). A hairline separates it
+  // from the stepper above instead.
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    // The chart follows directly; without this "Compare odds" sat on it.
     marginBottom: spacing.md,
-    padding: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
   },
   cardQuiet: {
     alignItems: 'center',
@@ -262,9 +265,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
+  // STACKED, primary on top. Side by side, the Bet button's text is wider than
+  // what is left beside Compare for any long price or book name, and a Text
+  // that will not shrink overflows its pill — the price printed half outside
+  // the green (2026-09-25). Full width, it always fits.
   actions: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
     gap: spacing.sm,
   },
   compare: {
@@ -278,10 +283,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgGrouped,
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
-    // The SECONDARY is what gives way under pressure — at an accessibility
-    // text size its intrinsic width would otherwise grow past half the row and
-    // squeeze the button that names the book taking the bet.
-    flexShrink: 1,
   },
   compareText: {
     fontSize: font.size.footnote,
@@ -289,7 +290,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   place: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -307,9 +307,10 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     fontVariant: ['tabular-nums'],
   },
-  // No flexShrink: the book's name is the one thing on this button that must
-  // not truncate, so the compare button shrinks instead.
+  // Shrinks only at an accessibility text size, where the full-width button
+  // still cannot hold it; the price beside it never does.
   placeBook: {
+    flexShrink: 1,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
   },

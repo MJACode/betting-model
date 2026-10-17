@@ -15,6 +15,11 @@ PRE-GAME retirements, and the first time "out of every total" was the ask.
 retirement of a WHOLE sport, and the first for a reason outside the models:
 DATAGOLF_API_KEY was never set on the worker, so every golf pipeline step
 no-opped and GOLF produced no games, no odds and no picks, ever.
+2026-10-15 (mike): the twelve NBA models of 2026-06-19 -- three game models and
+nine generic props -- "build new nba models, remove any previous nba models".
+They never wrote a BET. Their feature engines, their scorer loop and their
+artifacts went with them; the NBA model that replaced them is a rule
+(nba_prop_market) with no feature map and no artifact.
 """
 
 from __future__ import annotations
@@ -28,15 +33,24 @@ import config
 
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED_PROPS = ("mlb_prop_batter_hr", "mlb_prop_batter_rbi")
+RETIRED_NBA = (
+    "nba_moneyline", "nba_over_under", "nba_spread",
+    "nba_prop_player_points", "nba_prop_player_rebounds", "nba_prop_player_assists",
+    "nba_prop_player_threes", "nba_prop_player_pra", "nba_prop_player_blocks",
+    "nba_prop_player_steals", "nba_prop_player_turnovers", "nba_prop_player_dd",
+)
 
 
-def test_the_set_holds_exactly_the_nine_retirements():
+def test_the_set_holds_exactly_the_twenty_two_retirements():
     assert set(config.RETIRED_MODELS) == {
         "mlb_live_win_prob", "mlb_live_runline",
         "mlb_prop_batter_hr", "mlb_prop_batter_rbi",
         "golf_outright", "golf_top10", "golf_top20",
         "golf_make_cut", "golf_matchup",
+        "nfl_live_prop",
+        *RETIRED_NBA,
     }
+    assert len(config.RETIRED_MODELS) == 22
 
 
 @pytest.mark.parametrize("model_id", sorted(config.RETIRED_MODELS))
@@ -86,6 +100,22 @@ def test_a_retired_game_model_is_in_no_feature_map():
         assert not left, f"{left} are retired but still carry a {name} entry"
 
 
+def test_the_nba_engines_and_their_scorer_loop_are_gone():
+    """FEATURE_MAP is swept above; the NBA models also had their OWN maps and
+    loop -- features/nba_feature_engine.py (game), features/nba_prop_feature_engine.py
+    (NBA_PROP_FEATURE_MAP) and models.scorer._NBA_PROP_CONFIG, which the NBA
+    prop loop iterated instead of PROP_MODELS. The sweep above skips a module
+    it cannot import, so a resurrected engine would pass it silently; this
+    names them."""
+    import models.scorer as scorer
+    for rel in ("features/nba_feature_engine.py", "features/nba_prop_feature_engine.py"):
+        assert not (ROOT / rel).exists(), f"{rel} is back"
+    assert not hasattr(scorer, "_NBA_PROP_CONFIG")
+    assert not hasattr(scorer, "run_nba_prop_scorer")
+    from features.feature_engine import FEATURE_MAP
+    assert not (set(RETIRED_NBA) & set(FEATURE_MAP))
+
+
 def test_a_retired_sport_is_not_still_health_checked():
     """A check for a sport that can no longer produce data can only ever SKIP,
     and a permanently-skipping check is what this whole exercise was about."""
@@ -133,8 +163,16 @@ def test_retired_prop_picks_still_settle_on_their_own_stat():
 
 def test_the_artifacts_are_gone():
     saved = ROOT / "models" / "saved"
-    for m in RETIRED_PROPS:
+    for m in RETIRED_PROPS + RETIRED_NBA:
         assert not list(saved.glob(f"{m}_*.pkl")), f"{m} still has an artifact"
+    # ...and nothing still asks git to keep one (the .gitignore keep-list and
+    # the MANIFEST block, pinned equal by test_model_artifacts_load).
+    keep = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    manifest = (ROOT / "models" / "saved" / "MANIFEST.md").read_text(encoding="utf-8")
+    for m in RETIRED_NBA:
+        # "saved/" anchors the id: "wnba_moneyline_" contains "nba_moneyline_".
+        assert f"saved/{m}_" not in keep, f"{m} is still on the .gitignore keep-list"
+        assert f"saved/{m}_" not in manifest, f"{m} is still in MANIFEST.md"
 
 
 # ── out of every total that reads raw picks ─────────────────────────────────
@@ -211,9 +249,9 @@ NFL_KEEP_LIVE = frozenset({
     "nfl_prop_tackles_assists",
     "nfl_prop_market",
     "nfl_wind_totals",
-    "nfl_live_prop",
     "nfl_opener_spread",
 })
+# nfl_live_prop left this set 2026-10-04: RETIRED (mike), not paused.
 
 
 def test_ten_nfl_distributional_props_are_paused():

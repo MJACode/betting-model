@@ -1,33 +1,56 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { formatAmerican, formatGameTimeET } from '@/lib/format';
-import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
+import { gameStartAt, historyFrom, sincePick, type PickWindow } from '@/lib/lineHistory';
+import { lineMovementView, type Snap } from '@/lib/lineMovementView';
+import { canShowLineMovementHistory, gameMarketForModel, historyBookForPick, propMarketForPick } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
-import { decisionOdds } from '@/lib/decisionPrice';
 
 interface Props {
   pick: Pick;
   /** Player name parsed from pick_label (prop picks only). */
   playerName: string | null;
+  /** games.commence_time. The window ends at the earlier of it and pick.game_time. */
+  commenceTime?: string | null;
 }
 
-interface Snap extends PricedSnapshot {
-  snapshot_at: string;
-}
+const NO_HISTORY: PickWindow<Snap> = {
+  rows: [],
+  fromPick: false,
+  gap: false,
+  since: 0,
+  closed: false,
+  afterStart: false,
+};
 
 /**
  * Same-book price/line history since the pick was scored. Steam against
  * the lock is the "don't bet this anymore" signal. Fetch is the deciding
  * book (`historyBookForPick`), never a hard-coded DraftKings series.
+ *
+ * The rows run from the book's price when the pick was made to the game's
+ * start (lib/lineHistory `sincePick`), so the last row is the latest pre-game
+ * price. Every word on the card comes from lib/lineMovementView, which runs
+ * under Node in the tests: after the start the verdict is not graded (the
+ * Closing Line Value card grades the number), and a pick the book has not
+ * re-priced reads "No new price". A live pick has no card (`historyFrom`).
+ *
+ * `from` is only the fetch bound. The window is cut from the pick's own time
+ * (`pick.created_at`), so `sincePick` can tell a pick made after the start the
+ * card uses from one made before it; `from` has already been moved back to
+ * the start for such a pick.
  */
-export function LineMovementCard({ pick, playerName }: Props) {
-  const [snaps, setSnaps] = useState<Snap[] | null>(null);
+export function LineMovementCard({ pick, playerName, commenceTime }: Props) {
+  const [hist, setHist] = useState<PickWindow<Snap> | null>(null);
 
   const isProp = pick.model_id.includes('prop');
-  const market = isProp ? propMarketForModel(pick.model_id) : gameMarketForModel(pick.model_id);
+  // propMarketForPick: a multi-market rule's market is on the row, not the model.
+  const market = isProp ? propMarketForPick(pick) : gameMarketForModel(pick.model_id);
   const historyBook = historyBookForPick(pick);
+  const startAt = gameStartAt(commenceTime, pick.game_time);
+  // The pick, or the start when a pre-game pick sits after it; null for a live pick.
+  const from = historyFrom(pick, startAt);
 
   useEffect(() => {
     let mounted = true;
@@ -35,121 +58,65 @@ export function LineMovementCard({ pick, playerName }: Props) {
       !canShowLineMovementHistory(pick) ||
       historyBook == null ||
       market == null ||
-      (isProp && !playerName)
+      (isProp && !playerName) ||
+      from == null
     ) {
-      setSnaps([]);
+      setHist(NO_HISTORY);
       return undefined;
     }
     const load = isProp
       ? fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook)
-      : fetchOddsHistory(pick.game_id, market, historyBook);
+      : fetchOddsHistory(pick.game_id, market, historyBook, from, startAt);
     load
       .then((rows) => {
-        if (mounted) setSnaps(rows as Snap[]);
+        if (mounted) setHist(sincePick(rows as Snap[], pick.created_at, startAt));
       })
       .catch(() => {
-        if (mounted) setSnaps([]);
+        if (mounted) setHist(NO_HISTORY);
       });
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, historyBook, market, isProp, playerName]);
+  }, [pick.pick_id, pick.game_id, pick.created_at, from, historyBook, market, isProp, playerName, startAt]);
 
-  if (!snaps || snaps.length === 0 || market == null) return null;
-
-  // NFL game lines compare LINE only (soft-book price is not the snapshot
-  // book). Props are not lineOnly — they steam at the deciding book.
-  const lineOnly = isNflLineOnly(pick.model_id);
-  const latest = snaps[snaps.length - 1];
-  const movement = movementFromSameBookHistory(pick, latest, market);
-  const lockedPrice = decisionOdds(pick);
-  const currentPrice = priceForSide(latest, pick.pick_side);
-  const currentLine = lineFromSnapshot(latest, market);
-
-  const verdict = (() => {
-    if (!movement) {
-      return { label: 'Line steady since pick', color: colors.textSecondary };
-    }
-    if (movement.severity === 'skip') {
-      return {
-        label:
-          `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
-          `${formatSideLine(movement.currentLine, pick.pick_side, market)} against your ${pick.pick_side}`,
-        color: colors.avoid,
-      };
-    }
-    if (movement.lineOnly) {
-      return {
-        label:
-          `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
-          `${formatSideLine(movement.currentLine, pick.pick_side, market)} in your favor`,
-        color: colors.bet,
-      };
-    }
-    const pp = movement.priceShiftPp ?? 0;
-    if (movement.severity === 'caution') {
-      return {
-        label: `Steamed ${pp.toFixed(1)}pp against you since scoring`,
-        color: colors.avoid,
-      };
-    }
-    return {
-      label: `Moved ${Math.abs(pp).toFixed(1)}pp in your favor since scoring`,
-      color: colors.bet,
-    };
-  })();
-
-  const showLineCol = market.startsWith('totals') || market.startsWith('spreads') || isProp;
-  const recent = snaps.slice(-8);
+  const view = hist && market != null ? lineMovementView(pick, hist, market, isProp) : null;
+  if (!view) return null;
+  const verdictColor =
+    view.verdict.tone === 'for'
+      ? colors.betInk
+      : view.verdict.tone === 'against'
+        ? colors.avoidInk
+        : colors.textSecondary;
 
   return (
     <View style={styles.card}>
       <Text style={styles.heading}>Line Movement</Text>
       <View style={styles.headRow}>
-        {lineOnly ? (
-          <Text style={styles.prices}>
-            {`${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
-              `${formatSideLine(currentLine, pick.pick_side, market)}`}
-          </Text>
-        ) : (
-          <Text style={styles.prices}>
-            {`${formatAmerican(lockedPrice)} → ${formatAmerican(currentPrice)}`}
-          </Text>
-        )}
-        <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
+        <Text style={styles.prices}>{view.header}</Text>
+        <Text style={[styles.verdict, { color: verdictColor }]}>{view.verdict.label}</Text>
+        <Text style={styles.asOf}>{view.asOf}</Text>
       </View>
 
       <View style={styles.tableHead}>
-        <Text style={[styles.cell, styles.cellTime, styles.headText]}>Snapshot</Text>
-        {showLineCol ? <Text style={[styles.cell, styles.headText]}>Line</Text> : null}
+        <Text style={[styles.cell, styles.cellTime, styles.headText]}>Time (ET)</Text>
+        {view.showLineCol ? <Text style={[styles.cell, styles.headText]}>Line</Text> : null}
         <Text style={[styles.cell, styles.headText]}>Price</Text>
       </View>
-      {recent.map((s) => (
-        <View key={s.snapshot_at} style={styles.row}>
-          <Text style={[styles.cell, styles.cellTime]}>{formatGameTimeET(s.snapshot_at)}</Text>
-          {showLineCol ? (
-            <Text style={styles.cell}>
-              {lineForSide(lineFromSnapshot(s, market), pick.pick_side, market) ?? '—'}
-            </Text>
-          ) : null}
-          <Text style={styles.cell}>{formatAmerican(priceForSide(s, pick.pick_side))}</Text>
-        </View>
-      ))}
-      {snaps.length > recent.length ? (
-        <Text style={styles.more}>Showing last {recent.length} of {snaps.length} snapshots</Text>
-      ) : null}
-      <Text style={styles.note}>
-        {lineOnly
-          ? `Your pick is locked at the number the card took — ` +
-            `${formatSideLine(pick.scored_line, pick.pick_side, market)} at ` +
-            `${formatAmerican(lockedPrice)} (the book is named in the pick). The table shows ` +
-            `${bookName(historyBook ?? storedQuoteBook(pick))}'s line since. It doesn't change the pick or how ` +
-            `it settles.`
-          : `Your pick was decided at ${bookName(historyBook ?? storedQuoteBook(pick))} ${formatAmerican(lockedPrice)}` +
-            `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
-            `This just shows how that book's line has moved since, for or against you. It doesn't ` +
-            `change the pick or how it settles.`}
-      </Text>
+      {view.rows.map((r) =>
+        r.divider ? (
+          <View key={r.key} style={styles.row}>
+            <Text style={styles.divider}>{r.label}</Text>
+          </View>
+        ) : (
+          <View key={r.key} style={styles.row}>
+            <Text style={[styles.cell, styles.cellTime]}>{r.label}</Text>
+            {view.showLineCol ? <Text style={styles.cell}>{r.lineText}</Text> : null}
+            <Text style={styles.cell}>{r.priceText}</Text>
+          </View>
+        ),
+      )}
+      {view.footer ? <Text style={styles.more}>{view.footer}</Text> : null}
+      <Text style={styles.note}>{view.note}</Text>
     </View>
   );
 }
@@ -183,6 +150,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     marginTop: 2,
   },
+  asOf: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
   tableHead: {
     flexDirection: 'row',
     paddingBottom: 4,
@@ -209,6 +181,13 @@ const styles = StyleSheet.create({
     flex: 1.6,
     textAlign: 'left',
     color: colors.textSecondary,
+  },
+  divider: {
+    flex: 1,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   more: {
     fontSize: font.size.caption,

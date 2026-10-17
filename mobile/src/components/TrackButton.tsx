@@ -11,7 +11,10 @@ interface Props {
 }
 
 /**
- * "Track" / "Tracking" pill with a bell icon. When tracked, the line-change
+ * "Track" (bell) / "Tracking" (checkmark) pill. Both states are outlined in
+ * tint: the ON state changes the icon and the label, not the colour, because
+ * green means only "good for the user" (UX_REVIEW §2; Designer ruling on the
+ * usability audit, 2026-09-25). When tracked, the line-change
  * notifier pings the user if the DK line moves big before game time. Its own
  * Pressable so a tap doesn't bubble to the enclosing card (RN responder model).
  */
@@ -24,6 +27,8 @@ export function TrackButton({ tracked, onPress, compact }: Props) {
       // taps meant for its neighbour (UX review, 2026-09-05).
       hitSlop={{ top: 11, bottom: 11, left: 6, right: 6 }}
       accessibilityRole="button"
+      // VoiceOver says "selected" on the ON state, not only a changed label.
+      accessibilityState={{ selected: tracked }}
       accessibilityLabel={
         tracked
           ? 'Tracking this bet — we’ll alert you if the line moves a lot before game time. Tap to stop.'
@@ -38,15 +43,15 @@ export function TrackButton({ tracked, onPress, compact }: Props) {
     >
       <View style={styles.row}>
         <Ionicons
-          name={tracked ? 'notifications' : 'notifications-outline'}
+          name={tracked ? 'checkmark' : 'notifications-outline'}
           size={compact ? 14 : 16}
-          color={tracked ? colors.bet : colors.tint}
+          color={colors.tint}
         />
         <Text
           style={[
             styles.text,
             compact && styles.textCompact,
-            { color: tracked ? colors.bet : colors.tint },
+            { color: colors.tint },
           ]}
         >
           {tracked ? 'Tracking' : 'Track'}
@@ -68,7 +73,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   on: {
-    borderColor: colors.bet,
+    borderColor: colors.tint,
     backgroundColor: 'transparent',
   },
   off: {

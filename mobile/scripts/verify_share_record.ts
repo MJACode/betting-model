@@ -33,9 +33,12 @@ const neg = buildShareMessage(
   { ...base, roiFlat: -0.052, clvBeatRate: null },
   {},
 );
-check('negative ROI signed', neg.includes('-5.2%'));
+check('negative ROI signed with U+2212', neg.includes('\u22125.2%') && !neg.includes('-5.2%'));
 check('null CLV → no beat-the-close line', !neg.includes('beat the close') && !neg.includes('Beat the closing'));
 check('no units when omitted', !neg.includes('units on flat'));
+const loss = buildShareMessage(base, { endUnits: -33.14 });
+check('negative units signed with U+2212', loss.includes('\u221233.1 units') && !loss.includes('-33.1'));
+check('zero units unsigned', buildShareMessage(base, { endUnits: 0.04 }).includes('\n0.0 units'));
 
 console.log(failures === 0 ? '\nAll share-record checks passed.' : `\n${failures} FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

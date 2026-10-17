@@ -44,7 +44,7 @@ python run_pipeline.py --step model-quality
 
 ---
 
-## NFL 2026 paper-track (opener + wind)
+## NFL 2026 live track (opener + wind)
 
 Not a retrain and not a unit bump. Re-score the two fragile §28 rules:
 
@@ -200,6 +200,8 @@ unless you set `MONITOR_TOKEN`. Runbook: `docs/monitoring.md`.
 ```bash
 python -m pytest -q tests/            # was tests.yml, on every PR
 python -m pytest tests/test_discord_notifier.py -v   # one file
+python -m pip install -r requirements-test.txt       # once: pytest, node and Postgres as pip wheels
+(cd mobile && python ../scripts/npm.py ci --no-audit --no-fund)   # once: the app's node_modules
 ```
 
 Losing the PR check is the one real tradeoff in removing Actions: nothing now

@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-09-19
+ * Last generated: 2026-10-16
  */
 
 export interface ModelThreshold {
@@ -34,25 +34,15 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_spread_market: { min_prob: 0, min_edge: 0.018, min_odds: -200 },
   mlb_total_market: { min_prob: 0, min_edge: 0.02, min_odds: -200 },
   mlb_total_public_fade: { min_prob: 0, min_edge: 0, min_odds: -200 },
-  nba_moneyline: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
-  nba_over_under: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
-  nba_prop_player_assists: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_blocks: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_dd: { min_prob: 0.55, min_edge: 0, min_odds: -200 },
-  nba_prop_player_points: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_pra: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_rebounds: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_steals: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_threes: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_prop_player_turnovers: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },
-  nba_spread: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
+  nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200 },
   ncaaf_live_total: { min_prob: 0.73, min_edge: 0.12, min_odds: -200 },
   ncaaf_live_win_prob: { min_prob: 0.5, min_edge: 0.16, min_odds: -200 },
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 },
   ncaaf_over_under: { min_prob: 0.65, min_edge: 0, min_odds: -200 },
   ncaaf_spread: { min_prob: 0.55, min_edge: 0, min_odds: -200 },
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0, min_odds: -200 },
-  nfl_live_prop: { min_prob: 0, min_edge: 0, min_odds: -140 },
+  nfl_live_leader_ml: { min_prob: 0, min_edge: 0.02, min_odds: -140 },
   nfl_opener_spread: { min_prob: 0.55, min_edge: 0, min_odds: -200 },
   nfl_prop_anytime_td: { min_prob: 0.37, min_edge: 0.16, min_odds: -200 },
   nfl_prop_market: { min_prob: 0, min_edge: 0.05, min_odds: -200 },
@@ -68,9 +58,13 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nfl_prop_sacks: { min_prob: 0.7, min_edge: 0.15, min_odds: -200 },
   nfl_prop_tackles_assists: { min_prob: 0.7, min_edge: 0.15, min_odds: -200 },
   nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03, min_odds: -200 },
-  nhl_moneyline: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 },
+  nhl_moneyline: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_moneyline_regulation: { min_prob: 0.4, min_edge: 0.05, min_odds: -200 },
-  nhl_over_under: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 },
+  nhl_over_under: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nhl_prop_assists: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nhl_prop_blocked_shots: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nhl_prop_saves: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nhl_prop_shots_on_goal: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_puckline: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 },
   ufc_method_of_victory: { min_prob: 0.65, min_edge: 0, min_odds: -200 },
   ufc_moneyline: { min_prob: 0.65, min_edge: 0.08, min_odds: -200 },
@@ -87,12 +81,12 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
-  'nba_prop_player_dd',
   'ufc_method_of_victory',
 ]);
 
 export const RETIRED_PROB_ONLY_MODELS = new Set<string>([
   'mlb_prop_batter_hr',
+  'nba_prop_player_dd',
 ]);
 
 export const PAUSED_MODELS = new Set<string>([
@@ -137,7 +131,26 @@ export const RETIRED_MODELS = new Set<string>([
   'mlb_live_win_prob',
   'mlb_prop_batter_hr',
   'mlb_prop_batter_rbi',
+  'nba_moneyline',
+  'nba_over_under',
+  'nba_prop_player_assists',
+  'nba_prop_player_blocks',
+  'nba_prop_player_dd',
+  'nba_prop_player_points',
+  'nba_prop_player_pra',
+  'nba_prop_player_rebounds',
+  'nba_prop_player_steals',
+  'nba_prop_player_threes',
+  'nba_prop_player_turnovers',
+  'nba_spread',
+  'nfl_live_prop',
 ]);
+
+export const RECORD_EXCLUDED_MODELS = new Set<string>([
+  'nfl_live_prop',
+]);
+
+export const DUPLICATE_STATUS = 'DUPLICATE';
 
 export const KELLY_MULTIPLIER = 0.1;
 export const MAX_KELLY_FRACTION = 0.05;

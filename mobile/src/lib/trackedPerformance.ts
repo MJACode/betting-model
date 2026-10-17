@@ -8,7 +8,9 @@
  * tracked state is an on-device set of pick_ids; the picks themselves settle
  * server-side (paper_tracker writes result + profit_flat). Scoring a tracked
  * bet is therefore just grading its pick row: WIN/LOSS/PUSH → record + P&L,
- * result NULL → open, NO_ACTION → shown but excluded from the record.
+ * result NULL → open, NO_ACTION → shown but excluded from the record. A VOID
+ * (condition_status 'VOID', result NO_ACTION as its marker) is 'not_graded':
+ * a Discord-published VOID stays trackable (openForAction) but never grades.
  *
  * P&L convention: the server's profit_flat is dollars at a $100 flat stake,
  * so a bet at any stake S grades as profit_flat x S/100 (WIN scales the
@@ -18,7 +20,7 @@
  */
 import type { Pick } from '@/types';
 
-export type TrackedBetStatus = 'open' | 'won' | 'lost' | 'push' | 'no_action';
+export type TrackedBetStatus = 'open' | 'won' | 'lost' | 'push' | 'no_action' | 'not_graded';
 
 export interface TrackedBetRow {
   pick: Pick;
@@ -77,6 +79,9 @@ export function mergeTrackedSummaries(
 }
 
 export function trackedBetStatus(p: Pick): TrackedBetStatus {
+  // Before the result switch: a VOID's NO_ACTION is its marker, not a
+  // settlement, so "No action" on a fight hours away read as scratched.
+  if (p.condition_status === 'VOID') return 'not_graded';
   switch (p.result) {
     case 'WIN':
       return 'won';

@@ -63,19 +63,27 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'turnovers', label: 'Turnovers', sport: 'NBA', group: 'NBA', defaultLine: 1.5 },
   { key: 'minutes', label: 'Minutes', sport: 'NBA', group: 'NBA', defaultLine: 27.5 },
   // ── NFL (nflverse weekly stats — rush_rec_tds = rushing + receiving TDs) ──
+  // Touchdowns are ONE chip, named for the bet a book actually sells: Anytime
+  // TD (rush + rec). Rush TDs and Rec TDs were separate chips, and no book
+  // posts either, so both boards read "No sportsbook posts … lines" under a
+  // stat nobody can bet (Matt, 2026-09-25: "Rushing TD is not a bet type.
+  // Should be any time TD"). The log columns stay; only the chips went.
+  // The chip sits in BOTH Rushing and Receiving, because the bet is a
+  // receiver's as much as a back's; chips are keyed group:key (chipKey), so
+  // one column in two groups is two distinct chips.
   { key: 'passing_yards', label: 'Pass Yards', sport: 'NFL', group: 'Passing', defaultLine: 224.5 },
   { key: 'passing_tds', label: 'Pass TDs', sport: 'NFL', group: 'Passing', defaultLine: 1.5 },
   { key: 'completions', label: 'Completions', sport: 'NFL', group: 'Passing', defaultLine: 19.5 },
   { key: 'attempts', label: 'Pass Attempts', sport: 'NFL', group: 'Passing', defaultLine: 29.5 },
   { key: 'interceptions', label: 'INTs Thrown', sport: 'NFL', group: 'Passing', defaultLine: 0.5 },
   { key: 'rushing_yards', label: 'Rush Yards', sport: 'NFL', group: 'Rushing', defaultLine: 49.5 },
-  { key: 'rushing_tds', label: 'Rush TDs', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
   { key: 'carries', label: 'Carries', sport: 'NFL', group: 'Rushing', defaultLine: 12.5 },
-  { key: 'rush_rec_tds', label: 'Rush+Rec TDs', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
   { key: 'receptions', label: 'Receptions', sport: 'NFL', group: 'Receiving', defaultLine: 3.5 },
   { key: 'receiving_yards', label: 'Rec Yards', sport: 'NFL', group: 'Receiving', defaultLine: 49.5 },
-  { key: 'receiving_tds', label: 'Rec TDs', sport: 'NFL', group: 'Receiving', defaultLine: 0.5 },
-  { key: 'targets', label: 'Targets', sport: 'NFL', group: 'Receiving', defaultLine: 5.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NFL', group: 'Receiving', defaultLine: 0.5 },
+  // Targets removed (Matt, 2026-10-06: "Remove targets"). The log still
+  // stores the column; the position-vs-opponent card's NFL role cut reads it.
   { key: 'def_sacks', label: 'Sacks', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_interceptions', label: 'Interceptions', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
   // ── NCAAF (CFBD box scores — same column keys as the NFL log wherever the
@@ -87,12 +95,11 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'attempts', label: 'Pass Attempts', sport: 'NCAAF', group: 'Passing', defaultLine: 27.5 },
   { key: 'interceptions', label: 'INTs Thrown', sport: 'NCAAF', group: 'Passing', defaultLine: 0.5 },
   { key: 'rushing_yards', label: 'Rush Yards', sport: 'NCAAF', group: 'Rushing', defaultLine: 49.5 },
-  { key: 'rushing_tds', label: 'Rush TDs', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
   { key: 'carries', label: 'Carries', sport: 'NCAAF', group: 'Rushing', defaultLine: 10.5 },
-  { key: 'rush_rec_tds', label: 'Rush+Rec TDs', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
   { key: 'receptions', label: 'Receptions', sport: 'NCAAF', group: 'Receiving', defaultLine: 3.5 },
   { key: 'receiving_yards', label: 'Rec Yards', sport: 'NCAAF', group: 'Receiving', defaultLine: 44.5 },
-  { key: 'receiving_tds', label: 'Rec TDs', sport: 'NCAAF', group: 'Receiving', defaultLine: 0.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NCAAF', group: 'Receiving', defaultLine: 0.5 },
   { key: 'def_tackles', label: 'Tackles', sport: 'NCAAF', group: 'Defense', defaultLine: 4.5 },
   { key: 'def_solo', label: 'Solo Tackles', sport: 'NCAAF', group: 'Defense', defaultLine: 2.5 },
   { key: 'def_sacks', label: 'Sacks', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
@@ -108,6 +115,45 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'knockdowns', label: 'Knockdowns', sport: 'UFC', group: 'UFC' },
   { key: 'sub_attempts', label: 'Sub Attempts', sport: 'UFC', group: 'UFC' },
 ];
+
+/**
+ * Stats a player's page can chart from the box-score log that are NOT on the
+ * Stats-tab leaderboard. NBA only: the two combined markets the projection
+ * model bets (player_blocks_steals, player_rebounds_assists), which no catalog
+ * stat above was priced in, so those picks had no chart and no "View stats"
+ * stat.
+ *
+ * Off the leaderboard, and off every server read keyed on a stat, because the
+ * server does not have them: `v_player_season_totals_nba` has no such columns,
+ * and `player_season_stat_values_nba`, `player_h2h_stat_values_nba` and
+ * `position_vs_opponent_nba` whitelist their stat keys and return zero rows
+ * for these (none of their migrations has a branch for either key, checked
+ * 2026-10-16). On the board that would be two columns of zeroes; on the player
+ * page it would read "No meetings with X in the last 2 seasons" for a player
+ * who had met them. So the values
+ * are summed on the phone from the log (playerLog.normalizeLogRow), and the
+ * player page skips its head-to-head and same-position reads for them
+ * (usePlayerDetail). They join STAT_CATALOG once the view has both columns
+ * and the three functions have a branch for each key.
+ *
+ * The key is cast like playerLog's OUTS_STAT, for the same reason: the column
+ * is derived on log rows and is not a season-totals column.
+ */
+export const LOG_DERIVED_STATS: StatDef[] = [
+  { key: 'blocks_steals' as StatDef['key'], label: 'Blocks+Steals', sport: 'NBA', group: 'NBA', defaultLine: 1.5 },
+  { key: 'rebounds_assists' as StatDef['key'], label: 'Reb+Ast', sport: 'NBA', group: 'NBA', defaultLine: 9.5 },
+];
+
+/** One of the log-derived stats above: no leaderboard column, no server read. */
+export function isLogDerivedStat(def: StatDef | null | undefined): boolean {
+  if (!def) return false;
+  return LOG_DERIVED_STATS.some((d) => d.sport === def.sport && d.key === def.key);
+}
+
+/** A sport's log-derived stats, in order (empty for every sport but the NBA). */
+export function logDerivedStatsFor(sport: Sport): StatDef[] {
+  return LOG_DERIVED_STATS.filter((d) => d.sport === sport);
+}
 
 export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   MLB: ['Batting', 'Pitching'],
@@ -238,8 +284,7 @@ const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
  * A stat with no entry has no market we pull, and its column correctly stays
  * blank rather than borrowing a neighbouring market's number: solo tackles,
  * TFL, passes defended and defensive INTs (no book prices them), rushing and
- * receiving TDs separately (the book sells the combined "anytime" instead),
- * and NFL targets.
+ * and receiving TDs separately (the book sells the combined "anytime" instead).
  *
  * NOT HERE, DELIBERATELY: `def_tackles`. The book's `player_tackles_assists`
  * counts solo + assists at FULL credit, while CFBD charges a shared tackle as
@@ -329,6 +374,10 @@ const FOOTBALL_MARKET_NOT_PRICED: Partial<
 const STAT_KEY_TO_MARKET: Record<string, string> = {
   'MLB:doubles': 'batter_doubles',
   'MLB:triples': 'batter_triples',
+  // The two NBA log-derived stats (LOG_DERIVED_STATS): the combined markets
+  // the projection model bets. No per-stat model prices either.
+  'NBA:blocks_steals': 'player_blocks_steals',
+  'NBA:rebounds_assists': 'player_rebounds_assists',
 };
 
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
@@ -412,4 +461,21 @@ export function statForPropModel(modelId: string): StatDef | null {
     if (rawPropModelForStat(def) === modelId) return def;
   }
   return null;
+}
+
+/**
+ * Inverse of propMarketForStat on one sport's board: the stat a book market
+ * is. For a pick from a multi-market model (nba_prop_market,
+ * nba_prop_projection, wnba_prop_market, nfl_prop_market) the model id names
+ * no stat, and the row's prop_market is the only thing that does. The sport is
+ * required because NBA and WNBA share both column keys and market names
+ * ('player_points'). Retirement-blind like propMarketForStat: the NBA market
+ * names come through the retired per-stat models' PROP_MARKET_BY_MODEL rows,
+ * which is why those rows stay. The leaderboard catalog first, then the
+ * log-derived stats (blocks+steals, rebounds+assists).
+ */
+export function statForPropMarket(sport: Sport, market: string | null | undefined): StatDef | null {
+  if (!market) return null;
+  const match = (d: StatDef) => d.sport === sport && propMarketForStat(d) === market;
+  return STAT_CATALOG.find(match) ?? LOG_DERIVED_STATS.find(match) ?? null;
 }

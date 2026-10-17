@@ -3,6 +3,7 @@
 NFL preflight — is the wind/opener stack actually wired correctly?
 
     python -m scripts.nfl_preflight
+    python -m scripts.nfl_preflight --ci     # or NFL_PREFLIGHT_OFFLINE=1
 
 Read-only and offline. Spends no Odds API credits and needs no database: every
 check is against code, config and schedule. Checks that genuinely need the live
@@ -10,11 +11,18 @@ DB are reported as such rather than silently skipped.
 
 Run this after any change to the NFL models, the publisher, or the scheduler,
 and before the first game of the season.
+
+--ci (PR CI): the DATA section depends on the calendar and on committed data
+files, not on the code under review -- the committed schedule runs out between
+seasons -- so its misses are WARNs there. Every other check still fails.
 """
 
 from __future__ import annotations
 
+import argparse
+import ast
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -27,6 +35,7 @@ sys.path.insert(0, str(ROOT))
 
 PASS, FAIL, WARN, INFO = "PASS", "FAIL", "WARN", "INFO"
 results: list[tuple[str, str, str]] = []
+CI_MODE = False        # set by main(): --ci or NFL_PREFLIGHT_OFFLINE=1
 
 
 def check(section: str, name: str, ok, detail: str = "") -> None:
@@ -69,6 +78,8 @@ def check_models() -> None:
               and opener.edge_tier(0.07) == "LARGE")
         check(s, "defective books excluded", len(opener.DEFECTIVE_BOOKS) == 4,
               ", ".join(sorted(opener.DEFECTIVE_BOOKS)))
+        check(s, "opener fires at a 2-pt deviation", opener.DEPLOY_THRESHOLD == 2.0,
+              f"DEPLOY_THRESHOLD = {opener.DEPLOY_THRESHOLD}")
     except Exception as exc:                                   # noqa: BLE001
         check(s, "opener_spread", False, repr(exc))
 
@@ -94,10 +105,16 @@ def check_models() -> None:
         model_under_prob, stake_units = w.model_under_prob, w.stake_units
         check(s, "wind_totals imports", True)
         check(s, "lead calibration measured to day 7", MAX_CALIBRATED_LEAD == 7)
+        check(s, "wind fires no further out than 4 days", w.MAX_FIRE_LEAD == 4.0,
+              f"MAX_FIRE_LEAD = {w.MAX_FIRE_LEAD}")
         check(s, "live probability floors at lead 1 (never the ERA5 truth row)",
               MIN_LIVE_LEAD == 1 and model_under_prob(0) == model_under_prob(1))
-        check(s, "uncalibrated lead sizes to ZERO",
-              stake_units(model_under_prob(8), -110, 8) == 0.0)
+        # Stale on master: stake_units stopped gating on lead (its docstring:
+        # "Beyond MAX_CALIBRATED_LEAD the stake CLIPS to the lead-7 row rather
+        # than returning zero"). Assert the documented behaviour.
+        s8, s7 = stake_units(model_under_prob(8), -110, 8), stake_units(model_under_prob(7), -110, 7)
+        check(s, "uncalibrated lead clips to the lead-7 stake",
+              s7 > 0 and abs(s8 - s7) < 1e-12, f"lead8={s8:.4f} lead7={s7:.4f}")
         check(s, "calibrated lead sizes above zero",
               stake_units(model_under_prob(3), -110, 3) > 0)
         check(s, "1 unit = 1% of bankroll", UNIT_PCT == 0.01)
@@ -126,17 +143,73 @@ def check_import_shadowing() -> None:
           f"found: {bare.group(0).strip()!r}" if bare else "")
 
 
+# A `DELETE FROM [public.]picks` statement, to the end of its SQL string (or
+# the next `;`). Matched inside string constants only, never raw source text.
+_PICK_DELETE = re.compile(r"DELETE\s+FROM\s+(?:public\.)?picks\b[^;]*",
+                          re.IGNORECASE)
+_SQL_COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
+
+
+def _unguarded_pick_deletes(src: str) -> list[str]:
+    """Pick deletes NOT limited to an unsettled NONE row.
+
+    The one delete the NFL publishers may issue is the landing BET clearing
+    the game's own dead-zone NONE row: signal_type = 'NONE' AND result IS
+    NULL (.claude/rules/picks-and-publishing.md, corollaries). Anything else
+    -- a BET, a settled row -- is the lock being broken.
+
+    Scans the Python string constants of `src` (a Python comment or another
+    string can't supply the guard), after stripping SQL comments (a guard
+    that only sits in a trailing `--` comment doesn't count). An OR anywhere
+    in the statement fails it: `... AND result IS NULL OR game_id = %s`
+    deletes more than the guard says.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:                    # fail closed
+        return [f"unparseable source: {exc}"]
+    bad = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        for m in _PICK_DELETE.finditer(_SQL_COMMENT.sub(" ", node.value)):
+            stmt = m.group(0)
+            if not (re.search(r"signal_type\s*=\s*'NONE'", stmt, re.IGNORECASE)
+                    and re.search(r"\bresult\s+IS\s+NULL\b", stmt, re.IGNORECASE)
+                    and not re.search(r"\bOR\b", stmt, re.IGNORECASE)):
+                bad.append(" ".join(stmt.split())[:80])
+    return bad
+
+
+def _writer_slice(pub: str, start: str, end: str | None) -> str:
+    """The source of one writer, from its `def` line to the next writer's.
+    Anchored to a line start so prose quoting `def publish(` cannot move it."""
+    a = re.search(rf"^def {start}\(", pub, re.MULTILINE).start()
+    b = re.search(rf"^def {end}\(", pub, re.MULTILINE).start() if end else len(pub)
+    return pub[a:b]
+
+
 def check_lock_semantics() -> None:
     s = "THE LOCK"
     pub = (ROOT / "scripts" / "nfl_wind_publisher.py").read_text(encoding="utf-8")
-    wind = pub[pub.index("def publish("):pub.index("def publish_opener(")]
-    opener = pub[pub.index("def publish_opener("):]
-    check(s, "wind never deletes unstarted picks",
-          "DELETE FROM PICKS" not in wind.upper())
+    wind = _writer_slice(pub, "publish", "publish_opener")
+    opener = _writer_slice(pub, "publish_opener", None)
+    # Tightened (Reviewer, #838 post-merge). The old checks only asked whether
+    # the literal text appeared inside each writer's slice, so a delete moved
+    # into a helper passed the wind check unseen. Now BOTH checks require that
+    # no pick delete anywhere in the publisher -- in a writer or in any helper
+    # it calls -- touches anything but an unsettled NONE row.
+    anywhere = _unguarded_pick_deletes(pub)
+    in_wind = _unguarded_pick_deletes(wind)
+    in_opener = _unguarded_pick_deletes(opener)
+    check(s, "wind never deletes unstarted picks (only an unsettled NONE row)",
+          not anywhere and not in_wind,
+          f"unguarded: {anywhere or in_wind}" if anywhere or in_wind else "")
     check(s, "wind skips already-locked games",
           "SELECT DISTINCT game_id FROM picks" in wind)
-    check(s, "opener insert-once lock intact",
-          "INSERT-ONCE LOCK" in opener and "DELETE FROM PICKS" not in opener.upper())
+    check(s, "opener insert-once lock intact (only an unsettled NONE row deleted)",
+          "INSERT-ONCE LOCK" in opener and not anywhere and not in_opener,
+          f"unguarded: {anywhere or in_opener}" if anywhere or in_opener else "")
 
     mon = (ROOT / "scripts" / "nfl_pick_monitor.py").read_text(encoding="utf-8")
     upd = mon[mon.index("UPDATE picks"):mon.index("WHERE pick_id = %s")]
@@ -168,8 +241,11 @@ def check_schedule() -> None:
     m = re.search(r"NFL_POLL_HORIZON_DAYS\s*=\s*([\d.]+)", sch)
     check(s, "horizon is 10 days", bool(m) and float(m.group(1)) == 10.0,
           f"{m.group(1) if m else '?'} days")
-    m2 = re.search(r"NFL_FAST_WINDOW_HOURS\s*=\s*([\d.]+)", sch)
-    check(s, "fast window is 3 hours", bool(m2) and float(m2.group(1)) == 3.0,
+    # Stale on master: #489 (2026-09-05) made the window env-driven with a
+    # 24 h default (`float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))`).
+    m2 = re.search(r'NFL_FAST_WINDOW_HOURS\s*=\s*float\(os\.environ\.get\('
+                   r'"NFL_FAST_WINDOW_HOURS",\s*"([\d.]+)"\)\)', sch)
+    check(s, "fast window defaults to 24 hours", bool(m2) and float(m2.group(1)) == 24.0,
           f"{m2.group(1) if m2 else '?'} h")
     check(s, "old fixed wind-card slots removed",
           "nfl_wind_card_" not in sch and 'id="nfl_opener_card"' not in sch)
@@ -222,9 +298,15 @@ def check_config_gates() -> None:
     if m:
         opener = _load(NFL / "models" / "opener_spread.py", "pf_opener2")
         gate = float(m.group(1))
-        lo, hi = opener.model_prob_for_dev(1.0), opener.model_prob_for_dev(8.0)
-        check(s, "gate is a breakeven floor, not an edge filter",
-              gate <= 0.52 and lo > gate, f"min_prob {gate}, P(1pt) {lo:.4f}")
+        # Stale on master: config.py (mike, 2026-09-11) set min_prob 0.55 to
+        # MIRROR the |dev| >= 2.0 rule -- P(2pt) clears, P(1pt) does not.
+        lo, two = opener.model_prob_for_dev(1.0), opener.model_prob_for_dev(2.0)
+        check(s, "gate drops a 1-pt deviation and clears a 2-pt one",
+              lo < gate <= two,
+              f"min_prob {gate}, P(1pt) {lo:.4f}, P(2pt) {two:.4f}")
+        dep = opener.model_prob_for_dev(opener.DEPLOY_THRESHOLD)
+        check(s, "a deviation at DEPLOY_THRESHOLD clears the gate", dep >= gate,
+              f"P({opener.DEPLOY_THRESHOLD:g}pt) {dep:.4f} >= min_prob {gate}")
         check(s, "opener edge is NOT established", INFO,
               "ROI +1.34% [-3.9,+6.4] flat over 2020-2025; live by decision, "
               "Kelly-sized. Retire on a 2026 season at or below flat")
@@ -233,21 +315,26 @@ def check_config_gates() -> None:
 def check_data() -> None:
     s = "DATA"
     import csv as _csv
+
+    def data_check(name: str, ok: bool, detail: str = "") -> None:
+        # CI mode: calendar/committed-data misses warn (see module docstring).
+        check(s, name, PASS if ok else (WARN if CI_MODE else FAIL), detail)
+
     g = NFL / "data" / "games.csv"
-    check(s, "games.csv present", g.exists())
+    data_check("games.csv present", g.exists())
     if g.exists():
         now = datetime.now(timezone.utc).date().isoformat()
         with g.open(newline="", encoding="utf-8") as fh:
             rows = list(_csv.DictReader(fh))
         future = [r for r in rows if (r.get("gameday") or "") >= now]
         seasons = sorted({r.get("season") for r in rows if r.get("season")})
-        check(s, "schedule covers upcoming games", len(future) > 0,
+        data_check("schedule covers upcoming games", len(future) > 0,
               f"{len(future)} future games, seasons through {seasons[-1] if seasons else '?'}")
         if future:
             nxt = min(r["gameday"] for r in future)
             check(s, "next kickoff", INFO, nxt)
     cache = NFL / "data" / "odds_cache"
-    check(s, "odds cache present", cache.exists() and len(list(cache.iterdir())) > 5000,
+    data_check("odds cache present", cache.exists() and len(list(cache.iterdir())) > 5000,
           f"{len(list(cache.iterdir())) if cache.exists() else 0} snapshots")
 
 
@@ -270,7 +357,14 @@ def check_cost() -> None:
     check(s, "off-season / no game inside 10 days", INFO, "0 — driver returns early")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    global CI_MODE
+    ap = argparse.ArgumentParser(description="NFL wind/opener wiring preflight")
+    ap.add_argument("--ci", action="store_true",
+                    help="PR CI: DATA-section misses warn instead of failing "
+                         "(also NFL_PREFLIGHT_OFFLINE=1)")
+    args = ap.parse_args(argv)
+    CI_MODE = args.ci or os.environ.get("NFL_PREFLIGHT_OFFLINE") == "1"
     for fn in (check_models, check_import_shadowing, check_lock_semantics, check_schedule, check_cards_run,
                check_schema, check_config_gates, check_data, check_secrets, check_cost):
         try:

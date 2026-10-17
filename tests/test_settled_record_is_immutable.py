@@ -54,9 +54,30 @@ def _code(sql: str) -> str:
 
 # ── the Discord recap ────────────────────────────────────────────────────────
 
+def _without_row_marker(sql: str) -> str:
+    """The recap minus the paused-ROW clause (2026-09-28).
+
+    config.paused_row_exclusion_sql drops a pick WRITTEN while its model was
+    paused -- a property of the row, stamped at write time, never re-read from
+    the model's present state. That is a filter on what the pick WAS (the rule
+    these tests guard), so it is removed before looking for the model-state
+    `paused` flag this file exists to keep out."""
+    return sql.replace(config.paused_row_exclusion_sql("p"), "")
+
+
 def test_the_recap_does_not_re_apply_the_paused_flag_to_settled_picks():
     """The bug itself. `paused` says what a model may bet NEXT."""
-    assert "paused" not in _code(_SETTLED_SQL).lower()
+    code = _code(_without_row_marker(_SETTLED_SQL)).lower()
+    assert "paused" not in code
+    assert "model_action_thresholds" not in code
+
+
+def test_the_recap_drops_a_pick_written_while_paused_by_its_row_marker():
+    """2026-09-28: a paused model keeps its real verdict, so a paused BET can
+    settle. It was never posted or staked, so it is not in what was bet --
+    and it is kept out by the ROW's marker, not by the model's state."""
+    assert config.paused_row_exclusion_sql("p") in _SETTLED_SQL
+    assert "t.paused" not in _SETTLED_SQL
 
 
 def test_the_recap_does_not_re_cut_settled_picks_at_todays_thresholds():
@@ -198,8 +219,14 @@ def test_the_app_has_a_record_filter_that_ignores_model_state():
     assert "passesRecordFilter" in src, "the app has no settled-record filter"
     body = src[src.index("export function passesRecordFilter"):]
     body = body[:body.index("\n}")]
+    # Code only, and minus the paused-ROW check (2026-09-28): isPausedRow reads
+    # the row's own 'model paused' marker, a property of what the pick WAS.
+    code = "\n".join(l for l in body.splitlines()
+                     if not l.lstrip().startswith("//"))
+    assert "isPausedRow(p)" in code, "a paused model's BET would count as a bet of record"
+    code = code.replace("isPausedRow(p)", "")
     for token in ("paused", "min_prob", "min_edge", "min_odds"):
-        assert token not in body, f"passesRecordFilter still re-filters on {token}"
+        assert token not in code.lower(), f"passesRecordFilter still re-filters on {token}"
 
 
 def test_the_app_record_screens_do_not_use_the_action_filter():

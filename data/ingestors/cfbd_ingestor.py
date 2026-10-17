@@ -2214,8 +2214,18 @@ def backfill_ncaaf_lines(start_year: int, end_year: int) -> int:
 
 def run_ncaaf_stats_ingestor(season: int | None = None) -> dict:
     """
-    In-season weekly refresh. Off-season the schedule pull returns nothing and
-    every step is a clean no-op — that IS the off-season gate.
+    The daily NCAAF refresh, for the season `ncaaf_season_for_date` names today.
+
+    THE OFF-SEASON IS NOT A NO-OP (corrected 2026-10-12; this said "every step
+    is a clean no-op — that IS the off-season gate"). Whatever the schedule
+    pull returns, `ingest_ncaaf_team_stats` writes one preseason row per school
+    from the PRIOR season's final SP+, SRS and efficiency — it needs no games.
+    Measured by stubbing every CFBD call: season 2027 with an empty schedule
+    still asked for the 2026 SP+ and wrote a 2027-08-01 preseason row. So the
+    first run on or after March 1 (when the season label rolls over) is the
+    first time last season's final SP+ reaches the system — which is when a
+    school newly promoted to FBS can first get a rating
+    (config.NCAAF_PROMOTED_TO_FBS).
     """
     season = season or ncaaf_season_for_date(
         datetime.now(timezone.utc).strftime("%Y-%m-%d"))

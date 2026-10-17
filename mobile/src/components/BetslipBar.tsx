@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { setBetslipBarInset } from '@/hooks/useBetslipBarInset';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
@@ -81,7 +82,18 @@ function BetslipBarContent({
   // empty slate), where hiding is still the honest answer. The exception is the
   // first paint after an add, where the board hasn't landed yet: that renders
   // with a chevron instead of a price, so the add visibly registers.
-  if (!shouldShowBetslipBar(summary, resolving)) return null;
+  const visible = shouldShowBetslipBar(summary, resolving);
+  // Publish 0 whenever the bar isn't drawn (and on unmount — empty slip, or a
+  // NO_BETSLIP_BAR route), so BetslipBarSpacer only reserves room while the
+  // bar is actually over the content (usability audit M7).
+  const barHeight = useRef(0);
+  const floatGap = overTabBar ? spacing.sm : 0;
+  useEffect(() => {
+    setBetslipBarInset(visible && barHeight.current > 0 ? barHeight.current + floatGap : 0);
+  }, [visible, floatGap]);
+  useEffect(() => () => setBetslipBarInset(0), []);
+
+  if (!visible) return null;
 
   // The badge counts what's actually in the slip: once the board is known the
   // pruner has reconciled the two, and while it's still loading the raw
@@ -91,6 +103,13 @@ function BetslipBarContent({
   return (
     <Pressable
       onPress={onOpen}
+      // How far the bar reaches into the content: its own height, plus the
+      // float gap when it's inset above the tab bar (tab screens already end
+      // at the tab bar's top edge; stack screens run to the screen bottom).
+      onLayout={(e) => {
+        barHeight.current = e.nativeEvent.layout.height;
+        setBetslipBarInset(barHeight.current + floatGap);
+      }}
       accessibilityRole="button"
       accessibilityLabel={
         priced
@@ -147,6 +166,9 @@ function BetslipBarContent({
 
 const styles = StyleSheet.create({
   bar: {
+    // Declared tap floor (verify_a11y); the bar is already ~60pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     position: 'absolute',
     left: 0,
     right: 0,

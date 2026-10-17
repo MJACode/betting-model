@@ -139,3 +139,188 @@ class TestTheToolRefusesToMatchEverything:
     def test_writing_requires_an_explicit_flag(self):
         src = (ROOT / "scripts" / "void_picks.py").read_text(encoding="utf-8")
         assert '"--apply"' in src and "DRY RUN" in src
+
+
+class TestAPostedSignalIsLocked:
+    """Matt, 2026-09-28: "if a bet is posted as a signal it should be locked".
+
+    Ailin Perez ML (pick 2482412) was posted to Discord on 2026-09-19, voided by
+    the EV-floor sweep three hours later, stayed on the board (a VOID never
+    retracts the post), won on 2026-09-26 -- and the recap said no UFC pick
+    cleared the bar that day. A void cannot un-send a message, so it must not
+    be allowed to un-count one.
+    """
+
+    def test_a_posted_pick_is_refused(self):
+        to_void, refused = plan_voids([{**_row(), "posted": True}], REASON)
+        assert not to_void
+        assert "posted as a signal" in refused[0]["why"]
+
+    def test_an_unposted_pick_is_still_voidable(self):
+        """The lock is on the post, not on voiding: phantom-game rows that
+        never reached the channel (pick 661) still void."""
+        to_void, _ = plan_voids([{**_row(), "posted": False}], REASON)
+        assert len(to_void) == 1
+
+    def test_the_select_reads_the_discord_ledger_on_the_shared_key(self):
+        """Both callers (the script and the worker's void_picks job) go
+        through _select, so the posted flag must be computed THERE, from the
+        one lock_key definition -- not retyped."""
+        from scripts.void_picks import POSTED_SQL, _select
+        from tracking.publish_keys import live_lock_key_sql, lock_key_sql, posted_sql
+
+        assert POSTED_SQL == posted_sql("p")
+
+        assert "push_sent" in POSTED_SQL
+        assert "'discord_signal'" in POSTED_SQL and "'discord_live'" in POSTED_SQL
+        assert lock_key_sql("p") in POSTED_SQL
+        assert live_lock_key_sql("p") in POSTED_SQL
+
+        conn = _FakeConn()
+        _select(conn, [2482412], None, None, None)
+        sql = conn.calls[0][0]
+        assert "AS posted" in sql and "push_sent" in sql
+
+    def test_the_worker_job_uses_the_same_plan(self):
+        src = (ROOT / "tracking" / "job_queue.py").read_text(encoding="utf-8")
+        assert "from scripts.void_picks import _select, announce_posted_voids, plan_voids, void" in src
+
+
+class TestVoidingAPostedPickIsAnExplicitOptIn:
+    """mike, 2026-10-09: "Change the rule, void them".
+
+    Eight NCAAF unders were posted to members and decided on DraftKings
+    prices 15 to 28 days old: the odds feed had stopped listing those games
+    on 2026-09-05, so the number was not one the book was offering. Matt's
+    lock (2026-09-28) still holds by default. A posted pick is voided only
+    when the caller opts in, and a graded pick is never voided, opt-in or not.
+    """
+
+    def test_a_posted_pick_is_refused_by_default_and_told_how_to_opt_in(self):
+        to_void, refused = plan_voids([{**_row(), "posted": True}], REASON)
+        assert not to_void
+        why = refused[0]["why"]
+        assert "posted as a signal" in why
+        assert "--allow-posted" in why and "allow_posted" in why
+
+    def test_a_posted_pick_is_voided_with_the_opt_in(self):
+        to_void, refused = plan_voids([{**_row(), "posted": True}], REASON,
+                                      allow_posted=True)
+        assert [r["pick_id"] for r in to_void] == [1] and not refused
+
+    def test_a_graded_pick_is_refused_with_or_without_the_opt_in(self):
+        for allow in (False, True):
+            for result in GRADED:
+                rows = [{**_row(result=result), "posted": True},
+                        {**_row(2, result=result), "posted": False}]
+                to_void, refused = plan_voids(rows, REASON, allow_posted=allow)
+                assert not to_void, f"{result} voided with allow_posted={allow}"
+                assert all(f"already graded {result}" == r["why"] for r in refused)
+
+    def test_the_opt_in_does_not_skip_the_other_checks(self):
+        """An already-void pick stays a no-op and an empty reason is refused."""
+        to_void, refused = plan_voids([{**_row(result=VOID_RESULT), "posted": True}],
+                                      REASON, allow_posted=True)
+        assert not to_void and "no-op" in refused[0]["why"]
+        to_void, refused = plan_voids([{**_row(), "posted": True}], "  ",
+                                      allow_posted=True)
+        assert not to_void and "reason" in refused[0]["why"]
+
+    def test_the_command_line_opt_in_is_off_unless_given(self):
+        """A flag that defaulted on would lift Matt's lock on every void."""
+        from scripts.void_picks import build_parser
+        base = ["--pick-id", "1", "--reason", REASON]
+        assert build_parser().parse_args(base).allow_posted is False
+        assert build_parser().parse_args(base + ["--allow-posted"]).allow_posted is True
+
+    def test_the_command_line_hands_the_opt_in_to_the_plan(self, monkeypatch, capsys):
+        """main() end to end, with the database faked: a posted pick is skipped
+        without the flag, and written only with it."""
+        import data.db
+        import scripts.void_picks as vp
+
+        class _Conn:
+            def __init__(self):
+                self.updates = []
+
+            def execute(self, sql, params=()):
+                if "UPDATE picks" in sql:
+                    self.updates.append(params)
+                return self
+
+            def commit(self):
+                pass
+
+            def close(self):
+                pass
+
+        conn = _Conn()
+        monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+        monkeypatch.setattr(vp, "_select", lambda *a: [{**_row(), "posted": True}])
+        base = ["void_picks", "--pick-id", "1", "--reason", REASON]
+
+        monkeypatch.setattr(sys, "argv", base)
+        assert vp.main() == 0
+        out = capsys.readouterr().out
+        assert "SKIP  1" in out and "--allow-posted" in out
+        assert "VOID  1" not in out
+
+        monkeypatch.setattr(sys, "argv", base + ["--allow-posted"])
+        assert vp.main() == 0
+        out = capsys.readouterr().out
+        assert "VOID  1" in out and "1 would be voided" in out
+
+        monkeypatch.setattr(sys, "argv", base + ["--apply"])
+        vp.main()
+        assert conn.updates == [], "a posted pick was written without the opt-in"
+
+        notices = []
+        monkeypatch.setattr(vp, "announce_posted_voids",
+                            lambda rows, reason: notices.append((rows, reason)) or {"posted": 1})
+
+        monkeypatch.setattr(sys, "argv", base + ["--apply", "--allow-posted"])
+        vp.main()
+        assert [p[-1] for p in conn.updates] == [1]
+        assert [r["pick_id"] for item in notices for r in item[0]] == [1]
+        assert notices[0][1] == REASON
+
+
+class TestAPostedVoidAnnouncesAfterCommit:
+    """The original message stays. A posted pick gets a notice with the
+    reason once the void is committed. An unposted void posts nothing, and a
+    rejected notice does not raise."""
+
+    def test_an_unposted_void_does_not_call_discord(self, monkeypatch):
+        from scripts.void_picks import announce_posted_voids
+        called = []
+        monkeypatch.setattr(
+            "tracking.discord_notifier.notify_discord_void",
+            lambda *a, **k: called.append((a, k)))
+        assert announce_posted_voids([{**_row(), "posted": False}], REASON) is None
+        assert announce_posted_voids([], REASON) is None
+        assert called == []
+
+    def test_a_posted_void_sends_the_reason_and_does_not_dry_run(self, monkeypatch):
+        from scripts.void_picks import announce_posted_voids
+        seen = {}
+
+        def _notify(pick_ids, reason=None, dry_run=True):
+            seen.update(ids=list(pick_ids), reason=reason, dry_run=dry_run)
+            return {"dry_run": False, "posted": 1}
+
+        monkeypatch.setattr("tracking.discord_notifier.notify_discord_void", _notify)
+        out = announce_posted_voids([{**_row(), "posted": True}], REASON)
+        assert out["posted"] == 1
+        assert seen == {"ids": [1], "reason": REASON, "dry_run": False}
+
+    def test_a_rejected_notice_is_logged_and_does_not_raise(self, monkeypatch):
+        from tracking.discord_notifier import DiscordVoidRejected
+        from scripts.void_picks import announce_posted_voids
+
+        def _notify(*_a, **_k):
+            raise DiscordVoidRejected(["pick 1 has no discord_signal row"])
+
+        monkeypatch.setattr("tracking.discord_notifier.notify_discord_void", _notify)
+        out = announce_posted_voids([{**_row(), "posted": True}], REASON)
+        assert out["pick_ids"] == [1]
+        assert "discord_signal" in out["error"]

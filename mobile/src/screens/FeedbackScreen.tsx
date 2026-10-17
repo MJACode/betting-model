@@ -30,6 +30,7 @@ import {
 } from '@/lib/feedbackHelpers';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -99,6 +100,12 @@ export function FeedbackScreen() {
                 const active = c.key === category;
                 return (
                   <Pressable
+                    // ~30pt chip in a wrapping row (4pt gap): 7pt slop reaches 44;
+                    // the overlap sits in the gap, where the later chip wins.
+                    hitSlop={{ top: 7, bottom: 7, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={c.label}
+                    accessibilityState={{ selected: active }}
                     key={c.key}
                     onPress={() => setCategory(c.key)}
                     style={[styles.chip, active && styles.chipActive]}
@@ -110,6 +117,7 @@ export function FeedbackScreen() {
             </View>
 
             <TextInput
+              accessibilityLabel="Your feedback"
               style={styles.input}
               value={body}
               onChangeText={setBody}
@@ -124,6 +132,10 @@ export function FeedbackScreen() {
                 {remaining < 200 ? `${remaining} characters left` : 'Include the pick or screen if it helps.'}
               </Text>
               <Pressable
+                hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+                accessibilityRole="button"
+                accessibilityLabel={sending ? 'Sending' : 'Send'}
+                accessibilityState={{ disabled: !validation.ok || sending, busy: sending }}
                 onPress={send}
                 disabled={!validation.ok || sending}
                 style={[styles.sendBtn, (!validation.ok || sending) && styles.sendBtnDisabled]}
@@ -142,7 +154,12 @@ export function FeedbackScreen() {
           {loading && !loaded ? (
             <ActivityIndicator style={{ marginTop: spacing.lg }} color={colors.tint} />
           ) : error ? (
-            <Pressable style={styles.emptyCard} onPress={refresh}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Couldn't load your conversations. Tap to try again."
+              style={styles.emptyCard}
+              onPress={refresh}
+            >
               <Text style={styles.emptyTitle}>Couldn't load your conversations</Text>
               <Text style={styles.emptyBody}>Tap to try again.</Text>
             </Pressable>
@@ -167,9 +184,16 @@ export function FeedbackScreen() {
             Conversations are tied to this device, so they won't follow you to a new phone. Prefer
             email? Write to {SUPPORT_EMAIL}.
           </Text>
-          <Pressable onPress={openFeedback} style={({ pressed }) => pressed && styles.pressed}>
+          <Pressable
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+            accessibilityRole="link"
+            accessibilityLabel="Email us instead"
+            onPress={openFeedback}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
             <Text style={styles.emailLink}>Email us instead</Text>
           </Pressable>
+          <BetslipBarSpacer />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -179,7 +203,12 @@ export function FeedbackScreen() {
 function ThreadRow({ thread, onPress }: { thread: FeedbackThread; onPress: () => void }) {
   const unread = thread.unread_count > 0;
   return (
-    <Pressable style={({ pressed }) => [styles.threadCard, pressed && styles.pressed]} onPress={onPress}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${unread ? 'Unread. ' : ''}${thread.subject}`}
+      style={({ pressed }) => [styles.threadCard, pressed && styles.pressed]}
+      onPress={onPress}
+    >
       <View style={{ flex: 1 }}>
         <View style={styles.threadTop}>
           {unread ? <View style={styles.dot} /> : null}

@@ -1136,10 +1136,25 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     sp_sav  = ','.join(['%s'] * len(savant_seasons))
     sp_load = ','.join(['%s'] * len(load_seasons))
     sp_all  = ','.join(['%s'] * len(all_seasons))
+    # One prior season is the reach-back the rolling windows and the
+    # season-to-date fallback actually use (last 20 games, prior-season avg).
+    # Jan 1 of that season is the whole prior season: season and game_date
+    # year match on every row. A scoring pass for 2026 therefore reads
+    # 2025-01-01 on; a training pass that starts at 2019 (the table's first
+    # season) still reads the whole log.
+    #
+    # THE UNBOUNDED SCAN IS WHAT dispatch:prop-scoring CANCELLED. 2026-09-25
+    # 00:11:02Z, statement_timeout, the batter SELECT below with no date
+    # predicate: 321,134 rows. EXPLAIN walked idx_player_game_log_player and
+    # sorted the catalog (cost 30150). `game_date >= log_since` range-scans
+    # idx_player_game_log_date (cost 15610, ~79,836 rows for 2025–2026).
+    # Measured on the 2026-09-24 confirmed lineup (216 batters): 0 had a
+    # 20-game window reaching before 2025, and all 30 clubs have 2026 logs,
+    # so opp_team_sb_allowed stays on the team rate rather than the league
+    # fallback. Not a cut, a floor, or a feature-list change.
+    log_since = f"{min(load_seasons):04d}-01-01"
 
     # ── Batter game logs ──────────────────────────────────────────────────────
-    # Load ALL seasons so rolling windows at the start of each training season
-    # can reach back into prior-season games.
     gl_cols = [
         'player_id', 'player_name', 'team', 'game_id', 'game_date', 'season',
         'at_bats', 'hits', 'total_bases', 'home_runs', 'rbi', 'runs',
@@ -1153,8 +1168,9 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         WHERE player_type = 'batter'
           AND at_bats >= 1
           AND hits IS NOT NULL
+          AND game_date >= %s
         ORDER BY player_id, game_date
-    """).fetchall()
+    """, (log_since,)).fetchall()
 
     batter_logs: dict = {}
     for r in gl_rows:
@@ -1247,7 +1263,12 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     games: dict = {r[0]: {'home_team': r[1], 'away_team': r[2]} for r in g_rows}
 
     # ── Pitcher game logs (for opposing-starter HR/9 rolling + starter ID) ────
-    # Load all historical starts so rolling windows at season start can look back.
+    # Same lookback as the batter log. HR/9 uses the last 3 starts and a
+    # prior-season fallback. Unbounded, EXPLAIN is a Parallel Seq Scan
+    # (cost 16534) — the same plan as the strikeout log load that ran
+    # 14.3s / 41.8s / 21.8s in that refresh. game_date >= log_since uses
+    # idx_player_game_log_date (cost 11103). This query does not feed the
+    # umpire career features; those stay on the pitcher loader's full log.
     p_gl_cols = ['player_id', 'game_id', 'game_date', 'team', 'season',
                  'p_home_runs', 'innings_pitched']
     p_gl_rows = conn.execute("""
@@ -1257,8 +1278,9 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         WHERE player_type = 'pitcher'
           AND is_starter = TRUE
           AND p_home_runs IS NOT NULL
+          AND game_date >= %s
         ORDER BY player_id, game_date
-    """).fetchall()
+    """, (log_since,)).fetchall()
 
     pitcher_logs: dict = {}   # player_id → (sorted_dates, rows)
     game_starters: dict = {}  # game_id → {team: player_id}
@@ -1708,7 +1730,8 @@ def _all_batter_rows(bulk: dict, seasons: list[int],
 
 # ── Batter Scoring Row Builder (daily pipeline) ────────────────────────────────
 
-def build_batter_scoring_rows(game_date: str, model_id: str) -> pd.DataFrame:
+def build_batter_scoring_rows(game_date: str, model_id: str,
+                              bulk_cache: dict | None = None) -> pd.DataFrame:
     """
     Build batter feature rows for today's confirmed lineups.
 
@@ -1718,6 +1741,12 @@ def build_batter_scoring_rows(game_date: str, model_id: str) -> pd.DataFrame:
 
     Batters missing 5+ games of history (new players, early season) will have null
     rolling features and are dropped — scorer skips them rather than imputing.
+
+    `bulk_cache` is filled on the first model of a slate and reused by the
+    rest. The batter loop scores five models, and each one used to re-run the
+    log load that statement_timeout cancelled. The cache is the caller's — a
+    dict lives for one scorer pass, not for the worker process, so the next
+    date still reads the log.
     """
     if model_id not in PROP_FEATURE_MAP:
         raise NotImplementedError(f"No feature map for {model_id}")
@@ -1739,7 +1768,12 @@ def build_batter_scoring_rows(game_date: str, model_id: str) -> pd.DataFrame:
             logger.info(f"  No confirmed lineups for {game_date} — skipping batter scoring")
             return pd.DataFrame()
 
-        bulk = _build_bulk_batter_lookups(conn, [season])
+        if bulk_cache is not None and season in bulk_cache:
+            bulk = bulk_cache[season]
+        else:
+            bulk = _build_bulk_batter_lookups(conn, [season])
+            if bulk_cache is not None:
+                bulk_cache[season] = bulk
     finally:
         conn.close()
 

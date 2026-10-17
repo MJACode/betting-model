@@ -126,12 +126,13 @@ def test_the_guard_is_the_live_date_not_the_view_shape():
     """The lesson from the revert. A guard asking "does the view still look like
     my output?" is a lock: it cannot tell "never applied" from "deliberately
     superseded". This one asks whether the live-date gate is present."""
-    guards = re.findall(
-        r"IF position\('([^']+)' in d\) > 0 AND position\('([^']+)' in d\) > 0 THEN", CODE)
-    # Two properties since 2026-09-09: the live-date gate this file exists for,
-    # and the decision-price cut it gained -- so the definitions re-applied
-    # exactly once over the DraftKings-cut ones and never over themselves.
-    assert guards == [("2026-09-01", "decision_edge")] * 2, guards
+    guards = re.findall(r"^\s*IF (position\(.*) THEN$", CODE, re.M)
+    # ONE property. From 2026-09-09 this guard also required 'decision_edge',
+    # and this test pinned the pair. settled_record_survives_a_pause then took
+    # the decision-price cut out of both views on purpose, so the guard could
+    # never be true again: the file rebuilt both views on every pass, with the
+    # threshold join, and two later files rebuilt them again (2026-09-21).
+    assert guards == ["position('2026-09-01' in d) > 0"] * 2, guards
 
 
 def test_no_ddl_outside_the_guarded_branches():

@@ -20,11 +20,15 @@ def test_models_include_expected_ids():
         "mlb_moneyline", "mlb_over_under", "mlb_runline",
         "mlb_f5_moneyline", "mlb_f5_over_under", "mlb_f5_runline",
         # NHL
-        "nhl_moneyline", "nhl_moneyline_regulation", "nhl_over_under", "nhl_puckline",
+        # nhl_over_under left 2026-10-08: it is a rule now
+        # (models/nhl_totals_market.py), not a trained artifact.
+        "nhl_moneyline", "nhl_moneyline_regulation", "nhl_puckline",
         # WNBA
         "wnba_moneyline", "wnba_over_under", "wnba_spread",
-        # NBA
-        "nba_moneyline", "nba_over_under", "nba_spread",
+        # NBA: none. The three 2026-06-19 game models were RETIRED 2026-10-15
+        # (mike: "build new nba models, remove any previous nba models") and
+        # every NBA game market was closed for 2026-27 (docs/nba_models_2026.md
+        # 4.1). The NBA model that ships is a prop rule, outside MODELS.
         # UFC
         "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
         # GOLF
@@ -156,11 +160,48 @@ def test_only_a_market_priced_model_carries_a_negative_floor():
 
 def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
     """These were one expression while the floor dict held exactly these two.
-    Widening the floors must not take 36 more models off the calibration map."""
+    Widening the floors must not take 36 more models off the calibration map.
+
+    nhl_prop_blocked_shots joined BY NAME on 2026-10-01 (mike): its cut was
+    measured on its own probability, and the borrowed correction turned its
+    three-season backtest from +6.2% into a loss. Each addition is a decision
+    with its own measurement, which is why this stays an exact list.
+
+    nhl_prop_saves / _shots_on_goal / _assists joined the same day, the same
+    way (mike: "build saves, shots on goal and assists models"): each cut was
+    swept on the model's own probability, and under the borrowed correction
+    assists loses at every cut to 0.15 and shots on goal earns nothing
+    (scripts/nhl_prop_backtest.py)."""
     import config
 
     assert config.MODELS_ON_OWN_PROBABILITY == frozenset(
-        {"nfl_wind_totals", "nfl_opener_spread"}
+        {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
+         "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
+         # 2026-10-03 (mike): the two-way correction on a three-way market.
+         "nhl_moneyline_regulation",
+         # 2026-10-08 (mike): Pinnacle's no-vig price IS the probability;
+         # the pooled map sends every one of them to 0.500.
+         "nhl_over_under",
+         # 2026-10-12 (mike): the sharp reference's no-vig price; its map is
+         # a borrowed offset fitted on 23 picks (docs/nfl_edge_search.md §5).
+         "nfl_prop_market",
+         # 2026-10-13 (mike: "reenable the model"): the in-play leader
+         # moneyline's cut was measured on its own per-lead win probability,
+         # and it has no graded bet to fit a map on.
+         "nfl_live_leader_ml",
+         # 2026-10-15 (mike, "Yes"): the rebuilt moneyline is anchored on
+         # DraftKings' price and graded on its own number; the correction
+         # never crosses 0.5 and would delete its underdogs
+         # (docs/nhl_moneyline_rebuild.md).
+         "nhl_moneyline",
+         # 2026-10-15 (mike: "use what you've learned in this repo"): the NBA
+         # prop rule; its number IS Pinnacle's no-vig under, which its EV >= 0
+         # cut was measured on, and it has no record to fit a map on.
+         "nba_prop_market",
+         # 2026-10-16 (mike: "build the projection model"): its probability is
+         # calibrated per market inside its own artifact, on the graded seasons'
+         # main-line pairs, and every floor was chosen on that number.
+         "nba_prop_projection"}
     )
 
 
@@ -200,7 +241,7 @@ def test_the_models_the_global_floor_silently_removed_can_bet_again():
         for model_id, smallest_written in (
             ("mlb_spread_market", 0.00),  # negative min, floored at zero
             ("mlb_total_public_fade", 0.00),
-            ("nfl_live_prop", 0.062),
+            # nfl_live_prop (0.062) retired 2026-10-04 (mike).
         ):
             assert config.min_ev_for(model_id) <= smallest_written, (
                 f"{model_id} cannot place the smallest bet it has ever written"
@@ -213,12 +254,21 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
     """Carrying an own EV floor and deciding on the model's OWN probability
     were one expression until 2026-09-20. They are separate questions: where a
     model's edges sit, versus whether its calibration map can be trusted. Every
-    model but the two NFL rules keeps the promoted map."""
+    model but the two NFL rules and the four NHL prop models (2026-10-01, each
+    measured) keeps the promoted map."""
     import config
 
     assert "mlb_moneyline" in config.MODEL_OWN_EV_FLOOR
     assert "mlb_moneyline" not in config.MODELS_ON_OWN_PROBABILITY
-    on_own_but_not_a_rule = config.MODELS_ON_OWN_PROBABILITY - {
-        "nfl_wind_totals", "nfl_opener_spread"
+    not_named_here = config.MODELS_ON_OWN_PROBABILITY - {
+        "nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
+        "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
+        "nhl_moneyline_regulation", "nhl_over_under", "nfl_prop_market",
+        "nfl_live_leader_ml",
+        "nhl_moneyline",            # 2026-10-15 (mike): the anchored rebuild
+        # mike, 2026-10-15, "use what you've learned in this repo": the NBA
+        # prop rule decides on Pinnacle's no-vig under, its own number.
+        "nba_prop_market",
+        "nba_prop_projection",      # 2026-10-16 (mike): calibrated inside its own artifact
     }
-    assert not on_own_but_not_a_rule
+    assert not not_named_here

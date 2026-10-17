@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 export function ExplainerScreen() {
   return (
@@ -89,19 +90,19 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="BET / AVOID / NONE">
+        <Section heading="BET / AVOID / NEUTRAL">
           <Bullet>
             <Strong>BET</Strong> — model probability AND edge both clear that
             model's threshold. Unit stake attached. These are the picks worth
             backing.
           </Bullet>
           <Bullet>
-            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge ≤
-            -3%). Informational; do NOT bet the other side blindly.
+            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge at or
+            below that model's AVOID cut). Informational; do NOT bet the other side blindly.
           </Bullet>
           <Bullet>
-            <Strong>NONE</Strong> — edge is in the dead zone (between -3% and
-            +3%). Model and DK essentially agree; no advantage either way.
+            <Strong>NEUTRAL</Strong> — edge sits between that model's AVOID and
+            BET cuts. Model and DK essentially agree; no advantage either way.
           </Bullet>
           <P>
             The Signals tab applies the per-model action filter (e.g. moneyline
@@ -114,9 +115,12 @@ export function ExplainerScreen() {
         <Section heading="Stakes are in units, not dollars">
           <P>
             Every stake we publish is in <Strong>units</Strong>. One unit is one
-            flat bet at whatever size you bet — we never ask for your bankroll
-            and never put a dollar figure on a pick, because the same "$50" means
-            something different to every reader.
+            flat bet at whatever size you bet, and we never put a dollar figure
+            on a pick, because the same "$50" means something different to every
+            reader. You can add a bankroll in Settings if you like: it's
+            optional, it stays on this device, and it only converts your units
+            into dollars. It never sizes a bet: every pick is still the same
+            1u play for everyone.
           </P>
           <P>
             A pick is quoted as units to <Strong>win</Strong>, then grossed up by
@@ -345,6 +349,7 @@ export function ExplainerScreen() {
             history through your own conviction rules.
           </P>
         </Section>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -421,7 +426,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     backgroundColor: colors.bg,
     paddingHorizontal: 4,
-    fontSize: 13,
+    fontSize: font.size.footnote,
     color: colors.textPrimary,
   },
   bullet: {

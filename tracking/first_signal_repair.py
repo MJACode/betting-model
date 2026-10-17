@@ -121,7 +121,8 @@ def _standing(conn: DBConnection, game_id: str, model_id: str,
               pick_side: str) -> dict | None:
     """The unsettled pick currently occupying that lane/side, if any."""
     r = conn.execute("""
-        SELECT pick_id, scored_line, dk_odds, pick_label, created_at
+        SELECT pick_id, scored_line, dk_odds, pick_label, created_at,
+               downgrade_reason
         FROM picks
         WHERE game_id = %(g)s AND model_id = %(m)s AND pick_side = %(s)s
           AND result IS NULL
@@ -131,7 +132,21 @@ def _standing(conn: DBConnection, game_id: str, model_id: str,
     if r is None:
         return None
     return {"pick_id": r[0], "scored_line": r[1], "dk_odds": r[2],
-            "pick_label": r[3], "created_at": r[4]}
+            "pick_label": r[3], "created_at": r[4], "downgrade_reason": r[5]}
+
+
+def _restore_as_paused(model_id: str, standing: dict | None) -> bool:
+    """Should a restored lane carry config.PAUSED_NOTE?
+
+    picks_log has no downgrade_reason column, so a restored row would lose the
+    marker that keeps a paused model's BET off Discord, push and the record
+    (scorer._paused_signal, 2026-09-28) -- and come back as an announceable
+    BET. Keep it when the row being displaced carried it, or when the model is
+    paused now (what the scorer would stamp on the same pick today).
+    """
+    if standing is not None and standing.get("downgrade_reason") == config.PAUSED_NOTE:
+        return True
+    return model_id in config.PAUSED_MODELS
 
 
 def _lane_voided(conn: DBConnection, game_id: str, model_id: str,
@@ -202,6 +217,7 @@ def restore_first_signals(game_date: str | None = None,
                 repaired += 1
                 continue
 
+            paused_lane = _restore_as_paused(mid, standing)
             # Remove only the rows that exist BECAUSE the original was deleted.
             # Settled rows are never touched: a graded pick is history.
             conn.execute("""
@@ -225,6 +241,9 @@ def restore_first_signals(game_date: str | None = None,
                 if mid in _LIVE_MODEL_IDS:
                     cols.append("is_live")
                     vals["is_live"] = True
+                if paused_lane:
+                    cols.append("downgrade_reason")
+                    vals["downgrade_reason"] = config.PAUSED_NOTE
                 conn.execute(
                     f"INSERT INTO picks ({', '.join(cols)}) "
                     f"VALUES ({', '.join('%(' + c + ')s' for c in cols)})", vals)

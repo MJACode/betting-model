@@ -30,8 +30,12 @@ HTML = io.open(DASH, encoding="utf-8").read()
 # Rules: they carry a cut and fire, but are in no training registry.
 KNOWN_RULES = {
     "nfl_wind_totals", "nfl_opener_spread", "nfl_prop_market",
-    "nfl_live_prop", "wnba_prop_market", "mlb_spread_market",
+    "wnba_prop_market", "mlb_spread_market",
     "mlb_total_market", "mlb_total_public_fade",
+    "nhl_over_under",
+    # 2026-10-15 (mike): the NBA prop rule, Pinnacle's no-vig under vs the
+    # bettable books (models/nba_prop_market.py).
+    "nba_prop_market",
 }
 
 

@@ -123,8 +123,8 @@ export const DK_GREEN = colors.bookDraftKings;
 
 export function bookButtonColors(book: string): { bg: string; fg: string } {
   return book === 'draftkings'
-    ? { bg: DK_GREEN, fg: '#000' }
-    : { bg: colors.tint, fg: '#fff' };
+    ? { bg: DK_GREEN, fg: colors.textPrimary }
+    : { bg: colors.tint, fg: colors.textInverse };
 }
 
 // The button's label ("Bet on FanDuel") lives in markets.ts alongside the book

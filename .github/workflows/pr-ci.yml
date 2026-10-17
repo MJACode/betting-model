@@ -36,9 +36,25 @@ jobs:
           # only needs pytest + the modules those tests import. Install the
           # declared test pin and the light runtime deps config/scorer need.
           python -m pip install "pytest>=8.0.0" python-dotenv numpy pandas loguru psycopg2-binary requests scipy joblib scikit-learn xgboost-cpu optuna apscheduler beautifulsoup4
+          # tests/test_nba_injury_report.py parses real report PDFs (requirements.txt pin).
+          python -m pip install "pdfplumber>=0.11.0"
 
       - name: Mobile thresholds drift check
         run: python -m scripts.generate_mobile_thresholds --check
+
+      # Offline NFL wiring checks (no DB, no API credits): the #838 lock
+      # checks allow only an unsettled-NONE delete in the publishers. --ci:
+      # the DATA section (schedule coverage, odds cache) warns instead of
+      # failing, so the step doesn't go red when the committed schedule ends.
+      - name: NFL preflight
+        run: python -m scripts.nfl_preflight --ci
+
+      # test_discord_publish_sync runs the app predicate with
+      # node --experimental-strip-types. The runner image's node is not
+      # that, and a missing flag fails the subset.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Pytest non-integration subset
         env:
@@ -53,6 +69,7 @@ jobs:
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
             tests/test_mobile_threshold_parity.py \
+            tests/test_mobile_bankroll.py \
             tests/test_nfl_prop_thresholds.py \
             tests/test_pick_lock_is_on_picks.py \
             tests/test_pick_lock_survives_settlement.py \
@@ -60,7 +77,24 @@ jobs:
             tests/test_live_lock.py \
             tests/test_settle_self_heal.py \
             tests/test_settled_record_is_immutable.py \
+            tests/test_live_money_no_record_only.py \
+            tests/test_published_record.py \
             tests/test_settlement_timing.py \
+            tests/test_nhl_boxscore.py \
+            tests/test_nba_espn_box.py \
+            tests/test_nba_box_enrich.py \
+            tests/test_nba_injury_report.py \
+            tests/test_nba_odds_history.py \
+            tests/test_nba_period_scores.py \
+            tests/test_nba_prop_close.py \
+            tests/test_nba_prop_market.py \
+            tests/test_nba_prop_settle_stats.py \
+            tests/test_nba_props.py \
+            tests/test_nba_results_ingestor.py \
+            tests/test_nba_results_wiring.py \
+            tests/test_nba_schedule_ingestor.py \
+            tests/test_prop_odds_book_last_update.py \
+            tests/test_prop_box_scores.py \
             tests/test_intraday_freshness.py \
             tests/test_dk_freshness_parse.py \
             tests/test_savant_freshness.py \
@@ -68,16 +102,50 @@ jobs:
             tests/test_pitcher_stats_asof_invariants.py \
             tests/test_cfbd_snapshot_leakage.py \
             tests/test_paused_and_no_signal_rows.py \
+            tests/test_paused_keeps_real_verdict.py \
+            tests/test_nfl_scored_rows.py \
             tests/test_nfl_rule_2026_track.py \
+            tests/test_game_scorer_spares_nfl_props.py \
+            tests/test_nfl_prop_unstarted_clear.py \
+            tests/test_scorer_nfl_prop_like_escape.py \
+            tests/test_sql_percent_escaping.py \
             tests/test_nfl_prop_injury_veto.py \
             tests/test_nfl_injury_ingest.py \
             tests/test_injuries_status_ts_migration.py \
             tests/test_game_injury_gate.py \
             tests/test_espn_nhl_probables.py \
+            tests/test_nhl_asof.py \
+            tests/test_nhl_prop_odds_gate.py \
+            tests/test_nhl_prop_blocked_shots.py \
+            tests/test_nhl_props.py \
+            tests/test_nhl_derivative_odds_job.py \
             tests/test_nfl_prop_two_sharps.py \
             tests/test_nfl_prop_one_read_per_game.py \
             ncaaf_live/tests/test_cfbd_yardline.py \
             tests/test_nfl_prop_market_kalshi.py \
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
-            tests/test_mobile_betslip_combine.py
+            tests/test_position_vs_opponent.py \
+            tests/test_player_positions.py \
+            tests/test_mobile_betslip_combine.py \
+            tests/test_mobile_contrast_tokens.py \
+            tests/test_mobile_error_states.py \
+            tests/test_mobile_pick_cta.py \
+            tests/test_mobile_line_movement.py \
+            tests/test_mobile_a11y.py \
+            tests/test_mobile_nhl_lookahead.py \
+            tests/test_discord_publish_sync.py \
+            tests/test_discord_void_notice.py \
+            tests/test_anon_readable.py \
+            tests/test_clv_card_price_taken.py \
+            tests/test_publish_key_identity.py \
+            tests/test_void_picks.py \
+            tests/test_discord_post_one_pick_migration.py \
+            tests/test_results_recap_message_id.py \
+            tests/test_backfill_results_recap.py \
+            tests/test_job_queue.py \
+            tests/test_idle_read_transaction.py \
+            tests/test_view_migration_lock_noop.py \
+            tests/test_record_correction_post.py \
+            tests/test_voided_pick_not_rechosen.py \
+            tests/test_mobile_stat_segments.py

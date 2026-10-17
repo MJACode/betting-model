@@ -73,7 +73,28 @@ def load_prices(conn, season: int) -> pd.DataFrame:
     for c in ("line", "over", "under"):
         px[c] = pd.to_numeric(px[c], errors="coerce")
     px["pkey"] = px.player.map(fold)
-    return px
+    return coherent(px)
+
+
+# A two-way quote whose implied probabilities do not sum to a book's margin is
+# not a quote anyone was offered. FanDuel lists several lines per player and the
+# shared parser keeps one row per player, so it paired an over from one line
+# with an under from another: in a January 2024 sample 31.2% of FanDuel shots
+# rows summed under 100% and 24.9% over 115%, every other book 0.0% on both.
+# Those rows read +31% on 2,293 shots bets, which is the parser, not an edge.
+COHERENT_SUM = (1.00, 1.15)
+
+
+def coherent(px: pd.DataFrame) -> pd.DataFrame:
+    two_way = px.over.notna() & px.under.notna()
+    total = px.over.map(implied, na_action="ignore") + px.under.map(implied, na_action="ignore")
+    bad = two_way & ~total.between(*COHERENT_SUM)
+    if bad.any():
+        by_book = px[bad].book.value_counts()
+        print(f"dropped {int(bad.sum()):,} incoherent two-way rows (implied sum outside "
+              f"{COHERENT_SUM[0]:.2f}..{COHERENT_SUM[1]:.2f}): "
+              + ", ".join(f"{b} {n:,}" for b, n in by_book.items()))
+    return px[~bad]
 
 
 def predictions(conn, season: int) -> pd.DataFrame:
@@ -138,12 +159,17 @@ def sides(df: pd.DataFrame, p_over: np.ndarray) -> pd.DataFrame:
     return pd.concat(rows)
 
 
+DUMP: list[pd.DataFrame] = []      # bet-level rows, so seasons can be POOLED (--dump)
+
+
 def table(name: str, s: pd.DataFrame, cuts=EV_CUTS) -> list[dict]:
     out = []
     for c in cuts:
         b = s[s.ev >= c].sort_values("gdate")
         # one bet per player-game-market: the best EV on offer
         b = b.sort_values("ev", ascending=False).drop_duplicates(["game_id", "pkey", "market"]).sort_values("gdate")
+        DUMP.append(b[["game_id", "gdate", "market", "pkey", "book", "side", "line", "price", "p", "ev", "profit"]]
+                    .assign(rule=name, cut=c))
         if len(b) < 30:
             out.append({"rule": name, "EV>=": c, "bets": len(b)})
             continue
@@ -158,6 +184,8 @@ def table(name: str, s: pd.DataFrame, cuts=EV_CUTS) -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--season", type=int, default=2026)
+    ap.add_argument("--dump", default=None,
+                    help="write every bet behind every table row to this CSV (for pooling seasons)")
     a = ap.parse_args()
     conn = get_connection()
     try:
@@ -199,6 +227,9 @@ def main() -> None:
         print(f"\n### {market}  ({m.groupby(['game_id', 'pkey']).ngroups:,} player-games priced; "
               f"DraftKings {len(dk):,} rows; Pinnacle same-line {int(m.pin_over.notna().sum()):,})\n")
         print(pd.DataFrame(rows).to_string(index=False))
+    if a.dump:
+        pd.concat(DUMP).assign(season=a.season).to_csv(a.dump, index=False)
+        print(f"\nwrote {sum(len(d) for d in DUMP):,} bet rows to {a.dump}")
 
 
 if __name__ == "__main__":

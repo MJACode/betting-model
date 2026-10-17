@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
   Pressable,
   RefreshControl,
@@ -20,6 +19,8 @@ import { SPORTS } from '@/hooks/useSportFilter';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import { SettingsButton } from '@/components/SettingsButton';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
+import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import {
   EMPTY_SUMMARY,
   groupBySport,
@@ -30,20 +31,24 @@ import {
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPct, formatPctSigned } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { ROW_SLOP_PAD, unknownCountSpeech } from '@/lib/a11y';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** First day of the tracked record. Every published number starts here.
  *  The official live date — see lib/recordStart, which is the one place it is
  *  stated and must match the server's own gate. */
 const RECORD_START = LIVE_RECORD_START;
 
+// Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
+// which are 2.22 / 3.55:1 as text (audit H2).
+// The tone of the ROUNDED percent formatPctSigned prints (1 dp of roi × 100),
+// so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
-  if (roi > 0.001) return colors.positive;
-  if (roi < -0.001) return colors.negative;
-  return colors.textSecondary;
+  return pnlColor(roi, 1, 100);
 }
 
 export function TrackRecordScreen() {
@@ -65,7 +70,7 @@ export function TrackRecordScreen() {
       setRows(recRows);
       setDaily(dailyRows);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -120,6 +125,8 @@ export function TrackRecordScreen() {
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
   const canShare = rows.length > 0 && overall.picks > 0;
+  // Nothing has loaded (still loading, or the load failed): unknown, not zero.
+  const notLoaded = rows.length === 0 && (loading || Boolean(error));
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
@@ -170,13 +177,29 @@ export function TrackRecordScreen() {
         </Text>
 
         {availableSports.length > 2 ? (
-          <View style={styles.sportTabs}>
+          // One scrolling row, not a wrap: at seven sports the tabs broke onto
+          // a second line and the orphaned NHL chip read as a separate control
+          // (audit L13). The row pads by ROW_SLOP_PAD and pulls back by the
+          // same (sportTabsFrame), reaching only into the subtitle text above
+          // and its own bottom margin, so the ~27pt tabs get 11 + 27 + 11 =
+          // 49pt inside the ScrollView, which is where touches land (H9).
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.sportTabsFrame}
+            contentContainerStyle={styles.sportTabs}
+            accessibilityRole="tablist"
+          >
             {availableSports.map((s) => {
               const active = s === sportSel;
               return (
                 <Pressable
                   key={s}
                   onPress={() => setSportSel(s)}
+                  hitSlop={{ top: ROW_SLOP_PAD, bottom: ROW_SLOP_PAD, left: 2, right: 2 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={s === 'All' ? 'All sports' : s}
                   style={({ pressed }) => [
                     styles.sportTab,
                     active && styles.sportTabActive,
@@ -187,37 +210,93 @@ export function TrackRecordScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
         ) : null}
 
-        {error ? <Text style={styles.error}>Couldn’t load the record: {error}</Text> : null}
-        {loading && rows.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
+        {/* A failed first load says so, with Retry, and the hero below reads
+            "—" rather than a 0–0 record at 0% (usability audit H3). A failed
+            refresh over a record already on screen is a banner instead. */}
+        {error && rows.length === 0 ? (
+          <View style={styles.errCard}>
+            <ErrorState compact what="the track record" error={error} onRetry={() => void load()} retrying={loading} />
+          </View>
+        ) : error ? (
+          <ErrorBanner
+            what="the latest record"
+            error={error}
+            onRetry={() => void load()}
+            retrying={loading}
+            style={styles.errBanner}
+          />
+        ) : null}
 
-        {/* Overall hero */}
+        {/* Overall hero. First load: placeholders, never a flash of 0–0. */}
+        {loading && rows.length === 0 && !error ? (
+          <Skeleton label="the track record" style={styles.heroCard}>
+            <SkeletonBlock width={90} height={10} />
+            <SkeletonBlock width={120} height={34} style={styles.skelGap} />
+            <SkeletonBlock width={160} height={12} style={styles.skelGap} />
+            <View style={[styles.heroStatsRow, styles.skelStats]}>
+              <SkeletonBlock width={56} height={28} />
+              <SkeletonBlock width={56} height={28} />
+              <SkeletonBlock width={56} height={28} />
+            </View>
+          </Skeleton>
+        ) : (
         <View style={styles.heroCard}>
           <Text style={styles.heroLabel}>Flat-bet ROI</Text>
           <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
             {overall.stakedFlat > 0 ? formatPctSigned(overall.roiFlat) : '—'}
           </Text>
-          <Text style={styles.heroRecord}>
-            {overall.wins}–{overall.losses}
-            {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
+          <Text
+            style={styles.heroRecord}
+            accessibilityLabel={notLoaded ? unknownCountSpeech('— settled picks') : undefined}
+          >
+            {notLoaded ? (
+              '— settled picks'
+            ) : (
+              <>
+                {overall.wins}–{overall.losses}
+                {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
+              </>
+            )}
           </Text>
           <View style={styles.heroStatsRow}>
-            <HeroStat label="Win rate" value={formatPct(overall.winRate, 0)} />
+            <HeroStat label="Win rate" value={notLoaded ? '—' : formatPct(overall.winRate, 0)} />
             <HeroStat
               label="Beat the close"
               value={overall.clvBeatRate != null ? formatPct(overall.clvBeatRate, 0) : '—'}
             />
             <HeroStat label="Since" value={LIVE_RECORD_START_SHORT} />
           </View>
+          {overall.clvGameSettled > 0 || overall.clvPropSettled > 0 ? (
+            <Text style={styles.heroSplit}>
+              Beat the close ·{' '}
+              <Text style={splitTone(overall.clvGameSettled)}>
+                {beatSplitPiece('Game lines', overall.clvGameSettled, overall.clvGameBeatRate)}
+              </Text>
+              {' · '}
+              <Text style={splitTone(overall.clvPropSettled)}>
+                {beatSplitPiece('Props', overall.clvPropSettled, overall.clvPropBeatRate)}
+              </Text>
+            </Text>
+          ) : null}
+          {overall.marketClvBeatRate != null ? (
+            <Text style={[styles.heroSplit, splitTone(overall.marketClvSettled)]}>
+              Beat Pinnacle’s fair close{' '}
+              {overall.marketClvSettled < MIN_PICKS_FOR_COLOURED_ROI
+                ? thinSampleCaption()
+                : `${formatPct(overall.marketClvBeatRate, 0)} (${overall.marketClvSettled})`}
+            </Text>
+          ) : null}
         </View>
+        )}
 
         {/* Unconditional once loaded: EquityCurve carries its own "not enough
             settled days" copy, and it is the only thing between the hero and the
             prose now. Held back on the first load so it cannot assert there are
             too few settled days while the data is still in flight. */}
-        {loading && rows.length === 0 ? null : (
+        {rows.length === 0 && (loading || error) ? null : (
           <EquityCurve points={equity} width={chartWidth} />
         )}
 
@@ -228,8 +307,8 @@ export function TrackRecordScreen() {
             {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
             happened and is still in our books, but the published record starts here — so it is
             short by design, and the percentages will move a lot for a while.{'\n\n'}
-            This is the real, unedited record — flat $100 bets at the DraftKings price we
-            scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
+            This is the record Discord still has — flat $100 bets at the DraftKings price we
+            scored, every posted pick since {LIVE_RECORD_START_SHORT}. Some models are
             profitable, some aren’t yet, and we show them all. Every sample here is still
             small, and a few dozen settled bets tells you very little in either direction —
             where a model has too few to read, its percentage is greyed out and labelled
@@ -243,9 +322,10 @@ export function TrackRecordScreen() {
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>What “beat the close” means</Text>
           <Text style={styles.noteBody}>
-            Closing Line Value (CLV) checks whether the price moved in our favor between when we
-            posted a pick and when the line closed. Beating the close consistently is the strongest
-            evidence a model has a real edge — independent of short-run wins and losses.
+            Closing Line Value (CLV) checks whether the book we bet closed at a shorter price than
+            the one we took, on the same number. Beating that book's close is the headline. Market
+            edge, when we have it, is the same bet against Pinnacle’s fair close. Game lines and
+            props are counted apart. A moved number is left out of the beat rate.
             {overall.clvSettled < 30
               ? ' We’ve only just started capturing it, so this number is still building.'
               : ''}
@@ -277,15 +357,26 @@ export function TrackRecordScreen() {
         ) : null}
 
         <Text style={styles.footer}>
-          Every settled pick counts as it was posted — at the line and price we scored it,
+          Every pick Discord posted counts as it was posted — at the line and price we scored it,
           under the criteria that applied that day. Updated after each morning settlement. A
           pick only leaves the record if it was voided, meaning the model should never have
           produced it. If we pause a model, its past bets stay here; it just stops producing
           new picks.
         </Text>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function splitTone(settled: number) {
+  return settled > 0 && settled < MIN_PICKS_FOR_COLOURED_ROI ? styles.heroSplitThin : null;
+}
+
+function beatSplitPiece(label: string, settled: number, rate: number | null): string {
+  if (settled <= 0) return `${label} —`;
+  if (settled < MIN_PICKS_FOR_COLOURED_ROI) return `${label} ${thinSampleCaption()}`;
+  return `${label} ${rate != null ? formatPct(rate, 0) : '—'} (${settled})`;
 }
 
 function HeroStat({ label, value }: { label: string; value: string }) {
@@ -372,12 +463,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
-  error: {
-    fontSize: font.size.footnote,
-    color: colors.avoid,
-    marginBottom: spacing.md,
-  },
-  loading: { marginVertical: spacing.lg },
+  errCard: { backgroundColor: colors.bgCard, borderRadius: radii.md, marginBottom: spacing.md },
+  errBanner: { marginHorizontal: 0, marginTop: 0, marginBottom: spacing.md },
+  skelGap: { marginTop: spacing.sm },
+  skelStats: { marginTop: spacing.md },
   heroCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
@@ -388,6 +477,15 @@ const styles = StyleSheet.create({
   heroLabel: { fontSize: font.size.footnote, color: colors.textTertiary },
   heroRoi: { fontSize: font.size.largeTitle, fontWeight: font.weight.bold, marginVertical: 2 },
   heroRecord: { fontSize: font.size.callout, color: colors.textSecondary, marginBottom: spacing.md },
+  heroSplit: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  heroSplitThin: {
+    color: colors.textTertiary,
+  },
   heroStatsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -416,11 +514,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   noteBody: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 19 },
+  sportTabsFrame: {
+    flexGrow: 0,
+    marginTop: -ROW_SLOP_PAD,
+    marginBottom: spacing.md - ROW_SLOP_PAD,
+  },
   sportTabs: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.xs,
-    marginBottom: spacing.md,
+    paddingVertical: ROW_SLOP_PAD,
   },
   sportTab: {
     paddingVertical: spacing.xs + 1,
