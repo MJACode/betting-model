@@ -242,3 +242,10 @@ def test_the_bookmaker_these_rows_use_survives_the_daily_prune():
     pred = _unprotected(params, table="odds")
     assert "bookmaker NOT IN %(protected)s" in pred
     assert sbr.BOOK in params["protected"]
+
+
+def test_a_price_run_into_a_spread_is_refused_not_stored():
+    # NBA_2018-11-30_DEN_POR: the home row's Open cell read "2.5115"
+    assert sbr.classify("209", "2.5115") == (None, None)
+    assert sbr.classify("209", "2.5") == (-2.5, 209.0)
+    assert sbr.classify("209.5115", "2.5") == (None, None)

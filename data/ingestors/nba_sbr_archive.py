@@ -115,6 +115,10 @@ def _price(v) -> int | None:
     return None if f is None or abs(f) < 100 else int(f)
 
 
+def _is_half(x: float) -> bool:
+    return abs(2 * x - round(2 * x)) < 1e-9
+
+
 def classify(v_cell, h_cell) -> tuple[float | None, float | None]:
     """(spread_home, total) from one column's visitor and home cells.
 
@@ -126,8 +130,14 @@ def classify(v_cell, h_cell) -> tuple[float | None, float | None]:
     v, h = _num(v_cell), _num(h_cell)
     if v is None or h is None:
         return None, None
-    v_spread, h_spread = 0 <= v <= SPREAD_MAX, 0 <= h <= SPREAD_MAX
-    v_total, h_total = TOTAL_MIN <= v <= TOTAL_MAX, TOTAL_MIN <= h <= TOTAL_MAX
+    # A line is a whole or half point. A cell like "2.5115" is a 2.5 spread with
+    # its -115 price run into it; its size alone does not expose it, so the
+    # shape is checked too, and it is refused rather than guessed (2026-10-17:
+    # NBA_2018-11-30_DEN_POR's opener had been stored as -2.5115).
+    v_half, h_half = _is_half(v), _is_half(h)
+    v_spread, h_spread = v_half and 0 <= v <= SPREAD_MAX, h_half and 0 <= h <= SPREAD_MAX
+    v_total, h_total = (v_half and TOTAL_MIN <= v <= TOTAL_MAX,
+                        h_half and TOTAL_MIN <= h <= TOTAL_MAX)
     if h_spread and v_total:
         return (-h if h else 0.0), v
     if v_spread and h_total:
