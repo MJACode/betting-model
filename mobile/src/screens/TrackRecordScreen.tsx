@@ -17,7 +17,10 @@ import {
 } from '@/lib/queries';
 import { SPORTS } from '@/hooks/useSportFilter';
 import { modelLong } from '@/lib/modelMeta';
-import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
+import { EquityCurve } from '@/components/EquityCurve';
+import { RecordHeroCard } from '@/components/RecordHeroCard';
+import type { EquityPoint } from '@/lib/equityGeometry';
+import { DISCORD_ALL_TIME_LABEL } from '@/lib/recordHero';
 import { SettingsButton } from '@/components/SettingsButton';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
@@ -30,12 +33,12 @@ import {
 } from '@/lib/trackRecord';
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
-import { formatPct, formatPctSigned } from '@/lib/format';
-import { ROW_SLOP_PAD, unknownCountSpeech } from '@/lib/a11y';
+import { formatPctSigned } from '@/lib/format';
+import { ROW_SLOP_PAD } from '@/lib/a11y';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
-import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** First day of the tracked record. Every published number starts here.
@@ -130,10 +133,13 @@ export function TrackRecordScreen() {
   const canShare = rows.length > 0 && overall.picks > 0;
   // Nothing has loaded (still loading, or the load failed): unknown, not zero.
   const notLoaded = rows.length === 0 && (loading || Boolean(error));
+  // The hero number is the posted stake, the same units Discord #results prints.
+  const heroUnits = Number(overall.units ?? 0);
   // Daily rows arrived without a units column. Drawing them as zero is a flat
-  // line that ends at +0.00u.
+  // line that ends at +0.00u. A missing overall total is the same gap.
   const dailyLacksUnits =
     visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null);
+  const curveUnknown = overall.units == null || dailyLacksUnits;
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
@@ -240,93 +246,49 @@ export function TrackRecordScreen() {
           />
         ) : null}
 
-        {/* Overall hero. First load: placeholders, never a flash of 0–0. */}
+        {/* Overall hero. First load: placeholders, never a flash of 0–0.
+            Option B: posted-stake units beside a sparkline, then the 2×2 grid.
+            The end pill on the curve is the same heroUnits string. */}
         {loading && rows.length === 0 && !error ? (
           <Skeleton label="the track record" style={styles.heroCard}>
-            <SkeletonBlock width={90} height={10} />
-            <SkeletonBlock width={120} height={34} style={styles.skelGap} />
-            <SkeletonBlock width={160} height={12} style={styles.skelGap} />
-            <View style={[styles.heroStatsRow, styles.skelStats]}>
-              <SkeletonBlock width={56} height={28} />
-              <SkeletonBlock width={56} height={28} />
-              <SkeletonBlock width={56} height={28} />
+            <View style={styles.skelTop}>
+              <View>
+                <SkeletonBlock width={70} height={12} />
+                <SkeletonBlock width={140} height={34} style={styles.skelGap} />
+                <SkeletonBlock width={100} height={12} style={styles.skelGap} />
+                <SkeletonBlock width={110} height={12} style={styles.skelGap} />
+              </View>
+              <SkeletonBlock width={104} height={56} />
+            </View>
+            <View style={[styles.skelGrid, styles.skelStats]}>
+              <SkeletonBlock width={120} height={36} />
+              <SkeletonBlock width={120} height={36} />
+              <SkeletonBlock width={120} height={36} />
+              <SkeletonBlock width={120} height={36} />
             </View>
           </Skeleton>
         ) : (
-        <View style={styles.heroCard}>
-          <Text style={styles.heroLabel}>ROI · 1 to win</Text>
-          <Text style={[styles.heroRoi, { color: roiColor(overall.roi) }]}>
-            {Number(overall.risked ?? 0) > 0 ? formatPctSigned(overall.roi) : '—'}
-          </Text>
-          <Text
-            style={styles.heroRecord}
-            accessibilityLabel={notLoaded ? unknownCountSpeech('— settled picks') : undefined}
-          >
-            {notLoaded ? (
-              '— settled picks'
-            ) : (
-              <>
-                {overall.wins}–{overall.losses}
-                {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
-              </>
-            )}
-          </Text>
-          <View style={styles.heroStatsRow}>
-            <HeroStat label="Win rate" value={notLoaded ? '—' : formatPct(overall.winRate, 0)} />
-            <HeroStat
-              label="Beat the close"
-              value={overall.clvBeatRate != null ? formatPct(overall.clvBeatRate, 0) : '—'}
-            />
-            <HeroStat label="Since" value={LIVE_RECORD_START_SHORT} />
-          </View>
-          {overall.clvGameSettled > 0 || overall.clvPropSettled > 0 ? (
-            <Text style={styles.heroSplit}>
-              Beat the close ·{' '}
-              <Text style={splitTone(overall.clvGameSettled)}>
-                {beatSplitPiece('Game lines', overall.clvGameSettled, overall.clvGameBeatRate)}
-              </Text>
-              {' · '}
-              <Text style={splitTone(overall.clvPropSettled)}>
-                {beatSplitPiece('Props', overall.clvPropSettled, overall.clvPropBeatRate)}
-              </Text>
-            </Text>
-          ) : null}
-          {overall.marketClvBeatRate != null ? (
-            <Text style={[styles.heroSplit, splitTone(overall.marketClvSettled)]}>
-              Beat Pinnacle’s fair close{' '}
-              {overall.marketClvSettled < MIN_PICKS_FOR_COLOURED_ROI
-                ? thinSampleCaption()
-                : `${formatPct(overall.marketClvBeatRate, 0)} (${overall.marketClvSettled})`}
-            </Text>
-          ) : null}
-        </View>
+          <RecordHeroCard
+            label={sportSel === 'All' ? DISCORD_ALL_TIME_LABEL : sportSel}
+            summary={overall}
+            points={equity}
+            notLoaded={notLoaded}
+          />
         )}
 
         {/* EquityCurve carries its own "not enough settled days" copy. Held
-            back while nothing has loaded, and while the daily rows have no
-            units column, so that copy is not what a missing column says. */}
-        {notLoaded || dailyLacksUnits ? null : (
-          <EquityCurve points={equity} width={chartWidth} />
+            back while nothing has loaded, and while the posted-stake total is
+            unknown, so that copy is not what a missing column says. endUnits
+            is the hero's posted-stake total, so the pill matches it. */}
+        {notLoaded || curveUnknown ? null : (
+          <EquityCurve points={equity} seriesId={sportSel} width={chartWidth} endUnits={heroUnits} />
         )}
 
-        {/* Honest framing — the record is not all green, and says so. */}
+        {/* Two sentences: when the published record starts, and where the percentage is explained. */}
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>Read this first</Text>
           <Text style={styles.noteBody}>
-            {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
-            happened and is still in our books, but the published record starts here — so it is
-            short by design, and the percentages will move a lot for a while.{'\n\n'}
-            This is the record Discord still has — every posted pick since {LIVE_RECORD_START_SHORT},
-            at 1 unit to win. The stake is the price the bet was taken at: at −110 that is
-            1.1 units risked to win 1. Nothing risks more than 3, and a heavier favorite
-            still risks 3 and wins less than 1. ROI is the units won or lost divided by
-            the units risked. Yesterday and the Models tab still use a flat $100 bet, so
-            those percentages will not match this one. Some models are
-            profitable, some aren’t yet, and we show them all. Every sample here is still
-            small, and a few dozen settled bets tells you very little in either direction —
-            where a model has too few to read, its percentage is greyed out and labelled
-            rather than hidden. A pick that had no price is staked at 1 unit and still
-            counts.
+            The published record starts {LIVE_RECORD_START_SHORT}. The info button on Return on bets explains the percentage.
           </Text>
         </View>
 
@@ -378,25 +340,6 @@ export function TrackRecordScreen() {
         <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function splitTone(settled: number) {
-  return settled > 0 && settled < MIN_PICKS_FOR_COLOURED_ROI ? styles.heroSplitThin : null;
-}
-
-function beatSplitPiece(label: string, settled: number, rate: number | null): string {
-  if (settled <= 0) return `${label} —`;
-  if (settled < MIN_PICKS_FOR_COLOURED_ROI) return `${label} ${thinSampleCaption()}`;
-  return `${label} ${rate != null ? formatPct(rate, 0) : '—'} (${settled})`;
-}
-
-function HeroStat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.heroStat}>
-      <Text style={styles.heroStatValue}>{value}</Text>
-      <Text style={styles.heroStatLabel}>{label}</Text>
-    </View>
   );
 }
 
@@ -479,40 +422,14 @@ const styles = StyleSheet.create({
   errBanner: { marginHorizontal: 0, marginTop: 0, marginBottom: spacing.md },
   skelGap: { marginTop: spacing.sm },
   skelStats: { marginTop: spacing.md },
+  skelTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  skelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   heroCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
     padding: spacing.lg,
     marginBottom: spacing.md,
-    alignItems: 'center',
   },
-  heroLabel: { fontSize: font.size.footnote, color: colors.textTertiary },
-  heroRoi: { fontSize: font.size.largeTitle, fontWeight: font.weight.bold, marginVertical: 2 },
-  heroRecord: { fontSize: font.size.callout, color: colors.textSecondary, marginBottom: spacing.md },
-  heroSplit: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  heroSplitThin: {
-    color: colors.textTertiary,
-  },
-  heroStatsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignSelf: 'stretch',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-    paddingTop: spacing.md,
-  },
-  heroStat: { alignItems: 'center' },
-  heroStatValue: {
-    fontSize: font.size.title3,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  heroStatLabel: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
   noteCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,

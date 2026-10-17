@@ -179,7 +179,7 @@ check('no football catalog offers Targets', !(['NFL', 'NCAAF'] as Sport[]).some(
 
 // The sport switch still lands on the sport's default stat, and that stat is
 // on the segment the switch selects.
-for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC'] as Sport[]) {
+for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC', 'NHL'] as Sport[]) {
   const d = defaultStatFor(sport);
   check(
     `${sport}: the default stat (${ck(d)}) is on the default segment (${defaultSegmentFor(sport)})`,

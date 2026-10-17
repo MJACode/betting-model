@@ -119,9 +119,26 @@ def test_the_snapshot_stake_is_stake_for_not_a_flat_unit():
 def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
-    assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
-    assert ACTIVE_MIGRATIONS.index("clv_standard_v2_2026_10_14.sql") < len(ACTIVE_MIGRATIONS) - 1
+    clv = "clv_standard_v2_2026_10_14.sql"
+    units = "published_record_units_2026_10_16.sql"
+    assert clv in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(MIG.name) < ACTIVE_MIGRATIONS.index(clv)
+    # The posted-stake view patch reads the live view, so it is last and
+    # after the CLV stamp. Every other file after that stamp must not
+    # rewrite the record. The NHL stats views and the skater window
+    # totals are display-only and sit between the stamp and that pair.
+    assert ACTIVE_MIGRATIONS[-1] == units
+    assert ACTIVE_MIGRATIONS.index(clv) < len(ACTIVE_MIGRATIONS) - 1
     assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
+    views = "add_nhl_stats_views_2026_10_16.sql"
+    totals = "add_nhl_skater_window_totals_2026_10_17.sql"
+    assert ACTIVE_MIGRATIONS.index(clv) < ACTIVE_MIGRATIONS.index(views) < ACTIVE_MIGRATIONS.index(totals)
+    assert ACTIVE_MIGRATIONS.index(totals) < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
+    for name in ACTIVE_MIGRATIONS[ACTIVE_MIGRATIONS.index(clv) + 1:]:
+        if name == units:
+            continue
+        body = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
+        assert "v_public_track_record" not in body, name
     i = ACTIVE_MIGRATIONS.index(MIG.name)
     for owner in (
         "record_strikes_nfl_live_prop_2026_10_04.sql",
