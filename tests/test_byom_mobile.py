@@ -29,6 +29,10 @@ def test_the_backtest_hook_drops_a_stale_response():
     assert "if (seq.current === id) setLoading(false)" in src
     auth = (ROOT / "mobile/src/lib/authConfig.ts").read_text(encoding="utf-8")
     assert "?? 'false'" in auth
+    byom = (ROOT / "mobile/src/lib/byom.ts").read_text(encoding="utf-8")
+    assert "export const LINE_BASIS = 'DraftKings line at game start'" in byom
+    assert "units_uncapped" not in byom
+    assert "units_capped" not in byom
 
 
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")

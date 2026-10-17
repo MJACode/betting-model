@@ -3,15 +3,21 @@
  *
  * byom_backtest reads the facts tables. The saved-model RPCs need a
  * signed-in session. This file does not turn sign-in on and it does not
- * render a screen. units_uncapped and units_capped are results of
- * DraftKings' own lock price: 1u-to-win, and the same result after a
- * 3-unit risk ceiling. There is no recommended stake.
+ * render a screen. A result is a win, a loss, a push, or a tie. There
+ * is no unit and no recommended stake.
+ *
+ * LINE_BASIS is the label stored on each fact row. The backtest RPC
+ * returns season totals, not that label per game. A screen shows this
+ * string with the result.
  */
 
 import { byomFilters, type ByomFilters } from './byomFilters';
 import { supabase } from './supabase';
 
 export { byomFilters, type ByomFilters };
+
+/** The line on a fact row: the last DraftKings snapshot at or before kickoff. */
+export const LINE_BASIS = 'DraftKings line at game start';
 
 export interface ByomBacktestRow {
   market: string;
@@ -20,8 +26,6 @@ export interface ByomBacktestRow {
   losses: number;
   pushes: number;
   ties: number;
-  units_uncapped: number;
-  units_capped: number;
 }
 
 export interface ByomSnapshot {
@@ -34,8 +38,6 @@ export interface ByomSnapshot {
   losses: number;
   pushes: number;
   ties: number;
-  units_uncapped: number;
-  units_capped: number;
   summary: ByomBacktestRow[];
 }
 
@@ -81,8 +83,6 @@ export function parseBacktestRow(value: unknown): ByomBacktestRow {
     losses: num(row.losses),
     pushes: num(row.pushes),
     ties: num(row.ties),
-    units_uncapped: num(row.units_uncapped),
-    units_capped: num(row.units_capped),
   };
 }
 
@@ -105,8 +105,6 @@ function parseSnapshot(value: unknown): ByomSnapshot {
     losses: num(row.losses),
     pushes: num(row.pushes),
     ties: num(row.ties),
-    units_uncapped: num(row.units_uncapped),
-    units_capped: num(row.units_capped),
     summary,
   };
 }
@@ -127,7 +125,8 @@ export function parseByomModel(value: unknown): ByomModel {
 
 /**
  * One season of facts. `season` null is the current NFL season.
- * The RPC returns both result columns. It does not suggest a stake.
+ * The RPC returns win, loss, push, and tie counts. It does not suggest
+ * a stake. The line label is LINE_BASIS.
  */
 export async function fetchByomBacktest(
   season: number | null,
