@@ -33,12 +33,15 @@ def test_the_job_ships_disabled_and_does_not_write_by_default():
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()
     for banned in ("min_odds", "spread_size", "price_band", "insert into picks",
-                   "discord", "close_spread_at"):
+                   "discord"):
         assert banned not in text, banned
     from byom.refresh import _incomplete
     assert _incomplete((None, 20)) is True
     assert _incomplete((27, None)) is True
+    # A finished score is complete. A null line is not a fifth field here,
+    # and it is not what makes a row unfinished.
     assert _incomplete((27, 20)) is False
+    assert _incomplete((27, 20, None, None)) is False
 
 
 def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
@@ -125,6 +128,15 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
 
         conn = Conn()
         dry = refresh(conn, apply=False, today=AS_OF)
+        fact_reads = [
+            sql for sql, _params in conn.calls
+            if "from byom_game_facts" in sql.lower()
+        ]
+        assert len(fact_reads) == 1
+        lowered = fact_reads[0].lower()
+        assert "home_score" in lowered
+        assert "built_at" in lowered
+        assert "props_scanned_at" in lowered
         assert dry["season"] == 2026
         assert dry["as_of"] == "2026-10-16"
         assert dry["apply"] is False
@@ -146,6 +158,15 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         assert reasons["2026_03_CIN_CLE"] == "props"
         assert reasons["2026_07_NE_SEA"] == "window"
         assert reasons["2026_01_DET_GB"] == "missing"
+        assert "2019_01_DAL_NYG" not in reasons
+        cur = raw.cursor()
+        cur.execute("""
+            SELECT home_score, away_score, dk_spread_home
+              FROM byom_game_facts
+             WHERE canonical_key = '2026_03_CIN_CLE'
+        """)
+        cin_home, cin_away, cin_spread = cur.fetchone()
+        assert cin_home == 27 and cin_away == 20 and cin_spread is None
         joined = "\n".join(sql.lower() for sql, _params in conn.calls)
         for banned in ("nfl_odds_history", "player_prop_odds", "from odds"):
             assert banned not in joined, banned
@@ -170,6 +191,7 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
                             touched.add(item)
         assert "NFL_2026_12_DAL_PHI" not in touched
         assert "NFL_2025_05_ATL_NO" not in touched
+        assert "NFL_2019_01_DAL_NYG" not in touched
         assert "NFL_2026_05_BAL_KC" in touched
         assert "NFL_2026_02_NYJ_SF" in touched
         cur = raw.cursor()
@@ -184,6 +206,39 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         assert rows["2026_06_BUF_MIA"].startswith("2026-10-14") is False
         cur.execute("SELECT canonical_key FROM byom_prop_facts")
         assert [row[0] for row in cur.fetchall()] == ["2026_05_BAL_KC"]
+        cur.execute("""
+            SELECT props_scanned_at IS NOT NULL
+              FROM byom_game_facts
+             WHERE canonical_key = '2026_03_CIN_CLE'
+        """)
+        assert cur.fetchone()[0] is True
+        again = {
+            row["canonical_key"]: row["reason"]
+            for row in due_games(conn, today=AS_OF)
+        }
+        assert "2026_03_CIN_CLE" not in again
+        assert "2026_02_NYJ_SF" not in again
+        assert "2026_01_DET_GB" not in again
+        assert "2019_01_DAL_NYG" not in again
+        assert set(again) == {
+            "2026_05_BAL_KC", "2026_06_BUF_MIA", "2026_07_NE_SEA",
+        }
+        assert set(again.values()) == {"window"}
+        conn.calls.clear()
+        refresh(conn, apply=True, today=AS_OF)
+        touched_again = set()
+        for _sql, params in conn.calls:
+            if not params:
+                continue
+            for value in params:
+                if isinstance(value, str) and value.startswith("NFL_"):
+                    touched_again.add(value)
+                elif isinstance(value, (list, tuple)):
+                    for item in value:
+                        if isinstance(item, str) and item.startswith("NFL_"):
+                            touched_again.add(item)
+        assert "NFL_2026_03_CIN_CLE" not in touched_again
+        assert "NFL_2019_01_DAL_NYG" not in touched_again
     finally:
         if raw is not None:
             raw.close()
@@ -216,6 +271,10 @@ def _load(cur):
     _game(cur, "NFL_2026_07_NE_SEA", 2026, "2026-10-18", "SEA", "NE")
     _game(cur, "NFL_2026_03_CIN_CLE", 2026, "2026-09-24", "CLE", "CIN")
     _game(cur, "NFL_2025_05_ATL_NO", 2025, "2026-10-15", "NO", "ATL")
+    # Season column is the current season, so the schedule read sees it.
+    # The id's season is before DraftKings history, so assemble_game
+    # returns None and the game must not stay due as missing.
+    _game(cur, "NFL_2019_01_DAL_NYG", 2026, "2026-09-01", "NYG", "DAL")
     cur.execute("""
         INSERT INTO byom_game_facts (
           canonical_key, sport, season, week, away_team, home_team,

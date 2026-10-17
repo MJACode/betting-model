@@ -183,11 +183,15 @@ def build_season(conn, season: int, apply: bool = False,
     if season < PROP_HISTORY_START_SEASON:
         return {
             "season": season, "facts": 0, "written": 0,
+            "canonical_keys": [],
             "skipped": "before player_prop_odds history",
         }
     facts, keys = facts_for_season(conn, season, game_ids=game_ids)
     written = _upsert(conn, facts, keys) if apply else 0
-    return {"season": season, "facts": len(facts), "written": written}
+    return {
+        "season": season, "facts": len(facts), "written": written,
+        "canonical_keys": keys,
+    }
 
 
 def build_seasons(conn, seasons, apply: bool = False) -> dict:

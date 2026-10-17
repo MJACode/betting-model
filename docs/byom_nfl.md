@@ -98,9 +98,14 @@ the facts tables, not `picks`.
 is the current season only: games dated from yesterday through seven
 days ahead, plus a past game with no fact row, a past fact row that
 still has a null score, and a past game that has facts but no prop
-facts. A null line is not unfinished. A game today or inside that
-forward window with no fact row counts as missing. A row in that window
-whose `built_at` is more than 24 hours before the report clock is stale.
+facts and has not been scanned for props yet. A null line is not
+unfinished. Scores and `built_at` come from one read. After `apply`,
+the prop pass stamps `props_scanned_at` on each game it read, including
+a game that produced no prop row, and that game leaves the due set.
+A game `assemble_game` will not build is not scheduled as missing.
+A game today or inside that forward window with no fact row counts as
+missing. A row in that window whose `built_at` is more than 24 hours
+before the report clock is stale.
 Those two day counts and the 24 hour age are the refresh's own bounds.
 
 `apply` false returns the report and writes nothing. `apply` true
