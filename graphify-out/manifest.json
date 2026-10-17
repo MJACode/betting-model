@@ -8818,5 +8818,17 @@
     "seen": 1792216769.7322745,
     "ast_hash": "c1ff16e5709477b4be3a7a3243ee937f",
     "semantic_hash": ""
+  },
+  "scripts/nba_game2_projection.py": {
+    "mtime": 1792218144.8273587,
+    "seen": 1792218263.3299644,
+    "ast_hash": "444d5527ba4e63b51bb4bd828d60a33e",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_game2_projection.py": {
+    "mtime": 1792218144.8293643,
+    "seen": 1792218263.3308685,
+    "ast_hash": "43b54f87d4f7a87392b2cc95b7961ad5",
+    "semantic_hash": ""
   }
 }
