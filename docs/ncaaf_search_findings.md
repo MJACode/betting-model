@@ -365,8 +365,8 @@ data as exactly 1,650 openers across 1,650 propositions, while still discarding
 **Status: CANDIDATE, not a model.** Do not stake money on the backtest. The
 2026 season opens 2026-08-29; after a few weeks of timestamped capture, check
 whether DK's opener is still gettable when Bovada's/Pinnacle's number is known.
-If yes, this is deployable and should then be paper-traded to the standard
-go-live gate. If no, it is an artifact of capture timing and dies.
+If yes, this is deployable and should then be run to the standard
+go-live gate, as live money. If no, it is an artifact of capture timing and dies.
 
 Section 28's own opener rule shipped PAPER-FIRST on weaker evidence than this
 (ROI CI grazing zero). The same standard applies here.

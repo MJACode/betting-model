@@ -1,11 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  InputAccessoryView,
+  Keyboard,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,6 +24,7 @@ import { HitModeSheet } from '@/components/HitModeSheet';
 import { HitRateChart } from '@/components/HitRateChart';
 import { PlayerBetBar } from '@/components/PlayerBetBar';
 import { PlayerNewsButton } from '@/components/PlayerNewsButton';
+import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/PositionVsOpponentCard';
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
@@ -29,19 +35,24 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   chipKey,
+  chipRowScrollX,
   chipsForLoadedPlayer,
   chipsForPlayer,
   chipsWithRequested,
   defaultChipForPlayer,
   filledChipCounts,
+  commitTypedLineOnce,
   gameContextLine,
   groupsOfChips,
   lineStepFor,
   logStatValue,
   openingChip,
+  pagePlayerId,
   playerSubtitle,
   requestedChip,
   roundLineToStep,
+  stepLineFrom,
+  stepperRowLayout,
   windowOptionsFor,
   type GameWindow,
   type PlayerLogEntry,
@@ -77,7 +88,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
-import { STAT_CATALOG } from '@/lib/statCatalog';
+import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
   bookLineFromThreshold,
   formatRecordLine,
@@ -97,8 +108,18 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
+/** The keyboard bar under the typed line field. */
+const LINE_ACCESSORY_ID = 'player-line-input';
+
 export function PlayerStatsScreen() {
   const route = useRoute<Route>();
+  // Above fontScale 1 the Avg | Median | stepper row is wider than a 375pt
+  // card (measureStepperRow). The stepper's flex basis is 0, so it will not
+  // wrap on its own and the + button leaves the screen. On its own line it
+  // still fits through Accessibility Large (2.143). From Accessibility Extra
+  // Large (2.643) the mode control takes the line above − / field / +.
+  const { fontScale } = useWindowDimensions();
+  const stepperLayout = stepperRowLayout(fontScale);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
   const fromParlay = route.params.fromParlay === true;
@@ -235,9 +256,14 @@ export function PlayerStatsScreen() {
   // game-log dots were painting those same games the other colour.
   const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
 
+  // The route's id, else the loaded log's: a page opened by name (an
+  // nfl_prop_market pick has no player_id) still keys its id reads on the
+  // player (pagePlayerId).
+  const pageId = pagePlayerId(playerId, games);
+
   const detail = usePlayerDetail({
     sport,
-    playerId: playerId || null,
+    playerId: pageId,
     playerName,
     playerType,
     games,
@@ -278,9 +304,9 @@ export function PlayerStatsScreen() {
   const slipPick = useMemo(() => {
     if (line == null || mode === 'under') return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
-    const found = slipPickFor({ player_id: playerId }, idx, line - 0.5);
+    const found = slipPickFor({ player_id: pageId }, idx, line - 0.5);
     return found && found.pick.result == null ? found : null;
-  }, [todayPicks, stat, playerId, line, mode]);
+  }, [todayPicks, stat, pageId, line, mode]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
   const toggleSlip = () => {
@@ -351,11 +377,11 @@ export function PlayerStatsScreen() {
   // card beneath said 62.5 (UX review, 2026-09-20). The ± stepper still moves
   // in `step` increments from wherever the ruler sits.
   const pickThreshold = useMemo(() => {
-    if (!playerId) return null;
-    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(playerId);
+    if (!pageId) return null;
+    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(pageId);
     const sl = ep && ep.pick.result == null ? Number(ep.pick.scored_line) : NaN;
     return Number.isFinite(sl) ? thresholdFromBookLine(sl) : null;
-  }, [todayPicks, stat, playerId]);
+  }, [todayPicks, stat, pageId]);
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
   const snapThreshold = pickThreshold ?? postedThreshold;
   useEffect(() => {
@@ -441,13 +467,43 @@ export function PlayerStatsScreen() {
     setLineFromBoard(false);
     setLine((prev) => {
       const base = prev ?? roundLineToStep(median ?? step, step);
-      return Math.min(Math.max(0, base + deltaSteps * step), Math.ceil(maxValue) + step * 5);
+      return stepLineFrom(base, deltaSteps, step, Math.ceil(maxValue) + step * 5);
     });
+  };
+
+  // The number between − and + is also a field: tap it and type any line
+  // (Matt, 2026-10-08: "allow a user to manually enter in the line"). The
+  // stepper's ceiling does not apply — a typed line is a deliberate question.
+  const [lineDraft, setLineDraft] = useState<string | null>(null);
+  // Android fires onSubmitEditing and then onEndEditing for one Done press.
+  // The ref latches in the first call so the second does not apply the line again.
+  const lineCommitTaken = useRef(false);
+  const commitLineDraft = () => {
+    const result = commitTypedLineOnce(lineDraft, lineCommitTaken.current, mode, line);
+    lineCommitTaken.current = result.taken;
+    if (result.taken) setLineDraft(null);
+    if (result.line == null) return;
+    setLineTouched(true);
+    setLineFromBoard(false);
+    setLine(result.line);
   };
 
   const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
+
+  // The selected stat chip, scrolled into view once it lays out, the way
+  // SportToggle does it. A pick on Blocks+Steals or Reb+Ast opens on the 10th
+  // or 11th NBA chip, past the right edge on every iPhone (UX review,
+  // 2026-10-16). Layout only, never on a tap: a tapped chip is already on
+  // screen, and a load, a new player or a group tab remounts the chips.
+  const statRowRef = useRef<ScrollView>(null);
+  const statChipX = useRef<Record<string, number>>({});
+  const activeChipKey = stat ? chipKey(stat) : null;
+  const scrollToActiveChip = useCallback(() => {
+    const x = activeChipKey != null ? chipRowScrollX(statChipX.current[activeChipKey]) : null;
+    if (x != null) statRowRef.current?.scrollTo({ x, animated: false });
+  }, [activeChipKey]);
 
   // The pull spinner shows for a PULL only; each section has its own.
   const [pulled, setPulled] = useState(false);
@@ -471,6 +527,7 @@ export function PlayerStatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.list}
+        keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl
             refreshing={pulled && detail.loading}
@@ -559,6 +616,7 @@ export function PlayerStatsScreen() {
                 group tabs) the frame reaches 6pt into its bottom padding;
                 under the group tabs it can't — see statReach. */}
             <ScrollView
+              ref={statRowRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               style={statReach.frame}
@@ -571,6 +629,10 @@ export function PlayerStatsScreen() {
                     // In-bounds only: the row's 4pt padding (+ statReach above).
                     hitSlop={{ top: 4 + statReachAbove, bottom: 4, left: 2, right: 2 }}
                     key={chipKey(c)}
+                    onLayout={(e) => {
+                      statChipX.current[chipKey(c)] = e.nativeEvent.layout.x;
+                      if (active) scrollToActiveChip();
+                    }}
                     onPress={() => setPicked(c)}
                     // Pre-existing (ux_scan a11y-pressable, byte-identical to
                     // master): a chip whose only child is a Text announces as
@@ -679,7 +741,7 @@ export function PlayerStatsScreen() {
                 </View>
               </View>
 
-              <View style={styles.statsRow}>
+              <View style={[styles.statsRow, stepperLayout !== 'inline' && styles.statsRowStacked]}>
                 <View style={styles.statCell}>
                   <Text style={styles.statCellValue}>{avg != null ? avg.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Avg</Text>
@@ -688,7 +750,12 @@ export function PlayerStatsScreen() {
                   <Text style={styles.statCellValue}>{median != null ? median.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Median</Text>
                 </View>
-                <View style={styles.stepper}>
+                <View
+                  style={[
+                    stepperLayout === 'inline' ? styles.stepper : styles.stepperStacked,
+                    stepperLayout === 'split' && styles.stepperSplit,
+                  ]}
+                >
                   {/* The board's own mode control, not a second one. It opens
                       HitModeSheet, which is the one place the three idioms are
                       shown side by side — "2+ Hits", "Over 1.5 Hits", "Under
@@ -699,34 +766,62 @@ export function PlayerStatsScreen() {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Direction: ${hitModeLabel(mode)}. Change`}
-                    style={({ pressed }) => [styles.modeBtn, pressed && { opacity: 0.7 }]}
+                    style={({ pressed }) => [
+                      styles.modeBtn,
+                      stepperLayout === 'split' && styles.modeBtnSplit,
+                      pressed && { opacity: 0.7 },
+                    ]}
                   >
                     <Text style={styles.stepperLabel}>{hitModeLabel(mode)}</Text>
                     <Ionicons name="chevron-down" size={12} color={colors.textSecondary} />
                   </Pressable>
-                  {/* Icon-only, so the label is the only thing VoiceOver has
-                      — an unlabelled glyph button is announced as "button" and
-                      nothing else. Pre-existing; cleared here because this
-                      change brought the file into the reviewed set. */}
-                  <Pressable
-                    onPress={() => stepLine(-1)}
-                    hitSlop={8}
-                    style={styles.stepBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Lower the line"
-                  >
-                    <Ionicons name="remove" size={18} color={colors.tint} />
-                  </Pressable>
-                  <Text style={styles.stepValue}>{rulerValueLabel(effLine, mode)}</Text>
-                  <Pressable
-                    onPress={() => stepLine(1)}
-                    hitSlop={8}
-                    style={styles.stepBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Raise the line"
-                  >
-                    <Ionicons name="add" size={18} color={colors.tint} />
-                  </Pressable>
+                  {/* The three stay one group so a wrap can move them together
+                      without a second copy of the field. At the default size
+                      the group is only as wide as its contents. */}
+                  <View style={[styles.stepperControls, stepperLayout === 'split' && styles.stepperControlsSplit]}>
+                    {/* Icon-only, so the label is the only thing VoiceOver has
+                        — an unlabelled glyph button is announced as "button" and
+                        nothing else. Pre-existing; cleared here because this
+                        change brought the file into the reviewed set. */}
+                    <Pressable
+                      onPress={() => stepLine(-1)}
+                      hitSlop={8}
+                      style={styles.stepBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Lower the line"
+                    >
+                      <Ionicons name="remove" size={18} color={colors.tint} />
+                    </Pressable>
+                    <TextInput
+                      value={lineDraft ?? rulerValueLabel(effLine, mode)}
+                      onFocus={() => {
+                        lineCommitTaken.current = false;
+                        setLineDraft('');
+                      }}
+                      onChangeText={setLineDraft}
+                      onEndEditing={commitLineDraft}
+                      onSubmitEditing={commitLineDraft}
+                      placeholder={rulerValueLabel(effLine, mode)}
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      maxLength={6}
+                      inputAccessoryViewID={Platform.OS === 'ios' ? LINE_ACCESSORY_ID : undefined}
+                      style={[styles.stepValue, styles.stepInput]}
+                      accessibilityLabel={`Line, ${headline}`}
+                      accessibilityHint="Type a line"
+                    />
+                    <Pressable
+                      onPress={() => stepLine(1)}
+                      hitSlop={8}
+                      style={styles.stepBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Raise the line"
+                    >
+                      <Ionicons name="add" size={18} color={colors.tint} />
+                    </Pressable>
+                  </View>
                 </View>
               </View>
 
@@ -859,6 +954,46 @@ export function PlayerStatsScreen() {
               />
             ) : null}
 
+            {/* ── Same position vs the next opponent (NFL for now) ──────── */}
+            {detail.positionVsOpponent ? (
+              <PositionVsOpponentCard
+                opponent={detail.positionVsOpponent.opponent}
+                group={detail.positionVsOpponent.group}
+                seasonThis={detail.positionVsOpponent.seasonThis}
+                rows={detail.positionVsOpponent.rows}
+                loading={detail.positionVsOpponent.loading}
+                error={detail.positionVsOpponent.error}
+                playerId={pageId}
+                statLabel={statLabel}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                selection={selection}
+                groupBasis={detail.positionVsOpponent.groupBasis}
+                sport={detail.positionVsOpponent.sport}
+              />
+            ) : detail.positionVsOpponentPending ? (
+              <PositionVsOpponentPending
+                opponent={detail.positionVsOpponentPending.opponent}
+                loading={detail.positionVsOpponentPending.loading}
+                error={detail.positionVsOpponentPending.error}
+              />
+            ) : null}
+
+            {/* Blocks+Steals and Reb+Ast are summed from this page's log; the
+                server has no head-to-head or same-position read for either
+                yet (statCatalog.LOG_DERIVED_STATS), so the two cards above are
+                absent. Said where they were, rather than vanishing (UX
+                review, 2026-10-16). */}
+            {detail.serverReadsSkipped && detail.nextGame ? (
+              <>
+                <SectionTitle title={`vs ${detail.nextGame.entry.opponent}`} />
+                <View style={styles.card}>
+                  <Text style={styles.muted}>
+                    No head-to-head or same-position numbers for combined stats yet. Pick a single stat to see them.
+                  </Text>
+                </View>
+              </>
+            ) : null}
+
             {/* ── MLB context the prop models train on ─────────────────── */}
             {sport === 'MLB' && detail.savant ? (
               <StatcastCard savant={detail.savant} playerType={playerType ?? null} />
@@ -870,7 +1005,10 @@ export function PlayerStatsScreen() {
               record={detail.record}
               loading={detail.picksLoading}
               error={detail.picksError}
-              sportHasPropModel={STAT_CATALOG.some((d) => d.sport === sport && propModelForStat(d) != null)}
+              // From the model catalog: NBA's and the NFL's live prop models are
+              // multi-market rules with no single stat, so a stat-catalog test
+              // said "No prop model prices NBA players yet" while one did.
+              sportHasPropModel={sportHasLivePropModel(sport)}
               sport={sport}
             />
 
@@ -933,6 +1071,23 @@ export function PlayerStatsScreen() {
         onClose={() => setLineSheet(null)}
         onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
       />
+      {/* decimal-pad has no return key on iOS; this is how the typed line is
+          committed (same bar as Settings' bankroll field). */}
+      {Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={LINE_ACCESSORY_ID}>
+          <View style={styles.doneBar}>
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              hitSlop={8}
+              style={({ pressed }) => [styles.doneBtn, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1439,9 +1594,9 @@ function PickRecordCard({
       <SectionTitle
         title={`Our picks on ${playerName}`}
         tooltip={{
-          title: 'Settled bets only',
+          title: 'Posted bets only',
           body:
-            `Every settled BET our prop models made on ${playerName}, by market. Results are in units: one unit is one ` +
+            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units: one unit is one ` +
             'flat bet. A pick that carried no price counts in the record and not the units.',
         }}
       />
@@ -1455,7 +1610,7 @@ function PickRecordCard({
             {error
               ? `Couldn’t load our picks. ${friendlyCause(error)} Pull down to retry.`
               : sportHasPropModel
-                ? `No settled picks on ${playerName}.`
+                ? `No posted picks on ${playerName}.`
                 : `No prop model prices ${sport} players yet.`}
           </Text>
         </View>
@@ -1464,13 +1619,18 @@ function PickRecordCard({
           <View style={styles.recordTop}>
             <Text style={styles.recordTotal}>{formatRecordLine(record)}</Text>
             <Text style={styles.recordCount}>
-              {record.settled} settled {record.settled === 1 ? 'bet' : 'bets'}
+              {record.settled} posted {record.settled === 1 ? 'bet' : 'bets'}
               {record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}
             </Text>
+            {record.ledgerUnread ? (
+              <Text style={styles.muted}>
+                The Discord check did not finish, so this record can include picks whose posting status is unknown.
+              </Text>
+            ) : null}
           </View>
           {record.lines.map((l) => (
             <ReadRow
-              key={l.modelId}
+              key={l.key}
               label={l.label}
               value={formatRecordLine(l)}
               note={
@@ -1699,6 +1859,36 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: spacing.sm,
   },
+  // Own line, full width of the card. Not an override of `flex: 1` — that
+  // shorthand's basis of 0 wins over a later flexBasis and the row never wraps.
+  stepperStacked: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  // Mode on one line, − / field / + on the next. Only when the stepper's own
+  // line is wider than the card (Accessibility Extra Large and up).
+  stepperSplit: {
+    flexWrap: 'wrap',
+  },
+  stepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  stepperControlsSplit: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
+  modeBtnSplit: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
+  statsRowStacked: {
+    flexWrap: 'wrap',
+  },
   stepperLabel: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
@@ -1727,6 +1917,34 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  // Filled like the − and + beside it, so the three read as one control and
+  // the number reads as something to tap; the 44pt height is the target.
+  stepInput: {
+    minWidth: 48,
+    minHeight: 44,
+    paddingVertical: 0,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+  },
+  doneBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    backgroundColor: colors.bgGrouped,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  doneBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  doneText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   legendRow: {
     flexDirection: 'row',

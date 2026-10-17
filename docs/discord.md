@@ -217,6 +217,28 @@ treat a capture row as locked. Wiring them is TBD. The void path does not
 delete captures or Discord messages. The settled record still excludes
 every VOID.
 
+**A void notice is the publish state (2026-10-09).** `notify_discord_void`
+posts one gray embed per sport for picks that are already VOID and already
+have a `discord_signal` (or `discord_live`) row, then writes `push_sent`
+kind `discord_void` only after Discord accepts it. `v_discord_published`
+drops that lock only while the notice is strictly newer
+(`void.sent_at > signal.sent_at`; the same instant does not release). A
+null void `sent_at` does not release a stamped signal and does not keep a
+later stamp out of the view; it releases only a signal that also has no
+`sent_at`, and the next post then holds. The pre-game key is
+`game_id:model_id`, so a later pick on that game shares it: the notice
+releases the lock, and that pick's post stamps the signal after the notice
+and holds the lock again. `v_discord_void_notice` keeps the key so the app
+leaves the VOID pick unpublished. A missing view (`PGRST205`, the
+message `Could not find the table`, or `42P01` if the client forwards
+that code) is an empty notice list, so a published VOID stays published.
+Any other read error fails closed for a VOID pick. A lock with no notice is unchanged. The view is
+`security_invoker` and reads `sent_at`, so anon's column grant on
+`push_sent` is `lock_key, kind, sent_at`. `message_id` stays ungranted. The original message is not edited or deleted. A published
+VOID with no `discord_void` row stays on the board. The worker job is
+`publish_discord_void` (`dry_run` defaults to true). The migration is
+`discord_void_notice_2026_10_09.sql`; it is not applied from a dev session.
+
 **3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
 beyond it on the day (0 rows), so this is closed before it costs a pick rather
 than after. `NFL_AHEAD_DAYS` is 11 = the 10-day poll/prop horizon
@@ -325,8 +347,9 @@ app's card chip uses.
 **Recap units (2026-08-27)**: the recap reports **units, not dollars**. The
 wager is the units RISKED; what you win depends on the price — *risk 1.1u at
 −110 to win 1u*. WIN `+stake × (decimal − 1)`, LOSS `−stake`, PUSH `0` (and
-nothing counted as risked). Prob-only picks with no DK price grade at −110, the
-same fallback settlement uses. `mlb_prop_batter_hr` stays record-only.
+nothing counted as risked). The price is the one the bet was taken at. A
+pick with no taken price is staked at the bare conviction, not given a
+made-up −110.
 
 **Free pick of the day (2026-08-27)**: `DISCORD_WEBHOOK_FREE` gets ONE random
 qualifying signal per day, ledgered per date so only the first pass with a
@@ -373,14 +396,42 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   difference is not, because the recap query applies today's cuts. Hand
   re-posts stay a worker job: `publish_results` with `{"game_date": ...}`
   clears both ledger rows and posts through the ordinary paths.
-- **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
-  toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
-  and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
-  price, so counting them fabricates P&L.
+- **A day the 6am run could not recap posts at the first pass that can.**
+  2026-10-12's only counting bets (two NHL props) were graded at 07:24 on
+  10-13, after the 6am run had found nothing to recap, and nothing asked again
+  -- the recap never posted on either surface; 2026-10-05 had the same shape.
+  Now every refresh pass from 7am ET (`RECAP_RETRY_FROM_HOUR_ET`) runs
+  `post_missed_recap`: one statement asks whether each surface is ledgered for
+  YESTERDAY and whether anything in the recap's universe has settled; if a
+  surface is missing and something has, the ordinary notifiers post, Discord
+  then X. A surface that already posted is not re-posted (its own ledger), so
+  a 6am post that failed on one surface is retried on that surface alone. A
+  day with nothing counting posts nothing and logs nothing. The hour gate
+  keeps the overnight passes (00:17-05:17 ET) from posting yesterday before
+  its late games and the 6am-only ingests are in. It runs before the
+  restatement scan, so picks graded after it restate it once.
+  Because a missing ledger row now means "post again" on every pass, the
+  recap commits its ledger row the moment the post is delivered, BEFORE the
+  results snapshot is written. They used to share one transaction, and a
+  failed snapshot (a dropped connection, or a failed statement whose COMMIT
+  PostgreSQL turns into a silent ROLLBACK) took the ledger row with it: in
+  the test replay that re-posted the day once per pass, and 2026-10-12 had
+  46 settle passes between 7am ET and midnight.
+  The trade: a recap whose snapshot fails is ledgered with no snapshot, so
+  that date can never be restated; the warning in the log is its only trace.
+- **Units and the record are the same graded picks.** A home-run bet with a
+  real price counts in both. One with no price is staked at the bare
+  conviction. Neither is left out of the units.
 - **Failures never propagate.** Discord gets its own try block in both the
   pipeline step and the live loop, so a broken webhook can't fail the step or
   mask the mobile push that already succeeded.
-- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20).
+- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20), **except a pick whose game
+  starts within `DISCORD_UNCAPPED_WITHIN_MIN` (120) minutes**, which always posts in the run that finds it
+  (2026-10-16). A held pick only gets the next pass, and no pass posts a game that has started, so near
+  the tip the cap was a loss, not a delay: the two NBA prop models decide every game 55 minutes before
+  tip, up to about 175 bets in one slot (eight games tip together at 6pm ET on 2027-04-11). The NBA
+  window job also publishes on every tick while an NBA game is within 62 minutes of tip, so a failed
+  post retries before the game starts.
   Overflow is left un-ledgered and drips out on the next pass rather than
   dumping a full locked slate into a channel the moment a webhook is added.
 - Discord's own limits are respected: 10 embeds/message (`_post_embeds` chunks),
@@ -706,17 +757,15 @@ Two things this does not fix, both recorded rather than assumed:
   measured** — we had no `last_update` to look at. The guard is also the
   instrument: once it is running, a declined market is evidence.
 
-### "Paper trading" is banned from user-facing copy (2026-08-29)
+### A footer that says the bets are not real money is banned (2026-08-29)
 
-The daily recap posted a "Paper trading" footer under real settled numbers. The
-phrase came from `CLAUDE.md` §2, which was written when it was true and never
-revisited; every downstream surface inherited it. §2 now states the platform is
-live and that the go-live gate is **per model**. Removed from the Discord recap
-footer, the email footer, the dashboard, and the Track Record / Settings /
-Explainer / Opening Comparison screens. Still correct — and deliberately kept —
-where it describes a NEW model that must be paper-traded first
-(`scripts/ncaaf_margin_eval.py`, `docs/ncaaf_search_findings.md`,
-`nfl/live_model/`).
+The daily recap posted that footer under real settled numbers. The phrase
+came from `CLAUDE.md` §2, which was written when it was the framing and never
+revisited; every downstream surface inherited it. §2 now states that every
+model is live real money, and that gate standing is a report. Removed from
+the Discord recap footer, the email footer, the dashboard, and the Track
+Record / Settings / Explainer / Opening Comparison screens. Do not put it
+back, and do not tell a reader a new model has to be held off the record.
 ### Lesson: an absence is not the only delivery fault — a DUPLICATE is one too (2026-09-06)
 
 Every fault above was silence. This one was the opposite, and it hid in the same

@@ -153,13 +153,14 @@ class TestBuildScoredRows:
 
     @pytest.mark.parametrize("model_id", ["nfl_wind_totals", "nfl_opener_spread"])
     def test_label_names_the_quote_book_the_way_the_app_reads_it(self, model_id):
-        # mobile/src/lib/markets.ts storedQuoteBook: /\(([^()]*?),\s*([A-Za-z]{2,5})\)/
+        # The app's storedQuoteBook reads it with mobile/src/lib/clvBet.ts NFL_RE,
+        # /,\s*([A-Za-z_]+)\)/ (pinned to paper_tracker._NFL_LABEL_BOOK_RE).
         # A bare "(FD)" misses it and the app calls a FanDuel price DraftKings.
         import re
         r = _eval(model_id, current_book="fanduel", current_line="-3.0")
         (p,) = pub.build_scored_rows({(GAME, model_id): r}, GAMES, 1000.0)
-        m = re.search(r"\(([^()]*?),\s*([A-Za-z]{2,5})\)", p["pick_label"])
-        assert m and m.group(2) == "FD"
+        m = re.search(r",\s*([A-Za-z_]+)\)", p["pick_label"])
+        assert m and m.group(1) == "FD"
 
     @pytest.mark.parametrize("model_id,line,side", [
         ("nfl_wind_totals", "42.5", "under"),

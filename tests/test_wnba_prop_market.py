@@ -295,3 +295,19 @@ def test_nb_head_is_inert_until_an_artifact_is_registered():
     assert nb, "NB-head assists artifact should remain on disk for later use"
     with open(nb[-1], "rb") as f:
         assert pickle.load(f)["nb_r"] == 13.56
+
+
+def test_slate_drops_a_game_that_has_already_tipped():
+    """Same defect as the MLB cards (2026-10-09): the slate selected by
+    game_date alone, so after tip the card still priced the last pre-tip
+    quotes. It wrote two settled BETs after the scheduled tip in the published
+    window (2026-09-17, 1 min; 2026-09-23, 4 min)."""
+    from datetime import datetime, timedelta, timezone
+
+    from scripts.wnba_prop_market_card import slate
+
+    now = datetime.now(timezone.utc)
+    d = now.date().isoformat()
+    rows = [("WNBA_GONE", "NY", "LV", (now - timedelta(minutes=4)).isoformat()),
+            ("WNBA_OPEN", "MIN", "IND", (now + timedelta(hours=1)).isoformat())]
+    assert set(slate(_QuoteConn(rows), d)) == {"WNBA_OPEN"}

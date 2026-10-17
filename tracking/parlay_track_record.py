@@ -37,6 +37,7 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 
 from data.db import DBConnection, get_connection
+from tracking.publish_filters import captured_not_voided_sql
 
 # Model prefixes that are NOT settleable as game-level opening signals — excluded
 # from parlay legs so every leg settles via settle_opening_signals (mirrors the
@@ -87,6 +88,10 @@ def capture_parlay_track_record(target_date: str | None = None,
             WHERE os.game_date = %s
               AND os.dk_odds IS NOT NULL
               {not_game}
+              -- A voided pick is not a leg (2026-10-09). The void writes only
+              -- to picks, so its captured row would otherwise be chosen here
+              -- and graded into the public parlay record at its stale line.
+              {captured_not_voided_sql("os")}
             ORDER BY os.sport, os.edge DESC
         """, (target_date,)).fetchall()
 

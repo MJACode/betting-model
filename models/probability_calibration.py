@@ -346,12 +346,12 @@ def fetch_graded(conn, model_id: str, since: str) -> list[tuple[float, int]]:
         # population's shape. A live lane's population is that shape in every
         # window, by construction, so excluding the gap corrects nothing and
         # costs real bets (18 of mlb_live_total_runs' 126).
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT model_probability::float8, result
             FROM picks
             WHERE model_id = %(m)s AND is_live AND result IN ('WIN','LOSS')
               AND model_probability >= %(minp)s AND game_date >= %(since)s
-              AND dk_odds IS NOT NULL
+              AND dk_odds IS NOT NULL{config.duplicate_copy_exclusion_sql("picks")}
         """, {"m": model_id, "minp": MIN_PROB, "since": since}).fetchall()
         return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
 
@@ -366,14 +366,19 @@ def fetch_graded(conn, model_id: str, since: str) -> list[tuple[float, int]]:
         # fixed on 09-07, one source over. These models write BET rows only
         # (a rule has no dead zone), so like a live model the evidence is the
         # bet band alone.
-        rows = conn.execute("""
+        # ONE EVENT IS ONE BET (mike, 2026-10-09, "Count each fight once"):
+        # the second copy of a bet written under two game ids for one event
+        # (config.DUPLICATE_STATUS) is not a second piece of evidence. Measured
+        # 2026-10-09: ufc_total_rounds read 8 graded bets, 4 won; with the June
+        # Borjas-Lima copy out, 7 and 3.
+        rows = conn.execute(f"""
             SELECT model_probability::float8, result
             FROM picks
             WHERE model_id = %(m)s AND NOT coalesce(is_live, false)
               AND signal_type = 'BET' AND result IN ('WIN','LOSS')
               AND model_probability >= %(minp)s AND game_date >= %(since)s
               AND coalesce(decision_odds, dk_odds) IS NOT NULL
-              AND coalesce(condition_status, '') <> 'VOID'
+              AND coalesce(condition_status, '') <> 'VOID'{config.duplicate_copy_exclusion_sql("picks")}
         """, {"m": model_id, "minp": MIN_PROB, "since": since}).fetchall()
         return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
 

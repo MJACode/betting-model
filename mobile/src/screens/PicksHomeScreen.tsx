@@ -205,9 +205,9 @@ export function PicksHomeScreen() {
   // kept drawing a green BET badge and a stake here while Discord and push
   // had already stopped on `model_action_thresholds.paused`. The surfaces
   // show the same picks (CLAUDE.md §1b); this is the Live board's half.
-  // Deliberately NOT the full passesActionFilter: nfl_live_prop's cut is EV
-  // server-side, and its bundled row would hide BETs the lane legitimately
-  // wrote.
+  // Deliberately NOT the full passesActionFilter: an in-play model whose cut is
+  // applied server-side would have its bundled row hide BETs it legitimately
+  // wrote (nfl_live_prop was that case until it was retired 2026-10-04).
   const liveInProgress = useMemo(
     () =>
       allLiveData.filter(

@@ -61,6 +61,22 @@ WHAT IT DELIBERATELY DOES NOT DO
   * It does not re-price a locked pick. It calls the ordinary scorer, so §1c
     holds exactly as it does on any other pass: a BET freezes its pair, and
     only pairs that never produced a bet are re-scored.
+  * It does not clear anything it does not re-write (2026-10-12). It re-runs
+    the GAME scorer only, so it asks that scorer to clear game-level rows
+    only (`game_models_only=True`). Until then each tick that moved a game
+    took every player-prop NONE and AVOID row on it, and the prop scorers --
+    which run on the refresh pass, not here -- never re-wrote the ones taken
+    after the last pass. On MLB_2026-10-11_LAD_MIL the 00:17:18Z tick took
+    103 of them 2m41s before first pitch. Those rows are the evaluation
+    universe (CLAUDE.md §7). The refresh pass's own clear still runs right
+    before every prop pass, so it, not this tick, is what frees a player
+    the prop lock holds. ONE NARROW EXCEPTION, not bet-neutral: when a
+    refresh pass reads a game as already started (so its clear skips it)
+    and the feed then pushes the start back before that pass's prop step,
+    a tick in between used to free the game's prop players for that step.
+    Now they stay held until the next refresh pass's clear (passes run 10
+    minutes apart in the evening, up to an hour apart in the day), or for
+    good if the game starts first. docs/signal_timing.md, trap 4.
 
 SAFETY
   * A daily credit cap (PREGAME_POLL_DAILY_CREDIT_CAP), mirroring the live
@@ -201,7 +217,14 @@ def changed_rows(fetched: list, known: dict) -> tuple:
 
 
 def _credits_used_today(conn: DBConnection) -> float:
-    """This loop's own Odds API burn today, from the telemetry probe."""
+    """This loop's own Odds API burn today, from the telemetry probe.
+
+    The read ends its own transaction before returning. The caller next spends
+    the tick on the network, and this connection is reused for the life of the
+    process: an uncommitted SELECT holds AccessShareLock on api_call_log across
+    that call and across every quiet tick that never writes.
+    """
+    from data.db import release_read
     try:
         row = conn.execute("""
             SELECT COALESCE(SUM(credits), 0) FROM api_call_log
@@ -216,6 +239,8 @@ def _credits_used_today(conn: DBConnection) -> float:
         # Odds API's own quota is the backstop either way.
         logger.warning(f"pregame poller: credit read failed ({exc})")
         return 0.0
+    finally:
+        release_read(conn)
 
 
 def over_credit_cap(used: float) -> bool:
@@ -253,73 +278,88 @@ def poll_once(conn: DBConnection, sports: list | None = None,
 
     Returns a summary dict. Never raises -- see the module docstring."""
     sports = sports or config.PREGAME_POLL_SPORTS
+    from data.db import release_read
     from data.ingestors.odds_ingestor import fetch_pregame_rows, _insert_odds
 
-    used = _credits_used_today(conn)
-    if over_credit_cap(used):
-        logger.warning(
-            f"pregame poller: daily credit cap reached "
-            f"({used:.0f} >= {config.PREGAME_POLL_DAILY_CREDIT_CAP}) — skipping")
-        return {"skipped": "credit_cap", "credits_used": used}
+    # A quiet tick — the common case — used to leave the credit SELECT's
+    # transaction open until the next write, which on a still board is never.
+    # Commit only when this tick inserted. Every other exit rolls the read back.
+    committed = False
+    try:
+        used = _credits_used_today(conn)
+        if over_credit_cap(used):
+            logger.warning(
+                f"pregame poller: daily credit cap reached "
+                f"({used:.0f} >= {config.PREGAME_POLL_DAILY_CREDIT_CAP}) — skipping")
+            return {"skipped": "credit_cap", "credits_used": used}
 
-    if known is None:
-        known = {}
-    fetched = fetch_pregame_rows(sports)
-    # Seed ONLY what this fetch quoted and the map does not yet hold. After a
-    # re-seed (an empty map) that is every quoted key, once; on an ordinary
-    # tick it is the handful of games the API started quoting since.
-    missing = quoted_keys(fetched) - known.keys()
-    if missing:
-        known.update(last_known_prices(conn, missing))
-    to_write, moved = changed_rows(fetched, known)
+        if known is None:
+            known = {}
+        fetched = fetch_pregame_rows(sports)
+        # Seed ONLY what this fetch quoted and the map does not yet hold. After a
+        # re-seed (an empty map) that is every quoted key, once; on an ordinary
+        # tick it is the handful of games the API started quoting since.
+        missing = quoted_keys(fetched) - known.keys()
+        if missing:
+            known.update(last_known_prices(conn, missing))
+        to_write, moved = changed_rows(fetched, known)
 
-    if to_write:
-        _insert_odds(conn, to_write)
-        conn.commit()
-        # Fold the writes in only AFTER the commit. Doing it earlier would let a
-        # failed insert leave the map claiming a price the database never took,
-        # and the next tick would then see no change and never retry it.
-        for row in to_write:
-            known[_key(row)] = _fingerprint(row)
+        if to_write:
+            _insert_odds(conn, to_write)
+            conn.commit()
+            committed = True
+            # Fold the writes in only AFTER the commit. Doing it earlier would let a
+            # failed insert leave the map claiming a price the database never took,
+            # and the next tick would then see no change and never retry it.
+            for row in to_write:
+                known[_key(row)] = _fingerprint(row)
 
-    scored = 0
-    bets = 0
-    target_date = config.today_et()
-    if score and moved:
-        from models.scorer import run_scorer
-        result = run_scorer(target_date=target_date, only_games=moved)
-        scored = result.get("total_picks", 0)
-        bets = result.get("bets", 0)
+        scored = 0
+        bets = 0
+        target_date = config.today_et()
+        if score and moved:
+            from models.scorer import run_scorer
+            result = run_scorer(target_date=target_date, only_games=moved,
+                                game_models_only=True)
+            scored = result.get("total_picks", 0)
+            bets = result.get("bets", 0)
 
-    # PUBLISH WHAT WE JUST WROTE. A pick that waits for the next hourly pass is
-    # a pick whose game can start first -- see the module docstring. Gated on a
-    # new BET so the ~95% of quiet ticks stay free.
-    published = None
-    if bets:
-        try:
-            from tracking.signal_publisher import publish_new_signals
-            published = publish_new_signals(target_date=target_date)
-        except Exception as exc:                              # noqa: BLE001
-            # publish_new_signals guards each surface itself, so reaching here
-            # means the import failed or something outside it did. Belt and
-            # braces on purpose: the pick is already WRITTEN and the next pass
-            # will still publish it, but a tick that dies here stops watching
-            # prices, which is the more expensive failure.
-            logger.error(f"pregame poll: publish failed: {exc}", exc_info=True)
+        # PUBLISH WHAT WE JUST WROTE. A pick that waits for the next hourly pass is
+        # a pick whose game can start first -- see the module docstring. Gated on a
+        # new BET so the ~95% of quiet ticks stay free.
+        published = None
+        if bets:
+            try:
+                from tracking.signal_publisher import publish_new_signals
+                published = publish_new_signals(target_date=target_date)
+            except Exception as exc:                          # noqa: BLE001
+                # publish_new_signals guards each surface itself, so reaching here
+                # means the import failed or something outside it did. Belt and
+                # braces on purpose: the pick is already WRITTEN and the next pass
+                # will still publish it, but a tick that dies here stops watching
+                # prices, which is the more expensive failure.
+                logger.error(f"pregame poll: publish failed: {exc}", exc_info=True)
 
-    logger.info(f"pregame poll: {len(fetched)} quoted, {len(to_write)} changed, "
-                f"{len(moved)} game(s) re-scored, {scored} pick(s)"
-                + (f", {bets} BET(s) published {published}" if bets else ""))
-    return {"quoted": len(fetched), "written": len(to_write),
-            "games_moved": len(moved), "picks": scored, "bets": bets,
-            "published": published, "credits_used": used}
+        logger.info(f"pregame poll: {len(fetched)} quoted, {len(to_write)} changed, "
+                    f"{len(moved)} game(s) re-scored, {scored} pick(s)"
+                    + (f", {bets} BET(s) published {published}" if bets else ""))
+        return {"quoted": len(fetched), "written": len(to_write),
+                "games_moved": len(moved), "picks": scored, "bets": bets,
+                "published": published, "credits_used": used}
+    finally:
+        if not committed:
+            release_read(conn)
 
 
 def run_forever(interval_sec: int | None = None) -> None:
     """The supervised loop. One connection, reused; one tick per interval."""
+    from data.db import use_poller_session
     interval = interval_sec or config.PREGAME_POLL_INTERVAL_SEC
     logger.info(f"pregame line poller starting — every {interval}s over "
                 f"{','.join(config.PREGAME_POLL_SPORTS)}")
+    # Before the connection exists, so the first dial and every reconnect
+    # carry the idle-in-transaction backstop.
+    use_poller_session()
     conn = get_connection()
     # The fingerprint map lives across ticks -- see poll_once. `known is None`
     # is the re-seed signal, so a reconnect below re-seeds by clearing it.

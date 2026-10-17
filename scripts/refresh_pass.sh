@@ -119,6 +119,33 @@ par player-news-refresh
 par public-betting
 par_wait
 
+# NHL total goals (nhl_over_under): Pinnacle's no-vig price against the
+# bettable books IN THE FETCH `par odds` JUST STORED. First after the wait, so
+# the fetch is priced while it is the newest one (an NHL game pick written by
+# the scoring step was measured 7.3 minutes after its fetch, one example).
+# SEQUENTIAL: it writes picks, and every
+# writer to picks runs one at a time. Insert-once under the model's own lock,
+# so every later pass on a game already bet is a no-op.
+step nhl-over-under
+# NBA player props (nba_prop_market): same-line unders against Pinnacle IN THE
+# PROP FETCH `par nba-prop-odds` JUST STORED. It decides only games whose tip
+# is 45-57 minutes away, so it runs here, minutes after the fetch, rather than
+# in the scoring group. SEQUENTIAL, like every writer to picks; each game is
+# decided once (nba_prop_market_decisions) under the model's own lock, every
+# qualifying proposition bet. The five-minute window job
+# (scheduler.run_nba_prop_window) runs this same card for the tip times these
+# passes cannot reach.
+step nba-prop-market
+# The NBA projection model (nba_prop_projection), on the same fetch and AFTER
+# nba_prop_market, so it never takes a proposition the rule holds. It prices
+# the projections the window job stored about 65 minutes before tip; a game with
+# none is not decided here. SEQUENTIAL, a writer to picks.
+step nba-prop-projection
+# Its closing snapshot, for closing-line value only: one event call per bet
+# game, 12-25 minutes before tip, filed 'close' so no card decides on it. A
+# pass with no bet game in that window spends nothing.
+step nba-prop-close
+
 # MLB probable starters for today AND the look-ahead window. The scorer can
 # now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB game
 # models fail CLOSED without a starter -- so without this the widened window
@@ -162,7 +189,6 @@ step mlb-game-market
 step prop-scoring
 step wnba-prop-scoring
 step wnba-prop-market
-step nba-prop-scoring
 # Golf data + scoring run last so a DataGolf hiccup can never abort the
 # chain before game/prop picks are scored above.
 step golf-field
@@ -193,6 +219,12 @@ step push-notifications
 # need nothing extra. Everything below supplies what the OTHER sports' picks —
 # and MLB props — settle against.
 #
+# Props also need the player log. settle_picks pulls that box itself, on its
+# own connection, for every final that still has an unsettled prop and no
+# log. NHL reads the game-center box; MLB reads the game log; WNBA, NBA and
+# NFL are attempted at most once per 50 minutes. A game already logged is
+# not fetched again. One game is one savepoint.
+#
 # Every-pass steps are the ones that cost nothing when there is nothing to do:
 #   game-log-today   skips per game; no boxscore call for games already stored
 #   nfl-results      returns without fetching unless a started NFL game is unscored
@@ -204,6 +236,7 @@ par game-log-today
 par nfl-results
 par nhl-results
 par ufc-results-poll
+par nba-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
@@ -215,6 +248,10 @@ if [ "$MODE" = "hourly" ]; then
   step golf-results
 fi
 
+# Settles TODAY. From 7am ET it also posts YESTERDAY's results recap if the
+# 6am run could not (nothing counting had settled yet, as on 2026-10-12, or a
+# post failed) -- Discord then X, once per date, on the first pass where
+# something counting has settled (run_pipeline.step_settle).
 step settle
 
 # Re-grade the every-pick universe now that this pass's finals are in. The

@@ -106,6 +106,16 @@ def decide(model_id, p_raw, price, *, calibrated):
             and price >= MIN_ODDS[model_id])
 
 
+def _labels(model_id):
+    """Which of the two rows is the rule production runs. A model in
+    config.MODELS_ON_OWN_PROBABILITY decides on its own number (the regulation
+    model since PR #876, 2026-10-03); until 2026-10-08 this script still called
+    the corrected-probability row 'AS IT RUNS TODAY' for it."""
+    own = model_id in config.MODELS_ON_OWN_PROBABILITY
+    return (("corrected probability" + ("" if own else " (AS IT RUNS TODAY)")),
+            ("model's OWN probability" + (" (AS IT RUNS TODAY)" if own else "")))
+
+
 def halves(profit, dates):
     order = np.argsort(np.asarray(dates), kind="stable")
     h = len(order) // 2
@@ -161,6 +171,12 @@ def ml_prices(conn):
 def moneyline(conn):
     mid = "nhl_moneyline"
     art = artifact(mid)
+    if art.get("kind") == "anchored_logit":
+        # Since 2026-10-15 the live moneyline is scored around DraftKings' own
+        # price; its grade is scripts/nhl_moneyline_anchored_backtest.py.
+        print(f"\n===== nhl_moneyline {art['version']}: anchored on the market price — "
+              f"graded by scripts/nhl_moneyline_anchored_backtest.py, not here =====")
+        return
     f = frame(mid).copy()
     f["p"] = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
     df = f[["game_id", "p", "is_early_season"]].merge(ml_prices(conn), on="game_id", how="inner")
@@ -216,10 +232,11 @@ def moneyline(conn):
     rows = []
     live = bets(lambda p, pr: decide(mid, p, pr, calibrated=True))
     raw = bets(lambda p, pr: decide(mid, p, pr, calibrated=False))
+    tag_cal, tag_raw = _labels(mid)
     for at in ("dk", "best"):
-        rows.append(line("AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)", live, at))
+        rows.append(line(tag_cal, live, at))
     for at in ("dk", "best"):
-        rows.append(line("same cuts on the model's OWN probability", raw, at))
+        rows.append(line(tag_raw, raw, at))
     print("\n### The production rule on the holdout season\n")
     print(pd.DataFrame(rows).to_string(index=False))
     if len(live):
@@ -319,10 +336,11 @@ def regulation(conn):
                 "home/draw/away": f"{mix.get('home', 0)}/{mix.get('draw', 0)}/{mix.get('away', 0)}"}
 
     live, raw = bets(px, True), bets(px, False)
-    rows = [line("AS IT RUNS TODAY @ DraftKings", live, False),
-            line("AS IT RUNS TODAY @ best bettable book", live, True),
-            line("same cuts, model's OWN probability @ DraftKings", raw, False),
-            line("same cuts, model's OWN probability @ best bettable", raw, True)]
+    tag_cal, tag_raw = _labels(mid)
+    rows = [line(f"{tag_cal} @ DraftKings", live, False),
+            line(f"{tag_cal} @ best bettable book", live, True),
+            line(f"{tag_raw} @ DraftKings", raw, False),
+            line(f"{tag_raw} @ best bettable", raw, True)]
     print("\n### The production rule on the holdout season\n")
     print(pd.DataFrame(rows).to_string(index=False))
     rows = []
@@ -349,18 +367,19 @@ def regulation(conn):
 def bands() -> None:
     """Claimed, corrected and realised, on every side of every holdout game."""
     art = artifact("nhl_moneyline")
-    f = frame("nhl_moneyline")
-    p = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
-    y = f.target.values.astype(int)
-    side = pd.DataFrame({"p": np.r_[p, 1 - p], "won": np.r_[y, 1 - y]})
-    side["cal"] = side.p.map(lambda v: apply_calibration(float(v), CAL["nhl_moneyline"]))
-    side["band"] = pd.cut(side.p, [0.0, 0.40, 0.435, 0.485, 0.50, 0.515, 0.565, 0.60, 0.65, 1.0], right=False)
-    t = side.groupby("band", observed=True).agg(sides=("won", "size"), model_says=("p", "mean"),
-                                                corrected_says=("cal", "mean"),
-                                                actually_won=("won", "mean")).round(3)
-    print("\n### nhl_moneyline: what the model says, what the correction says, what happened "
-          "(every side of every game)\n")
-    print(t.to_string())
+    if art.get("kind") != "anchored_logit":     # the anchored model decides on its own number
+        f = frame("nhl_moneyline")
+        p = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
+        y = f.target.values.astype(int)
+        side = pd.DataFrame({"p": np.r_[p, 1 - p], "won": np.r_[y, 1 - y]})
+        side["cal"] = side.p.map(lambda v: apply_calibration(float(v), CAL["nhl_moneyline"]))
+        side["band"] = pd.cut(side.p, [0.0, 0.40, 0.435, 0.485, 0.50, 0.515, 0.565, 0.60, 0.65, 1.0], right=False)
+        t = side.groupby("band", observed=True).agg(sides=("won", "size"), model_says=("p", "mean"),
+                                                    corrected_says=("cal", "mean"),
+                                                    actually_won=("won", "mean")).round(3)
+        print("\n### nhl_moneyline: what the model says, what the correction says, what happened "
+              "(every side of every game)\n")
+        print(t.to_string())
 
     mid = "nhl_moneyline_regulation"
     art = artifact(mid)
@@ -376,7 +395,9 @@ def bands() -> None:
           f"corrected says {lifted.cal.mean():.3f} | actually happened {lifted.won.mean():.3f}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    # A function, not module-level code, so the worker's nhl_research job can
+    # import and run it (tracking/job_queue._run_script_main).
     for i, a in enumerate(sys.argv):
         if a == "--artifact" and i + 1 < len(sys.argv):
             k, _, v = sys.argv[i + 1].partition("=")
@@ -392,3 +413,7 @@ if __name__ == "__main__":
         bands()
     finally:
         c.close()
+
+
+if __name__ == "__main__":
+    main()

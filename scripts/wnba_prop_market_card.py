@@ -30,7 +30,7 @@ WNBA-specific:
   * PAPER-FIRST. Kill: no positive blind month at >= 50 flags → close the rule.
 
     python -m scripts.wnba_prop_market_card                    # today's card
-    python -m scripts.wnba_prop_market_card --date 2026-08-30  # replay a day
+    python -m scripts.wnba_prop_market_card --date 2026-08-30  # a day's untipped games only
     python -m scripts.wnba_prop_market_card --publish          # write picks
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ import argparse
 import re
 import sys
 import unicodedata
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -65,12 +65,28 @@ def norm_name(name: str) -> str:
     return " ".join(p for p in s.split() if p not in {"jr", "sr", "ii", "iii", "iv"})
 
 
-def slate(conn, game_date: str) -> dict[str, dict]:
+def slate(conn, game_date: str, now: datetime | None = None) -> dict[str, dict]:
+    """The day's WNBA games that have not tipped.
+
+    The started check was missing until 2026-10-09 (the MLB cards had the same
+    gap): the loader keeps the last pre-tip quote, so after tip the card still
+    priced it and wrote two settled BETs after the scheduled start (2026-09-17
+    and 2026-09-23, 1 and 4 minutes after). Parsed, because commence_time is
+    TEXT in mixed shapes.
+    """
+    from features.feature_engine import _parse_iso_ts
+    now = now or datetime.now(timezone.utc)
     rows = conn.execute("""
         SELECT game_id, home_team, away_team, commence_time
         FROM games WHERE sport = 'WNBA' AND game_date = %s
     """, (game_date,)).fetchall()
-    return {r[0]: {"home": r[1], "away": r[2], "commence_time": r[3]} for r in rows}
+    out = {}
+    for gid, home, away, commence in rows:
+        start = _parse_iso_ts(commence)
+        if start is None or start <= now:
+            continue
+        out[gid] = {"home": home, "away": away, "commence_time": commence}
+    return out
 
 
 def player_ids(conn, season: int) -> dict[str, str]:
@@ -203,7 +219,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
     try:
         games = slate(conn, game_date)
         if not games:
-            logger.info(f"wnba-prop-market: no WNBA games {game_date}")
+            logger.info(f"wnba-prop-market: no untipped WNBA games {game_date}")
             return {"flags": 0, "published": 0}
 
         quotes = mk.load_wnba_prop_quotes(conn, game_date, game_ids=list(games))

@@ -63,7 +63,7 @@ function mkPick(over: Partial<Pick>): Pick {
     closing_dk_odds: null,
     closing_line: null,
     clv_pct: null,
-    clv_captured_at: null, clv_method: null, clv_close_book: null,
+    clv_captured_at: null, clv_method: null, clv_close_book: null, clv_bet_book: null,
     dk_bet_link: null,
     ...over,
   } as Pick;
@@ -131,6 +131,58 @@ function mkPick(over: Partial<Pick>): Pick {
     mkPick({ model_id: 'nhl_prop_blocked_shots', player_id: '8477488', created_at: NOW }),
   );
   check('blocked shots takes the NHL prop note too', Boolean(blocks && !blocks.note.includes('lineup')));
+  // The NBA prop rule posts once, 45-57 minutes before tip, off the books'
+  // prices: no lineup check to claim, and a player who sits voids the bet.
+  const nbaProp = pickTimingInfo(
+    mkPick({
+      sport: 'NBA',
+      model_id: 'nba_prop_market',
+      player_id: '1628983',
+      pick_label: 'Shai Gilgeous-Alexander Under 31.5 Pts',
+      pick_side: 'under' as PickSide,
+      created_at: NOW,
+    }),
+  );
+  check('NBA prop rule stays on the posted timing', nbaProp?.kind === 'posted' && nbaProp.verb === 'Posted');
+  check('NBA prop note claims no confirmed lineup', Boolean(nbaProp && !nbaProp.note.includes('lineup')));
+  check('NBA prop note says it is void if he does not play',
+    Boolean(nbaProp?.note.endsWith('Void if the player doesn’t play.')), nbaProp?.note);
+  check('the NBA void line is not the goalie one', Boolean(nbaProp && !nbaProp.note.includes('goalie')));
+  // The NBA projection model posts in the same window, the same way, and on
+  // either side: an over is as void as an under when the player sits. Its
+  // labels use the rule's words for the shared markets ("Reb", "3PM").
+  for (const [side, label, market] of [
+    ['over', 'Stephen Curry Over 1.5 Steals', 'player_steals'],
+    ['under', 'Nikola Jokic Under 13.5 Reb+Ast', 'player_rebounds_assists'],
+    ['over', 'Karl-Anthony Towns Over 1.5 3PM', 'player_threes'],
+    ['under', 'Josh Hart Under 7.5 Reb', 'player_rebounds'],
+  ] as const) {
+    const proj = pickTimingInfo(
+      mkPick({
+        sport: 'NBA',
+        model_id: 'nba_prop_projection',
+        player_id: '201939',
+        pick_label: label,
+        pick_side: side as PickSide,
+        prop_market: market,
+        created_at: NOW,
+      }),
+    );
+    const name = `NBA projection ${side} (${label})`;
+    check(`${name} stays on the posted timing`,
+      proj?.kind === 'posted' && proj.verb === 'Posted' && proj.label === `Posted ${formatStampET(NOW)}`,
+      proj?.label);
+    check(`${name}: note claims no confirmed lineup`, Boolean(proj && !proj.note.includes('lineup')));
+    check(`${name}: note says it is void if he does not play`,
+      Boolean(proj?.note.endsWith('Void if the player doesn’t play.')), proj?.note);
+    check(`${name}: note is the NBA rule's note, word for word`, proj?.note === nbaProp?.note);
+  }
+  // NHL totals post on the first refresh that qualifies, often the night
+  // before: not at the first scoring run of the day.
+  const totals = pickTimingInfo(mkPick({ sport: 'NHL', model_id: 'nhl_over_under', created_at: NOW }));
+  check('NHL totals take the posted-once note', Boolean(totals?.note.startsWith('Posted once and never re-priced')), totals?.note);
+  check('NHL totals note claims no daily run', Boolean(totals && !totals.note.includes('first scoring run')));
+  check('NHL totals note has no void line', Boolean(totals && !totals.note.includes('Void')));
 
   const yesterday = pickTimingInfo(mkPick({ created_at: THREE_DAYS_AGO }));
   check(
@@ -155,6 +207,15 @@ function mkPick(over: Partial<Pick>): Pick {
     mkPick({ sport: 'NCAAF', model_id: 'ncaaf_over_under', is_live: true, inning_at_pick: 4 }),
   );
   check('NCAAF live shows a quarter, not an inning', Boolean(ncaaf?.label.includes('· Q4')), ncaaf?.label);
+
+  const nflLive = pickTimingInfo(
+    mkPick({ sport: 'NFL', model_id: 'nfl_live_leader_ml', is_live: true, inning_at_pick: 4 }),
+  );
+  check(
+    'NFL live shows a quarter, not an inning',
+    Boolean(nflLive?.label.includes('· Q4')) && !nflLive?.label.includes('inning'),
+    nflLive?.label,
+  );
 
   const noPeriod = pickTimingInfo(mkPick({ is_live: true, inning_at_pick: null }));
   check(

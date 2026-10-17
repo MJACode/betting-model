@@ -269,6 +269,26 @@ export function TrackRecordScreen() {
             />
             <HeroStat label="Since" value={LIVE_RECORD_START_SHORT} />
           </View>
+          {overall.clvGameSettled > 0 || overall.clvPropSettled > 0 ? (
+            <Text style={styles.heroSplit}>
+              Beat the close ·{' '}
+              <Text style={splitTone(overall.clvGameSettled)}>
+                {beatSplitPiece('Game lines', overall.clvGameSettled, overall.clvGameBeatRate)}
+              </Text>
+              {' · '}
+              <Text style={splitTone(overall.clvPropSettled)}>
+                {beatSplitPiece('Props', overall.clvPropSettled, overall.clvPropBeatRate)}
+              </Text>
+            </Text>
+          ) : null}
+          {overall.marketClvBeatRate != null ? (
+            <Text style={[styles.heroSplit, splitTone(overall.marketClvSettled)]}>
+              Beat Pinnacle’s fair close{' '}
+              {overall.marketClvSettled < MIN_PICKS_FOR_COLOURED_ROI
+                ? thinSampleCaption()
+                : `${formatPct(overall.marketClvBeatRate, 0)} (${overall.marketClvSettled})`}
+            </Text>
+          ) : null}
         </View>
         )}
 
@@ -287,8 +307,8 @@ export function TrackRecordScreen() {
             {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
             happened and is still in our books, but the published record starts here — so it is
             short by design, and the percentages will move a lot for a while.{'\n\n'}
-            This is the real, unedited record — flat $100 bets at the DraftKings price we
-            scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
+            This is the record Discord still has — flat $100 bets at the DraftKings price we
+            scored, every posted pick since {LIVE_RECORD_START_SHORT}. Some models are
             profitable, some aren’t yet, and we show them all. Every sample here is still
             small, and a few dozen settled bets tells you very little in either direction —
             where a model has too few to read, its percentage is greyed out and labelled
@@ -302,9 +322,10 @@ export function TrackRecordScreen() {
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>What “beat the close” means</Text>
           <Text style={styles.noteBody}>
-            Closing Line Value (CLV) checks whether the price moved in our favor between when we
-            posted a pick and when the line closed. Beating the close consistently is the strongest
-            evidence a model has a real edge — independent of short-run wins and losses.
+            Closing Line Value (CLV) checks whether the book we bet closed at a shorter price than
+            the one we took, on the same number. Beating that book's close is the headline. Market
+            edge, when we have it, is the same bet against Pinnacle’s fair close. Game lines and
+            props are counted apart. A moved number is left out of the beat rate.
             {overall.clvSettled < 30
               ? ' We’ve only just started capturing it, so this number is still building.'
               : ''}
@@ -336,7 +357,7 @@ export function TrackRecordScreen() {
         ) : null}
 
         <Text style={styles.footer}>
-          Every settled pick counts as it was posted — at the line and price we scored it,
+          Every pick Discord posted counts as it was posted — at the line and price we scored it,
           under the criteria that applied that day. Updated after each morning settlement. A
           pick only leaves the record if it was voided, meaning the model should never have
           produced it. If we pause a model, its past bets stay here; it just stops producing
@@ -346,6 +367,16 @@ export function TrackRecordScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function splitTone(settled: number) {
+  return settled > 0 && settled < MIN_PICKS_FOR_COLOURED_ROI ? styles.heroSplitThin : null;
+}
+
+function beatSplitPiece(label: string, settled: number, rate: number | null): string {
+  if (settled <= 0) return `${label} —`;
+  if (settled < MIN_PICKS_FOR_COLOURED_ROI) return `${label} ${thinSampleCaption()}`;
+  return `${label} ${rate != null ? formatPct(rate, 0) : '—'} (${settled})`;
 }
 
 function HeroStat({ label, value }: { label: string; value: string }) {
@@ -446,6 +477,15 @@ const styles = StyleSheet.create({
   heroLabel: { fontSize: font.size.footnote, color: colors.textTertiary },
   heroRoi: { fontSize: font.size.largeTitle, fontWeight: font.weight.bold, marginVertical: 2 },
   heroRecord: { fontSize: font.size.callout, color: colors.textSecondary, marginBottom: spacing.md },
+  heroSplit: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  heroSplitThin: {
+    color: colors.textTertiary,
+  },
   heroStatsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',

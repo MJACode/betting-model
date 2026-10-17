@@ -27,8 +27,8 @@ crons had).
 | NFL poll — hourly | every :00 | `run_nfl_poll(fast=False)` — both NFL models, 10-day horizon |
 | NFL poll — fast | every :10 | `run_nfl_poll(fast=True)` — only inside 3h of a kickoff |
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
-| Kalshi NFL prop ladders (record only) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
-| Kalshi NCAAF game markets (record only) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
+| Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
+| Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
@@ -61,6 +61,22 @@ this hour, it runs `refresh_pass.sh` once. The evening pass is never replaced
 (its next tick is at most ten minutes away). **It buys odds — about 1,000
 credits a re-run** (1,018 measured on the 09-20 19:17 UTC pass). Kill switch:
 `RUN_REFRESH_RETRY=0`. See `tracking/refresh_retry.py`.
+
+**A deploy-killed refresh row is closed at boot (2026-10-16).**
+`_abort_orphans` only stamps the kind that is starting. Evening
+`06b9db72a43c4323ad5ed84abf00b591` (started 03:50Z) was still the only
+unfinished `pipeline_runs` row later that morning: later hourlies finished,
+and the next evening `start_run` is the next evening, so
+`refresh_pass_completion` stayed on its stuck branch.
+`scheduler.abort_orphaned_refresh_runs` runs once before the scheduler
+starts, on the service that owns `hourly_refresh`, and stamps unfinished
+`hourly` and `evening` rows that started before this process
+(`finished_at`, `ok=false`, `failed_steps='aborted'`). It does not touch
+`daily`. The cutoff freezes on the first call, so a second call cannot
+abort a pass this process has opened. The one-off
+`abort_deploy_killed_evening_2026_10_16.sql` closes that row on the next
+view-migration pass if boot has not already. This sweep does not re-run
+the pass.
 
 ### NFL polling (changed 2026-08-22)
 
@@ -380,11 +396,9 @@ you win depends on the price — *risk 1.1u at −110 to win 1u*. So:
 | LOSS | `− stake` (the full amount risked) |
 | PUSH | `0`, and nothing counts as risked |
 
-ROI is units won over units risked. Prob-only picks (UFC method, some F5) carry
-no DK price, so they grade at −110 — the same fallback settlement already uses,
-rather than dropping them from the math. `mlb_prop_batter_hr` is record-only: it
-counts toward W-L but never toward units, because most HR picks have no real
-price and counting them would fabricate P&L.
+ROI is units won over units risked. The price is the one the bet was taken
+at. A pick with no taken price is staked at the bare conviction, not dropped
+and not given a made-up −110. Every graded pick in the record is in the units.
 
 The recap fires from the **6am daily run**, which settles *yesterday*. It refuses
 any date that is not already over, so the `--step settle` that runs on every

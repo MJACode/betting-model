@@ -114,7 +114,7 @@ FLAT_CAP = 0.01          # 1% of bankroll. Keep this binding.
 # is what actually determines growth. They are different numbers and conflating
 # them silently inflates every stake by roughly half a unit.
 # ---------------------------------------------------------------------------
-UNIT_PCT = 0.01          # 1 unit = 1% of bankroll. No unit bump (2026 paper-track).
+UNIT_PCT = 0.01          # 1 unit = 1% of bankroll. No unit bump (2026 live track).
 REF_KELLY = 0.0911       # full Kelly on the reference bet: lead 3, thr 11, -110
 MAX_UNITS = 2.0          # hard per-bet cap
 SLATE_UNIT_CAP = 3.0     # total units live on any one day
