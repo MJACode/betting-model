@@ -13,7 +13,7 @@ import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, pars
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
-import { CLV_NFL_LABEL_MODELS, clvLabelBook } from './clvBet';
+import { CLV_NFL_LABEL_MODELS, CLV_SUFFIX_LABEL_MODELS, clvLabelBook } from './clvBet';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -30,6 +30,10 @@ export function gameMarketForModel(modelId: string): string | null {
   // NFL movement is LINE-only — see isNflLineOnly / computeMovement.
   if (modelId === 'nfl_wind_totals') return 'totals';
   if (modelId === 'nfl_opener_spread') return 'spreads';
+  // The NFL in-play leader moneyline prices DraftKings' live h2h, which the loop
+  // logs to the odds table as in_play rows (v_latest_inplay_odds_all_books), so
+  // it HAS a market -- without this it would fall into the null below.
+  if (modelId === 'nfl_live_leader_ml') return 'h2h';
   if (modelId.startsWith('nfl_')) return null; // any future NFL model without snapshots
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
@@ -117,6 +121,18 @@ export function propMarketForModel(modelId: string): string | null {
 }
 
 /**
+ * The player_prop_odds market a prop PICK is priced in. One model id per
+ * market resolves through its model; the multi-market models
+ * (nba_prop_market, nba_prop_projection, wnba_prop_market, nfl_prop_market)
+ * are ONE id across several markets, so the model says nothing and the row's own prop_market
+ * is the answer. Without the fallback those picks loaded no other books, no
+ * line history and no closing-line market.
+ */
+export function propMarketForPick(pick: { model_id: string; prop_market?: string | null }): string | null {
+  return propMarketForModel(pick.model_id) ?? pick.prop_market ?? null;
+}
+
+/**
  * Player name for a prop pick, parsed from its label. Prop odds are keyed by
  * player_name (not player_id), so this is how a prop pick is matched to its
  * lines. Label format is set by scorer._make_prop_pick:
@@ -185,6 +201,7 @@ export function marketClassForModel(modelId: string): MarketClass {
     return 'game_spread';
   }
   if (modelId.includes('moneyline') || modelId.includes('win_prob')) return 'game_ml';
+  if (modelId === 'nfl_live_leader_ml') return 'game_ml';
   return 'other';
 }
 
@@ -353,6 +370,32 @@ export function bookName(key: string): string {
   return BOOK_NAMES[key] ?? key;
 }
 
+/**
+ * The All books card's line source: which book's row carries the "modeled"
+ * tag, and the sentence under the table that says whose line it is.
+ */
+export function allBooksLineSource(
+  pick: Pick,
+): { modeledBook: string; note: string } {
+  const named = lineBook(pick);
+  if (named) {
+    return {
+      modeledBook: named,
+      note: `The line is ${bookName(named)}’s — DraftKings doesn’t post this line, so it can’t go in a DraftKings slip. `,
+    };
+  }
+  // The NFL and WNBA rules name their book only in the label (decision_book
+  // NULL, dk_odds holding that book's price), and the line is that book's.
+  // Whether DraftKings posts it is unknown without line_book, so no claim.
+  if (CLV_SUFFIX_LABEL_MODELS.includes(pick.model_id) && decisionBook(pick) == null) {
+    const labelled = clvLabelBook(pick);
+    if (labelled !== MODEL_BOOK) {
+      return { modeledBook: labelled, note: `The line is ${bookName(labelled)}’s. ` };
+    }
+  }
+  return { modeledBook: MODEL_BOOK, note: 'The line is DraftKings’. Parlays are priced at DraftKings. ' };
+}
+
 /** "Bet on FanDuel" / "Bet on DraftKings" — the hand-off button's label. */
 export function betOnBookLabel(key: string): string {
   return `Bet on ${bookName(key)}`;
@@ -496,7 +539,8 @@ export function bestPriceForSide(rows: BookPricedRow[], side: PickSide): BookPri
 export function marketForPick(pick: Pick): string | null {
   const id = pick.model_id;
   if (!id) return null;
-  return gameMarketForModel(id) ?? propMarketForModel(id);
+  // propMarketForPick, not the model: a multi-market rule's market is on the row.
+  return gameMarketForModel(id) ?? propMarketForPick(pick);
 }
 
 /**
@@ -618,7 +662,7 @@ export function displayQuoteForPick(
   // computed from, so it wins over any fresher snapshot (see the doc block above).
   if (book === MODEL_BOOK && storedBook === MODEL_BOOK) return storedQuote();
 
-  const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
+  const market = marketForPick(pick); // the row's prop_market for a multi-market rule
   const row = rows.find((r) => r.bookmaker === book);
   const price = row ? priceForSide(row, pick.pick_side) : null;
   if (row && price != null) {
@@ -890,6 +934,14 @@ export function quoteIsCurrent(snapshotAt: string | null | undefined, now: numbe
   return t >= now - PREGAME_PRICE_MAX_AGE_MIN * 60_000;
 }
 
+/**
+ * In-play models whose loop stops reading the book once the bet is written
+ * (nfl_live_leader/gameday.py prices a game only until its bet). The card
+ * shows no live number for them after the bet, says why, and opens the book
+ * without quoting one.
+ */
+export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_leader_ml']);
+
 /** The newest stamp we hold for `book` on this pick's market, or null. */
 function bookSnapshotAt(
   book: string,
@@ -950,6 +1002,12 @@ export interface HeroAmerican {
   showLockedCaption: boolean;
   /** The deciding book has not updated this price within PREGAME_PRICE_MAX_AGE_MIN. */
   stale?: boolean;
+  /**
+   * Live, for a model in LIVE_PRICE_STOPS_AT_BET: `price` is null because we
+   * stop reading the book after the bet, not because the book stopped
+   * pricing. Not stale: the stake and EV stay (they are the bet of record).
+   */
+  untracked?: boolean;
   /**
    * Set with `stale`: the deciding book's newest stamp we hold (either view),
    * so the card can say when it last priced the bet ("DK last priced Sat 9/5
@@ -1016,8 +1074,21 @@ export function heroAmericanForPick(
     }
   }
 
-  const current = currentAtBook(pick, book, latest, bookRows);
+  let current = currentAtBook(pick, book, latest, bookRows);
   const lockedLine = numOrNull(pick.scored_line);
+
+  // A model whose loop stops reading the book once its bet is written holds
+  // no live price after the bet: its newest in-play row IS the lock's own
+  // quote, which would otherwise read as the live price for the rest of the
+  // game. Every other in-play model keeps logging, and DraftKings simply has
+  // not republished yet (a median 43 s after the lock on the last 60 live
+  // bets, UX review 2026-10-14), so its row stays the live price.
+  const untracked = live && LIVE_PRICE_STOPS_AT_BET.has(pick.model_id ?? '');
+  if (untracked && current != null) {
+    const at = bookSnapshotAt(book, latest, bookRows);
+    const lockT = pick.created_at ? parseStamp(pick.created_at).getTime() : NaN;
+    if (at == null || Number.isNaN(lockT) || !(parseStamp(at).getTime() > lockT)) current = null;
+  }
 
   if (live && current == null) {
     return {
@@ -1028,6 +1099,7 @@ export function heroAmericanForPick(
       link: pick.dk_bet_link ?? null,
       lockedPrice: locked,
       showLockedCaption: true,
+      ...(untracked ? { untracked: true } : {}),
     };
   }
   if (current != null && current.price !== locked) {
@@ -1122,10 +1194,14 @@ export function currentLineQuotes(
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
 export interface BoardHandoff {
   bookmaker: string;
-  price: number;
+  /** Null only with verb "Open": a live pick whose price we stop reading after the bet. */
+  price: number | null;
   link: string | null;
-  /** "Best" when another book beats the record; "Bet" otherwise (and always on live). */
-  verb: 'Best' | 'Bet';
+  /**
+   * "Best" when another book beats the record; "Bet" otherwise (and on live);
+   * "Open" when there is no number to quote (LIVE_PRICE_STOPS_AT_BET).
+   */
+  verb: 'Best' | 'Bet' | 'Open';
 }
 
 export function bestHandoffForPick(
@@ -1135,6 +1211,11 @@ export function bestHandoffForPick(
   priceAge?: PriceAgeContext,
 ): BoardHandoff | null {
   if (pick.is_live === true) {
+    // No live number to quote after the bet: open the book without one,
+    // rather than print the lock as if it were still on offer.
+    if (hero?.untracked) {
+      return { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open' };
+    }
     const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
     if (price == null) return null;
     return {
@@ -1262,10 +1343,11 @@ export interface Movement {
 /**
  * NFL picks are published from the standalone card scripts, which line-shop —
  * their stored price is NOT a DraftKings quote, so movement vs the DK
- * snapshots must ignore the price and compare lines only.
+ * snapshots must ignore the price and compare lines only. The in-play leader
+ * moneyline is the exception: it is decided at DraftKings' own live price.
  */
 export function isNflLineOnly(modelId: string): boolean {
-  return modelId.startsWith('nfl_');
+  return modelId.startsWith('nfl_') && modelId !== 'nfl_live_leader_ml';
 }
 
 /**
@@ -1359,8 +1441,29 @@ export function computeMovement(
  * own line (scripts/nfl_wind_publisher.py), so it is that book. Everything
  * else is scored at DraftKings' line. A line is compared only against the same
  * book's line: another book's number is a different bet, not movement.
+ *
+ * The multi-market prop rules store the BET book's own line as
+ * scored_line (nba/nfl/wnba_prop_market_card.py), so their line is that
+ * book's: the deciding book, else the book their label names (the NFL and
+ * WNBA rows carry no decision_book). Read as DraftKings' line, a price at a
+ * new line was compared with the lock at the old one and shown as price
+ * movement in the bettor's favour (designer review, 2026-10-16). Narrow on
+ * purpose: every other model keeps the rule above.
+ *
+ * The NBA projection model writes the same row shape as the NBA rule
+ * (scripts/nba_prop_projection_card.py pick_rows): decision_book always set,
+ * scored_line the main line that book quotes. So it is here too, on either
+ * side, since it bets overs as well as unders.
  */
+const BET_BOOK_LINE_MODELS: readonly string[] = [
+  'nba_prop_market',
+  'nba_prop_projection',
+  'nfl_prop_market',
+  'wnba_prop_market',
+];
+
 function scoredLineBook(pick: Pick): string {
+  if (BET_BOOK_LINE_MODELS.includes(pick.model_id)) return clvLabelBook(pick);
   const named = lineBook(pick);
   if (named) return named;
   if (decisionBook(pick) == null && CLV_NFL_LABEL_MODELS.includes(pick.model_id)) {
@@ -1548,6 +1651,14 @@ export interface PickTiming {
 }
 
 /**
+ * The NBA prop models that post once, 45-57 minutes before tip, off the books'
+ * prices, with no lineup check, and whose bet is void when the player sits:
+ * the rule (scripts/nba_prop_market_card.py) and the projection model
+ * (scripts/nba_prop_projection_card.py).
+ */
+const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_projection'];
+
+/**
  * When this bet posted, and what that time means for the number beside it.
  *
  * created_at IS the post time for every locked pick, because a locked row is
@@ -1580,7 +1691,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (pick.is_live) {
     const period =
       pick.inning_at_pick != null
-        ? pick.sport === 'NCAAF'
+        ? pick.sport === 'NCAAF' || pick.sport === 'NFL'
           ? ` · Q${pick.inning_at_pick}`
           : ` · inning ${pick.inning_at_pick}`
         : '';
@@ -1602,7 +1713,19 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // goalie does not start, and so does settlement. The NHL totals card
   // (scripts/nhl_totals_card.py) posts on the first refresh that qualifies,
   // often the evening before, not at "the first scoring run of the day".
-  if (pick.model_id.startsWith('nhl_prop_') || pick.model_id === 'nhl_over_under') {
+  // The NBA prop rule (scripts/nba_prop_market_card.py) is the same: it posts
+  // once, 45-57 minutes before tip, off the books' prices, with no lineup check.
+  // Like saves, it carries a void line: the books void a player prop when he
+  // does not play, and settlement does too (paper_tracker's DNP branch writes
+  // NO_ACTION for an nba_player with no box-score row in a logged game).
+  // The NBA projection model (scripts/nba_prop_projection_card.py) posts in
+  // the same window, the same way, and voids the same way, over or under.
+  const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
+  if (
+    pick.model_id.startsWith('nhl_prop_') ||
+    pick.model_id === 'nhl_over_under' ||
+    nbaPosted
+  ) {
     return {
       kind: 'posted',
       verb: 'Posted',
@@ -1610,7 +1733,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
       note:
         'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
         'shown.' +
-        (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : ''),
+        (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
+        (nbaPosted ? ' Void if the player doesn’t play.' : ''),
     };
   }
 

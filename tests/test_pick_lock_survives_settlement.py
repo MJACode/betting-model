@@ -159,11 +159,14 @@ def test_a_game_with_no_score_is_still_scoreable(conn):
 
 
 def test_every_prop_scorer_checks_it():
-    """Four prop loops (MLB batter, WNBA, NBA, MLB pitcher) share one skip
-    line. A loop that checks only the clock re-scores a finished doubleheader
-    game 1 all evening."""
-    assert SRC.count("or game_id in final_ids:") == 4
-    assert SRC.count("final_ids = _final_game_ids(") == 4
+    """Three prop loops (MLB batter, WNBA, MLB pitcher) share one skip line. A
+    loop that checks only the clock re-scores a finished doubleheader game 1
+    all evening. The NBA loop left 2026-10-15 with the retired NBA prop models;
+    the NBA prop rule decides only games whose tip is still 45-57 minutes
+    away, so a finished game is never in its window
+    (models/nba_prop_market.find_bets)."""
+    assert SRC.count("or game_id in final_ids:") == 3
+    assert SRC.count("final_ids = _final_game_ids(") == 3
 
 
 # ── The database backstop ───────────────────────────────────────────────────

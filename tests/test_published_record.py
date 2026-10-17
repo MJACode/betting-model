@@ -37,7 +37,8 @@ def test_the_recap_query_drops_an_unposted_bet_and_a_voided_lock():
     db.execute("""CREATE TABLE picks (
         sport, model_id, result, kelly_fraction, dk_odds, decision_odds,
         clv_pct, is_live, game_date, signal_type, downgrade_reason,
-        condition_status, game_id, pick_side, player_id, player_key, prop_market)""")
+        condition_status, game_id, pick_side, player_id, player_key, prop_market,
+        clv_method)""")
     db.execute("CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)")
     rows = [
         ("MLB", "m_posted", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g1", None, None, None, None),
@@ -46,7 +47,11 @@ def test_the_recap_query_drops_an_unposted_bet_and_a_voided_lock():
         ("NFL", "nfl_live_prop", "WIN", 0.02, -110, None, None, 1, "2026-10-01", "BET", None, None, "g4", "over", "p", "p", "player_pass_attempts"),
         ("MLB", "m_void_result", "NO_ACTION", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, "VOID", "g5", None, None, None, None),
     ]
-    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany(
+        "INSERT INTO picks (sport, model_id, result, kelly_fraction, dk_odds, "
+        "decision_odds, clv_pct, is_live, game_date, signal_type, downgrade_reason, "
+        "condition_status, game_id, pick_side, player_id, player_key, prop_market) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     db.executemany(
         "INSERT INTO push_sent VALUES (?, ?, ?)",
         [
@@ -112,7 +117,8 @@ def test_the_snapshot_stake_is_stake_for_not_a_flat_unit():
 def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
-    assert ACTIVE_MIGRATIONS[-1] == MIG.name
+    assert ACTIVE_MIGRATIONS[-1] == "clv_standard_v2_2026_10_14.sql"
+    assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
     i = ACTIVE_MIGRATIONS.index(MIG.name)
     for owner in (
         "record_strikes_nfl_live_prop_2026_10_04.sql",
@@ -172,4 +178,4 @@ def test_the_app_record_leaves_an_unpublished_graded_bet_out():
     assert "player_key" in cols and "prop_market" in cols
     assert queries.count("return attachDiscordPublish(") == 2
     cache = (ROOT / "mobile/src/lib/settledPickCache.ts").read_text(encoding="utf-8")
-    assert "const KEY = 'settledPicks.v8';" in cache
+    assert "const KEY = 'settledPicks.v9';" in cache

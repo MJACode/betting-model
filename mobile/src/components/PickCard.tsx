@@ -124,9 +124,9 @@ export function PickCard({
       ? movementFromLatest(pick, item.latestOdds, item.bookRows)
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
-  const showClv = pick.clv_pct != null;
+  const showClv = pick.clv_method === 'standard_v2' && pick.clv_pct != null;
   // Icon and words share one ink (non-text 3:1 ruling), toned from the CLV
-  // ROUNDED as formatClv prints it (1 dp): −0.03 reads "0.0pp" and stays
+  // ROUNDED as formatClv prints it (1 dp): −0.03 reads "0.0%" and stays
   // neutral, never a red zero (audit H2, Reviewer).
   const clvRounded = roundedAt(pick.clv_pct, 1);
   const clvTone = pnlTone(pick.clv_pct, 1);
@@ -265,7 +265,14 @@ export function PickCard({
   // iOS — VoiceOver groups the card — so Track, Betslip and the book hand-off
   // are also offered as custom actions (swipe up/down on the card).
   const a11yActions = [
-    ...(handoff ? [{ name: 'book', label: `${handoff.verb} at ${bookName(handoff.bookmaker)}` }] : []),
+    ...(handoff
+      ? [{
+          name: 'book',
+          label: handoff.price == null
+            ? `${handoff.verb} ${bookName(handoff.bookmaker)}`
+            : `${handoff.verb} at ${bookName(handoff.bookmaker)}`,
+        }]
+      : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
     ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
   ];
@@ -549,7 +556,11 @@ export function PickCard({
               }}
               hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
-              accessibilityLabel={`${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`}
+              accessibilityLabel={
+                handoff.price == null
+                  ? `${handoff.verb} ${bookName(handoff.bookmaker)} to check the live price`
+                  : `${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`
+              }
               style={({ pressed }) => [
                 styles.handoff,
                 handoff.bookmaker === 'draftkings' && styles.handoffDk,
@@ -560,7 +571,9 @@ export function PickCard({
                 style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
                 numberOfLines={1}
               >
-                {handoff.verb} {bookLabel(handoff.bookmaker)} {formatAmerican(handoff.price)}
+                {handoff.price == null
+                  ? `${handoff.verb} ${bookLabel(handoff.bookmaker)}`
+                  : `${handoff.verb} ${bookLabel(handoff.bookmaker)} ${formatAmerican(handoff.price)}`}
               </Text>
             </Pressable>
           ) : (
@@ -632,9 +645,10 @@ function summarizeMovement(
   return { icon: 'trending-up-outline', color: colors.bet, label: prices };
 }
 
-// CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).
+// Primary CLV is a percent (e.g. 8.5 = the price taken was 8.5% longer than
+// that same book's close). Older methods are not shown.
 function formatClv(clvPct: number): string {
-  return formatSigned(clvPct, 1, 'pp');
+  return formatSigned(clvPct, 1, '%');
 }
 
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {

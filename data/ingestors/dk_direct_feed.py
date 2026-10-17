@@ -82,8 +82,12 @@ def _ensure_schema(conn: DBConnection) -> None:
     # EXCLUSIVE on it whether or not the column is already there -- plus it
     # forces a PostgREST schema-cache reload, during which the API 503s. Once
     # the column and index exist there is nothing to do.
+    from data.db import release_read
     if schema_is_current(conn, "odds", columns=("source",),
                          indexes=("idx_odds_source_inplay",)):
+        # The catalog read opened a transaction. This connection is held for
+        # the whole poll, and a quiet board never commits.
+        release_read(conn)
         return
     for stmt in DDL:
         try:
@@ -156,56 +160,68 @@ def _seen_key(row: dict) -> tuple:
 
 def poll_once(conn: DBConnection, sport: str, sess, seen: set,
               game_cache: dict, dry_run: bool = False) -> dict:
-    """One read of DK's league feed. Returns counters, never raises upward."""
+    """One read of DK's league feed. Returns counters, never raises upward.
+
+    Game resolution is a SELECT. A tick that writes nothing — the common case
+    — used to leave that transaction open across the sleep. Commit only when
+    this tick inserted; every other exit rolls the read back.
+    """
+    from data.db import release_read
     out = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0}
     moved: set[str] = set()
-    for url in CANDIDATES.get(sport, []):
-        try:
-            body = sess.get(url, headers=HEADERS, timeout=15).json()
-        except Exception as exc:                          # noqa: BLE001
-            logger.debug(f"dk_direct {sport}: {type(exc).__name__} on {url[:60]}")
-            out["errors"] += 1
-            continue
+    committed = False
+    try:
+        for url in CANDIDATES.get(sport, []):
+            try:
+                body = sess.get(url, headers=HEADERS, timeout=15).json()
+            except Exception as exc:                      # noqa: BLE001
+                logger.debug(f"dk_direct {sport}: {type(exc).__name__} on {url[:60]}")
+                out["errors"] += 1
+                continue
 
-        now = datetime.now(timezone.utc).isoformat()
-        recs = parse_dk_payload(body, sport, live_only=True)
-        out["quotes"] += len(recs)
-        rows = []
-        for rec in recs:
-            game_id = _game_id_for(conn, sport, rec.get("event_name") or "",
-                                   game_cache)
-            if not game_id:
-                out["unmatched"] += 1
-                continue
-            row = _row_for(rec, game_id, sport, now)
-            if row is None:
-                continue
-            key = _seen_key(row)
-            if key in seen:
-                continue
-            seen.add(key)
-            moved.add(game_id)
-            rows.append(row)
+            now = datetime.now(timezone.utc).isoformat()
+            recs = parse_dk_payload(body, sport, live_only=True)
+            out["quotes"] += len(recs)
+            rows = []
+            for rec in recs:
+                game_id = _game_id_for(conn, sport, rec.get("event_name") or "",
+                                       game_cache)
+                if not game_id:
+                    out["unmatched"] += 1
+                    continue
+                row = _row_for(rec, game_id, sport, now)
+                if row is None:
+                    continue
+                key = _seen_key(row)
+                if key in seen:
+                    continue
+                seen.add(key)
+                moved.add(game_id)
+                rows.append(row)
 
-        if rows and not dry_run:
-            sql = (f"INSERT INTO odds ({', '.join(_COLS)}) VALUES "
-                   f"({', '.join('%(' + c + ')s' for c in _COLS)})")
-            for r in rows:
-                try:
-                    conn.execute(sql, r)
-                except Exception as exc:                  # noqa: BLE001
-                    # Roll back per row: a failed statement poisons the
-                    # connection and every later write in this pass would fail
-                    # silently behind it (the backfill_pbp lesson, 2026-08-30).
-                    conn.rollback()
-                    out["errors"] += 1
-                    logger.debug(f"dk_direct insert failed: {exc}")
-            conn.commit()
-        out["written"] += len(rows)
+            if rows and not dry_run:
+                sql = (f"INSERT INTO odds ({', '.join(_COLS)}) VALUES "
+                       f"({', '.join('%(' + c + ')s' for c in _COLS)})")
+                for r in rows:
+                    try:
+                        conn.execute(sql, r)
+                    except Exception as exc:              # noqa: BLE001
+                        # Roll back per row: a failed statement poisons the
+                        # connection and every later write in this pass would fail
+                        # silently behind it (the backfill_pbp lesson, 2026-08-30).
+                        conn.rollback()
+                        out["errors"] += 1
+                        logger.debug(f"dk_direct insert failed: {exc}")
+                conn.commit()
+                committed = True
+            out["written"] += len(rows)
+            out["moved"] = moved
+            return out          # first URL that answered is the one we use
         out["moved"] = moved
-        return out          # first URL that answered is the one we use
-    out["moved"] = moved
-    return out
+        return out
+    finally:
+        if not committed:
+            release_read(conn)
 
 
 def run(sports: list[str], minutes: float, dry_run: bool = False,
@@ -242,6 +258,8 @@ def run(sports: list[str], minutes: float, dry_run: bool = False,
     machinery working -- the same lesson as 2026-08-29, when the meaning of a
     cut moved without anyone changing it.
     """
+    from data.db import use_poller_session
+    use_poller_session()
     conn = get_connection()
     sess = _session("chrome124", bootstrap=True)
     seen: set = set()
