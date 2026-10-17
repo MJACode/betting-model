@@ -378,6 +378,38 @@ def test_bar_9_compares_a_one_sided_cell_with_that_side_over_its_own_population(
     assert sh["home"] == 1.0 and sh["fav"] == 1.0
 
 
+def test_a_cell_on_a_per_game_side_grades_with_the_rule_pick_on_its_neutral_frame():
+    # G1: the home team is favoured and wins; G2: the away team is favoured and
+    # wins. The cell bets "fav" through side_pick; its neutral frame carries the
+    # same side_pick, which the one-side blind needs and bar 9's blinds ignore.
+    tip = TIP
+    games = pd.DataFrame([{"game_id": g, "season": 2024, "game_date": "2024-01-15", "tip": tip,
+                           "home_team": "BOS", "away_team": "NYK", "home_score": hs,
+                           "away_score": aw} for g, hs, aw in (("G1", 110, 100), ("G2", 100, 110))])
+    rows = []
+    for g, (ph, pa) in (("G1", (-150.0, 130.0)), ("G2", (130.0, -150.0))):
+        for side, price in (("home", ph), ("away", pa)):
+            rows.append({"game_id": g, "season": 2024, "game_date": "2024-01-15", "tip": tip,
+                         "market": "h2h", "book": "fanduel", "T": tip - pd.Timedelta(minutes=120),
+                         "line": np.nan, "side": side, "price": price})
+    off = pd.DataFrame(rows)
+    fair = pd.DataFrame({"game_id": ["G1", "G2"], "market": "h2h", "mu": np.nan, "sigma": np.nan,
+                         "p_home": [0.62, 0.38]})
+    pick = {"G1": "home", "G2": "away"}
+    cand = H.fair_offers(off, fair).assign(side_pick=lambda d: d["game_id"].map(pick))
+    q = pd.DataFrame(columns=["game_id", "market", "book", "snapshot_at", "fetch_at", "line",
+                              "price_a", "price_b", "coherent"])
+    f = pd.DataFrame({"game_id": ["G1", "G2"], "tip": tip,
+                      "fetch_at": tip - pd.Timedelta(minutes=120), "lead_min": 120.0})
+    data = H.Data(games=games, quotes=q, fetches=f)
+    row = H.run_cells(data, "X", "C", cand, cand, [0.0], {"h2h": ["fav"]})[0]
+    # both favourites bet at -150 (risk 1.5, win 1.0), both win
+    assert row["n_choose"] == 2 and row["roi_choose"] == pytest.approx(2.0 / 3.0)
+    assert row["share_home"] == 0.5 and row["share_fav"] == 1.0
+    assert row["blind_roi_choose"] == pytest.approx(2.0 / 3.0)
+    assert row["blind_fav"] == pytest.approx(2.0 / 3.0) and row["blind_dog"] == pytest.approx(-1.0)
+
+
 def _stale_cache(tmp_path, odds_seasons, ledger):
     games = pd.DataFrame([{"game_id": f"G{s}", "sport": "NBA", "season": s, "game_date": f"{s - 1}-12-01",
                            "home_team": "BOS", "away_team": "NYK", "home_score": 110.0, "away_score": 100.0,
