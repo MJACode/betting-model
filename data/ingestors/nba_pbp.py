@@ -41,6 +41,13 @@ the home team of our `games` row.
     python -m data.ingestors.nba_pbp --seasons 2019-2026 --load
     python -m data.ingestors.nba_pbp --seasons 2019 --load --rederive-stints
     python -m data.ingestors.nba_pbp --seasons 2019 --dry-run   (no writes)
+    python -m data.ingestors.nba_pbp --seasons 2019-2026 --fill-gaps
+
+GAPS. The release lacks a few regular-season games (six late-February 2019-20
+games, for one). --fill-gaps takes every `games` row no stored ESPN game
+matched from ESPN's own free scoreboard and summary endpoints, which the
+release is a flattening of, and writes it through the same path with
+source 'espn_summary_api'.
 """
 from __future__ import annotations
 
@@ -1005,6 +1012,156 @@ def _exact_seconds(box_recs: list[dict], adv_secs: dict[str, float],
     return out
 
 
+# ── gaps: games the release lacks, from ESPN's own summary endpoint ────────
+
+GAP_SOURCE = "espn_summary_api"
+MAX_GAPS = 100      # more than this unmatched means the season is not loaded yet
+
+
+def summary_records(data: dict, espn_game_id: int, season: int, season_type: int,
+                    game_date: str):
+    """ESPN's summary JSON -> (play records, box records) in the release's
+    column names, so the same build_game path reads both. The release is
+    sportsdataverse's flattening of this same endpoint: participants[0..2] are
+    athlete_id_1..3, coordinate.x/y are coordinate_x_raw/y_raw."""
+    from data.ingestors.nba_espn_box import parse_nba_box
+
+    comp = ((data.get("header") or {}).get("competitions") or [{}])[0]
+    teams, scores = {}, {}
+    for c in comp.get("competitors") or []:
+        teams[c.get("homeAway")] = c.get("team") or {}
+        scores[c.get("homeAway")] = _int(c.get("score"))
+    home, away = teams.get("home") or {}, teams.get("away") or {}
+    base = {
+        "game_id": espn_game_id, "season": season, "season_type": season_type,
+        "game_date": game_date, "home_team_id": _int(home.get("id")),
+        "away_team_id": _int(away.get("id")), "home_team_abbrev": home.get("abbreviation"),
+        "away_team_abbrev": away.get("abbreviation"),
+        "home_team_name": home.get("displayName") or home.get("location"),
+        "away_team_name": away.get("displayName") or away.get("location"),
+    }
+    plays = []
+    for p in data.get("plays") or []:
+        parts = [((x or {}).get("athlete") or {}).get("id") for x in p.get("participants") or []]
+        parts += [None] * (3 - len(parts))
+        coord = p.get("coordinate") or {}
+        plays.append({
+            **base,
+            "sequence_number": p.get("sequenceNumber"),
+            "type_id": (p.get("type") or {}).get("id"),
+            "type_text": (p.get("type") or {}).get("text"),
+            "text": p.get("text"),
+            "away_score": p.get("awayScore"), "home_score": p.get("homeScore"),
+            "period_number": (p.get("period") or {}).get("number"),
+            "clock_display_value": (p.get("clock") or {}).get("displayValue"),
+            "scoring_play": p.get("scoringPlay"), "score_value": p.get("scoreValue"),
+            "team_id": (p.get("team") or {}).get("id"),
+            "athlete_id_1": parts[0], "athlete_id_2": parts[1], "athlete_id_3": parts[2],
+            "wallclock": p.get("wallclock"), "shooting_play": p.get("shootingPlay"),
+            "coordinate_x_raw": coord.get("x"), "coordinate_y_raw": coord.get("y"),
+            "points_attempted": p.get("pointsAttempted"),
+        })
+    home_code = nba_team(home.get("abbreviation"), home.get("displayName"))
+    box = []
+    for r in parse_nba_box(data):
+        ha = "home" if r["team"] == home_code else "away"
+        box.append({"athlete_id": r["espn_id"], "athlete_display_name": r["name"],
+                    "home_away": ha, "starter": r["starter"], "minutes": r["minutes"],
+                    "did_not_play": False, "team_score": scores.get(ha)})
+    return plays, box
+
+
+def find_event(game_id: str, game_date: str, boards: dict, get_board,
+               taken: set[int] = frozenset()) -> tuple | None:
+    """(scoreboard event, swapped) for one of our games, by its two teams on
+    its ET date, then the day before and after: ESPN dates some games by a
+    placeholder time (DET at POR, ours 2020-02-23, ESPN 2020-02-24T12:00Z).
+    An ESPN event already stored is never taken, so the other game of a
+    two-game series cannot stand in for this one."""
+    _sport, _d, away, home = game_id.split("_", 3)
+    d0 = date.fromisoformat(game_date)
+    for dd in (0, -1, 1):
+        d = (d0 + timedelta(days=dd)).isoformat()
+        if d not in boards:
+            boards[d] = get_board(d)
+        for ev in boards[d]:
+            if int(ev["event_id"]) in taken:
+                continue
+            if (ev["away"], ev["home"]) == (away, home):
+                return ev, False
+            if (ev["away"], ev["home"]) == (home, away):
+                return ev, True
+    return None
+
+
+def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dict:
+    """Load every `games` row of the season that no stored ESPN game matched,
+    from ESPN's free scoreboard and summary endpoints (the release is missing
+    a few: six late-February 2019-20 games, for one)."""
+    from data.ingestors.nba_espn_box import (ESPN_NBA_SCOREBOARD_URL, ESPN_NBA_SUMMARY_URL,
+                                              parse_nba_scoreboard)
+    if get_json is None:
+        from data.ingestors.nba_results_ingestor import _http_get_json as get_json
+    ensure_tables(conn)
+    missing = conn.execute("""
+        SELECT g.game_id, g.game_date FROM games g
+         WHERE g.sport = 'NBA' AND g.season = %s AND g.home_score IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM nba_pbp_games p WHERE p.game_id = g.game_id)
+         ORDER BY g.game_date""", (season,)).fetchall()
+    stats = Counter(missing=len(missing))
+    stats["season"] = season
+    if not missing:
+        return dict(stats)
+    if len(missing) > MAX_GAPS:
+        # The release has not been loaded for this season yet: filling now
+        # would fetch the whole season one game at a time.
+        logger.warning(f"season {season}: {len(missing)} games unmatched; run --load first")
+        stats["refused"] = 1
+        return dict(stats)
+    id_map = _load_map(conn)
+    adv = defaultdict(dict)
+    for gid, _team, pid, _n, played, secs in _season_adv(conn, season):
+        if played and secs:
+            adv[gid][pid] = float(secs)
+    boards: dict[str, list] = {}
+    taken = {int(r[0]) for r in conn.execute(
+        "SELECT espn_game_id FROM nba_pbp_games WHERE season = %s", (season,)).fetchall()}
+
+    def board(d):
+        return parse_nba_scoreboard(get_json(ESPN_NBA_SCOREBOARD_URL, {"dates": d.replace("-", "")}), d)
+
+    built = []
+    for game_id, gdate in missing:
+        found = find_event(game_id, gdate, boards, board, taken)
+        if not found:
+            stats["no_espn_event"] += 1
+            logger.warning(f"gap {game_id}: no ESPN event on the scoreboard")
+            continue
+        ev, swapped = found
+        eid = int(ev["event_id"])
+        data = get_json(ESPN_NBA_SUMMARY_URL, {"event": eid})
+        recs, box = summary_records(data, eid, season, ev.get("season_type") or 2, ev["game_date"])
+        if not recs:
+            stats["no_plays"] += 1
+            logger.warning(f"gap {game_id}: ESPN event {eid} has no plays")
+            continue
+        meta = espn_game_meta(eid, recs)
+        if meta is None:
+            stats["not_nba_teams"] += 1
+            continue
+        method = "gap_swapped" if swapped else "gap_exact"
+        g = build_game(eid, recs, box, meta, (game_id, True, method, swapped), id_map,
+                       _exact_seconds(box, adv.get(game_id, {}), id_map))
+        g[0]["source"] = GAP_SOURCE
+        stats["filled"] += 1
+        built.append(g)
+        time.sleep(0.3)
+    if not dry_run:
+        for i in range(0, len(built), GAMES_PER_COMMIT):
+            write_games(conn, built[i:i + GAMES_PER_COMMIT], rederive=False)
+    return dict(stats)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--seasons", required=True, help="e.g. 2019-2026")
@@ -1014,6 +1171,8 @@ def main() -> None:
                     help="replace stored segments with this derivation's")
     ap.add_argument("--dry-run", action="store_true", help="derive, write nothing")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--fill-gaps", action="store_true",
+                    help="games in `games` the release lacks, from ESPN's summary API")
     a = ap.parse_args()
     from data.db import get_connection
 
@@ -1022,11 +1181,14 @@ def main() -> None:
         seasons = parse_seasons(a.seasons)
         if a.build_map:
             print({"map": build_map(conn, seasons)})
-        if a.load or a.dry_run:
+        if a.load or (a.dry_run and not a.fill_gaps):
             for s in seasons:
                 out = load_season(conn, s, rederive=a.rederive_stints, dry_run=a.dry_run,
                                   limit=a.limit)
                 print(out["stats"])
+        if a.fill_gaps:
+            for s in seasons:
+                print(fill_gaps(conn, s, dry_run=a.dry_run))
     finally:
         conn.close()
 

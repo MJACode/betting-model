@@ -184,3 +184,51 @@ def test_stint_player_ids_fall_back_to_the_espn_id_and_are_sorted():
                                        ("2026,2019", [2019, 2026]), ("2024", [2024])])
 def test_parse_seasons(spec, out):
     assert nb.parse_seasons(spec) == out
+
+
+# ── gaps from ESPN's summary endpoint ───────────────────────────────────────
+
+def _summary():
+    return {
+        "header": {"competitions": [{"competitors": [
+            {"homeAway": "home", "score": "107", "team": {"id": "22", "abbreviation": "POR",
+                                                          "displayName": "Portland Trail Blazers"}},
+            {"homeAway": "away", "score": "104", "team": {"id": "8", "abbreviation": "DET",
+                                                          "displayName": "Detroit Pistons"}}]}]},
+        "plays": [{"sequenceNumber": "7", "type": {"id": "95", "text": "Layup Shot"},
+                   "text": "A makes layup (B assists)", "awayScore": 0, "homeScore": 2,
+                   "period": {"number": 1}, "clock": {"displayValue": "11:45"},
+                   "scoringPlay": True, "scoreValue": 2, "team": {"id": "22"},
+                   "participants": [{"athlete": {"id": "11"}}, {"athlete": {"id": "12"}}],
+                   "wallclock": "2020-02-24T03:11:09Z", "shootingPlay": True,
+                   "coordinate": {"x": 23, "y": 1}, "pointsAttempted": 2}],
+        "boxscore": {"players": []},
+    }
+
+
+def test_a_summary_reads_into_the_release_columns():
+    plays, box = nb.summary_records(_summary(), 401161490, 2020, 2, "2020-02-24")
+    p = plays[0]
+    assert (p["athlete_id_1"], p["athlete_id_2"], p["athlete_id_3"]) == ("11", "12", None)
+    assert (p["coordinate_x_raw"], p["coordinate_y_raw"]) == (23, 1)
+    assert (p["home_team_id"], p["away_team_id"]) == (22, 8)
+    rows = nb.slim_plays(plays, espn_game_id=401161490, game_id="NBA_2020-02-23_DET_POR",
+                         season=2020, season_type=2)
+    assert rows[0]["team_side"] == "H" and rows[0]["points"] == 2 and rows[0]["clock_s"] == 705.0
+    meta = nb.espn_game_meta(401161490, plays)
+    assert (meta["home"], meta["away"]) == ("POR", "DET")
+
+
+def test_a_gap_game_is_found_by_its_teams_a_day_off_and_never_twice():
+    """ESPN dates DET at POR 2020-02-24T12:00Z; ours says 2020-02-23."""
+    boards = {}
+    board_days = {"2020-02-24": [{"event_id": "401161490", "away": "DET", "home": "POR",
+                                  "game_date": "2020-02-24"}]}
+    found = nb.find_event("NBA_2020-02-23_DET_POR", "2020-02-23", boards,
+                          lambda d: board_days.get(d, []))
+    assert found[0]["event_id"] == "401161490" and found[1] is False
+    swapped = nb.find_event("NBA_2020-02-23_POR_DET", "2020-02-23", boards,
+                            lambda d: board_days.get(d, []))
+    assert swapped[1] is True
+    assert nb.find_event("NBA_2020-02-23_DET_POR", "2020-02-23", boards,
+                         lambda d: board_days.get(d, []), taken={401161490}) is None
