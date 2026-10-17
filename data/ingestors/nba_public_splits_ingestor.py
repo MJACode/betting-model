@@ -701,22 +701,23 @@ def run_archive_date(day: str, dry_run: bool = False) -> dict:
     from data.db import get_connection
 
     conn = get_connection()
-    out = {"date": day, "rows": 0}
+    out = {"date": day, "rows": 0, "skipped": []}
     try:
         if not dry_run:
             ensure_table(conn)
-            # The refresh pass calls this ~40 times a day; once the v2 archive
-            # for the date is stored there is nothing left to fetch (v1 has
-            # carried no splits for recent games since at least 2026-06).
-            if day in stored_archive_dates(conn, "v2", day):
-                out["skipped"] = "already stored"
-                return out
         y = int(day[:4])
         index, _ = load_games_index(conn, (y, y + 1))
         known = _known_abbrs()
         fetched_at = datetime.now(timezone.utc).isoformat()
         rows = []
         for endpoint in ("v1", "v2"):
+            # The refresh pass calls this ~40 times a day. Each endpoint is
+            # skipped on its own once stored. v1 carried NBA splits through
+            # 2026-04-12 and none on 2026-04-20, 05-15 or 06-10 (playoffs), so
+            # it is refetched every pass and stored only if it ever returns.
+            if not dry_run and day in stored_archive_dates(conn, endpoint, day):
+                out["skipped"].append(endpoint)
+                continue
             try:
                 data = fetch_scoreboard(endpoint, day)
             except Exception as exc:                             # noqa: BLE001

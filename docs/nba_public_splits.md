@@ -16,8 +16,8 @@ refused (HTTP 403); the browser headers in the ingestor answer HTTP 200.
 
 | Endpoint | Splits for | Extra |
 |---|---|---|
-| v1 `/web/v1/scoreboard/nba?period=game&bookIds=15&date=YYYYMMDD` | 2020-21 opening night on (see coverage) | `inserted`: last write of the consensus row |
-| v2 `/web/v2/scoreboard/nba?bookIds=15&date=YYYYMMDD&periods=event` | 2023-24 on | serves `0` on both sides where it has no split |
+| v1 `/web/v1/scoreboard/nba?period=game&bookIds=15&date=YYYYMMDD` | 2020-12-22 to 2026-04-12; none on the 2026 playoff dates checked (04-20, 05-15, 06-10) | `inserted`: last write of the consensus row |
+| v2 `/web/v2/scoreboard/nba?bookIds=15&date=YYYYMMDD&periods=event` | 2023-11-20 on, and today's games | serves `0` on both sides where it has no split |
 
 Routes that do **not** give NBA history: the per-game page
 (`/nba-game/<slug>/<id>`) answers HTTP 410 with an empty payload; the
@@ -27,9 +27,10 @@ split, and is empty for NBA games.
 
 ## What the archived number is (timing)
 
-**One number per side, with no time on it.** It is the split as it stood at,
-or very near, the listed start. It is a *closing split*, not a value a model
-could have read hours before tip. Four measurements:
+**One number per side, with no time on it.** It is the split as it stood when
+Action Network marked the game started, a few minutes after the listed start.
+It is a *closing split*, not a value a model could have read hours before tip.
+Four measurements:
 
 1. **MLB calibration** (`scripts/action_network_archive_timing.py`, run
    2026-10-16). `public_betting` holds 9,198 Action Network rows our own
@@ -43,11 +44,12 @@ could have read hours before tip. Four measurements:
    | 15–60 min | 634 | 74.0% | 64.7% | 0 / 1 | 0 / 4 |
    | 60–180 min | 234 | 46.6% | 12.0% | 1 / 2 | 2 / 9 |
 
-   The archive keeps moving right up to the start, and equals what was showing
-   in the last quarter hour.
+   The archive keeps moving right up to the start: it matches what was showing
+   in the last quarter hour 95% of the time, and what was showing an hour or
+   more earlier less than half the time.
 
 2. **NBA, dated pages from the Wayback Machine** — captures of
-   `actionnetwork.com/nba/public-betting` from the Wayback Machine. The CDX
+   `actionnetwork.com/nba/public-betting`. The CDX
    index lists 195 day-level captures 2020–2026; of the 25 fetched, 4 carried no
    page data and 1 (06:49Z) only last night's games, leaving 20 captures
    (2021-01-27 to 2026-04-14) with 157 games not yet started — 942 side-level
@@ -65,16 +67,22 @@ could have read hours before tip. Four measurements:
    of the tickets behind an archived split arrived after a morning or afternoon
    look at the page.
 
-3. **Tip-off poll, 2026-10-16 preseason** — Twelve preseason games polled every
-   5 minutes from 00:34Z (`poll_tip.py`, a one-off). The nine games already
-   under way held the same pre-game split and the same ticket count on every
-   poll for over an hour (one finished in that time); the only change was one
-   pre-game price (-110 to -107, split unchanged). The three not yet started
-   kept moving: ticket counts 848→913, 812→853, 1,024→1,115 and 6–9 split or
-   price changes each in 70 minutes.
+3. **Tip-off poll, 2026-10-16 preseason** (`poll_tip.py`, a one-off): twelve
+   games polled every 5 minutes, 00:34Z–02:44Z. Action Network refreshed each
+   game's ticket count about every 10 minutes and its percentages about hourly
+   (00:39, then 01:34–01:39). The count kept rising after the listed start
+   while the game still showed `scheduled` (the two 02:00Z games: 984→1,045
+   and 893→964 at 02:04; the 02:30Z game: 1,267→1,332 at 02:34). Once the
+   status turned `inprogress` (between 02:09 and 02:14 for the 02:00Z games)
+   the count and the split held for the next 30 minutes while pre-game prices
+   kept changing. The nine games already under way at 00:34 held their split
+   and count through to their finish. So the archive is the last refresh
+   before Action Network marks the game started — which can be a few minutes
+   after the listed start — and its percentages can be up to about an hour
+   older than that (preseason cadence; regular-season cadence not measured).
 
-4. **v1 `inserted`** is after the listed start for 7,233 of 7,254 games (median 19.4 minutes after,
-   10th–90th percentile 11.4 to 144.9) — it
+4. **v1 `inserted`** is after the listed start for 7,233 of 7,254 games
+   (median 19.4 minutes after; 10th–90th percentile 11.4 to 144.9). It
    marks the last write of the consensus row (a price can still be updated
    after the start), not when the split was observed. Kept per row as
    `source_inserted_at` / `inserted_minus_start_min`; do not read it as an
@@ -167,6 +175,8 @@ public-betting page loads for that date, fetched fresh: 0 mismatches.
 if it ever carries splits again), then one `pregame_poll` row per side for
 every regular-season or playoff game that has not reached its listed start.
 For a decision at time T read the latest poll row with `observed_at <= T`.
+The first poll was stored by hand at 2026-10-17 01:46Z: the three
+opening-night games of 2026-10-20, 18 rows, all matched to `games`.
 
 It never writes `public_betting`: `models/scorer.py` copies that table onto
 every pick by game id with no sport filter, and `tracking/model_quality.py`
