@@ -34,6 +34,13 @@ WHAT IS BOUGHT (cost MEASURED on 2026-10-15 from x-requests-last):
            The event list (1 credit a date) also gives each game's start, which
            fills `games.commence_time` where it is NULL.
 
+  --extra-hours / --fill-gaps  (2026-10-17, the second game-market search,
+           docs/nba_models_2026.md §6.5.) More hours on every game date, and
+           tip-relative fetches -- tip - 60 and tip - 240, the 5-minute snapshot
+           at or before -- for every game whose decision windows no held fetch
+           reaches. Same bulk endpoint and price as --lines. A fetch off the hour
+           is ledgered in `odds_history_fetches` (sport, requested_at).
+
 THE FLOOR. Last month the credit balance hit 0 on 09-26 and every live feed
 stopped until the 10-01 reset. Every response carries x-requests-remaining, and
 the run stops the moment it reads below `--floor` (default 2,200,000: October's
@@ -46,10 +53,12 @@ feed lists is counted and skipped, never minted as a game row.
 
     python -m data.ingestors.nba_odds_history --lines --seasons 2021 2026 --max-credits 300000 --apply
     python -m data.ingestors.nba_odds_history --props --seasons 2024 2026 --max-credits 520000 --apply
+    python -m data.ingestors.nba_odds_history --lines --extra-hours 16 17 18 20 21 28         --fill-gaps --season-order 2022 2023 2024 2025 2026 2021         --seasons 2021 2026 --max-credits 300000 --apply
 """
 from __future__ import annotations
 
 import argparse
+import bisect
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -90,6 +99,19 @@ SOURCE_PREFIX = DERIV_SOURCE
 FIRST_LINES_DATE = "2020-06-06"     # the feed's first featured-market snapshot
 FIRST_PROPS_DATE = "2023-05-03"     # the feed's first player-prop snapshot
 DEFAULT_FLOOR = 2_200_000
+# Fetches OFF the hour (a gap fill at 23:30Z). odds_history_pulls keys on an
+# integer hour and cannot hold one; see _buy_snapshot for the routing rule.
+FETCH_LEDGER_DDL = """
+CREATE TABLE IF NOT EXISTS odds_history_fetches (
+    sport        TEXT NOT NULL,
+    requested_at TIMESTAMPTZ NOT NULL,
+    snapshot_ts  TIMESTAMPTZ,
+    why          TEXT NOT NULL,
+    pulled_at    TIMESTAMPTZ NOT NULL,
+    rows         INTEGER NOT NULL,
+    PRIMARY KEY (sport, requested_at)
+)
+"""
 ET = ZoneInfo("America/New_York")
 
 
@@ -167,30 +189,128 @@ def _write_with_retry(conn, write, what: str, attempts: int = 4) -> bool:
 
 # ── game lines ──────────────────────────────────────────────────────────────
 
-def line_snapshots(game_dates: list[str]) -> list[tuple[str, int]]:
+def line_snapshots(game_dates: list[str],
+                   extra_hours: tuple[int, ...] = ()) -> list[tuple[str, int]]:
     """(UTC date, hour) pairs covering every ET game date, newest first.
 
     NBA tips run 23:00Z to ~03:30Z, so a game dated D (Eastern) is priced near
     its own start by one of D 22Z/23Z or D+1 00Z-03Z; 15Z and 19Z give the
-    day's path and D-1 22Z the overnight opener."""
+    day's path and D-1 22Z the overnight opener.
+
+    `extra_hours` adds hours counted from midnight UTC on D: 16 is D 16Z, 28 is
+    D+1 04Z, -2 is D-1 22Z. The second game-market search (docs/nba_models_2026.md
+    §6.5) buys 16, 17, 18, 20, 21 and 28 so afternoon and late tips have a price
+    in their own last hour."""
     pairs: set[tuple[str, int]] = set()
     for d in game_dates:
         day = date.fromisoformat(d)
         nxt, prv = (day + timedelta(days=1)).isoformat(), (day - timedelta(days=1)).isoformat()
         pairs |= {(d, 15), (d, 19), (d, 22), (d, 23), (prv, 22),
                   (nxt, 0), (nxt, 1), (nxt, 2), (nxt, 3)}
+        for h in extra_hours:
+            at = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) + timedelta(hours=h)
+            pairs.add((at.date().isoformat(), at.hour))
     return sorted(pairs, reverse=True)
 
 
-def buy_lines(conn, meter: Meter, first_season: int, last_season: int,
-              oldest_first: bool = False) -> dict:
+def _buy_snapshot(conn, meter: Meter, games: dict, when: datetime, stats: dict,
+                  why: str = "hourly") -> bool:
+    """Buy the whole slate at `when`, write it and its ledger row. False = stop.
+
+    On the hour it is ledgered in odds_history_pulls (sport, date, hour), the
+    shape every earlier purchase used; off the hour in odds_history_fetches,
+    keyed on the instant -- an integer hour cannot hold 23:30Z, and a :30 fetch
+    filed as hour 23 would read as the :00 one and never be bought (or the
+    reverse). One routing rule, so a gap fill landing on an hour the hourly
+    plan also wants is bought once."""
+    on_hour = when.minute == 0 and when.second == 0
+    snap_date, hour = when.date().isoformat(), when.hour
+    if on_hour:
+        held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = 'NBA' "
+                            "AND snapshot_date = %s AND hour_utc = %s",
+                            (snap_date, hour)).fetchone()
+    else:
+        held = conn.execute("SELECT 1 FROM odds_history_fetches WHERE sport = 'NBA' "
+                            "AND requested_at = %s", (when,)).fetchone()
+    if held:
+        conn.commit()
+        stats["skipped_by_sibling"] += 1
+        return True
+    stop = meter.stop_reason(30)
+    if stop:
+        stats["stopped"] = stop
+        logger.warning(f"lines stopping at {when:%Y-%m-%d %H:%M}Z: {stop}")
+        return False
+    snapshot_at = when.strftime("%Y-%m-%dT%H:%M:%SZ")
+    r = meter.get(f"{BASE}/odds", {"date": snapshot_at, "markets": ",".join(LINE_MARKETS),
+                                   "bookmakers": BOOKS, "oddsFormat": "american"})
+    if r is None or r.status_code != 200:
+        stats["errors"] += 1
+        logger.warning(f"lines {snapshot_at}: HTTP {getattr(r, 'status_code', 'network')}")
+        return True
+    body = r.json()
+    events = body.get("data") or []
+    game_rows, odds_rows = _process_events(events, "NBA", "open", snapshot_at)
+    for row in odds_rows:
+        row["source"] = HISTORICAL_ODDS_SOURCE
+    stats["marked_in_play"] += _mark_in_play(game_rows, odds_rows)
+    keep = [o for o in odds_rows if o["game_id"] in games]
+    stats["skipped_unknown_games"] += len({o["game_id"] for o in odds_rows
+                                           if o["game_id"] not in games})
+    starts = [(g["commence_time"], g["game_id"]) for g in game_rows
+              if g["game_id"] in games and g.get("commence_time")]
+
+    def _write():
+        if keep:
+            _insert_odds(conn, keep)
+        # commence_time where it is missing, and nothing else
+        if starts:
+            conn.executemany("UPDATE games SET commence_time = %s WHERE game_id = %s "
+                             "AND commence_time IS NULL", starts)
+        if on_hour:
+            conn.execute("""
+                INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
+                VALUES ('NBA', %s, %s, NOW(), %s)
+                ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                   SET pulled_at = NOW(), rows = EXCLUDED.rows
+            """, (snap_date, hour, len(keep)))
+        else:
+            conn.execute("""
+                INSERT INTO odds_history_fetches
+                       (sport, requested_at, snapshot_ts, why, pulled_at, rows)
+                VALUES ('NBA', %s, %s, %s, NOW(), %s)
+                ON CONFLICT (sport, requested_at) DO UPDATE
+                   SET snapshot_ts = EXCLUDED.snapshot_ts, pulled_at = NOW(),
+                       rows = EXCLUDED.rows
+            """, (when, body.get("timestamp"), why, len(keep)))
+        conn.commit()
+
+    if not _write_with_retry(conn, _write, f"lines {snapshot_at}"):
+        stats["errors"] += 1
+        return True
+    stats["odds_rows"] += len(keep)
+    stats["calls"] += 1
+    if stats["calls"] % 50 == 0:
+        logger.info(f"lines {snapshot_at}: {stats['calls']} calls, {stats['odds_rows']:,} rows, "
+                    f"spent {meter.spent:,}, balance {meter.remaining}")
+    return True
+
+
+def _ensure_ledgers(conn) -> None:
     conn.execute(PULL_LEDGER_DDL)
     lock_down(conn, "odds_history_pulls")
+    conn.execute(FETCH_LEDGER_DDL)
+    lock_down(conn, "odds_history_fetches")
     conn.commit()
+
+
+def buy_lines(conn, meter: Meter, first_season: int, last_season: int,
+              oldest_first: bool = False, extra_hours: tuple[int, ...] = ()) -> dict:
+    _ensure_ledgers(conn)
     games = _known_games(conn, first_season, last_season)
     dates = sorted({g["game_date"] for g in games.values()
                     if g["game_date"] >= FIRST_LINES_DATE})
-    pairs = line_snapshots(dates)
+    pairs = line_snapshots(dates, extra_hours)
     if oldest_first:
         # A second process over the same season walks the other way; the
         # per-snapshot ledger check below is what stops them double-buying
@@ -204,58 +324,86 @@ def buy_lines(conn, meter: Meter, first_season: int, last_season: int,
                 f"(~{30 * len(todo):,} credits)")
     stats = defaultdict(int)
     for snap_date, hour in todo:
-        if conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = 'NBA' "
-                        "AND snapshot_date = %s AND hour_utc = %s",
-                        (snap_date, hour)).fetchone():
-            conn.commit()
-            stats["skipped_by_sibling"] += 1
-            continue
-        why = meter.stop_reason(30)
-        if why:
-            stats["stopped"] = why
-            logger.warning(f"lines stopping at {snap_date} {hour:02d}Z: {why}")
+        when = datetime.fromisoformat(f"{snap_date}T{hour:02d}:00:00+00:00")
+        if not _buy_snapshot(conn, meter, games, when, stats):
             break
-        snapshot_at = f"{snap_date}T{hour:02d}:00:00Z"
-        r = meter.get(f"{BASE}/odds", {"date": snapshot_at, "markets": ",".join(LINE_MARKETS),
-                                       "bookmakers": BOOKS, "oddsFormat": "american"})
-        if r is None or r.status_code != 200:
-            stats["errors"] += 1
-            logger.warning(f"lines {snapshot_at}: HTTP {getattr(r, 'status_code', 'network')}")
-            continue
-        events = r.json().get("data") or []
-        game_rows, odds_rows = _process_events(events, "NBA", "open", snapshot_at)
-        for row in odds_rows:
-            row["source"] = HISTORICAL_ODDS_SOURCE
-        stats["marked_in_play"] += _mark_in_play(game_rows, odds_rows)
-        keep = [o for o in odds_rows if o["game_id"] in games]
-        unknown = {o["game_id"] for o in odds_rows if o["game_id"] not in games}
-        stats["skipped_unknown_games"] += len(unknown)
-        starts = [(g["commence_time"], g["game_id"]) for g in game_rows
-                  if g["game_id"] in games and g.get("commence_time")]
+    return dict(stats)
 
-        def _write():
-            if keep:
-                _insert_odds(conn, keep)
-            # commence_time where it is missing, and nothing else
-            if starts:
-                conn.executemany("UPDATE games SET commence_time = %s WHERE game_id = %s "
-                                 "AND commence_time IS NULL", starts)
-            conn.execute("""
-                INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
-                VALUES ('NBA', %s, %s, NOW(), %s)
-                ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
-                   SET pulled_at = NOW(), rows = EXCLUDED.rows
-            """, (snap_date, hour, len(keep)))
-            conn.commit()
 
-        if not _write_with_retry(conn, _write, f"lines {snapshot_at}"):
-            stats["errors"] += 1
+# ── tip-relative gap fill ───────────────────────────────────────────────────
+#
+# The second game-market search grades four decision points per game, each the
+# NEWEST fetch inside a window before tip (docs/nba_models_2026.md §6.2). The
+# hourly plan reaches every window for a tip on the hour; for a 7:30 ET tip
+# (00:30Z) the fetches sit at lead 30 and 90 and NONE lands in 45-75. Measured
+# 2026-10-17 on the cached archive, full-game markets only: the 45-75 window is
+# reached on 93% of :00 tips and 3% of the 2,195 :30 tips, every season. One
+# fetch at tip - 60 closes both the 45-75 and the 60-180 windows; tip - 240
+# closes 3-6 h.
+GAP_WINDOWS = {"B": (180, 360, 240), "C": (60, 180, 60), "D": (45, 75, 60)}
+
+
+def _held_fetches(conn) -> list[datetime]:
+    """Every NBA fetch instant already bought, from both ledgers."""
+    out = [datetime.fromisoformat(f"{d}T{int(h):02d}:00:00+00:00") for d, h in conn.execute(
+        "SELECT snapshot_date, hour_utc FROM odds_history_pulls WHERE sport = 'NBA'").fetchall()]
+    out += [t if t.tzinfo else t.replace(tzinfo=timezone.utc) for (t,) in conn.execute(
+        "SELECT requested_at FROM odds_history_fetches WHERE sport = 'NBA'").fetchall()]
+    return out
+
+
+def gap_instants(tips: list[datetime], held: list[datetime],
+                 windows: dict = GAP_WINDOWS) -> list[datetime]:
+    """The fetch instants that put every tip in every window, none already held.
+
+    A window (lo, hi, aim) is reached when a held fetch sits lo..hi minutes
+    before tip; a tip that misses it asks for tip - aim, rounded down to five
+    minutes (the feed's snapshot spacing). Pure, so the plan is testable."""
+    have = sorted(set(held))
+    want: set[datetime] = set()
+    for tip in sorted(tips):
+        for lo, hi, aim in windows.values():
+            i = bisect.bisect_left(have, tip - timedelta(minutes=hi))
+            j = bisect.bisect_right(have, tip - timedelta(minutes=lo))
+            if j > i:
+                continue
+            at = tip - timedelta(minutes=aim)
+            at = at.replace(minute=at.minute - at.minute % 5, second=0, microsecond=0)
+            want.add(at)
+            # a fetch planned for one game serves every other game it reaches
+            bisect.insort(have, at)
+    return sorted(want)
+
+
+def buy_gaps(conn, meter: Meter, first_season: int, last_season: int,
+             season_order: list[int] | None = None) -> dict:
+    """Fill every decision window for every game, choosing seasons first.
+
+    `season_order` decides what a floor stop leaves unbought: the seasons cuts
+    are chosen on come first, the confirmation season next, 2020-21 last."""
+    _ensure_ledgers(conn)
+    games = _known_games(conn, first_season, last_season)
+    season_of = {r[0]: int(r[1]) for r in conn.execute(
+        "SELECT game_id, season FROM games WHERE sport = 'NBA' AND season BETWEEN %s AND %s",
+        (first_season, last_season)).fetchall()}
+    tips_by_season: dict[int, list[datetime]] = defaultdict(list)
+    for g in games.values():
+        ct = g.get("commence_time")
+        if not ct or g["game_date"] < FIRST_LINES_DATE:
             continue
-        stats["odds_rows"] += len(keep)
-        stats["calls"] += 1
-        if stats["calls"] % 50 == 0:
-            logger.info(f"lines {snapshot_at}: {stats['calls']} calls, {stats['odds_rows']:,} rows, "
-                        f"spent {meter.spent:,}, balance {meter.remaining}")
+        t = ct if isinstance(ct, datetime) else datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+        tips_by_season[season_of[g["game_id"]]].append(t.astimezone(timezone.utc))
+    held = _held_fetches(conn)
+    order = season_order or sorted(tips_by_season, reverse=True)
+    plan = [(s, at) for s in order for at in gap_instants(tips_by_season.get(s, []), held)]
+    seen: set[datetime] = set()
+    plan = [(s, at) for s, at in plan if not (at in seen or seen.add(at))]
+    per = {s: sum(1 for x, _ in plan if x == s) for s in order}
+    logger.info(f"gaps: {len(plan)} fetches to buy (~{30 * len(plan):,} credits), by season {per}")
+    stats = defaultdict(int)
+    for s, at in plan:
+        if not _buy_snapshot(conn, meter, games, at, stats, why=f"gap_fill_{s}"):
+            break
     return dict(stats)
 
 
@@ -516,6 +664,13 @@ def main() -> None:
     ap.add_argument("--lead-min", type=int, default=60)
     ap.add_argument("--oldest-first", action="store_true",
                     help="lines: walk the dates oldest first (run beside a newest-first sibling)")
+    ap.add_argument("--extra-hours", nargs="+", type=int, default=[],
+                    help="lines: more hours, counted from midnight UTC on the game date "
+                         "(28 = next day 04Z)")
+    ap.add_argument("--fill-gaps", action="store_true",
+                    help="buy tip-relative fetches so every game reaches every decision window")
+    ap.add_argument("--season-order", nargs="+", type=int,
+                    help="fill-gaps: the order seasons are bought in")
     ap.add_argument("--max-credits", type=int)
     ap.add_argument("--floor", type=int, default=DEFAULT_FLOOR)
     ap.add_argument("--apply", action="store_true")
@@ -531,16 +686,20 @@ def main() -> None:
             print(s)
             print(f"MEASURED {meter.spent} credits for {s['events']} games; balance {meter.remaining}")
             return
-        if not a.seasons or not (a.lines or a.props or a.derivatives):
-            ap.error("give --lines, --props or --derivatives with --seasons FIRST LAST")
+        if not a.seasons or not (a.lines or a.props or a.derivatives or a.fill_gaps):
+            ap.error("give --lines, --fill-gaps, --props or --derivatives with --seasons FIRST LAST")
         if not a.apply:
             print("dry run: re-run with --apply --max-credits N")
             return
         if not a.max_credits:
             ap.error("--apply needs --max-credits")
         meter = Meter(ceiling=a.max_credits, floor=a.floor)
+        # Hours before gaps, so the gap plan is drawn against every hour held.
         if a.lines:
-            print("lines:", buy_lines(conn, meter, *a.seasons, oldest_first=a.oldest_first))
+            print("lines:", buy_lines(conn, meter, *a.seasons, oldest_first=a.oldest_first,
+                                      extra_hours=tuple(a.extra_hours)))
+        if a.fill_gaps and not meter.stop_reason(30):
+            print("gaps:", buy_gaps(conn, meter, *a.seasons, season_order=a.season_order))
         if a.props:
             print("props:", buy_props(conn, meter, *a.seasons, a.lead_min))
         if a.derivatives:
