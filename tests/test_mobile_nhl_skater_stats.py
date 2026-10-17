@@ -45,7 +45,11 @@ def test_nhl_skater_chips_and_the_read_are_in_source():
     assert "v_player_season_totals_nhl" not in queries
     markets = _read(MOBILE / "src/lib/markets.ts")
     assert "if (market === 'player_goal_scorer_anytime') return 'Anytime Goal';" in markets
-    assert "setHitMode('atLeast')" in screen
+    assert "if (sport === 'NHL') setHitMode('atLeast')" in screen
+    assert "rankedBoardChrome(" in screen
+    assert "createNhlSkaterReader" in queries
+    board = _read(MOBILE / "src/lib/statsBoard.ts")
+    assert "sport === 'NHL' && lineOnlyCount > 0" in board
     assert "Lines are up. Season totals aren\u2019t in yet." in screen
     teams = screen.index("if (boardMode === 'teams' && supportsTeamBoard(sport))")
     # The load callback also has `if (!stat)`. The render guard is the one

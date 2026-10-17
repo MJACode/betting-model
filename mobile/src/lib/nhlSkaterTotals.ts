@@ -34,10 +34,85 @@ export interface NhlSkaterGame {
  * NHL labels a season by the year it ENDS (CLAUDE.md §4). The Stats screen
  * passes the calendar year. In October 2026 that is 2026, and the season in
  * progress is 2027, so the ending year is tried first and the calendar year
- * is the fallback (last season, and the right label from January on).
+ * is the fallback (last season). From January through June the ending year
+ * IS the calendar year — asking for next year's label is an empty page.
  */
-export function nhlSeasonCandidates(calendarYear: number): number[] {
+export function nhlSeasonCandidates(calendarYear: number, month: number): number[] {
+  if (month >= 1 && month <= 6) return [calendarYear];
   return [calendarYear + 1, calendarYear];
+}
+
+/** How long a paged season stays on the phone. Pull-to-refresh clears it. */
+export const NHL_SKATER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * The paged game read, remembered per season, and the summed board,
+ * remembered per season + window + teams.
+ *
+ * There is no sum the app can ask the server for without a new migration
+ * (the window RPCs are the unapplied #962 grants). A full season is tens of
+ * thousands of game rows. The cache is what keeps a window change from
+ * paging that again. `now` is a seam for the tests.
+ */
+export function createNhlSkaterReader(opts: {
+  fetchGames: (season: number) => Promise<NhlSkaterGame[]>;
+  now?: () => number;
+  ttlMs?: number;
+}) {
+  const ttl = opts.ttlMs ?? NHL_SKATER_CACHE_TTL_MS;
+  const now = () => opts.now?.() ?? Date.now();
+  const games = new Map<number, { at: number; rows: NhlSkaterGame[] }>();
+  const inflight = new Map<number, Promise<NhlSkaterGame[]>>();
+  const boards = new Map<string, { at: number; rows: SeasonTotalsRow[] }>();
+
+  async function gamesFor(season: number): Promise<NhlSkaterGame[]> {
+    const t = now();
+    const hit = games.get(season);
+    if (hit && t - hit.at < ttl) return hit.rows;
+    const pending = inflight.get(season);
+    if (pending) return pending;
+    const job = opts.fetchGames(season).then(
+      (rows) => {
+        games.set(season, { at: now(), rows });
+        inflight.delete(season);
+        return rows;
+      },
+      (err: unknown) => {
+        inflight.delete(season);
+        throw err;
+      },
+    );
+    inflight.set(season, job);
+    return job;
+  }
+
+  return {
+    async board(
+      calendarYear: number,
+      month: number,
+      window: number | null,
+      teams: readonly string[] | null,
+    ): Promise<SeasonTotalsRow[]> {
+      const teamKey = teams && teams.length > 0 ? [...teams].sort().join(',') : '';
+      for (const season of nhlSeasonCandidates(calendarYear, month)) {
+        const key = `${season}|${window ?? ''}|${teamKey}`;
+        const t = now();
+        const hit = boards.get(key);
+        if (hit && t - hit.at < ttl) return hit.rows;
+        const rows = await gamesFor(season);
+        if (rows.length === 0) continue;
+        const summed = aggregateNhlSkaterTotals(rows, season, window, teams);
+        boards.set(key, { at: now(), rows: summed });
+        return summed;
+      }
+      return [];
+    },
+    invalidate(): void {
+      games.clear();
+      inflight.clear();
+      boards.clear();
+    },
+  };
 }
 
 function num(v: number | string | null | undefined): number {

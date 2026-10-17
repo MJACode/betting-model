@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984 review: NHL skater pages cached 5 minutes per season (no server sum without a migration); football Anytime TD header/count/empty state stays on the old path; Jan–Jun skips next year's season |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NHL Stats tab shows skater prop lines: Shots, Points, Goals, Assists from nhl_skater_stats; hit rate stays off pending #962; blocked shots omitted (no column) |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, The Citadel: The Odds API's "Citadel Bulldogs" joins `NCAAF_ODDS_API_MAP` (CFBD says "The Citadel", the fold keeps the article); `ncaaf_citadel_alias_2026_10_16.sql` consolidates five alias rows (Texas A&M 2026-10-17 held 605 odds, Charlotte 2026-09-05 8,639; no picks) onto the CFBD ids; the migration is executed on a scratch Postgres in its test |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA projection model (`nba_prop_projection`) live: six calibrated cells, every qualifying proposition, never one the rule holds, projected about 65 minutes before tip and decided in the window; three verifiers and a pre-merge review confirmed; live-path replay matches the graded predictions; the shared window moved to 45-57 (#970) and two missing markets fetched |

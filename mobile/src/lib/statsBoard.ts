@@ -139,6 +139,29 @@ export function listsPricedWithoutLog(sport: string, statKey: string | null | un
 }
 
 /**
+ * Header, empty state, and filter count around a line-only tail.
+ *
+ * Football Anytime TD already listed those names under a ranked board. That
+ * board stays as it was: the header is the ranked list's, the empty state
+ * still shows when that list is empty, and the filter count does not add the
+ * tail. NHL is the exception, because an empty skater log makes the tail the
+ * whole board.
+ */
+export function rankedBoardChrome(
+  sport: string,
+  rankedCount: number,
+  lineOnlyCount: number,
+): { showHeader: boolean; headerSorted: boolean; suppressEmpty: boolean; resultCount: number } {
+  const nhlTail = sport === 'NHL' && lineOnlyCount > 0;
+  return {
+    showHeader: rankedCount > 0 || (nhlTail && rankedCount === 0),
+    headerSorted: rankedCount > 0,
+    suppressEmpty: nhlTail && rankedCount === 0,
+    resultCount: rankedCount + (nhlTail ? lineOnlyCount : 0),
+  };
+}
+
+/**
  * The touch set a late response is allowed to commit, or null when a newer
  * load has taken the board.
  *

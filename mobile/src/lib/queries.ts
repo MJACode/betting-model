@@ -1,4 +1,5 @@
-import { aggregateNhlSkaterTotals, nhlSeasonCandidates, type NhlSkaterGame } from '@/lib/nhlSkaterTotals';
+import { createNhlSkaterReader, type NhlSkaterGame } from '@/lib/nhlSkaterTotals';
+import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
@@ -131,11 +132,12 @@ const NHL_SKATER_COLUMNS =
 
 /**
  * One season of nhl_skater_stats, paged. The read is per GAME, so a team
- * filter does not belong on the request — aggregateNhlSkaterTotals keeps a
- * skater by his newest team after the window is cut.
+ * filter does not belong on the request — the reader keeps a skater by his
+ * newest team after the window is cut.
  *
- * Row count on 2026-10-16: 0. A full season, if the table is ever filled, is
- * on the order of a few tens of thousands of rows, inside the pager's cap.
+ * Row count on 2026-10-16: 0. A filled season is tens of thousands of rows.
+ * `nhlSkaters` remembers the pages per season so a window change does not
+ * page them again. A server-side sum needs a migration; there isn't one.
  */
 function fetchNhlSkaterGames(season: number): Promise<NhlSkaterGame[]> {
   return fetchAllPages<NhlSkaterGame>(
@@ -152,18 +154,25 @@ function fetchNhlSkaterGames(season: number): Promise<NhlSkaterGame[]> {
   );
 }
 
+const nhlSkaters = createNhlSkaterReader({ fetchGames: fetchNhlSkaterGames });
+
+/** Drop the remembered season pages. Pull-to-refresh calls this. */
+export function invalidateNhlSkaterCache(): void {
+  nhlSkaters.invalidate();
+}
+
 /** Season or last-N skater totals. First season label that has any games. */
-async function fetchNhlSkaterBoard(
+function fetchNhlSkaterBoard(
   calendarYear: number,
   window: number | null,
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  for (const s of nhlSeasonCandidates(calendarYear)) {
-    const games = await fetchNhlSkaterGames(s);
-    if (games.length === 0) continue;
-    return aggregateNhlSkaterTotals(games, s, window, hasTeams(teams) ? teams : null);
-  }
-  return [];
+  return nhlSkaters.board(
+    calendarYear,
+    monthET(),
+    window,
+    hasTeams(teams) ? teams : null,
+  );
 }
 
 /**

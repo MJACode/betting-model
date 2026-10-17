@@ -56,6 +56,7 @@ import {
   fetchTeamStats,
   fetchTonightMatchups,
   fetchWindowTotals,
+  invalidateNhlSkaterCache,
 } from '@/lib/queries';
 import { bookLabel, bookName, booksLabel, booksName, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
@@ -131,6 +132,7 @@ import {
   pricedPlayers,
   type PricedPlayer,
   listsPricedWithoutLog,
+  rankedBoardChrome,
   needsTouchSet,
   seasonTouchFlag,
   shouldFetchTouchSet,
@@ -570,10 +572,10 @@ export function StatsScreen() {
     // default, not the one carried over.
     if (!supportsHitRate(sport)) {
       setTimeWindow((w) => (w === 'h2h' ? 10 : w));
-      // Under chosen on a hit-rate sport has no control here — the ruler is
-      // hit-rate only — and the odds pill would price that unnamed side.
-      // At Least is where a first visit already opens.
-      setHitMode('atLeast');
+      // NHL is the sport that prices a side and has no ruler to name it.
+      // Resetting every other sport without hit rate (UFC, golf) would throw
+      // away an Under the user set on the NFL the moment they passed through.
+      if (sport === 'NHL') setHitMode('atLeast');
     }
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
@@ -904,6 +906,7 @@ export function StatsScreen() {
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey, h2hKey]);
 
   const refreshBoard = useCallback(() => {
+    invalidateNhlSkaterCache();
     setSlateReload((n) => n + 1);
     void load();
   }, [load]);
@@ -1789,6 +1792,13 @@ export function StatsScreen() {
         : recentRows.map((r) => r.player_name),
     );
   }, [pricedByKey, activePositions, loading, error, rowsAreStale, shownKey, readKey, effectiveMode, rows, touchView, timeWindow, seasonValues, recentRows, lineOnlyFor]);
+  // Football Anytime TD keeps master's header, empty state, and filter count.
+  // NHL's empty log is the only board the tail replaces.
+  const boardChrome = rankedBoardChrome(
+    sport,
+    effectiveMode === 'hitRate' ? hitData.length : ranked.length,
+    lineOnlyList.length,
+  );
   const slateGameById = useMemo(() => new Map(slateGames.map((g) => [g.game_id, g] as const)), [slateGames]);
   // The log itself came back empty (nhl_skater_stats can), which is not the
   // Anytime TD case of a few names the log has no game for. Those keep the
@@ -2282,7 +2292,11 @@ export function StatsScreen() {
       {/* Averages on a sport with no hit-rate ruler. The pill still prices a
           side, and nothing else on the board names it. Same quiet caption as
           the no-lines note. The Goals chip stays "Goals"; the bet is Anytime
-          Goal (markets.ts propDisplayLabel). */}
+          Goal (markets.ts propDisplayLabel).
+          The pill does not also say the snapshot is old. Prop rows carry
+          snapshot_at, and the game-line age rule (markets.priceAgeApplies)
+          does not cover props — their normal age is hours. A second caption
+          on this shared cell would be a new flag on every sport's board. */}
       {!canHitRate && showOdds ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
@@ -2562,10 +2576,10 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
-      {(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0 || lineOnlyList.length > 0 ? (
+      {boardChrome.showHeader ? (
         <ColumnHeader
           rightLabel={rightLabel}
-          sorted={(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0}
+          sorted={boardChrome.headerSorted}
           showOdds={showOdds}
           // Named for the book it prints — "FD", "DK", "MGM" — so a FanDuel
           // user never reads an unlabelled number as someone else's. With
@@ -2679,7 +2693,7 @@ export function StatsScreen() {
             // A priced player with no log row is the board, not an empty one.
             // Hold the skeleton while those lines are still loading so the
             // first paint does not say "no data" and then fill in.
-            lineOnlyList.length > 0 ? null
+            boardChrome.suppressEmpty ? null
               : loading || (listsPricedWithoutLog(sport, stat ? String(stat.key) : null) && propLines.status === 'loading') ? (
               <BoardSkeleton />
             ) : (
@@ -2728,7 +2742,7 @@ export function StatsScreen() {
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         title="Filter players"
-        resultCount={(effectiveMode === 'hitRate' ? hitData.length : ranked.length) + lineOnlyList.length}
+        resultCount={boardChrome.resultCount}
         itemNoun="player"
         emptyLabel={touchView === 'error' ? 'Couldn’t load this list. Pull down to retry.' : undefined}
         // The Availability toggle re-READS the board (the server is narrowed to
