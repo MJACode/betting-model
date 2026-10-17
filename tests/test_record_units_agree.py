@@ -174,9 +174,12 @@ def test_both_record_views_sum_the_same_functions():
 
 def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     screen = (ROOT / "mobile/src/screens/TrackRecordScreen.tsx").read_text(encoding="utf-8")
+    card = (ROOT / "mobile/src/components/RecordHeroCard.tsx").read_text(encoding="utf-8")
+    hero = (ROOT / "mobile/src/lib/recordHero.ts").read_text(encoding="utf-8")
     queries = (ROOT / "mobile/src/lib/queries.ts").read_text(encoding="utf-8")
     summary = (ROOT / "mobile/src/lib/trackRecord.ts").read_text(encoding="utf-8")
     curve = (ROOT / "mobile/src/components/EquityCurve.tsx").read_text(encoding="utf-8")
+    spark = (ROOT / "mobile/src/components/RecordSparkline.tsx").read_text(encoding="utf-8")
     share = (ROOT / "mobile/src/lib/shareRecord.ts").read_text(encoding="utf-8")
     assert "units, risked" in queries
     assert queries.count("units, risked") >= 2
@@ -195,16 +198,68 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "/ 100" not in equity
     on_share = screen.split("const onShare", 1)[1].split("}, [overall, equity]);", 1)[0]
     assert "(overall.risked ?? 0) > 0" in on_share
-    assert "notLoaded || dailyLacksUnits" in screen
+    assert "notLoaded || curveUnknown" in screen
+    assert "overall.units == null || dailyLacksUnits" in screen
     assert "visibleDaily.some((d) => d.units != null)" in screen
-    assert "Flat-bet ROI" not in screen
-    assert ">ROI · 1 to win<" in screen
-    assert "Yesterday and the Models tab still use a flat $100 bet" in screen
-    assert "wins less than 1" in screen
+    # Option B: Discord's all-time label, the units number, the same pill.
+    assert "DISCORD_ALL_TIME_LABEL" in screen
+    assert "endUnits={heroUnits}" in screen
+    assert 'export const DISCORD_ALL_TIME_LABEL = \'All-time\'' in hero
+    assert "return formatSigned(units, 2, 'u')" in hero
+    assert "Units unavailable" in hero
+    assert "unknownCountSpeech('— settled picks')" in hero
+    assert "since ${LIVE_RECORD_START_SHORT}" in hero
+    # Yesterday's book is named "flat-bet ROI" on the Yesterday sheet.
+    # This screen says "Return on bets".
+    for blob in (screen, card, hero):
+        assert "Flat-bet ROI" not in blob
+        assert "flat-bet ROI" not in blob
+    assert 'label="Return on bets"' in card
+    assert "Return on bets (ROI)" in hero
+    assert "Total profit · all time" in hero
+    assert "heroVisibleLabel(label)" in card
+    assert "Units · 1 to win" in hero
+    assert "{UNITS_CAPTION}" in card
+    assert "Each pick risks the amount needed to win 1 unit" in hero
+    assert "Risk is capped at 3 units" in hero
+    assert "a pick with no price counts as 1 unit" in hero
+    assert "Nothing risks more than 3" not in hero
+    assert "wins less than 1" not in hero
+    assert "The info button on Return on bets" in screen
+    assert "not all green" not in screen
+    assert "Beat the closing line" in card
+    assert 'accessibilityRole="summary"' in card
+    assert "accessibilityLabel={heroLabel}" in card
+    assert "heroAccessibilityLabel" in hero
+    assert "pnlColor(units, 2)" in card
+    assert "pnlColor(summary.roi, 1, 100)" in card
+    assert "summary.units != null" in card
+    assert "overall.units == null" in screen
+    assert "Yesterday and Models use a flat $100 bet" in hero
     assert "unpriced, staked at 1u" in screen
     assert "flat $100" not in curve
+    assert "colors.positive" not in curve
+    assert "colors.betInk" in curve
     assert "Cumulative units, 1 to win" in curve
-    assert "formatSigned(last, 2, 'u')" in curve
+    assert "formatSigned(endUnits, 2, 'u')" in curve
+    assert "pnlColor(endUnits, 2)" in curve
+    assert "scrubIndexForSeries" in curve
+    assert "equitySeriesKey(seriesId, points)" in curve
+    assert "onBlur does not" in curve
+    assert "onBlur={releaseScrub}" not in curve
+    assert "scheduleScrubRelease" in curve
+    assert "seriesId={sportSel}" in screen
+    assert curve.count("<Circle") >= 2
+    assert "maxWidth: pill.maxWidth" in curve
+    geometry = (ROOT / "mobile/src/lib/equityGeometry.ts").read_text(encoding="utf-8")
+    assert "export function scrubIndexForSeries" in geometry
+    assert "SCRUB_RELEASE_MS" in geometry
+    assert "scheduleScrubRelease" in geometry
+    assert "maxWidth: chartW" in geometry
+    assert "strokeDasharray" in curve
+    assert "unitAxisTicks" in curve
+    assert "colors.betInk" in spark
+    assert "colors.positive" not in spark
     assert "units, 1 to win" in share
     assert "formatPctSigned(s.roi)" in share
     assert "(s.risked ?? 0) > 0" in share

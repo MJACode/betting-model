@@ -25,7 +25,7 @@ base.units = 11.2;
 const msg = buildShareMessage(base, { endUnits: 11.2, since: '2026-04-14' });
 check('includes signed ROI', msg.includes('+4.3%'), msg.split('\n')[2]);
 check('includes record', msg.includes('150-109'));
-check('includes win rate', msg.includes('58% win rate'));
+check('includes win rate', msg.includes('57.9% win rate'));
 check('includes units', msg.includes('+11.20 units'));
 check('includes beat-the-close', msg.includes('58% of the time'));
 check('includes settled count + since', msg.includes('259 settled picks since 2026-04-14'));
@@ -53,7 +53,7 @@ const beforeColumns = buildShareMessage(
 check('missing stake drops the ROI line', !beforeColumns.includes('ROI') && !beforeColumns.includes('0.0%'), beforeColumns);
 check('missing stake drops the units line', !beforeColumns.includes('units'), beforeColumns);
 check('missing stake keeps the record', beforeColumns.includes('150-109'), beforeColumns);
-check('missing stake keeps the win rate', beforeColumns.includes('58% win rate'), beforeColumns);
+check('missing stake keeps the win rate', beforeColumns.includes('57.9% win rate'), beforeColumns);
 check('missing stake still names the app', beforeColumns.includes(APP_URL));
 
 // risked 0 is a real total: every pick voided. The cards dash. Sharing it
@@ -65,7 +65,7 @@ const allVoid = buildShareMessage(
 check('all-void drops the ROI line', !allVoid.includes('ROI') && !allVoid.includes('0.0%'), allVoid);
 check('all-void drops the units line', !allVoid.includes('units'), allVoid);
 check('all-void keeps the record', allVoid.includes('150-109'), allVoid);
-check('all-void keeps the win rate', allVoid.includes('58% win rate'), allVoid);
+check('all-void keeps the win rate', allVoid.includes('57.9% win rate'), allVoid);
 
 console.log(failures === 0 ? '\nAll share-record checks passed.' : `\n${failures} FAILED.`);
 process.exit(failures === 0 ? 0 : 1);
