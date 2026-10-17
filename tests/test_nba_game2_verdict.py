@@ -14,6 +14,10 @@ def _cell(k=1, **over):
            "n_choose": 900, "roi_choose": 0.08, "ci_lo_choose": 0.02,
            "seasons_positive": True, "half_early_roi": 0.05, "half_late_roi": 0.09,
            "blind_roi_choose": -0.03, "placebo_rois": [-0.04, -0.01, 0.0, -0.02] * 5,
+           # all away; favourites and underdogs split; no totals
+           "share_home": 0.0, "share_fav": 0.5, "share_over": np.nan,
+           "blind_home": -0.05, "blind_away": -0.03, "blind_fav": -0.04, "blind_dog": -0.02,
+           "blind_over": np.nan, "blind_under": np.nan,
            "clv_median": 0.01, "n_confirm": 260, "roi_confirm": 0.10, "ci_lo_confirm": 0.01,
            "p_confirm": 1e-7, "p_choose": 1e-7}
     row.update(over)
@@ -37,7 +41,9 @@ def test_a_cell_clearing_every_bar_passes():
     ({"n_choose": 199}, "bar6"),
     ({"ci_lo_choose": -0.001}, "bar6"),
     ({"half_late_roi": -0.01}, "bar8"),
-    ({"blind_roi_choose": 0.09}, "bar9"),
+    ({"blind_away": 0.09}, "bar9"),
+    ({"share_fav": 0.8, "blind_fav": 0.085}, "bar9"),
+    ({"share_fav": 0.2, "blind_dog": np.nan}, "bar9"),
     ({"placebo_rois": [0.2] * 20}, "bar10"),
     ({"clv_median": -0.001}, "bar11"),
     ({"n_confirm": 150}, "confirm"),
@@ -81,3 +87,21 @@ def test_an_extra_axis_keeps_neighbours_apart():
 def test_duplicate_cells_are_refused():
     with pytest.raises(AssertionError):
         V.verdict(pd.concat([_grid(), _grid()], ignore_index=True))
+
+
+def test_a_cell_with_no_dominant_side_is_not_held_to_a_blind_bet():
+    m = _mid(V.verdict(_grid(share_home=0.6, share_fav=0.4, blind_home=0.5, blind_away=0.5)))
+    assert bool(m["bar9"]) is True
+
+
+def test_controls_are_reported_by_the_labs_and_never_judged_or_counted():
+    g = pd.concat([_grid(), _grid().assign(family="control_blind_home")], ignore_index=True)
+    v = V.verdict(g)
+    assert set(v["family"]) == {"F2"} and v["bh_m"].iloc[0] == 3 + 3750
+
+
+def test_an_all_empty_placebo_list_reads_as_no_placebo_not_a_crash():
+    g = _grid()
+    g["placebo_rois"] = [None, [None, None], [np.nan] * 3]
+    m = _mid(V.verdict(g))
+    assert m["failed"] == "bar10"
