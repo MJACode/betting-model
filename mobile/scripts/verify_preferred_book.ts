@@ -440,6 +440,11 @@ check('mlb_total_market resolves to totals (id has no over_under)', gameMarketFo
 check('mlb_total_public_fade resolves to totals (id has no over_under)', gameMarketForModel('mlb_total_public_fade') === 'totals');
 check('mlb_total_market is a game_total for parlay correlation', marketClassForModel('mlb_total_market') === 'game_total');
 check('mlb_total_public_fade is a game_total for parlay correlation', marketClassForModel('mlb_total_public_fade') === 'game_total');
+// nba_total_luck (NBA full-game totals, overs) has neither 'over_under' nor
+// 'total_runs' in its id: without its own case every price, line-shop and
+// movement lookup for its picks read the game's moneyline rows.
+check('nba_total_luck resolves to totals (id has no over_under)', gameMarketForModel('nba_total_luck') === 'totals');
+check('nba_total_luck is a game_total for parlay correlation', marketClassForModel('nba_total_luck') === 'game_total');
 check('mlb_spread_market resolves to spreads', gameMarketForModel('mlb_spread_market') === 'spreads');
 check('live runline resolves to spreads', gameMarketForModel('mlb_live_runline') === 'spreads');
 check('live win prob resolves to h2h', gameMarketForModel('mlb_live_win_prob') === 'h2h');

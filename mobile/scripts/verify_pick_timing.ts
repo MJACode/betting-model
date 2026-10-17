@@ -14,7 +14,7 @@
 
 import { formatStampET, normalizeStamp, todayET } from '../src/lib/format';
 import { UNLOCKED_LOOKAHEAD_SPORTS } from '../src/lib/thresholds';
-import { pickTimingInfo } from '../src/lib/markets';
+import { gameMarketForModel, pickTimingInfo } from '../src/lib/markets';
 import type { Pick, PickSide } from '../src/types';
 
 let failures = 0;
@@ -273,6 +273,11 @@ function mkPick(over: Partial<Pick>): Pick {
   check('and its same-day pick still is', pickTimingInfo({ ...ahead, game_date: todayET() })?.kind === 'posted');
   UNLOCKED_LOOKAHEAD_SPORTS.delete('UFC');
 }
+
+// The NBA totals overs model's picks are totals: their prices, movement and
+// line shop read the game's totals rows, never its moneyline rows.
+check('an nba_total_luck pick reads the totals market', gameMarketForModel('nba_total_luck') === 'totals',
+  String(gameMarketForModel('nba_total_luck')));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 if (failures > 0) process.exit(1);

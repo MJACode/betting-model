@@ -75,6 +75,11 @@ check('the NBA projection model is a player prop with no single stat',
   MODEL_META.nba_prop_projection?.type === 'player_prop' && MODEL_META.nba_prop_projection.statLabel === '');
 check('the NBA projection model\'s short name is a word, not its id',
   MODEL_META.nba_prop_projection?.shortLabel === 'Projection');
+// The chip sits beside "BOS vs NYK Over 225.5": a bare "Over" repeats the side
+// and names neither the market nor the model. Market plus method, as
+// 'O/U Mkt' and 'O/U Fade' do.
+check('the NBA totals overs model\'s chip names its market and method, not the side',
+  MODEL_META.nba_total_luck?.shortLabel === 'O/U Luck', String(MODEL_META.nba_total_luck?.shortLabel));
 // "Why this bet?": the projection model's probability is an upper bound. The
 // figures are its graded seasons, not a posted record (it has none yet), and
 // the 48% the prices implied is what shows the 50% beat them (UX review,

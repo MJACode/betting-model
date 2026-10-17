@@ -3004,7 +3004,15 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id LIKE '%%f5_runline%%' THEN 'spreads_1st_5_innings'
               WHEN p.model_id LIKE '%%f5_moneyline%%' THEN 'h2h_1st_5_innings'
               WHEN p.model_id LIKE '%%over_under%%' THEN 'totals'
-              WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%' THEN 'spreads'
+              -- The rule cards whose ids carry no 'over_under' (pinned against
+              -- tracking.paper_tracker._RULE_MODEL_MARKETS by
+              -- tests/test_rule_model_markets_everywhere.py).
+              WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market'
+                OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
+                THEN 'totals'
+              WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
+                OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
+                THEN 'spreads'
               ELSE 'h2h' END
         ORDER BY o.snapshot_at DESC
     """, (game_date,)).fetchall()

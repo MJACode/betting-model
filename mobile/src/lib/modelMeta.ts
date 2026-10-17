@@ -412,7 +412,9 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // label is the platform's "BOS vs NYK Over 225.5". A game line, not a
   // picker slot: totals are not one (betSlotForModel).
   nba_total_luck: {
-    shortLabel: 'Over',
+    // Market plus method, as 'O/U Mkt' and 'O/U Fade': the side is already in
+    // the label beside the chip.
+    shortLabel: 'O/U Luck',
     longLabel: 'Total Points (Overs)',
     type: 'game',
     statKey: null,
