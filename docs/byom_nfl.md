@@ -30,15 +30,11 @@ and the job is not in `jobs/declared_jobs.json`, so a merge does not
 backfill production.
 
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
-`byom/constants.py` holds `LOCK_WINDOW_HOURS` (120) and
-`NEAR_LOCK_WINDOW_HOURS` (24). Both are UNCONFIRMED. Seasons before
-`DK_HISTORY_START_SEASON` (2020) are refused. The grade is DraftKings'
-own price on the lock snapshot. `grade_*_book` is `draftkings`. Another
-book's price is not the grade. History is preferred over `odds` when
-both have a lock for that market. `line_source` records which table.
-Closing prices are stored and are not the grade. The builder reads one
-game at a time, DraftKings inside the lock window. Other books are not
-read here. The lock-shop change is what stores them. A season is not
-loaded in one fetch.
-`byom_game_facts_units_2026_10_16.sql` renames the unit columns. It is
-registered and was not applied.
+Seasons before `DK_HISTORY_START_SEASON` (2020) are refused. For each
+game it takes the latest DraftKings spread and the latest DraftKings
+total whose snapshot is at or before kickoff, from `nfl_odds_history`
+and `odds` together. That number is the line. `line_basis` is
+`DraftKings line at game start` on every built row, including a row
+whose spread and total are null. Moneyline is graded from the score
+and does not read a price. The builder reads one game at a time.
+Other books are not read. A season is not loaded in one fetch.

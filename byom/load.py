@@ -3,18 +3,21 @@
 Reads games, nfl_odds_history and odds. Writes only byom_game_facts.
 Does not touch picks. `apply=False` is the default: count the rows and
 write nothing.
+
+The line is the last DraftKings snapshot at or before game start, from
+either store. A missing line does not skip the game. Prices are not
+read. Moneyline is the score only.
 """
 from __future__ import annotations
 
-from byom.constants import DK_HISTORY_START_SEASON, LOCK_WINDOW_HOURS, SPORT
+from byom.constants import DK_HISTORY_START_SEASON, SPORT
 from byom.game_facts import assemble_game, parse_date, parse_game_id
 
 # One game at a time. A season of nfl_odds_history is millions of rows
 # (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
 # measured 2026-10-16). The index is (game_id, market). This builder reads
-# DraftKings inside the lock window and nothing else. The lock-shop builder
-# is what stores other books. The grade is DraftKings' own price on the
-# lock snapshot. apply=false uses the same reads and writes nothing.
+# DraftKings spreads and totals at or before kickoff. apply=false uses
+# the same reads and writes nothing.
 _ODDS_SNAPSHOT = """
 CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
      THEN o.snapshot_at::timestamptz
@@ -22,15 +25,13 @@ CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
 """
 
 _QUOTE_FROM_HISTORY = """
-SELECT game_id, bookmaker, market, snapshot_at, commence_time,
-       point, price_home, price_away
+SELECT game_id, bookmaker, market, snapshot_at, commence_time, point
   FROM nfl_odds_history
  WHERE game_id IN (%s, %s)
    AND bookmaker = 'draftkings'
-   AND market IN ('spreads', 'totals', 'h2h')
+   AND market IN ('spreads', 'totals')
    AND commence_time IS NOT NULL
    AND snapshot_at <= commence_time
-   AND snapshot_at >= commence_time - make_interval(hours => %s)
 """
 
 _QUOTE_FROM_ODDS = f"""
@@ -41,56 +42,27 @@ SELECT o.game_id, o.bookmaker, o.market,
          WHEN 'spreads' THEN o.spread_home
          WHEN 'totals' THEN o.total_line
          ELSE NULL
-       END AS point,
-       CASE WHEN o.market = 'totals' THEN o.over_price ELSE o.home_price END
-         AS price_home,
-       CASE WHEN o.market = 'totals' THEN o.under_price ELSE o.away_price END
-         AS price_away
+       END AS point
   FROM odds o
   JOIN games g ON g.game_id = o.game_id
  WHERE o.game_id IN (%s, %s)
    AND o.bookmaker = 'draftkings'
-   AND o.market IN ('spreads', 'totals', 'h2h')
+   AND o.market IN ('spreads', 'totals')
    AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
    AND g.commence_time IS NOT NULL
    AND {_ODDS_SNAPSHOT} IS NOT NULL
    AND {_ODDS_SNAPSHOT} <= g.commence_time::timestamptz
-   AND {_ODDS_SNAPSHOT}
-         >= g.commence_time::timestamptz - make_interval(hours => %s)
 """
 
 # Column order is the INSERT. built_at is the table default.
 FACT_COLUMNS = (
     "canonical_key", "sport", "season", "week", "away_team", "home_team",
     "game_date", "commence_time", "home_score", "away_score",
-    "lock_window_hours", "near_window_hours",
-    "lock_spread_at", "lock_spread_lead_hours", "dk_spread_home",
-    "dk_spread_home_price", "dk_spread_away_price",
-    "lock_total_at", "lock_total_lead_hours", "dk_total",
-    "dk_over_price", "dk_under_price",
-    "lock_ml_at", "lock_ml_lead_hours", "dk_ml_home_price", "dk_ml_away_price",
-    "near_spread_at", "near_spread_home", "near_spread_home_price",
-    "near_spread_away_price",
-    "near_total_at", "near_total", "near_over_price", "near_under_price",
-    "near_ml_at", "near_ml_home_price", "near_ml_away_price",
-    "close_spread_at", "close_spread_home", "close_spread_home_price",
-    "close_spread_away_price",
-    "close_total_at", "close_total", "close_over_price", "close_under_price",
-    "close_ml_at", "close_ml_home_price", "close_ml_away_price",
-    "grade_spread_home_price", "grade_spread_home_book",
-    "grade_spread_away_price", "grade_spread_away_book",
-    "grade_over_price", "grade_over_book",
-    "grade_under_price", "grade_under_book",
-    "grade_ml_home_price", "grade_ml_home_book",
-    "grade_ml_away_price", "grade_ml_away_book",
-    "ats_home_result", "ats_home_units_uncapped", "ats_home_units_capped",
-    "ats_away_result", "ats_away_units_uncapped", "ats_away_units_capped",
-    "ml_home_result", "ml_home_units_uncapped", "ml_home_units_capped",
-    "ml_away_result", "ml_away_units_uncapped", "ml_away_units_capped",
-    "ou_over_result", "ou_over_units_uncapped", "ou_over_units_capped",
-    "ou_under_result", "ou_under_units_uncapped", "ou_under_units_capped",
+    "line_basis", "dk_spread_home", "dk_total",
+    "ats_home_result", "ats_away_result",
+    "ml_home_result", "ml_away_result",
+    "ou_over_result", "ou_under_result",
     "home_rest_days", "away_rest_days", "is_primetime", "home_role", "away_role",
-    "line_source",
 )
 
 
@@ -116,14 +88,13 @@ def _games(conn, season: int) -> list[dict]:
     return out
 
 
-def _as_quotes(rows, source: str) -> list[dict]:
+def _as_quotes(rows) -> list[dict]:
     out = []
     for row in rows:
         out.append({
             "game_id": row[0], "bookmaker": row[1], "market": row[2],
             "snapshot_at": row[3], "commence_time": row[4],
-            "point": row[5], "price_home": row[6], "price_away": row[7],
-            "line_source": source,
+            "point": row[5],
         })
     return out
 
@@ -137,12 +108,8 @@ def _ids_for(game_id: str) -> tuple[str, str] | None:
 
 def _dk_quotes(conn, ids: tuple[str, str]) -> list[dict]:
     bare, prefixed = ids
-    history = _as_quotes(_fetch(
-        conn, _QUOTE_FROM_HISTORY, (bare, prefixed, LOCK_WINDOW_HOURS)),
-        "nfl_odds_history")
-    odds = _as_quotes(_fetch(
-        conn, _QUOTE_FROM_ODDS, (bare, prefixed, LOCK_WINDOW_HOURS)),
-        "odds")
+    history = _as_quotes(_fetch(conn, _QUOTE_FROM_HISTORY, (bare, prefixed)))
+    odds = _as_quotes(_fetch(conn, _QUOTE_FROM_ODDS, (bare, prefixed)))
     return history + odds
 
 

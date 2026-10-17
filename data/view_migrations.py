@@ -346,14 +346,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
     # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
-    # catalog return on the second pass. Does not touch picks, the record
-    # views, or a live model. Unapplied until the worker's next pass.
-    # The 120h/24h windows are UNCONFIRMED and are not in this file.
+    # catalog return on the second pass. Win, loss, or push. The line
+    # basis is a label. Does not touch picks, the record views, or a
+    # live model. Unapplied until the worker's next pass.
     "byom_facts_schema_2026_10_16.sql",
-    # 2026-10-16: label uncapped and capped unit columns. The unlabelled
-    # names from the facts schema are dropped. Catalog return on the
-    # second pass. Unapplied. Does not touch picks or the record views.
-    "byom_game_facts_units_2026_10_16.sql",
 ]
 
 

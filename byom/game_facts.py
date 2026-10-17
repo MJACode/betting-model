@@ -1,29 +1,20 @@
 """Pure grading for one NFL game's Build Your Own Model fact.
 
-No database. The grade is DraftKings' own price on the lock snapshot.
-A win pays +1 unit (1u to win). A loss is the risk that win required,
-stored as a result. The capped column cuts risk above 3. A missing
-price leaves both results NULL. Pushes and ties are results, not
-dropped rows. There is no recommended stake.
+No database. The line is the last DraftKings snapshot at or before
+game start. A missing line does not skip the game. Moneyline is the
+score only. There is no price and no unit.
 """
 from __future__ import annotations
 
 import re
 from datetime import date, datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from byom.constants import (
-    DK_HISTORY_START_SEASON,
-    LOCK_WINDOW_HOURS,
-    NEAR_LOCK_WINDOW_HOURS,
-    SOURCE_HISTORY,
-    SOURCE_ODDS,
-)
+from byom.constants import DK_HISTORY_START_SEASON, LINE_BASIS
 
 _KEY = re.compile(r"^(?:NFL_)?(\d{4})_(\d{2})_([A-Z]{2,3})_([A-Z]{2,3})$")
 _ET = ZoneInfo("America/New_York")
-_Q = Decimal("0.0001")
 
 
 def parse_ts(value):
@@ -79,12 +70,13 @@ def lead_hours(snapshot_at, commence) -> float | None:
     return (kick - snap).total_seconds() / 3600.0
 
 
-def _priced(quotes, market: str, bookmaker: str | None = None) -> list[dict]:
+def _pre_start(quotes, market: str) -> list[dict]:
+    """DraftKings quotes for one market, with a known lead. Other books out."""
     out = []
     for quote in quotes:
         if quote.get("market") != market:
             continue
-        if bookmaker is not None and (quote.get("bookmaker") or "").lower() != bookmaker:
+        if (quote.get("bookmaker") or "").lower() != "draftkings":
             continue
         lead = lead_hours(quote.get("snapshot_at"), quote.get("commence_time"))
         if lead is None:
@@ -93,20 +85,12 @@ def _priced(quotes, market: str, bookmaker: str | None = None) -> list[dict]:
     return out
 
 
-def first_in_window(quotes, window_hours: int) -> dict | None:
-    """Earliest pre-game quote whose lead is at or under `window_hours`."""
-    chosen = None
-    for quote in quotes:
-        lead = quote["lead_hours"]
-        if lead < 0 or lead > window_hours:
-            continue
-        if chosen is None or quote["snapshot_at"] < chosen["snapshot_at"]:
-            chosen = quote
-    return chosen
+def line_at_start(quotes) -> dict | None:
+    """Latest snapshot at or before game start.
 
-
-def closing_quote(quotes) -> dict | None:
-    """Latest pre-game quote. In-play (negative lead) is not a close."""
+    In-play (negative lead) is not the line. There is no hour window:
+    an older pre-start snapshot is the line when it is the latest one.
+    """
     chosen = None
     for quote in quotes:
         if quote["lead_hours"] < 0:
@@ -192,93 +176,25 @@ def grade_total(home_score, away_score, line) -> tuple[str, str] | None:
     return "push", "push"
 
 
-# Result ceiling of 3 units of risk. A loss at -400 is -4 uncapped
-# and -3 capped. Both numbers are results.
-_MAX_RISK_UNITS = Decimal("3")
-
-
-def units_1u_to_win(result: str | None, american):
-    """(uncapped result, capped result) for 1u-to-win.
-
-    Both numbers are results. Uncapped has no risk ceiling. Capped cuts
-    risk above 3 and recomputes a win from that risk. Push and tie are
-    (0, 0). A missing or zero price is (None, None).
-    """
-    if result is None:
-        return None, None
-    if result in ("push", "tie"):
-        return Decimal("0"), Decimal("0")
-    if result not in ("win", "loss"):
-        return None, None
-    if american is None:
-        return None, None
-    price = Decimal(str(american))
-    if price == 0:
-        return None, None
-    if price > 0:
-        decimal_odds = Decimal(1) + price / Decimal(100)
-    else:
-        decimal_odds = Decimal(1) + (Decimal(100) / abs(price))
-    if decimal_odds <= 1:
-        return None, None
-    profit_per_risk = decimal_odds - 1
-    risk = Decimal(1) / profit_per_risk
-    capped_risk = _MAX_RISK_UNITS if risk > _MAX_RISK_UNITS else risk
-    if result == "win":
-        uncapped = Decimal("1")
-        capped = (capped_risk * profit_per_risk).quantize(_Q, rounding=ROUND_HALF_UP)
-        return uncapped, capped
-    uncapped = -risk.quantize(_Q, rounding=ROUND_HALF_UP)
-    capped = -capped_risk.quantize(_Q, rounding=ROUND_HALF_UP)
-    return uncapped, capped
-
-
-def dk_lock_grade(slot, side: str):
-    """DraftKings' own price on the lock snapshot.
-
-    (price, 'draftkings') or (None, None). The slot's bookmaker has to be
-    DraftKings. Another book's price is not the grade. Totals use
-    price_home as over and price_away as under.
-    """
-    if slot is None:
-        return None, None
-    if (slot.get("bookmaker") or "").lower() != "draftkings":
-        return None, None
-    raw = slot.get("price_home") if side == "home" else slot.get("price_away")
-    if raw is None:
-        return None, None
-    price = Decimal(str(raw))
-    if price == 0:
-        return None, None
-    return price, "draftkings"
-
-
-def _prefer_history(quotes, market: str) -> tuple[list[dict], str | None]:
-    """DraftKings quotes for one market. History wins when it has a lock."""
-    history = _priced(quotes, market, "draftkings")
-    history = [q for q in history if q.get("line_source") == SOURCE_HISTORY]
-    odds = _priced(quotes, market, "draftkings")
-    odds = [q for q in odds if q.get("line_source") == SOURCE_ODDS]
-    if first_in_window(history, LOCK_WINDOW_HOURS) is not None:
-        return history, SOURCE_HISTORY
-    if first_in_window(odds, LOCK_WINDOW_HOURS) is not None:
-        return odds, SOURCE_ODDS
-    return [], None
-
-
 def _num(value):
     if value is None:
         return None
     return Decimal(str(value))
 
 
+def _side(pair, index: int):
+    if pair is None:
+        return None
+    return pair[index]
+
+
 def assemble_game(game: dict, quotes: list[dict],
                   played: dict[str, list[date]]) -> dict | None:
     """One facts dict, or None when this game is not built.
 
-    Not built: the id does not parse, the season in the id is before
-    DraftKings history, or no DraftKings market has a snapshot inside the
-    lock window. A large spread or a short price is not a reason to skip.
+    Not built: the id does not parse, or the season in the id is before
+    DraftKings history. A missing line is not a reason to skip. A large
+    spread is not a reason to skip. Moneyline uses the score only.
     """
     parsed = parse_game_id(game.get("game_id") or "")
     if parsed is None:
@@ -287,55 +203,10 @@ def assemble_game(game: dict, quotes: list[dict],
     if season < DK_HISTORY_START_SEASON:
         return None
 
-    markets = {}
-    sources = []
-    for market in ("spreads", "totals", "h2h"):
-        pool, source = _prefer_history(quotes, market)
-        if source is None:
-            markets[market] = None
-            continue
-        sources.append(source)
-        markets[market] = {
-            "pool": pool,
-            "source": source,
-            "lock": first_in_window(pool, LOCK_WINDOW_HOURS),
-            "near": first_in_window(pool, NEAR_LOCK_WINDOW_HOURS),
-            "close": closing_quote(pool),
-        }
-    if not any(markets[m] and markets[m]["lock"] for m in markets):
-        return None
-
-    def lock(market):
-        slot = markets.get(market)
-        return None if slot is None else slot["lock"]
-
-    def near(market):
-        slot = markets.get(market)
-        return None if slot is None else slot["near"]
-
-    def close(market):
-        slot = markets.get(market)
-        return None if slot is None else slot["close"]
-
-    spread = lock("spreads")
-    total = lock("totals")
-    money = lock("h2h")
-    near_spread = near("spreads")
-    near_total = near("totals")
-    near_money = near("h2h")
-    close_spread = close("spreads")
-    close_total = close("totals")
-    close_money = close("h2h")
-
+    spread = line_at_start(_pre_start(quotes, "spreads"))
+    total = line_at_start(_pre_start(quotes, "totals"))
     dk_spread = None if spread is None else spread.get("point")
     dk_total = None if total is None else total.get("point")
-
-    g_sh, g_sh_book = dk_lock_grade(spread, "home")
-    g_sa, g_sa_book = dk_lock_grade(spread, "away")
-    g_ov, g_ov_book = dk_lock_grade(total, "home")
-    g_un, g_un_book = dk_lock_grade(total, "away")
-    g_mh, g_mh_book = dk_lock_grade(money, "home")
-    g_ma, g_ma_book = dk_lock_grade(money, "away")
 
     home_score = game.get("home_score")
     away_score = game.get("away_score")
@@ -345,21 +216,11 @@ def assemble_game(game: dict, quotes: list[dict],
     home_role, away_role = roles(dk_spread)
     game_day = parse_date(game.get("game_date"))
     commence = game.get("commence_time")
-    if parse_ts(commence) is None and spread is not None:
-        commence = spread.get("commence_time")
-
-    def pair(result, price):
-        if result is None:
-            return None, None, None
-        uncapped, capped = units_1u_to_win(result, price)
-        return result, uncapped, capped
-
-    ats_h, ats_hu, ats_hc = pair(None if ats is None else ats[0], g_sh)
-    ats_a, ats_au, ats_ac = pair(None if ats is None else ats[1], g_sa)
-    ml_h, ml_hu, ml_hc = pair(None if ml is None else ml[0], g_mh)
-    ml_a, ml_au, ml_ac = pair(None if ml is None else ml[1], g_ma)
-    ou_o, ou_ou, ou_oc = pair(None if ou is None else ou[0], g_ov)
-    ou_u, ou_uu, ou_uc = pair(None if ou is None else ou[1], g_un)
+    if parse_ts(commence) is None:
+        for slot in (spread, total):
+            if slot is not None and parse_ts(slot.get("commence_time")) is not None:
+                commence = slot.get("commence_time")
+                break
 
     return {
         "canonical_key": key,
@@ -372,78 +233,18 @@ def assemble_game(game: dict, quotes: list[dict],
         "commence_time": parse_ts(commence),
         "home_score": _num(home_score),
         "away_score": _num(away_score),
-        "lock_window_hours": LOCK_WINDOW_HOURS,
-        "near_window_hours": NEAR_LOCK_WINDOW_HOURS,
-        "lock_spread_at": None if spread is None else spread["snapshot_at"],
-        "lock_spread_lead_hours": None if spread is None else Decimal(str(round(spread["lead_hours"], 4))),
+        "line_basis": LINE_BASIS,
         "dk_spread_home": _num(dk_spread),
-        "dk_spread_home_price": None if spread is None else _num(spread.get("price_home")),
-        "dk_spread_away_price": None if spread is None else _num(spread.get("price_away")),
-        "lock_total_at": None if total is None else total["snapshot_at"],
-        "lock_total_lead_hours": None if total is None else Decimal(str(round(total["lead_hours"], 4))),
         "dk_total": _num(dk_total),
-        "dk_over_price": None if total is None else _num(total.get("price_home")),
-        "dk_under_price": None if total is None else _num(total.get("price_away")),
-        "lock_ml_at": None if money is None else money["snapshot_at"],
-        "lock_ml_lead_hours": None if money is None else Decimal(str(round(money["lead_hours"], 4))),
-        "dk_ml_home_price": None if money is None else _num(money.get("price_home")),
-        "dk_ml_away_price": None if money is None else _num(money.get("price_away")),
-        "near_spread_at": None if near_spread is None else near_spread["snapshot_at"],
-        "near_spread_home": None if near_spread is None else _num(near_spread.get("point")),
-        "near_spread_home_price": None if near_spread is None else _num(near_spread.get("price_home")),
-        "near_spread_away_price": None if near_spread is None else _num(near_spread.get("price_away")),
-        "near_total_at": None if near_total is None else near_total["snapshot_at"],
-        "near_total": None if near_total is None else _num(near_total.get("point")),
-        "near_over_price": None if near_total is None else _num(near_total.get("price_home")),
-        "near_under_price": None if near_total is None else _num(near_total.get("price_away")),
-        "near_ml_at": None if near_money is None else near_money["snapshot_at"],
-        "near_ml_home_price": None if near_money is None else _num(near_money.get("price_home")),
-        "near_ml_away_price": None if near_money is None else _num(near_money.get("price_away")),
-        "close_spread_at": None if close_spread is None else close_spread["snapshot_at"],
-        "close_spread_home": None if close_spread is None else _num(close_spread.get("point")),
-        "close_spread_home_price": None if close_spread is None else _num(close_spread.get("price_home")),
-        "close_spread_away_price": None if close_spread is None else _num(close_spread.get("price_away")),
-        "close_total_at": None if close_total is None else close_total["snapshot_at"],
-        "close_total": None if close_total is None else _num(close_total.get("point")),
-        "close_over_price": None if close_total is None else _num(close_total.get("price_home")),
-        "close_under_price": None if close_total is None else _num(close_total.get("price_away")),
-        "close_ml_at": None if close_money is None else close_money["snapshot_at"],
-        "close_ml_home_price": None if close_money is None else _num(close_money.get("price_home")),
-        "close_ml_away_price": None if close_money is None else _num(close_money.get("price_away")),
-        "grade_spread_home_price": g_sh,
-        "grade_spread_home_book": g_sh_book,
-        "grade_spread_away_price": g_sa,
-        "grade_spread_away_book": g_sa_book,
-        "grade_over_price": g_ov,
-        "grade_over_book": g_ov_book,
-        "grade_under_price": g_un,
-        "grade_under_book": g_un_book,
-        "grade_ml_home_price": g_mh,
-        "grade_ml_home_book": g_mh_book,
-        "grade_ml_away_price": g_ma,
-        "grade_ml_away_book": g_ma_book,
-        "ats_home_result": ats_h,
-        "ats_home_units_uncapped": ats_hu,
-        "ats_home_units_capped": ats_hc,
-        "ats_away_result": ats_a,
-        "ats_away_units_uncapped": ats_au,
-        "ats_away_units_capped": ats_ac,
-        "ml_home_result": ml_h,
-        "ml_home_units_uncapped": ml_hu,
-        "ml_home_units_capped": ml_hc,
-        "ml_away_result": ml_a,
-        "ml_away_units_uncapped": ml_au,
-        "ml_away_units_capped": ml_ac,
-        "ou_over_result": ou_o,
-        "ou_over_units_uncapped": ou_ou,
-        "ou_over_units_capped": ou_oc,
-        "ou_under_result": ou_u,
-        "ou_under_units_uncapped": ou_uu,
-        "ou_under_units_capped": ou_uc,
+        "ats_home_result": _side(ats, 0),
+        "ats_away_result": _side(ats, 1),
+        "ml_home_result": _side(ml, 0),
+        "ml_away_result": _side(ml, 1),
+        "ou_over_result": _side(ou, 0),
+        "ou_under_result": _side(ou, 1),
         "home_rest_days": rest_days(home, game_day, played),
         "away_rest_days": rest_days(away, game_day, played),
         "is_primetime": is_primetime(commence),
         "home_role": home_role,
         "away_role": away_role,
-        "line_source": "+".join(sorted(set(sources))),
     }
