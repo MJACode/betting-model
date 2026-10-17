@@ -128,12 +128,12 @@ def test_combo_markets_are_mapped_to_helpers_and_only_the_nba_rule_uses_them():
     assert m["player_double_double"] == "COMPUTE_DD"
     assert m["player_points_rebounds_assists"] == "COMPUTE_PRA"
     # Until 2026-10-15 no model was registered against this map. The NBA prop
-    # rule (nba_prop_market) registered itself when it shipped; nothing else
-    # may share it -- another sport's market rule pointed here would settle
-    # its picks from the NBA box score.
+    # rule (nba_prop_market) registered itself when it shipped, and the NBA
+    # projection model on 2026-10-16; nothing else may share it -- another
+    # sport's market rule pointed here would settle its picks from the NBA box.
     users = sorted(mid for mid, stat_map in pt._PROP_MARKET_STAT_BY_MODEL.items()
                    if stat_map is m)
-    assert users == ["nba_prop_market"], users
+    assert users == ["nba_prop_market", "nba_prop_projection"], users
     for sentinel in set(m.values()):
         assert pt._nba_prop_actual(FULL_ROW, sentinel) is not None, sentinel
 

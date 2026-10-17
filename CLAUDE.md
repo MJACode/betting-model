@@ -434,6 +434,7 @@ python -m data.threshold_sync               # config.py -> model_action_threshol
 python -m scripts.emit_threshold_sql        # the action-filter SQL, generated
 python -m models.trainer --model <id>       # retrain (then COMMIT the .pkl)
 python -m pytest -q tests/                  # the only quality gate
+pip install -r requirements-test.txt        # pytest + node for the TS tests, not on the worker
 pip install -r requirements-dashboard.txt   # dashboard deps, not on the worker
 streamlit run dashboard/app.py
 ```
@@ -551,7 +552,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 63 models carry their
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 64 models carry their
   own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no

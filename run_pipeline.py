@@ -1325,7 +1325,7 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
 def step_nba_prop_market(dry_run: bool = False) -> bool:
     """NBA player props (`nba_prop_market`): same-line unders against Pinnacle.
 
-    Decides each game once, at the first look 45-70 minutes before its tip
+    Decides each game once, at the first look 45-57 minutes before its tip
     whose newest prop fetch holds Pinnacle, and writes every qualifying
     proposition with the game's decision row, under the model's lock
     (scripts/nba_prop_market_card.py; no game or night cap, mike 2026-10-16).
@@ -1341,6 +1341,39 @@ def step_nba_prop_market(dry_run: bool = False) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ NBA prop market card failed: {exc}")
+        return False
+
+
+def step_nba_prop_projection(dry_run: bool = False) -> bool:
+    """The NBA projection model (`nba_prop_projection`): price the stored projections.
+
+    Decides each game once, in the same window as nba_prop_market and after it
+    (scripts/nba_prop_projection_card.py), on the projections the window job
+    stored about 65 minutes before tip. Never a proposition nba_prop_market holds.
+    LIVE, no write switch. A look with no game in its window writes nothing.
+    """
+    try:
+        from scripts.nba_prop_projection_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA projection card: "
+                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA projection card failed: {exc}")
+        return False
+
+
+def step_nba_prop_project() -> bool:
+    """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
+    --project): the frame over every box line since 2018-19, the newest ESPN injury
+    list, each player's projected mean per market, stored. No API call."""
+    try:
+        from scripts.nba_prop_projection_card import run_project
+        n = run_project()
+        logger.success(f"✓ NBA projections: {n} player(s) projected")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA projections failed: {exc}")
         return False
 
 
@@ -1870,10 +1903,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 2c2: Fetching DK NBA player prop lines...")
     results["nba_prop_odds"] = step_nba_prop_odds(run_date, snapshot_type="open")
     # The NBA prop card reads the fetch just stored (it decides only games
-    # 45-70 minutes from tip, so at 6am it normally writes nothing), then the
+    # 45-57 minutes from tip, so at 6am it normally writes nothing), then the
     # closing snapshot for any bet game whose close is due.
     logger.info("Step 2c3: NBA prop card (same-line unders vs Pinnacle)...")
     results["nba_prop_market"] = step_nba_prop_market(dry_run=dry_run)
+    results["nba_prop_projection"] = step_nba_prop_projection(dry_run=dry_run)
     if not dry_run:
         results["nba_prop_close"] = step_nba_prop_close()
     time.sleep(2)
@@ -2223,6 +2257,7 @@ Examples:
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "nba-prop-market", "nba-prop-close",
+                                 "nba-prop-projection", "nba-prop-project",
                                  "nhl-over-under",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nfl-results",
@@ -2305,6 +2340,8 @@ Examples:
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
             "nba-prop-close": lambda: step_nba_prop_close(),
+            "nba-prop-projection": lambda: step_nba_prop_projection(dry_run=args.dry_run),
+            "nba-prop-project": lambda: step_nba_prop_project(),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),

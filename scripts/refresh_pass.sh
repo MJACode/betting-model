@@ -129,13 +129,18 @@ par_wait
 step nhl-over-under
 # NBA player props (nba_prop_market): same-line unders against Pinnacle IN THE
 # PROP FETCH `par nba-prop-odds` JUST STORED. It decides only games whose tip
-# is 45-70 minutes away, so it runs here, minutes after the fetch, rather than
+# is 45-57 minutes away, so it runs here, minutes after the fetch, rather than
 # in the scoring group. SEQUENTIAL, like every writer to picks; each game is
 # decided once (nba_prop_market_decisions) under the model's own lock, every
 # qualifying proposition bet. The five-minute window job
 # (scheduler.run_nba_prop_window) runs this same card for the tip times these
 # passes cannot reach.
 step nba-prop-market
+# The NBA projection model (nba_prop_projection), on the same fetch and AFTER
+# nba_prop_market, so it never takes a proposition the rule holds. It prices
+# the projections the window job stored about 65 minutes before tip; a game with
+# none is not decided here. SEQUENTIAL, a writer to picks.
+step nba-prop-projection
 # Its closing snapshot, for closing-line value only: one event call per bet
 # game, 12-25 minutes before tip, filed 'close' so no card decides on it. A
 # pass with no bet game in that window spends nothing.

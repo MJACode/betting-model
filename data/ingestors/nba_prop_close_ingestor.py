@@ -1,4 +1,4 @@
-"""The closing prop snapshot for every game holding an nba_prop_market bet.
+"""The closing prop snapshot for every game holding an NBA prop bet (either NBA prop model).
 
 WHY. Bar 11 of the 2026-27 rebuild (docs/nba_models_2026.md section 1) is
 closing-line value, and it could not be measured on the archive the rule was
@@ -61,6 +61,10 @@ from data.ingestors.prop_odds_ingestor import (
 ET = ZoneInfo("America/New_York")
 SPORT_KEY = SPORT_KEYS["NBA"]
 MODEL_ID = "nba_prop_market"
+# Every NBA prop model whose bets get a closing snapshot: the rule, and the
+# projection model (models/nba_prop_projection.py, 2026-10-16), whose bar 11 is
+# unmeasured for the same reason.
+MODEL_IDS = ("nba_prop_market", "nba_prop_projection")
 SNAPSHOT_TYPE = "close"          # read by the CLV capture, never by a card
 
 
@@ -78,7 +82,7 @@ def due(tip: datetime, now: datetime, has_bet: bool, close_taken: bool,
 
 def bet_games(conn: DBConnection, now: datetime) -> dict[str, dict]:
     """{game_id: {"markets": [...], "tip", "home", "away", "game_date"}} for every
-    nba_prop_market BET whose game tips within the close window's far end."""
+    NBA prop BET (MODEL_IDS) whose game tips within the close window's far end."""
     from models.nba_prop_market import tip_of
     today = now.astimezone(ET).date()
     dates = [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)]
@@ -88,8 +92,8 @@ def bet_games(conn: DBConnection, now: datetime) -> dict[str, dict]:
         FROM picks p
         JOIN games g ON g.game_id = p.game_id
         LEFT JOIN nba_schedule s ON s.game_id = p.game_id
-        WHERE p.model_id = %s AND p.signal_type = 'BET' AND p.game_date = ANY(%s)
-    """, (MODEL_ID, dates)).fetchall()
+        WHERE p.model_id = ANY(%s) AND p.signal_type = 'BET' AND p.game_date = ANY(%s)
+    """, (list(MODEL_IDS), dates)).fetchall()
     out: dict[str, dict] = {}
     for gid, market, home, away, gd, g_ct, s_ct in rows:
         tip = tip_of(s_ct, g_ct)

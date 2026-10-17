@@ -36,8 +36,10 @@ DATE = "2026-10-17"
 MODEL = "ncaaf_over_under"
 
 _LATERAL = re.compile(r"LEFT JOIN LATERAL \(.*?\) pk ON TRUE", re.S)
+# The LATERAL's columns are display only: when the pick was made, its best book and
+# price, and (2026-10-16) its market, which sets the "good to" price's EV floor.
 _DISPLAY_ONLY = ("LEFT JOIN (SELECT NULL AS created_at, NULL AS best_book, "
-                 "NULL AS best_odds) pk ON 1 = 1")
+                 "NULL AS best_odds, NULL AS prop_market) pk ON 1 = 1")
 
 
 class _Conn:
