@@ -125,10 +125,15 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     assert ACTIVE_MIGRATIONS.index(MIG.name) < ACTIVE_MIGRATIONS.index(clv)
     # The posted-stake view patch reads the live view, so it is last and
     # after the CLV stamp. Every other file after that stamp must not
-    # rewrite the record. The NHL stats views are display-only.
+    # rewrite the record. The NHL stats views and the skater window
+    # totals are display-only and sit between the stamp and that pair.
     assert ACTIVE_MIGRATIONS[-1] == units
     assert ACTIVE_MIGRATIONS.index(clv) < len(ACTIVE_MIGRATIONS) - 1
     assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
+    views = "add_nhl_stats_views_2026_10_16.sql"
+    totals = "add_nhl_skater_window_totals_2026_10_17.sql"
+    assert ACTIVE_MIGRATIONS.index(clv) < ACTIVE_MIGRATIONS.index(views) < ACTIVE_MIGRATIONS.index(totals)
+    assert ACTIVE_MIGRATIONS.index(totals) < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
     for name in ACTIVE_MIGRATIONS[ACTIVE_MIGRATIONS.index(clv) + 1:]:
         if name == units:
             continue

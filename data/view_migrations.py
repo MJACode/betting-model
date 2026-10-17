@@ -349,7 +349,8 @@ ACTIVE_MIGRATIONS: list[str] = [
     # keeps the CLV columns. Every other file after the CLV stamp must not
     # rewrite v_public_track_record (tests/test_published_record.py,
     # tests/test_record_units_agree.py). The NHL stats views are display-only
-    # and stay after CLV, before the posted-stake pair.
+    # and stay after CLV. The skater window totals follow those views.
+    # Both stay before the posted-stake pair.
     "abort_deploy_killed_evening_2026_10_16.sql",
     # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
     # is the market-edge column. Recomputes rows not yet standard_v2 and
@@ -360,6 +361,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # team totals, latest pre-game prop quote). Display only. Does not
     # rewrite v_public_track_record and does not run before the CLV stamp.
     "add_nhl_stats_views_2026_10_16.sql",
+    # 2026-10-17: NHL Players board sums, same RPC shape as the other
+    # sports. After the stats views. Does not rewrite the record.
+    "add_nhl_skater_window_totals_2026_10_17.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
@@ -370,7 +374,7 @@ ACTIVE_MIGRATIONS: list[str] = [
     # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
     # Reads the live view, so it runs after every owner above, including
     # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
-    # and does not post.
+    # and does not post. This file stays last.
     "published_record_units_2026_10_16.sql",
 ]
 
