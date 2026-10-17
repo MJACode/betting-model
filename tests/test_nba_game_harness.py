@@ -224,3 +224,37 @@ def test_one_whole_cell_grades_a_model_bet_against_its_blind_side():
     assert r0["units_choose"] == pytest.approx(1.0 - 1.1)
     assert r0["dk_n_choose"] == 2
     assert r0["blind_roi_choose"] == pytest.approx((1.0 - 1.1) / 2.2)
+
+
+def test_a_family_can_choose_on_fewer_seasons():
+    games = pd.DataFrame([{"game_id": f"G{s}", "season": s, "game_date": f"{s - 1}-12-01",
+                           "tip": pd.Timestamp(f"{s - 1}-12-02T00:00:00Z"), "home_team": "BOS",
+                           "away_team": "NYK", "home_score": 110, "away_score": 100}
+                          for s in (2022, 2024, 2026)])
+    bets = pd.DataFrame([{"game_id": f"G{s}", "season": s, "game_date": f"{s - 1}-12-01",
+                          "T": pd.Timestamp(f"{s - 1}-12-01T23:00:00Z"), "market": "h2h",
+                          "side": "home", "line": np.nan, "book": "fanduel", "price": -110.0}
+                         for s in (2022, 2024, 2026)])
+    g = H.grade(bets, games)
+    data = H.Data(games=games, quotes=pd.DataFrame(columns=["game_id", "market", "book", "snapshot_at",
+                                                            "fetch_at", "line", "price_a", "price_b",
+                                                            "coherent"]),
+                  fetches=pd.DataFrame(columns=["game_id", "tip", "fetch_at", "lead_min"]))
+    assert H.cell_report(g, data)["choose"]["bets"] == 2
+    r = H.cell_report(g, data, choose_seasons=(2024, 2025))
+    assert r["choose"]["bets"] == 1 and r["confirm"]["bets"] == 1
+
+
+def test_a_per_game_purchase_is_dated_by_its_own_stamp(tmp_path):
+    games = _games()
+    rows = [{"game_id": "G", "market": "team_totals_home", "bookmaker": "fanduel",
+             "snapshot_type": "open", "snapshot_at": (TIP - pd.Timedelta(minutes=m)).isoformat(),
+             "source": H.PER_EVENT_SOURCE, "created_at": "2026-10-16 00:00:00+00",
+             "home_price": None, "away_price": None, "spread_home": None, "total_line": 112.5,
+             "over_price": -110.0, "under_price": -110.0} for m in (65, 20)]
+    pd.DataFrame(rows).to_parquet(tmp_path / "nba_odds.parquet")
+    pe = H.load_per_event(games, cache=tmp_path)
+    assert (pe["fetch_at"] == pe["snapshot_at"]).all() and len(pe) == 2
+    t = H.per_event_times(pe, "D")
+    # 65 minutes out is inside 45-75; 20 minutes out is not a D decision
+    assert t["lead_min"].tolist() == [65.0]

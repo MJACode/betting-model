@@ -166,6 +166,46 @@ def load(cache: Path = CACHE, seasons=None) -> Data:
                 notes=notes)
 
 
+PER_EVENT_SOURCE = "odds_api_nba_derivative_history"
+
+
+def load_per_event(games: pd.DataFrame, cache: Path = CACHE,
+                   source: str = PER_EVENT_SOURCE) -> pd.DataFrame:
+    """Rows bought ONE GAME AT A TIME (first half, first quarter, team totals).
+
+    These have no slate ledger: the per-game purchase asked for tip - 60 and
+    stored the feed's own snapshot time as snapshot_at, so that stamp IS the
+    moment the price was available and fetch_at = snapshot_at. Same columns as
+    load().quotes; `market` keeps its stored name (team_totals_home, ...); the
+    over / under (or home / away) prices are price_a / price_b."""
+    o = pd.read_parquet(cache / "nba_odds.parquet")
+    o = o[(o["source"] == source) & (o["snapshot_type"] != "in_play")].copy()
+    o["snapshot_at"] = pd.to_datetime(o["snapshot_at"], utc=True)
+    o = o.merge(games[["game_id", "season", "game_date", "tip"]], on="game_id")
+    o = o[o["snapshot_at"] < o["tip"]].rename(columns={"bookmaker": "book"})
+    o["fetch_at"] = o["snapshot_at"]
+    ou = o["over_price"].notna()
+    o["line"] = np.where(o["spread_home"].notna(), o["spread_home"], o["total_line"])
+    o["price_a"] = np.where(ou, o["over_price"], o["home_price"])
+    o["price_b"] = np.where(ou, o["under_price"], o["away_price"])
+    o = o[o["price_a"].notna() & o["price_b"].notna()]
+    sm = imp(o["price_a"]) + imp(o["price_b"])
+    o["coherent"] = (sm >= COHERENT[0]) & (sm <= COHERENT[1])
+    return o[["game_id", "season", "game_date", "tip", "market", "book", "snapshot_at",
+              "fetch_at", "line", "price_a", "price_b", "coherent"]].reset_index(drop=True)
+
+
+def per_event_times(pe: pd.DataFrame, point: str = "D") -> pd.DataFrame:
+    """(game_id, T, lead_min): each game's per-game purchase, kept only when it
+    falls inside the decision point's window (D: 45-75 minutes before tip)."""
+    f = pe[["game_id", "tip", "fetch_at"]].drop_duplicates(["game_id", "fetch_at"])
+    f = f.assign(lead_min=(f["tip"] - f["fetch_at"]).dt.total_seconds() / 60.0)
+    lo, hi = POINTS[point]
+    f = f[(f["lead_min"] >= lo) & (f["lead_min"] <= hi)]
+    f = f.sort_values(["game_id", "fetch_at"]).drop_duplicates("game_id", keep="last")
+    return f.rename(columns={"fetch_at": "T"})[["game_id", "T", "lead_min"]].reset_index(drop=True)
+
+
 # ── decision points ─────────────────────────────────────────────────────────
 
 def decision_times(fetches: pd.DataFrame, games: pd.DataFrame, point: str) -> pd.DataFrame:
@@ -318,6 +358,8 @@ def next_fetch_check(bets: pd.DataFrame, data: Data) -> pd.Series:
     nxt = bets[["game_id", "T"]].drop_duplicates().merge(f[["game_id", "fetch_at"]], on="game_id")
     nxt = nxt[nxt["fetch_at"] > nxt["T"]].sort_values("fetch_at").drop_duplicates(
         ["game_id", "T"], keep="first").rename(columns={"fetch_at": "T_next"})
+    if nxt.empty:
+        return pd.Series(False, index=bets.index)
     t2 = nxt.rename(columns={"T_next": "Tn"})[["game_id", "T", "Tn"]]
     vis = visible(data.quotes, t2[["game_id", "Tn"]].rename(columns={"Tn": "T"}).drop_duplicates("game_id"))
     off = offers(vis)[["game_id", "market", "book", "side", "line", "price"]].rename(
@@ -409,9 +451,11 @@ def summarise(b: pd.DataFrame) -> dict:
 
 
 def cell_report(bets_all: pd.DataFrame, data: Data, cand: pd.DataFrame | None = None,
-                close: pd.DataFrame | None = None, sig: dict | None = None) -> dict:
-    """Everything §6.2/§6.4 asks of one cell. `bets_all` is graded, every season."""
-    ch = bets_all[bets_all["season"].isin(CHOOSE)]
+                close: pd.DataFrame | None = None, sig: dict | None = None,
+                choose_seasons=CHOOSE) -> dict:
+    """Everything §6.2/§6.4 asks of one cell. `bets_all` is graded, every season.
+    `choose_seasons`: the seasons cuts are chosen on (F6b and F6d have fewer)."""
+    ch = bets_all[bets_all["season"].isin(choose_seasons)]
     cf = bets_all[bets_all["season"] == CONFIRM]
     r = {"choose": summarise(ch), "confirm": summarise(cf),
          "regime_2021": summarise(bets_all[bets_all["season"] == REGIME])}
@@ -424,7 +468,8 @@ def cell_report(bets_all: pd.DataFrame, data: Data, cand: pd.DataFrame | None = 
         r["half_early_roi"] = roi(ch[ch["game_date"] < mid])
         r["half_late_roi"] = roi(ch[ch["game_date"] >= mid])
         r["seasons_positive"] = all(
-            (roi(ch[ch["season"] == s]) > 0) for s in CHOOSE if (ch["season"] == s).sum() >= 30)
+            (roi(ch[ch["season"] == s]) > 0) for s in choose_seasons
+            if (ch["season"] == s).sum() >= 30)
         sides = ch["side"].value_counts(normalize=True)
         r["top_side"], r["top_share"] = str(sides.index[0]), float(sides.iloc[0])
     if len(bets_all):
@@ -507,7 +552,7 @@ def blind_side(neutral: pd.DataFrame, side: str, games: pd.DataFrame) -> pd.Data
 
 def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: pd.DataFrame,
               cuts, sides_by_market: dict, close=None, sig=None, placebo=None,
-              strength: str = "ev") -> list[dict]:
+              strength: str = "ev", choose_seasons=CHOOSE) -> list[dict]:
     """Grade one family at one decision point over its cut axis and sides.
 
     `cand`: offers with p_win / p_push / ev. A model family leaves strength="ev"
@@ -522,19 +567,20 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
         nm = neutral[neutral["market"] == market]
         for side in sides:
             blind = blind_side(nm, side, data.games)
-            blind_ch = roi(blind[blind["season"].isin(CHOOSE)]) if len(blind) else np.nan
+            blind_ch = (roi(blind[blind["season"].isin(choose_seasons)])
+                        if len(blind) else np.nan)
             for k, cut in enumerate(cuts):
                 def pick(c, books=BETTABLE, cut=cut, side=side):
                     if strength == "ev":
                         return choose(c, cut, books=books, sides=[side])
                     return choose(c[c[strength] >= cut], -np.inf, books=books, sides=[side])
                 g = grade(pick(cm), data.games)
-                rep = cell_report(g, data, cm, close, sig)
+                rep = cell_report(g, data, cm, close, sig, choose_seasons=choose_seasons)
                 dk = grade(pick(cm, books=(DK,)), data.games)
                 pl = []
                 for pc in placebo or []:
                     gp = grade(pick(pc[pc["market"] == market]), data.games)
-                    pl.append(roi(gp[gp["season"].isin(CHOOSE)]) if len(gp) else np.nan)
+                    pl.append(roi(gp[gp["season"].isin(choose_seasons)]) if len(gp) else np.nan)
                 ch, cf = rep["choose"], rep["confirm"]
                 rows.append({
                     "family": family, "point": point, "market": market, "side": side,
@@ -548,12 +594,14 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                     "n_2021": rep["regime_2021"]["bets"], "roi_2021": rep["regime_2021"]["roi"],
                     **{f"roi_{s}": ch.get(f"roi_{s}", np.nan) for s in CHOOSE},
                     **{f"n_{s}": ch.get(f"n_{s}", 0) for s in CHOOSE},
+                    "choose_seasons": ",".join(str(x) for x in choose_seasons),
                     "half_early_roi": rep.get("half_early_roi", np.nan),
                     "half_late_roi": rep.get("half_late_roi", np.nan),
                     "seasons_positive": rep.get("seasons_positive", False),
                     "blind_roi_choose": blind_ch, "placebo_rois": pl,
-                    "dk_n_choose": int(dk["season"].isin(CHOOSE).sum()) if len(dk) else 0,
-                    "dk_roi_choose": roi(dk[dk["season"].isin(CHOOSE)]) if len(dk) else np.nan,
+                    "dk_n_choose": int(dk["season"].isin(choose_seasons).sum()) if len(dk) else 0,
+                    "dk_roi_choose": (roi(dk[dk["season"].isin(choose_seasons)])
+                                      if len(dk) else np.nan),
                     "dk_roi_confirm": roi(dk[dk["season"] == CONFIRM]) if len(dk) else np.nan,
                     "share_still_offered": rep.get("share_still_offered", np.nan),
                     "units_still_offered": rep.get("units_still_offered", np.nan),
