@@ -12,12 +12,18 @@ A cell passes only if every line holds:
   7  plateau: every existing neighbour (cut_index +-1, same family, decision
      point, market, side and every extra axis) is positive on the choosing
      seasons. Adjacent decision points are NOT neighbours (a different moment
-     is a different bet, not a nearby threshold).
+     is a different bet, not a nearby threshold), and neither are the values
+     of a categorical axis (F6c's situations): such a cell has no neighbours
+     and bar 7 reduces to its own ROI above zero.
   8  both date halves of the choosing seasons positive
-  9  beats the blind bet on the same side: every game at that decision point,
-     the best deciding offer under the market's own fair price, no cut. Each
-     cell is one side, so this applies to every cell (the 70% rule of section
-     1 is always met).
+  9  beats the blind bet on its dominant real side (section 1's wording): when
+     more than 70% of the cell's choosing-season bets fall on one side of a
+     split -- home/away, favourite/underdog (by the market's fair line at T),
+     over/under -- the cell's ROI must beat that side bet on every game of the
+     cell's own priced population at that point, no model, no cut, at the
+     best deciding offer under the market's fair line. A dominant side with no
+     blind number fails. (Supersedes the 2026-10-17 "each cell bets one side"
+     reading; amendment of the same date in section 6.4.)
   10 placebo: the cell's ROI above the 95th percentile of its placebo ROIs
      (fair parameters shuffled within date and market, 20 reps)
   11 closing-line value at decision points A-C: the median choosing-season
@@ -45,6 +51,9 @@ sys.path.insert(0, str(ROOT))
 from scripts.nba_game_harness import bh_pass  # noqa: E402
 
 CORE_AXES = ["family", "point", "market", "side"]
+CONTROL_PREFIX = "control_"
+DOMINANT = 0.70
+SPLITS = {"home": ("home", "away"), "fav": ("fav", "dog"), "over": ("over", "under")}
 NOT_AXES = {"cut_index", "cut"}
 M_FIRST_SEARCH = 3750
 CLV_POINTS = ("A", "B", "C")
@@ -72,20 +81,44 @@ def plateau_ok(cells: pd.DataFrame, axes: list[str]) -> pd.Series:
     return ok
 
 
+def _floats(v) -> np.ndarray:
+    """A placebo list as floats: parquet stores an all-NaN list as list<null>,
+    which reads back as None."""
+    if v is None:
+        return np.array([], float)
+    a = np.array(list(v), dtype=float)          # a None element reads as NaN
+    return a[np.isfinite(a)]
+
+
+def bar9(row: pd.Series) -> bool:
+    for split, (a, b) in SPLITS.items():
+        share = row.get(f"share_{split}", np.nan)
+        if not np.isfinite(share):
+            continue
+        side = a if share > DOMINANT else b if share < 1 - DOMINANT else None
+        if side is None:
+            continue
+        blind = row.get(f"blind_{side}", np.nan)
+        if not (np.isfinite(blind) and row["roi_choose"] > blind):
+            return False
+    return True
+
+
 def verdict(cells: pd.DataFrame, bh_basis: str = "confirm", m_first: int = M_FIRST_SEARCH,
             q: float = 0.05) -> pd.DataFrame:
-    c = cells.copy()
+    """Every bar on every candidate cell. Controls (family control_*) are
+    graded by the labs and reported, never judged or counted in m."""
+    c = cells[~cells["family"].astype(str).str.startswith(CONTROL_PREFIX)].copy()
     axes = axes_of(c)
     c["key"] = [cell_key(r, axes) for _, r in c.iterrows()]
     assert c["key"].is_unique, "two cells share every axis: a lab emitted a duplicate"
-    p95 = c["placebo_rois"].apply(
-        lambda v: np.percentile([x for x in v if np.isfinite(x)], 95)
-        if len([x for x in v if np.isfinite(x)]) else np.nan)
+    p95 = c["placebo_rois"].apply(lambda v: np.percentile(_floats(v), 95)
+                                  if len(_floats(v)) else np.nan)
     c["bar5"] = c["seasons_positive"].astype(bool) & (c["n_choose"] > 0)
     c["bar6"] = (c["n_choose"] >= MIN_BETS) & (c["ci_lo_choose"] > 0)
     c["bar7"] = plateau_ok(c, axes) & (c["roi_choose"] > 0)
     c["bar8"] = (c["half_early_roi"] > 0) & (c["half_late_roi"] > 0)
-    c["bar9"] = c["roi_choose"] > c["blind_roi_choose"].fillna(np.inf)
+    c["bar9"] = c.apply(bar9, axis=1) & c["roi_choose"].notna()
     c["bar10"] = c["roi_choose"] > p95.fillna(np.inf)
     at_clv = c["point"].isin(CLV_POINTS)
     c["bar11"] = ~at_clv | (c["clv_median"] > 0)
