@@ -636,7 +636,11 @@ check('PickCard: "Game started" is spoken once — in cardLabel (gameStartedSpee
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('Pick Detail: the started card speaks gameStartedSpeech, like the card (#847)', /styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)\}/.test(detail));
 check('PicksHome: "—" header counts speak "count not available", like the sub-tabs (#845)', /<Text style=\{styles\.subtitle\} accessibilityLabel=\{unknownCountSpeech\(unitsSpeech\(subtitle\)\)\}>/.test(read('src/screens/PicksHomeScreen.tsx')));
-check('TrackRecord: "— settled picks" speaks "count not available"', /accessibilityLabel=\{notLoaded \? unknownCountSpeech\('— settled picks'\) : undefined\}/.test(read('src/screens/TrackRecordScreen.tsx')));
+check('TrackRecord hero is one stop, units first, and a missing count still says so',
+  /accessibilityRole="summary"/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /accessibilityLabel=\{heroLabel\}/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /unknownCountSpeech\('— settled picks'\)/.test(read('src/lib/recordHero.ts')) &&
+  /Units unavailable/.test(read('src/lib/recordHero.ts')));
 // The sentence itself lives in lib/heroPriceText.ts ("looks off", or for an
 // old price which book has not updated it and since when); the pytest pin
 // and verify_pick_cta run it.
@@ -667,7 +671,7 @@ const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
-  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
+  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'RecordInfoSheet', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);
     return /<View style=\{styles\.backdrop\}>/.test(s) && !/<Pressable\s+style=\{styles\.backdrop\}/.test(s);
   }));
