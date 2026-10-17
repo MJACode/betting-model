@@ -2,16 +2,16 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Path } from 'react-native-svg';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
-import { formatSignedUnits } from '@/lib/format';
+import { formatSigned } from '@/lib/format';
 import { roundsToZero } from '@/lib/tone';
 
 export interface EquityPoint {
   date: string;
-  cumUnits: number; // cumulative flat-bet units (profit / 100), oldest → newest
+  cumUnits: number; // cumulative posted-stake units, oldest → newest
 }
 
 /**
- * Cumulative flat-bet equity curve for the Track Record screen — the visual
+ * Cumulative posted-stake equity curve for the Track Record screen — the visual
  * proof of the model's record over time. Area chart with a dashed break-even
  * line at zero; tinted green/red by where the line ends.
  */
@@ -53,7 +53,7 @@ export function EquityCurve({
   const last = points[points.length - 1].cumUnits;
   // The LINE keeps the chart hues (§D10, PR 5); the total is TEXT, so it takes
   // the ink for its sign, toned from the rounded "±0.0u" it prints (audit H2).
-  const flat = roundsToZero(last, 1);
+  const flat = roundsToZero(last, 2);
   const stroke = flat ? colors.textSecondary : last > 0 ? colors.positive : colors.negative;
   // Area fill: line down to the zero baseline and back.
   const areaD = `${lineD} L${xy[xy.length - 1].x.toFixed(1)} ${zeroY.toFixed(1)} L${xy[0].x.toFixed(1)} ${zeroY.toFixed(1)} Z`;
@@ -62,14 +62,14 @@ export function EquityCurve({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <Text style={styles.label}>Equity curve</Text>
-        <Text style={[styles.units, { color: pnlColor(last, 1) }]}>{formatSignedUnits(last)}</Text>
+        <Text style={[styles.units, { color: pnlColor(last, 2) }]}>{formatSigned(last, 2, 'u')}</Text>
       </View>
       <Svg width={width} height={height}>
         <Line x1={pad} x2={width - pad} y1={zeroY} y2={zeroY} stroke={colors.separatorOpaque} strokeDasharray="4 4" strokeWidth={1} />
         <Path d={areaD} fill={stroke} fillOpacity={0.12} />
         <Path d={lineD} stroke={stroke} strokeWidth={2} fill="none" />
       </Svg>
-      <Text style={styles.caption}>Cumulative units on flat $100 bets · break-even = dashed line</Text>
+      <Text style={styles.caption}>Cumulative units, 1 to win · break-even = dashed line</Text>
     </View>
   );
 }

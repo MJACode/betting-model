@@ -108,17 +108,20 @@ export function TrackRecordScreen() {
   );
   const groups: SportGroup[] = useMemo(() => groupBySport(visibleRows), [visibleRows]);
 
-  // Cumulative flat-bet units over time (sum profit_flat across sports per day).
+  // Cumulative posted-stake units (the same units Discord #results books).
+  // A select from before the units column has daily rows and no units.
+  // Treating the gap as zero draws a flat line that ends at +0.00u.
   const equity: EquityPoint[] = useMemo(() => {
+    if (!visibleDaily.some((d) => d.units != null)) return [];
     const byDate = new Map<string, number>();
     for (const d of visibleDaily) {
-      byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.profit_flat ?? 0));
+      byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.units ?? 0));
     }
     const dates = [...byDate.keys()].sort();
     let cum = 0;
     return dates.map((date) => {
       cum += byDate.get(date) ?? 0;
-      return { date, cumUnits: cum / 100 };
+      return { date, cumUnits: cum };
     });
   }, [visibleDaily]);
 
@@ -127,10 +130,17 @@ export function TrackRecordScreen() {
   const canShare = rows.length > 0 && overall.picks > 0;
   // Nothing has loaded (still loading, or the load failed): unknown, not zero.
   const notLoaded = rows.length === 0 && (loading || Boolean(error));
+  // Daily rows arrived without a units column. Drawing them as zero is a flat
+  // line that ends at +0.00u.
+  const dailyLacksUnits =
+    visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null);
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
-        endUnits: equity.length ? equity[equity.length - 1]!.cumUnits : null,
+        endUnits:
+          (overall.risked ?? 0) > 0 && equity.length
+            ? equity[equity.length - 1]!.cumUnits
+            : null,
         since: RECORD_START,
       }),
     }).catch(() => {});
@@ -244,9 +254,9 @@ export function TrackRecordScreen() {
           </Skeleton>
         ) : (
         <View style={styles.heroCard}>
-          <Text style={styles.heroLabel}>Flat-bet ROI</Text>
-          <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
-            {overall.stakedFlat > 0 ? formatPctSigned(overall.roiFlat) : '—'}
+          <Text style={styles.heroLabel}>ROI · 1 to win</Text>
+          <Text style={[styles.heroRoi, { color: roiColor(overall.roi) }]}>
+            {Number(overall.risked ?? 0) > 0 ? formatPctSigned(overall.roi) : '—'}
           </Text>
           <Text
             style={styles.heroRecord}
@@ -292,11 +302,10 @@ export function TrackRecordScreen() {
         </View>
         )}
 
-        {/* Unconditional once loaded: EquityCurve carries its own "not enough
-            settled days" copy, and it is the only thing between the hero and the
-            prose now. Held back on the first load so it cannot assert there are
-            too few settled days while the data is still in flight. */}
-        {rows.length === 0 && (loading || error) ? null : (
+        {/* EquityCurve carries its own "not enough settled days" copy. Held
+            back while nothing has loaded, and while the daily rows have no
+            units column, so that copy is not what a missing column says. */}
+        {notLoaded || dailyLacksUnits ? null : (
           <EquityCurve points={equity} width={chartWidth} />
         )}
 
@@ -307,14 +316,17 @@ export function TrackRecordScreen() {
             {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
             happened and is still in our books, but the published record starts here — so it is
             short by design, and the percentages will move a lot for a while.{'\n\n'}
-            This is the record Discord still has — flat $100 bets at the DraftKings price we
-            scored, every posted pick since {LIVE_RECORD_START_SHORT}. Some models are
+            This is the record Discord still has — every posted pick since {LIVE_RECORD_START_SHORT},
+            at 1 unit to win. The stake is the price the bet was taken at: at −110 that is
+            1.1 units risked to win 1. Nothing risks more than 3, and a heavier favorite
+            still risks 3 and wins less than 1. ROI is the units won or lost divided by
+            the units risked. Yesterday and the Models tab still use a flat $100 bet, so
+            those percentages will not match this one. Some models are
             profitable, some aren’t yet, and we show them all. Every sample here is still
             small, and a few dozen settled bets tells you very little in either direction —
             where a model has too few to read, its percentage is greyed out and labelled
-            rather than hidden. A pick that had no
-            DraftKings price when we posted it counts in the
-            win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
+            rather than hidden. A pick that had no price is staked at 1 unit and still
+            counts.
           </Text>
         </View>
 
@@ -337,14 +349,14 @@ export function TrackRecordScreen() {
           <View key={g.sport} style={styles.sportCard}>
             <View style={styles.sportHeader}>
               <Text style={styles.sportName}>{g.sport}</Text>
-              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roiFlat) }]}>
-                {g.summary.stakedFlat > 0 ? formatPctSigned(g.summary.roiFlat) : '—'}
+              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roi) }]}>
+                {Number(g.summary.risked ?? 0) > 0 ? formatPctSigned(g.summary.roi) : '—'}
               </Text>
             </View>
             <Text style={styles.sportSub}>
               {g.summary.wins}–{g.summary.losses}
               {g.summary.pushes > 0 ? `–${g.summary.pushes}` : ''} · {g.summary.picks} picks
-              {sportUnpriced(g.summary) > 0 ? ` · ${sportUnpriced(g.summary)} unpriced` : ''}
+              {sportUnpriced(g.summary) > 0 ? ` · ${sportUnpriced(g.summary)} unpriced, staked at 1u` : ''}
             </Text>
             {g.models.map((m) => (
               <ModelRow key={m.model_id} row={m} />
@@ -388,19 +400,19 @@ function HeroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Settled picks the view counted in the W-L but did not stake — no book
- *  price, so no money (require_price_for_published_units). The sport header
- *  has to say it too, or the header's W-L and ROI disagree in the same way
- *  its rows explain. */
+/** Settled picks with no book price. They stay in the W-L and are staked at
+ *  1 unit (published_pick_stake). staked_flat still counts only priced picks,
+ *  which is how the gap is named. */
 function sportUnpriced(s: TrackRecordSummary): number {
   return s.picks - Math.round(s.stakedFlat / 100);
 }
 
 function ModelRow({ row }: { row: TrackRecordRow }) {
   const decided = Number(row.wins ?? 0) + Number(row.losses ?? 0);
-  const roi = Number(row.staked_flat ?? 0) > 0 ? Number(row.profit_flat) / Number(row.staked_flat) : 0;
-  // The view counts every settled pick in the W-L but stakes only the priced
-  // ones (require_price_for_published_units), so name the gap when there is one.
+  const risked = Number(row.risked ?? 0);
+  const roi = risked > 0 ? Number(row.units ?? 0) / risked : 0;
+  // staked_flat counts priced picks only, so the gap is the unpriced ones.
+  // Their 1u stake is already inside units and risked.
   const unpriced = Number(row.picks ?? 0) - Math.round(Number(row.staked_flat ?? 0) / 100);
   return (
     <View style={styles.modelRow}>
@@ -411,15 +423,15 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
         <Text style={styles.modelSub}>
           {row.wins}–{row.losses}
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
-          {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
+          {unpriced > 0 ? ` · ${unpriced} unpriced, staked at 1u` : ''}
         </Text>
-        {decided < MIN_PICKS_FOR_COLOURED_ROI && Number(row.staked_flat ?? 0) > 0 ? (
+        {decided < MIN_PICKS_FOR_COLOURED_ROI && risked > 0 ? (
           // Its own line, not a fourth segment: the sub-line is already three
           // segments wide beside the ROI column, and a mid-phrase wrap orphans
           // the one segment that qualifies the number next to it. Same shape
-          // the Models tab already uses for the same reason — and, like that
-          // screen, it only fires when there is an ROI to qualify: an all-
-          // unpriced model renders "—", which "N unpriced" already explains.
+          // the Models tab already uses for the same reason — and it only fires
+          // when there is an ROI to qualify. An unpriced pick is staked at 1
+          // unit, so its ROI still shows, and "N unpriced" names the gap.
           <Text style={styles.modelSub}>{thinSampleCaption()}</Text>
         ) : null}
       </View>
@@ -429,7 +441,7 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           { color: decided < MIN_PICKS_FOR_COLOURED_ROI ? colors.textSecondary : roiColor(roi) },
         ]}
       >
-        {Number(row.staked_flat ?? 0) > 0 ? formatPctSigned(roi) : '—'}
+        {risked > 0 ? formatPctSigned(roi) : '—'}
       </Text>
     </View>
   );

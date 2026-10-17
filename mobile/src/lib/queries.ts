@@ -2184,18 +2184,47 @@ export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<stri
  * Backed by v_public_track_record, which applies the same prob/edge cuts as
  * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
  */
+const TRACK_RECORD_SELECT =
+  'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked, ' +
+  'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
+  'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
+  'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
+  'market_clv_settled, market_clv_beat, avg_market_clv_pct';
+
+/** The select from before units and risked existed. An OTA can ship first. */
+const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, risked', '');
+
+/**
+ * The units columns are not on the view until the migration runs.
+ *
+ * PostgREST puts `42703` on `error.code` for an undefined column, and
+ * `PGRST204` when the schema cache has no such column. The message names
+ * the column. Any other error still throws.
+ */
+export function postedStakeColumnsMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (!message.includes('units') && !message.includes('risked')) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === '42703' || code === 'PGRST204'
+    || message.includes('does not exist')
+    || message.includes('schema cache');
+}
+
 export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
-  const { data, error } = await supabase
-    .from('v_public_track_record')
-    .select(
-      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
-        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
-        'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
-        'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
-        'market_clv_settled, market_clv_beat, avg_market_clv_pct',
-    );
-  if (error) throw error;
-  return (data ?? []) as TrackRecordRow[];
+  const first = await supabase.from('v_public_track_record').select(TRACK_RECORD_SELECT);
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record')
+      .select(TRACK_RECORD_SELECT_WITHOUT_UNITS);
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordRow[];
 }
 
 /**
@@ -2222,13 +2251,27 @@ export async function fetchActionThresholds(): Promise<Record<string, ServerThre
 }
 
 /** Daily settled totals for the equity curve (v_public_track_record_daily). */
+const TRACK_RECORD_DAILY_SELECT =
+  'game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked';
+
+const TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS =
+  TRACK_RECORD_DAILY_SELECT.replace(', units, risked', '');
+
 export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
-  const { data, error } = await supabase
+  const first = await supabase
     .from('v_public_track_record_daily')
-    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat')
+    .select(TRACK_RECORD_DAILY_SELECT)
     .order('game_date', { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as TrackRecordDailyRow[];
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record_daily')
+      .select(TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS)
+      .order('game_date', { ascending: true });
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordDailyRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordDailyRow[];
 }
 
 /** The daily canonical cross-game parlays (public parlay track record). */
