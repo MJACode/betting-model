@@ -29,30 +29,9 @@ RUN_ID="$(python -m tracking.run_ledger start --kind "$MODE" 2>/dev/null | tail 
 FAILED_STEPS=()
 STEPS_TOTAL=0
 
-# Per-step time limits, in seconds, for the steps that have one. A step past
-# its limit is killed by coreutils `timeout` (exit 124) and recorded as a
-# failed step like any other, so one stuck read cannot hold the whole pass --
-# and with it every later step and the next ten-minute tick (the scheduler
-# skips a tick while a pass is still running).
-declare -A STEP_TIMEOUT_S=(
-  # The NBA totals card reads one season of box scores and the slate's
-  # totals quotes, and prices them in well under a minute; five is the bound.
-  [nba-total-luck]=300
-)
-
 step() {
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
-  local limit="${STEP_TIMEOUT_S[$1]:-}"
-  local rc=0
-  if [ -n "$limit" ]; then
-    timeout "$limit" python run_pipeline.py --step "$1" || rc=$?
-  else
-    python run_pipeline.py --step "$1" || rc=$?
-  fi
-  if [ "$rc" -ne 0 ]; then
-    if [ "$rc" -eq 124 ]; then
-      echo "WARN: step '$1' killed after its ${limit}s limit" >&2
-    fi
+  if ! python run_pipeline.py --step "$1"; then
     echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
     FAILED_STEPS+=("$1")
   fi
@@ -151,13 +130,6 @@ par_wait
 # writer to picks runs one at a time. Insert-once under the model's own lock,
 # so every later pass on a game already bet is a no-op.
 step nhl-over-under
-# NBA full-game totals, overs (nba_total_luck): the shooting-luck gap, priced
-# on the fetch `par odds` just stored. It decides a game only on the LAST pass
-# whose fetch is 60-180 minutes before tip (models/nba_total_luck.timing), so
-# it must read this pass's fetch while it is the newest one. SEQUENTIAL, a
-# writer to picks; each game decided once (nba_total_luck_decisions) under the
-# model's own lock. Time-limited (STEP_TIMEOUT_S above).
-step nba-total-luck
 # NBA player props (nba_prop_market): same-line unders against Pinnacle IN THE
 # PROP FETCH `par nba-prop-odds` JUST STORED. It decides only games whose tip
 # is 45-57 minutes away, so it runs here, minutes after the fetch, rather than
