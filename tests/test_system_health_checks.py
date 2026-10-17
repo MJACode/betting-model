@@ -506,7 +506,10 @@ class TestDailyOnlyFeedsOvernightWindow:
     The ceiling is a calendar day. A playoff off-day under it has no row to
     expect (2026-10-04 01:33 ET: ceiling 2026-10-02, no games that day,
     bullpen correctly stopped at 2026-10-01, gate opened because 10-03 had
-    finals). The floor is the newest MLB final on or before the ceiling.
+    finals). The floor is the newest MLB final on or before the ceiling,
+    and only while that final is within 7 days of the ceiling. Further
+    back is the offseason: the last World Series date would stay the bar
+    until spring.
     """
 
     def _freeze(self, monkeypatch, et_hour: int):
@@ -632,6 +635,9 @@ class TestDailyOnlyFeedsOvernightWindow:
         db.commit()
         row = _results(check)
         assert row["status"] == sh.OK, row
+        # The floor is three days before the run. That distance is a dark
+        # day, not a refresh interval — "every 3 days" would be the lie.
+        assert row["cadence"] == "each game day", row
 
     def test_dark_day_does_not_hide_a_feed_behind_the_last_final(self, db, monkeypatch):
         """Same slate as the gap-day case, but bullpen is older than the
@@ -663,14 +669,77 @@ class TestDailyOnlyFeedsOvernightWindow:
         assert row["status"] == sh.SKIPPED, row
         assert row["detail"] == f"no MLB finals on or before {day2}", row
 
-    def test_gap_yesterday_after_the_daily_expects_the_prior_final(self, db, monkeypatch):
-        """9am ET, yesterday was dark, the day before had a final, bullpen
-        is on that final. The floor is the prior final."""
+    @pytest.mark.parametrize("check", [
+        "mlb_bullpen_workload",
+        "mlb_player_game_log",
+        "umpires",
+    ])
+    def test_gap_yesterday_after_the_daily_expects_the_prior_final(
+            self, db, monkeypatch, check):
+        """9am ET, yesterday was dark, the day before had a final, the feed
+        is on that final. The floor is the prior final. Same rule for
+        bullpen, the player game log and umpires."""
         today = self._freeze(monkeypatch, et_hour=9)
         d = datetime.strptime(today, "%Y-%m-%d")
         day2 = (d - timedelta(days=2)).strftime("%Y-%m-%d")
         self._seed_final(db, "g-day2", day2)
-        self._insert_daily_feed(db, "mlb_bullpen_workload", day2)
+        self._insert_daily_feed(db, check, day2)
         db.commit()
-        row = _results("mlb_bullpen_workload")
+        row = _results(check)
         assert row["status"] == sh.OK, row
+        assert row["cadence"] == "each game day", row
+
+    @pytest.mark.parametrize("check", [
+        "mlb_bullpen_workload",
+        "mlb_player_game_log",
+        "umpires",
+    ])
+    def test_a_final_seven_days_behind_the_ceiling_is_still_the_bar(
+            self, db, monkeypatch, check):
+        """Seven days is inside the lookback. A feed older than that final
+        is still late."""
+        today = self._freeze(monkeypatch, et_hour=9)
+        d = datetime.strptime(today, "%Y-%m-%d")
+        final = (d - timedelta(days=1 + sh.MLB_GAME_FEED_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+        older = (d - timedelta(days=1 + sh.MLB_GAME_FEED_LOOKBACK_DAYS + 2)).strftime("%Y-%m-%d")
+        self._seed_final(db, "g-last", final)
+        self._insert_daily_feed(db, check, older)
+        db.commit()
+        row = _results(check)
+        assert row["status"] == sh.STALE, row
+        assert f"expected >= {final}" in row["detail"], row
+        assert row["cadence"] == "each game day", row
+
+    @pytest.mark.parametrize("check", [
+        "mlb_bullpen_workload",
+        "mlb_player_game_log",
+        "umpires",
+    ])
+    def test_offseason_final_more_than_seven_days_back_is_skipped(
+            self, db, monkeypatch, check):
+        """After the season the newest final is always on or before the
+        ceiling. Left uncapped, a bullpen or game-log or umpire row that
+        never landed for that last game stays STALE until spring, and the
+        two CRIT checks make the daily step return False.
+
+        The feed row here is older than the final, which is the miss the
+        uncapped check reports. More than 7 days behind the ceiling, the
+        check skips and names that final.
+        """
+        assert sh.MLB_GAME_FEED_LOOKBACK_DAYS == 7
+        today = self._freeze(monkeypatch, et_hour=9)
+        d = datetime.strptime(today, "%Y-%m-%d")
+        ceiling = (d - timedelta(days=1)).strftime("%Y-%m-%d")
+        final = (d - timedelta(days=1 + 8)).strftime("%Y-%m-%d")
+        older = (d - timedelta(days=40)).strftime("%Y-%m-%d")
+        self._seed_final(db, "g-last", final)
+        self._insert_daily_feed(db, check, older)
+        db.commit()
+        row = _results(check)
+        assert row["status"] == sh.SKIPPED, row
+        assert row["detail"] == (
+            f"newest MLB final {final} is 8 days before {ceiling}"
+            f" (lookback 7 days)"
+        ), row
+        assert row["cadence"] == "each game day", row
+        assert "every " not in row["cadence"]

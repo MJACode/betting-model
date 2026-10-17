@@ -18,7 +18,10 @@ Checks are CADENCE-AWARE: each sport's checks only apply when that sport had
 games in the relevant window (offseason/off-day → SKIPPED), so NBA in July or
 UFC midweek never false-alarm. The three MLB feeds dated by the game
 (bullpen, player game log, umpires) use the newest final on or before the
-cadence ceiling, so a dark day inside the window is not itself a miss.
+cadence ceiling, so a dark day inside the window is not itself a miss. A
+final more than MLB_GAME_FEED_LOOKBACK_DAYS before that ceiling is the
+offseason: the check skips instead of holding the last World Series date
+until spring.
 
 Severity:
   CRIT — a load-bearing feed is stale → the step returns False → the daily
@@ -73,6 +76,12 @@ OK, STALE, EMPTY, SKIPPED, ERROR = "OK", "STALE", "EMPTY", "SKIPPED", "ERROR"
 # Budgets are each sport's real dark window, measured from `games` rather than
 # recalled, plus slack. Past the budget the check reports STALE and says to
 # suspect the gate.
+#
+# Newest MLB final this many days before the health-check ceiling is still a
+# date the ingestor should have written (a dark week, the All-Star break).
+# Further back is the offseason.
+MLB_GAME_FEED_LOOKBACK_DAYS = 7
+
 SKIP_BUDGET_DAYS: dict = {
     # NBA: last game mid-June, next scheduled row 2026-10-20 -> ~130 days of
     # legitimate offseason. 165 leaves room for a late schedule load.
@@ -87,6 +96,16 @@ SKIP_BUDGET_DAYS: dict = {
     # accrue. 45 days covers that plus an off-week; longer than that means the
     # nightly fits have stopped, which is worth saying.
     "model_calibration": 45,
+    # Bullpen, the player game log and umpires skip once the newest final is
+    # more than MLB_GAME_FEED_LOOKBACK_DAYS before the ceiling. Consecutive
+    # MLB finals in `games` gap by at most 179 days (2010-10-03 to
+    # 2011-03-31, queried 2026-10-17). The skip starts 8 days after that
+    # final, so the streak is 171 days. 190 leaves room for a later opener
+    # than any gap this table has held. The 14-day default would turn that
+    # streak into STALE and fail the daily step for the rest of the winter.
+    "mlb_bullpen_workload": 190,
+    "mlb_player_game_log": 190,
+    "umpires": 190,
 }
 
 # Everything else: a fortnight. Long enough for a normal off-week in any sport
@@ -312,6 +331,31 @@ def _last_mlb_finals_on_or_before(conn, ceiling: str) -> str | None:
     return str(latest)[:10]
 
 
+def _mlb_game_dated_feed(conn, ceiling: str) -> tuple[str | None, str]:
+    """(min_date, skip_note) for bullpen, the player game log and umpires.
+
+    min_date is the newest MLB final on or before `ceiling` when that final
+    is at most MLB_GAME_FEED_LOOKBACK_DAYS before the ceiling. A dark day
+    inside the window is not a miss. A final older than the window is the
+    offseason: these checks would otherwise keep demanding the last World
+    Series date until spring, and a row that never landed stays STALE and
+    fails the daily step.
+    """
+    latest = _last_mlb_finals_on_or_before(conn, ceiling)
+    if latest is None:
+        return None, f"no MLB finals on or before {ceiling}"
+    gap = (
+        datetime.strptime(ceiling[:10], "%Y-%m-%d")
+        - datetime.strptime(latest[:10], "%Y-%m-%d")
+    ).days
+    if gap > MLB_GAME_FEED_LOOKBACK_DAYS:
+        return None, (
+            f"newest MLB final {latest} is {gap} days before {ceiling}"
+            f" (lookback {MLB_GAME_FEED_LOOKBACK_DAYS} days)"
+        )
+    return latest, ""
+
+
 # ── Why a check is in the state it is, in one word ──────────────────────────
 # `detail` is a sentence and gets clamped in every table that renders it, so the
 # ANSWER to "why is this one skipped?" was three lines down inside a truncated
@@ -394,13 +438,21 @@ class HealthReport:
         })
 
     def date_check(self, conn, check, severity, table, date_col, min_date,
-                   gate_ok=True, gate_note="no games in window", where=""):
+                   gate_ok=True, gate_note="no games in window", where="",
+                   cadence=None):
         """Generic 'MAX(date_col) >= min_date' freshness check.
 
         `where`, if given, is spliced in raw after the table name and must
         include its own WHERE keyword (e.g. `where="WHERE season = 2026"`).
+
+        `cadence`, when passed, is the refresh label. The derived label
+        treats `min_date` as a fixed window ("every N days"). That wording
+        is wrong when min_date is the last game day and N is only how dark
+        the calendar is — a one-day gap reads "every 3 days", and the
+        offseason would read "every 120 days".
         """
-        cadence = _cadence_from_dates(min_date, self.run_date)
+        if cadence is None:
+            cadence = _cadence_from_dates(min_date, self.run_date)
         if not gate_ok:
             self.add(check, SKIPPED, severity, gate_note,
                      reason=REASON_GATE_SHUT, cadence=cadence)
@@ -1017,7 +1069,9 @@ def run_system_health(run_date: str | None = None) -> dict:
         # playoff off-day (finals on 10-01 and 10-03, bullpen max 10-01).
         # The gate was "yesterday had finals" (10-03 did), so the check
         # opened and demanded a 10-02 row the ingestor will never write.
-        # Floor is _last_mlb_finals_on_or_before(ceiling).
+        # Floor is the newest final on or before the ceiling, and only
+        # while that final is within MLB_GAME_FEED_LOOKBACK_DAYS. Further
+        # back is the offseason, and the check skips.
         daily_pipeline_pending = datetime.now(ZoneInfo("America/New_York")).hour < 7
 
         # ── Odds feeds (The Odds API) ────────────────────────────────────────
@@ -1154,14 +1208,17 @@ def run_system_health(run_date: str | None = None) -> dict:
         # Shared by mlb_bullpen_workload, mlb_player_game_log and umpires.
         # Before 7am ET the ceiling is day2 (yesterday not ingested yet);
         # after the daily has had its chance it is yesterday. The floor is
-        # the newest final on or before that ceiling — a dark ceiling is
-        # not a date any of these tables can hold.
+        # the newest final on or before that ceiling, inside a 7-day
+        # lookback — a dark ceiling is not a date any of these tables can
+        # hold, and a final from last season is not one either. The cadence
+        # label is "each game day": the distance from today to that final
+        # is not a refresh interval.
         mlb_feed_ceiling = day2 if daily_pipeline_pending else yday
-        mlb_feed_floor = _last_mlb_finals_on_or_before(conn, mlb_feed_ceiling)
-        mlb_feed_note = f"no MLB finals on or before {mlb_feed_ceiling}"
+        mlb_feed_floor, mlb_feed_note = _mlb_game_dated_feed(conn, mlb_feed_ceiling)
         r.date_check(conn, "mlb_bullpen_workload", "CRIT", "mlb_bullpen_stats", "game_date",
                      mlb_feed_floor or mlb_feed_ceiling,
-                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note)
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note,
+                     cadence="each game day")
         r.date_check(conn, "mlb_pitcher_stats", "WARN", "mlb_pitcher_stats", "game_date",
                      d3, gate_ok=_games_count(conn, "MLB", d3, yday, finals_only=True) > 0,
                      gate_note="no MLB finals in last 3 days")
@@ -1169,14 +1226,16 @@ def run_system_health(run_date: str | None = None) -> dict:
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
         r.date_check(conn, "mlb_player_game_log", "CRIT", "player_game_log", "game_date",
                      mlb_feed_floor or mlb_feed_ceiling,
-                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note)
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note,
+                     cadence="each game day")
         r.date_check(conn, "injuries", "WARN", "injuries", "report_date",
                      yday, gate_ok=any_today > 0, gate_note="no games today")
         r.date_check(conn, "lineups", "WARN", "lineup_slots", "game_date",
                      yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "umpires", "WARN", "umpires", "game_date",
                      mlb_feed_floor or mlb_feed_ceiling,
-                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note)
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note,
+                     cadence="each game day")
         r.date_check(conn, "public_betting", "WARN", "public_betting", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
 
