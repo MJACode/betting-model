@@ -846,6 +846,33 @@ The row leaves these open, so they are the lab's definitions, not registered one
   value and "still offered at the next purchase" are not computed: the next purchase is
   about an hour later, in a different game state.
 
+#### IG-1: the information test (2026-10-17)
+
+`python -m scripts.nba_ingame_ig1` (log: build machine,
+`C:/Users/micha/AppData/Local/Temp/nba_game_edge/ingame/ig1_full_log.txt`; numbers in
+`info_IG-1.json` beside it). Units are squared points of the final total; below zero means
+the model helped.
+
+- **The registered test passes, so the grid runs.** Choosing seasons: −10.5 (95% interval
+  −13.7 to −7.2) on 3,573 quotes, against Pinnacle's own error of 187.3. 2025-26 alone:
+  −10.1 (−16.4 to −4.1) on 1,141 quotes.
+- **But the gain is the score, not the luck.** The three diagnostics:
+  - (a) The same model with no luck correction gains the same: −10.2 (−13.5 to −6.8), and
+    −10.5 in 2025-26.
+  - (b) The luck term added on top of (a) gains nothing: +0.20 (−0.18 to +0.57); 2025-26
+    +0.06 (−0.80 to +0.92).
+  - (c) Against the deciding books' own prices the full model gains nothing: +0.06 (−0.54
+    to +0.65); 2025-26 −0.87 (−2.13 to +0.36).
+  - The halftime break, when no one scores and Pinnacle's price has time to catch up, shows
+    no gain at all: +0.35 (−2.58 to +3.15).
+- **So the registered test was passed by the lag 7.1 found in Pinnacle's stored live
+  price**, not by shooting luck. The fitted pace weight w is near zero in every season and
+  window (−0.05 to +0.09): luck-corrected scoring so far does not predict the rest of the
+  game beyond the pre-game total.
+- 2020-21 has no earlier season, so its live-total distribution is its own; it is reported
+  only. Games per season with a decision (both teams ≥ 10 games): Q2 410–524, halftime
+  89–253, Q3 224–408.
+
 ### 7.3 Gates and bars
 
 1. **Information first.** For IG-1, IG-2 and HT-1, measure the change in log loss (moneyline)
