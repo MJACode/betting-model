@@ -46,7 +46,7 @@ def test_a_cell_clearing_every_bar_passes():
     ({"share_fav": 0.2, "blind_dog": np.nan}, "bar9"),
     ({"placebo_rois": [0.2] * 20}, "bar10"),
     ({"clv_median": -0.001}, "bar11"),
-    ({"n_confirm": 150}, "confirm"),
+    ({"n_confirm": 150}, "confirm,bh"),       # below the count it also enters the correction at p = 1
     ({"ci_lo_confirm": -0.01}, "confirm"),
     ({"p_confirm": 0.01}, "bh"),
 ])
@@ -105,3 +105,11 @@ def test_an_all_empty_placebo_list_reads_as_no_placebo_not_a_crash():
     g["placebo_rois"] = [None, [None, None], [np.nan] * 3]
     m = _mid(V.verdict(g))
     assert m["failed"] == "bar10"
+
+
+def test_a_cell_below_the_bet_count_enters_the_correction_at_p_one():
+    # three bets that all won: the bootstrap p is 0, but it must not count
+    m = _mid(V.verdict(_grid(n_confirm=3, p_confirm=0.0), "confirm"))
+    assert bool(m["bh"]) is False
+    m = _mid(V.verdict(_grid(n_choose=3, p_choose=0.0), "choose"))
+    assert bool(m["bh"]) is False

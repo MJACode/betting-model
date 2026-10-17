@@ -129,7 +129,14 @@ def verdict(cells: pd.DataFrame, bh_basis: str = "confirm", m_first: int = M_FIR
         pcol, m = "p_choose", len(c)
     else:
         raise ValueError(bh_basis)
-    passed = bh_pass(dict(zip(c["key"], c[pcol].fillna(1.0))), m_total=m, q=q)
+    # A cell below the bet-count bar enters the correction at p = 1: with a
+    # handful of bets that all won, no resample can show a loss, so its p is 0
+    # and it would loosen the bar for every other cell (found 2026-10-17 on the
+    # graded run: six such cells, 1-14 bets each; the outcome, 0 of 422, is
+    # the same either way).
+    n_col = "n_confirm" if bh_basis == "confirm" else "n_choose"
+    p_used = c[pcol].where(c[n_col] >= MIN_BETS, 1.0).fillna(1.0)
+    passed = bh_pass(dict(zip(c["key"], p_used)), m_total=m, q=q)
     c["bh"] = c["key"].isin(passed)
     c["bh_basis"], c["bh_m"] = bh_basis, m
     bars = ["bar5", "bar6", "bar7", "bar8", "bar9", "bar10", "bar11", "confirm", "bh"]
