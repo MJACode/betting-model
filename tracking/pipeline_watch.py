@@ -70,6 +70,20 @@ WEEKLY_STALE_DAYS = 8
 SILENT_KIND_LOOKBACK_DAYS = 14
 SILENT_KIND_MIN_ACTIVE_DAYS = 7
 
+# A recap Discord answered without a message id, or a restatement that
+# raised. These are not successes, so the silence rule (successes only)
+# never shows them. The morning report has to.
+RECAP_ERROR_KINDS = (
+    "discord_results_error",
+    "discord_results_restate_error",
+)
+# The success kind on the same lock_key. An error row whose lock also has
+# this kind was delivered by a later pass.
+RECAP_SUCCESS_FOR_ERROR = {
+    "discord_results_error": "discord_results",
+    "discord_results_restate_error": "discord_results_restate",
+}
+
 
 def _enabled() -> bool:
     return os.environ.get("RUN_PIPELINE_WATCH", "1") not in ("0", "false", "False")
@@ -173,6 +187,67 @@ def _step_regressions(conn, hours: int) -> list[str]:
             for s, now, base in rows]
 
 
+def findings_from_delivery(rows) -> list[str]:
+    """Recap failure rows whose lock has no success row.
+
+    Each row is (lock_key, kind, sent_at). A success kind on that lock
+    means a later pass delivered the recap, so the error is not an open
+    failure. A kind total from the delivery report cannot see the lock.
+    """
+    by_lock: dict[object, set] = {}
+    error_rows: list[tuple] = []
+    for r in rows or []:
+        lock_key, kind, sent_at = (list(r) + [None] * 3)[:3]
+        by_lock.setdefault(lock_key, set()).add(kind)
+        if kind in RECAP_ERROR_KINDS:
+            error_rows.append((lock_key, kind, sent_at))
+    open_by_kind: dict[str, list] = {}
+    for lock_key, kind, sent_at in error_rows:
+        success = RECAP_SUCCESS_FOR_ERROR[kind]
+        if success in by_lock.get(lock_key, ()):
+            continue
+        open_by_kind.setdefault(kind, []).append(sent_at)
+    out = []
+    for kind, sent_ats in open_by_kind.items():
+        latest = max((s for s in sent_ats if s is not None), default=None)
+        out.append(
+            f"`{kind}` has {len(sent_ats)} delivery-failure row(s) "
+            f"with no success on that lock, latest failure {latest}"
+        )
+    return out
+
+
+def _recap_ledger_rows(conn, hours: int):
+    """Recap ledger lines for the watch.
+
+    Rows inside the window, plus a no-message-id error of any age whose
+    lock has no success row. That row is the permanent stop. It was never
+    posted, so it stays a finding after it leaves the window, until a
+    success row exists or the error row is deleted.
+    """
+    kinds = tuple(RECAP_SUCCESS_FOR_ERROR.values()) + RECAP_ERROR_KINDS
+    return _rows(conn, """
+        SELECT lock_key, kind, sent_at
+        FROM push_sent
+        WHERE kind IN (%s, %s, %s, %s)
+          AND (
+            sent_at::timestamptz >= now() - (%s || ' hours')::interval
+            OR (
+              kind IN (%s, %s)
+              AND position('no message id' in lower(coalesce(message_id, ''))) > 0
+              AND NOT EXISTS (
+                SELECT 1 FROM push_sent s
+                WHERE s.lock_key = push_sent.lock_key
+                  AND s.kind = CASE push_sent.kind
+                        WHEN 'discord_results_error' THEN 'discord_results'
+                        ELSE 'discord_results_restate'
+                      END
+              )
+            )
+          )
+    """, (*kinds, hours, *RECAP_ERROR_KINDS))
+
+
 def _silent_kinds(conn, hours: int) -> list[str]:
     rows = _rows(conn, """
         SELECT kind,
@@ -233,6 +308,7 @@ def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
     findings += findings_from_passes(data.get("recent_passes"))
     findings += findings_from_checks(data.get("failing_checks"))
     findings += findings_from_burn(data.get("api_burn_by_source"))
+    findings += findings_from_delivery(_recap_ledger_rows(conn, hours))
     findings += _step_regressions(conn, hours)
     findings += _silent_kinds(conn, hours)
     findings += _stale_weeklies(conn, today)
