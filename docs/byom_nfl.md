@@ -14,20 +14,13 @@ changes a live model.
 
 DraftKings rows in `nfl_odds_history` start at the 2020 season (measured:
 `min(season)` where `bookmaker = 'draftkings'` is 2020). The 2015–2019
-schedule in `games` is not built. `line_source` names the table the lock
-quote came from.
+schedule in `games` is not built.
 
-The lock columns hold the first DraftKings pre-game snapshot at or under a
-120 hour lead, and a second snapshot at or under 24 hours. **Both numbers
-are UNCONFIRMED placeholders.** They are columns the builder fills, not
-check constraints. The grade is DraftKings' own price on that 120h lock
-snapshot. `grade_*_book` is `draftkings`. The closing DraftKings price is
-stored and is not the grade. Each result stores two unit columns.
-`*_units_uncapped` is the 1u-to-win result with no risk ceiling.
-`*_units_capped` is the result after a 3-unit risk ceiling: risk above 3
-is cut to 3, and a win is recomputed from that risk. A -400 loss is -4
-uncapped and -3 capped. A missing price leaves both NULL. Pushes and ties
-are stored. Both columns are results. There is no stake column.
+`line_basis` is `DraftKings line at game start`: the last DraftKings
+snapshot at or before kickoff. That label is stored on the row and is
+what a screen shows. The line is not a filter and not a reason to skip
+a game. A moneyline result is the score only. There is no price column
+and no unit column. Pushes and ties are stored.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
