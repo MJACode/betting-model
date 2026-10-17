@@ -2296,6 +2296,12 @@ def _record_delivery_failure(conn, lock_key: str, kind: str, detail: str) -> Non
     except Exception as exc:                              # noqa: BLE001
         logger.error(f"Discord delivery failure was not recorded "
                      f"({type(exc).__name__})")
+        # The insert aborted the transaction. The no-id path reads the
+        # row back next, and that read raises until this rolls back.
+        try:
+            conn.rollback()
+        except Exception:                                 # noqa: BLE001
+            pass
 
 
 def _delivery_failure_reason(raw) -> str:
@@ -2338,7 +2344,8 @@ def _alert_recap_missing_id(game_date: str, kind: str, reason: str) -> None:
         post_ops_alert(
             "Results recap has no message id",
             f"{kind} for {game_date} came back without a message id ({reason}). "
-            "It will not be posted again automatically.",
+            "It will not be posted again automatically. "
+            f"Delete the {kind}_error row for that lock to post it again.",
         )
     except Exception as exc:                       # noqa: BLE001
         logger.error(f"recap no-message-id alert failed ({type(exc).__name__})")

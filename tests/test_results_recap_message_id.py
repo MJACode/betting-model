@@ -201,26 +201,107 @@ def test_a_success_with_no_message_id_posts_once_and_alerts_once(monkeypatch):
     assert len(posts) == 1
     assert len(alerts) == 1
     assert "no message id" in alerts[0][1]
+    assert "Delete the discord_results_error row" in alerts[0][1]
     assert "api/webhooks" not in alerts[0][1]
     assert [row[1] for row in conn.inserts] == ["discord_results_error"]
     assert "no message id" in conn.inserts[0][3]
     assert "discord_results" not in {row[1] for row in conn.inserts}
 
 
-def test_pipeline_watch_shows_the_recap_error_kinds():
-    import inspect
+def test_a_failed_error_insert_rolls_back_before_the_read(monkeypatch):
+    """A failed insert aborts the transaction. The no-id path then reads
+    the row back. Without a rollback that read raises and the pass dies."""
+    class Conn:
+        def __init__(self):
+            self.aborted = False
+            self.rollbacks = 0
 
-    from tracking.pipeline_watch import findings_from_delivery, run_watch
+        def execute(self, sql, params=()):
+            if self.aborted:
+                raise RuntimeError("transaction is aborted")
+            if "INSERT INTO push_sent" in sql:
+                self.aborted = True
+                raise RuntimeError("insert failed")
+            return self
 
-    out = findings_from_delivery([
-        ("discord_results", 1, "2026-10-14T06:00:00-04:00"),
-        ("discord_results_error", 1, "2026-10-14T06:01:00-04:00"),
-        ("discord_results_restate_error", 2, "2026-10-14T07:01:00-04:00"),
-    ])
-    assert any(f.startswith("`discord_results_error`") for f in out)
-    assert any(f.startswith("`discord_results_restate_error`") for f in out)
-    assert not any(f.startswith("`discord_results` ") for f in out)
-    assert "findings_from_delivery" in inspect.getsource(run_watch)
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return [("NHL", "nhl_moneyline", "WIN", 0.02, -110.0, None, False)]
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            self.rollbacks += 1
+            self.aborted = False
+
+        def close(self):
+            pass
+
+    conn = Conn()
+    monkeypatch.setattr(dn, "get_connection", lambda: conn)
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    monkeypatch.setattr(dn.requests, "post", lambda *a, **k: _Resp(200, {}))
+    alerts = _silence_alert(monkeypatch)
+    assert dn.notify_discord_results(game_date="2026-10-04") == 0
+    assert conn.rollbacks == 1
+    assert conn.aborted is False
+    assert alerts == []
+
+
+def test_pipeline_watch_reports_an_uncleared_recap_error(monkeypatch):
+    """run_watch reports the error lock and skips the lock a later pass delivered."""
+    from datetime import date
+
+    import config
+    from tracking import pipeline_watch as pw
+
+    rows = [
+        ("discord_results:2026-10-05", "discord_results_error",
+         "2026-10-14T06:01:00-04:00"),
+        ("discord_results:2026-10-03", "discord_results_error",
+         "2026-10-14T05:00:00-04:00"),
+        ("discord_results:2026-10-03", "discord_results",
+         "2026-10-14T07:00:00-04:00"),
+    ]
+
+    class Conn:
+        def __init__(self):
+            self.sql = ""
+
+        def execute(self, sql, params=()):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            if "lock_key, kind, sent_at" in self.sql:
+                return rows
+            today = date.today().isoformat()
+            if "model_calibration_sweeps" in self.sql:
+                return [(today,)]
+            if "player_savant_stats" in self.sql:
+                return [(today, 2)]
+            return []
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    monkeypatch.setattr("scripts.pipeline_report.collect", lambda c, h: {})
+    monkeypatch.setattr("tracking.discord_notifier._post", lambda *a, **k: "1")
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "https://example.invalid/hook")
+    out = pw.run_watch(Conn(), hours=24, today=date(2026, 10, 14))
+    findings = out["findings"]
+    assert any(
+        f.startswith("`discord_results_error`") and "1 delivery-failure" in f
+        and "latest failure 2026-10-14T06:01:00-04:00" in f
+        for f in findings)
+    assert not any("2026-10-14T05:00:00" in f for f in findings)
+    assert not any(f.startswith("`discord_results` ") for f in findings)
 
 
 def test_a_restatement_stores_its_own_id(monkeypatch):

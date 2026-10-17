@@ -77,6 +77,12 @@ RECAP_ERROR_KINDS = (
     "discord_results_error",
     "discord_results_restate_error",
 )
+# The success kind on the same lock_key. An error row whose lock also has
+# this kind was delivered by a later pass.
+RECAP_SUCCESS_FOR_ERROR = {
+    "discord_results_error": "discord_results",
+    "discord_results_restate_error": "discord_results_restate",
+}
 
 
 def _enabled() -> bool:
@@ -182,14 +188,44 @@ def _step_regressions(conn, hours: int) -> list[str]:
 
 
 def findings_from_delivery(rows) -> list[str]:
-    """Recap failure rows. A success kind in the same window is not a finding."""
-    out = []
+    """Recap failure rows whose lock has no success row.
+
+    Each row is (lock_key, kind, sent_at). A success kind on that lock
+    means a later pass delivered the recap, so the error is not an open
+    failure. A kind total from the delivery report cannot see the lock.
+    """
+    by_lock: dict[object, set] = {}
+    error_rows: list[tuple] = []
     for r in rows or []:
-        kind, n, latest = (list(r) + [None] * 3)[:3]
-        if kind not in RECAP_ERROR_KINDS:
+        lock_key, kind, sent_at = (list(r) + [None] * 3)[:3]
+        by_lock.setdefault(lock_key, set()).add(kind)
+        if kind in RECAP_ERROR_KINDS:
+            error_rows.append((lock_key, kind, sent_at))
+    open_by_kind: dict[str, list] = {}
+    for lock_key, kind, sent_at in error_rows:
+        success = RECAP_SUCCESS_FOR_ERROR[kind]
+        if success in by_lock.get(lock_key, ()):
             continue
-        out.append(f"`{kind}` has {n} delivery-failure row(s), latest {latest}")
+        open_by_kind.setdefault(kind, []).append(sent_at)
+    out = []
+    for kind, sent_ats in open_by_kind.items():
+        latest = max((s for s in sent_ats if s is not None), default=None)
+        out.append(
+            f"`{kind}` has {len(sent_ats)} delivery-failure row(s) "
+            f"with no success on that lock, latest failure {latest}"
+        )
     return out
+
+
+def _recap_ledger_rows(conn, hours: int):
+    """One push_sent line per recap lock in the window, success and error."""
+    kinds = tuple(RECAP_SUCCESS_FOR_ERROR.values()) + RECAP_ERROR_KINDS
+    return _rows(conn, """
+        SELECT lock_key, kind, sent_at
+        FROM push_sent
+        WHERE kind IN (%s, %s, %s, %s)
+          AND sent_at::timestamptz >= now() - (%s || ' hours')::interval
+    """, (*kinds, hours))
 
 
 def _silent_kinds(conn, hours: int) -> list[str]:
@@ -252,7 +288,7 @@ def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
     findings += findings_from_passes(data.get("recent_passes"))
     findings += findings_from_checks(data.get("failing_checks"))
     findings += findings_from_burn(data.get("api_burn_by_source"))
-    findings += findings_from_delivery(data.get("delivery"))
+    findings += findings_from_delivery(_recap_ledger_rows(conn, hours))
     findings += _step_regressions(conn, hours)
     findings += _silent_kinds(conn, hours)
     findings += _stale_weeklies(conn, today)

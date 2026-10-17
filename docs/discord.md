@@ -424,7 +424,8 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   another copy each time. That recap is `discord_results_error` or
   `discord_results_restate_error` with the reason "no message id". Once
   that row exists, later passes do not post it. One ops alert is raised
-  on the pass that records the row. A rejected post (no success) stays
+  on the pass that records the row. Delete that `_error` row to post the
+  recap again. A rejected post (no success) stays
   retryable.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
