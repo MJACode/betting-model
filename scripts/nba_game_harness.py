@@ -39,6 +39,7 @@ DEFINITIONS (stated once, used everywhere):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,7 +53,9 @@ import config  # noqa: E402
 from scripts.nba_game_market_lab import (  # noqa: E402
     _assert_spread_sign, dec, imp, power_devig, probs_at, settle, solve_mu, threshold)
 
-CACHE = ROOT / "data" / "local" / "nba"
+# NBA_RESEARCH_CACHE points a lab in another worktree at the one shared cache
+# (scripts/nba_research_cache.py writes it; it is a cache of Supabase).
+CACHE = Path(os.environ.get("NBA_RESEARCH_CACHE", str(ROOT / "data" / "local" / "nba")))
 MARKETS = ("h2h", "spreads", "totals")
 SIDE_A = {"h2h": "home", "spreads": "home", "totals": "over"}
 SIDE_B = {"h2h": "away", "spreads": "away", "totals": "under"}
