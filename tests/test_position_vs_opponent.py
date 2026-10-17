@@ -224,8 +224,11 @@ def test_mlb_shows_a_per_player_summary_and_the_nfl_keeps_its_game_list():
 def test_the_pure_layer_behaves():
     """Runs mobile/scripts/verify_position_vs_opponent.ts: the MLB summary's
     grouping, averaging, latest-team, sort order and side; own-player
-    exclusion; doubleheader numbering. Needs the mobile deps (tsx resolves the
-    app's @/ aliases); skipped where they are not installed."""
+    exclusion; doubleheader numbering.
+
+    Needs the mobile deps (tsx resolves the app's @/ aliases); skipped where
+    they are not installed.
+    """
     import shutil
     import subprocess
 

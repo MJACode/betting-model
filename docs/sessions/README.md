@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, daily player positions names NBA, WNBA, and NCAAF; the validator accepts a list of known sports |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA public betting splits: Action Network v1/v2 archive 2020-21..2025-26 into `nba_public_splits` (64,027 rows, 7,230 of 7,230 regular-season games); the archived number is the split at the close (MLB calibration, 20 Wayback captures, a tip-off poll); `pregame_poll` capture in the refresh pass from 2026-27; `docs/nba_public_splits.md` |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA spread/moneyline/total second search: pre-registered (§6, four dated amendments before grading); 7,288 price fetches bought (218,670 credits, balance 2,300,945); one shared harness and pass/fail script; five labs built, reviewed three times and graded blind; no return read until the multiple-testing basis is decided |
@@ -89,6 +90,12 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, a late Anytime TD touch set cannot replace the board on screen; the player stepper stays on the card at the largest type size |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, every NHL model assessed for CLV and expected value: a name defect inflated the prop backtests (35% of the two-a-night case); game models clear no cut; four NHL prop bets a night (mike); a CLV-only final prop snapshot; CLV for picks at a line DraftKings never hung; `nhl_research` worker job |
 | 2026-10-08 | [2026-10](./2026-10.md) | 2026-10-08, Anytime TD board keeps every ball-carrier (16 hidden on TB@DAL); player stepper snaps 51→50, typed line entry |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, cold NBA player-positions pass is about 675 calls (406072 fetched 609 athlete docs); per-sport cap raised from 750 to 900 |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, removed the two-sport basketball positions job from declared_jobs; roster_candidates uses the season argument; NCAAF real run kept as on master |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, merge #889 into #888: one roster year from espn_basketball_season, empty-roster team count, #889 jobs 406072 and 406073 kept as historical exemptions |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, #888 review: prior-season team change vs in-season conflict; WNBA dry run not declared; NCAAF run_after 18:00Z; NBA ESPN season is the ending year; unmatched sentinel deleted on a later match |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, merge #886 into the player-positions branch: shared-name team rule uses the ESPN-to-log map; a tiebreak guess cannot overwrite a name or team claim (counted in duplicate_ids). verify_position_vs_opponent.ts stays local-only |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, player positions review: roster $ref (405765 404'd /teams/{id}/athletes), one sport per job, cap 750, stop after 3 consecutive 403/429/404, unmatched sentinel rows, coverage. Cold NBA about 520 calls, not ~45 |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card for NBA/WNBA (G/F/C, 15+ min) and NCAAF; daily position refresh; basketball dry run 2: 496/609 NBA, 213/243 WNBA matched |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
