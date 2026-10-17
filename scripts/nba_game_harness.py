@@ -273,7 +273,8 @@ class ResidDist:
     """The EMPIRICAL distribution of a side-A quantity around its centre (§6.3:
     "priced ... through the empirical margin/total distribution").
 
-    Built from residuals r = result - centre on seasons BEFORE the graded one:
+    Built from residuals r = result - centre on seasons BEFORE the graded one,
+    re-centred on zero (the spread, not the average miss):
     for the market's own pricing (market_fair, the blind bet, closing value,
     F2, F6a, F6d) the centre is Pinnacle's closing number (close_dist); for a
     market-independent projection (F1, F1b, F5) it is that projection, so the
@@ -292,6 +293,12 @@ class ResidDist:
         r = r[np.isfinite(r)]
         if len(r) < 50:
             raise ValueError(f"{label}: {len(r)} residuals is too few for an empirical distribution")
+        # The SPREAD of results around the centre, not their earlier average
+        # miss: uncentred, a projection's past bias would move its centre a
+        # second time (it is already in the calibration). For market pricing
+        # the centre is solved from the price, so centring changes nothing there.
+        self.mean = float(r.mean())
+        r = r - self.mean
         self.n, self.sd, self.label = len(r), float(r.std()), label
         self.d = np.arange(-self.LIM, self.LIM + self.STEP / 2, self.STEP)
         self.win_whole, self.push_whole = self._table(r, 0.0)
