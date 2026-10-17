@@ -274,12 +274,8 @@ def test_release_is_strictly_newer_and_a_null_void_stamp_does_not_stick():
 
 
 def _pg_bin(name):
-    import shutil
-    found = shutil.which(name)
-    if found:
-        return found
-    path = Path(f"/usr/lib/postgresql/16/bin/{name}")
-    return str(path) if path.is_file() else None
+    from tests._pg import pg_bin
+    return pg_bin(name)
 
 
 def _swap_dbname(dsn, name):
@@ -324,19 +320,13 @@ def test_anon_reads_both_discord_views():
             pytest.skip(
                 "LATEST_LINE_TEST_DSN not set and initdb is missing -- "
                 "needs a scratch Postgres")
-        owned = tempfile.mkdtemp(prefix="discord-void-pg-")
-        subprocess.run(
-            [initdb, "-D", owned, "-A", "trust", "--username", "postgres"],
-            check=True, capture_output=True, text=True)
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        subprocess.run(
-            [pg_ctl, "-D", owned, "-o", f"-p {port} -k {owned}",
-             "-l", str(Path(owned) / "log"), "-w", "start"],
-            check=True, capture_output=True, text=True)
-        dsn = f"host={owned} port={port} dbname=postgres user=postgres"
+        # tests/_pg.py: UTF-8, trusted, TCP on a free port, output to the
+        # cluster log (a captured pipe hangs pg_ctl on Windows). `owned`
+        # is the ExitStack that stops and deletes it.
+        import contextlib
+        from tests._pg import scratch_cluster
+        owned = contextlib.ExitStack()
+        dsn = owned.enter_context(scratch_cluster("discord-void-pg-"))
 
     conn = None
     try:
@@ -351,6 +341,7 @@ def test_anon_reads_both_discord_views():
             admin.close()
             dsn = _swap_dbname(dsn, "discord_void_anon")
         conn = psycopg2.connect(dsn)
+        conn.set_client_encoding("UTF8")
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute("""
@@ -437,10 +428,7 @@ def test_anon_reads_both_discord_views():
         if conn is not None:
             conn.close()
         if owned is not None:
-            subprocess.run(
-                [_pg_bin("pg_ctl"), "-D", owned, "-w", "-m", "immediate", "stop"],
-                check=False, capture_output=True, text=True)
-            shutil.rmtree(owned, ignore_errors=True)
+            owned.close()
 
 
 def test_the_migration_grants_sent_at_and_not_message_id():

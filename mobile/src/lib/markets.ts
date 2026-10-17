@@ -122,9 +122,9 @@ export function propMarketForModel(modelId: string): string | null {
 
 /**
  * The player_prop_odds market a prop PICK is priced in. One model id per
- * market resolves through its model; the three multi-market rules
- * (nba_prop_market, wnba_prop_market, nfl_prop_market) are ONE id across
- * several markets, so the model says nothing and the row's own prop_market
+ * market resolves through its model; the multi-market models
+ * (nba_prop_market, nba_prop_projection, wnba_prop_market, nfl_prop_market)
+ * are ONE id across several markets, so the model says nothing and the row's own prop_market
  * is the answer. Without the fallback those picks loaded no other books, no
  * line history and no closing-line market.
  */
@@ -1442,15 +1442,25 @@ export function computeMovement(
  * else is scored at DraftKings' line. A line is compared only against the same
  * book's line: another book's number is a different bet, not movement.
  *
- * The three multi-market prop rules store the BET book's own line as
+ * The multi-market prop rules store the BET book's own line as
  * scored_line (nba/nfl/wnba_prop_market_card.py), so their line is that
  * book's: the deciding book, else the book their label names (the NFL and
  * WNBA rows carry no decision_book). Read as DraftKings' line, a price at a
  * new line was compared with the lock at the old one and shown as price
  * movement in the bettor's favour (designer review, 2026-10-16). Narrow on
  * purpose: every other model keeps the rule above.
+ *
+ * The NBA projection model writes the same row shape as the NBA rule
+ * (scripts/nba_prop_projection_card.py pick_rows): decision_book always set,
+ * scored_line the main line that book quotes. So it is here too, on either
+ * side, since it bets overs as well as unders.
  */
-const BET_BOOK_LINE_MODELS: readonly string[] = ['nba_prop_market', 'nfl_prop_market', 'wnba_prop_market'];
+const BET_BOOK_LINE_MODELS: readonly string[] = [
+  'nba_prop_market',
+  'nba_prop_projection',
+  'nfl_prop_market',
+  'wnba_prop_market',
+];
 
 function scoredLineBook(pick: Pick): string {
   if (BET_BOOK_LINE_MODELS.includes(pick.model_id)) return clvLabelBook(pick);
@@ -1641,6 +1651,14 @@ export interface PickTiming {
 }
 
 /**
+ * The NBA prop models that post once, 45-57 minutes before tip, off the books'
+ * prices, with no lineup check, and whose bet is void when the player sits:
+ * the rule (scripts/nba_prop_market_card.py) and the projection model
+ * (scripts/nba_prop_projection_card.py).
+ */
+const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_projection'];
+
+/**
  * When this bet posted, and what that time means for the number beside it.
  *
  * created_at IS the post time for every locked pick, because a locked row is
@@ -1696,14 +1714,17 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // (scripts/nhl_totals_card.py) posts on the first refresh that qualifies,
   // often the evening before, not at "the first scoring run of the day".
   // The NBA prop rule (scripts/nba_prop_market_card.py) is the same: it posts
-  // once, 45-70 minutes before tip, off the books' prices, with no lineup check.
+  // once, 45-57 minutes before tip, off the books' prices, with no lineup check.
   // Like saves, it carries a void line: the books void a player prop when he
   // does not play, and settlement does too (paper_tracker's DNP branch writes
   // NO_ACTION for an nba_player with no box-score row in a logged game).
+  // The NBA projection model (scripts/nba_prop_projection_card.py) posts in
+  // the same window, the same way, and voids the same way, over or under.
+  const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
-    pick.model_id === 'nba_prop_market'
+    nbaPosted
   ) {
     return {
       kind: 'posted',
@@ -1713,7 +1734,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
         'shown.' +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
-        (pick.model_id === 'nba_prop_market' ? ' Void if the player doesn’t play.' : ''),
+        (nbaPosted ? ' Void if the player doesn’t play.' : ''),
     };
   }
 
