@@ -296,6 +296,113 @@ def test_segment_points_sum_to_the_final_score():
     assert sum(s["away_pts"] for s in stints) == 3
 
 
+# ── free throws ESPN left without a team ────────────────────────────────────
+
+def _sas_dal_technical():
+    """ESPN 401469046 (NBA_2023-02-23_SAS_DAL), 6:58 of the 1st: Branham's
+    and-one layup, Green's shooting foul, Doncic's technical, then the made
+    technical and the missed and-one, both logged with no team."""
+    sc = {"espn_home_score": 13}
+    return [
+        make2(1, 418, "A", 12) | {**sc, "espn_away_score": 12},
+        P(1, 418, "Shooting Foul", "H", 2, text="P2 shooting foul", **sc, espn_away_score=12),
+        P(1, 418, "Technical Foul", "H", 1, text="P1 technical foul", **sc, espn_away_score=12),
+        P(1, 418, "Free Throw - Technical", None, scoring=True, shooting=True,
+          text="makes technical free throw", **sc, espn_away_score=13),
+        P(1, 418, "Free Throw - 1 of 1", None, shooting=True,
+          text="misses free throw 1 of 1", **sc, espn_away_score=13),
+        dreb(1, 416, "H", 1) | {**sc, "espn_away_score": 13},
+    ]
+
+
+def test_a_free_throw_with_no_team_takes_its_side_from_the_running_score_or_the_trip():
+    plays = _sas_dal_technical()
+    assert st.infer_sides(plays) == 2
+    assert plays[3]["team_side"] == "A"      # the running score rose on the away side
+    assert plays[4]["team_side"] == "A"      # a miss: the side of the trip's other free throw
+    # the and-one now counts as one possession, ended by the defensive rebound
+    ends = st.possession_ends(st.order_plays(plays))
+    assert list(ends.values()) == ["A"]
+
+
+def test_a_free_throw_with_nothing_to_go_on_takes_the_opponent_of_the_foul():
+    plays = [P(1, 300, "Shooting Foul", "H", 2, text="P2 shooting foul"),
+             P(1, 300, "Free Throw - 1 of 1", None, shooting=True, text="misses free throw 1 of 1")]
+    assert st.infer_sides(plays) == 1 and plays[1]["team_side"] == "A"
+
+
+# ── when the plays do not add up to ESPN's final ────────────────────────────
+
+def _scored(row, h, a):
+    return row | {"espn_home_score": h, "espn_away_score": a}
+
+
+def _dup_game():
+    """Home's three at 10:00 is logged a second time at 9:58 (the running
+    score does not move on it); a substitution follows; away scores two."""
+    return five_game({1: [_scored(make3(1, 600, "H", 1), 3, 0),
+                          _scored(make3(1, 598, "H", 1), 3, 0),
+                          _scored(sub(1, 500, "H", 6, 1), 3, 0),
+                          _scored(make2(1, 400, "A", 11), 3, 2),
+                          _scored(make2(1, 300, "H", 6), 5, 2)]})
+
+
+def test_a_duplicated_play_scores_nothing_when_the_running_score_ends_at_the_final():
+    plays = _dup_game()
+    stints, diag = derive(plays)
+    assert sum(s["home_pts"] for s in stints) == 8          # the plays' own points
+    stints, diag = st.derive_stints(plays, ROSTER, STARTERS, {}, final=(5, 2))
+    assert sum(s["home_pts"] for s in stints) == 5
+    assert sum(s["away_pts"] for s in stints) == 2
+    assert diag.points_source == "espn_running_score" and diag.espn_score_sides == ["H"]
+    first = [s for s in stints if s["period"] == 1 and 1 in s["home_ids"]]
+    assert sum(s["home_pts"] for s in first) == 3            # the three, once, by P1's five
+
+
+def test_a_lagging_running_score_still_credits_the_scoring_play():
+    """The running score shows home's two only on the rebound after the
+    change; the points stay with the five that scored them."""
+    plays = five_game({1: [_scored(make3(1, 600, "H", 1), 3, 0),
+                           _scored(make3(1, 598, "H", 1), 3, 0),        # duplicate
+                           _scored(make2(1, 500, "H", 2), 3, 0),        # running score lags
+                           _scored(sub(1, 500, "H", 6, 2), 3, 0),
+                           _scored(miss(1, 480, "A", 11), 3, 0),
+                           _scored(dreb(1, 478, "H", 6), 5, 0)]})
+    stints, _ = st.derive_stints(plays, ROSTER, STARTERS, {}, final=(5, 0))
+    with_p2 = [s for s in stints if s["period"] == 1 and 2 in s["home_ids"]]
+    assert sum(s["home_pts"] for s in with_p2) == 5
+    assert sum(s["home_pts"] for s in stints) == 5
+
+
+def test_the_plays_points_stand_when_they_add_up_or_espn_is_short_too():
+    plays = _dup_game()
+    # adds up (the final says 8): ESPN's running score is never read
+    stints, diag = st.derive_stints(plays, ROSTER, STARTERS, {}, final=(8, 2))
+    assert sum(s["home_pts"] for s in stints) == 8 and diag.points_source == "plays"
+    # ESPN's running score ends at 5 but the final says 9: plays missing, keep 8
+    stints, diag = st.derive_stints(plays, ROSTER, STARTERS, {}, final=(9, 2))
+    assert sum(s["home_pts"] for s in stints) == 8 and diag.points_source == "plays"
+
+
+# ── zero-second segments ────────────────────────────────────────────────────
+
+def test_a_change_with_the_clock_stopped_keeps_the_five_that_played_the_event():
+    """NBA_2025-11-26_MIN_OKC, 0:26.8 of the 4th: after the timeout the away
+    side brings on P16 for P11, commits a 5-second inbound violation, and P11
+    goes back on, all at one instant. The turnover is the zero-second five's,
+    not the five before the timeout's."""
+    plays = five_game({4: [P(4, 26.8, "Full Timeout", "A", text="Full timeout"),
+                           sub(4, 26.8, "A", 16, 11),
+                           P(4, 26.8, "5-Second Turnover", "A", text="5 second violation"),
+                           sub(4, 26.8, "A", 11, 16)]})
+    stints, _ = derive(plays)
+    zero = [s for s in stints if s["duration_s"] == 0]
+    assert len(zero) == 1
+    assert 16 in zero[0]["away_ids"] and 11 not in zero[0]["away_ids"]
+    assert zero[0]["away_tov"] == 1 and zero[0]["away_poss"] == 1
+    assert sum(s["away_tov"] for s in stints if s["duration_s"] > 0) == 0
+
+
 # ── possessions ─────────────────────────────────────────────────────────────
 
 def test_possessions_end_on_makes_rebounds_turnovers_and_the_last_free_throw():

@@ -17,8 +17,10 @@ and the All-Star games (teams GIA, USA, STARS, STRIPES) are dropped.
 WHAT IT WRITES (every table created here, locked down beside its CREATE).
   nba_pbp_games      one row per ESPN game loaded: our game_id, how it was
                      matched to `games`, ESPN's final score, the derivation's
-                     diagnostics. A game's row is written in the SAME commit as
-                     its plays and segments, so it is the resume ledger.
+                     diagnostics, where its segment points came from
+                     (points_source) and whether they miss the final
+                     (points_mismatch). A game's row is written in the SAME
+                     commit as its plays and segments, so it is the resume ledger.
   nba_pbp            one row per play, slimmed (see PBP_COLS).
   nba_pbp_box        ESPN's box score per game: who played, for which side,
                      who started, minutes. The derivation's other input, kept
@@ -42,12 +44,18 @@ the home team of our `games` row.
     python -m data.ingestors.nba_pbp --seasons 2019 --load --rederive-stints
     python -m data.ingestors.nba_pbp --seasons 2019 --dry-run   (no writes)
     python -m data.ingestors.nba_pbp --seasons 2019-2026 --fill-gaps
+    python -m data.ingestors.nba_pbp --rebuild ids.txt [--dry-run]
 
 GAPS. The release lacks seven regular-season games (six from late February
 2019-20, and NBA_2026-01-20_LAC_CHI). --fill-gaps takes every `games` row no stored ESPN game
 matched from ESPN's own free scoreboard and summary endpoints, which the
 release is a flattening of, and writes it through the same path with
-source 'espn_summary_api'.
+source 'espn_summary_api', dated by our `games` row.
+
+REBUILD. --rebuild re-derives the stored games whose ESPN ids a file lists,
+from nba_pbp and nba_pbp_box alone (so gap games rebuild too), and replaces
+each one's ledger row and segments, and its plays where this code sets them
+differently, in one transaction per game.
 """
 from __future__ import annotations
 
@@ -67,7 +75,13 @@ from data.ingestors import nba_stints as st
 from data.name_match import normalize_player_name
 
 SOURCE = "sportsdataverse_espn_pbp"
-DERIVATION = "stints-v1"
+# stints-v2 (2026-10-17): sides inferred for free throws ESPN left without a
+# team, a side's points from ESPN's running score when its plays do not add up
+# to the final, plays logged under a second ESPN id aliased to the box id, and
+# the points_source / points_mismatch ledger columns. On every game none of
+# those touch, v2 writes exactly v1's rows, so only the games they touch were
+# rebuilt (`--rebuild`); the rest keep the label stints-v1.
+DERIVATION = "stints-v2"
 RELEASE = "https://github.com/sportsdataverse/sportsdataverse-data/releases/download"
 PBP_URL = RELEASE + "/espn_nba_pbp/play_by_play_{season}.parquet"
 BOX_URL = RELEASE + "/espn_nba_player_boxscores/player_box_{season}.parquet"
@@ -107,6 +121,7 @@ GAME_COLS = (
     "away_team", "in_games", "match_method", "sides_swapped", "n_plays",
     "n_periods", "espn_home_final", "espn_away_final", "pbp_home_pts",
     "pbp_away_pts", "n_stints", "diagnostics", "source", "derivation",
+    "points_source", "points_mismatch",
 )
 STINT_COLS = (
     "espn_game_id", "stint_no", "game_id", "season", "season_type", "period",
@@ -143,9 +158,19 @@ CREATE TABLE IF NOT EXISTS nba_pbp_games (
     diagnostics      JSONB,
     source           TEXT NOT NULL,
     derivation       TEXT,
-    loaded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    loaded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    points_source    TEXT,
+    points_mismatch  BOOLEAN
 )
 """
+# Columns added after a table was first created: CREATE TABLE IF NOT EXISTS
+# does nothing to a table that exists, so each one is also added here.
+ADDED_COLUMNS = {
+    "nba_pbp_games": (
+        "ALTER TABLE nba_pbp_games ADD COLUMN IF NOT EXISTS points_source TEXT",
+        "ALTER TABLE nba_pbp_games ADD COLUMN IF NOT EXISTS points_mismatch BOOLEAN",
+    ),
+}
 PBP_DDL = """
 CREATE TABLE IF NOT EXISTS nba_pbp (
     espn_game_id     BIGINT NOT NULL,
@@ -448,9 +473,20 @@ def slim_plays(records: list[dict], *, espn_game_id: int, game_id: str, season: 
             "clock": round(float(clock), 1),
         })
     rows = st.order_plays(rows)
-    home = away = 0
     for n, p in enumerate(rows, start=1):
         p["play_no"] = n
+    return score_plays(rows)
+
+
+def score_plays(rows: list[dict]) -> list[dict]:
+    """Rows in play order -> the same rows with team_side filled where ESPN
+    left a free throw or a scoring play without a team (nba_stints.infer_sides;
+    `espn_team_id` stays NULL on those, which is how a reader finds them), and
+    shot_value, points, our running score and game_s set. Shared by the load
+    and by --rebuild, which reads rows back from nba_pbp."""
+    st.infer_sides(rows)
+    home = away = 0
+    for p in rows:
         p["shot_value"] = st.shot_value(p)
         p["points"] = st.play_points(p)
         if p["points"] and p["team_side"] == st.HOME:
@@ -460,6 +496,12 @@ def slim_plays(records: list[dict], *, espn_game_id: int, game_id: str, season: 
         p["home_score"], p["away_score"] = home, away
         p["game_s"] = round(st.elapsed(p["period"], p["clock"]), 1)
     return rows
+
+
+def sides_inferred(plays: list[dict]) -> int:
+    """Rows whose team_side was inferred (it is set, ESPN's team is not)."""
+    return sum(1 for p in plays if p.get("team_side") in (st.HOME, st.AWAY)
+               and p.get("espn_team_id") is None)
 
 
 def box_context(box_records: list[dict], swapped: bool = False):
@@ -531,6 +573,77 @@ def drop_duplicate_box_ids(roster: dict, starters: dict, seconds: dict, names: d
         for s in starters.values():
             s.discard(a)
     return drop
+
+
+def alias_play_ids(plays: list[dict], roster: dict[int, str],
+                   names: dict[int, str]) -> dict[int, int]:
+    """{id the plays use: the box id of the same player} for a player ESPN's
+    plays carry under an id its box does not list.
+
+    ESPN logs some players' plays under a second athlete id (Emanuel Terry is
+    4411934 in the plays of NBA_2019-01-27_PHX_LAL and 4355392 in its box;
+    Jordan McLaughlin is both 4715220 and 3134916 in the plays of
+    NBA_2021-02-10_LAC_MIN). Without the alias the plays' id is a stranger: his
+    floor time sits under 'espn:<id>' and the box id he really is never plays.
+
+    For each id that appears in the plays but not the box, the side is the one
+    most of his plays are credited to, and his name is read from the play text:
+    the start of the text on his own plays ("Emanuel Terry makes 2-foot
+    layup"), and the leaving player's half of a substitution ("... enters the
+    game for Emanuel Terry"). He is the box player of that side whose
+    normalized name is read most often, when exactly one is, and no other box
+    player of the side shares that name."""
+    by_name: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for a, side in roster.items():
+        nm = normalize_player_name(names.get(a))
+        if nm:
+            by_name[side][nm].append(a)
+    read: dict[int, Counter] = defaultdict(Counter)    # stray id -> {box id: reads}
+    sides: dict[int, Counter] = defaultdict(Counter)
+    for p in plays:
+        side = p.get("team_side")
+        a1, a2 = p.get("athlete_id_1"), p.get("athlete_id_2")
+        if st.is_sub(p):
+            pin, pout = st.sub_players(p)
+            m = st._SUB_RE.match(p.get("text") or "")
+            spans = []
+            if pin is not None and m:
+                spans.append((pin, normalize_player_name(m.group("pin"))))
+            if pout is not None and m:
+                spans.append((pout, normalize_player_name(m.group("pout"))))
+        else:
+            spans = [(a1, normalize_player_name(p.get("text")))] if a1 is not None else []
+        for a, text in spans:
+            if a is None or a in roster or side not in (st.HOME, st.AWAY):
+                continue
+            sides[a][side] += 1
+            for nm, ids in by_name[side].items():
+                if len(ids) == 1 and (text == nm or text.startswith(nm + " ")):
+                    read[a][ids[0]] += 1
+    out: dict[int, int] = {}
+    for a, votes in read.items():
+        side = sides[a].most_common(1)[0][0]
+        votes = Counter({b: v for b, v in votes.items() if roster.get(b) == side})
+        top = votes.most_common(2)
+        if top and (len(top) == 1 or top[1][1] < top[0][1]):
+            out[a] = top[0][0]
+    return out
+
+
+def _with_aliases(plays: list[dict], aliases: dict[int, int]) -> list[dict]:
+    """Copies of the plays with each aliased athlete id replaced by the box id
+    (nba_pbp keeps ESPN's ids as ESPN wrote them; only the derivation reads
+    these)."""
+    if not aliases:
+        return plays
+    out = []
+    for p in plays:
+        q = dict(p)
+        for k in ("athlete_id_1", "athlete_id_2", "athlete_id_3"):
+            if q.get(k) in aliases:
+                q[k] = aliases[q[k]]
+        out.append(q)
+    return out
 
 
 # ── player id matching ──────────────────────────────────────────────────────
@@ -735,9 +848,46 @@ def box_finals(box_records: list[dict], swapped: bool = False):
     return (a, h) if swapped else (h, a)
 
 
+def derive_game(plays: list[dict], roster: dict, starters: dict, seconds: dict,
+                names: dict, *, final: tuple | None):
+    """The derivation's half of a game, shared by the load and --rebuild:
+    (segments, diagnostics dict, {play id: box id} aliases). `roster` gains the
+    players only the plays list (roster_from_plays), after aliasing."""
+    aliases = alias_play_ids(plays, roster, names)
+    dplays = _with_aliases(plays, aliases)
+    from_plays = roster_from_plays(dplays, roster)
+    stints, diag = st.derive_stints(dplays, roster, starters, seconds, ordered=True,
+                                    final=final)
+    return stints, {**diag.as_dict(), "roster_from_plays": from_plays,
+                    "sides_inferred": sides_inferred(plays),
+                    "play_id_aliases": {str(k): v for k, v in sorted(aliases.items())}}, aliases
+
+
+def points_check(s_rows: list[dict], final: tuple | None):
+    """True when the segments' points are not the final, None with no final."""
+    if final is None or final[0] is None or final[1] is None:
+        return None
+    return (sum(r["home_pts"] for r in s_rows), sum(r["away_pts"] for r in s_rows)) \
+        != (int(final[0]), int(final[1]))
+
+
+def alias_map_rows(aliases: dict[int, int], id_map: dict[int, str],
+                   names: dict[int, str]) -> list[dict]:
+    """nba_player_id_map rows for the ids only the plays use, so a reader can
+    join nba_pbp's athlete ids too; written only where the id has no row."""
+    return [{"espn_id": a, "player_id": id_map.get(b), "name": names.get(b) or "",
+             "our_name": None, "method": "play_alias_in_game", "games_seen": 1,
+             "games_matched": 1 if id_map.get(b) else 0, "games_conflict": 0}
+            for a, b in sorted(aliases.items())]
+
+
 def build_game(espn_game_id: int, recs: list[dict], box_recs: list[dict], meta: dict,
-               match: tuple, id_map: dict[int, str], seconds_override: dict | None = None):
-    """Everything one game writes: (game row, pbp rows, box rows, stint rows)."""
+               match: tuple, id_map: dict[int, str], seconds_override: dict | None = None,
+               games_final: tuple | None = None):
+    """Everything one game writes: (game row, pbp rows, box rows, stint rows).
+
+    `games_final` is our `games` row's (home, away), used for points_mismatch
+    only where ESPN's box carries no final (one 2018-19 game has no box)."""
     game_id, in_games, method, swapped = match
     season, stype = meta["season"], meta["season_type"]
     home, away = (meta["away"], meta["home"]) if swapped else (meta["home"], meta["away"])
@@ -747,13 +897,15 @@ def build_game(espn_game_id: int, recs: list[dict], box_recs: list[dict], meta: 
     play_ids = {a for p in plays for a in (p["athlete_id_1"], p["athlete_id_2"],
                                            p["athlete_id_3"]) if a is not None}
     dropped = drop_duplicate_box_ids(roster, starters, seconds, names, play_ids)
-    from_plays = roster_from_plays(plays, roster)
+    box_roster = dict(roster)
     if seconds_override:
         seconds = {**seconds, **seconds_override}
-    stints, diag = st.derive_stints(plays, roster, starters, seconds, ordered=True)
+    eh, ea = box_finals(box_recs, swapped)
+    final = (eh, ea) if eh is not None and ea is not None else games_final
+    stints, diag, aliases = derive_game(plays, roster, starters, seconds, names,
+                                        final=(eh, ea))
     s_rows = stint_rows(stints, espn_game_id=espn_game_id, game_id=game_id, season=season,
                         season_type=stype, home=home, away=away, id_map=id_map)
-    eh, ea = box_finals(box_recs, swapped)
     g = {
         "espn_game_id": espn_game_id, "game_id": game_id, "season": season,
         "season_type": stype, "game_date": meta["game_date"], "home_team": home,
@@ -764,11 +916,15 @@ def build_game(espn_game_id: int, recs: list[dict], box_recs: list[dict], meta: 
         "pbp_home_pts": plays[-1]["home_score"] if plays else 0,
         "pbp_away_pts": plays[-1]["away_score"] if plays else 0,
         "n_stints": len(s_rows),
-        "diagnostics": {**diag.as_dict(), "box_duplicate_ids_dropped": len(dropped),
-                        "roster_from_plays": from_plays, "box_rows": len(box_recs)},
+        "diagnostics": {**diag, "box_duplicate_ids_dropped": len(dropped),
+                        "box_rows": len(box_recs)},
         "source": SOURCE,
         "derivation": DERIVATION,
+        "points_source": diag["points_source"],
+        "points_mismatch": points_check(s_rows, final),
+        "_alias_map_rows": alias_map_rows(aliases, id_map, names),
     }
+    roster = box_roster
     b_rows = []
     for r in box_recs:
         aid = _int(r.get("athlete_id"))
@@ -800,6 +956,8 @@ def ensure_tables(conn) -> None:
                              revoked_from=API_ROLES):
             return False
         conn.execute(ddl)
+        for stmt in ADDED_COLUMNS.get(table, ()):
+            conn.execute(stmt)
         for k in idx(table):
             conn.execute(INDEXES[k])
         return True
@@ -845,6 +1003,8 @@ def write_games(conn, batch: list[tuple], rederive: bool) -> None:
         _insert(conn, "nba_pbp", PBP_COLS, [p for _g, ps, _b, _s in batch for p in ps])
         _insert(conn, "nba_pbp_box", BOX_COLS, [b for _g, _p, bs, _s in batch for b in bs])
     _insert(conn, "nba_stints", STINT_COLS, [s for _g, _p, _b, ss in batch for s in ss])
+    _insert(conn, "nba_player_id_map", MAP_COLS,
+            [m for g, _p, _b, _s in batch for m in g.get("_alias_map_rows", ())])
     conn.commit()
 
 
@@ -858,6 +1018,13 @@ def _season_games(conn, season: int) -> dict[str, tuple]:
         "SELECT game_id, home_score, away_score FROM games WHERE sport = 'NBA' AND season = %s",
         (season,)).fetchall()
     return {r[0]: (r[1], r[2]) for r in rows}
+
+
+def _games_final(scores) -> tuple | None:
+    """`games`' (home_score, away_score) as ints, or None."""
+    if not scores or _int(scores[0]) is None or _int(scores[1]) is None:
+        return None
+    return (_int(scores[0]), _int(scores[1]))
 
 
 def _season_adv(conn, season: int):
@@ -980,7 +1147,8 @@ def load_season(conn, season: int, *, rederive: bool = False, dry_run: bool = Fa
         m = meta[eid]
         match = matches[eid]
         built = build_game(eid, games[eid], boxes.get(eid, []), m, match, id_map,
-                           _exact_seconds(boxes.get(eid, []), rev.get(match[0], {}), id_map))
+                           _exact_seconds(boxes.get(eid, []), rev.get(match[0], {}), id_map),
+                           games_final=_games_final(our.get(match[0])))
         stats["games"] += 1
         stats["plays"] += len(built[1])
         stats["stints"] += len(built[3])
@@ -1094,6 +1262,29 @@ def find_event(game_id: str, game_date: str, boards: dict, get_board,
     return None
 
 
+def build_gap_game(game_id: str, game_date: str, ev: dict, swapped: bool, data: dict,
+                   season: int, id_map: dict[int, str], adv_secs: dict[str, float],
+                   games_final: tuple | None = None):
+    """One gap game from ESPN's summary JSON, through build_game; None when
+    the summary has no plays or a side is not an NBA team.
+
+    `game_date` is our `games` row's date (Eastern), and it is the date the
+    ledger stores: ESPN dates some of these games by a placeholder timestamp a
+    day late (DET at POR, 2020-02-23, is ESPN's 2020-02-24T12:00Z)."""
+    eid = int(ev["event_id"])
+    recs, box = summary_records(data, eid, season, ev.get("season_type") or 2, game_date)
+    if not recs:
+        return None
+    meta = espn_game_meta(eid, recs)
+    if meta is None:
+        return None
+    method = "gap_swapped" if swapped else "gap_exact"
+    g = build_game(eid, recs, box, meta, (game_id, True, method, swapped), id_map,
+                   _exact_seconds(box, adv_secs, id_map), games_final=games_final)
+    g[0]["source"] = GAP_SOURCE
+    return g
+
+
 def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dict:
     """Load every `games` row of the season that no stored ESPN game matched,
     from ESPN's free scoreboard and summary endpoints (the release is missing
@@ -1104,7 +1295,7 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
         from data.ingestors.nba_results_ingestor import _http_get_json as get_json
     ensure_tables(conn)
     missing = conn.execute("""
-        SELECT g.game_id, g.game_date FROM games g
+        SELECT g.game_id, g.game_date, g.home_score, g.away_score FROM games g
          WHERE g.sport = 'NBA' AND g.season = %s AND g.home_score IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM nba_pbp_games p WHERE p.game_id = g.game_id)
          ORDER BY g.game_date""", (season,)).fetchall()
@@ -1131,7 +1322,7 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
         return parse_nba_scoreboard(get_json(ESPN_NBA_SCOREBOARD_URL, {"dates": d.replace("-", "")}), d)
 
     built = []
-    for game_id, gdate in missing:
+    for game_id, gdate, hs, as_ in missing:
         found = find_event(game_id, gdate, boards, board, taken)
         if not found:
             stats["no_espn_event"] += 1
@@ -1140,19 +1331,12 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
         ev, swapped = found
         eid = int(ev["event_id"])
         data = get_json(ESPN_NBA_SUMMARY_URL, {"event": eid})
-        recs, box = summary_records(data, eid, season, ev.get("season_type") or 2, ev["game_date"])
-        if not recs:
-            stats["no_plays"] += 1
-            logger.warning(f"gap {game_id}: ESPN event {eid} has no plays")
+        g = build_gap_game(game_id, gdate, ev, swapped, data, season, id_map,
+                           adv.get(game_id, {}), games_final=_games_final((hs, as_)))
+        if g is None:
+            stats["no_plays_or_not_nba"] += 1
+            logger.warning(f"gap {game_id}: ESPN event {eid} has no plays or no NBA teams")
             continue
-        meta = espn_game_meta(eid, recs)
-        if meta is None:
-            stats["not_nba_teams"] += 1
-            continue
-        method = "gap_swapped" if swapped else "gap_exact"
-        g = build_game(eid, recs, box, meta, (game_id, True, method, swapped), id_map,
-                       _exact_seconds(box, adv.get(game_id, {}), id_map))
-        g[0]["source"] = GAP_SOURCE
         stats["filled"] += 1
         built.append(g)
         time.sleep(0.3)
@@ -1162,9 +1346,129 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
     return dict(stats)
 
 
+# ── --rebuild: named games re-derived from what Supabase already holds ─────
+
+def stored_inputs(game: dict, pbp: list[dict], box: list[dict]):
+    """A stored game (its nba_pbp_games, nba_pbp and nba_pbp_box rows as
+    dicts) -> (plays, roster, starters, seconds, names, final), the inputs
+    build_game hands the derivation. Stored sides are already flipped for a
+    swapped match, so nothing is flipped again."""
+    plays = []
+    for r in sorted(pbp, key=lambda r: r["play_no"]):
+        p = {k: r.get(k) for k in PBP_COLS}
+        p["clock"] = float(r["clock_s"])
+        plays.append(p)
+    score_plays(plays)
+    roster, starters, seconds, names = {}, {st.HOME: set(), st.AWAY: set()}, {}, {}
+    for b in box:
+        a = int(b["espn_id"])
+        roster[a] = b["side"]
+        names[a] = b.get("name") or ""
+        if b.get("starter"):
+            starters[b["side"]].add(a)
+        mins = _float(b.get("minutes"))
+        if mins and mins > 0:
+            seconds[a] = mins * 60.0
+    final = (game.get("espn_home_final"), game.get("espn_away_final"))
+    return plays, roster, starters, seconds, names, final
+
+
+def rebuild_stored(game: dict, pbp: list[dict], box: list[dict], id_map: dict[int, str],
+                   adv_secs: dict[str, float], games_final: tuple | None = None):
+    """(game row, plays, stint rows, plays_changed) for one stored game under
+    this derivation. plays_changed says whether any nba_pbp column this code
+    sets (team_side, the running score) differs from the stored row. The
+    ledger's game_date is the date in our game_id (Eastern, as every other NBA
+    table), which fixes the gap games ESPN dated a day late."""
+    plays, roster, starters, seconds, names, final = stored_inputs(game, pbp, box)
+    seconds = {**seconds, **{a: adv_secs[id_map[a]] for a in roster
+                             if id_map.get(a) in adv_secs}}
+    stints, diag, aliases = derive_game(plays, roster, starters, seconds, names, final=final)
+    s_rows = stint_rows(stints, espn_game_id=game["espn_game_id"], game_id=game["game_id"],
+                        season=game["season"], season_type=game["season_type"],
+                        home=game["home_team"], away=game["away_team"], id_map=id_map)
+    old_diag = game.get("diagnostics") or {}
+    if isinstance(old_diag, str):
+        import json
+        old_diag = json.loads(old_diag)
+    check = final if final[0] is not None and final[1] is not None else games_final
+    g = {**{k: game.get(k) for k in GAME_COLS},
+         "game_date": game["game_id"].split("_")[1],
+         "n_plays": len(plays), "n_periods": max((p["period"] for p in plays), default=0),
+         "pbp_home_pts": plays[-1]["home_score"] if plays else 0,
+         "pbp_away_pts": plays[-1]["away_score"] if plays else 0,
+         "n_stints": len(s_rows),
+         "diagnostics": {**diag,
+                         "box_duplicate_ids_dropped": old_diag.get("box_duplicate_ids_dropped", 0),
+                         "box_rows": old_diag.get("box_rows", len(box))},
+         "derivation": DERIVATION,
+         "points_source": diag["points_source"],
+         "points_mismatch": points_check(s_rows, check),
+         "_alias_map_rows": alias_map_rows(aliases, id_map, names)}
+    by_no = {r["play_no"]: r for r in pbp}
+    changed = any((p["team_side"], p["home_score"], p["away_score"], p["points"])
+                  != (by_no[p["play_no"]]["team_side"], by_no[p["play_no"]]["home_score"],
+                      by_no[p["play_no"]]["away_score"], by_no[p["play_no"]]["points"])
+                  for p in plays)
+    return g, plays, s_rows, changed
+
+
+def _dicts(cur_rows, cols):
+    return [dict(zip(cols, r)) for r in cur_rows]
+
+
+def rebuild_games(conn, espn_ids: list[int], *, dry_run: bool = False) -> dict:
+    """Re-derive the named stored games and replace each one's ledger row and
+    segments (and its plays, where this code sets them differently) in ONE
+    transaction per game. Reads by espn_game_id only (the tables' key)."""
+    if not dry_run:
+        ensure_tables(conn)
+    id_map = _load_map(conn)
+    stats = Counter()
+    out = []
+    logger.info(f"rebuild: {len(espn_ids)} games; {active_queries(conn)} active queries")
+    for n, eid in enumerate(espn_ids, start=1):
+        grow = conn.execute(f"SELECT {', '.join(GAME_COLS[:-2])} FROM nba_pbp_games "
+                            "WHERE espn_game_id = %s", (eid,)).fetchall()
+        if not grow:
+            stats["not_stored"] += 1
+            continue
+        game = dict(zip(GAME_COLS[:-2], grow[0]))
+        pbp = _dicts(conn.execute(f"SELECT {', '.join(PBP_COLS)} FROM nba_pbp "
+                                  "WHERE espn_game_id = %s", (eid,)).fetchall(), PBP_COLS)
+        box = _dicts(conn.execute(f"SELECT {', '.join(BOX_COLS)} FROM nba_pbp_box "
+                                  "WHERE espn_game_id = %s", (eid,)).fetchall(), BOX_COLS)
+        adv = {r[0]: float(r[1]) for r in conn.execute(
+            "SELECT player_id, seconds_played FROM nba_player_game_adv "
+            "WHERE game_id = %s AND played AND seconds_played > 0", (game["game_id"],)).fetchall()}
+        gf = conn.execute("SELECT home_score, away_score FROM games WHERE game_id = %s",
+                          (game["game_id"],)).fetchall()
+        g, plays, s_rows, changed = rebuild_stored(game, pbp, box, id_map, adv,
+                                                   _games_final(gf[0]) if gf else None)
+        stats["games"] += 1
+        stats["plays_rewritten"] += len(plays) if changed else 0
+        stats["stints"] += len(s_rows)
+        out.append((g, s_rows, changed))
+        if dry_run:
+            continue
+        conn.execute("DELETE FROM nba_stints WHERE espn_game_id = %s", (eid,))
+        conn.execute("DELETE FROM nba_pbp_games WHERE espn_game_id = %s", (eid,))
+        _insert(conn, "nba_pbp_games", GAME_COLS, [_json_diag(g)],
+                casts={"diagnostics": "::jsonb"})
+        if changed:
+            conn.execute("DELETE FROM nba_pbp WHERE espn_game_id = %s", (eid,))
+            _insert(conn, "nba_pbp", PBP_COLS, plays)
+        _insert(conn, "nba_stints", STINT_COLS, s_rows)
+        _insert(conn, "nba_player_id_map", MAP_COLS, g["_alias_map_rows"])
+        conn.commit()
+        if n % 25 == 0:
+            logger.info(f"rebuild: {n}/{len(espn_ids)}; {active_queries(conn)} active queries")
+    return {"stats": dict(stats), "games": out}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--seasons", required=True, help="e.g. 2019-2026")
+    ap.add_argument("--seasons", help="e.g. 2019-2026 (every mode but --rebuild)")
     ap.add_argument("--build-map", action="store_true")
     ap.add_argument("--load", action="store_true")
     ap.add_argument("--rederive-stints", action="store_true",
@@ -1173,11 +1477,18 @@ def main() -> None:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--fill-gaps", action="store_true",
                     help="games in `games` the release lacks, from ESPN's summary API")
+    ap.add_argument("--rebuild", metavar="FILE",
+                    help="re-derive the stored games whose ESPN ids FILE lists, one per line")
     a = ap.parse_args()
     from data.db import get_connection
 
     conn = get_connection()
     try:
+        if a.rebuild:
+            ids = [int(x) for x in Path(a.rebuild).read_text(encoding="utf-8").split()]
+            out = rebuild_games(conn, ids, dry_run=a.dry_run)
+            print(out["stats"])
+            return
         seasons = parse_seasons(a.seasons)
         if a.build_map:
             print({"map": build_map(conn, seasons)})

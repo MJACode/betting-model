@@ -20,6 +20,25 @@ throw is 1. ESPN's score columns are stale on non-scoring rows (a substitution
 between two free throws carries the score from before the first one), and
 `score_value` is 0 on every made free throw in the 2018-19 file.
 
+WHEN THE PLAYS DO NOT ADD UP. ESPN's play list sometimes logs a scoring play
+twice (NBA_2025-11-15_DEN_MIN: Jokic's three at sequence 400 and again at
+408) or flags a miss as a make, while ESPN's running score (the score columns)
+is right. For a side whose plays' points do not equal ESPN's final but whose
+running score ends exactly at it, that side's points are taken from the
+running score instead (espn_score_credits): each of the side's scoring plays
+is credited with how far the running score rose between it and the side's
+next scoring play, so a duplicate scores nothing and the side's total is the
+final. Measured over the 10,223 release games of 2018-19 to 2025-26 that
+carry ESPN's final: the plays add up in 10,196; the running score ends at the
+final in 19 of the other 27 (one of them, SAS_DAL 2023-02-23, adds up once
+infer_sides gives its technical free throw a team); in the last 8 the running
+score is short too (plays missing from the feed) and the plays' points are
+kept. Crediting every play from the running score is wrong: it can lag the
+play that scored (DEN_MIN 2025-11-15: Jokic's three at 2:34 of the third reads
+as one point until 1:22), and crediting each scoring row with the rise on that
+row broke the total in 179 of 2018-19's 1,305 games that add up and 63 of
+2025-26's 1,319.
+
 SUBSTITUTIONS DURING FREE THROWS. A substitution logged after a foul and before
 the last free throw of that trip, at the same clock, is moved to just after the
 last free throw. The free throws are then credited to the players who were on
@@ -259,6 +278,105 @@ def play_points(p) -> int:
         return 0
     v = shot_value(p)
     return v or 0
+
+
+def _espn_score(p):
+    h, a = p.get("espn_home_score"), p.get("espn_away_score")
+    return None if h is None or a is None else (int(h), int(a))
+
+
+def infer_sides(plays: list[dict]) -> int:
+    """Fill `team_side` on free throws and scoring plays ESPN logged with no
+    team. Rows in play order; changed in place; returns how many were filled.
+
+    ESPN gives some technical free throws no team (ESPN game 401469046,
+    NBA_2023-02-23_SAS_DAL, plays 46 and 47: a made technical and the missed
+    and-one after it, both San Antonio's, so its point fell out of every
+    segment). A scoring play takes the side whose ESPN running score rose on
+    that row, against the previous row that carries a score, when exactly one
+    side's did. A free throw still without a side takes the side of the other
+    free throws at the same instant, else the opponent of the team that fouled
+    at that instant; either only when there is exactly one candidate."""
+    n = 0
+    prev = (0, 0)
+    for p in plays:
+        cur = _espn_score(p)
+        if p.get("team_side") is None and p.get("scoring_play") and cur is not None:
+            dh, da = cur[0] - prev[0], cur[1] - prev[1]
+            side = HOME if dh > 0 and da == 0 else AWAY if da > 0 and dh == 0 else None
+            if side:
+                p["team_side"] = side
+                n += 1
+        if cur is not None:
+            prev = cur
+    i, m = 0, len(plays)
+    while i < m:
+        j = i
+        key = (plays[i]["period"], float(plays[i]["clock"]))
+        while j < m and (plays[j]["period"], float(plays[j]["clock"])) == key:
+            j += 1
+        group = plays[i:j]
+        for p in group:
+            if p.get("team_side") is not None or not is_ft(p):
+                continue
+            ft_sides = {q.get("team_side") for q in group
+                        if q is not p and is_ft(q) and q.get("team_side") in SIDES}
+            foul_sides = {q.get("team_side") for q in group
+                          if is_foul(q) and q.get("team_side") in SIDES}
+            if len(ft_sides) == 1:
+                p["team_side"] = ft_sides.pop()
+            elif not ft_sides and len(foul_sides) == 1:
+                p["team_side"] = _opp(foul_sides.pop())
+            else:
+                continue
+            n += 1
+        i = j
+    return n
+
+
+def espn_score_credits(plays: list[dict], final) -> tuple[dict | None, list[str]]:
+    """({id(play): [home pts, away pts]}, sides credited) when a side's points
+    must come from ESPN's running score (see WHEN THE PLAYS DO NOT ADD UP),
+    else (None, []). `final` is ESPN's final (home, away); rows in play order.
+
+    Per side, independently: kept on the plays' own points when they equal the
+    final, or when ESPN's running score does not end at the final either.
+    Otherwise each of the side's scoring plays gets the rise in the side's
+    running score (its running maximum, so a stale row never subtracts) from
+    the end of the previous scoring play's stretch to the end of its own, a
+    stretch running to the row before the side's next scoring play. The first
+    stretch starts at the tip and the last ends at the final buzzer, so the
+    credits add up to the final exactly."""
+    if final is None or final[0] is None or final[1] is None:
+        return None, []
+    own = {HOME: 0, AWAY: 0}
+    for p in plays:
+        if p.get("team_side") in SIDES:
+            own[p["team_side"]] += play_points(p)
+    credits: dict = {}
+    sides = []
+    for n_side, (s, key) in enumerate(((HOME, "espn_home_score"), (AWAY, "espn_away_score"))):
+        want = int(final[n_side])
+        if own[s] == want:
+            continue
+        run, top = [], 0
+        for p in plays:
+            v = p.get(key)
+            if v is not None and int(v) > top:
+                top = int(v)
+            run.append(top)
+        if top != want:
+            continue
+        idx = [k for k, p in enumerate(plays) if p.get("team_side") == s and play_points(p) > 0]
+        if not idx:
+            continue
+        before = 0
+        for n, k in enumerate(idx):
+            last = idx[n + 1] - 1 if n + 1 < len(idx) else len(plays) - 1
+            credits.setdefault(id(plays[k]), [0, 0])[n_side] = run[last] - before
+            before = run[last]
+        sides.append(s)
+    return (credits, sides) if sides else (None, [])
 
 
 def presence_eligible(p) -> bool:
@@ -569,23 +687,41 @@ class Diagnostics:
     added_missing: int = 0          # a fifth player put on (lookahead)
     unknown_ft: int = 0             # free-throw labels the parser did not know
     garbage_start: float | None = None
+    points_source: str = "plays"    # 'espn_running_score' when a side's came from it
+    espn_score_sides: list = field(default_factory=list)   # which sides did
 
     def as_dict(self):
-        return dict(self.__dict__)
+        return {k: (list(v) if isinstance(v, list) else v) for k, v in self.__dict__.items()}
 
 
 def derive_stints(plays: list[dict], roster: dict[int, str], starters: dict[str, set],
                   box_seconds: dict[int, float] | None = None,
-                  ordered: bool = False) -> tuple[list[dict], Diagnostics]:
+                  ordered: bool = False,
+                  final: tuple | None = None) -> tuple[list[dict], Diagnostics]:
     """One game's segments.
 
     plays     rows shaped like nba_pbp: period, clock (seconds remaining),
               sequence_number, type_text, text, team_side ('H'/'A'/None),
-              athlete_id_1..3, scoring_play, shooting_play.
+              athlete_id_1..3, scoring_play, shooting_play, and ESPN's running
+              score espn_home_score / espn_away_score.
     roster    {espn athlete id: 'H' | 'A'} from the box score.
     starters  {'H': {ids}, 'A': {ids}}, the box score's game starters.
     box_seconds  {espn athlete id: seconds played}, used only to fill a period
               whose five cannot all be seen in its plays.
+    final     ESPN's final (home, away). With it, a side whose plays do not add
+              up to it takes its points from ESPN's running score
+              (espn_score_credits); without it, points are the plays' own.
+
+    ZERO-SECOND SEGMENTS are kept. A change made while the clock is stopped
+    (between free-throw trips, before an inbound) gives a lineup that is on
+    the floor for no game time but for real events: of the 880 such rows in
+    2018-19 to 2025-26, 338 carry points and 669 a possession. Folding them
+    into a neighbour is wrong one way or the other: NBA_2025-11-26_MIN_OKC's
+    5-second inbound violation at 0:26.8 of the 4th belongs to the zero-second
+    five (on after the timeout, before Conley went off), not the five before
+    it; NBA_2025-10-27_DEN_MIN's free throw at 0:07 of the 3rd belongs to the
+    five after it. A model weighting segments must weight by possessions,
+    not seconds.
 
     LINEUP REPAIRS (each counted in Diagnostics). ESPN drops or half-logs
     some substitutions. A sub is applied as written; a play by a player we do
@@ -605,18 +741,23 @@ def derive_stints(plays: list[dict], roster: dict[int, str], starters: dict[str,
         info = ft_info(p.get("type_text"))
         if info and info[0] == "other":
             diag.unknown_ft += 1
+    credits, credit_sides = espn_score_credits(plays, final)
+    credit = (credits, set(credit_sides)) if credits is not None else None
+    if credits is not None:
+        diag.points_source = "espn_running_score"
+        diag.espn_score_sides = list(credit_sides)
 
     # Pass 1 without a garbage split gives the 4th-quarter states; pass 2
     # splits at the garbage start that pass 1 found.
     _segs, states, _ = _walk(plays, roster, starters, box_seconds, ends, dead, None,
-                             Diagnostics())
+                             Diagnostics(), credit)
     g = garbage_start(states, max(int(p["period"]) for p in plays))
-    segs, _, diag2 = _walk(plays, roster, starters, box_seconds, ends, dead, g, diag)
+    segs, _, diag2 = _walk(plays, roster, starters, box_seconds, ends, dead, g, diag, credit)
     diag2.garbage_start = g[0] if g else None
     return segs, diag2
 
 
-def _walk(plays, roster, starters, box_seconds, ends, dead, garbage, diag):
+def _walk(plays, roster, starters, box_seconds, ends, dead, garbage, diag, credit=None):
     segs_out: list[dict] = []
     states: list[tuple] = []   # 4th quarter: (time, margin, starters_on, next_index)
     credited: dict[int, float] = {}
@@ -723,7 +864,7 @@ def _walk(plays, roster, starters, box_seconds, ends, dead, garbage, diag):
                 else:
                     close(cur, t)
                     cur = _Seg(period, t, new, cur.garbage, (score[HOME], score[AWAY]))
-            _accumulate(cur, p, k, ends, dead, score)
+            _accumulate(cur, p, k, ends, dead, score, credit)
             if is_sub(p):
                 for a in sub_players(p):
                     if a is not None:
@@ -809,7 +950,7 @@ def _merge_same_lineup(rows: list[dict]) -> list[dict]:
     return out
 
 
-def _accumulate(seg: _Seg, p, k, ends, dead, score):
+def _accumulate(seg: _Seg, p, k, ends, dead, score, credit=None):
     side = p.get("team_side")
     if k in ends:
         seg.stats[ends[k]]["poss"] += 1
@@ -817,7 +958,10 @@ def _accumulate(seg: _Seg, p, k, ends, dead, score):
     if side not in SIDES:
         return
     st = seg.stats[side]
-    pts = play_points(p)
+    if credit is not None and side in credit[1]:
+        pts = credit[0].get(id(p), (0, 0))[0 if side == HOME else 1]
+    else:
+        pts = play_points(p)
     if pts:
         st["pts"] += pts
         score[side] += pts
