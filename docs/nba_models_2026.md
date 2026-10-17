@@ -956,6 +956,27 @@ the model helped.
        shuffles the model's disagreement with Pinnacle between games on the same date, 20 runs,
        and adds it back to each game's own Pinnacle price. "Still offered at the next purchase"
        and closing-line value are not measured in play.
+     - **IG-2's information test result (2026-10-17): both markets pass the gate as written, so
+       the grid runs. The gain is Pinnacle's stored-price lag, not the model's inputs.**
+       `python -m scripts.nba_ingame_ig2 --info` (log `ig2_info_log.txt`, numbers
+       `ig2_info.json`, both beside the shared table). Change per quote, with the model minus
+       without; negative means the model helps.
+       - Moneyline log loss: −0.0331 (−0.0403 to −0.0258) on 4,390 decisions in 2021-22 →
+         2024-25; −0.0281 (−0.0417 to −0.0144) on 1,304 in 2025-26. Every season is below zero.
+       - Spread squared error of the final margin: −11.75 points² (−13.79 to −9.63) on 5,117;
+         −13.74 (−17.79 to −10.01) on 1,528 in 2025-26.
+       - The model nearly replaces Pinnacle: its weight in the stack is 0.87–1.01. On its own,
+         its log loss is 0.522 against Pinnacle's 0.556, and its squared error 102.2 against
+         113.9.
+       - The score-and-time model without fouls does the same: −0.0330 (−0.0402 to −0.0258)
+         and −11.73 (−13.75 to −9.66). The foul inputs add nothing measurable. By the line
+         written above, this gain is Pinnacle's lag (7.1), not IG-2's inputs.
+       - Against the prices that would be bet (each deciding book's own no-vig), the moneyline
+         gain covers zero: −0.0013 (−0.0036 to +0.0009), and +0.0011 (−0.0032 to +0.0054) in
+         2025-26. The spread gain does not: −0.80 points² (−1.34 to −0.24), and −1.25 (−2.32 to
+         −0.15) in 2025-26.
+       - The model fit on 89,650–102,036 game states per season; 17 games whose play-by-play
+         final differs from the official score were left out of fitting.
 2. **Bars for a grid that runs:** the house standard of §6.7. The §6.4 bars and the
    multiple-testing count (now 4,226 with these 54) are reported beside.
 3. **A cell that passes is built LIVE.** That needs an NBA in-play loop; `ncaaf_live/` is the
