@@ -949,6 +949,38 @@ def step_nhl_prop_odds() -> bool:
         return False
 
 
+def _alert_nhl_prop_no_write(reason: str) -> None:
+    """One ops alert when a pass writes no NHL prop bets.
+
+    A refresh that hits this every pass would otherwise leave the slate with
+    zero NHL prop bets and only a log line. The repeat uses the failure
+    alerter's critical interval, so a long outage stays visible without a
+    post on every pass. A post that does not confirm is not stamped.
+    """
+    from datetime import datetime, timezone
+
+    from tracking.failure_alerter import RENOTIFY_CRIT_MIN
+    from tracking.watch_util import (
+        post_ops_alert, read_alert_state, should_notify, write_alert_state,
+    )
+
+    now = datetime.now(timezone.utc)
+    state = read_alert_state("nhl_prop_scoring_alerts.json")
+    key = "nhl-prop-scoring:no-write"
+    title = "NHL prop scoring wrote nothing"
+    if not should_notify(state, key, now, RENOTIFY_CRIT_MIN):
+        return
+    detail = (
+        f"nhl-prop-scoring wrote no bets this pass: {reason}. "
+        "A pick from this pool would keep its game, and a later pass does not "
+        "bet a game that already has an NHL prop bet. The next pass that "
+        "scores every market is the one that writes."
+    )
+    if post_ops_alert(title, detail):
+        state[key] = {"last": now.isoformat(), "title": title}
+        write_alert_state("nhl_prop_scoring_alerts.json", state)
+
+
 def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
     """NHL prop cards: price tonight's lines, write at most ONE prop bet a game.
 
@@ -957,35 +989,62 @@ def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
     (scripts/nhl_props_card.py) -- score without writing; their rows are then
     pooled and the single best-EV bet in each game not already bet is written
     (mike, 2026-10-02: one a game, the best of the best). One card failing
-    does not stop the other's rows from being considered.
+    does not stop the other from scoring, unless the blocked-shots card has
+    already used the player-log budget: the props card would only fail its
+    first uncached read. This pass writes nothing when any market errors. A
+    player-log deadline, a statement the server cancelled, or a quote-read
+    error all leave the pool short a market, and a bet written now would
+    keep its game on the next pass.
     """
     ok = True
     rows: list[dict] = []
+    log_deadline = False
+    incomplete = False
+    from models.nhl_props import PlayerLogCache, PlayerLogDeadline
+    # One cache for both cards. Its 120s is time inside the player-log
+    # statements, not scoring, quote reads, or the gap between the cards.
+    # Each statement still has the server's own statement_timeout.
+    log_cache = PlayerLogCache()
     try:
         from scripts.nhl_prop_card import run_card
         keep: dict = {}
-        result = run_card(do_publish=False, keep=keep)
+        result = run_card(do_publish=False, keep=keep, log_cache=log_cache)
         rows += keep.get("rows", [])
         logger.success(f"✓ NHL blocked-shots card: {result}")
     except Exception as exc:
         logger.error(f"✗ NHL prop card failed: {exc}")
         ok = False
-    try:
-        from scripts.nhl_props_card import run_card as run_props_card
-        keep = {}
-        result = run_props_card(do_publish=False, keep=keep)
-        rows += [r for k in keep.values() for r in k.get("rows", [])]
-        failed = [m for m, r in result.items() if isinstance(r, dict) and "error" in r]
-        if failed:
-            logger.error(f"✗ NHL saves / shots / assists card failed for {failed}: {result}")
+        incomplete = True
+        if isinstance(exc, PlayerLogDeadline) or log_cache.expired():
+            log_deadline = True
+    if not log_deadline:
+        try:
+            from scripts.nhl_props_card import run_card as run_props_card
+            keep = {}
+            result = run_props_card(do_publish=False, keep=keep, log_cache=log_cache)
+            rows += [r for k in keep.values() for r in k.get("rows", [])]
+            if any(isinstance(v, dict) and v.get("log_deadline") for v in result.values()):
+                log_deadline = True
+            failed = [m for m, r in result.items() if isinstance(r, dict) and "error" in r]
+            if failed:
+                logger.error(f"✗ NHL saves / shots / assists card failed for {failed}: {result}")
+                ok = False
+                incomplete = True
+            else:
+                logger.success(f"✓ NHL saves / shots / assists card: {result}")
+        except Exception as exc:
+            logger.error(f"✗ NHL saves / shots / assists card failed: {exc}")
             ok = False
-        else:
-            logger.success(f"✓ NHL saves / shots / assists card: {result}")
-    except Exception as exc:
-        logger.error(f"✗ NHL saves / shots / assists card failed: {exc}")
-        ok = False
+            incomplete = True
+            if isinstance(exc, PlayerLogDeadline) or log_cache.expired():
+                log_deadline = True
     if dry_run:
         return ok
+    if incomplete:
+        reason = "player-log deadline reached" if log_deadline else "a market failed"
+        logger.error(f"nhl-prop-scoring: {reason}; writing no bets this pass")
+        _alert_nhl_prop_no_write(reason)
+        return False
     try:
         from scripts.nhl_props_card import publish_across_models
         logger.success(f"✓ NHL prop bets written: {publish_across_models(rows)} (one a game, all four models)")

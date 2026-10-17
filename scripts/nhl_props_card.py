@@ -1,10 +1,9 @@
 """Tonight's NHL saves, shots-on-goal and assists card: the unders each model likes, at the best price on offer.
 
 Deployment of models/nhl_props (every Spec in `LIVE`). The blocked-shots card
-(scripts/nhl_prop_card.py) is the same idea for one model at one book and is
-left exactly as it went live; this one runs beside it in the same refresh-pass
-step and borrows its slate reader, so the two cannot drift on what "tonight"
-means.
+(scripts/nhl_prop_card.py) is the one-model card; this one runs beside it in
+the same refresh-pass step and borrows its slate reader, so the two cannot
+drift on what "tonight" means. The step hands both cards one player-log cache.
 
 For each live market: read the newest pre-game quote at each bettable book for
 each player in tonight's unstarted games, build his inputs through the SAME
@@ -419,7 +418,7 @@ def render(spec: np_.Spec, n_scored: int, rows: list[dict], skipped: list[str]) 
 
 
 def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
-                 artifact: dict | None = None) -> dict:
+                 artifact: dict | None = None, log_cache: dict | None = None) -> dict:
     """One market's card: the model's mean for each priced player, the picks that clear, who was skipped."""
     out = {"priced": 0, "mus": pd.DataFrame(), "quotes": pd.DataFrame(), "rows": [], "skipped": []}
     quotes = latest_quotes(conn, games, spec.market)
@@ -440,8 +439,8 @@ def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
     cand = candidates(conn, spec.kind, teams, [season, season - 1])
     named = cand[cand.pkey.isin({np_.name_key(p) for p in quotes.player})]
     cols = list(np_.GOALIE_COLS if spec.kind == "goalie" else np_.SKATER_COLS)
-    pl = (np_.load_players(conn, spec.kind, sorted(named.player_id.unique())) if len(named)
-          else pd.DataFrame(columns=cols))
+    pl = (np_.load_players(conn, spec.kind, sorted(named.player_id.unique()), cache=log_cache)
+          if len(named) else pd.DataFrame(columns=cols))
     # Strictly before tonight. Nothing is logged for a game that has not been
     # played, but a replay of a past slate would otherwise read it.
     pl = pl[pl.game_date.astype(str) < game_date]
@@ -474,18 +473,26 @@ def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
 
 
 def run_card(game_date: str | None = None, do_publish: bool = False, now: datetime | None = None,
-             artifacts: dict | None = None, keep: dict | None = None, only: str | None = None) -> dict:
+             artifacts: dict | None = None, keep: dict | None = None, only: str | None = None,
+             log_cache: dict | None = None) -> dict:
     """The pipeline entry point (run_pipeline step + refresh pass).
 
     `now` and `artifacts` ({model_id: artifact}) exist so a past slate can be
     replayed against named artifacts; `keep`, when given, receives each
     market's scored frame and pick rows. One market failing does not stop the
-    next: each is its own model.
+    next, unless the player-log budget is already spent. Any market that
+    errors leaves the pool short, and this run writes nothing.
     """
     now = now or datetime.now(timezone.utc)
     game_date = game_date or now.astimezone(ET).strftime("%Y-%m-%d")
     out: dict = {"date": game_date}
     conn = get_connection()
+    # One log cache for this run. Its 120s is time inside the player-log
+    # statements, shared with the blocked-shots card when the step passes
+    # the cache in. Shots and assists price overlapping skaters; the second
+    # market reads only the ids the first did not.
+    if log_cache is None:
+        log_cache = np_.PlayerLogCache()
     try:
         games = slate(conn, game_date, now)
         pooled: list[dict] = []
@@ -493,7 +500,8 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
             if only and spec.model_id != only:
                 continue
             try:
-                r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id))
+                r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id),
+                                 log_cache=log_cache)
                 pooled += r["rows"]
                 out[spec.model_id] = {"priced": r["priced"], "scored": len(r["mus"]), "bets": len(r["rows"]),
                                       "skipped": len(r["skipped"])}
@@ -503,8 +511,27 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
                 conn.rollback()
                 logger.error(f"nhl-props-card: {spec.model_id} failed: {exc}")
                 out[spec.model_id] = {"error": str(exc)}
-        # Pooled, then one a game: the best bet across the markets, not the first market's.
-        out["published"] = publish_across_models(pooled) if (do_publish and pooled) else 0
+                # A cancelled statement spends the same budget as the run
+                # deadline: the next market's first uncached read would only
+                # raise. A quote-read error does not, so the other markets
+                # still score.
+                deadline = isinstance(exc, np_.PlayerLogDeadline) or (
+                    isinstance(log_cache, np_.PlayerLogCache) and log_cache.expired())
+                if deadline:
+                    out[spec.model_id]["log_deadline"] = True
+                    break
+        # Any market error leaves this pool short a market. A bet written now
+        # keeps its game: the next pass does not bet a game that already has
+        # one. Leave the picks for a pass that scored every market.
+        if any(isinstance(v, dict) and "error" in v for v in out.values()):
+            if any(isinstance(v, dict) and v.get("log_deadline") for v in out.values()):
+                logger.error("nhl-props-card: player-log deadline reached; writing no bets this pass")
+            else:
+                logger.error("nhl-props-card: a market failed; writing no bets this pass")
+            out["published"] = 0
+        else:
+            # Pooled, then one a game: the best bet across the markets, not the first market's.
+            out["published"] = publish_across_models(pooled) if (do_publish and pooled) else 0
         return out
     finally:
         conn.close()
