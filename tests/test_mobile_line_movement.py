@@ -59,6 +59,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
+
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
 SRC = MOBILE / "src"
 LIB = SRC / "lib"
 QUERIES = LIB / "queries.ts"
@@ -85,11 +87,7 @@ def _fn(src: str, name: str) -> str:
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 def _run(tmp_path: Path, script: str, files: list[str] = HISTORY_FILES) -> subprocess.CompletedProcess:
@@ -98,7 +96,7 @@ def _run(tmp_path: Path, script: str, files: list[str] = HISTORY_FILES) -> subpr
         src = re.sub(r"from '\./([\w.]+)';", r"from './\1.ts';", _read(LIB / name))
         (tmp_path / name).write_text(src, encoding="utf-8")
     return subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
     )
 

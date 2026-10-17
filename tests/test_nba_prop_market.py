@@ -5,7 +5,7 @@ Each test pins one property of the rule as it was graded
 (docs/nba_models_2026.md 4.3) or of the card that writes it: the same line and
 the same fetch, coherent two-way quotes, the EV floor on Pinnacle's own number,
 unders only, the best bettable price with Pinnacle and Bovada never taken, the
-45-70 minute window, every qualifying proposition (no game or night cap), each
+45-57 minute window, every qualifying proposition (no game or night cap), each
 game decided once (the decisions ledger), insert-once under the lock, name
 refusal, the row shape, settlement and the closing-line path.
 """
@@ -179,10 +179,10 @@ def test_a_quote_with_no_clock_is_counted_not_refused():
 # ── the window and the read bounds ───────────────────────────────────────────
 
 @pytest.mark.parametrize("lead,bets_expected,key", [
-    (75, 0, "too_early"), (70, 1, "in_window"), (55, 1, "in_window"),
+    (70, 0, "too_early"), (58, 0, "too_early"), (57, 1, "in_window"), (55, 1, "in_window"),
     (45, 1, "in_window"), (44, 0, "too_late"),
 ])
-def test_only_45_to_70_minutes_before_tip(lead, bets_expected, key):
+def test_only_45_to_57_minutes_before_tip(lead, bets_expected, key):
     now = TIP - timedelta(minutes=lead)
     snap = now.isoformat()                       # fetched by this pass
     bets, diag = run([q("pinnacle", -115, -105, snap=snap), q("fanduel", -125, +105, snap=snap)],
@@ -191,9 +191,9 @@ def test_only_45_to_70_minutes_before_tip(lead, bets_expected, key):
 
 
 def test_the_price_must_be_from_inside_the_window_too():
-    """At tip-70 a fetch taken at tip-71 is a price from before the window."""
-    now = TIP - timedelta(minutes=70)
-    snap = (TIP - timedelta(minutes=71)).isoformat()
+    """At tip-57 a fetch taken at tip-58 is a price from before the window."""
+    now = TIP - timedelta(minutes=57)
+    snap = (TIP - timedelta(minutes=58)).isoformat()
     bets, diag = run([q("pinnacle", -115, -105, snap=snap), q("fanduel", -125, +105, snap=snap)],
                      now=now)
     assert bets == [] and diag["stale_fetch"] == 1
@@ -248,7 +248,7 @@ def test_the_card_reads_open_rows_only():
 
 def test_the_read_starts_just_before_the_window_and_casts_numerics():
     """Props are fetched for days before a game; the card reads only what can
-    decide it (a fetch older than tip-70 cannot), in one statement."""
+    decide it (a fetch older than tip-57 cannot), in one statement."""
     from decimal import Decimal
     seen = {}
 
@@ -262,7 +262,7 @@ def test_the_read_starts_just_before_the_window_and_casts_numerics():
                      Decimal("-115"), Decimal("-105"), None, None, FETCH, None, "open")]
 
     out = mk.load_quotes(_C(), GAMES, NOW)
-    assert seen["params"][3] == (TIP - timedelta(minutes=75)).isoformat()
+    assert seen["params"][3] == (TIP - timedelta(minutes=62)).isoformat()
     assert "snapshot_type = 'open'" in seen["sql"] and "snapshot_at >= %s" in seen["sql"]
     assert out[0]["line"] == 24.5 and isinstance(out[0]["under_price"], float)
 
@@ -274,7 +274,7 @@ def test_a_game_already_bet_is_never_decided_again():
 
 def test_a_missed_window_is_counted():
     now = TIP - timedelta(minutes=40)
-    early = (TIP - timedelta(minutes=100)).isoformat()      # nothing fetched 45-70 before tip
+    early = (TIP - timedelta(minutes=100)).isoformat()      # nothing fetched 45-57 before tip
     _, diag = run([q("pinnacle", -115, -105, snap=early)], now=now)
     assert diag["too_late"] == 1 and diag["window_missed"] == 1
     inside = (TIP - timedelta(minutes=50)).isoformat()
@@ -548,6 +548,24 @@ def test_publish_reads_under_the_lock_and_writes_once_in_one_transaction():
     assert (n, nd) == (2, 2)
     assert sorted(conn.decisions) == ["G2", "G3"]                     # G3: decided, no bet
     assert [p["game_id"] for p in conn.inserted] == ["G2", "G2"]
+
+
+def test_publish_skips_a_proposition_the_projection_model_already_holds():
+    """nba_prop_projection decides a game alone when this card has not decided it 50 minutes
+    out. A later decision here must not bet the same (game, player, market) a second time;
+    the game's other propositions are still bet, and the game is still decided."""
+    class _Held(_PublishConn):
+        def execute(self, sql, params=None):
+            super().execute(sql, params)
+            if "model_id = 'nba_prop_projection'" in " ".join(sql.split()):
+                self._all = [(GID, "201939", "player_points")]
+            return self
+
+    conn = _Held()
+    rows = card.pick_rows([_bet(), _bet(market="player_rebounds", line=7.5)], bankroll=1000.0)
+    n, nd = card.publish(conn, rows, [_decision(GID, 2)])
+    assert (n, nd) == (1, 1)
+    assert [p["prop_market"] for p in conn.inserted] == ["player_rebounds"]
 
 
 def test_publish_writes_bet_rows_once_with_its_own_column_list():

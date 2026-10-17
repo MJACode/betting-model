@@ -197,7 +197,11 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # 2026-10-15 (mike: "use what you've learned in this repo"): the NBA
          # prop rule; its number IS Pinnacle's no-vig under, which its EV >= 0
          # cut was measured on, and it has no record to fit a map on.
-         "nba_prop_market"}
+         "nba_prop_market",
+         # 2026-10-16 (mike: "build the projection model"): its probability is
+         # calibrated per market inside its own artifact, on the graded seasons'
+         # main-line pairs, and every floor was chosen on that number.
+         "nba_prop_projection"}
     )
 
 
@@ -265,5 +269,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         # mike, 2026-10-15, "use what you've learned in this repo": the NBA
         # prop rule decides on Pinnacle's no-vig under, its own number.
         "nba_prop_market",
+        "nba_prop_projection",      # 2026-10-16 (mike): calibrated inside its own artifact
     }
     assert not not_named_here
