@@ -19,6 +19,10 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * Hourly refresh        :17, 7am-5pm ET      -> bash scripts/refresh_pass.sh
   * Evening 10-min refresh every :00..:50, 6-11pm ET -> bash scripts/refresh_pass.sh
   * NBA prop window       every 5 min, 24x7     -> run_nba_prop_window
+  * NBA totals window     every minute, 24x7    -> run_nba_total_luck_window
+        (scripts/nba_total_luck_window.py: the NBA board fetched, and the
+        nba_total_luck card run, when an undecided game is 61-66 minutes
+        from tip; a tick with nothing due makes no API call)
         (scripts/nba_prop_window.py: props for exactly the NBA games 40-62
         minutes from tip and not yet decided, then the nba_prop_market card,
         the closing snapshot for bet games 12-25 minutes out, and publish.
@@ -573,7 +577,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "kalshi_ladders", "kalshi_game_markets",
                   # Writes picks through the same card as the refresh pass,
                   # so it lives beside the passes, not with the loops.
-                  "nba_prop_window"}
+                  "nba_prop_window",
+                  # Writes picks through its own card, with its own fetch.
+                  "nba_total_luck_window"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -1069,6 +1075,50 @@ def run_nba_prop_window() -> None:
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
         raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")
+
+
+# The NBA totals window's steps are bounded, so a stuck step cannot hold the
+# job past the ticks that follow it (max_instances=1): the fetch is one bulk
+# Odds API call; the card reads one season of box scores and the due games'
+# quotes and prices them in seconds.
+NBA_TOTAL_LUCK_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180}
+
+
+def run_nba_total_luck_window() -> None:
+    """One NBA totals window tick: every game due its nba_total_luck decision.
+
+    The card decides a game once, on a fetch that landed 60-66 minutes before
+    tip (models/nba_total_luck.py). Riding the refresh pass it had one look per
+    game, and a pass that overran its ten minutes made the scheduler skip the
+    next tick, and with it every game that tick would have decided. So this
+    job runs every minute, 24x7. It reads what is stored first
+    (scripts/nba_total_luck_window.plan) and returns without an API call when
+    no undecided game is 61-66 minutes from tip -- most ticks of most days.
+
+    Otherwise: fetch the NBA board, run the card on that fetch, publish what it
+    wrote. A step that fails or is killed raises AFTER publishing, so the
+    heartbeat records "error" and the failure alerter reports it, while a bet
+    that was written still goes out. The next tick, a minute later, tries any
+    game still undecided again.
+    """
+    from scripts.nba_total_luck_window import plan_tick
+    due = plan_tick()
+    if not due:
+        return
+    log.info("NBA totals window: deciding %s", due)
+    t = NBA_TOTAL_LUCK_WINDOW_TIMEOUT_S
+    outcomes = {
+        "nba-total-luck-fetch": _run(
+            [sys.executable, "-m", "scripts.nba_total_luck_window", "--fetch"],
+            "nba-total-luck-fetch", timeout=t["fetch"]),
+        "nba-total-luck": _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-total-luck"],
+            "nba-total-luck", timeout=t["card"]),
+    }
+    _publish_new_signals("nba-total-luck-window")
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    if bad:
+        raise RuntimeError(f"NBA totals window step(s) did not finish: {bad}")
 
 
 def run_nfl_opener_card() -> None:
@@ -1895,6 +1945,20 @@ def build_scheduler() -> BlockingScheduler:
         id="nba_prop_window",
         name="NBA prop window (every 5 min, 24x7: games 40-62 min from tip)",
         max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
+    # NBA totals window -- every minute, 24x7 (run_nba_total_luck_window). The
+    # nba_total_luck card decides here and nowhere else: on the refresh pass a
+    # skipped tick lost every game it would have decided. Every minute so the
+    # 61-66-minute window holds six ticks; misfire_grace_time 30 because a tick
+    # overtaken by the next one has nothing left to add. No write switch, like
+    # the card.
+    sched.add_job(
+        run_nba_total_luck_window,
+        CronTrigger(minute="*", timezone=TIMEZONE),
+        id="nba_total_luck_window",
+        name="NBA totals window (every minute, 24x7: games 61-66 min from tip)",
+        max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 
     # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow

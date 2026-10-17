@@ -75,6 +75,36 @@ def et_date(iso_ts: str | None) -> str | None:
     return dt.astimezone(_ET).strftime("%Y-%m-%d")
 
 
+def parse_nba_postponed(data: dict, game_date: str) -> list[dict]:
+    """Games ESPN lists as postponed or cancelled, one dict each: they were not
+    played on this date. ESPN keeps the event on its ORIGINAL date with status
+    STATUS_POSTPONED (CHA @ LAL, 2025-01-09, the Los Angeles fires: fetched
+    2026-10-17, tests/fixtures/espn_nba_scoreboard_2025-01-09_postponed.json)."""
+    out = []
+    for ev in (data or {}).get("events") or []:
+        st = (ev.get("status") or {}).get("type") or {}
+        name = str(st.get("name") or "").upper()
+        if st.get("completed") or not ("POSTPONED" in name or "CANCEL" in name):
+            continue
+        comps = ev.get("competitions") or []
+        home = away = None
+        for c in (comps[0].get("competitors") or []) if comps else []:
+            team = c.get("team") or {}
+            code = nba_team(team.get("abbreviation"), team.get("displayName"))
+            if c.get("homeAway") == "home":
+                home = code
+            elif c.get("homeAway") == "away":
+                away = code
+        if not home or not away:
+            continue
+        gdate = et_date(ev.get("date")) or game_date
+        out.append({"event_id": str(ev.get("id") or ""),
+                    "game_id": _build_game_id(gdate, away, home), "game_date": gdate,
+                    "home": home, "away": away,
+                    "status": str(st.get("description") or "Postponed")})
+    return out
+
+
 def parse_nba_scoreboard(data: dict, game_date: str) -> list[dict]:
     """Completed games between two NBA teams, one dict each.
 

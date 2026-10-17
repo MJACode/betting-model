@@ -295,6 +295,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # creates it on demand). Read by the card and the window job, never by
     # the app.
     "nba_prop_market_decisions",
+    # The NBA totals card's decisions ledger: one row per game it has decided,
+    # bet or not, with the reason (scripts/nba_total_luck_card.py, which
+    # creates it on demand). Read by the card, never by the app.
+    "nba_total_luck_decisions",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.

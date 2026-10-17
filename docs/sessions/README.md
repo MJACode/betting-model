@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, `nba_total_luck` review fixes: decided in its own one-minute job on a fetch 60-66 minutes out (27 of 504 evening refresh ticks never started); the NBA Cup final kept out of the ratings and the knockout games priced; `box_mismatch` and a one-game NBA.com box repair; the EV floor refunds a push (0 of 508 graded bets cut); the paused marker; the app's form strips read one sport and label points as points |
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, `nba_total_luck` LIVE: NBA totals overs when the shooting-luck-adjusted projected total is 3+ above the raw one; the lab's gap functions moved into the model (one copy); live code replays 611 of 611 lab bets; decided on the last refresh pass 60+ minutes before tip; artifact committed, no production write |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984 merged origin/master `9175740c` (#962, with #964/#983 already in that history); skater window totals follow the NHL stats views; published_record_units stays last |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: the two-line odds caption is NHL only; a whole-number off-line sentence says Over 2, not 2.5 or more |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: an off-line NHL sheet keeps the different-bet warning and then says how the book lists the line; half-point wording only; the pill caption may wrap to two lines |

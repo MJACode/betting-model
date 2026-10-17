@@ -2074,19 +2074,6 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }
 
-export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
-  const { data, error } = await supabase
-    .from('games')
-    .select(GAME_COLUMNS)
-    .or(`home_team.eq.${team},away_team.eq.${team}`)
-    .lt('game_date', beforeDate)
-    .not('home_score', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []) as GameRow[];
-}
-
 export async function fetchPlayerRecentGames(
   playerId: string,
   beforeDate: string,
@@ -2632,8 +2619,9 @@ export async function fetchTeamStats(
 
 /**
  * A team's most recent finished games IN ONE SPORT, newest first. Scoped by
- * sport, unlike fetchTeamRecentGames: 'BUF' is Buffalo in the NFL and the
- * NHL, and a form strip that mixes the two is wrong on both.
+ * sport: 'BUF' is Buffalo in the NFL and the NHL, and a form strip that mixes
+ * the two is wrong on both. The only team-form read: the unscoped one it
+ * replaced put Red Sox and Bruins games on a Celtics pick (2026-10-17).
  */
 export async function fetchTeamRecentGamesForSport(
   sport: string,
