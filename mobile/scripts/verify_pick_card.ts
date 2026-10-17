@@ -13,6 +13,8 @@ import { lineMovementView } from '../src/lib/lineMovementView';
 import {
   allBooksLineSource,
   bestHandoffForPick,
+  bookLabel,
+  bookName,
   canShowLineMovementHistory,
   computeMovement,
   formatSideLine,
@@ -28,6 +30,19 @@ import {
   MODEL_BOOK,
 } from '../src/lib/markets';
 import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
+import { formatAmerican, MINUS } from '../src/lib/format';
+import {
+  signalsBetHeadline,
+  signalsContextLine,
+  signalsContextTime,
+  signalsCtaLabel,
+  signalsCtaSpeech,
+  signalsHeroSpeech,
+  signalsNowLine,
+  signalsPriceText,
+  signalsStakeLine,
+  signalsStakeSpeech,
+} from '../src/lib/signalsCard';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
 
 let failed = 0;
@@ -95,6 +110,150 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   check(
     'pre-game moved → Now + Locked caption',
     h?.kind === 'now' && h.price === -115 && h.showLockedCaption && h.lockedPrice === -110,
+  );
+  check('a price move at the same line does not set movedLine', h?.movedLine == null && h?.line === 8.5);
+}
+{
+  // Line moved, price unchanged. The board pill stays the lock (kind
+  // decision, line is the scored line). Signals reads movedLine.
+  const pick = mkPick({
+    model_id: 'ncaaf_spread',
+    sport: 'NCAAF',
+    pick_side: 'home',
+    pick_label: 'Sam Houston -7.5',
+    scored_line: -7.5,
+    dk_odds: -110,
+    decision_odds: -110,
+    decision_book: 'draftkings',
+  });
+  const row = latest({
+    market: 'spreads',
+    spread_home: -8.5,
+    total_line: null,
+    home_price: -110,
+    away_price: -110,
+    over_price: null,
+    under_price: null,
+  });
+  const hero = heroAmericanForPick(pick, row, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
+  ]);
+  check(
+    'line-only move stays a decision hero and records the current line',
+    hero?.kind === 'decision' && hero.price === -110 && hero.line === -7.5 && hero.movedLine === -8.5,
+    JSON.stringify(hero),
+  );
+  const sideLine = formatSideLine(hero?.movedLine ?? null, pick.pick_side, 'spreads');
+  const screenNow = signalsNowLine({
+    line: sideLine,
+    price: formatAmerican(hero?.price),
+    priceDiffers: false,
+    book: bookLabel(hero?.book ?? ''),
+  });
+  const spokenNow = signalsNowLine({
+    line: sideLine,
+    price: formatAmerican(hero?.price),
+    priceDiffers: false,
+    book: bookName(hero?.book ?? ''),
+  });
+  check('Signals shows the moved line under the hero', screenNow === `DK line now ${MINUS}8.5 (${MINUS}110)`, screenNow ?? '');
+  const speech = signalsHeroSpeech({
+    decisionPrice: formatAmerican(hero?.lockedPrice),
+    book: bookName(hero?.book ?? ''),
+    now: spokenNow,
+  });
+  check(
+    'VoiceOver says that same Now line, with the full book name',
+    speech === `${MINUS}110 DraftKings. DraftKings line now ${MINUS}8.5 (${MINUS}110)` &&
+      speech.includes(spokenNow ?? 'missing'),
+    speech,
+  );
+  const handoff = bestHandoffForPick(pick, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
+  ], hero);
+  check(
+    'line-only move is a Now handoff with kind still decision: no current slip link, so Open DK',
+    handoff?.bookmaker === 'draftkings' && handoff.price == null && handoff.link == null && handoff.verb === 'Open' &&
+      signalsCtaLabel(bookLabel(handoff.bookmaker), null) === 'Open DK',
+    JSON.stringify(handoff),
+  );
+  const linked = bestHandoffForPick(pick, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5, home_link: 'dk://now-8.5' },
+  ], hero);
+  check(
+    'line-only move with a current slip link names the line and uses that link',
+    linked?.bookmaker === 'draftkings' && linked.price === -110 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
+      signalsCtaLabel(bookLabel(linked.bookmaker), formatAmerican(linked.price), sideLine) ===
+        `Bet DK ${MINUS}8.5 ${MINUS}110`,
+    JSON.stringify(linked),
+  );
+  const shop = bestHandoffForPick(pick, [
+    { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
+    { bookmaker: 'betmgm', home_price: -112, away_price: -108, spread_home: -7.5, home_link: 'mgm://7.5' },
+  ], hero);
+  check(
+    'line-only move prefers a book still at the scored line',
+    shop?.bookmaker === 'betmgm' && shop.price === -112 && shop.link === 'mgm://7.5',
+    JSON.stringify(shop),
+  );
+}
+{
+  // Price and line both moved, and the button is that current DK quote.
+  const pick = mkPick({
+    model_id: 'ncaaf_spread',
+    sport: 'NCAAF',
+    pick_side: 'home',
+    pick_label: 'Sam Houston -7.5',
+    scored_line: -7.5,
+    dk_odds: -110,
+    decision_odds: -110,
+    decision_book: 'draftkings',
+  });
+  const row = latest({
+    market: 'spreads',
+    spread_home: -8.5,
+    total_line: null,
+    home_price: -105,
+    away_price: -115,
+    over_price: null,
+    under_price: null,
+  });
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', home_price: -105, away_price: -115, spread_home: -8.5 },
+  ];
+  const hero = heroAmericanForPick(pick, row, rows);
+  check(
+    'price and line moved: Now price, and movedLine is the new line',
+    hero?.kind === 'now' && hero.price === -105 && hero.lockedPrice === -110 && hero.movedLine === -8.5,
+    JSON.stringify(hero),
+  );
+  const sideLine = formatSideLine(hero?.movedLine ?? null, pick.pick_side, 'spreads');
+  const screenNow = signalsNowLine({
+    line: sideLine,
+    price: formatAmerican(hero?.price),
+    priceDiffers: true,
+    book: bookLabel(hero?.book ?? ''),
+  });
+  check('Signals shows line and price together', screenNow === `DK line now ${MINUS}8.5 (${MINUS}105)`, screenNow ?? '');
+  const handoff = bestHandoffForPick(pick, rows, hero);
+  check(
+    'price and line moved, no current slip link: Open DK, not the lock slip',
+    handoff?.bookmaker === 'draftkings' && handoff.price == null && handoff.link == null &&
+      handoff.verb === 'Open' && handoff.link !== pick.dk_bet_link &&
+      signalsCtaLabel(bookLabel(handoff.bookmaker), null) === 'Open DK',
+    JSON.stringify(handoff),
+  );
+  const linkedRows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', home_price: -105, away_price: -115, spread_home: -8.5, home_link: 'dk://now-8.5' },
+  ];
+  const linked = bestHandoffForPick(pick, linkedRows, heroAmericanForPick(pick, row, linkedRows));
+  check(
+    'price and line moved: the button names the line and uses the current row link',
+    linked?.price === -105 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
+      linked.link !== pick.dk_bet_link &&
+      signalsCtaLabel(bookLabel(linked!.bookmaker), formatAmerican(linked!.price), sideLine) ===
+        `Bet DK ${MINUS}8.5 ${MINUS}105`,
+    JSON.stringify(linked),
   );
 }
 {
@@ -733,7 +892,7 @@ check(
     'PickCard a11y still announces the stored pick_label',
     // PR 4 (M8) builds the label as `cardLabel` so it can carry status, stake
     // and timing too; the stored pick_label is still in it.
-    /const cardLabel = \[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
+    /const cardLabel = joinCardSpeech\(\[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
   );
   check(
     'PickCard does not write pick_label',
@@ -748,6 +907,164 @@ check(
     'labelRow aligns chips to the primary line, not the two-line mid-point',
     /alignItems:\s*'flex-start'/.test(labelRow) && !/alignItems:\s*'center'/.test(labelRow),
   );
+}
+
+// ── Signals card (Option A) ────────────────────────────────────────────────
+{
+  const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
+  check(
+    'context line is abbrev @ abbrev · sport · time',
+    signalsContextLine({
+      sport: 'NCAAF',
+      away: 'Western Kentucky',
+      home: 'Sam Houston',
+      timeLabel: '8:00 PM ET',
+      abbrevs,
+    }) === 'WKU @ SHSU · NCAAF · 8:00 PM ET',
+  );
+  check(
+    'unknown NCAAF school is not given an invented code',
+    signalsContextLine({
+      sport: 'NCAAF',
+      away: 'Western Kentucky',
+      home: 'Sam Houston',
+      timeLabel: '8:00 PM ET',
+      abbrevs: null,
+    }) === 'Western Kentucky @ Sam Houston · NCAAF · 8:00 PM ET',
+  );
+  check(
+    'spread headline quotes the label with a true minus',
+    signalsBetHeadline('Sam Houston -7.5') === `Sam Houston ${MINUS}7.5` &&
+      !signalsBetHeadline('Sam Houston -7.5').includes('-7.5'),
+  );
+  check(
+    'a hyphen inside a school name stays a hyphen',
+    signalsBetHeadline('Louisiana-Monroe -2.5') === `Louisiana-Monroe ${MINUS}2.5`,
+  );
+  check('moneyline headline is the stored label', signalsBetHeadline('Sam Houston ML') === 'Sam Houston ML');
+  check('total headline is the side and the line', signalsBetHeadline('NYY vs BOS Over 8.5') === 'Over 8.5');
+  check(
+    'F5 stays on a total, a spread and a moneyline',
+    signalsBetHeadline('NYY vs BOS Over 4.5 F5') === 'Over 4.5 F5' &&
+      signalsBetHeadline('NYY -1.5 F5') === `NYY ${MINUS}1.5 F5` &&
+      signalsBetHeadline('NYY ML F5') === 'NYY ML F5',
+  );
+  check(
+    'stored NHL game total drops the matchup',
+    signalsBetHeadline('LAK vs EDM Under 6.0') === 'Under 6.0',
+  );
+  check(
+    'a team total keeps the club: the stored odds row is per team, and picks has no Team Total label',
+    signalsBetHeadline('Boston Bruins Over 3.5') === 'Boston Bruins Over 3.5' &&
+      signalsBetHeadline('BOS vs NYY Team Total Over 3.5') === 'BOS vs NYY Team Total Over 3.5' &&
+      signalsBetHeadline('New York vs Los Angeles Team Total Under 2.5') === 'New York vs Los Angeles Team Total Under 2.5' &&
+      signalsBetHeadline('Los Angeles vs New York Over 8.5') === 'Over 8.5',
+  );
+  check(
+    'prop headline keeps the player',
+    signalsBetHeadline('Roquan Smith Under 9.5 Tackles') === 'Roquan Smith Under 9.5 Tackles',
+  );
+  check(
+    'NFL card stake suffix is not the hero',
+    signalsBetHeadline('NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u') === 'Under 43.5 (Wind 14 mph, FD)',
+  );
+  check(
+    'price and book use a true minus',
+    signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`,
+  );
+  check('CTA names the best book, word is Bet', signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`);
+  check('CTA names the line when that bet is at a moved line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`);
+  check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
+  check(
+    'a different book or price is Best now on the button',
+    signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105` &&
+      signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105` &&
+      signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105` &&
+      !signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'),
+  );
+  check(
+    'stake cell names units to bet and units to win',
+    signalsStakeLine('1.5u', '0.4u') === 'Bet 1.5u · Win 0.4u' &&
+      signalsStakeLine('1.1u', '1u') === 'Bet 1.1u · Win 1u' &&
+      !signalsStakeLine('1.1u', '1u').includes('→'),
+  );
+  check(
+    'stake speech says both amounts, singular only at 1u',
+    signalsStakeSpeech('1.5u', '0.4u') === 'Bet 1.5 units, win 0.4 units' &&
+      signalsStakeSpeech('1u', '1u') === 'Bet 1 unit, win 1 unit' &&
+      signalsStakeSpeech('10u', '1.5u') === 'Bet 10 units, win 1.5 units',
+  );
+  const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
+  check('the picked-at line is not under the hero', !card.includes('signalsPickedAtLine') && !/pickedAt:/.test(card));
+  check('Today uses the same Best now wording as Signals', /bestNow: handoff\.verb === 'Best'/.test(card));
+  const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
+  check('Signals board opts into the signals layout', /layout=\{view === 'signals' \? 'signals' : 'board'\}/.test(home));
+  check('hero is 22pt', /betLeft: \{[\s\S]*?font\.size\.title2/.test(card) && /betRight: \{[\s\S]*?font\.size\.title2/.test(card));
+  check('four cells use the plain words', /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && />Stake</.test(card));
+  const navy = /handoffNavy: \{[\s\S]*?\}/.exec(card)?.[0] ?? '';
+  check('CTA fill is navy tint, not DK green or system blue', /backgroundColor: colors\.tint/.test(navy) && !/DK_GREEN|colors\.info/.test(navy));
+  check('CTA label is textInverse', /handoffNavyText: \{[\s\S]*?color: colors\.textInverse/.test(card));
+  check(
+    'signals stake is stakeFor risk and win, and the value is not line-capped',
+    /signalsStakeLine\(signalsRiskUnits, signalsWinUnits\)/.test(card) &&
+      /formatUnits\(stake\.risk\)/.test(card) &&
+      /formatUnits\(stake\.win\)/.test(card) &&
+      /Stake unavailable/.test(card) &&
+      /\{signalsStakeShown \?\? '—'\}/.test(card) &&
+      !/numberOfLines[\s\S]{0,120}signalsStakeShown \?\?/.test(card) &&
+      /metric: \{[\s\S]*?flexBasis: '46%'[\s\S]*?maxWidth: '48%'/.test(card) &&
+      !/flexBasis: '100%'/.test(card),
+  );
+  check(
+    'Signals movement chip uses a true minus; the board chip does not',
+    card.includes('trueMinus(movementSummary.label)') &&
+      card.split('trueMinus(movementSummary.label)').length === 2,
+  );
+  check(
+    'a later day joins the clock; today stays the clock',
+    signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET' &&
+      signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET',
+  );
+  const samePrice = signalsPriceText('-110', 'DraftKings');
+  const movedNow = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DraftKings' });
+  const priceNow = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DraftKings' });
+  check(
+    'VoiceOver uses the same price text as the headline, then the Now line the screen shows',
+    signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings' }) === samePrice &&
+      signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings', now: null }) === samePrice &&
+      !signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings' }).includes('Now') &&
+      signalsHeroSpeech({ decisionPrice: '-110', book: 'DraftKings', now: priceNow }) ===
+        `${samePrice}. ${priceNow}`,
+  );
+  check(
+    'a moved line is a Now line, and an unchanged card is not',
+    movedNow === `DraftKings line now ${MINUS}8.5 (${MINUS}110)` &&
+      priceNow === `DraftKings now (${MINUS}105)` &&
+      signalsNowLine({ line: '-4.5', price: '-110', priceDiffers: false, book: 'MGM' }) ===
+        `MGM line now ${MINUS}4.5 (${MINUS}110)` &&
+      signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) ===
+        `DK line now ${MINUS}8.5 (${MINUS}105)` &&
+      signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null &&
+      signalsNowLine({ line: '-8.5', price: null, priceDiffers: false, book: 'DK' }) === null,
+  );
+  check(
+    'a plain moved price does not restate Locked under the decision hero',
+    /heroPrice\?\.showLockedCaption && \(heroPrice\.stale \|\| heroPrice\.untracked\)/.test(card),
+  );
+  check('wrapped price stays on the trailing edge', /betRight: \{[\s\S]*?marginLeft: 'auto'/.test(card));
+  const slip = readFileSync(join(__dirname, '../src/components/AddToPlayButton.tsx'), 'utf-8');
+  const track = readFileSync(join(__dirname, '../src/components/TrackButton.tsx'), 'utf-8');
+  const tallOmitsSlop = (src: string) => {
+    const start = src.indexOf('if (tall)');
+    const slop = src.indexOf('hitSlop=', start);
+    const between = start >= 0 && slop > start ? src.slice(start, slop) : '';
+    return between.includes('styles.btnTall') && between.includes('</Pressable>');
+  };
+  check('tall Slip and Track omit the compact hit slop', tallOmitsSlop(slip) && tallOmitsSlop(track));
+  check('Slip and Track can be 44pt with a checkmark and a tint outline',
+    /btnTall: \{[\s\S]*?minHeight: 44/.test(slip) && /btnTall: \{[\s\S]*?minHeight: 44/.test(track) &&
+    /inPlay \? 'checkmark'/.test(slip) && /tracked \? 'checkmark'/.test(track) &&
+    !/colors\.info/.test(slip) && !/colors\.info/.test(track));
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);

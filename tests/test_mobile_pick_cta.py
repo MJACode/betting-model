@@ -382,7 +382,7 @@ def test_a_stale_card_offers_no_bet():
     slip = re.search(r"const canSlip =[^;]*;", card).group(0)
     assert "(!heroPrice?.stale || Boolean(inSlip))" in slip and slip.endswith("&& cta.slip;")
     assert re.search(r"const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview"
-                     r" \|\| paused \|\| heroPrice\?\.stale\s*\?\s*null", card)
+                     r" \|\| paused \|\| heroPrice\?\.stale \|\| signalsMuted\s*\?\s*null", card)
     # The words come from the reasons (lib/heroPriceText.ts).
     assert "{priceCheckChipText(check)}" in card and ">Price check<" not in card
     assert "flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`" in card
@@ -577,6 +577,135 @@ def test_price_check_is_display_only():
         assert not re.search(r"PRICE_CHECK_MAX_(EDGE|CENTS)\s*=", _read(SRC / rel)), rel
 
 
+def test_signals_card_quotes_the_bet_and_names_the_best_book():
+    """Signals (Designer Option A, Matt approved). The bet is the hero, the
+    compact line is abbreviations plus sport and time, the stake cell is one
+    unit figure, and the CTA is a navy Bet <book> button. Today and Live keep
+    the board layout."""
+    card = _read(SRC / "components" / "PickCard.tsx")
+    home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    assert "layout={view === 'signals' ? 'signals' : 'board'}" in home
+    assert "signalsBetHeadline(pick.pick_label)" in card
+    assert "Model chance" in card and "Expected return" in card
+    navy = re.search(r"handoffNavy: \{([^}]*)\}", card)
+    assert navy and "backgroundColor: colors.tint" in navy.group(1)
+    assert "DK_GREEN" not in navy.group(1) and "colors.info" not in navy.group(1)
+    assert re.search(r"handoffNavyText: \{[^}]*color: colors\.textInverse", card)
+    assert "signalsStakeLine(signalsRiskUnits, signalsWinUnits)" in card
+    assert "formatUnits(stake.risk)" in card and "formatUnits(stake.win)" in card
+    assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
+    assert "signalsNowLine(" in card and "now: signalsNowSpoken" in card
+    cta_block = re.search(r"const ctaAtMovedLine = Boolean\((.*?)\);", card, re.S)
+    assert cta_block and "kind === 'now'" not in cta_block.group(1)
+    markets = _read(LIB / "markets.ts")
+    assert "if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book)" in markets
+    assert "else if (hero.kind !== 'now')" not in markets
+    assert "heroPrice.stale || heroPrice.untracked" in card
+    assert "Stake unavailable" in card and ">Stake<" in card
+    assert "To win unavailable" not in card and ">To win<" not in card
+    assert "flexBasis: '46%'" in card and "maxWidth: '48%'" in card
+    assert "flexBasis: '100%'" not in card
+    assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine" not in card
+    assert "bestNow: handoff.verb === 'Best'" in card
+    stake = _read(LIB / "signalsCard.ts")
+    assert "export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win'" in stake
+    assert "SIGNALS_STAKE_FORM === 'single'" not in stake
+    assert "SIGNALS_STAKE_FORM === 'risk-win'" in stake
+    differs = re.search(r"const buttonDiffers = Boolean\((.*?)\);", card, re.S)
+    assert differs and "ctaAtMovedLine" in differs.group(1)
+    assert "buttonNowSpoken" not in card
+    assert "signalsMuted" in card and "tintSoft:" in _read(SRC / "lib" / "theme.ts")
+    assert "colors.tintSoft" in _read(SRC / "components" / "TrackButton.tsx")
+    assert "colors.tintSoft" in _read(SRC / "components" / "AddToPlayButton.tsx")
+    assert "marginLeft: 'auto'" in card
+    # The arrow form stays on the Today caption. The Signals cell does not use it.
+    assert "formatUnits(stake.risk)} → ${formatUnits(stake.win)}" in card
+    assert "minHeight: 44" in _read(SRC / "components" / "AddToPlayButton.tsx")
+    assert "minHeight: 44" in _read(SRC / "components" / "TrackButton.tsx")
+    for name in ("AddToPlayButton.tsx", "TrackButton.tsx"):
+        src = _read(SRC / "components" / name)
+        assert "colors.info" not in src
+        assert "? 'checkmark'" in src
+
+
+@pytest.mark.skipif(
+    not _node_strips_types(),
+    reason="node copy test skips on node older than 22.6",
+)
+def test_signals_card_copy(tmp_path):
+    """Behaviour of the Signals copy helpers, including a moved line.
+
+    Skips when node is older than 22.6 (no type stripping). The source pins
+    in test_signals_card_quotes_the_bet_and_names_the_best_book still run.
+    """
+    for name in ("format.ts", "signalsCard.ts"):
+        src = _read(LIB / name)
+        src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = r"""
+import { signalsBetHeadline, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsCtaSpeech, signalsHeroSpeech, signalsNowLine, signalsPriceText, signalsStakeLine, signalsStakeSpeech } from './signalsCard.ts';
+const MINUS = '\u2212';
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
+ok(signalsContextLine({ sport: 'NCAAF', away: 'Western Kentucky', home: 'Sam Houston', timeLabel: '8:00 PM ET', abbrevs }) === 'WKU @ SHSU · NCAAF · 8:00 PM ET', 'abbrev line');
+ok(signalsContextLine({ sport: 'NCAAF', away: 'Western Kentucky', home: 'Sam Houston', timeLabel: '8:00 PM ET', abbrevs: null }) === 'Western Kentucky @ Sam Houston · NCAAF · 8:00 PM ET', 'no invented code');
+ok(signalsContextLine({ sport: 'MLB', away: 'NYY', home: 'BOS', timeLabel: '7:05 PM ET' }) === 'NYY @ BOS · MLB · 7:05 PM ET', 'mlb abbrevs pass through');
+ok(signalsContextLine({ sport: 'UFC', away: 'A', home: 'B', timeLabel: '10:00 PM ET' }) === 'A vs B · UFC · 10:00 PM ET', 'ufc vs');
+ok(signalsBetHeadline('Sam Houston -7.5') === `Sam Houston ${MINUS}7.5`, 'spread minus');
+ok(!signalsBetHeadline('Sam Houston -7.5').includes('-'), 'no ascii hyphen on the spread');
+ok(signalsBetHeadline('Louisiana-Monroe -2.5') === `Louisiana-Monroe ${MINUS}2.5`, 'name hyphen stays');
+ok(signalsBetHeadline('Sam Houston ML') === 'Sam Houston ML', 'moneyline');
+ok(signalsBetHeadline('NYY vs BOS Over 8.5') === 'Over 8.5', 'total');
+ok(signalsBetHeadline('NYY vs BOS Over 4.5 F5') === 'Over 4.5 F5', 'F5 total keeps the qualifier');
+ok(signalsBetHeadline('NYY -1.5 F5') === `NYY ${MINUS}1.5 F5`, 'F5 spread keeps the qualifier');
+ok(signalsBetHeadline('NYY ML F5') === 'NYY ML F5', 'F5 moneyline keeps the qualifier');
+ok(signalsBetHeadline('LAK vs EDM Under 6.0') === 'Under 6.0', 'stored NHL game total');
+ok(signalsBetHeadline('Boston Bruins Over 3.5') === 'Boston Bruins Over 3.5', 'feed team-total shape keeps the club');
+ok(signalsBetHeadline('BOS vs NYY Team Total Over 3.5') === 'BOS vs NYY Team Total Over 3.5', 'team total quotes the label');
+ok(signalsBetHeadline('New York vs Los Angeles Team Total Under 2.5') === 'New York vs Los Angeles Team Total Under 2.5', 'team total after a two-word team');
+ok(signalsBetHeadline('Los Angeles vs New York Over 8.5') === 'Over 8.5', 'two-word teams are not a qualifier');
+ok(signalsBetHeadline('Roquan Smith Under 9.5 Tackles') === 'Roquan Smith Under 9.5 Tackles', 'prop');
+ok(signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`, 'price book');
+ok(signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`, 'cta');
+ok(signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`, 'cta names a moved line');
+ok(signalsCtaLabel('DK', null) === 'Open DK', 'no invented price');
+ok(signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`, 'best now');
+ok(signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105`, 'best now names the line');
+ok(signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105`, 'spoken best now');
+ok(signalsCtaSpeech('DraftKings', '-105', '-8.5', { bestNow: true }) === `Best now, DraftKings, ${MINUS}8.5, ${MINUS}105`, 'spoken best now names the line');
+ok(signalsCtaSpeech('DraftKings', null) === 'Open DraftKings', 'spoken open');
+ok(!signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'), 'spoken label has no middle dot');
+const moved = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DK' });
+const priced = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DK' });
+ok(moved === `DK line now ${MINUS}8.5 (${MINUS}110)`, 'moved line');
+ok(priced === `DK now (${MINUS}105)`, 'moved price');
+ok(signalsNowLine({ line: '-4.5', price: '-110', priceDiffers: false, book: 'MGM' }) === `MGM line now ${MINUS}4.5 (${MINUS}110)`, 'book names the line');
+ok(signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) === `DK line now ${MINUS}8.5 (${MINUS}105)`, 'line and price');
+ok(signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null, 'unchanged is quiet');
+ok(signalsNowLine({ line: '-8.5', price: null, priceDiffers: true, book: 'DK' }) === null, 'no price, no Now line');
+ok(signalsStakeLine('1.5u', '0.4u') === 'Bet 1.5u · Win 0.4u', 'capped favorite shows risk and win');
+ok(signalsStakeLine('1.1u', '1u') === 'Bet 1.1u · Win 1u', 'both amounts, no arrow');
+ok(!signalsStakeLine('1.1u', '1u').includes('\u2192'), 'arrow form is not the cell');
+ok(signalsStakeSpeech('1.5u', '0.4u') === 'Bet 1.5 units, win 0.4 units', 'speech says both');
+ok(signalsStakeSpeech('1u', '1u') === 'Bet 1 unit, win 1 unit', 'one unit is singular');
+ok(signalsStakeSpeech('10u', '1.5u') === 'Bet 10 units, win 1.5 units', 'ten stays plural');
+ok(signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET', 'today is the clock');
+ok(signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET', 'later day joins the clock');
+const locked = signalsPriceText('-110', 'BetMGM');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === locked, 'decision speech is the headline price');
+ok(!signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }).includes('Now'), 'no Now when the screen has none');
+const spoken = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'BetMGM' });
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }) === `${locked}. ${spoken}`, 'speech repeats the Now line');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }).includes(' now '), 'now is in the label when the button differs');
+ok(!signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }).includes('Picked at'), 'the lock is spoken once');
+"""
+    proc = subprocess.run(
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_pick_cta_pins_are_on_the_pr_ci_subset():
     assert "tests/test_mobile_pick_cta.py" in _read(ROOT / ".github" / "workflows" / "pr-ci.yml")
 
@@ -586,8 +715,10 @@ def test_pick_cta_pins_are_on_the_pr_ci_subset():
     reason="mobile node modules not installed",
 )
 def test_the_behavioural_checks_pass():
-    proc = subprocess.run(
-        [*tsx_cmd(MOBILE), "scripts/verify_pick_cta.ts"],
-        cwd=MOBILE, capture_output=True, text=True, timeout=300,
-    )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    cmd = tsx_cmd(MOBILE)
+    for script in ("scripts/verify_pick_cta.ts", "scripts/verify_pick_card.ts"):
+        proc = subprocess.run(
+            [*cmd, script],
+            cwd=MOBILE, capture_output=True, text=True, timeout=300,
+        )
+        assert proc.returncode == 0, script + "\n" + proc.stdout + proc.stderr

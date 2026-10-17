@@ -1000,6 +1000,13 @@ export interface HeroAmerican {
   link: string | null;
   lockedPrice: number;
   showLockedCaption: boolean;
+  /**
+   * The deciding book's line right now, home-relative, when it is not
+   * `scored_line`. Set even when the price has not moved. On that path
+   * `kind` stays `decision` and `line` stays the lock, so the board's price
+   * pill does not change. The Signals card prints it.
+   */
+  movedLine?: number;
   /** The deciding book has not updated this price within PREGAME_PRICE_MAX_AGE_MIN. */
   stale?: boolean;
   /**
@@ -1102,6 +1109,7 @@ export function heroAmericanForPick(
       ...(untracked ? { untracked: true } : {}),
     };
   }
+  const moved = movedLineField(current?.line, lockedLine);
   if (current != null && current.price !== locked) {
     return {
       kind: 'now',
@@ -1111,6 +1119,7 @@ export function heroAmericanForPick(
       link: current.link,
       lockedPrice: locked,
       showLockedCaption: true,
+      ...moved,
     };
   }
   if (live && current != null) {
@@ -1124,8 +1133,12 @@ export function heroAmericanForPick(
       // Live always restates the lock as a caption (designer contract), even
       // when Now equals it — the timing footer is not the price.
       showLockedCaption: true,
+      ...moved,
     };
   }
+  // kind stays decision and line stays the lock, so the board pill is the
+  // scored line. movedLine is the book's line now. The hand-off does not
+  // use this record link for that line: the link was stamped with the lock.
   return {
     kind: 'decision',
     price: locked,
@@ -1134,7 +1147,17 @@ export function heroAmericanForPick(
     link: recordLink(pick, storedQuoteBook(pick)),
     lockedPrice: locked,
     showLockedCaption: false,
+    ...moved,
   };
+}
+
+/** Home-relative current line, only when it is not the lock. */
+function movedLineField(
+  currentLine: number | null | undefined,
+  lockedLine: number | null,
+): { movedLine: number } | Record<string, never> {
+  if (currentLine == null || lockedLine == null || currentLine === lockedLine) return {};
+  return { movedLine: currentLine };
 }
 
 /**
@@ -1191,15 +1214,26 @@ export function currentLineQuotes(
   return kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
 }
 
+/**
+ * Side link on the book's current row. Not `dk_bet_link`: that link was
+ * stamped with the lock, so it still opens the old line after the number moves.
+ */
+function snapshotSideLink(pick: Pick, rows: BookPricedRow[] | undefined, book: string): string | null {
+  const row = (rows ?? []).find((r) => r.bookmaker === book);
+  return row ? linkForSide(row, pick.pick_side) : null;
+}
+
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
 export interface BoardHandoff {
   bookmaker: string;
-  /** Null only with verb "Open": a live pick whose price we stop reading after the bet. */
+  /** Null with verb "Open": there is no price to put on the button. */
   price: number | null;
   link: string | null;
   /**
    * "Best" when another book beats the record; "Bet" otherwise (and on live);
-   * "Open" when there is no number to quote (LIVE_PRICE_STOPS_AT_BET).
+   * "Open" when there is no number to quote (LIVE_PRICE_STOPS_AT_BET), or
+   * when the record book's line has moved and the only slip link on hand is
+   * the one stamped at the lock.
    */
   verb: 'Best' | 'Bet' | 'Open';
 }
@@ -1231,20 +1265,23 @@ export function bestHandoffForPick(
   if (quotes.length === 0) return null;
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet
-  // placed NOW. When the record chip wins and hero Now is at that same book,
-  // re-rank with that book at its current price: record DK −110, now DK −130,
-  // FD −115 must hand off to FD −115, not "Bet DK −130" (Reviewer #847).
-  // The same re-rank when that book has moved IN the bettor's favour and the
-  // record chip ranked behind another book: locked DK −110, now DK −102, MGM
-  // −105 must hand off to DK −102, not "Best MGM −105" (third review,
-  // 2026-10-09). That case only at the pick's line: DK's price at a moved
-  // line is a different bet, not ranked against books still at the line.
+  // placed NOW. Re-rank that book at its current price only while the
+  // current line is still the scored line: record DK −110, now DK −130,
+  // FD −115 hands off to FD −115 (Reviewer #847); locked DK −110, now
+  // DK −102, MGM −105 hands off to DK −102 (2026-10-09). A price at a
+  // moved line is a different bet: DK −8.5 −105 does not outrank MGM
+  // still at −7.5 −112.
   const scored = numOrNull(pick.scored_line);
+  // hero.line on a line-only move is the lock (kind stays decision, so the
+  // board pill does not change). movedLine is the current line. That is a
+  // different bet, so it does not enter the same-line re-rank.
+  const lineMoved = hero != null && hero.movedLine != null;
+  const sameLine =
+    !lineMoved &&
+    (hero == null || hero.line == null || scored == null || hero.line === scored);
   if (
-    hero?.kind === 'now' && hero.price != null &&
-    ((best.isRecord && best.bookmaker === hero.book) ||
-      ((hero.line == null || scored == null || hero.line === scored) &&
-        quotes.some((q) => q.isRecord && q.bookmaker === hero.book)))
+    hero?.kind === 'now' && hero.price != null && sameLine &&
+    quotes.some((q) => q.isRecord && q.bookmaker === hero.book)
   ) {
     const nowPrice = hero.price;
     quotes = rankQuotes(
@@ -1253,6 +1290,23 @@ export function bestHandoffForPick(
       ),
     );
     best = quotes.find((q) => q.isBest) ?? quotes[0];
+  }
+  // movedLine is a Now handoff whether or not kind is 'now'. A book still
+  // quoting the scored line wins. Otherwise a side link on the current row
+  // is that quote and the button names the line. With no such link the
+  // button opens the book and does not use the lock's slip.
+  if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book) {
+    const stillThere = quotes.filter((q) => !(q.isRecord && q.bookmaker === hero.book));
+    if (stillThere.length > 0) {
+      const ranked = rankQuotes(stillThere.map(({ isBest: _isBest, ...q }) => q));
+      best = ranked.find((q) => q.isBest) ?? ranked[0];
+    } else {
+      const currentLink = snapshotSideLink(pick, bookRows, hero.book);
+      if (currentLink && hero.price != null) {
+        return { bookmaker: hero.book, price: hero.price, link: currentLink, verb: 'Bet' };
+      }
+      return { bookmaker: hero.book, price: null, link: null, verb: 'Open' };
+    }
   }
   const verb: 'Best' | 'Bet' =
     best.isBest && quotes.length > 1 && !best.isRecord ? 'Best' : 'Bet';

@@ -94,7 +94,7 @@ eq(slopFor(31), { top: 7, bottom: 7, left: 0, right: 0 }, 'slop');
 eq(unknownCountSpeech('Sep 28 · — bets · — scored'), 'Sep 28, bets count not available, scored count not available', 'unknown counts');
 eq(unknownCountSpeech(unitsSpeech('Sep 28 · — pre-game signals · 1.2u staked')), 'Sep 28, pre-game signals count not available, 1.2 units staked', 'unknown + units');
 eq(unknownCountSpeech('3 in play'), '3 in play', 'known count');
-eq(gameStartedSpeech(-125, 'DraftKings'), 'Game started. Picked at -125 at DraftKings. Betting links are off once a game starts.', 'started speech');
+eq(gameStartedSpeech(-125, 'DraftKings'), 'Game started. Picked at \u2212125 at DraftKings. Betting links are off once a game starts.', 'started speech');
 eq(gameStartedSpeech(null, 'DraftKings'), 'Game started. Betting links are off once a game starts.', 'started, no price');
 // The visible line is unchanged from #847.
 eq(gameStartedLine(-125, 'DK'), 'Game started · picked at -125 DK', 'visible line');
