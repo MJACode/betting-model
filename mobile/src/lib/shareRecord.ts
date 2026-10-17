@@ -5,7 +5,7 @@
  * (a native module → full rebuild) and is a deliberate follow-up.
  */
 
-import { formatPctSigned, formatSignedUnits } from '@/lib/format';
+import { formatPctSigned, formatSigned } from '@/lib/format';
 import type { TrackRecordSummary } from '@/lib/trackRecord';
 
 export const APP_URL = 'https://signalbase-ai.com';
@@ -15,13 +15,18 @@ export function buildShareMessage(
   opts: { endUnits?: number | null; since?: string } = {},
 ): string {
   const record = `${s.wins}-${s.losses}${s.pushes > 0 ? `-${s.pushes}` : ''}`;
+  const recordLine = `${record} (${Math.round(s.winRate * 100)}% win rate)`;
+  // Same gate as the cards: ROI is known only when something was risked.
+  // An unset column (the select ran before the migration) and an all-void
+  // selection (risked 0) both leave roi at 0. The record and the win rate stay.
+  const roiKnown = (s.risked ?? 0) > 0;
   const lines: (string | null)[] = [
     '📊 Signalbase — verified sports-betting model',
     '',
-    `${formatPctSigned(s.roiFlat)} flat-bet ROI · ${record} (${Math.round(s.winRate * 100)}% win rate)`,
-    opts.endUnits != null
-      ? // Same sign and rounding as the equity curve's "+11.2u" (U+2212 for a loss).
-        `${formatSignedUnits(opts.endUnits).replace(/u$/, '')} units on flat $100 bets`
+    roiKnown ? `${formatPctSigned(s.roi)} ROI · ${recordLine}` : recordLine,
+    opts.endUnits != null && roiKnown
+      ? // Same sign and 2-decimal rounding as the equity curve (U+2212 for a loss).
+        `${formatSigned(opts.endUnits, 2, 'u').replace(/u$/, '')} units, 1 to win`
       : null,
     s.clvBeatRate != null
       ? `Beat the closing price at the book we bet, ${Math.round(s.clvBeatRate * 100)}% of the time`
