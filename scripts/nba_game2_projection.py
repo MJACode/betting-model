@@ -3,8 +3,10 @@
 docs/nba_models_2026.md section 6.3. This lab EMITS cells through the shared
 harness (scripts/nba_game_harness.py); scripts/nba_game2_verdict.py judges
 them. These three families are graded ONCE, after the play-by-play lineup
-segments (`nba_stints`) land, so --full refuses until they exist; until then
-the lab is built, tested and run on --smoke and --quality only.
+segments (`nba_stints`) land, so --full refuses until they exist for every
+season 2018-19 onward; until then the lab is built, tested and run on --smoke
+and --quality only. --full also refuses a stale price cache
+(H.load(require_seasons=...)).
 
 THE PROJECTION (every input dated at or before the decision time T)
   ratings   each player's offensive and defensive impact in points per 100
@@ -34,21 +36,32 @@ THE PROJECTION (every input dated at or before the decision time T)
             + own offence - opponent defence (+ home); margin and total through
             a linear calibration fit on prior seasons' walk-forward projections,
             with back-to-back terms read from the schedule.
-  price     spreads and totals Normal(mu, sigma) with sigma = H.close_sigma
-            (prior seasons); the moneyline from the margin distribution with
-            the tie mass removed (no ties in the NBA).
+  price     (F1) the projection's OWN empirical error distribution (section 6.5
+            amendment, second): result minus the same projection at the same
+            decision point, on seasons before S (H.dist_by_season), never the
+            market's error. 2020-21 has no earlier priced season at a decision
+            point, so it is priced on its own residuals (the harness's
+            fallback): reported, never chosen on. The moneyline is the margin
+            distribution's P(home margin > 0) with the tie mass removed.
+            F1b and F5 are rule families measured in points; their offers keep
+            the MARKET's fair pricing (H.close_dist), as closing-line value does.
 
 FAMILIES (section 6.3; 228 cells)
   F1   spread, total, moneyline x 2 sides x A,B,C,D x EV >= 0,.01,.02,.03,.05,.08   144
   F1b  the projection predicting the consensus line's move: OLS of
        (closing consensus - decision consensus) on (projection - decision
-       consensus), prior priced seasons, per market and decision point; bet a
-       side when the predicted move in its favour at the offered number is
-       >= k: spread, total x 2 x A,B,C x k = 0.5, 1, 1.5, 2                          48
+       consensus), prior priced seasons, per market and decision point; the
+       strength is the PREDICTED MOVE (predicted close - consensus at T) in the
+       side's favour, the same for every book; a side is bet when it is >= k,
+       at its best offer under the market's fair line:
+       spread, total x 2 x A,B,C x k = 0.5, 1, 1.5, 2                                 48
   F5   absences valued beyond minutes: the F1 projection plus an OLS of its
        prior-season residual on tiered absences, starters out, Questionable /
        Doubtful exposure and first games back; bet the gap between that
        projection and the offered number: spread, total x 2 x B,C,D x gap >= 1,2,3  36
+  A cell's population is the games its projection produced a number for. The
+  95% gate at D, the real-side shares and the blind bet per real side are the
+  harness's (H.run_cells); every bet carries its real side.
 
 WALK-FORWARD (season = ending year; nothing of season S is fit on season S)
   hyperparameters (rate half-life, shrinkage K, league and team-pace
@@ -116,6 +129,8 @@ FIRST_REF = 2020                 # the first season with a walk-forward projecti
 HYPER_FIT, HYPER_EVAL = 2019, 2020
 TRAIN_FROM = "2018-12-15"
 GRADED = (2021, 2022, 2023, 2024, 2025, 2026)
+STINT_SEASONS = tuple(range(FIRST_BOX, max(GRADED) + 1))   # season S's ratings read S-1 and S
+REGULAR_SEASON_TYPE = 2                                    # ESPN: 2 regular, 3 postseason, 5 play-in
 SMOKE_SEASONS = (2021,)
 QUALITY_SEASONS = (2022, 2023, 2024, 2025)   # never 2026: the confirmation season
 
@@ -374,21 +389,32 @@ def load_world(cache: Path, max_season: int) -> World:
 
 # ── lineup segments (nba_stints) ────────────────────────────────────────────
 
+# The real table (Supabase `nba_stints`, written by data/ingestors/nba_pbp.py on
+# branch nba-pbp-stints; columns read from information_schema on 2026-10-17)
+# carries every column below. Its player ids are the NBA.com person ids every
+# other NBA table uses, as TEXT[]; a player the id map lacks is 'espn:<id>' and
+# is kept as his own player (no box history, so a league-mean prior). A side
+# with other than five ids (n_home / n_away != 5: 18 of 37,132 regular-season
+# rows in 2021-22) is dropped, as are garbage-time rows and every row whose
+# season_type is not 2 (postseason 3 and play-in 5 are not in `games` either).
 STINT_NEEDS = (
     "game_id (the games table key, e.g. NBA_2024-01-15_BOS_NYK); "
     "home_player_ids and away_player_ids (five nba.com person ids each, as text, the same "
     "ids as nba_player_game_adv.player_id; or columns home_p1..home_p5 / away_p1..away_p5); "
     "home_pts and away_pts scored in the segment; home_poss and away_poss, each team's "
     "offensive possessions ending in the segment (or one `possessions` column, split evenly); "
-    "garbage_time (boolean, optional: those segments are dropped). Segments of regular-season "
-    "games only are used; a row without exactly five known ids per side is dropped.")
+    "garbage_time (boolean, optional: those segments are dropped); season_type (optional: "
+    "only 2, the regular season, is kept). A row without exactly five known ids per side is "
+    "dropped.")
 
 
 def _ids(s: pd.DataFrame, side: str) -> np.ndarray | None:
     lst = f"{side}_player_ids"
     if lst in s:
-        v = s[lst].map(lambda x: [str(i) for i in x] if x is not None else [])
-        return np.array([(r + [None] * 5)[:5] if len(r) == 5 else [None] * 5 for r in v], dtype=object)
+        # a list as written, a numpy array once it has been through parquet
+        v = s[lst].map(lambda x: [str(i) for i in x] if isinstance(x, (list, tuple, np.ndarray)) else [])
+        return np.array([(r + [None] * 5)[:5] if len(r) == 5 else [None] * 5 for r in v],
+                        dtype=object).reshape(-1, 5)
     cols = [f"{side}_p{i}" for i in range(1, 6)]
     if all(c in s for c in cols):
         return s[cols].astype(object).to_numpy()
@@ -406,8 +432,10 @@ def _norm_id(v):
 
 
 def normalize_stints(s: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
-    """The loader for <cache>/nba_stints.parquet, whatever the final schema
-    names its lineups; raises naming what is missing (STINT_NEEDS)."""
+    """The loader for <cache>/nba_stints.parquet (a cache of Supabase
+    `nba_stints`); raises naming what is missing (STINT_NEEDS)."""
+    if "season_type" in s:
+        s = s[pd.to_numeric(s["season_type"], errors="coerce") == REGULAR_SEASON_TYPE]
     hi, ai = _ids(s, "home"), _ids(s, "away")
     if hi is None or ai is None or "game_id" not in s or not {"home_pts", "away_pts"} <= set(s):
         raise ValueError("nba_stints: missing columns. Needs: " + STINT_NEEDS)
@@ -800,15 +828,21 @@ def stint_targets(st: State, box: dict, s: pd.DataFrame) -> pd.DataFrame:
 
 def rapm_solve(st: State, box: dict, s: pd.DataFrame, at_day: int, season: int, lam: float,
                decay: bool = True) -> pd.DataFrame:
-    """Deviation of the segment rating from the box rating at `at_day`, per player."""
+    """Deviation of the segment rating from the box rating at `at_day`, per player.
+
+    `lam` is the ridge penalty (rapm_lambda's cross-validated choice); the
+    time-decay rate of the segment weights is a separate number, from the
+    rate half-life. (The first build reused `lam` for the decay rate, so the
+    chosen penalty never reached the ridge, and with no decay the penalty was
+    0 and the solve singular.)"""
     ids = pd.unique(s[[f"h{j}" for j in range(5)] + [f"a{j}" for j in range(5)]].to_numpy().ravel())
     idx = {p: i for i, p in enumerate(ids)}
     q = pd.DataFrame({"player_id": ids, "day": at_day, "season": season})
     o0, d0 = box_rating(box, player_x(st, q))
     home = np.vectorize(idx.get)(s[[f"h{j}" for j in range(5)]].to_numpy())
     away = np.vectorize(idx.get)(s[[f"a{j}" for j in range(5)]].to_numpy())
-    lam = 0.0 if not np.isfinite(st.hp["hl"]) else np.log(2.0) / st.hp["hl"]
-    dec = np.exp(-lam * (at_day - s["day"].to_numpy(float))) if decay else 1.0
+    decay_rate = 0.0 if not np.isfinite(st.hp["hl"]) else np.log(2.0) / st.hp["hl"]
+    dec = np.exp(-decay_rate * (at_day - s["day"].to_numpy(float))) if decay else 1.0
     wh = np.nan_to_num(s["home_poss"].to_numpy(float)) * dec
     wa = np.nan_to_num(s["away_poss"].to_numpy(float)) * dec
     yh = np.nan_to_num(s["yh"].to_numpy(float))
@@ -1089,18 +1123,52 @@ def raw_model(m: Model) -> Model:
 
 # ── pricing (the harness's own functions) ───────────────────────────────────
 
-def fair_frame(proj: pd.DataFrame, sig: dict, margin: str = "margin", total: str = "total") -> pd.DataFrame:
-    """(game_id, market, mu, sigma, p_home) for spreads, totals and the moneyline."""
+def projection_resid(games: pd.DataFrame, proj: pd.DataFrame, margin: str = "margin",
+                     total: str = "total") -> pd.DataFrame:
+    """(season, market, resid): the result minus the projection, side A (the
+    home margin, the total), one row per projected game. No price is read."""
+    x = proj[["game_id", "season", margin, total]].merge(
+        games[["game_id", "home_score", "away_score"]], on="game_id")
+    hm = (x["home_score"] - x["away_score"]).to_numpy(float)
+    tt = (x["home_score"] + x["away_score"]).to_numpy(float)
+    out = pd.concat([
+        pd.DataFrame({"season": x["season"].astype(int), "market": "spreads", "resid": hm - x[margin]}),
+        pd.DataFrame({"season": x["season"].astype(int), "market": "totals", "resid": tt - x[total]}),
+    ], ignore_index=True)
+    return out[np.isfinite(out["resid"].to_numpy(float))].reset_index(drop=True)
+
+
+def projection_dist(games: pd.DataFrame, proj: pd.DataFrame, margin: str = "margin",
+                    total: str = "total") -> dict:
+    """(season, market) -> the projection's OWN empirical error distribution at
+    this decision point (§6.5 amendment, second): residuals of the same
+    projection at the same point on seasons BEFORE S (H.dist_by_season). The
+    first priced season has no earlier one at the point, so 2020-21 is priced
+    on its own residuals (the harness's fallback); it is reported, never
+    chosen on."""
+    r = projection_resid(games, proj, margin, total)
+    return H.dist_by_season(r, sorted(r["season"].unique())) if len(r) else {}
+
+
+def fair_frame(proj: pd.DataFrame, dist: dict, margin: str = "margin", total: str = "total") -> pd.DataFrame:
+    """(game_id, market, mu, sigma, p_home) for spreads, totals and the moneyline.
+
+    `dist`: (season, market) -> the projection's own H.ResidDist (projection_dist);
+    `sigma` carries it, so the harness prices every number through the
+    empirical distribution. The moneyline is P(home margin > 0) with the tie
+    mass removed (no ties in the NBA)."""
     p = proj[["game_id", "season", margin, total]].dropna()
     s = p["season"].astype(int)
-    ssp = np.array([sig.get((x, "spreads"), np.nan) for x in s])
-    sto = np.array([sig.get((x, "totals"), np.nan) for x in s])
-    w, _, l = H.probs_at(p[margin].to_numpy(), ssp, np.zeros(len(p)))
+    dsp = np.array([dist.get((x, "spreads")) for x in s], dtype=object)
+    dto = np.array([dist.get((x, "totals")) for x in s], dtype=object)
+    w, _, l = H.probs_any(p[margin].to_numpy(), dsp, np.zeros(len(p)))
     ph = w / np.where(w + l > 0, w + l, np.nan)
+    obj = lambda a: pd.Series(a, index=p.index, dtype=object)  # noqa: E731
     f = pd.concat([
-        pd.DataFrame({"game_id": p["game_id"], "market": "spreads", "mu": p[margin], "sigma": ssp, "p_home": np.nan}),
-        pd.DataFrame({"game_id": p["game_id"], "market": "totals", "mu": p[total], "sigma": sto, "p_home": np.nan}),
-        pd.DataFrame({"game_id": p["game_id"], "market": "h2h", "mu": np.nan, "sigma": np.nan, "p_home": ph}),
+        pd.DataFrame({"game_id": p["game_id"], "market": "spreads", "mu": p[margin], "sigma": obj(dsp), "p_home": np.nan}),
+        pd.DataFrame({"game_id": p["game_id"], "market": "totals", "mu": p[total], "sigma": obj(dto), "p_home": np.nan}),
+        pd.DataFrame({"game_id": p["game_id"], "market": "h2h", "mu": np.nan,
+                      "sigma": obj([None] * len(p)), "p_home": ph}),
     ], ignore_index=True)
     ok = np.where(f["market"] == "h2h", f["p_home"].notna(), f["mu"].notna() & f["sigma"].notna())
     return f[ok].reset_index(drop=True)
@@ -1154,20 +1222,29 @@ def fit_move(rows: pd.DataFrame) -> dict:
 
 
 def move_strength(neutral: pd.DataFrame, mu: pd.DataFrame, dec: pd.DataFrame, coef: dict) -> pd.DataFrame:
-    """F1b: predicted closing consensus C = dec + a + b (projection - dec); a side's
-    favour at the offered number L: home and over gain when C moves past L
-    (home: L - C on the home number; over: C - L), away and under the reverse."""
+    """F1b (§6.5 amendment, second): the PREDICTED MOVE of the consensus number,
+    M = C - cons = a + b (projection's number - cons), in the bettor's favour.
+    Spreads carry the home number, so home gains when it is predicted to fall
+    (-M) and away when it rises (+M); over gains when the total is predicted to
+    rise (+M), under when it falls (-M).
+
+    The offered number plays no part: every book's offer on a side carries the
+    same strength, and the harness then takes that side's best offer under the
+    MARKET's fair line (run_cells with strength="strength"). The first build
+    used the offered number minus the predicted close, which scores a soft
+    book's off-consensus number even when no move is predicted: the refuted
+    outlier mechanism."""
     x = mu.merge(dec, on=["game_id", "market"])
     x["x"] = np.where(x["market"] == "spreads", -x["mu"], x["mu"]) - x["cons"]
     ab = x["market"].map(lambda m: coef.get(m))
     a = np.array([v[0] if v is not None else np.nan for v in ab], float)
     b = np.array([v[1] if v is not None else np.nan for v in ab], float)
-    x["C"] = x["cons"] + a + b * x["x"]
-    o = neutral.merge(x[["game_id", "market", "C"]], on=["game_id", "market"], how="left")
+    x["move"] = a + b * x["x"]
+    o = neutral.merge(x[["game_id", "market", "move"]], on=["game_id", "market"], how="left")
     sp = (o["market"] == "spreads").to_numpy()
     side_a = o["side"].isin(["home", "over"]).to_numpy()
-    fav_a = np.where(sp, o["line"] - o["C"], o["C"] - o["line"])
-    return o.assign(strength=np.where(side_a, fav_a, -fav_a)).drop(columns="C")
+    fav_a = np.where(sp, -o["move"], o["move"])
+    return o.assign(strength=np.where(side_a, fav_a, -fav_a)).drop(columns="move")
 
 
 # ── one family, one decision point ──────────────────────────────────────────
@@ -1178,32 +1255,50 @@ class PointInputs:
     times: pd.DataFrame
     off: pd.DataFrame
     vis: pd.DataFrame
-    neutral: pd.DataFrame
+    neutral: pd.DataFrame       # offers priced at the MARKET's fair line (H.close_dist)
     proj: pd.DataFrame          # per game: season, margin, total, margin5, total5
+    dist: dict | None = None    # F1: the projection's own error distribution (projection_dist)
 
 
-def family_frames(fam: str, pi: PointInputs, games: pd.DataFrame, sig: dict, f1b_coef: dict | None,
+def scored_only(c: pd.DataFrame) -> pd.DataFrame:
+    """A rule family's offers on games its projection produced a number for.
+    The harness reads a cell's population (bar 9's blind sides) from the
+    games in `cand`, so a game with no number must not be there."""
+    return c[c["strength"].notna()].reset_index(drop=True)
+
+
+def family_frames(fam: str, pi: PointInputs, games: pd.DataFrame, f1b_coef: dict | None,
                   n_placebo: int = N_PLACEBO) -> tuple[pd.DataFrame, list[pd.DataFrame]]:
     """(cand, placebo frames) for one family at one point. Placebo run r shuffles
     the projection between games on the same date (rng seed r) and re-prices.
+
+    F1 prices the projection through ITS OWN error distribution (pi.dist), never
+    the market's. F1b and F5 are rule families: their strength is in points and
+    their offers keep the market's fair pricing (pi.neutral), so the harness
+    takes a side's best offer under the market's fair line.
     f1b_coef: {season: {market: (a, b) or None}} for THIS point (F1b only)."""
     rng = lambda r: np.random.default_rng(r)  # noqa: E731
     if fam == "F1":
-        fair = fair_frame(pi.proj, sig)
+        if not pi.dist:
+            raise ValueError("F1 is priced through the projection's own error distribution "
+                             "(projection_dist); none was given for point " + pi.point)
+        fair = fair_frame(pi.proj, pi.dist)
         cand = H.fair_offers(pi.off, fair)
         pl = [H.fair_offers(pi.off, H.shuffle_within_date(fair, games, rng(r))) for r in range(n_placebo)]
         return cand, pl
     if fam == "F5":
         mu = mu_frame(pi.proj, "margin5", "total5")
-        cand = gap_strength(pi.neutral, mu)
-        pl = [gap_strength(pi.neutral, H.shuffle_within_date(mu, games, rng(r))) for r in range(n_placebo)]
+        cand = scored_only(gap_strength(pi.neutral, mu))
+        pl = [scored_only(gap_strength(pi.neutral, H.shuffle_within_date(mu, games, rng(r))))
+              for r in range(n_placebo)]
         return cand, pl
     if fam == "F1b":
         mu = mu_frame(pi.proj, "margin", "total")
         dec = consensus(pi.vis)
         coef = f1b_coef or {}
-        cand = move_strength_by_season(pi.neutral, mu, dec, coef, pi.proj)
-        pl = [move_strength_by_season(pi.neutral, H.shuffle_within_date(mu, games, rng(r)), dec, coef, pi.proj)
+        cand = scored_only(move_strength_by_season(pi.neutral, mu, dec, coef, pi.proj))
+        pl = [scored_only(move_strength_by_season(pi.neutral, H.shuffle_within_date(mu, games, rng(r)),
+                                                  dec, coef, pi.proj))
               for r in range(n_placebo)]
         return cand, pl
     raise ValueError(fam)
@@ -1224,19 +1319,23 @@ def move_strength_by_season(neutral, mu, dec, coef_by_season: dict, proj) -> pd.
     return pd.concat(parts, ignore_index=True)
 
 
-def emit_family(fam: str, data: H.Data, inputs: dict, sig: dict, close, f1b_coef: dict | None,
+def emit_family(fam: str, data: H.Data, inputs: dict, market_sig: dict, close, f1b_coef: dict | None,
                 n_placebo: int = N_PLACEBO) -> tuple[list[dict], pd.DataFrame]:
     """Every cell of one family (run_cells rows) and its population counts.
+    `market_sig`: the market's own pricing (H.close_dist), for closing-line
+    value. The 95% gate at D, the real-side shares and the blind bets per real
+    side are the harness's (run_cells, given this point's decision times).
     f1b_coef: {point: {season: {market: (a, b)}}} (F1b only)."""
     spec = FAMILIES[fam]
     rows, pop = [], []
     for p in spec["points"]:
         pi = inputs[p]
         coef = (f1b_coef or {}).get(p) if fam == "F1b" else None
-        cand, placebo = family_frames(fam, pi, data.games, sig, coef, n_placebo)
+        cand, placebo = family_frames(fam, pi, data.games, coef, n_placebo)
         sides = {m: list(SIDES2[m]) for m in spec["markets"]}
         rows += H.run_cells(data, fam, p, cand, pi.neutral, list(spec["cuts"]), sides, close=close,
-                            sig=sig, placebo=placebo, strength=spec["strength"])
+                            sig=market_sig, placebo=placebo, strength=spec["strength"],
+                            times=pi.times)
         pop.append(population(fam, p, data, pi, cand))
     n = len(rows)
     assert n == EXPECTED_CELLS[fam], (fam, n)
@@ -1275,11 +1374,14 @@ def population(fam: str, point: str, data: H.Data, pi: PointInputs, cand: pd.Dat
     return pd.DataFrame(out)
 
 
-def point_inputs(data: H.Data, point: str, w: World, st: State, models: dict, sig: dict) -> PointInputs:
-    """Decision times, offers and the projection at one decision point, every season."""
+def point_inputs(data: H.Data, point: str, w: World, st: State, models: dict,
+                 market_sig: dict) -> PointInputs:
+    """Decision times, offers and the projection at one decision point, every
+    season; the market's fair pricing (market_sig = H.close_dist) and the
+    projection's own error distribution at this point (projection_dist)."""
     times, off = H.point_offers(data, point)
     vis = H.visible(data.quotes, times)
-    neutral = H.fair_offers(off, H.market_fair(vis, sig))
+    neutral = H.fair_offers(off, H.market_fair(vis, market_sig))
     gm = data.games.merge(times[["game_id", "T"]], on="game_id")
     gm = gm.merge(w.games[["game_id", "day"]], on="game_id")
     parts = []
@@ -1288,7 +1390,8 @@ def point_inputs(data: H.Data, point: str, w: World, st: State, models: dict, si
             parts.append(project(w, st, models[int(s)], g))
     proj = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(
         columns=["game_id", "season", "margin", "total", "margin5", "total5"])
-    return PointInputs(point, times, off, vis, neutral, proj)
+    dist = projection_dist(data.games, proj) if len(proj) else {}
+    return PointInputs(point, times, off, vis, neutral, proj, dist)
 
 
 def f1b_coefficients(data: H.Data, inputs: dict, seasons) -> dict:
@@ -1345,6 +1448,11 @@ def synthetic_cells_check(n_placebo: int = 2, seasons=(2021, 2022, 2023, 2024, 2
     sig = {(s, m): 12.0 if m == "spreads" else 18.0 for s in data.games["season"].unique()
            for m in ("spreads", "totals")}
     rng = np.random.default_rng(1)
+    # the projection's own error distribution, from synthetic residuals (a
+    # handful of games a season is below the empirical table's floor of 50)
+    by_market = {m: H.ResidDist(rng.normal(0.0, 13.0 if m == "spreads" else 19.0, 2000), f"synthetic {m}")
+                 for m in ("spreads", "totals")}
+    own = {(int(s), m): d for s in data.games["season"].unique() for m, d in by_market.items()}
     inputs = {}
     for p in ("A", "B", "C", "D"):
         times, off = H.point_offers(data, p)
@@ -1354,7 +1462,7 @@ def synthetic_cells_check(n_placebo: int = 2, seasons=(2021, 2022, 2023, 2024, 2
         proj = pd.DataFrame({"game_id": g["game_id"], "season": g["season"],
                              "margin": rng.normal(4, 6, len(g)), "total": rng.normal(220, 8, len(g))})
         proj["margin5"], proj["total5"] = proj["margin"] + 1.0, proj["total"] - 1.0
-        inputs[p] = PointInputs(p, times, off, vis, neutral, proj)
+        inputs[p] = PointInputs(p, times, off, vis, neutral, proj, own)
     coef = {p: {int(s): {"spreads": (0.0, 0.5), "totals": (0.0, 0.5)} for s in data.games["season"].unique()}
             for p in FAMILIES["F1b"]["points"]}
     close = H.pinnacle_close(data)
@@ -1450,18 +1558,20 @@ def smoke(cache: Path) -> dict:
     data = H.load(price_cache, seasons=list(SMOKE_SEASONS))
     print("price rows:", data.notes)
     close = H.pinnacle_close(data)
-    sig = H.close_sigma(close, data.games)
-    inputs = {p: point_inputs(data, p, w, st, models, sig) for p in H.POINTS}
+    market_sig = H.close_dist(close, data.games)
+    inputs = {p: point_inputs(data, p, w, st, models, market_sig) for p in H.POINTS}
     coef = f1b_coefficients(data, inputs, SMOKE_SEASONS)
     out_dir = RESULTS / "smoke"
     out_dir.mkdir(parents=True, exist_ok=True)
+    # what each distribution was built from (count and source, not its spread)
+    label = lambda d: {f"{s} {m}": {"n": v.n, "from": v.label} for (s, m), v in sorted(d.items())}  # noqa: E731
     summary = {"hyper": {k: v for k, v in hp.items() if k != "mse"}, "price_note": note,
-               "price_rows": data.notes, "points": {}}
+               "price_rows": data.notes, "market_pricing": label(market_sig), "points": {}}
     for fam in FAMILIES:
         pops = []
         for p in FAMILIES[fam]["points"]:
             pi = inputs[p]
-            cand, _ = family_frames(fam, pi, data.games, sig, coef.get(p) if fam == "F1b" else None,
+            cand, _ = family_frames(fam, pi, data.games, coef.get(p) if fam == "F1b" else None,
                                     n_placebo=0)
             pops.append(population(fam, p, data, pi, cand))
         pop = pd.concat(pops, ignore_index=True)
@@ -1471,10 +1581,14 @@ def smoke(cache: Path) -> dict:
             priced=("games_priced", "first"), with_model=("games_with_model", "first")).reset_index().to_dict("records")
     for p, pi in inputs.items():
         pr = pi.proj
+        cov = H.point_coverage(data, p, pi.times)
         summary["points"][p] = {"games_with_time": int(len(pi.times)),
+                                "coverage": {s: round(v, 4) for s, v in cov.items()},
+                                "harness_gate_drops": H.gated_seasons(cov, SMOKE_SEASONS, p)[1],
                                 "projected": int(pr["margin"].notna().sum()) if len(pr) else 0,
                                 "box_guard_failed": int((~pr["box_ok"]).sum()) if len(pr) else 0,
-                                "report_known": int(pr["covered"].fillna(False).sum()) if len(pr) else 0}
+                                "report_known": int(pr["covered"].fillna(False).sum()) if len(pr) else 0,
+                                "own_pricing": label(pi.dist or {})}
     print(json.dumps(summary, indent=1, default=str))
     return summary
 
@@ -1558,23 +1672,57 @@ def quality(cache: Path) -> dict:
     return res
 
 
+def stints_short(cache: Path, seasons=STINT_SEASONS, floor: float = H.MIN_PRICED_SHARE) -> dict:
+    """season -> share of its regular-season games with any lineup segment, for
+    every season below `floor` (the harness's own stale-cache share). A file
+    exported while the play-by-play load is still running would otherwise run
+    the early seasons with segment ratings and the later ones on box ratings
+    alone, without a sound."""
+    g = H.load_games(cache)
+    cols = ["game_id", "season_type"]
+    s = pd.read_parquet(cache / STINTS_FILE)
+    s = s[[c for c in cols if c in s]]
+    if "season_type" in s:
+        s = s[s["season_type"].astype(int) == REGULAR_SEASON_TYPE]
+    has = g["game_id"].isin(set(s["game_id"].astype(str)))
+    share = has.groupby(g["season"]).mean()
+    return {int(x): round(float(share.get(x, 0.0)), 4) for x in seasons
+            if float(share.get(x, 0.0)) < floor}
+
+
+def refuse(lines: list[str]) -> None:
+    for x in lines:
+        print("REFUSED:", x)
+    raise SystemExit(2)
+
+
 def full(cache: Path) -> None:
+    """The graded run. Cheap refusals first, then the hour-long projection:
+    the go flag and the files; a stale price cache (H.load with every graded
+    season required); a lineup-segment file missing a season the ratings read
+    (2018-19 onward: season S's adjusted plus-minus reads S-1 and S)."""
     why = refuse_full(cache)
     if why:
-        for x in why:
-            print("REFUSED:", x)
-        raise SystemExit(2)
+        refuse(why)
+    try:
+        data = H.load(cache, seasons=list(GRADED), require_seasons=GRADED)
+    except RuntimeError as e:
+        refuse([str(e)])
+    print("price rows:", data.notes)
+    short = stints_short(cache)
+    if short:
+        refuse([f"{cache / STINTS_FILE} has segments on too few regular-season games in {short} "
+                f"(need {H.MIN_PRICED_SHARE:.0%}): the play-by-play load is not finished or the "
+                "cache predates it"])
     w = load_world(cache, max_season=max(GRADED))
     hp, st, models, refs, _ = run_projection_setup(w, max(GRADED))
-    data = H.load(cache, seasons=list(GRADED))
-    print("price rows:", data.notes)
     close = H.pinnacle_close(data)
-    sig = H.close_sigma(close, data.games)
-    inputs = {p: point_inputs(data, p, w, st, models, sig) for p in H.POINTS}
+    market_sig = H.close_dist(close, data.games)
+    inputs = {p: point_inputs(data, p, w, st, models, market_sig) for p in H.POINTS}
     coef = f1b_coefficients(data, inputs, GRADED)
     RESULTS.mkdir(parents=True, exist_ok=True)
     for fam in FAMILIES:
-        rows, pop = emit_family(fam, data, inputs, sig, close, coef)
+        rows, pop = emit_family(fam, data, inputs, market_sig, close, coef)
         pd.DataFrame(rows).to_parquet(RESULTS / f"cells_{fam}.parquet")
         pop.to_parquet(RESULTS / f"population_{fam}.parquet")
         print(f"{fam}: {len(rows)} cells written")

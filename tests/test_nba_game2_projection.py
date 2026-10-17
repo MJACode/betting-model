@@ -337,6 +337,42 @@ def test_the_segment_loader_reads_the_ingestor_schema_and_names_what_is_missing(
         P.normalize_stints(s.drop(columns=["home_poss", "away_poss"]), games)
 
 
+# Supabase `nba_stints`, every column in table order (information_schema,
+# 2026-10-17; the writer is data/ingestors/nba_pbp.py on branch nba-pbp-stints)
+REAL_STINT_COLS = (
+    "espn_game_id", "stint_no", "game_id", "season", "season_type", "period", "start_s", "end_s",
+    "duration_s", "home_team", "away_team", "home_espn_ids", "away_espn_ids", "home_player_ids",
+    "away_player_ids", "n_home", "n_away", "home_pts", "away_pts", "home_poss", "away_poss",
+    "home_fga", "home_fg3a", "home_fg3m", "home_fta", "home_ftm", "home_oreb", "home_tov",
+    "away_fga", "away_fg3a", "away_fg3m", "away_fta", "away_ftm", "away_oreb", "away_tov",
+    "home_score_start", "away_score_start", "garbage_time", "derivation")
+
+
+def test_the_segment_loader_reads_the_real_table_after_a_parquet_round_trip(tmp_path):
+    games = pd.DataFrame({"game_id": ["G1"], "season": [2022], "day": [18950]})
+    five_h = ["201939", "203110", "1626172", "1628398", "espn:4432158"]   # one unmapped player
+    five_a = ["2544", "203076", "1629060", "1630559", "1627936"]
+    base = {c: 0 for c in REAL_STINT_COLS}
+    base.update({"espn_game_id": 401360000, "game_id": "G1", "season": 2022, "home_team": "GSW",
+                 "away_team": "LAL", "home_espn_ids": [1, 2, 3, 4, 5], "away_espn_ids": [6, 7, 8, 9, 10],
+                 "home_player_ids": five_h, "away_player_ids": five_a, "n_home": 5, "n_away": 5,
+                 "home_pts": 7, "away_pts": 4, "home_poss": 4, "away_poss": 4,
+                 "garbage_time": False, "derivation": "stints-v1", "season_type": 2})
+    rows = [dict(base, stint_no=1),
+            dict(base, stint_no=2, season_type=3),                                  # postseason
+            dict(base, stint_no=3, n_away=4, away_player_ids=five_a[:4]),           # four on the floor
+            dict(base, stint_no=4, garbage_time=True)]
+    pd.DataFrame(rows, columns=list(REAL_STINT_COLS)).to_parquet(tmp_path / "s.parquet")
+    s = pd.read_parquet(tmp_path / "s.parquet")
+    assert isinstance(s.loc[0, "home_player_ids"], np.ndarray)      # lists come back as arrays
+    out = P.normalize_stints(s, games)
+    assert out["home_pts"].tolist() == [7.0] and out["home_poss"].tolist() == [4.0]
+    assert [out.loc[0, f"h{j}"] for j in range(5)] == five_h
+    assert [out.loc[0, f"a{j}"] for j in range(5)] == five_a
+    # a postseason row is dropped by its season_type even when its game id is a games row
+    assert len(P.normalize_stints(s[s["stint_no"] == 2], games)) == 0
+
+
 def _segment_rows(games, per_game=8, seed=5):
     rng = np.random.default_rng(seed)
     rows = []
@@ -349,6 +385,38 @@ def _segment_rows(games, per_game=8, seed=5):
                          "home_pts": int(rng.integers(5, 20)), "away_pts": int(rng.integers(5, 20)),
                          "home_poss": hp, "away_poss": hp, "garbage_time": False})
     return pd.DataFrame(rows)
+
+
+def _rapm_inputs(hl):
+    """Real segments through the real loader, targets and box prior: one season."""
+    g = _games(n_per_season=30)
+    adv, log = _box(g)
+    ina = pd.DataFrame(columns=["game_id", "team", "player_id"])
+    w = P.build_world(g, adv, log, ina, _inj(), stints=_segment_rows(g))
+    st = _state(w, hl=hl)
+    box = P.fit_box(w, st, [2020])
+    s = P.stint_targets(st, box, w.stints[w.stints["season"] == 2021])
+    day = int(w.games.loc[w.games["season"] == 2021, "day"].max()) + 1
+    return st, box, s, day
+
+
+def test_the_chosen_penalty_reaches_the_segment_ridge():
+    # review fix 1: the cross-validated penalty was overwritten by the decay
+    # rate, so any two penalties gave the same deviations
+    st, box, s, day = _rapm_inputs(365.0)
+    lo = P.rapm_solve(st, box, s, day, 2021, 250.0)
+    hi = P.rapm_solve(st, box, s, day, 2021, 8000.0)
+    assert not np.allclose(lo["do"], hi["do"])
+    # the larger penalty holds every player closer to his box rating
+    assert np.abs(hi[["do", "dd"]].to_numpy()).max() < np.abs(lo[["do", "dd"]].to_numpy()).max()
+
+
+def test_no_time_decay_is_not_a_singular_solve():
+    # with no decay the overwritten penalty was 0: LinAlgError, Singular matrix
+    st, box, s, day = _rapm_inputs(np.inf)
+    dev = P.rapm_solve(st, box, s, day, 2021, 2000.0)
+    v = dev[["do", "dd"]].to_numpy()
+    assert np.isfinite(v).all() and np.abs(v).max() < 50.0
 
 
 def test_segment_ratings_flow_into_the_projection_and_move_it():
@@ -388,15 +456,66 @@ def test_the_segment_file_is_read_from_the_cache_when_present(tmp_path):
 
 # ── pricing and the rule families ───────────────────────────────────────────
 
+def _dist(sd, n=1000, seed=11, label=""):
+    return H.ResidDist(np.random.default_rng(seed).normal(0.0, sd, n), label)
+
+
 def test_the_moneyline_comes_from_the_margin_distribution_with_ties_removed():
     proj = pd.DataFrame({"game_id": ["a", "b"], "season": 2024, "margin": [0.0, 4.0], "total": 220.0})
-    f = P.fair_frame(proj, {(2024, "spreads"): 12.0, (2024, "totals"): 18.0})
+    dsp, dto = _dist(12.0), _dist(18.0, seed=12)
+    f = P.fair_frame(proj, {(2024, "spreads"): dsp, (2024, "totals"): dto})
     ph = f[f["market"] == "h2h"].set_index("game_id")["p_home"]
-    assert ph["a"] == pytest.approx(0.5)
-    w, _, l = H.probs_at(4.0, 12.0, 0.0)
-    assert ph["b"] == pytest.approx(w / (w + l)) and ph["b"] > 0.6
+    w0, _, l0 = dsp.probs(0.0, 0.0)
+    assert ph["a"] == pytest.approx(float(w0 / (w0 + l0)))
+    w, _, l = dsp.probs(4.0, 0.0)
+    assert ph["b"] == pytest.approx(float(w / (w + l))) and ph["b"] > 0.6
     sp = f[f["market"] == "spreads"].set_index("game_id")
-    assert sp.loc["b", "mu"] == 4.0 and sp.loc["b", "sigma"] == 12.0
+    assert sp.loc["b", "mu"] == 4.0 and sp.loc["b", "sigma"] is dsp
+
+
+def test_f1_is_priced_through_the_projections_own_error_not_the_markets():
+    # review fix 2: the first build priced F1 with the spread of results around
+    # Pinnacle's close; the projection's own error is wider
+    data = P.synthetic_market(per_season=4, seasons=(2022,))
+    market = {(2022, m): 6.0 for m in ("spreads", "totals")}
+    t, off = H.point_offers(data, "C")
+    vis = H.visible(data.quotes, t)
+    neutral = H.fair_offers(off, H.market_fair(vis, market))
+    g = data.games
+    proj = pd.DataFrame({"game_id": g["game_id"], "season": g["season"], "margin": 9.0, "total": 230.0})
+    own = {(2022, "spreads"): _dist(14.0), (2022, "totals"): _dist(19.0, seed=12)}
+    pi = P.PointInputs("C", t, off, vis, neutral, proj, own)
+    cand, _ = P.family_frames("F1", pi, g, None, n_placebo=0)
+    sp = cand[(cand["market"] == "spreads") & (cand["side"] == "home")]
+    w, push, _ = own[(2022, "spreads")].probs(np.full(len(sp), 9.0), -sp["line"].to_numpy())
+    assert np.allclose(sp["p_win"], w) and np.allclose(sp["p_push"], push)
+    # the market's narrower spread would price the same home number higher
+    w_mkt, _, _ = H.probs_at(np.full(len(sp), 9.0), np.full(len(sp), 6.0), -sp["line"].to_numpy())
+    assert (w_mkt > sp["p_win"].to_numpy() + 0.05).all()
+    with pytest.raises(ValueError, match="own error distribution"):
+        P.family_frames("F1", P.PointInputs("C", t, off, vis, neutral, proj), g, None, n_placebo=0)
+
+
+def test_the_projections_error_distribution_is_read_from_earlier_seasons_only():
+    rng = np.random.default_rng(4)
+    games, proj = [], []
+    for s, sd in ((2021, 10.0), (2022, 30.0)):
+        for i in range(400):
+            hs, as_ = int(rng.integers(90, 130)), int(rng.integers(90, 130))
+            games.append({"game_id": f"{s}_{i}", "home_score": hs, "away_score": as_})
+            proj.append({"game_id": f"{s}_{i}", "season": s, "margin": hs - as_ - rng.normal(0, sd),
+                         "total": hs + as_ - rng.normal(0, sd)})
+    games, proj = pd.DataFrame(games), pd.DataFrame(proj)
+    d = P.projection_dist(games, proj)
+    # 2022 is priced on 2021's residuals (result minus projection), never its own
+    assert d[(2022, "spreads")].n == 400 and d[(2022, "spreads")].sd == pytest.approx(10.0, rel=0.1)
+    assert "prior" in d[(2022, "totals")].label
+    r = P.projection_resid(games, proj)
+    x = proj.iloc[0]
+    g0 = games.iloc[0]
+    assert r.loc[0, "resid"] == pytest.approx(g0.home_score - g0.away_score - x.margin)
+    # 2021 has no earlier season: its own rows, which the label says
+    assert "own season" in d[(2021, "spreads")].label
 
 
 def _neutral(rows):
@@ -413,17 +532,35 @@ def test_the_f5_gap_reads_the_home_number():
     assert g == pytest.approx([2.5, -2.5, 4.5, -4.5])
 
 
-def test_f1b_favour_is_the_predicted_close_against_the_offered_number():
+def test_f1b_strength_is_the_predicted_move_in_the_sides_favour():
     n = _neutral([("spreads", "home", -3.0), ("spreads", "away", -3.0),
                   ("totals", "over", 220.0), ("totals", "under", 220.0)])
     mu = pd.DataFrame({"game_id": "G", "market": ["spreads", "totals"], "mu": [5.0, 224.0]})
     dec = pd.DataFrame({"game_id": "G", "market": ["spreads", "totals"], "cons": [-3.0, 220.0]})
-    # the projection says home by 5 (home number -5): half the gap closes -> -4;
-    # the total 224: half closes -> 222
+    # the projection says home by 5 (home number -5): half the gap closes, so
+    # the home number is predicted to fall 1 (home +1); the total 224: half
+    # closes, a rise of 2 (over +2)
     s = P.move_strength(n, mu, dec, {"spreads": (0.0, 0.5), "totals": (0.0, 0.5)})["strength"].tolist()
     assert s == pytest.approx([1.0, -1.0, 2.0, -2.0])
     none = P.move_strength(n, mu, dec, {"spreads": None})["strength"]
     assert none.isna().all()
+
+
+def test_f1b_does_not_score_a_books_number_off_the_consensus():
+    # review fix 3: the first build scored (offered number - predicted close),
+    # so a soft book hanging home -2 against a -3 consensus scored +1 for home
+    # with no move predicted at all (the refuted outlier mechanism)
+    n = _neutral([("spreads", "home", -3.0), ("spreads", "home", -2.0), ("spreads", "away", -2.0),
+                  ("totals", "over", 218.0), ("totals", "under", 222.0)])
+    mu = pd.DataFrame({"game_id": "G", "market": ["spreads", "totals"], "mu": [3.0, 220.0]})
+    dec = pd.DataFrame({"game_id": "G", "market": ["spreads", "totals"], "cons": [-3.0, 220.0]})
+    half = {"spreads": (0.0, 0.5), "totals": (0.0, 0.5)}
+    # the projection equals the consensus (home by 3, total 220): no move predicted
+    s = P.move_strength(n, mu, dec, half)["strength"].tolist()
+    assert s == pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0])
+    # a predicted move gives every book's offer on a side the same strength
+    s2 = P.move_strength(n, mu.assign(mu=[7.0, 226.0]), dec, half)["strength"].tolist()
+    assert s2 == pytest.approx([2.0, 2.0, -2.0, 3.0, -3.0])
 
 
 def test_the_placebo_moves_the_projection_and_never_the_price():
@@ -437,16 +574,40 @@ def test_the_placebo_moves_the_projection_and_never_the_price():
                          "margin": np.arange(len(g), dtype=float), "total": 220.0,
                          "margin5": np.arange(len(g), dtype=float), "total5": 220.0})
     pi = P.PointInputs("C", t, off, vis, neutral, proj)
-    cand, pl = P.family_frames("F5", pi, g, sig, None, n_placebo=3)
+    cand, pl = P.family_frames("F5", pi, g, None, n_placebo=3)
     key = ["game_id", "market", "side", "book", "line"]
     a = cand.sort_values(key).reset_index(drop=True)
     for p in pl:
         b = p.sort_values(key).reset_index(drop=True)
         assert np.allclose(a["ev"], b["ev"]) and np.allclose(a["price"], b["price"])
-    gap = a["market"] != "h2h"
-    assert a.loc[gap, "strength"].notna().all() and a.loc[~gap, "strength"].isna().all()
-    assert any(not np.allclose(a.loc[gap, "strength"], p.sort_values(key)["strength"].to_numpy()[gap.to_numpy()])
-               for p in pl)
+    # only the markets the projection numbers (no moneyline gap), every row scored
+    assert set(a["market"]) == {"spreads", "totals"} and a["strength"].notna().all()
+    assert any(not np.allclose(a["strength"], p.sort_values(key)["strength"].to_numpy()) for p in pl)
+
+
+def test_a_game_the_projection_did_not_number_is_outside_the_population():
+    # review follow-up (bar 9): the harness reads a cell's priced population
+    # from the games in `cand`; F5 and F1b carried every priced game, with an
+    # empty strength where the projection gave no number
+    data = P.synthetic_market(per_season=4, seasons=(2022,))
+    sig = {(2022, m): 12.0 for m in ("spreads", "totals")}
+    t, off = H.point_offers(data, "C")
+    vis = H.visible(data.quotes, t)
+    neutral = H.fair_offers(off, H.market_fair(vis, sig))
+    g = data.games
+    proj = pd.DataFrame({"game_id": g["game_id"], "season": g["season"],
+                         "margin": [5.0, np.nan, 5.0, 5.0], "total": [220.0, np.nan, 220.0, 220.0],
+                         "margin5": [5.0, np.nan, 5.0, 5.0], "total5": [220.0, np.nan, 220.0, 220.0]})
+    pi = P.PointInputs("C", t, off, vis, neutral, proj)
+    coef = {2022: {"spreads": (0.0, 0.5), "totals": (0.0, 0.5)}}
+    unpriced = g["game_id"].iloc[1]
+    for fam, c in (("F5", None), ("F1b", coef)):
+        cand, pl = P.family_frames(fam, pi, g, c, n_placebo=2)
+        assert unpriced not in set(cand["game_id"]) and len(cand), fam
+        assert all(unpriced not in set(p["game_id"]) for p in pl), fam
+        rows = H.run_cells(data, fam, "C", cand, neutral, [0.0], {"spreads": ["home"]},
+                           strength="strength", times=t)
+        assert rows[0]["population_games"] == 3, fam
 
 
 def test_population_counts_games_prices_model_numbers_and_bets():
@@ -461,7 +622,7 @@ def test_population_counts_games_prices_model_numbers_and_bets():
     proj = pd.DataFrame({"game_id": g["game_id"], "season": g["season"], "margin": 30.0, "total": 220.0,
                          "margin5": [30.0, np.nan, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0], "total5": 220.0})
     pi = P.PointInputs("D", t, off, vis, neutral, proj)
-    cand, _ = P.family_frames("F5", pi, g, sig, None, n_placebo=0)
+    cand, _ = P.family_frames("F5", pi, g, None, n_placebo=0)
     pop = P.population("F5", "D", data, pi, cand).set_index(["season", "market", "side", "cut"])
     r = pop.loc[(2023, "spreads", "home", 1.0)]
     assert (r["games"], r["games_with_time"], r["games_priced"], r["games_with_model"]) == (4, 3, 3, 3)
@@ -483,6 +644,76 @@ def test_full_refuses_without_go_segments_or_ledger(tmp_path, monkeypatch):
     assert P.refuse_full(tmp_path) == []
     (tmp_path / P.STINTS_FILE).unlink()
     assert len(P.refuse_full(tmp_path)) == 1 and "segments" in P.refuse_full(tmp_path)[0]
+
+
+def _games_file(tmp_path, seasons=(2019, 2020), n=10):
+    g = _games(n_per_season=n, seasons=seasons)
+    g["commence_time"] = g["tip"].astype(str)
+    g.to_parquet(tmp_path / "nba_games.parquet")
+    return g
+
+
+def test_a_segment_file_missing_part_of_a_season_is_refused(tmp_path):
+    # review fix 6: Supabase holds 2022-23 only to 2022-12-23 today; a file
+    # exported mid-load would grade later seasons on box ratings alone
+    g = _games_file(tmp_path)
+    covered = list(g.loc[g["season"] == 2019, "game_id"]) + list(g.loc[g["season"] == 2020, "game_id"][:6])
+    pd.DataFrame({"game_id": covered, "season_type": 2}).to_parquet(tmp_path / P.STINTS_FILE)
+    assert P.stints_short(tmp_path, seasons=(2019, 2020)) == {2020: 0.6}
+    # postseason segments do not count toward a regular-season game
+    pd.DataFrame({"game_id": list(g["game_id"]), "season_type": [2] * 10 + [3] * 10}).to_parquet(
+        tmp_path / P.STINTS_FILE)
+    assert P.stints_short(tmp_path, seasons=(2019, 2020)) == {2020: 0.0}
+    pd.DataFrame({"game_id": list(g["game_id"]), "season_type": 2}).to_parquet(tmp_path / P.STINTS_FILE)
+    assert P.stints_short(tmp_path, seasons=(2019, 2020)) == {}
+    assert P.stints_short(tmp_path, seasons=(2019, 2020, 2021)) == {2021: 0.0}
+    assert P.STINT_SEASONS == (2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026)
+
+
+def test_full_checks_the_price_cache_for_every_graded_season_before_building_anything(tmp_path, monkeypatch):
+    # review fix 6: --full calls H.load(require_seasons=...) with every season
+    # it grades, and does so before the hour-long projection build
+    monkeypatch.setenv(P.GO_ENV, "1")
+    (tmp_path / P.STINTS_FILE).write_bytes(b"x")
+    (tmp_path / P.LEDGER_FILE).write_bytes(b"x")
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_load(cache, seasons=None, require_seasons=None):
+        seen.update(seasons=seasons, require_seasons=require_seasons)
+        raise Stop
+
+    def built_too_early(*a, **k):
+        raise AssertionError("the projection was built before the cheap refusals ran")
+
+    monkeypatch.setattr(H, "load", fake_load)
+    monkeypatch.setattr(P, "load_world", built_too_early)
+    monkeypatch.setattr(P, "run_projection_setup", built_too_early)
+    with pytest.raises(Stop):
+        P.full(tmp_path)
+    assert tuple(seen["require_seasons"]) == P.GRADED == (2021, 2022, 2023, 2024, 2025, 2026)
+    assert tuple(seen["seasons"]) == P.GRADED
+
+    # a stale cache (the harness refuses) is a REFUSED exit, not a traceback
+    def stale(cache, seasons=None, require_seasons=None):
+        raise RuntimeError("cache prices too few games in {2024: 0.3}")
+
+    monkeypatch.setattr(H, "load", stale)
+    with pytest.raises(SystemExit) as e:
+        P.full(tmp_path)
+    assert e.value.code == 2
+
+    # prices fine, segments for only part of the seasons the ratings read: refused
+    g = _games_file(tmp_path, seasons=P.STINT_SEASONS, n=2)
+    pd.DataFrame({"game_id": g.loc[g["season"] <= 2022, "game_id"], "season_type": 2}).to_parquet(
+        tmp_path / P.STINTS_FILE)
+    monkeypatch.setattr(H, "load", lambda cache, seasons=None, require_seasons=None: H.Data(
+        games=g, quotes=pd.DataFrame(), fetches=pd.DataFrame(), notes={}))
+    with pytest.raises(SystemExit) as e:
+        P.full(tmp_path)
+    assert e.value.code == 2
 
 
 def test_the_smoke_ledger_has_every_2020_21_pull_and_never_writes_into_the_cache(tmp_path, monkeypatch):
