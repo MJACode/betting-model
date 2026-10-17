@@ -766,7 +766,12 @@ Only then does it run a betting grid.
       (+0.0016).
     - On the same moneyline quotes, Pinnacle's no-vig predicts worse than the deciding book's
       own no-vig: log loss +0.029 (+0.025 to +0.033), worse in every season.
-    - Against their own prices, the deciding books show +0.0021 pooled (−0.0004 to +0.0047).
+    - The total shows the same split: +0.0134 against Pinnacle's own price, +0.0024 against the
+      deciding books' own. A total sits near even money, where the no-vig method cannot cause it.
+    - Against their own prices the deciding books show +0.0021 pooled (−0.0004 to +0.0047).
+      Their spreads and totals cover zero. Their moneylines do not: +0.0054 (+0.0015 to
+      +0.0096), and +0.0067 (+0.0018 to +0.0119) on quotes that pass the rule. So the deciding
+      books' own moneyline prices also carry a small lag that the rule does not remove.
     - **What this means for 7.3:** an information test measured against Pinnacle's live price
       alone would be passed by any model that knows the recent score. Measuring it against the
       deciding books' own prices at the same stamp would change this pre-registration, so it is
