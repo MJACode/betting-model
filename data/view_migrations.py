@@ -352,10 +352,15 @@ ACTIVE_MIGRATIONS: list[str] = [
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-17: the posted-stake functions, committed on their own.
+    # The view patch is the next file. A failure there must not roll
+    # these back, or settlement's query names a function that does not
+    # exist. Does not rewrite snapshots, picks, or push_sent.
+    "published_pick_units_2026_10_17.sql",
     # 2026-10-16: Discord #results and the Record tab share one stake.
-    # published_pick_stake is stake_for (1u to win, risk capped at 3).
-    # The two record views gain units and risked from it. profit_flat
-    # stays. Reads the live view, so it runs after every owner above.
+    # The two record views gain units and risked from the functions
+    # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
+    # Reads the live view, so it runs after every owner above.
     # Does not rewrite snapshots, picks, or push_sent, and does not post.
     "published_record_units_2026_10_16.sql",
 ]

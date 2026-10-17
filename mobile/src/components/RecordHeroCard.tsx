@@ -46,11 +46,12 @@ export function RecordHeroCard({
   const labelMinHeight = Math.ceil(font.size.footnote * 1.35 * fontScale * 2);
   const [sheet, setSheet] = useState<'roi' | 'clv' | null>(null);
   const [sparkW, setSparkW] = useState(SPARK_W);
-  const units = Number(summary.units ?? 0);
+  const unitsKnown = summary.units != null;
+  const units = unitsKnown ? Number(summary.units) : 0;
   const risked = Number(summary.risked ?? 0);
   const quiet = notLoaded || summary.picks <= 0;
-  const unitsText = heroUnitsText(units, quiet);
-  const roi = roiText(summary.roiFlat, risked, quiet);
+  const unitsText = heroUnitsText(units, quiet || !unitsKnown);
+  const roi = roiText(summary.roi, risked, quiet || !unitsKnown);
   const record = recordLine(summary.wins, summary.losses, summary.pushes, quiet);
   const win = winRateText(summary.winRate, summary.wins, summary.losses, quiet);
   const clv = clvText(summary.clvBeatRate, quiet);
@@ -60,7 +61,8 @@ export function RecordHeroCard({
     label,
     units,
     risked,
-    roiFlat: summary.roiFlat,
+    unitsKnown,
+    roi: summary.roi,
     wins: summary.wins,
     losses: summary.losses,
     pushes: summary.pushes,
@@ -114,7 +116,7 @@ export function RecordHeroCard({
             <GridCell
               label="Return on bets"
               value={roi}
-              valueColor={roi === '—' ? colors.textSecondary : pnlColor(summary.roiFlat, 1, 100)}
+              valueColor={roi === '—' ? colors.textSecondary : pnlColor(summary.roi, 1, 100)}
               stacked={stacked}
               labelMinHeight={labelMinHeight}
               onInfo={() => open('roi')}

@@ -43,9 +43,9 @@ export function heroUnitsText(units: number, notLoaded: boolean): string {
   return formatSigned(units, 2, 'u');
 }
 
-export function roiText(roiFlat: number, risked: number, notLoaded: boolean): string {
+export function roiText(roi: number, risked: number, notLoaded: boolean): string {
   if (notLoaded || !(risked > 0)) return '—';
-  return formatPctSigned(roiFlat);
+  return formatPctSigned(roi);
 }
 
 export function recordLine(wins: number, losses: number, pushes: number, notLoaded: boolean): string {
@@ -77,20 +77,22 @@ export function heroAccessibilityLabel(o: {
   label: string;
   units: number;
   risked: number;
-  roiFlat: number;
+  /** False when the select fell back and the units column is not there yet. */
+  unitsKnown?: boolean;
+  roi: number;
   wins: number;
   losses: number;
   pushes: number;
   winRate: number;
   clvBeatRate: number | null;
 }): string {
-  const units = o.notLoaded
+  const units = o.notLoaded || o.unitsKnown === false
     ? 'Units unavailable'
     : o.picks <= 0
       ? 'No settled picks'
       : `${unitsSpeech(heroUnitsText(o.units, false))}, 1 to win`;
   const quiet = o.notLoaded || o.picks <= 0;
-  const roi = returnOnBetsSpeech(roiText(o.roiFlat, o.risked, quiet));
+  const roi = returnOnBetsSpeech(roiText(o.roi, o.risked, quiet || o.unitsKnown === false));
   const record = o.notLoaded
     ? unknownCountSpeech('— settled picks')
     : o.picks <= 0

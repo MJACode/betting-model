@@ -392,7 +392,7 @@ for (const rel of ['src/components/SportsbookPickerSheet.tsx', 'src/components/H
 const eq = read('src/components/EquityCurve.tsx');
 check('EquityCurve end pill is pnlColor ink + formatSigned, line is betInk (no bright green)', /formatSigned\(endUnits, 2, 'u'\)/.test(eq) && /pnlColor\(endUnits, 2\)/.test(eq) && /colors\.betInk/.test(eq) && !/colors\.positive/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
 const share = read('src/lib/shareRecord.ts');
-check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roiFlat\)/.test(share) && /formatSigned\(opts\.endUnits, 2, 'u'\)/.test(share) && !/\? '\+' : ''/.test(share));
+check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roi\)/.test(share) && /formatSigned\(opts\.endUnits, 2, 'u'\)/.test(share) && !/\? '\+' : ''/.test(share));
 check('DailyResults "No picks" rows: no opacity, textTertiary', /sportCardEmpty: \{ paddingVertical: spacing\.sm \}/.test(read('src/components/DailyResultsModal.tsx')));
 // Every pnlColor() names the display's precision: `, 1, 100)` for a ratio
 // printed by formatPctSigned, `, 2)` for dollars, `, 1)` for pp (Reviewer

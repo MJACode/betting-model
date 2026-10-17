@@ -1,96 +1,28 @@
--- One stake for the Discord #results post and the app Record tab.
+-- The two record views gain units and risked.
 --
--- Measured 2026-10-16 on the posted record through 2026-10-15 (439-377-2,
--- 818 settled, every pick priced, game_date from 2026-09-01):
---   stake_for (1u to win, risk capped at 3): +22.6501u, risked 917.1090,
---     ROI 2.4697%  — results_snapshots all_time, and the #results line
---     "+22.65u · +2.5% ROI"
---   profit_flat / $100 flat risk: +2785.85 dollars, staked 81800,
---     ROI 3.4057%, equity +27.8585u — v_public_track_record, shown as
---     "+3.4%" and an equity curve ending at "+27.9u"
--- Same picks. The flat book risks $100 on every bet. The posted stake
--- risks whatever the price requires to win 1 unit.
+-- The functions are the previous file, published_pick_units_2026_10_17.sql.
+-- This file does not create them. If this patch raises, that commit is
+-- already done and settlement still has the functions.
 --
--- The definition kept is the posted stake. It is the stake on the card
--- ("1.1u to win 1u") and the stake the results channel already books.
--- profit_flat and staked_flat stay on the views: the Models tab and the
--- Yesterday modal still read the flat book. The Record tab reads units
--- and risked, which these functions compute.
+-- Both sums FILTER to WIN/LOSS/PUSH. The view WHERE does not. A void
+-- (NO_ACTION) or an ungraded row (result NULL) is in the FROM and must
+-- not enter the sum. The function also returns 0 for those results, so
+-- either guard alone keeps them out.
 --
--- Does not rewrite results_snapshots, picks, or push_sent. Does not post.
--- Idempotent: the functions are created once, and each view is patched
--- once. One statement, so data/view_migrations.py can execute it.
+-- profit_flat and staked_flat stay: the Models tab and Yesterday still
+-- read the flat book. Does not rewrite snapshots, picks, or push_sent.
+-- Does not post. Idempotent: a view that already sums the function is
+-- left alone.
 
 DO $mig$
 DECLARE
   view_name text;
   d text;
   cols text := $cols$,
-    COALESCE(sum(published_pick_unit_profit(COALESCE(decision_odds, dk_odds), result)), 0) AS units,
-    COALESCE(sum(published_pick_unit_risked(COALESCE(decision_odds, dk_odds), result)), 0) AS risked
+    COALESCE(sum(published_pick_unit_profit(COALESCE(decision_odds, dk_odds), result)) FILTER (WHERE result IN ('WIN', 'LOSS', 'PUSH')), 0) AS units,
+    COALESCE(sum(published_pick_unit_risked(COALESCE(decision_odds, dk_odds), result)) FILTER (WHERE result IN ('WIN', 'LOSS', 'PUSH')), 0) AS risked
    $cols$;
 BEGIN
-  IF to_regprocedure('public.published_pick_stake(numeric)') IS NULL THEN
-    CREATE FUNCTION public.published_pick_stake(price numeric, OUT risk numeric, OUT win numeric)
-    LANGUAGE sql
-    IMMUTABLE
-    PARALLEL SAFE
-    SET search_path = pg_catalog
-    AS $stake$
-      SELECT
-        CASE
-          WHEN price IS NULL OR price = 0 THEN 1.0
-          WHEN (1.0 / (CASE WHEN price > 0 THEN price / 100.0
-                            ELSE 100.0 / abs(price) END)) > 3.0 THEN 3.0
-          ELSE 1.0 / (CASE WHEN price > 0 THEN price / 100.0
-                           ELSE 100.0 / abs(price) END)
-        END,
-        CASE
-          WHEN price IS NULL OR price = 0 THEN 1.0
-          WHEN (1.0 / (CASE WHEN price > 0 THEN price / 100.0
-                            ELSE 100.0 / abs(price) END)) > 3.0
-            THEN 3.0 * (CASE WHEN price > 0 THEN price / 100.0
-                             ELSE 100.0 / abs(price) END)
-          ELSE 1.0
-        END
-    $stake$;
-  END IF;
-
-  IF to_regprocedure('public.published_pick_unit_profit(numeric, text)') IS NULL THEN
-    CREATE FUNCTION public.published_pick_unit_profit(price numeric, result text)
-    RETURNS numeric
-    LANGUAGE sql
-    IMMUTABLE
-    PARALLEL SAFE
-    SET search_path = pg_catalog
-    AS $profit$
-      SELECT CASE result
-        WHEN 'WIN' THEN (public.published_pick_stake(price)).win
-        WHEN 'LOSS' THEN - (public.published_pick_stake(price)).risk
-        ELSE 0
-      END
-    $profit$;
-  END IF;
-
-  IF to_regprocedure('public.published_pick_unit_risked(numeric, text)') IS NULL THEN
-    CREATE FUNCTION public.published_pick_unit_risked(price numeric, result text)
-    RETURNS numeric
-    LANGUAGE sql
-    IMMUTABLE
-    PARALLEL SAFE
-    SET search_path = pg_catalog
-    AS $risked$
-      SELECT CASE
-        WHEN result = 'PUSH' THEN 0
-        ELSE (public.published_pick_stake(price)).risk
-      END
-    $risked$;
-  END IF;
-
-  GRANT EXECUTE ON FUNCTION public.published_pick_stake(numeric) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.published_pick_unit_profit(numeric, text) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.published_pick_unit_risked(numeric, text) TO anon, authenticated;
-
   FOREACH view_name IN ARRAY ARRAY[
     'v_public_track_record', 'v_public_track_record_daily'
   ] LOOP

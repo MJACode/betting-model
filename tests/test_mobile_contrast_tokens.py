@@ -313,7 +313,7 @@ def test_equity_total_share_text_and_no_picks_rows():
     assert "colors.positive" not in eq
     assert "toFixed(1)}u" not in eq
     share = _read(SRC / "lib" / "shareRecord.ts")
-    assert "formatPctSigned(s.roiFlat)" in share and "formatSigned(opts.endUnits, 2, 'u')" in share
+    assert "formatPctSigned(s.roi)" in share and "formatSigned(opts.endUnits, 2, 'u')" in share
     assert "? '+' : ''" not in share
     daily = _read(SRC / "components" / "DailyResultsModal.tsx")
     assert "sportCardEmpty: { paddingVertical: spacing.sm }," in daily

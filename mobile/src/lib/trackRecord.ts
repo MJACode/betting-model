@@ -18,9 +18,10 @@ export interface TrackRecordSummary {
   stakedFlat: number;
   /** Posted-stake units (published_pick_unit_profit). Same total as Discord. */
   units?: number;
-  /** Units laid on wins and losses. Pushes add nothing. */
+  /** Units laid on wins and losses. A push, a void, and an ungraded pick add nothing. */
   risked?: number;
-  roiFlat: number; // units / risked — the posted stake, not a flat $100 bet
+  /** Posted-stake ROI: units / risked. Absent columns leave this at 0 and risked unset. */
+  roi: number;
   winRate: number; // wins / (wins + losses)
   clvSettled: number;
   clvBeat: number;
@@ -45,7 +46,7 @@ export const EMPTY_SUMMARY: TrackRecordSummary = {
   stakedFlat: 0,
   units: 0,
   risked: 0,
-  roiFlat: 0,
+  roi: 0,
   winRate: 0,
   clvSettled: 0,
   clvBeat: 0,
@@ -78,6 +79,9 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
   let marketClvSettled = 0;
   let marketClvBeat = 0;
 
+  // The OTA select falls back without these columns. Treating the gap as
+  // zero would print a 0.00 record. Leave them unset so the screen shows a dash.
+  const postedKnown = rows.some((r) => r.units != null || r.risked != null);
   for (const r of rows) {
     // The view drops a retired model once threshold_sync prunes its row; until
     // then the row survives and would count. Same guard as passesActionFilter.
@@ -107,9 +111,9 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     pushes,
     profitFlat,
     stakedFlat,
-    units,
-    risked,
-    roiFlat: risked > 0 ? units / risked : 0,
+    units: postedKnown ? units : undefined,
+    risked: postedKnown ? risked : undefined,
+    roi: postedKnown && risked > 0 ? units / risked : 0,
     winRate: decided > 0 ? wins / decided : 0,
     clvSettled,
     clvBeat,

@@ -65,7 +65,7 @@ const spoken = heroAccessibilityLabel({
   label: DISCORD_ALL_TIME_LABEL,
   units: measured,
   risked: 900,
-  roiFlat: 0.024697,
+  roi: 0.024697,
   wins: 439,
   losses: 377,
   pushes: 2,
@@ -93,7 +93,7 @@ const missing = heroAccessibilityLabel({
   label: DISCORD_ALL_TIME_LABEL,
   units: 0,
   risked: 0,
-  roiFlat: 0,
+  roi: 0,
   wins: 0,
   losses: 0,
   pushes: 0,
@@ -101,6 +101,23 @@ const missing = heroAccessibilityLabel({
   clvBeatRate: null,
 });
 check('missing count is spoken, units first', missing.startsWith('Units unavailable') && missing.includes('settled picks count not available'), missing);
+const columnsMissing = heroAccessibilityLabel({
+  notLoaded: false,
+  picks: 10,
+  label: DISCORD_ALL_TIME_LABEL,
+  units: 0,
+  risked: 0,
+  unitsKnown: false,
+  roi: 0,
+  wins: 6,
+  losses: 4,
+  pushes: 0,
+  winRate: 0.6,
+  clvBeatRate: null,
+});
+check('a missing units column is unavailable and the record is still spoken',
+  columnsMissing.startsWith('Units unavailable') && columnsMissing.includes('Return on bets, unavailable') && columnsMissing.includes('6 wins'),
+  columnsMissing);
 
 check('2x text stacks', heroStacks(2, 390) && heroStacks(HERO_STACK_AT, 430) && !heroStacks(1, 390));
 check('narrow phone stacks before 1.2', heroStacks(1.15, 375) && !heroStacks(1.15, 390));

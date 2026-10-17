@@ -112,7 +112,10 @@ export function TrackRecordScreen() {
   const groups: SportGroup[] = useMemo(() => groupBySport(visibleRows), [visibleRows]);
 
   // Cumulative posted-stake units (the same units Discord #results books).
+  // A select that predates the units column has no daily units. A zero
+  // series would draw a flat line and call it the record.
   const equity: EquityPoint[] = useMemo(() => {
+    if (!visibleDaily.some((d) => d.units != null)) return [];
     const byDate = new Map<string, number>();
     for (const d of visibleDaily) {
       byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.units ?? 0));
@@ -269,7 +272,7 @@ export function TrackRecordScreen() {
             settled days" copy. Held back on the first load so it cannot assert
             there are too few settled days while the data is still in flight.
             endUnits is the hero's posted-stake total, so the pill matches it. */}
-        {rows.length === 0 && (loading || error) ? null : (
+        {rows.length === 0 && (loading || error) ? null : overall.units == null ? null : (
           <EquityCurve points={equity} seriesId={sportSel} width={chartWidth} endUnits={heroUnits} />
         )}
 
@@ -300,8 +303,8 @@ export function TrackRecordScreen() {
           <View key={g.sport} style={styles.sportCard}>
             <View style={styles.sportHeader}>
               <Text style={styles.sportName}>{g.sport}</Text>
-              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roiFlat) }]}>
-                {Number(g.summary.risked ?? 0) > 0 ? formatPctSigned(g.summary.roiFlat) : '—'}
+              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roi) }]}>
+                {Number(g.summary.risked ?? 0) > 0 ? formatPctSigned(g.summary.roi) : '—'}
               </Text>
             </View>
             <Text style={styles.sportSub}>
