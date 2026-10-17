@@ -151,3 +151,76 @@ def test_the_bootstrap_is_seeded_and_refines_small_p(monkeypatch):
 
 def test_the_arithmetic_checks_pass():
     H.check()
+
+
+# ── the market's fair line, the placebo, and one whole cell ──────────────────
+
+def _vis(rows):
+    return pd.DataFrame([{"game_id": g, "season": 2024, "game_date": "2024-01-15", "tip": TIP,
+                          "market": m, "book": b, "line": l, "price_a": a, "price_b": bb,
+                          "coherent": True, "T": TIP - pd.Timedelta(minutes=60)}
+                         for g, m, b, l, a, bb in rows])
+
+
+def test_market_fair_prefers_pinnacle_and_falls_back_to_the_book_median():
+    sig = {(2024, "spreads"): 12.0}
+    v = _vis([("G", "spreads", "pinnacle", -5.0, -105, -105),
+              ("G", "spreads", "fanduel", -7.0, -110, -110),
+              ("G2", "spreads", "fanduel", -3.0, -110, -110),
+              ("G2", "spreads", "betmgm", -4.0, -110, -110),
+              ("G2", "h2h", "fanduel", None, -150, 130)])
+    f = H.market_fair(v, sig).set_index(["game_id", "market"])
+    # an even no-vig price at -5 puts the home margin's centre at +5
+    assert f.loc[("G", "spreads"), "ref"] == "pinnacle"
+    assert f.loc[("G", "spreads"), "mu"] == pytest.approx(5.0, abs=1e-6)
+    assert f.loc[("G2", "spreads"), "ref"] == "consensus"
+    assert f.loc[("G2", "spreads"), "mu"] == pytest.approx(3.5, abs=1e-6)
+    ph = f.loc[("G2", "h2h"), "p_home"]
+    assert 0.55 < ph < 0.6
+
+
+def test_the_placebo_moves_parameters_only_between_games_on_the_same_date():
+    games = pd.DataFrame({"game_id": ["a", "b", "c"],
+                          "game_date": ["2024-01-15", "2024-01-15", "2024-01-16"]})
+    fair = pd.DataFrame({"game_id": ["a", "b", "c"], "market": "spreads",
+                         "mu": [1.0, 2.0, 3.0], "sigma": 12.0, "p_home": np.nan})
+    seen = set()
+    for seed in range(20):
+        sh = H.shuffle_within_date(fair, games, np.random.default_rng(seed)).set_index("game_id")
+        assert sh.loc["c", "mu"] == 3.0                  # alone on its date
+        assert {sh.loc["a", "mu"], sh.loc["b", "mu"]} == {1.0, 2.0}
+        seen.add(sh.loc["a", "mu"])
+    assert seen == {1.0, 2.0}
+
+
+def test_one_whole_cell_grades_a_model_bet_against_its_blind_side():
+    # two games; the model is sure the home side covers -4.5 in both; the
+    # home team covers in G (by 10) and not in G2 (by 2)
+    games = pd.DataFrame([
+        {"game_id": "G", "season": 2024, "game_date": "2024-01-15", "tip": TIP,
+         "home_team": "BOS", "away_team": "NYK", "home_score": 110, "away_score": 100},
+        {"game_id": "G2", "season": 2024, "game_date": "2024-01-16", "tip": TIP + pd.Timedelta(days=1),
+         "home_team": "LAL", "away_team": "DEN", "home_score": 102, "away_score": 100}])
+    q = pd.DataFrame([_q("fanduel", "spreads", 60, 66, -4.5, -110, -110),
+                      _q("draftkings", "spreads", 60, 66, -4.5, -112, -108)])
+    q2 = q.assign(game_id="G2", game_date="2024-01-16", tip=TIP + pd.Timedelta(days=1),
+                  fetch_at=q["fetch_at"] + pd.Timedelta(days=1),
+                  snapshot_at=q["snapshot_at"] + pd.Timedelta(days=1))
+    quotes = pd.concat([q, q2], ignore_index=True)
+    f = quotes[["game_id", "tip", "fetch_at"]].drop_duplicates()
+    f = f.assign(lead_min=(f["tip"] - f["fetch_at"]).dt.total_seconds() / 60)
+    data = H.Data(games=games, quotes=quotes, fetches=f)
+    t, off = H.point_offers(data, "D")
+    assert len(t) == 2
+    model = pd.DataFrame({"game_id": ["G", "G2"], "market": "spreads", "mu": [9.0, 9.0],
+                          "sigma": 12.0, "p_home": np.nan})
+    cand = H.fair_offers(off, model)
+    neutral = H.fair_offers(off, H.market_fair(H.visible(quotes, t), {(2024, "spreads"): 12.0}))
+    rows = H.run_cells(data, "test", "D", cand, neutral, cuts=[0.0, 0.5],
+                       sides_by_market={"spreads": ["home"]})
+    r0, r1 = rows
+    assert r0["n_choose"] == 2 and r1["n_choose"] == 0
+    # best price is fanduel -110 on both: +1 unit then -1.1 units
+    assert r0["units_choose"] == pytest.approx(1.0 - 1.1)
+    assert r0["dk_n_choose"] == 2
+    assert r0["blind_roi_choose"] == pytest.approx((1.0 - 1.1) / 2.2)

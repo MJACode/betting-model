@@ -443,6 +443,135 @@ def cell_report(bets_all: pd.DataFrame, data: Data, cand: pd.DataFrame | None = 
     return r
 
 
+# ── the market's own fair price, placebo, blind side, and the cell runner ────
+
+def market_fair(vis: pd.DataFrame, sig: dict) -> pd.DataFrame:
+    """The market's fair line at T per (game, market): Pinnacle's no-vig when it
+    quotes coherently, else the median over the deciding books. It ranks a
+    rule's offers (which number and price is best) and is the blind baseline's
+    chooser; it is never a model's own probability.
+
+    spreads/totals: mu of the side-A quantity solved from each quote's no-vig
+    probability at its own number; h2h: p_home."""
+    v = vis[vis["coherent"] & vis["book"].isin((SHARP, *BETTABLE))].copy()
+    if v.empty:
+        return pd.DataFrame(columns=["game_id", "market", "mu", "sigma", "p_home", "ref"])
+    ia, ib = imp(v["price_a"]), imp(v["price_b"])
+    v["fa"] = ia / (ia + ib)
+    v["sigma"] = [sig.get((int(se), m), np.nan) if m != "h2h" else np.nan
+                  for se, m in zip(v["season"], v["market"])]
+    sp = (v["market"] != "h2h").to_numpy()
+    mu = np.full(len(v), np.nan)
+    if sp.any():
+        x = v[sp]
+        mu[sp] = solve_mu(threshold(x["market"], x["line"]), x["fa"], x["sigma"])
+    v["mu"] = mu
+    sharp = v[v["book"] == SHARP].drop_duplicates(["game_id", "market"])
+    rest = v[v["book"] != SHARP].groupby(["game_id", "market"]).agg(
+        mu=("mu", "median"), fa=("fa", "median"), sigma=("sigma", "first")).reset_index()
+    have = set(zip(sharp["game_id"], sharp["market"]))
+    rest = rest[[k not in have for k in zip(rest["game_id"], rest["market"])]]
+    out = pd.concat([sharp[["game_id", "market", "mu", "fa", "sigma"]].assign(ref="pinnacle"),
+                     rest.assign(ref="consensus")], ignore_index=True)
+    out["p_home"] = np.where(out["market"] == "h2h", out["fa"], np.nan)
+    return out.drop(columns="fa")
+
+
+def fair_offers(off: pd.DataFrame, fair: pd.DataFrame) -> pd.DataFrame:
+    """Offers with p_win / p_push / ev under `fair` (game_id, market, mu, sigma, p_home)."""
+    x = off.merge(fair[["game_id", "market", "mu", "sigma", "p_home"]], on=["game_id", "market"])
+    pw, pp = side_probs(x["market"].to_numpy(), x["side"].to_numpy(), x["line"].to_numpy(),
+                        mu=x["mu"].to_numpy(), sigma=x["sigma"].to_numpy(),
+                        p_home=x["p_home"].to_numpy())
+    return with_ev(x.assign(p_win=pw, p_push=pp))
+
+
+def shuffle_within_date(fair: pd.DataFrame, games: pd.DataFrame, rng) -> pd.DataFrame:
+    """Placebo (bar 10): each game's fair parameters swapped with another game's
+    on the same date in the same market; prices and results untouched."""
+    f = fair.merge(games[["game_id", "game_date"]], on="game_id")
+    cols = [c for c in ("mu", "sigma", "p_home", "strength", "side_pick") if c in f]
+    out = []
+    for _, grp in f.groupby(["game_date", "market"], sort=False):
+        g2 = grp.copy()
+        g2[cols] = grp[cols].to_numpy()[rng.permutation(len(grp))]
+        out.append(g2)
+    return pd.concat(out, ignore_index=True).drop(columns="game_date") if out else fair
+
+
+def blind_side(neutral: pd.DataFrame, side: str, games: pd.DataFrame) -> pd.DataFrame:
+    """Bar 9's comparison: the side bet on EVERY game in the population, at the
+    best deciding offer under the market's own fair price (no model, no cut)."""
+    return grade(choose(neutral, cut=-np.inf, sides=[side]), games)
+
+
+def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: pd.DataFrame,
+              cuts, sides_by_market: dict, close=None, sig=None, placebo=None,
+              strength: str = "ev") -> list[dict]:
+    """Grade one family at one decision point over its cut axis and sides.
+
+    `cand`: offers with p_win / p_push / ev. A model family leaves strength="ev"
+    (the cut is an EV floor on its own probabilities). A rule family passes
+    offers priced at the MARKET's fair line plus a `strength` column; the cut
+    then applies to strength, and the best market-fair offer is taken.
+    `placebo`: re-priced `cand` frames graded at the same cuts.
+    One row per (market, side, cut) with every number section 6 reports."""
+    rows = []
+    for market, sides in sides_by_market.items():
+        cm = cand[cand["market"] == market]
+        nm = neutral[neutral["market"] == market]
+        for side in sides:
+            blind = blind_side(nm, side, data.games)
+            blind_ch = roi(blind[blind["season"].isin(CHOOSE)]) if len(blind) else np.nan
+            for k, cut in enumerate(cuts):
+                def pick(c, books=BETTABLE, cut=cut, side=side):
+                    if strength == "ev":
+                        return choose(c, cut, books=books, sides=[side])
+                    return choose(c[c[strength] >= cut], -np.inf, books=books, sides=[side])
+                g = grade(pick(cm), data.games)
+                rep = cell_report(g, data, cm, close, sig)
+                dk = grade(pick(cm, books=(DK,)), data.games)
+                pl = []
+                for pc in placebo or []:
+                    gp = grade(pick(pc[pc["market"] == market]), data.games)
+                    pl.append(roi(gp[gp["season"].isin(CHOOSE)]) if len(gp) else np.nan)
+                ch, cf = rep["choose"], rep["confirm"]
+                rows.append({
+                    "family": family, "point": point, "market": market, "side": side,
+                    "cut_index": k, "cut": cut,
+                    "n_choose": ch["bets"], "units_choose": ch["units"], "roi_choose": ch["roi"],
+                    "roi_kept_choose": ch["roi_kept"],
+                    "ci_lo_choose": ch["ci90"][0], "ci_hi_choose": ch["ci90"][1],
+                    "n_confirm": cf["bets"], "units_confirm": cf["units"], "roi_confirm": cf["roi"],
+                    "ci_lo_confirm": cf["ci90"][0], "ci_hi_confirm": cf["ci90"][1],
+                    "p_confirm": rep["p_confirm"],
+                    "n_2021": rep["regime_2021"]["bets"], "roi_2021": rep["regime_2021"]["roi"],
+                    **{f"roi_{s}": ch.get(f"roi_{s}", np.nan) for s in CHOOSE},
+                    **{f"n_{s}": ch.get(f"n_{s}", 0) for s in CHOOSE},
+                    "half_early_roi": rep.get("half_early_roi", np.nan),
+                    "half_late_roi": rep.get("half_late_roi", np.nan),
+                    "seasons_positive": rep.get("seasons_positive", False),
+                    "blind_roi_choose": blind_ch, "placebo_rois": pl,
+                    "dk_n_choose": int(dk["season"].isin(CHOOSE).sum()) if len(dk) else 0,
+                    "dk_roi_choose": roi(dk[dk["season"].isin(CHOOSE)]) if len(dk) else np.nan,
+                    "dk_roi_confirm": roi(dk[dk["season"] == CONFIRM]) if len(dk) else np.nan,
+                    "share_still_offered": rep.get("share_still_offered", np.nan),
+                    "units_still_offered": rep.get("units_still_offered", np.nan),
+                    "share_outlier": rep.get("share_outlier", np.nan),
+                    "units_without_outliers": rep.get("units_without_outliers", np.nan),
+                    "clv_median": rep.get("clv_median", np.nan),
+                    "clv_share_positive": rep.get("clv_share_positive", np.nan),
+                    "clv_n": rep.get("clv_n", 0),
+                })
+    return rows
+
+
+def point_offers(data: Data, point: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(times, offers) at one decision point; offers carry T."""
+    t = decision_times(data.fetches, data.games, point)
+    return t, offers(visible(data.quotes, t))
+
+
 def check() -> None:
     """Sign and arithmetic checks that must hold before any cell is read."""
     _assert_spread_sign()
