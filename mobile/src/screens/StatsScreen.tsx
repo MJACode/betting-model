@@ -130,6 +130,7 @@ import {
   startedForGame,
   pricedPlayers,
   type PricedPlayer,
+  listsPricedWithoutLog,
   needsTouchSet,
   seasonTouchFlag,
   shouldFetchTouchSet,
@@ -567,7 +568,13 @@ export function StatsScreen() {
     // for those sports below; this is the other half, for a user who picked it
     // on the NFL and then switched to the NHL. The window is the board's
     // default, not the one carried over.
-    if (!supportsHitRate(sport)) setTimeWindow((w) => (w === 'h2h' ? 10 : w));
+    if (!supportsHitRate(sport)) {
+      setTimeWindow((w) => (w === 'h2h' ? 10 : w));
+      // Under chosen on a hit-rate sport has no control here — the ruler is
+      // hit-rate only — and the odds pill would price that unnamed side.
+      // At Least is where a first visit already opens.
+      setHitMode('atLeast');
+    }
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
     // Drop the previous sport's slate in the same commit as the chip reset.
@@ -1538,7 +1545,7 @@ export function StatsScreen() {
                   : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}.`,
                 canSwitch: !oneWayMarket(propMarket, side),
               }
-            : dirLockNote
+            : canHitRate && dirLockNote
               ? { text: dirLockNote, canSwitch: true }
               : null;
 
@@ -1579,7 +1586,7 @@ export function StatsScreen() {
   // no row for at all is listed after the ranked rows, with no number.
   const pricedByKey = useMemo(
     () =>
-      stat && propMarket != null && propLines.market === propMarket && needsTouchSet(sport, String(stat.key))
+      stat && propMarket != null && propLines.market === propMarket && listsPricedWithoutLog(sport, String(stat.key))
         ? pricedPlayers(propLines.rows, propMarket, slateGameIds)
         : EMPTY_PRICED,
     [stat, sport, propMarket, propLines, slateGameIds],
@@ -1783,10 +1790,21 @@ export function StatsScreen() {
     );
   }, [pricedByKey, activePositions, loading, error, rowsAreStale, shownKey, readKey, effectiveMode, rows, touchView, timeWindow, seasonValues, recentRows, lineOnlyFor]);
   const slateGameById = useMemo(() => new Map(slateGames.map((g) => [g.game_id, g] as const)), [slateGames]);
+  // The log itself came back empty (nhl_skater_stats can), which is not the
+  // Anytime TD case of a few names the log has no game for. Those keep the
+  // "no games" row. This one says the totals aren't in.
+  const seasonLogEmpty =
+    effectiveMode === 'totals' && rows.length === 0 && lineOnlyList.length > 0;
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
       <View>
-        <SectionTitle title="Has a line · no games logged" />
+        <SectionTitle
+          title={
+            seasonLogEmpty
+              ? 'Lines are up. Season totals aren’t in yet.'
+              : 'Has a line · no games logged'
+          }
+        />
         {lineOnlyList.map((p) => {
           const game = slateGameById.get(p.gameId) ?? null;
           const started = game ? startedForGame(game) : null;
@@ -1804,6 +1822,7 @@ export function StatsScreen() {
               hitMode={hitMode}
               oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
               onOddsPress={quote ? () => openBook(quote) : undefined}
+              omitNoGames={seasonLogEmpty}
             />
           );
         })}
@@ -1907,13 +1926,14 @@ export function StatsScreen() {
   // tree, and a stale flag here is a clipped control.
   const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
-  // The headline under the ruler, in the mode's own idiom: "25+ Points" in
-  // At Least, "Over 0.5 Hits" in Over (lib/hitMode.ts).
-  const lineHeadline =
-    hitModeHeadline(lineN, hitMode, stat?.label ?? '');
   // What a BET made from this column is called. Almost always the column's own
   // name; the market's where the two differ (markets.ts propDisplayLabel).
   const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
+  // The headline under the ruler, in the mode's own idiom: "25+ Points" in
+  // At Least, "Over 0.5 Hits" in Over (lib/hitMode.ts). Uses the bet name, so
+  // a Goals board says "1+ Anytime Goal" in the caption and in the off-line
+  // explainer, not "1+ Goals".
+  const lineHeadline = hitModeHeadline(lineN, hitMode, betLabel);
 
   // What the tapped pill hands the add-to-betslip sheet: the proposition,
   // every book's price for it, and the off-line explainer when the book's own
@@ -2075,9 +2095,9 @@ export function StatsScreen() {
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
   }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment]);
 
-  // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
-  // have no player leaderboard at all, and they are two of the sports where
-  // team stats matter most — gating this behind `stat` would hide it there.
+  // Teams board. Ahead of the empty-catalog guard below so a sport with no
+  // player stat still reaches it, and so NHL's Teams/Goalies view stays one
+  // tap away on the Players | Teams row while the skater board is showing.
   if (boardMode === 'teams' && supportsTeamBoard(sport)) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -2109,11 +2129,9 @@ export function StatsScreen() {
     );
   }
 
-  // Sports with no per-player leaderboard (NHL: team+goalie only).
-  // The golf branch went with the sport on 2026-09-08: its copy promised
-  // leaderboards that are not coming and pointed at Picks/Signals for golf picks
-  // that no longer render, and GOLF is no longer a chip, so it was unreachable
-  // copy that could only ever mislead.
+  // A sport whose catalog is empty. Golf is no longer a chip. NHL is not this
+  // branch: it has a skater board, and its Teams/Goalies view is the Players |
+  // Teams segment above, which returns before this guard.
   if (!stat) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -2260,6 +2278,17 @@ export function StatsScreen() {
           </ScrollView>
         </View>
       </View>
+
+      {/* Averages on a sport with no hit-rate ruler. The pill still prices a
+          side, and nothing else on the board names it. Same quiet caption as
+          the no-lines note. The Goals chip stays "Goals"; the bet is Anytime
+          Goal (markets.ts propDisplayLabel). */}
+      {!canHitRate && showOdds ? (
+        <View style={styles.noLinesRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>{hitModeHeadline(lineN, hitMode, betLabel)}</Text>
+        </View>
+      ) : null}
 
       {/* The position row picked a position the board cannot filter by: say
           so once, in the same quiet caption as the no-lines note, rather than
@@ -2533,9 +2562,10 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
-      {(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0 ? (
+      {(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0 || lineOnlyList.length > 0 ? (
         <ColumnHeader
           rightLabel={rightLabel}
+          sorted={(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0}
           showOdds={showOdds}
           // Named for the book it prints — "FD", "DK", "MGM" — so a FanDuel
           // user never reads an unlabelled number as someone else's. With
@@ -2646,7 +2676,11 @@ export function StatsScreen() {
             );
           }}
           ListEmptyComponent={
-            loading ? (
+            // A priced player with no log row is the board, not an empty one.
+            // Hold the skeleton while those lines are still loading so the
+            // first paint does not say "no data" and then fill in.
+            lineOnlyList.length > 0 ? null
+              : loading || (listsPricedWithoutLog(sport, stat ? String(stat.key) : null) && propLines.status === 'loading') ? (
               <BoardSkeleton />
             ) : (
               <EmptyState
@@ -2694,7 +2728,7 @@ export function StatsScreen() {
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         title="Filter players"
-        resultCount={effectiveMode === 'hitRate' ? hitData.length : ranked.length}
+        resultCount={(effectiveMode === 'hitRate' ? hitData.length : ranked.length) + lineOnlyList.length}
         itemNoun="player"
         emptyLabel={touchView === 'error' ? 'Couldn’t load this list. Pull down to retry.' : undefined}
         // The Availability toggle re-READS the board (the server is narrowed to
@@ -3515,6 +3549,7 @@ function MatchupCell({
 /** Compact column header sitting flush above the leaderboard (HOF-style). */
 function ColumnHeader({
   rightLabel,
+  sorted = true,
   showOdds,
   oddsLabel,
   oddsDateLabel,
@@ -3522,6 +3557,8 @@ function ColumnHeader({
   matchupTooltip,
 }: {
   rightLabel: string;
+  /** False when the ranked list is empty. A line-only board is not sorted. */
+  sorted?: boolean;
   showOdds: boolean;
   /** Short name of the book the column prints ("FD", "DK"). */
   oddsLabel: string;
@@ -3547,12 +3584,13 @@ function ColumnHeader({
           not. */}
       <View
         style={styles.colHeaderSorted}
-        accessibilityLabel={`${rightLabel}, sorted highest first`}
+        accessible={!sorted}
+        accessibilityLabel={sorted ? `${rightLabel}, sorted highest first` : rightLabel}
       >
         <Text style={[styles.colHeaderRight, styles.colHeaderSortLabel]} numberOfLines={1}>
           {rightLabel.toUpperCase()}
         </Text>
-        <Ionicons name="arrow-down" size={9} color={colors.textTertiary} />
+        {sorted ? <Ionicons name="arrow-down" size={9} color={colors.textTertiary} /> : null}
       </View>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
@@ -3708,6 +3746,7 @@ function LineOnlyRow({
   hitMode,
   oddsDay,
   onOddsPress,
+  omitNoGames = false,
 }: {
   name: string;
   subline: string | null;
@@ -3719,6 +3758,8 @@ function LineOnlyRow({
   hitMode: HitMode;
   oddsDay?: string | null;
   onOddsPress?: () => void;
+  /** The log itself is empty. "no games" would describe the feed as the player. */
+  omitNoGames?: boolean;
 }) {
   const body = (
     <>
@@ -3726,7 +3767,11 @@ function LineOnlyRow({
       <View
         style={styles.rowMain}
         accessible
-        accessibilityLabel={lineOnlyRowLabel(name, subline ? sublineSpoken(subline) : null)}
+        accessibilityLabel={lineOnlyRowLabel(
+          name,
+          subline ? sublineSpoken(subline) : null,
+          omitNoGames ? '' : undefined,
+        )}
       >
         <Text style={styles.rowName} numberOfLines={1}>
           {name}
@@ -3737,9 +3782,13 @@ function LineOnlyRow({
           </Text>
         ) : null}
       </View>
-      <View style={styles.valueWrap}>
+      <View
+        style={styles.valueWrap}
+        accessibilityElementsHidden={omitNoGames}
+        importantForAccessibility={omitNoGames ? 'no-hide-descendants' : 'auto'}
+      >
         <Text style={[styles.value, { color: colors.textSecondary }]}>—</Text>
-        <Text style={styles.valueLabel}>no games</Text>
+        {omitNoGames ? null : <Text style={styles.valueLabel}>no games</Text>}
       </View>
       {showOdds ? (
         <OddsCell

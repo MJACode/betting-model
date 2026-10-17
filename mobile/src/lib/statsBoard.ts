@@ -128,6 +128,17 @@ export function needsTouchSet(sport: string, statKey: string | null | undefined)
 }
 
 /**
+ * List a priced player the board's read has no row for.
+ *
+ * Football Anytime TD already does this (the touch set). NHL does it for
+ * every skater chip: the log is `nhl_skater_stats`, which can be empty while
+ * the books have still posted a line, and that player is the row.
+ */
+export function listsPricedWithoutLog(sport: string, statKey: string | null | undefined): boolean {
+  return needsTouchSet(sport, statKey) || (sport === 'NHL' && statKey != null);
+}
+
+/**
  * The touch set a late response is allowed to commit, or null when a newer
  * load has taken the board.
  *
@@ -420,11 +431,17 @@ export const LINE_ONLY_ROW_TAIL = ', no games logged yet';
 /**
  * The line-only row's accessibility label. Name, then the spoken fixture,
  * then the tail — VoiceOver reads that the row has no games after it has
- * said who and which game. The row is not a button and has no hint.
+ * said who and which game. Pass `tail: ''` when the log itself is empty:
+ * "no games" would describe the feed as the player. The row is not a button
+ * and has no hint.
  */
-export function lineOnlyRowLabel(name: string, spokenSubline: string | null): string {
+export function lineOnlyRowLabel(
+  name: string,
+  spokenSubline: string | null,
+  tail: string = LINE_ONLY_ROW_TAIL,
+): string {
   const head = spokenSubline ? `${name}, ${spokenSubline}` : name;
-  return `${head}${LINE_ONLY_ROW_TAIL}`;
+  return tail ? `${head}${tail}` : head;
 }
 
 /**

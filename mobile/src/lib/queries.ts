@@ -1,3 +1,4 @@
+import { aggregateNhlSkaterTotals, nhlSeasonCandidates, type NhlSkaterGame } from '@/lib/nhlSkaterTotals';
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
@@ -121,6 +122,50 @@ const UFC_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, wins, ko_wins, sub_wins, ' +
   'sig_strikes, takedowns, knockdowns, sub_attempts';
 
+// The four skater columns the board chips on. Named here, not `*`, so a new
+// column on the table cannot widen the download. Measured 2026-10-16: these
+// four exist; the table held 0 rows.
+const NHL_SKATER_COLUMNS =
+  'player_id, player_name, team, position, season, game_date, game_id, ' +
+  'goals, assists, points, shots_on_goal';
+
+/**
+ * One season of nhl_skater_stats, paged. The read is per GAME, so a team
+ * filter does not belong on the request — aggregateNhlSkaterTotals keeps a
+ * skater by his newest team after the window is cut.
+ *
+ * Row count on 2026-10-16: 0. A full season, if the table is ever filled, is
+ * on the order of a few tens of thousands of rows, inside the pager's cap.
+ */
+function fetchNhlSkaterGames(season: number): Promise<NhlSkaterGame[]> {
+  return fetchAllPages<NhlSkaterGame>(
+    (from, to) =>
+      supabase
+        .from('nhl_skater_stats')
+        .select(NHL_SKATER_COLUMNS)
+        .eq('season', season)
+        .order('player_id')
+        .order('game_date')
+        .order('game_id')
+        .range(from, to),
+    (r) => `${r.player_id ?? ''}:${r.game_date}:${r.game_id ?? ''}`,
+  );
+}
+
+/** Season or last-N skater totals. First season label that has any games. */
+async function fetchNhlSkaterBoard(
+  calendarYear: number,
+  window: number | null,
+  teams?: SlateTeams,
+): Promise<SeasonTotalsRow[]> {
+  for (const s of nhlSeasonCandidates(calendarYear)) {
+    const games = await fetchNhlSkaterGames(s);
+    if (games.length === 0) continue;
+    return aggregateNhlSkaterTotals(games, s, window, hasTeams(teams) ? teams : null);
+  }
+  return [];
+}
+
 /**
  * The Stats board's slate narrowing — the teams whose players the board is
  * about, or null/[] for "the whole league".
@@ -156,6 +201,7 @@ export async function fetchSeasonTotals(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
     for (const s of footballSeasonCandidates(season)) {
@@ -242,10 +288,7 @@ export async function fetchWindowTotals(
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  if (sport === 'NHL') {
-    // No per-player skater leaderboard for NHL (team + goalie stats only).
-    return [];
-  }
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
   if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
@@ -386,7 +429,9 @@ export async function fetchRecentGames(
     }
     return [];
   }
-  return []; // UFC / NHL / GOLF: no per-game player logs
+  // UFC / GOLF have no log. NHL hit rate stays off (no game-log grant);
+  // the averages board reads nhl_skater_stats in fetchWindowTotals.
+  return [];
 }
 
 /** (player, game) is the row's identity; `rn` orders a player's games. */

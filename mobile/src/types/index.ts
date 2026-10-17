@@ -868,6 +868,10 @@ export interface SeasonTotalsRow {
   def_solo?: number | string;
   def_tfl?: number | string;
   def_pd?: number;
+  // NHL skaters (nhl_skater_stats, summed on the phone — there is no
+  // season-totals view). shots_on_goal is the book's "shots" market.
+  goals?: number;
+  shots_on_goal?: number;
 }
 
 /**

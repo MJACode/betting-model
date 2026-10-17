@@ -4,7 +4,7 @@ import type { Sport } from '@/hooks/useSportFilter';
 import { isModelPaused, isModelRetired } from './thresholds';
 
 export type StatGroup =
-  | 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC'
+  | 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC' | 'NHL'
   | 'Passing' | 'Rushing' | 'Receiving' | 'Defense';
 
 /**
@@ -106,6 +106,14 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'def_tfl', label: 'TFL', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_pd', label: 'Passes Defended', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_interceptions', label: 'Interceptions', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
+  // ── NHL skaters (nhl_skater_stats). Columns checked 2026-10-16:
+  //    goals, assists, points, shots_on_goal all exist. Blocked shots does
+  //    not, so it is not a chip. Goals is the book's anytime-scorer market
+  //    (player_goal_scorer_anytime), stored as over 0.5.
+  { key: 'shots_on_goal', label: 'Shots', sport: 'NHL', group: 'NHL', defaultLine: 2.5 },
+  { key: 'points', label: 'Points', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },
+  { key: 'goals', label: 'Goals', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },
+  { key: 'assists', label: 'Assists', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },
   // ── UFC (games_played = fights in the window; team column = weight class) ──
   { key: 'wins', label: 'Wins', sport: 'UFC', group: 'UFC' },
   { key: 'ko_wins', label: 'KO/TKO Wins', sport: 'UFC', group: 'UFC' },
@@ -162,8 +170,8 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   NFL: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   NCAAF: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   UFC: ['UFC'],
-  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1).
-  NHL: [],
+  NHL: ['NHL'],
+  // Golf has no per-player leaderboard (v1).
   GOLF: [],
 };
 
@@ -171,12 +179,13 @@ export function statsForSport(sport: Sport): StatDef[] {
   return STAT_CATALOG.filter((s) => s.sport === sport);
 }
 
-/** Sport's default leaderboard stat, or null when the sport has no leaderboard (NHL, Golf). */
+/** Sport's default leaderboard stat, or null when the sport has no leaderboard (Golf). */
 export function defaultStatFor(sport: Sport): StatDef | null {
   const wantKey =
     sport === 'WNBA' || sport === 'NBA' ? 'points'
     : sport === 'UFC' ? 'wins'
     : sport === 'NFL' || sport === 'NCAAF' ? 'passing_yards'
+    : sport === 'NHL' ? 'shots_on_goal'
     : 'hits';
   const list = statsForSport(sport);
   return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
@@ -213,7 +222,9 @@ export function defaultThresholdFor(def: StatDef | null): number {
 // Sports that support the Hit Rate view (have per-game player logs + RPCs).
 const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF']);
 
-/** Whether a sport can show the Hit Rate mode (UFC/NHL/Golf cannot). */
+/** Whether a sport can show the Hit Rate mode (UFC/NHL/Golf cannot).
+ *  NHL stays out: hit rate, season totals and the player card need the
+ *  game-log grants in #962, which is still a draft and is not applied. */
 export function supportsHitRate(sport: Sport): boolean {
   return HIT_RATE_SPORTS.has(sport);
 }
@@ -378,6 +389,13 @@ const STAT_KEY_TO_MARKET: Record<string, string> = {
   // the projection model bets. No per-stat model prices either.
   'NBA:blocks_steals': 'player_blocks_steals',
   'NBA:rebounds_assists': 'player_rebounds_assists',
+  // NHL skater chips. Keyed sport:key so `points` and `assists` cannot
+  // resolve a basketball column onto an NHL market. Goals is the anytime
+  // scorer (config.PROP_MARKETS_NHL), not a numbered player_goals market.
+  'NHL:shots_on_goal': 'player_shots_on_goal',
+  'NHL:points': 'player_points',
+  'NHL:goals': 'player_goal_scorer_anytime',
+  'NHL:assists': 'player_assists',
 };
 
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */

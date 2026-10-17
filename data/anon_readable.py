@@ -49,6 +49,9 @@ ANON_READABLE: tuple[str, ...] = (
     # and the default grant since the Teams board shipped; declared now that
     # a `.from()` names it.
     "nfl_team_game_stats",
+    # NHL skater log the Stats tab sums on the phone (2026-10-16). anon and
+    # authenticated already hold SELECT. The table had 0 rows that day.
+    "nhl_skater_stats",
     "odds",
     "parlay_correlations",
     "parlay_track_record",
