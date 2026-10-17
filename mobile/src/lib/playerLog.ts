@@ -14,6 +14,7 @@
 import type { Sport } from '@/hooks/useSportFilter';
 import { sportOfModel } from './modelMeta';
 import {
+  logDerivedStatsFor,
   statForPropMarket,
   statForPropModel,
   statsForSport,
@@ -120,6 +121,10 @@ export function logFetchLimit(sport: PlayerLogSport): number {
  *   basketball  threes = fg3_made, pra = points + rebounds + assists
  *   NFL         rush_rec_tds = rushing_tds + receiving_tds
  *   MLB pitcher outs — see `outs` note in `chipsForPlayer` below
+ * Plus two the leaderboard does not have, summed here only
+ * (statCatalog.LOG_DERIVED_STATS):
+ *   basketball  blocks_steals = blocks + steals,
+ *               rebounds_assists = rebounds + assists
  * Missing inputs stay missing rather than becoming 0: a null stat must read as
  * "no data" (excluded from the hit rate), never as a game with zero of it.
  */
@@ -128,6 +133,8 @@ export function normalizeLogRow(sport: PlayerLogSport, raw: Record<string, unkno
   if (sport === 'WNBA' || sport === 'NBA') {
     row.threes = num(raw.fg3_made);
     row.pra = sum(raw.points, raw.rebounds, raw.assists);
+    row.blocks_steals = sum(raw.blocks, raw.steals);
+    row.rebounds_assists = sum(raw.rebounds, raw.assists);
   } else if (FOOTBALL.has(sport)) {
     row.rush_rec_tds = sum(raw.rushing_tds, raw.receiving_tds);
   } else if (sport === 'MLB') {
@@ -183,14 +190,17 @@ const OUTS_STAT: StatDef = {
 /**
  * The stats a player's detail screen can chart, from the shared catalog.
  *
- * Two sport-specific adjustments:
+ * Three sport-specific adjustments:
  *  - MLB chips are split by player type, the way the leaderboard splits them.
  *  - MLB pitching swaps "Innings" for "Outs". The leaderboard SUMS innings so
  *    the notation quirk averages out there, but the detail screen compares a
  *    single game against a line, where 5.2 IP >= 5.5 is false and wrong.
+ *  - NBA adds Blocks+Steals and Reb+Ast after the leaderboard's chips
+ *    (statCatalog.LOG_DERIVED_STATS): markets the projection model bets, so
+ *    its pick's "View all stats" opens on the stat it is written on.
  */
 export function chipsForPlayer(sport: PlayerLogSport, playerType?: PlayerType | null): StatDef[] {
-  const all = statsForSport(sport);
+  const all = [...statsForSport(sport), ...logDerivedStatsFor(sport)];
   if (sport !== 'MLB') return all;
   const type = playerType ?? 'batter';
   return all
@@ -533,6 +543,28 @@ export function measureStepperRow(fontScale: number): StepperRowMeasure {
   const layout: StepperRowLayout =
     single <= STEPPER_ROW_INNER ? 'inline' : stacked <= STEPPER_ROW_INNER ? 'stacked' : 'split';
   return { single, stacked, controls, mode, inner: STEPPER_ROW_INNER, layout };
+}
+
+/**
+ * Room left of a chip when its row is scrolled to it, so the chip before it
+ * still shows and the row reads as scrollable (components/SportToggle.tsx).
+ */
+export const CHIP_ROW_LEAD = 40;
+
+/**
+ * Where a horizontal chip row scrolls so its selected chip is on screen, from
+ * the chip's x inside the row; null before the chip has laid out.
+ *
+ * The player page's stat row runs past the right edge on every iPhone: NBA
+ * has 11 chips, and a projection pick on Blocks+Steals or Reb+Ast opens on
+ * the 10th or 11th, so nothing on screen said which stat the chart was
+ * (UX review, 2026-10-16). Zero is a real answer: on an NFL page a group tab
+ * remounts the row's chips and the new first chip can sit left of where the
+ * row is scrolled to, which is why SportToggle's `x > 0` guard is not here.
+ */
+export function chipRowScrollX(chipX: number | null | undefined): number | null {
+  if (chipX == null || !Number.isFinite(chipX)) return null;
+  return Math.max(0, chipX - CHIP_ROW_LEAD);
 }
 
 /** Where the stepper sits so the + stays on a 375pt card. */

@@ -280,6 +280,8 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     # The NBA prop rule (2026-10-15): five markets under one id, settled from
     # nba_player_game_log by (player_id, game_id).
     "nba_prop_market":              ("nba_player", "FROM_PROP_MARKET"),
+    # The NBA projection model (2026-10-16): six markets under one id, either side.
+    "nba_prop_projection":          ("nba_player", "FROM_PROP_MARKET"),
     # NHL skater props — resolved from nhl_skater_game_log by player_id
     "nhl_prop_blocked_shots":       ("nhl_skater", "blocked_shots"),
     "nhl_prop_assists":             ("nhl_skater", "assists"),
@@ -341,6 +343,7 @@ _PROP_MARKET_STAT_BY_MODEL = {
     "nfl_live_prop":    _NFL_MARKET_STAT,
     "wnba_prop_market": _WNBA_MARKET_STAT,
     "nba_prop_market":  _NBA_MARKET_STAT,
+    "nba_prop_projection": _NBA_MARKET_STAT,
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -1577,6 +1580,8 @@ _PROP_MARKET_FOR_MODEL = {
     # (_bet_price_and_book) by the name in its label, which is that book's own
     # spelling (scripts/nba_prop_market_card.pick_rows).
     "nba_prop_market":  "FROM_PROP_MARKET",
+    # The projection card writes decision_book and the book's own spelling the same way.
+    "nba_prop_projection": "FROM_PROP_MARKET",
     "nhl_prop_blocked_shots": "player_blocked_shots",
     "nhl_prop_saves": "player_total_saves",
     "nhl_prop_shots_on_goal": "player_shots_on_goal",

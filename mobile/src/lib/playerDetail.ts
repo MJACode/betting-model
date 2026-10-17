@@ -26,7 +26,7 @@ import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MOD
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
-import { modelShort, sportOfModel } from '@/lib/modelMeta';
+import { modelLong, modelShort, sportOfModel } from '@/lib/modelMeta';
 import type { GameRow, PropOddsByBookRow, PropOddsSnapshotRow, SettledPick } from '@/types';
 
 // ── Line conversions ─────────────────────────────────────────────────────────
@@ -401,6 +401,17 @@ export interface PlayerPickRecord {
 }
 
 /**
+ * What a multi-market model's line on the player page is called after its
+ * stat: the parenthetical of the model's own name, so "Points (vs Pinnacle)"
+ * for the three rules priced against Pinnacle and "Steals (Projection)" for
+ * the NBA projection model, which is not priced against Pinnacle. The short
+ * name when the long one carries no parenthetical.
+ */
+function multiMarketModelName(modelId: string): string {
+  return /\(([^()]+)\)\s*$/.exec(modelLong(modelId))?.[1] ?? modelShort(modelId);
+}
+
+/**
  * Settled BETs on this player, grouped by model. Input is already the record
  * filter (BET, a real result); this only sorts and sums. A pick with no price
  * counts in the record and not in the units (CLAUDE.md §6).
@@ -422,10 +433,10 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     // unknown stay; only an explicit unpublished stamp leaves.
     if (!publishedRecordKeeps(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
-    // A multi-market rule (nba/wnba/nfl_prop_market) is one model id across
-    // several markets, so its picks are split by the row's prop_market and
-    // each line is named for that market's stat. Without this every one of
-    // its bets was one line labelled "Prop Mkt".
+    // A multi-market model (nba/wnba/nfl_prop_market, nba_prop_projection) is
+    // one model id across several markets, so its picks are split by the
+    // row's prop_market and each line is named for that market's stat.
+    // Without this every one of its bets was one line labelled "Prop Mkt".
     const modelStat = statForPropModel(p.model_id);
     const market = modelStat ? null : (p.prop_market ?? null);
     const key = market ? `${p.model_id}|${market}` : p.model_id;
@@ -437,7 +448,7 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
       const label = !stat
         ? modelShort(p.model_id)
         : market
-          ? `${stat.label} (vs Pinnacle)`
+          ? `${stat.label} (${multiMarketModelName(p.model_id)})`
           : stat.label;
       line = {
         key,
