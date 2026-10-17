@@ -418,9 +418,11 @@ def test_the_soft_outlier_bets_the_deviating_books_number_on_the_side_it_favours
     assert s.loc[s["strength"] >= 1.0].index.tolist() == [("spreads", "betmgm"), ("totals", "betrivers")]
 
 
-def _split(side, pct, observed, kind="pregame_poll", endpoint="v2", market="spreads"):
+def _split(side, pct, observed, kind="pregame_poll", endpoint="v2", market="spreads",
+           game_date="2024-01-15"):
     return {"game_id": "G", "market": market, "side": side, "tickets_pct": pct,
-            "capture_kind": kind, "endpoint": endpoint, "observed_at": observed}
+            "capture_kind": kind, "endpoint": endpoint, "observed_at": observed,
+            "game_date": game_date}
 
 
 def test_public_fade_reads_only_polls_observed_before_T():
@@ -445,6 +447,89 @@ def test_public_fade_without_a_pre_T_poll_or_with_an_even_split_bets_nothing():
     even = pd.DataFrame([_split("over", 50.0, T, market="totals"), _split("under", 50.0, T, market="totals")])
     assert M.public_signal(even, _times(lead=120)).empty
     assert M.public_signal(None, _times(lead=120)).empty
+
+
+def test_public_fade_drops_the_slate_the_source_serves_reversed():
+    """2022-03-09 is served home-for-away at the source (section 6, third
+    amendment): a poll on that slate, observed before T, still bets nothing,
+    while the same poll on any other date fades the public."""
+    T = TIP - pd.Timedelta(minutes=120)
+    obs = T - pd.Timedelta(minutes=30)
+
+    def poll(day):
+        return pd.DataFrame([_split("home", 75.0, obs, game_date=day),
+                             _split("away", 25.0, obs, game_date=day)])
+
+    assert M.public_signal(poll("2022-03-09"), _times(lead=120)).empty
+    # stored as a date or a timestamp rather than text: still the same slate
+    assert M.public_signal(poll(pd.Timestamp("2022-03-09")), _times(lead=120)).empty
+    s = M.public_signal(poll("2022-03-10"), _times(lead=120))
+    assert s["side_pick"].tolist() == ["away"] and s["strength"].tolist() == [75.0]
+    # a v1 archive row on an ordinary date is refused by its kind (the fallback
+    # while the splits table carries no reliability flag)
+    v1 = pd.DataFrame([_split("home", 75.0, obs, kind="archive_undated", endpoint="v1"),
+                       _split("away", 25.0, obs, kind="archive_undated", endpoint="v1")])
+    assert M.public_signal(v1, _times(lead=120)).empty
+
+
+def test_public_fade_refuses_splits_with_no_date_to_check_the_reversed_slate():
+    T = TIP - pd.Timedelta(minutes=120)
+    rows = pd.DataFrame([_split("home", 75.0, T), _split("away", 25.0, T)]).drop(columns="game_date")
+    with pytest.raises(ValueError, match="game_date"):
+        M.public_signal(rows, _times(lead=120))
+
+
+@pytest.mark.parametrize("argv,runs", [
+    (["--full"], 20),
+    (["--smoke"], 20),
+    (["--smoke", "--placebo", "2"], 2),
+])
+def test_the_placebo_count_is_twenty_unless_a_smoke_run_asks_for_fewer(argv, runs):
+    assert M.placebo_runs(M.parse_args(argv)) == runs
+
+
+@pytest.mark.parametrize("override", ["5", "20"])
+def test_full_refuses_the_hidden_placebo_override_even_at_twenty(override):
+    with pytest.raises(SystemExit, match="exactly 20 placebo runs"):
+        M.placebo_runs(M.parse_args(["--full", "--placebo", override]))
+
+
+def _stub_main(monkeypatch, tmp_path):
+    """main() with every load and grade stubbed: records the placebo count it hands on."""
+    seen = []
+    (tmp_path / "nba_fetch_ledger.parquet").write_bytes(b"")
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.setattr(M, "synthetic_checks", lambda: None)
+    monkeypatch.setattr(M, "load_data", lambda cache, full: type("D", (), {"notes": {}})())
+    monkeypatch.setattr(M, "market_pricing", lambda data: (None, {}))
+    monkeypatch.setattr(M, "schedule_features", lambda cache: None)
+    monkeypatch.setattr(M, "load_splits", lambda cache: None)
+    monkeypatch.setattr(M, "write_cells", lambda rows, path: None)
+
+    def f3(data, close, sig, n_placebo):
+        seen.append(("F3", n_placebo))
+        return pd.DataFrame(), pd.DataFrame()
+
+    def ctl(data, close, sig, sched, splits, n_placebo):
+        seen.append(("controls", n_placebo))
+        return pd.DataFrame(), pd.DataFrame()
+
+    monkeypatch.setattr(M, "run_f3", f3)
+    monkeypatch.setattr(M, "run_controls", ctl)
+    return seen
+
+
+def test_a_full_run_hands_exactly_twenty_placebo_runs_to_every_cell(monkeypatch, tmp_path):
+    seen = _stub_main(monkeypatch, tmp_path)
+    M.main(["--full", "--cache", str(tmp_path), "--results", str(tmp_path / "out")])
+    assert seen == [("F3", 20), ("controls", 20)]
+
+
+def test_a_full_run_with_the_override_stops_before_anything_is_graded(monkeypatch, tmp_path):
+    seen = _stub_main(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit, match="exactly 20 placebo runs"):
+        M.main(["--full", "--placebo", "3", "--cache", str(tmp_path), "--results", str(tmp_path / "out")])
+    assert seen == []
 
 
 def test_full_refuses_without_the_owners_go(monkeypatch):

@@ -80,8 +80,12 @@ decision point C, written to cells_controls.parquet). 35 cells:
                           docs/mlb_total_public_fade.md: 70 default, 80
                           supported). Reads nba_public_splits rows captured
                           BEFORE T (capture_kind 'pregame_poll', observed_at
-                          <= T); the undated archive is refused. Absent table:
-                          the cells are emitted with no bets.
+                          <= T). Excluded: the whole undated archive (the
+                          closing split, known only after tip; it holds every
+                          v1 row), and the 2022-03-09 slate, served reversed
+                          home-for-away at the source. The stored history is
+                          all archive, so before 2026-27 these cells bet
+                          nothing. Absent table: emitted with no bets.
 
 WALK-FORWARD. Nothing in F3 or the controls is fitted. The one fitted thing the
 harness uses -- the spread / total distribution behind market_fair, the blind
@@ -97,7 +101,11 @@ which more than 5% of rows match no purchase record, is refused (load_data).
 LOOK-AHEAD GUARDS: quotes are pre-game and fetched at or before T (H.load,
 H.visible); FIRST <= T is required; a streak counts a game only from tip + 3 h;
 schedule spots come from the published schedule; public splits only from a
-pre-tip poll observed at or before T.
+pre-tip poll observed at or before T, never the archive or the reversed
+2022-03-09 slate.
+
+PLACEBO COUNT. --full runs exactly 20 placebo runs per cell (bar 10); the
+hidden --placebo shortcut is for --smoke and is refused under --full.
 
     PYTHONPATH=. python -m scripts.nba_game2_move --smoke --cache <dir with the fetch ledger>
     NBA_GAME2_GO=1 PYTHONPATH=. python -m scripts.nba_game2_move --full
@@ -137,6 +145,8 @@ EARLY_DAYS = 21              # first 3 weeks = days 0..20 after opening night
 SPOT_CUTS = (1.0,)
 OUTLIER_CUTS = (1.0,)
 PUBLIC_CUTS = (70.0, 80.0)
+SPLITS_POLL = "pregame_poll"             # the only nba_public_splits kind read
+SPLITS_REVERSED_DATES = ("2022-03-09",)  # served home-for-away at the source: excluded
 TRAVEL_MI = 750
 ALTITUDE_VENUES = ("Denver", "Salt Lake City")
 CONTROL_CELLS = 35
@@ -404,12 +414,24 @@ def load_splits(cache: Path) -> pd.DataFrame | None:
 def public_signal(splits: pd.DataFrame | None, times: pd.DataFrame,
                   markets=("h2h", "spreads", "totals")) -> pd.DataFrame:
     """Against the side holding the larger share of tickets, from the newest
-    PRE-TIP poll observed at or before T. Archive rows are undated (the split
-    near the start) and never used."""
+    PRE-TIP poll observed at or before T.
+
+    Two exclusions (docs/nba_models_2026.md section 6, third amendment):
+      * every archive row (capture_kind 'archive_undated'): the archive is the
+        CLOSING split, known only after tip, so it is never usable at a pre-tip
+        decision. Every v1 row is an archive row (the ingestor polls v2 only),
+        so this also removes every v1 row, whatever a later flag says of it.
+      * every row on a slate the source serves reversed home-for-away
+        (SPLITS_REVERSED_DATES, by the row's own game_date), whatever its kind."""
     cols = ["game_id", "market", "strength", "side_pick"]
     if splits is None or splits.empty:
         return pd.DataFrame(columns=cols)
-    s = splits[(splits["capture_kind"] == "pregame_poll") & splits["tickets_pct"].notna()
+    if "game_date" not in splits:
+        raise ValueError("nba_public_splits rows need game_date to drop the reversed slate(s) "
+                         f"{SPLITS_REVERSED_DATES}")
+    reversed_slate = splits["game_date"].astype(str).str[:10].isin(SPLITS_REVERSED_DATES)
+    s = splits[(splits["capture_kind"] == SPLITS_POLL) & ~reversed_slate
+               & splits["tickets_pct"].notna()
                & splits["game_id"].notna() & splits["market"].isin(markets)].copy()
     s["observed_at"] = pd.to_datetime(s["observed_at"], utc=True)
     s = s.merge(times[["game_id", "T"]], on="game_id")
@@ -571,15 +593,32 @@ def coverage_text(pop: pd.DataFrame) -> str:
     return first.join(bets).to_string()
 
 
-def main() -> None:
+def parse_args(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--smoke", action="store_true", help="2020-21 only, plus synthetic checks")
     mode.add_argument("--full", action="store_true", help="every season (needs NBA_GAME2_GO=1)")
     ap.add_argument("--cache", type=Path, default=H.CACHE)
     ap.add_argument("--results", type=Path, default=RESULTS)
-    ap.add_argument("--placebo", type=int, default=N_PLACEBO, help=argparse.SUPPRESS)
-    a = ap.parse_args()
+    # a smoke-run shortcut only; --full refuses it (placebo_runs)
+    ap.add_argument("--placebo", type=int, default=None, help=argparse.SUPPRESS)
+    return ap.parse_args(argv)
+
+
+def placebo_runs(a: argparse.Namespace) -> int:
+    """How many placebo runs a cell carries. Bar 10 (section 6.4, read as the
+    2026-10-17 amendment "how each bar is read" fixes it) is the 95th
+    percentile of 20 shuffles, so --full takes no override at all, not even
+    --placebo 20; --smoke may ask for fewer."""
+    if a.full and a.placebo is not None:
+        raise SystemExit(f"--full runs exactly {N_PLACEBO} placebo runs (docs/nba_models_2026.md "
+                         "section 6.4, bar 10); --placebo is for --smoke only.")
+    return N_PLACEBO if a.placebo is None else int(a.placebo)
+
+
+def main(argv=None) -> None:
+    a = parse_args(argv)
+    n_placebo = placebo_runs(a)
     if a.full:
         refuse_full_without_go()
     synthetic_checks()
@@ -595,10 +634,10 @@ def main() -> None:
     sched = schedule_features(a.cache)
     splits = load_splits(a.cache)
     print("public splits:", "absent (control emitted with no bets)" if splits is None else f"{len(splits):,} rows")
-    f3, f3_pop = run_f3(data, close, sig, a.placebo)
+    f3, f3_pop = run_f3(data, close, sig, n_placebo)
     write_cells(f3, out / "cells_F3.parquet")
     f3_pop.to_parquet(out / "population_F3.parquet")
-    ctl, ctl_pop = run_controls(data, close, sig, sched, splits, a.placebo)
+    ctl, ctl_pop = run_controls(data, close, sig, sched, splits, n_placebo)
     write_cells(ctl, out / "cells_controls.parquet")
     ctl_pop.to_parquet(out / "population_controls.parquet")
     print(f"wrote {len(f3)} F3 cells and {len(ctl)} control cells to {out}")
