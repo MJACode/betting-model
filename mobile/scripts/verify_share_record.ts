@@ -14,7 +14,7 @@ function check(name: string, cond: boolean, detail = '') {
 
 const base: TrackRecordSummary = {
   picks: 259, wins: 150, losses: 109, pushes: 0,
-  profitFlat: 1120, stakedFlat: 25900, roiFlat: 0.043, winRate: 0.579,
+  profitFlat: 1120, stakedFlat: 25900, roi: 0.043, winRate: 0.579,
   clvSettled: 200, clvBeat: 116, clvBeatRate: 0.58,
 };
 
@@ -30,7 +30,7 @@ check('transparency line present', msg.includes('Nothing cherry-picked'));
 
 // Negative ROI signs correctly; null clv/units lines drop out.
 const neg = buildShareMessage(
-  { ...base, roiFlat: -0.052, clvBeatRate: null },
+  { ...base, roi: -0.052, clvBeatRate: null },
   {},
 );
 check('negative ROI signed with U+2212', neg.includes('\u22125.2%') && !neg.includes('-5.2%'));

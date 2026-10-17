@@ -18,7 +18,7 @@ export function buildShareMessage(
   const lines: (string | null)[] = [
     '📊 Signalbase — verified sports-betting model',
     '',
-    `${formatPctSigned(s.roiFlat)} ROI · ${record} (${Math.round(s.winRate * 100)}% win rate)`,
+    `${formatPctSigned(s.roi)} ROI · ${record} (${Math.round(s.winRate * 100)}% win rate)`,
     opts.endUnits != null
       ? // Same sign and 2-decimal rounding as the equity curve (U+2212 for a loss).
         `${formatSigned(opts.endUnits, 2, 'u').replace(/u$/, '')} units, 1 to win`

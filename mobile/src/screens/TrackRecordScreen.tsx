@@ -245,8 +245,8 @@ export function TrackRecordScreen() {
         ) : (
         <View style={styles.heroCard}>
           <Text style={styles.heroLabel}>ROI · 1 to win</Text>
-          <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
-            {Number(overall.risked ?? 0) > 0 ? formatPctSigned(overall.roiFlat) : '—'}
+          <Text style={[styles.heroRoi, { color: roiColor(overall.roi) }]}>
+            {Number(overall.risked ?? 0) > 0 ? formatPctSigned(overall.roi) : '—'}
           </Text>
           <Text
             style={styles.heroRecord}
@@ -317,7 +317,7 @@ export function TrackRecordScreen() {
             small, and a few dozen settled bets tells you very little in either direction —
             where a model has too few to read, its percentage is greyed out and labelled
             rather than hidden. A pick that had no price is staked at 1 unit and still
-            counts. It is marked unpriced, staked at 1u.
+            counts.
           </Text>
         </View>
 
@@ -340,8 +340,8 @@ export function TrackRecordScreen() {
           <View key={g.sport} style={styles.sportCard}>
             <View style={styles.sportHeader}>
               <Text style={styles.sportName}>{g.sport}</Text>
-              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roiFlat) }]}>
-                {Number(g.summary.risked ?? 0) > 0 ? formatPctSigned(g.summary.roiFlat) : '—'}
+              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roi) }]}>
+                {Number(g.summary.risked ?? 0) > 0 ? formatPctSigned(g.summary.roi) : '—'}
               </Text>
             </View>
             <Text style={styles.sportSub}>

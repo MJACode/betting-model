@@ -1280,7 +1280,8 @@ def recaps_needing_restatement(conn, through: str | None = None,
     out = []
     for d, published_at, settled in snaps:
         d = str(d)
-        late = conn.execute(
+        late = _execute_settled(
+            conn,
             _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
             (d, published_at)).fetchall()
         if late:
@@ -1400,7 +1401,8 @@ def post_missed_recap(now: datetime | None = None,
 
     conn = get_connection()
     try:
-        discord_done, x_sent_at, settled = conn.execute(
+        discord_done, x_sent_at, settled = _execute_settled(
+            conn,
             _missed_recap_state_sql(),
             (f"discord_results:{game_date}", f"x_results:{game_date}",
              game_date)).fetchone()
@@ -1439,7 +1441,8 @@ def _restate_x_if_behind(game_date: str, x_sent_at, dry_run: bool) -> int:
     from tracking.x_publisher import notify_x_results
     conn = get_connection()
     try:
-        late = conn.execute(
+        late = _execute_settled(
+            conn,
             _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
             (game_date, x_sent_at)).fetchall()
     finally:
@@ -2090,10 +2093,61 @@ _SETTLED_SQL = r"""
     + "\n          AND " + posted_sql("p") + "\n"
 
 
+_UNIT_COLUMN_SQL = (
+    ",\n               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+    ",\n               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+)
+
+
+def _sql_without_unit_functions(sql: str) -> str:
+    """The same query with the two function columns removed.
+
+    A shorter tuple is what `_tally` already prices with `stake_for`.
+    """
+    if _UNIT_COLUMN_SQL not in sql:
+        raise RuntimeError("settled sql has no posted-stake columns to drop")
+    return sql.replace(_UNIT_COLUMN_SQL, "")
+
+
+def _unit_functions_missing(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    if "published_pick_unit_" not in text:
+        return False
+    return "does not exist" in text or "no such function" in text
+
+
+def _execute_settled(conn, sql: str, params: tuple):
+    """Run a query built on `_SETTLED_SQL`.
+
+    The functions live in their own migration, and settle runs before that
+    migration on the morning the code deploys. A missing function is not a
+    failed settlement: drop the columns and let `_tally` use `stake_for`,
+    which the function body is pinned equal to. Any other error propagates.
+    """
+    try:
+        return conn.execute(sql, params)
+    except Exception as exc:
+        if not _unit_functions_missing(exc):
+            raise
+        # Postgres aborts the transaction on the error, so the retry needs a
+        # rollback. sqlite3.rollback undoes the open inserts instead, and the
+        # statement error did not abort that connection.
+        if type(exc).__module__.startswith("psycopg"):
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(
+            "published stake functions are not installed yet; "
+            "tallying with stake_for"
+        )
+        return conn.execute(_sql_without_unit_functions(sql), params)
+
+
 def _settled_rows(conn, game_date: str) -> list[tuple]:
     """One settled day."""
-    return conn.execute(_SETTLED_SQL.format(window="= %s"),
-                        (game_date,)).fetchall()
+    return _execute_settled(conn, _SETTLED_SQL.format(window="= %s"),
+                            (game_date,)).fetchall()
 
 
 def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
@@ -2102,7 +2156,8 @@ def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
     Bounded ABOVE by the recapped date so the all-time figure is as of that
     recap and never quietly includes a later day: a number published on Monday
     must still reproduce on Friday."""
-    return conn.execute(
+    return _execute_settled(
+        conn,
         _SETTLED_SQL.format(window="BETWEEN %s AND %s"),
         (start_date, through)).fetchall()
 
@@ -2183,7 +2238,9 @@ def _tally(rows: list[tuple]) -> dict:
             elif result == "LOSS":
                 t["units"] -= stake.risk
             # PUSH returns the stake: no unit change, and it was not risked.
-            if result != "PUSH":
+            # WIN and LOSS only. A push, a void, and an ungraded row
+            # laid nothing — the same rule as published_pick_unit_risked.
+            if result in ("WIN", "LOSS"):
                 t["risked"] += stake.risk
     return t
 

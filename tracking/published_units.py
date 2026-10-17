@@ -29,8 +29,9 @@ def unit_profit(price, result) -> float:
 
 
 def unit_risked(price, result) -> float:
-    """Units laid. A push risked nothing. Same pair as the SQL risked function."""
-    if result == "PUSH":
+    """Units laid on a graded win or loss. A push, a void, and an ungraded
+    pick laid nothing. Same pair as the SQL risked function."""
+    if result not in ("WIN", "LOSS"):
         return 0.0
     return stake_for(None, price).risk
 
