@@ -146,21 +146,28 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "Units unavailable" in hero
     assert "unknownCountSpeech('— settled picks')" in hero
     assert "since ${LIVE_RECORD_START_SHORT}" in hero
-    # Yesterday's book is named "flat-bet ROI" on the Yesterday sheet. This
-    # screen's grid says "ROI" so the two books are not the same words.
+    # Yesterday's book is named "flat-bet ROI" on the Yesterday sheet.
+    # This screen says "Return on bets".
     for blob in (screen, card, hero):
         assert "Flat-bet ROI" not in blob
         assert "flat-bet ROI" not in blob
-    assert 'label="ROI"' in card
-    assert "ROI, 1 to win" in hero
+    assert 'label="Return on bets"' in card
+    assert "Return on bets (ROI)" in hero
+    assert "Total profit · all time" in hero
+    assert "heroVisibleLabel(label)" in card
+    assert "Units · 1 to win" in hero
+    assert "{UNITS_CAPTION}" in card
+    assert "Each pick risks the amount needed to win 1 unit" in hero
+    assert "Nothing risks more than 3" not in hero
+    assert "wins less than 1" not in hero
+    assert "The info button on Return on bets" in screen
     assert "Beat the closing line" in card
     assert 'accessibilityRole="summary"' in card
     assert "accessibilityLabel={heroLabel}" in card
     assert "heroAccessibilityLabel" in hero
     assert "pnlColor(units, 2)" in card
     assert "pnlColor(summary.roiFlat, 1, 100)" in card
-    assert "Yesterday and the Models tab still use a flat $100 bet" in screen
-    assert "wins less than 1" in hero
+    assert "Yesterday and Models use a flat $100 bet" in hero
     assert "unpriced, staked at 1u" in screen
     assert "flat $100" not in curve
     assert "colors.positive" not in curve
@@ -169,8 +176,11 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "formatSigned(endUnits, 2, 'u')" in curve
     assert "pnlColor(endUnits, 2)" in curve
     assert "scrubIndexForSeries" in curve
-    assert "equitySeriesKey" in curve
-    assert "onBlur={releaseScrub}" in curve
+    assert "equitySeriesKey(seriesId, points)" in curve
+    assert "onBlur does not" in curve
+    assert "onBlur={releaseScrub}" not in curve
+    assert "seriesId={sportSel}" in screen
+    assert curve.count("<Circle") >= 2
     assert "maxWidth: pill.maxWidth" in curve
     geometry = (ROOT / "mobile/src/lib/equityGeometry.ts").read_text(encoding="utf-8")
     assert "export function scrubIndexForSeries" in geometry

@@ -7,12 +7,14 @@ import { RecordSparkline } from '@/components/RecordSparkline';
 import {
   CLOSING_LINE_TITLE,
   ROI_SHEET_TITLE,
+  UNITS_CAPTION,
   clvText,
   closingLineBody,
   roiSheetBody,
   heroAccessibilityLabel,
   heroStacks,
   heroUnitsText,
+  heroVisibleLabel,
   recordLine,
   roiText,
   sinceLine,
@@ -41,6 +43,7 @@ export function RecordHeroCard({
 }) {
   const { fontScale, width } = useWindowDimensions();
   const stacked = heroStacks(fontScale, width);
+  const labelMinHeight = Math.ceil(font.size.footnote * 1.35 * fontScale * 2);
   const [sheet, setSheet] = useState<'roi' | 'clv' | null>(null);
   const [sparkW, setSparkW] = useState(SPARK_W);
   const units = Number(summary.units ?? 0);
@@ -75,7 +78,7 @@ export function RecordHeroCard({
         accessibilityRole="summary"
         accessibilityLabel={heroLabel}
         accessibilityActions={[
-          { name: 'roi', label: 'ROI, 1 to win' },
+          { name: 'roi', label: 'Return on bets (ROI)' },
           { name: 'close', label: 'Beat the closing line details' },
         ]}
         onAccessibilityAction={(e) => {
@@ -86,7 +89,7 @@ export function RecordHeroCard({
         <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <View style={[styles.top, stacked && styles.topStacked]}>
             <View style={styles.figures}>
-              <Text style={styles.heroLabel}>{label}</Text>
+              <Text style={styles.heroLabel}>{heroVisibleLabel(label)}</Text>
               <Text
                 style={[styles.heroUnits, { color: quiet ? colors.textSecondary : pnlColor(units, 2) }]}
                 numberOfLines={1}
@@ -95,6 +98,7 @@ export function RecordHeroCard({
               >
                 {unitsText}
               </Text>
+              <Text style={styles.unitsCaption}>{UNITS_CAPTION}</Text>
               <Text style={styles.since}>{sinceLine()}</Text>
             </View>
             {points.length >= 2 ? (
@@ -108,19 +112,21 @@ export function RecordHeroCard({
           </View>
           <View style={styles.grid}>
             <GridCell
-              label="ROI"
+              label="Return on bets"
               value={roi}
               valueColor={roi === '—' ? colors.textSecondary : pnlColor(summary.roiFlat, 1, 100)}
               stacked={stacked}
+              labelMinHeight={labelMinHeight}
               onInfo={() => open('roi')}
-              infoLabel="ROI, 1 to win"
+              infoLabel="Return on bets (ROI)"
             />
-            <GridCell label="Record" value={record} stacked={stacked} />
-            <GridCell label="Win rate" value={win} stacked={stacked} />
+            <GridCell label="Record" value={record} stacked={stacked} labelMinHeight={labelMinHeight} />
+            <GridCell label="Win rate" value={win} stacked={stacked} labelMinHeight={labelMinHeight} />
             <GridCell
               label="Beat the closing line"
               value={clv}
               stacked={stacked}
+              labelMinHeight={labelMinHeight}
               onInfo={() => open('clv')}
               infoLabel="Beat the closing line details"
             />
@@ -142,6 +148,7 @@ function GridCell({
   value,
   valueColor,
   stacked,
+  labelMinHeight,
   onInfo,
   infoLabel,
 }: {
@@ -149,12 +156,13 @@ function GridCell({
   value: string;
   valueColor?: string;
   stacked: boolean;
+  labelMinHeight: number;
   onInfo?: () => void;
   infoLabel?: string;
 }) {
   return (
     <View style={[styles.cell, stacked && styles.cellStacked]}>
-      <View style={styles.cellLabelRow}>
+      <View style={[styles.cellLabelRow, { minHeight: labelMinHeight }]}>
         <Text style={styles.cellLabel}>{label}</Text>
         {onInfo ? (
           <Pressable
@@ -196,7 +204,8 @@ const styles = StyleSheet.create({
   figures: { flex: 1, minWidth: 0 },
   heroLabel: { fontSize: font.size.footnote, color: colors.textSecondary },
   heroUnits: { fontSize: font.size.largeTitle, fontWeight: font.weight.bold, marginVertical: 2 },
-  since: { fontSize: font.size.footnote, color: colors.textSecondary },
+  unitsCaption: { fontSize: font.size.caption, color: colors.textSecondary },
+  since: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
   spark: { width: SPARK_W, height: SPARK_H },
   grid: {
     flexDirection: 'row',

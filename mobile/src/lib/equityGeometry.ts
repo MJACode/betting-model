@@ -26,8 +26,12 @@ export interface PlotLayout {
   range: number;
 }
 
-/** Y-axis gutter on the full chart. The sparkline passes a tight pad instead. */
-export const CHART_PAD: PlotPad = { left: 48, right: 8, top: 28, bottom: 8 };
+/**
+ * Y-axis gutter on the full chart. The sparkline passes a tight pad instead.
+ * Top clears a 2× scrub bubble so it does not sit on the highest tick.
+ * Bottom keeps the lowest tick, including zero, off the caption.
+ */
+export const CHART_PAD: PlotPad = { left: 48, right: 8, top: 48, bottom: 24 };
 export const SPARK_PAD: PlotPad = { left: 2, right: 2, top: 4, bottom: 4 };
 
 export function plotLayout(
@@ -135,9 +139,12 @@ export function scrubIndexForSeries(index: number | null, count: number): number
   return index;
 }
 
-/** Dates of the series. A different list is a different curve. */
-export function equitySeriesKey(points: { date: string }[]): string {
-  return points.map((p) => p.date).join('\n');
+/**
+ * Identity of one curve. Dates alone are not enough: two sports can share
+ * every date and must not keep each other's scrub index.
+ */
+export function equitySeriesKey(seriesId: string, points: { date: string }[]): string {
+  return `${seriesId}\n${points.map((p) => p.date).join('\n')}`;
 }
 
 /**

@@ -38,7 +38,7 @@ import { ROW_SLOP_PAD } from '@/lib/a11y';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
-import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** First day of the tracked record. Every published number starts here.
@@ -269,27 +269,14 @@ export function TrackRecordScreen() {
             there are too few settled days while the data is still in flight.
             endUnits is the hero's posted-stake total, so the pill matches it. */}
         {rows.length === 0 && (loading || error) ? null : (
-          <EquityCurve points={equity} width={chartWidth} endUnits={heroUnits} />
+          <EquityCurve points={equity} seriesId={sportSel} width={chartWidth} endUnits={heroUnits} />
         )}
 
         {/* Honest framing — the record is not all green, and says so. */}
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>Read this first</Text>
           <Text style={styles.noteBody}>
-            {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
-            happened and is still in our books, but the published record starts here — so it is
-            short by design, and the percentages will move a lot for a while.{'\n\n'}
-            This is the record Discord still has — every posted pick since {LIVE_RECORD_START_SHORT},
-            at 1 unit to win. The stake is the price the bet was taken at: at −110 that is
-            1.1 units risked to win 1. Nothing risks more than 3, and a heavier favorite
-            still risks 3 and wins less than 1. ROI is the units won or lost divided by
-            the units risked. Yesterday and the Models tab still use a flat $100 bet, so
-            those percentages will not match this one. Some models are
-            profitable, some aren’t yet, and we show them all. Every sample here is still
-            small, and a few dozen settled bets tells you very little in either direction —
-            where a model has too few to read, its percentage is greyed out and labelled
-            rather than hidden. A pick that had no price is staked at 1 unit and still
-            counts. It is marked unpriced, staked at 1u.
+            The published record starts {LIVE_RECORD_START_SHORT}. The info button on Return on bets explains the percentage.
           </Text>
         </View>
 

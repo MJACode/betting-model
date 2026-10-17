@@ -3,11 +3,10 @@
  *
  * The big number is the posted-stake units Discord prints on the all-time
  * line (`_tally_line`: `{units:+.2f}u`). The same string is the equity
- * curve's end pill. The grid's ROI is that stake's return (units / risked),
- * the percentage Discord posts beside the units. Yesterday and Models still
- * use a flat $100 bet, so this cell is labelled "ROI" — Designer should
- * confirm that label and the sheet title "ROI, 1 to win". Do not put
- * Yesterday's name for its book on this card.
+ * curve's end pill. The grid's return is that stake's units / risked, the
+ * percentage beside Discord's units. The visible name is "Return on bets".
+ * VoiceOver still hears Discord's "All-time". Yesterday and Models still
+ * use a flat $100 bet. Do not put Yesterday's name for its book on this card.
  */
 
 import { spokenDate, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
@@ -17,6 +16,17 @@ import { pnlTone } from '@/lib/tone';
 
 /** Discord's all-time field name. A sport filter replaces it with that sport. */
 export const DISCORD_ALL_TIME_LABEL = 'All-time';
+
+/** Visible hero title. VoiceOver keeps DISCORD_ALL_TIME_LABEL. */
+export const HERO_VISIBLE_ALL_TIME = 'Total profit · all time';
+
+export function heroVisibleLabel(discordLabel: string): string {
+  if (discordLabel === DISCORD_ALL_TIME_LABEL) return HERO_VISIBLE_ALL_TIME;
+  return `Total profit · ${discordLabel}`;
+}
+
+/** Small line under the units number. */
+export const UNITS_CAPTION = 'Units · 1 to win';
 
 /** Above this Dynamic Type scale the hero stacks. Narrow phones stack sooner. */
 export const HERO_STACK_AT = 1.2;
@@ -45,7 +55,7 @@ export function recordLine(wins: number, losses: number, pushes: number, notLoad
 
 export function winRateText(winRate: number, wins: number, losses: number, notLoaded: boolean): string {
   if (notLoaded || wins + losses <= 0) return '—';
-  return formatPct(winRate, 0);
+  return formatPct(winRate, 1);
 }
 
 export function clvText(rate: number | null, notLoaded: boolean): string {
@@ -80,7 +90,7 @@ export function heroAccessibilityLabel(o: {
       ? 'No settled picks'
       : unitsSpeech(heroUnitsText(o.units, false));
   const quiet = o.notLoaded || o.picks <= 0;
-  const roi = roiText(o.roiFlat, o.risked, quiet);
+  const roi = returnOnBetsSpeech(roiText(o.roiFlat, o.risked, quiet));
   const record = o.notLoaded
     ? unknownCountSpeech('— settled picks')
     : o.picks <= 0
@@ -92,7 +102,7 @@ export function heroAccessibilityLabel(o: {
     units,
     o.label,
     `since ${spokenDate(LIVE_RECORD_START)}`,
-    `ROI ${roi === '—' ? 'unavailable' : roi}`,
+    roi,
     record,
     `Win rate ${win === '—' ? 'unavailable' : win}`,
     `Beat the closing line ${clv === '—' ? 'unavailable' : clv}`,
@@ -104,16 +114,24 @@ export function equityStrokeToken(units: number): 'betInk' | 'avoidInk' | 'textS
   return pnlTone(units, 2);
 }
 
-/** Sheet title. The cell itself says "ROI" so the grid stays one short word. */
-export const ROI_SHEET_TITLE = 'ROI, 1 to win';
+/** Sheet title. The cell says "Return on bets". */
+export const ROI_SHEET_TITLE = 'Return on bets (ROI)';
+
+/** "+2.5%" → "Return on bets, 2.5 percent". An em dash is unavailable. */
+export function returnOnBetsSpeech(roi: string): string {
+  if (roi === '—') return 'Return on bets, unavailable';
+  const minus = roi.startsWith('\u2212') || roi.startsWith('-');
+  const digits = roi.replace(/^[+\u2212-]/, '').replace('%', '');
+  return `Return on bets, ${minus ? 'minus ' : ''}${digits} percent`;
+}
 
 export function roiSheetBody(): string {
   return (
-    'This is units won or lost divided by units risked. Each bet is 1 unit to win, ' +
-    'at the price it was taken at. At −110 that is 1.1 units risked to win 1. ' +
-    'Nothing risks more than 3, and a heavier favorite still risks 3 and wins less than 1. ' +
-    'It is the same percentage Discord posts beside the all-time units. ' +
-    'Yesterday and the Models tab use a flat $100 bet, so their percentages will not match this one.'
+    'Each pick risks the amount needed to win 1 unit. ' +
+    'At −110 that\u2019s 1.1 units to win 1. ' +
+    'This number is units won or lost divided by units risked. ' +
+    'It matches the percentage in Discord\u2019s all-time line. ' +
+    'Yesterday and Models use a flat $100 bet, so their percentages won\u2019t match.'
   );
 }
 

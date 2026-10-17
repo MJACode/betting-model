@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { PanResponder, StyleSheet, Text, View } from 'react-native';
-import Svg, { Line, Path } from 'react-native-svg';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 import {
   areaPath,
   chartDateLabel,
@@ -31,11 +31,14 @@ import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
  */
 export function EquityCurve({
   points,
+  seriesId,
   width,
-  height = 176,
+  height = 212,
   endUnits,
 }: {
   points: EquityPoint[];
+  /** Sport (or All). Two sports can share every date; the scrub index must not. */
+  seriesId: string;
   width: number;
   height?: number;
   /** The hero's posted-stake units. The end pill prints this, not a second rounding. */
@@ -45,11 +48,12 @@ export function EquityCurve({
   const [a11yIndex, setA11yIndex] = useState<number | null>(null);
   const [bubbleW, setBubbleW] = useState(160);
   const [pillSize, setPillSize] = useState({ w: 76, h: 22 });
-  // Reset before paint when the series changes. A sport chip with fewer
-  // days would otherwise keep VoiceOver's index, point past the array,
-  // and leave the end pill hidden. The render below also refuses an
-  // out-of-range index, because this render still sees the old state.
-  const seriesKey = equitySeriesKey(points);
+  // Reset before paint when this curve is a different series. RN 0.81 does
+  // not tell the view when VoiceOver focus leaves, and onBlur does not
+  // fire for that, so focus-leave is not the release. The sport chip is:
+  // seriesId plus the dates. The render below also refuses an index past
+  // the array, because this render still sees the old state.
+  const seriesKey = equitySeriesKey(seriesId, points);
   const [seenKey, setSeenKey] = useState(seriesKey);
   if (seenKey !== seriesKey) {
     setSeenKey(seriesKey);
@@ -116,13 +120,6 @@ export function EquityCurve({
     const next = Math.max(0, Math.min(points.length - 1, cur + dir));
     setA11yIndex(next);
   };
-  // RN 0.81 has no VoiceOver-did-lose-focus event. onBlur is the focus-leave
-  // hook on this view, and the series reset above covers a chip change that
-  // happens while focus is still here.
-  const releaseScrub = () => {
-    setA11yIndex(null);
-    setFinger(null);
-  };
 
   return (
     <View style={styles.card}>
@@ -138,7 +135,6 @@ export function EquityCurve({
           if (e.nativeEvent.actionName === 'increment') moveA11y(1);
           if (e.nativeEvent.actionName === 'decrement') moveA11y(-1);
         }}
-        onBlur={releaseScrub}
         {...responder.panHandlers}
       >
         <Svg width={width} height={height}>
@@ -153,6 +149,7 @@ export function EquityCurve({
           />
           <Path d={areaD} fill={stroke} fillOpacity={0.12} />
           <Path d={lineD} stroke={stroke} strokeWidth={2} fill="none" />
+          <Circle cx={lastPt.x} cy={lastPt.y} r={3.5} fill={stroke} />
           {scrubAt != null ? (
             <Line
               x1={xy[scrubAt]!.x}
@@ -162,6 +159,9 @@ export function EquityCurve({
               stroke={colors.textSecondary}
               strokeWidth={1}
             />
+          ) : null}
+          {scrubAt != null ? (
+            <Circle cx={xy[scrubAt]!.x} cy={xy[scrubAt]!.y} r={3.5} fill={stroke} />
           ) : null}
         </Svg>
         {ticks.map((tick) => {

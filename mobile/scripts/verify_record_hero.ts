@@ -5,6 +5,7 @@
  */
 import { formatSigned } from '../src/lib/format';
 import {
+  CHART_PAD,
   scrubIndex,
   scrubIndexForSeries,
   equitySeriesKey,
@@ -17,12 +18,17 @@ import {
 import {
   DISCORD_ALL_TIME_LABEL,
   HERO_STACK_AT,
+  HERO_VISIBLE_ALL_TIME,
+  ROI_SHEET_TITLE,
+  UNITS_CAPTION,
   clvText,
   equityStrokeToken,
   heroAccessibilityLabel,
   heroStacks,
   heroUnitsText,
+  heroVisibleLabel,
   recordLine,
+  roiSheetBody,
   roiText,
   sinceLine,
   winRateText,
@@ -47,7 +53,7 @@ check('ROI is the posted-stake percent', roiText(0.024697, 900, false) === '+2.5
 check('ROI hidden when nothing was risked', roiText(0, 0, false) === '—');
 check('record keeps a push', recordLine(439, 377, 2, false) === '439–377–2');
 check('record drops a zero push count', recordLine(10, 4, 0, false) === '10–4');
-check('win rate', winRateText(439 / (439 + 377), 439, 377, false) === '54%');
+check('win rate is one decimal', winRateText(439 / (439 + 377), 439, 377, false) === '53.8%');
 check('win rate empty', winRateText(0, 0, 0, false) === '—');
 check('clv missing', clvText(null, false) === '—');
 
@@ -65,10 +71,16 @@ const spoken = heroAccessibilityLabel({
   clvBeatRate: 0.54,
 });
 check('one stop starts with the units', spoken.startsWith('+22.65 units'), spoken.slice(0, 40));
-check('spoken label names All-time and the date', spoken.includes('All-time') && spoken.includes('September 1, 2026'));
+check('spoken label names All-time and the date', spoken.includes('All-time') && spoken.includes('September 1, 2026') && !spoken.includes('Total profit'));
+check('visible title is not the VoiceOver label', heroVisibleLabel(DISCORD_ALL_TIME_LABEL) === HERO_VISIBLE_ALL_TIME && heroVisibleLabel('NFL') === 'Total profit · NFL');
+check('units caption', UNITS_CAPTION === 'Units · 1 to win');
 check('spoken grid names the four cells',
-  spoken.includes('ROI +2.5%') && spoken.includes('439 wins') && spoken.includes('Win rate 54%') && spoken.includes('Beat the closing line 54%'));
+  spoken.includes('Return on bets, 2.5 percent') && spoken.includes('439 wins') && spoken.includes('Win rate 53.8%') && spoken.includes('Beat the closing line 54%'));
 check('spoken grid does not use Yesterday\'s book name', !/flat-bet roi/i.test(spoken));
+check('sheet title and body',
+  ROI_SHEET_TITLE === 'Return on bets (ROI)' &&
+  roiSheetBody().includes('Each pick risks the amount needed to win 1 unit') &&
+  !roiSheetBody().includes('Nothing risks more than 3'));
 
 const missing = heroAccessibilityLabel({
   notLoaded: true,
@@ -102,7 +114,7 @@ const mid = scrubIndex(layout.plotLeft + layout.plotWidth / 2, layout, 11);
 check('scrub midpoint', mid === 5, String(mid));
 
 const pill = pillFrame(10, 10, 320, 176);
-check('pill stays inside', pill.left >= 0 && pill.top >= 0 && pill.left + 76 <= 320 && pill.top >= 0 && pill.top <= 176);
+check('pill stays inside', pill.left >= 0 && pill.left + 76 <= 320 && pill.top >= 0 && pill.top + 22 <= 176);
 const wide = pillFrame(300, 40, 320, 176, 400, 48);
 check('a pill wider than the chart stays inside',
   wide.left >= 0 && wide.left + Math.min(400, 320) <= 320 && wide.top >= 0 && wide.top + 48 <= 176 && wide.maxWidth === 320,
@@ -112,8 +124,11 @@ check('negative scrub index is released', scrubIndexForSeries(-1, 5) === null);
 check('in-range scrub index is kept', scrubIndexForSeries(2, 5) === 2);
 check('a one-point series cannot be scrubbed', scrubIndexForSeries(0, 1) === null);
 check('a non-integer scrub index is released', scrubIndexForSeries(1.5, 5) === null);
+const sameDays = [{ date: '2026-09-01' }];
 check('series key changes with the dates',
-  equitySeriesKey([{ date: '2026-09-01' }, { date: '2026-09-02' }]) !== equitySeriesKey([{ date: '2026-09-01' }]));
+  equitySeriesKey('NFL', [{ date: '2026-09-01' }, { date: '2026-09-02' }]) !== equitySeriesKey('NFL', sameDays));
+check('series key includes the sport', equitySeriesKey('NFL', sameDays) !== equitySeriesKey('NBA', sameDays));
+check('chart pad clears the bubble and the caption', CHART_PAD.top >= 44 && CHART_PAD.bottom >= 20);
 const bubble = scrubBubbleFrame(4, 320, 148, 48);
 check('bubble stays on the top edge, clear of the axis', bubble.top === 0 && bubble.left >= 48, String(bubble.left));
 check('chart date', chartDateLabel('2026-09-01') === 'Sep 1');
