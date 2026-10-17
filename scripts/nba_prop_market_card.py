@@ -4,7 +4,7 @@ Runs on every refresh pass right after the prop fetch (`par nba-prop-odds`),
 in the 6am daily run right after its NBA prop step, and on the five-minute
 window job right after that job's fetch of the games about to enter their
 window (scheduler.run_nba_prop_window), so the fetch it reads is the one just
-stored. It decides only games whose tip is 45-70 minutes away; every other
+stored. It decides only games whose tip is 45-57 minutes away; every other
 game is counted in the diagnostic line and left alone.
 
 LIVE, with no default-off write switch: the MLB cards' switches flipped off on
@@ -185,6 +185,19 @@ def decided_games(conn, game_ids: list[str]) -> set[str]:
         (list(game_ids),)).fetchall()}
 
 
+def projection_holdings(conn, game_ids: list[str]) -> set[tuple[str, str, str]]:
+    """(game, player, market) the projection model already holds a BET on. Normally empty: it
+    decides a game after this card. It decides alone only when this card has not decided the
+    game 50 minutes before tip (models.nba_prop_projection.DECIDE_ALONE_BY_MIN), and then a
+    later decision here must not bet the same proposition a second time."""
+    if not game_ids:
+        return set()
+    return {(g, str(p), m) for g, p, m in conn.execute("""
+        SELECT game_id, player_id, prop_market FROM picks
+        WHERE model_id = 'nba_prop_projection' AND signal_type = 'BET' AND game_id = ANY(%s)
+    """, (list(game_ids),)).fetchall()}
+
+
 # ── rows ──────────────────────────────────────────────────────────────────────
 
 def pick_label(bet: mk.NbaPropBet) -> str:
@@ -270,8 +283,11 @@ def publish(conn, rows: list[dict], decisions: list[mk.NbaPropDecision]) -> tupl
     gids = sorted({d.game_id for d in decisions})
     taken = games_with_a_bet(conn, gids)
     done = decided_games(conn, gids)
+    held = projection_holdings(conn, gids)
     by_game: dict[str, list[dict]] = {}
     for r in rows:
+        if (r["game_id"], r["player_id"], r["prop_market"]) in held:
+            continue                    # one bet per proposition across the NBA prop models
         by_game.setdefault(r["game_id"], []).append(r)
     n_bets = n_decided = 0
     for d in sorted(decisions, key=lambda x: x.game_id):

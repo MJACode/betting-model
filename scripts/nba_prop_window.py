@@ -1,14 +1,14 @@
 """The NBA prop window job: put a look inside every game's decision window.
 
-WHY. nba_prop_market decides a game once, 45-70 minutes before tip
+WHY. nba_prop_market decides a game once, 45-57 minutes before tip
 (models/nba_prop_market.DECISION_WINDOW_MIN). The refresh passes run hourly at
-:17 until 5pm ET and every ten minutes from 6pm, so no pass ever landed 45-70
+:17 until 5pm ET and every ten minutes from 6pm, so no pass ever landed 45-57
 minutes before a tip at or before 6:00pm ET: 177 of 1,206 regular-season games
 in 2026-27 could never be decided. mike, 2026-10-16: "run the fucking thing
 more often ... we're not leaving our games."
 
 WHAT A TICK DOES (scheduler.run_nba_prop_window, every five minutes, 24x7):
-  1. plan(): the unstarted regular-season NBA games tipping 40-75 minutes from
+  1. plan(): the unstarted regular-season NBA games tipping 40-62 minutes from
      now (LOOK_AHEAD_MIN) that are not decided yet, and the bet games whose
      closing snapshot is due (12-25 minutes before tip, not yet taken). One
      database read; no API call.
@@ -21,7 +21,7 @@ WHAT A TICK DOES (scheduler.run_nba_prop_window, every five minutes, 24x7):
 
 LOOK_AHEAD_MIN is a little wider than the decision window on both ends, so the
 fetch of a game is never the reason it misses its window: a tick whose fetch
-lands just outside 45-70 is simply not a decision, and the next tick, five
+lands just outside 45-57 is simply not a decision, and the next tick, five
 minutes later, tries again. The card, not this job, applies the window.
 
 The refresh pass keeps its own NBA prop fetch (every game, seven days ahead),
@@ -46,35 +46,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import data.ingestors.nba_prop_close_ingestor as close_ing  # noqa: E402
 import models.nba_prop_market as mk  # noqa: E402
 import scripts.nba_prop_market_card as card  # noqa: E402
+import scripts.nba_prop_projection_card as projection_card  # noqa: E402
 from data.db import get_connection  # noqa: E402
 
 _ET = ZoneInfo("America/New_York")
 
 # Minutes before tip in which a game is fetched for a decision, both ends
-# inclusive. Five minutes wider than DECISION_WINDOW_MIN (45, 70) at each end.
-LOOK_AHEAD_MIN = (40, 75)
+# inclusive. Five minutes wider than DECISION_WINDOW_MIN (45, 57) at each end.
+LOOK_AHEAD_MIN = (40, 62)
 
 
 @dataclass
 class Plan:
     decide: list[str] = field(default_factory=list)    # games to fetch and decide
     close: list[str] = field(default_factory=list)     # bet games owed a close
+    project: list[str] = field(default_factory=list)   # games due the projection model's frame
+    # An NBA game tips within LOOK_AHEAD_MIN: publish on this tick even with nothing else to do,
+    # so a bet a failed or capped Discord run held back still posts before its game starts.
+    publish: bool = False
 
 
 def plan(conn, now: datetime) -> Plan:
     """What this tick has to do, from what is stored. No API call."""
     card.ensure_decisions_table(conn)
     games = card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
+    publish = bool(games)                     # slate() keeps only games not yet tipped
     near = sorted(g for g, v in games.items()
                   if mk.minutes_to_tip(v["tip"], now) >= LOOK_AHEAD_MIN[0])
     if near:
-        done = card.decided_games(conn, near) | card.games_with_a_bet(conn, near)
-        near = [g for g in near if g not in done]
+        # a game is done only when BOTH NBA prop models have decided it
+        rule_done = card.decided_games(conn, near) | card.games_with_a_bet(conn, near)
+        proj_done = projection_card.decided_games(conn, near)
+        near = [g for g in near if not (g in rule_done and g in proj_done)]
     bet = close_ing.bet_games(conn, now)
     taken = close_ing.closes_taken(conn, sorted(bet)) if bet else set()
     owed = sorted(g for g, v in bet.items()
                   if close_ing.due(v["tip"], now, has_bet=True, close_taken=g in taken))
-    return Plan(decide=near, close=owed)
+    return Plan(decide=near, close=owed, project=projection_card.to_project(conn, now),
+                publish=publish)
 
 
 def plan_tick(now: datetime | None = None) -> Plan:

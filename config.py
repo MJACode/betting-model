@@ -343,6 +343,15 @@ DISCORD_FREE_PICK_PRIORITY: tuple = ("NFL",)
 # a webhook is added mid-day with a full slate already locked; anything over the
 # cap is left un-ledgered and posts on the next refresh pass.
 DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN", 20))
+# ...EXCEPT a pick whose game starts within this many minutes: it posts in this
+# run whatever the cap. A held pick only gets "the next pass", and the next
+# pass cannot post a game that has started (_new_signals), so near the tip the
+# cap stopped being a delay and became a loss. Measured on the NBA schedule
+# (2026-10-16): eight games tip together at 6pm ET on 2027-04-11, about 175
+# bets between the two NBA prop models, decided 55 minutes out, against three
+# publishing runs before the tip at 20 a run. The cap still bounds the blast
+# radius it was written for: a channel added mid-day with games hours away.
+DISCORD_UNCAPPED_WITHIN_MIN: int = int(os.environ.get("DISCORD_UNCAPPED_WITHIN_MIN", 120))
 
 # ── Price requirement ─────────────────────────────────────────────────────────
 # A BET must be placeable: no real book price, no bet. When True, any pick whose
@@ -601,6 +610,13 @@ ACTION_THRESHOLDS: dict = {
     # every season positive -- every qualifying proposition, as the card
     # writes it (mike, 2026-10-16: "maximize units won"; no game or night cap).
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
+    # The NBA projection model (2026-10-16, mike: "build the projection model",
+    # "maximize units won"): minutes x per-minute rate, a negative-binomial width
+    # and a per-market calibration map; six cells, each with its own side(s) and
+    # calibrated-EV floor (models/nba_prop_projection.CARD). Graded walk-forward
+    # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
+    # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
+    "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1843,6 +1859,9 @@ MODEL_MIN_ODDS: dict = {
     # season; docs/nba_models_2026.md 4.3). Pinned for the same reason as
     # nhl_over_under: a Railway DEFAULT_MIN_ODDS override must not move it.
     "nba_prop_market":           -200,
+    # The projection model was graded at the same -200 floor; it lays -200 to
+    # +3000 (median +110; the long tail is threes overs at 0.5 from one book).
+    "nba_prop_projection":       -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2074,6 +2093,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     # newest season (never used to choose) +2.1%. Expect about +2% live: the
     # top cell of a 1,518-cell search carries winner's curse.
     "nba_prop_market":           0.00,
+    # The lowest of its six cells' floors (rebounds unders). Each market's own
+    # floor (0.01-0.05) is applied on top, in models/nba_prop_projection.CARD.
+    "nba_prop_projection":       0.01,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2196,19 +2218,48 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # other models, which pulls a near-even probability toward 0.5 -- the
     # same reason nhl_over_under and nfl_prop_market are here.
     "nba_prop_market",
+    # Its probability is already calibrated, per market, inside its own
+    # artifact (a Platt map fitted on the graded seasons' main-line pairs); a
+    # second, pooled map would move every number it was graded on.
+    "nba_prop_projection",
 })
 
 
-def min_ev_for(model_id: str) -> float:
+# A model that bets several markets under ONE id, each market with its own
+# EV floor (2026-10-16, mike: "build the projection model"). These ARE the
+# floors models/nba_prop_projection.CARD bets over (it reads them from here),
+# chosen per market on 2023-24 + 2024-25 and confirmed on 2025-26
+# (docs/nba_models_2026.md section 5). min_ev_for(model, market) returns the
+# market's floor, so the Discord "good to" price solves the cut the pick
+# actually cleared rather than the lowest of the six.
+MODEL_MARKET_EV_FLOOR: dict = {
+    "nba_prop_projection": {
+        "player_steals":           0.02,
+        "player_rebounds":         0.01,
+        "player_blocks_steals":    0.05,
+        "player_blocks":           0.02,
+        "player_rebounds_assists": 0.04,
+        "player_threes":           0.04,
+    },
+}
+
+
+def min_ev_for(model_id: str, prop_market: str | None = None) -> float:
     """The EV floor this model actually bets over: its OWN floor when it
     carries one (MODEL_OWN_EV_FLOOR, the two NFL rules), else the global
     floor, or the model's MODEL_MIN_EV when that is higher. ONE accessor, for
     the same reason min_odds_for is one: the scorer's gate, every card, both
-    live loops and the Discord "good to" bound have to agree on the number."""
+    live loops and the Discord "good to" bound have to agree on the number.
+
+    `prop_market`: for a model in MODEL_MARKET_EV_FLOOR, that market's own
+    floor when it is higher."""
     if model_id in MODEL_OWN_EV_FLOOR:
-        return float(MODEL_OWN_EV_FLOOR[model_id])
-    own = MODEL_MIN_EV.get(model_id)
-    return GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
+        base = float(MODEL_OWN_EV_FLOOR[model_id])
+    else:
+        own = MODEL_MIN_EV.get(model_id)
+        base = GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
+    market = MODEL_MARKET_EV_FLOOR.get(model_id, {}).get(prop_market or "")
+    return base if market is None else max(base, float(market))
 
 
 def expected_value(prob, american) -> float | None:
@@ -2279,6 +2330,9 @@ SCORING_METHODS: dict = {
     "nhl_prop_saves": SCORING_ARTIFACT,
     "nhl_prop_shots_on_goal": SCORING_ARTIFACT,
     "nhl_prop_assists": SCORING_ARTIFACT,
+    # Trained and registered (scripts/nba_prop_projection_train.py), scored by
+    # scripts/nba_prop_projection_card.py.
+    "nba_prop_projection": SCORING_ARTIFACT,
 }
 
 
@@ -2305,6 +2359,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2392,6 +2447,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
+    "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -3765,6 +3821,13 @@ PROP_MARKETS_NBA = [
     "player_steals",
     "player_turnovers",
     "player_double_double",             # binary Yes/No (logistic, prob-only)
+    # Added 2026-10-16 for the NBA projection model, whose graded card bets
+    # both (blocks+steals both sides, rebounds+assists unders: +518.1 and
+    # +393.9 of its +3,554.6 units, 2023-24..2025-26). Nothing in the live
+    # feed held either market until they were asked for: the window job and
+    # the refresh pass both fetch exactly this list.
+    "player_blocks_steals",
+    "player_rebounds_assists",
 ]
 
 # NFL player prop markets (The Odds API americanfootball_nfl player-prop keys).
@@ -4268,6 +4331,15 @@ NCAAF_ODDS_API_MAP: dict = {
     # same commence_time 2026-09-19T20:30:00Z.
     "Southeastern Louisiana Lions": "SE Louisiana",
     "Southeastern Louisiana": "SE Louisiana",
+    # 2026-10-16: the pollers warned "Unresolved NCAAF school from Odds API:
+    # 'Citadel Bulldogs'" on every pregame pass. CFBD's school is "The
+    # Citadel" (mascot Bulldogs, FCS, alt_names NULL); The Odds API drops the
+    # article and _fold keeps it, so exact, "school mascot" and prefix all
+    # miss. The ingest had minted alias rows for five matchups back to 2023;
+    # the live one, Texas A&M 2026-10-17, held 605 odds rows the CFBD id
+    # would never see. ncaaf_citadel_alias_2026_10_16.sql consolidates them.
+    "Citadel Bulldogs": "The Citadel",
+    "Citadel": "The Citadel",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.
