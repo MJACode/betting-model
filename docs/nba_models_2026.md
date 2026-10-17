@@ -797,6 +797,50 @@ Only then does it run a betting grid.
    or squared error (spread, total) when the family's model is added to Pinnacle's live no-vig
    price at the same stamp. Walk-forward on 2021-22 → 2024-25, then 2025-26 alone. A family
    whose 95% interval covers zero is **closed without a betting grid**.
+   - **How HT-1 is scored (2026-10-17, fixed before any HT-1 number was computed;
+     `scripts/nba_ingame_ht1.py`).**
+     - *Decision quote.* Per game, the first purchase holding a deciding book's spread or total
+       stamped inside the halftime break, coherent, with a coherent Pinnacle quote in the same
+       purchase stamped within 60 s, and no point scored between either quote's stamp and its
+       serving (7.1's rule). Every such deciding-book quote in that purchase is an offer. Both
+       teams must have played 10 games this season (CLAUDE.md §3, as F4 applied it).
+     - *Game state* at a decision is the plays logged at or before the quote's stamp (the shared
+       table). The model is fit on every regular-season game of earlier seasons with a Pinnacle
+       pre-game close, from its plays in periods 1–2, not only on games with a halftime quote.
+     - *The model* is least squares on the rest-of-game points (total) or rest-of-game home
+       margin (spread), fit on seasons before S; 2020-21 has none before it, so its model is fit
+       on itself and it is reported only.
+       - Total: Pinnacle's pre-game close total; pace, as first-half points minus half that
+         close; luck points of both teams; first-half personal fouls of both teams; the size of
+         the halftime margin.
+       - Spread: Pinnacle's pre-game expected home margin (minus its close spread); that times
+         pace, as (first-half points ÷ half the close total − 1); the halftime margin; luck
+         points home minus away; personal fouls home minus away.
+       - Luck points of a team = 3 × (3PM − 3PA × its 3P%) + (FTM − FTA × its FT%), with its
+         rates from its own earlier games this season. Rates and counts both come from the
+         play-by-play, with missed end-of-period heaves left out of both.
+     - *Pinnacle's live price as a number:* the centre of the final total (or home margin) at
+       which Pinnacle's no-vig probability holds at its number. It is solved through the
+       empirical spread of (final − Pinnacle's halftime number) on earlier seasons' decision
+       games (at least 150; 2020-21 on itself).
+     - *The test, per market.* For season S, the base is Pinnacle's centre plus a constant. With
+       the model it is Pinnacle's centre plus a constant plus β × (model − Pinnacle's centre).
+       The constant and β are fit by least squares on earlier seasons' decision games. The
+       statistic is the drop in mean squared error of the final number, in points squared,
+       with a whole-day bootstrap 95% interval (4,000 resamples, seed 7). It is computed on
+       2021-22 → 2024-25 pooled and on 2025-26 alone. **A market has information only when
+       both intervals lie wholly above zero;** otherwise its six cells close without a grid.
+     - *Reported beside, never the gate:* the same test for a score-only model (the pre-game
+       close and the halftime score, no luck and no fouls). If that model passes too, the gain
+       is Pinnacle's lag (7.1), not HT-1's inputs. Also: the same test against the deciding
+       books' own median centre; the test with Pinnacle's raw number as its centre; and the
+       slope of (result − Pinnacle's no-vig) on points scored in the last 5 minutes of Q2.
+     - *The grid, only for a market with information.* Strength = model − Pinnacle's centre,
+       in points, from the side's view, the same for every book. A side is bet when its
+       strength is at least 1.5 / 3 / 4.5, at its best deciding offer under Pinnacle's halftime
+       fair price (the harness's `run_cells`). The placebo shuffles the strength within date,
+       20 runs. The house standard (§6.7) judges. "Still offered at the next purchase" and
+       closing-line value cannot be measured at halftime and are reported as not measured.
 2. **Bars for a grid that runs:** the house standard of §6.7. The §6.4 bars and the
    multiple-testing count (now 4,226 with these 54) are reported beside.
 3. **A cell that passes is built LIVE.** That needs an NBA in-play loop; `ncaaf_live/` is the
