@@ -344,10 +344,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # run_ledger._abort_orphans, this run_id only, and only while it is
     # still unfinished. Boot closes the next one; this closes the one
     # already open. Does not touch picks, thresholds, or pauses.
-    # Sits before clv_standard_v2: that file reads the live view.
-    # Anything after the CLV stamp must not rewrite v_public_track_record
-    # (tests/test_published_record.py). The NHL stats views are display-only
-    # and stay after it.
+    # Sits immediately before clv_standard_v2: that file reads the live view.
+    # published_record_units also reads the live view and is last, so it
+    # keeps the CLV columns. Every other file after the CLV stamp must not
+    # rewrite v_public_track_record (tests/test_published_record.py,
+    # tests/test_record_units_agree.py). The NHL stats views are display-only
+    # and stay after CLV, before the posted-stake pair.
     "abort_deploy_killed_evening_2026_10_16.sql",
     # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
     # is the market-edge column. Recomputes rows not yet standard_v2 and
@@ -358,6 +360,18 @@ ACTIVE_MIGRATIONS: list[str] = [
     # team totals, latest pre-game prop quote). Display only. Does not
     # rewrite v_public_track_record and does not run before the CLV stamp.
     "add_nhl_stats_views_2026_10_16.sql",
+    # 2026-10-17: the posted-stake functions, committed on their own.
+    # The view patch is the next file. A failure there must not roll
+    # these back, or settlement's query names a function that does not
+    # exist. Does not rewrite snapshots, picks, or push_sent.
+    "published_pick_units_2026_10_17.sql",
+    # 2026-10-16: Discord #results and the Record tab share one stake.
+    # The two record views gain units and risked from the functions
+    # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
+    # Reads the live view, so it runs after every owner above, including
+    # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
+    # and does not post.
+    "published_record_units_2026_10_16.sql",
 ]
 
 
