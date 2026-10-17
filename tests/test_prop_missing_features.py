@@ -110,8 +110,9 @@ class TestTheUmpireIsTheDeclaredException:
 
 class TestEveryPropLoopGoesThroughTheHelper:
     """A source tripwire. The behavioural tests above prove the helper; this
-    proves the four prop loops (MLB pitcher, MLB batter, WNBA, NBA) call it
-    and that no loop kept its own fill."""
+    proves the prop loops (MLB pitcher, MLB batter, WNBA; the NBA loop left
+    with the retired NBA prop models on 2026-10-15) call it and that no loop
+    kept its own fill."""
 
     def test_no_prop_loop_fills_nulls_itself(self):
         src = (ROOT / "models" / "scorer.py").read_text(encoding="utf-8")
@@ -119,5 +120,6 @@ class TestEveryPropLoopGoesThroughTheHelper:
         assert "np.nan_to_num(df[feature_cols].values.astype(float), nan=0.0)" not in src
 
     def test_the_four_loops_call_it(self):
+        # Three since 2026-10-15 (the NBA loop was deleted with its models).
         src = (ROOT / "models" / "scorer.py").read_text(encoding="utf-8")
-        assert src.count("prop_feature_matrix(df, feature_cols, model_id)") >= 4
+        assert src.count("prop_feature_matrix(df, feature_cols, model_id)") >= 3

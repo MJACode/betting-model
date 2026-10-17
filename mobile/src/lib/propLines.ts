@@ -67,6 +67,12 @@ export function foldAlternateRows<T extends PropLineLike>(rows: readonly T[]): T
       out.push(r);
       continue;
     }
+    // NHL alternate lines are stored for a later close. The ruler and the
+    // betslip fold every other sport's alternates (Matt, 2026-09-05).
+    // player_points_alternate is also an NBA key, so the guard is the game
+    // id, not the market name. A featured NHL row is not an alternate and
+    // stays. The season-totals view does not go through this fold.
+    if (r.game_id.startsWith('NHL_')) continue;
     const folded = { ...r, market: canonicalPropMarket(r.market) };
     if (standard.has(propLineRowKey(folded))) continue;
     out.push(folded);

@@ -379,6 +379,19 @@ def score_game(conn: DBConnection,
             conn, game_id, model_id, market, artifact)
         if home_prob is None:
             return []
+    elif artifact.get("kind") == "anchored_logit":
+        # nhl_moneyline, rebuilt 2026-10-13 (mike: "Look at and rebuild the
+        # money line model"; models/nhl_moneyline_anchored.py,
+        # docs/nhl_moneyline_rebuild.md): DraftKings' no-vig price, moved by
+        # inputs built from the per-game logs. It decides ONCE -- 16:00Z to
+        # 18:00Z on game day, with both teams' listed goalies -- because that is
+        # what the walk-forward graded; any other run writes its number as NONE
+        # with the reason. No DraftKings price, nothing to anchor on: skip,
+        # never prob-only.
+        home_prob, away_prob, no_signal = _anchored_probability(
+            conn, game_id, game_date, home_team, away_team, commence_time, artifact)
+        if home_prob is None:
+            return []
     elif artifact.get("kind") == "total_regression":
         # NCAAF totals regression (scripts/ncaaf_margin_eval --fit-totals).
         # Same shape as the margin artifact above: predict the TOTAL from
@@ -574,6 +587,19 @@ def score_game(conn: DBConnection,
     # otherwise fire a BET the walk-forward never validated.
     if no_signal:
         _apply_no_signal(picks, no_signal)
+
+    if artifact.get("kind") == "anchored_logit":
+        # Its rule is EV at the price and nothing else; AVOID is not part of
+        # it. With the edge cut at 0.0 the stock path would otherwise label the
+        # other side of nearly every game AVOID.
+        for p in picks:
+            if p.get("signal_type") == "AVOID":
+                p["signal_type"] = "NONE"
+            # The stock tier reads the DraftKings EDGE: for an EV rule it labels
+            # most bets LOW, and an underdog lower than a favourite at the same
+            # EV (UX review, 2026-10-15). The other EV rules (NHL props, NHL
+            # totals) write a fixed MED from their cards; so does this one.
+            p["confidence_tier"] = "MED"
 
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
@@ -800,6 +826,49 @@ def _score_f5_prob_only(
 
 
 _UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
+
+
+def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
+                          away_team: str, commence_time: str | None,
+                          artifact: dict) -> tuple:
+    """(home_prob, away_prob, no_signal) for the anchored NHL moneyline, or
+    (None, None, None) to skip the game: no DraftKings price to anchor on, or
+    an input the logs cannot supply.
+
+    `no_signal` is the reason this run may not decide (outside 16:00Z-18:00Z
+    on game day, or a team with no listed goalie yet). The number is still
+    written, as NONE -- an empty board and a broken pipeline look identical.
+    """
+    import models.nhl_moneyline_anchored as anc
+    odds = _get_dk_odds(conn, game_id, "h2h")
+    if not odds or odds.get("home_price") is None or odds.get("away_price") is None:
+        logger.debug(f"  {game_id}/nhl_moneyline: no DK moneyline — nothing to anchor on")
+        return None, None, None
+    hi = american_to_implied_prob(odds["home_price"])
+    ai = american_to_implied_prob(odds["away_price"])
+    if not hi or not ai:
+        return None, None, None
+    try:
+        rows, goalies, stale = anc.inputs_for_date(conn, game_date)
+    except Exception as exc:  # noqa: BLE001 - one game's inputs must not stop the pass
+        logger.error(f"  {game_id}/nhl_moneyline: inputs failed: {exc}")
+        return None, None, None
+    if game_id not in rows.index:
+        logger.debug(f"  {game_id}/nhl_moneyline: no input row")
+        return None, None, None
+    x = rows.loc[game_id, anc.FEATURES].astype(float).values
+    if np.isnan(x).any():
+        missing = [f for f, v in zip(anc.FEATURES, x) if np.isnan(v)]
+        logger.debug(f"  {game_id}/nhl_moneyline: inputs missing {missing}")
+        return None, None, None
+    offset = anc.market_logit([hi / (hi + ai)])
+    p_home = float(artifact["model"].predict_proba(x.reshape(1, -1), offset)[0, 1])
+    reason = anc.decision_window(game_date, commence_time)
+    if reason is None and ((game_id, home_team) not in goalies or (game_id, away_team) not in goalies):
+        reason = "waiting for both listed goalies"
+    if reason is None and (home_team in stale or away_team in stale):
+        reason = "waiting for last night's game logs"
+    return p_home, 1.0 - p_home, reason
 
 
 # Class index → pick_side for the NHL regulation 3-way model. Must match the
@@ -3666,6 +3735,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             f"odds (unconfirmed/speculative bout)")
                 continue
 
+            # A sport with no game model in config.MODELS has nothing to score
+            # here. NBA since 2026-10-15: its models are cards (docs/
+            # nba_models_2026.md), and building features for a game no model
+            # reads only spends database time.
+            if not any(sp == sport for sp, _, _ in MODELS.values()):
+                continue
+
             if sport == "MLB":
                 features = build_mlb_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
@@ -3674,12 +3750,6 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             elif sport == "WNBA":
                 from features.wnba_feature_engine import build_wnba_game_features
                 features = build_wnba_game_features(
-                    conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_mlb_h2h
-                )
-            elif sport == "NBA":
-                from features.nba_feature_engine import build_nba_game_features
-                features = build_nba_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
@@ -3695,11 +3765,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h, fbs_registry=ncaaf_fbs_registry
                 )
-            else:  # NHL
+            elif sport == "NHL":
                 features = build_nhl_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
+            else:
+                # Never borrow another sport's features: an NBA game once fell
+                # through to the NHL builder by being the last `else`.
+                logger.warning(f"  [SKIP] {game_id}: no game feature builder for {sport}")
+                continue
 
             if not features:
                 continue
@@ -5189,215 +5264,6 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
 
     logger.success(
         f"WNBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
-    )
-    return {
-        "target_date": target_date,
-        "prop_picks":  total_picks,
-        "bets":        total_bets,
-        "dry_run":     dry_run,
-    }
-
-
-# ── NBA Prop Config ───────────────────────────────────────────────────────────
-
-# Per-model: DK market name + stat label. Counts are Poisson over/under; the
-# double-double model is logistic + over-only (Yes/No, 0.5 line) and prob-only
-# (decided on model probability — DK juices DD heavily; see PROB_ONLY_MODELS).
-_NBA_PROP_CONFIG: dict[str, dict] = {
-    "nba_prop_player_points":    {"market": "player_points",                  "stat_label": "Pts"},
-    "nba_prop_player_rebounds":  {"market": "player_rebounds",                "stat_label": "Reb"},
-    "nba_prop_player_assists":   {"market": "player_assists",                 "stat_label": "Ast"},
-    "nba_prop_player_threes":    {"market": "player_threes",                  "stat_label": "3PM"},
-    "nba_prop_player_pra":       {"market": "player_points_rebounds_assists", "stat_label": "PRA"},
-    "nba_prop_player_blocks":    {"market": "player_blocks",                  "stat_label": "Blk"},
-    "nba_prop_player_steals":    {"market": "player_steals",                  "stat_label": "Stl"},
-    "nba_prop_player_turnovers": {"market": "player_turnovers",               "stat_label": "TO"},
-    "nba_prop_player_dd":        {"market": "player_double_double",           "stat_label": "DD",
-                                  "over_only": True},
-}
-
-
-def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
-    """
-    Score NBA player prop markets (points/reb/ast/threes/PRA/blocks/steals/
-    turnovers + double-double).
-
-    Poisson models: predict lambda → P(over line) via Poisson CDF → edge vs DK.
-    Logistic model (double-double): predict_proba → P(Yes), prob-only signal.
-    Candidate players come from build_nba_prop_scoring_rows (recent rotation).
-
-    Idempotent: deletes unsettled NBA prop picks for target_date before insert.
-    """
-    from features.nba_prop_feature_engine import build_nba_prop_scoring_rows
-
-    if target_date is None:
-        target_date = today_et()
-
-    logger.info(f"NBA Prop Scorer — {target_date}")
-
-    conn = get_connection()
-    bankroll = _get_current_bankroll(conn)
-    ct_map = _commence_time_map(conn, target_date, "NBA")
-    cut_map = _pregame_cutoff_map(conn, target_date, "NBA")
-    final_ids = _final_game_ids(conn, target_date, "NBA")
-    total_picks = 0
-    total_bets  = 0
-
-    try:
-        locked_prop_keys = _locked_prop_keys(conn, target_date, _NBA_PROP_CONFIG.keys())
-        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
-            for mid in _NBA_PROP_CONFIG:
-                conn.execute("""
-                    DELETE FROM picks
-                    WHERE game_date = %s AND model_id = %s AND result IS NULL
-                """, (target_date, mid))
-            conn.commit()
-
-        for model_id, cfg in _NBA_PROP_CONFIG.items():
-            market     = cfg["market"]
-            stat_label = cfg["stat_label"]
-            over_only  = cfg.get("over_only", False)
-
-            artifact = load_model(model_id)
-            if artifact is None:
-                logger.debug(f"  No trained model for {model_id} — skipping")
-                continue
-
-            model_type   = artifact.get("model_type", "poisson")
-            feature_cols = artifact["feature_cols"]
-            model_obj    = artifact["model"]
-
-            df = build_nba_prop_scoring_rows(target_date, model_id)
-            if df.empty:
-                logger.info(f"  {model_id}: no scoring rows for {target_date}")
-                continue
-
-            df, X = prop_feature_matrix(df, feature_cols, model_id)
-            if df.empty:
-                logger.info(f"  {model_id}: every row is missing a feature -- nothing scored this pass")
-                continue
-            if model_type == "logistic":
-                probs_over = model_obj.predict_proba(X)[:, 1]
-                lambdas    = None
-            else:
-                lambdas    = np.clip(model_obj.predict(X), 1e-6, None)
-                probs_over = None
-
-            is_prob_only = model_id in PROB_ONLY_MODELS
-
-            model_picks = []
-            for i, row in df.iterrows():
-                player_name = row["player_name"]
-                game_id     = row["game_id"]
-                player_id   = row.get("player_id")
-                if (game_id, model_id, player_id) in locked_prop_keys:
-                    continue  # first-signal prop lock — already locked today
-                if _game_started(cut_map.get(game_id)) or game_id in final_ids:
-                    continue  # game underway or already final — no pre-game price left
-
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              cut_map.get(game_id))
-                _best_ctx = (game_id,
-                             (prop_odds or {}).get("player_name") or player_name,
-                             market, cut_map.get(game_id))
-                if prop_odds is None or prop_odds.get("line") is None:
-                    if not is_prob_only:
-                        continue
-                    # prob-only (double-double): DK may not list it — still emit
-                    # the model's pick with NULL pricing on the 0.5 over side.
-                    line        = 0.5
-                    over_price  = None
-                    under_price = None
-                    over_link   = None
-                    under_link  = None
-                else:
-                    line        = float(prop_odds["line"])
-                    over_price  = prop_odds.get("over_price")
-                    under_price = prop_odds.get("under_price")
-                    over_link   = prop_odds.get("over_link")
-                    under_link  = prop_odds.get("under_link")
-
-                if model_type == "logistic":
-                    p_over = float(probs_over[i])
-                else:
-                    p_over = _poisson_over_prob(float(lambdas[i]), line)
-                p_under = 1.0 - p_over
-
-                # ── Score over ────────────────────────────────────────────────
-                if over_price is not None:
-                    dk_ip_over = american_to_implied_prob(over_price)
-                    if dk_ip_over:
-                        pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                            game_id=game_id, model_id=model_id,
-                            game_date=target_date,
-                            player_name=player_name, pick_side="over",
-                            model_prob=p_over, dk_implied_prob=dk_ip_over,
-                            edge=p_over - dk_ip_over,
-                            dk_odds=over_price, line=line,
-                            bankroll=bankroll, stat_label=stat_label,
-                            player_id=player_id, sport="NBA",
-                            dk_bet_link=over_link,
-                            commence_time=ct_map.get(game_id),
-                        )
-                        if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
-                elif is_prob_only:
-                    pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                        game_id=game_id, model_id=model_id,
-                        game_date=target_date,
-                        player_name=player_name, pick_side="over",
-                        model_prob=p_over, dk_implied_prob=None,
-                        edge=None, dk_odds=None, line=line,
-                        bankroll=bankroll, stat_label=stat_label,
-                        player_id=player_id, sport="NBA",
-                        dk_bet_link=over_link,
-                        commence_time=ct_map.get(game_id),
-                    )
-                    if pick:
-                        model_picks.append(_tag_prop(pick, _best_ctx, conn))
-
-                # ── Score under ───────────────────────────────────────────────
-                if under_price is not None and not over_only:
-                    dk_ip_under = american_to_implied_prob(under_price)
-                    if dk_ip_under:
-                        pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                            game_id=game_id, model_id=model_id,
-                            game_date=target_date,
-                            player_name=player_name, pick_side="under",
-                            model_prob=p_under, dk_implied_prob=dk_ip_under,
-                            edge=p_under - dk_ip_under,
-                            dk_odds=under_price, line=line,
-                            bankroll=bankroll, stat_label=stat_label,
-                            player_id=player_id, sport="NBA",
-                            dk_bet_link=under_link,
-                            commence_time=ct_map.get(game_id),
-                        )
-                        if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
-
-            bets = [p for p in model_picks if p["signal_type"] == "BET"]
-            logger.info(
-                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
-                f"({len(df)} players evaluated)"
-            )
-            if model_picks and not dry_run:
-                _insert_picks(conn, model_picks)
-                conn.commit()
-            total_picks += len(model_picks)
-            total_bets  += len(bets)
-
-    except Exception as exc:
-        conn.rollback()
-        logger.error(f"NBA prop scorer failed: {exc}")
-        raise
-    finally:
-        conn.close()
-
-    logger.success(
-        f"NBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
     )
     return {
         "target_date": target_date,

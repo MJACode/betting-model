@@ -36,6 +36,8 @@ jobs:
           # only needs pytest + the modules those tests import. Install the
           # declared test pin and the light runtime deps config/scorer need.
           python -m pip install "pytest>=8.0.0" python-dotenv numpy pandas loguru psycopg2-binary requests scipy joblib scikit-learn xgboost-cpu optuna apscheduler beautifulsoup4
+          # tests/test_nba_injury_report.py parses real report PDFs (requirements.txt pin).
+          python -m pip install "pdfplumber>=0.11.0"
 
       - name: Mobile thresholds drift check
         run: python -m scripts.generate_mobile_thresholds --check
@@ -80,6 +82,18 @@ jobs:
             tests/test_settlement_timing.py \
             tests/test_nhl_boxscore.py \
             tests/test_nba_espn_box.py \
+            tests/test_nba_box_enrich.py \
+            tests/test_nba_injury_report.py \
+            tests/test_nba_odds_history.py \
+            tests/test_nba_period_scores.py \
+            tests/test_nba_prop_close.py \
+            tests/test_nba_prop_market.py \
+            tests/test_nba_prop_settle_stats.py \
+            tests/test_nba_props.py \
+            tests/test_nba_results_ingestor.py \
+            tests/test_nba_results_wiring.py \
+            tests/test_nba_schedule_ingestor.py \
+            tests/test_prop_odds_book_last_update.py \
             tests/test_prop_box_scores.py \
             tests/test_intraday_freshness.py \
             tests/test_dk_freshness_parse.py \
@@ -130,6 +144,8 @@ jobs:
             tests/test_results_recap_message_id.py \
             tests/test_backfill_results_recap.py \
             tests/test_job_queue.py \
+            tests/test_idle_read_transaction.py \
+            tests/test_view_migration_lock_noop.py \
             tests/test_record_correction_post.py \
             tests/test_voided_pick_not_rechosen.py \
             tests/test_mobile_stat_segments.py

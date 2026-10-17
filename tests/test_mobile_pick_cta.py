@@ -25,6 +25,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
+
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
 SRC = MOBILE / "src"
 LIB = SRC / "lib"
 
@@ -34,11 +36,7 @@ def _read(path: Path) -> str:
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 def _run(tmp_path: Path, files: list[str], script: str) -> subprocess.CompletedProcess:
@@ -48,7 +46,7 @@ def _run(tmp_path: Path, files: list[str], script: str) -> subprocess.CompletedP
         src = re.sub(r"from '\./(\w+)';", r"from './\1.ts';", src)
         (tmp_path / name).write_text(src, encoding="utf-8")
     return subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
 
@@ -207,7 +205,7 @@ const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, latest({ ov
 eq([h2?.bookmaker, h2?.price, h2?.verb], [MODEL_BOOK, -112, 'Bet'], 'DK now -112 beats FD -115');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -297,7 +295,7 @@ eq(priceCheckForItem({ pick, latestOdds: latest(FRESH), bookRows: freshRows, gam
 eq(priceCheckForItem({ pick, latestOdds: null, bookRows: [], game }, null, NOW).flagged, false, 'missing');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -369,7 +367,7 @@ ok(cap.startsWith('Locked -112 · DK last priced ') && cap.includes('9/5') && ca
 eq(lockedCaptionText(moved), 'Locked -110', 'a moved price keeps the plain caption');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -444,7 +442,7 @@ eq(stalePriceNote(fh), null, 'fresh: no note');
 eq(currentLineQuotes(pick, rows).map((q) => q.bookmaker), ['draftkings'], 'no clock: unchanged');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -462,7 +460,7 @@ def test_pick_detail_applies_the_price_age_rule():
     assert "stalePriceNote(hero)" in detail
     # No chip left: no empty "Betting lines" card either.
     assert "const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge);" in detail
-    assert re.search(r"cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>", detail)
+    assert re.search(r"cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>", detail)
     row = _read(SRC / "components" / "BookLinesRow.tsx")
     assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in row
     assert "pickLineQuotes(" not in row
@@ -551,7 +549,7 @@ def test_pick_card_wiring():
 
 def test_pick_detail_board_and_copy_wiring():
     detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
-    assert re.search(r"cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>", detail)
+    assert re.search(r"cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>", detail)
     assert "cta.startedLine && openHere" in detail
     assert "gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))" in detail
     assert "&& !voided && cta.slip ?" in detail and "const canTrack = openHere;" in detail
@@ -584,13 +582,12 @@ def test_pick_cta_pins_are_on_the_pr_ci_subset():
 
 
 @pytest.mark.skipif(
-    not (MOBILE / "node_modules" / ".bin").exists() or shutil.which("node") is None,
+    tsx_cmd(MOBILE) is None,
     reason="mobile node modules not installed",
 )
 def test_the_behavioural_checks_pass():
-    tsx = MOBILE / "node_modules" / ".bin" / "tsx"
     proc = subprocess.run(
-        [str(tsx), "scripts/verify_pick_cta.ts"],
+        [*tsx_cmd(MOBILE), "scripts/verify_pick_cta.ts"],
         cwd=MOBILE, capture_output=True, text=True, timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr

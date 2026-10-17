@@ -277,6 +277,11 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     # picks.prop_market via _PROP_MARKET_STAT_BY_MODEL below.
     "nfl_prop_market":              ("nfl_player", "FROM_PROP_MARKET"),
     "wnba_prop_market":             ("wnba_player", "FROM_PROP_MARKET"),
+    # The NBA prop rule (2026-10-15): five markets under one id, settled from
+    # nba_player_game_log by (player_id, game_id).
+    "nba_prop_market":              ("nba_player", "FROM_PROP_MARKET"),
+    # The NBA projection model (2026-10-16): six markets under one id, either side.
+    "nba_prop_projection":          ("nba_player", "FROM_PROP_MARKET"),
     # NHL skater props — resolved from nhl_skater_game_log by player_id
     "nhl_prop_blocked_shots":       ("nhl_skater", "blocked_shots"),
     "nhl_prop_assists":             ("nhl_skater", "assists"),
@@ -310,12 +315,35 @@ _WNBA_MARKET_STAT = {
     "player_assists":  "assists",
 }
 
+# NBA analog: every Odds API NBA player market -> the column or the
+# _nba_prop_actual sentinel that settles it. nba_prop_market registered itself
+# against it below when it shipped (2026-10-15); it writes five of these
+# markets (models.nba_prop_market.MARKET_STAT, pinned to this map by test).
+_NBA_MARKET_STAT = {
+    "player_points":                  "points",
+    "player_rebounds":                "rebounds",
+    "player_assists":                 "assists",
+    "player_threes":                  "fg3_made",
+    "player_blocks":                  "blocks",
+    "player_steals":                  "steals",
+    "player_turnovers":               "turnovers",
+    "player_points_rebounds_assists": "COMPUTE_PRA",
+    "player_points_rebounds":         "COMPUTE_PR",
+    "player_points_assists":          "COMPUTE_PA",
+    "player_rebounds_assists":        "COMPUTE_RA",
+    "player_blocks_steals":           "COMPUTE_BS",
+    "player_double_double":           "COMPUTE_DD",
+    "player_triple_double":           "COMPUTE_TD",
+}
+
 # FROM_PROP_MARKET resolution, per model id. A market-relative model whose map
 # is missing here settles nothing (loudly), which beats guessing a stat.
 _PROP_MARKET_STAT_BY_MODEL = {
     "nfl_prop_market":  _NFL_MARKET_STAT,
     "nfl_live_prop":    _NFL_MARKET_STAT,
     "wnba_prop_market": _WNBA_MARKET_STAT,
+    "nba_prop_market":  _NBA_MARKET_STAT,
+    "nba_prop_projection": _NBA_MARKET_STAT,
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -405,23 +433,30 @@ def _load_wnba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     return wnba_actuals
 
 
+_NBA_ACTUAL_COLS = [
+    "player_id", "player_name", "game_id", "minutes",
+    "points", "rebounds", "offensive_reb", "defensive_reb", "assists",
+    "steals", "blocks", "turnovers",
+    "fg_made", "fg_att", "fg3_made", "fg3_att", "ft_made", "ft_att",
+]
+
+
 def _load_nba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     """
     Bulk-load nba_player_game_log rows for game_date.
 
     Returns:
         nba_actuals: {(player_id, game_id): row_dict}
-    Includes steals/blocks so the double-double model (COMPUTE_DD) can settle.
+    EVERY stat column, not just the ones today's models use. A market whose
+    column is not selected finds no value on a logged game, and the settler
+    then voids it as a did-not-play: nba_prop_player_turnovers did exactly
+    that until 2026-10-15, because `turnovers` was never selected.
     """
-    rows = conn.execute("""
-        SELECT player_id, player_name, game_id,
-               points, rebounds, assists, fg3_made, steals, blocks
-        FROM nba_player_game_log
-        WHERE game_date = %s
-    """, (game_date,)).fetchall()
+    _cols = _NBA_ACTUAL_COLS
+    rows = conn.execute(
+        f"SELECT {', '.join(_cols)} FROM nba_player_game_log WHERE game_date = %s",
+        (game_date,)).fetchall()
 
-    _cols = ["player_id", "player_name", "game_id",
-             "points", "rebounds", "assists", "fg3_made", "steals", "blocks"]
     nba_actuals: dict = {}
 
     for row in rows:
@@ -432,6 +467,33 @@ def _load_nba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
         f"NBA prop actuals: {len(nba_actuals)} player rows for {game_date}"
     )
     return nba_actuals
+
+
+# Sums settled by the NBA combo markets. A missing component counts as 0, the
+# rule COMPUTE_PRA always had: the row exists, so the player played.
+_NBA_SUMS = {
+    "COMPUTE_PRA": ("points", "rebounds", "assists"),
+    "COMPUTE_PR":  ("points", "rebounds"),
+    "COMPUTE_PA":  ("points", "assists"),
+    "COMPUTE_RA":  ("rebounds", "assists"),
+    "COMPUTE_BS":  ("blocks", "steals"),
+}
+# Double- and triple-double: >= 10 in at least 2 (3) of these. A 0/1 result
+# against a 0.5 line, so Over (Yes) wins on 1.
+_NBA_DOUBLE_CATS = ("points", "rebounds", "assists", "steals", "blocks")
+
+
+def _nba_prop_actual(row: dict, stat_col: str):
+    """One NBA prop's actual from a nba_player_game_log row, including the
+    combo and double/triple-double targets. None when the column is absent or
+    NULL -- the settler's signal that there is nothing to grade."""
+    if stat_col in _NBA_SUMS:
+        return sum((row.get(c) or 0) for c in _NBA_SUMS[stat_col])
+    if stat_col in ("COMPUTE_DD", "COMPUTE_TD"):
+        need = 2 if stat_col == "COMPUTE_DD" else 3
+        tens = sum(1 for c in _NBA_DOUBLE_CATS if (row.get(c) or 0) >= 10)
+        return int(tens >= need)
+    return row.get(stat_col)
 
 
 def _load_nhl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
@@ -467,28 +529,36 @@ def _load_nhl_goalie_actuals(conn: DBConnection, game_date: str) -> tuple[dict, 
     Two things come back because the void rule needs both. DraftKings voids a
     saves bet when the goalie does not start, so only starters are graded --
     a backup who relieved the starter has a row and saves, and must NOT be
-    settled on them. The second value is every game with ANY goalie row: a
-    priced goalie absent from the first and present in the second did not
-    start (NO_ACTION); a game absent from both is not ingested yet (retry).
+    settled on them. The second value is every game whose log holds a start
+    for BOTH teams: a priced goalie absent from the first and present in the
+    second did not start (NO_ACTION); any other game is not ingested yet
+    (retry).
     This is the rule scripts/nhl_prop_backtest.py grades on -- only starts are
     rows in the model's frame -- so the record and the backtest cannot differ
     on who was a bet.
     """
     day = datetime.strptime(game_date, "%Y-%m-%d")
     rows = conn.execute("""
-        SELECT player_id, player_name, game_id, started, saves, shots_against
+        SELECT player_id, player_name, game_id, started, saves, shots_against, team
         FROM nhl_goalie_game_log
         WHERE game_date BETWEEN %s AND %s AND game_id IS NOT NULL
     """, ((day - timedelta(days=1)).strftime("%Y-%m-%d"),
           (day + timedelta(days=1)).strftime("%Y-%m-%d"))).fetchall()
-    cols = ["player_id", "player_name", "game_id", "started", "saves", "shots_against"]
+    cols = ["player_id", "player_name", "game_id", "started", "saves", "shots_against", "team"]
     starters: dict = {}
-    logged: set = set()
+    starting_teams: dict = {}
     for row in rows:
         d = dict(zip(cols, row))
-        logged.add(d["game_id"])
         if d["player_id"] is not None and int(d["started"] or 0) == 1:
             starters[(str(int(d["player_id"])), d["game_id"])] = d
+            starting_teams.setdefault(d["game_id"], set()).add(d["team"])
+    # A game is logged for the void rule only once BOTH starters are in it.
+    # Any goalie row was enough until 2026-10-16: the evening box score wrote
+    # BUF@TOR with no start for Ukko-Pekka Luukkonen, his Under 25.5 saves was
+    # voided at 9:57pm ET, and the morning stats showed he started and made
+    # 26 saves -- a loss. Every one of 11,988 stored games has exactly two
+    # starts, so a game with fewer is not finished loading; it waits.
+    logged = {gid for gid, teams in starting_teams.items() if len(teams) >= 2}
     logger.debug(f"NHL goalie actuals: {len(starters)} starts in {len(logged)} games for {game_date}")
     return starters, logged
 
@@ -843,20 +913,7 @@ def _settle_prop_picks(
             if player_id:
                 row_data = nba_actuals.get((player_id, game_id))
                 if row_data:
-                    if stat_col == "COMPUTE_PRA":
-                        pts = row_data.get("points") or 0
-                        reb = row_data.get("rebounds") or 0
-                        ast = row_data.get("assists") or 0
-                        actual_stat = pts + reb + ast
-                    elif stat_col == "COMPUTE_DD":
-                        # Double-double: ≥10 in ≥2 of pts/reb/ast/stl/blk → 1 else 0.
-                        # scored_line is 0.5, so over (Yes) wins when actual == 1.
-                        cats = [row_data.get("points"), row_data.get("rebounds"),
-                                row_data.get("assists"), row_data.get("steals"),
-                                row_data.get("blocks")]
-                        actual_stat = int(sum(1 for c in cats if (c or 0) >= 10) >= 2)
-                    else:
-                        actual_stat = row_data.get(stat_col)
+                    actual_stat = _nba_prop_actual(row_data, stat_col)
 
         elif player_type == "nhl_skater":
             # A skater who dressed has a row; one who did not has none, and the
@@ -1519,6 +1576,12 @@ _PROP_MARKET_FOR_MODEL = {
     # travels on picks.prop_market (the same sentinel settlement uses).
     "nfl_prop_market":  "FROM_PROP_MARKET",
     "wnba_prop_market": "FROM_PROP_MARKET",
+    # nba_prop_market writes decision_book, so its close is read at that book
+    # (_bet_price_and_book) by the name in its label, which is that book's own
+    # spelling (scripts/nba_prop_market_card.pick_rows).
+    "nba_prop_market":  "FROM_PROP_MARKET",
+    # The projection card writes decision_book and the book's own spelling the same way.
+    "nba_prop_projection": "FROM_PROP_MARKET",
     "nhl_prop_blocked_shots": "player_blocked_shots",
     "nhl_prop_saves": "player_total_saves",
     "nhl_prop_shots_on_goal": "player_shots_on_goal",

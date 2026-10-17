@@ -432,7 +432,13 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
 - **Failures never propagate.** Discord gets its own try block in both the
   pipeline step and the live loop, so a broken webhook can't fail the step or
   mask the mobile push that already succeeded.
-- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20).
+- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20), **except a pick whose game
+  starts within `DISCORD_UNCAPPED_WITHIN_MIN` (120) minutes**, which always posts in the run that finds it
+  (2026-10-16). A held pick only gets the next pass, and no pass posts a game that has started, so near
+  the tip the cap was a loss, not a delay: the two NBA prop models decide every game 55 minutes before
+  tip, up to about 175 bets in one slot (eight games tip together at 6pm ET on 2027-04-11). The NBA
+  window job also publishes on every tick while an NBA game is within 62 minutes of tip, so a failed
+  post retries before the game starts.
   Overflow is left un-ledgered and drips out on the next pass rather than
   dumping a full locked slate into a channel the moment a webhook is added.
 - Discord's own limits are respected: 10 embeds/message (`_post_embeds` chunks),

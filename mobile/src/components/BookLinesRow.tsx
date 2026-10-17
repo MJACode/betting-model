@@ -18,7 +18,10 @@
 //
 // Live picks (is_live) get one DraftKings chip; the Live board's header and
 // the detail screen's provenance line say why (the in-play model prices and
-// places at DK only), so the row does not repeat it on every card.
+// places at DK only), so the row does not repeat it on every card. A live
+// model whose price we stop reading after the bet (hero.untracked,
+// markets.LIVE_PRICE_STOPS_AT_BET) gets that chip with no number on it, as
+// the card's "Open DK" does: the lock is not a price still on offer.
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -57,6 +60,32 @@ interface Props {
 }
 
 export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3, hero, priceAge }: Props) {
+  if (hero?.untracked) {
+    const book = hero.book;
+    return (
+      <View style={styles.wrap}>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Live price</Text>
+        </View>
+        <View style={styles.chips}>
+          <Pressable
+            onPress={() => {
+              void openBookBetslip(book, hero.link);
+            }}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${bookName(book)} to check the live price`}
+            style={({ pressed }) => [styles.chip, styles.chipDk, pressed && styles.pressed]}
+          >
+            <Text style={[styles.chipBook, styles.chipTextDk]}>Open {bookLabel(book)}</Text>
+            {onMore != null ? null : (
+              <Ionicons name="open-outline" size={11} color={colors.textPrimary} />
+            )}
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
   const quotes = currentLineQuotes(pick, bookRows, hero, priceAge);
   if (quotes.length === 0) return null;
   // Card (onMore set) vs detail: the card is scanned, so it drops the per-chip
