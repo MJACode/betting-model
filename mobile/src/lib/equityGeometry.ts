@@ -122,8 +122,29 @@ export function scrubIndex(x: number, layout: PlotLayout, count: number): number
 }
 
 /**
+ * A stored scrub index names a point only while that point still exists.
+ * VoiceOver's adjust actions keep an index, and a sport chip can replace
+ * the series with a shorter one. An index past the new array must not be
+ * used: reading it throws, and a leftover index hides the end pill.
+ * Out of range returns null so the pill comes back. It does not stick
+ * to the last point.
+ */
+export function scrubIndexForSeries(index: number | null, count: number): number | null {
+  if (index == null || !Number.isInteger(index) || count < 2) return null;
+  if (index < 0 || index >= count) return null;
+  return index;
+}
+
+/** Dates of the series. A different list is a different curve. */
+export function equitySeriesKey(points: { date: string }[]): string {
+  return points.map((p) => p.date).join('\n');
+}
+
+/**
  * End-of-line pill. Prefer above the point; drop below when the point is
- * already in the top gutter. Clamp so the pill stays inside the chart.
+ * already in the top gutter. `pillW` / `pillH` are the measured size.
+ * A pill wider than the chart is clamped to the chart, and `maxWidth` is
+ * that limit so the text can shrink instead of painting past the right edge.
  */
 export function pillFrame(
   x: number,
@@ -132,11 +153,15 @@ export function pillFrame(
   height: number,
   pillW = 76,
   pillH = 22,
-): { left: number; top: number } {
-  const left = Math.max(0, Math.min(x - pillW / 2, width - pillW));
-  const above = y - pillH - 4;
-  const top = above >= 0 ? above : Math.min(height - pillH, y + 4);
-  return { left, top: Math.max(0, top) };
+): { left: number; top: number; maxWidth: number } {
+  const chartW = Math.max(0, width);
+  const chartH = Math.max(0, height);
+  const w = Math.max(0, Math.min(pillW, chartW));
+  const h = Math.max(0, Math.min(pillH, chartH));
+  const left = Math.max(0, Math.min(x - w / 2, chartW - w));
+  const above = y - h - 4;
+  const top = above >= 0 ? above : Math.min(Math.max(0, chartH - h), y + 4);
+  return { left, top: Math.max(0, top), maxWidth: chartW };
 }
 
 /** Scrub readout sits on the top edge, centered on the point, clear of the y-axis. */

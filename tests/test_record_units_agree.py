@@ -146,7 +146,13 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "Units unavailable" in hero
     assert "unknownCountSpeech('— settled picks')" in hero
     assert "since ${LIVE_RECORD_START_SHORT}" in hero
-    assert "Flat-bet ROI" in card
+    # Yesterday's book is named "flat-bet ROI" on the Yesterday sheet. This
+    # screen's grid says "ROI" so the two books are not the same words.
+    for blob in (screen, card, hero):
+        assert "Flat-bet ROI" not in blob
+        assert "flat-bet ROI" not in blob
+    assert 'label="ROI"' in card
+    assert "ROI, 1 to win" in hero
     assert "Beat the closing line" in card
     assert 'accessibilityRole="summary"' in card
     assert "accessibilityLabel={heroLabel}" in card
@@ -162,6 +168,13 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "Cumulative units, 1 to win" in curve
     assert "formatSigned(endUnits, 2, 'u')" in curve
     assert "pnlColor(endUnits, 2)" in curve
+    assert "scrubIndexForSeries" in curve
+    assert "equitySeriesKey" in curve
+    assert "onBlur={releaseScrub}" in curve
+    assert "maxWidth: pill.maxWidth" in curve
+    geometry = (ROOT / "mobile/src/lib/equityGeometry.ts").read_text(encoding="utf-8")
+    assert "export function scrubIndexForSeries" in geometry
+    assert "maxWidth: chartW" in geometry
     assert "strokeDasharray" in curve
     assert "unitAxisTicks" in curve
     assert "colors.betInk" in spark

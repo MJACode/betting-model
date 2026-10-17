@@ -4,12 +4,14 @@ import Svg, { Line, Path } from 'react-native-svg';
 import {
   areaPath,
   chartDateLabel,
+  equitySeriesKey,
   linePath,
   pillFrame,
   plotLayout,
   pointXY,
   scrubBubbleFrame,
   scrubIndex,
+  scrubIndexForSeries,
   tickDigits,
   unitAxisTicks,
   type EquityPoint,
@@ -42,6 +44,18 @@ export function EquityCurve({
   const [finger, setFinger] = useState<number | null>(null);
   const [a11yIndex, setA11yIndex] = useState<number | null>(null);
   const [bubbleW, setBubbleW] = useState(160);
+  const [pillSize, setPillSize] = useState({ w: 76, h: 22 });
+  // Reset before paint when the series changes. A sport chip with fewer
+  // days would otherwise keep VoiceOver's index, point past the array,
+  // and leave the end pill hidden. The render below also refuses an
+  // out-of-range index, because this render still sees the old state.
+  const seriesKey = equitySeriesKey(points);
+  const [seenKey, setSeenKey] = useState(seriesKey);
+  if (seenKey !== seriesKey) {
+    setSeenKey(seriesKey);
+    setA11yIndex(null);
+    setFinger(null);
+  }
   const pointsRef = useRef(points);
   pointsRef.current = points;
   const widthRef = useRef(width);
@@ -84,10 +98,11 @@ export function EquityCurve({
   const tone = equityStrokeToken(endUnits);
   const stroke = tone === 'avoidInk' ? colors.avoidInk : tone === 'textSecondary' ? colors.textSecondary : colors.betInk;
   const lastPt = xy[xy.length - 1]!;
-  const pill = pillFrame(lastPt.x, lastPt.y, width, height);
+  const pill = pillFrame(lastPt.x, lastPt.y, width, height, pillSize.w, pillSize.h);
   const ticks = unitAxisTicks(layout.minV, layout.maxV);
   const digits = tickDigits(ticks);
-  const scrubAt = finger ?? a11yIndex;
+  const scrubAt = scrubIndexForSeries(finger, points.length)
+    ?? scrubIndexForSeries(a11yIndex, points.length);
   const scrubPt = scrubAt != null ? points[scrubAt] : null;
   const bubble = scrubPt
     ? scrubBubbleFrame(xy[scrubAt!]!.x, width, bubbleW, layout.plotLeft)
@@ -97,9 +112,16 @@ export function EquityCurve({
     : null;
 
   const moveA11y = (dir: 1 | -1) => {
-    const cur = a11yIndex ?? points.length - 1;
+    const cur = scrubIndexForSeries(a11yIndex, points.length) ?? points.length - 1;
     const next = Math.max(0, Math.min(points.length - 1, cur + dir));
     setA11yIndex(next);
+  };
+  // RN 0.81 has no VoiceOver-did-lose-focus event. onBlur is the focus-leave
+  // hook on this view, and the series reset above covers a chip change that
+  // happens while focus is still here.
+  const releaseScrub = () => {
+    setA11yIndex(null);
+    setFinger(null);
   };
 
   return (
@@ -116,6 +138,7 @@ export function EquityCurve({
           if (e.nativeEvent.actionName === 'increment') moveA11y(1);
           if (e.nativeEvent.actionName === 'decrement') moveA11y(-1);
         }}
+        onBlur={releaseScrub}
         {...responder.panHandlers}
       >
         <Svg width={width} height={height}>
@@ -155,8 +178,22 @@ export function EquityCurve({
           );
         })}
         {scrubAt == null ? (
-          <View style={[styles.pill, { left: pill.left, top: pill.top }]} pointerEvents="none">
-            <Text style={[styles.pillText, { color: pnlColor(endUnits, 2) }]} maxFontSizeMultiplier={1.6} numberOfLines={1}>
+          <View
+            style={[styles.pill, { left: pill.left, top: pill.top, maxWidth: pill.maxWidth }]}
+            pointerEvents="none"
+            onLayout={(e) => {
+              const w = Math.ceil(e.nativeEvent.layout.width);
+              const h = Math.ceil(e.nativeEvent.layout.height);
+              if (w > 0 && h > 0 && (w !== pillSize.w || h !== pillSize.h)) setPillSize({ w, h });
+            }}
+          >
+            <Text
+              style={[styles.pillText, { color: pnlColor(endUnits, 2) }]}
+              maxFontSizeMultiplier={1.6}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+            >
               {endText}
             </Text>
           </View>

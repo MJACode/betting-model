@@ -6,10 +6,10 @@ import { RecordInfoSheet } from '@/components/RecordInfoSheet';
 import { RecordSparkline } from '@/components/RecordSparkline';
 import {
   CLOSING_LINE_TITLE,
-  FLAT_BET_ROI_TITLE,
+  ROI_SHEET_TITLE,
   clvText,
   closingLineBody,
-  flatBetRoiBody,
+  roiSheetBody,
   heroAccessibilityLabel,
   heroStacks,
   heroUnitsText,
@@ -65,8 +65,8 @@ export function RecordHeroCard({
     clvBeatRate: summary.clvBeatRate,
   });
   const open = (which: 'roi' | 'clv') => setSheet(which);
-  const sheetTitle = sheet === 'clv' ? CLOSING_LINE_TITLE : FLAT_BET_ROI_TITLE;
-  const sheetBody = sheet === 'clv' ? closingLineBody(summary) : flatBetRoiBody();
+  const sheetTitle = sheet === 'clv' ? CLOSING_LINE_TITLE : ROI_SHEET_TITLE;
+  const sheetBody = sheet === 'clv' ? closingLineBody(summary) : roiSheetBody();
 
   return (
     <View style={styles.heroCard}>
@@ -75,7 +75,7 @@ export function RecordHeroCard({
         accessibilityRole="summary"
         accessibilityLabel={heroLabel}
         accessibilityActions={[
-          { name: 'roi', label: 'Flat-bet ROI details' },
+          { name: 'roi', label: 'ROI, 1 to win' },
           { name: 'close', label: 'Beat the closing line details' },
         ]}
         onAccessibilityAction={(e) => {
@@ -108,12 +108,12 @@ export function RecordHeroCard({
           </View>
           <View style={styles.grid}>
             <GridCell
-              label="Flat-bet ROI"
+              label="ROI"
               value={roi}
               valueColor={roi === '—' ? colors.textSecondary : pnlColor(summary.roiFlat, 1, 100)}
               stacked={stacked}
               onInfo={() => open('roi')}
-              infoLabel="Flat-bet ROI details"
+              infoLabel="ROI, 1 to win"
             />
             <GridCell label="Record" value={record} stacked={stacked} />
             <GridCell label="Win rate" value={win} stacked={stacked} />

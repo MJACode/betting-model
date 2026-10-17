@@ -6,6 +6,8 @@
 import { formatSigned } from '../src/lib/format';
 import {
   scrubIndex,
+  scrubIndexForSeries,
+  equitySeriesKey,
   pillFrame,
   plotLayout,
   unitAxisTicks,
@@ -65,7 +67,8 @@ const spoken = heroAccessibilityLabel({
 check('one stop starts with the units', spoken.startsWith('+22.65 units'), spoken.slice(0, 40));
 check('spoken label names All-time and the date', spoken.includes('All-time') && spoken.includes('September 1, 2026'));
 check('spoken grid names the four cells',
-  spoken.includes('Flat-bet ROI +2.5%') && spoken.includes('439 wins') && spoken.includes('Win rate 54%') && spoken.includes('Beat the closing line 54%'));
+  spoken.includes('ROI +2.5%') && spoken.includes('439 wins') && spoken.includes('Win rate 54%') && spoken.includes('Beat the closing line 54%'));
+check('spoken grid does not use Yesterday\'s book name', !/flat-bet roi/i.test(spoken));
 
 const missing = heroAccessibilityLabel({
   notLoaded: true,
@@ -99,7 +102,18 @@ const mid = scrubIndex(layout.plotLeft + layout.plotWidth / 2, layout, 11);
 check('scrub midpoint', mid === 5, String(mid));
 
 const pill = pillFrame(10, 10, 320, 176);
-check('pill stays inside', pill.left >= 0 && pill.top >= 0 && pill.left <= 320 && pill.top <= 176);
+check('pill stays inside', pill.left >= 0 && pill.top >= 0 && pill.left + 76 <= 320 && pill.top >= 0 && pill.top <= 176);
+const wide = pillFrame(300, 40, 320, 176, 400, 48);
+check('a pill wider than the chart stays inside',
+  wide.left >= 0 && wide.left + Math.min(400, 320) <= 320 && wide.top >= 0 && wide.top + 48 <= 176 && wide.maxWidth === 320,
+  `${wide.left},${wide.top},${wide.maxWidth}`);
+check('stale scrub index is released', scrubIndexForSeries(25, 5) === null);
+check('negative scrub index is released', scrubIndexForSeries(-1, 5) === null);
+check('in-range scrub index is kept', scrubIndexForSeries(2, 5) === 2);
+check('a one-point series cannot be scrubbed', scrubIndexForSeries(0, 1) === null);
+check('a non-integer scrub index is released', scrubIndexForSeries(1.5, 5) === null);
+check('series key changes with the dates',
+  equitySeriesKey([{ date: '2026-09-01' }, { date: '2026-09-02' }]) !== equitySeriesKey([{ date: '2026-09-01' }]));
 const bubble = scrubBubbleFrame(4, 320, 148, 48);
 check('bubble stays on the top edge, clear of the axis', bubble.top === 0 && bubble.left >= 48, String(bubble.left));
 check('chart date', chartDateLabel('2026-09-01') === 'Sep 1');

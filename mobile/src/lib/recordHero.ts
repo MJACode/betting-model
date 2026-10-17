@@ -3,9 +3,11 @@
  *
  * The big number is the posted-stake units Discord prints on the all-time
  * line (`_tally_line`: `{units:+.2f}u`). The same string is the equity
- * curve's end pill. Flat-bet ROI on the grid is that stake's return
- * (units / risked), which is the +2.5% beside Discord's units — not the
- * flat $100 book Yesterday and Models still use.
+ * curve's end pill. The grid's ROI is that stake's return (units / risked),
+ * the percentage Discord posts beside the units. Yesterday and Models still
+ * use a flat $100 bet, so this cell is labelled "ROI" — Designer should
+ * confirm that label and the sheet title "ROI, 1 to win". Do not put
+ * Yesterday's name for its book on this card.
  */
 
 import { spokenDate, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
@@ -90,7 +92,7 @@ export function heroAccessibilityLabel(o: {
     units,
     o.label,
     `since ${spokenDate(LIVE_RECORD_START)}`,
-    `Flat-bet ROI ${roi === '—' ? 'unavailable' : roi}`,
+    `ROI ${roi === '—' ? 'unavailable' : roi}`,
     record,
     `Win rate ${win === '—' ? 'unavailable' : win}`,
     `Beat the closing line ${clv === '—' ? 'unavailable' : clv}`,
@@ -102,9 +104,10 @@ export function equityStrokeToken(units: number): 'betInk' | 'avoidInk' | 'textS
   return pnlTone(units, 2);
 }
 
-export const FLAT_BET_ROI_TITLE = 'Flat-bet ROI';
+/** Sheet title. The cell itself says "ROI" so the grid stays one short word. */
+export const ROI_SHEET_TITLE = 'ROI, 1 to win';
 
-export function flatBetRoiBody(): string {
+export function roiSheetBody(): string {
   return (
     'This is units won or lost divided by units risked. Each bet is 1 unit to win, ' +
     'at the price it was taken at. At −110 that is 1.1 units risked to win 1. ' +
