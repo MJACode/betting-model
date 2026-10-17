@@ -777,8 +777,13 @@ def blind_by_real_side(nm: pd.DataFrame, population: set, games: pd.DataFrame,
                        seasons) -> dict:
     """Bar 9 as §1 words it: for each real side, that side bet on every game in
     the cell's own priced population at that point (no model, no cut), at the
-    best deciding offer under the market's fair line. ROI on `seasons`."""
-    pop = nm[nm["game_id"].isin(population)]
+    best deciding offer under the market's fair line. ROI on `seasons`.
+
+    A per-game rule passes its own frame, side_pick included, as `nm` (its
+    blind_side needs it). That column is the RULE's side; the favourite split
+    sets its own from the market, so the rule's is dropped first -- left in,
+    the merge below would suffix both and choose() would find neither."""
+    pop = nm[nm["game_id"].isin(population)].drop(columns="side_pick", errors="ignore")
     out = {}
     if pop.empty:
         return out

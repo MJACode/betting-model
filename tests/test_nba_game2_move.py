@@ -120,16 +120,149 @@ def test_an_f3_cell_bets_the_fade_side_at_its_cut_and_grades_on_the_real_side():
     assert dict(zip(signal["game_id"], signal["side_pick"])) == {"G": "away", "G2": "home"}
     assert dict(zip(signal["game_id"], signal["strength"])) == {"G": 2.0, "G2": 3.0}
     cand = M.attach(neutral, signal)
-    rows = H.run_cells(data, "F3", "D", cand, cand, cuts=M.F3_CUTS,
-                       sides_by_market={"spreads": [M.F3_SIDE]}, strength="strength")
+    rows = M.rule_cells(data, "F3", "D", cand, M.F3_CUTS, {"spreads": [M.F3_SIDE]})
     assert [r["side"] for r in rows] == ["fade"] * 4
     # cuts 0.5 / 1 / 1.5 / 2 take both games; nothing beyond is on the axis
     assert [r["n_choose"] for r in rows] == [2, 2, 2, 2]
     picks = H.grade(H.choose(cand, -np.inf, sides=["fade"]), data.games).set_index("game_id")
     assert picks["side"].to_dict() == {"G": "away", "G2": "home"}
     assert picks["result"].to_dict() == {"G": "L", "G2": "W"}
-    # blind (bar 9) is the fade side on every game that has one, no cut
+    # the fade side on every game that has one, no cut (reported beside bar 9)
     assert rows[0]["blind_roi_choose"] == pytest.approx(H.roi(picks))
+    # Bar 9 reads the REAL side of every graded bet: G bets away, G2 home, so
+    # home/away is split; both fades are underdogs by the market's fair line
+    # (G: home -4.5 is the favourite; G2: home +1.5 is the underdog).
+    r = rows[0]
+    assert r["share_home"] == 0.5 and r["share_fav"] == 0.0 and np.isnan(r["share_over"])
+    # blind home covers both (by 10 at -4.5, by 2 at +1.5); blind away loses both
+    assert r["blind_home"] == pytest.approx(2.0 / 2.2) and r["blind_away"] == pytest.approx(-1.0)
+    assert r["blind_dog"] == pytest.approx((1.0 - 1.1) / 2.2)          # G away loses, G2 home covers
+    assert r["blind_fav"] == pytest.approx((1.0 - 1.1) / 2.2)
+    assert r["population_games"] == 2
+
+
+def test_a_game_the_rule_gives_no_number_is_outside_the_cells_population():
+    # §6.5 (second amendment): bar 9's population is the games the rule
+    # produced a number for. G3 is priced at T but has no move number.
+    data = _two_game_data()
+    g3 = data.games.iloc[[1]].assign(game_id="G3", game_date="2024-01-17")
+    data.games = pd.concat([data.games, g3], ignore_index=True)
+    q3 = data.quotes[data.quotes["game_id"] == "G2"].assign(game_id="G3", game_date="2024-01-17")
+    q3 = q3.assign(fetch_at=q3["fetch_at"] + pd.Timedelta(days=1),
+                   snapshot_at=q3["snapshot_at"] + pd.Timedelta(days=1), tip=q3["tip"] + pd.Timedelta(days=1))
+    data.quotes = pd.concat([data.quotes, q3], ignore_index=True)
+    f = data.quotes[["game_id", "tip", "fetch_at"]].drop_duplicates()
+    data.fetches = f.assign(lead_min=(f["tip"] - f["fetch_at"]).dt.total_seconds() / 60).reset_index(drop=True)
+    sig = {(2024, "spreads"): 12.0}
+    t, _, _, neutral = M.point_frames(data, "D", sig)
+    signal = M.move_signal(data.quotes, t)
+    signal = signal[signal["game_id"] != "G3"]
+    cand = M.attach(neutral, signal)
+    assert cand["game_id"].nunique() == 3                     # G3 is priced at T
+    rows = M.rule_cells(data, "F3", "D", cand, M.F3_CUTS, {"spreads": [M.F3_SIDE]})
+    assert rows[0]["population_games"] == 2
+
+
+# ── market pricing, the graded load, the written cells ──────────────────────
+
+def _priced_season(n=80):
+    """n games in 2024 with Pinnacle's spread and total at 60 minutes out."""
+    rng = np.random.default_rng(5)
+    games, rows = [], []
+    for i in range(n):
+        tip = TIP + pd.Timedelta(days=i)
+        day = (tip - pd.Timedelta(hours=5)).strftime("%Y-%m-%d")
+        h, a = int(rng.integers(95, 125)), int(rng.integers(95, 125))
+        games.append({"game_id": f"P{i}", "season": 2024, "game_date": day, "tip": tip,
+                      "home_team": "BOS", "away_team": "NYK", "home_score": h, "away_score": a})
+        for m, line in (("spreads", -3.5), ("totals", 220.5)):
+            rows.append(dict(_q(f"P{i}", "pinnacle", m, 60, line, tip=tip), game_date=day))
+    quotes = pd.DataFrame(rows)
+    f = quotes[["game_id", "tip", "fetch_at"]].drop_duplicates()
+    f = f.assign(lead_min=(f["tip"] - f["fetch_at"]).dt.total_seconds() / 60)
+    return H.Data(games=pd.DataFrame(games), quotes=quotes, fetches=f.reset_index(drop=True))
+
+
+def test_market_pricing_is_the_empirical_distribution_around_pinnacles_close():
+    data = _priced_season()
+    close, sig = M.market_pricing(data)
+    assert set(sig) == {(2024, "spreads"), (2024, "totals")}
+    assert all(isinstance(v, H.ResidDist) for v in sig.values())
+    # and that is what the market's fair line at a decision point carries
+    _, _, fair, _ = M.point_frames(data, "C", sig)
+    assert all(isinstance(v, H.ResidDist) for v in fair["sigma"])
+
+
+def test_full_names_every_season_it_grades_so_a_stale_cache_is_refused(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_load(cache, seasons=None, require_seasons=None):
+        seen.update(seasons=seasons, require=require_seasons)
+        return "data"
+
+    monkeypatch.setattr(H, "load", fake_load)
+    assert M.load_data(tmp_path, full=True) == "data"
+    assert list(seen["seasons"]) == list(seen["require"]) == [2021, 2022, 2023, 2024, 2025, 2026]
+    M.load_data(tmp_path, full=False)
+    assert list(seen["seasons"]) == list(seen["require"]) == [2021]
+
+
+def test_placebo_returns_are_written_as_floats_even_when_every_one_is_empty(tmp_path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from scripts import nba_game2_verdict as V
+    rows = [{"family": "F3", "cut": 0.5, "placebo_rois": [np.nan] * 20},
+            {"family": "control_blind", "cut": 0.0, "placebo_rois": []},
+            {"family": "F3", "cut": 1.0, "placebo_rois": [np.nan, np.nan]}]
+    M.write_cells(rows, tmp_path / "cells_F3.parquet")
+    assert pq.read_schema(tmp_path / "cells_F3.parquet").field("placebo_rois").type == pa.list_(pa.float64())
+    back = V.load_cells(tmp_path)
+    assert [len(v) for v in back["placebo_rois"]] == [20, 0, 2]
+    assert all(np.isnan(x) for x in back["placebo_rois"].iloc[0])
+
+
+# ── the controls: every cell through the harness, every one a control ───────
+
+def _three_market_data():
+    """G and G2 (as _two_game_data) quoted on spreads, totals and moneyline by
+    three deciding books and Pinnacle, at 600 and 120 minutes before tip."""
+    tip2 = TIP + pd.Timedelta(days=1)
+    games = pd.DataFrame([
+        {"game_id": "G", "season": 2024, "game_date": "2024-01-15", "tip": TIP,
+         "home_team": "BOS", "away_team": "NYK", "home_score": 110, "away_score": 100},
+        {"game_id": "G2", "season": 2024, "game_date": "2024-01-16", "tip": tip2,
+         "home_team": "LAL", "away_team": "DEN", "home_score": 102, "away_score": 100}])
+    rows = []
+    for gid, tip, day, sp in (("G", TIP, "2024-01-15", (-2.5, -4.5)), ("G2", tip2, "2024-01-16", (-1.5, 1.5))):
+        for b in ("draftkings", "fanduel", "betmgm", "pinnacle"):
+            for lead, s in zip((600, 120), sp):
+                rows.append(dict(_q(gid, b, "spreads", lead, s, tip=tip), game_date=day))
+                rows.append(dict(_q(gid, b, "totals", lead, 220.5 if lead == 600 else 222.5, tip=tip),
+                                 game_date=day))
+                rows.append(dict(_q(gid, b, "h2h", lead, np.nan, pa=-150.0, pb=130.0, tip=tip), game_date=day))
+    quotes = pd.DataFrame(rows)
+    f = quotes[["game_id", "tip", "fetch_at"]].drop_duplicates()
+    f = f.assign(lead_min=(f["tip"] - f["fetch_at"]).dt.total_seconds() / 60)
+    sched = pd.concat([_sched(game_id="G", home_b2b=1, away_rest_days=1.0),
+                       _sched(game_id="G2", venue="Denver", away_b2b=1, days_since_open=5)],
+                      ignore_index=True)
+    return H.Data(games=games, quotes=quotes, fetches=f.reset_index(drop=True)), sched
+
+
+def test_every_control_runs_through_the_harness_as_a_control_on_real_sides():
+    data, sched = _three_market_data()
+    sig = {(2024, "spreads"): 12.0, (2024, "totals"): 18.0}
+    cells, _ = M.run_controls(data, H.pinnacle_close(data), sig, sched, None, n_placebo=2)
+    assert len(cells) == M.CONTROL_CELLS
+    assert cells["family"].str.startswith("control_").all()       # so the verdict never judges them
+    # a per-game side (the favourite) is graded on the real side it names:
+    # both games' home team is -150 everywhere, so both bets are home favourites
+    fav = cells[(cells["side"] == "favourite") & (cells["market"] == "h2h")].iloc[0]
+    assert fav["n_choose"] == 2 and fav["share_home"] == 1.0 and fav["share_fav"] == 1.0
+    assert np.isfinite(fav["blind_fav"]) and fav["blind_fav"] == pytest.approx(fav["blind_home"])
+    # the back-to-back spot bets the rested visitor in G only
+    r1 = cells[(cells["family"] == "control_spot_b2b_vs_rested") & (cells["market"] == "spreads")].iloc[0]
+    assert r1["n_choose"] == 1 and r1["share_home"] == 0.0
 
 
 def test_the_placebo_moves_the_signal_and_leaves_every_price_alone():

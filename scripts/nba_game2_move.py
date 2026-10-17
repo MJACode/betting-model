@@ -23,10 +23,25 @@ points B, C, D x move >= 0.5, 1, 1.5, 2 points, one side value "fade".
                   move, no side.
   STRENGTH        abs(MOVE); the cell's cut is STRENGTH >= k.
   PRICE           every offer at T priced at H.market_fair (Pinnacle's no-vig,
-                  else the deciding books' median): a rule family, so the cut is
-                  on STRENGTH and the best market-fair offer on the fade side is
-                  bet. The blind bet (bar 9) is the fade side on every game that
-                  has one at that decision point, no cut.
+                  else the deciding books' median) through the EMPIRICAL
+                  distribution of results around Pinnacle's close on earlier
+                  seasons (H.close_dist): a rule family, so the cut is on
+                  STRENGTH and the best market-fair offer on the fade side is
+                  bet.
+  SIDES           "fade" is a per-game label: each game's real side (home, away,
+                  over, under) is its side_pick, and every graded bet carries
+                  that real side, so the harness reads bar 9 by real side.
+  POPULATION      a cell's priced population (bar 9's blind bets) is the games
+                  the rule produced a move number for (rule_cells); a game
+                  whose line did not move is inside it, with no side.
+  BAR 9           (section 6.5, second amendment) when more than 70% of the
+                  choosing-season bets sit on one side of home/away,
+                  favourite/underdog or over/under, the cell must beat that side
+                  bet on every game of its population, no cut (H.run_cells
+                  writes the shares and blinds). The fade side on every game
+                  with no cut is still written, as blind_roi_choose.
+  GATE AT D       H.run_cells drops any choosing season D reaches on fewer than
+                  95% of its games (D here is the slate fetches).
   PLACEBO         20 runs, seed = run number 0..19: the rule's (strength,
                   side_pick) pairs are swapped between games on the same date
                   in the same market (H.shuffle_within_date on the SIGNAL frame
@@ -68,11 +83,16 @@ decision point C, written to cells_controls.parquet). 35 cells:
                           <= T); the undated archive is refused. Absent table:
                           the cells are emitted with no bets.
 
-WALK-FORWARD. Nothing in F3 or the controls is fitted. The one fitted number the
-harness uses -- the spread / total sigma behind market_fair -- is H.close_sigma:
-season S uses Pinnacle close residuals from seasons before S. Graded season ->
-fit seasons: 2021 -> 2021 (no earlier priced season; never chosen on), 2022 ->
+WALK-FORWARD. Nothing in F3 or the controls is fitted. The one fitted thing the
+harness uses -- the spread / total distribution behind market_fair, the blind
+bets and closing-line value -- is H.close_dist (market_pricing): season S uses
+the results around Pinnacle's close on seasons before S. Graded season -> fit
+seasons: 2021 -> 2021 (no earlier priced season; never chosen on), 2022 ->
 2021, 2023 -> 2021-22, 2024 -> 2021-23, 2025 -> 2021-24, 2026 -> 2021-25.
+
+GRADED LOAD. --full loads 2020-21 to 2025-26 and names all six to H.load as
+required, so a cache that prices any of them on fewer than 90% of games, or in
+which more than 5% of rows match no purchase record, is refused (load_data).
 
 LOOK-AHEAD GUARDS: quotes are pre-game and fetched at or before T (H.load,
 H.visible); FIRST <= T is required; a streak counts a game only from tip + 3 h;
@@ -95,6 +115,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from scripts import nba_game_harness as H  # noqa: E402
+from scripts.nba_game2_verdict import CONTROL_PREFIX  # noqa: E402
 
 RESULTS = Path(os.environ.get("NBA_GAME2_RESULTS",
                               "C:/Users/micha/AppData/Local/Temp/nba_game_edge/results"))
@@ -209,6 +230,20 @@ def placebo_cands(neutral: pd.DataFrame, signal: pd.DataFrame, games: pd.DataFra
     return out
 
 
+def rule_cells(data: H.Data, family: str, point: str, cand: pd.DataFrame, cuts,
+               sides_by_market: dict, close=None, sig=None, placebo=None) -> list[dict]:
+    """H.run_cells for a rule family, on the cell's own priced population.
+
+    Section 6.5 (second amendment): bar 9's population is "the games its model
+    or rule produced a number for". `cand` (attach) keeps every priced offer,
+    so the offers on games with no rule number (strength NaN) are left out
+    here. The cell's bets cannot change (every cut asks strength >= k); only
+    the population behind the real-side shares and blind bets does."""
+    pop = cand[cand["strength"].notna()]
+    return H.run_cells(data, family, point, pop, pop, cuts=cuts, sides_by_market=sides_by_market,
+                       close=close, sig=sig, placebo=placebo, strength="strength")
+
+
 def population(family: str, point: str, t: pd.DataFrame, cand: pd.DataFrame, data: H.Data,
                markets, side: str, cuts, axis_rule: str | None = None,
                signal: pd.DataFrame | None = None) -> list[dict]:
@@ -248,9 +283,8 @@ def run_f3(data: H.Data, close, sig, n_placebo: int = N_PLACEBO) -> tuple[pd.Dat
         signal = move_signal(data.quotes, t)
         cand = attach(neutral[neutral["market"].isin(F3_MARKETS)], signal)
         pl = placebo_cands(neutral[neutral["market"].isin(F3_MARKETS)], signal, data.games, n_placebo)
-        rows += H.run_cells(data, "F3", point, cand, cand, cuts=F3_CUTS,
-                            sides_by_market={m: [F3_SIDE] for m in F3_MARKETS},
-                            close=close, sig=sig, placebo=pl, strength="strength")
+        rows += rule_cells(data, "F3", point, cand, F3_CUTS, {m: [F3_SIDE] for m in F3_MARKETS},
+                           close=close, sig=sig, placebo=pl)
         pop += population("F3", point, t, cand, data, F3_MARKETS, F3_SIDE, F3_CUTS, signal=signal)
     cells = pd.DataFrame(rows)
     assert len(cells) == F3_CELLS, f"F3 emits {len(cells)} cells, section 6.3 lists {F3_CELLS}"
@@ -449,9 +483,8 @@ def run_controls(data: H.Data, close, sig, sched: pd.DataFrame, splits,
         keys = sp.get("keys", ("game_id", "market"))
         cand = attach(nm, sp["signal"], keys=keys)
         pl = placebo_cands(nm, sp["signal"], data.games, n_placebo) if sp["placebo"] else None
-        r = H.run_cells(data, sp["family"], CONTROL_POINT, cand, cand, cuts=sp["cuts"],
-                        sides_by_market=sp["side_by_market"], close=close, sig=sig,
-                        placebo=pl, strength="strength")
+        r = rule_cells(data, sp["family"], CONTROL_POINT, cand, sp["cuts"], sp["side_by_market"],
+                       close=close, sig=sig, placebo=pl)
         rows += [{**x, "axis_rule": sp["axis_rule"]} for x in r]
         for m, sides in sp["side_by_market"].items():
             for side in sides:
@@ -459,6 +492,8 @@ def run_controls(data: H.Data, close, sig, sched: pd.DataFrame, splits,
                                   sp["cuts"], axis_rule=sp["axis_rule"])
     cells = pd.DataFrame(rows)
     assert len(cells) == CONTROL_CELLS, f"controls emit {len(cells)} cells, expected {CONTROL_CELLS}"
+    # the verdict drops families named control_* (section 6.5: never judged, not in m)
+    assert cells["family"].str.startswith(CONTROL_PREFIX).all(), sorted(set(cells["family"]))
     return cells, pd.DataFrame(pop)
 
 
@@ -481,6 +516,35 @@ def synthetic_checks() -> None:
 def schedule_features(cache: Path) -> pd.DataFrame:
     from features.nba_schedule_features import game_schedule_features
     return game_schedule_features(pd.read_parquet(cache / "nba_schedule.parquet"))
+
+
+def load_data(cache: Path, full: bool) -> H.Data:
+    """The seasons a run grades, each named as required: H.load refuses a cache
+    that prices one of them on fewer than 90% of its games, or in which more
+    than 5% of rows match no purchase record (a stale ledger)."""
+    seasons = FULL_SEASONS if full else SMOKE_SEASONS
+    return H.load(cache, seasons=seasons, require_seasons=seasons)
+
+
+def market_pricing(data: H.Data) -> tuple[pd.DataFrame, dict]:
+    """(Pinnacle's close, the market's pricing model): the empirical
+    distribution of results around Pinnacle's close on earlier seasons
+    (H.close_dist), never a bell curve."""
+    close = H.pinnacle_close(data)
+    return close, H.close_dist(close, data.games)
+
+
+def write_cells(rows, path: Path) -> None:
+    """The cell table as parquet, with placebo_rois typed list<double>. Left to
+    pandas, a column whose lists are all NaN or all empty (a control with no
+    placebo) is stored as list<null>, which reads back as None."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    df = pd.DataFrame(rows)
+    t = pa.Table.from_pandas(df.drop(columns="placebo_rois"), preserve_index=False)
+    pl = pa.array([[float(x) for x in v] for v in df["placebo_rois"]],
+                  type=pa.list_(pa.float64()), from_pandas=False)
+    pq.write_table(t.append_column("placebo_rois", pl), path)
 
 
 def refuse_full_without_go() -> None:
@@ -517,21 +581,20 @@ def main() -> None:
     if not (a.cache / "nba_fetch_ledger.parquet").exists():
         raise SystemExit(f"{a.cache} has no nba_fetch_ledger.parquet: refresh the research cache "
                          "(python -m scripts.nba_research_cache --only lines) first.")
-    seasons = SMOKE_SEASONS if a.smoke else FULL_SEASONS
     out = a.results / "smoke_move" if a.smoke else a.results
     out.mkdir(parents=True, exist_ok=True)
-    data = H.load(a.cache, seasons=seasons)
+    data = load_data(a.cache, full=a.full)
     print("load:", data.notes)
-    close = H.pinnacle_close(data)
-    sig = H.close_sigma(close, data.games)
+    close, sig = market_pricing(data)
+    print("market pricing:", ", ".join(repr(sig[k]) for k in sorted(sig)))
     sched = schedule_features(a.cache)
     splits = load_splits(a.cache)
     print("public splits:", "absent (control emitted with no bets)" if splits is None else f"{len(splits):,} rows")
     f3, f3_pop = run_f3(data, close, sig, a.placebo)
-    f3.to_parquet(out / "cells_F3.parquet")
+    write_cells(f3, out / "cells_F3.parquet")
     f3_pop.to_parquet(out / "population_F3.parquet")
     ctl, ctl_pop = run_controls(data, close, sig, sched, splits, a.placebo)
-    ctl.to_parquet(out / "cells_controls.parquet")
+    write_cells(ctl, out / "cells_controls.parquet")
     ctl_pop.to_parquet(out / "population_controls.parquet")
     print(f"wrote {len(f3)} F3 cells and {len(ctl)} control cells to {out}")
     pd.set_option("display.width", 250)
