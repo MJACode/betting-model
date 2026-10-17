@@ -27,6 +27,7 @@ import {
   betTypeStatusSuffix,
   choiceAddedLabel,
   modelLong,
+  modelProbabilityNote,
   withdrawnRulesEmpty,
 } from '../src/lib/modelMeta';
 import {
@@ -65,6 +66,29 @@ for (const id of ['mlb_spread_market', 'mlb_total_market', 'nba_prop_market', 'n
 }
 check('no model is called "market-relative" any more',
   !Object.values(MODEL_META).some((m) => m.longLabel.includes('market-relative')));
+// The NBA projection model prices its own projection, not Pinnacle's number,
+// so its name must not borrow the rule's "(vs Pinnacle)".
+check('the NBA projection model is "NBA Props (Projection)", not "(vs Pinnacle)"',
+  modelLong('nba_prop_projection') === 'NBA Props (Projection)', modelLong('nba_prop_projection'));
+check('the NBA projection model is a player prop with no single stat',
+  MODEL_META.nba_prop_projection?.type === 'player_prop' && MODEL_META.nba_prop_projection.statLabel === '');
+check('the NBA projection model\'s short name is a word, not its id',
+  MODEL_META.nba_prop_projection?.shortLabel === 'Projection');
+// "Why this bet?": the projection model's probability is an upper bound. The
+// figures are its graded seasons, not a posted record (it has none yet), and
+// the 48% the prices implied is what shows the 50% beat them (UX review,
+// 2026-10-16).
+check('the projection model\'s probability note says upper bound, graded seasons, and the price',
+  modelProbabilityNote('nba_prop_projection') ===
+    'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
+    'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
+  modelProbabilityNote('nba_prop_projection'));
+check('every other model keeps the plain probability sentence',
+  modelProbabilityNote('nba_prop_market') === 'What our model says is the chance this side hits.' &&
+  modelProbabilityNote('mlb_moneyline') === 'What our model says is the chance this side hits.');
+check('the "Why this bet?" card reads that note for the pick\'s own model',
+  readFileSync(join(__dirname, '..', 'src/components/ReasoningCard.tsx'), 'utf-8')
+    .includes('sub={modelProbabilityNote(pick.model_id)}'));
 
 // ── The built-in model screen's title is the long name ──────────────────────
 // Titled with the short label, the three prop-rule screens all read
@@ -74,8 +98,10 @@ check('no model is called "market-relative" any more',
   check('the built-in model screen is titled with the long label',
     /navigation\.setOptions\(\{ title: modelLong\(modelId\) \}\)/.test(screen));
   check('its chip keeps the short label', /<Text style=\{styles\.modelChipText\}>\{modelShort\(modelId\)\}<\/Text>/.test(screen));
-  const titles = new Set(['nba_prop_market', 'nfl_prop_market', 'wnba_prop_market'].map(modelLong));
-  check('the three prop-rule screens have three different titles', titles.size === 3, [...titles].join(' / '));
+  const titles = new Set(
+    ['nba_prop_market', 'nba_prop_projection', 'nfl_prop_market', 'wnba_prop_market'].map(modelLong),
+  );
+  check('the four multi-market prop screens have four different titles', titles.size === 4, [...titles].join(' / '));
 }
 
 // ── Bet-type picker ─────────────────────────────────────────────────────────
@@ -116,13 +142,16 @@ check('an active batter prop is still a bet type you can build on',
   check('NFL has no moneyline model, so it does not invent an ML row',
     row('NFL').join(',') === 'Spread|Spread line,Player props|All player markets');
   // The NBA rebuild retired nba_moneyline and nba_spread (config
-  // RETIRED_MODELS); the one live NBA model is the nba_prop_market rule, so
-  // the picker offers Player props and nothing else for NBA.
+  // RETIRED_MODELS); the live NBA models are the nba_prop_market rule and the
+  // nba_prop_projection model, both props, so the picker offers Player props
+  // and nothing else for NBA.
   check('NBA is Player props only — its moneyline and spread are retired',
     row('NBA').join(',') === 'Player props|All player markets');
   const nbaProps = betTypePickerGroups().find((g) => g.sport === 'NBA')?.choices.find((c) => c.slot === 'props');
-  check('NBA Player props writes the live nba_prop_market rule, not a retired per-stat model',
-    nbaProps?.modelIds.join(',') === 'nba_prop_market');
+  check('NBA Player props writes the two live NBA prop models, not a retired per-stat model',
+    nbaProps?.modelIds.join(',') === 'nba_prop_market,nba_prop_projection', nbaProps?.modelIds.join(','));
+  check('the NBA projection model is titled in picker language',
+    betTypeLabel('nba_prop_projection') === 'NBA · Player props', betTypeLabel('nba_prop_projection'));
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',
     row('NCAAF').join(',') === 'Spread|Spread line');
   const ncaafLine = betTypePickerGroups().find((g) => g.sport === 'NCAAF')?.choices.find((c) => c.slot === 'line');
@@ -206,6 +235,22 @@ check('a model the server leaves live still appears',
 setServerThresholds(null);
 check('clearing the server store restores the bundled pause set',
   !isModelPaused('mlb_moneyline') && isModelPaused('mlb_prop_batter_hits'));
+
+// The NBA player page's "our picks" note asks whether ANY live prop model
+// prices NBA players. With the rule paused on the server the projection model
+// still does; with both paused, none does.
+setServerThresholds({
+  nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+});
+check('the projection model alone keeps NBA priced when the rule is paused',
+  sportHasLivePropModel('NBA'));
+setServerThresholds({
+  nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+  nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+});
+check('with both NBA prop models paused, no live prop model prices NBA players',
+  !sportHasLivePropModel('NBA'));
+setServerThresholds(null);
 
 check('a paused rule chip is labelled (paused), not (retired)',
   betTypeStatusSuffix('mlb_prop_batter_hits') === ' (paused)');
