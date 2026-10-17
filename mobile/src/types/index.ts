@@ -194,14 +194,8 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
-  // Client-only. attachDiscordPublish stamps it after the fetch; it is not
-  // a column and not part of SETTLED_PICK_COLUMNS, so the cache key stays.
-  // Optional like downgrade_reason: a hand-built row and a cache written
-  // before the stamp still type-check. The published-record readers need it.
-  // Stamped by the record readers (#942) and read by teamDetail and the model
-  // detail screen; Pick carries it, this type did not, so master's type check
-  // failed and the over-the-air update stopped publishing (2026-10-14).
-  // DiscordPublish is that same 'published' | 'unpublished' | 'unknown' union.
+  // Client-only. attachDiscordPublish stamps it after the fetch. Not a
+  // column, so it stays out of SETTLED_PICK_COLUMNS and the cache key.
   discordPublish?: DiscordPublish;
 };
 

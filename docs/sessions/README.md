@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, PR tsc gate after #935: master is already 32 diagnostics including scripts/verify_share_record.ts TS2740; scripts/ keyed by file and TS code; a fixed baseline entry warns; #846's mobile/ci/tsc-baseline.txt is a different gate |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA public betting splits: Action Network v1/v2 archive 2020-21..2025-26 into `nba_public_splits` (64,027 rows, 7,230 of 7,230 regular-season games); the archived number is the split at the close (MLB calibration, 20 Wayback captures, a tip-off poll); `pregame_poll` capture in the refresh pass from 2026-27; `docs/nba_public_splits.md` |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA spread/moneyline/total second search: pre-registered (§6, four dated amendments before grading); 7,288 price fetches bought (218,670 credits, balance 2,300,945); one shared harness and pass/fail script; five labs built, reviewed three times and graded blind; no return read until the multiple-testing basis is decided |
