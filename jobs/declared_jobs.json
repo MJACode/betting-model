@@ -1072,7 +1072,7 @@
     "job_type": "byom_refresh",
     "requested_by": "owner",
     "enabled": false,
-    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. This is not a schedule: a declared job is enqueued once, and only after the owner sets enabled true. apply false reports freshness and does not read odds and does not write. apply true rebuilds the current season's games from yesterday through 7 days ahead, plus a past game with no fact row, a past fact row still missing a score, and a past game that has facts but no prop facts. A null line is not unfinished. Does not write picks.",
+    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. This is not a schedule: a declared job is enqueued once, and only after the owner sets enabled true. apply false reports freshness and does not read odds and does not write. apply true rebuilds the current season's games from yesterday through 7 days ahead, plus a past game with no fact row, a past fact row still missing a score, and a past game that has facts but no prop facts and has not been scanned yet. A prop pass with no rows stamps the game so it is not due again. A null line is not unfinished. A game the builder will not write is not scheduled. Does not write picks.",
     "args": {
       "sport": "NFL",
       "apply": false

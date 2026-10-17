@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, BYOM refresh drains a past game after the prop pass reads it, including when that pass writes no prop row; a game the builder will not write is not scheduled as missing |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, BYOM is win, loss, or push: one DraftKings line at game start, labelled; shop removed; no prices or units |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM reviewer pass: game facts read DraftKings only; prop rebuild deletes then inserts; backtest timeout 3s; incomplete and prop-missing games are due; save reads the backtest once; the mobile hook drops a stale response |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM lock shop: a moved DraftKings h2h lock writes the new price; fresh h2h with no DK row replaces a stored DK row; the job warns on or after 2026-10-17 when the shop has no rows |
@@ -33,7 +34,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, `requirements-test.txt` (pytest + `nodejs-wheel-binaries`) so the 13 TypeScript-backed tests run on any machine; testing.md, local_ops.md and CLAUDE.md §5 point at it; the worker still installs only requirements.txt |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the 26 tests failing on master were all stale tests or Windows-only (recap fixture lacked `clv_method`; CLV capture literals; `node` absent; savepoint wrapper from #843; posix/backslash paths; `SOURCE` vs `SOURCE_PREFIX`); `tests/_node.py` finds node via the pip wheel so 10 more node-backed tests run here; `verify_a11y.ts` normalises separators and CRLF — 79/79, no app source touched |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM saved models: auth.uid() tables, cap 25, snapshot of byom_backtest at save time, migration not registered, sign-in left off |
-| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM refresh: freshness reads no odds; apply true rebuilds yesterday through 7 days plus played games missing a fact; job enabled false and apply false |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM refresh: freshness reads no odds; due set is yesterday through 7 days, a past game with no fact, a past fact with a null score, and a past game with facts but no prop facts; a null line is not unfinished; job enabled false and apply false |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM backtest RPC: SECURITY INVOKER, current season by default, both unit columns, no price or line filter, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL prop facts: 24h UNCONFIRMED lock, no alt ladders, log_status for missing log vs non-participant, anytime TD is rush+rec, job disabled, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM lock shop review: worker-only (no anon grant), h2h replaced when the DK snapshot moves, declared job enabled false and apply false, first apply before the 2026-10-17 prune |
