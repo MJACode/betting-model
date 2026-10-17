@@ -1,7 +1,9 @@
 # Graph Report - bm_nhl  (2026-10-17)
 
 ## Corpus Check
-- cluster-only mode — file stats not available
+- 1478 files · ~2,452,554 words
+- Verdict: corpus is large enough that graph structure adds value.
+- Unclassified: 15 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
 ## Summary
 - 28941 nodes · 68771 edges · 940 communities (720 shown, 220 thin omitted)
@@ -9,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `dc493d99`
+- Built from commit: `2f9961b1`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -882,12 +884,12 @@
   docs/nba_pbp_stints.md → data/ingestors/nba_stints.py
 - `4.3 Player props — one rule ships` --references--> `run_nba_prop_window()`  [INFERRED]
   docs/nba_models_2026.md → scheduler.py
+- `What the archived number is (timing)` --references--> `inserted_minus_start_min()`  [INFERRED]
+  docs/nba_public_splits.md → data/ingestors/nba_public_splits_ingestor.py
+- `Forward capture (2026-27)` --references--> `run_forward()`  [INFERRED]
+  docs/nba_public_splits.md → data/ingestors/nba_public_splits_ingestor.py
 - `Table` --references--> `over()`  [INFERRED]
   docs/nba_public_splits.md → mobile/scripts/verify_contrast_tokens.ts
-- `Tables (all worker-only, locked down where they are created)` --references--> `diagnostics()`  [INFERRED]
-  docs/nba_pbp_stints.md → scripts/nfl_edge_inplay_2025.py
-- `2. Data used (all in Supabase)` --references--> `odds()`  [INFERRED]
-  docs/nba_models_2026.md → tests/test_latest_line_state.py
 
 ## Import Cycles
 - None detected.
@@ -3799,7 +3801,7 @@ Nodes (3): parse_clock(), test_field_goal_value(), test_parse_clock()
   docs/privacy.html · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **105 isolated node(s):** `RFC-4122`, `@babel/core`, `babel-plugin-module-resolver`, `babel-preset-expo`, `expo-asset` (+100 more)
+- **105 isolated node(s):** `expo-asset`, `expo-dev-client`, `expo-font`, `react-native-purchases`, `react-native-screens` (+100 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 11058 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **220 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -3807,17 +3809,17 @@ Nodes (3): parse_clock(), test_field_goal_value(), test_parse_clock()
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Table` connect `NBA public splits pipeline step` to `mobile/scripts/verify_contrast_tokens.ts`, `Latest line state rebuild tests`?**
-  _High betweenness centrality (0.213) - this node is a cross-community bridge._
-- **What connects `RFC-4122`, `@babel/core`, `babel-plugin-module-resolver` to the rest of the system?**
+  _High betweenness centrality (0.180) - this node is a cross-community bridge._
+- **What connects `expo-asset`, `expo-dev-client`, `expo-font` to the rest of the system?**
   _105 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Injury report ingestion with WNBA fallback` be split into smaller, more focused modules?**
   _Cohesion score 0.04480874316939891 - nodes in this community are weakly interconnected._
 - **Why does `over()` connect `mobile/scripts/verify_contrast_tokens.ts` to `Mobile bankroll number formatting`, `NBA public splits pipeline step`?**
-  _High betweenness centrality (0.213) - this node is a cross-community bridge._
+  _High betweenness centrality (0.180) - this node is a cross-community bridge._
 - **Should `Mobile stats board` be split into smaller, more focused modules?**
   _Cohesion score 0.014417956909969689 - nodes in this community are weakly interconnected._
 - **Why does `inserted_minus_start_min()` connect `NBA public splits pipeline step` to `NBA public betting splits ingestor`, `NBA public betting splits ingestor tests`?**
-  _High betweenness centrality (0.120) - this node is a cross-community bridge._
+  _High betweenness centrality (0.105) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

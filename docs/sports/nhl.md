@@ -22,7 +22,9 @@
 >   7 bets for +1.1 units, against 31 for -4.9 the early one actually made.
 >   The 7 are all among the 31 and on the same outcome, at a better average
 >   price (+173 against +159). The 24 it would not have made lost 5.8 units.
->   About 120 games: this rules out "clearly worse", nothing more.
+>   About 120 games: this rules out "clearly worse", nothing more. A game
+>   that starts by 16:00Z has no window, so neither model bets it. None of
+>   the first 136 games of 2026-27 did; a Europe game would.
 > - Both side models' rows for a game are held back and checked before they
 >   are written (`_apply_side_conflicts`). Each pick maps to the endings it
 >   wins on. A BET already standing on the game keeps it, and the new pick is

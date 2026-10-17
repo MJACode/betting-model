@@ -4025,14 +4025,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             # never reaches this log. Bind model_id: the loop
                             # variable would otherwise score every model as
                             # the last one.
+                            # A side model's rows come back unwritten
+                            # (write=False) for the check below; every other
+                            # model is called exactly as before.
                             hold = model_id in side_models
                             picks = _call_in_savepoint(
                                 conn, "sp_model_game",
-                                lambda model_id=model_id, hold=hold: score_game(
+                                lambda model_id=model_id: score_game(
                                     conn, game_id, model_id, features,
                                     bankroll, dry_run=dry_run,
                                     commence_time=commence_time,
-                                    write=not hold))
+                                    **({"write": False} if model_id in side_models else {})))
                         except ConnectionLost:
                             raise                      # the game's unit, not the model's
                         except Exception as exc:
