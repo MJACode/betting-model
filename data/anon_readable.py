@@ -70,7 +70,7 @@ ANON_READABLE: tuple[str, ...] = (
     # Build Your Own Model facts (2026-10-16). Granted before the screen
     # exists: an undeclared table arrives with no SELECT and the first read
     # is an empty error. Nothing in mobile/src names these yet, so they are
-    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
+    # also AHEAD_OF_THE_APP. Display data only: win, loss, or push.
     "byom_game_facts",
     "byom_prop_facts",
     "tracked_bets",

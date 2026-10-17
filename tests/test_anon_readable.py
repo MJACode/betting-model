@@ -464,21 +464,40 @@ def test_every_worker_only_create_site_goes_through_the_gated_helper():
     # it is exempt in tests/test_ddl_guard.py for the same reason.
     EXEMPT = {"data/db_setup.py"}
 
+    def _create_sources():
+        yield from _repo_sources()
+        root = Path(__file__).resolve().parents[1]
+        for path in sorted((root / "data" / "migrations").glob("*.sql")):
+            rel = path.relative_to(root).as_posix()
+            yield rel, path.read_text(encoding="utf-8")
+
+    sources = list(_create_sources())
     creators: dict[str, list[str]] = {}
-    for rel, src in _repo_sources():
+    for rel, src in sources:
         if rel in EXEMPT:
             continue
         for table in WORKER_ONLY_TABLES:
-            if re.search(rf"CREATE TABLE IF NOT EXISTS {table}\b", src):
+            # Migrations qualify the name (`public.<table>`). A Python
+            # create site does not. Both are the create.
+            if re.search(rf"CREATE TABLE IF NOT EXISTS (?:public\.)?{table}\b", src):
                 creators.setdefault(table, []).append(rel)
 
+    by_rel = dict(sources)
     for table, files in sorted(creators.items()):
         for rel in files:
-            src = dict(_repo_sources())[rel]
-            assert "lock_down(" in src, (
-                f"{rel} creates {table}, a worker-only table, but never calls "
-                f"lock_down(conn, ...). A sweep does not hold: the next run "
-                f"against a database without the table recreates it open.")
+            src = by_rel[rel]
+            if rel.endswith(".sql"):
+                # A migration cannot call lock_down(). The same two statements
+                # have to be in the file, after the catalog return.
+                assert "REVOKE" in src and "ENABLE ROW LEVEL SECURITY" in src, (
+                    f"{rel} creates {table}, a worker-only table, but does not "
+                    f"revoke and enable RLS. The next apply against a database "
+                    f"without the table recreates it open.")
+            else:
+                assert "lock_down(" in src, (
+                    f"{rel} creates {table}, a worker-only table, but never calls "
+                    f"lock_down(conn, ...). A sweep does not hold: the next run "
+                    f"against a database without the table recreates it open.")
 
     # EVERY worker-only table must have a create site, or it belongs in
     # ARCHIVE_TABLES instead -- that distinction is the whole reason there are

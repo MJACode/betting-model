@@ -24,17 +24,49 @@ and no unit column. Pushes and ties are stored.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
-empty until someone runs the builder with `--apply`. That job is
+empty until someone runs a builder with `--apply`. The game job is
 `byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false,
-and the job is not in `jobs/declared_jobs.json`, so a merge does not
+and that job is not in `jobs/declared_jobs.json`, so a merge does not
 backfill production.
 
-The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
-Seasons before `DK_HISTORY_START_SEASON` (2020) are refused. For each
-game it takes the latest DraftKings spread and the latest DraftKings
-total whose snapshot is at or before kickoff, from `nfl_odds_history`
-and `odds` together. That number is the line. `line_basis` is
-`DraftKings line at game start` on every built row, including a row
-whose spread and total are null. Moneyline is graded from the score
-and does not read a price. The builder reads one game at a time.
-Other books are not read. A season is not loaded in one fetch.
+The game builder is `byom/load.py` (`scripts/byom_game_facts.py` for a
+dry run). Seasons before `DK_HISTORY_START_SEASON` (2020) are refused.
+For each game it takes the latest DraftKings spread and the latest
+DraftKings total whose snapshot is at or before kickoff, from
+`nfl_odds_history` and `odds` together. That number is the line.
+`line_basis` is `DraftKings line at game start` on every built row,
+including a row whose spread and total are null. Moneyline is graded
+from the score and does not read a price. The builder reads one game
+at a time. Other books are not read. A season is not loaded in one fetch.
+
+## Prop facts
+
+`byom_prop_facts` is one standard prop at the DraftKings line at game
+start: the last DraftKings snapshot at or before kickoff.
+`player_prop_odds` is the source, from `2023-09-01`
+(`PROP_HISTORY_START_DATE`). Seasons before 2023 are refused. The same
+`line_basis` label is stored on the row. The line is not a filter. A
+market key ending in `_alternate` is an alt ladder and is not built.
+There is no price column and no unit column. A rebuild deletes that
+game's prop rows in the same transaction, then inserts the rows this
+pass produced.
+
+The stat is `nfl_player_game_log`. `log_status` says which rule fired:
+
+| status | meaning |
+|---|---|
+| `logged` | one log row matches the normalised name; `actual` is that stat |
+| `non_participant` | the game's log has rows and this name is not among them; `actual` is 0. A player whose row never landed looks the same as a scratch |
+| `missing_log` | the game has a score and the log has zero rows. Results stay NULL. A missing file is not a loss |
+| `unplayed` | no final score. The line is kept. Results stay NULL |
+| `ambiguous` | two log rows normalise to the same name and the quote's team does not pick exactly one. No guess. Results stay NULL |
+
+Anytime TD is `rushing_tds + receiving_tds`. Passing TDs are
+`player_pass_tds`. A return or defensive touchdown is not in the weekly
+file, so a score that is only a return grades as a loss. The name match
+does not expand nicknames, so Josh and Joshua do not meet.
+
+`log_status` is on the facts schema. The job `byom_prop_facts` defaults
+`apply` to false. `jobs/declared_jobs.json` lists `byom-nfl-prop-facts`
+with `enabled` false and `apply` false, so a merge does not enqueue a
+writer. The builder reads one game at a time.

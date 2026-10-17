@@ -1846,6 +1846,41 @@ def _validate_byom_game_facts(args: dict) -> dict:
     return {"sport": sport, "season": season, "apply": apply}
 
 
+def _validate_byom_prop_facts(args: dict) -> dict:
+    """NFL prop facts. apply defaults false. Seasons before the prop
+    history start are refused."""
+    from byom.constants import PROP_HISTORY_START_SEASON
+
+    sport = str(args.get("sport") or "NFL")
+    if sport != "NFL":
+        raise ValueError(f"byom_prop_facts builds NFL only, got {sport!r}")
+    season = args.get("season")
+    if season in (None, ""):
+        season = None
+    else:
+        season = int(season)
+        if season < PROP_HISTORY_START_SEASON:
+            raise ValueError(
+                f"season {season} is before player_prop_odds history "
+                f"({PROP_HISTORY_START_SEASON})")
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    return {"sport": sport, "season": season, "apply": apply}
+
+
+def _job_byom_prop_facts(**kw):
+    """Write byom_prop_facts. Does not touch picks or a live model."""
+    from data.db import get_connection
+    from byom.prop_load import build_seasons
+
+    conn = get_connection()
+    try:
+        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+    finally:
+        conn.close()
+
+
 def _job_byom_game_facts(**kw):
     """Write byom_game_facts. Does not touch picks or a live model."""
     from data.db import get_connection
@@ -1945,10 +1980,13 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Not listed
-    # in jobs/declared_jobs.json, so a merge does not backfill production.
-    # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
+    # NFL Build Your Own Model game facts. apply defaults false. Not in
+    # jobs/declared_jobs.json, so a merge does not enqueue a writer.
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
+    # NFL prop facts. apply defaults false. Listed in declared_jobs.json
+    # with enabled false and apply false, so a merge does not enqueue a
+    # writer.
+    "byom_prop_facts": (_job_byom_prop_facts, _validate_byom_prop_facts),
 }
 
 
@@ -2025,6 +2063,12 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
     queued = []
     for entry in declared if isinstance(declared, list) else []:
         try:
+            # Missing `enabled` stays on. Only the boolean false is off, so
+            # a string or a 0 does not silently drop a job that was meant
+            # to run. A declared BYOM entry ships false until the owner sets
+            # it true and sets apply true in the same change.
+            if entry.get("enabled", True) is False:
+                continue
             key = str(entry["key"])
             job_id = enqueue(conn, entry["job_type"], entry.get("args") or {},
                              requested_by=entry.get("requested_by", "declared"),
