@@ -282,7 +282,7 @@ check(
       && screen.includes('return modeLineLabel(line, side, mode, true);')
       // Two lines (was one). "3 or fewer" was clipped at large text inside the
       // 62-93pt column. Other sports still print the short form ("3+", "O 2.5").
-      && /style=\{\[styles\.oddsCaption[\s\S]{0,120}?numberOfLines=\{2\}/.test(screen));
+      && /style=\{\[styles\.oddsCaption[\s\S]{0,180}?numberOfLines=\{sport === 'NHL' \? 2 : 1\}/.test(screen));
 
   // Two idioms, two homes, and neither is spoken in the other's sentence.
   // The betslip explainer quotes the board headline and the book's number in

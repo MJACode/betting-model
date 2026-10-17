@@ -33,7 +33,7 @@ import {
 import { lineLegLabel, nhlBookListing, nhlLegPhrase, propLineSheetInput } from '../src/lib/lineLegs';
 import type { StatsOddsQuote } from '../src/lib/statsOdds';
 import { lineOnlyRowLabel, listsPricedWithoutLog, needsTouchSet, rankedBoardChrome } from '../src/lib/statsBoard';
-import { hitModeHeadline, selectionFor } from '../src/lib/hitMode';
+import { bookLineLabel, hitModeHeadline, selectionFor } from '../src/lib/hitMode';
 import { defaultLineN } from '../src/lib/lineRuler';
 import { oneWayMarket, propDisplayLabel } from '../src/lib/markets';
 import type { Sport } from '../src/hooks/useSportFilter';
@@ -117,6 +117,8 @@ check('the four captions are one sentence',
   && nhlBetCaption(0.5, 'assists') === '1 or more assists');
 check('anytime goals are captioned only at the priced 0.5',
   nhlBetCaption(1.5, 'goals') === null && nhlBetCaption(0.5, 'shots') === '1 or more shots');
+check('a whole-number line is not spoken half a count higher',
+  nhlBetCaption(2, 'shots') === null && nhlBetCaption(2, 'points') === null);
 const shotsLeg = {
   kind: 'prop' as const,
   game_id: 'g',
@@ -167,6 +169,15 @@ const offSheet = propLineSheetInput(
 );
 check('an off-line NHL sheet says the bet differs, then how the book lists it',
   offSheet.explainer === 'The board is on 3 or more shots; FanDuel only posts 2 or more shots. FanDuel lists this as Over 1.5. Add it to your betslip now — you’ll choose the sportsbook there.');
+const wholeOff = propLineSheetInput(
+  { ...sheetQuote, line: 2, offLine: true, book: 'fanduel' },
+  'NHL',
+  'Shots',
+  '3 or more shots',
+  (l, sd) => nhlBetCaption(l, 'shots') ?? bookLineLabel(l, sd),
+);
+check('a whole-number off-line sentence does not add 0.5',
+  wholeOff.explainer === 'The board is on 3 or more shots; FanDuel only posts Over 2. FanDuel lists this as Over 2. Add it to your betslip now — you’ll choose the sportsbook there.');
 check('Shots opens on the posted line once per NHL visit',
   shouldOpenShotsLine('NHL', 'shots', 1.5, null)
   && !shouldOpenShotsLine('NHL', 'shots', 1.5, 'NHL')
@@ -243,7 +254,8 @@ check('the filter count goes through the same chrome',
 check('an NHL off-line pill uses the plain count',
   screen.includes('const plain = nhlOffLineCount(line, side);')
   && screen.includes('if (plain != null) return plain;')
-  && screen.includes('numberOfLines={2}'));
+  && screen.includes("numberOfLines={sport === 'NHL' ? 2 : 1}")
+  && screen.includes('nhlBetCaption(l, String(stat.key)) ?? bookLineLabel(l, sd)'));
 check('the load error is not capped at three lines',
   screen.includes('Couldn’t load the board.') && !screen.includes('numberOfLines={3}'));
 const sheetSrc = read('src/components/AddLineSheet.tsx');

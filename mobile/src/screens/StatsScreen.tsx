@@ -79,6 +79,7 @@ import {
 } from '@/lib/gameFilter';
 import { computeHitRate, hitRateBandOf, hitRateColorDiscriminates } from '@/lib/hitRate';
 import {
+  bookLineLabel,
   hitModeHeadline,
   hitModeLabel,
   hitModeLineLabel,
@@ -1986,7 +1987,7 @@ export function StatsScreen() {
               betLabel,
               lineHeadline,
               sport === 'NHL' && stat
-                ? (l, sd) => nhlBetCaption(l, String(stat.key)) ?? modeLineLabel(l, sd, hitMode)
+                ? (l, sd) => nhlBetCaption(l, String(stat.key)) ?? bookLineLabel(l, sd)
                 : (l, sd) => modeLineLabel(l, sd, hitMode),
             ),
             ...(sport === 'NHL' && stat && nhlBetCaption(lineSheet.line, String(stat.key))
@@ -3510,10 +3511,10 @@ function OddsCell({
   // translation (UX review). statsOdds offLine.
   //
   // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first. The column
-  // is 62-93pt and the text scales with Dynamic Type. Two lines, not one:
-  // "3 or fewer" was ellipsized at large text, and losing the count hides that
-  // the price is a different bet (UX review, 2026-09-12, and the follow-up on
-  // the longer NHL words). The day is what a third line would have carried.
+  // is 62-93pt and the text scales with Dynamic Type. NHL may use a second
+  // line so "3 or fewer" is not ellipsized. Other sports stay on one line:
+  // "Under 224.5" wrapping made one row taller than its neighbours (UX review,
+  // 2026-09-12). The day is what a third line would have carried.
   // VoiceOver reads both regardless — see `label` above.
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
@@ -3549,7 +3550,7 @@ function OddsCell({
         // present, regular when the caption is only a day.
         <Text
           style={[styles.oddsCaption, !lineCaption && styles.oddsCaptionDay]}
-          numberOfLines={2}
+          numberOfLines={sport === 'NHL' ? 2 : 1}
         >
           {caption}
         </Text>

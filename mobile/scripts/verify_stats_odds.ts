@@ -445,13 +445,15 @@ check(
     nearestLine([1.5, 3.5], 2.5, 'over') === 1.5 && nearestLine([1.5, 3.5], 2.5, 'under') === 3.5);
   check('an off-line row prices the side it posts even with the other side missing', under.get('george springer')?.price === 230);
   const stats = read('src/screens/StatsScreen.tsx');
-  // The BOARD's idiom, whichever one that is (2026-09-06). Abbreviated and
-  // capped at one line: "Under 224.5" wrapped inside the 62pt odds column and
-  // made one row of a 25-row board taller than its neighbours (UX review).
+  // The BOARD's idiom, whichever one that is (2026-09-06). Other sports stay
+  // on one line: "Under 224.5" wrapped inside the 62pt odds column and made
+  // one row of a 25-row board taller than its neighbours (UX review). NHL may
+  // use a second line for "3 or fewer". The assertion is the caption's own
+  // numberOfLines, not a `{1}` that also appears on the price.
   check('the pill prints the off-line number under the price, in the board\'s idiom',
     stats.includes('const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;')
       && /styles\.oddsCaption, !lineCaption && styles\.oddsCaptionDay\]/.test(stats)
-      && /numberOfLines=\{1\}/.test(stats)
+      && /style=\{\[styles\.oddsCaption[\s\S]{0,180}?numberOfLines=\{sport === 'NHL' \? 2 : 1\}/.test(stats)
       && modeLineLabel(1.5, 'over', 'atLeast', true) === '2+'
       && modeLineLabel(1.5, 'over', 'over', true) === 'O 1.5'
       && modeLineLabel(1.5, 'under', 'under', true) === 'U 1.5');

@@ -51,7 +51,9 @@ export function nhlBetCaption(line: number, statKey: string): string | null {
     if (line !== 0.5) return null;
     return 'Anytime goal scorer: 1 or more goals';
   }
-  const n = line + 0.5;
+  // A whole number is not "line + 0.5 or more". 2 is not "2.5 or more shots".
+  const n = nhlPlainCount(line, 'over');
+  if (n == null) return null;
   const noun =
     statKey === 'shots' ? 'shots'
     : statKey === 'points' ? 'points'

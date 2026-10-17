@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: the two-line odds caption is NHL only; a whole-number off-line sentence says Over 2, not 2.5 or more |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: an off-line NHL sheet keeps the different-bet warning and then says how the book lists the line; half-point wording only; the pill caption may wrap to two lines |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: NHL betslip leg says Over 2.5 shots (3 or more); sheet explainer says DraftKings lists this as Over 1.5; sheet prices use U+2212; off-line pill says 3 or more |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: a missing or permission-denied player_window_totals_nhl (PGRST202/42883/42501) is an empty average so lines still show; Shots opens once per visit; Goals caption only at 0.5 |
