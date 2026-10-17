@@ -125,25 +125,40 @@ class _Clock:
         return self.t
 
 
-def test_one_run_stops_at_its_deadline_and_still_returns_a_cached_player():
-    """Each statement keeps the server's 120s timeout. The run does not get
-    another 120s per player."""
+class _Timed(_Rec):
+    """Each player-log statement costs `cost` seconds on `clock`."""
+
+    def __init__(self, clock: _Clock, cost: float):
+        super().__init__()
+        self.clock = clock
+        self.cost = cost
+
+    def execute(self, sql, params=None):
+        if isinstance(sql, str) and "player_id = %s" in sql:
+            self.clock.t += self.cost
+        return super().execute(sql, params)
+
+
+def test_the_deadline_counts_time_inside_the_log_reads():
+    """Scoring, quote reads and the gap between the two cards are not charged.
+    Time inside the player-log statements is. A cached player still comes
+    back after the budget is spent."""
     clock = _Clock()
     cache = np_.PlayerLogCache(deadline_s=120, clock=clock)
-    rec = _Rec()
+    rec = _Timed(clock, 40)
     np_.load_players(rec, "skater", [1], cache=cache)
-    clock.t = 119
+    clock.t += 500
     np_.load_players(rec, "skater", [2], cache=cache)
-    clock.t = 120
+    np_.load_players(rec, "skater", [3], cache=cache)
     try:
-        np_.load_players(rec, "skater", [3], cache=cache)
+        np_.load_players(rec, "skater", [4], cache=cache)
     except np_.PlayerLogDeadline:
         pass
     else:
-        raise AssertionError("a third player started after the run's 120s")
+        raise AssertionError("a fourth player started after 120s inside the reads")
     again = np_.load_players(rec, "skater", [1], cache=cache)
     assert again.empty
-    assert [p[0] for _, p in _player_calls(rec)] == [1, 2]
+    assert [p[0] for _, p in _player_calls(rec)] == [1, 2, 3]
 
 
 def test_the_card_hands_one_cache_to_every_market(monkeypatch):
@@ -243,3 +258,106 @@ def test_the_scoring_step_shares_one_cache_across_both_cards(monkeypatch):
     assert len(seen) == 2 and seen[0] is seen[1]
     assert isinstance(seen[0], np_.PlayerLogCache)
     assert seen[0].deadline_s == np_.PLAYER_LOG_DEADLINE_S
+
+
+def _publish_recorder(monkeypatch, blocked_fn, props_fn):
+    import run_pipeline
+    published: list = []
+
+    def fake_publish(rows):
+        published.append(list(rows))
+        return len(rows)
+
+    monkeypatch.setattr("scripts.nhl_prop_card.run_card", blocked_fn)
+    monkeypatch.setattr("scripts.nhl_props_card.run_card", props_fn)
+    monkeypatch.setattr("scripts.nhl_props_card.publish_across_models", fake_publish)
+    return run_pipeline, published
+
+
+def test_a_player_log_deadline_writes_no_bets_this_pass(monkeypatch):
+    """A market that dies on the deadline leaves an incomplete pool. A pick
+    written now would keep its game, because a later pass does not bet a game
+    that already has one. This pass writes nothing."""
+    row = {"game_id": "G1", "model_id": "nhl_prop_blocked_shots", "_ev": 0.3}
+
+    def fake_blocked(**k):
+        k["keep"]["rows"] = [row]
+        return {"bets": 1}
+
+    def fake_props(**k):
+        k["keep"]["nhl_prop_saves"] = {"rows": [
+            {"game_id": "G2", "model_id": "nhl_prop_saves", "_ev": 0.4}]}
+        return {
+            "date": "2026-10-17",
+            "nhl_prop_saves": {"priced": 1, "scored": 1, "bets": 1, "skipped": 0},
+            "nhl_prop_shots_on_goal": {
+                "error": "nhl player log: 120s run deadline reached before reading player_id 9",
+                "log_deadline": True,
+            },
+        }
+
+    run_pipeline, published = _publish_recorder(monkeypatch, fake_blocked, fake_props)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert published == []
+
+    def blocked_raises(**k):
+        raise np_.PlayerLogDeadline(
+            "nhl player log: 120s run deadline reached before reading player_id 3")
+
+    def props_finished(**k):
+        k["keep"]["nhl_prop_saves"] = {"rows": [
+            {"game_id": "G2", "model_id": "nhl_prop_saves", "_ev": 0.4}]}
+        return {"date": "2026-10-17",
+                "nhl_prop_saves": {"priced": 1, "scored": 1, "bets": 1, "skipped": 0}}
+
+    run_pipeline, published = _publish_recorder(monkeypatch, blocked_raises, props_finished)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert published == []
+
+
+def test_a_finished_pool_still_publishes(monkeypatch):
+    def fake_blocked(**k):
+        k["keep"]["rows"] = [{"game_id": "G1", "model_id": "nhl_prop_blocked_shots", "_ev": 0.3}]
+        return {"bets": 1}
+
+    def fake_props(**k):
+        k["keep"]["nhl_prop_saves"] = {"rows": [
+            {"game_id": "G2", "model_id": "nhl_prop_saves", "_ev": 0.4}]}
+        return {"date": "2026-10-17",
+                "nhl_prop_saves": {"priced": 1, "scored": 1, "bets": 1, "skipped": 0}}
+
+    run_pipeline, published = _publish_recorder(monkeypatch, fake_blocked, fake_props)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is True
+    assert [r["game_id"] for r in published[0]] == ["G1", "G2"]
+
+
+def test_the_card_writes_nothing_when_a_market_hits_the_deadline(monkeypatch):
+    published: list = []
+
+    def fake_score(conn, spec, games, game_date, artifact=None, log_cache=None):
+        if spec.model_id == "nhl_prop_shots_on_goal":
+            raise np_.PlayerLogDeadline(
+                "nhl player log: 120s run deadline reached before reading player_id 4")
+        return {"priced": 1, "mus": [1], "rows": [{"game_id": "G1", "model_id": spec.model_id}],
+                "skipped": []}
+
+    class Conn:
+        def close(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    def fake_publish(rows):
+        published.append(list(rows))
+        return len(rows)
+
+    monkeypatch.setattr(card, "score_market", fake_score)
+    monkeypatch.setattr(card, "get_connection", lambda: Conn())
+    monkeypatch.setattr(card, "slate", lambda conn, game_date, now: {})
+    monkeypatch.setattr(card, "publish_across_models", fake_publish)
+    out = card.run_card(game_date="2026-10-17", do_publish=True,
+                        now=datetime(2026, 10, 17, 16, tzinfo=timezone.utc))
+    assert out["nhl_prop_shots_on_goal"]["log_deadline"] is True
+    assert out["published"] == 0
+    assert published == []

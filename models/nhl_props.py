@@ -83,11 +83,12 @@ PARAMS = dict(objective="count:poisson", n_estimators=400, max_depth=4, learning
 # Rows appended for games not yet played carry ids from here up, so they can
 # never collide with a real NHL game id (ten digits) or sort before one.
 UPCOMING_ID0 = 10 ** 12
-# One budget for every uncached player-log read in a scoring run. The server
-# still cancels a single statement at 120s. A healthy dispatch:nhl-prop-scoring
-# run from 2026-10-04 through 2026-10-17 (697 successes in pipeline_log) took
-# 6.5s on average and 23.1s at most, so 120s is the run's ceiling, the same
-# number the server already uses for one statement.
+# Time inside uncached player-log statements, summed across the scoring run.
+# The server still cancels one statement at 120s. Scoring, quote reads and the
+# gap between the two cards are not part of this number. A healthy
+# dispatch:nhl-prop-scoring run from 2026-10-04 through 2026-10-17 (697
+# successes in pipeline_log) took 6.5s on average and 23.1s at most for the
+# whole step, so 120s of statement time is the run's ceiling.
 PLAYER_LOG_DEADLINE_S = 120.0
 
 
@@ -102,25 +103,33 @@ class PlayerLogDeadline(RuntimeError):
 class PlayerLogCache(dict):
     """Rows already read in one scoring run, and that run's log-read deadline.
 
-    The budget starts when the first uncached read starts. Every market that
-    shares this cache spends the same budget. A player already stored is
-    returned after the deadline.
+    The budget is time spent inside uncached player-log statements. Scoring,
+    quote reads, and the gap between the two cards are not charged. Every
+    market that shares this cache spends the same budget. A player already
+    stored is returned after the budget is spent.
     """
 
     def __init__(self, deadline_s: float = PLAYER_LOG_DEADLINE_S, clock=None):
         super().__init__()
         self.deadline_s = float(deadline_s)
         self._clock = clock or time.monotonic
-        self.started: float | None = None
+        self.spent_s = 0.0
+        self._open: float | None = None
 
     def begin(self) -> None:
-        if self.started is None:
-            self.started = self._clock()
+        if self._open is None:
+            self._open = self._clock()
+
+    def end(self) -> None:
+        if self._open is not None:
+            self.spent_s += max(0.0, self._clock() - self._open)
+            self._open = None
 
     def expired(self) -> bool:
-        if self.started is None:
-            return False
-        return (self._clock() - self.started) >= self.deadline_s
+        spent = self.spent_s
+        if self._open is not None:
+            spent += max(0.0, self._clock() - self._open)
+        return spent >= self.deadline_s
 
 
 SKATER_USAGE = ("toi_l", "toi_s", "pp_toi_l", "pp_toi_s", "is_home", "rest", "is_d", "gp")
@@ -220,7 +229,13 @@ def _rows_for_players(conn, sql: str, player_ids: list, cache: dict | None, kind
                         f"nhl player log: {store.deadline_s:.0f}s run deadline reached "
                         f"before reading player_id {pid}")
                 store.begin()
-            store[key] = conn.execute(sql + " AND player_id = %s", (pid,)).fetchall()
+                try:
+                    got = conn.execute(sql + " AND player_id = %s", (pid,)).fetchall()
+                finally:
+                    store.end()
+                store[key] = got
+            else:
+                store[key] = conn.execute(sql + " AND player_id = %s", (pid,)).fetchall()
         rows.extend(store[key])
     return rows
 

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, a player-log deadline writes no NHL prop bets this pass, so a pick from the incomplete pool cannot stick; the 120s budget is time inside the log statements |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NHL prop log reads are a safety net: `dispatch:nhl-prop-scoring` errored 6 times on 2026-10-02 and 4 on 2026-10-03, then 697 successes from 2026-10-04 through 2026-10-17 (average 6.5s, maximum 23.1s) on the original statement; one 120s deadline per run, and the blocked-shots card takes the shared cache |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master (`0d3b58b3`, #988) merged into the record-units branch; session logs keep both sides, newest first |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |

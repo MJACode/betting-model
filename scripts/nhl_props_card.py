@@ -486,10 +486,10 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     game_date = game_date or now.astimezone(ET).strftime("%Y-%m-%d")
     out: dict = {"date": game_date}
     conn = get_connection()
-    # One log cache and one 120s deadline for this run. The pipeline step
-    # passes the cache it already gave the blocked-shots card, so both cards
-    # spend one budget. Shots and assists price overlapping skaters; the
-    # second market reads only the ids the first did not.
+    # One log cache for this run. Its 120s is time inside the player-log
+    # statements, shared with the blocked-shots card when the step passes
+    # the cache in. Shots and assists price overlapping skaters; the second
+    # market reads only the ids the first did not.
     if log_cache is None:
         log_cache = np_.PlayerLogCache()
     try:
@@ -510,8 +510,17 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
                 conn.rollback()
                 logger.error(f"nhl-props-card: {spec.model_id} failed: {exc}")
                 out[spec.model_id] = {"error": str(exc)}
-        # Pooled, then one a game: the best bet across the markets, not the first market's.
-        out["published"] = publish_across_models(pooled) if (do_publish and pooled) else 0
+                if isinstance(exc, np_.PlayerLogDeadline):
+                    out[spec.model_id]["log_deadline"] = True
+        # A deadline means this pool is missing a market. A bet written now
+        # keeps its game: the next pass does not bet a game that already has
+        # one. Leave the picks for a pass that scored every market.
+        if any(isinstance(v, dict) and v.get("log_deadline") for v in out.values()):
+            logger.error("nhl-props-card: player-log deadline reached; writing no bets this pass")
+            out["published"] = 0
+        else:
+            # Pooled, then one a game: the best bet across the markets, not the first market's.
+            out["published"] = publish_across_models(pooled) if (do_publish and pooled) else 0
         return out
     finally:
         conn.close()

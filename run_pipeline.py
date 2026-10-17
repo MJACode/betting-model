@@ -956,15 +956,18 @@ def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
     (scripts/nhl_prop_card.py) and saves / shots on goal / assists
     (scripts/nhl_props_card.py) -- score without writing; their rows are then
     pooled and the single best-EV bet in each game not already bet is written
-    (mike, 2026-10-02: one a game, the best of the best). One card failing
-    does not stop the other's rows from being considered.
+    (mike, 2026-10-02: one a game, the best of the best).     One card failing
+    does not stop the other's rows from being considered. A player-log
+    deadline does stop the write: the pool is missing a market, and a bet
+    written now would keep its game on the next pass.
     """
     ok = True
     rows: list[dict] = []
-    from models.nhl_props import PlayerLogCache
-    # One cache and one 120s log-read budget for blocked shots and for
-    # saves / shots / assists. Each player statement still has the server's
-    # own statement_timeout; this is what stops those from stacking.
+    log_deadline = False
+    from models.nhl_props import PlayerLogCache, PlayerLogDeadline
+    # One cache for both cards. Its 120s is time inside the player-log
+    # statements, not scoring, quote reads, or the gap between the cards.
+    # Each statement still has the server's own statement_timeout.
     log_cache = PlayerLogCache()
     try:
         from scripts.nhl_prop_card import run_card
@@ -975,11 +978,15 @@ def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
     except Exception as exc:
         logger.error(f"✗ NHL prop card failed: {exc}")
         ok = False
+        if isinstance(exc, PlayerLogDeadline):
+            log_deadline = True
     try:
         from scripts.nhl_props_card import run_card as run_props_card
         keep = {}
         result = run_props_card(do_publish=False, keep=keep, log_cache=log_cache)
         rows += [r for k in keep.values() for r in k.get("rows", [])]
+        if any(isinstance(v, dict) and v.get("log_deadline") for v in result.values()):
+            log_deadline = True
         failed = [m for m, r in result.items() if isinstance(r, dict) and "error" in r]
         if failed:
             logger.error(f"✗ NHL saves / shots / assists card failed for {failed}: {result}")
@@ -989,8 +996,13 @@ def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
     except Exception as exc:
         logger.error(f"✗ NHL saves / shots / assists card failed: {exc}")
         ok = False
+        if isinstance(exc, PlayerLogDeadline):
+            log_deadline = True
     if dry_run:
         return ok
+    if log_deadline:
+        logger.error("nhl-prop-scoring: player-log deadline reached; writing no bets this pass")
+        return False
     try:
         from scripts.nhl_props_card import publish_across_models
         logger.success(f"✓ NHL prop bets written: {publish_across_models(rows)} (one a game, all four models)")
