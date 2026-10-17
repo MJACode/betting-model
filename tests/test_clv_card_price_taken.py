@@ -26,6 +26,10 @@ import pytest
 from tracking import paper_tracker as pt
 
 ROOT = Path(__file__).parent.parent
+
+from tests._node import node_exe, node_strips_types  # noqa: E402
+
+NODE = node_exe()
 CLV_BET = (ROOT / "mobile/src/lib/clvBet.ts").read_text(encoding="utf-8")
 DETAIL = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
 
@@ -146,7 +150,7 @@ const got = cases.map((c) => {{
 process.stdout.write(JSON.stringify(got));
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -170,14 +174,14 @@ def test_a_recorded_book_differs_from_the_derived_one():
     assert derived[0] != want[0] and derived[1] == want[1], (derived, want)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs node (CI has 22)")
+@pytest.mark.skipif(NODE is None, reason="needs node >= 22.6")
 def test_the_app_prefers_the_recorded_book_at_the_derived_price():
     got = _app([row for row, _ in RECORDED])
     for (row, want), g in zip(RECORDED, got):
         assert g[:2] == want, (row, g, want)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs node (CI has 22)")
+@pytest.mark.skipif(NODE is None, reason="needs node >= 22.6")
 def test_the_app_prices_every_row_as_the_server_grades_it():
     want = [_server(c) for c in CASES]
     got = _app(CASES)
@@ -190,11 +194,7 @@ def test_the_app_prices_every_row_as_the_server_grades_it():
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
@@ -238,7 +238,7 @@ const dkPick = { ...pick, pick_label: 'CIN @ MIA Under 42.5 (Wind 11 mph, DK) ·
 eq(sev(movementFromLatest(dkPick, dk(41.5), [])), ['skip', 42.5, 41.5], 'DraftKings pick, DraftKings line');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr

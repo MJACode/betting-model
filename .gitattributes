@@ -6,3 +6,7 @@ ncaaf_live/data/artifacts/* -text
 # Inactive historical pkls may still exist as regular git blobs in history.
 # New inactive pkls should not be added (see .gitignore). Active pkls remain
 # normal git blobs so the Railway checkout can score without LFS.
+
+# graphify outputs are machine-written JSON/HTML, rewritten whole by `graphify
+# update .`. Never translate line endings or every checkout shows them modified.
+graphify-out/** -text

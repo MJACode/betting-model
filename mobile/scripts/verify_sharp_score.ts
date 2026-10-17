@@ -145,10 +145,12 @@ check('tiny sample → pedigree neutral 20, not trusted', Math.round(unproven.pa
 // 0.225 (session 60) and this assertion, which pinned the resulting 20, went
 // red and stayed red. Assert the SHAPE (prob above the bar earns a positive,
 // bounded edge part) so a future threshold change cannot make it a false alarm.
-// Fixture is nba_prop_player_dd since 2026-09-02: HR was RETIRED and left
-// PROB_ONLY_MODELS with it. The "at the bar" probe sits just above its cut.
+// Fixture is ufc_method_of_victory, the one live prob-only model: HR was
+// RETIRED 2026-09-02 and nba_prop_player_dd with the NBA rebuild, and a
+// retired model has no ACTION_THRESHOLDS entry to read the bar from. The "at
+// the bar" probe sits just above its cut.
 setModelClv(null);
-const PROB_ONLY_ID = 'nba_prop_player_dd';
+const PROB_ONLY_ID = 'ufc_method_of_victory';
 const probOnlyBar = ACTION_THRESHOLDS[PROB_ONLY_ID]!.min_prob;
 const probOnly = sharpScore(mkPick({ model_id: PROB_ONLY_ID, edge: 0, model_probability: 0.7 }))!;
 check('prob-only → edge part derived from prob, not from edge',

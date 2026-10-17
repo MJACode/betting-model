@@ -531,6 +531,78 @@ for -1.908 units, EV at close +2.96% on the 5 that closed at the same number.
 On a whole number (6.0) the stated EV ignores the push, so it overstates the
 true EV by the push share; the lab did the same.
 
+## NBA — `nba_prop_market`, the 2026-27 rule (2026-10-15, mike)
+
+The twelve 2026-06-19 NBA models are retired (`config.RETIRED_MODELS`). One
+model replaces them: unders at the best bettable book on Pinnacle's own line,
+in the same fetch, decided 45-57 minutes before the scheduled tip
+(`models/nba_prop_market.py`, `scripts/nba_prop_market_card.py`; the grid and
+every bar are in `docs/nba_models_2026.md` 4.3).
+
+| Setting | Value | Where |
+|---|---|---|
+| prob / edge cut | 0.0 / 0.0 — the cut is EV | `ACTION_THRESHOLDS`, both threshold dicts |
+| EV floor | 0.00, on Pinnacle's proportional no-vig under | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned | `MODEL_MIN_ODDS` |
+| caps | none: every qualifying proposition, one bet per (game, player, market) (mike, 2026-10-16: "maximize units won") | `models/nba_prop_market.py` |
+| decided once | the first look 45-57 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions`, never looked at again | `scripts/nba_prop_market_card.py` |
+| looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-62 min from tip | `scheduler.run_nba_prop_window` |
+| stale soft quote | refused when its clock is > 10 min behind Pinnacle's | same |
+
+Graded on 2023-24..2025-26 at the best bettable price: every proposition
+25,204 bets +2.85% (90% CI +1.75..+3.96); at -200 with no double/triple-double
+-- the population the card bets -- 24,572 bets, +781.3 units, +2.96%
+(+1.85..+4.05), +393.6 / +220.5 / +167.1 units by season: about +260 units a
+season, about 50 bets a night (median 50, most 119). The one-a-game, four-a-night
+caps it shipped with on 10-15 made +94.9 units on 1,862 bets over the same seasons. Neighbouring floors:
++2.1% at EV -0.01, +3.1% at 0.01. Expect about +2% live.
+
+**Prices it lays:** the -200 floor; on the bet list, min -200, 5th percentile -143,
+median -105, 95th +128, max +230; 38% plus money, 3.5% at -150 or shorter.
+
+**Decision timing:** the graded snapshot sat 54.4 minutes before tip for 87% of
+bets and 64.4 for 13% (50-60 min +2.95% on 21,252; 60-70 min +2.97% on 3,146,
+CI +0.09..+5.85). It shipped deciding inside 45-70, and with a look every five
+minutes the first look inside 45-70 came about 70 minutes before an on-the-hour
+tip, a lead nothing was graded at. **From 2026-10-16 the window is 45-57**: the
+first look lands 55 minutes before any tip on a five-minute mark (53-57 for any
+other), the lead 87% of the graded bets were decided at
+(`docs/nba_models_2026.md` 4.3; `tests/test_nba_prop_window.py`).
+
+Closing-line value is measured from the first night: each bet game gets a `'close'` prop snapshot 12-25
+minutes before tip (`data/ingestors/nba_prop_close_ingestor.py`).
+
+## NBA — `nba_prop_projection`, the projection model (2026-10-16, mike)
+
+Each player's projected count (minutes × per-minute rate, a negative-binomial
+width, a per-market calibration map), priced at the consensus main line, every
+qualifying proposition, never one `nba_prop_market` holds
+(`models/nba_prop_projection.py`, `scripts/nba_prop_projection_card.py`; the
+search and every check are in `docs/nba_models_2026.md` §5).
+
+| Setting | Value | Where |
+|---|---|---|
+| prob / edge cut | 0.0 / 0.0 — the cut is EV, per market | `ACTION_THRESHOLDS`, both threshold dicts |
+| the cells | steals over+under 0.02; rebounds under 0.01; blocks+steals over+under 0.05; blocks under 0.02; rebounds+assists under 0.04; threes over+under 0.04 | `models/nba_prop_projection.CARD` |
+| EV floor | 0.01 (the lowest cell's), each cell's own floor on top; on its own calibrated probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned | `MODEL_MIN_ODDS` |
+| caps | none: every qualifying proposition (mike, 2026-10-16: "maximize units won") | — |
+| decided once | the first look 45-57 min before tip, after `nba_prop_market` has decided the game (or alone from 50 min out); a row in `nba_prop_projection_decisions` | `scripts/nba_prop_projection_card.py` |
+| stale quote | refused when its clock is > 10 min behind the freshest book's for the same market in the same fetch | `models/nba_prop_projection.py` |
+| not bet | assists overs (chosen by the search, failed on 2025-26), points and the scoring combos, turnovers, double-doubles | `docs/nba_models_2026.md` §5 |
+
+Graded 2023-24..2025-26, -200 floor, every qualifying proposition: at the five
+books the 2026-27 feed returns, 66,588 bets, +2,392.8 units, +3.60% (90% CI
++2.93..+4.32), +1,125.2 / +433.3 / +834.4 units by season, about 130 bets a night
+(median 131, most 362); at all eight bettable books 83,360 bets, +3,410.1 units,
++4.12% (+3.49..+4.77); at DraftKings alone +2.46%. Expect less live (a 546-cell
+search; +1.45% at the second-best book).
+
+**Prices it lays:** min -200, 5th percentile -166, median +108, 95th +170, max
++3000; 64% plus money, 9% at -150 or shorter; the +1,600..+3,000 tail is threes
+overs at 0.5 from one book. The probability shown is an upper bound (claimed
+0.533, won 0.501 in the band bet).
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the

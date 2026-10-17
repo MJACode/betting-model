@@ -132,8 +132,9 @@ def test_ambiguity_is_a_miss_not_a_guess():
 # ── every prop path uses the resolved spelling ───────────────────────────────
 
 def test_every_prop_lane_keys_line_shopping_on_the_resolved_name():
-    """MLB, WNBA, NBA, NFL and the pitcher lane all build _best_ctx right after
-    _get_prop_dk_odds. A lane that kept the roster spelling would line-shop a
+    """MLB, WNBA, NFL and the pitcher lane all build _best_ctx right after
+    _get_prop_dk_odds (the NBA lane left 2026-10-15 with its retired models;
+    the NBA prop rule pairs books on the resolved player id instead). A lane that kept the roster spelling would line-shop a
     name the odds table doesn't hold (§1b: one gap fixed in one sport is a gap
     left in five)."""
     src = (REPO / "models" / "scorer.py").read_text(encoding="utf-8")
@@ -147,4 +148,4 @@ def test_every_prop_lane_keys_line_shopping_on_the_resolved_name():
         r'_best_ctx = \(game_id,\s*\n\s*\(prop_odds or \{\}\)\.get\("player_name"\) or player_name,',
         src,
     ))
-    assert lanes == resolved == 5, f"{lanes} prop lanes, {resolved} using the resolved name"
+    assert lanes == resolved == 4, f"{lanes} prop lanes, {resolved} using the resolved name"

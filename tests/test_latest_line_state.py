@@ -4,9 +4,10 @@ real triggers on a real Postgres.
 WHY A REAL DATABASE. The migration is plpgsql over transition tables, ON
 CONFLICT guards and window functions; a Python re-implementation would test the
 re-implementation. So this runs against whatever Postgres LATEST_LINE_TEST_DSN
-points at (a scratch cluster: `initdb` + `pg_ctl`; the sandbox carries
-/usr/lib/postgresql/16/bin) and SKIPS where there is none -- Matt's Windows
-machine, the worker. The static shape is pinned separately in
+points at, or at a throwaway cluster tests/_pg.py starts from whichever
+initdb it finds (PATH, the sandbox's /usr/lib/postgresql/16/bin, or the
+`embedded-postgres` pip package in requirements-test.txt), and SKIPS only
+when there is none -- the worker. The static shape is pinned separately in
 tests/test_latest_odds_views.py, which always runs.
 
 Every assertion here was watched failing under a mutation of the migration
@@ -23,9 +24,18 @@ import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
 
-DSN = os.environ.get("LATEST_LINE_TEST_DSN")
-pytestmark = pytest.mark.skipif(
-    not DSN, reason="LATEST_LINE_TEST_DSN not set -- needs a scratch Postgres")
+from tests._pg import can_scratch, env_dsn, scratch_cluster  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def dsn():
+    if env_dsn():
+        yield env_dsn()
+        return
+    if not can_scratch():
+        pytest.skip("LATEST_LINE_TEST_DSN not set and no initdb -- needs a scratch Postgres")
+    with scratch_cluster("latest-line-pg-") as d:
+        yield d
 
 ROOT = Path(__file__).parent.parent
 MIGRATION = ROOT / "data" / "migrations" / "latest_line_state_tables.sql"
@@ -69,8 +79,9 @@ INSERT INTO games VALUES ('G1', 'MLB', '2026-09-05', 'HOU', 'ARI', '2026-09-05T2
 
 
 @pytest.fixture
-def db():
-    conn = psycopg2.connect(DSN)
+def db(dsn):
+    conn = psycopg2.connect(dsn)
+    conn.set_client_encoding("UTF8")  # the migration carries box-drawing characters
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(SCHEMA)

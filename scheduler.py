@@ -18,6 +18,13 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * Daily full pipeline   6:00am ET            -> python run_pipeline.py
   * Hourly refresh        :17, 7am-5pm ET      -> bash scripts/refresh_pass.sh
   * Evening 10-min refresh every :00..:50, 6-11pm ET -> bash scripts/refresh_pass.sh
+  * NBA prop window       every 5 min, 24x7     -> run_nba_prop_window
+        (scripts/nba_prop_window.py: props for exactly the NBA games 40-62
+        minutes from tip and not yet decided, then the nba_prop_market card,
+        the closing snapshot for bet games 12-25 minutes out, and publish.
+        Returns without an API call when no game is in either range. mike,
+        2026-10-16: "we're not leaving our games" -- the hourly passes put no
+        look 45-57 minutes before any tip at or before 6pm ET.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -563,7 +570,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "failure_alerter",
                   "calibration_watch",
                   "model_quality",
-                  "kalshi_ladders", "kalshi_game_markets"}
+                  "kalshi_ladders", "kalshi_game_markets",
+                  # Writes picks through the same card as the refresh pass,
+                  # so it lives beside the passes, not with the loops.
+                  "nba_prop_window"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -991,6 +1001,76 @@ def run_nfl_prop_card() -> None:
     _publish_new_signals("nfl-prop-card")
 
 
+# Each step of an NBA prop window tick is bounded, and the DECIDING steps
+# (fetch, both cards, close) fit inside one five-minute tick together
+# (max_instances=1 turns one stuck step into skipped ticks -- the 2026-10-11 NFL
+# poll, see _run). The fetch is one event call per game about to be decided;
+# the cards and the close are a read and a handful of writes, plus one event
+# call per bet game owed a close. The PROJECTING steps run after them, on the
+# tick about an hour before tip, so a slow frame never delays a decision: the
+# ESPN injury pull, then the frame over every box line since 2018-19.
+NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "card": 60, "projection_card": 60, "close": 60,
+                             "injuries": 60, "project": 240}
+
+
+def run_nba_prop_window() -> None:
+    """One NBA prop window tick: every game decided inside its window.
+
+    nba_prop_market and nba_prop_projection decide a game once, 45-57 minutes
+    before tip. The refresh passes cannot put a look there for any tip at or
+    before 6pm ET (hourly at :17 until 5pm), so this tick runs every five
+    minutes, 24x7. It reads what is stored first (scripts/nba_prop_window.plan)
+    and returns without an API call when no game is 40-62 minutes out and
+    undecided, no bet game is owed its closing snapshot and no game is due its
+    projection -- most ticks of most days.
+
+    Otherwise: fetch props for exactly the games to decide, run nba_prop_market's
+    card and then the projection card on that fetch, take any closing snapshot
+    that is due, and publish what the cards wrote. THEN, for the games about 65
+    minutes from tip, pull the ESPN injury list and store their projections (the
+    projection card prices them two ticks later, inside the window). A step
+    that fails or is killed raises AFTER publishing, so the heartbeat records
+    "error" and the failure alerter reports it, while a bet that was written
+    still goes out.
+    """
+    from scripts.nba_prop_window import plan_tick
+    plan = plan_tick()
+    if not plan.decide and not plan.close and not plan.project:
+        if plan.publish:
+            # Only a game near its tip: post anything still unposted for it.
+            _publish_new_signals("nba-prop-window")
+        return
+    log.info("NBA prop window: deciding %s; closes due %s; projecting %s",
+             plan.decide, plan.close, plan.project)
+    t = NBA_PROP_WINDOW_TIMEOUT_S
+    outcomes: dict[str, str] = {}
+    if plan.decide:
+        outcomes["nba-prop-window-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
+            "nba-prop-window-fetch", timeout=t["fetch"])
+        outcomes["nba-prop-market"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-market"],
+            "nba-prop-market", timeout=t["card"])
+        outcomes["nba-prop-projection"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-projection"],
+            "nba-prop-projection", timeout=t["projection_card"])
+    if plan.close:
+        outcomes["nba-prop-close"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-close"],
+            "nba-prop-close", timeout=t["close"])
+    _publish_new_signals("nba-prop-window")
+    if plan.project:
+        outcomes["nba-injuries"] = _run(
+            [sys.executable, "-m", "data.ingestors.injury_ingestor", "--sport", "NBA"],
+            "nba-injuries", timeout=t["injuries"])
+        outcomes["nba-prop-project"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_projection_card", "--project", *plan.project],
+            "nba-prop-project", timeout=t["project"])
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    if bad:
+        raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")
+
+
 def run_nfl_opener_card() -> None:
     """One opener tick: fetch the board, fire what qualifies, publish it.
 
@@ -1311,6 +1391,38 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
     except Exception:  # noqa: BLE001 — never block startup / the watch
         log.exception("daily catch-up [%s] failed (scheduler continues)", source)
         return {"status": "error", "reason": "catch-up raised"}
+
+
+def abort_orphaned_refresh_runs() -> int:
+    """Close refresh ledger rows the previous container left unfinished.
+
+    2026-10-16: evening run 06b9db72a43c4323ad5ed84abf00b591 was still open
+    at 11:25Z. The 04:17Z deploy killed it, later hourlies finished, and
+    `_abort_orphans` only closes the kind that is starting — so the evening
+    stayed unfinished until the next evening and `refresh_pass_completion`
+    counted it as stuck.
+
+    Once, before this process starts a pass. Only the service that owns the
+    refresh jobs: a poller restart must not stamp a pass the pipeline
+    service is still running. The cutoff freezes on the first call, so a
+    second call cannot abort a pass this process has since opened. Does not
+    touch `daily`. Best-effort: a ledger failure must not stop the scheduler.
+    """
+    if not owns("hourly_refresh"):
+        log.info("refresh orphan sweep: SERVICE_ROLE=%s does not own hourly_refresh",
+                 SERVICE_ROLE)
+        return 0
+    try:
+        from data.db import get_connection
+        from tracking.run_ledger import abort_prior_refresh_orphans
+        conn = get_connection()
+        try:
+            return abort_prior_refresh_orphans(conn)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — never block startup
+        log.exception("refresh orphan sweep failed (scheduler continues)")
+        return 0
 
 
 def catch_up_refresh_pass(*, source: str = "boot") -> dict:
@@ -1772,6 +1884,19 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_NFL_PROP_CARD=0 — NFL prop card NOT scheduled.")
 
+    # NBA prop window — every 5 minutes, 24x7 (run_nba_prop_window). Around
+    # the clock because the cost of an idle tick is one database read, and a
+    # schedule with hours in it is a schedule that can miss a tip: the hourly
+    # passes missed every one at or before 6pm ET. Unconditional: the card has
+    # no write switch (scripts/nba_prop_market_card.py) and neither does this.
+    sched.add_job(
+        run_nba_prop_window,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="nba_prop_window",
+        name="NBA prop window (every 5 min, 24x7: games 40-62 min from tip)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
     # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow
     # Kalshi response cannot delay anything that places a bet.
     sched.add_job(
@@ -1839,6 +1964,11 @@ def main() -> None:
         log.exception("Monitoring failed to start (pipeline continues)")
 
     sched = build_scheduler()
+
+    # Before any pass this process starts, and before sched.start() can fire
+    # the :17 cron. Same-kind orphan cleanup does not run again for an
+    # evening until the next evening window.
+    abort_orphaned_refresh_runs()
 
     # Before the first cron fires: run any weekly job whose data is already
     # stale. Ownership is checked per job INSIDE the catch-up rather than here:

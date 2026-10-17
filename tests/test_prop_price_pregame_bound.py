@@ -207,7 +207,10 @@ def test_every_scorer_call_site_passes_a_pregame_cutoff():
                 f"{node.name}:{call.lineno} passes {base!r}, but it is not "
                 f"assigned from {CUTOFF_MAPS[base]}() in that function")
             checked += 1
-    assert checked >= 5, f"expected every prop scorer to be covered, saw {checked}"
+    # Four since 2026-10-15: run_nba_prop_scorer was deleted with the retired
+    # NBA prop models. The NBA prop rule bounds its reads on the scheduled tip,
+    # which is earlier than the real start (models/nba_prop_market._pre_tip).
+    assert checked >= 4, f"expected every prop scorer to be covered, saw {checked}"
 
 
 def test_the_started_game_guard_uses_the_cutoff_too():
@@ -225,7 +228,7 @@ def test_the_started_game_guard_uses_the_cutoff_too():
             assert base in CUTOFF_MAPS, (
                 f"{node.name}:{call.lineno} guards on {base!r}, not a cutoff map")
             checked += 1
-    assert checked >= 5, f"expected a guard in every prop lane, saw {checked}"
+    assert checked >= 4, f"expected a guard in every prop lane, saw {checked}"  # NBA lane retired 2026-10-15
 
 
 def test_the_stamped_commence_time_is_still_the_schedule():

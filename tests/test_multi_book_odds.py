@@ -166,7 +166,8 @@ def test_feature_engines_whitelist_draftkings():
     engines = [
         "features/feature_engine.py",
         "features/wnba_feature_engine.py",
-        "features/nba_feature_engine.py",
+        # features/nba_feature_engine.py was deleted 2026-10-15 with the
+        # retired NBA game models; no NBA training feature reads `odds` now.
     ]
     for rel in engines:
         src = _source(rel)
