@@ -4,7 +4,7 @@
 This lab EMITS cells; scripts/nba_game2_verdict.py judges them. Every quote,
 decision time, fair line, choice and grade comes from scripts/nba_game_harness
 (H): load, point_offers, visible, market_fair, fair_offers, run_cells (which
-calls choose and grade), pinnacle_close, close_sigma, shuffle_within_date.
+calls choose and grade), pinnacle_close, close_dist, shuffle_within_date.
 Nothing here prices, chooses or grades a bet. No cut, constant or rule below
 was chosen by looking at a betting result.
 
@@ -17,10 +17,14 @@ F4  SHOOTING-LUCK-ADJUSTED RATINGS -- 32 cells
   The Ringer 2021-02-12, "make or miss"; year-to-year r = 0.225, Paine 2009,
   basketball-reference blog p=3475); a defence has little control over opponent
   free-throw % (KenPom, kenpom.com/blog/?p=98; MetricGate's luck-adjusted
-  plus-minus strips it). A team's own three-point % persists in part
-  (split-half r = 0.42, The Ringer; year-to-year 0.425, Paine). No tolerance
-  on how closely the line tracks the raw rating is applied: that would be a
-  parameter section 6.3 does not register.
+  plus-minus strips it). Only those two are adjusted, as section 6.3 registers
+  ("opponent three-point and free-throw percentage replaced by their
+  expectation"). A team's OWN shooting is left as played: a term that pulled
+  its own 3P% toward the league came from the build instructions, not 6.3,
+  and was removed before any priced season was graded (section 6.4, second
+  amendment of 2026-10-17). No tolerance on how closely the line tracks the
+  raw rating is applied: that would be a parameter section 6.3 does not
+  register.
 
   Inputs for a game on Eastern date D (decision A = 15Z on D, C = 60-180 min
   before tip): box scores (nba_player_game_log summed to team and opponent) of
@@ -30,10 +34,9 @@ F4  SHOOTING-LUCK-ADJUSTED RATINGS -- 32 cells
              (Dean Oliver's possession estimate with Hollinger's 0.44)
     ORtg   = 100 x PTS / poss       DRtg = 100 x OPP_PTS / poss   (season to date)
     lg3, lgFT = league 3P% and FT% over the same season's games before D
-    adjusted: own 3P% -> lg3 + 0.42 x (own 3P% - lg3)   (the published
-              split-half correlation used as the multiplier toward the mean)
-              opponent 3P% -> lg3, opponent FT% -> lgFT (points only; the
-              possession count is left as played)
+    adjusted: opponent 3P% -> lg3, opponent FT% -> lgFT (points only; the
+              possession count is left as played). The team's own points are
+              not touched, so ORtg adjusted = ORtg raw; only DRtg moves.
   Projection for home H, away A, pace = mean of the two teams' possessions per
   game, lg = league points per 100 (identical raw and adjusted: the
   adjustments sum to zero over the league):
@@ -48,6 +51,10 @@ F4  SHOOTING-LUCK-ADJUSTED RATINGS -- 32 cells
 
 F6c LATE-SEASON MOTIVATION -- 6 cells
     spread, against the team in the situation x A, C x 3 situations (axis_situation).
+    The situation is a CATEGORICAL axis: the verdict gives its values no
+    neighbours (section 6.4, second amendment), so bar 7 for an F6c cell is
+    its own ROI on the choosing seasons above zero. Each cell carries one cut
+    (the 0/1 flag, cut 1.0, cut_index 0).
 
   Krieger, Pace, Clarke & Girdner 2015 (Financial Services Review 24(4), NBA
   2004-2012): teams that had locked a seed failed to cover. As of game date D,
@@ -73,29 +80,54 @@ F6c LATE-SEASON MOTIVATION -- 6 cells
   2022-02-10 (ESPN/ABC7), 2023-02-09 (NBC Sports, NBA.com tracker),
   2024-02-08 (NBA.com), 2025-02-06 (NBA.com, NBC), 2026-02-05 (NBA.com tracker).
 
-  The harness bets one fixed side per cell; "against the team" is home in
-  some games and away in others. So each situation is graded on an ORIENTED
-  copy of the data: every game whose situation team is at HOME has its teams,
-  scores, spread number (negated) and two prices swapped, so in that copy
-  "home" is always the side against the situation team. Each F6c row keeps
-  run_cells' side label "home" (the oriented side) and says so in
-  bet_side_meaning. Consequence for bar 9: the blind bet is "home" on every
-  game in the oriented copy -- the real home side everywhere except the
-  situation games, where it is the against side.
+  "Against the team" is home in some games and away in others, so each cell
+  bets the per-game label "against": every game with exactly one team in the
+  situation carries side_pick = the REAL side against that team (away when
+  the team is at home, home when it is away), and H.choose keeps the offer
+  on that real side. The data is never rewritten: every bet carries its real
+  side (home / away), its stored home number and its real price, so the
+  harness grades it, reports its home/away and favourite/underdog shares and
+  runs bar 9's blind bets on real sides.
+  Bar 9's population is every game priced at the point: the rule gives each
+  game a number (1 = one team in the situation, 0 = neither or both), as
+  section 6.4's second amendment defines it ("the games its model or rule
+  produced a number for"). The comparison is therefore "does betting against
+  the team in the situation beat betting that real side (home, away,
+  favourite, underdog) on every game". run_cells' own blind_roi_choose for the
+  label "against" is the cell itself at no cut; the verdict does not read it.
 
 PLACEBO: 20 runs, rng seed = run number. One row per (game, market) carrying
-  the family's number (F4: the signed gap; F6c: the 0/1 flag) is shuffled
-  within date and market by H.shuffle_within_date, then re-attached to the
-  same market-fair offers. The market's fair price is never shuffled.
+  the family's number (F4: the signed gap; F6c: the 0/1 flag and its per-game
+  side, which move together) is shuffled within date and market by
+  H.shuffle_within_date, then re-attached to the same market-fair offers. The
+  market's fair price is never shuffled.
 
-WALK-FORWARD / FIT SEASONS: neither family fits anything. For every graded
-  season S (2021-2026) F4's ratings and league averages and F6c's standings
-  use only season S's games before the game date; the constants (0.42, 0.44,
-  10 games, seeds 1-10, bottom 3) are published or fixed in section 6.3.
-  The harness fits the margin / total sigma behind the market's fair line and
-  the closing-line value on Pinnacle closes of seasons before S
-  (H.close_sigma; 2020-21 has none before it and uses its own, the harness's
-  fallback).
+PRICING: the market's fair line, the blind bets and closing-line value use
+  the EMPIRICAL distribution of results around Pinnacle's closing number on
+  seasons before S (H.close_dist; 2020-21 has none before it and uses its own,
+  the harness's fallback, and is reported, never chosen on). Neither family
+  prices from a model of its own: F4's gap and F6c's flag only choose which
+  market-fair offers are taken.
+
+WALK-FORWARD AND WHERE EACH CONSTANT COMES FROM: neither family fits
+  anything. For every graded season S (2021-2026) F4's ratings and league
+  averages and F6c's standings use only season S's games before the game date.
+    Registered in section 6.3: the gap cuts 1, 2, 3, 4 points; decision
+      points A and C; the three situation names; "against the team".
+    From a published source or a project rule:
+      0.44        Dean Oliver's possession estimate, Hollinger's coefficient
+      10 games    the early-season rule, CLAUDE.md section 3 (population, not a cut)
+    Lab definitions that section 6.3 does NOT fix (F6c's are recorded as such
+    in section 6.4's second amendment, so they are not read as registered):
+      "expectation" = the league's 3P% / FT% over the same season's games
+                      before the date (F4)
+      seed_locked   = a fixed rank among seeds 1-10 (play-in seeds count)
+      eliminated    = at least 10 conference teams certainly finish above
+      tanking       = among the league's three lowest win %, ties included,
+                      only on dates strictly after the trade deadline
+      the deadline dates themselves (each date is cited to a source above;
+      using the deadline as the start of tanking is the lab's choice)
+      the conservative tie rule (a possible tie never locks or eliminates)
 
     PYTHONPATH=. python -m scripts.nba_game2_luck --smoke [--harness-cache DIR]
     NBA_GAME2_GO=1 PYTHONPATH=. python -m scripts.nba_game2_luck --full
@@ -125,11 +157,11 @@ from scripts import nba_game_harness as H  # noqa: E402
 RESULTS = Path(os.environ.get("NBA_GAME2_RESULTS",
                               "C:/Users/micha/AppData/Local/Temp/nba_game_edge/results"))
 SMOKE_SEASONS = (2021,)
+FULL_SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)     # 2021-2026: every season --full grades
 QUALITY_SEASONS = (2022, 2023, 2024, 2025)          # never 2026
 N_PLACEBO = 20
 
 # F4
-OWN3_KEEP = 0.42             # The Ringer 2021 split-half r for own 3P% (Paine 2009: 0.425)
 FTA_POSS = 0.44              # Oliver / Hollinger possession estimate
 MIN_GAMES = 10               # CLAUDE.md section 3 early-season rule
 F4_POINTS = ("A", "C")
@@ -142,7 +174,7 @@ SITUATIONS = ("seed_locked", "eliminated", "tanking")
 PLAYIN_SEEDS = 10
 TANK_BOTTOM = 3
 F6C_CUTS = (1.0,)
-F6C_SIDES = {"spreads": ["home"]}                    # "home" in the oriented copy = against
+F6C_SIDES = {"spreads": ["against"]}                 # per-game label: the real side is side_pick
 TRADE_DEADLINE = {2019: "2019-02-07", 2020: "2020-02-06", 2021: "2021-03-25",
                   2022: "2022-02-10", 2023: "2023-02-09", 2024: "2024-02-08",
                   2025: "2025-02-06", 2026: "2026-02-05"}
@@ -182,7 +214,7 @@ def team_box(box: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
     return t.drop(columns=["home_team", "away_team"]).reset_index(drop=True)
 
 
-TEAM_SUMS = ["pts", "fg3m", "fg3a", "opp_pts", "opp_fg3m", "opp_fg3a", "opp_ftm", "opp_fta", "poss"]
+TEAM_SUMS = ["pts", "opp_pts", "opp_fg3m", "opp_fg3a", "opp_ftm", "opp_fta", "poss"]
 LEAGUE_SUMS = ["pts", "fg3m", "fg3a", "ftm", "fta", "poss"]
 
 
@@ -198,7 +230,9 @@ def _before(targets: pd.DataFrame, cum: pd.DataFrame, by: list[str]) -> pd.DataF
 def as_of_ratings(tb: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
     """Raw and luck-adjusted ratings for (season, team, game_date) targets, from
     that team's games in the same season with game_date < the target's date,
-    and league averages over the same season's games before that date."""
+    and league averages over the same season's games before that date. Only
+    the opponents' 3P% and FT% are replaced (section 6.3): the offence is
+    left as played, so ortg_adj equals ortg_raw."""
     team = tb.groupby(["season", "team", "game_date"], as_index=False)[TEAM_SUMS].sum()
     team["n"] = 1.0
     team = team.sort_values(["season", "team", "game_date"])
@@ -212,13 +246,11 @@ def as_of_ratings(tb: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
     x["n"] = x["n"].fillna(0.0)
     lg3 = x["lg_fg3m"] / x["lg_fg3a"]
     lgft = x["lg_ftm"] / x["lg_fta"]
-    own3 = x["fg3m"] / x["fg3a"]
-    adj_pts = x["pts"] + 3.0 * x["fg3a"] * (lg3 + OWN3_KEEP * (own3 - lg3) - own3)
     adj_opp = (x["opp_pts"] + 3.0 * (x["opp_fg3a"] * lg3 - x["opp_fg3m"])
                + (x["opp_fta"] * lgft - x["opp_ftm"]))
     x["ortg_raw"] = 100.0 * x["pts"] / x["poss"]
     x["drtg_raw"] = 100.0 * x["opp_pts"] / x["poss"]
-    x["ortg_adj"] = 100.0 * adj_pts / x["poss"]
+    x["ortg_adj"] = x["ortg_raw"]
     x["drtg_adj"] = 100.0 * adj_opp / x["poss"]
     x["pace"] = x["poss"] / x["n"]
     x["lg_rtg"] = 100.0 * x["lg_pts"] / x["lg_poss"]
@@ -333,31 +365,25 @@ def game_situations(games: pd.DataFrame, sit: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True)
 
 
-def _swap(df: pd.DataFrame, mask, a: str, b: str) -> None:
-    """Swap two columns on the masked rows. Copies first: a block's to_numpy()
-    can be a view, and a two-column .loc assignment then reads a column it has
-    already overwritten."""
-    va, vb = df.loc[mask, a].to_numpy().copy(), df.loc[mask, b].to_numpy().copy()
-    df.loc[mask, a], df.loc[mask, b] = vb, va
+def f6c_signal(neutral: pd.DataFrame, gs: pd.DataFrame) -> pd.DataFrame:
+    """One row per (game, market) at the point. Where exactly one team is in
+    the situation: strength 1 and side_pick = the REAL side against it (away
+    when it is at home, home when it is away). Elsewhere (neither team, or
+    both): strength 0 and no side."""
+    s = neutral[["game_id", "market"]].drop_duplicates()
+    team_at_home = gs.loc[gs["single"]].set_index("game_id")["home_in"].astype(bool)
+    pick = s["game_id"].map(team_at_home.map({True: "away", False: "home"}))
+    return s.assign(strength=pick.notna().astype(float), side_pick=pick).reset_index(drop=True)
 
 
-def orient(data: H.Data, flip_ids) -> H.Data:
-    """A copy of `data` with every game in `flip_ids` seen from the other bench:
-    teams and scores swapped; spread number negated and both two-way prices
-    swapped (moneyline too); totals untouched. Grading in this copy is grading
-    the real other side."""
-    flip = set(flip_ids)
-    g = data.games.copy()
-    m = g["game_id"].isin(flip).to_numpy()
-    for a, b in (("home_team", "away_team"), ("home_score", "away_score")):
-        _swap(g, m, a, b)
-    q = data.quotes.copy()
-    mq = (q["game_id"].isin(flip) & (q["market"] != "totals")).to_numpy()
-    _swap(q, mq, "price_a", "price_b")
-    sp = mq & (q["market"] == "spreads").to_numpy()
-    q.loc[sp, "line"] = -q.loc[sp, "line"]
-    return H.Data(games=g, quotes=q, fetches=data.fetches,
-                  notes={**data.notes, "flipped_games": int(m.sum())})
+def f6c_offers(neutral: pd.DataFrame, signal: pd.DataFrame) -> pd.DataFrame:
+    """Market-fair offers with F6c's flag and per-game side merged on, UNSIGNED:
+    both sides of a game carry the same strength and side_pick, and H.choose
+    keeps the offer whose real side is side_pick. (side_strength would negate
+    the flag on the away side and cut every bet that goes away.)"""
+    cols = ("strength", "side_pick")
+    base = neutral.drop(columns=[c for c in cols if c in neutral])
+    return base.merge(signal[["game_id", "market", *cols]], on=["game_id", "market"], how="left")
 
 
 # ── one decision point ──────────────────────────────────────────────────────
@@ -370,14 +396,16 @@ def market_offers(data: H.Data, point: str, sig: dict, markets) -> tuple[pd.Data
     return t, neutral[neutral["market"].isin(list(markets))].reset_index(drop=True)
 
 
-def placebo_frames(neutral: pd.DataFrame, signal: pd.DataFrame, games: pd.DataFrame) -> list[pd.DataFrame]:
-    """N_PLACEBO re-priced candidate frames: the per-game number shuffled within
-    date and market (seed = run number), re-attached to the same offers."""
+def placebo_frames(neutral: pd.DataFrame, signal: pd.DataFrame, games: pd.DataFrame,
+                   attach=side_strength) -> list[pd.DataFrame]:
+    """N_PLACEBO re-priced candidate frames: the per-game number (and F6c's
+    per-game side with it) shuffled within date and market (seed = run
+    number), re-attached to the same offers by the family's own `attach`."""
+    cols = ["game_id", "market", *[c for c in ("strength", "side_pick") if c in signal]]
     out = []
     for run in range(N_PLACEBO):
-        sh = H.shuffle_within_date(signal[["game_id", "market", "strength"]], games,
-                                   np.random.default_rng(run))
-        out.append(side_strength(neutral, sh))
+        sh = H.shuffle_within_date(signal[cols], games, np.random.default_rng(run))
+        out.append(attach(neutral, sh))
     return out
 
 
@@ -397,39 +425,26 @@ def run_f4(data: H.Data, tb: pd.DataFrame, close, sig) -> tuple[list[dict], pd.D
     return rows, pd.concat(pop, ignore_index=True)
 
 
-def f6c_flip(gs: pd.DataFrame) -> set:
-    """Games to see from the other bench: the situation team is at home, so
-    after the flip "home" is the side against it."""
-    return set(gs.loc[gs["single"] & gs["home_in"], "game_id"])
-
-
-def f6c_signal(neutral: pd.DataFrame, gs: pd.DataFrame) -> pd.DataFrame:
-    """One row per (game, market) at the point: strength 1 where exactly one
-    team is in the situation, else 0 (no side, or both teams in it)."""
-    single = set(gs.loc[gs["single"], "game_id"])
-    s = neutral[["game_id", "market"]].drop_duplicates()
-    return s.assign(strength=s["game_id"].isin(single).astype(float)).reset_index(drop=True)
-
-
-def run_f6c(data: H.Data, games_sit: pd.DataFrame) -> tuple[list[dict], pd.DataFrame]:
+def run_f6c(data: H.Data, games_sit: pd.DataFrame, close, sig) -> tuple[list[dict], pd.DataFrame]:
+    """The 6 F6c cells. `cand` (every priced game's offers, with the 0/1 flag
+    and side_pick) is passed as run_cells' neutral frame too, because the
+    per-game label "against" needs side_pick wherever the harness chooses."""
     rows, pop = [], []
-    for k in SITUATIONS:
-        gs = games_sit[games_sit["situation"] == k]
-        d = orient(data, f6c_flip(gs))
-        close = H.pinnacle_close(d)
-        sig = H.close_sigma(close, d.games)
-        for point in F6C_POINTS:
-            _, neutral = market_offers(d, point, sig, F6C_SIDES)
+    for point in F6C_POINTS:
+        _, neutral = market_offers(data, point, sig, F6C_SIDES)
+        for k in SITUATIONS:
+            gs = games_sit[games_sit["situation"] == k]
             signal = f6c_signal(neutral, gs)
-            cand = side_strength(neutral, signal)
-            pl = placebo_frames(neutral, signal, d.games)
-            got = H.run_cells(d, "F6c", point, cand, neutral, F6C_CUTS, F6C_SIDES, close=close,
+            cand = f6c_offers(neutral, signal)
+            pl = placebo_frames(neutral, signal, data.games, attach=f6c_offers)
+            got = H.run_cells(data, "F6c", point, cand, cand, F6C_CUTS, F6C_SIDES, close=close,
                               sig=sig, placebo=pl, strength="strength")
             for r in got:
                 r["axis_situation"] = k
-                r["bet_side_meaning"] = "against the team in the situation (oriented copy: home)"
+                r["bet_side_meaning"] = ("against the team in the situation; each bet carries "
+                                         "its real side (home or away)")
             rows += got
-            p = population(d.games, point, neutral, signal[signal["strength"] > 0], got)
+            p = population(data.games, point, neutral, signal[signal["strength"] > 0], got)
             both = gs[gs["both"]].groupby("season").size()
             p["situation"] = k
             p["games_both_in_situation_not_bet"] = p["season"].map(both).fillna(0).astype(int)
@@ -492,6 +507,8 @@ def quality(games: pd.DataFrame, tb: pd.DataFrame, seasons=QUALITY_SEASONS) -> p
 # ── synthetic checks (run by --smoke before any data is read) ────────────────
 
 def synthetic_checks() -> None:
+    """The spread-sign self-check and the F6c side rule, on one hand-built game.
+    Run by --smoke and --full before any data is read."""
     H.check()
     tip = pd.Timestamp("2024-03-20T23:30:00Z")
     games = pd.DataFrame([{"game_id": "G", "season": 2024, "game_date": "2024-03-20", "tip": tip,
@@ -502,12 +519,15 @@ def synthetic_checks() -> None:
                        "price_b": -115.0, "coherent": True}])
     f = pd.DataFrame({"game_id": ["G"], "tip": [tip], "fetch_at": [tip - pd.Timedelta(minutes=60)],
                       "lead_min": [60.0]})
-    d = orient(H.Data(games=games, quotes=q, fetches=f), ["G"])
-    # DET (home, +6.5) lost by 10: the oriented "home" is BOS -6.5 at -115 and covers
-    assert d.games.iloc[0]["home_team"] == "BOS" and d.quotes.iloc[0]["line"] == -6.5
-    t, off = H.point_offers(d, "C")
-    b = H.grade(off[off["side"] == "home"], d.games)
-    assert b["result"].tolist() == ["W"] and b.iloc[0]["price"] == -115.0
+    d = H.Data(games=games, quotes=q, fetches=f)
+    _, off = H.point_offers(d, "C")
+    gs = pd.DataFrame({"game_id": ["G"], "home_in": [True], "away_in": [False],
+                       "single": [True], "both": [False]})
+    cand = f6c_offers(off.assign(p_win=0.5, p_push=0.0), f6c_signal(off, gs))
+    b = H.grade(H.choose(cand[cand["strength"] >= 1.0], -np.inf, sides=F6C_SIDES["spreads"]), d.games)
+    # DET (home, +6.5, in the situation) lost by 10: the bet against it is the
+    # real AWAY side, BOS -6.5 at -115, stored at the home number +6.5; it covers
+    assert b[["side", "line", "price", "result"]].values.tolist() == [["away", 6.5, -115.0, "W"]], b
     st = pd.DataFrame({"season": 2024, "game_date": "2024-04-01", "conf": "E",
                        "team": list("ABCDEFGHIJKLMNO"), "w": [60] + list(range(40, 26, -1)),
                        "l": 0.0, "remaining": 2.0})
@@ -555,30 +575,34 @@ def main(argv=None) -> None:
     if a.full and os.environ.get("NBA_GAME2_GO") != "1":
         raise SystemExit("--full refused: set NBA_GAME2_GO=1 (the owner runs it after the price "
                          "data is refreshed)")
+    if not a.quality:
+        synthetic_checks()                       # the spread-sign self-check, smoke AND full
     box, sched = _load_box(H.CACHE)
     if a.quality:
         games = H.load_games(H.CACHE)
         games = games[games["season"] < H.CONFIRM]
         print(quality(games, team_box(box, games)).round(3).to_string(index=False))
         return
-    if a.smoke:
-        synthetic_checks()
     if not (a.harness_cache / "nba_fetch_ledger.parquet").exists():
         raise SystemExit(f"{a.harness_cache} has no nba_fetch_ledger.parquet: refresh the cache "
                          "(scripts/nba_research_cache.py writes it) or pass --harness-cache")
-    seasons = list(SMOKE_SEASONS) if a.smoke else None
     out = RESULTS / "smoke" if a.smoke else RESULTS
     out.mkdir(parents=True, exist_ok=True)
-    data = H.load(a.harness_cache, seasons=seasons)
+    if a.smoke:
+        data = H.load(a.harness_cache, seasons=SMOKE_SEASONS)
+    else:
+        # a graded run refuses a cache that prices too few games in any season
+        # it grades, or whose rows match no purchase record (section 6.4)
+        data = H.load(a.harness_cache, seasons=FULL_SEASONS, require_seasons=FULL_SEASONS)
     print("loaded", data.notes)
     close = H.pinnacle_close(data)
-    sig = H.close_sigma(close, data.games)
+    sig = H.close_dist(close, data.games)          # the empirical distribution (section 6.4)
     tb = team_box(box, data.games)
 
     f4, pop4 = run_f4(data, tb, close, sig)
     assert len(f4) == EXPECTED_CELLS["F4"], len(f4)
     sit = situations(standings(data.games, season_lengths(sched)))
-    f6, pop6 = run_f6c(data, game_situations(data.games, sit))
+    f6, pop6 = run_f6c(data, game_situations(data.games, sit), close, sig)
     assert len(f6) == EXPECTED_CELLS["F6c"], len(f6)
     assert len(f4) + len(f6) == 38
 

@@ -91,12 +91,16 @@ def _two_team_league(det_own=(12, 30), det_opp=(9, 30), det_opp_ft=(15, 20)):
     return tb, L.as_of_ratings(tb, _target("DET", "2024-01-02")).iloc[0], lg3, lgft
 
 
-def test_own_three_point_pct_is_regressed_by_the_published_amount():
+def test_a_teams_own_shooting_is_left_as_played():
+    # Section 6.3 replaces only the OPPONENT's three-point and free-throw
+    # percentage. A team that made its own threes at a hot rate keeps every
+    # point: no term pulls its own 3P% toward the league (2026-10-17 amendment).
     tb, r, lg3, _ = _two_team_league(det_own=(14, 30))
-    own3, poss = 14 / 30, tb.iloc[0]["poss"]
-    want = 100 * 3 * 30 * (L.OWN3_KEEP - 1.0) * (own3 - lg3) / poss
-    assert L.OWN3_KEEP == 0.42
-    assert r["ortg_adj"] - r["ortg_raw"] == pytest.approx(want)
+    assert 14 / 30 > lg3 + 0.05
+    assert r["ortg_adj"] == pytest.approx(r["ortg_raw"])
+    # its opponents shot their usual rate, so its defence barely moves either
+    assert r["drtg_adj"] - r["drtg_raw"] == pytest.approx(
+        100 * 3 * (30 * lg3 - 9) / tb.iloc[0]["poss"])
 
 
 def test_opponent_three_and_free_throw_pct_are_replaced_by_the_league_average():
@@ -268,18 +272,27 @@ def test_a_game_with_both_teams_in_the_situation_has_no_side():
     assert bool(e.loc["G2", "single"]) and bool(e.loc["G2", "away_in"]) and not bool(e.loc["G2", "home_in"])
 
 
-def test_only_games_with_the_situation_team_at_home_are_flipped_and_flagged_once():
-    gs = pd.DataFrame({"game_id": ["G1", "G2", "G3", "G4"],
-                       "home_in": [True, False, True, False], "away_in": [False, True, True, False]})
+def _gs(home_in, away_in, ids=None):
+    ids = ids or [f"G{i + 1}" for i in range(len(home_in))]
+    gs = pd.DataFrame({"game_id": ids, "home_in": home_in, "away_in": away_in})
     gs["single"], gs["both"] = gs["home_in"] ^ gs["away_in"], gs["home_in"] & gs["away_in"]
-    assert L.f6c_flip(gs) == {"G1"}
+    return gs
+
+
+def test_the_rule_names_the_real_side_against_the_team_in_the_situation():
+    # G1: home team in it -> bet away. G2: away team in it -> bet home.
+    # G3: both in it, G4: neither -> no side, no number.
+    gs = _gs([True, False, True, False], [False, True, True, False])
     neutral = pd.DataFrame({"game_id": ["G1", "G1", "G2", "G3", "G4"], "market": "spreads",
                             "side": ["home", "away", "home", "home", "home"]})
-    sig = L.f6c_signal(neutral, gs).set_index("game_id")["strength"]
-    assert sig.to_dict() == {"G1": 1.0, "G2": 1.0, "G3": 0.0, "G4": 0.0}
+    s = L.f6c_signal(neutral, gs).set_index("game_id")
+    assert s["strength"].to_dict() == {"G1": 1.0, "G2": 1.0, "G3": 0.0, "G4": 0.0}
+    assert s.loc["G1", "side_pick"] == "away" and s.loc["G2", "side_pick"] == "home"
+    assert s.loc[["G3", "G4"], "side_pick"].isna().all()
+    assert set(L.F6C_SIDES["spreads"]) - set(H.REAL_SIDES), "F6c's side must be a per-game label"
 
 
-# ── F6c orientation ─────────────────────────────────────────────────────────
+# ── F6c: the bet against the team, on the real side ─────────────────────────
 
 TIP = pd.Timestamp("2024-03-20T23:30:00Z")
 
@@ -301,28 +314,36 @@ def _one_game_data(home_score, away_score, line, pa, pb):
     return H.Data(games=games, quotes=q, fetches=f)
 
 
-def test_the_oriented_home_bet_is_the_bet_against_the_situation_team():
-    # DET (home, the situation team) +6.5 at -105 lost by 10: the bet against it
-    # is BOS -6.5 at -115, and it wins
-    d = L.orient(_one_game_data(100, 110, 6.5, -105.0, -115.0), ["G"])
-    _, off = H.point_offers(d, "C")
-    home = off[(off["side"] == "home") & (off["market"] == "spreads")]
-    b = H.grade(home, d.games)
-    assert b["result"].tolist() == ["W"] and b.iloc[0]["price"] == -115.0 and b.iloc[0]["line"] == -6.5
+def _against_bet(data, home_in):
+    """The F6c bet on the one game, chosen and graded by the harness."""
+    _, off = H.point_offers(data, "C")
+    off = off[off["market"] == "spreads"].assign(p_win=0.5, p_push=0.0)
+    cand = L.f6c_offers(off, L.f6c_signal(off, _gs([home_in], [not home_in], ["G"])))
+    bet = H.choose(cand[cand["strength"] >= 1.0], -np.inf, sides=L.F6C_SIDES["spreads"])
+    return H.grade(bet, data.games)
+
+
+def test_the_bet_against_the_team_carries_and_settles_on_its_real_side():
+    # DET (home, the team in the situation) +6.5 at -105 lost by 10. The bet
+    # against it is BOS -6.5 at -115, stored as the AWAY side at the home number
+    # +6.5 (the data is never rewritten), and it wins.
+    b = _against_bet(_one_game_data(100, 110, 6.5, -105.0, -115.0), home_in=True)
+    assert b[["side", "line", "price", "result"]].values.tolist() == [["away", 6.5, -115.0, "W"]]
     # BOS winning by 6 does not cover -6.5
-    d2 = L.orient(_one_game_data(100, 106, 6.5, -105.0, -115.0), ["G"])
-    _, off2 = H.point_offers(d2, "C")
-    assert H.grade(off2[(off2["side"] == "home") & (off2["market"] == "spreads")], d2.games)["result"].tolist() == ["L"]
-    # totals are not touched
-    tot = d.quotes[d.quotes["market"] == "totals"].iloc[0]
-    assert tot["price_a"] == -108.0 and tot["line"] == 220.5
+    assert _against_bet(_one_game_data(100, 106, 6.5, -105.0, -115.0), True)["result"].tolist() == ["L"]
+    # the AWAY team in the situation: the bet is DET +6.5 at -105, the home side
+    b2 = _against_bet(_one_game_data(100, 110, 6.5, -105.0, -115.0), home_in=False)
+    assert b2[["side", "line", "price", "result"]].values.tolist() == [["home", 6.5, -105.0, "L"]]
 
 
-def test_an_unflipped_game_is_left_as_it_was():
-    raw = _one_game_data(100, 110, 6.5, -105.0, -115.0)
-    d = L.orient(raw, [])
-    pd.testing.assert_frame_equal(d.games, raw.games)
-    pd.testing.assert_frame_equal(d.quotes, raw.quotes)
+def test_both_sides_of_a_game_carry_the_flag_unsigned():
+    # side_strength negates the number on the away side (F4's signed gap); the
+    # F6c flag must not be, or a bet that should go away is cut at strength >= 1
+    off = pd.DataFrame({"game_id": "G", "market": "spreads", "side": ["home", "away"], "book": "fanduel"})
+    sig = pd.DataFrame({"game_id": ["G"], "market": ["spreads"], "strength": [1.0], "side_pick": ["away"]})
+    c = L.f6c_offers(off, sig).set_index("side")
+    assert c["strength"].to_dict() == {"home": 1.0, "away": 1.0}
+    assert (c["side_pick"] == "away").all()
 
 
 # ── placebo ─────────────────────────────────────────────────────────────────
@@ -348,7 +369,9 @@ def test_the_placebo_moves_the_number_between_games_and_never_the_price():
 
 # ── whole families on a synthetic season ────────────────────────────────────
 
-def _synthetic_data(n_dates=13, start="2024-03-01"):
+def _synthetic_data(n_dates=30, start="2024-03-01"):
+    """Four teams, two games a date. 30 dates = 60 Pinnacle closes per market,
+    above the 50 results an empirical distribution needs (H.ResidDist)."""
     tb, games = _season(n_dates, start=start)
     games["tip"] = pd.to_datetime(games["game_date"]) .dt.tz_localize("UTC") + pd.Timedelta(days=1)
     rows = []
@@ -366,28 +389,69 @@ def _synthetic_data(n_dates=13, start="2024-03-01"):
     return H.Data(games=games, quotes=q, fetches=f.reset_index(drop=True)), tb
 
 
+def _market_pricing(data):
+    """What main() prices with: Pinnacle's close and the EMPIRICAL distribution
+    of results around it. Asserted non-empty, so a test cannot silently fall
+    back to no distribution (NaN fair line, no bets)."""
+    close = H.pinnacle_close(data)
+    sig = H.close_dist(close, data.games)
+    assert {(2024, "spreads"), (2024, "totals")} <= set(sig)
+    assert all(isinstance(v, H.ResidDist) for v in sig.values())
+    return close, sig
+
+
 def test_f4_emits_its_32_cells_with_twenty_placebos_each():
     data, tb = _synthetic_data()
     assert H.decision_times(data.fetches, data.games, "A")["T"].dt.hour.eq(15).all()
-    close = H.pinnacle_close(data)
-    sig = H.close_sigma(close, data.games)
+    close, sig = _market_pricing(data)
     rows, pop = L.run_f4(data, tb, close, sig)
     assert len(rows) == L.EXPECTED_CELLS["F4"] == 32
     keys = {(r["point"], r["market"], r["side"], r["cut"]) for r in rows}
     assert len(keys) == 32 and {r["family"] for r in rows} == {"F4"}
     assert all(len(r["placebo_rois"]) == 20 for r in rows)
     assert set(pop["point"]) == {"A", "C"} and (pop["games_with_number"] > 0).all()
+    assert sum(r["n_choose"] for r in rows) > 0               # the empirical pricing path bets
 
 
-def test_f6c_emits_its_6_cells_one_per_situation_and_point():
+def _f6c_inputs():
     data, _ = _synthetic_data()
-    lengths = pd.DataFrame({"season": 2024, "team": ["DET", "BOS", "NYK", "MIA"], "n_games": 20})
+    lengths = pd.DataFrame({"season": 2024, "team": ["DET", "BOS", "NYK", "MIA"], "n_games": 40})
     sit = L.situations(L.standings(data.games, lengths))
-    rows, pop = L.run_f6c(data, L.game_situations(data.games, sit))
+    return data, L.game_situations(data.games, sit)
+
+
+def test_f6c_emits_its_6_cells_one_per_situation_and_point_on_real_sides():
+    data, gsit = _f6c_inputs()
+    close, sig = _market_pricing(data)
+    rows, pop = L.run_f6c(data, gsit, close, sig)
     assert len(rows) == L.EXPECTED_CELLS["F6c"] == 6
     assert {(r["axis_situation"], r["point"]) for r in rows} == {
         (k, p) for k in L.SITUATIONS for p in L.F6C_POINTS}
-    assert {r["side"] for r in rows} == {"home"} and all(len(r["placebo_rois"]) == 20 for r in rows)
+    assert {r["side"] for r in rows} == {"against"} and all(len(r["placebo_rois"]) == 20 for r in rows)
+    # tanking (3 of the 4 teams after the deadline) bets games; the harness
+    # saw REAL sides, so bar 9's home/away share and blind bets are numbers
+    tank = [r for r in rows if r["axis_situation"] == "tanking"]
+    assert all(r["n_choose"] > 0 for r in tank)
+    assert all(np.isfinite(r["share_home"]) and np.isfinite(r["blind_home"])
+               and np.isfinite(r["blind_away"]) for r in tank)
+    # bar 9's population is every priced game at the point, not only the bet ones
+    assert all(r["population_games"] == data.games["game_id"].nunique() for r in rows)
+
+
+def test_the_f6c_placebo_moves_the_side_with_the_flag():
+    games = pd.DataFrame({"game_id": ["a", "b", "c"], "game_date": "2024-03-15"})
+    neutral = pd.DataFrame([{"game_id": g, "market": "spreads", "side": s, "book": "fanduel",
+                             "price": -110.0, "ev": 0.0} for g in "abc" for s in ("home", "away")])
+    signal = pd.DataFrame({"game_id": list("abc"), "market": "spreads", "strength": [1.0, 0.0, 0.0],
+                           "side_pick": ["away", None, None]})
+    moved = False
+    for f in L.placebo_frames(neutral, signal, games, attach=L.f6c_offers):
+        per_game = f.drop_duplicates("game_id").set_index("game_id")
+        flagged = per_game[per_game["strength"] == 1.0]
+        assert len(flagged) == 1 and (flagged["side_pick"] == "away").all()
+        assert per_game.loc[per_game["strength"] == 0.0, "side_pick"].isna().all()
+        moved |= flagged.index[0] != "a"
+    assert moved
 
 
 def test_the_registered_count_is_38():
@@ -402,6 +466,72 @@ def test_full_refuses_without_the_owners_go(monkeypatch, tmp_path):
     monkeypatch.delenv("NBA_GAME2_GO", raising=False)
     with pytest.raises(SystemExit, match="NBA_GAME2_GO"):
         L.main(["--full"])
+
+
+class _Stop(Exception):
+    pass
+
+
+def test_full_runs_the_spread_sign_self_check_before_reading_anything(monkeypatch, tmp_path):
+    # an empty cache: if --full skipped the check it would fail on a missing
+    # file instead of on the check
+    monkeypatch.setattr(H, "CACHE", tmp_path)
+    monkeypatch.setattr(L, "RESULTS", tmp_path)
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+
+    def check():
+        raise _Stop("sign check ran")
+    monkeypatch.setattr(H, "check", check)
+    with pytest.raises(_Stop, match="sign check ran"):
+        L.main(["--full"])
+
+
+def test_full_asks_the_load_for_every_season_it_grades(monkeypatch, tmp_path):
+    # the harness refuses a cache that prices too few games in a season it is
+    # told it needs; --full must name all six (2020-21 through 2025-26)
+    monkeypatch.setattr(L, "RESULTS", tmp_path)
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.setattr(L, "_load_box", lambda cache: (pd.DataFrame(), pd.DataFrame()))
+    (tmp_path / "nba_fetch_ledger.parquet").write_bytes(b"")
+    seen = {}
+
+    def load(*args, **kw):
+        seen.update(kw)
+        raise _Stop("load called")
+    monkeypatch.setattr(H, "load", load)
+    with pytest.raises(_Stop):
+        L.main(["--full", "--harness-cache", str(tmp_path)])
+    assert tuple(seen.get("require_seasons") or ()) == (2021, 2022, 2023, 2024, 2025, 2026)
+    assert tuple(seen.get("seasons") or ()) == (2021, 2022, 2023, 2024, 2025, 2026)
+
+
+def test_the_run_prices_the_market_with_the_empirical_distribution(monkeypatch, tmp_path):
+    # main() must hand run_f4 / run_f6c the distribution of results around
+    # Pinnacle's close (H.close_dist), never the bell curve's single number
+    data, _ = _synthetic_data()
+    monkeypatch.setattr(L, "RESULTS", tmp_path)
+    monkeypatch.setattr(L, "_load_box", lambda cache: (pd.DataFrame(), pd.DataFrame()))
+    monkeypatch.setattr(H, "load", lambda *a, **k: data)
+    (tmp_path / "nba_fetch_ledger.parquet").write_bytes(b"")
+
+    def close_dist(close, games):
+        raise _Stop("empirical pricing")
+
+    def close_sigma(close, games):
+        raise _Stop("bell curve")
+    monkeypatch.setattr(H, "close_dist", close_dist)
+    monkeypatch.setattr(H, "close_sigma", close_sigma)
+    with pytest.raises(_Stop, match="empirical pricing"):
+        L.main(["--smoke", "--harness-cache", str(tmp_path)])
+
+
+def test_the_docstring_does_not_pass_lab_definitions_off_as_registered():
+    doc = L.__doc__
+    assert "published or fixed in section 6.3" not in doc
+    lab = doc[doc.index("Lab definitions that section 6.3 does NOT fix"):]
+    for name in ("seed_locked", "eliminated", "tanking", "deadline dates", "expectation"):
+        assert name in lab, name
+    assert "0.42" not in doc
 
 
 def test_the_price_free_check_refuses_2026():
