@@ -68,9 +68,17 @@ export interface SignalBadgeSpec {
 
 export const SIGNAL_BADGE: Record<SignalType, SignalBadgeSpec> = {
   BET: { label: 'BET', glyph: 'checkmark', ink: 'betInk', fill: 'betSoft' },
-  NONE: { label: 'NONE', glyph: 'remove', ink: 'textSecondary', fill: 'noneSoft' },
+  // The stored value stays 'NONE'; members read NEUTRAL (Matt, 2026-10-12:
+  // "None should be neutral sentiment not none") — the model and the book
+  // agree, which is a reading, not a missing value.
+  NONE: { label: 'NEUTRAL', glyph: 'remove', ink: 'textSecondary', fill: 'noneSoft' },
   AVOID: { label: 'AVOID', glyph: 'close', ink: 'avoidInk', fill: 'avoidSoft' },
 };
+
+/** The word a member reads for a stored signal_type (NONE → NEUTRAL). */
+export function signalDisplayName(signal: SignalType): string {
+  return SIGNAL_BADGE[signal].label;
+}
 
 /**
  * Badge glyph size in points. Ionicons `size` is NOT scaled by Dynamic Type

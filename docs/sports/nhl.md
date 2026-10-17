@@ -4,6 +4,26 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+> **2026-10-08: `docs/nhl_clv_ev_assessment.md` is the current grade of every
+> NHL model for closing-line value and expected value.** The prop backtest
+> figures quoted below before that date are inflated by a shared-name defect
+> (#895). The nightly prop limit is four (mike).
+
+> **2026-10-08 (mike): `nhl_over_under` is LIVE, as a rule** (*"This is live
+> model, stop asking about paper"*). It is no longer a trained model and no
+> longer untrained: it is out of `config.MODELS` and the feature map, and the
+> trainer refuses it. On every refresh pass, right after the odds fetch, it
+> takes the newest stored fetch that holds Pinnacle's full-game total,
+> de-vigs Pinnacle, and bets the bettable book in THAT SAME FETCH with the best
+> EV at the same number, if EV is at least 0.01 and the price is -200 or
+> better. One bet a game, written once and never re-priced.
+> `models/nhl_totals_market.py` (the rule and its evidence),
+> `scripts/nhl_totals_card.py` (step `nhl-over-under`). Six seasons at the
+> bettable books: 1,276 bets, +60.2 units, +4.72%, EV at Pinnacle's close
+> +1.32%. The return is not established (interval -0.6% to +10.1%); closing
+> line value is the case for it. Thresholds and the full grid:
+> `docs/thresholds.md`.
+
 > **Read `docs/nhl_market_research.md` first (2026-09-20).** The 2026-06-21
 > holdout numbers in the table below were produced on season-final inputs. On
 > the rebuilt inputs `nhl_moneyline` walks forward at AUC 0.585 and a log loss
@@ -14,7 +34,7 @@
 
 > **THE NHL MODELS ARE LIVE, WITH THE GO-LIVE GATE NOT MET** (mike,
 > 2026-10-01: *"this is a live model"*). Raised with the grade below in front
-> of him, restated, his call. Do not describe them as paper-only, do not hold
+> of him, restated, his call. Do not describe them as held back, do not hold
 > their picks back, and do not restore the gate without asking him.
 >
 > **NHL HAS NO 10-GAME HOLD** (mike, same day, on a proposal to hold picks until
@@ -24,6 +44,12 @@
 > early weeks than in the rest of the season, and the alternative built to
 > replace them (every team number blended toward last season) graded worse.
 > Nothing was switched. `docs/nhl_market_lab.md`, "The early weeks, backtested".
+>
+> **2026-10-03 (mike): `nhl_moneyline_regulation` decides on its OWN
+> probability** (`config.MODELS_ON_OWN_PROBABILITY`). The correction is a
+> two-way map and made the three regulation outcomes sum to 1.144; it lifted
+> every outcome under 50% by ~6 points. `nhl_moneyline` keeps it. The note
+> below is the 10-01 decision this partly reverses.
 >
 > **THE PROBABILITY CORRECTION STAYS AS IT IS** (mike, same day: underdog
 > plus-money bets are wanted). What it does to these two models is measured in
@@ -74,8 +100,13 @@
 >   book's margin on BOTH sides of the full-game number (every over -4.0%,
 >   every under -4.4%), no edge from Pinnacle against DraftKings, and a ceiling
 >   of +3% to +5% even for a bettor who knew which way the number would move.
->   `nhl_over_under` stays untrained. The total-goals markets shaped like the
->   props (team totals, period totals, alternates) have no stored price.
+>   `nhl_over_under` stays untrained. The derivative totals (team, alternate,
+>   first period) were graded on the stored `odds_api_nhl_totals_history` rows
+>   and nothing cleared (`docs/nhl_derivative_totals.md`). They are not
+>   registered and not in the pipeline. The buyer has no credit cap; `--apply`
+>   had not been run as of 2026-10-03 because this environment had no
+>   `ODDS_API_KEY`. (Superseded for the full-game total on 2026-10-08: the
+>   Pinnacle rule above is live.)
 > - **Player prop prices are collected from 2026-10-01**: an opening and a
 >   closing snapshot per game, six markets, ten books
 >   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step
@@ -87,7 +118,7 @@
 >   probable starters carried the league-average line.
 > - `nhl_puckline` is still untrained; its stated blocker (no historical
 >   lines) ended 2026-09-21. `nhl_over_under` is untrained because four rounds
->   found nothing to train toward (above).
+>   found nothing to train toward (above). It is a rule since 2026-10-08.
 > - The month's odds-feed allowance ran out on 2026-09-26 and reset on 10-01
 >   (mike: it refreshes every month; nothing to diagnose). No NHL price was
 >   stored between 09-26 22:59Z and 10-01 00:02Z, so opening night has no
@@ -124,6 +155,27 @@
   the logs do (130 games).
 
 ## 24. NHL — Pipeline Operations
+### `nhl_moneyline` REBUILT (mike, 2026-10-13; shipped on his "Yes", 2026-10-15)
+
+`models/nhl_moneyline_anchored.py`, artifact `kind = "anchored_logit"`
+(`models/saved/nhl_moneyline_20261013_225002.pkl`, fit on 7,900 priced games
+2020-21 → 2025-26). DraftKings' no-vig price is an unpenalised offset; 34
+inputs built from `nhl_team_game_log` / `nhl_goalie_game_log` / `games` move
+it (form, shots, special teams, goalie, rest / back-to-back / road trip,
+rating, goalie workload, home ice, travel). It is NOT fit by
+`models.trainer` (`OWN_FIT_PATH` refuses it): refit with
+`scripts/nhl_moneyline_anchored_train.py`, grade with
+`scripts/nhl_moneyline_anchored_backtest.py` (it must reproduce before a new
+artifact goes live). **One decision a game: 16:00Z-18:00Z on game day, with
+both teams' game-day goalie rows in `nhl_goalie_stats`, and both teams' games
+of the last two days already in `nhl_team_game_log`** (they land ~10:05Z; if
+that ingest is late the model waits rather than read stale rest and form);
+every other run writes NONE with the reason, and it never writes AVOID. EV ≥ 0.06 on its own
+probability at the best price, −200 floor; evidence in `docs/thresholds.md`
+and `docs/nhl_moneyline_rebuild.md`. Gate standing: 0 settled bets, live by
+mike's rule (CLAUDE.md §2, "never propose paper"). The regulation model below
+is unchanged.
+
 ### Models (2026-09-20: moneyline + regulation RETRAINED on honest inputs; LIVE since 2026-10-01, gate not met — mike; O/U + puckline untrained)
 
 **Retrained 2026-09-20 (mike), train 2018-19 → 2024-25, holdout 2025-26, 1,352 games.** A retrain resets the go-live gate (≥ 50 settled picks, positive flat ROI, calibration ≤ 5%); **mike made both LIVE on 2026-10-01 with the gate not met** (top of this file).
@@ -140,12 +192,12 @@ Both are calibrated and both are barely better than quoting base rates. Publishe
 |---|---|---|---|---|
 | `nhl_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | **LIVE** — holdout 2025 acc 60.4% / AUC 0.642 / CalErr 5.09% (6870 train rows); backtest 942 bets 64.2% +22.6% (prob-only synthetic −110 — directional only, NHL favorites are heavily juiced) |
 | `nhl_moneyline_regulation` | **3-class** XGBoost (`multi:softprob`) + calibrated | h2h_3way | real DK 3-way (per-event endpoint) | **LIVE** — holdout acc 50.0% / OvR-AUC 0.596 / CalErr 2.55% |
-| `nhl_over_under` | binary XGBoost + Platt | totals | real DK totals | BLOCKED — "no training data" (target needs historical total_line; trains once live DK lines accrue) |
+| `nhl_over_under` | **rule** (no artifact): Pinnacle's no-vig price vs the bettable books, same fetch, same number | totals | Pinnacle + the bettable books (one stored fetch) | **LIVE from 2026-10-08** (mike) — EV >= 0.01 on Pinnacle's own number, price -200 or better, one bet a game. `models/nhl_totals_market.py` |
 | `nhl_puckline` | binary XGBoost + Platt | spreads (±1.5) | real DK puck line | BLOCKED — same (needs historical spread_home) |
 
 **Trained 2026-06-21 after fixing 4 stacked ingestion bugs that had silently blocked NHL (see session log):** (1) `/schedule` games carry no `gameDate` (it's on the gameWeek day) → 0 games upserted; (2) `/team/summary` returns `teamFullName` not `teamAbbrev` → every team-stat row skipped (all stats null); (3) `/team/advanced` is dead (500) → Corsi now from `/team/realtime` satPct; (4) summary has no `goalDifferential` (derive from goalsFor−goalsAgainst) and xGF% isn't in the free NHL API at all (removed `d_xgf_pct` from the feature list — it was 100% null and dropna would have zeroed the matrix). Backfill: ~8,991 games 2019-2025 + team/goalie season snapshots. Top moneyline features: d_goal_differential (23%), d_goals_per_game, d_goals_against_pg, d_goalie_gsaa, away_win_pct. `nhl_moneyline` CalErr 5.09% is just above the 5% gate — provisional, re-check after 50 live settled picks. Artifacts committed + active in `model_registry`; GitHub Actions scores NHL automatically.
 
-Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation 40%/5% (3-way → lower per-side prob), O/U 55%/5%, puckline 55%/5%.
+Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation 40%/5% (3-way → lower per-side prob), puckline 55%/5%. O/U is the rule: action cut 0.0 / 0.0, EV floor 0.01, price floor -200 (`docs/thresholds.md`).
 
 ### Data source — NHL API (free, no key)
 
@@ -169,8 +221,9 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 | NHL results (`nhl-results`) | GitHub Actions (step 0b, **before settle**) | daily 7am | `ingest_nhl_scores_for_date` — trailing-3-day final scores + regulation outcomes into `games` (settlement reads `home_score`; the MLB statsapi fetch in paper_tracker doesn't cover NHL) |
 | NHL odds (h2h/totals/spreads bulk + per-event 3-way) | GitHub Actions (`step_odds`) | 6am + hourly to 5pm + every 10 min 6pm–11pm | DK lines; 3-way attempted per-event (bulk 422s it), non-fatal when absent |
 | NHL team + goalie stats (`nhl_stats`) | GitHub Actions (`step_nhl_stats`) | daily 7am | season-to-date team metrics + probable-starter goalie rows (ESPN `probableStartingGoalie` overlay) |
-| NHL scoring (`step_scoring`) | GitHub Actions | 6am + every refresh pass | `run_scorer` NHL branch → picks (incl. `_score_nhl_3way`) |
-| Settlement | GitHub Actions (`settle`) | 7am | generic game-level settle (NHL is not excluded); 3-way draw handled in `_compute_result` |
+| NHL totals (`nhl-over-under`) | Railway worker (`step_nhl_over_under`) | 6am (right after the odds step) + every refresh pass (right after `par odds`) | `scripts/nhl_totals_card.py`: every unstarted NHL game, Pinnacle vs the bettable books in the newest fetch; writes at most one `nhl_over_under` BET a game, once, under the model's advisory lock. Logs a diagnostic line every pass (`no_sharp`, `pinnacle_withdrawn`, ...) so an empty card can be told from a broken one |
+| NHL scoring (`step_scoring`) | GitHub Actions | 6am + every refresh pass | `run_scorer` NHL branch → picks (incl. `_score_nhl_3way`); `nhl_over_under` is not in it |
+| Settlement | Railway worker (`settle`) | every refresh pass and the 6am run | Game lines grade off `games` once `nhl-results` has the final. Props grade in the same `settle_picks` once a final that is still missing its skater or goalie log has a box from `/gamecenter/{id}/boxscore`. The morning `top_up` still writes the full stats-API row; the box insert is `ON CONFLICT DO NOTHING`, so it does not blank that row. 3-way draw is handled in `_compute_result`. |
 
 NHL picks won't generate until the four models are trained and the `.pkl`
 artifacts are committed (like MLB/WNBA/UFC) — until then the NHL steps no-op

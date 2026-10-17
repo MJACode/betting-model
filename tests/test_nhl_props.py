@@ -216,12 +216,12 @@ class TestTheCard:
 
     def test_the_cut_is_the_models_own_ev_floor_on_its_own_probability(self):
         for spec in P.LIVE:
-            assert config.min_ev_for(spec.model_id) == config.MODEL_OWN_EV_FLOOR[spec.model_id] == 0.10
+            assert config.min_ev_for(spec.model_id) == config.MODEL_OWN_EV_FLOOR[spec.model_id] == 0.18   # mike, 2026-10-02
             assert spec.model_id in config.MODELS_ON_OWN_PROBABILITY
         p = 1 - float(P.p_over(0.42, 0.5))                     # P(no assist) = exp(-0.42) = 0.657
-        just_under = _quotes([(1, "draftkings", 0.5, 130, -150)])   # EV = 0.657 * 1.667 - 1 = +0.095
-        just_over = _quotes([(1, "draftkings", 0.5, 130, -145)])    # EV = 0.657 * 1.690 - 1 = +0.110
-        assert P.expected_value(p, -150) < 0.10 < P.expected_value(p, -145)
+        just_under = _quotes([(1, "draftkings", 0.5, 110, -130)])   # EV = 0.657 * 1.769 - 1 = +0.163
+        just_over = _quotes([(1, "draftkings", 0.5, 105, -125)])    # EV = 0.657 * 1.800 - 1 = +0.183
+        assert P.expected_value(p, -130) < 0.18 < P.expected_value(p, -125)
         assert card.pick_rows(P.ASSISTS, _mus([(1, 0.42)]), just_under, GAMES, "2026-10-01", 1000.0, 0.0) == []
         assert len(card.pick_rows(P.ASSISTS, _mus([(1, 0.42)]), just_over, GAMES, "2026-10-01", 1000.0, 0.0)) == 1
 
@@ -548,9 +548,26 @@ class TestSettlement:
         sat = _bet(db, "nhl_prop_saves", "8476999", "Linus Ullmark", 25.5, -110.0, "Saves", "player_total_saves")
         _in_goal(db, 8478048, "Igor Shesterkin", "NYR", 0, 4)   # relieved the starter: four saves, under 25.5
         _in_goal(db, 8470000, "The Starter", "NYR", 1, 12)
+        _in_goal(db, 8476883, "Jeremy Swayman", "BOS", 1, 30)
         pt._settle_prop_picks(_Shim(db), "2026-10-01", "TS")
         assert _result(db, relief) == ("NO_ACTION", 0)
         assert _result(db, sat) == ("NO_ACTION", 0)
+
+    def test_a_game_missing_a_starter_waits_then_grades(self, db):
+        """2026-10-15 BUF@TOR: the evening box held the backups (no start) but
+        not Luukkonen's start, and his under was voided. He started and made
+        26 saves. A game without both starts is not loaded yet; it waits, and
+        grades on the saves once the starts arrive."""
+        bet = _bet(db, "nhl_prop_saves", "8480045", "Ukko-Pekka Luukkonen", 25.5, -110.0, "Saves",
+                   "player_total_saves")
+        _in_goal(db, 8481551, "C. Ellis", "BOS", 0, 0)
+        _in_goal(db, 8476932, "A. Stolarz", "NYR", 0, 0)
+        _in_goal(db, 8475683, "Sergei Bobrovsky", "NYR", 1, 29)   # one team's start only
+        pt._settle_prop_picks(_Shim(db), "2026-10-01", "TS")
+        assert _result(db, bet) == (None, None)
+        _in_goal(db, 8480045, "Ukko-Pekka Luukkonen", "BOS", 1, 26)
+        pt._settle_prop_picks(_Shim(db), "2026-10-01", "TS")
+        assert _result(db, bet) == ("LOSS", -100.0)
 
     def test_a_game_with_no_goalie_log_yet_waits(self, db):
         waiting = _bet(db, "nhl_prop_saves", "8478048", "Igor Shesterkin", 25.5, -125.0, "Saves", "player_total_saves")
@@ -599,7 +616,7 @@ class TestEveryLiveModelIsWiredEverywhere:
         body = rp.split("def step_nhl_prop_scoring")[1].split("\ndef ")[0]
         assert "from scripts.nhl_prop_card import run_card" in body
         assert "from scripts.nhl_props_card import run_card as run_props_card" in body
-        assert body.count("except Exception") == 2 and "return ok" in body
+        assert body.count("except Exception") == 3 and "return ok" in body   # two cards + the one-a-game write
 
     def test_the_row_is_written_whole(self):
         """Every column the card computes is one it inserts: a key left out of
@@ -619,3 +636,68 @@ def test_slate_time_is_utc_and_a_started_game_is_not_scored():
                     return [("G1", "NYR", "BOS", "2026-10-01T23:10:00Z"), ("G2", "VAN", "EDM", "2026-10-02T02:10:00Z")]
             return R()
     assert list(card.slate(Conn(), "2026-10-01", datetime(2026, 10, 2, 0, 0, tzinfo=timezone.utc))) == ["G2"]
+
+
+class TestOneNhlPropBetAGame:
+    """mike, 2026-10-02: "1 max ... it needs to be the best of the best."
+    One NHL prop bet a game across all four prop models, at a floor of 0.18."""
+
+    @staticmethod
+    def _r(gid: str, model: str, pid: str, ev: float) -> dict:
+        return {"game_id": gid, "model_id": model, "player_id": pid, "_ev": ev}
+
+    def test_the_single_best_bet_across_the_four_models_is_kept(self):
+        rows = [self._r("A", "nhl_prop_shots_on_goal", "1", 0.20), self._r("A", "nhl_prop_saves", "2", 0.31),
+                self._r("A", "nhl_prop_blocked_shots", "3", 0.25), self._r("A", "nhl_prop_assists", "1", 0.19),
+                self._r("B", "nhl_prop_assists", "9", 0.18)]
+        kept = card.one_per_game(rows)
+        assert [(r["game_id"], r["model_id"]) for r in kept] == [("A", "nhl_prop_saves"),
+                                                                 ("B", "nhl_prop_assists")]
+
+    def test_a_game_already_bet_gets_nothing_more(self):
+        rows = [self._r("A", "nhl_prop_saves", "2", 0.50), self._r("B", "nhl_prop_assists", "9", 0.20)]
+        assert [r["game_id"] for r in card.one_per_game(rows, {"A"})] == ["B"]
+
+    def test_every_nhl_prop_model_is_pooled_and_the_floor_is_018(self):
+        assert set(card.PROP_MODEL_IDS) == {"nhl_prop_blocked_shots"} | {s.model_id for s in P.LIVE}
+        assert card.MAX_PROP_BETS_PER_GAME == 1
+        for m in card.PROP_MODEL_IDS:
+            assert config.min_ev_for(m) == 0.18
+
+    def test_every_writer_goes_through_the_one_a_game_door(self):
+        """Both cards and the pipeline step publish only through publish_across_models."""
+        props = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
+        blocked = (ROOT / "scripts" / "nhl_prop_card.py").read_text(encoding="utf-8")
+        step = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
+        assert "publish_across_models(pooled)" in props
+        assert "publish(conn, r[\"rows\"])" not in props
+        assert "out[\"published\"] = publish_across_models(rows)" in blocked
+        assert "out[\"published\"] = publish(conn, rows)" not in blocked
+        body = step[step.index("def step_nhl_prop_scoring"):step.index("def step_nba_game_log")]
+        assert "do_publish=False" in body and "publish_across_models(rows)" in body
+        assert "do_publish=not dry_run" not in body
+
+
+class TestFourNhlPropBetsANight:
+    """At most four a night (mike, 2026-10-08; two from 10-03, "Too many fucking unders nhl props.")."""
+
+    @staticmethod
+    def _r(gid: str, date: str, ev: float) -> dict:
+        return {"game_id": gid, "game_date": date, "model_id": "nhl_prop_saves", "player_id": gid, "_ev": ev}
+
+    def test_the_four_best_of_the_night_are_kept(self):
+        rows = [self._r("A", "2026-10-04", 0.19), self._r("B", "2026-10-04", 0.40),
+                self._r("C", "2026-10-04", 0.25), self._r("E", "2026-10-04", 0.21),
+                self._r("F", "2026-10-04", 0.30), self._r("D", "2026-10-05", 0.18)]
+        kept = card.per_night(rows)
+        assert sorted(r["game_id"] for r in kept) == ["B", "C", "D", "E", "F"]
+
+    def test_picks_already_written_that_night_count(self):
+        rows = [self._r("A", "2026-10-04", 0.50), self._r("B", "2026-10-04", 0.30)]
+        assert [r["game_id"] for r in card.per_night(rows, {"2026-10-04": 3})] == ["A"]
+        assert card.per_night(rows, {"2026-10-04": 21}) == []
+
+    def test_the_limit_is_four_and_the_writer_applies_it(self):
+        assert card.MAX_PROP_BETS_PER_NIGHT == 4
+        src = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
+        assert "chosen = per_night(one_per_game(rows, taken), written)" in src

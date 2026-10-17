@@ -137,6 +137,15 @@ def _creds() -> tuple | None:
     return tuple(vals) if all(vals) else None
 
 
+def results_can_post() -> bool:
+    """Whether notify_x_results could tweet here at all: switched on, and all
+    four credentials set -- the same two checks it opens with. The recap retry
+    (discord_notifier.post_missed_recap) uses it to tell "X has not posted
+    this date" from "X is off on this machine", so a worker without X does not
+    look like a missed recap on every pass."""
+    return _enabled() and _creds() is not None
+
+
 # ── OAuth 1.0a (RFC 5849) ─────────────────────────────────────────────────────
 
 def _quote(s: str) -> str:
@@ -342,7 +351,7 @@ def render_results(recap: dict, game_date: str, restate: bool = False) -> str:
     if risked > 0:
         tally = f"{rec}, {units:+.2f}u, {units / risked * 100:+.1f}% ROI"
     else:
-        tally = f"{rec}, record only"
+        tally = f"{rec}, {units:+.2f}u"
     # "(restated)" when a late settlement invalidated the tweet before it --
     # the embed says "restated" in its title; the two must agree.
     head = f"{pretty} results (restated)" if restate else f"{pretty} results"

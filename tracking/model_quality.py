@@ -38,7 +38,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import record_exclusion_sql, today_et
+from config import duplicate_copy_exclusion_sql, record_exclusion_sql, today_et
 from data.db import get_connection
 from data.ddl_guard import schema_is_current
 
@@ -95,7 +95,7 @@ VOLUME_WARN_MULT = 3.0
 VOLUME_CRIT_MULT = 5.0
 MIN_VOLUME_TODAY = 6
 
-CLV_METHODS = ("no_vig", "zero_vig")
+CLV_METHODS = ("standard_v2",)
 
 _SIDE_ALIASES = {
     "o": "over", "over": "over",
@@ -336,9 +336,10 @@ def detect_clv_degradation(
     *,
     min_n: int = MIN_CLV_N,
 ) -> dict[str, Any] | None:
-    """Rolling no-vig / zero-vig CLV vs the prior window. None = thin sample.
+    """Rolling same-book CLV vs the prior window. None = thin sample.
 
-    Only `clv_method` in (`no_vig`, `zero_vig`) and a numeric `clv_pct`.
+    Only `clv_method` = `standard_v2` and a numeric `clv_pct` (same-book
+    percent). Older methods are a different definition and are ignored.
     Beat-rate uses `clv_beat_close` when present, else `clv_pct > 0`.
     """
     def _sample(rows: list[dict]) -> tuple[int, float | None, float | None]:
@@ -388,7 +389,7 @@ def detect_clv_degradation(
         return {
             "status": FLAGGED, "severity": CRIT,
             "detail": (
-                f"recent no-vig CLV {mean_r:+.2f}pp / beat {beat_r:.0%} "
+                f"recent same-book CLV {mean_r:+.2f}% / beat {beat_r:.0%} "
                 f"on {n_r} settled BET(s)"
             ),
             "metrics": metrics,
@@ -398,15 +399,15 @@ def detect_clv_degradation(
         return {
             "status": FLAGGED, "severity": WARN,
             "detail": (
-                f"recent no-vig CLV {mean_r:+.2f}pp vs baseline "
-                f"{mean_b:+.2f}pp (drop {drop:.2f}pp) on {n_r} settled BET(s)"
+                f"recent same-book CLV {mean_r:+.2f}% vs baseline "
+                f"{mean_b:+.2f}% (drop {drop:.2f}) on {n_r} settled BET(s)"
             ),
             "metrics": metrics,
         }
     return {
         "status": OK, "severity": WARN,
         "detail": (
-            f"recent no-vig CLV {mean_r:+.2f}pp / beat {beat_r:.0%} "
+            f"recent same-book CLV {mean_r:+.2f}% / beat {beat_r:.0%} "
             f"on {n_r} settled BET(s)"
         ),
         "metrics": metrics,
@@ -751,7 +752,9 @@ def run_model_quality(run_date: str | None = None) -> dict:
 
         open_by_model = _group(open_rows)
 
-        excl = record_exclusion_sql("p")
+        # Explicit removals, plus the second copy of a bet written under two
+        # game ids for one event (config.DUPLICATE_STATUS, mike 2026-10-09).
+        excl = record_exclusion_sql("p") + duplicate_copy_exclusion_sql("p")
         try:
             settled_sql = _SETTLED_BET_SQL.format(excl=excl)
             recent_rows = [_row_settled(r) for r in conn.execute(
@@ -836,7 +839,7 @@ def run_model_quality(run_date: str | None = None) -> dict:
                         "status": SKIPPED, "severity": WARN,
                         "detail": (
                             f"{len(recent)} recent settled BET(s) — "
-                            f"need {MIN_CLV_N} with no-vig/zero-vig CLV"
+                            f"need {MIN_CLV_N} with standard_v2 CLV"
                         ),
                         "metrics": {"recent_n": len(recent)},
                     }

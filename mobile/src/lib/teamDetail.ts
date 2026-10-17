@@ -22,6 +22,7 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
+import { isDuplicateCopy, isPausedRow, publishedRecordKeeps } from '@/lib/thresholds';
 import {
   teamStatsForSport,
   teamStatValue,
@@ -441,6 +442,8 @@ export interface TeamPickRecords {
   over: PickRecord;
   under: PickRecord;
   settled: number;
+  /** A ledger read failed. Unknown stamps stayed in the counts. */
+  ledgerUnread: boolean;
 }
 
 function emptyRecord(): PickRecord {
@@ -463,18 +466,32 @@ function addPick(rec: PickRecord, p: SettledPick): void {
 /**
  * Settled BET rows in the team's games, split by which side they backed. The
  * input is already the record filter (`signal_type = 'BET'`, a real result,
- * game-level rows) — this only sorts each row into a bucket. Live picks count:
+ * game-level rows, not paused, not the second copy of one bet) — this
+ * re-checks it and sorts each row into a
+ * bucket. Live picks count:
  * a bet on the team is a bet on the team whenever it was placed.
  */
 export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: string): TeamPickRecords {
   const byId = new Map(games.map((g) => [g.game_id, g] as const));
   const out: TeamPickRecords = {
-    on: emptyRecord(), against: emptyRecord(), over: emptyRecord(), under: emptyRecord(), settled: 0,
+    on: emptyRecord(), against: emptyRecord(), over: emptyRecord(), under: emptyRecord(),
+    settled: 0, ledgerUnread: false,
   };
   for (const p of picks) {
     const g = byId.get(p.game_id);
     if (!g) continue;
     if (p.signal_type !== 'BET') continue;
+    // A BET written while its model was paused was never posted or staked, so
+    // it is not a bet of record (#850). The query drops it server-side too;
+    // this keeps the count honest whatever feeds it.
+    if (isPausedRow(p)) continue;
+    // The second copy of one bet under another game id counts once (2026-10-09).
+    // An NCAAF game can exist under an Eastern and a UTC date, so this page is
+    // where that copy would land.
+    if (isDuplicateCopy(p)) continue;
+    // The published record is the picks Discord still has. Omitted and
+    // unknown stay; only an explicit unpublished stamp leaves.
+    if (!publishedRecordKeeps(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
     // nfl_prop_market writes player_id NULL and pick_side over/under — those
     // are player props, not team totals. Same for every *prop* model_id.
@@ -487,6 +504,7 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
     else if (side === 'home') addPick(teamIsHome ? out.on : out.against, p);
     else if (side === 'away') addPick(teamIsHome ? out.against : out.on, p);
     else continue;
+    if (p.discordPublish === 'unknown') out.ledgerUnread = true;
     out.settled += 1;
   }
   return out;

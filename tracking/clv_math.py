@@ -1,84 +1,98 @@
-"""Honest CLV arithmetic: no-vig two-way close vs the price you bet.
+"""CLV arithmetic. Two numbers, never mixed.
 
-Industry standard (OddsShopper, 2026): convert BOTH sides of the closing
-two-way market to implied probability, divide each by the sum (multiplicative
-/ proportional de-vig), then
+PRIMARY — same-book raw price. The book the bet was taken at
+(``clv_bet_book``), last pre-start snapshot, same side, same line. Neither
+side is de-vigged.
 
-    clv_pct = (fair_close_p(side) − fair_bet_p(side)) × 100
+    clv_pct = (taken_decimal / close_decimal − 1) × 100     # percent
+    clv_pp  = (raw_close_implied − raw_taken_implied) × 100  # probability points
 
-Positive = you bought cheaper than the market's true close. The posted close
-still has hold in it and flatters or distorts the number; vig widening at
-close is the trap that makes raw "cents" look like edge when the fair number
-did not move.
+Beat = the price we took is better than that book's close (``clv_pct > 0``).
+No snapshot at that book on that line → both are None. Another book is not
+a substitute.
 
-Worked OddsShopper example — bet Dodgers −130, close −150 / +135:
+SECONDARY — market edge. Pinnacle's last pre-start snapshot only, power
+de-vigged (3-way power when the close has a draw). The taken side stays raw.
 
-    Dodgers raw close  150/250 = 0.60
-    Padres  raw close  100/235 ≈ 0.425532
-    sum                  = 1.025532  (2.55% vig)
-    fair Dodgers         = 0.60 / 1.025532 ≈ 0.58505  (≈ −141)
-    bet implied (raw)    = 130/230 ≈ 0.565217
-    clv_pct              = (0.58505 − 0.565217) × 100 ≈ +1.98 pp
+    market_clv_pct = (taken_decimal × fair_close_prob − 1) × 100
+    market_clv_pp  = (fair_close_prob − raw_taken_implied) × 100
 
-OddsShopper's worked example only shows one bet price, so the bet stays raw
-implied. When the locked two-way is on the snapshot, both sides are de-vigged
-and vig widening (−110/−110 → −115/−115) is exactly 0 — not the +1.11 pp raw
-cents invent.
+No Pinnacle close, or a one-way quote with nothing to de-vig against → None.
+The method stamp on the row is ``standard_v2``. The de-vig method is
+``power`` / ``power_3way`` / ``zero_vig``, recorded separately.
 
-Raw close would have reported (0.60 − 0.565217) × 100 ≈ +3.48 pp. The no-vig
-figure is the honest one.
-
-Prediction-market prices (Kalshi, Polymarket) are already no-vig: do not
-de-vig them again. One-way sportsbook quotes have no second side to remove
-hold against, so the fair close is refused rather than invented.
-
-This module is the arithmetic only. The capture path (tracking/paper_tracker)
-owns which book is the close, the same-line guard, and the in-play bound.
+Same-line is the caller's job: a moved number does not get a price CLV.
 Full contract: docs/clv.md.
 """
 from __future__ import annotations
 
 from models.market_relative import implied
 
-# Exchanges, not sportsbooks. Their two sides already sum to ~1; running the
-# sportsbook de-vig on them would invent hold that is not there.
+# Exchanges, not sportsbooks. A close read from one of these is already
+# no-vig; power de-vig would invent hold.
 ZERO_VIG_BOOKS = frozenset({"kalshi", "polymarket"})
 
-# Circa is not in The Odds API feed we store. Pinnacle is the sharp close we
-# actually have. Callers may pass config.SHARP_BOOKMAKERS instead.
+# The sharp close we store. Circa is not in the feed. Callers may pass
+# config.SHARP_BOOKMAKERS; the secondary metric never falls through to a
+# soft book.
 DEFAULT_SHARP_CLOSE_BOOKS = ("pinnacle",)
 
-# Rows captured before 2026-09-14 used raw one-sided implied on the pick's
-# book. Pedigree must not average those with the no-vig number.
+CLV_METHOD_STANDARD = "standard_v2"
+
+# Pre-standard stamps. Kept so a row written under an older definition can
+# be named, and so pedigree can refuse it. None of these is averaged.
 CLV_METHOD_RAW_LEGACY = "raw_one_sided"
 CLV_METHOD_NO_VIG = "no_vig"
 CLV_METHOD_ZERO_VIG = "zero_vig"
 CLV_METHOD_ONE_WAY = "raw_one_way"
+CLV_METHOD_DK_GRADED_LEGACY = "graded_at_dk_legacy"
 
-# Published avg_clv_pct / beat-rate pedigree. Legacy raw and one-way juice
-# stay on the pick row for pick-detail but do not enter the model average.
-PEDIGREE_CLV_METHODS = frozenset({CLV_METHOD_NO_VIG, CLV_METHOD_ZERO_VIG})
+DEVIG_POWER = "power"
+DEVIG_POWER_3WAY = "power_3way"
+
+# Published averages. Old methods stay on the row until the recompute
+# stamps standard_v2, and they do not enter the average while they wait.
+PEDIGREE_CLV_METHODS = frozenset({CLV_METHOD_STANDARD})
+
+# Bisection shared with the SQL recompute (clv_power_fair). Same bounds,
+# same iteration count, so a row the migration writes matches this module.
+_POWER_LO = 0.05
+_POWER_HI = 12.0
+_POWER_ITERS = 80
 
 
 def close_book_candidates(
-    pick_book: str | None,
+    pick_book: str | None = None,
     sharp_books: tuple[str, ...] | list[str] = DEFAULT_SHARP_CLOSE_BOOKS,
 ) -> list[str]:
-    """Sharp close first, then the book the pick was priced at.
+    """Sharp books only. The pick's book is not a close for the market-edge
+    number, and it is not a fallback when Pinnacle is missing.
 
-    Grading DK-in vs DK-close is half-circular. A missing sharp snapshot is
-    not a missing capability: the pick's own book is the fallback, never an
-    unbounded "latest" quote after first pitch.
+    ``pick_book`` is accepted so older call sites keep parsing; it is not
+    appended. The primary metric looks the bet book up on its own.
     """
+    del pick_book
     out: list[str] = []
     for book in sharp_books:
         b = (book or "").strip().lower()
         if b and b not in out:
             out.append(b)
-    pick = (pick_book or "draftkings").strip().lower() or "draftkings"
-    if pick not in out:
-        out.append(pick)
     return out
+
+
+def american_to_decimal(american) -> float | None:
+    """American → decimal odds. None when the price is missing or zero."""
+    if american is None:
+        return None
+    try:
+        o = float(american)
+    except (TypeError, ValueError):
+        return None
+    if o != o or o == 0.0:  # NaN or a price that is not a price
+        return None
+    if o > 0:
+        return 1.0 + o / 100.0
+    return 1.0 + 100.0 / abs(o)
 
 
 def implied_to_american(p: float) -> int | None:
@@ -93,78 +107,113 @@ def implied_to_american(p: float) -> int | None:
     return int(round(100.0 * (1.0 - x) / x))
 
 
-def fair_close_probability(
-    side_price,
-    other_prices,
-    *,
-    book: str | None = None,
-) -> tuple[float | None, str]:
-    """No-vig probability of `side_price` at close, plus the method stamp.
+def _round_pct(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 2)
 
-    `other_prices` is the rest of the market (one price for two-way, two for
-    a 3-way). Missing/NaN others → one-way: we do not de-vig, and we do not
-    pretend the raw juice is fair — method `raw_one_way`, probability is the
-    raw implied so pick-detail still has a number, pedigree excludes it.
 
-    Zero-vig books skip de-vig even when both sides are present.
+def same_book_clv(bet_american, close_american) -> tuple[float | None, float | None]:
+    """Primary CLV. Raw vs raw. Returns ``(clv_pct, clv_pp)``.
+
+    ``clv_pct`` is percent: ``(taken_decimal / close_decimal − 1) × 100``.
+    ``clv_pp`` is probability points:
+    ``(raw_close_implied − raw_taken_implied) × 100``.
+
+    Positive = the close is a worse price than the one we took. Neither
+    input is de-vigged. Missing either price → ``(None, None)``.
     """
-    side_ip = implied(side_price)
-    if side_ip is None:
-        return None, CLV_METHOD_ONE_WAY
-    book_key = (book or "").strip().lower()
-    if book_key in ZERO_VIG_BOOKS:
-        return side_ip, CLV_METHOD_ZERO_VIG
-
-    others = list(other_prices or [])
-    other_ips = [implied(p) for p in others]
-    if not other_ips or any(p is None for p in other_ips):
-        return side_ip, CLV_METHOD_ONE_WAY
-
-    total = side_ip + sum(other_ips)
-    if not total:
-        return None, CLV_METHOD_ONE_WAY
-    return side_ip / total, CLV_METHOD_NO_VIG
+    taken_p = implied(bet_american)
+    close_p = implied(close_american)
+    taken_d = american_to_decimal(bet_american)
+    close_d = american_to_decimal(close_american)
+    if taken_p is None or close_p is None or taken_d is None or close_d is None:
+        return None, None
+    if close_d == 0:
+        return None, None
+    pct = (taken_d / close_d - 1.0) * 100.0
+    pp = (close_p - taken_p) * 100.0
+    return _round_pct(pct), _round_pct(pp)
 
 
-def price_clv_pct(
+def power_fair(prices: list) -> list[float] | None:
+    """Power de-vig. Solve ``Σ p_i^k = 1`` and return fair probabilities
+    in the same order.
+
+    Two prices or three. A missing price, a non-probability, or a single
+    side returns None — a one-way quote is not given a made-up hold.
+    """
+    ips: list[float] = []
+    for price in prices:
+        p = implied(price)
+        if p is None or p <= 0.0 or p >= 1.0:
+            return None
+        ips.append(p)
+    if len(ips) < 2:
+        return None
+    # Already fair (an exchange, or a book that took no hold).
+    if abs(sum(ips) - 1.0) < 1e-12:
+        return ips
+    lo, hi = _POWER_LO, _POWER_HI
+    for _ in range(_POWER_ITERS):
+        k = (lo + hi) / 2.0
+        total = sum(p ** k for p in ips)
+        if total > 1.0:
+            lo = k
+        else:
+            hi = k
+    k = (lo + hi) / 2.0
+    powered = [p ** k for p in ips]
+    scale = sum(powered)
+    if not scale:
+        return None
+    return [v / scale for v in powered]
+
+
+def market_edge_clv(
     bet_american,
     side_close,
     other_prices,
     *,
     book: str | None = None,
-    bet_other_prices=None,
-    bet_book: str | None = None,
-) -> tuple[float | None, str]:
-    """Probability-point CLV: (fair_close_p − fair_bet_p) × 100.
+) -> tuple[float | None, float | None, str | None]:
+    """Secondary CLV against a de-vigged close. Returns
+    ``(market_clv_pct, market_clv_pp, devig_method)``.
 
-    `book` is the close; `bet_book` is the book we bet (defaults to the close
-    book). `bet_other_prices` is the rest of the two-way (or 3-way) at LOCK.
-    Missing lock others → raw bet implied, matching OddsShopper's Dodgers
-    example. Present lock others → both markets are de-vigged, so vig
-    widening grades as 0.
-
-    Same-line only is the caller's job. This function will happily difference
-    two prices on different numbers; do not call it when the line moved.
-
-    The returned method stamps the CLOSE, which is what pedigree filters on.
+    The taken side is raw. The close is power-de-vigged, or left raw when
+    ``book`` is already no-vig. One-way closes return ``(None, None, None)``.
     """
-    fair, method = fair_close_probability(side_close, other_prices, book=book)
-    bet_ip, _bet_method = fair_close_probability(
-        bet_american,
-        bet_other_prices or [],
-        book=bet_book if bet_book is not None else book,
-    )
-    if bet_ip is None or fair is None:
-        return None, method
-    return round((fair - bet_ip) * 100, 2), method
+    taken_p = implied(bet_american)
+    taken_d = american_to_decimal(bet_american)
+    if taken_p is None or taken_d is None:
+        return None, None, None
+
+    book_key = (book or "").strip().lower()
+    others = [p for p in (other_prices or [])]
+    if book_key in ZERO_VIG_BOOKS:
+        fair = implied(side_close)
+        method = CLV_METHOD_ZERO_VIG
+    else:
+        if any(p is None for p in others) or not others:
+            return None, None, None
+        fair_all = power_fair([side_close, *others])
+        if not fair_all:
+            return None, None, None
+        fair = fair_all[0]
+        method = DEVIG_POWER_3WAY if len(others) >= 2 else DEVIG_POWER
+    if fair is None:
+        return None, None, None
+    pct = (taken_d * fair - 1.0) * 100.0
+    pp = (fair - taken_p) * 100.0
+    return _round_pct(pct), _round_pct(pp), method
 
 
 def other_side_prices(closing: dict, pick_side: str) -> list:
-    """The other American(s) in a closing snapshot for de-vig.
+    """The other American(s) in a closing snapshot, for the market-edge de-vig.
 
     Totals/props: the opposite over/under. H2H: the opposite team, plus draw
-    when the snapshot is 3-way. Missing keys become None and fair_close then
-    stamps the market one-way.
+    when the snapshot is 3-way. Missing keys stay None so the caller can
+    refuse a one-way de-vig.
     """
     if not closing:
         return []

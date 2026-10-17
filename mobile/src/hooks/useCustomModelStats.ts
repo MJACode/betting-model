@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchCustomModelBacktest,
   fetchCustomModelPicks,
+  fetchSettledPickMarkers,
   fetchSettledPicks,
   fetchPublishedModelRecord,
   FullOutcomeRecord,
@@ -22,8 +23,11 @@ import {
   refreshFrom,
   writeSettledCache,
 } from '@/lib/settledPickCache';
+import { applySettledMarkers } from '@/lib/settledPickMarkers';
+import { isDuplicateCopy } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
+import { attachDiscordPublish } from '@/lib/discordPublish';
 import { errorText, isAbortError } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, SettledPick, SignalType } from '@/types';
@@ -57,14 +61,23 @@ export function useSettledPicksSincePaperStart() {
   const [records, setRecords] = useState<Record<string, FullOutcomeRecord>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const seq = useRef(0);
 
   const load = useCallback(async (opts?: { full?: boolean }) => {
+    const id = ++seq.current;
     setLoading(true);
     setError(null);
     try {
       const cached = opts?.full ? [] : await readSettledCache();
-      // Show what we already have while the network catches up.
-      if (cached.length > 0) setRows(cached);
+      if (seq.current !== id) return;
+      // Stamp before paint. The cache itself stays unstamped: discordPublish
+      // is a read of the ledger, not part of the pick, and a cached stamp
+      // would go stale the moment a post or a void notice lands.
+      if (cached.length > 0) {
+        const stampedCache = await attachDiscordPublish(cached);
+        if (seq.current !== id) return;
+        setRows(stampedCache);
+      }
 
       const from = refreshFrom(cached, PAPER_START);
 
@@ -72,21 +85,32 @@ export function useSettledPicksSincePaperStart() {
       // built-in model rows — the same v_public_track_record rows Retool reads,
       // so the two surfaces cannot disagree (Matt, 2026-09-04: "mirror retool").
       // View fetch is failure-tolerant so a view error can't blank the screen.
-      const [fresh, recs] = await Promise.all([
+      //
+      // Markers: a row older than the refetch window is kept as first cached,
+      // so a marker set on it later (the second copy of one bet, marked
+      // DUPLICATE once both copies settle) would never arrive.
+      // The marker read is small and covers the whole cached range; on a
+      // failure (null) the cached rows keep what they had, and the next load
+      // tries again (lib/settledPickMarkers).
+      const [fresh, recs, markers] = await Promise.all([
         fetchSettledPicks(from, todayET()),
         fetchPublishedModelRecord().catch(() => ({} as Record<string, FullOutcomeRecord>)),
+        fetchSettledPickMarkers(PAPER_START).catch(() => null),
       ]);
 
-      const merged = mergeSettled(cached, fresh, from);
-      setRows(merged);
-      setRecords(recs);
+      if (seq.current !== id) return;
+      const merged = mergeSettled(applySettledMarkers(cached, markers, PAPER_START), fresh, from);
       void writeSettledCache(merged);
+      const stamped = await attachDiscordPublish(merged);
+      if (seq.current !== id) return;
+      setRows(stamped);
+      setRecords(recs);
     } catch (e: unknown) {
       // Cached rows stay on screen — a failed refresh shouldn't blank the
       // backtest, it just leaves it as stale as the last successful load.
-      if (!isAbortError(e)) setError(errorText(e));
+      if (seq.current === id && !isAbortError(e)) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (seq.current === id) setLoading(false);
     }
   }, []);
 
@@ -99,8 +123,8 @@ export function useSettledPicksSincePaperStart() {
 
 /** Adapt a full-outcome view row to the CustomModelStats shape the screens render.
  *  Units in the view are 1-unit (flat); screens display at a $100 notional stake,
- *  so scale by 100 to match computeBuiltInModelStats. roi_pct is NULL for prob-only
- *  HR (no real odds) — surface a record-only row (0 ROI) rather than NaN. */
+ *  so scale by 100 to match computeBuiltInModelStats. roi_pct is NULL when
+ *  nothing was priced — surface 0 ROI rather than NaN. */
 export function viewRecordToStats(rec: FullOutcomeRecord): CustomModelStats {
   const decided = rec.wins + rec.losses;
   const priced = rec.priced_bets ?? 0;
@@ -221,7 +245,8 @@ export function useCustomModelBacktest(
     if (!model || !withPicks || uncovered.length === 0) return [];
     const sub = { ...model, rules: uncovered };
     return settled
-      .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION')
+      .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION'
+        && !isDuplicateCopy(p))
       .map((p) => ({
         pick_id: p.pick_id,
         model_id: p.model_id,

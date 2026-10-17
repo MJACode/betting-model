@@ -254,13 +254,21 @@ def apply_calibration(prob: float, params: dict | None) -> float:
     (p >= 0.5) and the other side is defined as 1 - f(1 - p). Without that a
     prop's over and under would not sum to 1, and the app would publish two
     probabilities for one proposition that disagree.
+
+    NEVER ACROSS 0.5 (mike, 2026-10-03). The map is fitted on bets claiming
+    0.65-0.78 and has never seen a pick near 0.5. With a negative offset the
+    mirror put f(0.5) at ~0.43 from above and ~0.57 from below, so every side
+    the model rated 0.43-0.50 came out as the FAVOURITE and its opponent as
+    the dog: Florida 0.479 -> 0.546 and Illinois 0.468 -> 0.535 were bet live
+    on 2026-10-03 off that flip alone. A side the model rates under 0.5 stays
+    under 0.5; the preferred side shrinks to 0.5 at most, never past it.
     """
     if not params or params.get("method") != "platt":
         return prob
     a, b = float(params["a"]), float(params["b"])
     if prob >= 0.5:
-        return _sigmoid(a * _logit(prob) + b)
-    return 1.0 - _sigmoid(a * _logit(1.0 - prob) + b)
+        return max(0.5, _sigmoid(a * _logit(prob) + b))
+    return min(0.5, 1.0 - _sigmoid(a * _logit(1.0 - prob) + b))
 
 
 def invert_calibration(cal_prob: float, params: dict | None) -> float:
@@ -276,6 +284,10 @@ def invert_calibration(cal_prob: float, params: dict | None) -> float:
     a, b = float(params["a"]), float(params["b"])
     if a == 0:
         return cal_prob
+    if cal_prob == 0.5:
+        # every raw >= 0.5 that a negative offset shrinks past 0.5 is held AT
+        # 0.5, so the lowest raw number that reaches it is 0.5 itself
+        return 0.5
     if cal_prob >= 0.5:
         return _sigmoid((_logit(cal_prob) - b) / a)
     return 1.0 - _sigmoid((_logit(1.0 - cal_prob) - b) / a)
@@ -334,12 +346,12 @@ def fetch_graded(conn, model_id: str, since: str) -> list[tuple[float, int]]:
         # population's shape. A live lane's population is that shape in every
         # window, by construction, so excluding the gap corrects nothing and
         # costs real bets (18 of mlb_live_total_runs' 126).
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT model_probability::float8, result
             FROM picks
             WHERE model_id = %(m)s AND is_live AND result IN ('WIN','LOSS')
               AND model_probability >= %(minp)s AND game_date >= %(since)s
-              AND dk_odds IS NOT NULL
+              AND dk_odds IS NOT NULL{config.duplicate_copy_exclusion_sql("picks")}
         """, {"m": model_id, "minp": MIN_PROB, "since": since}).fetchall()
         return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
 
@@ -354,14 +366,19 @@ def fetch_graded(conn, model_id: str, since: str) -> list[tuple[float, int]]:
         # fixed on 09-07, one source over. These models write BET rows only
         # (a rule has no dead zone), so like a live model the evidence is the
         # bet band alone.
-        rows = conn.execute("""
+        # ONE EVENT IS ONE BET (mike, 2026-10-09, "Count each fight once"):
+        # the second copy of a bet written under two game ids for one event
+        # (config.DUPLICATE_STATUS) is not a second piece of evidence. Measured
+        # 2026-10-09: ufc_total_rounds read 8 graded bets, 4 won; with the June
+        # Borjas-Lima copy out, 7 and 3.
+        rows = conn.execute(f"""
             SELECT model_probability::float8, result
             FROM picks
             WHERE model_id = %(m)s AND NOT coalesce(is_live, false)
               AND signal_type = 'BET' AND result IN ('WIN','LOSS')
               AND model_probability >= %(minp)s AND game_date >= %(since)s
               AND coalesce(decision_odds, dk_odds) IS NOT NULL
-              AND coalesce(condition_status, '') <> 'VOID'
+              AND coalesce(condition_status, '') <> 'VOID'{config.duplicate_copy_exclusion_sql("picks")}
         """, {"m": model_id, "minp": MIN_PROB, "since": since}).fetchall()
         return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
 

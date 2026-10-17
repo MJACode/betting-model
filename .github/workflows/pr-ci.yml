@@ -36,6 +36,8 @@ jobs:
           # only needs pytest + the modules those tests import. Install the
           # declared test pin and the light runtime deps config/scorer need.
           python -m pip install "pytest>=8.0.0" python-dotenv numpy pandas loguru psycopg2-binary requests scipy joblib scikit-learn xgboost-cpu optuna apscheduler beautifulsoup4
+          # tests/test_nba_injury_report.py parses real report PDFs (requirements.txt pin).
+          python -m pip install "pdfplumber>=0.11.0"
 
       - name: Mobile thresholds drift check
         run: python -m scripts.generate_mobile_thresholds --check
@@ -75,7 +77,24 @@ jobs:
             tests/test_live_lock.py \
             tests/test_settle_self_heal.py \
             tests/test_settled_record_is_immutable.py \
+            tests/test_live_money_no_record_only.py \
+            tests/test_published_record.py \
             tests/test_settlement_timing.py \
+            tests/test_nhl_boxscore.py \
+            tests/test_nba_espn_box.py \
+            tests/test_nba_box_enrich.py \
+            tests/test_nba_injury_report.py \
+            tests/test_nba_odds_history.py \
+            tests/test_nba_period_scores.py \
+            tests/test_nba_prop_close.py \
+            tests/test_nba_prop_market.py \
+            tests/test_nba_prop_settle_stats.py \
+            tests/test_nba_props.py \
+            tests/test_nba_results_ingestor.py \
+            tests/test_nba_results_wiring.py \
+            tests/test_nba_schedule_ingestor.py \
+            tests/test_prop_odds_book_last_update.py \
+            tests/test_prop_box_scores.py \
             tests/test_intraday_freshness.py \
             tests/test_dk_freshness_parse.py \
             tests/test_savant_freshness.py \
@@ -99,19 +118,34 @@ jobs:
             tests/test_nhl_prop_odds_gate.py \
             tests/test_nhl_prop_blocked_shots.py \
             tests/test_nhl_props.py \
+            tests/test_nhl_derivative_odds_job.py \
             tests/test_nfl_prop_two_sharps.py \
             tests/test_nfl_prop_one_read_per_game.py \
             ncaaf_live/tests/test_cfbd_yardline.py \
             tests/test_nfl_prop_market_kalshi.py \
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
+            tests/test_position_vs_opponent.py \
+            tests/test_player_positions.py \
             tests/test_mobile_betslip_combine.py \
             tests/test_mobile_contrast_tokens.py \
             tests/test_mobile_error_states.py \
             tests/test_mobile_pick_cta.py \
+            tests/test_mobile_line_movement.py \
             tests/test_mobile_a11y.py \
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
+            tests/test_discord_void_notice.py \
+            tests/test_anon_readable.py \
+            tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
+            tests/test_discord_post_one_pick_migration.py \
+            tests/test_results_recap_message_id.py \
+            tests/test_backfill_results_recap.py \
+            tests/test_job_queue.py \
+            tests/test_idle_read_transaction.py \
+            tests/test_view_migration_lock_noop.py \
+            tests/test_record_correction_post.py \
+            tests/test_voided_pick_not_rechosen.py \
             tests/test_mobile_stat_segments.py

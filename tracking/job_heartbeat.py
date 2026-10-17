@@ -66,6 +66,10 @@ MAX_SILENCE: dict = {
     # Every 10 minutes, 9am-midnight ET. Off overnight by design, so the bound
     # has to clear the gap: ~9h of silence is legitimate.
     "nfl_live_worker": 700,
+    # Same cadence and the same overnight gap. The beat lands when a launch
+    # RETURNS, and one launch can run a whole Sunday slate (1pm to ~7:30pm
+    # ET, ~6.5h), which 700 also clears.
+    "nfl_live_leader": 700,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -73,6 +77,9 @@ MAX_SILENCE: dict = {
     "heartbeat_watchdog": 45,
     # Every 5 minutes, 24x7.
     "job_queue": 30,
+    # Every 5 minutes, 24x7, and it beats on the idle ticks too (it returns
+    # after one read when no NBA game is near), so silence means stopped.
+    "nba_prop_window": 30,
 }
 
 
@@ -146,6 +153,39 @@ def seed(job_id: str) -> None:
     beat(job_id, status="registered", detail="scheduled, not yet run")
 
 
+def mark_disabled(job_id: str, why: str = "switched off on this deployment") -> None:
+    """Record that a watched job is OFF here on purpose, so its silence is not
+    an alarm.
+
+    "Never registered = no row" only holds for a job that was never on. A job
+    switched off after it ran keeps the row its last run wrote, and that row
+    goes stale forever: on 2026-10-11 the NFL in-play worker -- off since its
+    model was retired on 10-04 (RUN_NFL_LIVE=0) -- was still raising "has gone
+    silent" from its last check-in, a week later. The scheduler calls this at
+    startup for every watched job it owns but did not register; registering
+    the job again overwrites it via `seed`.
+    """
+    beat(job_id, status="disabled", detail=why)
+
+
+def failing_jobs(conn) -> list:
+    """[(job_id, detail)] for every watched job whose last run raised.
+
+    Silence is not the only way a watched job breaks. Since 2026-10-11 the NFL
+    poll kills a step that overruns instead of hanging on it, and then RAISES
+    so the run is recorded as "error" -- a job that beats on time and fails
+    every tick would otherwise look healthy here. Never raises.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT job_id, last_status, detail FROM job_heartbeats").fetchall()
+        return [(r[0], (r[2] if len(r) > 2 else "") or "") for r in rows
+                if r[0] in MAX_SILENCE and len(r) > 1 and str(r[1]) == "error"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"heartbeat status read failed: {exc}")
+        return []
+
+
 def stale_jobs(conn, now: datetime | None = None) -> list:
     """[(job_id, minutes_silent, allowed)] for every watched job that is late.
 
@@ -165,13 +205,16 @@ def stale_jobs(conn, now: datetime | None = None) -> list:
     now = now or datetime.now(timezone.utc)
     try:
         rows = conn.execute(
-            "SELECT job_id, last_run_at FROM job_heartbeats").fetchall()
+            "SELECT job_id, last_run_at, last_status FROM job_heartbeats").fetchall()
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"heartbeat read failed: {exc}")
         return []
 
     seen = {}
-    for job_id, raw in rows:
+    for row in rows:
+        job_id, raw = row[0], row[1]
+        if len(row) > 2 and str(row[2]) == "disabled":
+            continue                      # off here on purpose — see mark_disabled
         try:
             parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except (ValueError, TypeError):

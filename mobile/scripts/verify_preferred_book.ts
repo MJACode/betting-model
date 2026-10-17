@@ -27,10 +27,10 @@ import {
   lineShopForPick,
   priceForBook,
   storedQuoteBook,
-  clvLockBook,
   LINE_SHOP_BOOKS,
   MODEL_BOOK,
 } from '../src/lib/markets';
+import { clvBetQuote } from '../src/lib/clvBet';
 import type { BookPricedRow, Pick } from '../src/types';
 
 let passed = 0;
@@ -326,51 +326,86 @@ check(
 );
 // BR is BetRivers since 2026-09-03 (the Discord notifier maps "br" the same
 // way), so the unknown-abbrev case uses one no book has ever claimed.
+// The book key comes back lowercased, as the server grades it.
 check(
-  'a book we do not carry is reported as-is, never guessed into a known one',
-  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, XYZ) · 1.00u')) === 'XYZ',
+  'a book we do not carry is reported as its raw key, never guessed into a known one',
+  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, XYZ) · 1.00u')) === 'xyz',
 );
 check(
   'BR in an NFL label is BetRivers',
   storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, BR) · 1.00u')) === 'betrivers',
 );
 check(
-  'REBET in an NFL label is still ReBet after PIN was added to the map',
+  'REBET in an NFL label is the raw key rebet',
   storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, REBET) · 1.00u')) === 'rebet',
+);
+// The NFL publisher writes a book it has no code for in full.
+check(
+  'a book written out in full in an NFL wind label is that book',
+  storedQuoteBook(nflPick('PIT @ CLE Under 38.5 (Wind 11 mph, fanatics) · 1.19u', 'nfl_wind_totals')) ===
+    'fanatics',
 );
 check(
   'an unparseable NFL label falls back to DraftKings rather than inventing a book',
   storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5')) === MODEL_BOOK,
 );
+// The market-relative prop cards name their book as a trailing "(FD)".
 check(
-  'non-NFL picks are always DraftKings-priced',
+  'the trailing (FD) on an NFL market-relative prop is FanDuel',
+  storedQuoteBook(nflPick('Jadarian Price Over 1.5 Rec (FD)', 'nfl_prop_market')) === 'fanduel',
+);
+check(
+  'the trailing (FD) on a WNBA market-relative prop is FanDuel',
+  storedQuoteBook(nflPick("A'ja Wilson Over 24.5 Pts (FD)", 'wnba_prop_market')) === 'fanduel',
+);
+check(
+  'the header and the CLV card name the same book for one price',
+  storedQuoteBook(nflPick('PIT @ CLE Under 38.5 (Wind 11 mph, fanatics) · 1.19u', 'nfl_wind_totals')) ===
+    clvBetQuote(nflPick('PIT @ CLE Under 38.5 (Wind 11 mph, fanatics) · 1.19u', 'nfl_wind_totals')).book,
+);
+check(
+  'a pick whose label names no book is DraftKings-priced',
   storedQuoteBook({ ...pick('home', -110), model_id: 'mlb_moneyline' } as Pick) === MODEL_BOOK,
 );
 
+// The CLV card prints the price taken at the book it was taken
+// (lib/clvBet.ts, paper_tracker._bet_price_and_book).
 check(
-  'CLV lock book is the trailing (FD) on a market-relative label, not decision_book',
-  clvLockBook({
+  'CLV bet is the trailing (FD) on a market-relative label',
+  clvBetQuote({
     model_id: 'nfl_prop_market',
     pick_label: 'Jadarian Price Over 1.5 Rec (FD)',
-  }) === 'fanduel',
+    dk_odds: -120,
+  }).book === 'fanduel',
 );
 check(
-  'CLV lock book is DraftKings when the label has no book suffix',
-  clvLockBook({ model_id: 'mlb_moneyline', pick_label: 'NYY ML' }) === MODEL_BOOK,
+  'CLV bet is DraftKings when nothing else names a book',
+  clvBetQuote({ model_id: 'mlb_moneyline', pick_label: 'NYY ML', dk_odds: -130 }).book === MODEL_BOOK,
 );
 check(
-  'CLV lock book names the NFL wind/opener comma book that owns dk_odds',
-  clvLockBook({
+  'CLV bet names the NFL wind/opener comma book that owns dk_odds',
+  clvBetQuote({
     model_id: 'nfl_wind_totals',
     pick_label: 'NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u',
-  }) === 'fanduel',
+    dk_odds: -105,
+  }).book === 'fanduel',
 );
-check(
-  'CLV lock book ignores a deciding book — dk_odds is still DraftKings',
-  clvLockBook({
+{
+  const taken = clvBetQuote({
     model_id: 'mlb_moneyline',
     pick_label: 'NYY ML',
-  }) === MODEL_BOOK,
+    dk_odds: -130,
+    decision_book: 'betmgm',
+    decision_odds: -118,
+  });
+  check(
+    'CLV bet is the deciding book at the deciding price, not DraftKings',
+    taken.book === 'betmgm' && taken.price === -118,
+  );
+}
+check(
+  'a (F5) on a model that is not label-priced is not a book',
+  clvBetQuote({ model_id: 'mlb_f5_moneyline', pick_label: 'NYY ML (F5)', dk_odds: -130 }).book === MODEL_BOOK,
 );
 
 // A DK user on an NFL pick priced at MGM, with no DK row: show MGM's number and

@@ -8,7 +8,7 @@
 -- Grading CASEs mirror v_model_full_outcome_picks (keep in step — this is the
 -- documented grading-logic maintenance trap; runline away side = (away-home) -
 -- scored_line). picks.result is deliberately NOT written for non-BET rows:
--- paper-trading P&L and the go-live gate stay BET-only.
+-- live P&L and the go-live gate stay BET-only.
 --
 -- Materialized because the same query as a plain view ran ~6s per builder
 -- keystroke; refreshed daily by run_pipeline step 0d (refresh-outcomes) right
