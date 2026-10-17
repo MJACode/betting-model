@@ -122,9 +122,12 @@ def test_both_record_views_sum_the_same_functions():
 
 def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     screen = (ROOT / "mobile/src/screens/TrackRecordScreen.tsx").read_text(encoding="utf-8")
+    card = (ROOT / "mobile/src/components/RecordHeroCard.tsx").read_text(encoding="utf-8")
+    hero = (ROOT / "mobile/src/lib/recordHero.ts").read_text(encoding="utf-8")
     queries = (ROOT / "mobile/src/lib/queries.ts").read_text(encoding="utf-8")
     summary = (ROOT / "mobile/src/lib/trackRecord.ts").read_text(encoding="utf-8")
     curve = (ROOT / "mobile/src/components/EquityCurve.tsx").read_text(encoding="utf-8")
+    spark = (ROOT / "mobile/src/components/RecordSparkline.tsx").read_text(encoding="utf-8")
     share = (ROOT / "mobile/src/lib/shareRecord.ts").read_text(encoding="utf-8")
     assert "units, risked" in queries
     assert queries.count("units, risked") >= 2
@@ -135,21 +138,34 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "d.units" in equity
     assert "profit_flat" not in equity
     assert "/ 100" not in equity
-    assert "Flat-bet ROI" not in screen
-    assert ">Units · 1 to win<" in screen
-    assert "formatSigned(heroUnits, 2, 'u')" in screen
-    assert "pnlColor(heroUnits, 2)" in screen
-    assert "unitsSpeech(formatSigned(heroUnits, 2, 'u'))" in screen
-    assert "Units unavailable" in screen
-    assert "alignSelf: 'stretch'" in screen
-    assert "textAlign: 'center'" in screen.split("heroRecord:", 1)[1].split("heroSplit:", 1)[0]
-    assert "formatPctSigned(overall.roiFlat)} ROI" in screen
+    # Option B: Discord's all-time label, the units number, the same pill.
+    assert "DISCORD_ALL_TIME_LABEL" in screen
+    assert "endUnits={heroUnits}" in screen
+    assert 'export const DISCORD_ALL_TIME_LABEL = \'All-time\'' in hero
+    assert "return formatSigned(units, 2, 'u')" in hero
+    assert "Units unavailable" in hero
+    assert "unknownCountSpeech('— settled picks')" in hero
+    assert "since ${LIVE_RECORD_START_SHORT}" in hero
+    assert "Flat-bet ROI" in card
+    assert "Beat the closing line" in card
+    assert 'accessibilityRole="summary"' in card
+    assert "accessibilityLabel={heroLabel}" in card
+    assert "heroAccessibilityLabel" in hero
+    assert "pnlColor(units, 2)" in card
+    assert "pnlColor(summary.roiFlat, 1, 100)" in card
     assert "Yesterday and the Models tab still use a flat $100 bet" in screen
-    assert "wins less than 1" in screen
+    assert "wins less than 1" in hero
     assert "unpriced, staked at 1u" in screen
     assert "flat $100" not in curve
+    assert "colors.positive" not in curve
+    assert "colors.betInk" in curve
     assert "Cumulative units, 1 to win" in curve
-    assert "formatSigned(last, 2, 'u')" in curve
+    assert "formatSigned(endUnits, 2, 'u')" in curve
+    assert "pnlColor(endUnits, 2)" in curve
+    assert "strokeDasharray" in curve
+    assert "unitAxisTicks" in curve
+    assert "colors.betInk" in spark
+    assert "colors.positive" not in spark
     assert "units, 1 to win" in share
     assert "flat-bet ROI" not in share
     assert "flat $100" not in share

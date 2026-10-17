@@ -390,7 +390,7 @@ for (const rel of ['src/components/SportsbookPickerSheet.tsx', 'src/components/H
 }
 // Designer H2 / L9 misses: the equity-curve total and the share text.
 const eq = read('src/components/EquityCurve.tsx');
-check('EquityCurve total is pnlColor ink + formatSigned (no bright text, no hyphen)', /<Text style=\{\[styles\.units, \{ color: pnlColor\(last, 2\) \}\]\}>\{formatSigned\(last, 2, 'u'\)\}<\/Text>/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
+check('EquityCurve end pill is pnlColor ink + formatSigned, line is betInk (no bright green)', /formatSigned\(endUnits, 2, 'u'\)/.test(eq) && /pnlColor\(endUnits, 2\)/.test(eq) && /colors\.betInk/.test(eq) && !/colors\.positive/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
 const share = read('src/lib/shareRecord.ts');
 check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roiFlat\)/.test(share) && /formatSigned\(opts\.endUnits, 2, 'u'\)/.test(share) && !/\? '\+' : ''/.test(share));
 check('DailyResults "No picks" rows: no opacity, textTertiary', /sportCardEmpty: \{ paddingVertical: spacing\.sm \}/.test(read('src/components/DailyResultsModal.tsx')));
