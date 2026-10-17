@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
   TEAM_WINDOW_SIZE,
   teamCellAccessibilityLabel,
+  teamFifthColumnLabel,
   teamSeasonNote,
   teamShortWindowNote,
 } from '@/lib/teamForm';
@@ -49,10 +50,13 @@ export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames 
       <View style={styles.row}>
         {KEYS.map((k) => {
           const t = trends[k.key];
-          // Team "season" is the last 25 finished games in that sport, and it
-          // crosses into the previous season once that window is full. The
-          // player strip keeps "Season": its window is 25 or 50 by sport.
-          const label = mode === 'team' && k.key === 'season' ? 'L25' : k.label;
+          // Team fifth column: Season when these games are the whole current
+          // season, L25 when they are the last 25. The player strip keeps
+          // "Season": its window is 25 or 50 by sport.
+          const label =
+            mode === 'team' && k.key === 'season'
+              ? teamFifthColumnLabel(t.games, seasonGames)
+              : k.label;
           const primary =
             mode === 'team'
               ? t.winPct != null
@@ -88,6 +92,7 @@ export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames 
                       avg: t.avg,
                       spokenUnit: spokenUnit ?? '',
                       seasonGames,
+                      columnLabel: k.key === 'season' ? label : undefined,
                     })
                   : undefined
               }

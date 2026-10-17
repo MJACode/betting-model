@@ -77,9 +77,10 @@ def test_team_form_reads_one_sport_and_does_not_say_runs_for_football():
     strip = _read(STRIP)
     assert "toFixed(1)} R`" not in strip, "the team average was hardcoded as runs"
     assert "${t.avg.toFixed(1)} ${unit}" in strip
-    # The fifth column is the last 25 games in that sport, not the season.
+    # The fifth column is Season or L25 from the games it shows.
     # Player mode keeps "Season": its window is 25 or 50 depending on sport.
-    assert "mode === 'team' && k.key === 'season' ? 'L25'" in strip
+    assert "teamFifthColumnLabel(" in strip
+    assert "columnLabel: k.key === 'season' ? label : undefined" in strip
     assert "label: 'Season'" in strip
     assert "teamCellAccessibilityLabel(" in strip
     assert "teamGamesRow(" not in strip
@@ -95,7 +96,7 @@ def test_team_form_reads_one_sport_and_does_not_say_runs_for_football():
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_scoring_unit_is_points_for_football_and_runs_for_baseball(tmp_path):
     script = PRELUDE + """
-import { teamScoringUnit, teamScoringUnitSpoken, teamShortWindowNote, teamSeasonNote, teamCellAccessibilityLabel, countThisSeason } from './teamForm.ts';
+import { teamScoringUnit, teamScoringUnitSpoken, teamShortWindowNote, teamSeasonNote, teamFifthColumnLabel, teamCellAccessibilityLabel, countThisSeason } from './teamForm.ts';
 eq(teamScoringUnit('MLB'), 'R', 'mlb');
 eq(teamScoringUnit('NFL'), 'pts', 'nfl');
 eq(teamScoringUnit('NCAAF'), 'pts', 'ncaaf');
@@ -110,13 +111,21 @@ eq(teamScoringUnitSpoken('NBA'), 'points', 'spoken nba');
 eq(teamScoringUnitSpoken('WNBA'), 'points', 'spoken wnba');
 eq(teamScoringUnitSpoken('NHL'), 'goals', 'spoken nhl');
 eq(teamScoringUnitSpoken(null), '', 'spoken unknown');
+eq(teamFifthColumnLabel(0, 0), 'Season', 'zero games is not L25');
+eq(teamFifthColumnLabel(0, null), 'Season', 'empty unknown season is not L25');
+eq(teamFifthColumnLabel(1, 1), 'Season', 'one game this season');
+eq(teamFifthColumnLabel(4, 4), 'Season', 'fewer than 25, all this season');
+eq(teamFifthColumnLabel(25, 25), 'L25', '25 this season is last 25, not the whole season');
+eq(teamFifthColumnLabel(25, 4), 'L25', 'last 25 may span seasons');
+eq(teamFifthColumnLabel(20, 4), 'L20', 'a short span is not Season and not L25');
+eq(teamFifthColumnLabel(4, null), 'L4', 'unknown season is not called Season');
 eq(teamShortWindowNote({ l3: 0, l5: 0, l10: 0, l20: 0, l25: 0 }), null, 'no data is not 0 games');
 eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }), null, 'a full window hides the count');
-eq(teamShortWindowNote({ l3: 3, l5: 4, l10: 4, l20: 4, l25: 4 }), 'Only 4 games so far. L5–L25 all use those 4.', 'short window');
-eq(teamShortWindowNote({ l3: 1, l5: 1, l10: 1, l20: 1, l25: 1 }), 'Only 1 game so far. L3–L25 all use that 1.', 'one game');
-eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }), 'Only 20 games so far. L25 uses those 20.', 'only L25 is short');
-eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }, 20), 'Only 20 games so far. L25 uses those 20.', 'same season stays so far');
-eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }, 4), 'Only 20 games available. L25 uses those 20.', 'cross season says available');
+eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }, 4), null, '25 games stays silent');
+eq(teamShortWindowNote({ l3: 3, l5: 4, l10: 4, l20: 4, l25: 4 }, 4), 'Only 4 games so far. L5–Season all use those 4.', 'short window');
+eq(teamShortWindowNote({ l3: 1, l5: 1, l10: 1, l20: 1, l25: 1 }, 1), 'Only 1 game so far. L3–Season all use that 1.', 'one game');
+eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }, 20), 'Only 20 games so far. Season uses those 20.', 'only the season column is short');
+eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }, 4), 'Only 20 games available. L20 uses those 20.', 'cross season names the real window');
 eq(
   teamSeasonNote(4, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }),
   'This season: 4 games. L5–L25 include earlier seasons.',
@@ -163,10 +172,17 @@ eq(
 );
 eq(
   teamCellAccessibilityLabel({
-    window: 25, games: 4, winPct: 0.5, avg: 3.2, spokenUnit: 'goals',
+    window: 25, games: 4, winPct: 0.5, avg: 3.2, spokenUnit: 'goals', columnLabel: 'Season',
   }),
-  'Last 25 games, only 4 played: won 50 percent, 3.2 goals a game',
-  'a short window names how many were played',
+  'Season, only 4 played: won 50 percent, 3.2 goals a game',
+  'a season column is not spoken as last 25',
+);
+eq(
+  teamCellAccessibilityLabel({
+    window: 25, games: 25, winPct: 0.5, avg: 3.2, spokenUnit: 'goals', columnLabel: 'L25', seasonGames: 4,
+  }),
+  'Last 25 games, including earlier seasons: won 50 percent, 3.2 goals a game',
+  'L25 may include earlier seasons',
 );
 eq(
   teamCellAccessibilityLabel({
