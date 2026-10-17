@@ -664,3 +664,42 @@ bets are written out. A cell passes when all of these hold:
   correlation).
 
 A cell that passes is built LIVE (CLAUDE.md §2) and judged on its live record.
+
+**Results under the house standard (2026-10-17).** Every lab was re-run unchanged with pooled
+numbers and its bets written out (`NBA_GAME2_BETS`). `python -m scripts.nba_game2_verdict
+--house`: **4 of 422 cells pass, all one effect: F4's overs.**
+
+| Cell | Bets | Units | ROI | 95% interval | Seasons positive | Closing value (cell / blind over) |
+|---|---|---|---|---|---|---|
+| over, morning (A), gap ≥ 3 | 507 | +57.0 | +10.3% | +2.2 .. +18.5 | 5 of 5 | −2.35% / −2.80% |
+| over, morning (A), gap ≥ 4 | 210 | +29.9 | +13.1% | +0.3 .. +25.7 | 4 of 4 | −2.34% / −2.80% |
+| over, 60–180 min (C), gap ≥ 3 | 508 | +55.6 | +10.1% | +2.0 .. +18.3 | 5 of 5 | −2.23% / −2.41% |
+| over, 60–180 min (C), gap ≥ 4 | 210 | +31.2 | +13.6% | +1.3 .. +25.6 | 4 of 4 | −2.23% / −2.41% |
+
+- **How to read it.** Only 6 cells clear the 95% interval at all, against about 10.6 expected
+  by chance before correlation. Two of the 6 are one-bet artifacts and the other four are this
+  one effect. So the interval is not what makes it credible.
+- **What does make it credible is the shape:**
+  - The return rises with the luck gap at every decision time: +3.8 / +5.7 / +10.3 / +13.1% at
+    A, +3.7 / +5.9 / +10.1 / +13.6% at C.
+  - Every graded season is positive at gap ≥ 3.
+  - It works for overs only (unders are mixed).
+  - The mechanism is published: opponents' three-point shooting is mostly luck.
+  - The neighbours are positive, though not themselves significant: gap ≥ 2 spans zero. That is a
+    neighbourhood by the house definition and a ridge by a stricter one.
+- **Closing-line value is not a warning sign.** A line that never moves scores about −2 to −4.5%
+  by this measure (the bookmaker's margin). These bets fare slightly better than blind overs at
+  the same moment.
+- **The profit survives the market's own move.** The diagnostic at D (45–75 minutes, not
+  registered) at gap ≥ 3: 506 bets, +53.6 units, +9.7%, interval +1.6 .. +18.1, 5 of 5 seasons.
+- **Robustness of the cell that ships (C, gap ≥ 3):**
+  - Without single-book outlier prices: +46.8 units.
+  - Without BetRivers (+26.5 units on 78 bets): 430 bets, +29.1 units, +6.2%.
+  - DraftKings alone: +8.2% on 425 bets over the choosing seasons, +7.0% in 2025-26.
+  - Still offered at the next stored fetch: 27.8% of bets.
+  - Prices −115 to +100, median −110. 290-214-4.
+- **The other near misses fail the house standard:**
+  - F5 home spreads (3–6 h, gap ≥ 3): 512 bets, +8.1%, interval −0.4 .. +16.5.
+  - F6c against eliminated teams: 371 bets, +6.3%, interval −3.5 .. +16.2, 3 of 5 seasons.
+
+**Shipped LIVE (CLAUDE.md §2):** F4 overs at C, gap ≥ 3. It is judged on its live record.
