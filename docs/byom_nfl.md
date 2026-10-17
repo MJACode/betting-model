@@ -120,7 +120,7 @@ does not add a schedule. It does not write `picks`.
 user sees their own rows. The cap is 25 models. Saving an existing name
 updates that model and appends a snapshot of `byom_backtest` at that
 moment. The snapshot totals and the per-market summary are that one
-read. The snapshot keeps both unit totals. Those are results. A
+read. The snapshot stores wins, losses, pushes, and ties. A
 stake, kelly, price, line, or spread-size filter is rejected. An
 allowlisted key in the wrong case is rejected. There
 is no recommended stake.
