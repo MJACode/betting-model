@@ -23,7 +23,9 @@ import {
   parseTypedLine,
   stepLineFrom,
   stepperRowLayout,
+  CHIP_ROW_LEAD,
   chipKey,
+  chipRowScrollX,
   chipsForLoadedPlayer,
   chipsForPlayer,
   defaultChipForPlayer,
@@ -41,12 +43,21 @@ import {
   pagePlayerId,
   playerSubtitle,
   positionGroups,
+  requestedChip,
   roundLineToStep,
   supportsPlayerDetail,
   windowOptionsFor,
   type PlayerLogEntry,
 } from '../src/lib/playerLog';
-import { statForPropMarket, statForPropModel, type StatDef } from '../src/lib/statCatalog';
+import {
+  isLogDerivedStat,
+  propMarketForStat,
+  propModelForStat,
+  statForPropMarket,
+  statForPropModel,
+  statsForSport,
+  type StatDef,
+} from '../src/lib/statCatalog';
 import { playerPickRecord } from '../src/lib/playerDetail';
 import type { SettledPick } from '../src/types';
 
@@ -82,6 +93,92 @@ check('NBA threes stay null when fg3_made is null', nbaRow.threes === null);
 const allNull = normalizeLogRow('NBA', { points: null, rebounds: null, assists: null });
 check('an all-missing PRA is null, not 0 (a null game must not count as a zero game)',
   allNull.pra === null);
+
+// Blocks+Steals and Reb+Ast: the two combined markets the NBA projection model
+// bets. No leaderboard view carries them, so the log row is the only place
+// they are summed (statCatalog.LOG_DERIVED_STATS).
+const nbaCombo = normalizeLogRow('NBA', { blocks: 2, steals: 1, rebounds: 9, assists: 4 });
+check('NBA Blocks+Steals = blocks + steals', nbaCombo.blocks_steals === 3);
+check('NBA Reb+Ast = rebounds + assists', nbaCombo.rebounds_assists === 13);
+const nbaComboGap = normalizeLogRow('NBA', { blocks: null, steals: 2, rebounds: null, assists: null });
+check('Blocks+Steals ignores a missing component rather than zeroing it', nbaComboGap.blocks_steals === 2);
+check('an all-missing Reb+Ast is null, not 0', nbaComboGap.rebounds_assists === null);
+check('Blocks+Steals reads through logStatValue on its chip',
+  logStatValue(nbaCombo, statOf('NBA', 'Blocks+Steals')) === 3 &&
+  logStatValue(nbaCombo, statOf('NBA', 'Reb+Ast')) === 13);
+check('the NBA player page offers Blocks+Steals and Reb+Ast after the leaderboard chips',
+  chipsForPlayer('NBA').slice(-2).map((c) => c.label).join() === 'Blocks+Steals,Reb+Ast');
+check('the NBA leaderboard does not carry them (no view column, no server branch)',
+  !statsForSport('NBA').some((c) => c.label === 'Blocks+Steals' || c.label === 'Reb+Ast'));
+check('WNBA offers neither (no WNBA model bets them)',
+  !chipsForPlayer('WNBA').some((c) => isLogDerivedStat(c)));
+check('the NBA player page still opens on Points', defaultChipForPlayer('NBA')?.label === 'Points');
+check('a pick handed over as blocks_steals opens on that chip',
+  requestedChip(chipsForPlayer('NBA'), 'blocks_steals', 'NBA')?.label === 'Blocks+Steals');
+check('the two are log-derived; a leaderboard stat is not',
+  isLogDerivedStat(statOf('NBA', 'Reb+Ast')) && !isLogDerivedStat(statOf('NBA', 'PRA')));
+check('their markets resolve with no per-stat model behind them',
+  propMarketForStat(statOf('NBA', 'Blocks+Steals')) === 'player_blocks_steals' &&
+  propMarketForStat(statOf('NBA', 'Reb+Ast')) === 'player_rebounds_assists' &&
+  propModelForStat(statOf('NBA', 'Blocks+Steals')) === null);
+// The head-to-head and same-position cards read server functions keyed on the
+// stat, which have no branch for either key and return nothing: the card would
+// say "No meetings with X" about a player who has met them. The hook skips
+// both reads, and both cards, for a log-derived stat.
+{
+  const hook = readFileSync(join(import.meta.dirname, '..', 'src/hooks/usePlayerDetail.ts'), 'utf-8');
+  check('the player page knows which stats the server cannot read',
+    hook.includes('const serverStat = !isLogDerivedStat(stat);'));
+  check('its head-to-head read and card are skipped for them',
+    hook.includes('team && opponent && stat && serverStat') &&
+    hook.includes('if (!opponent || threshold == null || !serverStat) return null;'));
+  check('its same-position read and card are skipped for them',
+    hook.includes('opponent && stat && serverStat && posGroup && pvoSeason != null') &&
+    hook.includes('opponent && serverStat && posGroup && pvoSeason != null') &&
+    hook.includes('serverStat && isRosterSport && opponent && stat && !posGroup'));
+  // …and the page says so where the cards were, instead of dropping them
+  // without a word (UX review, 2026-10-16).
+  check('the hook says when those reads were skipped and there was an opponent to read',
+    hook.includes('serverReadsSkipped: !serverStat && stat != null && opponent != null,'));
+  const screenSrc = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
+  check('the player page puts one muted line in a card where the two cards were',
+    /\{detail\.serverReadsSkipped && detail\.nextGame \? \(\s*<>\s*<SectionTitle title=\{`vs \$\{detail\.nextGame\.entry\.opponent\}`\} \/>\s*<View style=\{styles\.card\}>\s*<Text style=\{styles\.muted\}>\s*No head-to-head or same-position numbers for combined stats yet\. Pick a single stat to see them\.\s*<\/Text>\s*<\/View>\s*<\/>\s*\) : null\}/
+      .test(screenSrc));
+  check('that line sits after the same-position card, before the MLB context',
+    screenSrc.indexOf('{detail.serverReadsSkipped && detail.nextGame ? (') > screenSrc.indexOf('<PositionVsOpponentPending') &&
+    screenSrc.indexOf('{detail.serverReadsSkipped && detail.nextGame ? (') < screenSrc.indexOf('<StatcastCard'));
+}
+
+// ── The selected stat chip is scrolled into view ────────────────────────────
+// NBA has 11 chips; a projection pick on Blocks+Steals or Reb+Ast opens on the
+// 10th or 11th, past the right edge on every iPhone, so nothing visible said
+// which stat the chart was (UX review, 2026-10-16). SportToggle's pattern:
+// offsets from each chip's onLayout, scroll when the active chip lays out.
+check('NBA Blocks+Steals and Reb+Ast are the 10th and 11th chips (why this matters)',
+  chipsForPlayer('NBA').findIndex((c) => c.label === 'Blocks+Steals') === 9 &&
+  chipsForPlayer('NBA').findIndex((c) => c.label === 'Reb+Ast') === 10 &&
+  chipsForPlayer('NBA').length === 11);
+check('the row scrolls to 40pt before the chip, as SportToggle does',
+  CHIP_ROW_LEAD === 40 && chipRowScrollX(600) === 560);
+check('a chip near the start scrolls the row back to 0, never negative',
+  chipRowScrollX(30) === 0 && chipRowScrollX(0) === 0);
+check('a chip that has not laid out yet does not scroll the row',
+  chipRowScrollX(undefined) === null && chipRowScrollX(null) === null && chipRowScrollX(NaN) === null);
+{
+  const screenSrc = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
+  check('the stat chip row carries a ref',
+    /<ScrollView\s+ref=\{statRowRef\}\s+horizontal/.test(screenSrc));
+  check('each stat chip records its x under its chip key, and the active one scrolls when it lays out',
+    /onLayout=\{\(e\) => \{\s*statChipX\.current\[chipKey\(c\)\] = e\.nativeEvent\.layout\.x;\s*if \(active\) scrollToActiveChip\(\);\s*\}\}/
+      .test(screenSrc));
+  check('the scroll is keyed on the resolved stat and goes through chipRowScrollX, not animated',
+    screenSrc.includes('const activeChipKey = stat ? chipKey(stat) : null;') &&
+    screenSrc.includes('chipRowScrollX(statChipX.current[activeChipKey])') &&
+    screenSrc.includes('statRowRef.current?.scrollTo({ x, animated: false });') &&
+    screenSrc.includes('}, [activeChipKey]);'));
+  check('it scrolls on layout only, never on a tap (a tapped chip is already on screen)',
+    screenSrc.split('scrollToActiveChip').length - 1 === 2);
+}
 
 const nflRow = normalizeLogRow('NFL', {
   player_id: '2', player_name: 'A Back', team: 'SF', opponent: 'SEA', week: 4, pos: 'RB',
@@ -227,6 +324,28 @@ check('the outs swap holds on the pick path too',
 check('statForPropMarket needs the sport: no NCAAF stat is priced in an NBA market',
   statForPropMarket('NCAAF', 'player_points') === null);
 
+// The NBA projection model: one id across six markets, like the rule. Two of
+// them (Blocks+Steals, Reb+Ast) had no stat at all until the log-derived pair.
+for (const [market, label] of [
+  ['player_steals', 'Steals'],
+  ['player_rebounds', 'Rebounds'],
+  ['player_blocks_steals', 'Blocks+Steals'],
+  ['player_blocks', 'Blocks'],
+  ['player_rebounds_assists', 'Reb+Ast'],
+  ['player_threes', '3PM'],
+] as const) {
+  const d = detailStatForPick({ model_id: 'nba_prop_projection', prop_market: market });
+  check(`a projection pick on ${market} opens the NBA ${label} stat`, d?.label === label && d.sport === 'NBA');
+}
+check('statForPropMarket resolves the two combined NBA markets',
+  String(statForPropMarket('NBA', 'player_blocks_steals')?.key) === 'blocks_steals' &&
+  String(statForPropMarket('NBA', 'player_rebounds_assists')?.key) === 'rebounds_assists');
+check('the combined markets are NBA-only: no WNBA stat is priced in them',
+  statForPropMarket('WNBA', 'player_blocks_steals') === null &&
+  statForPropMarket('WNBA', 'player_rebounds_assists') === null);
+check('the projection model names no single stat of its own',
+  detailStatForPropModel('nba_prop_projection') === null);
+
 // ── "Our picks on <player>": a multi-market rule splits by market ───────────
 {
   const settled = (over: Partial<SettledPick>): SettledPick => ({
@@ -264,6 +383,46 @@ check('statForPropMarket needs the sport: no NCAAF stat is priced in an NBA mark
   const bothLabels = both.lines.map((l) => l.label).sort().join(',');
   check('a per-stat Assists line and the rule\'s Assists line read differently',
     bothLabels === 'Assists,Assists (vs Pinnacle)');
+
+  // The NBA projection model is not priced against Pinnacle, so its lines
+  // carry its own name; it bets overs as well as unders.
+  const proj = playerPickRecord([
+    settled({ pick_id: 7, model_id: 'nba_prop_projection', prop_market: 'player_steals', pick_side: 'over',
+      pick_label: 'A Player Over 1.5 Steals' }),
+    settled({ pick_id: 8, model_id: 'nba_prop_projection', prop_market: 'player_steals', pick_side: 'under',
+      pick_label: 'A Player Under 1.5 Steals', result: 'LOSS', profit_flat: -100 }),
+    settled({ pick_id: 9, model_id: 'nba_prop_projection', prop_market: 'player_blocks_steals', pick_side: 'over',
+      pick_label: 'A Player Over 2.5 Blocks+Steals' }),
+    settled({ pick_id: 10, model_id: 'nba_prop_projection', prop_market: 'player_rebounds_assists',
+      pick_label: 'A Player Under 13.5 Reb+Ast' }),
+    settled({ pick_id: 11, prop_market: 'player_rebounds', pick_label: 'A Player Under 8.5 Reb' }),
+  ]);
+  const projLabels = proj.lines.map((l) => l.label).sort().join(',');
+  check('the projection model\'s lines are named "(Projection)", the rule\'s stay "(vs Pinnacle)"',
+    projLabels === 'Blocks+Steals (Projection),Reb+Ast (Projection),Rebounds (vs Pinnacle),Steals (Projection)');
+  check('no projection line claims Pinnacle',
+    proj.lines.filter((l) => l.modelId === 'nba_prop_projection').every((l) => !l.label.includes('Pinnacle')));
+  const steals = proj.lines.find((l) => l.label === 'Steals (Projection)');
+  check('a projection line counts its overs and its unders',
+    steals?.overs === 1 && steals.unders === 1 && steals.wins === 1 && steals.losses === 1);
+  check('the projection and the rule are separate lines even in one sport',
+    new Set(proj.lines.map((l) => l.key)).size === proj.lines.length && proj.settled === 5);
+
+  // The projection's labels use the rule's words for the shared markets:
+  // rebounds is "Reb" and threes is "3PM" (models/nba_prop_projection.py
+  // MARKET_LABEL). The line is named from the row's prop_market, not the
+  // label's words, so both still land on their stat.
+  const words = playerPickRecord([
+    settled({ pick_id: 12, model_id: 'nba_prop_projection', prop_market: 'player_rebounds', pick_side: 'under',
+      pick_label: 'Josh Hart Under 7.5 Reb' }),
+    settled({ pick_id: 13, model_id: 'nba_prop_projection', prop_market: 'player_threes', pick_side: 'over',
+      pick_label: 'Karl-Anthony Towns Over 1.5 3PM' }),
+  ]);
+  check('a projection "Reb" pick is a Rebounds line, a "3PM" pick a 3PM line',
+    words.lines.map((l) => l.label).sort().join(',') === '3PM (Projection),Rebounds (Projection)');
+  check('…on its own side',
+    words.lines.find((l) => l.label === '3PM (Projection)')?.overs === 1 &&
+    words.lines.find((l) => l.label === 'Rebounds (Projection)')?.unders === 1);
 }
 
 // ── The tabs a player actually fills ────────────────────────────────────────

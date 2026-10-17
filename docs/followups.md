@@ -21,21 +21,44 @@
 
 ---
 
-## [ ] NBA projection model: one under a game, on worker-only inputs (2026-10-16)
+## [ ] NBA projection model: what to read after its first nights (2026-10-16)
 
-The NHL count recipe for NBA (`models/nba_props.py`) re-fit on what the worker
-has in 2026-27 (ESPN box lines, schedule, odds, ESPN injury statuses):
-unders, one a game, 3,630 bets, +5.57%, 90% CI +2.45..+8.62, every season
-positive, DraftKings alone +5.28% (`docs/nba_models_2026.md` §4.4; verifier
-bet lists in `C:/Users/micha/AppData/Local/Temp/nba_rebuild/verify_model/` on
-the build machine). Strongest where Pinnacle does not quote: 1,045 bets,
-+9.01%; blocks unders at EV ≥ 0.06 +6.55% on 7,701 (chosen after seeing
-results, so an extra search). Four a night does NOT hold (2024-25 +1.5 u).
-Before it can go live: a card on the live frame path (never run), the same
-roster rule as the backtest (log window + injury list), main lines only (the
-live feed carries alternates the backtest never saw), a calibrated published
-probability (the model claims 0.636 where it wins 0.464), and an owner rule for
-the 530 picks it shares with `nba_prop_market` (that rule keeps them).
+`nba_prop_projection` went live with three things the archive could not grade
+(`docs/nba_models_2026.md` §5): (1) which books quote steals, blocks and
+blocks+steals near tip — four days out only DraftKings and FanDuel did, and the
+timing verifier graded that case at +2.53% (its five-market version of the card); (2) the stale-quote guard, which refuses
+quotes the archive never stored a clock for — count `stale_rejected` in the card's
+diagnostic line against bets written; (3) closing-line value, from the 'close'
+snapshot each bet game now gets. After the first 250 settled bets, grade the
+record by market and by deciding book, and BetParx-only lines separately
+(32% of the graded 2025-26 units, uncheckable against another book).
+
+## [ ] NBA: Blocks+Steals and Reb+Ast on the Stats leaderboard (2026-10-16)
+
+The app's NBA player pages show both combined stats, summed from the game log, and
+hide the head-to-head and same-position cards for them: the server has neither. To
+put them on the Stats leaderboard, add `blocks_steals` and `rebounds_assists`
+branches to `player_season_stat_values_nba`, `player_h2h_stat_values_nba` and
+`position_vs_opponent_nba`, and both columns to `v_player_season_totals_nba`; then
+move the two entries from `LOG_DERIVED_STATS` into `STAT_CATALOG`
+(`mobile/src/lib/statCatalog.ts`) and remove the gating in
+`mobile/src/hooks/usePlayerDetail.ts`.
+
+## [ ] App: the player record reads at most 200 settled bets (2026-10-16)
+
+"Our picks on <player>" (`mobile/src/lib/queries.ts`, `.limit(200)`) was sized for a
+busiest player of 50 settled bets. The NBA projection model can bet five markets on
+one player in one game. Measure once it has posted:
+`select player_id, count(*) from picks where model_id='nba_prop_projection' and
+signal_type='BET' group by 1 order by 2 desc limit 5`; if the top player nears 200,
+say "Latest 200 bets" on the card or page the read.
+
+## [ ] NBA: a partial ESPN injury pull looks complete (2026-10-16)
+
+`injury_ingestor.fetch_espn_injuries` stores nothing for a team whose ESPN call
+fails and writes the other 29, so the projection reads that team's Out players as
+available. Not observed since 2026-10-01 (no "injuries failed" warning in worker
+logs). The fix is a per-team failure marker the projection can refuse.
 
 ## [ ] NBA: the official injury report is not on the worker (2026-10-16)
 
