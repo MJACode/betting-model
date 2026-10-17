@@ -301,4 +301,5 @@ def test_full_refuses_without_the_owners_go(monkeypatch):
 
 def test_the_cell_counts_are_the_registered_ones():
     assert M.F3_CELLS == 24 and len(M.F3_MARKETS) * len(M.F3_POINTS) * len(M.F3_CUTS) == 24
+    assert M.SMOKE_SEASONS == [2021] and M.FULL_SEASONS == [2021, 2022, 2023, 2024, 2025, 2026]
     M.synthetic_checks()

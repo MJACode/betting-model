@@ -98,7 +98,8 @@ from scripts import nba_game_harness as H  # noqa: E402
 
 RESULTS = Path(os.environ.get("NBA_GAME2_RESULTS",
                               "C:/Users/micha/AppData/Local/Temp/nba_game_edge/results"))
-SMOKE_SEASONS = [2021]
+SMOKE_SEASONS = [H.REGIME]                                  # 2020-21
+FULL_SEASONS = sorted({H.REGIME, *H.CHOOSE, H.CONFIRM})       # 2020-21 .. 2025-26, the priced seasons
 N_PLACEBO = 20
 SETTLE_HOURS = 3.0           # a game is final this long after tip (features/nba_schedule_features)
 
@@ -516,7 +517,7 @@ def main() -> None:
     if not (a.cache / "nba_fetch_ledger.parquet").exists():
         raise SystemExit(f"{a.cache} has no nba_fetch_ledger.parquet: refresh the research cache "
                          "(python -m scripts.nba_research_cache --only lines) first.")
-    seasons = SMOKE_SEASONS if a.smoke else None
+    seasons = SMOKE_SEASONS if a.smoke else FULL_SEASONS
     out = a.results / "smoke_move" if a.smoke else a.results
     out.mkdir(parents=True, exist_ok=True)
     data = H.load(a.cache, seasons=seasons)
