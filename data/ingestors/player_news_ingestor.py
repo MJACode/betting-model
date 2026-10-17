@@ -68,6 +68,17 @@ ESPN_HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json",
+    # The 2026-09-19 diagnostic job (worker_jobs 161989) got HTTP 403 on every
+    # call -- league feed AND all 12 team feeds -- while `injuries` reads a
+    # DIFFERENT host (sports.core.api.espn.com) with the same UA and is fresh.
+    # So this was never the ESPN IP-block from sessions 112/115 (that blocked
+    # the whole worker); it is `site.api.espn.com`'s `/news` path specifically
+    # rejecting a request with no Referer. Publicly documented as the fix for
+    # this exact endpoint (docs/rules_evidence.md 2026-09-21). Unverified from
+    # here -- this sandbox's egress proxy 403s the host outright -- so land it
+    # behind a new diagnostic job and read worker_jobs.result once merged.
+    "Referer": "https://www.espn.com/",
+    "Origin": "https://www.espn.com",
 }
 
 ESPN_NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/{path}/news"
