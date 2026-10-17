@@ -60,6 +60,7 @@ import {
   MODEL_BOOK,
 } from '@/lib/markets';
 import { stalePriceNote } from '@/lib/heroPriceText';
+import { teamScoreUnit } from '@/lib/teamForm';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
@@ -272,12 +273,17 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // no run-based team form to show, so skip the trend strips like UFC.
   const isGolf = game?.sport === 'GOLF' || pick.sport === 'GOLF';
   const showTeamTrends = isGameModel && !isUfc && !isGolf;
+  // The form strips read the pick's own sport: `games` stores the Celtics, the
+  // Red Sox and the Bruins all as 'BOS'.
+  const teamSport = game?.sport ?? pick.sport ?? null;
 
   const homeTrends = useTeamTrends(
+    showTeamTrends ? teamSport : null,
     showTeamTrends ? game?.home_team ?? null : null,
     pick.game_date,
   );
   const awayTrends = useTeamTrends(
+    showTeamTrends ? teamSport : null,
     showTeamTrends ? game?.away_team ?? null : null,
     pick.game_date,
   );
@@ -523,8 +529,18 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
 
         {showTeamTrends && game ? (
           <>
-            <TrendStrip title={`${game.home_team} (home) form`} trends={homeTrends.trends} mode="team" />
-            <TrendStrip title={`${game.away_team} (away) form`} trends={awayTrends.trends} mode="team" />
+            <TrendStrip
+              title={`${game.home_team} (home) form`}
+              trends={homeTrends.trends}
+              mode="team"
+              unit={teamScoreUnit(teamSport)}
+            />
+            <TrendStrip
+              title={`${game.away_team} (away) form`}
+              trends={awayTrends.trends}
+              mode="team"
+              unit={teamScoreUnit(teamSport)}
+            />
           </>
         ) : null}
 

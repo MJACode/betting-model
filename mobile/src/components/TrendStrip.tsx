@@ -7,7 +7,10 @@ interface Props {
   title: string;
   trends: TrendBuckets;
   mode: 'team' | 'player';
-  unit?: string; // e.g. "Ks", "Hits"
+  // Player mode: the stat under the average ("Ks", "Hits"). Team mode: the
+  // unit after the scoring average, by sport (lib/teamForm.teamScoreUnit:
+  // "R", "GF", "PTS"); "R" when not given, so MLB reads as it always did.
+  unit?: string;
 }
 
 const KEYS: Array<{ key: keyof TrendBuckets; label: string }> = [
@@ -36,7 +39,7 @@ export function TrendStrip({ title, trends, mode, unit }: Props) {
           const secondary =
             mode === 'team'
               ? t.avg != null
-                ? `${t.avg.toFixed(1)} R`
+                ? `${t.avg.toFixed(1)} ${unit ?? 'R'}`
                 : '—'
               : unit ?? '';
           return (
