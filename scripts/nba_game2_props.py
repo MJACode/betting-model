@@ -104,11 +104,23 @@ THE MODEL NUMBER, PER GAME AT DECISION POINT D
              offer under the market's own fair line among the offers clearing
              g (run_cells strength="gap").
 
+POPULATION  the games this rule produced a model number for (refused games are
+            not in it): the cell's own priced population, over which the
+            harness takes bar 9's blind bet on each real side.
+SIDES       every offer keeps its real side (home / away / over / under); no
+            game is oriented, so the harness grades, shares and blinds by the
+            real side.
+GATE        the harness's 95% gate at D reads THIS lab's decision times (the
+            per-game prop purchases, H.per_event_times), passed as times=.
+MARKET      the market's fair line, the blind bet and closing value are
+            priced through H.close_dist: the empirical spread of results
+            around Pinnacle's close on seasons BEFORE the graded one. A prop
+            season priced from its own results is refused (check_close_prior).
 PLACEBO     20 runs: the model numbers (implied margin, implied total) shuffled
             between games on the same date in the same market
             (H.shuffle_within_date, rng seed = run number 0-19), the gap
             recomputed against each game's own offers, graded at the same cuts.
-CLOSE       H.pinnacle_close / H.close_sigma (reported only at D).
+CLOSE       H.pinnacle_close / H.close_dist (reported only at D).
 
 NO LOOK-AHEAD: prop quotes at or before T and within 60 minutes (H.visible);
 box scores only from games whose tip is >= 4 hours before T; the injury report
@@ -146,6 +158,12 @@ POINT = "D"
 CUTS = (2.0, 4.0, 6.0)
 SIDES = {"spreads": ["home", "away"], "totals": ["over", "under"]}
 CHOOSE_SEASONS = (2024, 2025)
+PROP_SEASONS = (2024, 2025, 2026)     # the seasons with props: --full grades and fits shapes for these
+# --full loads every PRICED season through 2025-26: the market's pricing for
+# 2024 is fit on 2021-2023's closes. Named, not "every season", so 2026-27
+# (untouched, section 6.5) never enters a graded run once its games are scored.
+FULL_LOAD_SEASONS = (2021, 2022, 2023, 2024, 2025, 2026)
+SMOKE_SEASONS = (2021,)
 EXPECTED_CELLS = 12
 PROP_MARKET = "player_points"
 KEY_PREFIX = "pp|"                    # the player rides in H.visible's `market` column
@@ -558,12 +576,19 @@ def with_gap(neutral: pd.DataFrame, model: pd.DataFrame) -> pd.DataFrame:
     return x.assign(gap=gap)
 
 
+def modelled(cand: pd.DataFrame) -> pd.DataFrame:
+    """Only the offers of games the rule produced a number for: the cell's own
+    priced population (section 6.4, second amendment), which run_cells reads
+    from the games in `cand`."""
+    return cand[cand["gap"].notna()].reset_index(drop=True)
+
+
 def placebo_frames(neutral: pd.DataFrame, model: pd.DataFrame, games: pd.DataFrame,
                    n: int = N_PLACEBO) -> list[pd.DataFrame]:
     out = []
     for run in range(n):
         sh = H.shuffle_within_date(model, games, np.random.default_rng(run)) if len(model) else model
-        out.append(with_gap(neutral, sh))
+        out.append(modelled(with_gap(neutral, sh)))
     return out
 
 
@@ -638,20 +663,35 @@ def build(data: H.Data, games_all: pd.DataFrame, props: pd.DataFrame, app: pd.Da
     times = times[times["game_id"].isin(data.games["game_id"])].reset_index(drop=True)
     model, per_game, names = model_numbers(times, props, games_all, app, inj, shape_by_season)
     _, neutral = offers_at(data, times, sig)
-    cand = with_gap(neutral, model)
+    cand = modelled(with_gap(neutral, model))
     return {"times": times, "model": model, "per_game": per_game, "names": names,
             "neutral": neutral, "cand": cand}
+
+
+def check_close_prior(sig: dict, seasons) -> None:
+    """Every graded prop season's market pricing must come from EARLIER
+    seasons' results around Pinnacle's close. H.dist_by_season falls back to a
+    season's own results when fewer than 300 earlier closes exist (meant for
+    2020-21, never chosen on); for 2024-2026 that would price a season with its
+    own outcomes, and a missing entry would price nothing. Either one stops the run."""
+    for s in seasons:
+        for m in SIDES:
+            d = sig.get((int(s), m))
+            if not isinstance(d, H.ResidDist) or not d.label.endswith("(prior)"):
+                raise RuntimeError(f"{s} {m}: the market's pricing is {d!r}, not a distribution fit on "
+                                   "earlier seasons; load every priced season before the graded ones")
 
 
 def run(data: H.Data, games_all: pd.DataFrame, props: pd.DataFrame, app: pd.DataFrame,
         inj: pd.DataFrame | None, shape_by_season: dict, results: Path | None) -> dict:
     close = H.pinnacle_close(data)
-    sig = H.close_sigma(close, data.games)
+    sig = H.close_dist(close, data.games)
+    check_close_prior(sig, [s for s in PROP_SEASONS if s in set(data.games["season"].astype(int))])
     b = build(data, games_all, props, app, inj, shape_by_season, sig)
     placebo = placebo_frames(b["neutral"], b["model"], data.games)
     rows = H.run_cells(data, FAMILY, POINT, b["cand"], b["neutral"], cuts=list(CUTS),
                        sides_by_market=SIDES, close=close, sig=sig, placebo=placebo,
-                       strength="gap", choose_seasons=CHOOSE_SEASONS)
+                       strength="gap", choose_seasons=CHOOSE_SEASONS, times=b["times"])
     assert len(rows) == EXPECTED_CELLS, f"F6b emits {EXPECTED_CELLS} cells, got {len(rows)}"
     cells = pd.DataFrame(rows)
     pop = population(data, b["times"], b["neutral"], b["cand"], b["per_game"], b["names"])
@@ -676,8 +716,13 @@ def shape_offset(shape: Shape, line: float, p: float = 0.5) -> float:
     return float(mean_from_over([line], [p], shape)[0] - line)
 
 
-def load_all(seasons, cache: Path = H.CACHE):
-    data = H.load(cache, seasons=seasons)
+def load_all(seasons, cache: Path = H.CACHE, require_seasons=None):
+    """`seasons`: what H.load keeps. The market's pricing for 2024-2026 is fit
+    on the priced seasons before them (2020-21 on), so a graded run loads those
+    too (FULL_LOAD_SEASONS). `require_seasons`: a graded run's seasons; H.load
+    refuses a cache that prices too few of their games or whose rows match no
+    purchase."""
+    data = H.load(cache, seasons=seasons, require_seasons=require_seasons)
     games_all = H.load_games(cache)
     t = box_tables(cache)
     app = appearances(t["adv"], t["log"], t["ina"], games_all)
@@ -694,9 +739,36 @@ def symmetric_shape(n: int = 2001) -> Shape:
     return Shape(m=np.full(n, 20.0), e=np.linspace(-12.0, 12.0, n), seasons=(0,))
 
 
+PRIOR_GAMES = 300      # H.dist_by_season fits a season on earlier ones from 300 closes up
+
+
+def prior_season(n: int = PRIOR_GAMES, season: int = 2023) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(games, quotes): n MIA v CHI games of an earlier season, each with one
+    coherent Pinnacle spread (-4.5) and total (220.5) 70 minutes before tip and
+    a deterministic score, so the market's pricing of the next season has
+    earlier closes to be fit on."""
+    tips = pd.Timestamp(f"{season - 1}-11-01T00:30:00Z") + pd.to_timedelta(np.arange(n), unit="D")
+    i = np.arange(n)
+    games = pd.DataFrame({"game_id": [f"Q{k}" for k in i], "season": season,
+                          "game_date": [str((t - pd.Timedelta(hours=5)).date()) for t in tips],
+                          "tip": tips, "home_team": "MIA", "away_team": "CHI",
+                          "home_score": 98 + (i * 7) % 25, "away_score": 95 + (i * 11) % 21})
+    q = []
+    for gid, date, tip in zip(games["game_id"], games["game_date"], games["tip"]):
+        fetch = tip - pd.Timedelta(minutes=70)
+        for mk, ln in (("spreads", -4.5), ("totals", 220.5)):
+            q.append({"game_id": gid, "season": season, "game_date": date, "tip": tip, "market": mk,
+                      "book": "pinnacle", "line": ln, "snapshot_at": fetch - pd.Timedelta(minutes=2),
+                      "fetch_at": fetch, "price_a": -105.0, "price_b": -105.0, "coherent": True})
+    return games, pd.DataFrame(q)
+
+
 def synthetic_case() -> dict:
     """BOS v NYK twice in 2024: P0 (final two days earlier, its box the roster)
-    and G1 (decided at tip - 60 from its props). Every number set by hand."""
+    and G1 (decided at tip - 60 from its props), plus a 2023 season of MIA v
+    CHI closes (prior_season) for the market's pricing. P0's props are bought
+    too, so D reaches every 2024 game; P0 has no final game before it and gets
+    no model number. Every number set by hand."""
     tip1 = pd.Timestamp("2024-01-16T00:30:00Z")
     tip0 = pd.Timestamp("2024-01-14T00:30:00Z")
     games = pd.DataFrame([
@@ -722,16 +794,17 @@ def synthetic_case() -> dict:
     app["pts"] = np.where(app["played"], app["points"], np.where(app["avail"], 0.0, np.nan))
     # props at T: b1 and n1 priced (fanduel and draftkings, even money no vig)
     rows = []
-    for name, line in (("Ann Bee", 27.5), ("Gus Hay", 22.5)):
-        for book in ("fanduel", "draftkings"):
-            rows.append({"game_id": "G1", "player_name": name, "market": PROP_MARKET, "bookmaker": book,
-                         "snapshot_type": "open", "snapshot_at": T.isoformat(), "line": line,
-                         "over_price": -110.0, "under_price": -110.0})
+    for gid, at in (("G1", T), ("P0", tip0 - pd.Timedelta(minutes=60))):
+        for name, line in (("Ann Bee", 27.5), ("Gus Hay", 22.5)):
+            for book in ("fanduel", "draftkings"):
+                rows.append({"game_id": gid, "player_name": name, "market": PROP_MARKET, "bookmaker": book,
+                             "snapshot_type": "open", "snapshot_at": at.isoformat(), "line": line,
+                             "over_price": -110.0, "under_price": -110.0})
     props = props_frame(pd.DataFrame(rows), games)
     inj = pd.DataFrame([{"game_id": "G1", "team": "NYK", "report_ts": T - pd.Timedelta(minutes=45),
                          "player_id": "n2", "player_name": "Ivy Jay", "status": "Out"}])
-    # full-game quotes at a slate fetch 70 minutes before each tip; Pinnacle on
-    # both games so the closing spread has two residuals (H.close_sigma)
+    # full-game quotes at a slate fetch 70 minutes before each tip, Pinnacle
+    # among them; the 2023 closes are what the 2024 pricing is fit on
     parts = []
     for gid, date, tip, sp, tot in (("P0", "2024-01-13", tip0, -5.0, 200.0),
                                     ("G1", "2024-01-15", tip1, -3.5, 220.5)):
@@ -742,9 +815,11 @@ def synthetic_case() -> dict:
                               "market": mk, "book": book, "line": ln,
                               "snapshot_at": fetch - pd.Timedelta(minutes=2), "fetch_at": fetch,
                               "price_a": pa, "price_b": pa, "coherent": True})
-    quotes = pd.DataFrame(parts)
+    pg, pq = prior_season()
+    quotes = pd.concat([pd.DataFrame(parts), pq], ignore_index=True)
     fetches = quotes[["game_id", "tip", "fetch_at"]].drop_duplicates()
     fetches = fetches.assign(lead_min=(fetches["tip"] - fetches["fetch_at"]).dt.total_seconds() / 60)
+    games = pd.concat([pg, games], ignore_index=True)
     data = H.Data(games=games, quotes=quotes, fetches=fetches)
     return {"games": games, "app": app, "props": props, "inj": inj, "data": data, "T": T,
             "shape": {2024: symmetric_shape()}}
@@ -824,7 +899,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--smoke", action="store_true", help="2020-21 only, plus the synthetic checks")
-    mode.add_argument("--full", action="store_true", help="every season (needs NBA_GAME2_GO=1)")
+    mode.add_argument("--full", action="store_true",
+                      help="grades 2023-24 to 2025-26 (needs NBA_GAME2_GO=1)")
     mode.add_argument("--quality", action="store_true", help="price-free bench check, 2022-2025")
     mode.add_argument("--names-check", action="store_true", help="price-free name resolution, 2024-2025")
     a = ap.parse_args()
@@ -847,9 +923,16 @@ def main() -> None:
         sys.exit("--full is run by the owner after the price data is refreshed: set NBA_GAME2_GO=1")
     syn = synthetic_check()
     print(f"synthetic check passes: home {syn['home']:.3f}, away {syn['away']:.3f}")
-    seasons = [2021] if a.smoke else None
-    data, games_all, app, inj, props = load_all(seasons)
-    graded = sorted(int(s) for s in data.games["season"].unique())
+    if a.smoke:
+        data, games_all, app, inj, props = load_all(list(SMOKE_SEASONS))
+        graded = SMOKE_SEASONS
+    else:
+        # every priced season loaded (the market's pricing reads the seasons
+        # before 2024); the seasons with props are the ones graded and
+        # required, and the only ones a shape is fit for (2019 has no box
+        # season before it to fit on)
+        data, games_all, app, inj, props = load_all(FULL_LOAD_SEASONS, require_seasons=PROP_SEASONS)
+        graded = PROP_SEASONS
     results = RESULTS / "smoke" if a.smoke else RESULTS     # a smoke run never sits beside real cells
     out = run(data, games_all, props, app, inj, shapes(app, graded), results)
     cells, pop = out["cells"], out["population"]

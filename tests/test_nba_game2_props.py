@@ -322,10 +322,12 @@ def test_the_run_emits_exactly_the_twelve_cells_and_the_coverage_files(tmp_path)
     assert set(zip(cells["market"], cells["side"])) == {("spreads", "home"), ("spreads", "away"),
                                                        ("totals", "over"), ("totals", "under")}
     assert sorted(cells["cut"].unique()) == [2.0, 4.0, 6.0]
-    assert set(cells["choose_seasons"]) == {"2024,2025"}
+    # asked for 2024 and 2025; the synthetic case has no 2025 game, so the D gate drops it
+    assert set(cells["choose_seasons_asked"]) == {"2024,2025"}
+    assert set(cells["choose_seasons"]) == {"2024"} and set(cells["gate_dropped"]) == {"2025"}
     assert cells["placebo_rois"].map(len).eq(L.N_PLACEBO).all()
     pop = pd.read_parquet(tmp_path / "population_F6b.parquet").set_index("season")
-    assert pop.loc[2024, "games_props_at_T"] == 1 and pop.loc[2024, "games_model"] == 1
+    assert pop.loc[2024, "games_props_at_T"] == 2 and pop.loc[2024, "games_model"] == 1
     assert pop.loc[2024, "bets_spreads_home_g2"] == 1 and pop.loc[2024, "bets_totals_over_g2"] == 0
     assert (tmp_path / "names_F6b.parquet").exists()
     # the cells and the population count the same bets
@@ -336,6 +338,122 @@ def test_the_run_emits_exactly_the_twelve_cells_and_the_coverage_files(tmp_path)
 def test_the_synthetic_check_passes():
     r = L.synthetic_check()
     assert r["home"] == 39.5 and r["away"] == 22.5
+
+
+def _run(s, props=None, data=None):
+    return L.run(s["data"] if data is None else data, s["games"], s["props"] if props is None else props,
+                 s["app"], s["inj"], s["shape"], None)
+
+
+def test_the_market_is_priced_through_the_empirical_close_of_earlier_seasons():
+    s = L.synthetic_case()
+    out = _run(s)
+    nm = out["neutral"]
+    assert set(nm["game_id"]) == {"P0", "G1"}
+    for m in ("spreads", "totals"):
+        d = nm.loc[nm["market"] == m, "sigma"]
+        # an empirical distribution, not a bell curve's float sd
+        assert all(isinstance(x, H.ResidDist) for x in d)
+        # fit on the 2023 closes alone: none of 2024's own results is in it
+        assert {x.label for x in d} == {f"2024 {m} (prior)"}
+        assert {x.n for x in d} == {L.PRIOR_GAMES}
+
+
+def test_a_prop_season_priced_from_its_own_results_is_refused():
+    s = L.synthetic_case()
+    d = s["data"]
+    # the earlier closes relabelled 2024: no earlier season is left, so the
+    # harness would fit 2024's pricing on 2024's own results
+    own = H.Data(games=d.games.assign(season=2024), quotes=d.quotes.assign(season=2024),
+                 fetches=d.fetches)
+    with pytest.raises(RuntimeError, match="earlier seasons"):
+        _run(s, data=own)
+    with pytest.raises(RuntimeError, match="earlier seasons"):      # a missing entry prices nothing
+        L.check_close_prior({}, [2024])
+
+
+def test_the_d_gate_reads_the_prop_purchases_not_the_slate_fetches():
+    s = L.synthetic_case()
+    full = _run(s)["cells"]
+    assert (full["gate_cov_2024"] == 1.0).all()
+    # P0's props not bought: the slate still reaches P0 at D (70 minutes out),
+    # but this rule decides at its prop purchase, so D reaches half of 2024
+    cells = _run(s, props=s["props"][s["props"]["game_id"] != "P0"])["cells"]
+    assert (cells["gate_cov_2024"] == 0.5).all()
+    assert set(cells["gate_dropped"]) == {"2024,2025"} and set(cells["choose_seasons"]) == {""}
+    assert (cells["n_choose"] == 0).all()
+
+
+def test_the_population_is_the_games_with_a_model_number():
+    s = L.synthetic_case()
+    out = _run(s)
+    # P0 is reached and priced at D but has no final game before it: no model number
+    assert out["per_game"].set_index("game_id").loc["P0", "refused"] == "no_final_game_this_season"
+    assert set(out["neutral"]["game_id"]) == {"P0", "G1"}
+    # the harness's bar-9 population (the games in the cells' offers) is G1 alone
+    assert (out["cells"]["population_games"] == 1).all()
+    assert set(out["cand"]["game_id"]) == {"G1"}
+
+
+def test_bets_carry_the_real_side_and_the_cells_report_real_side_shares_and_blinds():
+    s = L.synthetic_case()
+    # Gus Hay (NYK) at 60.5: the model has the AWAY team by 21 against home -3.5
+    props = s["props"].assign(line=np.where(s["props"]["player_name"] == "Gus Hay", 60.5, s["props"]["line"]))
+    out = _run(s, props=props)
+    cells = out["cells"].set_index(["market", "side", "cut"])
+    away, under = cells.loc[("spreads", "away", 2.0)], cells.loc[("totals", "under", 2.0)]
+    assert away["n_choose"] == 1 and cells.loc[("spreads", "home", 2.0), "n_choose"] == 0
+    # every bet on the real away side; the market has home as favourite, so it is the underdog
+    assert away["share_home"] == 0.0 and away["share_fav"] == 0.0
+    assert under["n_choose"] == 1 and under["share_over"] == 0.0
+    for col in ("blind_home", "blind_away", "blind_fav", "blind_dog"):
+        assert np.isfinite(away[col]), col
+    for col in ("blind_over", "blind_under"):
+        assert np.isfinite(under[col]), col
+    # the graded bets are the real sides, settled on the real score (BOS won 120-100)
+    bets = pd.concat([H.grade(L.pick(out["cand"], 2.0, "away", "spreads"), s["games"]),
+                      H.grade(L.pick(out["cand"], 2.0, "under", "totals"), s["games"])])
+    assert bets["side"].tolist() == ["away", "under"] and set(bets["side"]) <= set(H.REAL_SIDES)
+    assert bets["line"].tolist() == [-3.5, 220.5] and bets["result"].tolist() == ["L", "W"]
+
+
+class _Stop(Exception):
+    pass
+
+
+def test_full_loads_every_priced_season_and_requires_the_prop_seasons(monkeypatch):
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.setattr("sys.argv", ["nba_game2_props", "--full"])
+    seen = {}
+
+    def fake_load(cache=H.CACHE, seasons=None, require_seasons=None):   # nothing real is read
+        seen.update(seasons=seasons, require_seasons=require_seasons)
+        raise _Stop
+    monkeypatch.setattr(H, "load", fake_load)
+    with pytest.raises(_Stop):
+        L.main()
+    assert seen["require_seasons"] == (2024, 2025, 2026)
+    # the seasons before 2024 are loaded for the market's pricing; 2026-27 never is
+    assert seen["seasons"] == (2021, 2022, 2023, 2024, 2025, 2026)
+
+
+def test_full_fits_a_shape_only_for_the_seasons_with_props(monkeypatch):
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.setattr("sys.argv", ["nba_game2_props", "--full"])
+    s = L.synthetic_case()
+    d = s["data"]
+    g19 = d.games.iloc[[0]].assign(game_id="S19", season=2019)      # a season with no box season before it
+    data = H.Data(games=pd.concat([d.games, g19], ignore_index=True), quotes=d.quotes, fetches=d.fetches)
+    monkeypatch.setattr(L, "load_all", lambda *a, **k: (data, s["games"], s["app"], s["inj"], s["props"]))
+    asked = []
+
+    def fake_shapes(app, seasons):
+        asked.extend(int(x) for x in seasons)
+        raise _Stop
+    monkeypatch.setattr(L, "shapes", fake_shapes)
+    with pytest.raises(_Stop):
+        L.main()
+    assert asked == [2024, 2025, 2026]
 
 
 def test_full_refuses_to_run_without_the_owner_s_go(monkeypatch):
