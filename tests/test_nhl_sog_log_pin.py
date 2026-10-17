@@ -1,25 +1,22 @@
-"""The NHL shots-on-goal log load stays one player per statement.
+"""The NHL prop log load is one player per statement, with one deadline per run.
 
-2026-10-02 dispatch:nhl-prop-scoring cancelled this statement at
-statement_timeout (pipeline_log 117003 at 16:27:37Z and 117073 at 17:23:45Z,
-SQLSTATE 57014). Saves and assists on the same card finished:
-
-    SELECT ... FROM nhl_skater_game_log
-    WHERE game_type = 2 AND player_id IS NOT NULL
-      AND player_id = ANY(ARRAY[11 ids])
-
-Index Scan on idx_nhl_skater_game_log_player_date, planner cost 3085 for an
-estimated 3,153 rows. The same shape for assists' 14 ids completed in
-70,351 ms one minute later (cost 3580, estimated 3,742 rows). Eleven ids did
-not finish inside 120s. One player is one index range on the index that
-exists; the rows are the same rows.
+2026-10-02 and 2026-10-03: dispatch:nhl-prop-scoring cancelled the shots
+(and, twice, the assists) read of nhl_skater_game_log at statement_timeout.
+pipeline_log has 6 errors on 2026-10-02 and 4 on 2026-10-03, each mentioning
+that timeout. From 2026-10-04 through 2026-10-17 the same step, still on the
+single ANY() statement, succeeded 697 times (average 6.5s, maximum 23.1s).
+One player per statement, and one 120s budget for every uncached read in the
+run, is the safety net for the next slow night.
 """
 from __future__ import annotations
 
-import inspect
+from datetime import datetime, timezone
+
+import pandas as pd
 
 import models.nhl_prop_blocked_shots as bs
 import models.nhl_props as np_
+from scripts import nhl_prop_card as blocked
 from scripts import nhl_props_card as card
 
 
@@ -120,9 +117,129 @@ def test_blocked_shots_uses_the_same_one_player_statement():
         assert isinstance(params, tuple) and len(params) == 1
 
 
-def test_the_card_hands_one_cache_to_every_market():
-    src = inspect.getsource(card.run_card)
-    assert "log_cache: dict = {}" in src or "log_cache = {}" in src
-    assert "log_cache=log_cache" in src
-    body = inspect.getsource(card.score_market)
-    assert "cache=log_cache" in body or "log_cache" in body
+class _Clock:
+    def __init__(self, t: float = 0.0):
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def test_one_run_stops_at_its_deadline_and_still_returns_a_cached_player():
+    """Each statement keeps the server's 120s timeout. The run does not get
+    another 120s per player."""
+    clock = _Clock()
+    cache = np_.PlayerLogCache(deadline_s=120, clock=clock)
+    rec = _Rec()
+    np_.load_players(rec, "skater", [1], cache=cache)
+    clock.t = 119
+    np_.load_players(rec, "skater", [2], cache=cache)
+    clock.t = 120
+    try:
+        np_.load_players(rec, "skater", [3], cache=cache)
+    except np_.PlayerLogDeadline:
+        pass
+    else:
+        raise AssertionError("a third player started after the run's 120s")
+    again = np_.load_players(rec, "skater", [1], cache=cache)
+    assert again.empty
+    assert [p[0] for _, p in _player_calls(rec)] == [1, 2]
+
+
+def test_the_card_hands_one_cache_to_every_market(monkeypatch):
+    """run_card is executed. Every live market receives the same cache object."""
+    seen: list = []
+
+    def fake_score(conn, spec, games, game_date, artifact=None, log_cache=None):
+        seen.append(log_cache)
+        return {"priced": 0, "mus": [], "rows": [], "skipped": []}
+
+    class Conn:
+        def close(self):
+            return None
+
+    monkeypatch.setattr(card, "score_market", fake_score)
+    monkeypatch.setattr(card, "get_connection", lambda: Conn())
+    monkeypatch.setattr(card, "slate", lambda conn, game_date, now: {})
+    now = datetime(2026, 10, 17, 16, tzinfo=timezone.utc)
+    card.run_card(game_date="2026-10-17", now=now)
+    assert len(seen) == len(np_.LIVE)
+    assert len({id(c) for c in seen}) == 1
+    assert isinstance(seen[0], np_.PlayerLogCache)
+    assert seen[0].deadline_s == np_.PLAYER_LOG_DEADLINE_S
+
+    seen.clear()
+    shared = np_.PlayerLogCache(deadline_s=120, clock=_Clock())
+    card.run_card(game_date="2026-10-17", now=now, log_cache=shared)
+    assert seen and all(c is shared for c in seen)
+
+
+class _CardConn:
+    def __init__(self):
+        self.calls: list[tuple[str, object]] = []
+
+    def execute(self, sql, params=None):
+        self.calls.append((sql, params))
+        return self
+
+    def fetchall(self):
+        return []
+
+    def close(self):
+        return None
+
+
+def _blocked_slate(monkeypatch, conn: _CardConn):
+    monkeypatch.setattr(blocked, "get_connection", lambda: conn)
+    monkeypatch.setattr(blocked, "slate", lambda conn, game_date, now: {
+        "G1": {"home": "BOS", "away": "NYR", "commence_time": "2026-10-17T23:00:00Z"},
+    })
+    monkeypatch.setattr(blocked, "latest_quotes", lambda conn, games: pd.DataFrame([{
+        "game_id": "G1", "player": "A Player", "line": 1.5,
+        "over": -110, "under": -110,
+    }]))
+    monkeypatch.setattr(blocked, "candidates", lambda conn, teams, seasons: pd.DataFrame([{
+        "player_id": 10, "player_name": "A Player", "pkey": bs.name_key("A Player"),
+    }]))
+
+
+def test_the_blocked_shots_card_passes_the_shared_cache(monkeypatch):
+    """A player already in the cache is not read again. Without the cache
+    argument the card would issue the one-player statement."""
+    conn = _CardConn()
+    _blocked_slate(monkeypatch, conn)
+    cache = np_.PlayerLogCache(deadline_s=120, clock=_Clock())
+    cache[("blocked", 10)] = []
+    blocked.run_card(
+        game_date="2026-10-17", do_publish=False, artifact={"model": object()},
+        log_cache=cache, now=datetime(2026, 10, 17, 16, tzinfo=timezone.utc))
+    assert conn.calls == []
+
+    conn2 = _CardConn()
+    _blocked_slate(monkeypatch, conn2)
+    blocked.run_card(
+        game_date="2026-10-17", do_publish=False, artifact={"model": object()},
+        now=datetime(2026, 10, 17, 16, tzinfo=timezone.utc))
+    player = [(sql, params) for sql, params in conn2.calls if "player_id = %s" in sql]
+    assert len(player) == 1
+    assert player[0][1] == (10,)
+
+
+def test_the_scoring_step_shares_one_cache_across_both_cards(monkeypatch):
+    import run_pipeline
+    seen: list = []
+
+    def fake_blocked(*_a, **k):
+        seen.append(k["log_cache"])
+        return {}
+
+    def fake_props(*_a, **k):
+        seen.append(k["log_cache"])
+        return {"date": "2026-10-17"}
+
+    monkeypatch.setattr("scripts.nhl_prop_card.run_card", fake_blocked)
+    monkeypatch.setattr("scripts.nhl_props_card.run_card", fake_props)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=True) is True
+    assert len(seen) == 2 and seen[0] is seen[1]
+    assert isinstance(seen[0], np_.PlayerLogCache)
+    assert seen[0].deadline_s == np_.PLAYER_LOG_DEADLINE_S

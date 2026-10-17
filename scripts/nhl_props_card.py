@@ -1,10 +1,9 @@
 """Tonight's NHL saves, shots-on-goal and assists card: the unders each model likes, at the best price on offer.
 
 Deployment of models/nhl_props (every Spec in `LIVE`). The blocked-shots card
-(scripts/nhl_prop_card.py) is the same idea for one model at one book and is
-left exactly as it went live; this one runs beside it in the same refresh-pass
-step and borrows its slate reader, so the two cannot drift on what "tonight"
-means.
+(scripts/nhl_prop_card.py) is the one-model card; this one runs beside it in
+the same refresh-pass step and borrows its slate reader, so the two cannot
+drift on what "tonight" means. The step hands both cards one player-log cache.
 
 For each live market: read the newest pre-game quote at each bettable book for
 each player in tonight's unstarted games, build his inputs through the SAME
@@ -474,7 +473,8 @@ def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
 
 
 def run_card(game_date: str | None = None, do_publish: bool = False, now: datetime | None = None,
-             artifacts: dict | None = None, keep: dict | None = None, only: str | None = None) -> dict:
+             artifacts: dict | None = None, keep: dict | None = None, only: str | None = None,
+             log_cache: dict | None = None) -> dict:
     """The pipeline entry point (run_pipeline step + refresh pass).
 
     `now` and `artifacts` ({model_id: artifact}) exist so a past slate can be
@@ -486,10 +486,12 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     game_date = game_date or now.astimezone(ET).strftime("%Y-%m-%d")
     out: dict = {"date": game_date}
     conn = get_connection()
-    # One log cache for the card. Shots and assists price overlapping skaters;
-    # the shots load is what statement_timeout cancelled on 2026-10-02, and
-    # assists must not read those players again.
-    log_cache: dict = {}
+    # One log cache and one 120s deadline for this run. The pipeline step
+    # passes the cache it already gave the blocked-shots card, so both cards
+    # spend one budget. Shots and assists price overlapping skaters; the
+    # second market reads only the ids the first did not.
+    if log_cache is None:
+        log_cache = np_.PlayerLogCache()
     try:
         games = slate(conn, game_date, now)
         pooled: list[dict] = []

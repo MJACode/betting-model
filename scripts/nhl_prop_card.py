@@ -230,15 +230,21 @@ def render(scored: pd.DataFrame, rows: list[dict], skipped: list[str]) -> str:
 
 
 def run_card(game_date: str | None = None, do_publish: bool = False, now: datetime | None = None,
-             artifact: dict | None = None, keep: dict | None = None) -> dict:
+             artifact: dict | None = None, keep: dict | None = None,
+             log_cache: dict | None = None) -> dict:
     """The pipeline entry point (run_pipeline step + refresh pass).
 
     `now` and `artifact` exist so a past slate can be replayed against a named
     artifact; `keep`, when given, receives the scored frame and the pick rows.
+    `log_cache` is the run's player-log cache. The scoring step passes the
+    one it shares with the saves / shots / assists card.
     """
+    from models.nhl_props import PlayerLogCache
     now = now or datetime.now(timezone.utc)
     game_date = game_date or now.astimezone(ET).strftime("%Y-%m-%d")
     out = {"date": game_date, "priced": 0, "scored": 0, "bets": 0, "published": 0, "skipped": 0}
+    if log_cache is None:
+        log_cache = PlayerLogCache()
     conn = get_connection()
     try:
         games = slate(conn, game_date, now)
@@ -261,7 +267,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
         named = cand[cand.pkey.isin({bs.name_key(p) for p in quotes.player})]
         # Strictly before tonight. Nothing is logged for a game that has not
         # been played, but a replay of a past slate would otherwise read it.
-        sk = bs.load_skaters(conn, sorted(named.player_id.unique())) if len(named) else pd.DataFrame(
+        sk = bs.load_skaters(conn, sorted(named.player_id.unique()), cache=log_cache) if len(named) else pd.DataFrame(
             columns=list(bs.SKATER_COLS))
         sk = sk[sk.game_date.astype(str) < game_date]
         up, skipped = upcoming_rows(quotes, games, identities(sk), game_date, season)

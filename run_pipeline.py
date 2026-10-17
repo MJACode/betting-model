@@ -961,10 +961,15 @@ def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
     """
     ok = True
     rows: list[dict] = []
+    from models.nhl_props import PlayerLogCache
+    # One cache and one 120s log-read budget for blocked shots and for
+    # saves / shots / assists. Each player statement still has the server's
+    # own statement_timeout; this is what stops those from stacking.
+    log_cache = PlayerLogCache()
     try:
         from scripts.nhl_prop_card import run_card
         keep: dict = {}
-        result = run_card(do_publish=False, keep=keep)
+        result = run_card(do_publish=False, keep=keep, log_cache=log_cache)
         rows += keep.get("rows", [])
         logger.success(f"✓ NHL blocked-shots card: {result}")
     except Exception as exc:
@@ -973,7 +978,7 @@ def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
     try:
         from scripts.nhl_props_card import run_card as run_props_card
         keep = {}
-        result = run_props_card(do_publish=False, keep=keep)
+        result = run_props_card(do_publish=False, keep=keep, log_cache=log_cache)
         rows += [r for k in keep.values() for r in k.get("rows", [])]
         failed = [m for m, r in result.items() if isinstance(r, dict) and "error" in r]
         if failed:

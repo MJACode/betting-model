@@ -65,6 +65,7 @@ every season positive both ways).
 """
 from __future__ import annotations
 
+import time
 import unicodedata
 from dataclasses import dataclass
 
@@ -82,6 +83,45 @@ PARAMS = dict(objective="count:poisson", n_estimators=400, max_depth=4, learning
 # Rows appended for games not yet played carry ids from here up, so they can
 # never collide with a real NHL game id (ten digits) or sort before one.
 UPCOMING_ID0 = 10 ** 12
+# One budget for every uncached player-log read in a scoring run. The server
+# still cancels a single statement at 120s. A healthy dispatch:nhl-prop-scoring
+# run from 2026-10-04 through 2026-10-17 (697 successes in pipeline_log) took
+# 6.5s on average and 23.1s at most, so 120s is the run's ceiling, the same
+# number the server already uses for one statement.
+PLAYER_LOG_DEADLINE_S = 120.0
+
+
+class PlayerLogDeadline(RuntimeError):
+    """This scoring run has used its player-log budget.
+
+    The next uncached player is not started. A statement already running can
+    still finish, or the server can cancel it at statement_timeout.
+    """
+
+
+class PlayerLogCache(dict):
+    """Rows already read in one scoring run, and that run's log-read deadline.
+
+    The budget starts when the first uncached read starts. Every market that
+    shares this cache spends the same budget. A player already stored is
+    returned after the deadline.
+    """
+
+    def __init__(self, deadline_s: float = PLAYER_LOG_DEADLINE_S, clock=None):
+        super().__init__()
+        self.deadline_s = float(deadline_s)
+        self._clock = clock or time.monotonic
+        self.started: float | None = None
+
+    def begin(self) -> None:
+        if self.started is None:
+            self.started = self._clock()
+
+    def expired(self) -> bool:
+        if self.started is None:
+            return False
+        return (self._clock() - self.started) >= self.deadline_s
+
 
 SKATER_USAGE = ("toi_l", "toi_s", "pp_toi_l", "pp_toi_s", "is_home", "rest", "is_d", "gp")
 
@@ -139,15 +179,15 @@ def load_players(conn, kind: str, player_ids: list | None = None,
                  cache: dict | None = None) -> pd.DataFrame:
     """Regular-season rows: all of them to train, one player at a time to score.
 
-    Scoring used to bind every priced id in one `player_id = ANY(...)`.
-    On 2026-10-02 that statement, eleven skaters for shots on goal, was
-    cancelled at statement_timeout (pipeline_log 117003 at 16:27:37Z and
-    117073 at 17:23:45Z). The plan was an index scan on
-    idx_nhl_skater_game_log_player_date (cost 3085, estimated 3,153 rows).
-    The same shape for assists' fourteen ids finished in 70,351 ms. One id
-    is one range of that index, and the rows are the same rows. `cache`
-    is {(kind, player_id): rows} so the next market on this card does not
-    read a player the previous market already read.
+    Scoring reads one player per statement (`player_id = %s`), one range of
+    idx_nhl_skater_game_log_player_date. The eleven-id `ANY(...)` is the
+    statement Postgres cancelled on 2026-10-02 (pipeline_log 117003, 117073,
+    and four later runs that day) and on 2026-10-03 (four runs). From
+    2026-10-04 through 2026-10-17 that same statement's step succeeded on
+    every run. One player per statement is the safety net for the next slow
+    night. `cache` is a PlayerLogCache shared by the run: the next market
+    does not re-read a player already stored, and once the run's deadline
+    is spent an uncached player raises PlayerLogDeadline.
     """
     table, cols = (("nhl_goalie_game_log", GOALIE_COLS) if kind == "goalie"
                    else ("nhl_skater_game_log", SKATER_COLS))
@@ -160,7 +200,12 @@ def load_players(conn, kind: str, player_ids: list | None = None,
 
 
 def _rows_for_players(conn, sql: str, player_ids: list, cache: dict | None, kind: str) -> list:
-    """One statement per player. An empty id list reads nothing."""
+    """One statement per player. An empty id list reads nothing.
+
+    A PlayerLogCache stops the loop once the run's deadline is spent, so a
+    slow night cannot start one statement_timeout per player. A plain dict
+    has no deadline; training does not come through here.
+    """
     ids = list(dict.fromkeys(int(p) for p in player_ids))
     if not ids:
         return []
@@ -169,6 +214,12 @@ def _rows_for_players(conn, sql: str, player_ids: list, cache: dict | None, kind
     for pid in ids:
         key = (kind, pid)
         if key not in store:
+            if isinstance(store, PlayerLogCache):
+                if store.expired():
+                    raise PlayerLogDeadline(
+                        f"nhl player log: {store.deadline_s:.0f}s run deadline reached "
+                        f"before reading player_id {pid}")
+                store.begin()
             store[key] = conn.execute(sql + " AND player_id = %s", (pid,)).fetchall()
         rows.extend(store[key])
     return rows
