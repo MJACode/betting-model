@@ -613,12 +613,10 @@ function renderPerf(){
       <span>ROI</span><span>Signals / day</span></div>` + d.map(m=>{
     const roi=m.roi_pct;
     const cls=roi==null?"mu":roi>0?"ok":roi<0?"cr":"mu";
-    // A record-only model (batter HR: 252 settled, 20 priced) has no honest ROI.
     const priced = +m.priced||0, settled = +m.settled||0;
-    const recordOnly = priced === 0;
-    // batter HR settles 252 and prices 20. An ROI over those 20 sitting beside
-    // a 42-210 record reads as the record's ROI, which it is not — so say the
-    // denominator out loud whenever it is not the whole record.
+    const unpriced = priced === 0;
+    // Say the denominator out loud whenever it is not the whole record, so an
+    // ROI over a priced handful is not read as the full record's ROI.
     const partial = priced > 0 && priced < settled;
     const rec=`${m.wins}-${m.losses}${m.pushes?"-"+m.pushes:""}`;
     // A registered model that has never settled a pick used to be ABSENT from
@@ -640,10 +638,10 @@ function renderPerf(){
       <span class="nm"><span class="chip">${esc(m.sport||"")}</span>
         <span class="id">${esc(m.model_id)}<div class="sub">last ${esc(m.last_date||"—")}</div></span></span>
       <span class="n">${rec}<div class="sub">${num(m.settled)} settled</div></span>
-      <span class="n ${cls}">${recordOnly?"—":sgn(+m.units)}</span>
-      <span class="n ${partial?"wr":cls}">${roi==null?"record only":roi.toFixed(1)+"%"}
+      <span class="n ${cls}">${sgn(+m.units)}</span>
+      <span class="n ${partial?"wr":cls}">${roi==null?"\u2014":roi.toFixed(1)+"%"}
         <div class="sub">${partial?num(priced)+" of "+num(settled)+" priced"
-                                  :recordOnly?"no priced bets":num(priced)+" priced"}</div></span>
+                                  :unpriced?"no priced bets":num(priced)+" priced"}</div></span>
       <span>${sparkFor(m.model_id)}</span></div>`;
   }).join("");
 }

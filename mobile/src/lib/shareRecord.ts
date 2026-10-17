@@ -23,7 +23,9 @@ export function buildShareMessage(
       ? // Same sign and rounding as the equity curve's "+11.2u" (U+2212 for a loss).
         `${formatSignedUnits(opts.endUnits).replace(/u$/, '')} units on flat $100 bets`
       : null,
-    s.clvBeatRate != null ? `Beat the closing line ${Math.round(s.clvBeatRate * 100)}% of the time` : null,
+    s.clvBeatRate != null
+      ? `Beat the closing price at the book we bet, ${Math.round(s.clvBeatRate * 100)}% of the time`
+      : null,
     opts.since ? `${s.picks} settled picks since ${opts.since}` : null,
     '',
     'Every pick public — wins, losses, no-pick days. Nothing cherry-picked.',

@@ -116,14 +116,14 @@ def test_ncaaf_groups_match_the_nfl_card():
 
 
 def test_the_table_is_migrated_guarded_and_read_only_to_anon():
-    from data.anon_readable import VIEW_BASE_TABLES
+    from data.anon_readable import ANON_READABLE
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     code = MIG.read_text(encoding="utf-8")
     sql = "\n".join(ln for ln in code.splitlines() if not ln.lstrip().startswith("--"))
     assert MIG.name in ACTIVE_MIGRATIONS
-    # Read through the security-invoker functions, never a direct .from().
-    assert "player_positions" in VIEW_BASE_TABLES
+    # The player page reads one row by key; the card functions join it.
+    assert "player_positions" in ANON_READABLE
     assert sql.strip().startswith("DO $mig$") and sql.strip().endswith("$mig$;")
     assert "IF to_regclass('public.player_positions') IS NOT NULL THEN" in code
     assert "REVOKE ALL ON public.player_positions FROM anon, authenticated;" in code

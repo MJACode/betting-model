@@ -20,7 +20,49 @@
  * not shown; the next complete snapshot says where the line went. A field no
  * snapshot has (the line on a moneyline, where the card passes null) is not
  * tracked, so it never makes a row partial.
+ *
+ * Since the pick (2026-10-09): the card used to read the OLDEST 50 snapshots
+ * of a market and call the last of them "now" — days before the pick on a busy
+ * NFL total, so it said "steady" about a line that had moved. It now shows the
+ * book's price when the pick was made (the last snapshot at or before it) and
+ * every snapshot after it up to the game's start, newest kept (`sincePick`).
+ * The first row is that price, not the opener, so it reads "At pick".
+ *
+ * Every stamp is parsed (`parseStamp`), never compared as text: about half of
+ * player_prop_odds is stamped in Eastern time ("...-04:00", "-05:00" from
+ * November), so its text order is hours off its time order.
+ *
+ * Review of that change (2026-10-09):
+ * - When more snapshots follow the pick than the card holds, the price at the
+ *   pick is still the first row. The dropped ones sit behind a divider row
+ *   that no run crosses, and the footer names the missing stretch instead of
+ *   counting changes it cannot see.
+ * - `since` counts the snapshots after the pick, so a pick the book has not
+ *   re-priced reads "no new price", not "steady".
+ * - Labels carry the weekday when the rows cross an Eastern midnight, and the
+ *   date too past six days (a weekday repeats after seven). "ET" is in the
+ *   column heading, not on every row.
+ * - A pick made after the start that is not live (an NHL start moved earlier
+ *   at settlement) reads the last pre-game price (`historyFrom`).
+ *
+ * Second review (2026-10-09):
+ * - The 8-row table keeps the price at the pick and its divider on screen when
+ *   the window was cut; the newest rows fill the rest (`recentChanges`). It
+ *   used to keep the last 8 rows, which dropped both off the top while the
+ *   note still said the table started at the pick (pick 3133024).
+ * - The divider says "Some prices after your pick not shown". "Earlier changes"
+ *   read as changes before the pick, and claimed changes the card never saw
+ *   (on pick 3350315 every dropped snapshot equals the price at the pick).
+ * - `afterStart` says the pick time is at or after the start the card uses, so
+ *   the card never says "since your pick" about a window that ends before it.
+ * - `anchorAt` (the pick time) joins the day check, so a lone row from five
+ *   weeks before the pick carries its date.
  */
+
+import { etDate, formatDayTimeET, parseStamp } from './format';
+
+/** Snapshots the card holds: the price at the pick plus the newest after it. */
+export const HISTORY_ROWS = 50;
 
 export interface HistoryPoint {
   /** ISO timestamp of the snapshot. */
@@ -32,785 +74,367 @@ export interface HistoryPoint {
 export interface HistoryRow extends HistoryPoint {
   /** How many snapshots this row stands for (the run it collapsed). */
   count: number;
-  /** The first row: where the line opened. Not a change. */
-  opening: boolean;
+  /**
+   * A row the changes are measured from, not a change: the first row, and the
+   * first row after a divider (what came before it is not on the card).
+   */
+  baseline: boolean;
+  /**
+   * Not a snapshot: snapshots between the price at the pick and the next row
+   * were dropped. Its label says so; it has no line or price.
+   */
+  divider: boolean;
   /** Unique React key (timestamps can repeat). */
   key: string;
   /**
-   * "8:21 PM", or "8:21:12 PM" when another row shares its minute.
-   * AM/PM is joined with a no-break space. The header carries ET.
-   * A series that crosses midnight, or that is not today in ET, also
-   * carries the date: "10/4 8:21 PM".
+   * Eastern time with no zone (the column heading says ET): "3:50 PM", or
+   * "3:50:12 PM" when another row shares its minute; "Sat 3:50 PM" when the
+   * rows cross midnight, "Sat 10/3, 3:50 PM" when they span over six days.
+   * "At pick" for the pick's own price; the divider's text on a divider.
    */
   label: string;
 }
 
-const minuteFmt = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/New_York',
-  hour: 'numeric',
-  minute: '2-digit',
-});
+/**
+ * The divider row's text. It sits under the price at the pick, so it names
+ * that stretch, and it says "prices", not "changes": the card never saw the
+ * dropped snapshots, which may all equal the price at the pick.
+ */
+export const DIVIDER_LABEL = 'Some prices after your pick not shown';
+
+const ET = 'America/New_York';
+const minuteFmt = new Intl.DateTimeFormat('en-US', { timeZone: ET, hour: 'numeric', minute: '2-digit' });
 const secondFmt = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/New_York',
+  timeZone: ET,
   hour: 'numeric',
   minute: '2-digit',
   second: '2-digit',
 });
-const dayKeyFmt = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/New_York',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
-const monthDayFmt = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/New_York',
-  month: 'numeric',
-  day: 'numeric',
-});
-const spokenDateFmt = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/New_York',
-  month: 'long',
-  day: 'numeric',
-});
+const weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: ET, weekday: 'short' });
+const monthDayFmt = new Intl.DateTimeFormat('en-US', { timeZone: ET, month: 'numeric', day: 'numeric' });
 
-function stamp(at: string, seconds: boolean, withDate: boolean): string {
-  const d = new Date(at);
-  if (Number.isNaN(d.getTime())) return '—';
-  const time = (seconds ? secondFmt : minuteFmt).format(d).replace(/ (AM|PM)$/, '\u00A0$1');
-  if (!withDate) return time;
-  return `${monthDayFmt.format(d)} ${time}`;
+/**
+ * A stamp's instant in ms, or NaN. Through parseStamp, never the bare Date
+ * constructor: Hermes rejects a space for "T" and only promises millisecond
+ * fractions.
+ */
+function instant(at: string | null | undefined): number {
+  return at ? parseStamp(at).getTime() : NaN;
 }
 
-function etDay(at: string): string {
-  const d = new Date(at);
-  if (Number.isNaN(d.getTime())) return '';
-  return dayKeyFmt.format(d);
+/** How much of the day a row label needs: none, the weekday, or weekday and date. */
+type DayPart = 'none' | 'weekday' | 'date';
+
+function stamp(at: string, seconds: boolean, day: DayPart = 'none'): string {
+  const d = parseStamp(at);
+  if (Number.isNaN(d.getTime())) return '—';
+  const time = (seconds ? secondFmt : minuteFmt).format(d);
+  if (day === 'none') return time;
+  const weekday = weekdayFmt.format(d);
+  return day === 'date' ? `${weekday} ${monthDayFmt.format(d)}, ${time}` : `${weekday} ${time}`;
 }
 
 /**
- * Collapse runs of the same line + price; returns oldest → newest.
- * `now` is the clock the "today" date rule uses. Tests pass a fixed one.
+ * Rows on one Eastern day need no day. Across midnight they need the weekday;
+ * across more than six days the date too, because a weekday repeats after
+ * seven (an NFL opener can be locked a week or more before kickoff).
  */
-export function collapseLineHistory(points: HistoryPoint[], now: Date = new Date()): HistoryRow[] {
+function dayPart(ats: string[]): DayPart {
+  const days = [
+    ...new Set(
+      ats
+        .map((a) => parseStamp(a))
+        .filter((d) => !Number.isNaN(d.getTime()))
+        .map(etDate),
+    ),
+  ].sort();
+  if (days.length < 2) return 'none';
+  const first = Date.parse(`${days[0]}T00:00:00Z`);
+  const last = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
+  return (last - first) / 86400000 > 6 ? 'date' : 'weekday';
+}
+
+/**
+ * A 19-character UTC bound ("2026-10-07T18:00:15", the second floored) for a
+ * server-side text comparison on odds.snapshot_at. Only the game-line table:
+ * every row there is UTC ("…Z", "…+00:00", "….ffffff+00:00", measured
+ * 2026-10-09), so its text order is its time order, and a bound with no suffix
+ * sorts before every row stamped inside that second, whatever its shape. Never
+ * player_prop_odds: Eastern-time rows there compare hours wrong as text.
+ */
+export function utcSecond(at: string | null | undefined): string | null {
+  const t = instant(at);
+  return Number.isNaN(t) ? null : new Date(t).toISOString().slice(0, 19);
+}
+
+/** The game's start: the earliest of the stamps that parse (games.commence_time, picks.game_time). */
+export function gameStartAt(...stamps: Array<string | null | undefined>): string | null {
+  const times = stamps.map(instant).filter((t) => !Number.isNaN(t));
+  return times.length > 0 ? new Date(Math.min(...times)).toISOString() : null;
+}
+
+/**
+ * Where the card's window starts: the pick, or the start when the pick was
+ * made after it. Null hides the card: a live pick (in-game movement after it
+ * is not built), or a pick time that does not parse.
+ *
+ * Only `is_live` hides it. A pre-game pick can still sit after the start the
+ * card computes: an NHL game's start moves about ten minutes earlier when it
+ * is settled, which put most NHL moneyline and regulation picks "after the
+ * start" and took their card away once the result was in (review,
+ * 2026-10-09). Such a pick reads the last price before the start.
+ */
+export function historyFrom(
+  pick: { is_live?: boolean | null; created_at: string },
+  startAt: string | null,
+): string | null {
+  if (pick.is_live === true) return null;
+  const t = instant(pick.created_at);
+  if (Number.isNaN(t)) return null;
+  const s = instant(startAt);
+  return new Date(Number.isNaN(s) ? t : Math.min(t, s)).toISOString();
+}
+
+/** Rows oldest → newest by the instant each was taken; a stamp that does not parse is dropped. */
+export function byTime<T extends { snapshot_at: string }>(rows: T[]): T[] {
+  return rows
+    .map((r, i) => ({ r, i, t: instant(r.snapshot_at) }))
+    .filter((x) => !Number.isNaN(x.t))
+    .sort((a, b) => a.t - b.t || a.i - b.i)
+    .map((x) => x.r);
+}
+
+export interface PickWindow<T> {
+  /** Oldest → newest, all before the start. */
+  rows: T[];
+  /**
+   * rows[0] is the book's price when the pick was made: its last snapshot at
+   * or before the pick. False when the series holds none (the book first
+   * posted after the pick, or a long prop series was capped).
+   */
+  fromPick: boolean;
+  /**
+   * Snapshots after the pick were dropped to fit: between rows[0] and rows[1]
+   * with `fromPick`, before rows[0] without it.
+   */
+  gap: boolean;
+  /**
+   * Snapshots after the pick and before the start that reached the phone,
+   * kept or not (the game-line read already stops at the newest 50). Zero
+   * with `fromPick`: the book has posted nothing since the pick.
+   */
+  since: number;
+  /** The game has started: the last row is the last price before it, not "now". */
+  closed: boolean;
+  /**
+   * The pick time is at or after the start the card uses (an NHL start moved
+   * earlier at settlement): rows[0] is the last price before the start, not
+   * the price at the pick, and there is no stretch "since the pick".
+   */
+  afterStart: boolean;
+}
+
+/** The last `k` items (none for k <= 0; `slice(-0)` would keep them all). */
+function newest<T>(rows: T[], k: number): T[] {
+  return k <= 0 ? [] : rows.slice(Math.max(0, rows.length - k));
+}
+
+/**
+ * The book's line from the pick to the game's start. The pick is scored from
+ * a snapshot taken a few seconds to about 45 minutes before it, so a window
+ * that began AT the pick would be empty for most NHL props; it begins at that
+ * snapshot instead. Rows at or after the start are dropped (books keep
+ * posting "open" rows after it). A pick time after the start reads as the
+ * start, and `afterStart` says so. Pass the pick's own time, not one already
+ * moved back to the start (`historyFrom`). The price at the pick is always
+ * kept; after it, the newest that fit in `max`, and `gap` says whether any
+ * were dropped.
+ */
+export function sincePick<T extends { snapshot_at: string }>(
+  rows: T[],
+  pickAt: string,
+  startAt: string | null,
+  max = HISTORY_ROWS,
+  now = Date.now(),
+): PickWindow<T> {
+  const start = instant(startAt);
+  const closed = !Number.isNaN(start) && now >= start;
+  const end = Number.isNaN(start) ? Infinity : start;
+  const raw = instant(pickAt);
+  // At the start itself nothing is after the pick and before the start, so a
+  // pick made exactly then has no stretch "since the pick" either.
+  const afterStart = !Number.isNaN(raw) && raw >= end;
+  const pick = Math.min(raw, end);
+  if (Number.isNaN(pick)) return { rows: [], fromPick: false, gap: false, since: 0, closed, afterStart };
+  const pre = byTime(rows).filter((r) => instant(r.snapshot_at) < end);
+  const after = pre.filter((r) => instant(r.snapshot_at) > pick);
+  const atPick = pre.filter((r) => instant(r.snapshot_at) <= pick).pop();
+  const kept = newest(after, atPick ? max - 1 : max);
+  return {
+    rows: atPick ? [atPick, ...kept] : kept,
+    fromPick: atPick != null,
+    gap: kept.length < after.length,
+    since: after.length,
+    closed,
+    afterStart,
+  };
+}
+
+export interface CollapseOptions {
+  /** The first point is the pick's own price: its row reads "At pick". */
+  atPick?: boolean;
+  /**
+   * Snapshots between the first point and the second were dropped: a divider
+   * row goes between them, and no run spans it (the same price on both sides
+   * says nothing about what happened in between).
+   */
+  gap?: boolean;
+  /**
+   * A stamp the rows are read against (the pick): it joins the day check but
+   * is not a row. A lone row from five weeks before the pick then reads
+   * "Sat 9/5, 3:16 PM", not a bare "3:16 PM".
+   */
+  anchorAt?: string | null;
+}
+
+/** Collapse runs of the same line + price; returns oldest → newest. */
+export function collapseLineHistory(points: HistoryPoint[], opts: CollapseOptions = {}): HistoryRow[] {
   const tracksLine = points.some((p) => p.line != null);
   const tracksPrice = points.some((p) => p.price != null);
-  const runs: Array<HistoryPoint & { count: number }> = [];
-  for (const p of points) {
+  type Run = HistoryPoint & { count: number; baseline: boolean; divider: boolean; atPick: boolean };
+  const runs: Run[] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i === 1 && opts.gap) {
+      runs.push({ at: '', line: null, price: null, count: 0, baseline: false, divider: true, atPick: false });
+    }
+    const p = points[i];
     const known = [tracksLine ? p.line != null : null, tracksPrice ? p.price != null : null].filter(
       (k): k is boolean => k != null,
     );
     const last = runs[runs.length - 1];
+    const open = last && !last.divider ? last : undefined;
     // Nothing for the side: a gap in the feed. It joins the run (only both
-    // null carry); before any run it has nothing to join.
+    // null carry); before any run, or right after a divider, it has nothing
+    // to join.
     if (known.every((k) => !k)) {
-      if (last) last.count += 1;
+      if (open) open.count += 1;
       continue;
     }
     // Partial: unknown, never half-carried into a pair (see the header).
     if (!known.every((k) => k)) continue;
-    if (last && last.line === p.line && last.price === p.price) last.count += 1;
-    else runs.push({ ...p, count: 1 });
+    if (open && open.line === p.line && open.price === p.price) open.count += 1;
+    else {
+      // The first row is the price at the pick only if the first POINT
+      // started it (a partial first point is skipped, and the next row is
+      // after the pick).
+      runs.push({ ...p, count: 1, baseline: open == null, divider: false, atPick: i === 0 && opts.atPick === true });
+    }
   }
-  // A one-day series from an earlier date reads as today when the cell is
-  // only a clock time. Show the date when the rows span more than one ET
-  // day, or when any row is not today in ET.
-  const today = etDay(now.toISOString());
-  const days = new Set(runs.map((r) => etDay(r.at)));
-  const withDate = days.size > 1 || [...days].some((day) => day !== today);
-  const minutes = runs.map((r) => stamp(r.at, false, withDate));
-  const clash = new Set(minutes.filter((m, i) => minutes.indexOf(m) !== i));
+  const part = dayPart([
+    ...runs.filter((r) => !r.divider).map((r) => r.at),
+    ...(runs.length > 0 && opts.anchorAt ? [opts.anchorAt] : []),
+  ]);
+  const minutes = runs.map((r) => (r.divider ? '' : stamp(r.at, false, part)));
+  const clash = new Set(minutes.filter((m, i) => m !== '' && minutes.indexOf(m) !== i));
   return runs.map((r, i) => ({
-    ...r,
-    opening: i === 0,
-    key: `${r.at}#${i}`,
-    label: clash.has(minutes[i]) ? stamp(r.at, true, withDate) : minutes[i],
+    at: r.at,
+    line: r.line,
+    price: r.price,
+    count: r.count,
+    baseline: r.baseline,
+    divider: r.divider,
+    key: r.divider ? `divider#${i}` : `${r.at}#${i}`,
+    label: r.divider
+      ? DIVIDER_LABEL
+      : r.atPick
+        ? 'At pick'
+        : clash.has(minutes[i])
+          ? stamp(r.at, true, part)
+          : minutes[i],
   }));
 }
 
-/**
- * The last `n` rows, oldest → newest (what the card shows). `changes` counts
- * moves only — the opening row is not one — and `shownChanges` is how many of
- * them are on screen.
- */
-export function recentChanges(
-  points: HistoryPoint[],
-  n = 8,
-): { rows: HistoryRow[]; changes: number; shownChanges: number; hidden: number } {
-  const all = collapseLineHistory(points);
-  const rows = all.slice(-n);
-  return {
-    rows,
-    changes: Math.max(0, all.length - 1),
-    shownChanges: rows.filter((r) => !r.opening).length,
-    hidden: all.length - rows.length,
-  };
+export interface RecentChanges {
+  /** The rows on screen, oldest → newest. */
+  rows: HistoryRow[];
+  /** Moves in the whole series: rows that are neither a baseline nor a divider. */
+  changes: number;
+  /** How many of them are on screen. */
+  shownChanges: number;
+  /**
+   * Rows not on screen. Without a pinned price at the pick they are above the
+   * screen; with one (a cut window), they sit between the divider and the
+   * newest rows.
+   */
+  hidden: number;
+  /** The first snapshot row's stamp, on screen or not. */
+  firstAt: string | null;
 }
 
 /**
- * How many snapshots one read is allowed to bring back.
- *
- * PostgREST returns at most this many rows and does not say when the table
- * holds more. An oldest-first page of this size is the early line, not the
- * current one: JAX/PHI DraftKings spreads on 2026-10-06 were 3,939 rows, the
- * 50th was still −3 on Oct 2, and the latest was −7.
+ * The `n` rows the card shows, oldest → newest: the last `n`, except that a
+ * cut window (`gap`) keeps the price at the pick and its divider as the first
+ * two rows and fills the rest with the newest. Without that pin, more than
+ * about six changes after the cut pushed both off the top, and nothing on
+ * screen marked where the pick was (pick 3133024). `changes` counts moves
+ * only — the first row is where they are measured from, not one, and neither
+ * is the first row after a divider — and `shownChanges` is how many of them
+ * are on screen.
  */
-export const LINE_HISTORY_PAGE = 50;
+export function recentChanges(points: HistoryPoint[], n = 8, opts: CollapseOptions = {}): RecentChanges {
+  const all = collapseLineHistory(points, opts);
+  // all[0] can itself be the divider (a partial first point is skipped), so
+  // pin only a real price followed by the divider.
+  const pin =
+    opts.gap && n > 2 && all.length > n && !all[0].divider && all[1]?.divider ? all.slice(0, 2) : [];
+  const rows = [...pin, ...newest(all.slice(pin.length), n - pin.length)];
+  const isChange = (r: HistoryRow) => !r.baseline && !r.divider;
+  return {
+    rows,
+    changes: all.filter(isChange).length,
+    shownChanges: rows.filter(isChange).length,
+    hidden: all.length - rows.length,
+    firstAt: all.find((r) => !r.divider)?.at ?? null,
+  };
+}
 
 /**
  * The table's footer. "Last 8 of 19 changes" only when changes are really cut;
- * when the one row off the top is the OPENING, every change is on screen and
- * "Last 8 of 8 changes" read as a cut that wasn't (Reviewer #847) — it says
- * "8 changes · opening not shown" instead.
+ * when the one row off the top is the first row (where the changes are
+ * measured from), every change is on screen and "Last 8 of 8 changes" read as
+ * a cut that wasn't (Reviewer #847) — it says "8 changes" instead.
  *
- * A partial series is the open, a sample of the gap, and the latest page.
- * Quoting that length as the snapshot population says the book only moved
- * as often as we sampled.
+ * Never a snapshot count: snapshots are the feed's unit, not the reader's (50
+ * of them is 50 minutes at DraftKings). When snapshots after the pick were
+ * dropped (`gap`), the change count is not a total, so the footer names the
+ * stretch that is missing instead. It says "prices", not "changes": the card
+ * never saw them. Without the price at the pick, it says where the table
+ * starts. The card shows no footer while the divider row is on screen; the
+ * divider already says the same thing.
  */
 export function changesFooter(
-  r: { changes: number; shownChanges: number; hidden: number },
-  snapshots: number,
-  /** The series is the open, a sample of the gap, and the latest page — not every row. */
-  partial = false,
+  r: Pick<RecentChanges, 'rows' | 'changes' | 'shownChanges' | 'hidden' | 'firstAt'>,
+  w: { fromPick: boolean; gap: boolean },
 ): string {
   const noun = (n: number) => `${n} ${n === 1 ? 'change' : 'changes'}`;
-  if (partial) {
-    // "Of N" is the full count on a complete history. On a sample that N is
-    // not the book, so a cut table says how many rows are on screen and that
-    // moves in between are missing. The snapshot length is not quoted.
-    const head =
-      r.shownChanges < r.changes
-        ? `Last ${r.shownChanges} ${r.shownChanges === 1 ? 'change' : 'changes'} shown`
-        : noun(r.changes);
-    return `${head} · brief moves between samples may be missing`;
-  }
   const head =
-    r.shownChanges < r.changes
-      ? `Last ${r.shownChanges} of ${r.changes} changes`
-      : r.hidden > 0
-        ? `${noun(r.changes)} · opening not shown`
-        : noun(r.changes);
-  return `${head} · ${snapshots} snapshots`;
-}
-
-/**
- * Right-hand side of the headline. After the start, that number is the close.
- * A non-live lock after the stored start shows only the pick's own number:
- * the close is earlier, so the arrow would run backwards.
- */
-export function movementHeadline(lock: string, end: string, atClose: boolean, lockOnly = false): string {
-  if (lockOnly) return lock;
-  return atClose ? `${lock} → ${end} at the close` : `${lock} → ${end}`;
-}
-
-export type MovementVerdictKind = 'steady' | 'against' | 'favor' | 'steamed' | 'eased';
-
-/** Verdict under the headline. The against-line names the pick, not the side key. */
-export function movementVerdict(opts: {
-  kind: MovementVerdictKind;
-  atClose: boolean;
-  lock?: string;
-  end?: string;
-  pp?: number | null;
-}): string {
-  const { kind, atClose } = opts;
-  if (kind === 'steady') return atClose ? 'Line steady through the close' : 'Line steady since pick';
-  if (kind === 'against') {
-    const base = `Line moved ${opts.lock} → ${opts.end} against your pick`;
-    return atClose ? `${base} by the close` : base;
+    r.shownChanges < r.changes ? `Last ${r.shownChanges} of ${r.changes} changes` : noun(r.changes);
+  if (!w.fromPick) {
+    return r.firstAt
+      ? `${head} since ${formatDayTimeET(r.firstAt)}. The price at your pick isn't available.`
+      : `The price at your pick isn't available.`;
   }
-  if (kind === 'favor') {
-    const base = `Line moved ${opts.lock} → ${opts.end} in your favor`;
-    return atClose ? `${base} by the close` : base;
-  }
-  if (kind === 'steamed') {
-    const n = (opts.pp ?? 0).toFixed(1);
-    return atClose
-      ? `Steamed ${n}pp against you by the close`
-      : `Steamed ${n}pp against you since scoring`;
-  }
-  const abs = Math.abs(opts.pp ?? 0).toFixed(1);
-  return atClose
-    ? `Moved ${abs}pp in your favor by the close`
-    : `Moved ${abs}pp in your favor since scoring`;
-}
-
-/**
- * Time cell. The last pregame row is the close once the game has started.
- * A live pick ends on "Final price" only once the game is final, so the
- * number does not read as a score. While it is still on, that row is
- * Latest. A gap row the bisect did not pin is an upper bound, so it says
- * "by 8:21 PM" (or "by 10/4 8:21 PM"). ET is the column header, not the cell.
- */
-export function historyTimeLabel(
-  label: string,
-  opts: {
-    atCloseLast: boolean;
-    atFinalLast?: boolean;
-    atLatestLast?: boolean;
-    bounded: boolean;
-  },
-): string {
-  if (opts.atFinalLast) return 'Final price';
-  if (opts.atLatestLast) return 'Latest';
-  if (opts.atCloseLast) return 'Close';
-  if (opts.bounded) return `by ${label}`;
-  return label;
-}
-
-/** The sentence under a live pick's headline. Not green, not red. */
-export function inPlayMovementLabel(): string {
-  return 'In-play prices since your pick';
-}
-
-function speakMagnitude(n: number, signed: boolean): string {
-  const abs = Math.abs(n);
-  const body = String(abs);
-  if (n < 0) return `minus ${body}`;
-  if (n > 0 && signed) return `plus ${body}`;
-  return body;
-}
-
-/** "11:33 AM Eastern, October 4". Seconds when the cell shows them. */
-export function historySpokenWhen(at: string, seconds = false): string {
-  const d = new Date(at);
-  if (Number.isNaN(d.getTime())) return 'time not available';
-  const time = (seconds ? secondFmt : minuteFmt).format(d);
-  return `${time} Eastern, ${spokenDateFmt.format(d)}`;
-}
-
-/** "1:00 PM Eastern". Close has no date. */
-function spokenEasternClock(at: string): string {
-  const d = new Date(at);
-  if (Number.isNaN(d.getTime())) return 'time not available';
-  return `${minuteFmt.format(d)} Eastern`;
-}
-
-/**
- * One VoiceOver label for a history row. Time first, then Eastern, then
- * the date. Close speaks commence_time and omits the date. Final and
- * Latest keep those words; the visible Final cell says "Final price".
- * A line is "plus" or "minus" only when the cell shows a sign.
- */
-export function historyRowAccessibilityLabel(opts: {
-  marker: string;
-  at: string;
-  line: number | null;
-  price: number | null;
-  showLine: boolean;
-  signedLine?: boolean;
-  /** First row of the series. */
-  opening?: boolean;
-  /** commence_time. Close speaks this, not when the number first appeared. */
-  closeAt?: string | null;
-  /** A live pick. Its first row is the first price after the pick. */
-  inPlay?: boolean;
-}): string {
-  const seconds = /\d:\d{2}:\d{2}/.test(opts.marker);
-  const finalRow = opts.marker === 'Final' || opts.marker === 'Final price';
-  const latestRow = opts.marker === 'Latest';
-  const closeRow = opts.marker === 'Close';
-  const whenAt = closeRow ? (opts.closeAt ?? '') : opts.at;
-  const spoken = closeRow ? spokenEasternClock(whenAt) : historySpokenWhen(whenAt, seconds);
-  // A "by" cell is an upper bound even when it is the first row. The
-  // clock cell of a first row is the open, or the first price after a
-  // live pick.
-  const bounded = opts.marker.startsWith('by ');
-  const when = finalRow
-    ? `Final, ${spoken}`
-    : latestRow
-      ? `Latest, ${spoken}`
-      : closeRow
-        ? `Close, ${spoken}`
-        : bounded
-          ? `Changed sometime before ${spoken}`
-          : opts.opening && opts.inPlay
-            ? `First price after your pick, ${spoken}`
-            : opts.opening
-              ? `Opened at ${spoken}`
-              : `Changed at ${spoken}`;
-  const parts: string[] = [];
-  if (opts.showLine) {
-    parts.push(opts.line == null ? 'line not available' : `line ${speakMagnitude(opts.line, opts.signedLine === true)}`);
-  }
-  parts.push(opts.price == null ? 'price not available' : `price ${speakMagnitude(opts.price, true)}`);
-  return `${when}: ${parts.join(', ')}`;
-}
-
-/** VoiceOver for the headline numbers. Minus is the word, not a hyphen. */
-export function movementHeadlineLabel(opts: {
-  kind: 'line' | 'price';
-  lock: number | null;
-  end: number | null;
-  atClose: boolean;
-  /** Spreads show a sign. Totals and props do not say "plus". */
-  signedLine?: boolean;
-  /** The pick's own number only. No arrow, no close. */
-  lockOnly?: boolean;
-}): string {
-  const signed = opts.kind === 'price' || opts.signedLine === true;
-  const speak = (n: number | null) => (n == null || Number.isNaN(n) ? 'not available' : speakMagnitude(n, signed));
-  const noun = opts.kind === 'line' ? 'Line ' : 'Price ';
-  if (opts.lockOnly) return `${noun}${speak(opts.lock)}`;
-  const tail = opts.atClose ? ' at the close' : '';
-  return `${noun}${speak(opts.lock)} to ${speak(opts.end)}${tail}`;
-}
-
-/** American price on this card. Minus is U+2212. A missing price is an em dash. */
-export function formatHistoryAmerican(odds: number | null | undefined): string {
-  if (odds == null || Number.isNaN(Number(odds))) return '—';
-  const rounded = Math.round(Number(odds));
-  if (rounded > 0) return `+${rounded}`;
-  if (rounded < 0) return `\u2212${Math.abs(rounded)}`;
-  return '0';
-}
-
-/**
- * A line on this card. Spreads always show a sign. A negative uses U+2212.
- * Null is an em dash, not "N/A".
- */
-export function formatHistoryLine(line: number | null | undefined, explicitSign: boolean): string {
-  if (line == null || Number.isNaN(Number(line))) return '—';
-  const n = Number(line);
-  const abs = Math.abs(n);
-  const body = String(abs);
-  if (n < 0) return `\u2212${body}`;
-  if (n > 0 && explicitSign) return `+${body}`;
-  return body;
-}
-
-/**
- * Samples across the span from the open to the start of the latest page,
- * counting the two ends the caller already holds. Interior probes are one
- * row each.
- */
-export const LINE_HISTORY_BUCKETS = 12;
-
-export interface HistoryProbe {
-  ascending: boolean;
-  limit: number;
-  /** Inclusive lower bound on snapshot_at. */
-  gte?: string;
-  /** Exclusive upper bound on snapshot_at. */
-  lt?: string;
-  /**
-   * Inclusive upper bound on snapshot_at. Pregame reads set this to the
-   * game's commence_time, written in the series' own text form. Live reads
-   * leave it unset.
-   */
-  lte?: string;
-  /**
-   * One newest row, no range. That row's suffix is how this series writes
-   * snapshot_at. A range on this read would be the wrong offset.
-   */
-  unbounded?: boolean;
-}
-
-/**
- * What one history read is allowed to see.
- *
- * `until` is commence_time for a pregame pick, including one whose lock
- * is after that start. Every probe is `snapshot_at <= commence_time`.
- * `from` is the lock time for a live pick, which may read past the start.
- */
-export interface LineHistoryWindow {
-  from?: string;
-  until?: string;
-}
-
-export interface SampledSeries<T> {
-  rows: T[];
-  /**
-   * snapshot_at of gap rows whose time only bounds the move. The card prints
-   * those as "by 3:10 PM ET".
-   */
-  moveByAt: string[];
-}
-
-/**
- * Postgres writes timestamps as text, and not all of it is ISO.
- * `created_at` since 2026-09-20 looks like `2026-10-05 01:00:00.123+00`
- * (a space, and `+00` with no minutes). Hermes parses the ECMA-262 form
- * `YYYY-MM-DDTHH:mm:ss.sssZ` or `±HH:MM`, and a space sorts before `T`, so
- * the raw string both fails to parse and compares before every ISO row.
- * Null when the text is not a timestamp.
- */
-export function normalizeTimestamp(raw: string | null | undefined): string | null {
-  if (raw == null) return null;
-  const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(
-    raw.trim(),
-  );
-  if (!match) return null;
-  const date = match[1];
-  const time = match[2];
-  const frac = match[3];
-  const tz = match[4];
-  let fraction = '';
-  if (frac) fraction = `.${(frac.slice(1) + '000').slice(0, 3)}`;
-  let zone = 'Z';
-  if (tz) {
-    if (tz.toUpperCase() === 'Z') zone = 'Z';
-    else {
-      const sign = tz[0] === '-' ? '-' : '+';
-      const rest = tz.slice(1).replace(':', '');
-      if (!/^\d{2,4}$/.test(rest)) return null;
-      const hh = rest.slice(0, 2);
-      const mm = (rest.slice(2, 4) || '00').padStart(2, '0');
-      zone = `${sign}${hh}:${mm}`;
-    }
-  }
-  const iso = `${date}T${time}${fraction}${zone}`;
-  if (Number.isNaN(Date.parse(iso))) return null;
-  return iso;
-}
-
-function instantMs(raw: string | null | undefined): number {
-  const iso = normalizeTimestamp(raw);
-  if (!iso) return Number.NaN;
-  return Date.parse(iso);
-}
-
-/**
- * `snapshot_at` is text, so a bound has to wear the series' own suffix or
- * the comparison is not chronological. `2026-10-04T23:20:05-04:00` sorts
- * before `2026-10-05T00:10:00+00:00` even though it is three hours later.
- * `sampleTs` is one row from the series: same separator, fraction length
- * and offset spelling. Subseconds are dropped when the sample has none.
- */
-export function formatBoundLike(sampleTs: string, instant: number | Date): string {
-  const ms = typeof instant === 'number' ? instant : instant.getTime();
-  if (!Number.isFinite(ms)) return '';
-  const match = /^(\d{4}-\d{2}-\d{2})([ T])(\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(
-    sampleTs.trim(),
-  );
-  if (!match) return new Date(ms).toISOString();
-  const sep = match[2] === ' ' ? ' ' : 'T';
-  const frac = match[4];
-  const tz = match[5] ?? 'Z';
-  let offsetMin = 0;
-  let suffix = 'Z';
-  if (tz.toUpperCase() === 'Z') {
-    suffix = 'Z';
-  } else {
-    const sign = tz[0] === '-' ? -1 : 1;
-    const rest = tz.slice(1).replace(':', '');
-    const hh = Number(rest.slice(0, 2));
-    const mm = Number(rest.slice(2, 4) || '0');
-    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return new Date(ms).toISOString();
-    offsetMin = sign * (hh * 60 + mm);
-    suffix = tz;
-  }
-  const shifted = new Date(ms + offsetMin * 60_000);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  let fraction = '';
-  if (frac) {
-    const width = frac.length - 1;
-    const digits = `${String(shifted.getUTCMilliseconds()).padStart(3, '0')}000000`;
-    fraction = `.${digits.slice(0, width)}`;
-  }
-  return (
-    `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}` +
-    `${sep}${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}` +
-    `${fraction}${suffix}`
-  );
-}
-
-/**
- * Pregame picks never read a row after the start. The worker keeps writing
- * odds after commence_time, mostly still tagged snapshot_type 'open', so the
- * cap is the timestamp.
- *
- * A live pick is `is_live === true` only. It reads from its lock and may
- * continue past the start. Any other pick is pregame and stops at
- * commence_time, even when the lock is later. Close is the latest row at
- * or before that start. A row between the start and the lock is in-play
- * and must not be labelled Close.
- *
- * Both instants come back normalized. An unparseable lock on a live pick
- * is unknown, not a pregame cap: capping it would hide the in-play rows
- * it was written on. An unparseable lock on any other pick still caps
- * at commence_time.
- */
-export function lineHistoryWindow(input: {
-  commenceTime: string | null | undefined;
-  createdAt: string | null | undefined;
-  isLive?: boolean | null;
-}): LineHistoryWindow {
-  const startRaw = input.commenceTime ?? '';
-  const start = startRaw ? normalizeTimestamp(startRaw) : null;
-  const kick = start ? Date.parse(start) : Number.NaN;
-  if (!start || Number.isNaN(kick)) {
-    // No start time on the game or the pick, so this read is not capped.
-    return {};
-  }
-  if (input.isLive === true) {
-    const createdRaw = input.createdAt ?? '';
-    const created = createdRaw ? normalizeTimestamp(createdRaw) : null;
-    if (!created || Number.isNaN(Date.parse(created))) {
-      // The lock did not parse. Unknown, not pregame.
-      return {};
-    }
-    return { from: created };
-  }
-  return { until: start };
-}
-
-/**
- * Non-live, and the lock is after the stored start. The series still ends
- * on the close, but that close is earlier than the lock, so a green or red
- * verdict would read the move backwards. Caller suppresses the verdict.
- */
-export function nonLiveLockAfterStart(input: {
-  commenceTime: string | null | undefined;
-  createdAt: string | null | undefined;
-  isLive?: boolean | null;
-}): boolean {
-  if (input.isLive === true) return false;
-  const startRaw = input.commenceTime ?? '';
-  const start = startRaw ? normalizeTimestamp(startRaw) : null;
-  const kick = start ? Date.parse(start) : Number.NaN;
-  if (!start || Number.isNaN(kick)) return false;
-  const createdRaw = input.createdAt ?? '';
-  const created = createdRaw ? normalizeTimestamp(createdRaw) : null;
-  const locked = created ? Date.parse(created) : Number.NaN;
-  return Number.isFinite(locked) && locked > kick;
-}
-
-/**
- * Instants strictly between `startIso` and `endIso`. `buckets` counts the
- * whole span, so the result length is `buckets - 2`.
- */
-export function historyBucketInstants(startIso: string, endIso: string, buckets: number): string[] {
-  const start = instantMs(startIso);
-  const end = instantMs(endIso);
-  const interior = buckets - 2;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || interior < 1) return [];
-  const out: string[] = [];
-  for (let i = 1; i <= interior; i++) {
-    out.push(new Date(start + ((end - start) * i) / (interior + 1)).toISOString());
-  }
-  return out;
-}
-
-/**
- * Halves taken per changed gap. Six steps bring a bucket-width gap (about
- * a tenth of the pregame span) inside a quarter hour. Wider than that, or
- * a gap the cap did not spend queries on, stays an upper bound.
- */
-export const LINE_HISTORY_BISECT_STEPS = 6;
-
-/** Hard cap on the extra reads. Four changes get the full step budget. */
-export const LINE_HISTORY_BISECT_CAP = 24;
-
-/** A refined time within this of the previous bound is the move, not "by". */
-const MOVE_TIGHT_MS = 60_000;
-
-function applyBounds(probe: HistoryProbe, bounds?: LineHistoryWindow): HistoryProbe {
-  let gte = probe.gte;
-  const fromMs = bounds?.from ? instantMs(bounds.from) : Number.NaN;
-  const gteMs = gte ? instantMs(gte) : Number.NaN;
-  if (bounds?.from && Number.isFinite(fromMs) && (!gte || !Number.isFinite(gteMs) || fromMs > gteMs)) {
-    gte = bounds.from;
-  }
-  const lte = bounds?.until ?? probe.lte;
-  if (gte === probe.gte && lte === probe.lte) return probe;
-  return { ...probe, gte, lte };
-}
-
-function rowQuote<T extends { snapshot_at: string }>(row: T, quote?: (row: T) => string): string {
-  if (quote) return quote(row);
-  const { snapshot_at: _at, ...rest } = row;
-  return JSON.stringify(rest);
-}
-
-interface ChangeGap<T> {
-  leftAt: string;
-  right: T;
-  span: number;
-}
-
-function changeGaps<T extends { snapshot_at: string }>(
-  rows: T[],
-  quote?: (row: T) => string,
-): ChangeGap<T>[] {
-  const out: ChangeGap<T>[] = [];
-  for (let i = 1; i < rows.length; i++) {
-    if (rowQuote(rows[i - 1], quote) === rowQuote(rows[i], quote)) continue;
-    const span = instantMs(rows[i].snapshot_at) - instantMs(rows[i - 1].snapshot_at);
-    if (span > MOVE_TIGHT_MS) out.push({ leftAt: rows[i - 1].snapshot_at, right: rows[i], span });
-  }
-  return out;
-}
-
-/**
- * Earliest snapshot in (leftAt, right] carrying right's quote. Empty halves
- * shrink the window without moving the candidate: no row there means the
- * move is not there. Stops at a minute, or after LINE_HISTORY_BISECT_STEPS.
- */
-async function refineChange<T extends { snapshot_at: string }>(
-  read: (probe: HistoryProbe) => Promise<T[]>,
-  leftAt: string,
-  right: T,
-  quote?: (row: T) => string,
-): Promise<{ row: T; tight: boolean }> {
-  const key = rowQuote(right, quote);
-  let lo = instantMs(leftAt);
-  let hi = instantMs(right.snapshot_at);
-  let best = right;
-  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi - lo <= MOVE_TIGHT_MS) {
-    return { row: best, tight: true };
-  }
-  for (let step = 0; step < LINE_HISTORY_BISECT_STEPS; step++) {
-    if (hi - lo <= MOVE_TIGHT_MS) break;
-    const midMs = lo + (hi - lo) / 2;
-    const row = (await read({
-      ascending: true,
-      limit: 1,
-      gte: new Date(midMs).toISOString(),
-      lt: best.snapshot_at,
-    }))[0];
-    if (!row?.snapshot_at) {
-      hi = midMs;
-      continue;
-    }
-    const t = instantMs(row.snapshot_at);
-    if (!Number.isFinite(t) || t <= lo) break;
-    if (rowQuote(row, quote) === key) {
-      best = row;
-      hi = t;
-    } else {
-      lo = t;
-    }
-  }
-  return { row: best, tight: hi - lo <= MOVE_TIGHT_MS };
-}
-
-/**
- * Oldest-first snapshots from the open through the latest row the window
- * allows.
- *
- * A history that fits in one page comes back whole (latest page, reversed).
- * A full page has not reached the open, so the open is kept and the gap
- * before that page is sampled. The latest page is kept row for row — two
- * snapshots can share a timestamp — and the series always ends on it.
- *
- * `bounds.until` caps every probe, including that latest page. `bounds.from`
- * starts a live pick at its lock. With neither set, the read is unbounded.
- *
- * The first read is one newest row and no range. Every bound sent after that
- * is formatted like that row, because snapshot_at is text and a UTC cap does
- * not exclude a `-04:00` row. `quote` keys a move on the pick's side. The
- * default is the whole row, so the other side's price is a move.
- */
-export async function sampleOpenToNow<T extends { snapshot_at: string }>(
-  read: (probe: HistoryProbe) => Promise<T[]>,
-  bounds?: LineHistoryWindow,
-  quote?: (row: T) => string,
-): Promise<SampledSeries<T>> {
-  const sample = (await read({ ascending: false, limit: 1, unbounded: true }))[0];
-  const sampleTs = sample?.snapshot_at;
-  const like = (instant: string | number | undefined): string | undefined => {
-    if (instant == null || instant === '') return undefined;
-    const ms = typeof instant === 'number' ? instant : instantMs(instant);
-    if (!Number.isFinite(ms)) return typeof instant === 'string' ? instant : undefined;
-    if (!sampleTs) return new Date(ms).toISOString();
-    return formatBoundLike(sampleTs, ms);
-  };
-  const bounded = (probe: HistoryProbe) => {
-    const applied = applyBounds(probe, bounds);
-    return read({
-      ...applied,
-      gte: applied.gte != null ? like(applied.gte) : undefined,
-      lt: applied.lt != null ? like(applied.lt) : undefined,
-      lte: applied.lte != null ? like(applied.lte) : undefined,
-    });
-  };
-  const [latestDesc, openRows] = await Promise.all([
-    bounded({ ascending: false, limit: LINE_HISTORY_PAGE }),
-    bounded({ ascending: true, limit: 1 }),
-  ]);
-  const latest = latestDesc.slice().reverse();
-  if (latest.length < LINE_HISTORY_PAGE) {
-    return { rows: rowsWithinWindow(latest, bounds), moveByAt: [] };
-  }
-
-  const open = openRows[0];
-  const pageStart = latest[0]?.snapshot_at;
-  if (!open?.snapshot_at || !pageStart || instantMs(open.snapshot_at) >= instantMs(pageStart)) {
-    return { rows: rowsWithinWindow(latest, bounds), moveByAt: [] };
-  }
-
-  const instants = historyBucketInstants(open.snapshot_at, pageStart, LINE_HISTORY_BUCKETS);
-  const probed = await Promise.all(
-    instants.map((gte) => bounded({ ascending: true, limit: 1, gte, lt: pageStart })),
-  );
-  const seen = new Set(latest.map((r) => r.snapshot_at));
-  const head: T[] = [];
-  for (const row of [open, ...probed.flat()]) {
-    if (!row?.snapshot_at || seen.has(row.snapshot_at)) continue;
-    seen.add(row.snapshot_at);
-    head.push(row);
-  }
-  head.sort((a, b) => instantMs(a.snapshot_at) - instantMs(b.snapshot_at));
-
-  const gaps = changeGaps(head, quote);
-  const prev = head[head.length - 1];
-  const first = latest[0];
-  if (prev && first && rowQuote(prev, quote) !== rowQuote(first, quote)) {
-    const span = instantMs(first.snapshot_at) - instantMs(prev.snapshot_at);
-    if (span > MOVE_TIGHT_MS) gaps.push({ leftAt: prev.snapshot_at, right: first, span });
-  }
-  gaps.sort((a, b) => b.span - a.span);
-  const slots = Math.floor(LINE_HISTORY_BISECT_CAP / LINE_HISTORY_BISECT_STEPS);
-  const chosen = gaps.slice(0, slots);
-  const skipped = gaps.slice(slots);
-
-  const refined = await Promise.all(
-    chosen.map((gap) => refineChange(bounded, gap.leftAt, gap.right, quote)),
-  );
-  const replacements = new Map<string, T>();
-  const moveByAt: string[] = [];
-  chosen.forEach((gap, i) => {
-    const result = refined[i];
-    if (result.row.snapshot_at !== gap.right.snapshot_at) {
-      replacements.set(gap.right.snapshot_at, result.row);
-    }
-    if (!result.tight) moveByAt.push(result.row.snapshot_at);
-  });
-  for (const gap of skipped) moveByAt.push(gap.right.snapshot_at);
-
-  const headSeen = new Set(latest.map((r) => r.snapshot_at));
-  const headOut: T[] = [];
-  for (const row of head) {
-    const next = replacements.get(row.snapshot_at) ?? row;
-    if (headSeen.has(next.snapshot_at)) continue;
-    headSeen.add(next.snapshot_at);
-    headOut.push(next);
-  }
-  let tail = latest;
-  if (first) {
-    const junction = replacements.get(first.snapshot_at);
-    if (junction && junction.snapshot_at !== first.snapshot_at && !headSeen.has(junction.snapshot_at)) {
-      tail = [junction, ...latest];
-    }
-  }
-  const rows = rowsWithinWindow([...headOut, ...tail], bounds);
-  rows.sort((a, b) => instantMs(a.snapshot_at) - instantMs(b.snapshot_at));
-  const kept = new Set(rows.map((row) => row.snapshot_at));
-  return { rows, moveByAt: moveByAt.filter((at) => kept.has(at)) };
-}
-
-/**
- * Real-time window on the assembled series. A mixed offset can still satisfy
- * a text cap: `2026-10-04T20:00:00-05:00` is after a 00:10Z start and still
- * sorts before `2026-10-04T20:10:00-04:00`. Those rows never reach the card.
- */
-function rowsWithinWindow<T extends { snapshot_at: string }>(rows: T[], bounds?: LineHistoryWindow): T[] {
-  if (!bounds?.from && !bounds?.until) return rows;
-  const fromMs = bounds.from ? instantMs(bounds.from) : Number.NEGATIVE_INFINITY;
-  const untilMs = bounds.until ? instantMs(bounds.until) : Number.POSITIVE_INFINITY;
-  return rows.filter((row) => {
-    const t = instantMs(row.snapshot_at);
-    if (!Number.isFinite(t)) return false;
-    return t >= fromMs && t <= untilMs;
-  });
+  if (!w.gap) return `${head} since your pick`;
+  // The first row on screen after the missing stretch. With the price at the
+  // pick pinned above a divider, that is the first row after the divider (the
+  // pinned row is the pick's own time); otherwise the first row on screen
+  // that is not the very first row.
+  const d = r.rows.findIndex((x) => x.divider);
+  const resume =
+    d >= 0
+      ? r.rows.slice(d + 1).find((x) => !x.divider)
+      : r.rows.find((x, i) => !x.divider && r.hidden + i > 0);
+  return resume
+    ? `Prices between your pick and ${formatDayTimeET(resume.at)} not shown`
+    : 'Some prices since your pick not shown';
 }

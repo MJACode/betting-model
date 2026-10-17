@@ -13,6 +13,12 @@
  * history every time and treat the server as authoritative for that window —
  * dropping cached rows inside it rather than merging, so a deleted or re-graded
  * pick can't linger.
+ *
+ * Rows older than the window keep their result as first fetched, but NOT their
+ * condition_status: a marker can be set weeks later (the second copy of one
+ * bet, marked DUPLICATE once both copies settle, 2026-10-09), so every load
+ * first copies the server's markers onto the whole cache (settledPickMarkers).
+ * That is why a new marker needs no bump of KEY below.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,7 +54,15 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // scorer keeps a paused model's real verdict, a paused BET can settle, and
 // passesRecordFilter keeps it out by the row's 'model paused' marker. On a v6
 // envelope that field is undefined and the guard would never fire.
-const KEY = 'settledPicks.v7';
+// v8 (2026-10-14): SETTLED_PICK_COLUMNS gained player_key and prop_market.
+// The published-record stamp builds the Discord lock from those columns. On
+// a v7 envelope both are undefined, a posted prop's key is short, and the
+// stamp marks it unpublished.
+// v9 (2026-10-14): SETTLED_PICK_COLUMNS gained clv_method. Model detail
+// averages standard_v2 only. On a v8 envelope the field is undefined, the
+// filter drops every row, and a pre-migration cache would also show the old
+// probability-point number as a percent.
+const KEY = 'settledPicks.v9';
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day

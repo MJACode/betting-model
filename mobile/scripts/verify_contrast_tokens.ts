@@ -20,7 +20,10 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+// Source is read with LF whatever the checkout: autocrlf gives CRLF on
+// Windows, and regexes below that end a match at a newline never matched.
+const readUtf8 = (p: string) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
+import { join, relative, sep } from 'node:path';
 
 import {
   formatCurrency,
@@ -33,7 +36,9 @@ import {
 import { badgeGlyphSize, pnlTone, roundedAt, roundsToZero, SIGNAL_BADGE } from '../src/lib/tone';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
+// Allowlists and labels use '/'; relative() yields '\\' on Windows.
+const relPosix = (f: string) => relative(ROOT, f).split(sep).join('/');
+const read = (p: string) => readUtf8(join(ROOT, p));
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -174,9 +179,11 @@ check('the old failures really were failures', ratio(tok.bet, tok.bgCard) < 3 &&
 
 // ── signal badge (H1) ───────────────────────────────────────────────────────
 const GLYPH = { BET: 'checkmark', NONE: 'remove', AVOID: 'close' } as const;
+// NONE is stored as NONE and read as NEUTRAL (Matt, 2026-10-12).
+const WORD = { BET: 'BET', NONE: 'NEUTRAL', AVOID: 'AVOID' } as const;
 for (const s of ['BET', 'NONE', 'AVOID'] as const) {
   const spec = SIGNAL_BADGE[s];
-  check(`badge ${s}: word "${s}"`, spec.label === s);
+  check(`badge ${s}: word "${WORD[s]}"`, spec.label === WORD[s]);
   check(`badge ${s}: glyph ${GLYPH[s]}`, spec.glyph === GLYPH[s], spec.glyph);
   const r = ratio(tok[spec.ink], tok[spec.fill]);
   check(`badge ${s}: ${spec.ink} on ${spec.fill} ≥ 4.5:1`, r >= 4.5, r.toFixed(2));
@@ -305,8 +312,8 @@ const medIcons: string[] = [];
 // icon from `color` and the words through inkFor()).
 const HUE_TEXT = /(?<![A-Za-z])(color:|tint:|tint=\{)[^,;\n}]*\bcolors\.(bet|avoid|med|positive|negative|high|none|low)\b(?!Soft|Ink)/;
 for (const f of files) {
-  const rel = relative(ROOT, f);
-  code(readFileSync(f, 'utf-8'))
+  const rel = relPosix(f);
+  code(readUtf8(f))
     .split('\n')
     .forEach((line, i) => {
       // The short form is the one the scan could not see (L3); 6-digit brand
@@ -359,8 +366,8 @@ function ioniconColors(src: string): [number, string][] {
 const BRIGHT_ICON = /\bcolors\.(med|bet|positive|high)\b(?!Soft|Ink)/;
 const brightIcons: string[] = [];
 for (const f of files) {
-  const rel = relative(ROOT, f).split('\\').join('/');
-  for (const [line, expr] of ioniconColors(code(readFileSync(f, 'utf-8')))) {
+  const rel = relPosix(f).split('\\').join('/');
+  for (const [line, expr] of ioniconColors(code(readUtf8(f)))) {
     if (!BRIGHT_ICON.test(expr)) continue;
     brightIcons.push(`${rel}:${line} ${expr.replace(/\s+/g, ' ')}`);
   }
@@ -393,8 +400,8 @@ check('DailyResults "No picks" rows: no opacity, textTertiary', /sportCardEmpty:
 const toneCalls: string[] = [];
 const badToneCalls: string[] = [];
 for (const f of files) {
-  const rel = relative(ROOT, f);
-  for (const m of code(readFileSync(f, 'utf-8')).matchAll(/pnlColor\(((?:[^()]|\([^()]*\))*)\)/g)) {
+  const rel = relPosix(f);
+  for (const m of code(readUtf8(f)).matchAll(/pnlColor\(((?:[^()]|\([^()]*\))*)\)/g)) {
     if (/^value, digits/.test(m[1])) continue;
     toneCalls.push(rel);
     if (!/,\s*(1,\s*100|2|1)\s*$/.test(m[1])) badToneCalls.push(`${rel}: pnlColor(${m[1]})`);

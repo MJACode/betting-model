@@ -3,7 +3,7 @@
     "key": "mlb-historical-pilot-2024-06-01",
     "job_type": "historical_odds",
     "requested_by": "mike",
-    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 \u2014 205 rows over 48 games \u2014 two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
+    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 — 205 rows over 48 games — two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
     "args": {
       "sport": "MLB",
       "start": "2024-06-01",
@@ -28,7 +28,7 @@
     "key": "mlb-relabel-in-play-2024-pilot",
     "job_type": "relabel_in_play",
     "requested_by": "mike",
-    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game \u2014 ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
+    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game — ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
     "args": {
       "sport": "MLB",
       "since": "2024-06-01"
@@ -735,7 +735,7 @@
     "key": "team-stats-asof-verify-after-marker-2026-09-14",
     "job_type": "team_stats_asof_verify",
     "requested_by": "mike",
-    "note": "After committing data/TEAM_STATS_ASOF_REBUILD_COMPLETE (rebuild landed 2026-09-03 per docs/team_stats_leak.md; Phase 2 pitcher rebuild Done same day). verify-only: fail loud on impossible games_played or thin snapshots. Does NOT DELETE/rebuild \u2014 the ongoing gate after the #710 freeze lifts. SPENT: job 90631 failed on live-season MIN 2026-05-05 (fixed in #715).",
+    "note": "After committing data/TEAM_STATS_ASOF_REBUILD_COMPLETE (rebuild landed 2026-09-03 per docs/team_stats_leak.md; Phase 2 pitcher rebuild Done same day). verify-only: fail loud on impossible games_played or thin snapshots. Does NOT DELETE/rebuild — the ongoing gate after the #710 freeze lifts. SPENT: job 90631 failed on live-season MIN 2026-05-05 (fixed in #715).",
     "args": {}
   },
   {
@@ -763,8 +763,15 @@
     "note": "ONE-SHOT. Error Handler 2026-09-15: fill the 2/3/4pp MLB spreads+totals grid on odds.snapshot_type=open (commence_time is on games), bettable BEST_LINE books, Pin de-vig vs soft de-vig, equal line, 300s, by month. MCP timed out on unbounded joins. Result lands in worker_jobs.result. Does not publish, pause, or unpause. Next if totals 2pp is still negative: the companion dk-implied pin-lean job.",
     "args": {
       "sport": "MLB",
-      "markets": ["spreads", "totals"],
-      "edges": [0.02, 0.03, 0.04],
+      "markets": [
+        "spreads",
+        "totals"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
       "snapshot_type": "open",
       "bettable": true,
       "by_month": true,
@@ -781,11 +788,20 @@
     "note": "ONE-SHOT. GROK_BOT 2026-09-15 construction: Pin open no-vig lean vs DraftKings open implied, equal line, 2/3/4pp, snapshot_type=open. GROK reported totals Apr-Jul ~+11% n~103 and spreads ~-5% n~200; this remeasures on the worker (MCP timed out). Does not publish, pause, or unpause.",
     "args": {
       "sport": "MLB",
-      "markets": ["spreads", "totals"],
-      "edges": [0.02, 0.03, 0.04],
+      "markets": [
+        "spreads",
+        "totals"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
       "snapshot_type": "open",
       "bettable": false,
-      "soft_books": ["draftkings"],
+      "soft_books": [
+        "draftkings"
+      ],
       "by_month": true,
       "vs": "implied",
       "pin_lean": true,
@@ -801,13 +817,25 @@
     "args": {}
   },
   {
+    "key": "clv-price-taken-recompute-2026-10-08",
+    "job_type": "clv_backfill",
+    "requested_by": "mike",
+    "note": "ONE-SHOT. mike 2026-10-08: grade CLV at the price taken. clv_price_taken_2026_10_08.sql stamps the captured BETs that were graded at DraftKings although taken at another book (216 on 2026-10-08, 27 game dates) as graded_at_dk_legacy; this loops paper_tracker._backfill_clv until a pass fills 0 so they are re-measured in one go, while the odds history they need is still unpruned, and so model_quality's 14/28-day CLV windows never hold two definitions. No model, threshold, pick, result or stake change.",
+    "args": {}
+  },
+  {
     "key": "mlb-game-line-market-sweep-2026-09-15",
     "job_type": "game_line_market_sweep",
     "requested_by": "mike",
     "note": "ONE-SHOT measure-only (mike via mlb Handicap). Pinnacle vs the script's eight soft books (draftkings, fanduel, betmgm, williamhill_us, espnbet, betrivers, hardrockbet, bovada), equal-line only, pre-game, MLB spreads + totals. Writes nothing to ACTION_THRESHOLDS / PAUSED_MODELS; does not publish. Independent of the runline retrain.",
     "args": {
-      "sport": ["MLB"],
-      "market": ["spreads", "totals"]
+      "sport": [
+        "MLB"
+      ],
+      "market": [
+        "spreads",
+        "totals"
+      ]
     }
   },
   {
@@ -816,10 +844,20 @@
     "requested_by": "mike",
     "note": "ONE-SHOT measure-only (mike via mlb Handicap). Honest path from .github/workflows/runline_sweep.yml: retrain mlb_runline seasons 2019-2025 / holdout 2026, THEN sweep --seasons 2026. Combined job so the sweep cannot run against the pre-retrain live pickle. register=false matches every prior declared retrain_model job (a queued retrain must not swap the live artifact whose .pkl is not committed); the sweep loads the just-trained pickle via --artifact. Does not ship a RE-CUT, does not pause/unpause. Requires data/TEAM_STATS_ASOF_REBUILD_COMPLETE (in tree since 2026-09-14) or TEAM_STATS_ASOF_REBUILD_COMPLETE=1 — scripts.mlb_runline_sweep asserts this at import; do not bypass by deleting the guard.",
     "args": {
-      "seasons": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+      "seasons": [
+        2019,
+        2020,
+        2021,
+        2022,
+        2023,
+        2024,
+        2025
+      ],
       "holdout": 2026,
       "register": false,
-      "sweep_seasons": [2026]
+      "sweep_seasons": [
+        2026
+      ]
     }
   },
   {
@@ -828,10 +866,20 @@
     "requested_by": "mike",
     "note": "ONE-SHOT measure-only (mike via mlb Handicap / Error Handler). Twin of mlb-runline-retrain-sweep-2026-09-15: retrain mlb_over_under seasons 2019-2025 / holdout 2026, THEN sweep --seasons 2026. Combined job so the sweep cannot run against the pre-retrain live pickle. register=false matches every prior declared retrain_model job (a queued retrain must not swap the live artifact whose .pkl is not committed); the sweep loads the just-trained pickle via --artifact. Does not ship a RE-CUT, does not pause/unpause. Requires data/TEAM_STATS_ASOF_REBUILD_COMPLETE (in tree since 2026-09-14) or TEAM_STATS_ASOF_REBUILD_COMPLETE=1 — scripts.mlb_over_under_sweep asserts this at import; do not bypass by deleting the guard.",
     "args": {
-      "seasons": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+      "seasons": [
+        2019,
+        2020,
+        2021,
+        2022,
+        2023,
+        2024,
+        2025
+      ],
       "holdout": 2026,
       "register": false,
-      "sweep_seasons": [2026]
+      "sweep_seasons": [
+        2026
+      ]
     }
   },
   {
@@ -847,7 +895,9 @@
     "requested_by": "matt",
     "note": "DIAGNOSTIC. A scheduled staleness sweep found player_news at 0 rows, total, ever -- despite step_player_news running in every daily/hourly pipeline pass since the feature shipped ~2026-08-30 and always reporting success (a dead ESPN feed is a quiet zero by design). injuries reads the same site.api.espn.com host and is fresh, ruling out the known ESPN IP-block (sessions 112, 115). Could not confirm the real cause locally: the dev sandbox's egress proxy 403s site.api.espn.com outright, for both requests and WebFetch, and public docs for ESPN's OTHER news API (now.core.api.espn.com) show `categories` entries with `description` directly on the category, not nested under an `athlete` key the way this repo's test fixtures assume -- unconfirmed for this endpoint, so not acted on blind. This job (added same commit) forces a real fetch, scoped to MLB only to keep it to one league-feed call, and the per-sport summary now carries a `warnings` key with whatever fetch_espn_news logged (0 raw articles / raw articles that named nobody, with a sample). Read worker_jobs.result once this runs to see the actual ESPN shape and rows written, then land the confirmed parser fix as a follow-up.",
     "args": {
-      "sports": ["MLB"]
+      "sports": [
+        "MLB"
+      ]
     }
   },
   {
@@ -856,7 +906,11 @@
     "requested_by": "matt",
     "note": "DRY RUN, writes nothing. Phase 3 of the position-vs-opponent card (Matt, 2026-10-05) needs positions for NBA, WNBA and NCAAF. ESPN core rosters and CFBD /roster both 403 from the dev sandbox, so their response shapes are unverified. This reports, per sport: teams/athletes listed, athletes parsed, the name-match rate to our nba_api ids (basketball) or the id-match rate to ncaaf_player_game_log (CFBD), the positions seen and a sample. Read worker_jobs.result, fix the parser if needed, then queue the real run (dry_run false).",
     "args": {
-      "sports": ["NBA", "WNBA", "NCAAF"],
+      "sports": [
+        "NBA",
+        "WNBA",
+        "NCAAF"
+      ],
       "season": 2026,
       "dry_run": true
     }
@@ -867,7 +921,10 @@
     "requested_by": "matt",
     "note": "DRY RUN 2, basketball only. Dry run 1 (job 405765) listed 30 NBA and 17 WNBA teams but every season-less roster URL (/teams/{id}/athletes) answered 404 on the worker, so no athlete was read. The ingestor now tries season-scoped rosters (/seasons/{year}/teams/{id}/athletes) and records which year answered (roster_season_used). Writes nothing. Read worker_jobs.result for listed/parsed/matched counts, match_method (name/team/tiebreak_recent) and the positions seen.",
     "args": {
-      "sports": ["NBA", "WNBA"],
+      "sports": [
+        "NBA",
+        "WNBA"
+      ],
       "dry_run": true
     }
   },
@@ -878,9 +935,125 @@
     "note": "REAL RUN, NCAAF only. Dry run 1 (job 405765) read 29,765 CFBD /roster rows for 2026 and matched 11,153 of the 11,641 players in ncaaf_player_game_log by id (95.8%), with the expected positions (QB 1,424, RB 2,006, WR 3,995, TE 1,842, ...). Writes player_positions. run_after 12:30Z so the table (add_player_positions.sql) exists from the 11:17Z/12:17Z refresh passes; if it still does not, the job raises and is retried.",
     "run_after": "2026-10-06T12:30:00+00:00",
     "args": {
-      "sports": ["NCAAF"],
+      "sports": [
+        "NCAAF"
+      ],
       "season": 2026,
       "dry_run": false
     }
+  },
+  {
+    "key": "player-positions-basketball-2026-10-06",
+    "job_type": "player_positions",
+    "requested_by": "matt",
+    "note": "REAL RUN, NBA + WNBA. Dry run 2 (job 406072): NBA rosters answered under season 2027 for all 30 teams, 609 athletes read, 496 matched to our nba_api ids by name (0 tiebreaks), positions G/F/C; WNBA under 2026 for 16 teams, 243 read, 213 matched. Unmatched are mostly 2026 rookies with no log history (and a national team ESPN lists in the WNBA). Writes player_positions; the daily step keeps it fresh from the next 6am run.",
+    "args": {
+      "sports": [
+        "NBA",
+        "WNBA"
+      ],
+      "dry_run": false
+    }
+  },
+  {
+    "key": "nhl-prop-ev-lab-2026-10-08",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-08: assess all NHL models and optimise for CLV and expected value. The four prop models graded together on three priced seasons in UNITS A SEASON for every EV floor x per-game cap x per-night cap; FanDuel in vs out; assists both sides; and 2026-27 so far, every candidate at a game's first stored price vs its last. Read-only. Result: worker_jobs.result->>'stdout'.",
+    "args": {
+      "script": "nhl_prop_ev_lab"
+    }
+  },
+  {
+    "key": "nhl-live-artifact-grade-2026-10-08",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-08, same assessment: the two live NHL game artifacts (nhl_moneyline, nhl_moneyline_regulation) re-graded at real 2025-26 prices with the corrections promoted today. Read-only. Result: worker_jobs.result->>'stdout'.",
+    "args": {
+      "script": "nhl_live_artifact_grade"
+    }
+  },
+  {
+    "key": "nhl-prop-ev-lab-namesakes-fixed-2026-10-08",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-08: the same prop grid as nhl-prop-ev-lab-2026-10-08, re-run with shared player names refused the way the live card refuses them (scripts/nhl_prop_backtest.namesakes). The first run reproduces the published numbers; this one is the corrected grade. Read-only.",
+    "args": {
+      "script": "nhl_prop_ev_lab"
+    }
+  },
+  {
+    "key": "void-stale-ncaaf-3094555-2026-10-09",
+    "job_type": "void_picks",
+    "requested_by": "mike",
+    "note": "mike 2026-10-09: void the open NCAAF BETs priced off September lines. 3094555 (ncaaf_moneyline, Alabama ML -142, NCAAF_2026-10-24_texas-a-m_alabama) was decided on a DraftKings price 25.8 days old: its last DraftKings price was stored 2026-09-05 16:15 UTC, after which the feed stopped listing the game, and the scorer kept reading that row. It was never posted (paused model) and has not settled. The 8 posted ones are refused by scripts/void_picks.py (posted signals are locked) and are not in this job.",
+    "args": {
+      "pick_ids": [
+        3094555
+      ],
+      "reason": "decided on a DraftKings price 25.8 days old (its last stored price, 2026-09-05 16:15 UTC): the odds feed stopped listing the game and the scorer used that row; nobody could bet that number (mike, 2026-10-09)"
+    }
+  },
+  {
+    "key": "void-ncaaf-stale-dk-posted-unders-2026-10-09",
+    "job_type": "void_picks",
+    "requested_by": "mike",
+    "note": "mike, 2026-10-09: 'Change the rule, void them'. Eight posted NCAAF unders were decided on DraftKings totals rows stored 2026-09-05, 15.1 to 28.4 days before each pick; no book stored a totals row for these games between then and the pick (re-measured 2026-10-09). allow_posted lifts Matt's 2026-09-28 posted-pick lock for these picks only (scripts/void_picks.py). Must run before 2026-10-17 16:00 UTC, when 2992283 kicks off.",
+    "args": {
+      "pick_ids": [
+        2558703,
+        2558736,
+        2935576,
+        2992283,
+        2992290,
+        2992474,
+        3020766,
+        3204788
+      ],
+      "allow_posted": true,
+      "reason": "decided on a DraftKings price 15 to 28 days old: the newest DraftKings row for this game at or before the pick was stored 2026-09-05 and no book had a row for it between then and the pick (the odds feed had stopped listing the game), so the number was not one DraftKings was offering when the pick was made. It was posted to members. Voided by mike's decision of 2026-10-09 to lift the posted-pick lock for these picks: 'Change the rule, void them'."
+    }
+  },
+  {
+    "key": "oct13-nhl-reply-2026-10-14",
+    "job_type": "publish_oct13_nhl_reply",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14: the Oct 13 line as a reply to tweet 2110451858137641367. Discord follow-up is skipped when record_correction:2026-10-13-nhl / discord_correction already exists. The reply is push_sent kind x_correction_reply on that lock.",
+    "args": {}
+  },
+  {
+    "key": "oct13-nhl-line-2026-10-14",
+    "job_type": "publish_oct13_nhl_line",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14: the correction had already posted, so this one line goes out once on its own, Discord results and X. Words are fixed in scripts/post_record_correction.py. push_sent lock_key record_correction:2026-10-13-nhl, kinds discord_correction and x_correction.",
+    "args": {}
+  },
+  {
+    "key": "record-correction-2026-10-14",
+    "job_type": "publish_record_correction",
+    "requested_by": "owner",
+    "note": "Owner approved one post, 2026-10-14. Discord results channel, then a pin attempt, then X. The words are fixed in scripts/post_record_correction.py. push_sent kinds discord_correction, x_correction, and x_correction_reply on lock_key record_correction:2026-10-14. A retry skips a surface that already has a row.",
+    "args": {}
+  },
+  {
+    "key": "full-record-2026-10-14",
+    "job_type": "publish_full_record",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14 17:36 ET: post the full current record to Discord results, once. Not X. Text fixed in scripts/post_record_correction.py. push_sent lock_key full_record:2026-10-14, kind discord_full_record.",
+    "args": {}
+  },
+  {
+    "key": "full-record-standard-2026-10-14",
+    "job_type": "publish_full_record_standard",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14: full record through Oct 13 in the standard recap embed (discord_notifier.all_time_embed). Discord results once, not X. push_sent full_record_std:2026-10-14 / discord_full_record.",
+    "args": {}
+  },
+  {
+    "key": "delete-custom-record-2026-10-14",
+    "job_type": "delete_custom_record_post",
+    "requested_by": "owner",
+    "note": "Owner, 2026-10-14 18:27 ET: delete the custom-format full record, Discord message 1560045816352079957, via the results webhook. Standard post 1560049598565715999 and X untouched.",
+    "args": {}
   }
 ]

@@ -21,6 +21,660 @@
 
 ---
 
+## [ ] NBA projection model: what to read after its first nights (2026-10-16)
+
+`nba_prop_projection` went live with three things the archive could not grade
+(`docs/nba_models_2026.md` §5): (1) which books quote steals, blocks and
+blocks+steals near tip — four days out only DraftKings and FanDuel did, and the
+timing verifier graded that case at +2.53% (its five-market version of the card); (2) the stale-quote guard, which refuses
+quotes the archive never stored a clock for — count `stale_rejected` in the card's
+diagnostic line against bets written; (3) closing-line value, from the 'close'
+snapshot each bet game now gets. After the first 250 settled bets, grade the
+record by market and by deciding book, and BetParx-only lines separately
+(32% of the graded 2025-26 units, uncheckable against another book).
+
+## [ ] NBA: Blocks+Steals and Reb+Ast on the Stats leaderboard (2026-10-16)
+
+The app's NBA player pages show both combined stats, summed from the game log, and
+hide the head-to-head and same-position cards for them: the server has neither. To
+put them on the Stats leaderboard, add `blocks_steals` and `rebounds_assists`
+branches to `player_season_stat_values_nba`, `player_h2h_stat_values_nba` and
+`position_vs_opponent_nba`, and both columns to `v_player_season_totals_nba`; then
+move the two entries from `LOG_DERIVED_STATS` into `STAT_CATALOG`
+(`mobile/src/lib/statCatalog.ts`) and remove the gating in
+`mobile/src/hooks/usePlayerDetail.ts`.
+
+## [ ] App: the player record reads at most 200 settled bets (2026-10-16)
+
+"Our picks on <player>" (`mobile/src/lib/queries.ts`, `.limit(200)`) was sized for a
+busiest player of 50 settled bets. The NBA projection model can bet five markets on
+one player in one game. Measure once it has posted:
+`select player_id, count(*) from picks where model_id='nba_prop_projection' and
+signal_type='BET' group by 1 order by 2 desc limit 5`; if the top player nears 200,
+say "Latest 200 bets" on the card or page the read.
+
+## [ ] NBA: a partial ESPN injury pull looks complete (2026-10-16)
+
+`injury_ingestor.fetch_espn_injuries` stores nothing for a team whose ESPN call
+fails and writes the other 29, so the projection reads that team's Out players as
+available. Not observed since 2026-10-01 (no "injuries failed" warning in worker
+logs). The fix is a per-team failure marker the projection can refuse.
+
+## [ ] NBA: the official injury report is not on the worker (2026-10-16)
+
+`data/ingestors/nba_injury_report.py --today` fetches the latest league PDF;
+it is not wired, and whether the worker reaches `ak-static.cms.nba.com` is not
+measured. The shipped rule does not read injuries. The projection model would
+(ESPN's Out ≈ the official Out; Probable and Questionable both read as
+Day-To-Day on ESPN, and Probable players lost −18.4% inside the model's card).
+
+## [ ] NBA: leads graded and not shipped (2026-10-16)
+
+Recorded so they are not re-derived (`docs/nba_models_2026.md` §4):
+- Moneyline outlier prices: each soft book against the other books' no-vig in
+  the same fetch, EV ≥ 0.035, 1,260 bets +17.5%. Looks like quotes that had not
+  updated; whether they could be bet live is unmeasured; DraftKings' lone
+  outliers are the opposite (it moves first on news; the long side won 16.8%).
+- Home team totals vs Pinnacle, same number, EV ≥ 0.01: 182 bets, +6.6%, CI
+  −6.3..+19.1 — re-grade when 2026-27 adds a season.
+- Kalshi carries NBA prop and game ladders with hourly history from 2025-26
+  (free, `api.elections.kalshi.com`); the repo maps only NFL series. Not built.
+
+## [ ] App: a non-DraftKings pick's line move can read as a price move in the member's favour (found 2026-10-16)
+
+From the UX review of the NBA rebuild. `mobile/src/lib/markets.ts`
+`scoredLineBook` falls back to DraftKings while the movement history is the
+deciding book's, so when the book a pick was taken at moves its LINE, the app
+compares the new line's price with the locked line's price and can say "Moved
+3.6pp in your favor" when the line moved a point against the bet. Fixed for
+the three Pinnacle-reference prop rules in the NBA rebuild PR (they read
+`decision_book`, else the label book); every other pick decided at a book other
+than DraftKings still has it. The broad fix changes the movement chip across
+the whole board and wants its own reviewed PR. Same root: on NFL wind and
+opener picks the All books footnote says "The line is DraftKings'" when the
+line is the label book's.
+
+The other direction is open for every over/under model, the three rules
+included: when the bet book's line moves IN the member's favour (Under 4.5 at
+-110 -> 5.5 at -140), `computeMovement` still compares the two prices and the
+board chip reads "Steam -110 -> -140" in red, "Steamed 6.0pp against you" on
+the detail card. Only compute `priceShiftPp` when the current line equals the
+scored line; otherwise return a line-labelled result ("Line 4.5 -> 5.5"), as
+the NFL line-only branch does, and update `summarizeMovement`
+(PickCard.tsx) and the detail verdict (lineMovementView.ts) to match.
+Smaller items from the same review: one exported list of the three rule ids
+(four copies today), `allBooksLineSource` reading the same helper as
+`scoredLineBook`, ", modeled line" in the All books row's VoiceOver label, and
+"(vs Pinnacle)" so the record column never breaks inside the parenthesis.
+
+## [ ] App: a player page opened by name can show a namesake's data (found 2026-10-16)
+
+NFL rule picks carry no player id, so pick detail opens the player page by
+name (`playerId: pick.player_id ?? ''`), and the by-name log fetch is an exact
+name match ordered by date. `nfl_player_game_log` has 7 names since 2025 held
+by two player ids — Justin Jefferson is the Minnesota WR and a Cleveland LB,
+both with a game on 2026-10-11 — so `games[0]` (the page's team, next game,
+and since the NBA rebuild PR its head-to-head, today's picks and same-position
+card via `pagePlayerId`) can be the other player. Fix: pick detail passes the
+pick's game id or teams; when the by-name log holds more than one id, keep the
+rows whose team plays in that game.
+
+## [ ] [needs-decision] NHL game picks are decided before the night's goalie is known (found 2026-10-13)
+
+"OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am
+ET, on Linus Ullmark's goalie row: he started for Ottawa the night before.
+Tonight's probable-starter row, Samuel Ersson, landed in `nhl_goalie_stats`
+at 10:05Z. Re-scored with it, the model says 0.4606 (0.4549 on all of
+tonight's inputs) against the 0.4931 it bet on, and neither clears the 0.20
+EV floor at +145. The hourly overnight passes score every NHL game, and
+`_get_nhl_goalie_stats` falls back to the latest earlier row, so any game
+pick that first clears between midnight and ~6am ET is decided on the last
+start's goalie, which for Ottawa on 10-13 was not the listed starter. MLB already has
+the guard (`models/scorer.score_game`: no game-model score until both
+probable starters are loaded); NHL has none. The fix is the same guard for
+NHL — no game pick until that date's goalie row exists for both teams —
+which changes when NHL picks fire: mike's call, `Updated-By`.
+
+Measured the same day, it is not only overnight. **32 of the 35 NHL game
+BETs since 2026-10-01 were written before that game's first goalie row**,
+31 of them on an Eastern day before the game (up to six days ahead), because
+a game pick locks at the first run that clears and lines open days out. Re-scored with the game-day goalie
+row and everything else as of the pick (all 32 reproduced their stored
+probability exactly first): in **14 of 32** the goalie the model used was not
+the one listed on game day, and there the bet side fell 2.8 points on
+average. Five fall below today's bar at the price taken: WSH ML 10-03 (0.486
+→ 0.378), PIT ML 10-07 (0.498 → 0.484), "PIT (Regulation)" 10-07 (0.483 →
+0.387), "SEA (Regulation)" 10-13 (0.446 → 0.413), "OTT (Regulation)" 10-13
+(0.493 → 0.461). A sixth, FLA ML 10-04, flips only because its probability
+crossed the moneyline correction's 0.50 seam (0.4998 → 0.5002), so it is not
+counted. The guard as written
+would end NHL game bets at early prices; the alternative is to keep the
+early decision and re-check it once the goalie row lands, which collides with
+the pick lock (CLAUDE.md §1c) and is mike's call either way.
+Related: rest. Graded the same day — rest, back-to-back and road-trip
+inputs added to both NHL game models make neither more accurate on 2025-26,
+on all games or on the 350 back-to-back games, and move the Ottawa game by
+0.0001 (`docs/nhl_market_lab.md`, "Rest, back-to-back and road trip in the
+production models"; branch `nhl-rest-candidate`). The goalie is what moves
+a back-to-back game, which is why the timing above is the fix.
+
+## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
+
+`injuries` gets a full copy of each team's list on every ingest run
+(report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per
+player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). `query_injuries_for_game`
+reads every row for the latest report_date and `_compute_injury_adjustment`
+sums them, so `home_injury_adj` / `away_injury_adj` grow all day: Ottawa read
+11.2 at 07:22Z and 53.9 at 22:23Z, against 2.8 and 3.5 counting each player once
+(the docstring says 0-3). It is also the "Opponent injury burden: 79.80" note
+on picks. `nhl_moneyline_regulation` never splits on an injury input (0
+splits across all folds), so it changed nothing there. Before a fix (read
+only the latest snapshot), list which live artifacts DO split on injury
+inputs and what their inputs looked like in training, since the fix moves
+those models' inputs: mike's call.
+
+**For the NHL game models the six injury inputs are dead whatever the reader
+does.** NHL rows in `injuries` start 2026-04-05, so every training game
+(2018-19 → 2024-25) had none and the inputs were zero on every training row;
+that is why neither tree splits on them. And two of the six can never switch
+on for NHL even now: every NHL row is stored at `severity_weight` 0.7 and
+`scenario` 'A', while `_has_starter_out` needs severity ≥ 0.8 and
+`_has_returnee` needs scenario 'B'. A usable NHL injury input has to be
+built from history the model can learn from — e.g. who dressed each game in
+the per-game skater logs, weighted by usage — which is a project, not a
+reader fix.
+
+## [ ] App copy that EV-cut models contradict, and a dollars tile (found 2026-10-15, UX review)
+
+Raised by the front-end review of the NHL moneyline rebuild; declined in that
+PR because each was already wrong for the six models whose cut is EV
+(probability and edge bars 0.0 — NHL props, NHL totals, the MLB public fade).
+One front-end PR, with its own review:
+
+- `ExplainerScreen.tsx:108-109` says "moneyline needs ≥72% model prob and ≥12%
+  edge" (MLB's old bar; 11% today); :95-97 says a BET clears probability AND
+  edge; :190 says every BET carries a Sharp Score. Reword: a BET clears that
+  model's own bar — for some models expected value at the price, so it can be
+  an underdog under 50% — and drop the hard-coded numbers.
+- `ExplainerScreen.tsx:218-226` says a BET at noon can become AVOID at 6pm
+  and to honour the latest signal — the opposite of the pick rule (a BET is
+  locked); :84-90 says the probability shown is calibrated (it is the raw one).
+- The All board's and the model screen's tooltips (`PicksHomeScreen.tsx:609`,
+  `BuiltInModelDetailScreen.tsx:192`) say picks lock the first time they are
+  scored; they lock the first time they become a BET.
+- `ReasoningCard.tsx:93` explains a pick by edge only; an EV row would name
+  what an EV-cut model actually bet on.
+- **`BuiltInModelDetailScreen.tsx:246-250, :464` show results in DOLLARS**
+  ("vs $100 flat per bet", `formatCurrencySigned`) — against the units rule
+  (CLAUDE.md §4).
+
+## [ ] Nothing stops the test suite from reaching the production database (found 2026-10-14)
+
+`tests/conftest.py` sets no guard on `DATABASE_URL` or `ODDS_API_KEY`, and the
+local `.env` holds the production values, so any test that opens a connection
+or calls the feed during `python -m pytest -q tests/` does it against
+production. Found by a research agent that started the suite with `.env` in
+its worktree and stopped it after 46 file-only tests; whether any test in the
+suite actually connects has not been checked. Fix: an autouse fixture that
+unsets both for the session unless a test opts in, and a check that lists the
+tests that reach for either.
+
+## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
+
+Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe
+one fight, 71 of them the two fighter orders on one date
+(`UFC_2026-06-20_kevin-borjas_andre-lima` and `..._andre-lima_kevin-borjas`),
+the rest an Eastern and a UTC date. `ufc_total_rounds` bet both rows of two
+fights (picks 332605/332615 and 524487/530849); the record now counts each
+once (`docs/sessions/2026-10.md`, "count each fight once"), but nothing stops
+the next one, and the `one_pick_per_event` health check only reports it after
+both copies settle. On 2026-09-05 Spann vs Pinto had BETs on both rows from
+two different models (1438528 total rounds, 1664623 moneyline), so the scorer
+still scores both rows. Two more shapes in the same table: placeholder rows a
+week from the real card (`UFC_2026-10-10_esteban-ribovics_king-green` beside
+the 10-03 fight, which has a final) and pairs 23-24 hours apart with
+placeholder start times. Fix at the source: one id per fight in the UFC
+ingestor (sorted fighters, Eastern date), a merge of the existing pairs that
+keeps the row picks point at, and a scorer guard that skips a fight whose twin
+already carries a pick for the model. Check the moneyline side first: on a
+swapped row `home` is the other fighter.
+## [x] Land the job that voids the eight stale-price NCAAF unders (deadline 2026-10-17) — in this branch
+
+Added to `jobs/declared_jobs.json` on 2026-10-09 with mike's approval in the session, so it merges together with
+the code. After the worker runs it, check its result: all eight under "voided", none under "refused".
+The original item:
+
+
+mike, 2026-10-09: *"Change the rule, void them"*. Eight posted NCAAF unders
+were decided on DraftKings prices 15 to 28 days old (the table is in the
+session log for 2026-10-09). The code that lets a posted pick be voided is on
+branch `claude/void-posted-stale`. The job that does it is not: the session's
+permission check refused the write to the queued-jobs file three times. It
+needs mike to add it, or to approve it being added.
+
+Add it to the end of `jobs/declared_jobs.json` as text, without reformatting
+the file:
+
+- key `void-ncaaf-stale-dk-posted-unders-2026-10-09`, job type `void_picks`,
+  requested by `mike`, and a note recording mike's decision and the price ages
+- `pick_ids`: 2558703, 2558736, 2935576, 2992283, 2992290, 2992474, 3020766,
+  3204788
+- `allow_posted`: true
+- `reason` (449 characters, under the 500 that are kept): *decided on a
+  DraftKings price 15 to 28 days old: the newest DraftKings row for this game
+  at or before the pick was stored 2026-09-05 and no book had a row for it
+  between then and the pick (the odds feed had stopped listing the game), so
+  the number was not one DraftKings was offering when the pick was made. It
+  was posted to members. Voided by mike's decision of 2026-10-09 to lift the
+  posted-pick lock for these picks: 'Change the rule, void them'.*
+
+Two rules. **Merge it with that branch or after it, never before**: master's
+job check drops `allow_posted` without a word, so the job would refuse all
+eight as posted, be marked done, and never run again under its name. **It must
+run before 2026-10-17 16:00 UTC**, when 2992283 kicks off (2992290 and
+3204788 play later that day): once a pick is graded, the void refuses it even
+with the opt-in. After it runs, check its result: all eight under "voided",
+none under "refused".
+
+## [ ] [needs-decision] A voided posted pick gives members no sign it was withdrawn
+
+Found 2026-10-09 while making posted picks voidable. After a void:
+
+- **Discord.** The original post stays. The correction is a separate gray
+  notice, `notify_discord_void` / job `publish_discord_void` (branch
+  `cursor/discord-void-notice-eaef`). It is not posted until someone runs the
+  job with `dry_run` false, after the migration is applied. The original
+  message is not edited.
+- **Phone.** The "new bet" push went out when the pick was posted. Nothing
+  follows the void. Still open.
+- **App.** Once a `discord_void` row exists, `v_discord_published` drops the
+  lock and the card leaves the board the same way an unpublished VOID does.
+  Until that row exists, the card keeps its badge, Track and the betslip
+  button. The detail screen still adds "Posted to Discord · not counted in
+  the model's record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
+
+The notice wording is in that PR for approval. The phone push is still a
+decision.
+
+## [x] NCAAF picks scored from prices more than a week old — FIXED 2026-10-09
+
+Found by the 2026-10-09 line-movement review: 200 of 682 pre-game NCAAF picks
+on 10-08 and 10-09 stood on DraftKings prices from 09-04 to 09-06. The odds
+feed stopped listing 31 games then; the scorer kept deciding them off the last
+stored row. Not the two-ids defect below. Branch `claude/ncaaf-stale-prices`:
+a game that has not started is now decided only on a price stored within
+`config.PREGAME_PRICE_MAX_AGE_MIN` (180 minutes), in every game-market read,
+the best-price shop, both entry checks and the NHL totals card
+(`tests/test_pregame_price_age.py`). Still open:
+
+- **mike decides** the 9 open BETs written on stale prices (list in
+  `docs/sessions/2026-10.md`, 2026-10-09). Three kick off 10-17.
+- **Player props have no age bound.** Their normal age is hours by design
+  (NHL props are bought at an opening and a closing snapshot, NCAAF props
+  three times a day), so a prop bound needs its own size per sport.
+- **The odds step failed on every pass 2026-09-27 to 10-01** ("Invalid
+  ODDS_API_KEY", 378 failures a day in `pipeline_log`) while scoring reported
+  success. Checked: `odds_dk_lines` ended 09-28 STALE and 09-29 and 09-30 OK.
+  The new CRIT row `odds_dk_pregame_current` reads 100% of priced games stale
+  on every outage sample. Still open: the pass never recorded the odds step
+  as failed. In `pipeline_runs`, no run from 09-27 to 10-02 lists an odds
+  step in `failed_steps`, and 51 to 53 of 54 runs a day were `ok` from 09-27
+  to 09-30.
+- **The closing-price reader** still reads the newest stored row whatever
+  its age. Not measured: whether any closing price was taken from a row the
+  feed had stopped refreshing. (Pick Detail's chips, All books table and
+  betslip follow the card's rule since the second review, 2026-10-09. The
+  betslip screen itself still prices a leg added before its price went old
+  at the lock, with its full edge.)
+
+## [ ] One UFC fight can be scored, and graded, under two ids
+
+Found 2026-10-09 while fixing the stale-price bound. The odds feed builds a
+UFC id from its home fighter, and that flips between fetches, so one fight can
+sit under both orientations. Since 2026-10-09 an id whose own DraftKings rows
+went stale no longer borrows its twin's price (`_ufc_id_never_priced`), so the
+abandoned copy is skipped, but only once its newest DraftKings row is more
+than 3 hours old: for up to 3 hours after a flip both ids hold current rows.
+
+- [x] **Both ids scored in one pass — FIXED 2026-10-09 (second review).** An
+  id DraftKings never priced still borrowed its twin's price, and both ids
+  were current for up to 3 hours after a flip, so both were decided and the
+  fight could be bet twice. `run_scorer` now scores a fight present under
+  both ids on one of them (the id whose own newest DraftKings row is newer,
+  `_ufc_one_id_per_fight`), clears the other id's no-bet rows, and a BET on
+  either id locks that model on both. The chosen id still borrows a market
+  only its twin carries (the 08-29 totals case).
+- **Two ids for one fight have each carried a BET, and both were graded**
+  (cause not established). Swapped ids: 332605 and 332615
+  (`ufc_total_rounds`, 2026-06-20, "Andre Lima vs Kevin Borjas Over 2.5" and
+  "Kevin Borjas vs Andre Lima Over 2.5", both BET, both WIN). Two dates, a
+  different shape: 524487 (`UFC_2026-07-18_kamaru-usman_dricus-du-plessis`)
+  and 530849 (the 07-19 id), both BET, both WIN. Nothing was changed; whether
+  the record keeps both is mike's call.
+
+## [x] NHL props: the nightly cap — DECIDED 2026-10-08 (mike): four a night
+
+Two a night became four (`scripts/nhl_props_card.MAX_PROP_BETS_PER_NIGHT`),
+`Updated-By: mike`. What remains open is the first-come ordering, below.
+
+## [ ] NHL props: first-come slots (2026-10-08 assessment)
+
+Full numbers: `docs/nhl_clv_ev_assessment.md`. Two caps apply across the four
+NHL prop models: one bet a game, and two a night. The nightly cap costs units
+a season against every looser rule, in every season, and the intervals clear
+zero (corrected for the name defect below).
+
+The caps also fill first-come. The 00:18 ET pass sees only Hard Rock, for
+shots on goal and assists. It can take both nightly slots before saves and
+blocked shots are posted, about 70 minutes before puck drop. Choosing the
+night's best two instead is +5.1 pp in the backtest at 0.18, but its interval
+is -0.5..+10.7, so that size is not established. The size of either cap is
+mike's call (10-02 "best of the best", 10-03 "too many unders").
+
+## [x] NHL props: a CLV-only closing snapshot — DECIDED 2026-10-08 (mike): added
+
+Built as the FINAL in `data/ingestors/nhl_prop_odds_ingestor.py`: between 25
+and 12 minutes before the feed's start time, filed as snapshot_type 'close'
+so no card decides on it. Read the first week of prop CLV once it exists.
+The original item:
+
+The prop ingestor buys an open and a 70-minute close. Saves and blocked shots
+appear only in the close, so they are bet on it, and their CLV is zero (or a
+same-instant gap) by construction. One more snapshot per game makes CLV
+measurable. Measured cost: 5 credits a game per snapshot, about 6,600 credits
+over a 1,312-game season. It spends credits, so it needs mike's OK.
+
+## [x] The line-movement card shows the OLDEST 50 snapshots as "now" — FIXED 2026-10-09
+
+Fixed on `claude/line-movement-since-pick` (session note 2026-10-09). The card
+now shows the book's price when the pick was made, then the newest snapshots
+up to the game's start. Game lines are cut on the server (every stamp there is
+UTC); prop series come back whole and are sorted and cut on the phone (about
+half of them are stamped in Eastern time). The player page reads the same prop
+series and was fixed by the same change.
+
+After review, the same day:
+
+- When the newest snapshots don't all fit, the price at the pick still stays
+  as the first row. A divider row marks the dropped stretch, and the footer
+  says which stretch is missing.
+- That row reads "At pick" only when it is the number the pick locked.
+- After the start, the card no longer grades the move as for or against you.
+  It says where the line went and leaves the grading to the Closing Line
+  Value card.
+- A pick the book hasn't re-priced reads "No new price from <book>", with the
+  date of the newest price.
+- Only live picks have no card. A pre-game pick made after the start the card
+  computes (an NHL start moved earlier at settlement) reads the last pre-game
+  price instead of losing the card.
+
+After a second review, the same day: the price at the pick and the divider
+stay on the 8-row table; "steady" only when the numbers did not move; an old
+or different first row is named, never called the price at the pick; a pick
+made after the card's start says so instead of "No new price"; no footer when
+nothing is missing.
+
+Known limit: the prop read keeps the 500 rows written most recently. On a
+longer series the price at the pick can fall off; the card then says the price
+at your pick isn't available instead of claiming the table runs from it. The
+longest series for the card's markets was 174 rows (measured 2026-10-09).
+
+## [ ] The line-movement card's game-line read misses most moves on minute-by-minute books (found 2026-10-09)
+
+The card reads the price at the pick plus the newest 50 snapshots before the
+start (`fetchOddsHistory`, `mobile/src/lib/queries.ts`). DraftKings NFL
+spreads are stored about once a minute, so on a busy game those 50 cover under
+an hour. Measured 2026-10-09: pick 3262471 (PHI +6 at DraftKings) has 5,791
+snapshots from the pick to 10-09 18:17 UTC holding 15 changes to the line or
+PHI's price; the newest 49 cover 47 minutes and hold none. The card shows the
+price at the pick, a "Some prices after your pick not shown" divider, and one
+row. Raising the limit does not fix it: that series already holds 8,899
+pre-game rows.
+
+Fix: a read-only SQL function, called by `fetchOddsHistory` instead of the two
+reads. Arguments: game_id, market, bookmaker, the pick's UTC second and the
+start's. It returns:
+
+- the last row before the pick (as now);
+- the rows after it where a priced column changed (home_price, away_price,
+  spread_home, total_line, over_price, under_price), ordered by parsed time,
+  compared with the row before, seeded with the row at the pick; the newest 50
+  of those;
+- always the newest row before the start, even when nothing changed. Without
+  it a book that re-posted the same price reads "No new price", because
+  `sincePick` counts the rows after the pick, and the "As of" time would show
+  the last change instead of the newest post.
+
+Comparing every price column on the server keeps every row the phone would
+show; the phone then merges rows that read the same for the pick's side. The
+phone code (`sincePick`, the table, the card's text) stays as it is.
+Delivery: a guarded migration in `data/migrations` listed in
+`ACTIVE_MIGRATIONS` (`data/view_migrations.py`), `GRANT EXECUTE` to anon and
+authenticated, the name in `RPC_ANON_CALLABLE` (`data/anon_readable.py`), and
+the phone falls back to the two current reads if the call fails, so an app
+build that ships before the worker applies the migration still has a card.
+Not built in the second review: it is a database change, and that session
+had read-only database access, so it could neither apply the function nor
+test it as deployed.
+
+## [ ] The line-movement card could end its window at the listed start (found 2026-10-09)
+
+The card's window ends at the earlier of `games.commence_time` and
+`picks.game_time` (`gameStartAt`, `mobile/src/lib/lineHistory.ts`). NHL
+settlement rewrites `commence_time` about ten minutes before the listed start,
+and real pre-game prices keep arriving in between: pick 3414594 (TOR ML at
+betPARX +160, made 02:06:55 UTC) has a +155 at 02:09:27 that the card cannot
+show because its window ends at 02:00. The card now says plainly that the
+recorded start is before the pick (second review), but it still hides that
+move. Ending the window at `picks.game_time` when it is set would show it.
+Not done: rows after the real start are stamped `open`, like pre-game rows, so
+only the start keeps in-game prices out. Before switching, measure across NHL
+and MLB, at each pick's deciding book, that no row between the two stamps
+carries an in-game price. There is no column that marks one, so the check has
+to be built (for example, a price more than N points of implied chance away
+from the last row before `commence_time`). One game checked (TOR @ VGK, two
+books): the first in-game prices are at 02:19 UTC, after `game_time` (02:10).
+One game is not the measurement.
+
+Original report below.
+
+`fetchOddsHistory` and `fetchPropOddsHistory` (`mobile/src/lib/queries.ts`)
+sort oldest first and keep 50 rows, and `LineMovementCard` reads the last of
+those as the current price. Any book with more than 50 snapshots therefore
+shows a stale "now", often from before the pick existed. Measured
+2026-10-09: pick 3350315 (CIN @ MIA Under 42.5, Fanatics) has 192 Fanatics
+totals rows; the 50th is 2026-10-06 17:16Z at 42.5, the latest 2026-10-09
+13:16Z at 43.0. Week-1 opener games hold about 8,100 DraftKings spread rows,
+and the 50th is a week before kickoff. Fix: newest 50 (descending, reversed on
+the client), bounded below by the pick's own `created_at` (parsed, not raw
+text: `created_at` has a space where `snapshot_at` has a "T") and above by the
+game's start (rows typed `open` run past kickoff). Stop calling the first of
+those rows the "opening" (`lineHistory.ts`), or fetch the real opener. Not
+caused by the CLV card change; that change only moved some picks to their
+label book's equally stale history.
+
+## [x] Three prop writers stamp Eastern time — FIXED 2026-10-09 (#904, mike: "fix the prop writers to stamp UTC too")
+
+Both writers stamp `datetime.now(timezone.utc).isoformat()` from #904's deploy on. Old rows keep "-04:00"; an audit of every
+reader (code, views, functions, triggers, the app) found none that breaks, and the latest-prop trigger's text `MAX` is right
+across the switch because a later UTC stamp always sorts above an earlier Eastern one. The original item:
+
+
+`data/ingestors/prop_odds_ingestor.py:797` (MLB, WNBA, NBA) and
+`data/ingestors/ncaaf_prop_odds_ingestor.py:338` write
+`snapshot_at = datetime.now(_ET).isoformat()`, so about half of recent
+`player_prop_odds` rows end "-04:00" (measured 2026-10-09: 1,685,669 of
+3,512,638 rows since 10-05, 48%). The NFL and NHL writers stamp UTC. From
+2026-11-01 the Eastern rows become "-05:00". Wherever two offsets meet in one
+series, text order is hours off time order; today that is only where the
+historical backfill ("Z") overlaps live rows. The app's line-movement reads now
+parse every stamp, so they are safe. Still exposed: anything that orders or
+filters this column as text, including the latest-prop trigger
+(`latest_prop_odds_on_insert` takes `MAX(snapshot_at)`, which is text). Fix: write
+`datetime.now(timezone.utc).isoformat()`. `backfilled_dates()` tells history
+from live rows by a trailing "Z", which "+00:00" does not match, so it keeps
+working. Not done in the line-movement fix because it changes a writer.
+
+## [x] NCAAF picks scored from prices more than a week old (found 2026-10-09) — fixed in #908; see the FIXED entry above
+
+Found while reviewing the line-movement card. Measured 2026-10-09 with
+read-only SQL: 200 of the 682 pre-game NCAAF picks made on 10-08 and 10-09
+sit on 31 games where the deciding book's newest stored pre-game price is more
+than 7 days older than the pick. For every one of them that newest price is
+from 2026-09-04 to 2026-09-06. The games are dated 2026-10-24 to 2026-12-12,
+mostly at DraftKings (a few at BetParx, FanDuel and BetRivers). So those picks
+were priced off early-September lines, not a price anyone can bet now. The
+line-movement card now says "Our newest <book> price is from <date>, before
+your pick" and labels that row with its date, not "At pick", so the app no
+longer calls it steady or the price at the pick. The scoring is the
+real problem and is not touched here: either odds for those games stopped being
+collected after 09-06, or the scorer should skip a game whose newest price is
+that old. Query shape: for each pick, the newest `odds` row (not in-play) for
+its game at its deciding book, compared with `picks.created_at`, both parsed as
+timestamps.
+
+## [ ] The model screen's "Avg CLV" tile mixes two CLV definitions (found 2026-10-09)
+
+`BuiltInModelDetailScreen.tsx` (`clvSummary`) averages every settled pick's
+`clv_pct`, whatever its `clv_method`. 1,016 captured picks still carry an
+older posted-price grade (`raw_one_sided` 1,012, `raw_one_way` 4; game dates
+2026-05-01 to 07-02, MLB and WNBA props, `mlb_f5_moneyline`,
+`mlb_moneyline`; measured by the CLV card review). The published average
+(`v_public_track_record`, the Models tab) counts only `no_vig` and
+`zero_vig`. The tile should filter on `clv_method` the same way, or say which
+picks it averages. The CLV card's footnote ("the fair (no-vig) close") is
+also untrue for those 1,016 picks; it predates the price-taken change.
+
+## [x] CLV at the price taken — DECIDED and BUILT 2026-10-08 (mike: "yes")
+
+Built: `paper_tracker._bet_price_and_book`, `picks.clv_bet_book`, the
+`graded_at_dk_legacy` recompute (`data/migrations/clv_price_taken_2026_10_08.sql`
+plus the declared `clv_backfill` job). Only the bet side moved; the close is
+still Pinnacle, else DraftKings. `docs/clv.md`. The app's CLV card shows the
+price taken at that book since 2026-10-09 (`mobile/src/lib/clvBet.ts`, which
+derives the same book for rows captured before `clv_bet_book` existed). The
+original item:
+
+### CLV is graded at DraftKings' price, not the price taken
+
+`tracking/paper_tracker._capture_clv` grades `dk_odds` against a DraftKings
+lock snapshot whenever DraftKings hung the line, even when the pick was
+decided and settled at another book. 17 of 23 regulation bets and 15 of 30
+measured shots-on-goal bets. Grading `decision_odds` at `decision_book` changes
+the published CLV of every model that shops books, so it is a decision.
+(Picks with no DraftKings price at all were fixed on 2026-10-08.)
+
+## [ ] The odds pruner fails every night, and fixing it as written would break CLV
+
+Found 2026-10-08 in the CLV-at-the-price-taken design. The worker logged
+`Odds prune failed (non-fatal): canceling statement due to statement timeout`
+on 2026-10-07 and 2026-10-08 at 10:26 UTC, while the daily run printed
+`✓ prune_odds` (`run_pipeline.step_prune_odds` swallows the error). It has not
+pruned `odds` since early September. Re-measured 2026-10-08 on one MLB game per
+date, moneyline plus totals: 2026-09-02 holds 6 FanDuel and 6 Pinnacle rows
+(pruned) against 3,152 DraftKings; 2026-09-20 still holds 1,998 FanDuel and
+1,978 Pinnacle.
+
+**Do not just make it fast.** For every game before today, `data/prune_odds.py`
+keeps only each non-DraftKings book's first row and its last row not marked
+`in_play`. Pinnacle is protected only in `player_prop_odds`, not in `odds`.
+Two things depend on the rows it would delete:
+- **CLV at the price taken** de-vigs the bet with the two-way at the book it
+  was taken, at the pick's `created_at`. That row is usually neither first nor
+  last, so a later capture or re-grade falls back to the price with the margin
+  in it.
+- **The close.** NHL in-play rows are stored as `open`, not `in_play`, so the
+  "last pre-game" row the pruner keeps can be an in-play quote, and the real
+  last pre-game Pinnacle quote is the one deleted.
+
+The one-time re-grade (`clv-price-taken-recompute-2026-10-08`) must run before
+any pruner fix. The fix should keep, per game and book, the row at every
+pick's `created_at` and the last row at or before the start.
+
+## [ ] [needs-decision] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
+
+Read-only query, 2026-10-08: `mlb_total_public_fade` wrote 4 BETs at
+2026-09-16 22:07Z and `mlb_spread_market` 2 at 2026-09-17 00:57Z, each 3 to 7
+hours after its game's first pitch (pick_ids 2304600, 2304601, 2304605,
+2304610, 2321911, 2321912; 2-4). Of their 29 and 49 BETs, those are the only
+ones. Cause: `scripts/mlb_game_market_card.slate()` selects by `game_date`
+with no started-game check, and its quotes are bounded only to the last
+pre-game snapshot. The NHL totals card's slate shows the check. Also assess
+whether the MLB card needs the NHL card's "Pinnacle withdrawn" guard. Check
+whether the six rows count in the published record before changing anything
+settled; that is mike's call.
+
+**2026-10-09:** the code half is done. Both MLB cards (and the WNBA prop card,
+which had the same gap) now skip a game that has started. The Pinnacle-withdrawn
+guard was assessed and is not needed for MLB. Still open, mike's call: the six
+rows (and two late WNBA prop bets) count in the published record, the app's
+Models and Record tabs, and the Discord recaps. Neither existing exit fits:
+`void_picks.py` refuses graded picks and `RECORD_EXCLUSIONS` has no per-pick
+form. Numbers and options: `docs/sessions/2026-10.md`, 2026-10-09 entry.
+
+## [ ] `games.first_pitch_at` has not been filled since 2026-08-31 (found 2026-10-09)
+
+Read-only query, 2026-10-09: the newest MLB game with `first_pitch_at` is
+game_date 2026-08-31; 0 of 188 MLB games since 2026-09-15 have it. The
+`derive_first_pitch` job ran once (`worker_jobs`, 2026-09-01) and nothing
+schedules it (not in `scheduler.py` or `run_pipeline.py`). So every pre-game
+bound built on `data/first_pitch.pregame_cutoff_sql` (the odds relabel,
+`models/mlb_prop_market.py`, `models/wnba_prop_market.py`, the scorer's price
+reads) has fallen back to the scheduled start for every MLB game since, which
+`data/first_pitch.py` measured as about 16 minutes too late. Fix: run the
+derivation on the worker's schedule, after the live loop's state is written.
+Check first whether "Live" there means first pitch or warm-ups (the module
+records that the cause is not known).
+
+## [ ] NHL props: revisit the 0.18 floor after a month of real CLV (mike, 2026-10-08)
+
+mike: keep 0.18 for now. Lowering it to 0.15 is the units-a-season peak with
+one bet a game (+68.4 at four a night against +54.6), but that floor was
+chosen on the seasons it is graded on. Read it against the first month of CLV
+from the new final prop snapshot, at the price taken. From about 2026-11-08.
+
+## [ ] Two smaller CLV-capture defects (found 2026-10-08)
+
+- The prop close lookup matches names exactly: Pinnacle's "Lafreniere" missed
+  DraftKings' "Lafrenière" and fell back to a structural 0.0
+  (`paper_tracker.py`, the `player_name = %s` lookup).
+- [x] FIXED 2026-10-08: the close is now bounded by the earlier of
+  `games.commence_time` and `picks.game_time`. Measured that day: the feed moved
+  SJS_STL's start from 00:10 to 00:10:37 after puck drop, and "Alex Nedeljkovic
+  Under 25.5 Saves" closed on a quote 45 s past the start it was written
+  against. The NHL prop ingestor also buys nothing after a game's final
+  snapshot now (it had bought an in-play board, filed as pre-game, when the
+  start moved). Still open: `games.commence_time` itself keeps moving, and
+  every reader that bounds on it alone inherits that.
+
+## [ ] The NHL prop lab still pairs a shared name's prices
+
+Found 2026-10-08 by the anytime-scorer check. `scripts/nhl_prop_lab_priced.py`
+folds names to letters only. That turns "Elias Pettersson (2004)", the
+defenceman, into the forward's key. The two-way markets are hit too: the
+forward's line was graded on the defenceman's result (2025-26 DraftKings
+exposure: assists +24.2, points +46.9, shots on goal +46.1 units). The
+production backtests were fixed in #895 (`scripts/nhl_prop_backtest.namesakes`).
+The lab was not. Apply the same drop before its merge, then treat every lab
+table in `docs/nhl_market_lab.md` dated before 2026-10-08 as unconfirmed.
+
+## [ ] NHL derivative totals: the grade has two defects
+
+Found 2026-10-08. Team totals were graded on regulation goals, but every book
+prices full-game goals; on full-game goals the same unders lose (-1.78% at EV
+≥ 0.10). The alternate and first-period grades paid a push as an under win on
+whole-number lines. Fix both in `scripts/nhl_derivative_totals_backtest.py`
+and re-grade (it is on the `nhl_research` allowlist). The purchase itself is
+done: all 4,192 priced games.
+
+## [ ] A best-price quote far from every other book is taken as real
+
+"FLA ML" was decided on BetMGM +154 while DraftKings had FLA -125 in the same
+fetch, and Pinnacle closed FLA at -138. `_fresh_quotes` (models/scorer.py)
+checks a quote's age, not how far it sits from the other books. Measured across
+all models since 2026-09-09: a gap of 10+ points appears on 10 rows and 1 BET.
+A guard changes which bets fire, so it is a model update.
+
 ## [ ] [needs-decision] A BET the scorer writes on the corrected probability can fail the publishers' cut on the model's own
 
 Found 2026-10-01 through the NHL picks. The scorer decides on the corrected
@@ -52,10 +706,10 @@ probabilities of a game sum to 1.144). mike: underdog plus-money bets are
 wanted. Not changed. The measurements stay in `docs/nhl_market_lab.md` as a
 record, not an open question.
 
-## [x] Paper-only for the NHL models — DECIDED 2026-10-01 (mike): they are LIVE
+## [x] Hold-back for the NHL models — DECIDED 2026-10-01 (mike): they are LIVE
 
 *"this is a live model."* Gate not met, his call; recorded in CLAUDE.md §2 and
-at the top of `docs/sports/nhl.md`. No paper-only switch was built.
+at the top of `docs/sports/nhl.md`. No hold-back switch was built.
 
 ## [x] NHL week-one inputs: blended toward last season — BUILT, BACKTESTED, NOT ADOPTED (2026-10-01)
 
@@ -162,7 +816,13 @@ before the module is imported. Nothing has been queued yet.
   `wnba_prop_market` store the soft book's price in `dk_odds`, and
   `mobile/src/lib/parlay.ts` `legFromPick` calls any non-null `dk_odds`
   DraftKings'. Either move those cards to the `decision_*` / `line_book` shape
-  these NHL cards use, or key the leg on `clvLockBook`.
+  these NHL cards use, or key the leg on `clvBetQuote`
+  (`mobile/src/lib/clvBet.ts`), which names the book that owns the price.
+  Since 2026-10-09 the pick screens name the label's book on all four
+  label-priced models (126 picks: 32 NFL wind/opener, 94 props), so on those
+  the screen and the slip now disagree; 23 NFL picks already did. Fix in
+  `legFromPick`: when `lineBook(p) ?? storedQuoteBook(p)` is not DraftKings,
+  mark the leg `dkPriced: false` at that book.
 - A correction fitted on each model's own bets once it has about 150.
 - Points and anytime scorer have prices and no model.
 
@@ -191,14 +851,45 @@ seasons at a 2% cut and no edge (`scripts/nhl_moneyline_market_lab.py`,
 quotes from one snapshot (`odds.created_at` groups one; `snapshot_at` is each
 book's own last update).
 
-## [ ] `nhl_over_under` and `nhl_puckline` have never been trained
+## [x] `nhl_over_under` — a live rule since 2026-10-08 (mike), not a trained model
+
+It is the Pinnacle rule now: `models/nhl_totals_market.py`, written by
+`scripts/nhl_totals_card.py` (step `nhl-over-under`), EV >= 0.01 on Pinnacle's
+own number, out of `config.MODELS` and the feature map, and the trainer refuses
+any rule id. Evidence and cut: `docs/thresholds.md`.
+
+## [ ] `nhl_puckline` has never been trained
 
 Blocked since 2026-06 on "no historical lines". DraftKings and Pinnacle game
 lines for 2020-21 -> 2025-26 landed in `odds` on 2026-09-21
-(`source = 'odds_api_historical'`). The lab's totals model found nothing in
-three rounds and its puck-line result was a peak, so the honest options are to
-train and grade them the same way or to retire the two ids. Both still carry
-their own cuts and EV floors in `config.py`.
+(`source = 'odds_api_historical'`). The lab's puck-line result was a peak, so
+the honest options are to train and grade it the same way or to retire the id.
+It still carries its own cut and EV floor in `config.py`.
+
+## [ ] `nhl_over_under`: check the first weeks live (from 2026-10-08)
+
+Three things to measure once it has written bets, each against what the six
+seasons said:
+
+- **Firing rate.** Live fetches are far denser than the history (about 41
+  Pinnacle fetches a game against about 5), and a first-qualifying rule
+  gets more looks the denser the fetches. Before go-live it fired on 10 of 58
+  games (17.2%) against 16.1% historically. If it climbs well past that, the
+  extra bets are a population the cut was not measured on.
+- **Closing-line value at the price taken.** The case for the model is CLV
+  (+1.32% at Pinnacle's close in the history), not the return. Read it once the
+  price-taken CLV change has landed, so a bet taken off DraftKings is graded
+  at its own price.
+- **Bets found within 3 hours of puck drop.** They lost 9.41 units on 501 bets
+  in the history while every earlier bucket was positive. That is an in-sample
+  split, so nothing was cut (mike, 2026-10-08); re-check it on this season's
+  own bets.
+
+Two things with no backtest behind them: **betparx** is in the bettable books
+(mike, 2026-10-08) but the history purchase never asked for it, and the
+**"Pinnacle withdrawn"** guard (no bet while a newer fetch lacks Pinnacle) is
+new with this card. The card's per-pass log line counts `pinnacle_withdrawn`
+and names the book of every bet, so both can be read off the worker log.
 
 ## [ ] Per-game closing lines for the team page, for every sport (not just NFL)
 
@@ -290,9 +981,9 @@ they are untouched until someone measures them.
 so the MLB arm is a small change; MLB Pinnacle prop coverage starts 2026-08-27,
 so the window is thin.
 
-## [ ] Re-score nfl_opener_spread and nfl_wind_totals 2026 paper-track (October)
+## [ ] Re-score nfl_opener_spread and nfl_wind_totals 2026 live track (October)
 
-mike / design review 2026-09-14: paper-track through 2026 with **no unit bump**.
+mike / design review 2026-09-14: live track through 2026 with **no unit bump**.
 Opener retires if 2026 ≤ flat. Wind keeps the physical residual and
 `MAX_FIRE_LEAD=4` (deployed Open-Meteo population). Do not unpause paused XGB
 props. Command: `python -m scripts.nfl_rule_2026_track` (`--settle` runs the
@@ -645,6 +1336,24 @@ in the ingestor's id derivation (ET, everywhere, per CLAUDE.md §4), plus a
 one-off merge of the duplicates that PRESERVES the earlier row's identity —
 picks point at it (§1c: `created_at` and the pick's game_id are part of the bet
 of record, not metadata).
+
+**2026-10-09: the record half is covered; the `games` half is not.** Measured
+read-only: since 2026-06-01, 71 NCAAF pairs of `games` rows describe one game
+(62 an ET and a UTC date, 3 home and away swapped), and 78 UFC pairs. No NCAAF
+model has bet both rows of one game (0 settled pairs). Two UFC fights were bet
+twice and counted twice; those copies are now marked and every record surface
+counts the event once (`condition_status='DUPLICATE'`, result unchanged;
+`docs/sessions/2026-10.md`, "count each fight once"). A health check,
+`one_pick_per_event`, now reports any new settled pair. Still open: the
+ingestor's id derivation and the merge of the duplicate rows, which is what
+stops a model betting the second row in the first place.
+
+**Checked 2026-10-09, and NOT the cause of the stale NCAAF picks** (that was the
+feed dropping games; entry at the top of this file). 10 unplayed NCAAF games
+exist twice with the same kickoff, all night games. In every pair the
+Eastern-date id (written by the odds feed) holds every pick and every stored
+price; the UTC-date id (the CFBD import) holds 0 picks and 0 prices. Still
+open, unchanged.
 
 ## [ ] [needs-decision] The player detail screen speaks the fan idiom while the board may be speaking the book's
 

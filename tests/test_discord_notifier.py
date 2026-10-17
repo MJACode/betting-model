@@ -127,37 +127,47 @@ def test_a_loss_costs_the_full_stake_and_a_push_costs_nothing():
     assert push["risked"] == 0.0, "a push returns the stake, so nothing was risked"
 
 
-def test_record_only_model_counts_in_record_but_never_in_money():
-    """mlb_prop_batter_hr is tracked for its W-L but its P&L is not counted —
-    most HR picks have no real DK price, so counting them fabricates P&L."""
+def test_every_graded_pick_counts_in_units_at_its_taken_price():
+    """A longshot and a -110 winner are the same graded set. The longshot's
+    units are its real price, not a drop and not a fabricated -110."""
     rows = [
         ("MLB", "mlb_moneyline", "WIN", 0.022, -110, None),
-        ("MLB", "mlb_prop_batter_hr", "LOSS", 0.01, 400, None),
-        ("MLB", "mlb_prop_batter_hr", "WIN", 0.01, 400, None),
+        ("NHL", "nhl_prop_saves", "LOSS", 0.01, 400, None),
+        ("NHL", "nhl_prop_saves", "WIN", 0.01, 400, None),
     ]
     t = dn._tally(rows)
-    assert (t["w"], t["l"]) == (2, 1), "record must include the HR picks"
-    # The winner pays exactly its conviction back: 1.65u risked at -110 wins 1.5u.
-    # That identity is what makes the to-win convention readable in the recap.
-    assert t["units"] == pytest.approx(1.0, abs=0.001), "HR units must be excluded"
-    assert t["risked"] == pytest.approx(1.10, abs=0.001), "HR stake must be excluded"
-    assert t["record_only"] == 2
+    assert (t["w"], t["l"]) == (2, 1)
+    # -110 win pays 1u and risks 1.1. +400 risks 0.25 to win 1u.
+    # The +400 win pays +1, the +400 loss costs 0.25.
+    assert t["units"] == pytest.approx(1.0 + 1.0 - 0.25, abs=0.001)
+    assert t["risked"] == pytest.approx(1.10 + 0.25 + 0.25, abs=0.001)
 
 
-def test_tally_line_reports_units_and_degrades_to_record_only():
+def test_a_pick_with_no_price_stays_in_the_units_at_bare_conviction():
+    """No taken price is not a reason to leave the pick out of the units."""
+    t = dn._tally([
+        ("NHL", "nhl_over_under", "WIN", 0.01, None, None),
+        ("NHL", "nhl_over_under", "LOSS", 0.01, None, None),
+    ])
+    assert (t["w"], t["l"]) == (1, 1)
+    assert t["units"] == pytest.approx(0.0, abs=0.001)
+    assert t["risked"] == pytest.approx(2.0, abs=0.001)
+
+
+def test_tally_line_reports_units():
     line = dn._tally_line({"w": 3, "l": 2, "p": 0, "units": 1.7693,
-                           "risked": 14.0, "record_only": 0})
+                           "risked": 14.0})
     assert line.startswith("3-2 ")
     assert "+1.77u" in line and "+12.6% ROI" in line
     # Pushes surface only when they exist.
     assert dn._tally_line({"w": 1, "l": 1, "p": 2, "units": 0.0,
-                           "risked": 2.0, "record_only": 0}).startswith("1-1-2 ")
-    # An all-record-only day must not print a fabricated 0% ROI.
-    assert dn._tally_line({"w": 1, "l": 5, "p": 0, "units": 0.0,
-                           "risked": 0.0, "record_only": 6}) == "1-5 · record only"
+                           "risked": 2.0}).startswith("1-1-2 ")
+    # Nothing risked (a push-only slate): units are stated, ROI is not divided.
+    assert dn._tally_line({"w": 0, "l": 0, "p": 2, "units": 0.0,
+                           "risked": 0.0}) == "0-0-2 · +0.00u"
     # A losing day reads as negative units, not negative dollars.
     assert "-3.00u" in dn._tally_line({"w": 0, "l": 2, "p": 0, "units": -3.0,
-                                       "risked": 3.0, "record_only": 0})
+                                       "risked": 3.0})
 
 
 # ── Embeds ───────────────────────────────────────────────────────────────────
@@ -583,6 +593,35 @@ def test_post_returns_false_when_the_network_is_down(monkeypatch):
     monkeypatch.setattr(dn.requests, "post", boom)
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
     assert not dn._post("http://hook", {})
+
+
+def test_a_network_error_log_redacts_the_webhook_url(monkeypatch):
+    """urllib3 names the request URL in a timeout. That URL is the webhook
+    token, so the error log keeps the exception type and drops the URL."""
+    from loguru import logger
+
+    secret = "https://discord.com/api/webhooks/999/SUPERSECRETTOKEN"
+    other = "/api/webhooks/111/ANOTHERT0KEN"
+
+    def boom(*_a, **_k):
+        raise dn.requests.exceptions.ReadTimeout(
+            f"Read timed out. (read timeout=15) for url: {secret}?wait=true "
+            f"also {other}")
+
+    monkeypatch.setattr(dn.requests, "post", boom)
+    monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+    lines = []
+    sink = logger.add(lines.append, level="ERROR", format="{message}")
+    try:
+        assert dn._post(secret, {}) is False
+    finally:
+        logger.remove(sink)
+    text = "".join(str(m) for m in lines)
+    assert "ReadTimeout" in text
+    assert "SUPERSECRETTOKEN" not in text
+    assert "ANOTHERT0KEN" not in text
+    assert secret not in text
+    assert "[webhook]" in text
 
 
 def test_partial_delivery_reports_only_what_landed(monkeypatch):
@@ -1074,7 +1113,7 @@ def test_a_429_reports_what_discord_asked_for(monkeypatch):
 
 
 
-# ── Flat sizing, and record-only models ──────────────────────────────────────
+# ── Flat sizing ──────────────────────────────────────────────────────────────
 #
 # The Kelly-derived 1..3u scale sized UP into the only losing bucket: over 387
 # settled picks the highest-edge third won 50.4% for -7.2% ROI against +16.8%
@@ -1099,10 +1138,9 @@ def test_the_risk_cap_can_no_longer_bind():
     assert dn.stake_for(0.05, -1000).capped is True   # 10u to win 1u -> capped
 
 
-def test_a_record_only_model_publishes_no_stake():
-    f = dn._signal_field(_signal(model_id="mlb_prop_batter_hr", dk_odds=300))
-    assert "record only" in f["value"]
-    assert "u to win" not in f["value"]
+def test_every_model_publishes_a_stake():
+    f = dn._signal_field(_signal(model_id="nhl_prop_saves", dk_odds=300))
+    assert "to win" in f["value"]
 
 
 def test_a_normal_model_still_publishes_a_stake():
@@ -1170,12 +1208,12 @@ def test_snapshot_rows_capture_every_published_figure():
                       ("all_time", None), ("all_time", "MLB"),
                       ("all_time", "WNBA")}
     overall = next(r for r in rows if r[1] == "daily" and r[2] is None)
-    # game_date, scope, sport, w, l, p, settled, record_only, ...
+    # game_date, scope, sport, w, l, p, settled, units, ...
     assert overall[0] == "2026-08-28"
     assert (overall[3], overall[4], overall[5]) == (1, 1, 0)
-    assert overall[11] == 2 and overall[12] == 1        # clv graded / beat
-    assert overall[13] == pytest.approx(50.0)           # clv pct
-    assert overall[14] == "2026-08-29T06:00:00-04:00"
+    assert overall[10] == 2 and overall[11] == 1        # clv graded / beat
+    assert overall[12] == pytest.approx(50.0)           # clv pct
+    assert overall[13] == "2026-08-29T06:00:00-04:00"
 
 
 def test_a_snapshot_with_no_clv_stores_null_not_zero():
@@ -1184,7 +1222,7 @@ def test_a_snapshot_with_no_clv_stores_null_not_zero():
     rows = dn.snapshot_rows("2026-08-28", "ts", dn._tally(rows_in),
                             {"MLB": rows_in}, dn._tally(rows_in),
                             {"MLB": rows_in}, 1, 1)
-    assert all(r[13] is None for r in rows)
+    assert all(r[12] is None for r in rows)
 
 
 def test_a_started_game_is_never_delivered():

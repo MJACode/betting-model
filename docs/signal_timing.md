@@ -15,7 +15,7 @@ from. This is the same lesson as the session-68 full-outcome sweep (the `BET`-on
 sweep overstated `mlb_moneyline` at +29% on 23 bets; the full-outcome sample said
 +4.1% on 50) and it is why `mv_scored_pick_outcomes` (§113) grades the whole universe.
 
-Three coverage traps to check BEFORE trusting any such analysis:
+Four coverage traps to check BEFORE trusting any such analysis:
 
 1. **`NONE` rows did not always exist.** They were only introduced 2026-05-12
    (session 16). Anything before that date has no dead-zone rows to grade.
@@ -31,6 +31,45 @@ Three coverage traps to check BEFORE trusting any such analysis:
    persisted. Measured share of DK-priced games with zero rows, clean windows:
    `mlb_moneyline` 8.3%, `mlb_f5_moneyline` 7.4%, `mlb_over_under` 7.2%,
    **`mlb_runline` 35.3%**. Only a model re-run can recover those probabilities.
+4. **Player-prop `NONE`/`AVOID` rows are a survivor sample from 2026-08-30.** Two
+   clears in the game scorer took them, and the 2026-10-12 fix closes only the first:
+   - **The 30-second pre-game line poller** (shipped 2026-08-30) re-ran the game
+     scorer on any game whose line moved, and that scorer's clear took every prop
+     no-bet row on the game. The prop scorers did not run again before the start
+     unless a refresh pass did. **Fixed once the 2026-10-12 change is running on the
+     pollers service**: the poller now clears game-level rows only
+     (`run_scorer(game_models_only=True)`).
+   - **A refresh pass still clears a game that starts while the pass is running**,
+     and the prop scorers then usually skip it as started, so those rows are still
+     lost (WNBA_2026-10-09_ATL_NY: 91 rows, 2m48s after its start). Exempting such a
+     game was tried and withdrawn because it is not bet-neutral. The odds feed
+     pushes a start back around first pitch or tip, the poller writes that into
+     `games.commence_time` every 30 s, and the prop scorers re-read it and score the
+     game as pre-game. A kept `NONE` row would then hold that player under the prop
+     lock, where today's clear frees him to become a BET. Measured 2026-10-12, games
+     with picks dated 2026-10-01 → 10-12: the stored start is later than the
+     earliest start stamped on the game's picks for 12 of 20 MLB games (10 by more
+     than 5 min, at most 15 min) and 8 of 8 WNBA games (3 by more than 5 min, at
+     most 7 min). Closing this neutrally needs a start the feed cannot revise.
+
+   Measured 2026-10-12 from `picks` and `games`: of 18 MLB games 2026-10-01 → 10-11,
+   **10 ended with zero prop no-bet rows** (the other 8 kept 131–146 each), and **all
+   10 WNBA games** in that span ended with zero. Which games survived depends on
+   whether a line moved after the last pass, and on whether a pass straddled the
+   start, so the survivors are not a random sample. Prop BET rows were never touched
+   by either clear.
+
+   **One narrow cost of the fix, disclosed because it can change a bet.** The
+   refresh pass's own clear, which runs right before every prop step, is what frees a
+   prop player held at `NONE`. If a pass reads a game as already started (so its
+   clear skips it) and the feed then pushes the start back before that pass's prop
+   step, a poller tick in between used to free the game's prop players for that
+   step. Now they stay held until the next pass's clear, or for good if the game
+   starts first. The same applies if the pass's end-of-run clear gives up on its
+   10 s lock wait (0 times in the worker's logs 2026-10-05 → 10-12, 352 scoring
+   runs) or the scoring step fails outright (0 of 663 scoring steps
+   2026-09-28 → 10-12 in `pipeline_log`). Production has not been searched for a
+   case where this cost a bet.
 
 ### 29.2 Analysis: does the daily pick lock cost us signals? (2026-08-23)
 

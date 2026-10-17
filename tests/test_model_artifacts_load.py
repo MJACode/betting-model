@@ -65,6 +65,14 @@ def test_artifact_deserialises(path: Path):
         with open(path, "rb") as fh:
             artifact = pickle.load(fh)
     assert artifact is not None
+    if isinstance(artifact, dict) and artifact.get("kind") == "nba_prop_projection":
+        # Two stages, not one estimator (models/nba_prop_projection.py): a minutes model and
+        # one per-minute rate model per base stat, plus the widths and maps that price them.
+        assert artifact["minutes"]["model"] is not None, f"{path.name}: no minutes model"
+        assert artifact["rates"] and all(r["model"] is not None for r in artifact["rates"].values()), (
+            f"{path.name}: a rate model is missing")
+        assert artifact["alphas"] and artifact["calibration"], f"{path.name}: no widths or maps"
+        return
     if isinstance(artifact, dict):
         assert "model" in artifact, f"{path.name} has no 'model' key"
         # A NULL `model` is legitimate for a RULE. ncaaf_spread and
