@@ -480,7 +480,8 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     `now` and `artifacts` ({model_id: artifact}) exist so a past slate can be
     replayed against named artifacts; `keep`, when given, receives each
     market's scored frame and pick rows. One market failing does not stop the
-    next: each is its own model.
+    next, unless the player-log budget is already spent. Any market that
+    errors leaves the pool short, and this run writes nothing.
     """
     now = now or datetime.now(timezone.utc)
     game_date = game_date or now.astimezone(ET).strftime("%Y-%m-%d")
@@ -510,13 +511,23 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
                 conn.rollback()
                 logger.error(f"nhl-props-card: {spec.model_id} failed: {exc}")
                 out[spec.model_id] = {"error": str(exc)}
-                if isinstance(exc, np_.PlayerLogDeadline):
+                # A cancelled statement spends the same budget as the run
+                # deadline: the next market's first uncached read would only
+                # raise. A quote-read error does not, so the other markets
+                # still score.
+                deadline = isinstance(exc, np_.PlayerLogDeadline) or (
+                    isinstance(log_cache, np_.PlayerLogCache) and log_cache.expired())
+                if deadline:
                     out[spec.model_id]["log_deadline"] = True
-        # A deadline means this pool is missing a market. A bet written now
+                    break
+        # Any market error leaves this pool short a market. A bet written now
         # keeps its game: the next pass does not bet a game that already has
         # one. Leave the picks for a pass that scored every market.
-        if any(isinstance(v, dict) and v.get("log_deadline") for v in out.values()):
-            logger.error("nhl-props-card: player-log deadline reached; writing no bets this pass")
+        if any(isinstance(v, dict) and "error" in v for v in out.values()):
+            if any(isinstance(v, dict) and v.get("log_deadline") for v in out.values()):
+                logger.error("nhl-props-card: player-log deadline reached; writing no bets this pass")
+            else:
+                logger.error("nhl-props-card: a market failed; writing no bets this pass")
             out["published"] = 0
         else:
             # Pooled, then one a game: the best bet across the markets, not the first market's.

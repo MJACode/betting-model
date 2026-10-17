@@ -260,6 +260,10 @@ def test_the_scoring_step_shares_one_cache_across_both_cards(monkeypatch):
     assert seen[0].deadline_s == np_.PLAYER_LOG_DEADLINE_S
 
 
+def _silence_ops_alert(monkeypatch):
+    monkeypatch.setattr("tracking.watch_util.post_ops_alert", lambda *a, **k: False)
+
+
 def _publish_recorder(monkeypatch, blocked_fn, props_fn):
     import run_pipeline
     published: list = []
@@ -271,6 +275,7 @@ def _publish_recorder(monkeypatch, blocked_fn, props_fn):
     monkeypatch.setattr("scripts.nhl_prop_card.run_card", blocked_fn)
     monkeypatch.setattr("scripts.nhl_props_card.run_card", props_fn)
     monkeypatch.setattr("scripts.nhl_props_card.publish_across_models", fake_publish)
+    _silence_ops_alert(monkeypatch)
     return run_pipeline, published
 
 
@@ -361,3 +366,165 @@ def test_the_card_writes_nothing_when_a_market_hits_the_deadline(monkeypatch):
     assert out["nhl_prop_shots_on_goal"]["log_deadline"] is True
     assert out["published"] == 0
     assert published == []
+
+
+def test_a_market_error_writes_no_bets_this_pass(monkeypatch):
+    """A cancelled log statement, or any other market error, is not a
+    PlayerLogDeadline. The pool is still short a market, and a pick written
+    now would keep its game."""
+    def fake_blocked(**k):
+        k["keep"]["rows"] = [{"game_id": "G1", "model_id": "nhl_prop_blocked_shots", "_ev": 0.3}]
+        return {"bets": 1}
+
+    def fake_props(**k):
+        k["keep"]["nhl_prop_saves"] = {"rows": [
+            {"game_id": "G2", "model_id": "nhl_prop_saves", "_ev": 0.4}]}
+        return {
+            "date": "2026-10-17",
+            "nhl_prop_saves": {"priced": 1, "scored": 1, "bets": 1, "skipped": 0},
+            "nhl_prop_shots_on_goal": {
+                "error": "canceling statement due to statement timeout",
+            },
+        }
+
+    run_pipeline, published = _publish_recorder(monkeypatch, fake_blocked, fake_props)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert published == []
+
+    called: list[str] = []
+
+    def blocked_quote(**k):
+        raise RuntimeError("quote read failed")
+
+    def props_finished(**k):
+        called.append("props")
+        k["keep"]["nhl_prop_saves"] = {"rows": [
+            {"game_id": "G2", "model_id": "nhl_prop_saves", "_ev": 0.4}]}
+        return {"date": "2026-10-17",
+                "nhl_prop_saves": {"priced": 1, "scored": 1, "bets": 1, "skipped": 0}}
+
+    run_pipeline, published = _publish_recorder(monkeypatch, blocked_quote, props_finished)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert called == ["props"]
+    assert published == []
+
+
+def test_the_card_writes_nothing_when_a_market_errors(monkeypatch):
+    published: list = []
+    seen: list[str] = []
+
+    def fake_score(conn, spec, games, game_date, artifact=None, log_cache=None):
+        seen.append(spec.model_id)
+        if spec.model_id == "nhl_prop_shots_on_goal":
+            raise RuntimeError("quote read failed")
+        return {"priced": 1, "mus": [1], "rows": [{"game_id": "G1", "model_id": spec.model_id}],
+                "skipped": []}
+
+    class Conn:
+        def close(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    def fake_publish(rows):
+        published.append(list(rows))
+        return len(rows)
+
+    monkeypatch.setattr(card, "score_market", fake_score)
+    monkeypatch.setattr(card, "get_connection", lambda: Conn())
+    monkeypatch.setattr(card, "slate", lambda conn, game_date, now: {})
+    monkeypatch.setattr(card, "publish_across_models", fake_publish)
+    out = card.run_card(game_date="2026-10-17", do_publish=True,
+                        now=datetime(2026, 10, 17, 16, tzinfo=timezone.utc))
+    assert "error" in out["nhl_prop_shots_on_goal"]
+    assert "log_deadline" not in out["nhl_prop_shots_on_goal"]
+    assert seen == ["nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists"]
+    assert out["published"] == 0
+    assert published == []
+
+
+def test_a_deadline_does_not_start_the_next_market(monkeypatch):
+    seen: list[str] = []
+
+    def fake_score(conn, spec, games, game_date, artifact=None, log_cache=None):
+        seen.append(spec.model_id)
+        if spec.model_id == "nhl_prop_shots_on_goal":
+            raise np_.PlayerLogDeadline(
+                "nhl player log: 120s run deadline reached before reading player_id 4")
+        return {"priced": 1, "mus": [1], "rows": [], "skipped": []}
+
+    class Conn:
+        def close(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    monkeypatch.setattr(card, "score_market", fake_score)
+    monkeypatch.setattr(card, "get_connection", lambda: Conn())
+    monkeypatch.setattr(card, "slate", lambda conn, game_date, now: {})
+    monkeypatch.setattr(card, "publish_across_models", lambda rows: len(rows))
+    card.run_card(game_date="2026-10-17", do_publish=False,
+                  now=datetime(2026, 10, 17, 16, tzinfo=timezone.utc))
+    assert seen == ["nhl_prop_saves", "nhl_prop_shots_on_goal"]
+
+
+def test_a_spent_budget_does_not_start_the_props_card(monkeypatch):
+    called: list[str] = []
+
+    def blocked_deadline(**k):
+        raise np_.PlayerLogDeadline(
+            "nhl player log: 120s run deadline reached before reading player_id 3")
+
+    def props_ran(**k):
+        called.append("props")
+        return {"date": "2026-10-17"}
+
+    run_pipeline, published = _publish_recorder(monkeypatch, blocked_deadline, props_ran)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert called == []
+    assert published == []
+
+    def blocked_timeout(**k):
+        k["log_cache"].spent_s = k["log_cache"].deadline_s
+        raise RuntimeError("canceling statement due to statement timeout")
+
+    run_pipeline, published = _publish_recorder(monkeypatch, blocked_timeout, props_ran)
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert called == []
+    assert published == []
+
+
+def test_a_pass_that_writes_nothing_alerts_once(monkeypatch):
+    posts: list[tuple[str, str]] = []
+    state: dict = {}
+
+    def fake_post(title, detail, recovery=False, post=None):
+        posts.append((title, detail))
+        return True
+
+    def fake_blocked(**k):
+        return {"bets": 0}
+
+    def fake_props(**k):
+        return {
+            "date": "2026-10-17",
+            "nhl_prop_shots_on_goal": {
+                "error": "nhl player log: 120s run deadline reached before reading player_id 9",
+                "log_deadline": True,
+            },
+        }
+
+    run_pipeline, _published = _publish_recorder(monkeypatch, fake_blocked, fake_props)
+    monkeypatch.setattr("tracking.watch_util.post_ops_alert", fake_post)
+    monkeypatch.setattr("tracking.watch_util.read_alert_state", lambda filename: dict(state))
+    monkeypatch.setattr("tracking.watch_util.write_alert_state",
+                        lambda filename, new: state.update(new))
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=True) is False
+    assert posts == []
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert len(posts) == 1
+    assert "deadline" in posts[0][1].lower()
+    assert run_pipeline.step_nhl_prop_scoring(dry_run=False) is False
+    assert len(posts) == 1
