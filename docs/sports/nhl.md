@@ -4,6 +4,33 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+> **2026-10-17 (mike, "Build the fix"): ONE NHL GAME NEVER GETS TWO PICKS
+> THAT CANNOT BOTH WIN, AND THE TWO SIDE MODELS DECIDE AT THE SAME MOMENT.**
+> That day the regulation model had locked "BOS (Regulation)" at 18:26Z the
+> day before, ahead of Boston's game at Anaheim that night. The moneyline
+> model then took "LAK ML" at 16:22Z on game day, knowing Boston was on a
+> back-to-back. Its LA number went from 58.7% to 64.8% once that game was in
+> the logs. "LAK ML" was voided at his request. It had happened once before:
+> on 2026-10-04 "FLA ML" and "ANA (Regulation)" both lost. Two changes:
+> - `nhl_moneyline_regulation` now decides only in the moneyline model's
+>   window: 16:00Z-18:00Z on game day, both listed goalies, last night's logs
+>   in. Every other run writes its rows NONE with the reason. Both models read
+>   one gate (`models/scorer._nhl_game_day_reason`). Before this change, every
+>   one of its 33 BETs this season was written 10-72 hours before puck drop.
+>   Graded on the 120 finished 2026-27 games
+>   (`scripts/nhl_regulation_game_day_grade.py`): the game-day decision made
+>   7 bets for +1.1 units, against 31 for -4.9 the early one actually made.
+>   The 7 are all among the 31 and on the same outcome, at a better average
+>   price (+173 against +159). The 24 it would not have made lost 5.8 units.
+>   About 120 games: this rules out "clearly worse", nothing more.
+> - Both side models' rows for a game are held back and checked before they
+>   are written (`_apply_side_conflicts`). Each pick maps to the endings it
+>   wins on. A BET already standing on the game keeps it, and the new pick is
+>   written NONE with why. Two such BETs from the same pass are both written
+>   NONE: the models disagree and there is no telling which is wrong. A VOID
+>   or paused-model BET holds nothing. Moneyline and same-team regulation, or
+>   moneyline and the regulation draw, can both win and both stand.
+
 > **2026-10-08: `docs/nhl_clv_ev_assessment.md` is the current grade of every
 > NHL model for closing-line value and expected value.** The prop backtest
 > figures quoted below before that date are inflated by a shared-name defect
