@@ -1,3 +1,6 @@
+import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
+import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
+import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
@@ -122,6 +125,42 @@ const UFC_TOTALS_COLUMNS =
   'sig_strikes, takedowns, knockdowns, sub_attempts';
 
 /**
+ * Season or last-N skater totals from player_window_totals_nhl.
+ *
+ * The same shape as the other sports: one row per player, summed in SQL,
+ * p_window null for the season. The function reads nhl_skater_game_log
+ * (`shots`, regular season, season = the ending year). The first label
+ * with rows wins.
+ *
+ * The function is SECURITY INVOKER. Before this migration is applied the
+ * call is PGRST202 or 42883 (the function is not in the schema). Before
+ * #962 grants the log it is 42501 (permission denied). Those two are an
+ * empty average, so posted lines still render. Every other error is thrown.
+ */
+async function fetchNhlSkaterBoard(
+  calendarYear: number,
+  window: number | null,
+  teams?: SlateTeams,
+): Promise<SeasonTotalsRow[]> {
+  const fn = 'player_window_totals_nhl';
+  try {
+    for (const s of nhlSeasonCandidates(calendarYear, monthET())) {
+      const rows = await pageRpc<SeasonTotalsRow>(
+        fn,
+        { p_season: s, p_window: window },
+        teams,
+        totalsRowKey,
+      );
+      if (rows.length) return rows;
+    }
+    return [];
+  } catch (e) {
+    if (nhlSkaterReadMissing(e)) return [];
+    throw e;
+  }
+}
+
+/**
  * The Stats board's slate narrowing — the teams whose players the board is
  * about, or null/[] for "the whole league".
  *
@@ -156,6 +195,7 @@ export async function fetchSeasonTotals(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
     for (const s of footballSeasonCandidates(season)) {
@@ -242,10 +282,7 @@ export async function fetchWindowTotals(
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  if (sport === 'NHL') {
-    // No per-player skater leaderboard for NHL (team + goalie stats only).
-    return [];
-  }
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
   if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
@@ -386,7 +423,9 @@ export async function fetchRecentGames(
     }
     return [];
   }
-  return []; // UFC / NHL / GOLF: no per-game player logs
+  // UFC / GOLF have no log. NHL hit rate stays off. The averages board
+  // reads player_window_totals_nhl in fetchWindowTotals.
+  return [];
 }
 
 /** (player, game) is the row's identity; `rn` orders a player's games. */
