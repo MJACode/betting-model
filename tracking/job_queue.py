@@ -1822,6 +1822,42 @@ def _job_mlb_over_under_retrain_sweep(**kw):
     }
 
 
+def _validate_byom_game_facts(args: dict) -> dict:
+    """NFL game facts. apply defaults false so a queued job writes nothing
+    until someone asks. Seasons before DraftKings history are refused.
+    """
+    from byom.constants import DK_HISTORY_START_SEASON
+
+    sport = str(args.get("sport") or "NFL")
+    if sport != "NFL":
+        raise ValueError(f"byom_game_facts builds NFL only, got {sport!r}")
+    season = args.get("season")
+    if season in (None, ""):
+        season = None
+    else:
+        season = int(season)
+        if season < DK_HISTORY_START_SEASON:
+            raise ValueError(
+                f"season {season} is before DraftKings history "
+                f"({DK_HISTORY_START_SEASON})")
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    return {"sport": sport, "season": season, "apply": apply}
+
+
+def _job_byom_game_facts(**kw):
+    """Write byom_game_facts. Does not touch picks or a live model."""
+    from data.db import get_connection
+    from byom.load import build_seasons
+
+    conn = get_connection()
+    try:
+        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+    finally:
+        conn.close()
+
+
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
@@ -1909,6 +1945,10 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
+    # NFL Build Your Own Model game facts. apply defaults false. Not listed
+    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
+    "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
 }
 
 

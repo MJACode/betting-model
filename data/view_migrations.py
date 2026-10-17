@@ -344,14 +344,19 @@ ACTIVE_MIGRATIONS: list[str] = [
     # run_ledger._abort_orphans, this run_id only, and only while it is
     # still unfinished. Boot closes the next one; this closes the one
     # already open. Does not touch picks, thresholds, or pauses.
-    # Sits before clv_standard_v2: that file reads the live view and stays
-    # last (tests/test_published_record.py).
+    # Sits before clv_standard_v2: that file reads the live view. Anything
+    # after clv must not recreate that view (tests/test_published_record.py).
     "abort_deploy_killed_evening_2026_10_16.sql",
     # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
     # is the market-edge column. Recomputes rows not yet standard_v2 and
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
+    # catalog return on the second pass. Win, loss, or push. The line
+    # basis is a label. Does not touch picks, the record views, or a
+    # live model. Unapplied until the worker's next pass.
+    "byom_facts_schema_2026_10_16.sql",
 ]
 
 

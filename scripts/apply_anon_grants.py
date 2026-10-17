@@ -114,6 +114,16 @@ def _function_signature(conn, name: str) -> str | None:
     return "|".join(r[0] for r in row)
 
 
+# In ANON_READABLE before the worker has applied their migration. A GRANT or
+# has_table_privilege on a missing name raises and rolls the whole sweep back.
+# Once the table exists the normal checks apply. byom_lock_shop is not here:
+# it is worker-only and the closed-table path already skips an absent relation.
+MAY_BE_UNAPPLIED = (
+    "byom_game_facts",
+    "byom_prop_facts",
+)
+
+
 def _table_exists(conn, rel: str) -> bool:
     """Whether `rel` is a base table in public.
 
@@ -130,18 +140,41 @@ def _table_exists(conn, rel: str) -> bool:
         (rel,)).fetchall())
 
 
-def _plan() -> list[str]:
+def _plan(conn=None) -> list[str]:
     """Table statements only. Function statements need the database to resolve
-    each signature, so they are built in main()."""
+    each signature, so they are built in main().
+
+    Pass conn on an apply. A MAY_BE_UNAPPLIED relation that is not in the
+    catalog is left out, because GRANT on a missing name raises.
+    """
     stmts = [REVOKE_DEFAULT]
     for rel in ANON_READABLE:
+        if (conn is not None and rel in MAY_BE_UNAPPLIED
+                and not _table_exists(conn, rel)):
+            continue
         stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     for rel in AUTHENTICATED_ONLY:
         stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
     # The security_invoker views' base tables: the caller reads them too.
     for rel in VIEW_BASE_TABLES:
+        if (conn is not None and rel in MAY_BE_UNAPPLIED
+                and not _table_exists(conn, rel)):
+            continue
         stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     return stmts
+
+
+def _anon_can_read(conn, rel: str) -> bool:
+    """False only when the relation exists and anon cannot SELECT it.
+
+    A MAY_BE_UNAPPLIED relation that is not in the catalog is not a failure:
+    has_table_privilege on a missing name raises.
+    """
+    if not _table_exists(conn, rel):
+        return rel in MAY_BE_UNAPPLIED
+    return bool(conn.execute(
+        "SELECT has_table_privilege('anon', %s, 'SELECT')",
+        (f'public."{rel}"',)).fetchone()[0])
 
 
 def _function_plan(conn) -> tuple[list[str], list[str]]:
@@ -195,20 +228,29 @@ def main() -> int:
                     help="actually run it (default is a dry run)")
     args = ap.parse_args()
 
-    stmts = _plan()
-    logger.info(f"{len(stmts)} statement(s): 1 ALTER DEFAULT PRIVILEGES, "
-                f"{len(ANON_READABLE)} anon+authenticated grants, "
-                f"{len(AUTHENTICATED_ONLY)} authenticated-only grant(s); plus "
-                f"revoke+RLS on {len(closed_tables())} closed tables, "
-                f"gated on the catalog")
-    logger.info(REVOKE_DEFAULT)
-
     if not args.apply:
+        stmts = _plan()
+        logger.info(f"{len(stmts)} statement(s): 1 ALTER DEFAULT PRIVILEGES, "
+                    f"{len(ANON_READABLE)} anon+authenticated grants, "
+                    f"{len(AUTHENTICATED_ONLY)} authenticated-only grant(s); plus "
+                    f"revoke+RLS on {len(closed_tables())} closed tables, "
+                    f"gated on the catalog")
+        logger.info(REVOKE_DEFAULT)
         logger.info("DRY RUN — nothing executed. Re-run with --apply.")
         return 0
 
     conn = get_connection()
     try:
+        stmts = _plan(conn)
+        absent = [rel for rel in MAY_BE_UNAPPLIED if not _table_exists(conn, rel)]
+        if absent:
+            logger.warning(
+                f"not in pg_class, grant skipped until the migration runs: "
+                f"{absent}")
+        logger.info(f"{len(stmts)} statement(s) after skipping unapplied "
+                    f"relations; revoke+RLS on {len(closed_tables())} closed "
+                    f"tables, gated on the catalog")
+        logger.info(REVOKE_DEFAULT)
         fn_stmts, skipped = _function_plan(conn)
         if skipped:
             logger.warning(
@@ -282,9 +324,7 @@ def main() -> int:
         # Verify inside the transaction: the app's read surface must survive.
         missing = [
             rel for rel in ANON_READABLE
-            if not conn.execute(
-                "SELECT has_table_privilege('anon', %s, 'SELECT')",
-                (f'public."{rel}"',)).fetchone()[0]
+            if not _anon_can_read(conn, rel)
         ]
         if missing:
             conn.rollback()
