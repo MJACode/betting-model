@@ -1401,3 +1401,54 @@ untried without anything noticing; sources reported rather than used; the wrong
 yardstick (classifier metrics, not units and CLV against the market); no
 feature hypotheses or ablation; plumbing with no timebox; and no standing
 method in the repo, which is why it recurred across sessions.
+
+## §0 (evidence). Say each thing once (2026-10-09)
+
+mike: *"Why do you keep restating results? What the fuck is going on, fix this
+bullshit."* Measured on the three session transcripts from 2026-10-03 and
+2026-10-04 (13 replies that carried the four headings):
+
+- Every one put 1,200–1,900 characters of prose ABOVE the headings (averages per
+  session: 1,221 / 1,887 / 1,695), and the "Quick summary" then listed the same
+  facts again. The answer was being written twice per reply.
+- Items carried across replies with no change in status: "the 9 test failures
+  that are also on master" appeared in 8 of the 13; "the in-play NCAAF cut was
+  chosen on the broken numbers" in three consecutive replies.
+
+Cause: §0 required the four headings but never said what goes above them, so the
+habit was a prose answer followed by a heading-shaped recap of it, with every
+open item re-listed each turn. The rule now says the headings are the reply and
+only what is new since the last reply is stated.
+
+## §1c (evidence). One event bet twice under two game ids counts once (2026-10-09)
+
+mike, 2026-10-09: *"Count each fight once."* `ufc_total_rounds` scored both
+`games` rows of two UFC fights and wrote the same bet twice each time; all four
+copies settled WIN:
+
+| kept | marked | why two ids |
+|---|---|---|
+| 332605 `UFC_2026-06-20_kevin-borjas_andre-lima`, -166 | 332615 `..._andre-lima_kevin-borjas`, -130 | fighters swapped, same run |
+| 524487 `UFC_2026-07-18_kamaru-usman_dricus-du-plessis` | 530849 `UFC_2026-07-19_...` | an Eastern and a UTC date |
+
+Read-only over every BET ever written, these were the only unmarked pairs (a
+third, MLB 04-15/04-16, was already VOID). Both are before the published window
+(2026-09-01), so the published views, the app and the Discord recaps showed
+the right numbers; the monitor dashboard did not (`ufc_total_rounds` 14 settled
+9-5 -1.09u, 12 settled 7-5 -1.86u once each fight counts once).
+
+Why a marker and not VOID or `RECORD_EXCLUSIONS`: VOID rewrites the result to
+`NO_ACTION` and `void_picks.py` refuses a graded pick by design; the exclusion
+list takes whole models. The second copy is not a bet leaving the record, it
+is one bet counted twice, so the row says so (`condition_status='DUPLICATE'`)
+and every record query skips it. Why it is not automatic: the shared-event
+match is fuzzy (UFC copies sit up to 24 hours apart on placeholder starts, MLB
+plays the same opponent on consecutive days), so the `one_pick_per_event`
+health check reports and a guarded migration marks.
+
+**Broken again the same day, by the reply that announced the fix (2026-10-10).**
+The first version allowed "a direct answer" above the headings. The announcing
+reply used that gap: the PR and the memory copy were each described in the
+prose, then under Quick summary, then again under Errors and under Decisions.
+Any text above the headings becomes a second Quick summary, so the rule now
+allows none, and the "why" of a question goes under Errors or Bugs found.

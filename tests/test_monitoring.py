@@ -338,6 +338,8 @@ INSTRUMENTED_ENTRYPOINTS = [
     "nfl/scripts/daily_opener_card.py",
     "scripts/nfl_pick_monitor.py",
     "scripts/nfl_prop_market_card.py",
+    "scripts/nba_prop_window.py",
+    "scripts/nba_prop_projection_card.py",
 ]
 
 
@@ -388,9 +390,9 @@ def test_roi_denominator_excludes_pushes():
     assert m["roi_pct"] == pytest.approx(8.0 / 80 * 100)
 
 
-def test_a_record_only_model_reports_no_roi():
-    """batter HR settles hundreds of picks and prices almost none. An ROI over
-    the priced few, printed beside the full record, reads as the record's ROI."""
+def test_an_unpriced_model_reports_no_roi():
+    """A model that settled picks and priced none has no ROI. An ROI over a
+    priced handful, printed beside the full record, would not be that record."""
     m = store.model_performance(
         _perf_rows(("mlb_prop_batter_hr", "MLB", 252, 42, 210, 0, 0, 0, "x")))[0]
     assert m["roi_pct"] is None
@@ -423,12 +425,12 @@ def test_slow_panels_are_bounded_on_an_indexed_column():
 
 
 def test_roster_reports_a_registered_but_untrained_model():
-    """NHL totals and the golf models are registered with thresholds and no
-    artifact. That is a real state and worth seeing before score time."""
-    conn = FakeConn([("nhl_over_under", False, False, 0.55, 0.05, None,
+    """NHL puck line is registered with thresholds and no artifact. That is
+    a real state and worth seeing before score time."""
+    conn = FakeConn([("nhl_puckline", False, False, 0.55, 0.05, None,
                       None, None, None, None, None)])
     m = store.model_roster(conn)[0]
-    assert m["model_id"] == "nhl_over_under" and m["version"] is None
+    assert m["model_id"] == "nhl_puckline" and m["version"] is None
 
 
 # ── cache ────────────────────────────────────────────────────────────────────

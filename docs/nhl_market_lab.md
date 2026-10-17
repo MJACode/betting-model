@@ -768,7 +768,7 @@ totals vs DraftKings open          0.04   1,739    -9.0   -0.5%   4.7      -1.8 
   is the closing-line value**: the bets beat Pinnacle's close 61-67% of the
   time at 0.06 in every season, +0.5 to +0.9 points of no-vig probability.
   The model reads something the opening price lacks; it is not enough to
-  beat the price. **Not a model to bet.** A paper-only run at DraftKings'
+  beat the price. **Not a model to bet.** A measured run at DraftKings'
   open at 0.06 would be the honest next measurement, if any.
 - **Puck line: a peak, not a plateau.** +11.8% at 0.08 on 493 is two seasons
   (+19.9, +15.5) against two negative-or-flat, and 0.06 either side reads
@@ -2213,3 +2213,79 @@ under  1033   48.7  4.72 -0.9..+10.1 +2.9% (101)  -4.7% (219) +6.9% (227) +6.8% 
   shaped like that are the derivative ones -- team totals, period totals,
   alternate totals. Graded 2026-10-02 on the stored prices: nothing cleared,
   not publishing (`docs/nhl_derivative_totals.md`).
+
+---
+
+# Rest, back-to-back and road trip in the production models (2026-10-13)
+
+mike, after "OTT (Regulation)" was bet with Ottawa on the second night of a
+back-to-back: *"How the fuck does the model not use any of this?"* The live
+`nhl_moneyline` and `nhl_moneyline_regulation` have no schedule input; round
+two's lab model had one, but that model as a whole did not replicate (round
+three) and was never shipped, so rest had never been tried in the production
+models. This puts round two's schedule group into them and grades it.
+
+**What was built** (branch `nhl-rest-candidate`, commit `63982f14`, research
+only, not merged, nothing registered): `home_rest_days`, `away_rest_days`
+(days since the team's previous game this season, strictly before the game's
+date, capped at 6), `home_b2b`, `away_b2b` (rest = 1), `away_road_trip` (away
+games in a row before this one, restarting each season) appended to
+`NHL_H2H_FEATURES`, computed by one helper in both the training and the
+scoring path (0 disagreements on 975 values from 195 games). A game counts
+toward rest once it has a final score or is at most two days old, because
+production decides games up to a week ahead. No preseason rows exist in
+`games`; unplayed past rows (postponements, "if necessary" playoff dates)
+are excluded. Back-to-back flags on 2025-26 agree with an independent
+previous-calendar-day count on all 1,352 games (home 160, visitor 262).
+
+**How it was graded.** Three versions of each model, all scored on the
+2025-26 frame none of them trained on: the live artifact, a matched baseline
+(today's code and data, the old 22 inputs, `--no-register --trials 100`) and
+the candidate (27 inputs, same settings). The baseline separates the effect
+of rest from the effect of simply retraining.
+
+```
+paired log loss, same 1,352 games (negative = the first version is more accurate)
+                                 all games                      the 350 with a team on a back-to-back
+moneyline   candidate - baseline +0.00077 (-0.00079..+0.00233)  +0.00262 (-0.00294..+0.00817)
+regulation  candidate - baseline +0.00040 (-0.00066..+0.00145)  +0.00084 (-0.00193..+0.00360)
+regulation  candidate - live     +0.00087 (+0.00004..+0.00171)
+mean log loss: moneyline live 0.68837 / baseline 0.68791 / candidate 0.68868 (DraftKings no-vig 0.6836)
+               regulation live 1.07720 / baseline 1.07767 / candidate 1.07807 (DraftKings no-vig 1.0727)
+```
+
+The schedule inputs are used — 4.7% of the regulation candidate's splits and
+8.1% of the moneyline's — and against the matched baseline they move a
+back-to-back side down by 0.4 to 0.9 points (visitor on a back-to-back
+against a rested home side: baseline 0.344 → candidate 0.337, DraftKings
+no-vig 0.328, happened 0.284). Accuracy does not improve,
+overall or on the back-to-back games. The regulation bet grid at real
+3-way prices is one season (prices exist for 2025-26 only) and its
+intervals are ±35-60 ROI points either way, so it decides nothing.
+
+**The game that started it** (`NHL_2026-10-13_STL_OTT`, home regulation win,
+DraftKings +145; the bar is 0.40 / 0.05 / EV 0.20):
+
+```
+                  inputs at the pick (Ullmark)   pick inputs + Ersson   all of tonight's inputs
+live              0.4931  EV +0.208 -> BET       0.4606                 0.4549
+matched baseline  0.4876  EV +0.195 -> no bet    0.4522                 0.4530
+candidate         0.4860  EV +0.191 -> no bet    0.4552                 0.4507
+candidate with Ottawa shown rested: 0.4861
+```
+
+Rest moves this game by 0.0001. Retraining the same model on the same inputs
+moves it by 0.0055, which is enough to cross the EV floor: the bet sat inside
+the model's own run-to-run variation. The goalie moves it by about 0.03.
+
+## Read, rest in the production models
+
+- **Rest adds nothing these models can use.** Neither model is more accurate
+  with it, on all games or on the back-to-back games, and on tonight's game it
+  moves the number by a hundredth of a point. Not proposed for production;
+  the branch stays as the record.
+- **The goalie is the input that matters on a back-to-back, and the problem
+  there is timing, not the model**: in training every game used the goalie
+  who started it, while production usually decides a day or more ahead on the
+  previous game's starter (`docs/followups.md`, "NHL game picks are decided
+  before the night's goalie is known").

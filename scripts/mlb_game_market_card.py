@@ -25,11 +25,14 @@ Deliberate and load-bearing:
     python -m scripts.mlb_game_market_card
     python -m scripts.mlb_game_market_card --market totals
     python -m scripts.mlb_game_market_card --date 2026-09-15 --publish
+
+  (--date picks the slate's days; only games that have not started are on
+  it, so a past date prints an empty card. See slate().)
 """
 from __future__ import annotations
 
 import argparse
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
@@ -79,9 +82,22 @@ _BOOK = {
 }
 
 
-def slate(conn, game_date: str) -> dict[str, dict]:
+def slate(conn, game_date: str, now: datetime | None = None) -> dict[str, dict]:
     """Unstarted MLB games on `game_date` (and the next calendar day, so a
-    west-coast night slate still prices after midnight ET)."""
+    west-coast night slate still prices after midnight ET).
+
+    UNSTARTED IS CHECKED HERE, against `now`. Until 2026-10-09 it was only in
+    this docstring: the query selected by date, and load_latest_quotes bounds
+    the quotes to snapshot_at <= commence_time, so after first pitch the card
+    still priced the last pre-game quotes and could write a bet nobody could
+    take. It did on 2026-09-16, six BETs 180-436 minutes after first pitch,
+    on games that were over by the time the rows were written. Shared by the
+    public-fade card. The check is on the parsed start because commence_time
+    is TEXT in mixed shapes. A replay of a past `--date` is therefore an empty
+    slate: every game on it has started.
+    """
+    from features.feature_engine import _parse_iso_ts
+    now = now or datetime.now(timezone.utc)
     nxt = (date.fromisoformat(game_date) + timedelta(days=1)).isoformat()
     rows = conn.execute("""
         SELECT game_id, home_team, away_team, commence_time, game_date
@@ -92,6 +108,9 @@ def slate(conn, game_date: str) -> dict[str, dict]:
     """, (game_date, nxt)).fetchall()
     out = {}
     for gid, home, away, commence, gd in rows:
+        start = _parse_iso_ts(commence)
+        if start is None or start <= now:
+            continue
         out[gid] = {
             "home": home, "away": away,
             "commence_time": commence, "game_date": str(gd)[:10],
@@ -267,7 +286,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False,
     try:
         games = slate(conn, game_date)
         if not games:
-            logger.info(f"mlb {market} market: no MLB games on {game_date}")
+            logger.info(f"mlb {market} market: no unstarted MLB games on {game_date}")
             return {"flags": 0, "published": 0, "market": market,
                     "publish_enabled": mk.publish_enabled(market)}
         quotes = mk.load_latest_quotes(conn, SPORT, market, list(games))

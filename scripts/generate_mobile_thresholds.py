@@ -27,6 +27,10 @@ import config  # noqa: E402
 
 OUT = ROOT / "mobile" / "src" / "lib" / "thresholds.generated.ts"
 
+# Prob-only at retirement (see render). Add a model here when a prob-only
+# model is retired; it is history, so it never shrinks.
+RETIRED_PROB_ONLY_MODELS = frozenset({"mlb_prop_batter_hr", "nba_prop_player_dd"})
+
 
 def _fmt(x: float) -> str:
     if isinstance(x, float) and x == int(x):
@@ -70,8 +74,15 @@ def render() -> str:
         lines.append(f"  '{m}',")
     lines.append("]);")
     lines.append("")
+    # Models that were prob-only when they were retired. config drops a model
+    # from PROB_ONLY_MODELS when it retires, so this cannot be derived; the app
+    # still needs it, because a retired prob-only pick must keep being shown
+    # the way it was made (isProbOnlyModel). mlb_prop_batter_hr retired
+    # 2026-09-02; nba_prop_player_dd retired with the NBA rebuild.
     lines.append("export const RETIRED_PROB_ONLY_MODELS = new Set<string>([")
-    lines.append("  'mlb_prop_batter_hr',")
+    for m in sorted(RETIRED_PROB_ONLY_MODELS):
+        assert m in config.RETIRED_MODELS, f"{m} is listed as retired prob-only but is not retired"
+        lines.append(f"  '{m}',")
     lines.append("]);")
     lines.append("")
     lines.append("export const PAUSED_MODELS = new Set<string>([")
@@ -83,6 +94,20 @@ def render() -> str:
     for m in sorted(config.RETIRED_MODELS):
         lines.append(f"  '{m}',")
     lines.append("]);")
+    lines.append("")
+    # Whole-model entries of config.RECORD_EXCLUSIONS: struck from the settled
+    # record on an explicit instruction (CLAUDE.md 1c). Date-bounded entries
+    # are not mirrored -- the app's record starts after every one of them.
+    lines.append("export const RECORD_EXCLUDED_MODELS = new Set<string>([")
+    for m in sorted({e["model_id"] for e in config.RECORD_EXCLUSIONS
+                     if not e.get("before")}):
+        lines.append(f"  '{m}',")
+    lines.append("]);")
+    lines.append("")
+    # The marker on the second copy of a bet written under two game ids for
+    # one event (config.DUPLICATE_STATUS, mike 2026-10-09). passesRecordFilter
+    # counts the event once.
+    lines.append(f"export const DUPLICATE_STATUS = '{config.DUPLICATE_STATUS}';")
     lines.append("")
     lines.append(f"export const KELLY_MULTIPLIER = {_fmt(float(config.KELLY_MULTIPLIER))};")
     lines.append(f"export const MAX_KELLY_FRACTION = {_fmt(float(config.MAX_KELLY_FRACTION))};")

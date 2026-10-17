@@ -235,7 +235,12 @@ def _drain(max_rows: int = 500) -> list[tuple]:
 def _writer_loop() -> None:
     conn = None
     ensured = False
-    last_prune = 0.0
+    # The clock starts now, not at 0. At 0 every process pruned -- and rolled up
+    # the whole log -- on its FIRST flush, so each short-lived pipeline step paid
+    # a full scan of api_call_log: 29,609 runs at ~7 s each by 2026-10-03, the
+    # database's largest disk reader. The long-running worker and pollers still
+    # prune hourly.
+    last_prune = time.time()
     while True:
         time.sleep(_FLUSH_SEC)
         rows = _drain()
