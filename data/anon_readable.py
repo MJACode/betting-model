@@ -513,3 +513,16 @@ RPC_MISSING_IN_PROD: tuple[str, ...] = (
     "my_access",
 )
 
+# Saved-model RPCs. The mobile data layer names them. They are NOT granted
+# to anon, and scripts/apply_anon_grants.py must not mention them: the
+# migration that creates them is not in ACTIVE_MIGRATIONS, and GRANT on a
+# missing function is a warning today only because the function plan skips
+# an absent signature — a table grant would raise and roll the sweep back.
+# The migration grants EXECUTE to authenticated only. Usable once Matt
+# turns sign-in on. Do not add these names to RPC_ANON_CALLABLE.
+RPC_AFTER_SIGN_IN: tuple[str, ...] = (
+    "byom_save_model",
+    "byom_list_models",
+    "byom_delete_model",
+)
+

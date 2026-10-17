@@ -118,3 +118,26 @@ Quotes for a game outside the due set are not fetched.
 lists `byom-nfl-refresh` with `enabled` false and `apply` false, so a
 merge does not enqueue it. A declared job is enqueued once. This file
 does not add a schedule. It does not write `picks`.
+
+## Saved models
+
+`byom_models` and `byom_model_snapshots` are keyed to `auth.uid()`. A
+user sees their own rows. The cap is 25 models. Saving an existing name
+updates that model and appends a snapshot of `byom_backtest` at that
+moment. The snapshot totals and the per-market summary are that one
+read. The snapshot stores wins, losses, pushes, and ties. A
+stake, kelly, price, line, or spread-size filter is rejected. An
+allowlisted key in the wrong case is rejected. There
+is no recommended stake.
+
+The RPCs are `SECURITY DEFINER`: `byom_save_model`, `byom_list_models`,
+`byom_delete_model`. The user id comes from `auth.uid()`, not from an
+argument. The tables are not granted to anon or authenticated. The
+functions are granted to authenticated only. They are listed in
+`RPC_AFTER_SIGN_IN` and are not in `RPC_ANON_CALLABLE`, so the grant
+sweep does not name them.
+
+`data/migrations/byom_saved_models_2026_10_16.sql` is **not** in
+`ACTIVE_MIGRATIONS`. The worker will not apply it. It stays unused
+until sign-in is turned on. That switch is Matt's. This change does
+not set it.
