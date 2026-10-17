@@ -641,7 +641,11 @@ export interface TrackRecordRow {
   losses: number;
   pushes: number;
   profit_flat: number;    // sum of profit_flat on $100 flat stakes
-  staked_flat: number;    // 100 * picks
+  staked_flat: number;    // 100 * priced picks
+  /** Posted stake: published_pick_unit_profit. Same units as Discord #results. */
+  units?: number;
+  /** Units laid (published_pick_unit_risked). Pushes contribute 0. */
+  risked?: number;
   clv_settled: number;    // settled picks with a same-book price CLV
   clv_beat: number;       // of those, how many beat that book's close (clv_pct > 0)
   avg_clv_pct: number | null;
@@ -670,6 +674,9 @@ export interface TrackRecordDailyRow {
   pushes: number;
   profit_flat: number;
   staked_flat: number;
+  /** Posted stake for that day, same function as the model rows. */
+  units?: number;
+  risked?: number;
 }
 
 /** One row from parlay_track_record — the daily canonical cross-game parlay. */
@@ -868,6 +875,11 @@ export interface SeasonTotalsRow {
   def_solo?: number | string;
   def_tfl?: number | string;
   def_pd?: number;
+  // NHL skaters (player_window_totals_nhl over nhl_skater_game_log).
+  // `shots` is the log column. The book's market is player_shots_on_goal.
+  // Season on the log is the ending year.
+  goals?: number;
+  shots?: number;
 }
 
 /**

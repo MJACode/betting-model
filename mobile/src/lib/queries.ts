@@ -1,3 +1,6 @@
+import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
+import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
+import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
@@ -122,6 +125,42 @@ const UFC_TOTALS_COLUMNS =
   'sig_strikes, takedowns, knockdowns, sub_attempts';
 
 /**
+ * Season or last-N skater totals from player_window_totals_nhl.
+ *
+ * The same shape as the other sports: one row per player, summed in SQL,
+ * p_window null for the season. The function reads nhl_skater_game_log
+ * (`shots`, regular season, season = the ending year). The first label
+ * with rows wins.
+ *
+ * The function is SECURITY INVOKER. Before this migration is applied the
+ * call is PGRST202 or 42883 (the function is not in the schema). Before
+ * #962 grants the log it is 42501 (permission denied). Those two are an
+ * empty average, so posted lines still render. Every other error is thrown.
+ */
+async function fetchNhlSkaterBoard(
+  calendarYear: number,
+  window: number | null,
+  teams?: SlateTeams,
+): Promise<SeasonTotalsRow[]> {
+  const fn = 'player_window_totals_nhl';
+  try {
+    for (const s of nhlSeasonCandidates(calendarYear, monthET())) {
+      const rows = await pageRpc<SeasonTotalsRow>(
+        fn,
+        { p_season: s, p_window: window },
+        teams,
+        totalsRowKey,
+      );
+      if (rows.length) return rows;
+    }
+    return [];
+  } catch (e) {
+    if (nhlSkaterReadMissing(e)) return [];
+    throw e;
+  }
+}
+
+/**
  * The Stats board's slate narrowing — the teams whose players the board is
  * about, or null/[] for "the whole league".
  *
@@ -156,6 +195,7 @@ export async function fetchSeasonTotals(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
     for (const s of footballSeasonCandidates(season)) {
@@ -242,10 +282,7 @@ export async function fetchWindowTotals(
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  if (sport === 'NHL') {
-    // No per-player skater leaderboard for NHL (team + goalie stats only).
-    return [];
-  }
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
   if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
@@ -386,7 +423,9 @@ export async function fetchRecentGames(
     }
     return [];
   }
-  return []; // UFC / NHL / GOLF: no per-game player logs
+  // UFC / GOLF have no log. NHL hit rate stays off. The averages board
+  // reads player_window_totals_nhl in fetchWindowTotals.
+  return [];
 }
 
 /** (player, game) is the row's identity; `rn` orders a player's games. */
@@ -2184,18 +2223,47 @@ export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<stri
  * Backed by v_public_track_record, which applies the same prob/edge cuts as
  * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
  */
+const TRACK_RECORD_SELECT =
+  'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked, ' +
+  'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
+  'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
+  'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
+  'market_clv_settled, market_clv_beat, avg_market_clv_pct';
+
+/** The select from before units and risked existed. An OTA can ship first. */
+const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, risked', '');
+
+/**
+ * The units columns are not on the view until the migration runs.
+ *
+ * PostgREST puts `42703` on `error.code` for an undefined column, and
+ * `PGRST204` when the schema cache has no such column. The message names
+ * the column. Any other error still throws.
+ */
+export function postedStakeColumnsMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (!message.includes('units') && !message.includes('risked')) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === '42703' || code === 'PGRST204'
+    || message.includes('does not exist')
+    || message.includes('schema cache');
+}
+
 export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
-  const { data, error } = await supabase
-    .from('v_public_track_record')
-    .select(
-      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
-        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
-        'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
-        'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
-        'market_clv_settled, market_clv_beat, avg_market_clv_pct',
-    );
-  if (error) throw error;
-  return (data ?? []) as TrackRecordRow[];
+  const first = await supabase.from('v_public_track_record').select(TRACK_RECORD_SELECT);
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record')
+      .select(TRACK_RECORD_SELECT_WITHOUT_UNITS);
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordRow[];
 }
 
 /**
@@ -2222,13 +2290,27 @@ export async function fetchActionThresholds(): Promise<Record<string, ServerThre
 }
 
 /** Daily settled totals for the equity curve (v_public_track_record_daily). */
+const TRACK_RECORD_DAILY_SELECT =
+  'game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked';
+
+const TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS =
+  TRACK_RECORD_DAILY_SELECT.replace(', units, risked', '');
+
 export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
-  const { data, error } = await supabase
+  const first = await supabase
     .from('v_public_track_record_daily')
-    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat')
+    .select(TRACK_RECORD_DAILY_SELECT)
     .order('game_date', { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as TrackRecordDailyRow[];
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record_daily')
+      .select(TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS)
+      .order('game_date', { ascending: true });
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordDailyRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordDailyRow[];
 }
 
 /** The daily canonical cross-game parlays (public parlay track record). */
