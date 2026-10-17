@@ -378,6 +378,24 @@ def test_bar_9_compares_a_one_sided_cell_with_that_side_over_its_own_population(
     assert sh["home"] == 1.0 and sh["fav"] == 1.0
 
 
+def test_bar_9_runs_for_a_rule_whose_frame_carries_its_per_game_side():
+    # A rule that bets a different side in each game ("against", "fade")
+    # passes a frame with side_pick as `neutral`, because blind_side needs it.
+    # The favourite / underdog blind bet must still run on it, and must take
+    # the MARKET's favourite (home here, mu = 4), never the rule's pick (away).
+    off = _offers()
+    off = off[off["book"].isin(["fanduel", "draftkings"])]
+    away = off.iloc[[1]].assign(side="away", price=-105.0, p_win=0.40)
+    off = pd.concat([off, away], ignore_index=True).assign(mu=4.0, p_home=np.nan, side_pick="away")
+    b = H.blind_by_real_side(off, {"G"}, _games(), seasons=(2024,))
+    assert b["fav"] == b["home"] > 0 and b["dog"] == b["away"] < 0
+    # and the whole cell runs: run_cells takes the rule's frame as both inputs
+    data = H.Data(games=_games(), quotes=pd.DataFrame(), fetches=_fetches(60))
+    rows = H.run_cells(data, "R", "C", off.assign(strength=1.0), off.assign(strength=1.0),
+                       cuts=(1.0,), sides_by_market={"spreads": ["against"]}, strength="strength")
+    assert rows[0]["blind_fav"] == b["fav"] and rows[0]["n_choose"] == 1
+
+
 def _stale_cache(tmp_path, odds_seasons, ledger):
     games = pd.DataFrame([{"game_id": f"G{s}", "sport": "NBA", "season": s, "game_date": f"{s - 1}-12-01",
                            "home_team": "BOS", "away_team": "NYK", "home_score": 110.0, "away_score": 100.0,
@@ -411,3 +429,12 @@ def test_a_graded_load_refuses_rows_that_match_no_purchase(tmp_path):
     with pytest.raises(RuntimeError, match="no purchase"):
         H.load(cache=tmp_path, require_seasons=(2022, 2023))
     assert H.load(cache=tmp_path).notes["placed_by_snapshot_share"] == 0.5
+
+
+def test_a_past_average_miss_does_not_move_the_centre():
+    # earlier seasons missed by +5 on average; the distribution keeps their
+    # spread, not the miss, so the centre stays where the model put it
+    dist = H.ResidDist(np.random.default_rng(4).normal(5.0, 12.0, 8000), "biased")
+    w, _, _ = dist.probs(np.array([0.0]), np.array([0.5]))
+    wn, _, _ = H.probs_at(np.array([0.0]), np.array([12.0]), np.array([0.5]))
+    assert abs(w[0] - wn[0]) < 0.02 and abs(dist.mean - 5.0) < 0.5
