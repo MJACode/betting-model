@@ -457,3 +457,27 @@ Two rules follow, fixed now:
   book's last update, up to ~25 minutes before the fetch, so it does not name the window.
 - **Gate before any D cell is graded:** D is reached on ≥ 95% of games in **every** season cuts
   are chosen on, not on average. A season short of it is reported and not chosen on.
+
+**Amendment, 2026-10-17, before any cell is graded: how each bar is read.** Written into
+`scripts/nba_game2_verdict.py` and committed with this line; the labs only emit cells.
+
+- **Each cell bets one side**, so bar 9 applies to every cell. The blind bet is that side on
+  every game with a price at that decision point, at the best deciding offer under the
+  market's own fair line (Pinnacle's no-vig, else the median of the deciding books), with no
+  cut. (The first search compared at the first fetch instead.)
+- **Placebo:** the cell's ROI must beat the 95th percentile of 20 placebo runs. Each run
+  shuffles the model's fair numbers between games on the same date in the same market (seed =
+  run number).
+- **Plateau:** the neighbours are the cut one step either side, everything else equal. A
+  neighbouring decision point is not a neighbour.
+- **Closing-line value** is measured on the choosing seasons' bets.
+- **p values:** whole-day bootstrap, 4,000 resamples; any p under 0.01 is recomputed with
+  400,000 (same seed), because the best cell's bar is 1.2e-5, finer than 4,000 can show.
+- **Fewer choosing seasons where the data starts later:** F6b chooses on 2023-24 and 2024-25;
+  F6d's team-total cells on 2024-25 alone.
+- **Per-game purchases** (team totals, props) are dated by the feed's own snapshot time and
+  count only at D.
+- **Open before the verdict runs (mike):** whether the Benjamini–Hochberg p is read on 2025-26
+  alone over m = 4,172 (as written above) or on the four choosing seasons over this search's
+  cells, with the 2025-26 confirmation bar unchanged. The script computes both; it is run on
+  real cells only after that is decided.

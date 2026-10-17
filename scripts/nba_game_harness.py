@@ -462,6 +462,7 @@ def cell_report(bets_all: pd.DataFrame, data: Data, cand: pd.DataFrame | None = 
     r["choose"]["ci90"] = ci90(ch)
     r["confirm"]["ci90"] = ci90(cf)
     r["p_confirm"] = p_one_sided(cf)
+    r["p_choose"] = p_one_sided(ch)
     if len(ch):
         days = np.sort(ch["game_date"].unique())
         mid = days[len(days) // 2]
@@ -480,8 +481,8 @@ def cell_report(bets_all: pd.DataFrame, data: Data, cand: pd.DataFrame | None = 
             out = outlier_flag(bets_all, cand)
             r["units_without_outliers"] = float(bets_all.loc[~out, "units"].sum())
             r["share_outlier"] = float(out.mean())
-        if close is not None and sig is not None:
-            ev = clv(bets_all, close, sig)
+        if close is not None and sig is not None and len(ch):
+            ev = clv(ch, close, sig)
             r["clv_median"] = float(np.nanmedian(ev)) if ev.notna().any() else np.nan
             r["clv_share_positive"] = float((ev > 0).mean()) if ev.notna().any() else np.nan
             r["clv_n"] = int(ev.notna().sum())
@@ -590,7 +591,7 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                     "ci_lo_choose": ch["ci90"][0], "ci_hi_choose": ch["ci90"][1],
                     "n_confirm": cf["bets"], "units_confirm": cf["units"], "roi_confirm": cf["roi"],
                     "ci_lo_confirm": cf["ci90"][0], "ci_hi_confirm": cf["ci90"][1],
-                    "p_confirm": rep["p_confirm"],
+                    "p_confirm": rep["p_confirm"], "p_choose": rep["p_choose"],
                     "n_2021": rep["regime_2021"]["bets"], "roi_2021": rep["regime_2021"]["roi"],
                     **{f"roi_{s}": ch.get(f"roi_{s}", np.nan) for s in CHOOSE},
                     **{f"n_{s}": ch.get(f"n_{s}", 0) for s in CHOOSE},
