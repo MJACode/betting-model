@@ -104,6 +104,10 @@ check(
   'textTertiary stays lighter than textSecondary (hierarchy)',
   lum(tok.textTertiary) > lum(tok.textSecondary),
 );
+check(
+  'pausedInk sits between tertiary and secondary',
+  lum(tok.textTertiary) > lum(tok.pausedInk) && lum(tok.pausedInk) > lum(tok.textSecondary),
+);
 
 // ── contrast on the real grounds ────────────────────────────────────────────
 type Pair = { fg: string; bg: string; bgName: string; min: number; where: string };
@@ -139,6 +143,7 @@ const PAIRS: Pair[] = [
   T('medInk', 'medSoft', 'MED tier, warn banners, reconnect, DOG tag (H8/M6/M24)'),
   W('medInk', 'med', 'parlay "Fair" grade (H2)'),
   T('textSecondary', 'noneSoft', 'NONE badge, LOW tier, P letter, Preview (H1)'),
+  T('pausedInk', 'noneSoft', 'Paused pick chip (designer, #963)'),
   W('textPrimary', 'info', 'parlay "Good" grade (H2)'),
   T('textPrimary', 'bet', 'SportToggle count on green (H6)'),
   T('textPrimary', 'med', 'player hit-rate badge on amber (H6 class)'),
