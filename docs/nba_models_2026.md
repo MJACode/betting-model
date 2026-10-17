@@ -923,6 +923,28 @@ the model helped.
        fair price (the harness's `run_cells`). The placebo shuffles the strength within date,
        20 runs. The house standard (§6.7) judges. "Still offered at the next purchase" and
        closing-line value cannot be measured at halftime and are reported as not measured.
+     - **HT-1's result (2026-10-17): closed. Totals show no information; spreads pass the gate
+       as written, but the gain is Pinnacle's lag, and none of the 6 spread cells passes the
+       house standard.** `python -m scripts.nba_ingame_ht1` (log `ht1/run_log.txt` beside the
+       shared table; cells `cells_HT-1.parquet`). Drop in mean squared error of the final
+       number when the model is added to Pinnacle's centre; positive means the model helps.
+       - Population after the 10-game rule: 573 spread and 574 total decisions in 2021-22 →
+         2024-25, 212 and 211 in 2025-26. The state at the stamp equals the game's first half
+         on 958 of 959 games.
+       - Totals: +0.65 points² (−1.35 to +2.60) on the choosing seasons; −2.17 (−7.70 to
+         +3.78) in 2025-26. **Closed without a grid.**
+       - Spreads: +3.11 points² (+0.75 to +5.68); +4.70 (+0.33 to +9.46) in 2025-26. The gate
+         opens. But the score-only model does nearly as well: +2.83 (+0.66 to +5.17), and +4.19
+         (−0.47 to +9.29) in 2025-26. Against the deciding books' own median centre the model
+         adds nothing: −0.005 (−0.18 to +0.17), and +0.44 (+0.05 to +0.86) in 2025-26. On
+         2021-22 → 2025-26 together, Pinnacle's halftime spread centre has a squared error of
+         115.1 points², the books' own 111.1. By the line above, the gain is Pinnacle's lag.
+       - Points scored in Q2's last 5 minutes still predict against Pinnacle's halftime price:
+         spread +0.0068 per point (+0.0013 to +0.0124), total +0.0059 (+0.0002 to +0.0118).
+       - The spread grid (house standard, `house_verdict`): 0 of 6 pass. No cell reaches 200
+         pooled bets; the most is 147 (home, strength ≥ 1.5: −9.97 units, −6.0%, interval
+         −21.0% to +10.1%). Away at ≥ 3: 25 bets, +14.34 units, +52.4%, with no season holding
+         30 bets. The §6.4 bars, with the count at 4,226: 0 of 6.
    - **How IG-2 is scored (2026-10-17, fixed before any IG-2 number was computed;
      `scripts/nba_ingame_ig2.py`, whose docstring holds every definition).**
      - *Decision.* Per game, market and phase (Q1–Q2, Q3, Q4 with 6:00 or more left; halftime
