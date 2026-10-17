@@ -1,45 +1,22 @@
-"""Read NFL lines and write byom_game_facts and byom_lock_shop.
+"""Read NFL lines and write byom_game_facts.
 
-Reads games, nfl_odds_history and odds. Does not touch picks.
-`apply=False` is the default: count the rows and write nothing.
+Reads games, nfl_odds_history and odds. Writes only byom_game_facts.
+Does not touch picks. `apply=False` is the default: count the rows and
+write nothing.
 
-The shop capture is not scheduled to write. jobs/declared_jobs.json
-lists byom_game_facts with enabled false and apply false.
-sync_declared_jobs skips enabled false. The owner turns it on. Once on,
-run it daily before prune-odds. The first apply has to land before
-byom.constants.SHOP_FIRST_APPLY_BEFORE (2026-10-17): prune deletes
-non-DraftKings rows from odds for games before today, and a lock quote
-that is only in odds is not the opener and not the close.
-nfl_odds_history is not that prune. Merging the migration only creates
-the empty table. The job warns when that date has passed and the shop
-has no rows. This module does not run that apply.
+The line is the last DraftKings snapshot at or before game start, from
+either store. A missing line does not skip the game. Prices are not
+read. Moneyline is the score only.
 """
 from __future__ import annotations
 
-import logging
-from datetime import date, datetime
-from zoneinfo import ZoneInfo
-
-from byom.constants import (
-    DK_HISTORY_START_SEASON,
-    LOCK_WINDOW_HOURS,
-    SHOP_FIRST_APPLY_BEFORE,
-    SPORT,
-)
-from byom.game_facts import (
-    capture_game,
-    parse_date,
-    parse_game_id,
-    shop_markets_to_replace,
-    shop_windows,
-)
+from byom.constants import DK_HISTORY_START_SEASON, SPORT
+from byom.game_facts import assemble_game, parse_date, parse_game_id
 
 # One game at a time. A season of nfl_odds_history is millions of rows
 # (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
-# measured 2026-10-16). The index is (game_id, market). DraftKings inside
-# the lock window is the grade. Other books are read only inside the shop
-# slices shop_windows() names, and those rows are stored reference. The
-# grade is DraftKings' own price on the lock snapshot. apply=false uses
+# measured 2026-10-16). The index is (game_id, market). This builder reads
+# DraftKings spreads and totals at or before kickoff. apply=false uses
 # the same reads and writes nothing.
 _ODDS_SNAPSHOT = """
 CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
@@ -48,15 +25,13 @@ CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
 """
 
 _QUOTE_FROM_HISTORY = """
-SELECT game_id, bookmaker, market, snapshot_at, commence_time,
-       point, price_home, price_away
+SELECT game_id, bookmaker, market, snapshot_at, commence_time, point
   FROM nfl_odds_history
  WHERE game_id IN (%s, %s)
    AND bookmaker = 'draftkings'
-   AND market IN ('spreads', 'totals', 'h2h')
+   AND market IN ('spreads', 'totals')
    AND commence_time IS NOT NULL
    AND snapshot_at <= commence_time
-   AND snapshot_at >= commence_time - make_interval(hours => %s)
 """
 
 _QUOTE_FROM_ODDS = f"""
@@ -67,66 +42,27 @@ SELECT o.game_id, o.bookmaker, o.market,
          WHEN 'spreads' THEN o.spread_home
          WHEN 'totals' THEN o.total_line
          ELSE NULL
-       END AS point,
-       CASE WHEN o.market = 'totals' THEN o.over_price ELSE o.home_price END
-         AS price_home,
-       CASE WHEN o.market = 'totals' THEN o.under_price ELSE o.away_price END
-         AS price_away
+       END AS point
   FROM odds o
   JOIN games g ON g.game_id = o.game_id
  WHERE o.game_id IN (%s, %s)
    AND o.bookmaker = 'draftkings'
-   AND o.market IN ('spreads', 'totals', 'h2h')
+   AND o.market IN ('spreads', 'totals')
    AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
    AND g.commence_time IS NOT NULL
    AND {_ODDS_SNAPSHOT} IS NOT NULL
    AND {_ODDS_SNAPSHOT} <= g.commence_time::timestamptz
-   AND {_ODDS_SNAPSHOT}
-         >= g.commence_time::timestamptz - make_interval(hours => %s)
 """
 
 # Column order is the INSERT. built_at is the table default.
 FACT_COLUMNS = (
     "canonical_key", "sport", "season", "week", "away_team", "home_team",
     "game_date", "commence_time", "home_score", "away_score",
-    "lock_window_hours", "near_window_hours",
-    "lock_spread_at", "lock_spread_lead_hours", "dk_spread_home",
-    "dk_spread_home_price", "dk_spread_away_price",
-    "lock_total_at", "lock_total_lead_hours", "dk_total",
-    "dk_over_price", "dk_under_price",
-    "lock_ml_at", "lock_ml_lead_hours", "dk_ml_home_price", "dk_ml_away_price",
-    "near_spread_at", "near_spread_home", "near_spread_home_price",
-    "near_spread_away_price",
-    "near_total_at", "near_total", "near_over_price", "near_under_price",
-    "near_ml_at", "near_ml_home_price", "near_ml_away_price",
-    "close_spread_at", "close_spread_home", "close_spread_home_price",
-    "close_spread_away_price",
-    "close_total_at", "close_total", "close_over_price", "close_under_price",
-    "close_ml_at", "close_ml_home_price", "close_ml_away_price",
-    "grade_spread_home_price", "grade_spread_home_book",
-    "grade_spread_away_price", "grade_spread_away_book",
-    "grade_over_price", "grade_over_book",
-    "grade_under_price", "grade_under_book",
-    "grade_ml_home_price", "grade_ml_home_book",
-    "grade_ml_away_price", "grade_ml_away_book",
-    "ats_home_result", "ats_home_units_uncapped", "ats_home_units_capped",
-    "ats_away_result", "ats_away_units_uncapped", "ats_away_units_capped",
-    "ml_home_result", "ml_home_units_uncapped", "ml_home_units_capped",
-    "ml_away_result", "ml_away_units_uncapped", "ml_away_units_capped",
-    "ou_over_result", "ou_over_units_uncapped", "ou_over_units_capped",
-    "ou_under_result", "ou_under_units_uncapped", "ou_under_units_capped",
+    "line_basis", "dk_spread_home", "dk_total",
+    "ats_home_result", "ats_away_result",
+    "ml_home_result", "ml_away_result",
+    "ou_over_result", "ou_under_result",
     "home_rest_days", "away_rest_days", "is_primetime", "home_role", "away_role",
-    "line_source",
-)
-
-# The lock-time shop. ON CONFLICT DO NOTHING keeps a book already stored
-# at this lock. A spread or total whose DraftKings number moved, and an
-# h2h market whose DraftKings snapshot moved, are deleted first
-# (shop_markets_to_replace) so the insert writes the new lock.
-SHOP_COLUMNS = (
-    "canonical_key", "sport", "season", "week", "lock_window_hours",
-    "market", "bookmaker", "line_source", "snapshot_at", "point",
-    "dk_point", "price_home", "price_away",
 )
 
 
@@ -152,14 +88,13 @@ def _games(conn, season: int) -> list[dict]:
     return out
 
 
-def _as_quotes(rows, source: str) -> list[dict]:
+def _as_quotes(rows) -> list[dict]:
     out = []
     for row in rows:
         out.append({
             "game_id": row[0], "bookmaker": row[1], "market": row[2],
             "snapshot_at": row[3], "commence_time": row[4],
-            "point": row[5], "price_home": row[6], "price_away": row[7],
-            "line_source": source,
+            "point": row[5],
         })
     return out
 
@@ -173,65 +108,9 @@ def _ids_for(game_id: str) -> tuple[str, str] | None:
 
 def _dk_quotes(conn, ids: tuple[str, str]) -> list[dict]:
     bare, prefixed = ids
-    history = _as_quotes(_fetch(
-        conn, _QUOTE_FROM_HISTORY, (bare, prefixed, LOCK_WINDOW_HOURS)),
-        "nfl_odds_history")
-    odds = _as_quotes(_fetch(
-        conn, _QUOTE_FROM_ODDS, (bare, prefixed, LOCK_WINDOW_HOURS)),
-        "odds")
+    history = _as_quotes(_fetch(conn, _QUOTE_FROM_HISTORY, (bare, prefixed)))
+    odds = _as_quotes(_fetch(conn, _QUOTE_FROM_ODDS, (bare, prefixed)))
     return history + odds
-
-
-def _shop_quotes(conn, ids: tuple[str, str], windows: list[tuple]) -> list[dict]:
-    """Non-DraftKings rows inside the lock slices. No slices, no read.
-
-    Stored as reference. The grade does not read these rows.
-    """
-    if not windows:
-        return []
-    bare, prefixed = ids
-    clauses = []
-    params: list = [bare, prefixed]
-    for market, floor, lock_at in windows:
-        clauses.append(
-            "(market = %s AND snapshot_at >= %s AND snapshot_at <= %s)")
-        params.extend([market, floor, lock_at])
-    arms = " OR ".join(clauses)
-    history_sql = f"""
-        SELECT game_id, bookmaker, market, snapshot_at, commence_time,
-               point, price_home, price_away
-          FROM nfl_odds_history
-         WHERE game_id IN (%s, %s)
-           AND bookmaker <> 'draftkings'
-           AND commence_time IS NOT NULL
-           AND snapshot_at <= commence_time
-           AND ({arms})
-    """
-    odds_sql = f"""
-        SELECT o.game_id, o.bookmaker, o.market,
-               {_ODDS_SNAPSHOT} AS snapshot_at,
-               g.commence_time::timestamptz AS commence_time,
-               CASE o.market
-                 WHEN 'spreads' THEN o.spread_home
-                 WHEN 'totals' THEN o.total_line
-                 ELSE NULL
-               END AS point,
-               CASE WHEN o.market = 'totals' THEN o.over_price ELSE o.home_price END
-                 AS price_home,
-               CASE WHEN o.market = 'totals' THEN o.under_price ELSE o.away_price END
-                 AS price_away
-          FROM odds o
-          JOIN games g ON g.game_id = o.game_id
-         WHERE o.game_id IN (%s, %s)
-           AND o.bookmaker <> 'draftkings'
-           AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
-           AND g.commence_time IS NOT NULL
-           AND {_ODDS_SNAPSHOT} IS NOT NULL
-           AND ({arms.replace("snapshot_at", _ODDS_SNAPSHOT)})
-           AND {_ODDS_SNAPSHOT} <= g.commence_time::timestamptz
-    """
-    return (_as_quotes(_fetch(conn, history_sql, params), "nfl_odds_history")
-            + _as_quotes(_fetch(conn, odds_sql, params), "odds"))
 
 
 def _played(games: list[dict]) -> dict:
@@ -247,58 +126,21 @@ def _played(games: list[dict]) -> dict:
     return played
 
 
-def _load_shop(conn, season: int) -> dict[str, list[dict]]:
-    rows = _fetch(conn, """
-        SELECT canonical_key, lock_window_hours, market, bookmaker,
-               point, dk_point, price_home, price_away, line_source,
-               snapshot_at
-          FROM byom_lock_shop
-         WHERE season = %s AND sport = %s
-    """, (season, SPORT))
-    out: dict[str, list[dict]] = {}
-    for row in rows:
-        out.setdefault(row[0], []).append({
-            "canonical_key": row[0],
-            "lock_window_hours": row[1],
-            "market": row[2],
-            "bookmaker": row[3],
-            "point": row[4],
-            "dk_point": row[5],
-            "price_home": row[6],
-            "price_away": row[7],
-            "line_source": row[8],
-            "snapshot_at": row[9],
-        })
-    return out
-
-
-def season_facts_and_shop(conn, season: int):
-    """Facts this season would write, and the shop rows from the quotes
-    still on hand. No INSERT. The grade is DraftKings' own price on the
-    lock snapshot. Stored shop rows are not the grade."""
+def facts_for_season(conn, season: int) -> list[dict]:
+    """The facts this season would write. No INSERT."""
     if season < DK_HISTORY_START_SEASON:
-        return [], []
+        return []
     games = _games(conn, season)
     played = _played(games)
     facts = []
-    shops = []
     for game in games:
         ids = _ids_for(game["game_id"])
         if ids is None:
             continue
         quotes = _dk_quotes(conn, ids)
-        quotes += _shop_quotes(conn, ids, shop_windows(quotes))
-        fact, fresh = capture_game(game, quotes, played)
-        if fact is None:
-            continue
-        facts.append(fact)
-        shops.extend(fresh)
-    return facts, shops
-
-
-def facts_for_season(conn, season: int) -> list[dict]:
-    """The facts this season would write. No INSERT."""
-    facts, _shops = season_facts_and_shop(conn, season)
+        fact = assemble_game(game, quotes, played)
+        if fact is not None:
+            facts.append(fact)
     return facts
 
 
@@ -319,53 +161,16 @@ def _upsert(conn, facts: list[dict]) -> int:
     return len(values)
 
 
-def _write_shop(conn, season: int, shops: list[dict], stored: dict) -> int:
-    """Insert shop rows. A book already captured at this lock stays.
-
-    A spread or total whose DraftKings number moved, and an h2h market
-    whose DraftKings snapshot moved, are the previous lock. A stored
-    DraftKings h2h row is also the previous lock when the fresh rows
-    have no DraftKings quote. Those rows are replaced by this one.
-    The shop is reference. It does not set the grade.
-    """
-    if not shops:
-        return 0
-    for key, window, market in shop_markets_to_replace(shops, stored):
-        conn.execute("""
-            DELETE FROM byom_lock_shop
-             WHERE canonical_key = %s
-               AND lock_window_hours = %s
-               AND market = %s
-        """, (key, window, market))
-    cols = ", ".join(SHOP_COLUMNS)
-    placeholders = ", ".join(["%s"] * len(SHOP_COLUMNS))
-    sql = (
-        f"INSERT INTO byom_lock_shop ({cols}) VALUES ({placeholders}) "
-        f"ON CONFLICT (canonical_key, lock_window_hours, market, bookmaker) "
-        f"DO NOTHING"
-    )
-    values = [tuple(row[col] for col in SHOP_COLUMNS) for row in shops]
-    conn.executemany(sql, values)
-    return len(values)
-
-
 def build_season(conn, season: int, apply: bool = False) -> dict:
     """One season. apply=False writes nothing."""
     if season < DK_HISTORY_START_SEASON:
         return {
-            "season": season, "facts": 0, "written": 0, "shop": 0,
+            "season": season, "facts": 0, "written": 0,
             "skipped": "before DraftKings history",
         }
-    facts, shops = season_facts_and_shop(conn, season)
-    written = 0
-    if apply:
-        stored = _load_shop(conn, season)
-        _write_shop(conn, season, shops, stored)
-        written = _upsert(conn, facts)
-    return {
-        "season": season, "facts": len(facts), "written": written,
-        "shop": len(shops) if apply else 0,
-    }
+    facts = facts_for_season(conn, season)
+    written = _upsert(conn, facts) if apply else 0
+    return {"season": season, "facts": len(facts), "written": written}
 
 
 def seasons_in_games(conn) -> list[int]:
@@ -386,44 +191,3 @@ def build_seasons(conn, seasons, apply: bool = False) -> dict:
     if apply:
         conn.commit()
     return {"apply": apply, "seasons": built}
-
-
-def warn_if_shop_apply_window_missed(conn, today=None) -> str | None:
-    """Warn when the first shop apply can no longer see 2026-10-16 odds.
-
-    The check is the America/New_York date. On or after
-    SHOP_FIRST_APPLY_BEFORE, an empty byom_lock_shop means lock quotes
-    that lived only in odds are gone. A missing table counts as no rows
-    and does not raise. Returns the warning text, or None. Does not
-    write and does not enqueue the job.
-    """
-    if today is None:
-        today = datetime.now(ZoneInfo("America/New_York")).date()
-    elif isinstance(today, datetime):
-        today = today.astimezone(ZoneInfo("America/New_York")).date()
-    elif not isinstance(today, date):
-        today = date.fromisoformat(str(today))
-    cutoff = date.fromisoformat(SHOP_FIRST_APPLY_BEFORE)
-    if today < cutoff:
-        return None
-    # Two statements. A count in the same query as to_regclass is planned
-    # against the table even when that branch is not taken, and a missing
-    # table then raises.
-    cur = conn.execute("SELECT to_regclass('public.byom_lock_shop')")
-    row = cur.fetchone()
-    if row is None or row[0] is None:
-        count = None
-    else:
-        cur = conn.execute("SELECT count(*) FROM public.byom_lock_shop")
-        counted = cur.fetchone()
-        count = 0 if counted is None else int(counted[0])
-    if count is not None and count > 0:
-        return None
-    message = (
-        f"byom_lock_shop has no rows on or after {SHOP_FIRST_APPLY_BEFORE}. "
-        "Lock quotes that lived only in odds are gone after that prune. "
-        "Merging the migration only creates the empty table. "
-        "The first shop apply is a separate production write."
-    )
-    logging.getLogger(__name__).warning(message)
-    return message

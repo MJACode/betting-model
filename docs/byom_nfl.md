@@ -14,90 +14,42 @@ changes a live model.
 
 DraftKings rows in `nfl_odds_history` start at the 2020 season (measured:
 `min(season)` where `bookmaker = 'draftkings'` is 2020). The 2015–2019
-schedule in `games` is not built. `line_source` names the table the lock
-quote came from.
+schedule in `games` is not built.
 
-The lock columns hold the first DraftKings pre-game snapshot at or under a
-120 hour lead, and a second snapshot at or under 24 hours. **Both numbers
-are UNCONFIRMED placeholders.** They are columns the builder fills, not
-check constraints. The grade is DraftKings' own price on that 120h lock
-snapshot. `grade_*_book` is `draftkings`. The closing DraftKings price is
-stored and is not the grade. Each result stores two unit columns.
-`*_units_uncapped` is the 1u-to-win result with no risk ceiling.
-`*_units_capped` is the result after a 3-unit risk ceiling: risk above 3
-is cut to 3, and a win is recomputed from that risk. A -400 loss is -4
-uncapped and -3 capped. A missing price leaves both NULL. Pushes and ties
-are stored. Both columns are results. There is no stake column.
+`line_basis` is `DraftKings line at game start`: the last DraftKings
+snapshot at or before kickoff. That label is stored on the row and is
+what a screen shows. The line is not a filter and not a reason to skip
+a game. A moneyline result is the score only. There is no price column
+and no unit column. Pushes and ties are stored.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
-empty until someone runs the builder with `--apply`. That job is
-`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false.
-`jobs/declared_jobs.json` lists it as `byom-nfl-game-facts-shop` with
-`enabled` false and `apply` false. `sync_declared_jobs` does not enqueue
-`enabled: false`, so a merge does not backfill production. Turning it on
-is the owner's call, and `apply` has to be set true in that same change.
+empty until someone runs a builder with `--apply`. The game job is
+`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false,
+and that job is not in `jobs/declared_jobs.json`, so a merge does not
+backfill production.
 
-The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
-`byom/constants.py` holds `LOCK_WINDOW_HOURS` (120) and
-`NEAR_LOCK_WINDOW_HOURS` (24). Both are UNCONFIRMED. Seasons before
-`DK_HISTORY_START_SEASON` (2020) are refused. The grade is DraftKings'
-own price on the lock snapshot. `grade_*_book` is `draftkings`. Another
-book's price is not the grade. History is preferred over `odds` when
-both have a lock for that market. `line_source` records which table.
-Closing prices are stored and are not the grade. The builder reads one
-game at a time: DraftKings inside the lock window for the grade, then
-other books only inside that game's shop slices. Those rows are stored
-reference and are not the grade. A season is not loaded in one fetch.
-`byom_game_facts_units_2026_10_16.sql` renames the unit columns. It is
-registered and was not applied.
-
-`byom_lock_shop` stores every book's quote at DraftKings' line at the
-grade lock and at the near lock, inside that 30-minute lag, including
-Pinnacle. The app does not read it. The migration revokes anon and
-authenticated and enables RLS with no policy. The worker owns the table.
-The first capture is kept. A rebuild does not grade from those rows.
-The grade stays DraftKings' own price on the lock snapshot, so a later
-prune of non-DraftKings quotes does not change it. A spread or
-total whose DraftKings number has moved replaces that market. h2h has no
-number: it is replaced when the stored DraftKings `snapshot_at` is not
-the lock being written, when the stored rows have no DraftKings row, or
-when a stored DraftKings row is still there and the fresh rows have no
-DraftKings row. Another book's timestamp may be earlier inside the lag
-and is not the check. The shop is reference. It does not set the grade.
-`data/migrations/byom_lock_shop_2026_10_16.sql` is registered for the
-worker and was not applied by the change that added it. The windows are
-UNCONFIRMED and are not check constraints.
-
-Once the owner sets the declared job `enabled` and `apply` true, the
-cadence is daily, before `prune-odds`. `data/prune_odds.py` deletes
-non-DraftKings rows from `odds` and `player_prop_odds` for games before
-today, keeping the opener and the close. It does not delete from
-`nfl_odds_history`. A lock quote that lives only in `odds` is neither
-the opener nor the close. The first apply has to land before
-`2026-10-17`, the prune of games dated `2026-10-16`.
-`byom.constants.SHOP_FIRST_APPLY_BEFORE` is that date. Merging the
-migration only creates the empty table. The job logs a warning when the
-America/New_York date is on or after that date and `byom_lock_shop` has
-no rows. The first apply is a separate production write and was not run.
+The game builder is `byom/load.py` (`scripts/byom_game_facts.py` for a
+dry run). Seasons before `DK_HISTORY_START_SEASON` (2020) are refused.
+For each game it takes the latest DraftKings spread and the latest
+DraftKings total whose snapshot is at or before kickoff, from
+`nfl_odds_history` and `odds` together. That number is the line.
+`line_basis` is `DraftKings line at game start` on every built row,
+including a row whose spread and total are null. Moneyline is graded
+from the score and does not read a price. The builder reads one game
+at a time. Other books are not read. A season is not loaded in one fetch.
 
 ## Prop facts
 
-`byom_prop_facts` is one standard prop at the DraftKings lock.
+`byom_prop_facts` is one standard prop at the DraftKings line at game
+start: the last DraftKings snapshot at or before kickoff.
 `player_prop_odds` is the source, from `2023-09-01`
-(`PROP_HISTORY_START_DATE`). Seasons before 2023 are refused. The lock is
-the first DraftKings snapshot at or under `PROP_LOCK_WINDOW_HOURS` (24).
-**That window is UNCONFIRMED.** It is not the 120h game lock and it is
-not a check constraint. A market key ending in `_alternate` is an alt
-ladder and is not built. The grade is DraftKings' own price on that
-lock snapshot. `grade_*_book` is `draftkings`. Another book's price is
-not the grade. The close on a row is the latest pre-game quote on that
-row's line. A later quote on a different number is a different row.
-Closing prices are stored and are not the grade. A rebuild deletes that
+(`PROP_HISTORY_START_DATE`). Seasons before 2023 are refused. The same
+`line_basis` label is stored on the row. The line is not a filter. A
+market key ending in `_alternate` is an alt ladder and is not built.
+There is no price column and no unit column. A rebuild deletes that
 game's prop rows in the same transaction, then inserts the rows this
-window produced.
-Each side stores `*_units_uncapped` and `*_units_capped`. Both are
-results. There is no stake column.
+pass produced.
 
 The stat is `nfl_player_game_log`. `log_status` says which rule fired:
 
@@ -114,12 +66,10 @@ Anytime TD is `rushing_tds + receiving_tds`. Passing TDs are
 file, so a score that is only a return grades as a loss. The name match
 does not expand nicknames, so Josh and Joshua do not meet.
 
-`byom_prop_facts_units_2026_10_16.sql` adds the labelled unit columns and
-`log_status`, and drops `over_units` / `under_units`. It is registered
-and was not applied. The job `byom_prop_facts` defaults `apply` to false.
-`jobs/declared_jobs.json` lists `byom-nfl-prop-facts` with `enabled`
-false and `apply` false, so a merge does not enqueue a writer. The
-builder reads one game at a time.
+`log_status` is on the facts schema. The job `byom_prop_facts` defaults
+`apply` to false. `jobs/declared_jobs.json` lists `byom-nfl-prop-facts`
+with `enabled` false and `apply` false, so a merge does not enqueue a
+writer. The builder reads one game at a time.
 
 ## Backtest
 
@@ -130,9 +80,8 @@ August stay on the previous year's label. A caller can pass an older
 season. Filters are side (home/away), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
 is left out. There is no spread-size, price, or line filter. Each
-market row sums `units_uncapped` and `units_capped`. Those columns are
-the stored DraftKings-lock results. There is no stake and no
-recommended stake.
+market row counts wins, losses, pushes, and ties. There is no unit
+column and no stake.
 Game markets include both sides. Prop markets include the over and the
 under. An empty filter object is the whole season. It is not a model
 record, and the UI must not present that unfiltered result as one.
