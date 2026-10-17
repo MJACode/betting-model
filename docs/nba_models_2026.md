@@ -574,3 +574,52 @@ changed.**
   produced a number for. The placebo still moves the flag across every game on the date.
 - **Lab definition recorded:** F4's "expectation" for opponent three-point and free-throw
   percentage is the league's rate so far that season, from games final before the date.
+
+### 6.6 Results (graded 2026-10-17): every family closed for 2026-27
+
+All 422 cells were graded walk-forward at bought prices and stored before any return was read
+(`nba_game2_cells`, run `2026-10-17-full`). The pass/fail script then ran once on each
+multiple-testing basis: **0 of 422 pass on either**, so the open question in §6.4 changes
+nothing.
+
+- 113 cells are positive on the choosing seasons, 91 on 2025-26, and 32 on both.
+- 342 cells have ≥ 200 bets on the choosing seasons. 4 of them have a 90% interval above zero,
+  all in F4.
+- 247 cells have ≥ 200 bets in 2025-26. None has a 90% interval above zero there.
+
+The nearest cell in each family (most bets-backed: highest lower interval bound among cells with
+≥ 200 choosing-season bets, else the best there is). Units are one unit to win.
+
+| Family | Nearest cell | Choosing seasons: bets, units, ROI (90% CI) | 2025-26: bets, units, ROI | Bars failed |
+|---|---|---|---|---|
+| F1 player strength | moneyline away, morning, EV ≥ 0.02 | 2,339, +38.2, +2.8% (−1.5..+7.2) | 484, −5.1, −2.0% | 5, 6, 11, confirm, BH |
+| F1b predicted move | total under, morning, move ≥ 0.5 | 115, +1.0, +0.8% (−13.6..+15.3) | 6, −0.2 | 6, 7, 8, 11, confirm, BH |
+| F2 spread vs moneyline | underdog, consensus, morning, EV ≥ 0.01 | 1,060, +22.6, +9.0% (−1.9..+19.3) | 119, −5.1, −25.0% | 5, 6, 11, confirm, BH |
+| F3 fade the move | total, 45–75 min, move ≥ 0.5 | 4,399, −120.2, −2.5% (−4.9..−0.3) | 1,105, −54.7, −4.6% | 5, 6, 7, 8, 10, confirm, BH |
+| F4 shooting luck | over, morning, gap ≥ 3 | 426, +49.4, +10.7% (+3.2..+18.2) | 81, +7.6, +8.5% | 11, confirm, BH |
+| F5 absences | home spread, 3–6 h, gap ≥ 3 | 381, +32.9, +8.0% (−0.3..+15.9) | 131, +11.7, +8.3% | 6, 7, 11, confirm, BH |
+| F6a overtime tail | over, spread within 4 | 1,777, −83.4, −4.3% (−7.9..−0.6) | 403, −47.5, −10.9% | every bar |
+| F6b props summed | away spread, gap ≥ 2 | 1,034, −11.5, −1.0% (−5.8..+3.9) | 510, −7.9, −1.5% | 5, 6, 7, 8, 10, confirm, BH |
+| F6c motivation | against an eliminated team, morning | 282, +18.5, +6.0% (−3.1..+14.7) | 89, +7.1, +7.3% | 5, 6, 11, confirm, BH |
+| F6d one book vs itself | moneyline home, 60–180 min, EV ≥ 0.01 | 1,156, +5.0, +0.4% (−4.6..+5.4) | 266, −27.4, −8.5% | 5, 6, 8, 11, confirm, BH |
+
+**The one near miss is F4 overs**: betting the over in the morning when the luck-adjusted
+projection is at least 3 points above the raw one.
+
+- **What it clears:** positive in every choosing season (+15.3%, +5.3%, +2.5%, +20.6%), a
+  plateau, both halves, the blind over and the placebo.
+- **Why it fails:**
+  - **Closing-line value:** the median bet is 2.4% worse than Pinnacle's no-vig close. The
+    market moves away from these bets, not toward them.
+  - **2025-26 has only 81 bets** (+7.6 units), against the 200 the confirmation needs.
+  - **2020-21 lost** 8.5% on 103 bets.
+- **Verdict:** closed by §1's kill criterion, because no cut passes bars 4–11.
+
+**A defect found after the results, fixed, with the outcome unchanged.** Six cells with 1–14
+bets that all won had a resampled p of exactly 0 and cleared the correction alone; every one
+fails the 200-bet bar. Such a cell now enters the correction at p = 1. That only makes the bar
+stricter; it is still 0 of 422.
+
+**What comes next is 2026-27.** It is a season nobody has looked at, with every price move kept
+from opening night (#985). The grids above, and F4's overs in particular, can be re-graded on it
+with the same harness and no new choices.
