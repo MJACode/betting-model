@@ -331,10 +331,12 @@ def pick_rows(bets: list[tl.TotalLuckBet], games: dict[str, dict],
         if b.price < (tl.config.min_odds_for(MODEL_ID) or -1e9):
             refused[b.game_id] = f"below_price_floor:{b.price:+.0f}"
             continue
-        # p_model is P(the over WINS), pushes in its denominator; a push on a
-        # whole-number total returns the stake, so the EV the floor reads
-        # counts it back (models/nba_total_luck.py, THE PROBABILITY).
-        ev = gate(MODEL_ID, b.p_model, b.price, p_push=b.p_push)
+        # The floor reads p x decimal - 1, a push scored as a loss: the same
+        # quantity every publisher filters on (decision_edge = p - implied,
+        # which is >= 0 exactly when this is). Counting a push back here would
+        # write a BET that Discord, push and the app all drop (review,
+        # 2026-10-17; models/nba_total_luck.py, THE PROBABILITY).
+        ev = gate(MODEL_ID, b.p_model, b.price)
         if not ev.clears:
             logger.info(f"{MODEL_ID}: {ev.reason} - dropped {b.game_id} over @{b.book}")
             refused[b.game_id] = ev.reason

@@ -616,7 +616,7 @@ everything it failed are `docs/nba_models_2026.md` 6.6 and 6.7).
 |---|---|---|
 | the cut | luck-adjusted minus raw projected total ≥ 3.0 points; overs only | `models/nba_total_luck.GAP_CUT` |
 | prob / edge cut | 0.0 / 0.0 — the publishers show every bet the card writes | `ACTION_THRESHOLDS`, both threshold dicts |
-| EV floor | 0.00, on its own probability (below), with a push refunded; not a second cut: it removes none of the 508 graded bets | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY`, `models/honest_ev.gate` (`p_push`) |
+| EV floor | 0.00, on its own probability (below), a push scored as a loss (the publishers' own test); not a second cut: it removes 1 of the 508 graded bets | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY`, `models/honest_ev.gate` |
 | price floor | -200, pinned, and passed to the offer choice itself | `MODEL_MIN_ODDS` |
 | the offer | the over at the deciding book with the best EV under the market's fair line (Pinnacle's no-vig, else the deciding books' median), priced through the empirical spread of final totals around Pinnacle's close on every earlier season | `scripts/nba_game_harness` (one copy) + the artifact |
 | early season | both teams 10+ games: the first bets come in mid-November | `models/nba_total_luck.MIN_GAMES` |
@@ -653,17 +653,15 @@ against a mean fair chance of 0.5050, so **+0.0659** for 2026-27. Fitted the
 same way on the seasons before each, the uplift was +0.085 (2022-23), +0.070,
 +0.054 and +0.068 (2025-26).
 
-**The EV the floor reads refunds a push.** The probability is the chance the
-over WINS, with pushes in its denominator, so the EV is p x decimal - 1 +
-P(push): a whole-number total returns the stake on a push (204 of the 508
-graded bets were on whole numbers, P(push) 0.023 on average). On the 508 graded
-bets at the 2026-27 uplift that EV is +0.011 at the smallest, +0.038 next and
-+0.100 at the median, so the 0.00 floor removes none of them. Until 2026-10-17
-the card counted a push as a loss (p x decimal - 1), which put one bet under
-zero and refused it: 2023-01-24 DEN at NOP, FanDuel over 232.0 at -110, -0.012
-that way and +0.011 with its 0.024 chance of a push refunded. No publishing
-surface disagrees: Discord's "good to" price applies an EV floor only when it is
-above 0.
+**The EV the floor reads scores a push as a loss** (p x decimal - 1). That is
+the quantity every publisher filters on: the stored decision edge, p minus the
+implied probability, is at least 0 exactly when it is. A review round tried
+refunding the push (a whole-number total returns the stake), and the final
+review measured the result: a bet the card wrote as a BET that Discord, push and
+the app would all have dropped. So the refund was taken out. On the 508 graded
+bets at the 2026-27 uplift the floor removes exactly one: 2023-01-24 DEN at NOP,
+FanDuel over 232.0 at -110, -0.012 (+0.011 with its 0.024 chance of a push
+refunded). The next smallest is +0.030 and the median +0.090.
 
 **Prices it lays:** min -115, 5th percentile -114, median -110, 95th -105, max
 +100; 1% plus money. Totals bet from 198.5 to 253.5 (median 225.5).
@@ -680,8 +678,12 @@ afternoon or evening; if that tick is skipped or fails, five more follow. Until
 ten minutes made the scheduler skip the next, and 27 of the 504 evening ticks
 over 2026-10-03..16 never started (production `pipeline_runs`, read
 2026-10-17), so those games would have gone unpriced. The research found the
-edge at the morning fetch too (+10.3%) and at 45-75 minutes (+9.7% on 506 bets),
-so a decision 66 minutes out is inside the evidence. A fetch is one bulk NBA call
+edge at 60 minutes (+10.0% on 508 bets, the replay) and on the newest fetch 61-180
+minutes out, which lands at 90 or 120 (+10.9% on 508 bets, 5 of 5 seasons positive:
+`python -m scripts.nba_total_luck_replay --window 61 180`), and at the morning fetch
+(+10.3%). A decision 66 minutes out sits between two graded times that both show it.
+(The 45-75-minute diagnostic is not evidence for 66 minutes: the archive holds no
+fetch between 61 and 75 minutes, so its decisions are the same 60-minute fetch.) A fetch is one bulk NBA call
 for three markets at the line-shop books, about 3 credits by the Odds API's
 markets x regions rule (not measured on this job), about one per distinct tip
 time a day.

@@ -69,9 +69,15 @@ THE RULE, per regular-season game:
      tips), so a pass that never started lost the game: 27 of the 504 evening
      ticks over 2026-10-03..16 never started (production pipeline_runs, read
      2026-10-17). The lab's C fetch sat at exactly 60 minutes on 609 of
-     611 bets; the same cell decided 45-75 minutes out (decision point D) made
-     506 bets at +9.7% against C's +10.1% (docs/nba_models_2026.md 6.7), so a
-     fetch 66 minutes out stays inside the graded effect. Each game is decided
+     611 bets; the archive holds no fetch between 61 and 75 minutes, so the 45-75
+     window (decision point D) is the same 60-minute fetch and is not evidence
+     for 66 minutes. The evidence is the bracket around it, each the shipped
+     rule run by `scripts/nba_total_luck_replay.py`, 2021-22..2025-26 pooled:
+     at 60 minutes (C) 508 bets, +55.6 units, +10.0% (the replay); on the
+     newest fetch 61-180 minutes out, which lands at 90 or 120 (`--window 61
+     180`), 508 bets, +59.9 units, +10.9%, 5 of 5 seasons positive; and the
+     morning fetch, +10.3% (docs/nba_models_2026.md 6.7). A fetch 66 minutes
+     out sits between two graded times that both show the edge. Each game is decided
      ONCE (the card's ledger); a later tick, a moved line or a better price
      writes nothing.
   5. THE OFFER (exactly the harness's): at decision time T, each book's newest
@@ -94,14 +100,15 @@ pushes counted in the denominator. For 2026-27 it is fitted on 2021-22 through
 0.5050, so the uplift is +0.0659 (scripts/nba_total_luck_build.py stores both
 per season). The model decides on that number (config.MODELS_ON_OWN_PROBABILITY):
 it has no record, so a promoted map would be the offset borrowed from other
-models. Its EV floor (config.MODEL_OWN_EV_FLOOR, 0.00) is applied to the EV
-WITH THE PUSH REFUNDED (p x decimal - 1 + P(push), the card's gate), because
-the probability counts pushes in its denominator and a push on a whole-number
-total returns the stake. On the 508 graded bets, at the 2026-27 uplift, that
-EV is +0.011 at the smallest, +0.038 at the second smallest and +0.100 at the
-median: the floor removes none of them. Counted the other way (a push as a
-loss) one bet fell under zero, 2023-01-24 DEN at NOP, over 232.0 at -110:
--0.012 only because its 0.024 chance of a push was scored as a loss.
+models. Its EV floor (config.MODEL_OWN_EV_FLOOR, 0.00) is applied to p x
+decimal - 1, a push scored as a loss. That is deliberately the quantity every
+publisher filters on: decision_edge = p - implied is >= 0 exactly when it is,
+so the card never writes a BET that Discord, push and the app would all drop.
+(Refunding the push here, as one review round did, broke that agreement for a
+whole-number total.) On the 508 graded bets at the 2026-27 uplift it removes
+exactly one: 2023-01-24 DEN at NOP, FanDuel over 232.0 at -110, -0.012 (with
+its 0.024 chance of a push refunded it would have been +0.011). The next
+smallest is +0.030 and the median +0.090.
 
 THE ARTIFACT (models/saved/, ARTIFACT_PATH): the residual sample (final total
 minus Pinnacle's closing total, per season, 2020-21 to 2025-26) and the

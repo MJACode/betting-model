@@ -570,11 +570,11 @@ def test_the_artifact_prices_each_season_from_the_seasons_before_it(art):
 
 def test_the_ev_floor_is_not_a_second_cut():
     """RULE (CLAUDE.md 1b): the model carries its own EV floor, and it is not a
-    second cut. The EV the floor reads refunds a push (the gate's p_push). On
-    the 508 graded bets at the 2026-27 uplift that EV is +0.011 at the
-    smallest, +0.038 next, +0.100 at the median, so 0.00 removes none."""
+    second cut. On the 508 graded bets at the 2026-27 uplift the EV (a push
+    scored as a loss) is -0.012 at the smallest, +0.030 next, +0.090 at the
+    median: 0.00 removes one bet and sits under every other."""
     floor = config.min_ev_for(tl.MODEL_ID)
-    assert floor == 0.0 and floor < 0.011
+    assert floor == 0.0 and floor < 0.030
     assert tl.MODEL_ID in config.MODEL_OWN_EV_FLOOR
     assert config.ACTION_THRESHOLDS[tl.MODEL_ID]["min_edge"] <= floor
     assert config.ACTION_THRESHOLDS[tl.MODEL_ID]["min_prob"] == 0.0
@@ -835,29 +835,30 @@ def test_a_bet_under_the_ev_floor_is_refused():
     assert rows == [] and refused["NBA_2026-11-05_AWY_HOM"].startswith("ev_below_floor")
 
 
-def test_the_ev_floor_refunds_a_push():
-    """RULE: model_probability is P(the over WINS), pushes in its denominator,
-    so the EV the floor reads is p x decimal - 1 + P(push). The graded bet
-    this decides: 2023-01-24 DEN at NOP, over 232.0 at -110, P(push) 0.024:
-    -0.012 with the push counted as a loss, +0.011 refunded. Here: p x decimal
-    - 1 = -0.010 with a 0.030 chance of a push."""
+def test_the_card_writes_only_what_every_publisher_shows():
+    """RULE (CLAUDE.md 1b: the app, Discord and push show the same picks): the
+    card's EV check is the publishers' own, decision_edge >= the model's
+    min_edge. A whole-number total whose EV is negative with the push scored
+    as a loss is refused, even with a chance of a push; every row it does write
+    carries decision_edge >= 0. Watched failing with the push refunded."""
     from scripts import nba_total_luck_card as card
     p_model = 0.99 / (1 + 100 / 110)                     # p x decimal - 1 = -0.010
     whole = _bet(p_fair=p_model - 0.0659)
     whole = tl.TotalLuckBet(**{**whole.__dict__, "line": 224.0, "p_push": 0.030})
     rows, refused = card.pick_rows([whole], GAMES, 1000.0)
-    assert refused == {} and len(rows) == 1, refused
-    half = tl.TotalLuckBet(**{**whole.__dict__, "line": 224.5, "p_push": 0.0})
-    rows, refused = card.pick_rows([half], GAMES, 1000.0)
     assert rows == [] and refused["NBA_2026-11-05_AWY_HOM"].startswith("ev_below_floor")
+    good = tl.TotalLuckBet(**{**whole.__dict__, "p_model": 0.56})
+    rows, refused = card.pick_rows([good], GAMES, 1000.0)
+    assert refused == {} and len(rows) == 1
+    floor = config.ACTION_THRESHOLDS[tl.MODEL_ID]["min_edge"]
+    assert all(r["decision_edge"] >= floor for r in rows)
 
 
 def test_the_shared_gate_is_unchanged_for_every_other_caller():
     from models.honest_ev import gate
     g = gate("nhl_over_under", 0.55, -110)
     assert g.ev == pytest.approx(config.expected_value(g.cal_prob, -110))
-    assert gate("nhl_over_under", 0.55, -110, p_push=0.02).ev == pytest.approx(g.ev + 0.02)
-    assert gate("nhl_over_under", 0.55, None, p_push=0.02).ev is None
+    assert gate("nhl_over_under", 0.55, None).ev is None
 
 
 @pytest.mark.parametrize("paused", [False, True])

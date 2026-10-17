@@ -179,11 +179,59 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
     }
 
 
+def grade_window(ld: dict, season: int, lo: float, hi: float, art: dict | None = None) -> dict:
+    """The shipped rule, decided on the newest fetch lo-hi minutes before tip,
+    graded on the final scores: how the edge holds at decision times other
+    than the lab's C (whose fetches sit at 60 minutes)."""
+    data, box = ld["data"], ld["box"]
+    art = art or tl.load_artifact()
+    games = data.games[data.games["season"] == season]
+    f = data.fetches[(data.fetches["lead_min"] >= lo) & (data.fetches["lead_min"] <= hi)]
+    times = (f.sort_values(["game_id", "fetch_at"]).drop_duplicates("game_id", keep="last")
+              .rename(columns={"fetch_at": "T"})[["game_id", "T", "lead_min"]])
+    times = times[times["game_id"].isin(set(games["game_id"]))]
+    quotes = tl.quote_frame(ld["rows"], games)
+    targets = games[games["game_id"].isin(set(times["game_id"]))][
+        ["game_id", "season", "game_date", "home_team", "away_team"]]
+    from scripts.nba_total_luck_card import load_season
+    final, season_box, sched = load_season(FrameConn(ld["games"], ld["schedule"], box),
+                                           season, "9999-12-31")
+    prior = [s for s in art["bucket"] if int(s) < season]
+    bets, _, _ = tl.decide(targets, quotes, season_box, final, times, art, scheduled=sched,
+                           bucket_uplift=None if prior else 0.0)
+    tips = games.set_index("game_id")["tip"]
+    b = pd.DataFrame([{"game_id": x.game_id, "season": season, "game_date": None,
+                       "market": tl.MARKET, "side": tl.SIDE, "line": x.line, "price": x.price,
+                       "book": x.book,
+                       "lead_min": (tips[x.game_id] - x.fetch_at).total_seconds() / 60.0}
+                      for x in bets])
+    if b.empty:
+        return {"season": season, "bets": 0}
+    b["game_date"] = b["game_id"].map(games.set_index("game_id")["game_date"])
+    g = H.grade(b, data.games)
+    return {"season": season, "bets": int(len(g)), "units": round(float(g["units"].sum()), 2),
+            "risk": round(float(g["risk"].sum()), 2), "roi": round(H.roi(g), 4),
+            "median_lead_min": float(g["lead_min"].median())}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--seasons", type=int, nargs="+", default=list(LAB_SEASONS))
+    ap.add_argument("--window", type=float, nargs=2, metavar=("LO", "HI"),
+                    help="grade the shipped rule on the newest fetch LO-HI minutes before tip")
     a = ap.parse_args()
     ld = load()
+    if a.window:
+        rows = [grade_window(ld, s, *a.window) for s in a.seasons]
+        for r in rows:
+            print(r)
+        graded = [r for r in rows if r.get("bets") and r["season"] != H.REGIME]
+        n = sum(r["bets"] for r in graded)
+        u = sum(r["units"] for r in graded)
+        risk = sum(r["risk"] for r in graded)
+        print(f"pooled 2021-22..2025-26: {n} bets, {u:+.1f} units, {100 * u / risk:+.1f}%, "
+              f"{sum(1 for r in graded if r['units'] > 0)} of {len(graded)} seasons positive")
+        return
     for s in a.seasons:
         r = replay(ld, s)
         print({k: v for k, v in r.items()})

@@ -60,16 +60,9 @@ def honest_probability(model_id: str, prob: float) -> float:
     return float(prob) if cal is None else float(cal)
 
 
-def gate(model_id: str, prob: float, odds, p_push: float = 0.0) -> Gate:
-    """`prob` is the probability the bet WINS. `p_push` is the chance it pushes
-    and returns the stake (a whole-number total or spread): the EV is then
-    prob x decimal - 1 + p_push, the refund counted back. 0 (the default) is
-    prob x decimal - 1, every caller's EV before nba_total_luck: a push scored
-    as a loss, which is exact for any line that cannot push."""
+def gate(model_id: str, prob: float, odds) -> Gate:
     cal = honest_probability(model_id, prob)
-    ev = config.expected_value(cal, odds)
-    if ev is not None and p_push:
-        ev += float(p_push)
     return Gate(model_id=model_id, raw_prob=float(prob), cal_prob=cal,
-                odds=None if odds is None else float(odds), ev=ev,
+                odds=None if odds is None else float(odds),
+                ev=config.expected_value(cal, odds),
                 floor=config.min_ev_for(model_id))
