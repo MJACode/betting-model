@@ -42,6 +42,7 @@ windows around the stamp -- the lag profile, which also checks the clock
 mapping -- and the coverage per season and decision window after the rule.
 
     PYTHONPATH=. python -m scripts.nba_ingame_staleness
+    PYTHONPATH=. python -m scripts.nba_ingame_staleness --extra   # diagnostics after the gate
 """
 from __future__ import annotations
 
@@ -175,6 +176,65 @@ def lag_profile(q: pd.DataFrame, tl: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def logloss_gap(df: pd.DataFrame, n_boot: int = N_BOOT, seed: int = SEED) -> dict:
+    """Mean log loss of Pinnacle's no-vig minus the quote's own no-vig on the
+    same quotes (positive = Pinnacle predicts worse), whole-day 95% interval."""
+    eps = 1e-6
+    y = df["y"].to_numpy()
+    def ll(p):
+        p = np.clip(np.asarray(p, float), eps, 1 - eps)
+        return -(y * np.log(p) + (1 - y) * np.log(1 - p))
+    d = pd.DataFrame({"game_date": df["game_date"].to_numpy(), "g": ll(df["pin_fa"]) - ll(df["fa"])})
+    s = d.groupby("game_date")["g"].agg(["sum", "size"])
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(s), size=(n_boot, len(s)))
+    bs = s["sum"].to_numpy()[idx].sum(1) / s["size"].to_numpy()[idx].sum(1)
+    lo, hi = np.percentile(bs, [2.5, 97.5])
+    return {"n": int(len(df)), "gap": float(d["g"].mean()), "lo": float(lo), "hi": float(hi)}
+
+
+def extra(q: pd.DataFrame, tl: pd.DataFrame) -> None:
+    """Diagnostics after the gate (never the gate): is the effect recent
+    scoring or all scoring; is Pinnacle's live price or the deciding book's own
+    the better predictor on the same quote; does the effect survive the rule."""
+    pn = panels(q)
+    from scripts.nba_ingame_data import state_at
+    rows = []
+    for name in ("1 every book vs Pinnacle (pre-registered)", "2 Pinnacle's own quotes",
+                 "4 deciding books vs their own no-vig"):
+        df = pn[name]
+        z = df[["game_id"]].assign(_b=df["stamp"] - pd.Timedelta(seconds=600))
+        sb = state_at(z, tl, "_b", ["h_pts", "a_pts"]).fillna(0)
+        df = df.assign(x=signed_points(df["market"], sb["h_pts"], sb["a_pts"]))
+        for mk in ("h2h", "spreads", "totals"):
+            rows.append({"panel": name[:1], "market": mk, "window": "(first play, t-600]",
+                         **slope_ci(df[df["market"] == mk], n_boot=1000)})
+    print("\nall earlier scoring: slope on points from the first play to 10 min before the stamp")
+    print(pd.DataFrame(rows).round(4).to_string(index=False))
+    # Pinnacle against the deciding book's own price, same quotes (moneyline; no number to match)
+    d = pn["4 deciding books vs their own no-vig"]
+    d = d[d["market"] == "h2h"]
+    print("\nmoneyline, deciding-book quotes with Pinnacle within 60 s: log loss of Pinnacle's no-vig "
+          "minus the book's own (positive = Pinnacle worse):", {k: (round(v, 5) if isinstance(v, float) else v)
+                                                              for k, v in logloss_gap(d).items()})
+    for s in sorted(d["season"].unique()):
+        r = logloss_gap(d[d["season"] == s], n_boot=1000)
+        print(f"  {s}: n {r['n']}, gap {r['gap']:+.5f} ({r['lo']:+.5f} .. {r['hi']:+.5f})")
+    # the gate's own test on quotes that pass the rule (quote and its Pinnacle quote both fresh)
+    pin_fresh = q[q["book"] == H.SHARP].set_index(["game_id", "market", "fetch_at", "stamp"])["pts_since_stamp"]
+    q2 = q.assign(x=signed_points(q["market"], q["h_pts_m60"] - q["h_pts_m120"], q["a_pts_m60"] - q["a_pts_m120"]))
+    key = pd.MultiIndex.from_frame(q2[["game_id", "market", "fetch_at", "pin_stamp"]])
+    q2["pin_pts_since"] = pin_fresh.reindex(key).to_numpy()
+    q2 = q2[(q2["pts_since_stamp"] == 0) & (q2["pin_pts_since"] == 0)]
+    rows = []
+    for name, df in panels(q2).items():
+        for mk in ("h2h", "spreads", "totals", "pooled"):
+            dd = df if mk == "pooled" else df[df["market"] == mk]
+            rows.append({"panel": name[:1], "market": mk, **slope_ci(dd)})
+    print("\nthe gate's test on quotes that pass the rule (both fresh):")
+    print(pd.DataFrame(rows).round(4).to_string(index=False))
+
+
 WINDOWS = ("Q1-Q2", "Q2", "halftime", "Q3", "Q4 6+ min")
 
 
@@ -214,10 +274,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--quotes", default=str(OUT))
     ap.add_argument("--no-profile", action="store_true")
+    ap.add_argument("--extra", action="store_true", help="only the diagnostics after the gate")
     a = ap.parse_args()
     q = pd.read_parquet(a.quotes)
     tl = pd.read_parquet(Path(a.quotes).parent / TIMELINE.name)
     pd.set_option("display.width", 220)
+    if a.extra:
+        extra(q, tl)
+        return
     t, fires, over = gate(q)
     base = q[q["coherent"] & q["pin_fa"].notna()]
     off = base[(base["market"] != "h2h") & ~np.isclose(base["line"].fillna(0), base["pin_line"].fillna(np.inf))]

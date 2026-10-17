@@ -744,6 +744,33 @@ Only then does it run a betting grid.
     over-reaction, not staleness, and imposes nothing. When imposed, the rule covers the
     deciding quote and the Pinnacle quote it is measured against: no point scored between each
     one's stamp and the moment the feed served it.
+  - **Result (2026-10-17): the gate fires, so the rule is imposed.**
+    `python -m scripts.nba_ingame_staleness` ran on 374,827 in-play quotes built by
+    `scripts/nba_ingame_data.py` (2020-21 → 2025-26). It left out 34 games whose play clock is
+    broken; in 13 of them, from late October 2025, ESPN stamped a whole half about 24 hours off.
+    - Points scored 60–120 seconds before a quote's stamp predict its result against Pinnacle's
+      live no-vig price, in every market and every season.
+    - Across every book the slope is +0.0159 per point (95% interval +0.0131 to +0.0189, 136,743
+      quotes): moneyline +0.0194, spread +0.0196, total +0.0110.
+    - On Pinnacle's own quotes it is +0.0154 (+0.0128 to +0.0179).
+    - So every in-game family uses a quote only under two conditions. No point was scored between
+      its stamp and the moment the feed served it, for the deciding quote and for its Pinnacle
+      quote. And Pinnacle quoted within 60 seconds.
+    - After the rule, the games per season with a usable deciding-book quote are: Q1–Q2 567–782;
+      halftime 114–299; Q3 262–483; Q4 with 6+ minutes left 170–359.
+  - **What the diagnostics add (2026-10-17; not part of the gate; `--extra`).**
+    - The rule does not remove the effect. On quotes that pass it, the same test gives +0.0170
+      (+0.0134 to +0.0205).
+    - The lag is in Pinnacle's stored live price. Points from 5–10 minutes before the stamp
+      still predict against it (moneyline +0.0106); points from earlier in the game barely do
+      (+0.0016).
+    - On the same moneyline quotes, Pinnacle's no-vig predicts worse than the deciding book's
+      own no-vig: log loss +0.029 (+0.025 to +0.033), worse in every season.
+    - Against their own prices, the deciding books show +0.0021 pooled (−0.0004 to +0.0047).
+    - **What this means for 7.3:** an information test measured against Pinnacle's live price
+      alone would be passed by any model that knows the recent score. Measuring it against the
+      deciding books' own prices at the same stamp would change this pre-registration, so it is
+      not done here.
 - **Settlement:** full-game results. A live total is settled on the full-game score; the
   remaining points are the live line minus the points already scored.
 - **Prices:** as §6.2, with the best of the 8 deciding books, the −200 floor, DraftKings alone
