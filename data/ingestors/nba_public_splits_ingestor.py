@@ -42,6 +42,12 @@ Usage:
     python -m data.ingestors.nba_public_splits_ingestor --poll   # today, pre-tip
     python -m data.ingestors.nba_public_splits_ingestor --archive-date 2026-10-21
     ... --dry-run                            # fetch + parse + match, no writes
+    python -m data.ingestors.nba_public_splits_ingestor --backfill-quality \
+        --expect reversed_at_source=72 --expect late_rewrite=1706
+
+Unreliable rows are flagged, not deleted: ``quality`` is 'reversed_at_source'
+(the 2022-03-09 slate) or 'late_rewrite' (v1 rewritten long after tip), NULL
+otherwise. Read with ``quality IS NULL`` unless the flag is the subject.
 """
 
 from __future__ import annotations
@@ -82,6 +88,26 @@ _HEADERS = {
 
 ARCHIVE = "archive_undated"
 POLL = "pregame_poll"
+
+# ``quality`` -- rows the stored history shows to be unreliable AT THE SOURCE.
+# NULL means nothing is known against the row. Measured 2026-10-17
+# (docs/nba_public_splits.md, "Rows to leave out"):
+#
+# * 2022-03-09: Action Network holds home and away the other way round for the
+#   whole slate (12 games, 72 v1 rows): UTA at home against POR is stored at
+#   +19.5 / +1500, MIN at home against OKC at +15.5 / +700. Every row of the
+#   date is flagged, whatever its endpoint.
+# * v1 listings whose consensus row was last written more than
+#   LATE_REWRITE_MIN minutes after the listed start (297 listings, the twelve
+#   above among them): the split was rewritten long after the game, so it is
+#   not known to be the split at tip.
+#
+# One flag per row; a reversed row is flagged reversed even when it is also
+# late (all twelve 2022-03-09 listings are).
+Q_REVERSED = "reversed_at_source"
+Q_LATE = "late_rewrite"
+REVERSED_AT_SOURCE_DATES = frozenset({"2022-03-09"})
+LATE_REWRITE_MIN = 400.0
 
 # Action Network market name -> our market key (same vocabulary as
 # public_betting and the odds tables).
@@ -346,6 +372,20 @@ def inserted_minus_start_min(inserted: str | None, start_time: str | None):
     return round((a - b).total_seconds() / 60.0, 1)
 
 
+def quality_flag(game_date: str | None, inserted_lag_min) -> str | None:
+    """The row's ``quality`` value: 'reversed_at_source', 'late_rewrite' or None.
+
+    `inserted_lag_min` is inserted_minus_start_min (v1 only; None on v2 and on
+    every poll row). The stored-row backfill (quality_backfill_statements)
+    applies this same rule in SQL; a test holds the two together.
+    """
+    if game_date in REVERSED_AT_SOURCE_DATES:
+        return Q_REVERSED
+    if inserted_lag_min is not None and float(inserted_lag_min) > LATE_REWRITE_MIN:
+        return Q_LATE
+    return None
+
+
 def build_rows(game: dict, endpoint: str, index: dict, known: set[str], *,
                capture_kind: str, fetched_at: str, observed_at: str | None = None,
                counts: dict | None = None) -> tuple[list[dict], dict]:
@@ -372,6 +412,8 @@ def build_rows(game: dict, endpoint: str, index: dict, known: set[str], *,
     else:
         home, away = meta["an_home"], meta["an_away"]
     snapshot_key = "archive" if capture_kind == ARCHIVE else str(observed_at)
+    lag = inserted_minus_start_min(src_inserted, meta["an_start_time"])
+    quality = quality_flag(meta["game_date"], lag)
     rows = []
     for (market, side), v in sides.items():
         if v.get("tickets") is None and v.get("money") is None:
@@ -400,11 +442,11 @@ def build_rows(game: dict, endpoint: str, index: dict, known: set[str], *,
             "capture_kind": capture_kind,
             "observed_at": observed_at,
             "source_inserted_at": src_inserted,
-            "inserted_minus_start_min": inserted_minus_start_min(
-                src_inserted, meta["an_start_time"]),
+            "inserted_minus_start_min": lag,
             "snapshot_key": snapshot_key,
             "fetched_at": fetched_at,
             "source": SOURCE,
+            "quality": quality,
         })
     return rows, {**meta, "game_id": game_id, "season": season, "match_kind": kind,
                   "n_rows": len(rows)}
@@ -467,6 +509,7 @@ CREATE TABLE IF NOT EXISTS nba_public_splits (
     snapshot_key             TEXT    NOT NULL,
     fetched_at               TIMESTAMPTZ NOT NULL,
     source                   TEXT    NOT NULL,
+    quality                  TEXT,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT {TABLE}_uniq UNIQUE
         (an_game_id, market, side, endpoint, capture_kind, snapshot_key),
@@ -476,6 +519,10 @@ CREATE TABLE IF NOT EXISTS nba_public_splits (
             AND observed_at < an_start_time))
 )
 """
+
+# The table was created (2026-10-16) before `quality` existed; CREATE TABLE IF
+# NOT EXISTS does not add a column to an existing table, this does.
+_ADD_QUALITY_SQL = f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS quality TEXT"
 
 _INDEXES = {
     f"{TABLE}_game_idx":
@@ -493,7 +540,7 @@ ROW_COLS = (
     "market", "side", "line_value", "odds", "tickets_pct", "money_pct",
     "num_bets", "endpoint", "book_id", "capture_kind", "observed_at",
     "source_inserted_at", "inserted_minus_start_min", "snapshot_key",
-    "fetched_at", "source",
+    "fetched_at", "source", "quality",
 )
 
 _INSERT_SQL = f"""
@@ -502,14 +549,15 @@ INSERT INTO {TABLE} (
     an_status, home_team, away_team, match_kind, market, side, line_value,
     odds, tickets_pct, money_pct, num_bets, endpoint, book_id, capture_kind,
     observed_at, source_inserted_at, inserted_minus_start_min, snapshot_key,
-    fetched_at, source
+    fetched_at, source, quality
 ) VALUES (
     %(an_game_id)s, %(game_id)s, %(season)s, %(game_date)s, %(an_start_time)s,
     %(an_game_type)s, %(an_status)s, %(home_team)s, %(away_team)s,
     %(match_kind)s, %(market)s, %(side)s, %(line_value)s, %(odds)s,
     %(tickets_pct)s, %(money_pct)s, %(num_bets)s, %(endpoint)s, %(book_id)s,
     %(capture_kind)s, %(observed_at)s, %(source_inserted_at)s,
-    %(inserted_minus_start_min)s, %(snapshot_key)s, %(fetched_at)s, %(source)s
+    %(inserted_minus_start_min)s, %(snapshot_key)s, %(fetched_at)s, %(source)s,
+    %(quality)s
 )
 ON CONFLICT (an_game_id, market, side, endpoint, capture_kind, snapshot_key)
 DO NOTHING
@@ -530,6 +578,7 @@ def ensure_table(conn) -> None:
                              indexes=tuple(_INDEXES), rls=True,
                              revoked_from=API_ROLES):
         conn.execute(_CREATE_SQL)
+        conn.execute(_ADD_QUALITY_SQL)
         lock_down(conn, "nba_public_splits")
         for stmt in _INDEXES.values():
             conn.execute(stmt)
@@ -561,10 +610,77 @@ def stored_archive_dates(conn, endpoint: str, day: str | None = None) -> set[str
     return {r[0] for r in conn.execute(sql, params).fetchall()}
 
 
+def stored_archive_games(conn, endpoint: str, day: str) -> set[int]:
+    """Action Network game ids already archived for one endpoint on one ET date.
+
+    The forward archive decides per GAME, not per date: a 10pm ET tip is
+    still in play at the 00:17 ET pass that first archives its date, and a
+    per-date check would never come back for it.
+    """
+    return {r[0] for r in conn.execute(
+        f"SELECT DISTINCT an_game_id FROM {TABLE} "
+        f"WHERE endpoint = %s AND capture_kind = %s AND game_date = %s",
+        (endpoint, ARCHIVE, day)).fetchall()}
+
+
+def archive_ready(games: list[dict] | None, stored_ids: set) -> list[dict]:
+    """The games of one scoreboard to archive now: finished (Action Network
+    status 'complete') and not already stored for this endpoint. A finished
+    game that built no rows (no split served) stays unstored and is looked at
+    again on the next pass."""
+    return [g for g in games or []
+            if (g.get("status") or "") == "complete" and g.get("id") not in stored_ids]
+
+
+def quality_backfill_statements(ph: str = "%s") -> list[tuple[str, str, tuple]]:
+    """(flag, UPDATE, params) that set `quality` on STORED rows by the same
+    rule quality_flag() applies to new ones, reversed first so a row that is
+    both carries the reversed flag. Both only touch rows not already carrying
+    their flag, so a second run updates nothing. `ph` is the placeholder
+    ('?' lets the test run them on SQLite)."""
+    dates = tuple(sorted(REVERSED_AT_SOURCE_DATES))
+    marks = ", ".join([ph] * len(dates))
+    return [
+        (Q_REVERSED,
+         f"UPDATE {TABLE} SET quality = {ph} WHERE game_date IN ({marks}) "
+         f"AND (quality IS NULL OR quality <> {ph})",
+         (Q_REVERSED, *dates, Q_REVERSED)),
+        (Q_LATE,
+         f"UPDATE {TABLE} SET quality = {ph} WHERE quality IS NULL "
+         f"AND inserted_minus_start_min > {ph}",
+         (Q_LATE, LATE_REWRITE_MIN)),
+    ]
+
+
+def backfill_quality(conn, expect: dict | None = None) -> dict:
+    """Flag the stored rows in ONE transaction: add the column if the catalog
+    lacks it, run both UPDATEs, commit once. With `expect` ({flag: rows}), any
+    count that differs rolls the whole write back and raises -- a count that
+    does not match what was measured beforehand is a question, not a result.
+    Returns {flag: rows updated}."""
+    from data.ddl_guard import schema_is_current
+    try:
+        if not schema_is_current(conn, TABLE, columns=("quality",)):
+            conn.execute(_ADD_QUALITY_SQL)
+        counts = {flag: conn.execute(sql, params).rowcount
+                  for flag, sql, params in quality_backfill_statements()}
+        if expect is not None and counts != expect:
+            raise RuntimeError(f"quality backfill: updated {counts}, expected "
+                               f"{expect}; rolled back, nothing written")
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return counts
+
+
 def write_rows(conn, rows: list[dict]) -> int:
-    """Insert one group of whole dates in ONE transaction (so the backfill's
-    skip-a-stored-date rule can never meet half a date); ON CONFLICT DO NOTHING
-    makes a re-run write nothing already stored. Returns rows attempted."""
+    """Insert one group of rows in ONE transaction. The backfill passes whole
+    dates (so its skip-a-stored-date rule can never meet half a date); the
+    forward archive passes whole games, so a date it is still filling in holds
+    some games and not others -- a later --backfill over that date would skip
+    it. ON CONFLICT DO NOTHING makes a re-run write nothing already stored.
+    Returns rows attempted."""
     if not rows:
         return 0
     for i in range(0, len(rows), WRITE_BATCH):
@@ -696,12 +812,25 @@ def run_poll(target_date: str | None = None, dry_run: bool = False) -> dict:
 
 
 def run_archive_date(day: str, dry_run: bool = False) -> dict:
-    """Archive one finished date from both endpoints (the forward job runs this
-    for yesterday, so the 2026-27 archive sits beside its pre-tip polls)."""
+    """Archive one date's finished games from both endpoints (the forward job
+    runs this for yesterday, so the 2026-27 archive sits beside its pre-tip
+    polls).
+
+    Decided per GAME: each pass archives every finished game not already
+    stored for that endpoint. The first pass after midnight ET (00:17) finds a
+    10pm ET tip still in play; the next pass (01:17) archives it. A per-date
+    check -- skip once any row of the date is stored -- never came back for
+    it. The 2026-27 schedule has 182 regular-season tips at 10pm ET or later,
+    every one on a date with an earlier game (nba_schedule, read 2026-10-17).
+    The cost is one free
+    scoreboard GET per endpoint per pass for yesterday (v1 was already
+    refetched every pass: it carried NBA splits through 2026-04-12 and none on
+    2026-04-20, 05-15 or 06-10, so it is stored only if it ever returns).
+    """
     from data.db import get_connection
 
     conn = get_connection()
-    out = {"date": day, "rows": 0, "skipped": []}
+    out = {"date": day, "rows": 0, "already_stored": {}, "not_finished": {}}
     try:
         if not dry_run:
             ensure_table(conn)
@@ -711,21 +840,19 @@ def run_archive_date(day: str, dry_run: bool = False) -> dict:
         fetched_at = datetime.now(timezone.utc).isoformat()
         rows = []
         for endpoint in ("v1", "v2"):
-            # The refresh pass calls this ~40 times a day. Each endpoint is
-            # skipped on its own once stored. v1 carried NBA splits through
-            # 2026-04-12 and none on 2026-04-20, 05-15 or 06-10 (playoffs), so
-            # it is refetched every pass and stored only if it ever returns.
-            if not dry_run and day in stored_archive_dates(conn, endpoint, day):
-                out["skipped"].append(endpoint)
-                continue
+            stored = set() if dry_run else stored_archive_games(conn, endpoint, day)
             try:
                 data = fetch_scoreboard(endpoint, day)
             except Exception as exc:                             # noqa: BLE001
                 logger.warning(f"{endpoint} {day}: fetch failed (non-fatal): {exc}")
                 continue
-            for game in data.get("games") or []:
-                if (game.get("status") or "") != "complete":
-                    continue
+            games = data.get("games") or []
+            ready = archive_ready(games, stored)
+            out["already_stored"][endpoint] = sum(g.get("id") in stored for g in games)
+            out["not_finished"][endpoint] = sum(
+                (g.get("status") or "") != "complete" and g.get("id") not in stored
+                for g in games)
+            for game in ready:
                 r, info = build_rows(game, endpoint, index, known,
                                      capture_kind=ARCHIVE, fetched_at=fetched_at)
                 if keep_for_poll(info):
@@ -775,9 +902,21 @@ if __name__ == "__main__":
     ap.add_argument("--date", metavar="YYYY-MM-DD")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--summary-out", help="write the run summary JSON here")
+    ap.add_argument("--backfill-quality", action="store_true",
+                    help="set `quality` on stored rows (one transaction)")
+    ap.add_argument("--expect", action="append", default=[], metavar="FLAG=ROWS",
+                    help="with --backfill-quality: roll back unless each count matches")
     args = ap.parse_args()
 
-    if args.backfill:
+    if args.backfill_quality:
+        from data.db import get_connection
+        expect = {k: int(v) for k, _, v in (e.partition("=") for e in args.expect)}
+        conn = get_connection()
+        try:
+            res = backfill_quality(conn, expect or None)
+        finally:
+            conn.close()
+    elif args.backfill:
         cache = Path(args.cache_dir) if args.cache_dir else None
         if cache:
             cache.mkdir(parents=True, exist_ok=True)
@@ -791,7 +930,7 @@ if __name__ == "__main__":
     elif args.forward:
         res = run_forward(args.date)
     else:
-        ap.error("choose --backfill, --poll, --archive-date or --forward")
+        ap.error("choose --backfill, --poll, --archive-date, --forward or --backfill-quality")
     text = json.dumps(res, indent=1, default=str)
     if args.summary_out:
         Path(args.summary_out).write_text(text, encoding="utf-8")

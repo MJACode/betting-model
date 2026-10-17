@@ -295,3 +295,230 @@ def test_every_inserted_column_exists_in_the_table():
     for col in ing.ROW_COLS:
         assert f"\n    {col} " in ing._CREATE_SQL, col
         assert f"%({col})s" in ing._INSERT_SQL, col
+
+
+# ── the forward archive decides per game, not per date ────────────────────────
+
+def _scoreboard(statuses: dict) -> dict:
+    """A v2 scoreboard for 2024-01-15: HOU @ PHI (1pm ET) and OKC @ LAL (10:30pm
+    ET, 03:30Z next day), each with the given Action Network status."""
+    early = _v2_game(HOU_PHI, gid=205736)
+    late = _v2_game(HOU_PHI, gid=205999, start="2024-01-16T03:30:00.000Z",
+                    home=("LAL", "Los Angeles Lakers"),
+                    away=("OKC", "Oklahoma City Thunder"))
+    early["status"], late["status"] = statuses[205736], statuses[205999]
+    return {"games": [early, late]}
+
+
+class _Store:
+    """The table, as the archive path sees it: what is stored, and what each
+    pass wrote. Both the per-game and the old per-date lookup read it."""
+
+    def __init__(self):
+        self.rows: list[dict] = []
+        self.writes: list[list[dict]] = []
+
+    def stored_games(self, conn, endpoint, day):
+        return {r["an_game_id"] for r in self.rows
+                if r["endpoint"] == endpoint and r["capture_kind"] == ing.ARCHIVE
+                and r["game_date"] == day}
+
+    def stored_dates(self, conn, endpoint, day=None):
+        return {r["game_date"] for r in self.rows
+                if r["endpoint"] == endpoint and r["capture_kind"] == ing.ARCHIVE
+                and (day is None or r["game_date"] == day)}
+
+    def write(self, conn, rows):
+        self.writes.append(list(rows))
+        self.rows.extend(rows)
+        return len(rows)
+
+
+class _NoDB:
+    def close(self):
+        pass
+
+
+def _wire_archive(monkeypatch, store, boards):
+    """run_archive_date with the database and the network replaced: `boards`
+    is popped once per v2 fetch; v1 serves no games (no NBA splits since
+    2026-04-12)."""
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: _NoDB())
+    monkeypatch.setattr(ing, "ensure_table", lambda conn: None)
+    monkeypatch.setattr(ing, "load_games_index", lambda conn, seasons: (INDEX, {}))
+    monkeypatch.setattr(ing, "stored_archive_games", store.stored_games)
+    monkeypatch.setattr(ing, "stored_archive_dates", store.stored_dates)
+    monkeypatch.setattr(ing, "write_rows", store.write)
+    monkeypatch.setattr(ing, "fetch_scoreboard",
+                        lambda endpoint, day, cache_dir=None:
+                        boards.pop(0) if endpoint == "v2" else {"games": []})
+
+
+def test_a_late_game_still_in_play_after_midnight_is_archived_at_the_next_pass(monkeypatch):
+    """00:17 ET: yesterday's 1pm game is final, its 10:30pm game still in play.
+    01:17 ET: both final. The late game must be archived at the second pass --
+    a per-date check saw the date already stored and never came back for it."""
+    store = _Store()
+    _wire_archive(monkeypatch, store, [
+        _scoreboard({205736: "complete", 205999: "inprogress"}),   # 00:17 ET
+        _scoreboard({205736: "complete", 205999: "complete"}),     # 01:17 ET
+    ])
+
+    first = ing.run_archive_date("2024-01-15")
+    assert first["rows"] == 6
+    assert {r["game_id"] for r in store.rows} == {"NBA_2024-01-15_HOU_PHI"}
+
+    second = ing.run_archive_date("2024-01-15")
+    assert second["rows"] == 6, "the game in play at the first pass was never archived"
+    assert {r["game_id"] for r in store.writes[-1]} == {"NBA_2024-01-15_OKC_LAL"}
+    assert {r["game_id"] for r in store.rows} == {"NBA_2024-01-15_HOU_PHI",
+                                                   "NBA_2024-01-15_OKC_LAL"}
+    assert first["not_finished"]["v2"] == 1
+    assert second["already_stored"]["v2"] == 1
+
+
+def test_a_stored_game_is_not_written_again_and_a_splitless_game_is_retried():
+    """archive_ready: finished and not stored. A finished game with no split
+    built no rows, so it is not stored and comes up again next pass."""
+    board = _scoreboard({205736: "complete", 205999: "complete"})["games"]
+    assert [g["id"] for g in ing.archive_ready(board, {205736})] == [205999]
+    assert ing.archive_ready(board, {205736, 205999}) == []
+    board[1]["status"] = "inprogress"
+    assert [g["id"] for g in ing.archive_ready(board, set())] == [205736]
+    assert ing.archive_ready(None, set()) == []
+
+
+# ── quality: rows unreliable at the source ───────────────────────────────────
+
+def _v1_listing(start: str, inserted: str):
+    """A v1 consensus listing tipping at `start`, last written at `inserted`."""
+    g = _v1_game([{**V1_ODDS, "inserted": inserted}])
+    g["start_time"] = start
+    return g
+
+
+def test_every_row_of_the_reversed_slate_is_flagged_whatever_its_lag():
+    """2022-03-09 (ET; a 7pm ET tip is 00:00Z on 03-10): home and away
+    reversed at the source. Flagged on a short lag too -- the date decides."""
+    for inserted in ("2022-03-10T00:20:00+00:00", "2022-03-10T18:00:00+00:00"):
+        rows, info = ing.build_rows(_v1_listing("2022-03-10T00:00:00Z", inserted),
+                                    "v1", INDEX, KNOWN, capture_kind=ing.ARCHIVE,
+                                    fetched_at="t")
+        assert info["game_date"] == "2022-03-09"
+        assert len(rows) == 6
+        assert {r["quality"] for r in rows} == {"reversed_at_source"}
+
+
+def test_a_v1_listing_rewritten_more_than_400_minutes_after_tip_is_late():
+    start = "2024-01-15T18:00:00.000Z"
+    late, _ = ing.build_rows(_v1_listing(start, "2024-01-16T00:40:06+00:00"),   # 400.1
+                             "v1", INDEX, KNOWN, capture_kind=ing.ARCHIVE, fetched_at="t")
+    edge, _ = ing.build_rows(_v1_listing(start, "2024-01-16T00:40:00+00:00"),   # 400.0
+                             "v1", INDEX, KNOWN, capture_kind=ing.ARCHIVE, fetched_at="t")
+    assert {r["inserted_minus_start_min"] for r in late} == {400.1}
+    assert {r["quality"] for r in late} == {"late_rewrite"}
+    assert {r["inserted_minus_start_min"] for r in edge} == {400.0}
+    assert {r["quality"] for r in edge} == {None}
+
+
+def test_v2_and_poll_rows_carry_no_quality_flag():
+    t = "2026-10-21T22:00:00+00:00"
+    arch, _ = ing.build_rows(_v2_game(HOU_PHI), "v2", INDEX, KNOWN,
+                             capture_kind=ing.ARCHIVE, fetched_at="t")
+    poll, _ = ing.build_rows(_v2_game(HOU_PHI), "v2", INDEX, KNOWN,
+                             capture_kind=ing.POLL, fetched_at=t, observed_at=t)
+    assert {r["quality"] for r in arch + poll} == {None}
+
+
+def test_the_quality_rule_puts_reversed_ahead_of_late():
+    assert ing.quality_flag("2022-03-09", 1079.3) == "reversed_at_source"
+    assert ing.quality_flag("2022-03-09", None) == "reversed_at_source"
+    assert ing.quality_flag("2024-01-15", 400.1) == "late_rewrite"
+    assert ing.quality_flag("2024-01-15", 400.0) is None
+    assert ing.quality_flag("2024-01-15", None) is None
+    assert ing.quality_flag("2024-01-15", -60.0) is None
+
+
+# Stored rows as (game_date, inserted_minus_start_min): the reversed slate on
+# a long, short and missing lag; the 400-minute edge either side; a v2 row
+# (no lag); a 2021 COVID-era rewrite; a lag before the start.
+_STORED = [("2022-03-09", 1079.3), ("2022-03-09", 5.0), ("2022-03-09", None),
+           ("2024-01-15", 400.0), ("2024-01-15", 400.1), ("2024-01-15", None),
+           ("2021-01-05", 16206.6), ("2024-01-15", -60.0)]
+
+
+def test_the_stored_row_backfill_flags_exactly_what_the_rule_flags():
+    """The one-off UPDATE and the per-row rule must agree row for row (a `>=`
+    in the SQL would flag the 400.0 edge), and a second run changes nothing."""
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE nba_public_splits "
+               "(game_date TEXT, inserted_minus_start_min REAL, quality TEXT)")
+    db.executemany("INSERT INTO nba_public_splits (game_date, inserted_minus_start_min) "
+                   "VALUES (?, ?)", _STORED)
+    first = {flag: db.execute(sql, params).rowcount
+             for flag, sql, params in ing.quality_backfill_statements(ph="?")}
+    got = [q for (q,) in db.execute(
+        "SELECT quality FROM nba_public_splits ORDER BY rowid")]
+    assert got == [ing.quality_flag(d, m) for d, m in _STORED]
+    assert first == {"reversed_at_source": 3, "late_rewrite": 2}
+    again = {flag: db.execute(sql, params).rowcount
+             for flag, sql, params in ing.quality_backfill_statements(ph="?")}
+    assert again == {"reversed_at_source": 0, "late_rewrite": 0}
+
+
+class _CountingConn:
+    """Answers each UPDATE with a fixed rowcount; records what was run and
+    whether the transaction was committed or rolled back."""
+
+    def __init__(self, rowcounts):
+        self.rowcounts = list(rowcounts)
+        self.statements: list[str] = []
+        self.commits = self.rollbacks = 0
+
+    def execute(self, sql, params=None):
+        self.statements.append(" ".join(sql.split()))
+        n = self.rowcounts.pop(0) if sql.lstrip().startswith("UPDATE") else -1
+        return type("Cur", (), {"rowcount": n})()
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def test_the_backfill_adds_the_column_and_commits_once(monkeypatch):
+    import data.ddl_guard
+    monkeypatch.setattr(data.ddl_guard, "schema_is_current", lambda *a, **k: False)
+    conn = _CountingConn([72, 1706])
+    out = ing.backfill_quality(conn, {"reversed_at_source": 72, "late_rewrite": 1706})
+    assert out == {"reversed_at_source": 72, "late_rewrite": 1706}
+    assert conn.statements[0] == ing._ADD_QUALITY_SQL
+    assert (conn.commits, conn.rollbacks) == (1, 0)
+
+
+def test_the_backfill_rolls_back_when_a_count_is_not_what_was_measured(monkeypatch):
+    import data.ddl_guard
+    monkeypatch.setattr(data.ddl_guard, "schema_is_current", lambda *a, **k: True)
+    conn = _CountingConn([72, 1778])
+    with pytest.raises(RuntimeError, match="rolled back"):
+        ing.backfill_quality(conn, {"reversed_at_source": 72, "late_rewrite": 1706})
+    assert (conn.commits, conn.rollbacks) == (0, 1)
+    assert not any(s.startswith("ALTER") for s in conn.statements)
+
+
+def test_an_existing_table_gets_the_quality_column(monkeypatch):
+    """The table predates the column. CREATE TABLE IF NOT EXISTS leaves an
+    existing table as it is, so ensure_table must also ADD COLUMN."""
+    import data.anon_readable
+    import data.ddl_guard
+    monkeypatch.setattr(data.ddl_guard, "schema_is_current", lambda *a, **k: False)
+    monkeypatch.setattr(data.anon_readable, "lock_down", lambda conn, table: ())
+    conn = _CountingConn([])
+    ing.ensure_table(conn)
+    assert conn.statements[0].startswith("CREATE TABLE IF NOT EXISTS nba_public_splits")
+    assert ("ALTER TABLE nba_public_splits ADD COLUMN IF NOT EXISTS quality TEXT"
+            in conn.statements)
+    assert conn.commits == 1

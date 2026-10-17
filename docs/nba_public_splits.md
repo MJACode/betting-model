@@ -30,6 +30,10 @@ split, and is empty for NBA games.
 **One number per side, with no time on it.** It is the split as it stood when
 Action Network marked the game started, a few minutes after the listed start.
 It is a *closing split*, not a value a model could have read hours before tip.
+And it is only known **after tip**: Action Network serves it for a game that
+has started, and this table stores it only once the game is final. So the
+2020-21 to 2025-26 history holds no split anyone could have read before a
+game; the first pre-tip readings are the 2026-27 polls.
 Four measurements:
 
 1. **MLB calibration** (`scripts/action_network_archive_timing.py`, run
@@ -93,6 +97,48 @@ at the close". A rule that fades it is graded against the close and must not
 be described as available earlier. Only `pregame_poll` rows (2026-27 on) carry
 a real observation time.
 
+## Rows to leave out
+
+Two sets of stored rows are wrong or doubtful at the source. They are kept and
+flagged in the `quality` column, never deleted. **Read with
+`quality IS NULL` unless the flag is what you are studying.**
+
+- **`reversed_at_source` — the whole 2022-03-09 slate.** Action Network has
+  home and away the wrong way round for all 12 games that night (72 rows, all
+  v1; v2 has no splits that early). Utah at home against Portland is stored at
+  +19.5 and +1500, Minnesota at home against Oklahoma City at +15.5 and +700:
+  the favourite's numbers sit on the underdog. The percentages are reversed
+  with them, so no side of that slate can be trusted. Checked against the odds
+  archive's own spreads (prices only, 2026-10-17): it is the only date where
+  the stored home spread has the wrong sign on most games (12 of 12). Outside
+  it, 257 of 7,183 v1 listings and 118 of 3,412 v2 listings disagree in sign
+  with the archive's median pre-tip spread. They are single games, nearly all
+  within 3 points of pick'em, where the favourite changed during the day; five
+  games differ by more, and on two of those v1 and v2 agree with each other.
+- **`late_rewrite` — v1 listings last written more than 400 minutes after
+  tip.** v1's consensus row is normally last written about 20 minutes after
+  the start. On these listings it was rewritten hours or days later (once
+  about 249 days later), so the split stored is not known to be the one at tip.
+  297 listings carry a rewrite that late: 120 in 2020-21, 15 in 2021-22, 14
+  in 2022-23, 72 in 2023-24, none in 2024-25, 73 in 2025-26, and 3 postponed
+  listings not matched to a game. The 12 listings of 2022-03-09 are among
+  them and carry the reversed flag instead, so `late_rewrite` is on 285
+  listings (1,706 rows).
+
+The flags were set on the stored rows in one write on 2026-10-17
+(`--backfill-quality`, which refuses to commit unless the counts are the ones
+measured beforehand): 72 rows reversed, 1,706 rows late. Read back the same
+day: every one of the 64,045 rows carries the flag the rule gives it. New rows
+get the flag as they are written.
+
+```sql
+SELECT endpoint, quality, count(*) AS rows, count(DISTINCT an_game_id) AS listings
+FROM nba_public_splits WHERE capture_kind = 'archive_undated'
+GROUP BY 1, 2 ORDER BY 1, 2;
+-- v1 NULL 41,726 / 6,957 · v1 late_rewrite 1,706 / 285
+-- v1 reversed_at_source 72 / 12 · v2 NULL 20,523 / 3,436
+```
+
 ## Table
 
 `nba_public_splits` — worker-only (RLS on, no app-role grant), created on
@@ -115,6 +161,7 @@ endpoint × capture.
 | `observed_at` | poll fetch time; NULL for the archive |
 | `source_inserted_at`, `inserted_minus_start_min` | v1's `inserted` and its gap to the listed start, evidence only |
 | `snapshot_key` | `archive`, or the poll's fetch time — part of the unique key |
+| `quality` | NULL, or why the row should be left out: `reversed_at_source` (the 2022-03-09 slate) or `late_rewrite` (v1 last written more than 400 minutes after tip). See "Rows to leave out" |
 
 Unique key `(an_game_id, market, side, endpoint, capture_kind, snapshot_key)`;
 every write is `ON CONFLICT DO NOTHING`, so a re-run writes nothing already
@@ -146,8 +193,8 @@ original date before the postponement. Playoffs and play-in are not in
 Dropped by validation, both endpoints together: 26 ticket pairs and 28 money
 pairs that did not sum to 100 ± 1 (all v2; e.g. 0 against 34), 667 ticket and
 1,445 money pairs that were absent or 0/0. v1 and v2 hold the same ticket % on
-19,637 of the 20,523 sides both carry; on the 856 that differ the median gap is
-2 points.
+19,637 of the 20,493 sides both carry; on the 856 that differ the median gap is
+2 points (re-measured 2026-10-17; 20,523 is v2's row count, not the overlap).
 
 ```sql
 WITH s AS (
@@ -170,11 +217,23 @@ public-betting page loads for that date, fetched fresh: 0 mismatches.
 
 ## Forward capture (2026-27)
 
-`par nba-public-splits` in `scripts/refresh_pass.sh` (hourly 7am–5pm ET, every
-10 minutes 6–11pm ET) runs `run_forward`: archive yesterday once (v2, plus v1
-if it ever carries splits again), then one `pregame_poll` row per side for
-every regular-season or playoff game that has not reached its listed start.
+`par nba-public-splits` in `scripts/refresh_pass.sh` (hourly at :17,
+midnight–5am and 7am–5pm ET; every 10 minutes 6–11pm ET) runs `run_forward`: archive
+yesterday's finished games, then one `pregame_poll` row per side for every
+regular-season or playoff game that has not reached its listed start.
 For a decision at time T read the latest poll row with `observed_at <= T`.
+
+The archive decides **per game**: each pass stores every finished game of
+yesterday not already stored for that endpoint (v2, plus v1 if it ever carries
+splits again). The first pass after midnight ET (00:17) finds a 10pm ET tip
+still in play, and the 01:17 pass stores it. The first version skipped a whole
+date once any row of it was stored, so it would never have come back for
+those games: the 2026-27 schedule has 182 regular-season tips at 10pm ET or
+later, each on a date with an earlier game. The cost is one free scoreboard
+request per endpoint per pass for yesterday. A finished game with no split
+served is simply looked at again next pass. One consequence: a date the
+forward archive is still filling in holds some games and not others, and
+`--backfill` (which skips a date once any of it is stored) would skip it.
 The first poll was stored by hand at 2026-10-17 01:46Z: the three
 opening-night games of 2026-10-20, 18 rows, all matched to `games`.
 
@@ -185,14 +244,20 @@ reads it back, so NBA rows there would change what live NBA picks carry.
 ## How to read it
 
 ```sql
--- the closing split for each regular-season game (v2 where it exists, else v1)
+-- the closing split for each regular-season game (v2 where it exists, else v1),
+-- known only after tip, leaving out the flagged rows
 SELECT DISTINCT ON (game_id, market, side)
        game_id, season, market, side, line_value, odds,
        tickets_pct, money_pct, endpoint
 FROM nba_public_splits
 WHERE capture_kind = 'archive_undated' AND game_id IS NOT NULL
+  AND quality IS NULL
 ORDER BY game_id, market, side, (endpoint = 'v2') DESC;
 ```
+
+Dropping the flagged rows can leave a game with v2 only, or with nothing (the
+whole 2022-03-09 slate, and any late-rewritten v1 game before v2 began on
+2023-11-20).
 
 Join to `games` on `game_id`. Read a pick's line from its label, never rebuild
 it from `line_value` (CLAUDE.md §00).
