@@ -623,3 +623,44 @@ stricter; it is still 0 of 422.
 **What comes next is 2026-27.** It is a season nobody has looked at, with every price move kept
 from opening night (#985). The grids above, and F4's overs in particular, can be re-graded on it
 with the same harness and no new choices.
+
+### 6.7 The house standard, applied to the same 422 cells (2026-10-17, after §6.6 was read)
+
+mike, 2026-10-17: *"Find it … edge like we have with other sports."* The bars in §1 and §6.4
+were stricter than any model shipped in this repo was held to. The newest shipped game-market
+model, `nhl_moneyline` (`docs/thresholds.md`, 2026-10-13/15), went live on this:
+
+- a walk-forward over its graded seasons pooled;
+- a 95% interval above zero;
+- seasons mostly positive (its newest season was −3.0%);
+- beating the blind bet on the same side;
+- a neighbourhood, not a peak;
+- closing-line value reported, not a bar.
+
+It had no separate one-season confirmation and no correction across the cells searched.
+
+**This section applies that standard to all 422 cells, once, as one fixed list. It is applied
+AFTER the §6.6 results were read, and it is stated before any number under it is computed.**
+The labs are re-run unchanged, except that each cell also reports its pooled numbers, and its
+bets are written out. A cell passes when all of these hold:
+
+1. **Pooled walk-forward:** every graded season (2021-22 → 2025-26, or the family's own
+   seasons per §6.3) together, ≥ 200 bets.
+2. **The pooled whole-day bootstrap 95% interval** of ROI is above zero (4,000 resamples, seed 7).
+3. **Seasons mostly positive:** of the graded seasons with ≥ 30 bets, all but at most one are
+   positive.
+4. **Beats the blind same real side**, pooled, over its own priced population (bar 9 as amended
+   in §6.4).
+5. **Neighbourhood:** every existing neighbour on the cut axis is positive, pooled.
+6. **Placebo:** above the 95th percentile of its shuffles (bar 10).
+
+**Reported beside each passing cell, not as bars:**
+
+- pooled closing-line value;
+- the blind same side's closing-line value at the same point (to tell a cell's own late drift
+  from the market's);
+- DraftKings alone;
+- the count of cells expected to clear bar 2 by chance (422 × 0.025 ≈ 10.5, before
+  correlation).
+
+A cell that passes is built LIVE (CLAUDE.md §2) and judged on its live record.
