@@ -255,6 +255,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "nba_game_inactives",
     "nba_game_officials",
     "nba_player_game_adv",
+    # Action Network NBA ticket/money splits, archive and pre-tip polls.
+    # Created on demand by data/ingestors/nba_public_splits_ingestor.py;
+    # research control input, never read by the app.
+    "nba_public_splits",
     # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
     # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
     # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
