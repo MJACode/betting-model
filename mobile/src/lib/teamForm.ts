@@ -63,6 +63,32 @@ export function teamFifthColumnLabel(games: number, seasonGames?: number | null)
   return 'Season';
 }
 
+/**
+ * Visible names of the five team columns.
+ *
+ * The fifth column's own name (`teamFifthColumnLabel`) can repeat column 4:
+ * 20 cross-season games are L20 and L20, and 12 are L20 beside L12. When that
+ * name is already on an earlier column, the fifth column says All. Column 4
+ * takes the real count when it has 1–19 games and that count is not already
+ * L3, L5 or L10. A season column stays L20: those games are this season, and
+ * the note says Season uses them.
+ */
+export function teamStripLabels(
+  counts: { l3: number; l5: number; l10: number; l20: number; l25: number },
+  seasonGames?: number | null,
+): { l3: string; l5: string; l10: string; l20: string; fifth: string } {
+  const fifthRaw = teamFifthColumnLabel(counts.l25, seasonGames);
+  const seasonCol = fifthRaw === 'Season';
+  let l20 = 'L20';
+  if (!seasonCol && counts.l20 > 0 && counts.l20 < TEAM_WINDOW_SIZE.l20) {
+    const candidate = `L${counts.l20}`;
+    if (candidate !== 'L3' && candidate !== 'L5' && candidate !== 'L10') l20 = candidate;
+  }
+  const used = new Set(['L3', 'L5', 'L10', l20]);
+  const fifth = used.has(fifthRaw) ? 'All' : fifthRaw;
+  return { l3: 'L3', l5: 'L5', l10: 'L10', l20, fifth };
+}
+
 /** "L5–Season", or a list when the last label is not a wider window than the first. */
 function columnSpan(labels: string[]): string {
   if (labels.length <= 1) return labels[0] ?? '';
@@ -82,10 +108,10 @@ function columnSpan(labels: string[]): string {
  * One line under the strip when the fetch is shorter than a column.
  * The count used to sit in the cell, and at large text "4 games" ran into
  * the next column. Zero is a missing fetch, not "0 games". A full 25
- * already names every column. The last name is the fifth column's own
- * label, so a season is not called L25. When the window also reaches an
- * earlier season, "so far" would sit next to "This season: N games" and
- * contradict it, so that case says "available".
+ * already names every column. The names are the ones on the strip. When the
+ * window also reaches an earlier season, "so far" would sit next to "This
+ * season: N games" and contradict it, so that case says "available". An
+ * unknown season says neither: "so far" would claim a season we don't have.
  */
 export function teamShortWindowNote(
   counts: {
@@ -99,23 +125,37 @@ export function teamShortWindowNote(
 ): string | null {
   const n = Math.max(counts.l3, counts.l5, counts.l10, counts.l20, counts.l25);
   if (n <= 0 || n >= TEAM_WINDOW_SIZE.season) return null;
-  const fifth = teamFifthColumnLabel(counts.l25, seasonGames);
-  const windows = [
-    { label: 'L3', size: TEAM_WINDOW_SIZE.l3 },
-    { label: 'L5', size: TEAM_WINDOW_SIZE.l5 },
-    { label: 'L10', size: TEAM_WINDOW_SIZE.l10 },
-    { label: 'L20', size: TEAM_WINDOW_SIZE.l20 },
-    { label: fifth, size: TEAM_WINDOW_SIZE.season },
+  const labels = teamStripLabels(counts, seasonGames);
+  const columns = [
+    { label: labels.l3, games: counts.l3, size: TEAM_WINDOW_SIZE.l3 },
+    { label: labels.l5, games: counts.l5, size: TEAM_WINDOW_SIZE.l5 },
+    { label: labels.l10, games: counts.l10, size: TEAM_WINDOW_SIZE.l10 },
+    { label: labels.l20, games: counts.l20, size: TEAM_WINDOW_SIZE.l20 },
+    { label: labels.fifth, games: counts.l25, size: TEAM_WINDOW_SIZE.season },
   ];
-  const short = windows.filter((w) => n < w.size);
-  if (short.length === 0) return null;
   const gamesWord = n === 1 ? 'game' : 'games';
   const those = n === 1 ? 'that 1' : `those ${n}`;
-  const span = columnSpan(short.map((w) => w.label));
+  const knownSeason = seasonGames != null;
+  const crossSeason = knownSeason && counts.l25 > seasonGames;
+  const how = !knownSeason ? '' : crossSeason ? ' available' : ' so far';
+  if (labels.fifth === 'All') {
+    const sharing = columns.filter((c) => c.games === n);
+    const other = sharing.find((c) => c.label !== 'All');
+    if (sharing.length === 2 && other != null) {
+      return `Only ${n} ${gamesWord}${how}. ${other.label} and All use ${those}.`;
+    }
+    const earlier = columns.filter((c) => c.games < n);
+    if (earlier.length === 0) {
+      return `Only ${n} ${gamesWord}${how}. Every column uses ${those}.`;
+    }
+    const lastFull = earlier[earlier.length - 1];
+    return `Only ${n} ${gamesWord}${how}. Every column after ${lastFull.label} uses ${those}.`;
+  }
+  const short = columns.filter((c) => n < c.size);
+  if (short.length === 0) return null;
+  const span = columnSpan(short.map((c) => c.label));
   const use = short.length === 1 ? 'uses' : 'all use';
-  const crossSeason = seasonGames != null && counts.l25 > seasonGames;
-  const how = crossSeason ? 'available' : 'so far';
-  return `Only ${n} ${gamesWord} ${how}. ${span} ${use} ${those}.`;
+  return `Only ${n} ${gamesWord}${how}. ${span} ${use} ${those}.`;
 }
 
 /** How many of the fetched games belong to the pick's season. Null if we don't know the season. */
@@ -141,12 +181,13 @@ export function teamSeasonNote(
   if (seasonGames === 0) {
     return 'No games yet this season. Every column is from earlier seasons.';
   }
-  const fifth = teamFifthColumnLabel(counts.l25, seasonGames);
+  const labels = teamStripLabels(counts, seasonGames);
+  const fifth = labels.fifth;
   const windows = [
-    { label: 'L3', games: counts.l3 },
-    { label: 'L5', games: counts.l5 },
-    { label: 'L10', games: counts.l10 },
-    { label: 'L20', games: counts.l20 },
+    { label: labels.l3, games: counts.l3 },
+    { label: labels.l5, games: counts.l5 },
+    { label: labels.l10, games: counts.l10 },
+    { label: labels.l20, games: counts.l20 },
     { label: fifth, games: counts.l25 },
   ];
   const first = windows.find((w) => w.games > seasonGames);
@@ -176,9 +217,14 @@ export function teamCellAccessibilityLabel(opts: {
   const fromLabel = named != null && /^L(\d+)$/.test(named) ? Number(named.slice(1)) : null;
   const spokenN = fromLabel ?? n;
   let head =
-    named === 'Season' ? 'Season' : `Last ${spokenN} ${spokenN === 1 ? 'game' : 'games'}`;
+    named === 'All'
+      ? 'All games'
+      : named === 'Season'
+        ? 'Season'
+        : `Last ${spokenN} ${spokenN === 1 ? 'game' : 'games'}`;
   // The count stays in the spoken label. The visible cell does not print it.
-  if (opts.games > 0 && opts.games < (named === 'Season' ? n : spokenN)) {
+  // All already means every game in hand, so it does not add "only N played".
+  if (named !== 'All' && opts.games > 0 && opts.games < (named === 'Season' ? n : spokenN)) {
     head += `, only ${opts.games} played`;
   }
   if (named !== 'Season' && opts.seasonGames != null && opts.games > opts.seasonGames) {

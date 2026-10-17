@@ -3,9 +3,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
   TEAM_WINDOW_SIZE,
   teamCellAccessibilityLabel,
-  teamFifthColumnLabel,
   teamSeasonNote,
   teamShortWindowNote,
+  teamStripLabels,
 } from '@/lib/teamForm';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { TrendBuckets } from '@/types';
@@ -38,6 +38,7 @@ export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames 
     l20: trends.l20.games,
     l25: trends.season.games,
   };
+  const labels = mode === 'team' ? teamStripLabels(counts, seasonGames) : null;
   const note =
     mode === 'team'
       ? [teamShortWindowNote(counts, seasonGames), teamSeasonNote(seasonGames, counts)]
@@ -50,13 +51,10 @@ export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames 
       <View style={styles.row}>
         {KEYS.map((k) => {
           const t = trends[k.key];
-          // Team fifth column: Season when these games are the whole current
-          // season, L25 when they are the last 25. The player strip keeps
-          // "Season": its window is 25 or 50 by sport.
-          const label =
-            mode === 'team' && k.key === 'season'
-              ? teamFifthColumnLabel(t.games, seasonGames)
-              : k.label;
+          // Team columns use the names that match the games in them. Column 4
+          // is L12 when it holds 12, and the fifth column is All when that
+          // name is already on the strip. The player strip keeps "Season".
+          const label = labels != null ? labels[k.key === 'season' ? 'fifth' : k.key] : k.label;
           const primary =
             mode === 'team'
               ? t.winPct != null
@@ -92,7 +90,7 @@ export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames 
                       avg: t.avg,
                       spokenUnit: spokenUnit ?? '',
                       seasonGames,
-                      columnLabel: k.key === 'season' ? label : undefined,
+                      columnLabel: label,
                     })
                   : undefined
               }

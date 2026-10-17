@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, form strip: 20 cross-season games are L20 and All; 11–19 are L11–L19 and All; an unknown season says "Only 4 games. Every column after L3 uses those 4." and does not say so far |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, pick detail form strip: the fifth column says Season only when the games are the whole current season, and L25 only when they are the last 25 |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master (`0d3b58b3`, #988) merged into the record-units branch; session logs keep both sides, newest first |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |
