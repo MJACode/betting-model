@@ -155,6 +155,7 @@ import {
   nhlBetCaption,
   nhlEmptyBoardText,
   nhlLineOnlyTitle,
+  nhlOffLineCount,
   shouldOpenShotsLine,
   stopForPostedLine,
 } from '@/lib/nhlBoard';
@@ -1857,6 +1858,7 @@ export function StatsScreen() {
               showMatchup={showMatchupCol}
               statLabel={betLabel}
               hitMode={hitMode}
+              sport={sport}
               oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
               onOddsPress={quote ? () => openBook(quote) : undefined}
               omitNoGames={nhlLinesOnly}
@@ -2531,14 +2533,14 @@ export function StatsScreen() {
           tab and come back. */}
       {error ? (
         <View style={styles.errorBanner}>
-          <Text style={styles.errorText} numberOfLines={3}>
+          <Text style={styles.errorText}>
             Couldn’t load the board. {friendlyCause(error)}
           </Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => void load()}
             disabled={loading}
-            hitSlop={8}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
             accessibilityLabel="Retry loading the board"
             style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
           >
@@ -2669,6 +2671,7 @@ export function StatsScreen() {
                 showOdds={showOdds}
                 statLabel={betLabel}
                 hitMode={hitMode}
+                sport={sport}
                 colorful={colorful}
                 thinSample={timeWindow === 'h2h'}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
@@ -2730,6 +2733,7 @@ export function StatsScreen() {
                 showOdds={showOdds}
                 statLabel={betLabel}
                 hitMode={hitMode}
+                sport={sport}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail && canOpenPlayerDetail(item.row.player_id)}
@@ -3432,7 +3436,13 @@ function fmtValue(value: number, basis: Basis): string {
  *  this sits in a 62pt column: "Under 224.5" wrapped to two lines and made one
  *  row of a 25-row board taller than its neighbours (UX review, 2026-09-06).
  *  The pill's accessibilityLabel keeps the full words. */
-export function offLineCaption(line: number, side: StatsOddsSide, mode: HitMode): string {
+export function offLineCaption(
+  line: number,
+  side: StatsOddsSide,
+  mode: HitMode,
+  sport?: string,
+): string {
+  if (sport === 'NHL') return nhlOffLineCount(line, side);
   return modeLineLabel(line, side, mode, true);
 }
 
@@ -3442,6 +3452,7 @@ function OddsCell({
   playerName,
   statLabel,
   hitMode,
+  sport,
   dayLabel,
   onPress,
 }: {
@@ -3451,6 +3462,8 @@ function OddsCell({
   statLabel: string;
   /** Which idiom the board is speaking, for the off-line caption. */
   hitMode: HitMode;
+  /** NHL names an off-line number "3 or more". Other sports keep "3+". */
+  sport?: string;
   /** "MON" — the day of THIS quote's game, when it is not the day the column
    *  header names. Null on the common row, so an all-Sunday board is silent
    *  about the day exactly as it was before the odds window widened. */
@@ -3500,7 +3513,7 @@ function OddsCell({
   // that the price is for a DIFFERENT LINE than the ruler's, i.e. a different
   // bet. Order the sacrifice deliberately (UX review, 2026-09-12). VoiceOver
   // reads both regardless — see `label` above.
-  const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;
+  const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   return (
     <Pressable
@@ -3697,6 +3710,7 @@ function LeaderRow({
   showOdds,
   statLabel,
   hitMode,
+  sport,
   oddsDay,
   onOddsPress,
   tappable,
@@ -3720,6 +3734,7 @@ function LeaderRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  sport?: string;
   /** Weekday of the quote's game, when it is not the day the header names. */
   oddsDay?: string | null;
   onOddsPress?: () => void;
@@ -3768,6 +3783,7 @@ function LeaderRow({
           playerName={row.player_name ?? ''}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -3807,6 +3823,7 @@ function LineOnlyRow({
   showMatchup,
   statLabel,
   hitMode,
+  sport,
   oddsDay,
   onOddsPress,
   omitNoGames = false,
@@ -3819,6 +3836,7 @@ function LineOnlyRow({
   showMatchup: boolean;
   statLabel: string;
   hitMode: HitMode;
+  sport?: string;
   oddsDay?: string | null;
   onOddsPress?: () => void;
   /** The log itself is empty. "no games" would describe the feed as the player. */
@@ -3860,6 +3878,7 @@ function LineOnlyRow({
           playerName={name}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -3884,6 +3903,7 @@ function HitRateRow({
   showOdds,
   statLabel,
   hitMode,
+  sport,
   colorful,
   thinSample,
   oddsDay,
@@ -3910,6 +3930,7 @@ function HitRateRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  sport?: string;
   /** Weekday of the quote's game, when it is not the day the header names. */
   oddsDay?: string | null;
   onOddsPress?: () => void;
@@ -3968,6 +3989,7 @@ function HitRateRow({
           playerName={player.player_name}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -4602,7 +4624,7 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.sm,
     backgroundColor: colors.avoidSoft,

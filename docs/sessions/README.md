@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: NHL betslip leg says Over 2.5 shots (3 or more); sheet explainer says DraftKings lists this as Over 1.5; sheet prices use U+2212; off-line pill says 3 or more |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: a missing or permission-denied player_window_totals_nhl (PGRST202/42883/42501) is an empty average so lines still show; Shots opens once per visit; Goals caption only at 0.5 |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: Stats Players sums nhl_skater_game_log through player_window_totals_nhl (shots, ending year); table GRANT stays on unapplied #962; empty-log betLabel crash fixed; Shots opens on the most common posted line |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984 review: NHL skater pages cached 5 minutes per season (no server sum without a migration); football Anytime TD header/count/empty state stays on the old path; Jan–Jun skips next year's season |

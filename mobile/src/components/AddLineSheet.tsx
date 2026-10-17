@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { showToast } from '@/components/Toast';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { formatAmerican } from '@/lib/format';
+import { formatAmerican, MINUS } from '@/lib/format';
 import { isGameSpec, lineLegKey, lineLegLabel, type LineSheetInput } from '@/lib/lineLegs';
 import { bookLabelShort, bookName, MODEL_BOOK } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
@@ -137,12 +137,13 @@ export function AddLineSheet({
                 const isModel = p.book === MODEL_BOOK;
                 const isBest = best != null && p.price === best;
                 const mine = (myBooks as readonly string[]).includes(p.book);
+                const priceText = formatAmerican(p.price).replace(/-/g, MINUS);
                 return (
                   <View
                     key={p.book}
                     style={[styles.row, i > 0 && styles.rowDivider]}
                     accessible
-                    accessibilityLabel={`${bookName(p.book)}${mine ? ', yours' : ''}, ${formatAmerican(p.price)}${isBest ? ', best odds' : ''}`}
+                    accessibilityLabel={`${bookName(p.book)}${mine ? ', yours' : ''}, ${priceText}${isBest ? ', best odds' : ''}`}
                   >
                     <View style={[styles.badge, isModel && styles.badgeDk]}>
                       <Text style={[styles.badgeText, isModel && styles.badgeTextDk]}>{bookLabelShort(p.book)}</Text>
@@ -151,7 +152,7 @@ export function AddLineSheet({
                       {bookName(p.book)}
                     </Text>
                     {mine ? <Text style={styles.yours}>Yours</Text> : null}
-                    <Text style={styles.rowPrice}>{formatAmerican(p.price)}</Text>
+                    <Text style={styles.rowPrice}>{priceText}</Text>
                     {isBest ? (
                       <Ionicons name="star" size={14} color={colors.best} accessibilityElementsHidden />
                     ) : (

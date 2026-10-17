@@ -148,8 +148,35 @@ export function lineLegLabel(s: LineLegSpec): string {
     const side = s.side === 'under' ? 'Under' : 'Over';
     return `${home} vs ${away} ${side} ${s.line == null ? '' : fmtLine(s.line)}`.trim();
   }
+  if (s.sport === 'NHL') {
+    const phrase = nhlLegPhrase(s.line, s.side, s.market);
+    if (phrase) return `${s.player_name} ${phrase}`.trim();
+  }
   const side = s.side === 'under' ? 'Under' : 'Over';
   return `${s.player_name} ${side} ${s.line} ${s.statLabel}`.trim();
+}
+
+const NHL_COUNT_NOUN: Record<string, string> = {
+  player_shots_on_goal: 'shots',
+  player_points: 'points',
+  player_assists: 'assists',
+  player_goal_scorer_anytime: 'goals',
+};
+
+/** "Over 2.5 shots (3 or more)". The book's line and the board's sentence. */
+export function nhlLegPhrase(line: number, side: LineSide, market: string): string | null {
+  const noun = NHL_COUNT_NOUN[market];
+  if (!noun || !Number.isFinite(line)) return null;
+  const word = side === 'under' ? 'Under' : 'Over';
+  const count = side === 'under' ? line - 0.5 : line + 0.5;
+  const how = side === 'under' ? 'or fewer' : 'or more';
+  return `${word} ${line} ${noun} (${count} ${how})`;
+}
+
+/** "DraftKings lists this as Over 1.5." The sheet title keeps the plain sentence. */
+export function nhlBookListing(book: string, line: number, side: LineSide): string {
+  const word = side === 'under' ? 'Under' : 'Over';
+  return `${bookName(book)} lists this as ${word} ${line}.`;
 }
 
 /** The priced side of an odds row for a game spec. */
@@ -327,12 +354,15 @@ export function propLineSheetInput(
     statLabel,
   };
   const prices = bettablePrices(rows, (r) => num(quote.side === 'under' ? r.under_price : r.over_price));
+  const choose = 'Add it to your betslip now — you’ll choose the sportsbook there.';
   const explainer =
-    quote.offLine && boardHeadline
-      ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${
-          numberLabel(quote.line, quote.side)
-        }. Add it to your betslip now — you’ll choose the sportsbook there.`
-      : undefined;
+    sport === 'NHL'
+      ? `${nhlBookListing(quote.book, quote.line, quote.side)} ${choose}`
+      : quote.offLine && boardHeadline
+        ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${
+            numberLabel(quote.line, quote.side)
+          }. ${choose}`
+        : undefined;
   return { spec, prices, explainer };
 }
 

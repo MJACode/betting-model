@@ -25,10 +25,13 @@ import {
   nhlBetCaption,
   nhlEmptyBoardText,
   nhlLineOnlyTitle,
+  nhlOffLineCount,
   nhlSkaterReadMissing,
   shouldOpenShotsLine,
   stopForPostedLine,
 } from '../src/lib/nhlBoard';
+import { lineLegLabel, nhlBookListing, propLineSheetInput } from '../src/lib/lineLegs';
+import type { StatsOddsQuote } from '../src/lib/statsOdds';
 import { lineOnlyRowLabel, listsPricedWithoutLog, needsTouchSet, rankedBoardChrome } from '../src/lib/statsBoard';
 import { hitModeHeadline, selectionFor } from '../src/lib/hitMode';
 import { defaultLineN } from '../src/lib/lineRuler';
@@ -114,6 +117,40 @@ check('the four captions are one sentence',
   && nhlBetCaption(0.5, 'assists') === '1 or more assists');
 check('anytime goals are captioned only at the priced 0.5',
   nhlBetCaption(1.5, 'goals') === null && nhlBetCaption(0.5, 'shots') === '1 or more shots');
+const shotsLeg = {
+  kind: 'prop' as const,
+  game_id: 'g',
+  sport: 'NHL',
+  market: 'player_shots_on_goal',
+  player_name: 'Auston Matthews',
+  team: 'TOR',
+  side: 'over' as const,
+  statLabel: 'Shots',
+};
+check('an NHL shots leg says the book line and the plain count',
+  lineLegLabel({ ...shotsLeg, line: 2.5 }) === 'Auston Matthews Over 2.5 shots (3 or more)'
+  && lineLegLabel({ ...shotsLeg, line: 1.5 }) === 'Auston Matthews Over 1.5 shots (2 or more)');
+check('a baseball leg is unchanged',
+  lineLegLabel({ ...shotsLeg, sport: 'MLB', market: 'batter_hits', line: 0.5, statLabel: 'Hits' }) === 'Auston Matthews Over 0.5 Hits');
+check('the sheet explainer names the book line',
+  nhlBookListing('draftkings', 1.5, 'over') === 'DraftKings lists this as Over 1.5.');
+check('an off-line pill says 3 or more',
+  nhlOffLineCount(2.5, 'over') === '3 or more' && nhlOffLineCount(1.5, 'over') === '2 or more');
+const sheetQuote: StatsOddsQuote = {
+  playerKey: 'auston matthews',
+  playerName: 'Auston Matthews',
+  gameId: 'NHL_2026-10-17_BOS_TOR',
+  market: 'player_shots_on_goal',
+  line: 1.5,
+  side: 'over',
+  book: 'draftkings',
+  price: -110,
+  link: null,
+  bookRows: [{ bookmaker: 'draftkings', line: 1.5, over_price: -110, under_price: null }],
+};
+const sheet = propLineSheetInput(sheetQuote, 'NHL', 'Shots', '2 or more shots');
+check('the NHL sheet keeps the plain title and puts the book line under it',
+  sheet.explainer === 'DraftKings lists this as Over 1.5. Add it to your betslip now — you’ll choose the sportsbook there.');
 check('Shots opens on the posted line once per NHL visit',
   shouldOpenShotsLine('NHL', 'shots', 1.5, null)
   && !shouldOpenShotsLine('NHL', 'shots', 1.5, 'NHL')
@@ -187,6 +224,13 @@ check('the sort claim is withheld when nothing is ranked',
   && screen.includes('sorted ? `${rightLabel}, sorted highest first` : rightLabel'));
 check('the filter count goes through the same chrome',
   screen.includes('resultCount={boardChrome.resultCount}'));
+check('an NHL off-line pill uses the plain count',
+  screen.includes('if (sport === \'NHL\') return nhlOffLineCount(line, side);'));
+check('the load error is not capped at three lines',
+  screen.includes('Couldn’t load the board.') && !screen.includes('numberOfLines={3}'));
+const sheetSrc = read('src/components/AddLineSheet.tsx');
+check('sheet prices use the minus glyph',
+  sheetSrc.includes('formatAmerican(p.price).replace(/-/g, MINUS)'));
 
 const nflEmpty = rankedBoardChrome('NFL', 0, 4);
 const nflRanked = rankedBoardChrome('NFL', 12, 4);

@@ -60,6 +60,13 @@ export function nhlBetCaption(line: number, statKey: string): string | null {
   return `${n} or more ${noun}`;
 }
 
+/** The off-line pill caption. The board says "3 or more", so the pill does too. */
+export function nhlOffLineCount(line: number, side: 'over' | 'under'): string {
+  const count = side === 'under' ? line - 0.5 : line + 0.5;
+  const how = side === 'under' ? 'or fewer' : 'or more';
+  return `${count} ${how}`;
+}
+
 /**
  * Move the Shots ruler onto the posted line once per NHL visit.
  *

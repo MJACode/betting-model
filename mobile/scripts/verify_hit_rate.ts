@@ -276,7 +276,8 @@ check(
     screen.includes('modeLineLabel(l, sd, hitMode),')
       && read('src/lib/lineLegs.ts').includes('numberLabel(quote.line, quote.side)'));
   check('the off-line caption is the short form, on one line, in that idiom',
-    screen.includes('offLineCaption(quote.line, quote.side, hitMode)')
+    screen.includes('offLineCaption(quote.line, quote.side, hitMode, sport)')
+      && screen.includes("if (sport === 'NHL') return nhlOffLineCount(line, side);")
       && screen.includes('return modeLineLabel(line, side, mode, true);')
       // Repointed 2026-09-19: the caption took a second style (`oddsCaptionDay`)
       // and moved onto its own line. Still ONE line of text, which is the claim
