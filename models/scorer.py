@@ -2968,8 +2968,13 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "inning_at_pick":     p.get("inning_at_pick"),
             "score_diff_at_pick": p.get("score_diff_at_pick"),
             # Why a row that cleared its cut is a NONE anyway. NULL on every
-            # row the model itself declined; see _downgrade().
-            "downgrade_reason":   p.get("downgrade_reason"),
+            # row the model itself declined; see _downgrade(). A row that does
+            # not set it at all (the rule cards that write through here:
+            # mlb_game_market, mlb_total_public_fade, nhl_over_under) gets the
+            # paused marker when its model is paused, as every builder above
+            # stamps it (config.PAUSED_NOTE: every row a paused model writes).
+            "downgrade_reason":   (p["downgrade_reason"] if "downgrade_reason" in p
+                                   else _pause_note(p.get("model_id"))),
         }
         for p in picks
     ]
