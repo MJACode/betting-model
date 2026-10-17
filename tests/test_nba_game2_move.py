@@ -163,6 +163,29 @@ def test_a_game_the_rule_gives_no_number_is_outside_the_cells_population():
     assert rows[0]["population_games"] == 2
 
 
+def test_a_rule_keyed_by_book_keeps_every_books_offer_in_its_population():
+    # The soft-book outlier gives a number to one BOOK (betmgm, 1.5 off the
+    # consensus); the game is in the population, so its blind bets are taken
+    # at the best deciding offer on the game, not at the outlier book alone.
+    games = pd.DataFrame([{"game_id": "G", "season": 2024, "game_date": "2024-01-15", "tip": TIP,
+                           "home_team": "BOS", "away_team": "NYK", "home_score": 105, "away_score": 100}])
+    quotes = pd.DataFrame([_q("G", "draftkings", "spreads", 60, -4.5), _q("G", "fanduel", "spreads", 60, -4.5),
+                           _q("G", "betmgm", "spreads", 60, -6.0),
+                           _q("G", "pinnacle", "spreads", 60, -4.5, pa=-105.0, pb=-105.0)])
+    f = quotes[["game_id", "tip", "fetch_at"]].drop_duplicates()
+    data = H.Data(games=games, quotes=quotes,
+                  fetches=f.assign(lead_min=(f["tip"] - f["fetch_at"]).dt.total_seconds() / 60))
+    t, vis, _, neutral = M.point_frames(data, "C", {(2024, "spreads"): 12.0})
+    cand = M.attach(neutral, M.outlier_signal(vis), keys=("game_id", "market", "book"))
+    rows = M.rule_cells(data, "control_soft_outlier", "C", cand, (1.0,), {"spreads": ["outlier_book"]})
+    r = rows[0]
+    # the bet: away +6 at betmgm, home won by 5 -> covers
+    assert r["n_choose"] == 1 and r["share_home"] == 0.0 and r["units_choose"] == pytest.approx(1.0)
+    # blind home is home -4.5 (draftkings or fanduel, both -110): covers by 5;
+    # at betmgm's -6 alone it would lose
+    assert r["blind_home"] == pytest.approx(1.0 / 1.1)
+
+
 # ── market pricing, the graded load, the written cells ──────────────────────
 
 def _priced_season(n=80):

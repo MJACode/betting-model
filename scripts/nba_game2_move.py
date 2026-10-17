@@ -236,10 +236,15 @@ def rule_cells(data: H.Data, family: str, point: str, cand: pd.DataFrame, cuts,
 
     Section 6.5 (second amendment): bar 9's population is "the games its model
     or rule produced a number for". `cand` (attach) keeps every priced offer,
-    so the offers on games with no rule number (strength NaN) are left out
-    here. The cell's bets cannot change (every cut asks strength >= k); only
-    the population behind the real-side shares and blind bets does."""
-    pop = cand[cand["strength"].notna()]
+    so a (game, market) with no rule number on any row is left out here. A
+    rule keyed by book (the soft-book outlier) numbers one book's row; every
+    book's offer on that game stays, so the blind bets are taken at the best
+    deciding offer on the game. The cell's bets cannot change (every cut asks
+    strength >= k); only the population behind the real-side shares and blind
+    bets does."""
+    key = pd.MultiIndex.from_frame(cand[["game_id", "market"]])
+    numbered = pd.MultiIndex.from_frame(cand.loc[cand["strength"].notna(), ["game_id", "market"]])
+    pop = cand[key.isin(numbered)]
     return H.run_cells(data, family, point, pop, pop, cuts=cuts, sides_by_market=sides_by_market,
                        close=close, sig=sig, placebo=placebo, strength="strength")
 
