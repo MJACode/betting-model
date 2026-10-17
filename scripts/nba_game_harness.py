@@ -273,7 +273,8 @@ class ResidDist:
     """The EMPIRICAL distribution of a side-A quantity around its centre (§6.3:
     "priced ... through the empirical margin/total distribution").
 
-    Built from residuals r = result - centre on seasons BEFORE the graded one:
+    Built from residuals r = result - centre on seasons BEFORE the graded one,
+    re-centred on zero (the spread, not the average miss):
     for the market's own pricing (market_fair, the blind bet, closing value,
     F2, F6a, F6d) the centre is Pinnacle's closing number (close_dist); for a
     market-independent projection (F1, F1b, F5) it is that projection, so the
@@ -292,6 +293,12 @@ class ResidDist:
         r = r[np.isfinite(r)]
         if len(r) < 50:
             raise ValueError(f"{label}: {len(r)} residuals is too few for an empirical distribution")
+        # The SPREAD of results around the centre, not their earlier average
+        # miss: uncentred, a projection's past bias would move its centre a
+        # second time (it is already in the calibration). For market pricing
+        # the centre is solved from the price, so centring changes nothing there.
+        self.mean = float(r.mean())
+        r = r - self.mean
         self.n, self.sd, self.label = len(r), float(r.std()), label
         self.d = np.arange(-self.LIM, self.LIM + self.STEP / 2, self.STEP)
         self.win_whole, self.push_whole = self._table(r, 0.0)
@@ -779,10 +786,10 @@ def blind_by_real_side(nm: pd.DataFrame, population: set, games: pd.DataFrame,
     the cell's own priced population at that point (no model, no cut), at the
     best deciding offer under the market's fair line. ROI on `seasons`.
 
-    A rule's own per-game `side_pick` (on `nm` when the cell bets a label
-    such as "fav" or "fade") is dropped here: these blind bets read only the
-    real sides and the market's own favourite, and a second side_pick column
-    from the merge below would leave choose() with neither."""
+    A per-game rule passes its own frame, side_pick included, as `nm` (its
+    blind_side needs it). That column is the RULE's side; the favourite split
+    sets its own from the market, so the rule's is dropped first -- left in,
+    the merge below would suffix both and choose() would find neither."""
     pop = nm[nm["game_id"].isin(population)].drop(columns="side_pick", errors="ignore")
     out = {}
     if pop.empty:
