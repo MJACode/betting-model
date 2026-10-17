@@ -9,9 +9,12 @@
 --
 -- This file does not GRANT on the log and does not add an RLS policy.
 -- Those are add_nhl_stats_views_2026_10_16.sql (#962, draft, not applied).
--- The log was created with RLS on and no policy, so anon SELECT is denied
--- until that file runs, and this function then returns no rows. Merging
--- #962 is the OK for that grant.
+-- The function is SECURITY INVOKER. Until this migration runs, PostgREST
+-- answers PGRST202, or Postgres answers 42883: the function is not in the
+-- schema. Until #962 grants anon SELECT and adds a policy, a call answers
+-- 42501, permission denied for nhl_skater_game_log. Both are errors.
+-- The app treats those codes as an empty average and still shows lines.
+-- Merging #962 is the OK for that grant.
 --
 -- One statement. It returns once the function exists, so a later change
 -- needs a new migration. NOT applied from a development session.

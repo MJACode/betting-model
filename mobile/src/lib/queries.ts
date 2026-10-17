@@ -1,3 +1,4 @@
+import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
 import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
 import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
@@ -129,8 +130,12 @@ const UFC_TOTALS_COLUMNS =
  * The same shape as the other sports: one row per player, summed in SQL,
  * p_window null for the season. The function reads nhl_skater_game_log
  * (`shots`, regular season, season = the ending year). The first label
- * with rows wins. The log's anon grant is #962 and is not applied; until
- * it is, this read comes back empty.
+ * with rows wins.
+ *
+ * The function is SECURITY INVOKER. Before this migration is applied the
+ * call is PGRST202 or 42883 (the function is not in the schema). Before
+ * #962 grants the log it is 42501 (permission denied). Those two are an
+ * empty average, so posted lines still render. Every other error is thrown.
  */
 async function fetchNhlSkaterBoard(
   calendarYear: number,
@@ -138,16 +143,21 @@ async function fetchNhlSkaterBoard(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   const fn = 'player_window_totals_nhl';
-  for (const s of nhlSeasonCandidates(calendarYear, monthET())) {
-    const rows = await pageRpc<SeasonTotalsRow>(
-      fn,
-      { p_season: s, p_window: window },
-      teams,
-      totalsRowKey,
-    );
-    if (rows.length) return rows;
+  try {
+    for (const s of nhlSeasonCandidates(calendarYear, monthET())) {
+      const rows = await pageRpc<SeasonTotalsRow>(
+        fn,
+        { p_season: s, p_window: window },
+        teams,
+        totalsRowKey,
+      );
+      if (rows.length) return rows;
+    }
+    return [];
+  } catch (e) {
+    if (nhlSkaterReadMissing(e)) return [];
+    throw e;
   }
-  return [];
 }
 
 /**

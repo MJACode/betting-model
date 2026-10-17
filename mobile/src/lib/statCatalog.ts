@@ -107,11 +107,12 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'def_pd', label: 'Passes Defended', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_interceptions', label: 'Interceptions', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
   // ── NHL skaters. player_window_totals_nhl reads nhl_skater_game_log.
-  //    The shots column is `shots` (not shots_on_goal). Season on that
-  //    table is the ending year. Blocked shots is not a chip. Goals is
-  //    the book's anytime-scorer market, stored as over 0.5. defaultLine
-  //    2.5 is the fallback when no shots line is posted; the board uses
-  //    tonight's most common posted line when there is one.
+  //    The shots column is `shots` (not shots_on_goal). The log also has
+  //    `blocked_shots` and `hits`; neither is a chip on this board. Season
+  //    on that table is the ending year. Goals is the book's anytime-scorer
+  //    market, stored as over 0.5, and the caption names only that line.
+  //    defaultLine 2.5 is the fallback when no shots line is posted; the
+  //    board opens on the most common posted line once per NHL visit.
   { key: 'shots', label: 'Shots', sport: 'NHL', group: 'NHL', defaultLine: 2.5 },
   { key: 'points', label: 'Points', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },
   { key: 'goals', label: 'Goals', sport: 'NHL', group: 'NHL', defaultLine: 0.5 },

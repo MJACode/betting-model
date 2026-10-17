@@ -155,6 +155,7 @@ import {
   nhlBetCaption,
   nhlEmptyBoardText,
   nhlLineOnlyTitle,
+  shouldOpenShotsLine,
   stopForPostedLine,
 } from '@/lib/nhlBoard';
 import {
@@ -1032,15 +1033,24 @@ export function StatsScreen() {
 
   // Shots opens on the line the most players are posted at tonight.
   // 2.5 (stop 3, "3 or more") is the fallback when nothing is posted.
+  // Once per NHL visit: a refetch and a return to the chip leave the
+  // number the user already set.
   const postedShotsLine = useMemo(() => {
     if (sport !== 'NHL' || stat?.key !== 'shots') return null;
     if (!propMarket || propLines.market !== propMarket) return null;
     return mostCommonPostedLine(propLines.rows);
   }, [sport, stat, propMarket, propLines]);
+  const shotsOpenKey = useRef<string | null>(null);
   useEffect(() => {
-    if (postedShotsLine == null) return;
-    setLineN(snapStop(stopForPostedLine(postedShotsLine), rulerScale));
-  }, [postedShotsLine, rulerScale]);
+    if (sport !== 'NHL') shotsOpenKey.current = null;
+  }, [sport]);
+  useEffect(() => {
+    const key = stat ? String(stat.key) : null;
+    const posted = postedShotsLine;
+    if (!shouldOpenShotsLine(sport, key, posted, shotsOpenKey.current) || posted == null) return;
+    shotsOpenKey.current = sport;
+    setLineN(snapStop(stopForPostedLine(posted), rulerScale));
+  }, [sport, stat, postedShotsLine, rulerScale]);
 
   // Prop lines for the WHOLE forward window, not one date. The board is no
   // longer cut to the slate (Matt, 2026-09-12), so a player whose next game is
@@ -1958,7 +1968,7 @@ export function StatsScreen() {
   // "Over 0.5 Hits").
   const lineHeadline =
     sport === 'NHL' && stat
-      ? nhlBetCaption(line, String(stat.key))
+      ? (nhlBetCaption(line, String(stat.key)) ?? '')
       : hitModeHeadline(lineN, hitMode, betLabel);
 
   // What the tapped pill hands the add-to-betslip sheet: the proposition,
@@ -1974,10 +1984,10 @@ export function StatsScreen() {
               betLabel,
               lineHeadline,
               sport === 'NHL' && stat
-                ? (l) => nhlBetCaption(l, String(stat.key))
+                ? (l, sd) => nhlBetCaption(l, String(stat.key)) ?? modeLineLabel(l, sd, hitMode)
                 : (l, sd) => modeLineLabel(l, sd, hitMode),
             ),
-            ...(sport === 'NHL' && stat
+            ...(sport === 'NHL' && stat && nhlBetCaption(lineSheet.line, String(stat.key))
               ? { title: `${lineSheet.playerName} ${nhlBetCaption(lineSheet.line, String(stat.key))}` }
               : {}),
           }
@@ -2333,7 +2343,7 @@ export function StatsScreen() {
           snapshot_at, and the game-line age rule (markets.priceAgeApplies)
           does not cover props — their normal age is hours. A second caption
           on this shared cell would be a new flag on every sport's board. */}
-      {!canHitRate && showOdds ? (
+      {!canHitRate && showOdds && lineHeadline ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
           <Text style={styles.noLinesText}>{lineHeadline}</Text>

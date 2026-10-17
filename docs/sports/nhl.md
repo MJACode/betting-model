@@ -131,9 +131,13 @@
   (2017-18 → 2025-26 team and goalie; skaters 2018-19 →). `season` on
   `nhl_skater_game_log` is the ENDING year (2027 is 2026-27). Measured
   2026-10-17: season 2027, `game_type` 2, 4,247 rows from 2026-09-29 through
-  2026-10-15. The shots column is `shots`. The Stats Players tab sums it
-  with `player_window_totals_nhl` (same RPC shape as the other sports).
-  Anon SELECT on the log is the unapplied #962 grant. Importer:
+  2026-10-15.   The shots column is `shots`. The log also has `blocked_shots` and
+  `hits`; the Stats board does not chip them. The Stats Players tab sums
+  it with `player_window_totals_nhl` (same RPC shape as the other sports).
+  The function is SECURITY INVOKER. Until this migration and #962's anon
+  SELECT are both applied, the call errors (function not found, or
+  permission denied). The app treats those two as an empty average and
+  still shows posted lines. Importer:
   `data/ingestors/nhl_game_logs.py` (`--seasons A B --apply`, `--no-skaters`
   for the fast pass, `--recent N` for the daily top-up). Skater reports are
   capped at 10,000 rows a call, so they are pulled a week at a time and a

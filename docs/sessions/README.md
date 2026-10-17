@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: a missing or permission-denied player_window_totals_nhl (PGRST202/42883/42501) is an empty average so lines still show; Shots opens once per visit; Goals caption only at 0.5 |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: Stats Players sums nhl_skater_game_log through player_window_totals_nhl (shots, ending year); table GRANT stays on unapplied #962; empty-log betLabel crash fixed; Shots opens on the most common posted line |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984 review: NHL skater pages cached 5 minutes per season (no server sum without a migration); football Anytime TD header/count/empty state stays on the old path; Jan–Jun skips next year's season |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NHL Stats tab shows skater prop lines: Shots, Points, Goals, Assists from nhl_skater_stats; hit rate stays off pending #962; blocked shots omitted (no column) |

@@ -39,16 +39,56 @@ export function stopForPostedLine(line: number): number {
   return line + 0.5;
 }
 
-/** One sentence for the caption under the chips and for the sheet. */
-export function nhlBetCaption(line: number, statKey: string): string {
+/**
+ * One sentence for the caption under the chips and for the sheet.
+ *
+ * Anytime goal scorer is priced only at 0.5 (measured 2026-10-17:
+ * `player_goal_scorer_anytime`, game_date from 2026-10-01, one line,
+ * 691 players). A ruler stop past 1 is not that bet, so it gets no caption.
+ */
+export function nhlBetCaption(line: number, statKey: string): string | null {
+  if (statKey === 'goals') {
+    if (line !== 0.5) return null;
+    return 'Anytime goal scorer: 1 or more goals';
+  }
   const n = line + 0.5;
-  if (statKey === 'goals') return `Anytime goal scorer: ${n} or more goals`;
   const noun =
     statKey === 'shots' ? 'shots'
     : statKey === 'points' ? 'points'
     : statKey === 'assists' ? 'assists'
     : statKey;
   return `${n} or more ${noun}`;
+}
+
+/**
+ * Move the Shots ruler onto the posted line once per NHL visit.
+ *
+ * A later refetch, and a return to the Shots chip, leave the number the
+ * user already has. `appliedSport` is the sport this visit already opened.
+ */
+export function shouldOpenShotsLine(
+  sport: string,
+  statKey: string | null,
+  postedLine: number | null,
+  appliedSport: string | null,
+): boolean {
+  return sport === 'NHL' && statKey === 'shots' && postedLine != null && appliedSport !== sport;
+}
+
+/** Codes that mean the skater average cannot be read yet, and nothing else.
+ *
+ * 42501: player_window_totals_nhl is SECURITY INVOKER and nhl_skater_game_log
+ * has RLS on with no policy and no anon SELECT, so the call is permission
+ * denied until #962. PGRST202 and 42883: the function is not in the schema
+ * until this migration runs. A timeout, a missing table, or a permission
+ * sentence with a different code stays a real error.
+ */
+const NHL_SKATER_READ_MISSING = new Set(['42501', 'PGRST202', '42883']);
+
+export function nhlSkaterReadMissing(error: unknown): boolean {
+  if (error == null || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && NHL_SKATER_READ_MISSING.has(code);
 }
 
 /** Section title above priced names the log did not rank. */

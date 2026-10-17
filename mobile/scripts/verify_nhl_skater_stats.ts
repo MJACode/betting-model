@@ -25,6 +25,8 @@ import {
   nhlBetCaption,
   nhlEmptyBoardText,
   nhlLineOnlyTitle,
+  nhlSkaterReadMissing,
+  shouldOpenShotsLine,
   stopForPostedLine,
 } from '../src/lib/nhlBoard';
 import { lineOnlyRowLabel, listsPricedWithoutLog, needsTouchSet, rankedBoardChrome } from '../src/lib/statsBoard';
@@ -61,11 +63,11 @@ for (const def of nhl) {
   check(`${def.label} is not a model pick`, propModelForStat(def) === null);
 }
 check('no other NHL chip was invented', nhl.length === 4);
-check('blocked shots is not a chip — the log column is not on this board',
-  !STAT_CATALOG.some((d) => d.sport === 'NHL' && String(d.key) === 'blocked_shots'));
-
 check('NHL is not a hit-rate sport', !supportsHitRate('NHL' as Sport));
 const catalog = read('src/lib/statCatalog.ts');
+check('blocked shots and hits are on the log and are not chips',
+  catalog.includes('`blocked_shots` and `hits`')
+  && !STAT_CATALOG.some((d) => d.sport === 'NHL' && (String(d.key) === 'blocked_shots' || String(d.key) === 'hits')));
 check('HIT_RATE_SPORTS does not name NHL',
   !/HIT_RATE_SPORTS = new Set<Sport>\(\[[^\]]*NHL/.test(catalog));
 
@@ -110,6 +112,21 @@ check('the four captions are one sentence',
   nhlBetCaption(0.5, 'points') === '1 or more points'
   && nhlBetCaption(0.5, 'goals') === 'Anytime goal scorer: 1 or more goals'
   && nhlBetCaption(0.5, 'assists') === '1 or more assists');
+check('anytime goals are captioned only at the priced 0.5',
+  nhlBetCaption(1.5, 'goals') === null && nhlBetCaption(0.5, 'shots') === '1 or more shots');
+check('Shots opens on the posted line once per NHL visit',
+  shouldOpenShotsLine('NHL', 'shots', 1.5, null)
+  && !shouldOpenShotsLine('NHL', 'shots', 1.5, 'NHL')
+  && !shouldOpenShotsLine('NHL', 'points', 1.5, null)
+  && !shouldOpenShotsLine('NHL', 'shots', null, null)
+  && !shouldOpenShotsLine('NFL', 'shots', 1.5, null));
+check('a missing function or a denied log is an empty average',
+  nhlSkaterReadMissing({ code: '42501', message: 'permission denied for table nhl_skater_game_log' })
+  && nhlSkaterReadMissing({ code: 'PGRST202', message: 'Could not find the function public.player_window_totals_nhl' })
+  && nhlSkaterReadMissing({ code: '42883', message: 'function player_window_totals_nhl(integer, integer) does not exist' })
+  && !nhlSkaterReadMissing({ code: '57014', message: 'canceling statement due to statement timeout' })
+  && !nhlSkaterReadMissing({ message: 'permission denied for table nhl_skater_game_log' })
+  && !nhlSkaterReadMissing('42501'));
 check('tonight’s most common line wins, and a tie keeps the lower line',
   mostCommonPostedLine([
     { player_name: 'A', line: 1.5 },
@@ -138,6 +155,9 @@ check('window totals routes NHL',
   queries.includes("if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams)"));
 check('the sum is the same RPC the other sports use',
   queries.includes("const fn = 'player_window_totals_nhl'"));
+check('those two failures become an empty read and every other error is thrown',
+  queries.includes('if (nhlSkaterReadMissing(e)) return [];')
+  && queries.includes('throw e;'));
 
 const screen = read('src/screens/StatsScreen.tsx');
 const teamsAt = screen.indexOf("if (boardMode === 'teams' && supportsTeamBoard(sport))");
@@ -153,7 +173,9 @@ check('betLabel is declared before the line-only rows',
   screen.indexOf('const betLabel = propDisplayLabel') > 0
   && screen.indexOf('const betLabel = propDisplayLabel') < screen.indexOf('const lineOnlySection'));
 check('averages on that sport names the bet under the chips',
-  screen.includes('!canHitRate && showOdds') && screen.includes('{lineHeadline}'));
+  screen.includes('!canHitRate && showOdds && lineHeadline') && screen.includes('{lineHeadline}'));
+check('the posted shots line is applied once',
+  screen.includes('shouldOpenShotsLine(') && screen.includes('shotsOpenKey'));
 check('an empty NHL log does not say the totals are not in',
   screen.includes('nhlLineOnlyTitle(nhlLogEmpty)') && !screen.includes('Season totals aren’t in yet'));
 check('NHL drops the no-games label; football keeps it',

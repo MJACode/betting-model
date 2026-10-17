@@ -80,6 +80,12 @@ def test_the_window_function_reads_the_game_log_and_does_not_grant_it():
     assert "GRANT EXECUTE ON FUNCTION public.player_window_totals_nhl" in sql
     assert "GRANT SELECT" not in sql
     assert "v_public_track_record" not in sql
+    assert "42501" in sql and "PGRST202" in sql and "42883" in sql
+    assert "returns no rows" not in sql
+    board = _read(MOBILE / "src/lib/nhlBoard.ts")
+    assert "NHL_SKATER_READ_MISSING = new Set(['42501', 'PGRST202', '42883'])" in board
+    queries = _read(MOBILE / "src/lib/queries.ts")
+    assert "if (nhlSkaterReadMissing(e)) return [];" in queries
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
     clv = "clv_standard_v2_2026_10_14.sql"
