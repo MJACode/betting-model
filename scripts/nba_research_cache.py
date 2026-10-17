@@ -73,6 +73,23 @@ def cache_lines(conn, games: pd.DataFrame) -> None:
     """, ids)
     local_store.write_table("nba_odds", df, SEASONS)
     logger.info(f"odds {len(df):,}")
+    # When each stored fetch was ASKED FOR. A quote's snapshot_at is the book's
+    # last update, minutes before the fetch, so it cannot place a fetch in a
+    # decision window; the ledgers can. Rows join their fetch on created_at =
+    # pulled_at (one transaction writes both). docs/nba_models_2026.md §6.5.
+    parts = [_frame(conn, """
+        SELECT (snapshot_date || 'T' || lpad(hour_utc::text, 2, '0') || ':00:00+00')::timestamptz
+                   AS requested_at, pulled_at, rows, 'hourly' AS why
+          FROM odds_history_pulls WHERE sport = 'NBA'
+    """)]
+    if _table_exists(conn, "odds_history_fetches"):
+        parts.append(_frame(conn, """
+            SELECT requested_at, pulled_at, rows, why
+              FROM odds_history_fetches WHERE sport = 'NBA'
+        """))
+    led = pd.concat(parts, ignore_index=True)
+    local_store.write_table("nba_fetch_ledger", led, SEASONS)
+    logger.info(f"fetch ledger {len(led):,}")
 
 
 def cache_props(conn, games: pd.DataFrame) -> None:
@@ -89,7 +106,10 @@ def cache_props(conn, games: pd.DataFrame) -> None:
 def cache_box(conn) -> None:
     for t in ("nba_player_game_log", "nba_player_game_adv", "nba_game_inactives",
               "nba_game_officials", "nba_injury_report", "nba_period_scores",
-              "nba_player_dnp", "player_positions"):
+              "nba_player_dnp", "player_positions",
+              # the game-market search's free data (docs/nba_models_2026.md §6.5);
+              # each is skipped until its table exists
+              "nba_public_splits", "nba_stints", "nba_player_id_map"):
         if not _table_exists(conn, t):
             logger.warning(f"{t}: not in the database yet")
             continue
