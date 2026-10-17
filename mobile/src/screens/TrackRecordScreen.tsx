@@ -135,11 +135,16 @@ export function TrackRecordScreen() {
   const notLoaded = rows.length === 0 && (loading || Boolean(error));
   // The hero number is the posted stake, the same units Discord #results prints.
   const heroUnits = Number(overall.units ?? 0);
+  // Daily rows arrived without a units column. Drawing them as zero is a flat
+  // line that ends at +0.00u. A missing overall total is the same gap.
+  const dailyLacksUnits =
+    visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null);
+  const curveUnknown = overall.units == null || dailyLacksUnits;
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
         endUnits:
-          overall.risked != null && equity.length
+          (overall.risked ?? 0) > 0 && equity.length
             ? equity[equity.length - 1]!.cumUnits
             : null,
         since: RECORD_START,
@@ -271,13 +276,11 @@ export function TrackRecordScreen() {
           />
         )}
 
-        {/* Unconditional once loaded: EquityCurve carries its own "not enough
-            settled days" copy. Held back on the first load so it cannot assert
-            there are too few settled days while the data is still in flight.
-            Daily rows with no units column are not that case: the curve stays
-            off rather than drawing +0.00u. endUnits is the hero's posted-stake
-            total, so the pill matches it. */}
-        {rows.length === 0 && (loading || error) ? null : overall.units == null || (visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null)) ? null : (
+        {/* EquityCurve carries its own "not enough settled days" copy. Held
+            back while nothing has loaded, and while the posted-stake total is
+            unknown, so that copy is not what a missing column says. endUnits
+            is the hero's posted-stake total, so the pill matches it. */}
+        {notLoaded || curveUnknown ? null : (
           <EquityCurve points={equity} seriesId={sportSel} width={chartWidth} endUnits={heroUnits} />
         )}
 

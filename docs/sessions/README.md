@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, the share keeps the record and the win rate when ROI is unknown; ROI and the units line require risked > 0, the same gate the cards use, so an all-void selection is not shared as 0.0% |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, a select from before the units column leaves the curve off and drops the ROI and units lines from the share; the hero uses that share; model rows sort by model id; the tally rollback is a read-then-write |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #964's risked fix (`cc017a11`) merged into the hero branch; the return cell reads `roi`; a missing units column dashes the hero and hides the curve |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, posted risked is WIN/LOSS only: snapshot through 2026-10-15 is 918.2090 (the 917.1090 figure is one −110 loss earlier); 106 NO_ACTION and 30 ungraded would have made 1071.8475; functions are their own migration; the app select falls back if the columns are missing |
@@ -28,6 +29,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, Record hero review: VoiceOver scrub index resets on a shorter series and on blur; end pill is measured; grid says ROI; verify_record_hero.ts runs in PR CI |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Record headline rebuilt to Designer's Option B: Discord units beside a sparkline, 2×2 grid, equity end pill the same string, betInk line |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Record hero shows posted-stake units at two decimals (the Discord figure); ROI stays on the line under it; stacked on #964 |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, a bet Discord posted keeps its edge, probability and price cuts in the app (mike: "Yes"); DUPLICATE copies are never an action; display only |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Luukkonen Under 25.5 Saves (pick 3628128) voided on the evening box pass with no start logged for him; goalie void now needs both teams' starts; regraded LOSS, 2026-10-15 restates |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, The Citadel: The Odds API's "Citadel Bulldogs" joins `NCAAF_ODDS_API_MAP` (CFBD says "The Citadel", the fold keeps the article); `ncaaf_citadel_alias_2026_10_16.sql` consolidates five alias rows (Texas A&M 2026-10-17 held 605 odds, Charlotte 2026-09-05 8,639; no picks) onto the CFBD ids; the migration is executed on a scratch Postgres in its test |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA projection model (`nba_prop_projection`) live: six calibrated cells, every qualifying proposition, never one the rule holds, projected about 65 minutes before tip and decided in the window; three verifiers and a pre-merge review confirmed; live-path replay matches the graded predictions; the shared window moved to 45-57 (#970) and two missing markets fetched |
