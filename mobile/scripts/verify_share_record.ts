@@ -17,6 +17,10 @@ const base: TrackRecordSummary = {
   profitFlat: 1120, stakedFlat: 25900, roi: 0.043, winRate: 0.579,
   clvSettled: 200, clvBeat: 116, clvBeatRate: 0.58,
 };
+// Set after the literal so the pre-existing missing-field error stays the
+// same text. The happy path is a stake the view has already reported.
+base.risked = 260;
+base.units = 11.2;
 
 const msg = buildShareMessage(base, { endUnits: 11.2, since: '2026-04-14' });
 check('includes signed ROI', msg.includes('+4.3%'), msg.split('\n')[2]);
@@ -39,6 +43,16 @@ check('no units when omitted', !neg.includes('units, 1 to win'));
 const loss = buildShareMessage(base, { endUnits: -33.14 });
 check('negative units signed with U+2212', loss.includes('\u221233.14 units') && !loss.includes('-33.14'));
 check('zero units unsigned', buildShareMessage(base, { endUnits: 0.004 }).includes('\n0.00 units'));
+
+// The OTA can ship before the view has units. roi is then 0 and a caller
+// can still hand endUnits 0. The public text must not say either.
+const beforeColumns = buildShareMessage(
+  { ...base, units: undefined, risked: undefined, roi: 0 },
+  { endUnits: 0, since: '2026-04-14' },
+);
+check('missing stake drops the ROI line', !beforeColumns.includes('ROI') && !beforeColumns.includes('+0.0%'), beforeColumns);
+check('missing stake drops the units line', !beforeColumns.includes('units'), beforeColumns);
+check('missing stake still names the app', beforeColumns.includes(APP_URL));
 
 console.log(failures === 0 ? '\nAll share-record checks passed.' : `\n${failures} FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

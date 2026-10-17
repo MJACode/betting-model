@@ -15,11 +15,17 @@ export function buildShareMessage(
   opts: { endUnits?: number | null; since?: string } = {},
 ): string {
   const record = `${s.wins}-${s.losses}${s.pushes > 0 ? `-${s.pushes}` : ''}`;
+  // risked is unset when the select ran before the units column existed.
+  // roi is then 0, and a caller can still pass endUnits 0. Neither number
+  // is the record, so both lines stay out of the public text.
+  const stakeKnown = s.risked != null;
   const lines: (string | null)[] = [
     '📊 Signalbase — verified sports-betting model',
     '',
-    `${formatPctSigned(s.roi)} ROI · ${record} (${Math.round(s.winRate * 100)}% win rate)`,
-    opts.endUnits != null
+    stakeKnown
+      ? `${formatPctSigned(s.roi)} ROI · ${record} (${Math.round(s.winRate * 100)}% win rate)`
+      : null,
+    opts.endUnits != null && stakeKnown
       ? // Same sign and 2-decimal rounding as the equity curve (U+2212 for a loss).
         `${formatSigned(opts.endUnits, 2, 'u').replace(/u$/, '')} units, 1 to win`
       : null,

@@ -109,7 +109,10 @@ export function TrackRecordScreen() {
   const groups: SportGroup[] = useMemo(() => groupBySport(visibleRows), [visibleRows]);
 
   // Cumulative posted-stake units (the same units Discord #results books).
+  // A select from before the units column has daily rows and no units.
+  // Treating the gap as zero draws a flat line that ends at +0.00u.
   const equity: EquityPoint[] = useMemo(() => {
+    if (!visibleDaily.some((d) => d.units != null)) return [];
     const byDate = new Map<string, number>();
     for (const d of visibleDaily) {
       byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.units ?? 0));
@@ -130,7 +133,10 @@ export function TrackRecordScreen() {
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
-        endUnits: equity.length ? equity[equity.length - 1]!.cumUnits : null,
+        endUnits:
+          overall.risked != null && equity.length
+            ? equity[equity.length - 1]!.cumUnits
+            : null,
         since: RECORD_START,
       }),
     }).catch(() => {});
@@ -296,7 +302,7 @@ export function TrackRecordScreen() {
             settled days" copy, and it is the only thing between the hero and the
             prose now. Held back on the first load so it cannot assert there are
             too few settled days while the data is still in flight. */}
-        {rows.length === 0 && (loading || error) ? null : (
+        {rows.length === 0 && (loading || error) ? null : visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null) ? null : (
           <EquityCurve points={equity} width={chartWidth} />
         )}
 

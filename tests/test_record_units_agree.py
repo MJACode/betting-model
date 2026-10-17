@@ -188,9 +188,12 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "Number(r.risked ?? 0)" in summary
     assert "risked > 0 ? units / risked" in summary
     equity = screen.split("const equity", 1)[1].split("}, [visibleDaily]);", 1)[0]
-    assert "d.units" in equity
+    assert "d.units != null" in equity
+    assert "return []" in equity
     assert "profit_flat" not in equity
     assert "/ 100" not in equity
+    assert "overall.risked != null" in screen
+    assert "visibleDaily.some((d) => d.units != null)" in screen
     assert "Flat-bet ROI" not in screen
     assert ">ROI · 1 to win<" in screen
     assert "Yesterday and the Models tab still use a flat $100 bet" in screen
@@ -201,10 +204,12 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "formatSigned(last, 2, 'u')" in curve
     assert "units, 1 to win" in share
     assert "formatPctSigned(s.roi)" in share
+    assert "s.risked != null" in share
     assert "s.roiFlat" not in share
     assert "flat-bet ROI" not in share
     assert "flat $100" not in share
     assert "roi:" in summary
+    assert "localeCompare(String(b.model_id))" in summary
     assert "roiFlat:" not in summary.split("export interface ParlaySummary")[0]
 
 
@@ -275,3 +280,16 @@ def test_a_missing_function_tallies_with_stake_for():
     assert tallied["w"] == 1
     assert tallied["units"] == pytest.approx(stake_for(None, -110).win)
     assert tallied["risked"] == pytest.approx(stake_for(None, -110).risk)
+
+
+def test_the_fallback_rollback_is_only_safe_because_callers_read_first():
+    """An uncommitted insert on the same connection would not survive it."""
+    src = (ROOT / "tracking/discord_notifier.py").read_text(encoding="utf-8")
+    fn = src.split("def _execute_settled", 1)[1].split("\ndef ", 1)[0]
+    assert "writes afterwards" in fn
+    body = src.split("def notify_discord_results", 1)[1].split("\ndef ", 1)[0]
+    assert body.index("_settled_rows(") < body.index("INSERT INTO push_sent")
+    assert body.index("_settled_rows_since(") < body.index("INSERT INTO push_sent")
+    for name in ("recaps_needing_restatement", "post_missed_recap", "_restate_x_if_behind"):
+        other = src.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
+        assert "INSERT" not in other
