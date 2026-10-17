@@ -404,12 +404,17 @@ BEGIN
           ELSE 'draftkings'
         END AS bet_book,
         CASE
-          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market') THEN 'from_row'
+          -- Multi-market prop models: the market is on the row. The two NBA ones
+          -- (2026-10-16) fell to 'game' here, so a late recompute stamped their
+          -- CLV empty and the Python capture never revisited it.
+          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market',
+                              'nba_prop_market', 'nba_prop_projection') THEN 'from_row'
           WHEN public.clv_prop_key(p.model_id) IS NOT NULL THEN 'prop'
           ELSE 'game'
         END AS kind,
         CASE
-          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market') THEN p.prop_market
+          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market',
+                              'nba_prop_market', 'nba_prop_projection') THEN p.prop_market
           ELSE public.clv_prop_key(p.model_id)
         END AS prop_market,
         public.clv_game_market(p.model_id) AS game_market,

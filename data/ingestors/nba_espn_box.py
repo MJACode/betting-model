@@ -1,24 +1,38 @@
-"""NBA player box scores from ESPN, for the worker.
+"""NBA scoreboard and box-score parsers for ESPN, for the worker.
 
-`nba_api` reads stats.nba.com, which blocks this worker, so the morning
-`nba-game-log` step does not run here. ESPN's basketball summary is the same
-shape the WNBA results step already parses, and it is reachable from the
-worker. Rows are written only when every unsettled prop's player_id on that
-game resolved to a name already in `nba_player_game_log`. A name that did
-not resolve leaves the game unlogged, so the settler does not void the bet
-as a DNP.
+`nba_api` reads stats.nba.com, which blocks the worker, so NBA finals and
+player box scores on the worker come from ESPN's site API instead. This module
+holds the PURE parsers (fixture-tested, no I/O); the writer that uses them is
+`data/ingestors/nba_results_ingestor.py`, the `nba-results` pipeline step.
+
+ESPN team codes differ from ours (GS, NO, NY, SA, UTAH, WSH); they are mapped
+through nba_stats_ingestor's table. An event whose teams are not two NBA teams
+(an international preseason opponent, an All-Star side) is dropped here.
+
+Shape (measured 2026-10-15 against the 2026-04-10 slate; fixtures under
+tests/fixtures/espn_nba_*.json):
+  scoreboard  events[].{id, date (UTC), season.type (1 pre, 2 regular, 3 post,
+              5 play-in), status.{period, type.completed},
+              competitions[0].competitors[].{homeAway, score,
+              team.{abbreviation, displayName}}}
+  summary     boxscore.players[].{team.{abbreviation, displayName},
+              statistics[0].{labels[], totals[], athletes[].{athlete.{id,
+              displayName}, starter, didNotPlay, reason, stats[]}}}
+  ESPN puts `reason: "COACH'S DECISION"` on EVERY athlete, including the ones
+  who played. It means something only when didNotPlay is true, so that is the
+  only place it is read. Players ruled out before the game (inactive) are not
+  in the box at all.
 """
 from __future__ import annotations
 
-from loguru import logger
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
-from data.db import call_in_savepoint, get_connection, statement_timeout
-from data.ingestors.injury_ingestor import ESPN_HEADERS
 from data.ingestors.nba_stats_ingestor import (
-    _build_game_id, _nba_season_for_date, _norm_nba, _upsert_player_log,
+    _NBA_ABBREV_MAP, _NBA_NAME_MAP, _build_game_id,
 )
 from data.ingestors.wnba_results_ingestor import (
-    _min_to_float, _split_made_att, _to_int, norm_player_name,
+    _min_to_float, _split_made_att, _to_int,
 )
 
 ESPN_NBA_SCOREBOARD_URL = (
@@ -28,49 +42,91 @@ ESPN_NBA_SUMMARY_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary"
 )
 
-_LABELS_NEEDED = ("MIN", "PTS", "REB", "OREB", "DREB", "AST", "STL", "BLK", "TO",
-                  "FG", "3PT", "FT")
+_ET = ZoneInfo("America/New_York")
+_NBA_CODES = frozenset(_NBA_ABBREV_MAP.values())
+
+# ESPN season.type values. Preseason is never ours to score.
+SEASON_TYPE_PRESEASON = 1
+
+
+def nba_team(abbrev: str | None, name: str | None = "") -> str | None:
+    """Our 3-letter code for an ESPN team, or None when it is not an NBA team.
+
+    Unlike nba_stats_ingestor._norm_nba this never passes an unknown code
+    through: a preseason game against an overseas club must not become a game
+    row with a made-up team.
+    """
+    a = (abbrev or "").upper().strip()
+    code = _NBA_ABBREV_MAP.get(a) or _NBA_NAME_MAP.get(name or "")
+    return code if code in _NBA_CODES else None
+
+
+def et_date(iso_ts: str | None) -> str | None:
+    """'2026-04-11T02:30Z' -> '2026-04-10' (the ET calendar date), or None."""
+    s = str(iso_ts or "").strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_ET).strftime("%Y-%m-%d")
 
 
 def parse_nba_scoreboard(data: dict, game_date: str) -> list[dict]:
-    """Completed games only. game_id is NBA_{date}_{away}_{home}."""
+    """Completed games between two NBA teams, one dict each.
+
+    `game_date` is the ET date the scoreboard was asked for. The game's own
+    date is the ET date of its tip (the event's UTC timestamp); when that is
+    missing the requested date is used. `went_to_ot` is 1 when ESPN counts more
+    than four periods, None when it does not say.
+    """
     out = []
     for ev in (data or {}).get("events") or []:
         comps = ev.get("competitions") or []
         if not comps:
             continue
         comp = comps[0]
-        completed = bool(((ev.get("status") or {}).get("type") or {}).get("completed"))
-        if not completed:
+        status = ev.get("status") or {}
+        if not bool((status.get("type") or {}).get("completed")):
             continue
         home = away = None
+        home_score = away_score = None
         for c in comp.get("competitors") or []:
             team = c.get("team") or {}
-            abbrev = _norm_nba(team.get("abbreviation") or "", team.get("displayName") or "")
+            code = nba_team(team.get("abbreviation"), team.get("displayName"))
             if c.get("homeAway") == "home":
-                home = abbrev
+                home, home_score = code, _to_int(c.get("score"))
             elif c.get("homeAway") == "away":
-                away = abbrev
+                away, away_score = code, _to_int(c.get("score"))
         if not home or not away:
             continue
+        gdate = et_date(ev.get("date")) or game_date
+        period = _to_int(status.get("period"))
+        season_type = _to_int((ev.get("season") or {}).get("type"))
         out.append({
             "event_id": str(ev.get("id") or ""),
-            "game_id": _build_game_id(game_date, away, home),
-            "game_date": game_date,
+            "game_id": _build_game_id(gdate, away, home),
+            "game_date": gdate,
             "home": home,
             "away": away,
+            "home_score": home_score,
+            "away_score": away_score,
+            "period": period,
+            "went_to_ot": (1 if period > 4 else 0) if period else None,
+            "season_type": season_type,
+            "commence_time": ev.get("date"),
         })
     return out
 
 
-def parse_nba_box(data: dict) -> list[dict]:
-    """Per-player stats by label. DNP and empty rows are omitted. `starter`
-    stays a bool here; the row written to Postgres uses 0/1."""
-    out = []
+def _team_blocks(data: dict):
+    """(our team code, labels index, athletes) per team in a summary's box."""
     for team_block in ((data or {}).get("boxscore") or {}).get("players") or []:
         team_info = team_block.get("team") or {}
-        team = _norm_nba(team_info.get("abbreviation") or "",
-                         team_info.get("displayName") or "")
+        team = nba_team(team_info.get("abbreviation"), team_info.get("displayName"))
         if not team:
             continue
         blocks = team_block.get("statistics") or []
@@ -78,18 +134,55 @@ def parse_nba_box(data: dict) -> list[dict]:
             continue
         block = blocks[0]
         labels = [str(x).upper() for x in (block.get("labels") or block.get("names") or [])]
-        idx = {lab: i for i, lab in enumerate(labels)}
+        yield team, {lab: i for i, lab in enumerate(labels)}, block
 
+
+_COUNTING = ("PTS", "REB", "AST", "STL", "BLK", "TO", "OREB", "DREB", "PF")
+
+
+def _no_minutes(row: list, idx: dict) -> bool:
+    """ESPN lists some benched players with MIN '--' and every count zero,
+    without didNotPlay. stats.nba.com has no row for them (2 of 2 such rows,
+    2026-04-01..12, e.g. DaQuan Jeffries in NBA_2026-04-05_LAC_SAC), and a prop
+    on a player who never checked in is void, so they are treated as DNP."""
+    def stat(label):
+        i = idx.get(label)
+        return row[i] if i is not None and i < len(row) else None
+
+    if _min_to_float(stat("MIN")) is not None:
+        return False
+    for label in _COUNTING:
+        v = _to_int(stat(label))
+        if v:
+            return False
+    for label in ("FG", "3PT", "FT"):
+        _m, a = _split_made_att(stat(label))
+        if a:
+            return False
+    return True
+
+
+def _played(ath: dict, idx: dict) -> bool:
+    if ath.get("didNotPlay"):
+        return False
+    row = ath.get("stats") or []
+    return bool(row) and not _no_minutes(row, idx)
+
+
+def parse_nba_box(data: dict) -> list[dict]:
+    """Every athlete who played, stats read BY LABEL. DNP, empty and
+    no-minutes rows are omitted. `starter` stays a bool here; the row written
+    to Postgres uses 0/1."""
+    out = []
+    for team, idx, block in _team_blocks(data):
         def stat(row, label, idx=idx):
             i = idx.get(label)
             return row[i] if i is not None and i < len(row) else None
 
         for ath in block.get("athletes") or []:
-            if ath.get("didNotPlay"):
+            if not _played(ath, idx):
                 continue
             row = ath.get("stats") or []
-            if not row:
-                continue
             a = ath.get("athlete") or {}
             name = a.get("displayName") or ""
             if not name:
@@ -98,6 +191,7 @@ def parse_nba_box(data: dict) -> list[dict]:
             fg3_m, fg3_a = _split_made_att(stat(row, "3PT"))
             ft_m, ft_a = _split_made_att(stat(row, "FT"))
             out.append({
+                "espn_id": str(a.get("id") or ""),
                 "name": name,
                 "team": team,
                 "starter": bool(ath.get("starter")),
@@ -117,150 +211,68 @@ def parse_nba_box(data: dict) -> list[dict]:
     return out
 
 
-def rows_for_game(players: list[dict], name_to_id: dict[str, str],
-                  needed_ids: set[str], game: dict) -> tuple[list[dict], list[str]]:
-    """Matched log rows, and the box names that did not resolve.
-
-    When a needed player_id is missing and some box name did not resolve,
-    return no rows. Writing the others would make the settler treat the
-    unmatched bet as a DNP.
-    """
-    season = _nba_season_for_date(game["game_date"])
-    matched = []
-    unmatched = []
-    for p in players:
-        key = norm_player_name(p["name"])
-        pid = name_to_id.get(key)
-        if not pid:
-            unmatched.append(p["name"])
-            continue
-        matched.append({
-            "player_id": pid,
-            "player_name": p["name"],
-            "team": p["team"],
-            "game_id": game["game_id"],
-            "game_date": game["game_date"],
-            "season": season,
-            "minutes": p["minutes"],
-            "is_starter": int(p["starter"]),
-            "points": p["points"],
-            "rebounds": p["rebounds"],
-            "offensive_reb": p["offensive_reb"],
-            "defensive_reb": p["defensive_reb"],
-            "assists": p["assists"],
-            "steals": p["steals"],
-            "blocks": p["blocks"],
-            "turnovers": p["turnovers"],
-            "fg_made": p["fg_made"], "fg_att": p["fg_att"],
-            "fg3_made": p["fg3_made"], "fg3_att": p["fg3_att"],
-            "ft_made": p["ft_made"], "ft_att": p["ft_att"],
-        })
-    have = {r["player_id"] for r in matched}
-    if (set(needed_ids) - have) and unmatched:
-        return [], unmatched
-    return matched, unmatched
+NO_MINUTES_REASON = "NO MINUTES"
 
 
-def _name_map(conn, since: str) -> dict[str, str]:
-    """Normalized name -> player_id. A name worn by two ids is dropped."""
-    def _read():
-        return conn.execute(
-            "SELECT player_id, player_name FROM nba_player_game_log "
-            "WHERE game_date >= %s",
-            (since,),
-        ).fetchall()
+def parse_nba_dnp(data: dict) -> list[dict]:
+    """Athletes ESPN lists as did-not-play, with the reason it gives
+    ("COACH'S DECISION", an injury note...), plus the no-minutes rows
+    parse_nba_box leaves out (reason NO MINUTES). Inactive players are not
+    listed by ESPN at all."""
+    out = []
+    for team, idx, block in _team_blocks(data):
+        for ath in block.get("athletes") or []:
+            if _played(ath, idx) or not (ath.get("didNotPlay") or ath.get("stats")):
+                continue
+            a = ath.get("athlete") or {}
+            name = a.get("displayName") or ""
+            if not name:
+                continue
+            if ath.get("didNotPlay"):
+                reason = ath.get("reason")
+                reason = str(reason).strip() if reason else None
+            else:
+                reason = NO_MINUTES_REASON
+            out.append({
+                "espn_id": str(a.get("id") or ""),
+                "name": name,
+                "team": team,
+                "reason": reason,
+            })
+    return out
 
-    rows = call_in_savepoint(conn, "nba_box_names", _read)
-    by_name: dict[str, str] = {}
-    ambiguous: set[str] = set()
-    for pid, name in rows:
-        key = norm_player_name(name)
-        if not key or key in ambiguous:
-            continue
-        sid = str(pid)
-        if key in by_name and by_name[key] != sid:
-            ambiguous.add(key)
-            del by_name[key]
-        else:
-            by_name[key] = sid
-    return by_name
+
+def box_team_totals(data: dict) -> dict[str, int]:
+    """{team: points} from the box's own team totals row, for reconciliation."""
+    out = {}
+    for team, idx, block in _team_blocks(data):
+        i = idx.get("PTS")
+        totals = block.get("totals") or []
+        if i is not None and i < len(totals):
+            pts = _to_int(totals[i])
+            if pts is not None:
+                out[team] = pts
+    return out
 
 
 def fill_missing(dates_to_games: dict[str, dict[str, set[str]]], *, get_json=None,
                  connect=None) -> dict:
-    """`dates_to_games` is `{date: {game_id: {player_id, ...}}}`.
+    """Log the box of every final on these dates that is not logged yet.
 
-    Only those games are fetched. A game that does not resolve every needed
-    player is left unlogged.
+    Called by settlement (data/ingestors/prop_box_scores.py) with
+    `{date: {game_id: {player_id, ...}}}` for games that have a score and an
+    unsettled prop but no log. It used to write a game only when every needed
+    player resolved by name, which meant a rookie's game was never logged. It
+    now runs the same writer as the `nba-results` step, so there is one opinion
+    about how an NBA box is logged: every player, with an `espn:<id>` id when
+    no NBA.com id can be found (nba_results_ingestor's docstring).
     """
-    import requests
-    from datetime import timedelta
-    from datetime import date as date_cls
-
     if not dates_to_games:
         return {"games": 0, "skipped": 0, "errors": 0}
+    from data.ingestors.nba_results_ingestor import ingest_nba_results
 
-    def _default_get(url, params):
-        resp = requests.get(url, params=params, headers=ESPN_HEADERS, timeout=20)
-        resp.raise_for_status()
-        return resp.json()
-
-    get_json = get_json or _default_get
-    own = connect is None
-    conn = (connect or get_connection)()
-    games = skipped = errors = 0
-    try:
-        dates = sorted(dates_to_games)
-        since = (date_cls.fromisoformat(dates[0]) - timedelta(days=400)).isoformat()
-        try:
-            names = _name_map(conn, since)
-        except Exception as exc:                              # noqa: BLE001
-            if statement_timeout(exc):
-                logger.warning("NBA box score: name map timed out — next pass")
-            else:
-                logger.warning(f"NBA box score: name map failed: {exc}")
-            return {"games": 0, "skipped": 0, "errors": 1}
-        for game_date, wanted in dates_to_games.items():
-            try:
-                board = get_json(ESPN_NBA_SCOREBOARD_URL,
-                                 {"dates": game_date.replace("-", "")})
-            except Exception as exc:                          # noqa: BLE001
-                logger.warning(f"NBA box score: scoreboard {game_date} failed: {exc}")
-                errors += 1
-                continue
-            by_id = {g["game_id"]: g for g in parse_nba_scoreboard(board, game_date)}
-            for game_id, needed in wanted.items():
-                game = by_id.get(game_id)
-                if not game or not game.get("event_id"):
-                    skipped += 1
-                    continue
-                try:
-                    summary = get_json(ESPN_NBA_SUMMARY_URL, {"event": game["event_id"]})
-                    players = parse_nba_box(summary)
-                    rows, unmatched = rows_for_game(players, names, set(needed), game)
-                    if not rows:
-                        logger.info(f"NBA box score: {game_id} left unlogged "
-                                    f"({len(unmatched)} name(s) unresolved)")
-                        skipped += 1
-                        continue
-                    def _write(rows=rows):
-                        return _upsert_player_log(conn, rows)
-                    call_in_savepoint(conn, "nba_box_game", _write)
-                    conn.commit()
-                    games += 1
-                except Exception as exc:                      # noqa: BLE001
-                    if statement_timeout(exc):
-                        logger.warning(f"NBA box score: {game_id} timed out — next pass")
-                    else:
-                        logger.warning(f"NBA box score: {game_id} failed: {exc}")
-                    errors += 1
-                    try:
-                        conn.rollback()
-                    except Exception:                          # noqa: BLE001
-                        pass
-    finally:
-        if own:
-            conn.close()
-    logger.info(f"NBA box scores: {games} game(s) stored, {skipped} skipped, "
-                f"{errors} error(s)")
-    return {"games": games, "skipped": skipped, "errors": errors}
+    totals = ingest_nba_results(dates=sorted(dates_to_games), get_json=get_json,
+                                connect=connect, raise_on_error=False)
+    return {"games": totals.get("box_games", 0),
+            "skipped": totals.get("not_in_games", 0),
+            "errors": totals.get("errors", 0)}

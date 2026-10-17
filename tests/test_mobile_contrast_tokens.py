@@ -25,6 +25,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
+
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
 SRC = MOBILE / "src"
 
 
@@ -360,11 +362,7 @@ def test_badge_glyph_tracks_dynamic_type():
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
@@ -395,7 +393,7 @@ const cases = [
 for (const [got, want] of cases) if (got !== want) throw new Error(`${got} !== ${want}`);
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=ROOT, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -413,7 +411,7 @@ def test_ux_scan_sees_short_hex_and_rgba():
             encoding="utf-8",
         )
         proc = subprocess.run(
-            ["node", "--experimental-strip-types", "mobile/scripts/ux_scan.mts", str(probe)],
+            [NODE, "--experimental-strip-types", "mobile/scripts/ux_scan.mts", str(probe)],
             cwd=ROOT, capture_output=True, text=True,
         )
     assert proc.returncode == 0, proc.stderr
@@ -432,13 +430,12 @@ def test_contrast_pins_are_on_the_pr_ci_subset():
 
 
 @pytest.mark.skipif(
-    not (MOBILE / "node_modules" / ".bin").exists() or shutil.which("node") is None,
+    tsx_cmd(MOBILE) is None,
     reason="mobile node modules not installed",
 )
 def test_the_behavioural_checks_pass():
-    tsx = MOBILE / "node_modules" / ".bin" / "tsx"
     proc = subprocess.run(
-        [str(tsx), "scripts/verify_contrast_tokens.ts"],
+        [*tsx_cmd(MOBILE), "scripts/verify_contrast_tokens.ts"],
         cwd=MOBILE, capture_output=True, text=True, timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -18,7 +18,7 @@ import {
   lineShopForPick,
   numOrNull,
   playerNameFromPickLabel,
-  propMarketForModel,
+  propMarketForPick,
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
@@ -1056,7 +1056,8 @@ export async function fetchPicksForDate(
       lineGames.add(p.game_id);
       continue;
     }
-    const propMarket = propMarketForModel(p.model_id);
+    // propMarketForPick: a multi-market rule's market is on the row, not the model.
+    const propMarket = propMarketForPick(p);
     const player = propMarket ? playerNameFromPickLabel(p.pick_label) : null;
     if (propMarket && player) {
       propGames.add(p.game_id);
@@ -1140,7 +1141,8 @@ export async function fetchPicksForDate(
       ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
       : [];
     if (bookRows.length === 0) {
-      const propMarket = propMarketForModel(pick.model_id);
+      // The row's prop_market for a multi-market rule (propMarketForPick).
+      const propMarket = propMarketForPick(pick);
       const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
       if (propMarket && player) {
         bookRows = propBooksByKey.get(`${pick.game_id}|${propMarket}|${player}`) ?? [];
@@ -1754,7 +1756,8 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
   if (!data) return null;
   const [pick] = await attachDiscordPublish([data as Pick]);
   const market = gameMarketForModel(pick.model_id);
-  const propMarket = market ? null : propMarketForModel(pick.model_id);
+  // The row's prop_market for a multi-market rule (propMarketForPick).
+  const propMarket = market ? null : propMarketForPick(pick);
   const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
 
   const [gameRes, weatherRes, bookRes] = await Promise.all([

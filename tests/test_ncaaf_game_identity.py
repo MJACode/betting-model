@@ -185,6 +185,12 @@ def test_the_odds_api_map_bridges_names_no_rule_can():
     # The Odds API spells it out, and no automatic rule bridges them.
     assert m.get("Southeastern Louisiana Lions") == "SE Louisiana"
     assert m.get("Southeastern Louisiana") == "SE Louisiana"
+    # 2026-10-16: the pollers warned "Unresolved NCAAF school from Odds API:
+    # 'Citadel Bulldogs'" every pregame pass. CFBD's school is "The Citadel";
+    # The Odds API drops the article and the fold keeps it. The live Texas
+    # A&M 2026-10-17 matchup was already split (605 odds rows on the alias).
+    assert m.get("Citadel Bulldogs") == "The Citadel"
+    assert m.get("Citadel") == "The Citadel"
 
 
 def test_every_override_target_is_a_canonical_school_shape():

@@ -131,8 +131,10 @@ export function BuiltInModelDetailScreen() {
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
+  // The long name: three prop rules share the short label "Prop Mkt", so a
+  // short title made their screens indistinguishable. The chip keeps it.
   useEffect(() => {
-    navigation.setOptions({ title: modelShort(modelId) });
+    navigation.setOptions({ title: modelLong(modelId) });
   }, [navigation, modelId]);
 
   // Prop models are Poisson count projections, so the model card labels their
