@@ -1,0 +1,357 @@
+"""scripts/nba_game2_props (family F6b): every feature rule and every leak guard,
+each pinned by an outcome on small games built by hand. No real season is read."""
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from scripts import nba_game_harness as H
+from scripts import nba_game2_props as L
+
+TIP = pd.Timestamp("2024-01-16T00:30:00Z")      # 7:30 ET on 2024-01-15
+T = TIP - pd.Timedelta(minutes=60)
+DAY = pd.Timedelta(days=1)
+
+
+# ── builders ────────────────────────────────────────────────────────────────
+
+def _g(gid, season, tip, home, away, hs=110, as_=100):
+    return {"game_id": gid, "season": season, "game_date": str((tip - pd.Timedelta(hours=5)).date()),
+            "tip": tip, "home_team": home, "away_team": away, "home_score": hs, "away_score": as_}
+
+
+def _games(*extra):
+    """G (the decided game, BOS v NYK) and P0 (both teams' previous game, final two days before)."""
+    rows = [_g("G", 2024, TIP, "BOS", "NYK"), _g("P0", 2024, TIP - 2 * DAY, "BOS", "NYK")]
+    return pd.DataFrame(rows + list(extra))
+
+
+_REASON = {"coach": "DNP - Coach's Decision", "injury": "DND - Injury/Illness", "played": None}
+
+
+def _box(rows, games):
+    """rows: (game_id, player_id, name, team, kind, points); kind played / coach / injury / inactive."""
+    adv, log, ina = [], [], []
+    season = games.set_index("game_id")["season"]
+    for gid, pid, name, team, kind, pts in rows:
+        base = {"game_id": gid, "player_id": pid, "player_name": name, "team": team,
+                "season": int(season[gid]), "game_type": "regular"}
+        if kind == "inactive":
+            ina.append(base)
+            continue
+        adv.append({**base, "played": kind == "played", "did_not_play_reason": _REASON[kind]})
+        if kind == "played":
+            log.append({"game_id": gid, "player_id": pid, "points": float(pts)})
+    adv = pd.DataFrame(adv, columns=["game_id", "player_id", "player_name", "team", "season", "game_type",
+                                     "played", "did_not_play_reason"])
+    log = pd.DataFrame(log, columns=["game_id", "player_id", "points"])
+    ina = pd.DataFrame(ina, columns=["game_id", "player_id", "player_name", "team", "season", "game_type"])
+    return L.appearances(adv, log, ina, games)
+
+
+def _props(rows, games, snap=T):
+    """rows: (player_name, book, line, over, under)."""
+    raw = pd.DataFrame([{"game_id": "G", "player_name": n, "market": L.PROP_MARKET, "bookmaker": b,
+                         "snapshot_type": "open", "snapshot_at": snap.isoformat(), "line": ln,
+                         "over_price": o, "under_price": u} for n, b, ln, o, u in rows])
+    return L.props_frame(raw, games)
+
+
+def _inj(rows):
+    """rows: (team, player_id, name, status, minutes_before_T)."""
+    return pd.DataFrame([{"game_id": "G", "team": t, "player_id": pid, "player_name": n, "status": s,
+                          "report_ts": T - pd.Timedelta(minutes=m)} for t, pid, n, s, m in rows],
+                        columns=["game_id", "team", "player_id", "player_name", "status", "report_ts"])
+
+
+SHAPES = {2024: L.symmetric_shape()}
+BASE_BOX = [("P0", "b1", "Ann Bee", "BOS", "played", 30), ("P0", "b2", "Cal Dee", "BOS", "played", 12),
+            ("P0", "n1", "Gus Hay", "NYK", "played", 25), ("P0", "n2", "Ivy Jay", "NYK", "played", 8)]
+BASE_PROPS = [("Ann Bee", "fanduel", 27.5, -110, -110), ("Gus Hay", "fanduel", 22.5, -110, -110)]
+
+
+def _model(games, box_rows=BASE_BOX, prop_rows=BASE_PROPS, inj=None, snap=T):
+    app = _box(box_rows, games)
+    props = _props(prop_rows, games, snap)
+    times = H.per_event_times(props, "D")
+    model, pg, names = L.model_numbers(times, props, games, app, inj, SHAPES)
+    return model.set_index("market")["mu"] if len(model) else pd.Series(dtype=float), \
+        pg.set_index("game_id"), names
+
+
+# ── props: dated by their own stamp, one quote per player and book ──────────
+
+def test_props_are_dated_by_their_own_stamp_and_nothing_after_tip_survives():
+    games = _games()
+    raw = pd.DataFrame([
+        {"game_id": "G", "player_name": "Ann Bee", "market": L.PROP_MARKET, "bookmaker": "fanduel",
+         "snapshot_type": "open", "snapshot_at": s.isoformat(), "line": 27.5, "over_price": -110.0,
+         "under_price": u}
+        for s, u in ((T, -110.0), (TIP + pd.Timedelta(minutes=5), -110.0), (T, 300.0))])
+    p = L.props_frame(raw, games)
+    assert len(p) == 2                                    # the in-play row is gone
+    assert (p["fetch_at"] == p["snapshot_at"]).all()
+    assert p["market"].unique().tolist() == ["pp|Ann Bee"]
+    assert p["coherent"].tolist() == [True, False]        # -110 / +300 sums under 1.00
+
+
+def test_t_is_the_purchase_in_the_45_75_window_and_each_player_keeps_his_own_quote():
+    games = _games()
+    early = _props([("Ann Bee", "fanduel", 27.5, -110, -110), ("Gus Hay", "fanduel", 22.5, -110, -110)],
+                   games, snap=T)
+    late = _props([("Ann Bee", "fanduel", 29.5, -110, -110)], games, snap=TIP - pd.Timedelta(minutes=30))
+    stale = _props([("Gus Hay", "draftkings", 20.5, -110, -110)], games, snap=T - pd.Timedelta(minutes=70))
+    props = pd.concat([early, late, stale], ignore_index=True)
+    times = H.per_event_times(props, "D")
+    assert times["T"].tolist() == [T]
+    vis = H.visible(props, times).set_index(["market", "book"])
+    # 30 minutes out is not D; 70 minutes before T is stale; both players kept
+    assert sorted(vis.index.tolist()) == [("pp|Ann Bee", "fanduel"), ("pp|Gus Hay", "fanduel")]
+    assert vis.loc[("pp|Ann Bee", "fanduel"), "line"] == 27.5
+
+
+# ── the shape ───────────────────────────────────────────────────────────────
+
+def _season_rows(season, pts, pid="p", team="BOS"):
+    games = pd.DataFrame([_g(f"{season}-{i}", season, pd.Timestamp(f"{season - 1}-11-01T00:00Z") + i * DAY,
+                             team, "NYK") for i in range(len(pts))])
+    return games, [(f"{season}-{i}", pid, "P", team, "played", x) for i, x in enumerate(pts)]
+
+
+def test_the_shape_is_fit_only_on_seasons_before_the_graded_one():
+    g1, r1 = _season_rows(2023, [10] * 25)
+    g2, r2 = _season_rows(2024, [10] * 24 + [90])
+    games = pd.concat([g1, g2], ignore_index=True)
+    sh = L.fit_shape(_box(r1 + r2, games), 2024)
+    assert sh.seasons == (2023,)
+    assert np.abs(sh.e).max() == 0.0                       # the 2024 outlier is not in it
+
+
+def test_the_shape_reads_residuals_around_the_whole_season_average():
+    g, r = _season_rows(2023, [10] * 19 + [30])
+    sh = L.fit_shape(_box(r, g), 2024)
+    assert np.allclose(sh.m, 11.0)                         # one average for the player-season
+    assert sorted(sh.e.tolist()) == [-1.0] * 19 + [19.0]
+
+
+def test_the_mean_reads_the_skew_at_even_money_and_rises_with_the_over_price():
+    sym = L.symmetric_shape()
+    assert L.mean_from_over([20.5], [0.5], sym)[0] == pytest.approx(20.5, abs=1e-6)
+    assert L.mean_from_over([20.5], [0.6], sym)[0] > 20.5
+    # every residual -1 (a player who scores one under his average): X = mu - 1 + U
+    point = L.Shape(m=np.full(10, 20.0), e=np.full(10, -1.0))
+    assert L.mean_from_over([20.5, 20.5], [0.5, 0.8], point) == pytest.approx([21.5, 21.8], abs=1e-3)
+
+
+def test_the_continuity_correction_keeps_each_over_probability_exact():
+    y = np.array([18, 19, 19, 20, 21, 21, 21, 24], float)      # whole points, average 0 removed
+    F = L.smooth_cdf(y, x=np.array([18.5, 19.5, 20.5, 23.5]))
+    assert F == pytest.approx([1 / 8, 3 / 8, 4 / 8, 7 / 8])      # P(points <= k) at k + 0.5
+    # between half-points the mass is spread: at 19.0, half of the two 19s
+    assert L.smooth_cdf(y, x=np.array([19.0]))[0] == pytest.approx(2 / 8)
+
+
+def test_the_nearest_residuals_are_the_k_closest_averages():
+    sh = L.Shape(m=np.arange(10.0), e=np.arange(10.0) * 100)
+    got = sorted(L.nearest_residuals(sh, 4.1, k=3).tolist())
+    assert got == [300.0, 400.0, 500.0]
+
+
+# ── one mean per player ─────────────────────────────────────────────────────
+
+def test_pinnacle_sets_the_mean_else_the_deciding_books_median_and_bovada_alone_prices_nobody():
+    games = _games()
+    props = _props([("Ann Bee", "pinnacle", 20.5, -110, -110), ("Ann Bee", "fanduel", 24.5, -110, -110),
+                    ("Gus Hay", "fanduel", 10.5, -110, -110), ("Gus Hay", "draftkings", 14.5, -110, -110),
+                    ("Gus Hay", "bovada", 30.5, -110, -110), ("Ivy Jay", "bovada", 8.5, -110, -110)], games)
+    times = H.per_event_times(props, "D")
+    qm = L.quote_means(H.visible(props, times), SHAPES)
+    assert "Ivy Jay" not in set(qm["player_name"])
+    pm = L.player_mean(qm.assign(player_id=qm["player_name"])).set_index("player_id")
+    assert pm.loc["Ann Bee", "mu"] == pytest.approx(20.5) and pm.loc["Ann Bee", "ref"] == "pinnacle"
+    assert pm.loc["Gus Hay", "mu"] == pytest.approx(12.5) and pm.loc["Gus Hay", "ref"] == "consensus"
+
+
+def test_two_spellings_of_one_player_count_once():
+    games = _games()
+    box = BASE_BOX + [("P0", "b9", "Nic Claxton", "BOS", "played", 9)]
+    props = BASE_PROPS + [("Nic Claxton", "fanduel", 9.5, -110, -110),
+                          ("Nicolas Claxton", "draftkings", 11.5, -110, -110)]
+    m, pg, _ = _model(games, box, props)
+    assert pg.loc["G", "h_n_priced"] == 2                     # Ann Bee and Claxton, once
+    assert m["totals"] == pytest.approx(27.5 + 12 + 10.5 + 22.5 + 8)
+
+
+# ── the roster and the bench, as of T ───────────────────────────────────────
+
+def test_the_bench_rule_is_points_per_available_team_game():
+    games = _games(_g("P1", 2024, TIP - 4 * DAY, "BOS", "NYK"), _g("P2", 2024, TIP - 6 * DAY, "BOS", "NYK"))
+    box = BASE_BOX + [("P0", "b3", "Eve Eff", "BOS", "played", 10), ("P1", "b3", "Eve Eff", "BOS", "coach", 0),
+                      ("P2", "b3", "Eve Eff", "BOS", "inactive", 0)]
+    m, pg, _ = _model(games, box)
+    # played 10, coach's decision 0, inactive skipped -> 5 a game; Cal Dee 12
+    assert pg.loc["G", "h_bench_pts"] == pytest.approx(12 + 5)
+
+
+def test_a_box_game_counts_only_once_final_four_hours_before_t():
+    # BOS played P9 two hours before T (not final): its box must not be read
+    games = _games(_g("P9", 2024, T - pd.Timedelta(hours=2), "BOS", "MIA"))
+    box = BASE_BOX + [("P9", "b1", "Ann Bee", "BOS", "played", 30), ("P9", "b7", "New Guy", "BOS", "played", 40)]
+    m, pg, _ = _model(games, box)
+    assert pg.loc["G", "h_bench_pts"] == pytest.approx(12.0)  # Cal Dee from P0 only; New Guy unseen
+
+
+def test_the_roster_is_this_season_only_and_a_player_who_left_is_not_on_it():
+    games = _games(_g("L0", 2023, TIP - 200 * DAY, "BOS", "NYK"),
+                   _g("X1", 2024, TIP - 1 * DAY, "MIA", "CHI"))
+    box = BASE_BOX + [("L0", "b8", "Old Hand", "BOS", "played", 20),       # last season only
+                      ("L0", "b2", "Cal Dee", "BOS", "played", 50),        # not in this season's rate
+                      ("P0", "b6", "Gone Soon", "BOS", "played", 15),      # then played for MIA
+                      ("X1", "b6", "Gone Soon", "MIA", "played", 15)]
+    m, pg, _ = _model(games, box)
+    assert pg.loc["G", "h_bench_pts"] == pytest.approx(12.0)
+
+
+def test_the_injury_report_counts_thirty_minutes_after_its_stamp():
+    games = _games()
+    early = _inj([("BOS", "b2", "Cal Dee", "Out", 45)])
+    late = _inj([("BOS", "b2", "Cal Dee", "Out", 20)])
+    _, pg_early, _ = _model(games, inj=early)
+    _, pg_late, _ = _model(games, inj=late)
+    assert pg_early.loc["G", "h_bench_pts"] == 0.0            # known: Out
+    assert pg_late.loc["G", "h_bench_pts"] == 12.0            # printed 20 minutes before T: not yet known
+
+
+def test_a_report_row_with_no_nba_id_is_matched_by_name_within_the_team():
+    _, pg, _ = _model(_games(), inj=_inj([("BOS", None, "Cal Dee", "Out", 45)]))
+    assert pg.loc["G", "h_bench_pts"] == 0.0
+
+
+def test_the_report_wins_a_player_it_lists_for_one_team_is_not_on_the_other():
+    # Ivy Jay played for BOS in P0, then was traded: NYK's report lists him Out
+    box = [r for r in BASE_BOX if r[1] != "n2"] + [("P0", "n2", "Ivy Jay", "BOS", "played", 8)]
+    _, pg, _ = _model(_games(), box, inj=_inj([("NYK", "n2", "Ivy Jay", "Out", 45)]))
+    assert pg.loc["G", "h_bench_pts"] == 12.0 and pg.loc["G", "a_bench_pts"] == 0.0
+
+
+def test_doubtful_and_questionable_bench_players_still_count():
+    _, pg, _ = _model(_games(), inj=_inj([("BOS", "b2", "Cal Dee", "Doubtful", 45)]))
+    assert pg.loc["G", "h_bench_pts"] == 12.0
+
+
+def test_a_priced_player_out_at_t_contributes_nothing_and_is_counted():
+    m, pg, _ = _model(_games(), inj=_inj([("BOS", "b1", "Ann Bee", "Out", 45)]),
+                      prop_rows=BASE_PROPS + [("Cal Dee", "fanduel", 11.5, -110, -110)])
+    assert pg.loc["G", "h_n_priced_out"] == 1
+    assert pg.loc["G", "h_team_pts"] == pytest.approx(11.5)
+
+
+def test_the_report_places_a_player_the_box_has_not_seen_on_his_team():
+    # a new signing, Probable for BOS, priced: the report puts him on the roster
+    m, pg, names = _model(_games(), inj=_inj([("BOS", "b5", "Neo Signing", "Probable", 45)]),
+                          prop_rows=BASE_PROPS + [("Neo Signing", "fanduel", 6.5, -110, -110)])
+    assert pg.loc["G", "refused"] == ""
+    assert pg.loc["G", "h_n_priced"] == 2
+
+
+# ── names ───────────────────────────────────────────────────────────────────
+
+def test_a_name_two_roster_players_share_refuses_the_game():
+    box = BASE_BOX + [("P0", "b4", "Jalen Green", "BOS", "played", 20), ("P0", "b5", "Jeff Green", "BOS", "played", 8)]
+    m, pg, names = _model(_games(), box, BASE_PROPS + [("J. Green", "fanduel", 19.5, -110, -110)])
+    assert pg.loc["G", "refused"] == "name_collision"
+    assert m.empty
+    assert names.set_index("player_name").loc["J. Green", "how"] == "shared"
+
+
+def test_a_name_nobody_on_either_roster_has_refuses_the_game():
+    m, pg, _ = _model(_games(), prop_rows=BASE_PROPS + [("Traded Today", "fanduel", 14.5, -110, -110)])
+    assert pg.loc["G", "refused"] == "unresolved_name" and m.empty
+
+
+def test_a_book_spelling_in_the_alias_table_finds_its_player():
+    box = BASE_BOX + [("P0", "b4", "Brandon Boston", "BOS", "played", 10)]
+    m, pg, _ = _model(_games(), box, BASE_PROPS + [("B.J. Boston Jr", "fanduel", 9.5, -110, -110)])
+    assert pg.loc["G", "refused"] == "" and pg.loc["G", "h_n_priced"] == 2
+
+
+def test_a_team_with_no_final_game_this_season_has_no_model_number():
+    games = pd.DataFrame([_g("G", 2024, TIP, "BOS", "NYK"), _g("L0", 2023, TIP - 200 * DAY, "BOS", "NYK")])
+    box = [("L0", "b1", "Ann Bee", "BOS", "played", 30), ("L0", "n1", "Gus Hay", "NYK", "played", 25)]
+    m, pg, _ = _model(games, box)
+    assert pg.loc["G", "refused"] == "no_final_game_this_season" and m.empty
+
+
+# ── the gap ─────────────────────────────────────────────────────────────────
+
+def test_the_gap_is_in_the_side_s_favour_and_agrees_with_settlement():
+    model = pd.DataFrame({"game_id": ["G", "G"], "market": ["spreads", "totals"], "mu": [8.0, 230.0]})
+    off = pd.DataFrame({"game_id": "G", "market": ["spreads", "spreads", "totals", "totals"],
+                        "side": ["home", "away", "over", "under"], "line": [-5.5, -5.5, 225.5, 225.5]})
+    gap = L.with_gap(off, model).set_index("side")["gap"]
+    assert gap.to_dict() == {"home": 2.5, "away": -2.5, "over": 4.5, "under": -4.5}
+    # a game that lands exactly on the model's numbers (119-111) pays the positive-gap sides
+    res = H.settle(np.array(["spreads", "spreads", "totals", "totals"]),
+                   np.array(["home", "away", "over", "under"]), np.array([-5.5, -5.5, 225.5, 225.5]),
+                   np.array([119] * 4), np.array([111] * 4))
+    assert res.tolist() == ["W", "L", "W", "L"]
+
+
+def test_the_placebo_moves_model_numbers_only_between_games_on_one_date_and_regaps():
+    games = pd.DataFrame({"game_id": ["a", "b", "c"], "game_date": ["2024-01-15", "2024-01-15", "2024-01-16"]})
+    model = pd.DataFrame({"game_id": ["a", "b", "c"], "market": "totals", "mu": [200.0, 240.0, 220.0]})
+    off = pd.DataFrame({"game_id": ["a", "b", "c"], "market": "totals", "side": "over", "line": 220.0})
+    seen = set()
+    for c in L.placebo_frames(off, model, games):
+        g = c.set_index("game_id")["gap"]
+        assert g["c"] == 0.0
+        assert {g["a"], g["b"]} == {-20.0, 20.0}
+        seen.add(g["a"])
+    assert seen == {-20.0, 20.0}                               # the shuffle moved it
+
+
+# ── the whole run ───────────────────────────────────────────────────────────
+
+def test_the_run_emits_exactly_the_twelve_cells_and_the_coverage_files(tmp_path):
+    s = L.synthetic_case()
+    out = L.run(s["data"], s["games"], s["props"], s["app"], s["inj"], s["shape"], tmp_path)
+    cells = pd.read_parquet(tmp_path / "cells_F6b.parquet")
+    assert len(cells) == L.EXPECTED_CELLS == 12
+    assert set(cells["family"]) == {"F6b"} and set(cells["point"]) == {"D"}
+    assert set(zip(cells["market"], cells["side"])) == {("spreads", "home"), ("spreads", "away"),
+                                                       ("totals", "over"), ("totals", "under")}
+    assert sorted(cells["cut"].unique()) == [2.0, 4.0, 6.0]
+    assert set(cells["choose_seasons"]) == {"2024,2025"}
+    assert cells["placebo_rois"].map(len).eq(L.N_PLACEBO).all()
+    pop = pd.read_parquet(tmp_path / "population_F6b.parquet").set_index("season")
+    assert pop.loc[2024, "games_props_at_T"] == 1 and pop.loc[2024, "games_model"] == 1
+    assert pop.loc[2024, "bets_spreads_home_g2"] == 1 and pop.loc[2024, "bets_totals_over_g2"] == 0
+    assert (tmp_path / "names_F6b.parquet").exists()
+    # the cells and the population count the same bets
+    n = cells.set_index(["market", "side", "cut"])["n_choose"]
+    assert n[("spreads", "home", 2.0)] == pop.loc[2024, "bets_spreads_home_g2"]
+
+
+def test_the_synthetic_check_passes():
+    r = L.synthetic_check()
+    assert r["home"] == 39.5 and r["away"] == 22.5
+
+
+def test_full_refuses_to_run_without_the_owner_s_go(monkeypatch):
+    monkeypatch.delenv("NBA_GAME2_GO", raising=False)
+    monkeypatch.setattr("sys.argv", ["nba_game2_props", "--full"])
+
+    def no_load(*a, **k):                                 # nothing real is ever read here
+        raise RuntimeError("--full went past the gate")
+    monkeypatch.setattr(L, "load_all", no_load)
+    with pytest.raises(SystemExit) as e:
+        L.main()
+    assert "NBA_GAME2_GO" in str(e.value)
+
+
+def test_the_price_free_checks_refuse_2026():
+    with pytest.raises(AssertionError):
+        L.quality(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), seasons=(2026,))
+    with pytest.raises(AssertionError):
+        L.names_check(cache=Path("does-not-exist"), seasons=(2025, 2026))
