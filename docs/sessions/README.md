@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, a no-message-id recap alerts when its error row is not saved and names the lock; check the channel before deleting that row; the watch keeps an uncleared stop after 24h |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, a recap with no message id stays stopped until its `_error` row is deleted; pipeline_watch skips a lock that later succeeded; a failed error insert rolls back |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA public betting splits: Action Network v1/v2 archive 2020-21..2025-26 into `nba_public_splits` (64,027 rows, 7,230 of 7,230 regular-season games); the archived number is the split at the close (MLB calibration, 20 Wayback captures, a tip-off poll); `pregame_poll` capture in the refresh pass from 2026-27; `docs/nba_public_splits.md` |

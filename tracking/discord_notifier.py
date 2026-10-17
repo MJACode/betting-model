@@ -2336,16 +2336,30 @@ def _recap_missing_id_recorded(conn, lock_key: str, kind: str) -> bool:
     return "no message id" in str(row[0]).lower()
 
 
-def _alert_recap_missing_id(game_date: str, kind: str, reason: str) -> None:
-    """One ops alert for a recap that will not be posted again."""
+def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
+                            lock_key: str, *, recorded: bool) -> None:
+    """One ops alert. The lock key is the row to delete, and a restatement's
+    key includes the published_at of the recap it corrects.
+
+    recorded means that row is in push_sent, so later passes do not post.
+    An insert that failed leaves nothing to stop the next pass, and the
+    alert says so.
+    """
     from tracking.watch_util import post_ops_alert
 
+    if recorded:
+        tail = (
+            "It will not be posted again automatically. "
+            f"Delete the {kind}_error row for that lock to post it again."
+        )
+    else:
+        tail = ("The error row was not recorded, so a later pass may post "
+                "it again.")
     try:
         post_ops_alert(
             "Results recap has no message id",
             f"{kind} for {game_date} came back without a message id ({reason}). "
-            "It will not be posted again automatically. "
-            f"Delete the {kind}_error row for that lock to post it again.",
+            f"Lock {lock_key}. {tail}",
         )
     except Exception as exc:                       # noqa: BLE001
         logger.error(f"recap no-message-id alert failed ({type(exc).__name__})")
@@ -2520,9 +2534,18 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             logger.error(f"Discord(results) {game_date} "
                          f"{'restate ' if restate else ''}not confirmed ({reason})")
             _record_delivery_failure(conn, lock_key, kind, reason)
-            if (isinstance(raw, str) and raw == _POST_OK_NO_ID
-                    and _recap_missing_id_recorded(conn, lock_key, kind)):
-                _alert_recap_missing_id(game_date, kind, reason)
+            if isinstance(raw, str) and raw == _POST_OK_NO_ID:
+                try:
+                    recorded = _recap_missing_id_recorded(conn, lock_key, kind)
+                except Exception as exc:                  # noqa: BLE001
+                    logger.error(f"Discord(results) {game_date} error row "
+                                 f"could not be read back ({type(exc).__name__})")
+                    recorded = False
+                # A missing row does not stop the next pass. Alert either
+                # way: once when the stop is stored, and on this pass when
+                # the insert did not stick.
+                _alert_recap_missing_id(
+                    game_date, kind, reason, lock_key, recorded=recorded)
             return 0
 
         published_at = datetime.now(ET).isoformat()

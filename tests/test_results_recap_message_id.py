@@ -201,6 +201,7 @@ def test_a_success_with_no_message_id_posts_once_and_alerts_once(monkeypatch):
     assert len(posts) == 1
     assert len(alerts) == 1
     assert "no message id" in alerts[0][1]
+    assert "Lock discord_results:2026-10-04" in alerts[0][1]
     assert "Delete the discord_results_error row" in alerts[0][1]
     assert "api/webhooks" not in alerts[0][1]
     assert [row[1] for row in conn.inserts] == ["discord_results_error"]
@@ -248,7 +249,91 @@ def test_a_failed_error_insert_rolls_back_before_the_read(monkeypatch):
     assert dn.notify_discord_results(game_date="2026-10-04") == 0
     assert conn.rollbacks == 1
     assert conn.aborted is False
+    assert len(alerts) == 1
+    assert "Lock discord_results:2026-10-04" in alerts[0][1]
+    assert "not recorded" in alerts[0][1]
+    assert "will not be posted again" not in alerts[0][1]
+
+
+def test_a_restate_with_no_message_id_names_its_lock(monkeypatch):
+    """The restatement lock includes the published_at being corrected."""
+    conn = _Ledger()
+    monkeypatch.setattr(dn, "get_connection", lambda: conn)
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    alerts = _silence_alert(monkeypatch)
+    monkeypatch.setattr(dn.requests, "post", lambda *a, **k: _Resp(200, {}))
+    restate = {"published_at": "2026-10-06T07:26:00-04:00", "late": 1, "settled": 2}
+    assert dn.notify_discord_results(game_date="2026-10-05", restate=restate) == 0
+    assert len(alerts) == 1
+    assert ("Lock discord_results_restate:2026-10-05:"
+            "2026-10-06T07:26:00-04:00") in alerts[0][1]
+
+
+def test_a_rejected_post_whose_error_row_fails_does_not_alert(monkeypatch):
+    class Conn:
+        def __init__(self):
+            self.aborted = False
+
+        def execute(self, sql, params=()):
+            if self.aborted:
+                raise RuntimeError("transaction is aborted")
+            if "INSERT INTO push_sent" in sql:
+                self.aborted = True
+                raise RuntimeError("insert failed")
+            return self
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return [("NHL", "nhl_moneyline", "WIN", 0.02, -110.0, None, False)]
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            self.aborted = False
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(dn, "get_connection", lambda: Conn())
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    monkeypatch.setattr(dn.requests, "post", lambda *a, **k: _Resp(400, text="no"))
+    alerts = _silence_alert(monkeypatch)
+    assert dn.notify_discord_results(game_date="2026-10-04") == 0
     assert alerts == []
+
+
+def test_a_stopped_recap_stays_in_the_watch_after_a_day():
+    """A no-message-id error with no success row is not dropped at 24h."""
+    from tracking.pipeline_watch import _recap_ledger_rows
+
+    seen = {}
+
+    class Conn:
+        def execute(self, sql, params=()):
+            seen["sql"] = sql
+            seen["params"] = params
+            return self
+
+        def fetchall(self):
+            return [("discord_results:2026-10-01", "discord_results_error",
+                     "2026-10-01T06:00:00-04:00")]
+
+        def rollback(self):
+            pass
+
+    rows = _recap_ledger_rows(Conn(), 24)
+    sql = " ".join(seen["sql"].lower().split())
+    assert "no message id" in sql
+    assert " or " in sql
+    assert "not exists" in sql
+    assert "sent_at::timestamptz >= now()" in sql
+    assert seen["params"][4] == 24
+    assert seen["params"][5:] == (
+        "discord_results_error", "discord_results_restate_error")
+    assert rows[0][0] == "discord_results:2026-10-01"
 
 
 def test_pipeline_watch_reports_an_uncleared_recap_error(monkeypatch):

@@ -218,14 +218,34 @@ def findings_from_delivery(rows) -> list[str]:
 
 
 def _recap_ledger_rows(conn, hours: int):
-    """One push_sent line per recap lock in the window, success and error."""
+    """Recap ledger lines for the watch.
+
+    Rows inside the window, plus a no-message-id error of any age whose
+    lock has no success row. That row is the permanent stop. It was never
+    posted, so it stays a finding after it leaves the window, until a
+    success row exists or the error row is deleted.
+    """
     kinds = tuple(RECAP_SUCCESS_FOR_ERROR.values()) + RECAP_ERROR_KINDS
     return _rows(conn, """
         SELECT lock_key, kind, sent_at
         FROM push_sent
         WHERE kind IN (%s, %s, %s, %s)
-          AND sent_at::timestamptz >= now() - (%s || ' hours')::interval
-    """, (*kinds, hours))
+          AND (
+            sent_at::timestamptz >= now() - (%s || ' hours')::interval
+            OR (
+              kind IN (%s, %s)
+              AND position('no message id' in lower(coalesce(message_id, ''))) > 0
+              AND NOT EXISTS (
+                SELECT 1 FROM push_sent s
+                WHERE s.lock_key = push_sent.lock_key
+                  AND s.kind = CASE push_sent.kind
+                        WHEN 'discord_results_error' THEN 'discord_results'
+                        ELSE 'discord_results_restate'
+                      END
+              )
+            )
+          )
+    """, (*kinds, hours, *RECAP_ERROR_KINDS))
 
 
 def _silent_kinds(conn, hours: int) -> list[str]:
