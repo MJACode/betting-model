@@ -439,3 +439,21 @@ A family with no cell clearing every bar is closed, with its grid recorded here.
 - **Live game-line history kept from 2026-27 on.** Every NBA price change from every book is
   retained (only exact repeats thinned), so 2026-27 becomes an untouched season and the true
   opener becomes observable.
+
+**Amendment, 2026-10-17, before any cell is graded: the hours alone miss the half-hour tips.**
+Measured on the cached archive (full-game moneyline, spread and total; pre-tip quotes only):
+the 45–75-minute window (decision point D) is reached on 93% of tips on the hour but on 3% of
+the 2,195 tips on the half hour (7:30 ET and the like). Every season sits at 64–72% of games.
+A half-hour evening tip's fetches sit 30 and 90 minutes out, and the hours listed above do not
+change that. So the purchase also buys, for every game no held fetch reaches, a fetch at
+tip − 60 (closes D and C) and tip − 240 (closes B where 3–6 hours is empty), each at the
+5-minute snapshot at or before. Seasons are bought in the order 2021-22, 2022-23, 2023-24,
+2024-25, 2025-26, 2020-21, so a floor stop leaves the least-needed season short.
+
+Two rules follow, fixed now:
+
+- **A cell's decision time is the fetch instant**, read from the two purchase ledgers
+  (`odds_history_pulls` on the hour, `odds_history_fetches` off it). A quote's stamp is the
+  book's last update, up to ~25 minutes before the fetch, so it does not name the window.
+- **Gate before any D cell is graded:** D is reached on ≥ 95% of games in **every** season cuts
+  are chosen on, not on average. A season short of it is reported and not chosen on.
