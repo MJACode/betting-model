@@ -620,6 +620,7 @@ everything it failed are `docs/nba_models_2026.md` 6.6 and 6.7).
 | price floor | -200, pinned, and passed to the offer choice itself | `MODEL_MIN_ODDS` |
 | the offer | the over at the deciding book with the best EV under the market's fair line (Pinnacle's no-vig, else the deciding books' median), priced through the empirical spread of final totals around Pinnacle's close on every earlier season | `scripts/nba_game_harness` (one copy) + the artifact |
 | early season | both teams 10+ games: the first bets come in mid-November | `models/nba_total_luck.MIN_GAMES` |
+| every game present | every scheduled game of the season before the date must have its final score and both box scores, as every game did in the lab; else the game is declined, `score_missing` or `box_missing`, and the card logs the missing games. A game ESPN lists as postponed is not owed; one still unscored two weeks after its date is presumed not played and named in the log every pass | `models/nba_total_luck.missing_inputs` |
 | decided once | the last scheduled refresh pass at least 60 minutes before tip; a row in `nba_total_luck_decisions`, bet or not, never looked at again | `scripts/nba_total_luck_card.py` |
 | artifact | the residual sample and the bucket's per-season counts | `models/saved/nba_total_luck_20261017_090305.pkl` |
 
@@ -671,6 +672,21 @@ afternoon decisions are inside the evidence, not outside it.
 `scripts/nba_total_luck_replay.py`): the live code, run on the research cache at
 the lab's decision instants, reproduces every lab bet — 611 of 611 across
 2020-21 → 2025-26 (82 of 82 in 2025-26) — and 6,294 gaps to the last digit.
+It feeds both sides the same cached box scores, so it proves the code matches,
+not the data: live 2026-27 boxes come from ESPN, the graded seasons from a
+source keyed on NBA.com ids, and no difference between the two has been
+measured.
+
+**Why every game must be present.** The league's three-point, free-throw and
+scoring rates in the gap come from every game before the date, not just the two
+teams'. On 2025-26, removing one other teams' box score (SAS at OKC,
+2025-12-13) moved the 2026-03-24 DEN at PHX gap from 2.992 (no bet) to 3.008
+(a bet), and removing the previous night's games moved 2025-12-01 gaps by up to
+0.68 points. 20 of the 508 graded bets and 14 declines sat within 0.05 of the
+cut. Since 2026-10-17 such a game is declined instead (both cases re-run on the
+research cache: declined, `box_missing:1` and `score_missing:8`). The results
+step retries a missing score or box back to the season's opening, and records
+ESPN's postponements, so one missing game does not stop the model for long.
 
 **Review:** re-sweep the gap cut, on its own settled record and the graded
 seasons together, at about 250 settled bets (about two and a half seasons at

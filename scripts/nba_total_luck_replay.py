@@ -9,6 +9,8 @@ minutes before tip, scripts.nba_game_harness.decision_times), with:
            read from the purchase ledger (the live odds table carries it in
            created_at; the archive's created_at is the purchase time)
   box      nba_player_game_log, and the season's final games from nba_games
+  schedule nba_schedule's regular-season rows: what the completeness check
+           (models.nba_total_luck.missing_inputs) owes before each date
   pricing  the committed artifact (models.nba_total_luck.ARTIFACT_PATH)
 
 and compared, game by game, with what the lab graded:
@@ -58,8 +60,12 @@ def load(cache: Path = H.CACHE, seasons=LAB_SEASONS) -> dict:
     o["created_at"] = o["fetch_at"]                          # the live table's meaning
     box = pd.read_parquet(cache / "nba_player_game_log.parquet",
                           columns=["game_id", "team", *tl.BOX_COLS])
+    sched = pd.read_parquet(cache / "nba_schedule.parquet",
+                            columns=["game_id", "season", "game_type", "game_date",
+                                     "home_team", "away_team", "status_text"])
+    sched = sched[sched["game_type"] == "regular"]
     return {"data": data, "rows": o.drop(columns="fetch_at"), "box": box,
-            "seasons": tuple(seasons)}
+            "schedule": sched, "seasons": tuple(seasons)}
 
 
 def lab_gaps(data: H.Data, box: pd.DataFrame) -> pd.Series:
@@ -83,7 +89,10 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
     # 2020-21 and 2021-22 have no graded season before them to fit an uplift on;
     # it moves only the written probability, never the bet, so 0 is used there.
     prior = [s for s in art["bucket"] if int(s) < season]
+    sched = ld["schedule"]
+    sched = sched[sched["season"].astype(int) == season]
     bets, decisions, diag = tl.decide(targets, quotes, box, final, times, art,
+                                      scheduled=sched,
                                       bucket_uplift=None if prior else 0.0)
 
     lab_gap = lab_gaps(data, box)

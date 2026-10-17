@@ -51,7 +51,13 @@ settings `docs/thresholds.md`). Graded walk-forward at bought prices,
 The probability it writes is the market's fair chance of the over plus the
 +0.0659 this bucket has won above it on those five seasons. The live code
 reproduces every one of the lab's 611 bets on the research cache
-(`tests/test_nba_total_luck_replay.py`).
+(`tests/test_nba_total_luck_replay.py`). **It needs every game.** The league's
+shooting rates in the gap come from every game of the season before the date,
+so a game is declined while any earlier game lacks its final score or its box
+score (`models/nba_total_luck.missing_inputs`). The results step
+(`data/ingestors/nba_results_ingestor.py`) therefore retries a missing score
+or box back to the season's opening, and writes ESPN's "Postponed" onto
+`nba_schedule` so the model stops waiting for a game that was not played.
 
 **Each game is decided once.** The first look 45-57 minutes before tip whose
 newest prop fetch holds Pinnacle is the game's decision, bets or none, and is

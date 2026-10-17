@@ -37,18 +37,22 @@ def _et(y, m, d, hh, mm, ss=0):
     return datetime(y, m, d, hh, mm, ss, tzinfo=ET).astimezone(UTC)
 
 
-def _season(n_games: int, opp_fg3m: int = 10, hot_fg3m: int = 18, start="2026-10-21"):
+def _season(n_games: int, opp_fg3m: int = 10, hot_fg3m: int = 18, start="2026-10-21",
+            others: bool = False):
     """A synthetic season: HOM and AWY each play OT1/OT2 once a day.
 
     Against HOM and AWY the others make `opp_fg3m` of 40 threes; HOM and AWY
     make `hot_fg3m`. With 10 against 18 the league rate sits near 35% and
     HOM's and AWY's opponents shot 25%: their luck-adjusted defence is worse
-    than the raw one, so the adjusted total is HIGHER (an over gap)."""
+    than the raw one, so the adjusted total is HIGHER (an over gap).
+    `others` adds a daily OT3 vs OT4 game (neither team is HOM or AWY): it
+    reaches the gap only through the league's averages."""
     games, box = [], []
     d0 = pd.Timestamp(start)
+    pairs = (("HOM", "OT1"), ("OT2", "AWY")) + ((("OT3", "OT4"),) if others else ())
     for i in range(n_games):
         day = (d0 + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
-        for home, away in (("HOM", "OT1"), ("OT2", "AWY")):
+        for home, away in pairs:
             gid = f"NBA_{day}_{away}_{home}"
             games.append({"game_id": gid, "season": 2027, "game_date": day,
                           "home_team": home, "away_team": away})
@@ -94,11 +98,13 @@ def _decide(art, quotes, gap, tip=None, monkeypatch=None, **kw):
     q = tl.quote_frame(_rows(t.game_id[0], fetch, quotes), games)
     proj = t.assign(gap_total=gap, gap_margin=0.0)
     monkeypatch.setattr(tl, "f4_projections", lambda targets, tb: proj)
-    monkeypatch.setattr(tl, "missing_boxes", lambda *a: {})
+    monkeypatch.setattr(tl, "missing_inputs", lambda targets, *a: {
+        g: {"score_missing": [], "box_missing": [], "presumed_unplayed": []}
+        for g in targets["game_id"]})
     times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
     empty = pd.DataFrame(columns=["game_id", "team", *tl.BOX_COLS])
     final = pd.DataFrame(columns=["game_id", "season", "game_date", "home_team", "away_team"])
-    return tl.decide(t, q, empty, final, times, art, **kw)
+    return tl.decide(t, q, empty, final, times, art, scheduled=final, **kw)
 
 
 # ── the gap: one copy, shared with the lab ───────────────────────────────────
@@ -159,7 +165,7 @@ def test_both_teams_need_ten_games(monkeypatch, art, n, priced):
                                                    ("draftkings", 224.5, -110, -110)]),
                        t.assign(tip=pd.Timestamp(tip)))
     times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
-    bets, decisions, diag = tl.decide(t, q, box, games, times, art)
+    bets, decisions, diag = tl.decide(t, q, box, games, times, art, scheduled=games)
     assert diag["early_season"] == (0 if priced else 1)
     assert (len(bets) == 1) is priced, (decisions, diag)
 
@@ -176,9 +182,139 @@ def test_a_missing_box_score_declines_the_game(art):
     q = tl.quote_frame(_rows(t.game_id[0], fetch, [("draftkings", 224.5, -110, -110)]),
                        t.assign(tip=pd.Timestamp(tip)))
     times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
-    bets, decisions, diag = tl.decide(t, q, box, games, times, art)
+    bets, decisions, diag = tl.decide(t, q, box, games, times, art, scheduled=games)
     assert not bets and diag["box_missing"] == 1
     assert decisions[0].detail.startswith("box_missing")
+
+
+# ── completeness: every game of the season before the date, not just the two
+#    teams' (models/nba_total_luck.missing_inputs) ────────────────────────────
+
+def _complete_case(games, box, scheduled, art, day="2026-11-05"):
+    t = _target(day)
+    tip = _et(*map(int, day.split("-")), 19, 30)
+    fetch = tip - timedelta(minutes=65)
+    q = tl.quote_frame(_rows(t.game_id[0], fetch, [("pinnacle", 224.5, -105, -115),
+                                                   ("draftkings", 224.5, -110, -110)]),
+                       t.assign(tip=pd.Timestamp(tip)))
+    times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
+    return tl.decide(t, q, box, games, times, art, scheduled=scheduled)
+
+
+def test_a_missing_box_between_two_other_teams_declines_the_game(art):
+    """RULE: the league's 3P%, FT% and points per 100 come from EVERY game
+    before the date. A scored game between two other teams with no box drops
+    out of them and moves the gap (the review measured 2.992 -> 3.008, a bet
+    the lab never made), so it declines the game too."""
+    games, box = _season(12, others=True)
+    gone = games[games["home_team"] == "OT3"]["game_id"].iloc[4]
+    short = box[box["game_id"] != gone]
+    full = tl.f4_projections(_target(), tl.team_box(box, games))["gap_total"].iloc[0]
+    moved = tl.f4_projections(_target(), tl.team_box(short, games))["gap_total"].iloc[0]
+    assert moved != pytest.approx(full), "the case must move the gap, or it proves nothing"
+    bets, decisions, diag = _complete_case(games, box, games, art)
+    assert diag["box_missing"] == 0, "the intact season must not decline"
+    bets, decisions, diag = _complete_case(games, short, games, art)
+    assert not bets and diag["box_missing"] == 1, decisions
+    assert decisions[0].detail.startswith(f"box_missing:1 ({gone})")
+
+
+def test_a_previous_night_game_with_no_score_declines_the_game(art):
+    """RULE: a game played before the date whose final has not landed in
+    `games` is owed. The old check never saw it (it loaded only scored games):
+    it dropped out of everything, the two teams' own ratings included."""
+    games, box = _season(14, others=True)
+    night = games[games["game_date"] == "2026-11-03"]
+    final = games[~games["game_id"].isin(night["game_id"])]
+    short = box[~box["game_id"].isin(night["game_id"])]
+    bets, decisions, diag = _complete_case(games, box, games, art)
+    assert diag["score_missing"] == 0 and diag["box_missing"] == 0
+    bets, decisions, diag = _complete_case(final, short, games, art)
+    assert not bets and diag["score_missing"] == 1, decisions
+    assert decisions[0].detail.startswith(f"score_missing:{len(night)} (")
+
+
+def test_a_postponed_game_is_not_owed(art):
+    """A game ESPN (or stats.nba.com, "PPD") lists as postponed or cancelled was
+    not played: the lab never had it, so it is not waited for."""
+    games, box = _season(14, others=True)
+    gone = games[games["game_date"] == "2026-11-03"]["game_id"].iloc[2]
+    final = games[games["game_id"] != gone]
+    short = box[box["game_id"] != gone]
+    sched = games.assign(status_text=np.where(games["game_id"] == gone, "Postponed", "Final"))
+    _, _, diag = _complete_case(final, short, sched, art)
+    assert diag["score_missing"] == 0 and diag["box_missing"] == 0, diag
+    _, _, diag = _complete_case(final, short, sched.assign(status_text="Final"), art)
+    assert diag["score_missing"] == 1, "the same game, not marked postponed, is owed"
+
+
+def test_a_game_unscored_for_two_weeks_is_presumed_unplayed_and_named(art):
+    """A game still unscored UNPLAYED_AFTER_DAYS after its date is presumed not
+    played (a postponement nothing recorded): it no longer blocks, but it is
+    listed in diag['presumed_unplayed'] so the card logs it every pass."""
+    games, box = _season(30, others=True)
+    old = games[games["game_date"] == "2026-10-22"]["game_id"].iloc[2]
+    recent = games[games["game_date"] == "2026-11-15"]["game_id"].iloc[2]
+    for gone, blocks in ((old, False), (recent, True)):
+        final = games[games["game_id"] != gone]
+        short = box[box["game_id"] != gone]
+        _, decisions, diag = _complete_case(final, short, games, art, day="2026-11-20")
+        assert (diag["score_missing"] == 1) is blocks, (gone, diag)
+        assert diag["presumed_unplayed"] == ([] if blocks else [gone]), diag
+
+
+def test_a_placeholder_with_no_teams_is_not_a_game(art):
+    """nba_schedule seeds the NBA Cup knockout slots before their teams are known
+    (home and away 'NaN', 3 such ids in 2026-27, read 2026-10-17). They never
+    get a score and must not block the model from December on."""
+    games, box = _season(14, others=True)
+    slot = pd.DataFrame([{"game_id": "NBA_2026-11-01_nan_nan", "season": 2027,
+                          "game_date": "2026-11-01", "home_team": "NaN", "away_team": "NaN"}])
+    _, _, diag = _complete_case(games, box, pd.concat([games, slot, slot]), art)
+    assert diag["score_missing"] == 0, diag
+    assert tl.scheduled_games(pd.concat([games, slot]))["game_id"].tolist() == \
+        sorted(games["game_id"])
+
+
+def test_the_schedule_is_a_required_input(art):
+    """No default: a caller that forgot it would skip the check without a sound."""
+    games, box = _season(12)
+    with pytest.raises(TypeError):
+        tl.decide(_target(), pd.DataFrame(), box, games, pd.DataFrame(), art)
+
+
+def test_the_card_owes_every_scheduled_game_and_every_games_row_the_schedule_lacks():
+    """load_season's owed set: nba_schedule's regular-season rows (scored or
+    not) plus `games` rows the schedule does not list (games added after the
+    schedule was loaded). The scored set no longer needs a start time."""
+    from scripts import nba_total_luck_card as card
+
+    class C:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append(" ".join(sql.split()))
+            s = self.sql[-1]
+            if s.startswith("SELECT g.game_id, g.season"):
+                rows = [("G1", 2027, "2026-10-21", "HOM", "AWY")]
+            elif s.startswith("SELECT s.game_id, s.game_date"):
+                rows = [("G1", "2026-10-21", "HOM", "AWY", "Final"),
+                        ("G2", "2026-10-22", "OT1", "OT2", None),
+                        ("G3", "2026-10-22", "OT3", "OT4", None)]
+            else:
+                rows = []
+            return type("R", (), {"fetchall": lambda self_: rows})()
+
+    c = C()
+    final, box, sched = card.load_season(c, 2027, "2026-10-23")
+    assert final["game_id"].tolist() == ["G1"] and list(box.columns)[:2] == ["game_id", "team"]
+    assert sched["game_id"].tolist() == ["G1", "G2", "G3"]
+    owed = next(s for s in c.sql if s.startswith("SELECT s.game_id, s.game_date"))
+    assert "FROM nba_schedule s" in owed and "s.game_type = 'regular'" in owed
+    assert "UNION ALL" in owed and "NOT EXISTS (SELECT 1 FROM nba_schedule" in owed
+    scored = next(s for s in c.sql if s.startswith("SELECT g.game_id, g.season"))
+    assert "commence_time" not in scored
 
 
 # ── the offer: exactly the harness's choice ──────────────────────────────────
@@ -512,11 +648,12 @@ def test_run_card_decides_only_games_due_and_not_already_decided(monkeypatch):
     monkeypatch.setattr(card, "newest_fetch", lambda c, g, n: {k: fetch for k in g})
     seen = {}
 
-    def fake_decide(targets, quotes, box, final, times, art, **kw):
+    def fake_decide(targets, quotes, box, final, times, art, *, scheduled, **kw):
         seen["games"] = sorted(targets["game_id"])
-        return [], [], dict.fromkeys(tl.DIAG_KEYS, 0)
+        return [], [], {**dict.fromkeys(tl.DIAG_KEYS, 0), "presumed_unplayed": []}
     monkeypatch.setattr(tl, "decide", fake_decide)
-    monkeypatch.setattr(card, "load_season", lambda c, s, b: (pd.DataFrame(), pd.DataFrame()))
+    monkeypatch.setattr(card, "load_season",
+                        lambda c, s, b: (pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
     monkeypatch.setattr(card, "load_quote_rows", lambda c, g, s: pd.DataFrame(
         columns=list(tl.QUOTE_ROW_COLS)))
     out = card.run_card(do_publish=False, now=now)

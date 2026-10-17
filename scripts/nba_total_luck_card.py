@@ -19,6 +19,12 @@ pass can overlap). A game with a decision row, or with any nba_total_luck BET,
 is never looked at again: a later pass, a moved line or a better price writes
 nothing.
 
+EVERY GAME PRESENT. The gap reads every game of the season before the date
+(the league's shooting rates), so a game is declined, and the ledger says why,
+while any of them lacks its final score or its box score (load_season ->
+models.nba_total_luck.missing_inputs). Each such decline is logged as an
+ERROR naming the missing games; a game presumed not played is a WARNING.
+
 BET ROWS ONLY in picks. The scorer deletes every model's unsettled non-BET
 rows on each pass, so a "declined" row would not survive there. A decision
 with no bet lives in the ledger with its reason; the per-pass diagnostic line
@@ -183,34 +189,55 @@ def load_quote_rows(conn, game_ids: list[str], since: datetime) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
-def load_season(conn, season: int, before: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(final_games, box) for one season, games before the Eastern date `before`.
+SCHEDULED_COLS = ["game_id", "game_date", "home_team", "away_team", "status_text"]
 
-    final_games: the season's NBA games with a final score and a start time
-    (the lab's population: scripts.nba_game_harness.load_games), less any game
-    nba_schedule names as something other than a regular-season game. box: their
-    nba_player_game_log rows."""
+
+def load_season(conn, season: int, before: str
+                ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """(final_games, box, scheduled) for one season, games before the Eastern
+    date `before`.
+
+    final_games: the season's NBA games with a final score (the lab's
+    population, scripts.nba_game_harness.load_games, every one of which had a
+    start time), less any game nba_schedule names as something other than a
+    regular-season game. box: their nba_player_game_log rows.
+    scheduled: every game the season OWES before the date, scored or not, for
+    the completeness check (models.nba_total_luck.missing_inputs): the
+    regular-season rows of nba_schedule, plus any `games` row the schedule does
+    not list (a game added after the schedule was loaded: the NBA Cup knockout
+    games and the 24 games scheduled around them). Placeholder rows with no
+    teams yet are dropped by models.nba_total_luck.scheduled_games."""
     g = pd.DataFrame(conn.execute("""
         SELECT g.game_id, g.season, g.game_date, g.home_team, g.away_team
         FROM games g
         LEFT JOIN nba_schedule s ON s.game_id = g.game_id
         WHERE g.sport = 'NBA' AND g.season = %s AND g.game_date < %s
           AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-          AND g.commence_time IS NOT NULL
           AND (s.game_type IS NULL OR s.game_type = 'regular')
     """, (int(season), before)).fetchall(),
         columns=["game_id", "season", "game_date", "home_team", "away_team"])
+    g = g.drop_duplicates("game_id")
     g["game_date"] = g["game_date"].astype(str).str[:10]
     g["season"] = g["season"].astype(int)
+    sched = pd.DataFrame(conn.execute("""
+        SELECT s.game_id, s.game_date, s.home_team, s.away_team, s.status_text
+        FROM nba_schedule s
+        WHERE s.season = %s AND s.game_type = 'regular' AND s.game_date < %s
+        UNION ALL
+        SELECT g.game_id, g.game_date, g.home_team, g.away_team, NULL
+        FROM games g
+        WHERE g.sport = 'NBA' AND g.season = %s AND g.game_date < %s
+          AND NOT EXISTS (SELECT 1 FROM nba_schedule s WHERE s.game_id = g.game_id)
+    """, (int(season), before, int(season), before)).fetchall(), columns=SCHEDULED_COLS)
     cols = ["game_id", "team", *tl.BOX_COLS]
     if g.empty:
-        return g, pd.DataFrame(columns=cols)
+        return g, pd.DataFrame(columns=cols), sched
     box = pd.DataFrame(conn.execute(f"""
         SELECT {', '.join(cols)} FROM nba_player_game_log WHERE game_id = ANY(%s)
     """, (g["game_id"].tolist(),)).fetchall(), columns=cols)
     for c in tl.BOX_COLS:
         box[c] = pd.to_numeric(box[c], errors="coerce")
-    return g, box
+    return g, box, sched
 
 
 # ── rows ──────────────────────────────────────────────────────────────────────
@@ -420,15 +447,27 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                                 "game_date": games[g]["game_date"],
                                 "home_team": games[g]["home"], "away_team": games[g]["away"],
                                 "tip": pd.Timestamp(games[g]["tip"])} for g in gids])
-            final, box = load_season(conn, season, max(tg["game_date"]))
+            final, box, scheduled = load_season(conn, season, max(tg["game_date"]))
             since = min(due[g] for g in gids) - timedelta(minutes=70)
             quotes = tl.quote_frame(load_quote_rows(conn, gids, since), tg)
             times = pd.DataFrame({"game_id": gids,
                                   "T": [pd.Timestamp(due[g]) for g in gids]})
             bets, decisions, diag = tl.decide(tg.drop(columns="tip"), quotes, box, final,
-                                              times, art)
+                                              times, art, scheduled=scheduled)
             bets_all += bets
             decisions_all += decisions
+            presumed = diag.pop("presumed_unplayed", [])
+            if presumed:
+                logger.warning(
+                    f"nba-total-luck: {len(presumed)} game(s) of {season} still have no final "
+                    f"score {tl.UNPLAYED_AFTER_DAYS}+ days after their date and are treated as "
+                    f"not played (a postponement nothing recorded): {presumed}. If one WAS "
+                    f"played, its score and box are missing and every gap since is off.")
+            for d in decisions:
+                if d.detail.startswith(("score_missing", "box_missing")):
+                    logger.error(f"nba-total-luck: {d.game_id} declined, {d.detail}: the gap "
+                                 f"would not be the lab's. The results step "
+                                 f"(nba-results) retries every started game all season.")
             for k, v in diag.items():
                 diag_all[k] += v
         published = n_decided = 0

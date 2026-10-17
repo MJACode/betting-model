@@ -43,6 +43,9 @@ THE RULE, per regular-season game:
      Luck-adjusted DRtg replaces the opponents' made threes and made free
      throws with their attempts times the league's 3P% and FT% over the same
      season's games before the date. The offence is left as played.
+     EVERY scheduled game of the season before the date must have its final
+     score and both teams' box scores, as every game did in the lab; else the
+     game is declined, 'score_missing' or 'box_missing' (missing_inputs).
   2. PROJECTION: pace = mean of the two teams' possessions per game;
        total = pace/100 x [ORtg_H + DRtg_A + ORtg_A + DRtg_H - 2 x league rating]
      gap = adjusted total - raw total, in points.
@@ -447,28 +450,99 @@ class Decision:
     detail: str
 
 
-DIAG_KEYS = ("games", "early_season", "box_missing", "gap_below_cut", "no_fair_line",
-             "no_offer", "bets")
+DIAG_KEYS = ("games", "score_missing", "box_missing", "early_season", "gap_below_cut",
+             "no_fair_line", "no_offer", "bets")
+
+# ── completeness: the gap is the lab's only when every input game is present ─
+#
+# The gap reads TWO kinds of game: the two teams' own, and EVERY game of the
+# season before the date (the league's 3P%, FT% and points per 100,
+# as_of_ratings). The lab had all of them: in the research cache every
+# regular-season game of 2018-19..2025-26 has a final score and a box score
+# for both teams (measured 2026-10-17: 1,230 of 1,230 in each full season).
+# Live, a game whose score or box has not landed simply drops out, and the gap
+# moves with no sound: one other teams' box removed moved a 2025-26 gap from
+# 2.992 (no bet) to 3.008 (a bet), and a missing previous night moved gaps by
+# up to 0.68 points. So a game is decided only when, for EVERY scheduled
+# regular-season game of its season before its Eastern date:
+#   * the game has a final score (else 'score_missing'), and
+#   * a scored game has a box score for both teams (else 'box_missing').
+# A game ESPN reported postponed or cancelled (nba_schedule.status_text,
+# written by data/ingestors/nba_results_ingestor.py or stats.nba.com's "PPD")
+# was not played and is not owed. A game still unscored more than
+# UNPLAYED_AFTER_DAYS before the date is presumed not played (a postponement
+# nothing recorded): the results step retries every started unscored game all
+# season, so a game played and still unscored after two weeks of passes has no
+# score anywhere this system can read. It is counted in 'presumed_unplayed' and
+# named in the card's log, so a gap computed without it is never silent.
+# Placeholder rows (the NBA Cup knockout slots before their teams are known,
+# home and away 'NaN') are not games.
+UNPLAYED_AFTER_DAYS = 14
+_POSTPONED = r"(?i)(?:ppd|postpon|cancel)"
+_NOT_A_TEAM = {"", "NAN", "NONE", "NULL", "TBD"}
 
 
-def missing_boxes(targets: pd.DataFrame, final_games: pd.DataFrame,
-                  tb: pd.DataFrame) -> dict[str, int]:
-    """game_id -> how many of its two teams' final games before its date have
-    no box score in `tb`. A game missing from the box drops out of BOTH teams'
-    ratings and moves the gap without a sound, so such a game is not priced."""
-    have = set(tb["game_id"])
-    fg = final_games[~final_games["game_id"].isin(have)]
+def _known_team(x) -> bool:
+    return isinstance(x, str) and x.strip().upper() not in _NOT_A_TEAM
+
+
+def scheduled_games(rows: pd.DataFrame) -> pd.DataFrame:
+    """The season's scheduled regular-season games, one row per game_id:
+    (game_id, game_date, postponed). `rows` may list a game twice (nba_schedule
+    and games); a game is postponed when any row says so. Rows without two
+    real teams are dropped."""
+    cols = ["game_id", "game_date", "postponed"]
+    if rows is None or rows.empty:
+        return pd.DataFrame(columns=cols)
+    r = rows[rows["home_team"].map(_known_team) & rows["away_team"].map(_known_team)].copy()
+    st = r["status_text"] if "status_text" in r else pd.Series(None, index=r.index, dtype=object)
+    r["postponed"] = st.fillna("").astype(str).str.contains(_POSTPONED, regex=True)
+    if "postponed_flag" in r:
+        r["postponed"] = r["postponed"] | r["postponed_flag"].fillna(False).astype(bool)
+    r["game_date"] = r["game_date"].astype(str).str[:10]
+    out = r.groupby("game_id", as_index=False).agg(game_date=("game_date", "min"),
+                                                   postponed=("postponed", "any"))
+    return out[cols]
+
+
+def missing_inputs(targets: pd.DataFrame, scheduled: pd.DataFrame, final_games: pd.DataFrame,
+                   tb: pd.DataFrame) -> dict[str, dict[str, list[str]]]:
+    """game_id -> {'score_missing', 'box_missing', 'presumed_unplayed'}: the
+    game ids of its season, before its Eastern date, that are owed and absent.
+
+    scheduled    scheduled_games(...) for the season (every game, scored or not)
+    final_games  the season's scored regular-season games
+    tb           team_box(box, final_games): a game is boxed only when both
+                 teams' rows are there"""
+    played = set(final_games["game_id"])
+    boxed = set(tb["game_id"])
+    sch = scheduled[~scheduled["game_id"].isin(played) & ~scheduled["postponed"]]
+    sch_d = pd.to_datetime(sch["game_date"])
+    # _d from the subset itself: assigning a Series to an EMPTY frame adopts the
+    # Series' index (pandas 3), which filled this with the whole season as NaN.
+    unboxed = final_games[~final_games["game_id"].isin(boxed)]
+    unboxed = unboxed.assign(_d=unboxed["game_date"].astype(str).str[:10])
     out = {}
     for r in targets.itertuples(index=False):
-        m = fg[(fg["season"] == r.season) & (fg["game_date"].astype(str) < str(r.game_date))
-               & (fg["home_team"].isin([r.home_team, r.away_team])
-                  | fg["away_team"].isin([r.home_team, r.away_team]))]
-        out[r.game_id] = int(len(m))
+        d = pd.Timestamp(str(r.game_date)[:10])
+        before = sch[sch_d < d]
+        old = pd.to_datetime(before["game_date"]) < d - pd.Timedelta(days=UNPLAYED_AFTER_DAYS)
+        out[r.game_id] = {
+            "score_missing": sorted(before.loc[~old, "game_id"]),
+            "presumed_unplayed": sorted(before.loc[old, "game_id"]),
+            "box_missing": sorted(unboxed.loc[unboxed["_d"] < str(d.date()), "game_id"]),
+        }
     return out
 
 
+def _named(ids: list[str], k: int = 3) -> str:
+    more = f" +{len(ids) - k} more" if len(ids) > k else ""
+    return f"{len(ids)} ({', '.join(ids[:k])}{more})"
+
+
 def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
-           final_games: pd.DataFrame, times: pd.DataFrame, art: dict,
+           final_games: pd.DataFrame, times: pd.DataFrame, art: dict, *,
+           scheduled: pd.DataFrame,
            books=None, min_odds: float | None = None, gap_cut: float = GAP_CUT,
            bucket_uplift: float | None = None) -> tuple[list[TotalLuckBet], list[Decision], dict]:
     """The rule on frames. Pure given its inputs, so the card and the replay of
@@ -481,12 +555,20 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     final_games  the season's final regular-season games (game_id, season,
                  game_date, home_team, away_team)
     times        game_id, T: each game's decision instant
+    scheduled    every scheduled regular-season game of the season, scored or
+                 not (scheduled_games(...)): what the completeness check owes.
+                 Required: without it nothing can tell a game that has not
+                 landed from a game that was never played.
     bucket_uplift  the uplift to state the probability with; default the
                  artifact's, fitted on the seasons before this one. Only the
                  written probability depends on it, never which bet is taken.
+
+    diag['presumed_unplayed'] counts the distinct games, over all targets,
+    left out as presumed not played (UNPLAYED_AFTER_DAYS); the card names them.
     """
     from scripts import nba_game_harness as H
     diag = dict.fromkeys(DIAG_KEYS, 0)
+    diag["presumed_unplayed"] = []
     if targets.empty:
         return [], [], diag
     seasons = sorted(set(int(s) for s in targets["season"]))
@@ -501,7 +583,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     tb = team_box(box, final_games)
     proj = f4_projections(targets, tb)
     gaps = dict(zip(proj["game_id"], proj["gap_total"]))
-    missing = missing_boxes(targets, final_games, tb)
+    missing = missing_inputs(targets, scheduled_games(scheduled), final_games, tb)
 
     t = times[times["game_id"].isin(set(targets["game_id"]))]
     q = quotes[(quotes["market"] == MARKET) & quotes["game_id"].isin(set(t["game_id"]))]
@@ -518,6 +600,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     t_by = dict(zip(t["game_id"], t["T"]))
 
     bets, decisions = [], []
+    presumed: set[str] = set()
     for g in targets.itertuples(index=False):
         gid = g.game_id
         if gid not in t_by:
@@ -525,9 +608,17 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
         diag["games"] += 1
         T = t_by[gid]
         gap = gaps.get(gid)
-        if missing.get(gid, 0):
+        miss = missing[gid]
+        presumed.update(miss["presumed_unplayed"])
+        if miss["score_missing"]:
+            diag["score_missing"] += 1
+            decisions.append(Decision(gid, T, None, 0,
+                                      f"score_missing:{_named(miss['score_missing'])}"))
+            continue
+        if miss["box_missing"]:
             diag["box_missing"] += 1
-            decisions.append(Decision(gid, T, None, 0, f"box_missing:{missing[gid]}"))
+            decisions.append(Decision(gid, T, None, 0,
+                                      f"box_missing:{_named(miss['box_missing'])}"))
             continue
         if gap is None:
             diag["early_season"] += 1
@@ -561,4 +652,5 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
             link=getattr(c, "link_a", None), dk_link=dk_link))
         diag["bets"] += 1
         decisions.append(Decision(gid, T, float(gap), 1, f"bet:{c.book} {c.line:g} {c.price:+.0f}"))
+    diag["presumed_unplayed"] = sorted(presumed)
     return bets, decisions, diag
