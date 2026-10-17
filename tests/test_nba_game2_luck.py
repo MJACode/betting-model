@@ -434,8 +434,13 @@ def test_f6c_emits_its_6_cells_one_per_situation_and_point_on_real_sides():
     assert all(r["n_choose"] > 0 for r in tank)
     assert all(np.isfinite(r["share_home"]) and np.isfinite(r["blind_home"])
                and np.isfinite(r["blind_away"]) for r in tank)
-    # bar 9's population is every priced game at the point, not only the bet ones
-    assert all(r["population_games"] == data.games["game_id"].nunique() for r in rows)
+    # bar 9's population is the situation's own games (a categorical cell),
+    # so it counts exactly the games in the situation at that point
+    for r in rows:
+        k = r["axis_situation"]
+        n_sit = gsit[(gsit["situation"] == k) & gsit["single"]]["game_id"].nunique()
+        assert r["population_games"] == n_sit
+    assert all(r["population_games"] < data.games["game_id"].nunique() for r in rows)
 
 
 def test_the_f6c_placebo_moves_the_side_with_the_flag():

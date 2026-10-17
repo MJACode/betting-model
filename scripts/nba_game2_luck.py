@@ -88,13 +88,14 @@ F6c LATE-SEASON MOTIVATION -- 6 cells
   side (home / away), its stored home number and its real price, so the
   harness grades it, reports its home/away and favourite/underdog shares and
   runs bar 9's blind bets on real sides.
-  Bar 9's population is every game priced at the point: the rule gives each
-  game a number (1 = one team in the situation, 0 = neither or both), as
-  section 6.4's second amendment defines it ("the games its model or rule
-  produced a number for"). The comparison is therefore "does betting against
-  the team in the situation beat betting that real side (home, away,
-  favourite, underdog) on every game". run_cells' own blind_roi_choose for the
-  label "against" is the cell itself at no cut; the verdict does not read it.
+  Bar 9's population is the games IN the cell's situation (the 2026-10-17
+  fourth amendment in section 6.4: a categorical cell is its own population,
+  since it has no cut to apply inside it). The comparison is therefore "does
+  betting against the team in the situation beat betting the dominant real
+  side (home, away, favourite, underdog) in those same games". run_cells' own
+  blind_roi_choose for the label "against" is the cell itself at no cut; the
+  verdict does not read it. The placebo still shuffles the flag across every
+  game on the date.
 
 PLACEBO: 20 runs, rng seed = run number. One row per (game, market) carrying
   the family's number (F4: the signed gap; F6c: the 0/1 flag and its per-game
@@ -426,9 +427,10 @@ def run_f4(data: H.Data, tb: pd.DataFrame, close, sig) -> tuple[list[dict], pd.D
 
 
 def run_f6c(data: H.Data, games_sit: pd.DataFrame, close, sig) -> tuple[list[dict], pd.DataFrame]:
-    """The 6 F6c cells. `cand` (every priced game's offers, with the 0/1 flag
-    and side_pick) is passed as run_cells' neutral frame too, because the
-    per-game label "against" needs side_pick wherever the harness chooses."""
+    """The 6 F6c cells. The candidate and neutral frames are the situation's
+    games only (bar 9's population; side_pick is needed wherever the harness
+    chooses); the placebo frames keep every priced game, so the shuffled flag
+    can land anywhere on the date."""
     rows, pop = [], []
     for point in F6C_POINTS:
         _, neutral = market_offers(data, point, sig, F6C_SIDES)
@@ -437,8 +439,9 @@ def run_f6c(data: H.Data, games_sit: pd.DataFrame, close, sig) -> tuple[list[dic
             signal = f6c_signal(neutral, gs)
             cand = f6c_offers(neutral, signal)
             pl = placebo_frames(neutral, signal, data.games, attach=f6c_offers)
-            got = H.run_cells(data, "F6c", point, cand, cand, F6C_CUTS, F6C_SIDES, close=close,
-                              sig=sig, placebo=pl, strength="strength")
+            in_sit = cand[cand["strength"] > 0]
+            got = H.run_cells(data, "F6c", point, in_sit, in_sit, F6C_CUTS, F6C_SIDES,
+                              close=close, sig=sig, placebo=pl, strength="strength")
             for r in got:
                 r["axis_situation"] = k
                 r["bet_side_meaning"] = ("against the team in the situation; each bet carries "
