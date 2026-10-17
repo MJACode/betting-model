@@ -955,11 +955,16 @@ Same command; cells in `cells_IG-1.parquet`, the verdict in `verdict_house_IG-1.
        - Totals: +0.65 points² (−1.35 to +2.60) on the choosing seasons; −2.17 (−7.70 to
          +3.78) in 2025-26. **Closed without a grid.**
        - Spreads: +3.11 points² (+0.75 to +5.68); +4.70 (+0.33 to +9.46) in 2025-26. The gate
-         opens. But the score-only model does nearly as well: +2.83 (+0.66 to +5.17), and +4.19
-         (−0.47 to +9.29) in 2025-26. Against the deciding books' own median centre the model
-         adds nothing: −0.005 (−0.18 to +0.17), and +0.44 (+0.05 to +0.86) in 2025-26. On
-         2021-22 → 2025-26 together, Pinnacle's halftime spread centre has a squared error of
-         115.1 points², the books' own 111.1. By the line above, the gain is Pinnacle's lag.
+         opens.
+       - The score-only model clears the choosing seasons, +2.83 (+0.66 to +5.17), but not
+         2025-26, +4.19 (−0.47 to +9.29). So by the line above it does not strictly pass.
+       - Three other measurements say the gain is Pinnacle's lag:
+         - Against the deciding books' own median centre, the model adds nothing on the
+           choosing seasons: −0.005 (−0.18 to +0.17). 2025-26 alone shows +0.44 (+0.05 to
+           +0.86), one season, which the rule does not count.
+         - On 2021-22 → 2025-26 together, Pinnacle's halftime spread centre has a squared error
+           of 115.1 points². The books' own centre has 111.1.
+         - The late-Q2 slope below lies above zero.
        - Points scored in Q2's last 5 minutes still predict against Pinnacle's halftime price:
          spread +0.0068 per point (+0.0013 to +0.0124), total +0.0059 (+0.0002 to +0.0118).
        - The spread grid (house standard, `house_verdict`): 0 of 6 pass. No cell reaches 200
