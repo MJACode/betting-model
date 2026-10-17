@@ -258,3 +258,21 @@ def test_a_per_game_purchase_is_dated_by_its_own_stamp(tmp_path):
     t = H.per_event_times(pe, "D")
     # 65 minutes out is inside 45-75; 20 minutes out is not a D decision
     assert t["lead_min"].tolist() == [65.0]
+
+
+def test_a_per_game_side_takes_each_games_side_pick_and_settles_on_the_real_side():
+    # G: the rule says away; G2: the rule says home; G3: no side at all
+    off = pd.concat([_offers().assign(game_id=g) for g in ("G", "G2", "G3")], ignore_index=True)
+    off = off[(off["book"] == "fanduel") | (off["side"] == "away")]
+    off.loc[off["side"] == "away", "price"] = -110.0
+    off["side_pick"] = off["game_id"].map({"G": "away", "G2": "home"})
+    pick = H.choose(off, cut=-np.inf, sides=["fade"]).set_index("game_id")
+    assert pick["side"].to_dict() == {"G": "away", "G2": "home"}
+    # a real side still means that side, side_pick or not
+    assert set(H.choose(off, cut=-np.inf, sides=["home"])["side"]) == {"home"}
+    games = pd.concat([_games(), _games().assign(game_id="G2")], ignore_index=True)
+    g = H.grade(pick.reset_index(), games).set_index("game_id")
+    # home won by 10: away +4.5 loses, home -4.5 covers
+    assert g["result"].to_dict() == {"G": "L", "G2": "W"}
+    with pytest.raises(KeyError):
+        H.choose(off.drop(columns="side_pick"), cut=-np.inf, sides=["fade"])
