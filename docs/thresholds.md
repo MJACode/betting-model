@@ -616,12 +616,13 @@ everything it failed are `docs/nba_models_2026.md` 6.6 and 6.7).
 |---|---|---|
 | the cut | luck-adjusted minus raw projected total ≥ 3.0 points; overs only | `models/nba_total_luck.GAP_CUT` |
 | prob / edge cut | 0.0 / 0.0 — the publishers show every bet the card writes | `ACTION_THRESHOLDS`, both threshold dicts |
-| EV floor | 0.00, on its own probability (below); not a second cut | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| EV floor | 0.00, on its own probability (below), with a push refunded; not a second cut: it removes none of the 508 graded bets | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY`, `models/honest_ev.gate` (`p_push`) |
 | price floor | -200, pinned, and passed to the offer choice itself | `MODEL_MIN_ODDS` |
 | the offer | the over at the deciding book with the best EV under the market's fair line (Pinnacle's no-vig, else the deciding books' median), priced through the empirical spread of final totals around Pinnacle's close on every earlier season | `scripts/nba_game_harness` (one copy) + the artifact |
 | early season | both teams 10+ games: the first bets come in mid-November | `models/nba_total_luck.MIN_GAMES` |
-| every game present | every scheduled game of the season before the date must have its final score and both box scores, as every game did in the lab; else the game is declined, `score_missing` or `box_missing`, and the card logs the missing games. A game ESPN lists as postponed is not owed; one still unscored two weeks after its date is presumed not played and named in the log every pass | `models/nba_total_luck.missing_inputs` |
-| decided once | the last scheduled refresh pass at least 60 minutes before tip; a row in `nba_total_luck_decisions`, bet or not, never looked at again | `scripts/nba_total_luck_card.py` |
+| every game present | every scheduled game of the season before the date must have its final score and both box scores, and each team's box points must add up to its final score, as every game did in the lab; else the game is declined, `score_missing`, `box_missing` or `box_mismatch`, and the card logs the games and the repair command. A game ESPN lists as postponed is not owed; one still unscored two weeks after its date is presumed not played and named in the log every run | `models/nba_total_luck.missing_inputs` |
+| regular season only | the lab's population: a game the schedule lists as regular season, or a `games` row it does not list on a regular-season day with no other kind of game that day. The NBA Cup quarterfinals and semifinals count; the Cup final, preseason, play-in and playoffs never do | `models/nba_total_luck.regular_season` |
+| decided once | on a fetch that landed 60-66 minutes before tip, at most 5 minutes old, made by its own job every minute (the refresh pass does not run it); a row in `nba_total_luck_decisions`, bet or not, never looked at again | `scripts/nba_total_luck_window.py`, `scheduler.run_nba_total_luck_window`, `scripts/nba_total_luck_card.py` |
 | artifact | the residual sample and the bucket's per-season counts | `models/saved/nba_total_luck_20261017_090305.pkl` |
 
 **The evidence** (decision point C, gap ≥ 3, the over; graded walk-forward at
@@ -650,32 +651,54 @@ the line and price taken, plus the gap ≥ 3 bucket's uplift fitted on the
 seasons before the live one: on 2021-22 → 2025-26, 290 wins in 508 bets (0.5709)
 against a mean fair chance of 0.5050, so **+0.0659** for 2026-27. Fitted the
 same way on the seasons before each, the uplift was +0.085 (2022-23), +0.070,
-+0.054 and +0.068 (2025-26). The written EV on the 508 graded bets: median
-+0.090, second smallest +0.030; the one bet under zero (-0.012, 2023-01-24
-DEN at NOP, FanDuel over 232.0, lost 1.1 units) is the only one the 0.00 floor
-removes — 507 bets, +56.7 units, +10.3% without it.
++0.054 and +0.068 (2025-26).
+
+**The EV the floor reads refunds a push.** The probability is the chance the
+over WINS, with pushes in its denominator, so the EV is p x decimal - 1 +
+P(push): a whole-number total returns the stake on a push (204 of the 508
+graded bets were on whole numbers, P(push) 0.023 on average). On the 508 graded
+bets at the 2026-27 uplift that EV is +0.011 at the smallest, +0.038 next and
++0.100 at the median, so the 0.00 floor removes none of them. Until 2026-10-17
+the card counted a push as a loss (p x decimal - 1), which put one bet under
+zero and refused it: 2023-01-24 DEN at NOP, FanDuel over 232.0 at -110, -0.012
+that way and +0.011 with its 0.024 chance of a push refunded. No publishing
+surface disagrees: Discord's "good to" price applies an EV floor only when it is
+above 0.
 
 **Prices it lays:** min -115, 5th percentile -114, median -110, 95th -105, max
 +100; 1% plus money. Totals bet from 198.5 to 253.5 (median 225.5).
 
 **Decision timing:** the lab's decision sat exactly 60 minutes before tip on 609
-of its 611 bets. Live, the lead is read at the refresh pass's scheduled start
-(its rows land 8-12 seconds later). On the 1,206 scheduled 2026-27
-regular-season games: 1,029 are decided by the pass exactly 60 minutes out
-(every tip from 7:00 pm ET on), 35 by one 73 minutes out (afternoon half-hour
-tips) and 142 by one 103 minutes out (tips on the hour, noon to 6:00 pm, which
-the hourly :17 passes reach only then). The research found the edge at the
-morning fetch too (+10.3%) and at 45-75 minutes (+9.7%), so the earlier
-afternoon decisions are inside the evidence, not outside it.
+of its 611 bets. Live, a job of its own (`scheduler.run_nba_total_luck_window`,
+every minute, 24x7) fetches the NBA board when an undecided game is 61-66
+minutes from tip and runs the card on that fetch. The card decides on a fetch
+that landed 60-66 minutes out and is at most 5 minutes old, so a tip on a whole
+minute is decided on a fetch about 66 minutes out, the same for every tip time,
+afternoon or evening; if that tick is skipped or fails, five more follow. Until
+2026-10-17 the card rode the refresh pass and decided only on the pass exactly
+60 minutes out (73 or 103 minutes for afternoon tips): a pass that ran past its
+ten minutes made the scheduler skip the next, and 27 of the 504 evening ticks
+over 2026-10-03..16 never started (production `pipeline_runs`, read
+2026-10-17), so those games would have gone unpriced. The research found the
+edge at the morning fetch too (+10.3%) and at 45-75 minutes (+9.7% on 506 bets),
+so a decision 66 minutes out is inside the evidence. A fetch is one bulk NBA call
+for three markets at the line-shop books, about 3 credits by the Odds API's
+markets x regions rule (not measured on this job), about one per distinct tip
+time a day.
 
 **The replay** (`tests/test_nba_total_luck_replay.py`,
 `scripts/nba_total_luck_replay.py`): the live code, run on the research cache at
 the lab's decision instants, reproduces every lab bet — 611 of 611 across
 2020-21 → 2025-26 (82 of 82 in 2025-26) — and 6,294 gaps to the last digit.
-It feeds both sides the same cached box scores, so it proves the code matches,
-not the data: live 2026-27 boxes come from ESPN, the graded seasons from a
-source keyed on NBA.com ids, and no difference between the two has been
-measured.
+Since 2026-10-17 the season's games and box scores reach it through the card's
+own season load (its SQL answered from the cache), which returned exactly the
+lab's games and scores in every season. It feeds both sides the same cached box
+scores, so it proves the code matches, not the data: live 2026-27 boxes come
+from ESPN, the graded seasons from a source keyed on NBA.com ids, and no
+difference between the two has been measured. Two live-only cases are pinned by
+unit tests instead: the NBA Cup final (a `games` row the schedule lists only as
+a placeholder, 2026-12-11) stays out of the ratings, and a box that does not add
+up to its final score (a player stored twice) declines the game.
 
 **Why every game must be present.** The league's three-point, free-throw and
 scoring rates in the gap come from every game before the date, not just the two
@@ -686,7 +709,14 @@ teams'. On 2025-26, removing one other teams' box score (SAS at OKC,
 cut. Since 2026-10-17 such a game is declined instead (both cases re-run on the
 research cache: declined, `box_missing:1` and `score_missing:8`). The results
 step retries a missing score or box back to the season's opening, and records
-ESPN's postponements, so one missing game does not stop the model for long.
+ESPN's postponements, so one missing game does not stop the model for long. A
+box that never lands, or does not add up, is replaced with NBA.com's for
+exactly the games affected, from a residential machine:
+`python -m data.ingestors.nba_stats_ingestor --repair-boxes 2027`. It writes a
+game only when NBA.com's box adds up to its final score. The older remedy,
+`--game-log-date <date>`, loads every game of the date and stores a second row
+for any player ESPN filed under a fallback id, which is the duplicate the check
+exists to catch.
 
 **Review:** re-sweep the gap cut, on its own settled record and the graded
 seasons together, at about 250 settled bets (about two and a half seasons at

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, `nba_total_luck` review fixes: decided in its own one-minute job on a fetch 60-66 minutes out (27 of 504 evening refresh ticks never started); the NBA Cup final kept out of the ratings and the knockout games priced; `box_mismatch` and a one-game NBA.com box repair; the EV floor refunds a push (0 of 508 graded bets cut); the paused marker; the app's form strips read one sport and label points as points |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, `nba_total_luck` LIVE: NBA totals overs when the shooting-luck-adjusted projected total is 3+ above the raw one; the lab's gap functions moved into the model (one copy); live code replays 611 of 611 lab bets; decided on the last refresh pass 60+ minutes before tip; artifact committed, no production write |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master (`0d3b58b3`, #988) merged into the record-units branch; session logs keep both sides, newest first |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NBA public splits: the forward archive decides per game (a 10pm ET tip in play at 00:17 is stored at 01:17; 182 such tips on the 2026-27 schedule); `quality` column, 72 rows `reversed_at_source` (2022-03-09) and 1,706 `late_rewrite` set in one production write, 0 of 64,045 rows off the rule |

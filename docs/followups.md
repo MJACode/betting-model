@@ -25,25 +25,55 @@
 
 Live from 2026-10-17; the first bet needs both teams at 10 games, so mid-November.
 Read after the first slates: (1) `nba_total_luck_decisions` — every regular-season
-game should get exactly one row, on the pass 60 minutes out (103 for an afternoon
-tip on the hour); a game with no row before tip means its last pass's odds step
-failed (the card logs "was never decided"); (2) `score_missing` / `box_missing` in
-the detail column: a game of the season before the date with no final score or no
-box score, which declines EVERY later game until it lands (the card logs an ERROR
-naming it; the results step retries it back to the season's opening). A box
-ESPN never completes (the worker log says "box incomplete" for the same game
-pass after pass) cannot be fixed on the worker: run
-`python -m data.ingestors.nba_stats_ingestor --game-log-date <date>` on a
-residential machine (stats.nba.com blocks datacenter addresses). A
+game should get exactly one row, with `lead_min` 60-66 (the totals window job,
+`nba_total_luck_window`, every minute); a game with no row before tip means every
+tick 61-66 minutes out was skipped or its fetch failed (the card logs "was never
+decided"; the job's heartbeat goes silent after 20 minutes stopped); (2)
+`score_missing` / `box_missing` / `box_mismatch` in the detail column: a game of
+the season before the date with no final score, no box score, or a box whose
+points do not add up to its final (a player stored twice, a box ESPN never
+finished). Each declines EVERY later game until it is fixed (the card logs an
+ERROR naming it; the results step retries a missing one back to the season's
+opening). A box the worker cannot fix is replaced from a residential machine
+(stats.nba.com blocks datacenter addresses):
+`python -m data.ingestors.nba_stats_ingestor --repair-boxes 2027`, which writes a
+game only when NBA.com's box adds up. Never `--game-log-date` for this: it loads
+every game of the date and doubles any player ESPN stored under a fallback id. A
 "presumed not played" WARNING names a game still unscored two weeks on: if it was
 in fact played, its score and box are missing and every gap since is off;
-(3) the artifact's copy in Supabase's `model_artifacts` — not written yet (the
+(3) the NBA Cup knockout games: nba_schedule lists them only as placeholders with
+no teams (production, read 2026-10-17: quarterfinals 12-04 and 12-05, semifinals
+12-08, the final 12-11). The model prices the quarterfinals and semifinals from
+their `games` rows and keeps the final out of the ratings by its date; reloading
+the schedule once the bracket is set (`python -m data.ingestors.nba_schedule_ingestor
+--seasons 2027`, residential machine) gives them their real rows; (4) the
+artifact's copy in Supabase's `model_artifacts` — not written yet (the
 committed file is what the worker loads); `python -m scripts.nba_total_luck_build
 --store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the
 2027-28 season** refit the artifact through 2026-27
 (`python -m scripts.nba_total_luck_build`): the card refuses a season the artifact
 does not end just before. Re-sweep the gap cut at about 250 settled bets
 (`docs/thresholds.md`, NBA — `nba_total_luck`).
+
+## [ ] The paused marker on the rule cards with their own picks insert (2026-10-17)
+
+config.PAUSED_NOTE says every row a paused model writes carries
+`downgrade_reason = 'model paused'`, so a pick written while paused stays
+unannounced after an unpause. Since 2026-10-17 the shared insert
+(`models.scorer._insert_picks`) stamps it on a row that does not set the column,
+which covers `mlb_game_market`, `mlb_total_public_fade` and `nhl_over_under`, and
+`nba_total_luck` stamps it itself. These cards still write their own INSERT with
+no `downgrade_reason`, so a paused one writes unmarked BET rows:
+`scripts/nba_prop_market_card.py`, `scripts/nba_prop_projection_card.py`,
+`scripts/nhl_prop_card.py`, `scripts/nhl_props_card.py`,
+`scripts/wnba_prop_market_card.py`, `scripts/nfl_prop_market_card.py`, and the BET
+inserts of `scripts/nfl_wind_publisher.py` (its other insert already writes the
+column for its own reason). Each needs `downgrade_reason: models.scorer._pause_note(
+MODEL_ID)` on the row and the column in its insert, with a test that pauses the
+model (tests/test_nba_total_luck.py, `test_a_paused_model_s_rows_carry_the_paused_marker`,
+is the shape). The window it guards is small: while paused the threshold flag
+stops the post; only a pick written while paused, for a game still unstarted at
+the unpause, would post.
 
 ## [ ] NBA projection model: what to read after its first nights (2026-10-16)
 
