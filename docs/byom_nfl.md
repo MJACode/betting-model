@@ -70,3 +70,24 @@ does not expand nicknames, so Josh and Joshua do not meet.
 `apply` to false. `jobs/declared_jobs.json` lists `byom-nfl-prop-facts`
 with `enabled` false and `apply` false, so a merge does not enqueue a
 writer. The builder reads one game at a time.
+
+## Backtest
+
+`byom_backtest(season, filters)` is `SECURITY INVOKER` plpgsql. Filter
+values are locals. `season` NULL is the current NFL season only: the
+year the season starts, in `America/New_York`, and January through
+August stay on the previous year's label. A caller can pass an older
+season. Filters are side (home/away), role (favorite/underdog/pickem),
+weeks, rest days, primetime, and market type. A leg missing that datum
+is left out. There is no spread-size, price, or line filter. Each
+market row counts wins, losses, pushes, and ties. There is no unit
+column and no stake.
+Game markets include both sides. Prop markets include the over and the
+under. An empty filter object is the whole season. It is not a model
+record, and the UI must not present that unfiltered result as one.
+The function sets `statement_timeout` to 3 seconds. The season cutoff
+is the same rule as `byom/season.py`: month >= 9 keeps the calendar
+year, otherwise the label is the previous year.
+`data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
+and was not applied. The function is in `RPC_ANON_CALLABLE`. It reads
+the facts tables, not `picks`.

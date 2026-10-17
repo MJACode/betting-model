@@ -357,6 +357,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # basis is a label. Does not touch picks, the record views, or a
     # live model. Unapplied until the worker's next pass.
     "byom_facts_schema_2026_10_16.sql",
+    # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
+    # return when the function body already has the marker. Unapplied.
+    # Does not touch picks or the record views. Win, loss, or push.
+    # No spread, price, or line filter.
+    "byom_backtest_rpc_2026_10_16.sql",
 ]
 
 

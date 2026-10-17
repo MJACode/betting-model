@@ -146,6 +146,7 @@ jobs:
             tests/test_byom_facts_schema.py \
             tests/test_byom_game_facts.py \
             tests/test_byom_prop_facts.py \
+            tests/test_byom_backtest.py \
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
