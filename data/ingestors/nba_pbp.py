@@ -43,8 +43,8 @@ the home team of our `games` row.
     python -m data.ingestors.nba_pbp --seasons 2019 --dry-run   (no writes)
     python -m data.ingestors.nba_pbp --seasons 2019-2026 --fill-gaps
 
-GAPS. The release lacks a few regular-season games (six late-February 2019-20
-games, for one). --fill-gaps takes every `games` row no stored ESPN game
+GAPS. The release lacks seven regular-season games (six from late February
+2019-20, and NBA_2026-01-20_LAC_CHI). --fill-gaps takes every `games` row no stored ESPN game
 matched from ESPN's own free scoreboard and summary endpoints, which the
 release is a flattening of, and writes it through the same path with
 source 'espn_summary_api'.
