@@ -204,9 +204,9 @@
     "semantic_hash": "0ae8ced10e023e505550d093c8020997"
   },
   "data/ingestors/nba_espn_box.py": {
-    "mtime": 1792240788.166142,
-    "seen": 1792244939.086206,
-    "ast_hash": "1b3f1b74da39ccdf349e58248a28c3c3",
+    "mtime": 1792249477.8325562,
+    "seen": 1792250967.0905511,
+    "ast_hash": "c0d227caa84a9b0220d56833f2063372",
     "semantic_hash": ""
   },
   "data/ingestors/nba_stats_ingestor.py": {
@@ -780,9 +780,9 @@
     "semantic_hash": ""
   },
   "data/migrations/clv_standard_v2_2026_10_14.sql": {
-    "mtime": 1792240788.4208097,
-    "seen": 1792244939.0866332,
-    "ast_hash": "dc524ca1aedd33be1cc2fcaae8cdb53f",
+    "mtime": 1792248892.1384797,
+    "seen": 1792250967.0907543,
+    "ast_hash": "311fa3ec5832e289c7672b1bb69320c5",
     "semantic_hash": ""
   },
   "data/migrations/custom_model_backtest_rpcs.sql": {
@@ -1476,9 +1476,9 @@
     "semantic_hash": "667944f09b945ebe7c161d71fa09e4bd"
   },
   "mobile/scripts/verify_paused_catalog.ts": {
-    "mtime": 1792245769.7336955,
-    "seen": 1792245948.2203228,
-    "ast_hash": "c4902ea1ec93e870f344d2d1fc489a5c",
+    "mtime": 1792248770.5177855,
+    "seen": 1792250967.0909727,
+    "ast_hash": "34c2ca797691d40638e924185d39cd77",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_card.ts": {
@@ -1506,9 +1506,9 @@
     "semantic_hash": "03b5a09dc83bbdd21396d6b5650e53dc"
   },
   "mobile/scripts/verify_pick_timing.ts": {
-    "mtime": 1792245769.7357073,
-    "seen": 1792245948.2203462,
-    "ast_hash": "2622d0b64f99773fd51d457f196403fd",
+    "mtime": 1792248767.8840878,
+    "seen": 1792250967.0909815,
+    "ast_hash": "405a63a663bdf15c54287289f76bfde5",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_player_log.ts": {
@@ -1524,10 +1524,10 @@
     "semantic_hash": "f390f1c3a428c89c2940e864cf3ce4b1"
   },
   "mobile/scripts/verify_preferred_book.ts": {
-    "mtime": 1792240788.6319425,
-    "seen": 1792244939.0871043,
-    "ast_hash": "9d2b53a934f3a5a28ead5eca42619826",
-    "semantic_hash": "9d2b53a934f3a5a28ead5eca42619826"
+    "mtime": 1792248764.4937992,
+    "seen": 1792250967.0909889,
+    "ast_hash": "081b4cc339447bf32259ba3369f10899",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_push.ts": {
     "mtime": 1792240788.6336956,
@@ -2568,9 +2568,9 @@
     "semantic_hash": "8d531595cbd57c1dc034f964da7c2ae2"
   },
   "mobile/src/lib/markets.ts": {
-    "mtime": 1792245769.7386017,
-    "seen": 1792245948.221192,
-    "ast_hash": "ddbe3c20c43b5ac74d967e24117c3048",
+    "mtime": 1792248782.056051,
+    "seen": 1792250967.091317,
+    "ast_hash": "289cbf4c30c7f9dd786d3ee0acd41dc4",
     "semantic_hash": ""
   },
   "mobile/src/lib/matchup.ts": {
@@ -2580,9 +2580,9 @@
     "semantic_hash": "8934a2647c82903c5cbc235e18d6f610"
   },
   "mobile/src/lib/modelMeta.ts": {
-    "mtime": 1792245769.7396176,
-    "seen": 1792245948.2212014,
-    "ast_hash": "98cd8c1a61a3e812e7e2d28a35888ef8",
+    "mtime": 1792248783.4392555,
+    "seen": 1792250967.0913205,
+    "ast_hash": "58d1ce7f25db431992f80736ef2200f3",
     "semantic_hash": ""
   },
   "mobile/src/lib/otaUpdate.ts": {
@@ -3102,9 +3102,9 @@
     "semantic_hash": "713bbd2b24dccecfa6b6e2002e18a894"
   },
   "models/scorer.py": {
-    "mtime": 1792240789.1762705,
-    "seen": 1792244939.088177,
-    "ast_hash": "e56dac5be774e61709a403ade22d3d3e",
+    "mtime": 1792248939.15717,
+    "seen": 1792250967.0914927,
+    "ast_hash": "bb6edeb9209d86e8ac7a76246d622ba1",
     "semantic_hash": ""
   },
   "models/slate_concentration.py": {
@@ -7788,9 +7788,9 @@
     "semantic_hash": "8b73684b5fcdb3e9cf71938553bac270"
   },
   "docs/followups.md": {
-    "mtime": 1792245769.5709648,
-    "seen": 1792245948.2257829,
-    "ast_hash": "b8e7baa310323e9b27a6c9cba307a2ff",
+    "mtime": 1792250798.3788624,
+    "seen": 1792250967.093164,
+    "ast_hash": "a2bb337097a17e1b7f67391cc49475d2",
     "semantic_hash": ""
   },
   "docs/game_injury_gate.md": {
@@ -7890,10 +7890,10 @@
     "semantic_hash": "4f73ef29a0b0e6aa64f57015cd042bf3"
   },
   "docs/mobile_picks_prompt.md": {
-    "mtime": 1792240788.4524837,
-    "seen": 1792244939.0906794,
-    "ast_hash": "d0a23bef515c056ef94c9375fc9f24a2",
-    "semantic_hash": "d0a23bef515c056ef94c9375fc9f24a2"
+    "mtime": 1792248913.5159013,
+    "seen": 1792250967.0931976,
+    "ast_hash": "4cb31acc9d639d4e1cfa78cccfa7ba12",
+    "semantic_hash": ""
   },
   "docs/model_quality.md": {
     "mtime": 1792240788.4524837,
@@ -8142,9 +8142,9 @@
     "semantic_hash": "a988c799e587a85e3ef36554027fedf2"
   },
   "docs/sports/nba.md": {
-    "mtime": 1792245769.5806165,
-    "seen": 1792245948.2259548,
-    "ast_hash": "f25fc68132c94f7b3dda781d638e6ba7",
+    "mtime": 1792249850.59451,
+    "seen": 1792250967.093286,
+    "ast_hash": "c40345bf49869f5bfc9e82f7ba61118b",
     "semantic_hash": ""
   },
   "docs/sports/ncaaf.md": {
@@ -8196,9 +8196,9 @@
     "semantic_hash": ""
   },
   "docs/thresholds.md": {
-    "mtime": 1792245769.582739,
-    "seen": 1792245948.2259781,
-    "ast_hash": "3a94c5e8b60c94107a320a302674c0da",
+    "mtime": 1792249847.7316153,
+    "seen": 1792250967.0933027,
+    "ast_hash": "fba22f3ea9ca33a818abc0fbb4ae45e0",
     "semantic_hash": ""
   },
   "email/preview.html": {
@@ -8346,9 +8346,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/nba_results_ingestor.py": {
-    "mtime": 1792240788.1730838,
-    "seen": 1792244939.0862334,
-    "ast_hash": "493c30e2f8e4b044c96cf1f563e7adad",
+    "mtime": 1792250796.1919205,
+    "seen": 1792250967.090566,
+    "ast_hash": "c82c6cf7eed06b8b2a40ad7f50add5da",
     "semantic_hash": ""
   },
   "data/ingestors/nba_schedule_ingestor.py": {
@@ -8598,9 +8598,9 @@
     "semantic_hash": ""
   },
   "tests/test_nba_results_ingestor.py": {
-    "mtime": 1792240798.1847892,
-    "seen": 1792244939.08997,
-    "ast_hash": "c74c160f9f3ff19a905d71cf669c0b64",
+    "mtime": 1792249596.2162228,
+    "seen": 1792250967.0926082,
+    "ast_hash": "cefc4200c49ae02008d134de91edad0a",
     "semantic_hash": ""
   },
   "tests/test_nba_results_wiring.py": {
@@ -8886,9 +8886,9 @@
     "semantic_hash": ""
   },
   "models/nba_total_luck.py": {
-    "mtime": 1792245769.9023635,
-    "seen": 1792245948.2215931,
-    "ast_hash": "c8f1c4a9b7aeb4fb33bf4011accaea15",
+    "mtime": 1792250793.0347137,
+    "seen": 1792250967.0914724,
+    "ast_hash": "56f00cd21bd81c281a5e61e067e8ed2e",
     "semantic_hash": ""
   },
   "scripts/nba_game2_f4_late.py": {
@@ -8904,27 +8904,27 @@
     "semantic_hash": ""
   },
   "scripts/nba_total_luck_card.py": {
-    "mtime": 1792245769.7596517,
-    "seen": 1792245948.2226968,
-    "ast_hash": "e9d0c7f4ec05db9d0dd7b3419af66bda",
+    "mtime": 1792249881.5649865,
+    "seen": 1792250967.0918963,
+    "ast_hash": "8f2e637982ec7703dc8802fb242020a0",
     "semantic_hash": ""
   },
   "scripts/nba_total_luck_replay.py": {
-    "mtime": 1792245769.7616646,
-    "seen": 1792245948.222701,
-    "ast_hash": "9cd82e44520249dd48960eee92cb95b2",
+    "mtime": 1792249240.5268953,
+    "seen": 1792250967.0918984,
+    "ast_hash": "efab56ca2d77a63af3ced178ae110785",
     "semantic_hash": ""
   },
   "tests/test_nba_total_luck.py": {
-    "mtime": 1792245769.90849,
-    "seen": 1792245948.2245717,
-    "ast_hash": "e249b144bc4cd1a2f454e270a8334eb5",
+    "mtime": 1792249676.6881454,
+    "seen": 1792250967.0926175,
+    "ast_hash": "e997b69cc73de31b931d13d55e455d3e",
     "semantic_hash": ""
   },
   "tests/test_nba_total_luck_replay.py": {
-    "mtime": 1792245769.7737286,
-    "seen": 1792245948.224576,
-    "ast_hash": "712f01d44cdcd74f610329adab1141b9",
+    "mtime": 1792249800.623715,
+    "seen": 1792250967.092619,
+    "ast_hash": "7d657040acddf1d1a8ca670e424b6d31",
     "semantic_hash": ""
   },
   "tests/test_record_units_agree.py": {
@@ -8937,6 +8937,18 @@
     "mtime": 1792240798.3482647,
     "seen": 1792244939.090553,
     "ast_hash": "72c4606622ef8c1fe157d8ff520c8d40",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/espn_nba_scoreboard_2025-01-09_postponed.json": {
+    "mtime": 1792249082.802354,
+    "seen": 1792250967.092228,
+    "ast_hash": "c64fe02a9772e5657532e3f5600d403b",
+    "semantic_hash": ""
+  },
+  "tests/test_rule_model_markets_everywhere.py": {
+    "mtime": 1792248873.4711177,
+    "seen": 1792250967.0929096,
+    "ast_hash": "af408ee298a0814efaa31122dcc1bf36",
     "semantic_hash": ""
   }
 }
