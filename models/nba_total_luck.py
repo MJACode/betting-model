@@ -63,7 +63,7 @@ THE RULE, per regular-season game:
      when an undecided game is 61-66 minutes from tip it fetches the NBA board
      and runs the card (scripts/nba_total_luck_window.py). The first tick in
      the window decides, so a game on a whole-minute tip is decided on a fetch
-     about 66 minutes out, and five more ticks follow if that one is skipped
+     65-66 minutes out, and five more ticks follow if that one is skipped
      or fails. Until 2026-10-17 the card rode the refresh pass and decided
      only on the pass exactly 60 minutes out (73 or 103 minutes for afternoon
      tips), so a pass that never started lost the game: 27 of the 504 evening

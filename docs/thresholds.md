@@ -673,7 +673,7 @@ of its 611 bets. Live, a job of its own (`scheduler.run_nba_total_luck_window`,
 every minute, 24x7) fetches the NBA board when an undecided game is 61-66
 minutes from tip and runs the card on that fetch. The card decides on a fetch
 that landed 60-66 minutes out and is at most 5 minutes old, so a tip on a whole
-minute is decided on a fetch about 66 minutes out, the same for every tip time,
+minute is decided on a fetch 65-66 minutes out, the same for every tip time,
 afternoon or evening; if that tick is skipped or fails, five more follow. Until
 2026-10-17 the card rode the refresh pass and decided only on the pass exactly
 60 minutes out (73 or 103 minutes for afternoon tips): a pass that ran past its

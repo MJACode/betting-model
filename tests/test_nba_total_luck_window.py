@@ -128,12 +128,8 @@ def test_the_fetch_is_the_refresh_pass_s_own_nba_fetch(monkeypatch):
 # ── the job ──────────────────────────────────────────────────────────────────
 
 def _jobs(monkeypatch):
-    import scheduler
-    from tracking import job_heartbeat as jh
-    monkeypatch.setattr(jh, "seed", lambda jid: None)
-    monkeypatch.setattr(jh, "mark_disabled", lambda jid, *a, **k: None)
-    monkeypatch.setattr(scheduler, "SERVICE_ROLE", "all")
-    return {j.id: j for j in scheduler.build_scheduler().get_jobs()}
+    from tests.test_nba_prop_window import _jobs as jobs     # one copy of the helper
+    return jobs(monkeypatch)
 
 
 def test_the_job_runs_every_minute_on_the_pipeline_service_and_is_watched(monkeypatch):

@@ -585,22 +585,14 @@ def test_the_ev_floor_is_not_a_second_cut():
 # ── timing: a fetch 60-66 minutes before tip, from the window job ───────────
 
 def _window_job(monkeypatch):
-    import scheduler
-    from tracking import job_heartbeat as jh
-    monkeypatch.setattr(jh, "seed", lambda jid: None)
-    monkeypatch.setattr(jh, "mark_disabled", lambda jid, *a, **k: None)
-    monkeypatch.setattr(scheduler, "SERVICE_ROLE", "all")
-    return {j.id: j for j in scheduler.build_scheduler().get_jobs()}["nba_total_luck_window"]
+    # The scheduler-reading helpers of the NBA prop window job's tests, shared.
+    from tests.test_nba_prop_window import _jobs
+    return _jobs(monkeypatch)["nba_total_luck_window"]
 
 
 def _fires(job, start, end):
-    out, prev, t = [], None, start
-    while True:
-        nxt = job.trigger.get_next_fire_time(prev, t)
-        if nxt is None or nxt > end:
-            return out
-        out.append(nxt.astimezone(UTC))
-        prev, t = nxt, nxt + timedelta(seconds=1)
+    from tests.test_nba_prop_window import _fires as fires
+    return fires(job, start, end)
 
 
 def test_the_window_holds_at_least_two_of_the_job_s_ticks(monkeypatch):
