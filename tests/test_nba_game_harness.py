@@ -429,3 +429,12 @@ def test_a_graded_load_refuses_rows_that_match_no_purchase(tmp_path):
     with pytest.raises(RuntimeError, match="no purchase"):
         H.load(cache=tmp_path, require_seasons=(2022, 2023))
     assert H.load(cache=tmp_path).notes["placed_by_snapshot_share"] == 0.5
+
+
+def test_a_past_average_miss_does_not_move_the_centre():
+    # earlier seasons missed by +5 on average; the distribution keeps their
+    # spread, not the miss, so the centre stays where the model put it
+    dist = H.ResidDist(np.random.default_rng(4).normal(5.0, 12.0, 8000), "biased")
+    w, _, _ = dist.probs(np.array([0.0]), np.array([0.5]))
+    wn, _, _ = H.probs_at(np.array([0.0]), np.array([12.0]), np.array([0.5]))
+    assert abs(w[0] - wn[0]) < 0.02 and abs(dist.mean - 5.0) < 0.5

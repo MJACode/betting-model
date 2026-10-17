@@ -539,3 +539,28 @@ afterwards. Measured on the refreshed cache with `python -m scripts.nba_game_har
 
 The D gate (≥ 95% in every choosing season) passes in all four. Of 2,733,316 full-game rows,
 2,732,723 join their purchase record exactly; 593 (0.02%) were placed by their stamp.
+
+**Amendment, 2026-10-17 (third), before any priced season is graded: what the re-reviews
+changed.**
+
+- **The empirical distribution is the spread, not the average miss.** Residuals are
+  re-centred on zero before use. Uncentred, a projection's earlier average miss would move its
+  centre a second time: measured on 2020-21, about 1 point toward the away team and 1.4–2.3
+  points toward the under, on top of a calibration that already corrects it. For the market's
+  own pricing, the centre is solved from the price, so this changes nothing there.
+- **Only F1 is priced with the projection's own error.** F1b, F5 and F6b cut on a gap in
+  points and take the best offer under the market's fair line, like every rule family.
+- **Every "gap against the line" is measured against the consensus number at T**
+  (Pinnacle's, else the deciding books' median), not against each book's offered number. This
+  covers F1b, F5 and F6b. Measured against each book's own number, a soft book's
+  off-consensus line raises the gap, which is the refuted outlier mechanism.
+- **Two lab definitions recorded:**
+  - F6d's team-total distribution is the team's score minus the team total implied by
+    Pinnacle's closing spread and total, home and away pooled, on earlier seasons only, with
+    no fallback to the season's own games.
+  - F2's placebo shuffles the favourite's win probability between games on a date; each game
+    keeps its own favourite side.
+- **Public splits:** the stored history (2020-21 to 2025-26) is the CLOSING split (measured
+  in `docs/nba_public_splits.md`). It is known only after tip, so the public-fade control has
+  no pre-tip bets before 2026-27. The 2022-03-09 slate is reversed home-for-away at the source
+  and is excluded.
