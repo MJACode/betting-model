@@ -481,3 +481,44 @@ Two rules follow, fixed now:
   alone over m = 4,172 (as written above) or on the four choosing seasons over this search's
   cells, with the 2025-26 confirmation bar unchanged. The script computes both; it is run on
   real cells only after that is decided.
+
+**Amendment, 2026-10-17 (second), before any priced season is graded: what the lab reviews
+changed.** Each family's lab was reviewed for look-ahead and for drift from §6.3. These follow,
+and all land before any cell is graded:
+
+- **The empirical distribution, as §6.3 says** (the first builds used a bell curve). Two
+  sources. The market's own pricing (F2, F6a, F6d, the market's fair line, the blind bet,
+  closing value) uses the spread of results around Pinnacle's closing number on earlier
+  seasons. A projection built without prices (F1, F1b, F5) uses the spread of results around
+  that projection on earlier seasons, so it is never priced with the market's smaller error.
+  Results are whole numbers: a result placed between two integers is split between them by
+  distance, so whole-number lines carry push mass and half-point lines none.
+- **Bar 9 is read as §1 words it. This replaces the earlier line "each cell bets one side".**
+  When more than 70% of a cell's choosing-season bets fall on one side of home/away,
+  favourite/underdog (by the market's fair line at T) or over/under, the cell must beat that
+  side bet on every game of its own priced population at that point, with no cut. The
+  population is the games its model or rule produced a number for. A dominant side with no
+  blind number fails.
+- **The 95% gate at D is applied by the harness**, season by season. Every cell row records
+  each season's coverage and any season it dropped.
+- **A graded run refuses a stale cache:** any season it needs priced on fewer than 90% of
+  games, or more than 5% of rows matching no purchase record.
+- **Controls are never judged** and do not count in m.
+- **A categorical axis has no neighbours** (F6c's situations); bar 7 there reduces to the
+  cell's own ROI above zero.
+- **Corrections inside the labs:**
+  - F4 adjusts only opponent three-point and free-throw percentage. A term regressing each
+    team's own three-point percentage came from the build instructions, not §6.3, and is
+    removed.
+  - F6a's cut reads the posted spread (Pinnacle's, else the deciding books' median), not a
+    centre solved from the price.
+  - F2 leaves a level reference (pick'em) with no favourite.
+  - F6d's "one book against itself" takes both of that book's quotes from the same fetch.
+  - F1b's strength is the predicted move (predicted close minus the consensus number at T) in
+    the bettor's favour. The build used the offered number minus the predicted close, which
+    rewards a soft book's off-consensus number: the refuted outlier mechanism.
+- **Lab definitions §6.3 does not fix,** recorded so they are not read as registered: F6c's
+  "seed locked", "eliminated" and "tanking" (bottom three after the trade deadline) and its
+  deadline dates; F6b's points distribution (the spread of a player's points around his
+  season average on earlier seasons); F1's roster, minutes and injury-probability settings
+  (in the lab's docstring).
