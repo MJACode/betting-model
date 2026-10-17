@@ -497,8 +497,6 @@ def scheduled_games(rows: pd.DataFrame) -> pd.DataFrame:
     r = rows[rows["home_team"].map(_known_team) & rows["away_team"].map(_known_team)].copy()
     st = r["status_text"] if "status_text" in r else pd.Series(None, index=r.index, dtype=object)
     r["postponed"] = st.fillna("").astype(str).str.contains(_POSTPONED, regex=True)
-    if "postponed_flag" in r:
-        r["postponed"] = r["postponed"] | r["postponed_flag"].fillna(False).astype(bool)
     r["game_date"] = r["game_date"].astype(str).str[:10]
     out = r.groupby("game_id", as_index=False).agg(game_date=("game_date", "min"),
                                                    postponed=("postponed", "any"))
@@ -563,8 +561,8 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
                  artifact's, fitted on the seasons before this one. Only the
                  written probability depends on it, never which bet is taken.
 
-    diag['presumed_unplayed'] counts the distinct games, over all targets,
-    left out as presumed not played (UNPLAYED_AFTER_DAYS); the card names them.
+    diag['presumed_unplayed'] lists the distinct games, over all targets, left
+    out as presumed not played (UNPLAYED_AFTER_DAYS); the card logs them.
     """
     from scripts import nba_game_harness as H
     diag = dict.fromkeys(DIAG_KEYS, 0)

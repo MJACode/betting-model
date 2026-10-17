@@ -692,9 +692,16 @@ def _postponements(board, d: str, known: dict, store, totals: dict, dry_run: boo
                 pass
             continue
         game["postponed"] = True
+        if not n:
+            # A game only `games` has (added after the schedule was loaded):
+            # nothing to record it on. The totals model presumes it unplayed
+            # after two weeks (models/nba_total_luck.UNPLAYED_AFTER_DAYS).
+            logger.warning(f"NBA results: {ev['game_id']} {ev['status'].lower()} on {d} "
+                           f"(ESPN), but nba_schedule has no row for it to record")
+            continue
         totals["postponed"] += 1
         logger.info(f"NBA results: {ev['game_id']} {ev['status'].lower()} on {d} (ESPN); "
-                    f"recorded on nba_schedule ({n} row)")
+                    f"recorded on nba_schedule")
 
 
 def _one_game(ev, game, store: PgStore, resolver, totals, *, get_json, dry_run,

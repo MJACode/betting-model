@@ -27,8 +27,12 @@ Live from 2026-10-17; the first bet needs both teams at 10 games, so mid-Novembe
 Read after the first slates: (1) `nba_total_luck_decisions` — every regular-season
 game should get exactly one row, on the pass 60 minutes out (103 for an afternoon
 tip on the hour); a game with no row before tip means its last pass's odds step
-failed (the card logs "was never decided"); (2) `box_missing` in the detail column:
-a final game the results ingest did not log, which declines both teams' games;
+failed (the card logs "was never decided"); (2) `score_missing` / `box_missing` in
+the detail column: a game of the season before the date with no final score or no
+box score, which declines EVERY later game until it lands (the card logs an ERROR
+naming it; the results step retries it back to the season's opening). A
+"presumed not played" WARNING names a game still unscored two weeks on: if it was
+in fact played, its score and box are missing and every gap since is off;
 (3) the artifact's copy in Supabase's `model_artifacts` — not written yet (the
 committed file is what the worker loads); `python -m scripts.nba_total_luck_build
 --store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the
