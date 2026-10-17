@@ -70,9 +70,7 @@ ANON_READABLE: tuple[str, ...] = (
     # Build Your Own Model facts (2026-10-16). Granted before the screen
     # exists: an undeclared table arrives with no SELECT and the first read
     # is an empty error. Nothing in mobile/src names these yet, so they are
-    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
-    # byom_lock_shop is worker-only (WORKER_ONLY_TABLES): it holds every
-    # book's price, including Pinnacle, and the app does not read it.
+    # also AHEAD_OF_THE_APP. Display data only: win, loss, or push.
     "byom_game_facts",
     "byom_prop_facts",
     "tracked_bets",
@@ -256,12 +254,6 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # recurrence shape as the rest of this list.
     "api_call_daily",
     "brand_assets",
-    # The lock-time book shop. Every book at DraftKings' line, including
-    # Pinnacle. The app does not read it. Created by
-    # data/migrations/byom_lock_shop_2026_10_16.sql, which revokes anon and
-    # authenticated and enables RLS with no policy. The worker owns the
-    # table and bypasses RLS. Not FORCE ROW LEVEL SECURITY.
-    "byom_lock_shop",
     "model_artifacts",
     # The 250-bet review's two tables. Created on demand by
     # tracking/threshold_review.ensure_schema, never read by the app -- the

@@ -346,27 +346,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
     # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
-    # catalog return on the second pass. Does not touch picks, the record
-    # views, or a live model. Unapplied until the worker's next pass.
-    # The 120h/24h windows are UNCONFIRMED and are not in this file.
+    # catalog return on the second pass. Win, loss, or push. The line
+    # basis is a label. Does not touch picks, the record views, or a
+    # live model. Unapplied until the worker's next pass.
     "byom_facts_schema_2026_10_16.sql",
-    # 2026-10-16: label uncapped and capped unit columns. The unlabelled
-    # names from the facts schema are dropped. Catalog return on the
-    # second pass. Unapplied. Does not touch picks or the record views.
-    "byom_game_facts_units_2026_10_16.sql",
-    # 2026-10-16: the book shop at the DraftKings lock, so a rebuild grades
-    # 2026 the same way after non-DK quotes are pruned. Empty table.
-    # Worker-only: no anon grant, RLS with no policy. Catalog return on
-    # the second pass. Unapplied until the worker's next pass. Does not
-    # touch picks or the record views. The lock windows are UNCONFIRMED
-    # and are not in this file.
-    "byom_lock_shop_2026_10_16.sql",
-    # 2026-10-16: label prop unit columns and add log_status. The
-    # unlabelled over_units / under_units names from the facts schema are
-    # dropped. Catalog return on the second pass. Unapplied. Does not
-    # touch picks or the record views. The 24h prop lock is UNCONFIRMED
-    # and is not in this file.
-    "byom_prop_facts_units_2026_10_16.sql",
 ]
 
 
