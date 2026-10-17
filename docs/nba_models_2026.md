@@ -791,6 +791,61 @@ Only then does it run a betting grid.
 | IG-2 | **Game-state model against the live moneyline and spread.** A walk-forward win-probability and remaining-margin model. Inputs: margin, seconds left, Pinnacle's pre-game close spread as the prior (Stern 1994 variance), team fouls, foul counts of the top-minute players. | live moneyline (inside −200), live spread × the side the model favours | three phases: Q1–Q2, Q3, Q4 with ≥ 6 minutes left | EV ≥ 0.02 / 0.05 / 0.08 | 18 |
 | HT-1 | **Halftime.** Rest-of-game total and spread from first-half luck points, first-half pace against the pace the pre-game close implied, team fouls, and the halftime margin. Graded first on the held quotes stamped inside the break (103–271 games a season). | full-game live total and spread at halftime × 2 sides | one quote inside the break | model gap ≥ 1.5 / 3 / 4.5 points | 12 |
 
+#### IG-1: how the lab reads the row above (2026-10-17, written before any IG-1 number)
+
+The row leaves these open, so they are the lab's definitions, not registered ones
+(`scripts/nba_ingame_ig1.py`). Nothing below changes after a result is seen.
+
+- **Luck so far (L).** Both teams, from everything the play-by-play shows at or before the
+  quote's stamp: 3 × (3PM − 3PA × expected 3P%) + (FTM − FTA × expected FT%).
+  - "Expected" is the shooting team's own rate this season, from the box scores
+    (`nba_player_game_log`) of its games on earlier dates.
+  - Through 2024-25 the official three-point attempts count missed end-of-period heaves, so
+    the in-game count includes them too. From 2025-26 both leave them out.
+- **The luck gap is L itself, in points.** A cell bets the under when L ≥ g and the over when
+  L ≤ −g. The control, `control_ig1_persist`, bets the other way at the same cuts.
+- **Population.** Both teams have played at least 10 games this season (CLAUDE.md §3, as F4),
+  and Pinnacle has a pre-game closing total.
+- **The decision.** For each game and window, the first purchase in that window holding an
+  eligible quote. The offers are every eligible quote in that purchase and window, and the
+  cut is applied there and nowhere later.
+  - Eligible: one of the 8 deciding books, a coherent two-way price, a coherent Pinnacle
+    quote in the same purchase within 60 s, and no point scored between stamp and serving
+    for either quote (the 7.1 rule).
+  - The window is read from the quote's own stamp: Q2 in play; the halftime break; Q3 in
+    play, with the break after it.
+  - L is read at the earliest stamp among those offers and their Pinnacle quotes.
+- **The model (used by the information test only).** Remaining points =
+  C·f + w·(P − L − C·(1 − f))·f/(1 − f).
+  - C is Pinnacle's pre-game fair total (its close, no-vig, through the harness's empirical
+    distribution); f is the share of the 48 minutes still to play; P is the points so far.
+  - w is fit per window, by least squares on the seasons before the one predicted.
+  - The model's full-game total is M = P + remaining points.
+- **The information test (7.3).**
+  - Rows: Pinnacle's own coherent live totals that pass the 7.1 rule, the first per game and
+    window, read at Pinnacle's stamp.
+  - Pinnacle's fair total μ is solved from its no-vig over price at its number, through the
+    spread of (final total − Pinnacle's live number) on earlier seasons in the same window.
+    2020-21 has no earlier season and uses its own; it is reported, never chosen on.
+  - Without the model: μ + a0. With it: μ + a + b·(M − μ). a0, a and b are fit by least
+    squares on earlier seasons, per window.
+  - The statistic is the mean change in squared error of the final total, with the model
+    minus without (below zero = information), whole-day bootstrap 95%, 4,000 resamples,
+    seed 7. It is computed on the choosing seasons pooled (each predicted from the seasons
+    before it) and on 2025-26 alone.
+  - **Closed without a grid** unless the choosing seasons' interval lies wholly below zero.
+    2025-26 is reported beside; if its interval covers zero, that is said first.
+- **Diagnostics beside the test, never the gate.** 7.1 found that Pinnacle's stored live
+  price lags the score by minutes, so a model that only knows the score may pass. So:
+  (a) the model with no luck correction (L = 0, its own w) against Pinnacle; (b) the luck term
+  added on top of (a); (c) the full model against the deciding books' own fair total (the
+  median over books) at their first eligible quote.
+- **The grid, only if the test passes.** The harness's `run_cells`. Offers are priced at
+  Pinnacle's live fair total through the same distribution; best of the 8 deciding books,
+  −200 floor, DraftKings beside. The placebo shuffles L within date, 20 runs. Closing-line
+  value and "still offered at the next purchase" are not computed: the next purchase is
+  about an hour later, in a different game state.
+
 ### 7.3 Gates and bars
 
 1. **Information first.** For IG-1, IG-2 and HT-1, measure the change in log loss (moneyline)
