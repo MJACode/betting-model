@@ -1231,7 +1231,7 @@ export async function fetchUpcomingNflPicks(
   afterDate: string,
   throughDate: string,
 ): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, latestOddsRes, allBooksRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -1252,6 +1252,15 @@ export async function fetchUpcomingNflPicks(
       .from('games')
       .select(GAME_COLUMNS)
       .eq('sport', 'NFL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    // The wind reason ("Wind 14 mph at kickoff") is game_weather, not the
+    // parenthetical inside pick_label. One row per game; a miss leaves the
+    // reason blank and does not take the board down.
+    supabase
+      .from('game_weather')
+      .select(WEATHER_COLUMNS)
+      .like('game_id', 'NFL_%')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
     supabase
@@ -1304,6 +1313,10 @@ export async function fetchUpcomingNflPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  const weatherByGame = new Map<string, GameWeather>();
+  if (!weatherRes.error) {
+    for (const w of (weatherRes.data ?? []) as unknown as GameWeather[]) weatherByGame.set(w.game_id, w);
+  }
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -1318,7 +1331,7 @@ export async function fetchUpcomingNflPicks(
     return {
       pick,
       game: gameById.get(pick.game_id) ?? null,
-      weather: null,
+      weather: weatherByGame.get(pick.game_id) ?? null,
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
       ...bookEnrichment(pick, booksByGameMarket),
     };

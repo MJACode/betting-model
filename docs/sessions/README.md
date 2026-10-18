@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Signals card Option 1 on unmerged #965: bet-only headline from fields, wind reason, wrapping matchup, stake row, model footer. Today and Live stay on the board |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master `58f205d9` merged into the Signals card branch; session logs kept both sides; the behavioural check runs both verify scripts through `tsx_cmd` |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals reviewer lows: a flagged or stale leg already in the slip can be removed; a line-only move is `Best now · DK −8.5 −110`; the single stake form is gone; the Today handoff is one line |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals re-check: stake wording waits on Matt (`SIGNALS_STAKE_FORM`), Picked-at line dropped, Now line is `MGM line now −4.5 (−110)`, Today Best matches Signals |

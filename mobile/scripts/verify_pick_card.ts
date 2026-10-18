@@ -33,13 +33,16 @@ import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
 import { formatAmerican, MINUS } from '../src/lib/format';
 import {
   signalsBetHeadline,
+  signalsCardSpeech,
   signalsContextLine,
   signalsContextTime,
   signalsCtaLabel,
   signalsCtaSpeech,
   signalsHeroSpeech,
+  signalsModelCaption,
   signalsNowLine,
   signalsPriceText,
+  signalsReasonLine,
   signalsStakeLine,
   signalsStakeSpeech,
 } from '../src/lib/signalsCard';
@@ -889,10 +892,13 @@ check(
   const src = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
   check('PickCard titles through splitPickTitle', src.includes('splitPickTitle'));
   check(
-    'PickCard a11y still announces the stored pick_label',
-    // PR 4 (M8) builds the label as `cardLabel` so it can carry status, stake
-    // and timing too; the stored pick_label is still in it.
-    /const cardLabel = joinCardSpeech\(\[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
+    'board cardLabel still announces the stored pick_label',
+    /joinCardSpeech\(\[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
+  );
+  check(
+    'Signals cardLabel is the structured speech, not the stored label',
+    /const cardLabel = signals\s*\?\s*signalsCardSpeech\(/.test(src) &&
+      !/signalsBetHeadline\(pick\.pick_label\)/.test(src),
   );
   check(
     'PickCard does not write pick_label',
@@ -932,41 +938,124 @@ check(
       abbrevs: null,
     }) === 'Western Kentucky @ Sam Houston · NCAAF · 8:00 PM ET',
   );
+  const spread = signalsBetHeadline({
+    side: 'home', line: -7.5, market: 'spreads', homeTeam: 'Sam Houston', awayTeam: 'WKU',
+  });
   check(
-    'spread headline quotes the label with a true minus',
-    signalsBetHeadline('Sam Houston -7.5') === `Sam Houston ${MINUS}7.5` &&
-      !signalsBetHeadline('Sam Houston -7.5').includes('-7.5'),
+    'spread headline is the club and the side line, with a true minus',
+    spread === `Sam Houston ${MINUS}7.5` && !spread.includes('-7.5'),
+  );
+  check(
+    'a whole-number spread does not grow a tenth',
+    signalsBetHeadline({ side: 'home', line: -7, market: 'spreads', homeTeam: 'BUF', awayTeam: 'KC' }) === `BUF ${MINUS}7` &&
+      signalsBetHeadline({ side: 'home', line: 3, market: 'spreads', homeTeam: 'BUF', awayTeam: 'KC' }) === 'BUF +3' &&
+      signalsBetHeadline({ side: 'away', line: 3, market: 'spreads', homeTeam: 'BUF', awayTeam: 'KC' }) === `KC ${MINUS}3`,
   );
   check(
     'a hyphen inside a school name stays a hyphen',
-    signalsBetHeadline('Louisiana-Monroe -2.5') === `Louisiana-Monroe ${MINUS}2.5`,
+    signalsBetHeadline({
+      side: 'home', line: -2.5, market: 'spreads', homeTeam: 'Louisiana-Monroe', awayTeam: 'WKU',
+    }) === `Louisiana-Monroe ${MINUS}2.5`,
   );
-  check('moneyline headline is the stored label', signalsBetHeadline('Sam Houston ML') === 'Sam Houston ML');
-  check('total headline is the side and the line', signalsBetHeadline('NYY vs BOS Over 8.5') === 'Over 8.5');
+  check(
+    'moneyline headline is the team and ML',
+    signalsBetHeadline({ side: 'home', line: null, market: 'h2h', homeTeam: 'Sam Houston', awayTeam: 'WKU' }) === 'Sam Houston ML',
+  );
+  check(
+    'total headline is the side and the line',
+    signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'BOS', awayTeam: 'NYY' }) === 'Over 8.5',
+  );
+  check(
+    'a whole-number total drops the decimal',
+    signalsBetHeadline({ side: 'under', line: 56, market: 'totals', homeTeam: 'BUF', awayTeam: 'KC' }) === 'Under 56',
+  );
   check(
     'F5 stays on a total, a spread and a moneyline',
-    signalsBetHeadline('NYY vs BOS Over 4.5 F5') === 'Over 4.5 F5' &&
-      signalsBetHeadline('NYY -1.5 F5') === `NYY ${MINUS}1.5 F5` &&
-      signalsBetHeadline('NYY ML F5') === 'NYY ML F5',
+    signalsBetHeadline({ side: 'over', line: 4.5, market: 'totals_1st_5_innings', homeTeam: 'BOS', awayTeam: 'NYY' }) === 'Over 4.5 F5' &&
+      signalsBetHeadline({ side: 'home', line: -1.5, market: 'spreads_1st_5_innings', homeTeam: 'NYY', awayTeam: 'BOS' }) === `NYY ${MINUS}1.5 F5` &&
+      signalsBetHeadline({ side: 'home', line: null, market: 'h2h_1st_5_innings', homeTeam: 'NYY', awayTeam: 'BOS' }) === 'NYY ML F5',
   );
   check(
-    'stored NHL game total drops the matchup',
-    signalsBetHeadline('LAK vs EDM Under 6.0') === 'Under 6.0',
+    'a whole-number game total does not keep a trailing .0',
+    signalsBetHeadline({ side: 'under', line: 6, market: 'totals', homeTeam: 'EDM', awayTeam: 'LAK' }) === 'Under 6',
   );
   check(
-    'a team total keeps the club: the stored odds row is per team, and picks has no Team Total label',
-    signalsBetHeadline('Boston Bruins Over 3.5') === 'Boston Bruins Over 3.5' &&
-      signalsBetHeadline('BOS vs NYY Team Total Over 3.5') === 'BOS vs NYY Team Total Over 3.5' &&
-      signalsBetHeadline('New York vs Los Angeles Team Total Under 2.5') === 'New York vs Los Angeles Team Total Under 2.5' &&
-      signalsBetHeadline('Los Angeles vs New York Over 8.5') === 'Over 8.5',
+    'a team total names the club the market belongs to',
+    signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Over 3.5' &&
+      signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Under 2.5' &&
+      signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Over 8.5',
   );
   check(
-    'prop headline keeps the player',
-    signalsBetHeadline('Roquan Smith Under 9.5 Tackles') === 'Roquan Smith Under 9.5 Tackles',
+    'prop headline is the player, the side, the line and the stat',
+    signalsBetHeadline({
+      side: 'under', line: 9.5, market: 'player_tackles_assists', player: 'Roquan Smith',
+    }) === 'Roquan Smith Under 9.5 Tkl+Ast',
   );
   check(
-    'NFL card stake suffix is not the hero',
-    signalsBetHeadline('NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u') === 'Under 43.5 (Wind 14 mph, FD)',
+    'the headline has no stake suffix and no wind parenthetical',
+    signalsBetHeadline({ side: 'under', line: 43.5, market: 'totals', homeTeam: 'MIA', awayTeam: 'NYJ' }) === 'Under 43.5' &&
+      !signalsBetHeadline({ side: 'under', line: 56, market: 'totals' }).includes('0.77u') &&
+      !signalsBetHeadline({ side: 'under', line: 56, market: 'totals' }).includes('Wind'),
+  );
+  check(
+    'wind reason is the forecast, and other models stay quiet',
+    signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14 }) === 'Wind 14 mph at kickoff' &&
+      signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14.2 }) === 'Wind 14 mph at kickoff' &&
+      signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14, dome: 1 }) === null &&
+      signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null &&
+      signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: null }) === null,
+  );
+  check(
+    'model caption is modelLong plus when it posted',
+    signalsModelCaption('Wind Totals (Under)', 'Posted 11:07 AM ET') === 'Wind Totals (Under) model · Posted 11:07 AM ET' &&
+      signalsModelCaption('Wind Totals (Under)', null) === 'Wind Totals (Under) model',
+  );
+  check(
+    'VoiceOver reads bet, price, reason, matchup, figures, stake, model, posted',
+    signalsCardSpeech({
+      bet: 'Under 56',
+      price: `${MINUS}110 DraftKings`,
+      reason: 'Wind 14 mph at kickoff',
+      teams: 'Kansas City at Buffalo',
+      time: '8:00 PM ET',
+      edge: 'Edge +6.0%',
+      modelChance: 'Model chance 58%',
+      expectedReturn: 'Expected return +4.0%',
+      stake: 'Stake, Bet 1.1 units, win 1 unit',
+      modelName: 'Wind Totals (Under) model',
+      posted: 'Posted 11:07 AM ET',
+      paused: null,
+      gameStatus: null,
+      sharp: null,
+      started: null,
+    }) === `Under 56. ${MINUS}110 DraftKings. Wind 14 mph at kickoff. Kansas City at Buffalo. 8:00 PM ET. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`,
+  );
+  check(
+    'paused, live, locked and flagged speech keep their place',
+    signalsCardSpeech({
+      bet: 'Under 56', price: null, reason: null, teams: null, time: null,
+      edge: 'Price check. The number looks off.',
+      modelChance: 'Model chance 58%',
+      expectedReturn: 'Expected return unavailable',
+      stake: 'Stake unavailable',
+      modelName: 'Wind Totals (Under) model',
+      posted: 'Locked Tue 10/20 · 9:31 AM ET',
+      paused: 'Paused model, not a bet',
+      gameStatus: 'Live',
+      sharp: null,
+      started: `Game started, picked at ${MINUS}110, DraftKings`,
+    }).endsWith(`Paused model, not a bet. Live. Game started, picked at ${MINUS}110, DraftKings`) &&
+      signalsCardSpeech({
+        bet: 'Under 56', price: null, reason: null, teams: null, time: null,
+        edge: 'Price check. The number looks off.',
+        modelChance: null, expectedReturn: null, stake: 'Stake unavailable',
+        modelName: null, posted: null, paused: null, gameStatus: null, sharp: null, started: null,
+      }).includes('Price check') &&
+      !signalsCardSpeech({
+        bet: 'Under 56', price: null, reason: null, teams: null, time: null,
+        edge: null, modelChance: null, expectedReturn: null, stake: null,
+        modelName: null, posted: null, paused: null, gameStatus: null, sharp: null, started: null,
+      }).includes('models agree'),
   );
   check(
     'price and book use a true minus',
@@ -1000,7 +1089,33 @@ check(
   const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
   check('Signals board opts into the signals layout', /layout=\{view === 'signals' \? 'signals' : 'board'\}/.test(home));
   check('hero is 22pt', /betLeft: \{[\s\S]*?font\.size\.title2/.test(card) && /betRight: \{[\s\S]*?font\.size\.title2/.test(card));
-  check('four cells use the plain words', /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && />Stake</.test(card));
+  check(
+    'three figures use the plain words, and Stake is not a fourth cell',
+    /Model chance/.test(card) && /Expected return/.test(card) && />Edge</.test(card) && !/>Stake</.test(card),
+  );
+  check(
+    'the bet, the reason and the matchup wrap instead of ellipsizing',
+    /\{betHeadline\}/.test(card) &&
+      !/numberOfLines=\{[^}]*\}\s*>\s*\{betHeadline\}/.test(card) &&
+      /styles\.reasonLine/.test(card) &&
+      !/numberOfLines=\{[^}]*\}[^<]{0,40}reasonLine/.test(card) &&
+      /styles\.matchupLine/.test(card) &&
+      !/numberOfLines=\{[^}]*\}[\s\S]{0,80}signalsContextLine\(/.test(card),
+  );
+  check(
+    'the model name is the footer caption',
+    /styles\.modelCaption/.test(card) && /\{modelCaption\}/.test(card),
+  );
+  check(
+    'a paused Signals card shows PAUSED and mutes the hero',
+    /signalsMuted = signals && \(flagged \|\| Boolean\(heroPrice\?\.stale\) \|\| paused\)/.test(card) &&
+      card.split('>PAUSED<').length === 3,
+  );
+  check(
+    'a long bet keeps its line with the name; the price does not steal the row',
+    /betLeft: \{[\s\S]*?flexShrink: 0[\s\S]*?maxWidth: '100%'/.test(card) &&
+      !/betLeft: \{[\s\S]*?flexBasis: '55%'/.test(card),
+  );
   const navy = /handoffNavy: \{[\s\S]*?\}/.exec(card)?.[0] ?? '';
   check('CTA fill is navy tint, not DK green or system blue', /backgroundColor: colors\.tint/.test(navy) && !/DK_GREEN|colors\.info/.test(navy));
   check('CTA label is textInverse', /handoffNavyText: \{[\s\S]*?color: colors\.textInverse/.test(card));

@@ -19,11 +19,14 @@ import {
   movementFromLatest,
   numOrNull,
   pickTimingInfo,
+  playerNameFromPickLabel,
   priceAgeFor,
+  propMarketForPick,
   splitPickTitle,
   storedQuoteBook,
   type Movement,
 } from '@/lib/markets';
+import { modelLong, isPropModel } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
@@ -39,12 +42,15 @@ import { gameStatusSpeech, sharpScoreSpeech, unitsSpeech } from '@/lib/a11y';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import {
   signalsBetHeadline,
+  signalsCardSpeech,
   signalsContextLine,
   signalsContextTime,
   signalsCtaLabel,
   signalsCtaSpeech,
   signalsHeroSpeech,
+  signalsModelCaption,
   signalsNowLine,
+  signalsReasonLine,
   signalsStakeLine,
   signalsStakeSpeech,
   signalsTeamsSpeech,
@@ -107,7 +113,7 @@ export function PickCard({
   layout = 'board',
   teamAbbrevs = null,
 }: Props) {
-  const { pick, game } = item;
+  const { pick, game, weather } = item;
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -223,7 +229,7 @@ export function PickCard({
   // Signals price-check and stale cards are not a bet: no Bet button, no Slip.
   // Today keeps both (a stale Today leg already in the slip can still come out).
   const signals = layout === 'signals';
-  const signalsMuted = signals && (flagged || Boolean(heroPrice?.stale));
+  const signalsMuted = signals && (flagged || Boolean(heroPrice?.stale) || paused);
   const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted;
   const handoff = offersBook && cta.handoff
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge)
@@ -364,39 +370,72 @@ export function PickCard({
   const signalsStakeShown = stakeCaption ? signalsStakeLine(signalsRiskUnits, signalsWinUnits) : null;
   const signalsReturn =
     flagged || ev == null ? '—' : formatPctSigned(ev);
-  const cardLabel = joinCardSpeech([
-    signals ? signalsBetHeadline(pick.pick_label) : matchup,
-    signals
-      ? signalsTeamsSpeech(contextSport, game?.away_team ?? '', game?.home_team ?? '')
-      : gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
-    signals ? (contextTime || null) : pick.pick_label,
-    signals ? null : (paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type)),
-    // The reason in words (lib/heroPriceText.ts): "looks off" for an
-    // implausible edge or a moved price; for an old price, which book has not
-    // updated it and since when.
-    flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
-    signals ? `Model chance ${formatPct(pick.model_probability)}` : null,
-    signals ? (flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`) : null,
-    // The full book name, and the lock whenever the eye sees "Locked".
-    // Signals speaks the same decision price the 22pt number shows, then the
-    // Now line when the screen shows one. Stale and untracked keep heroPriceSpeech.
+  // Game markets come from the model. Props come from the row's market.
+  // The player name has no column (player_key is a slug on some models), so
+  // a prop passes that one token from the label. The headline is still not
+  // the label: the "· 0.77u" suffix and the wind parenthetical stay out.
+  const signalsGameMarket = gameMarketForModel(pick.model_id);
+  const signalsPropMarket = signalsGameMarket ? null : propMarketForPick(pick);
+  const betHeadline = signalsBetHeadline({
+    side: pick.pick_side,
+    line: pick.scored_line,
+    market: signalsGameMarket ?? signalsPropMarket,
+    homeTeam: game?.home_team ?? '',
+    awayTeam: game?.away_team ?? '',
+    player: signalsPropMarket && isPropModel(pick.model_id)
+      ? playerNameFromPickLabel(pick.pick_label)
+      : null,
+  });
+  const reasonLine = signalsReasonLine({
+    modelId: pick.model_id,
+    windMph: weather?.wind_mph,
+    dome: weather?.is_dome_game,
+  });
+  const modelCaption = signalsModelCaption(modelLong(pick.model_id), timing?.label ?? null);
+  const signalsPriceSpoken =
     signals && lockedAmerican && quoteBookKey && heroPrice && !heroPrice.stale && !heroPrice.untracked
       ? signalsHeroSpeech({
           decisionPrice: lockedAmerican,
           book: bookName(quoteBookKey),
           now: signalsNowSpoken,
         })
-      : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null),
-    signals
-      ? (signalsStakeShown ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}` : 'Stake unavailable')
-      : (stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null),
-    timing ? timing.label : null,
-    startedSpoken,
-    signals && sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
-    signals && gameStatus(game, liveState).kind !== 'pre'
-      ? gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time))
-      : null,
-  ]);
+      : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null);
+  const signalsStakeSpoken = signalsStakeShown
+    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}`
+    : 'Stake unavailable';
+  const statusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+  const cardLabel = signals
+    ? signalsCardSpeech({
+        bet: betHeadline,
+        price: signalsPriceSpoken,
+        reason: reasonLine,
+        teams: signalsTeamsSpeech(contextSport, game?.away_team ?? '', game?.home_team ?? ''),
+        time: contextTime || null,
+        edge: flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
+        modelChance: `Model chance ${formatPct(pick.model_probability)}`,
+        expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
+        stake: signalsStakeSpoken,
+        modelName: `${modelLong(pick.model_id)} model`,
+        posted: timing?.label ?? null,
+        paused: paused ? 'Paused model, not a bet' : null,
+        gameStatus: gameStatus(game, liveState).kind !== 'pre' ? statusSpeech : null,
+        sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
+        started: startedSpoken,
+      })
+    : joinCardSpeech([
+        matchup,
+        gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
+        pick.pick_label,
+        paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
+        // The reason in words (lib/heroPriceText.ts): "looks off" for an
+        // implausible edge or a moved price; for an old price, which book has not
+        // updated it and since when.
+        flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
+        heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
+        stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
+        timing ? timing.label : null,
+        startedSpoken,
+      ]);
   // Nested buttons inside an accessible card aren't separately focusable on
   // iOS — VoiceOver groups the card — so Track, Betslip and the book hand-off
   // are also offered as custom actions (swipe up/down on the card).
@@ -767,20 +806,16 @@ export function PickCard({
       </>
       ) : (
       <>
+      {preview || paused || flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
       <View style={styles.contextRow}>
-        <Text style={styles.context}>
-          {signalsContextLine({
-            sport: contextSport,
-            away: game?.away_team ?? '',
-            home: game?.home_team ?? '',
-            timeLabel: contextTime,
-            abbrevs: teamAbbrevs,
-          })}
-        </Text>
         <View style={styles.contextTrail}>
           {preview ? (
             <View style={[styles.labelChip, styles.previewBadge]}>
               <Text style={styles.previewBadgeText}>PREVIEW</Text>
+            </View>
+          ) : paused ? (
+            <View style={[styles.labelChip, styles.previewBadge]}>
+              <Text style={styles.previewBadgeText}>PAUSED</Text>
             </View>
           ) : null}
           {flagged ? (
@@ -817,10 +852,11 @@ export function PickCard({
           ) : null}
         </View>
       </View>
+      ) : null}
 
       <View style={styles.betRow}>
         <Text style={[styles.betLeft, signalsMuted && styles.betMuted]}>
-          {signalsBetHeadline(pick.pick_label)}
+          {betHeadline}
         </Text>
         {lockedAmerican && quoteBookKey ? (
           <Text style={[styles.betRight, signalsMuted && styles.betMuted]}>
@@ -829,6 +865,18 @@ export function PickCard({
           </Text>
         ) : null}
       </View>
+      {reasonLine ? (
+        <Text style={[styles.reasonLine, signalsMuted && styles.betMuted]}>{reasonLine}</Text>
+      ) : null}
+      <Text style={styles.matchupLine}>
+        {signalsContextLine({
+          sport: contextSport,
+          away: game?.away_team ?? '',
+          home: game?.home_team ?? '',
+          timeLabel: contextTime,
+          abbrevs: teamAbbrevs,
+        })}
+      </Text>
       {signalsNow ? (
         <Text style={styles.nowLine}>{signalsNow}</Text>
       ) : null}
@@ -859,13 +907,10 @@ export function PickCard({
           </Text>
           <Text style={styles.metricLabel}>Expected return</Text>
         </View>
-        <View style={styles.metric}>
-          <Text style={[styles.metricValue, styles.stakeValue, signalsStakeShown == null ? styles.metricMuted : null]}>
-            {signalsStakeShown ?? '—'}
-          </Text>
-          <Text style={styles.metricLabel}>Stake</Text>
-        </View>
       </View>
+      <Text style={[styles.stakeRow, signalsStakeShown == null ? styles.metricMuted : null]}>
+        {signalsStakeShown ?? '—'}
+      </Text>
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
@@ -932,6 +977,17 @@ export function PickCard({
               <Text style={[styles.extraText, { color: clvInk, fontWeight: font.weight.medium }]}>
                 CLV {formatClv(pick.clv_pct!)}
               </Text>
+            </View>
+          ) : null}
+          {pausedLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="pause-circle-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{pausedLabel}</Text>
             </View>
           ) : null}
           {previewLabel ? (
@@ -1008,27 +1064,7 @@ export function PickCard({
         </View>
       ) : null}
 
-      {timing ? (
-        <View style={styles.timingRow}>
-          <Ionicons
-            name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
-            size={13}
-            color={timing.kind === 'live' ? colors.betInk : colors.textTertiary}
-            style={styles.extraIcon}
-          />
-          <Text
-            style={[
-              styles.extraText,
-              styles.timingText,
-              timing.kind === 'live'
-                ? { color: colors.betInk, fontWeight: font.weight.medium }
-                : null,
-            ]}
-          >
-            {timing.label}
-          </Text>
-        </View>
-      ) : null}
+      <Text style={styles.modelCaption}>{modelCaption}</Text>
       </>
       )}
     </Pressable>
@@ -1404,11 +1440,13 @@ const styles = StyleSheet.create({
     rowGap: spacing.xs,
     marginBottom: spacing.xs,
   },
+  // Size to the bet. A short bet ("Under 56") stays on one row with the
+  // price at the trailing edge. A long school name takes the full row and
+  // the price wraps under it, so the spread number does not wrap alone.
   betLeft: {
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: '55%',
-    minWidth: 0,
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: '100%',
     fontSize: font.size.title2,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
@@ -1433,6 +1471,34 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.regular,
     color: colors.textSecondary,
   },
+  // Under the bet. Wraps. No line cap — a long forecast stays whole.
+  reasonLine: {
+    marginBottom: spacing.xs,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  // The matchup is its own line under the reason and wraps with the card.
+  matchupLine: {
+    marginBottom: spacing.xs,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  // Stake is its own row: "Bet 1.1u · Win 1u". Not a cell, not a "· 0.77u" suffix.
+  stakeRow: {
+    marginBottom: spacing.xs,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  modelCaption: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.medium,
+    color: colors.textTertiary,
+  },
   // The book's current line or price, when it is not the lock. Same "Now"
   // ink as the board's tag (textSecondary, above 4.5:1). Wraps at large text.
   nowLine: {
@@ -1451,17 +1517,14 @@ const styles = StyleSheet.create({
     rowGap: spacing.sm,
     marginBottom: spacing.xs,
   },
-  // Two by two. Basis leaves room for the column gap, and each cell can
-  // shrink so "Bet 1.5u · Win 0.4u" wraps inside the stake cell at large text.
+  // Three figures. Basis leaves room for the column gap so a long value
+  // wraps inside its cell at large text. Stake is the row under them.
   metric: {
     flexGrow: 1,
     flexShrink: 1,
     flexBasis: '46%',
     maxWidth: '48%',
     minWidth: 0,
-  },
-  stakeValue: {
-    flexShrink: 1,
   },
   metricValue: {
     fontSize: font.size.callout,

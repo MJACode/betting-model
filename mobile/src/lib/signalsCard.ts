@@ -1,11 +1,15 @@
 /**
- * Signals pick card copy (Picks > Signals, Designer Option A).
+ * Signals pick card copy (Designer Option 1, on the Option A structure).
  *
  * Pure — no React Native — so the card, VoiceOver and the verify script
- * share one sentence. The bet is quoted from `pick_label` (CLAUDE.md §00):
- * a total drops only the matchup prefix, because the compact line already
- * names the teams. A signed number uses U+2212; a hyphen inside a name
+ * share one sentence. The headline is the bet only, built from the pick's
+ * side, line, market and teams. It does not read `pick_label`, so a card
+ * suffix ("· 0.77u") and a parenthetical ("Wind 14 mph, FD") never become
+ * the bet. A signed number uses U+2212; a hyphen inside a name
  * ("Louisiana-Monroe") stays a hyphen.
+ *
+ * The player name is the one token a prop has no column for. The card
+ * passes it in. This function still does not accept a label string.
  */
 
 import { MINUS } from './format';
@@ -16,45 +20,215 @@ export function trueMinus(text: string): string {
 }
 
 /**
- * A game-market tag that belongs to the bet, not to the team name. It stays
- * on the hero when the matchup prefix is dropped: "Over 4.5 F5". A two-word
- * school ("Los Angeles") is not in this list. "Team Total" is handled apart
- * from this list: that bet is per team, and stripping the matchup drops the
- * club the total belongs to.
+ * The stat word a prop label uses, keyed by the odds market. Single-market
+ * models and the multi-market cards (`nba_prop_market`, `nba_prop_projection`,
+ * `nfl_prop_market`) share these words with the scorer, so the headline does
+ * not have to parse `pick_label` to name the stat.
  */
-const TOTAL_QUALIFIER = /(?:F5|alternate total|1st-period total)$/i;
+const PROP_BET_STAT: Readonly<Record<string, string>> = {
+  pitcher_strikeouts: 'Ks',
+  pitcher_hits_allowed: 'Hits',
+  pitcher_earned_runs: 'ER',
+  pitcher_outs: 'Outs',
+  pitcher_walks: 'Walks',
+  batter_hits: 'Hits',
+  batter_total_bases: 'TB',
+  batter_home_runs: 'HR',
+  batter_rbis: 'RBI',
+  batter_runs_scored: 'Runs',
+  batter_stolen_bases: 'SB',
+  batter_walks: 'Walks',
+  player_points: 'Pts',
+  player_rebounds: 'Reb',
+  player_assists: 'Ast',
+  player_threes: '3PM',
+  player_points_rebounds_assists: 'PRA',
+  player_steals: 'Steals',
+  player_blocks: 'Blocks',
+  player_blocks_steals: 'Blocks+Steals',
+  player_rebounds_assists: 'Reb+Ast',
+  player_turnovers: 'Turnovers',
+  player_double_double: 'DD',
+  player_pass_yds: 'Pass Yds',
+  player_pass_attempts: 'Pass Att',
+  player_pass_completions: 'Comp',
+  player_pass_tds: 'Pass TD',
+  player_rush_yds: 'Rush Yds',
+  player_rush_attempts: 'Carries',
+  player_reception_yds: 'Rec Yds',
+  player_receptions: 'Rec',
+  player_rush_reception_yds: 'Ru+Re Yds',
+  player_anytime_td: 'Anytime TD',
+  player_tackles_assists: 'Tkl+Ast',
+  player_sacks: 'Sacks',
+  player_blocked_shots: 'Blocked Shots',
+  player_total_saves: 'Saves',
+  player_shots_on_goal: 'Shots on Goal',
+};
+
+export interface SignalsBetFields {
+  side: 'home' | 'away' | 'over' | 'under' | 'draw';
+  line: number | string | null;
+  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, a prop key). */
+  market: string | null;
+  homeTeam?: string | null;
+  awayTeam?: string | null;
+  /** Prop player. Game markets leave this empty. */
+  player?: string | null;
+  /** Overrides `PROP_BET_STAT` when the market is not in that map. */
+  stat?: string | null;
+}
+
+function finiteLine(line: number | string | null | undefined): number | null {
+  if (line == null || line === '') return null;
+  const n = typeof line === 'number' ? line : Number(line);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Totals and props: 56 → "56", 43.5 → "43.5". Whole numbers drop the decimal. */
+function totalNumber(line: number): string {
+  const n = Math.round(line * 1000) / 1000;
+  if (Object.is(n, -0) || n === 0) return '0';
+  return Number.isInteger(n) ? String(n) : String(n);
+}
 
 /**
- * The bet the Signals card headlines.
- * "Sam Houston -7.5" → "Sam Houston −7.5".
- * "LAK vs EDM Under 6.0" → "Under 6.0" (the stored NHL game total; the
- * teams are the line above). "NYY vs BOS Over 4.5 F5" keeps F5.
- * A team total is quoted whole: picks has no such label (measured
- * 2026-10-16, 0 rows), and the odds row stores the club as
- * team_totals_home / team_totals_away with the feed description
- * ("Boston Bruins"), not as a tag between two clubs. "Boston Bruins Over
- * 3.5" and "BOS vs NYY Team Total Over 3.5" both keep every team word.
- * A prop keeps the stored label, player included.
+ * Spreads: the pick's side, printed like `formatSideLine` — a whole number
+ * stays whole (`+3`, `−7`), a tenth stays a tenth (`−7.5`). U+2212 for a minus.
+ * Forcing `.0` made the lock disagree with the Now line on the same card.
  */
-export function signalsBetHeadline(pickLabel: string | null | undefined): string {
-  // NFL card labels append the stake ("· 1.00u"). The stake cell owns that
-  // number; the hero is the bet.
-  const label = (pickLabel ?? '').trim().replace(/\s·\s[\d.]+u$/, '');
-  // Per-team market. Quoting the label whole is the only way the club is
-  // not dropped: the words do not say which of the two sides the total is.
-  if (/\bteam total\b/i.test(label)) return trueMinus(label);
-  const split = label.match(/^(.*?)\s+(?:vs|@)\s+(.*)$/);
-  if (!split) return trueMinus(label);
-  const rest = split[2];
-  const at = rest.search(/(?:^|\s)(?:Over|Under)\b/);
-  if (at < 0) return trueMinus(label);
-  const betAt = at === 0 ? 0 : at + 1;
-  // "vs Over …" with no home team is not a game total. Leave the label.
-  if (betAt === 0) return trueMinus(label);
-  const before = rest.slice(0, betAt).trimEnd();
-  const qualifier = before.match(TOTAL_QUALIFIER);
-  const bet = qualifier ? rest.slice(betAt - qualifier[0].length - 1) : rest.slice(betAt);
+function spreadNumber(line: number, side: SignalsBetFields['side'], market: string): string {
+  const shown = market.startsWith('spreads') && side === 'away' ? -line : line;
+  const n = Object.is(shown, -0) ? 0 : shown;
+  const body = String(Math.abs(n));
+  if (n > 0) return `+${body}`;
+  if (n < 0) return `${MINUS}${body}`;
+  return body;
+}
+
+function isPropMarket(market: string | null, player: string | null): boolean {
+  if (player) return true;
+  return market != null && /^(player_|pitcher_|batter_)/.test(market);
+}
+
+/**
+ * The bet the card headlines. "Under 56", "Sam Houston −7.5", "Sam Houston ML",
+ * "Roquan Smith Under 9.5 Tkl+Ast". A first-five market keeps " F5". A team
+ * total names the club the market belongs to ("Boston Bruins Over 3.5").
+ */
+export function signalsBetHeadline(fields: SignalsBetFields): string {
+  const market = fields.market;
+  const side = fields.side;
+  const line = finiteLine(fields.line);
+  const home = (fields.homeTeam ?? '').trim();
+  const away = (fields.awayTeam ?? '').trim();
+  const player = (fields.player ?? '').trim();
+  const f5 = market != null && market.includes('1st_5');
+  const team = side === 'away' ? away : home;
+
+  let bet: string;
+  if (side === 'draw') {
+    bet = 'Draw';
+  } else if (market != null && market.startsWith('team_totals')) {
+    const club = market === 'team_totals_away' ? away : home;
+    const word = side === 'over' ? 'Over' : side === 'under' ? 'Under' : '';
+    const num = line == null ? '' : totalNumber(line);
+    bet = [club, word, num].filter((part) => part.length > 0).join(' ');
+  } else if (market != null && market.startsWith('spreads')) {
+    const num = line == null ? '' : spreadNumber(line, side, market);
+    bet = [team, num].filter((part) => part.length > 0).join(' ');
+  } else if (
+    market != null && market.startsWith('h2h')
+    || (market == null && (side === 'home' || side === 'away') && !player)
+  ) {
+    bet = team ? `${team} ML` : 'ML';
+  } else if (side === 'over' || side === 'under') {
+    const word = side === 'over' ? 'Over' : 'Under';
+    const num = line == null ? '' : totalNumber(line);
+    const prop = isPropMarket(market, player);
+    const stat = prop ? ((fields.stat ?? '').trim() || (market ? PROP_BET_STAT[market] ?? '' : '')) : '';
+    const subject = prop ? player : '';
+    bet = [subject, word, num, stat].filter((part) => part.length > 0).join(' ');
+  } else {
+    bet = team || side;
+  }
+  if (f5 && bet) bet = `${bet} F5`;
   return trueMinus(bet);
+}
+
+/**
+ * The short line under the headline. Wind totals name the forecast the card
+ * was built on: "Wind 14 mph at kickoff". A dome, a missing wind, and every
+ * other model stay quiet — a reason is not invented, and "N models agree"
+ * is not this line.
+ */
+export function signalsReasonLine(input: {
+  modelId: string;
+  windMph: number | string | null | undefined;
+  dome?: boolean | number | null;
+}): string | null {
+  if (input.modelId !== 'nfl_wind_totals') return null;
+  if (input.dome === true || input.dome === 1) return null;
+  const n = finiteLine(input.windMph ?? null);
+  if (n == null) return null;
+  return `Wind ${Math.round(n)} mph at kickoff`;
+}
+
+/**
+ * Footer caption. `longName` is `modelLong` ("Wind Totals (Under)").
+ * `when` is the existing timing label ("Posted 11:07 AM ET", "Locked …",
+ * "Priced …"), or null when the card is not showing one.
+ */
+export function signalsModelCaption(longName: string, when: string | null | undefined): string {
+  const name = `${longName.trim()} model`;
+  const posted = (when ?? '').trim();
+  return posted ? `${name} · ${posted}` : name;
+}
+
+/**
+ * VoiceOver for the Option 1 card, in visual order: the bet, the price on
+ * that row, the reason, the matchup, the time, the three figures, the stake
+ * sentence, the model, when it posted, then paused / live / sharp / started.
+ * Boards 01–05 were not in this workspace; this is that stack.
+ */
+export function signalsCardSpeech(input: {
+  bet: string;
+  price: string | null;
+  reason: string | null;
+  teams: string | null;
+  time: string | null;
+  edge: string | null;
+  modelChance: string | null;
+  expectedReturn: string | null;
+  stake: string | null;
+  modelName: string | null;
+  posted: string | null;
+  paused: string | null;
+  gameStatus: string | null;
+  sharp: string | null;
+  started: string | null;
+}): string {
+  const parts = [
+    input.bet,
+    input.price,
+    input.reason,
+    input.teams,
+    input.time,
+    input.edge,
+    input.modelChance,
+    input.expectedReturn,
+    input.stake,
+    input.modelName,
+    input.posted,
+    input.paused,
+    input.gameStatus,
+    input.sharp,
+    input.started,
+  ];
+  return parts.filter((p): p is string => Boolean(p && p.length > 0)).reduce((acc, part) => {
+    if (acc.length === 0) return part;
+    return acc.endsWith('.') ? `${acc} ${part}` : `${acc}. ${part}`;
+  }, '');
 }
 
 /** "−110 MGM" — the decision price and the book that price came from. */
