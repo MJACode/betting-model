@@ -78,14 +78,23 @@ def test_the_good_to_clause_is_dropped_not_truncated_when_it_will_not_fit():
     overflows on its own and hits the pre-existing `[:MAX_TWEET]` truncation,
     which is a different (and already tested) behaviour.
     """
-    label = "X" * 200
+    # 205 is the measured length where the body plus #Royals #Marlins still
+    # fits, and "Good to -115." does not — even after every reach tag is
+    # dropped. 200 still fits the clause once #MLB is dropped.
+    label = "X" * 205
     base = xp.render_free_pick(_pick(label=label), "2026-09-02")
     assert len(base) <= xp.MAX_TWEET, "fixture no longer fits without the clause"
 
     t = xp.render_free_pick(_pick(label=label, good_to=-115), "2026-09-02")
     assert len(t) <= xp.MAX_TWEET
     assert "Good to" not in t, "the clause was added and then truncated"
-    assert t.endswith(xp.hashtags_for("MLB")), "the tags were pushed off the end"
+    # Team tags stay, and they stay ahead of whatever reach tags still fit.
+    # The two longest reach tags do not fit in this fixture, so they go.
+    assert "#Royals" in t and "#Marlins" in t
+    assert t.index("#Royals") < t.index("#Marlins")
+    assert "#GamblingX" not in t and "#FreePicks" not in t
+    if "#MLB" in t:
+        assert t.index("#Marlins") < t.index("#MLB")
 
 
 def test_the_tweet_publishes_the_good_to_bound_when_it_fits():

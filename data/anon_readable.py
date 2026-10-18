@@ -49,6 +49,11 @@ ANON_READABLE: tuple[str, ...] = (
     # and the default grant since the Teams board shipped; declared now that
     # a `.from()` names it.
     "nfl_team_game_stats",
+    # Signals compact line: school name → abbreviation. The anon SELECT
+    # policy has been on this table since the Teams board
+    # (data/migrations/add_team_stats_board.sql, "anon read ncaaf_teams").
+    # Declared now that a `.from()` names it. A miss stays the school name.
+    "ncaaf_teams",
     "odds",
     "parlay_correlations",
     "parlay_track_record",

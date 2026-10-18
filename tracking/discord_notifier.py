@@ -702,7 +702,8 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
     )
 
 
-def _new_signals(conn, target_date: str) -> list[dict]:
+def _new_signals(conn, target_date: str, *,
+                 include_already_posted: bool = False) -> list[dict]:
     """Bettable picks that have not been posted to Discord yet.
 
     READS `picks`, NOT `opening_signals` (2026-09-05, Matt: "the app and discord
@@ -738,6 +739,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     the same one §1c calls the bet of record. The synthesised lock_key matches
     the key capture minted (`game:model[:player]`), so the push_sent ledger
     carries over and nothing already posted posts twice.
+
+    `include_already_posted` drops only the Discord-ledger filter. X uses it
+    so a pick Discord just posted in this same pass is still visible; X has
+    its own ledger and must not treat "already on Discord" as "already tweeted".
     """
     rows = conn.execute(f"""
         WITH bet AS (
@@ -794,7 +799,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
-        WHERE NOT ({channel_lock_held_sql('bet.lock_key', 'discord_signal')})
+        {"" if include_already_posted else "WHERE NOT (" + channel_lock_held_sql('bet.lock_key', 'discord_signal') + ")"}
         ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{
@@ -825,6 +830,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         "game_date": r[18],
         # What tracking/pick_integrity checks the label against.
         "side": r[20], "line": r[21],
+        "prop_market": r[22] if len(r) > 22 else None,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that

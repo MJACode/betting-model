@@ -1377,6 +1377,9 @@ export async function fetchUpcomingNflPicks(
     return {
       pick,
       game: gameById.get(pick.game_id) ?? null,
+      // game_weather has no NFL rows. nfl_kickoff_wind_reads is a later
+      // observation and its mph does not match the bet. The kickoff-hour
+      // forecast is the "Wind N mph" parenthetical on the label.
       weather: null,
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
       ...bookEnrichment(pick, booksByGameMarket),
