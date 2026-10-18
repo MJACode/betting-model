@@ -19,6 +19,8 @@ from datetime import timedelta
 
 import pandas as pd
 
+from data.ddl_guard import schema_is_current
+
 TABLE = "nfl_kickoff_wind_reads"
 # An hour past the lookback the rule uses, so a clock skew between the insert
 # and the read cannot drop the oldest reading the window needs.
@@ -94,8 +96,21 @@ def attach_live_wind_reads(games: pd.DataFrame, *, now=None) -> dict[str, list[t
               "this poll cannot lock a wind bet", file=sys.stderr)
         return current
     try:
-        for stmt in _DDL:
-            conn.execute(stmt)
+        # Hourly, and every 10 minutes inside a day of kickoff. CREATE,
+        # ENABLE ROW LEVEL SECURITY and REVOKE are not free on a table that
+        # already exists: each takes a lock and fires pgrst_ddl_watch, and
+        # PostgREST answers 503 while it reloads (2026-09-01). The catalog
+        # check is one SELECT. It returns False when the table is missing or
+        # the probe cannot be read, so this poll still creates the table and
+        # the insert and select below still run.
+        if not schema_is_current(
+            conn, TABLE,
+            columns=("game_id", "observed_at", "wind_mph"),
+            rls=True,
+            revoked_from=("anon", "authenticated"),
+        ):
+            for stmt in _DDL:
+                conn.execute(stmt)
         conn.executemany(
             _INSERT,
             [(gid, ts, mph) for gid, series in current.items() for ts, mph in series],
