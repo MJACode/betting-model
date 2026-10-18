@@ -1076,3 +1076,469 @@ Same command; cells in `cells_IG-1.parquet`, the verdict in `verdict_house_IG-1.
 - HT-1's full set of halftime snapshots: 117,270 credits for 2021-22 → 2025-26 (measured grid).
 - The 5-minute in-play archive, to replay a rule that bets the first time a price crosses its
   cut: 586,710 credits for moneyline only, 1,760,130 for all three markets.
+
+## 8. Fourth search: pre-game moneyline, spread, total, first half, first quarter, team totals (pre-registered 2026-10-18, before any grid)
+
+mike, 2026-10-18: *"I want pre game ml / spread / totals. Also look at 1q 1H."* The in-game
+build was stopped; nothing in-game ships. Two gaps made this search:
+
+- Nothing pre-game outside §6.7 was ever judged under the house standard. That covers the first
+  search's 978 full-game cells and its 2,772 first-half / first-quarter / team-total cells.
+- The recipe behind the newest profitable game-market model here, `nhl_moneyline`, was never
+  tried for NBA. That recipe is the market's own no-vig price as an unpenalised offset, moved
+  by an L2 model on prior-game inputs (`models/nhl_moneyline_anchored.py`).
+
+**Bars: the house standard of §6.7, from the start**, applied once to every cell below. The
+derivative markets pool their graded seasons (2024-25 and 2025-26, plus 2023-24 once bought).
+Expected passes by chance at the interval alone: about 2.5% of cells, reported beside.
+
+**Data added:** 2023-24 first-half, first-quarter and team-total prices at tip − 60, bought
+2026-10-18 (~86,000 credits; the floor for this run was 2,000,000).
+
+| # | Family | Markets × sides | Decision | Cut axis | Cells |
+|---|---|---|---|---|---|
+| P1 | **Market-anchored model (the NHL recipe).** Offset = the market's no-vig at T (Pinnacle, else the deciding books' median): logit for moneylines, centre for spreads and totals. L2 on prior-game inputs only: second-search ratings (box score + adjusted plus-minus), the shooting-luck gap, availability from the injury report, rest / travel / schedule, pace. Walk-forward: fit on seasons before S. | full game: moneyline, spread, total × 2 sides; first half, first quarter: moneyline, spread, total × 2; team totals × over, under | full game at A, C and D; derivative markets at their purchase (D) | EV ≥ 0.02 / 0.04 / 0.06 / 0.08 | 128 |
+| P2 | **The first search's market rules, re-graded on the shared harness.** Sharp vs soft at the same number (Pinnacle's no-vig against each deciding book). Off-market number (a deciding book's number differs from Pinnacle's). | the same markets × 2 sides | full game at A, B, C and D; derivative markets at D | same number: EV ≥ 0.00 / 0.01 / 0.02 / 0.03; off-number: gap ≥ 0.5 / 1 / 1.5 / 2 | 256 |
+| P3 | **Second-search signals on the derivative markets.** The shooting-luck gap (F4) on first-half totals and team totals. The ratings projection (F1) on first-half and first-quarter moneyline, spread and total. | as named × 2 sides | D | F4: gap ≥ 1 / 2 / 3 / 4; F1: EV ≥ 0.02 / 0.04 / 0.06 / 0.08 | 72 |
+
+**Settlement:** first-half and first-quarter markets settle on the period line scores
+(`nba_period_scores`), never on the full-game score. Team totals settle on the team's own score.
+**A cell that passes is built LIVE** as a pre-game model.
+
+### 8.1 P1, the market-anchored model: choices fixed before any P1 cell was graded (2026-10-18)
+
+Section 8 names the recipe; these lines fix everything it leaves open. Lab:
+`scripts/nba_game4_p1.py`. None of them was chosen from a betting result.
+
+**Seasons**
+
+- **Full game:** 2021-22 → 2025-26 graded and pooled (2025-26 is still reported apart as the
+  confirmation season). 2020-21 is a fitting season only: no earlier priced season exists to
+  fit it on.
+- **First half, first quarter, team totals:** the first season the cache prices is a fitting
+  season only, for the same reason. With 2023-24 in the cache, 2024-25 and 2025-26 are graded.
+  With the cache as it stood on 2026-10-18 (2024-25 and 2025-26 only), 2025-26 is the only
+  graded season. The house standard's "seasons mostly positive" needs two seasons with 30 or
+  more bets, so every one of these cells fails it until 2023-24 is in. That is the data, not a
+  miss.
+- `--full` reads which of these seasons the cache holds from row counts, requires all eight
+  markets to hold the same seasons, and refuses a season priced on fewer than 90% of its games
+  (a purchase still running).
+- A model is fitted only on 300 or more training rows. Fewer means no model and no bet that
+  season.
+
+**The model**
+
+- One model per market per decision point, trained on the same decision point's rows from
+  earlier seasons. Team totals: one model for both teams' markets, one row per team, with a
+  home flag.
+- **Moneylines**, every period: `OffsetLogit` and `choose_C` from
+  `models/nhl_moneyline_anchored.py`, imported unchanged. The offset is the log-odds of the
+  market's no-vig home price, unpenalised. Penalty grid 0.003 to 0.3. The penalty is chosen on
+  the last three training seasons that have 800 or more earlier rows, each scored by a fit on
+  the seasons before it, by mean log loss. With no such season it is 0.003, the grid's first
+  value.
+- First-half and first-quarter moneylines are trained on decided periods only. A level period
+  voids the two-way bet, so the no-vig price is the home side's chance given a winner.
+- **Spreads, totals and team totals** (the centre): the same fit, on squared error.
+  - Target: (result − the market's centre) divided by its spread on the training rows.
+  - Inputs standardised on the training rows. Intercept unpenalised. Penalty and grid as above.
+  - The penalty is chosen by the same rule, scored on mean squared error.
+  - The model's centre is the market's centre plus the fitted move, in points.
+  - It is priced through the same distribution the market's centre was solved through. A
+    model with nothing to say returns the market's fair line exactly.
+- **The market's number at T** is the shared harness's: Pinnacle's no-vig where it quotes,
+  else the deciding books' median. A centre is solved through the spread of results around
+  Pinnacle's last price on seasons before the graded one. For the derivative markets that last
+  price is the purchase itself (tip − 60).
+
+**Inputs** (each dated at or before T, built the same way for training and graded rows)
+
+- **Ratings:** the second search's projected home margin and total at T. These are box-score
+  plus-minus plus adjusted plus-minus from lineup segments, times projected minutes from the
+  injury report (`scripts/nba_game2_projection.py`, its own walk-forward models).
+- **Availability:** that projection's absence terms at T: minutes missing by player tier,
+  starters out, Questionable or Doubtful exposure, first game back. Home minus away for margin
+  models, home plus away for totals. Nobody missing reads 0.
+- **Shooting luck:** the second search's gap (luck-adjusted minus raw, margin and total), from
+  the season's games before the date. It reads 0 until both teams have 10 games this season.
+- **Pace:** each team's as-of pace from the projection, home plus away.
+- **Schedule** (`features/nba_schedule_features.py`): each team's rest days, back-to-back,
+  third game in four nights, game number on the current road trip, miles travelled, time-zone
+  shift; whether the venue is at altitude. Not the road trip's total length, which reads the
+  schedule as it was played. Not national TV, which is filled in for three seasons only.
+- **Team totals:** the team's own projected points ((total ± margin) / 2) and its own luck gap,
+  its own and its opponent's absences and schedule, both paces, and the home flag.
+- **Scaled to the period:** for the first half and first quarter, every input measured in
+  points is multiplied by the period's share of full-game points, from period scores of
+  seasons before the graded one. Within one fit that share is a constant, so after
+  standardising it moves no prediction. It only states the inputs in the period's points.
+- The first-half, first-quarter and team-total models decide at the per-game purchase (tip − 60,
+  inside D's 45–75 minutes). The projection is recomputed at that moment, not taken from the
+  full-game D fetch.
+
+**Population**
+
+- The 10-game early-season rule (CLAUDE.md §3) is not applied as a filter. Section 8 registers
+  none, and the projection works from the first game on prior-season ratings, which is §3's own
+  baseline. The bets in either team's first 10 games are counted beside every cell, so that
+  window can be read on its own.
+- A game with no model number (no projection, or no market number at T) is not in the cell's
+  population, and so not in its blind comparison either.
+
+**Placebo**
+
+- 20 runs, seed = run number. The model's move off the market (in log-odds for moneylines, in
+  points for centres) is shuffled between games on the same date in the same market. Each
+  shuffled move is added to that game's own market number and re-priced. Shuffling the whole
+  probability would hand each game another game's market price, which any model beats.
+
+**Cells**
+
+- Team totals form one group per side and cut (over and under × 4 cuts = 8 cells), both teams'
+  markets pooled. One game can carry a bet on each team's total. Every bet keeps its real
+  market.
+- 72 full-game + 48 first-half and first-quarter + 8 team-total = **128**.
+
+**Smoke run**
+
+- 2020-21 has no earlier priced season. So `--smoke` fits on 2020-21 games dated before
+  2021-03-10 (the day the season's second half began) and grades those from that date on. It
+  checks the plumbing and is never a result. With one fitting season the penalty falls to
+  0.003.
+- The first-half, first-quarter and team-total cells run on synthetic games only.
+
+Three more lines, 2026-10-18, still before any P1 cell was graded:
+
+- A fitting season with no season before it (2020-21 for the full game; the first derivative
+  season the cache holds) has its centres solved through its own season's spread of results,
+  the shared harness's fallback. Those centres are only ever fitted on, never bet.
+- With 2025-26 as the only graded derivative season, no choosing season is left. The placebo
+  bar is judged on the choosing seasons, so it cannot pass either, as well as "seasons mostly
+  positive". Both fail by construction until 2023-24 is in the cache.
+- `--full` also refuses when no results folder is named, so P1's cells never land beside the
+  second search's 422.
+
+Two more lines, 2026-10-18, after the review and still before any P1 cell was graded:
+
+- **Which number a book hangs** is P2's rule (§8.2), imported, not copied: each book's rung with
+  prices closest to even, and no deciding book's first-half, first-quarter or team-total spread
+  or total more than 1 point from the deciding books' median. The review counted the gap: two
+  books list four to seven team-total numbers in one purchase, and reading whichever came last
+  in the file kept a number 2 to 3 points off Pinnacle's on half the games. This governs the
+  offers, the blind bets and the market's fair line. The model's own input, the market's
+  number, is Pinnacle's on 98.7% of rows and barely moves.
+- `--full` also refuses unless `NBA_GAME2_BETS` is set, so a passing cell's bets (its reported
+  figures and the first-10-games split) are written in the same run.
+
+### 8.2 P2, the first search's market rules: choices fixed before any P2 cell was graded (2026-10-18)
+
+Section 8 names the two rules and their cuts; these lines fix everything it leaves open. Lab:
+`scripts/nba_game4_p2.py`. None of them was chosen from a betting result. The two rules are the
+first search's own code, imported (`sharp_pairs` and `gap_candidates` in
+`scripts/nba_game_market_lab.py`). They run on the shared harness's quotes, and only the harness
+grades.
+
+**Cells (256)**
+
+- **Same number, 152 cells:** every market × 2 sides × EV ≥ 0.00 / 0.01 / 0.02 / 0.03. The full
+  game's moneyline, spread and total at A, B, C and D make 96. The first half's and first
+  quarter's at D make 48. Team totals at D make 8.
+- **Off number, 104 cells:** spreads and totals only, because a moneyline has no number. The full
+  game at A, B, C and D makes 64. The first half and first quarter at D make 32. Team totals at D
+  make 8.
+- **Team totals:** both teams' markets form one cell per side and cut, as in P1. A game can carry
+  a bet on each team's total, and every bet keeps its real market. This is the only way the
+  registered 256 adds up.
+- One family label, `P2`, with the rule in its own column. So a gap cut is never read as an EV
+  cut's neighbour.
+- Expected to clear the 95% interval by chance alone: 256 × 0.025 ≈ 6.4 cells, before
+  correlation.
+
+**Same number**
+
+- A deciding book is compared with Pinnacle only when both quotes come from the same purchase.
+  This is the first search's rule. A soft quote from an earlier purchase could be a line that has
+  since moved.
+- Spreads and totals pair only at Pinnacle's number. Moneylines always pair.
+- Pinnacle's no-vig price is the proportional one. There is no second method, because section 8
+  registers no such axis.
+- Expected value = Pinnacle's no-vig chance of the side × the book's decimal price − 1. A push is
+  ignored, as in the first search. The harness hands a push's stake back and leaves it out of the
+  denominator, so this is the value per unit risked when there is no push.
+- The best qualifying offer at a deciding book is bet, at −200 or better.
+
+**Off number**
+
+- Again the deciding book and Pinnacle must be in the same purchase.
+- The side the gap favours is bet. On a spread it is the side getting the extra points. On a
+  total it is the under at a higher number, or the over at a lower one.
+- That side's gap is the number the cut reads. The other side of the same quote reads minus the
+  gap. A quote at Pinnacle's number reads 0. The gap is read to within 1e-9, as in the first
+  search.
+- There is no expected-value floor. Section 8 registers the gap alone.
+- When several offers qualify, the best expected value is bet. Each offer is priced around
+  Pinnacle: the centre is solved from Pinnacle's own number and price at the decision time, and
+  the shape is the spread of past results (below). The first search's bell curve is not used.
+
+**Which number a book hangs** (measured by counting quotes in the cache; no result was read)
+
+- Two books, BetRivers and betPARX, list four to seven team-total numbers in one purchase.
+- Those two and Hard Rock often list a single first-half or first-quarter number 2 or more points
+  from Pinnacle's, while the median book sits within half a point of Pinnacle on most games.
+  Their two prices sit about 22 points apart in implied chance, against about 3 for the other
+  quotes: alternate lines, not disagreements.
+- A book's number is its rung with prices closest to even, the first search's "main" rung. Ties
+  go to the lower number.
+- In the same-number rule, a book's rung at Pinnacle's number is used when it lists one. The first
+  search compared every rung at Pinnacle's number.
+- A first-half, first-quarter or team-total spread or total more than 1 point from the median of
+  the deciding books' numbers is an alternate line. It is never bet, never a blind bet, and never
+  sets the market's fair line. This is the first search's ladder rule (1 point), extended to team
+  totals. Pinnacle's quote is never dropped. The full game is not filtered this way: its
+  purchases list one number per book and market (in 2024-25, 252 of 586,148 list two; those are
+  read at the main rung).
+
+**Pricing.** It orders offers at different numbers, prices the blind bets and names the
+favourite. It never sets a rule's own number.
+
+- **Full game:** the harness's. The spread of results around Pinnacle's last pre-game price, on
+  seasons before the graded one.
+- **First half, first quarter, team totals:** the spread of results around Pinnacle's number at
+  the per-game purchase, on earlier seasons holding these prices, once they hold 300 or more
+  games.
+- The first season the cache prices these markets has no earlier one. It is priced on a stand-in
+  that needs no first-half or team-total price, from the seasons before it:
+  - first half and first quarter: the period's result around half (or a quarter) of Pinnacle's
+    full-game closing spread or total, by minutes played;
+  - team totals: F6d's recorded definition, imported. Each team's score around the team total
+    Pinnacle's full-game close implies, both teams pooled, 300 or more earlier games.
+- A season's own results never price it. A market with no pricing in a season has no blind bet
+  and no off-number choice there.
+
+**Seasons and decision points**
+
+- **Full game:** A, B, C and D, the harness's. Choosing seasons 2021-22 → 2024-25, pooled with
+  2025-26. 2020-21 is reported apart.
+- **First half, first quarter, team totals:** D only, each game's one purchase when it falls 45–75
+  minutes before tip.
+- Every season the cache prices these markets in is graded: today 2024-25 and 2025-26, and
+  2023-24 once its purchase lands. Nothing in P2 is fitted on these prices, so the first priced
+  season is graded too (as in P3, unlike P1). The harness's choosing seasons are all of them but
+  2025-26.
+- `--full` lists these seasons from any row in the cache. So a season bought part-way is named,
+  and then refused, because it is priced on fewer than 90% of its games. It always requires
+  2024-25 and 2025-26.
+
+**Not measurable on the first-half, first-quarter and team-total markets, reported as such**
+
+- Closing-line value: one purchase per game, so there is no later price.
+- "Still offered at the next purchase": there is no next purchase, so it reads 0.
+
+**Placebo:** 20 runs, seed = run number.
+
+- Same number: Pinnacle's no-vig chance is shuffled between games on the same date in the same
+  market. Prices and numbers stay.
+- Off number: the gap is shuffled among the offers on the same date, in the same market, on the
+  same side. A placebo bets other offers at the same rate. Prices stay at the market's fair line.
+
+**Smoke run:** the 160 full-game cells on 2020-21 alone, which checks the plumbing and is never a
+result. The 96 first-half, first-quarter and team-total cells run on synthetic games only.
+
+One more line, 2026-10-18, after the 2020-21 smoke and before any other P2 grade. It changes no
+cell. `--full` also refuses when no results folder is named, so P2's cells never land beside the
+second search's 422, which the pass/fail script would read together.
+
+### 8.3 P3, the second search's signals on the derivative markets: choices fixed before any P3 cell was graded (2026-10-18)
+
+Section 8 names the two signals and their cuts; these lines fix everything it leaves open. Lab:
+`scripts/nba_game4_p3.py`. None of them was chosen from a betting result.
+
+**Cells (72)**
+
+- **Shooting luck (F4), 24 cells:** first-half total, home team total and away team total ×
+  over / under × gap ≥ 1 / 2 / 3 / 4. The two team totals are separate cells, because that is
+  the only way the registered 72 adds up. (P1 pools them; P3 does not.)
+- **Ratings projection (F1), 48 cells:** first-half and first-quarter moneyline, spread and
+  total × 2 sides × EV ≥ 0.02 / 0.04 / 0.06 / 0.08.
+- Each signal carries its own family label (`P3_F4`, `P3_F1`). Both bet the first-half total
+  at the same cut positions, so without the labels a gap cut would be read as an EV cut's
+  neighbour.
+- Expected to clear the 95% interval by chance alone: 72 × 0.025 ≈ 1.8 cells, before
+  correlation.
+
+**Decision and seasons**
+
+- Each game's one per-game purchase, used only when it falls 45–75 minutes before tip (D).
+  Measured on the cache: it reaches 99.5% of 2024-25 games and 99.0% of 2025-26 games, at a
+  median 54 minutes before tip.
+- **Graded: every season the cache prices these markets in**, today 2024-25 and 2025-26;
+  2023-24 joins when its purchase lands. Nothing in P3 is fitted on derivative prices, so,
+  unlike P1, the first priced season is graded too. All graded seasons are pooled. The
+  harness's "choosing" seasons (which the placebo bar reads) are all of them but 2025-26.
+- `--full` refuses any of these seasons priced on fewer than 90% of its games (a purchase still
+  running), and always requires 2024-25 and 2025-26.
+
+**Shooting luck: what the gap is**
+
+- **First-half total:** F4's own full-game number, unscaled: the luck-adjusted minus the raw
+  projected game total, in full-game points. The first half's line is taken to follow the
+  same raw ratings, so the same number ranks the same games, and the registered cuts keep
+  their §6.3 meaning (gap ≥ 3 is the near miss of §6.6 and §6.7). No share is fitted.
+- **Team totals:** the team's own part of that number. That is the luck in its opponent's
+  defence (the three-point and free-throw shooting the opponent allowed, replaced by the
+  league's rate so far), times the game's pace, in that team's points. The home and away parts
+  add up to F4's total gap.
+- Everything else is F4's: box scores of the same season dated before the game; both teams
+  with 10 or more games this season; a side bet at its best deciding offer under the market's
+  fair line.
+
+**Ratings projection: the period scaling**
+
+- For each graded season S and each period (first half, first quarter):
+  - the period's home margin = a + b × the projection's full-game home margin;
+  - the period's total = a + b × the projection's full-game total.
+- a and b are least squares on the projection's walk-forward numbers for seasons 2020-21
+  through the season before S, at tip − 60, each calibrated by its own season's model. Only
+  games whose period scores pass the first search's check are used. 2019-20 is left out: its
+  projection has no calibration.
+- The projection is priced with its own period error: that same fit's residuals, re-centred,
+  as the harness's empirical distribution. Seasons before S only, 300 or more earlier games,
+  with no fallback to S: fewer stops the run.
+- **Moneyline:** the chance the period's home margin is above zero, out of above or below
+  zero. A level period voids the bet, so that mass is removed.
+- The graded number is the projection at the purchase instant; the fit's numbers sit at
+  tip − 60. The projection itself (ratings, minutes, the injury report, its calibration) is the
+  second search's, unchanged. There is no 10-game rule: F1 never had one.
+
+**The market's own pricing** (the fair line that picks a side's best offer, the blind bets, the
+favourite)
+
+- **First-half and first-quarter spreads and totals:** the spread of the period's result around
+  a + b × Pinnacle's full-game closing number (the home margin its spread implies, or its
+  total). Fit on the seasons before S, from 2020-21; 300 or more earlier games; no fallback.
+- **Team totals:** F6d's recorded definition (§6.5, third amendment), imported unchanged.
+- The purchases' own prices are not used for this. The first priced season has no earlier one,
+  so it would be priced on its own results.
+- A season or market with no such pricing stops the run before any cell is graded.
+
+**Not measurable here, reported as such**
+
+- Closing-line value: one purchase per game, so there is no later price.
+- "Still offered at the next purchase": there is no next purchase, so it reads 0.
+
+**Placebo:** 20 runs, seed = run number. Shooting luck: the gap is shuffled between games on
+the same date in the same market. Projection: its fair numbers are shuffled the same way.
+Prices never move.
+
+**Smoke run:** every P3 cell runs on synthetic games only. On real data `--smoke` prints counts
+only: the seasons held, D coverage, and the games with a shooting-luck number.
+
+One more line, 2026-10-18, still before any P3 cell was graded: `--full` also refuses when no
+results folder is named, as P1's and P2's do, so P3's cells never land beside the second
+search's 422.
+
+Three more lines, 2026-10-18, after the review and still before any P3 cell was graded:
+
+- **Which number a book hangs** is P2's rule (§8.2), imported: each book's rung with prices
+  closest to even, and no deciding book's first-half, first-quarter or team-total spread or
+  total more than 1 point from the deciding books' median. The review counted 6,719 of the
+  7,320 team-total quotes the lab would have read at BetRivers and betPARX as alternates (a
+  median 2 points off the main number). This governs both families' offers, blind bets and the
+  market's fair line. The moneylines are untouched.
+- `--full` also refuses unless `NBA_GAME2_BETS` is set.
+- `--full` writes the two families' cells only after both are built, so a failure in the
+  projection leaves no half set for the pass/fail script to read.
+
+### 8.4 Results (graded 2026-10-18)
+
+Run `2026-10-18-fourth`: 456 cells, stored in Supabase (`nba_game2_cells`,
+`nba_game2_population`). Every lab ran `--full` after the review fixes (each book's main number,
+the bets written in the same run) and after 2023-24's first-half, first-quarter and team-total
+prices reached the cache: all 1,230 games, 99.6% of purchases 45-75 minutes before tip, team
+totals on 1,138 games. Pass/fail: `python -m scripts.nba_game2_verdict --house`.
+
+**2 of 456 cells pass the house standard. 16 clear the 95% interval alone, against about 11.4
+expected by chance before correlation.**
+
+| Family | Cells | With 200+ bets | Clear the interval | Pass | Best cell with 200+ bets |
+|---|---|---|---|---|---|
+| P1, market-anchored | 128 | 113 | 0 | 0 | full-game total over, EV >= 0.06, decided in the morning: 856 bets, +41.8 units, +4.5%, interval -2.0% to +10.7%, 4 of 5 seasons positive |
+| P2, the first search's market rules | 256 | 104 | 14, all on 1 to 51 bets | 0 | moneyline away 3-6 hours before tip, same number, EV >= 0.03: 296 bets, +7.6 units, +10.7%, interval -13.4% to +35.1% |
+| P3, ratings projection on the derivative markets | 48 | 48 | 0 | 0 | first-quarter spread away, EV >= 0.06: 562 bets, +0.3 units, 0.0% |
+| P3, shooting luck on the derivative markets | 24 | 14 | 2 | 2 | below |
+
+The market-anchored model (the NHL recipe) found nothing in the NBA: no cell's interval clears
+zero. Its pooled returns on the 113 cells with 200 or more bets have a median of -1.3%.
+
+**The two passing cells**, both shooting luck, decided at each game's one purchase 45-75 minutes
+before tip (measured median 54, not the 60 the lab's text says), 2023-24 to 2025-26 pooled:
+
+| Cell | Bets | Units | Return | 95% interval | Seasons |
+|---|---|---|---|---|---|
+| C1: first-half total over, full-game gap >= 2 | 595 | +51.5 | +8.0% | +0.4% to +15.4% | +4.0%, +11.6%, +9.9% |
+| C2: home team total under, the home team's part of the gap >= 2 | 349 | +64.7 | +16.6% | +6.4% to +26.4% | +13.9%, +18.7%, +18.0% |
+
+Both were then put through six independent checks and a judge (workflow
+`nba-derivative-candidates-verify`, scripts under `%TEMP%/nba_game_edge/verify4/`):
+replication and settlement, prices and books, look-ahead, mechanism, overlap with the shipped
+full-game model, and chance. Replication and look-ahead found no fault in either: every figure
+reproduces exactly, every bet settles the same way from the cache, and changing a game's own
+box score moves none of the signals.
+
+**C1 is not built.** It passed the house standard, which section 8 says is built live; this is
+a judgement against that, made after looking, and is reported as such.
+- The effect is incoherent. A total set wrong by shooting luck should be wrong in both halves.
+  Against games with a gap between -1 and +1, C1's games ran +1.89 points over in the first half
+  (interval +0.68 to +3.09) and -0.45 in the second (-1.80 to +0.87); the difference is +2.34
+  (+0.63 to +4.07). The full game on the same games: +1.45 (-0.45 to +3.33).
+- The pass has no margin. It needs all eight deciding books: DraftKings alone puts the lower
+  bound at -1.0%, the best of the four biggest books at -0.04%. Turning two half-point wins
+  into losses takes it to zero.
+- 323 of its 595 bets are on games the shipped full-game overs model already bets, at +4.0%
+  (interval -6.7% to +14.2%). The other 272 (gap 2 to 3) made +12.75%, but that band was picked
+  out after looking and is not a registered strategy.
+- By chance: in 5,000 shuffled 24-cell families, a pass at +8.0% or better appears in 3.0% to
+  4.1% of them, depending on the shuffle.
+
+**C2 is built live** as `nba_team_total_luck`.
+- Not one book: DraftKings alone 340 bets, +14.8% (interval +4.4% to +24.8%); FanDuel alone
+  +16.9%; the worst deciding offer +13.5% (+3.3% to +23.4%); with any one book removed and the
+  bet re-picked, +15.9% to +16.7%. Bets at exactly Pinnacle's number did best: 175 bets, +22.2%.
+- Not chance: its return is reached by 0 to 3 of 5,000 shuffled worlds. A pass of its size
+  appears in at most 5 of 5,000 shuffled families. All six season halves are positive.
+- The mechanism holds after taking out each game's own shooting: the home team scored 2.47
+  points under the market number (interval -3.60 to -1.34).
+- The weakness: the same rule on the AWAY team's total made nothing (-0.9% at cut 2). Its
+  points moved the same way (-0.80, interval -2.08 to +0.49), weaker, and after taking out
+  each game's own shooting the away number was also set too high (-1.64, -2.67 to -0.62): the
+  away teams in those games happened to shoot hot. The judge's reading is one effect at both
+  venues, with the home figure overstated. Both venues pooled at cut 2: 713 bets, +61.3 units,
+  +7.7% (interval +0.6% to +14.9%). Expect something nearer +7.7% than +16.6%.
+- Prices it lays: -122 to +110, median -112. Lines 101.5 to 135.5. Settled on the home team's
+  final score including overtime (DraftKings' house rule for team totals); counting overtime cost
+  it 3 bets.
+
+**Corrections to what was said before grading**
+- The earlier search's full-game UNDERS on this signal did not lose. At the newest price before
+  tip they returned -0.1%, +0.1%, +1.3% and +7.6% at gaps 1 to 4. "Overs only" described which
+  side passed, not a losing under.
+- The home team-total overs were +0.3% and +0.6% at gaps 2 and 4, not flat or negative.
+- The chance rate was measured across this 24-cell family only, not across all 456 cells.
+
+**Two flaws in the bars, for the next search (this one is not re-graded)**
+- The neighbouring-cut bar compares nested cuts: the gap >= 1 cell contains every gap >= 2 bet.
+  So it never tests the band below the cut. That band lost for both cells: C1's 1-to-2 band
+  -5.4% on 445 bets, C2's -6.3% on 540. C2 still holds because every band above its cut is
+  positive (+17.5%, +13.9%, +17.7%). The next search should compare bands, not nested cuts.
+- The placebo bar's 20 shuffles are coarse: one of C1's 20 placebos beat it on the seasons the
+  bar judges, and C1 cleared only because the bar is the 95th percentile.
+
+**An assessment to run on the shipped full-game overs model** (not a pause, nothing changes):
+in 2023-24 to 2025-26, at gaps of 2 or more, full-game totals ran +1.74 points over the middle
+games. +1.21 of that came from both teams shooting above the league rate in that same game;
+what is left is +0.51 (interval -1.22 to +2.20). Its premise says a game's own shooting
+averages out, so in this window most of its over result may be hot shooting rather than a
+number set too low. It gets the full assessment a live model gets. C2's version of the same
+test was favourable (above).
+
