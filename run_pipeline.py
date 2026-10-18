@@ -1197,6 +1197,23 @@ def step_public_betting(run_date: str) -> bool:
         return False
 
 
+def step_nba_public_splits(run_date: str) -> bool:
+    """
+    NBA public betting splits (Action Network, free): archive yesterday's
+    finished games, then snapshot today's games that have not reached their
+    listed start, stamped with the fetch time. Writes nba_public_splits only --
+    never public_betting, which the scorer copies onto every pick. Best-effort.
+    """
+    try:
+        from data.ingestors.nba_public_splits_ingestor import run_forward
+        result = run_forward(run_date)
+        logger.success(f"✓ NBA public splits: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA public splits failed: {exc}")
+        return False
+
+
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score pitcher + batter props across the look-ahead window.
 
@@ -1560,11 +1577,11 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X gets exactly what the FREE Discord channel gets -- one pick a day,
-        # never the paid slate (mike, 2026-08-30: "A without links"). Posting
-        # the paid signals publicly would be giving away what members pay for.
-        # Ledgered independently of Discord, so one surface failing never
-        # suppresses the other.
+        # X posts the free pick (the same one the free Discord channel got)
+        # and, unless X_POST_ALL_PICKS=0, every other released pre-game pick.
+        # mike, 2026-10-18. Ledgered independently of Discord, so one surface
+        # failing never suppresses the other. The free pick stays labeled
+        # "Free pick" and is not posted a second time as a plain pick.
         try:
             from tracking.x_publisher import notify_x_free_pick
             notify_x_free_pick(target_date=run_date, dry_run=dry_run)
@@ -2252,7 +2269,7 @@ Examples:
                                  "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news", "player-positions",
                                  "player-news-refresh",
-                                 "umpires", "public-betting", "scoring",
+                                 "umpires", "public-betting", "nba-public-splits", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
@@ -2322,6 +2339,7 @@ Examples:
             "player-positions": lambda: step_player_positions(run_date),
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
+            "nba-public-splits": lambda: step_nba_public_splits(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
             "game-log-today": lambda: step_game_log(run_date, run_date),

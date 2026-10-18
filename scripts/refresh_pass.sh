@@ -117,6 +117,9 @@ par weather-refresh
 # both are no-ops that never open a socket.
 par player-news-refresh
 par public-betting
+# NBA splits: a pre-tip snapshot per pass into nba_public_splits (never
+# public_betting, which the scorer reads), plus yesterday's archive once.
+par nba-public-splits
 par_wait
 
 # NHL total goals (nhl_over_under): Pinnacle's no-vig price against the

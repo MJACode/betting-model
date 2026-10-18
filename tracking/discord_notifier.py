@@ -702,7 +702,8 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
     )
 
 
-def _new_signals(conn, target_date: str) -> list[dict]:
+def _new_signals(conn, target_date: str, *,
+                 include_already_posted: bool = False) -> list[dict]:
     """Bettable picks that have not been posted to Discord yet.
 
     READS `picks`, NOT `opening_signals` (2026-09-05, Matt: "the app and discord
@@ -738,6 +739,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     the same one §1c calls the bet of record. The synthesised lock_key matches
     the key capture minted (`game:model[:player]`), so the push_sent ledger
     carries over and nothing already posted posts twice.
+
+    `include_already_posted` drops only the Discord-ledger filter. X uses it
+    so a pick Discord just posted in this same pass is still visible; X has
+    its own ledger and must not treat "already on Discord" as "already tweeted".
     """
     rows = conn.execute(f"""
         WITH bet AS (
@@ -794,7 +799,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
-        WHERE NOT ({channel_lock_held_sql('bet.lock_key', 'discord_signal')})
+        {"" if include_already_posted else "WHERE NOT (" + channel_lock_held_sql('bet.lock_key', 'discord_signal') + ")"}
         ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{
@@ -825,6 +830,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         "game_date": r[18],
         # What tracking/pick_integrity checks the label against.
         "side": r[20], "line": r[21],
+        "prop_market": r[22] if len(r) > 22 else None,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -1280,7 +1286,8 @@ def recaps_needing_restatement(conn, through: str | None = None,
     out = []
     for d, published_at, settled in snaps:
         d = str(d)
-        late = conn.execute(
+        late = _execute_settled(
+            conn,
             _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
             (d, published_at)).fetchall()
         if late:
@@ -1400,7 +1407,8 @@ def post_missed_recap(now: datetime | None = None,
 
     conn = get_connection()
     try:
-        discord_done, x_sent_at, settled = conn.execute(
+        discord_done, x_sent_at, settled = _execute_settled(
+            conn,
             _missed_recap_state_sql(),
             (f"discord_results:{game_date}", f"x_results:{game_date}",
              game_date)).fetchone()
@@ -1439,7 +1447,8 @@ def _restate_x_if_behind(game_date: str, x_sent_at, dry_run: bool) -> int:
     from tracking.x_publisher import notify_x_results
     conn = get_connection()
     try:
-        late = conn.execute(
+        late = _execute_settled(
+            conn,
             _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
             (game_date, x_sent_at)).fetchall()
     finally:
@@ -2075,7 +2084,9 @@ _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
                COALESCE(p.decision_odds, p.dk_odds),
                CASE WHEN p.clv_method = 'standard_v2' THEN p.clv_pct END,
-               p.is_live
+               p.is_live,
+               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result),
+               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
@@ -2088,10 +2099,66 @@ _SETTLED_SQL = r"""
     + "\n          AND " + posted_sql("p") + "\n"
 
 
+_UNIT_COLUMN_SQL = (
+    ",\n               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+    ",\n               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+)
+
+
+def _sql_without_unit_functions(sql: str) -> str:
+    """The same query with the two function columns removed.
+
+    A shorter tuple is what `_tally` already prices with `stake_for`.
+    """
+    if _UNIT_COLUMN_SQL not in sql:
+        raise RuntimeError("settled sql has no posted-stake columns to drop")
+    return sql.replace(_UNIT_COLUMN_SQL, "")
+
+
+def _unit_functions_missing(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    if "published_pick_unit_" not in text:
+        return False
+    return "does not exist" in text or "no such function" in text
+
+
+def _execute_settled(conn, sql: str, params: tuple):
+    """Run a query built on `_SETTLED_SQL`.
+
+    The functions live in their own migration, and settle runs before that
+    migration on the morning the code deploys. A missing function is not a
+    failed settlement: drop the columns and let `_tally` use `stake_for`,
+    which the function body is pinned equal to. Any other error propagates.
+    """
+    try:
+        return conn.execute(sql, params)
+    except Exception as exc:
+        if not _unit_functions_missing(exc):
+            raise
+        # Postgres aborts the transaction on the error, so the retry needs a
+        # rollback. That rollback is safe only because every caller reads
+        # here and writes afterwards: notify_discord_results inserts
+        # push_sent after both tallies return, and the scan, the missed
+        # recap, and the X catch-up select and then close. An uncommitted
+        # insert already on `conn` would be lost. sqlite3.rollback undoes
+        # the test's open inserts instead, and the statement error did not
+        # abort that connection.
+        if type(exc).__module__.startswith("psycopg"):
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(
+            "published stake functions are not installed yet; "
+            "tallying with stake_for"
+        )
+        return conn.execute(_sql_without_unit_functions(sql), params)
+
+
 def _settled_rows(conn, game_date: str) -> list[tuple]:
     """One settled day."""
-    return conn.execute(_SETTLED_SQL.format(window="= %s"),
-                        (game_date,)).fetchall()
+    return _execute_settled(conn, _SETTLED_SQL.format(window="= %s"),
+                            (game_date,)).fetchall()
 
 
 def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
@@ -2100,7 +2167,8 @@ def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
     Bounded ABOVE by the recapped date so the all-time figure is as of that
     recap and never quietly includes a later day: a number published on Monday
     must still reproduce on Friday."""
-    return conn.execute(
+    return _execute_settled(
+        conn,
         _SETTLED_SQL.format(window="BETWEEN %s AND %s"),
         (start_date, through)).fetchall()
 
@@ -2166,14 +2234,25 @@ def _tally(rows: list[tuple]) -> dict:
             t["l"] += 1
         else:
             t["p"] += 1
-        stake = stake_for(kelly, price)
-        if result == "WIN":
-            t["units"] += stake.win
-        elif result == "LOSS":
-            t["units"] -= stake.risk
-        # PUSH returns the stake: no unit change.
-        if result != "PUSH":
-            t["risked"] += stake.risk
+        # A row from _SETTLED_SQL carries the shared SQL functions in the
+        # last two columns (published_pick_unit_profit, published_pick_unit_risked).
+        # Those are the Record tab's units and risked. A shorter tuple is a
+        # unit test of this formatter; it uses stake_for, which the function
+        # body is pinned equal to.
+        if len(row) >= 9:
+            t["units"] += float(row[7] or 0)
+            t["risked"] += float(row[8] or 0)
+        else:
+            stake = stake_for(kelly, price)
+            if result == "WIN":
+                t["units"] += stake.win
+            elif result == "LOSS":
+                t["units"] -= stake.risk
+            # PUSH returns the stake: no unit change, and it was not risked.
+            # WIN and LOSS only. A push, a void, and an ungraded row
+            # laid nothing — the same rule as published_pick_unit_risked.
+            if result in ("WIN", "LOSS"):
+                t["risked"] += stake.risk
     return t
 
 

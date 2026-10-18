@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   InputAccessoryView,
@@ -14,8 +15,10 @@ import {
   Switch,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { ScrollView as GestureScrollView, State, TapGestureHandler } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -79,6 +82,7 @@ import {
 } from '@/lib/gameFilter';
 import { computeHitRate, hitRateBandOf, hitRateColorDiscriminates } from '@/lib/hitRate';
 import {
+  bookLineLabel,
   hitModeHeadline,
   hitModeLabel,
   hitModeLineLabel,
@@ -101,7 +105,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, etDate, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -130,6 +134,8 @@ import {
   startedForGame,
   pricedPlayers,
   type PricedPlayer,
+  listsPricedWithoutLog,
+  rankedBoardChrome,
   needsTouchSet,
   seasonTouchFlag,
   shouldFetchTouchSet,
@@ -148,6 +154,15 @@ import {
   type TonightSlate,
 } from '@/lib/statsBoard';
 import { normalizePlayerName } from '@/lib/playerNews';
+import {
+  mostCommonPostedLine,
+  nhlBetCaption,
+  nhlEmptyBoardText,
+  nhlLineOnlyTitle,
+  nhlOffLineCount,
+  shouldOpenShotsLine,
+  stopForPostedLine,
+} from '@/lib/nhlBoard';
 import {
   defaultStatFor,
   propMarketForStat,
@@ -174,11 +189,13 @@ import {
 } from '@/lib/statSegments';
 import {
   baseStopCount,
-  clampTypedLine,
-  clampedFieldText,
   clearSettleSkip,
+  commitTypedThreshold,
   defaultLineN,
+  pointInBubble,
+  previewTypedLine,
   programmaticPick,
+  rulerChromeHeight,
   rulerHi,
   rulerScaleFor,
   settleHold,
@@ -186,6 +203,15 @@ import {
   stopAt,
   stopCount,
   stopIndexOf,
+  THRESHOLD_BUBBLE_H,
+  THRESHOLD_BUBBLE_W,
+  THRESHOLD_TAP_MAX_DIST,
+  THRESHOLD_TAP_MAX_MS,
+  THRESHOLD_TYPE_HINT,
+  thresholdBubbleLabel,
+  thresholdControlsScroll,
+  thresholdFieldWidth,
+  type BubbleBox,
   type RulerScale,
 } from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
@@ -409,6 +435,15 @@ export function StatsScreen() {
   // can be and no book prices.
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [hitMode, setHitMode] = useState<HitMode>('atLeast');
+  // Shown under the ruler after a typed line is clamped or refused. Navy,
+  // not a toast: the correction belongs next to the number it changed.
+  const [lineNotice, setLineNotice] = useState<string | null>(null);
+  // Android and web have no keyboard accessory, so Cancel and Done render in
+  // the row. iOS keeps them on the keyboard. The ruler fills the callbacks
+  // while a draft is open.
+  const [lineEditBar, setLineEditBar] = useState<{ cancel: () => void; commit: () => void } | null>(null);
+  const { width: windowWidth, height: windowHeight, fontScale: windowFontScale } = useWindowDimensions();
+  const lineScroll = thresholdControlsScroll(windowFontScale, windowWidth, windowHeight);
   const [modeOpen, setModeOpen] = useState<boolean>(false);
   // TOUGHNESS as a filter, which is the half of Matt's ask the grade alone did
   // not answer: the column is truthful on every sport now, but until this the
@@ -567,7 +602,13 @@ export function StatsScreen() {
     // for those sports below; this is the other half, for a user who picked it
     // on the NFL and then switched to the NHL. The window is the board's
     // default, not the one carried over.
-    if (!supportsHitRate(sport)) setTimeWindow((w) => (w === 'h2h' ? 10 : w));
+    if (!supportsHitRate(sport)) {
+      setTimeWindow((w) => (w === 'h2h' ? 10 : w));
+      // NHL is the sport that prices a side and has no ruler to name it.
+      // Resetting every other sport without hit rate (UFC, golf) would throw
+      // away an Under the user set on the NFL the moment they passed through.
+      if (sport === 'NHL') setHitMode('atLeast');
+    }
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
     // Drop the previous sport's slate in the same commit as the chip reset.
@@ -976,10 +1017,12 @@ export function StatsScreen() {
   // keeps `lineN` on it — three copies of this arithmetic is three chances to
   // leave the board on a number the strip cannot scroll back to.
   const rulerScale: RulerScale = useMemo(() => rulerScaleFor(stat, hitMode), [stat, hitMode]);
-  // The last stop the adjustable will step to. Not `rulerScale.max`: that
-  // can sit off the grid, and a typed number parked there cannot be stepped
-  // down (`next <= hi` inside LineRuler).
-  const rulerCeiling = rulerHi(rulerScale);
+  // A clamp message is about the line that was just typed. A different stat
+  // or direction is a different ruler, so the old sentence must not linger.
+  const noticeStatKey = stat ? String(stat.key) : '';
+  useEffect(() => {
+    setLineNotice(null);
+  }, [noticeStatKey, hitMode]);
 
   // Leaving Under drops the one extra stop Under needs ("n-1 or fewer" has to
   // reach a ceiling At Least says as "n+"), so a user parked on it would keep
@@ -1014,6 +1057,27 @@ export function StatsScreen() {
   // reads a model for anything — the betslip button lives one tap deeper, on
   // the player's detail screen, which is where a researcher lands anyway.
   const propMarket = propMarketForStat(stat);
+
+  // Shots opens on the line the most players are posted at tonight.
+  // 2.5 (stop 3, "3 or more") is the fallback when nothing is posted.
+  // Once per NHL visit: a refetch and a return to the chip leave the
+  // number the user already set.
+  const postedShotsLine = useMemo(() => {
+    if (sport !== 'NHL' || stat?.key !== 'shots') return null;
+    if (!propMarket || propLines.market !== propMarket) return null;
+    return mostCommonPostedLine(propLines.rows);
+  }, [sport, stat, propMarket, propLines]);
+  const shotsOpenKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (sport !== 'NHL') shotsOpenKey.current = null;
+  }, [sport]);
+  useEffect(() => {
+    const key = stat ? String(stat.key) : null;
+    const posted = postedShotsLine;
+    if (!shouldOpenShotsLine(sport, key, posted, shotsOpenKey.current) || posted == null) return;
+    shotsOpenKey.current = sport;
+    setLineN(snapStop(stopForPostedLine(posted), rulerScale));
+  }, [sport, stat, postedShotsLine, rulerScale]);
 
   // Prop lines for the WHOLE forward window, not one date. The board is no
   // longer cut to the slate (Matt, 2026-09-12), so a player whose next game is
@@ -1538,7 +1602,7 @@ export function StatsScreen() {
                   : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}.`,
                 canSwitch: !oneWayMarket(propMarket, side),
               }
-            : dirLockNote
+            : canHitRate && dirLockNote
               ? { text: dirLockNote, canSwitch: true }
               : null;
 
@@ -1579,7 +1643,7 @@ export function StatsScreen() {
   // no row for at all is listed after the ranked rows, with no number.
   const pricedByKey = useMemo(
     () =>
-      stat && propMarket != null && propLines.market === propMarket && needsTouchSet(sport, String(stat.key))
+      stat && propMarket != null && propLines.market === propMarket && listsPricedWithoutLog(sport, String(stat.key))
         ? pricedPlayers(propLines.rows, propMarket, slateGameIds)
         : EMPTY_PRICED,
     [stat, sport, propMarket, propLines, slateGameIds],
@@ -1782,11 +1846,29 @@ export function StatsScreen() {
         : recentRows.map((r) => r.player_name),
     );
   }, [pricedByKey, activePositions, loading, error, rowsAreStale, shownKey, readKey, effectiveMode, rows, touchView, timeWindow, seasonValues, recentRows, lineOnlyFor]);
+  // Football Anytime TD keeps master's header, empty state, and filter count.
+  // NHL's empty log is the only board the tail replaces.
+  const boardChrome = rankedBoardChrome(
+    sport,
+    effectiveMode === 'hitRate' ? hitData.length : ranked.length,
+    lineOnlyList.length,
+  );
   const slateGameById = useMemo(() => new Map(slateGames.map((g) => [g.game_id, g] as const)), [slateGames]);
+  // Declared here, above the line-only rows. The map reads it, and a later
+  // const is a temporal dead zone: the empty-log board throws before paint.
+  const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
+  // Football keeps "Has a line · no games logged". NHL does not: an empty
+  // read is the unapplied game-log grant, and a name the fold missed is
+  // not a player with no games.
+  const nhlLogEmpty =
+    sport === 'NHL' && effectiveMode === 'totals' && rows.length === 0 && lineOnlyList.length > 0;
+  const nhlLinesOnly = sport === 'NHL' && lineOnlyList.length > 0 && effectiveMode === 'totals';
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
       <View>
-        <SectionTitle title="Has a line · no games logged" />
+        <SectionTitle
+          title={nhlLinesOnly ? nhlLineOnlyTitle(nhlLogEmpty) : 'Has a line · no games logged'}
+        />
         {lineOnlyList.map((p) => {
           const game = slateGameById.get(p.gameId) ?? null;
           const started = game ? startedForGame(game) : null;
@@ -1802,8 +1884,10 @@ export function StatsScreen() {
               showMatchup={showMatchupCol}
               statLabel={betLabel}
               hitMode={hitMode}
+              sport={sport}
               oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
               onOddsPress={quote ? () => openBook(quote) : undefined}
+              omitNoGames={nhlLinesOnly}
             />
           );
         })}
@@ -1907,13 +1991,13 @@ export function StatsScreen() {
   // tree, and a stale flag here is a clipped control.
   const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
-  // The headline under the ruler, in the mode's own idiom: "25+ Points" in
-  // At Least, "Over 0.5 Hits" in Over (lib/hitMode.ts).
+  // NHL says the bet once, in words ("3 or more shots"), on the caption and
+  // on the sheet. Every other sport keeps the ruler's idiom ("25+ Points",
+  // "Over 0.5 Hits").
   const lineHeadline =
-    hitModeHeadline(lineN, hitMode, stat?.label ?? '');
-  // What a BET made from this column is called. Almost always the column's own
-  // name; the market's where the two differ (markets.ts propDisplayLabel).
-  const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
+    sport === 'NHL' && stat
+      ? (nhlBetCaption(line, String(stat.key)) ?? '')
+      : hitModeHeadline(lineN, hitMode, betLabel);
 
   // What the tapped pill hands the add-to-betslip sheet: the proposition,
   // every book's price for it, and the off-line explainer when the book's own
@@ -1921,11 +2005,22 @@ export function StatsScreen() {
   const lineSheetInput = useMemo(
     () =>
       lineSheet
-        ? propLineSheetInput(lineSheet, sport, betLabel, lineHeadline, (l, sd) =>
-            modeLineLabel(l, sd, hitMode),
-          )
+        ? {
+            ...propLineSheetInput(
+              lineSheet,
+              sport,
+              betLabel,
+              lineHeadline,
+              sport === 'NHL' && stat
+                ? (l, sd) => nhlBetCaption(l, String(stat.key)) ?? bookLineLabel(l, sd)
+                : (l, sd) => modeLineLabel(l, sd, hitMode),
+            ),
+            ...(sport === 'NHL' && stat && nhlBetCaption(lineSheet.line, String(stat.key))
+              ? { title: `${lineSheet.playerName} ${nhlBetCaption(lineSheet.line, String(stat.key))}` }
+              : {}),
+          }
         : null,
-    [lineSheet, sport, betLabel, lineHeadline, hitMode],
+    [lineSheet, sport, betLabel, lineHeadline, hitMode, stat],
   );
 
   /**
@@ -2071,13 +2166,22 @@ export function StatsScreen() {
         ? `No upcoming ${sport} games, so there is no opponent to compare against yet.`
         : `No ${sport} ${stat?.label ?? ''} in the last 2 seasons against each player's next opponent.`;
     }
+    if (sport === 'NHL') {
+      const hasLines =
+        propMarket != null &&
+        propLines.market === propMarket &&
+        propLines.status !== 'loading' &&
+        propLines.rows.some((r) => r.market === propMarket);
+      const missing = nhlEmptyBoardText(hasLines, betLabel || (stat?.label ?? 'lines'));
+      if (missing && rows.length === 0) return missing;
+    }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
-  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment]);
+  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment, propMarket, propLines, betLabel, rows.length]);
 
-  // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
-  // have no player leaderboard at all, and they are two of the sports where
-  // team stats matter most — gating this behind `stat` would hide it there.
+  // Teams board. Ahead of the empty-catalog guard below so a sport with no
+  // player stat still reaches it, and so NHL's Teams/Goalies view stays one
+  // tap away on the Players | Teams row while the skater board is showing.
   if (boardMode === 'teams' && supportsTeamBoard(sport)) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -2109,11 +2213,9 @@ export function StatsScreen() {
     );
   }
 
-  // Sports with no per-player leaderboard (NHL: team+goalie only).
-  // The golf branch went with the sport on 2026-09-08: its copy promised
-  // leaderboards that are not coming and pointed at Picks/Signals for golf picks
-  // that no longer render, and GOLF is no longer a chip, so it was unreachable
-  // copy that could only ever mislead.
+  // A sport whose catalog is empty. Golf is no longer a chip. NHL is not this
+  // branch: it has a skater board, and its Teams/Goalies view is the Players |
+  // Teams segment above, which returns before this guard.
   if (!stat) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -2261,6 +2363,21 @@ export function StatsScreen() {
         </View>
       </View>
 
+      {/* Averages on a sport with no hit-rate ruler. The pill still prices a
+          side, and nothing else on the board names it. Same quiet caption as
+          the no-lines note. The Goals chip stays "Goals"; the bet is Anytime
+          Goal (markets.ts propDisplayLabel).
+          The pill does not also say the snapshot is old. Prop rows carry
+          snapshot_at, and the game-line age rule (markets.priceAgeApplies)
+          does not cover props — their normal age is hours. A second caption
+          on this shared cell would be a new flag on every sport's board. */}
+      {!canHitRate && showOdds && lineHeadline ? (
+        <View style={styles.noLinesRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>{lineHeadline}</Text>
+        </View>
+      ) : null}
+
       {/* The position row picked a position the board cannot filter by: say
           so once, in the same quiet caption as the no-lines note, rather than
           label a list of every position "QB" (Designer + Reviewer, #830). */}
@@ -2273,7 +2390,11 @@ export function StatsScreen() {
 
       {/* Line picker: the mode, a tick ruler, then the headline. */}
       {effectiveMode === 'hitRate' ? (
-        <>
+        <ThresholdChromeScroll
+          enabled={lineScroll}
+          maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
+        >
+          <View style={styles.lineStack}>
           <View style={styles.lineRow}>
             {/* Locked to the one side the member's books actually sell. It
                 loses the chevron AND the chip's fill and border, because a
@@ -2332,14 +2453,14 @@ export function StatsScreen() {
                   : hitModeHeadline(n, hitMode, stat?.label ?? '')
               }
               a11yLabel={`${stat?.label ?? ''} line`}
+              statLabel={stat?.label ?? ''}
+              onNotice={setLineNotice}
+              onEditBar={setLineEditBar}
               // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
-              // that line in Over/Under). The number is clamped onto the
-              // stops VoiceOver can step: below the first stop it is raised
-              // to that stop, and above the last on-grid stop it is brought
-              // down to that stop. Junk still parses as nothing.
-              parseTyped={(text) =>
-                clampTypedLine(parseTypedLine(text, hitMode), rulerScale.min, rulerCeiling)
-              }
+              // that line in Over/Under). Clamping happens on commit, against
+              // the stops VoiceOver can step — LineRuler's `hi`, not
+              // `scale.max`. Junk still parses as nothing.
+              parseTyped={(text) => parseTypedLine(text, hitMode)}
             />
             {/* At Least only, and a footnote rather than a headline. The row
                 this replaces restated the stat, the number and the direction —
@@ -2358,7 +2479,17 @@ export function StatsScreen() {
               </Text>
             ) : null}
           </View>
-        </>
+          {Platform.OS !== 'ios' && lineEditBar ? (
+            <ThresholdDoneBar onCancel={lineEditBar.cancel} onDone={lineEditBar.commit} />
+          ) : null}
+          {lineNotice ? (
+            <View style={styles.lineNotice} accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}>
+              <Ionicons name="information-circle-outline" size={14} color={colors.tint} />
+              <Text style={styles.lineNoticeText}>{lineNotice}</Text>
+            </View>
+          ) : null}
+          </View>
+        </ThresholdChromeScroll>
       ) : null}
 
       {/* Time window strip (L3…L20), with Hit Rates | Averages riding the end.
@@ -2375,6 +2506,7 @@ export function StatsScreen() {
           that child now and carries the pin; the scroller inside it flexes on
           the horizontal axis, which cannot crush anything. The FlatList below
           stays the one flexible region. */}
+      {sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0 ? null : (
       <View style={[styles.fixedRow, styles.windowStrip]}>
         <ScrollView
           horizontal
@@ -2419,6 +2551,7 @@ export function StatsScreen() {
           </View>
         ) : null}
       </View>
+      )}
       {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
           row and nothing in the strip can shrink (tabCompact is flex: 0, and a
           plain View defaults to flexShrink: 0 in RN), so the time-window chips
@@ -2440,14 +2573,14 @@ export function StatsScreen() {
           tab and come back. */}
       {error ? (
         <View style={styles.errorBanner}>
-          <Text style={styles.errorText} numberOfLines={3}>
+          <Text style={styles.errorText}>
             Couldn’t load the board. {friendlyCause(error)}
           </Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => void load()}
             disabled={loading}
-            hitSlop={8}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
             accessibilityLabel="Retry loading the board"
             style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
           >
@@ -2533,9 +2666,10 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
-      {(effectiveMode === 'hitRate' ? hitData.length : ranked.length) > 0 ? (
+      {boardChrome.showHeader ? (
         <ColumnHeader
           rightLabel={rightLabel}
+          sorted={boardChrome.headerSorted}
           showOdds={showOdds}
           // Named for the book it prints — "FD", "DK", "MGM" — so a FanDuel
           // user never reads an unlabelled number as someone else's. With
@@ -2577,6 +2711,7 @@ export function StatsScreen() {
                 showOdds={showOdds}
                 statLabel={betLabel}
                 hitMode={hitMode}
+                sport={sport}
                 colorful={colorful}
                 thinSample={timeWindow === 'h2h'}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
@@ -2638,6 +2773,7 @@ export function StatsScreen() {
                 showOdds={showOdds}
                 statLabel={betLabel}
                 hitMode={hitMode}
+                sport={sport}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail && canOpenPlayerDetail(item.row.player_id)}
@@ -2646,7 +2782,11 @@ export function StatsScreen() {
             );
           }}
           ListEmptyComponent={
-            loading ? (
+            // A priced player with no log row is the board, not an empty one.
+            // Hold the skeleton while those lines are still loading so the
+            // first paint does not say "no data" and then fill in.
+            boardChrome.suppressEmpty ? null
+              : loading || (listsPricedWithoutLog(sport, stat ? String(stat.key) : null) && propLines.status === 'loading') ? (
               <BoardSkeleton />
             ) : (
               <EmptyState
@@ -2694,7 +2834,7 @@ export function StatsScreen() {
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         title="Filter players"
-        resultCount={effectiveMode === 'hitRate' ? hitData.length : ranked.length}
+        resultCount={boardChrome.resultCount}
         itemNoun="player"
         emptyLabel={touchView === 'error' ? 'Couldn’t load this list. Pull down to retry.' : undefined}
         // The Availability toggle re-READS the board (the server is narrowed to
@@ -2966,6 +3106,79 @@ const LABEL_W = 44;
  * Label cadence adapts to the range (every stop for short rulers, every
  * 5th/10th for yard-scale ones) so the strip stays legible at any size.
  */
+/** Scrolls the line control when 2x text or landscape would push it off. At
+ *  the default portrait size it is a fragment, so the row is not a nested
+ *  scroller fighting the strip. */
+function ThresholdChromeScroll({
+  enabled,
+  maxHeight,
+  children,
+}: {
+  enabled: boolean;
+  maxHeight: number;
+  children: React.ReactNode;
+}) {
+  if (!enabled) return <>{children}</>;
+  return (
+    <View style={[styles.fixedRow, styles.thresholdChrome, { maxHeight, minHeight: 72 }]}>
+      <ScrollView
+        style={styles.thresholdChromeScroll}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="none"
+      >
+        {children}
+        <BetslipBarSpacer />
+      </ScrollView>
+    </View>
+  );
+}
+
+function ThresholdDoneBar({ onCancel, onDone }: { onCancel: () => void; onDone: () => void }) {
+  const cancelHost = useRef<React.ElementRef<typeof Pressable> | null>(null);
+  useEffect(() => {
+    // Web blurs the field on mouse-down, before Cancel's click, and that blur
+    // commits. react-native-web waits 50ms before onPressIn
+    // (PressResponder DEFAULT_PRESS_DELAY_MS), so a latch set there is already
+    // late. preventDefault on this mouse-down keeps the field focused, and
+    // Cancel's click still runs. A blur from anywhere else still commits.
+    const node = cancelHost.current as unknown as {
+      addEventListener?: (type: string, listener: (event: Event) => void) => void;
+      removeEventListener?: (type: string, listener: (event: Event) => void) => void;
+    } | null;
+    if (node?.addEventListener == null || node.removeEventListener == null) return;
+    const keepFocus = (event: Event) => {
+      event.preventDefault();
+    };
+    node.addEventListener('mousedown', keepFocus);
+    return () => node.removeEventListener?.('mousedown', keepFocus);
+  }, []);
+  return (
+    <View style={styles.doneBar}>
+      <Pressable
+        ref={cancelHost}
+        onPress={onCancel}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+      >
+        <Text style={styles.cancelText}>Cancel</Text>
+      </Pressable>
+      <Pressable
+        onPress={onDone}
+        accessibilityRole="button"
+        accessibilityLabel="Done"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+      >
+        <Text style={styles.doneText}>Done</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function LineRuler({
   value,
   scale,
@@ -2974,14 +3187,24 @@ function LineRuler({
   format,
   describe,
   a11yLabel,
+  statLabel = '',
+  onNotice,
+  onEditBar,
   parseTyped,
 }: {
   a11yLabel: string;
-  /** Reads a typed line into a stop, or null to refuse it. When given, the
-   *  number in the centre is a field (Matt, 2026-10-09: "need to allow user
-   *  to edit manually"). A typed number need not sit on the strip's grid —
-   *  the strip scrolls to the nearest stop and the centre shows the number
-   *  typed, until the next drag. */
+  /** The stat's own name, spoken with the face: "Threshold 225 Pass Yards". */
+  statLabel?: string;
+  /** A clamp or a refused draft. Null clears it. */
+  onNotice?: (message: string | null) => void;
+  /** Android and web draw Cancel and Done under the whole row. iOS ignores
+   *  this and uses the keyboard accessory. Null when the field is closed. */
+  onEditBar?: (bar: { cancel: () => void; commit: () => void } | null) => void;
+  /** Reads a typed line into a stop, or null to refuse it. UNCLAMPED — the
+   *  commit decides min / max. When given, the centre bubble is the field
+   *  (Matt, 2026-10-09: "need to allow user to edit manually"). A typed
+   *  number need not sit on the strip's grid — the strip parks at the
+   *  nearest stop and the value stays what was typed, until the next drag. */
   parseTyped?: (text: string) => number | null;
   /** The ruler's whole-number STOP. What the user sees is `format(value)`. */
   value: number;
@@ -3001,11 +3224,20 @@ function LineRuler({
   describe?: (n: number) => string;
 }) {
   const [width, setWidth] = useState(0);
+  const { fontScale } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
+  const tapRef = useRef<React.ComponentRef<typeof TapGestureHandler>>(null);
   const reportedRef = useRef(value);
   // One programmatic scroll's settle (the animated scrollTo in pickTick).
   // Cleared when that settle arrives, or sooner if a finger drag starts.
   const skipSettleRef = useRef(false);
+  // scrollTo fires onScrollEndDrag and onMomentumScrollEnd. settleHold
+  // consumes one skip; this covers the second so an off-grid line is not
+  // snapped to the tick the strip parked on.
+  const skipCountRef = useRef(0);
+  // True while the bubble is the field. A preview scroll's settle must not
+  // commit the tick it parked on.
+  const editingRef = useRef(false);
   const { min, step } = scale;
   const count = stopCount(scale);
   /** The last reachable stop — the same ceiling a typed line is clamped to. */
@@ -3071,8 +3303,16 @@ function LineRuler({
       scale,
     );
     skipSettleRef.current = next.skipNextSettle;
+    // A preview scroll while the field is open must not replace the typed
+    // number with the tick it parked on. A finger drag clears that below.
+    if (editingRef.current) return;
+    if (skipCountRef.current > 0) {
+      skipCountRef.current -= 1;
+      return;
+    }
     if (next.value !== reportedRef.current) {
       reportedRef.current = next.value;
+      onNotice?.(null);
       onChange(next.value);
     }
   };
@@ -3081,51 +3321,163 @@ function LineRuler({
     const next = programmaticPick(v);
     reportedRef.current = next.value;
     skipSettleRef.current = next.skipNextSettle;
+    skipCountRef.current = 2;
     scrollRef.current?.scrollTo({ x: offsetFor(v), animated: true });
     onChange(v);
   };
 
   const [draft, setDraft] = useState<string | null>(null);
+  // The resting bubble is pointerEvents none, so Pressable's pressed style
+  // never runs. Dim it for the moment the tap is down inside the box.
+  const [bubblePressed, setBubblePressed] = useState(false);
+  // Select the whole face on open. Cleared on the first keystroke so the
+  // cursor is not pinned to "all" after that.
+  const [forceSelect, setForceSelect] = useState(false);
+  const [bubbleFrame, setBubbleFrame] = useState<BubbleBox | null>(null);
   // Android fires onSubmitEditing and onEndEditing for one Done press, in the
   // same turn with the same draft; the latch applies it once (the player
-  // card's commitTypedLineOnce, same reason).
+  // card's commitTypedLineOnce, same reason). Cancel sets it too, so the
+  // blur that follows a Cancel does not commit the typed text.
   const commitTaken = useRef(false);
-  // A clamped commit writes the applied face into the field first. Closing
-  // in that same setState would drop it — React keeps the last value — so
-  // the close waits until that face has painted.
-  const pendingClose = useRef(false);
-  useEffect(() => {
-    if (!pendingClose.current || draft == null) return;
-    pendingClose.current = false;
-    setDraft(null);
-  }, [draft]);
+  const openedValue = useRef(value);
+  const bubbleBox = useRef<BubbleBox | null>(null);
+  // A tap that started on the bubble also lands on the tick underneath.
+  // That tick must not move the line. The tick's onPress can arrive after
+  // the tap handler's END, so the guard stays up through this turn and drops
+  // on the next frame, or sooner when the next touch begins.
+  const suppressTick = useRef(false);
+  const suppressRelease = useRef<number | null>(null);
+  const releaseTickGuard = () => {
+    if (suppressRelease.current != null) cancelAnimationFrame(suppressRelease.current);
+    suppressRelease.current = requestAnimationFrame(() => {
+      suppressRelease.current = null;
+      suppressTick.current = false;
+    });
+  };
+  useEffect(() => () => {
+    if (suppressRelease.current != null) cancelAnimationFrame(suppressRelease.current);
+  }, []);
+  const scrollToValue = (v: number) => {
+    skipSettleRef.current = true;
+    skipCountRef.current = 2;
+    scrollRef.current?.scrollTo({ x: offsetFor(v), animated: false });
+  };
   const openDraft = () => {
+    if (!parseTyped || draft != null) return;
     commitTaken.current = false;
-    pendingClose.current = false;
-    setDraft('');
+    editingRef.current = true;
+    openedValue.current = value;
+    onNotice?.(null);
+    setForceSelect(true);
+    setDraft(faceOf(value));
+  };
+  const closeDraft = () => {
+    editingRef.current = false;
+    setForceSelect(false);
+    setDraft(null);
   };
   const commitDraft = () => {
     if (commitTaken.current || draft == null) return;
     commitTaken.current = true;
-    if (!parseTyped || draft.trim() === '') {
-      setDraft(null);
-      return;
+    const typed = parseTyped ? parseTyped(draft) : null;
+    const outcome = commitTypedThreshold(draft, typed, min, hi, faceOf);
+    const restore = openedValue.current;
+    closeDraft();
+    onNotice?.(outcome.notice);
+    // Android speaks the notice from accessibilityLiveRegion. Announcing
+    // here as well reads the clamp twice. iOS does not speak that region.
+    if (outcome.notice && Platform.OS !== 'android') {
+      AccessibilityInfo.announceForAccessibility(outcome.notice);
     }
-    const typed = parseTyped(draft);
-    if (typed == null) {
-      setDraft(null);
-      showToast(`Enter a line from ${faceOf(min)} up`);
-      return;
-    }
-    const clampedText = clampedFieldText(draft, typed, faceOf);
-    if (clampedText != null && clampedText !== draft) {
-      setDraft(clampedText);
-      pendingClose.current = true;
+    if (outcome.apply == null) {
+      scrollToValue(restore);
+    } else if (outcome.apply !== value) {
+      pickTick(outcome.apply);
     } else {
-      setDraft(null);
+      scrollToValue(outcome.apply);
     }
-    if (typed !== value) pickTick(typed);
+    Keyboard.dismiss();
   };
+  const cancelDraft = () => {
+    if (draft == null) return;
+    commitTaken.current = true;
+    closeDraft();
+    onNotice?.(null);
+    // Strip only. The board is still the value the edit opened on: a tick
+    // under the bubble is ignored while the guard is up, and onChange here
+    // would move the board.
+    scrollToValue(openedValue.current);
+    Keyboard.dismiss();
+  };
+  // The row's bar calls these after the draft has changed. Refs, so the
+  // effect below does not re-bind on every keystroke.
+  const commitRef = useRef(commitDraft);
+  const cancelRef = useRef(cancelDraft);
+  commitRef.current = commitDraft;
+  cancelRef.current = cancelDraft;
+  const fieldOpen = draft != null;
+  useEffect(() => {
+    if (Platform.OS === 'ios' || !onEditBar) return;
+    if (!fieldOpen) {
+      onEditBar(null);
+      return;
+    }
+    onEditBar({
+      cancel: () => cancelRef.current(),
+      commit: () => commitRef.current(),
+    });
+    return () => onEditBar(null);
+  }, [fieldOpen, onEditBar]);
+  const onType = (text: string) => {
+    setForceSelect(false);
+    setDraft(text);
+    if (!parseTyped) return;
+    if (text.trim() === '') {
+      scrollToValue(openedValue.current);
+      return;
+    }
+    const preview = previewTypedLine(text, parseTyped(text), min, hi);
+    if (preview == null) return;
+    scrollToValue(preview);
+  };
+  const onBubbleLayout = (e: { nativeEvent: { layout: BubbleBox } }) => {
+    const box = e.nativeEvent.layout;
+    bubbleBox.current = box;
+    setBubbleFrame((prev) =>
+      prev &&
+      prev.x === box.x &&
+      prev.y === box.y &&
+      prev.width === box.width &&
+      prev.height === box.height
+        ? prev
+        : box,
+    );
+  };
+  const onBubbleTap = (e: { nativeEvent: { state: number; x: number; y: number } }) => {
+    const box = bubbleBox.current;
+    const { state, x, y } = e.nativeEvent;
+    const inside = box != null && pointInBubble(x, y, box);
+    if (state === State.BEGAN) {
+      if (suppressRelease.current != null) {
+        cancelAnimationFrame(suppressRelease.current);
+        suppressRelease.current = null;
+      }
+      suppressTick.current = inside;
+      setBubblePressed(inside);
+      return;
+    }
+    if (state === State.FAILED || state === State.CANCELLED) {
+      setBubblePressed(false);
+      if (suppressTick.current) releaseTickGuard();
+      return;
+    }
+    if (state === State.END && inside) openDraft();
+    setBubblePressed(false);
+    if (suppressTick.current) releaseTickGuard();
+  };
+
+  const draftSelection =
+    forceSelect && draft != null ? { start: 0, end: draft.length } : undefined;
 
   return (
     // ONE adjustable element, not N tick buttons. VoiceOver gets the number
@@ -3134,148 +3486,197 @@ function LineRuler({
     // landed: in Under mode the ruler's number and the headline's deliberately
     // differ by one, so a screen-reader user who cannot reach the ruler cannot
     // tell which bet the board is on (UX review, 2026-09-05).
+    // The bubble is a SIBLING of that adjustable. The adjustable hides its
+    // children, so a button drawn inside it never becomes its own element.
     <View style={styles.rulerRow}>
-    <View
-      style={styles.rulerWrap}
-      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      // Not while typing, so VoiceOver can reach the field.
-      accessible={draft == null}
-      accessibilityRole="adjustable"
-      accessibilityLabel={a11yLabel}
-      // `text` overrides `now` for VoiceOver, which is the point: the stop
-      // index is meaningless to a user, and in Over mode the face is 0.5
-      // where the index is 1. It announces the whole BET rather than the bare
-      // face, because the side and the stat live on other elements and this is
-      // the one element a screen-reader user actually drives (UX review).
-      accessibilityValue={{ min, max: hi, now: value, text: describeOf(value) }}
-      accessibilityActions={[
-        { name: 'increment' },
-        { name: 'decrement' },
-        // Typing is the fastest way to a far line — fifty swipes reach 250 on
-        // a step-5 ruler — so it is an action on the adjustable itself, which
-        // hides its children from VoiceOver (UX review, 2026-10-09).
-        ...(parseTyped ? [{ name: 'edit', label: 'Type a line' }] : []),
-      ]}
-      onAccessibilityAction={(e) => {
-        if (e.nativeEvent.actionName === 'edit') {
-          openDraft();
-          return;
-        }
-        // One STOP per action, so VoiceOver moves the line by the same amount
-        // a drag notch does. A hard-coded 1 here would leave a step-5 ruler
-        // reachable only by touch, at four values it can never settle on.
-        // stepLineFrom lands a typed, off-grid line on the grid first, so
-        // the next stop is one VoiceOver can keep stepping from.
-        const next = stepLineFrom(value, e.nativeEvent.actionName === 'increment' ? 1 : -1, step);
-        if (next >= min && next <= hi) pickTick(next);
-      }}
-    >
-      {width > 0 ? (
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={tickW}
-          decelerationRate="fast"
-          contentOffset={{ x: offsetFor(value), y: 0 }}
-          contentContainerStyle={{ paddingHorizontal: sidePad }}
-          onMomentumScrollEnd={settle}
-          onScrollEndDrag={settle}
-          onScrollBeginDrag={() => {
-            const next = clearSettleSkip({
-              value: reportedRef.current,
-              skipNextSettle: skipSettleRef.current,
-            });
-            skipSettleRef.current = next.skipNextSettle;
-          }}
+      <View style={styles.rulerStrip}>
+        <TapGestureHandler
+          ref={tapRef}
+          enabled={parseTyped != null && draft == null}
+          maxDurationMs={THRESHOLD_TAP_MAX_MS}
+          maxDist={THRESHOLD_TAP_MAX_DIST}
+          simultaneousHandlers={scrollRef}
+          onHandlerStateChange={onBubbleTap}
         >
-          {Array.from({ length: count }, (_, i) => {
-            const v = stopAt(i, scale);
-            const labeled = v % labelUnits === 0 || v === min || v === hi;
-            return (
-              <Pressable
-                key={v}
-                onPress={() => pickTick(v)}
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                style={[styles.tickCol, { width: tickW }]}
+          <View
+            style={[styles.rulerWrap, { height: rulerChromeHeight(fontScale) }]}
+            collapsable={false}
+            onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+            // Not while typing, so VoiceOver can reach the field.
+            accessible={draft == null}
+            accessibilityRole="adjustable"
+            accessibilityLabel={a11yLabel}
+            // `text` overrides `now` for VoiceOver, which is the point: the stop
+            // index is meaningless to a user, and in Over mode the face is 0.5
+            // where the index is 1. It announces the whole BET rather than the bare
+            // face, because the side and the stat live on other elements and this is
+            // the one element a screen-reader user actually drives (UX review).
+            accessibilityValue={{ min, max: hi, now: value, text: describeOf(value) }}
+            accessibilityActions={[
+              { name: 'increment' },
+              { name: 'decrement' },
+              // Typing is the fastest way to a far line — fifty swipes reach 250 on
+              // a step-5 ruler — so it is an action on the adjustable itself, which
+              // hides its children from VoiceOver (UX review, 2026-10-09).
+              ...(parseTyped ? [{ name: 'edit', label: 'Type a line' }] : []),
+            ]}
+            onAccessibilityAction={(e) => {
+              if (e.nativeEvent.actionName === 'edit') {
+                openDraft();
+                return;
+              }
+              // One STOP per action, so VoiceOver moves the line by the same amount
+              // a drag notch does. A hard-coded 1 here would leave a step-5 ruler
+              // reachable only by touch, at four values it can never settle on.
+              // stepLineFrom lands a typed, off-grid line on the grid first, so
+              // the next stop is one VoiceOver can keep stepping from.
+              const next = stepLineFrom(value, e.nativeEvent.actionName === 'increment' ? 1 : -1, step);
+              if (next >= min && next <= hi) pickTick(next);
+            }}
+          >
+            {width > 0 ? (
+              <GestureScrollView
+                ref={scrollRef}
+                simultaneousHandlers={tapRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={tickW}
+                decelerationRate="fast"
+                contentOffset={{ x: offsetFor(value), y: 0 }}
+                contentContainerStyle={{ paddingHorizontal: sidePad }}
+                onMomentumScrollEnd={settle}
+                onScrollEndDrag={settle}
+                onScrollBeginDrag={() => {
+                  // A drag is the finger taking the strip. Drop an open draft
+                  // so the settle lands on the dragged stop, and so the blur
+                  // that follows does not commit the half-typed number.
+                  if (editingRef.current) {
+                    commitTaken.current = true;
+                    editingRef.current = false;
+                    setForceSelect(false);
+                    setDraft(null);
+                    onNotice?.(null);
+                    Keyboard.dismiss();
+                  }
+                  skipCountRef.current = 0;
+                  const next = clearSettleSkip({
+                    value: reportedRef.current,
+                    skipNextSettle: skipSettleRef.current,
+                  });
+                  skipSettleRef.current = next.skipNextSettle;
+                }}
               >
-                <View style={[styles.tick, labeled && styles.tickMajor]} />
-                {/* The label is wider than its tick column — centre it with a
-                    negative margin so it can't clip, and only label ticks far
-                    enough apart (labelEvery) that neighbours can't collide. */}
-                <Text
-                  style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
-                  numberOfLines={1}
-                  // The box is a fixed LABEL_W, so a face that outgrows it
-                  // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
-                  // truncation, it reads as a different number. Capping the
-                  // scale is the sanctioned trade for numerals in a dense
-                  // strip (UX_REVIEW §5); it matters more now that the wide
-                  // branch labels EVERY stop on a five-character Over face.
-                  maxFontSizeMultiplier={1.3}
+                {Array.from({ length: count }, (_, i) => {
+                  const v = stopAt(i, scale);
+                  const labeled = v % labelUnits === 0 || v === min || v === hi;
+                  return (
+                    // VoiceOver: the strip is one adjustable, so a tick is not its
+                    // own control (accessible={false}). The bubble beside it is.
+                    <Pressable
+                      key={v}
+                      onPress={() => {
+                        if (suppressTick.current) return;
+                        pickTick(v);
+                      }}
+                      accessible={false}
+                      accessibilityElementsHidden
+                      importantForAccessibility="no-hide-descendants"
+                      style={[styles.tickCol, { width: tickW }]}
+                    >
+                      <View style={[styles.tick, labeled && styles.tickMajor]} />
+                      {/* The label is wider than its tick column — centre it with a
+                          negative margin so it can't clip, and only label ticks far
+                          enough apart (labelEvery) that neighbours can't collide. */}
+                      <Text
+                        style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
+                        numberOfLines={1}
+                        // The box is a fixed LABEL_W, so a face that outgrows it
+                        // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
+                        // truncation, it reads as a different number. Capping the
+                        // scale is the sanctioned trade for numerals in a dense
+                        // strip (UX_REVIEW §5); it matters more now that the wide
+                        // branch labels EVERY stop on a five-character Over face.
+                        maxFontSizeMultiplier={1.3}
+                      >
+                        {labeled ? faceOf(v) : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </GestureScrollView>
+            ) : null}
+            {/* The bubble is pointerEvents none so a drag that starts on the
+                number reaches the strip. A quick tap is the gesture handler
+                on the wrap: it fails past THRESHOLD_TAP_MAX_DIST, and the
+                scroll keeps the gesture. The field takes touch only while open. */}
+            <View pointerEvents="box-none" style={styles.centerMarker}>
+              <View pointerEvents="none" style={styles.centerLine} />
+              {draft != null ? (
+                <TextInput
+                  value={draft}
+                  onChangeText={onType}
+                  onEndEditing={commitDraft}
+                  onBlur={commitDraft}
+                  onSubmitEditing={commitDraft}
+                  selection={draftSelection}
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                  autoFocus
+                  selectTextOnFocus
+                  maxLength={6}
+                  inputAccessoryViewID={Platform.OS === 'ios' ? RULER_ACCESSORY_ID : undefined}
+                  style={[
+                    styles.thresholdBubble,
+                    styles.tickValueActive,
+                    styles.thresholdInput,
+                    { width: thresholdFieldWidth(fontScale), maxWidth: thresholdFieldWidth(fontScale) },
+                  ]}
+                  accessibilityLabel={`Type a ${a11yLabel}, now ${describeOf(value)}`}
+                />
+              ) : (
+                <View
+                  pointerEvents="none"
+                  style={[styles.thresholdBubble, bubblePressed && styles.pressed]}
+                  onLayout={onBubbleLayout}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
                 >
-                  {labeled ? faceOf(v) : ''}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : null}
-      {/* Fixed centre marker + the selected value, over the scrolling strip.
-          Touch passes through it to the strip, so a drag can start on the
-          number; the field takes touch only while it is open. */}
-      <View pointerEvents="box-none" style={styles.centerMarker}>
-        <View pointerEvents="none" style={styles.centerLine} />
-        {draft != null ? (
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            onEndEditing={commitDraft}
-            onSubmitEditing={commitDraft}
-            placeholder={faceOf(value)}
-            placeholderTextColor={colors.textSecondary}
-            keyboardType="decimal-pad"
-            returnKeyType="done"
-            autoFocus
-            maxLength={6}
-            inputAccessoryViewID={Platform.OS === 'ios' ? RULER_ACCESSORY_ID : undefined}
-            style={[styles.tickValueBox, styles.tickValueActive, styles.tickValueInput]}
-            accessibilityLabel={`Type a ${a11yLabel}, now ${describeOf(value)}`}
-          />
-        ) : (
-          <View pointerEvents="none" style={styles.tickValueBox}>
-            <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
+                  <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
+                  {parseTyped ? <Ionicons name="pencil" size={12} color={colors.tint} /> : null}
+                </View>
+              )}
+            </View>
           </View>
-        )}
+        </TapGestureHandler>
+        {parseTyped && draft == null ? (
+          <View
+            accessible
+            accessibilityRole="button"
+            accessibilityLabel={thresholdBubbleLabel(faceOf(value), statLabel)}
+            accessibilityHint={THRESHOLD_TYPE_HINT}
+            accessibilityActions={[{ name: 'activate' }]}
+            onAccessibilityAction={(e) => {
+              if (e.nativeEvent.actionName === 'activate') openDraft();
+            }}
+            onAccessibilityTap={openDraft}
+            pointerEvents="none"
+            style={[
+              styles.thresholdA11y,
+              bubbleFrame
+                ? {
+                    left: bubbleFrame.x,
+                    top: bubbleFrame.y,
+                    width: Math.max(bubbleFrame.width, THRESHOLD_BUBBLE_W),
+                    height: Math.max(bubbleFrame.height, THRESHOLD_BUBBLE_H),
+                  }
+                : null,
+            ]}
+          />
+        ) : null}
       </View>
-    </View>
-      {/* Its own 44pt control beside the strip, not the centre number: a
-          button there swallowed the drag where a thumb lands (UX review). The
-          ruler's VoiceOver 'edit' action is the same path from the
-          adjustable itself. */}
-      {parseTyped ? (
-        <Pressable
-          onPress={openDraft}
-          accessibilityRole="button"
-          accessibilityLabel={`Type a ${a11yLabel}`}
-          style={({ pressed }) => [styles.typeLineBtn, pressed && styles.pressed]}
-        >
-          <Ionicons name="pencil" size={16} color={colors.tint} />
-        </Pressable>
-      ) : null}
       {parseTyped && Platform.OS === 'ios' ? (
         <InputAccessoryView nativeID={RULER_ACCESSORY_ID}>
-          <View style={styles.doneBar}>
-            <Pressable
-              onPress={() => Keyboard.dismiss()}
-              accessibilityRole="button"
-              accessibilityLabel="Done"
-              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
-            >
-              <Text style={styles.doneText}>Done</Text>
-            </Pressable>
-          </View>
+          <ThresholdDoneBar onCancel={cancelDraft} onDone={commitDraft} />
         </InputAccessoryView>
       ) : null}
     </View>
@@ -3336,7 +3737,16 @@ function fmtValue(value: number, basis: Basis): string {
  *  this sits in a 62pt column: "Under 224.5" wrapped to two lines and made one
  *  row of a 25-row board taller than its neighbours (UX review, 2026-09-06).
  *  The pill's accessibilityLabel keeps the full words. */
-export function offLineCaption(line: number, side: StatsOddsSide, mode: HitMode): string {
+export function offLineCaption(
+  line: number,
+  side: StatsOddsSide,
+  mode: HitMode,
+  sport?: string,
+): string {
+  if (sport === 'NHL') {
+    const plain = nhlOffLineCount(line, side);
+    if (plain != null) return plain;
+  }
   return modeLineLabel(line, side, mode, true);
 }
 
@@ -3346,6 +3756,7 @@ function OddsCell({
   playerName,
   statLabel,
   hitMode,
+  sport,
   dayLabel,
   onPress,
 }: {
@@ -3355,6 +3766,8 @@ function OddsCell({
   statLabel: string;
   /** Which idiom the board is speaking, for the off-line caption. */
   hitMode: HitMode;
+  /** NHL names an off-line number "3 or more". Other sports keep "3+". */
+  sport?: string;
   /** "MON" — the day of THIS quote's game, when it is not the day the column
    *  header names. Null on the common row, so an all-Sunday board is silent
    *  about the day exactly as it was before the odds window widened. */
@@ -3390,20 +3803,20 @@ function OddsCell({
   // inherits nothing from the row — without the player and the stat it is 25
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  const priceText = formatAmerican(quote.price).replace(/-/g, MINUS);
+  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
   // translation (UX review). statsOdds offLine.
   //
-  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first because the
-  // caption is `numberOfLines={1}` inside a container fixed at 62-93pt while
-  // the text scales with Dynamic Type: at accessibility sizes the tail is what
-  // truncates. Losing "MON" costs the reader a schedule fact; losing "3+" hides
-  // that the price is for a DIFFERENT LINE than the ruler's, i.e. a different
-  // bet. Order the sacrifice deliberately (UX review, 2026-09-12). VoiceOver
-  // reads both regardless — see `label` above.
-  const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;
+  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first. The column
+  // is 62-93pt and the text scales with Dynamic Type. NHL may use a second
+  // line so "3 or fewer" is not ellipsized. Other sports stay on one line:
+  // "Under 224.5" wrapping made one row taller than its neighbours (UX review,
+  // 2026-09-12). The day is what a third line would have carried.
+  // VoiceOver reads both regardless — see `label` above.
+  const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   return (
     <Pressable
@@ -3427,7 +3840,7 @@ function OddsCell({
           style={[styles.oddsText, { color: filled ? c.fg : colors.textPrimary }]}
           numberOfLines={1}
         >
-          {formatAmerican(quote.price)}
+          {priceText}
         </Text>
         <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>
@@ -3437,7 +3850,7 @@ function OddsCell({
         // present, regular when the caption is only a day.
         <Text
           style={[styles.oddsCaption, !lineCaption && styles.oddsCaptionDay]}
-          numberOfLines={1}
+          numberOfLines={sport === 'NHL' ? 2 : 1}
         >
           {caption}
         </Text>
@@ -3515,6 +3928,7 @@ function MatchupCell({
 /** Compact column header sitting flush above the leaderboard (HOF-style). */
 function ColumnHeader({
   rightLabel,
+  sorted = true,
   showOdds,
   oddsLabel,
   oddsDateLabel,
@@ -3522,6 +3936,8 @@ function ColumnHeader({
   matchupTooltip,
 }: {
   rightLabel: string;
+  /** False when the ranked list is empty. A line-only board is not sorted. */
+  sorted?: boolean;
   showOdds: boolean;
   /** Short name of the book the column prints ("FD", "DK"). */
   oddsLabel: string;
@@ -3547,12 +3963,13 @@ function ColumnHeader({
           not. */}
       <View
         style={styles.colHeaderSorted}
-        accessibilityLabel={`${rightLabel}, sorted highest first`}
+        accessible={!sorted}
+        accessibilityLabel={sorted ? `${rightLabel}, sorted highest first` : rightLabel}
       >
         <Text style={[styles.colHeaderRight, styles.colHeaderSortLabel]} numberOfLines={1}>
           {rightLabel.toUpperCase()}
         </Text>
-        <Ionicons name="arrow-down" size={9} color={colors.textTertiary} />
+        {sorted ? <Ionicons name="arrow-down" size={9} color={colors.textTertiary} /> : null}
       </View>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
@@ -3596,6 +4013,7 @@ function LeaderRow({
   showOdds,
   statLabel,
   hitMode,
+  sport,
   oddsDay,
   onOddsPress,
   tappable,
@@ -3619,6 +4037,7 @@ function LeaderRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  sport?: string;
   /** Weekday of the quote's game, when it is not the day the header names. */
   oddsDay?: string | null;
   onOddsPress?: () => void;
@@ -3667,6 +4086,7 @@ function LeaderRow({
           playerName={row.player_name ?? ''}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -3706,8 +4126,10 @@ function LineOnlyRow({
   showMatchup,
   statLabel,
   hitMode,
+  sport,
   oddsDay,
   onOddsPress,
+  omitNoGames = false,
 }: {
   name: string;
   subline: string | null;
@@ -3717,8 +4139,11 @@ function LineOnlyRow({
   showMatchup: boolean;
   statLabel: string;
   hitMode: HitMode;
+  sport?: string;
   oddsDay?: string | null;
   onOddsPress?: () => void;
+  /** The log itself is empty. "no games" would describe the feed as the player. */
+  omitNoGames?: boolean;
 }) {
   const body = (
     <>
@@ -3726,7 +4151,11 @@ function LineOnlyRow({
       <View
         style={styles.rowMain}
         accessible
-        accessibilityLabel={lineOnlyRowLabel(name, subline ? sublineSpoken(subline) : null)}
+        accessibilityLabel={lineOnlyRowLabel(
+          name,
+          subline ? sublineSpoken(subline) : null,
+          omitNoGames ? '' : undefined,
+        )}
       >
         <Text style={styles.rowName} numberOfLines={1}>
           {name}
@@ -3737,9 +4166,13 @@ function LineOnlyRow({
           </Text>
         ) : null}
       </View>
-      <View style={styles.valueWrap}>
+      <View
+        style={styles.valueWrap}
+        accessibilityElementsHidden={omitNoGames}
+        importantForAccessibility={omitNoGames ? 'no-hide-descendants' : 'auto'}
+      >
         <Text style={[styles.value, { color: colors.textSecondary }]}>—</Text>
-        <Text style={styles.valueLabel}>no games</Text>
+        {omitNoGames ? null : <Text style={styles.valueLabel}>no games</Text>}
       </View>
       {showOdds ? (
         <OddsCell
@@ -3748,6 +4181,7 @@ function LineOnlyRow({
           playerName={name}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -3772,6 +4206,7 @@ function HitRateRow({
   showOdds,
   statLabel,
   hitMode,
+  sport,
   colorful,
   thinSample,
   oddsDay,
@@ -3798,6 +4233,7 @@ function HitRateRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  sport?: string;
   /** Weekday of the quote's game, when it is not the day the header names. */
   oddsDay?: string | null;
   onOddsPress?: () => void;
@@ -3856,6 +4292,7 @@ function HitRateRow({
           playerName={player.player_name}
           statLabel={statLabel}
           hitMode={hitMode}
+          sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
         />
@@ -4000,6 +4437,12 @@ const styles = StyleSheet.create({
   },
 
   // ── Line picker ──
+  // The row, and on Android and web the Cancel/Done bar under it. The bar
+  // is a sibling of the row so it is as wide as the row, not as wide as the
+  // ruler column between the direction pill and the book line.
+  lineStack: {
+    alignSelf: 'stretch',
+  },
   lineRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4039,23 +4482,20 @@ const styles = StyleSheet.create({
   },
   rulerRow: {
     flex: 1,
+    minWidth: 164,
+    justifyContent: 'center',
+  },
+  rulerStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 164,
-  },
-  // The typed-line control. 44pt square, the HIG floor, tinted like a link.
-  typeLineBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   rulerWrap: {
     flex: 1,
     // A floor, so nothing sharing the row can shrink the strip out of
-    // existence. Below this the ticks are unusable anyway.
+    // existence. Below this the ticks are unusable anyway. The rendered
+    // height comes from rulerChromeHeight so a 44pt bubble is not clipped.
     minWidth: 120,
-    height: 58,
+    minHeight: 72,
     justifyContent: 'center',
   },
   tickCol: {
@@ -4101,42 +4541,97 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     backgroundColor: colors.tint,
   },
-  tickValueBox: {
+  // The value itself is the field. Navy outline plus the pencil say it can
+  // be typed; the box is at least 64×44. pointerEvents stays none on the
+  // resting bubble so a drag still reaches the strip.
+  thresholdBubble: {
+    minWidth: THRESHOLD_BUBBLE_W,
+    minHeight: THRESHOLD_BUBBLE_H,
     marginTop: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: spacing.sm,
     borderRadius: radii.sm,
     backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
+    borderWidth: 2,
+    borderColor: colors.tint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  // Width is thresholdFieldWidth(fontScale), applied on the field. A bare
+  // width here is the 1× bubble; the live style replaces it so 2× text does
+  // not keep a 64pt box or fall back to the browser's default input width.
+  thresholdInput: {
+    width: THRESHOLD_BUBBLE_W,
+    maxWidth: THRESHOLD_BUBBLE_W,
+    textAlign: 'center',
+    paddingVertical: 0,
+    alignSelf: 'center',
+    flexGrow: 0,
+  },
+  // Sits on the bubble for VoiceOver. pointerEvents none: a real button
+  // here swallowed the drag. Activation is onAccessibilityTap.
+  thresholdA11y: {
+    position: 'absolute',
+    width: THRESHOLD_BUBBLE_W,
+    height: THRESHOLD_BUBBLE_H,
   },
   tickValueActive: {
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  tickValueInput: {
-    minWidth: 56,
-    textAlign: 'center',
-    paddingVertical: 2,
-  },
   doneBar: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    gap: spacing.lg,
     backgroundColor: colors.bgGrouped,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
+  // "Done" is about the width of the word. minWidth plus the same 8pt
+  // hit slop the other accessory bars use keeps a 44pt target, and the
+  // 16pt gap between Cancel and Done is where the two slops meet.
   doneBtn: {
     minHeight: 44,
+    minWidth: 44,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   doneText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.tint,
+  },
+  cancelText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  thresholdChrome: {
+    flexShrink: 1,
+  },
+  thresholdChromeScroll: {
+    flexGrow: 0,
+  },
+  // Neutral navy, with the info icon. Not a warning colour: a clamp is a
+  // correction, and red would read as the bet failing.
+  lineNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+  },
+  lineNoticeText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    lineHeight: font.size.footnote * 1.35,
   },
   // The book's half-point line, sitting at the end of the ruler row. A
   // footnote, not a headline: it qualifies the number the ruler is showing.
@@ -4490,7 +4985,7 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.sm,
     backgroundColor: colors.avoidSoft,

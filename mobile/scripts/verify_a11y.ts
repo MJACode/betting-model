@@ -183,7 +183,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
-  ['src/screens/StatsScreen.tsx', 'retryBtn,pressed', 1], // 39.5pt
 ];
 
 function walk(d: string, out: string[] = []): string[] {
@@ -636,7 +635,11 @@ check('PickCard: "Game started" is spoken once — in cardLabel (gameStartedSpee
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('Pick Detail: the started card speaks gameStartedSpeech, like the card (#847)', /styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)\}/.test(detail));
 check('PicksHome: "—" header counts speak "count not available", like the sub-tabs (#845)', /<Text style=\{styles\.subtitle\} accessibilityLabel=\{unknownCountSpeech\(unitsSpeech\(subtitle\)\)\}>/.test(read('src/screens/PicksHomeScreen.tsx')));
-check('TrackRecord: "— settled picks" speaks "count not available"', /accessibilityLabel=\{notLoaded \? unknownCountSpeech\('— settled picks'\) : undefined\}/.test(read('src/screens/TrackRecordScreen.tsx')));
+check('TrackRecord hero is one stop, units first, and a missing count still says so',
+  /accessibilityRole="summary"/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /accessibilityLabel=\{heroLabel\}/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /unknownCountSpeech\('— settled picks'\)/.test(read('src/lib/recordHero.ts')) &&
+  /Units unavailable/.test(read('src/lib/recordHero.ts')));
 // The sentence itself lives in lib/heroPriceText.ts ("looks off", or for an
 // old price which book has not updated it and since when); the pytest pin
 // and verify_pick_cta run it.
@@ -669,8 +672,15 @@ check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 4
 const errorState = read('src/components/ErrorState.tsx');
 check('ErrorState speaks retryAccessibilityLabel, not "Try again loading"',
   /retryAccessibilityLabel\(retryLabel, what\)/.test(errorState) && !/\$\{retryLabel\} loading \$\{what\}/.test(errorState));
+check('Stats threshold bubble: the name is the label and the gesture is the hint',
+  /accessibilityLabel=\{thresholdBubbleLabel\(faceOf\(value\), statLabel\)\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityHint=\{THRESHOLD_TYPE_HINT\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityActions=\{\[\{ name: 'activate' \}\]\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /actionName === 'activate'\) openDraft\(\)/.test(read('src/screens/StatsScreen.tsx')) &&
+    /return `Threshold \$\{value\}`;/.test(read('src/lib/lineRuler.ts')) &&
+    /export const THRESHOLD_TYPE_HINT = 'double tap to type a value';/.test(read('src/lib/lineRuler.ts')));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
-  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
+  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'RecordInfoSheet', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);
     return /<View style=\{styles\.backdrop\}>/.test(s) && !/<Pressable\s+style=\{styles\.backdrop\}/.test(s);
   }));
