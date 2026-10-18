@@ -1242,6 +1242,12 @@ export interface BoardHandoff {
    * the one stamped at the lock.
    */
   verb: 'Best' | 'Bet' | 'Open';
+  /**
+   * Books still at the line this button is choosing among. One is "Bet now".
+   * More than one is "Best now". A moved record chip is not in the count:
+   * that line is a different bet. Live is one (DraftKings).
+   */
+  bookCount: number;
 }
 
 export function bestHandoffForPick(
@@ -1254,7 +1260,7 @@ export function bestHandoffForPick(
     // No live number to quote after the bet: open the book without one,
     // rather than print the lock as if it were still on offer.
     if (hero?.untracked) {
-      return { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open' };
+      return { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open', bookCount: 1 };
     }
     const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
     if (price == null) return null;
@@ -1263,6 +1269,7 @@ export function bestHandoffForPick(
       price,
       link: hero?.link ?? pick.dk_bet_link ?? null,
       verb: 'Bet',
+      bookCount: 1,
     };
   }
   // No hand-off to a book whose newest price is older than the bound
@@ -1301,19 +1308,26 @@ export function bestHandoffForPick(
   // quoting the scored line wins. Otherwise a side link on the current row
   // is that quote. Signals names the line on its button. Today does not:
   // todayBoardHandoff turns this Bet into Open, so the button does not
-  // read "Bet DK −110" and open the new line. With no current link the
+  // read "Bet now · DK −110" and open the new line. With no current link the
   // button opens the book and does not use the lock's slip.
-  if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book) {
+  // bookCount is the books still at the line. The moved record chip is a
+  // different bet, so it is not one of the books being compared — including
+  // when another book ranked ahead of it.
+  let bookCount = quotes.length;
+  if (hero != null && lineMoved) {
     const stillThere = quotes.filter((q) => !(q.isRecord && q.bookmaker === hero.book));
-    if (stillThere.length > 0) {
-      const ranked = rankQuotes(stillThere.map(({ isBest: _isBest, ...q }) => q));
-      best = ranked.find((q) => q.isBest) ?? ranked[0];
-    } else {
-      const currentLink = snapshotSideLink(pick, bookRows, hero.book);
-      if (currentLink && hero.price != null) {
-        return { bookmaker: hero.book, price: hero.price, link: currentLink, verb: 'Bet' };
+    bookCount = stillThere.length > 0 ? stillThere.length : 1;
+    if (best.isRecord && best.bookmaker === hero.book) {
+      if (stillThere.length > 0) {
+        const ranked = rankQuotes(stillThere.map(({ isBest: _isBest, ...q }) => q));
+        best = ranked.find((q) => q.isBest) ?? ranked[0];
+      } else {
+        const currentLink = snapshotSideLink(pick, bookRows, hero.book);
+        if (currentLink && hero.price != null) {
+          return { bookmaker: hero.book, price: hero.price, link: currentLink, verb: 'Bet', bookCount: 1 };
+        }
+        return { bookmaker: hero.book, price: null, link: null, verb: 'Open', bookCount: 1 };
       }
-      return { bookmaker: hero.book, price: null, link: null, verb: 'Open' };
     }
   }
   const verb: 'Best' | 'Bet' =
@@ -1330,6 +1344,7 @@ export function bestHandoffForPick(
       price: hero.price,
       link: hero.link,
       verb,
+      bookCount,
     };
   }
   return {
@@ -1337,6 +1352,7 @@ export function bestHandoffForPick(
     price: best.price,
     link: best.link,
     verb,
+    bookCount,
   };
 }
 
@@ -1346,10 +1362,10 @@ export function bestHandoffForPick(
  * When the deciding book has moved its line but not its price, and no
  * other book is still at the scored line, `bestHandoffForPick` returns
  * a Bet whose link is the current row — the new line, at the old price.
- * Putting that on Today reads "Bet DK −110" and opens a different bet.
+ * Putting that on Today reads "Bet now · DK −110" and opens a different bet.
  * This case is the existing Open hand-off: no price, and no slip link.
- * A book still at the scored line is unchanged, including "Best now".
- * Signals names the line and does not call this.
+ * A book still at the scored line is unchanged. The button word is bookCount,
+ * not this conversion. Signals names the line and does not call this.
  */
 export function todayBoardHandoff(
   handoff: BoardHandoff | null,
@@ -1365,7 +1381,7 @@ export function todayBoardHandoff(
     handoff.price != null &&
     handoff.price === hero.price
   ) {
-    return { bookmaker: handoff.bookmaker, price: null, link: null, verb: 'Open' };
+    return { bookmaker: handoff.bookmaker, price: null, link: null, verb: 'Open', bookCount: handoff.bookCount };
   }
   return handoff;
 }

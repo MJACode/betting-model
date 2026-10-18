@@ -238,8 +238,8 @@ export function PickCard({
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge)
     : null;
   // Today prints the lock and does not name a line. A line-only move with
-  // no book left at the picked line is Open: no "Bet DK −110", and no slip
-  // at the new line. Signals names the line, so it keeps `handoff`.
+  // no book left at the picked line is Open: no "Bet now · DK −110", and no
+  // slip at the new line. Signals names the line, so it keeps `handoff`.
   const boardHandoff = todayBoardHandoff(handoff, heroPrice);
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
@@ -345,23 +345,15 @@ export function PickCard({
     handoff.price != null &&
     handoff.price === heroPrice.price,
   );
-  // Open (no price) is not a different bet. A different book, a different
-  // price, or a line this button names that is not the lock is "Best now".
-  // A line-only move keeps the locked price, so the named line is the difference.
-  const buttonDiffers = Boolean(
-    handoff &&
-    handoff.price != null &&
-    heroPrice &&
-    (handoff.bookmaker !== heroPrice.book ||
-      handoff.price !== heroPrice.lockedPrice ||
-      ctaAtMovedLine),
-  );
+  // One bettable book is "Bet now". Several books that can be compared is
+  // "Best now". A missing price stays "Open …" inside the label helpers.
+  const signalsBestNow = (handoff?.bookCount ?? 0) > 1;
   const signalsCta = handoff
     ? signalsCtaLabel(
         bookLabel(handoff.bookmaker),
         handoff.price == null ? null : formatAmerican(handoff.price),
         ctaAtMovedLine ? signalsMovedLineText : null,
-        { bestNow: buttonDiffers },
+        { bestNow: signalsBestNow },
       )
     : null;
   const signalsCtaSpoken = handoff
@@ -369,7 +361,7 @@ export function PickCard({
         bookName(handoff.bookmaker),
         handoff.price == null ? null : formatAmerican(handoff.price),
         ctaAtMovedLine ? signalsMovedLineText : null,
-        { bestNow: buttonDiffers },
+        { bestNow: signalsBestNow },
       )
     : null;
   const signalsRiskUnits = formatUnits(stake.risk);
@@ -477,7 +469,7 @@ export function PickCard({
                   bookName(actionHandoff.bookmaker),
                   formatAmerican(actionHandoff.price),
                   null,
-                  { bestNow: actionHandoff.verb === 'Best' },
+                  { bestNow: (actionHandoff.bookCount ?? 0) > 1 },
                 ),
         }]
       : []),
@@ -773,7 +765,7 @@ export function PickCard({
                       bookName(boardHandoff.bookmaker),
                       formatAmerican(boardHandoff.price),
                       null,
-                      { bestNow: boardHandoff.verb === 'Best' },
+                      { bestNow: (boardHandoff.bookCount ?? 0) > 1 },
                     )
               }
               style={({ pressed }) => [
@@ -790,7 +782,7 @@ export function PickCard({
                   bookLabel(boardHandoff.bookmaker),
                   boardHandoff.price == null ? null : formatAmerican(boardHandoff.price),
                   null,
-                  { bestNow: boardHandoff.verb === 'Best' },
+                  { bestNow: (boardHandoff.bookCount ?? 0) > 1 },
                 )}
               </Text>
             </Pressable>
@@ -1609,7 +1601,10 @@ const styles = StyleSheet.create({
   // Not the DraftKings green and not colors.info.
   handoffNavy: {
     flexGrow: 1,
-    flexShrink: 1,
+    // The label keeps the price on the verb. Shrink would wrap "Bet now · DK
+    // −8.5 −105" inside the button beside Track and Slip; the row already
+    // wraps, so those two drop under a button that stays one line.
+    flexShrink: 0,
     minHeight: 44,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,

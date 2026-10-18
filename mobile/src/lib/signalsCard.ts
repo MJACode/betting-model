@@ -320,12 +320,11 @@ export function signalsPriceText(priceText: string, book: string): string {
 }
 
 /**
- * "Bet MGM −110" when the button is the decision book at the decision price.
- * "Best now · FD −105" when the button's book or price is not that hero
- * (`bestNow`): the same Best/Bet split as the Today card, with "now" because
- * the 22pt number is still the lock. `lineText` is the book's current line
- * when this button is a bet at that line and it is not the line in the
- * headline. No price → "Open <book>", never a made-up number.
+ * "Bet now · MGM −110" when one book is bettable (`bestNow` false).
+ * "Best now · FD −105" when several books can be compared (`bestNow`).
+ * `lineText` is the book's current line when this button is a bet at that
+ * line and it is not the line in the headline. No price → "Open <book>",
+ * never a made-up number.
  */
 export function signalsCtaLabel(
   book: string,
@@ -336,12 +335,13 @@ export function signalsCtaLabel(
   if (!priceText) return `Open ${book}`;
   const line = lineText ? `${trueMinus(lineText)} ` : '';
   const quote = `${book} ${line}${trueMinus(priceText)}`;
-  return opts?.bestNow ? `Best now · ${quote}` : `Bet ${quote}`;
+  return opts?.bestNow ? `Best now · ${quote}` : `Bet now · ${quote}`;
 }
 
 /**
  * The same button, as VoiceOver should say it. Full book name, no middle
- * dot: "Best now, FanDuel, −105". `book` here is the spoken name.
+ * dot: "Bet now, Caesars, −125" or "Best now, FanDuel, −105". `book` here
+ * is the spoken name.
  */
 export function signalsCtaSpeech(
   book: string,
@@ -350,7 +350,7 @@ export function signalsCtaSpeech(
   opts?: { bestNow?: boolean },
 ): string {
   if (!priceText) return `Open ${book}`;
-  const parts = [opts?.bestNow ? 'Best now' : 'Bet', book];
+  const parts = [opts?.bestNow ? 'Best now' : 'Bet now', book];
   if (lineText) parts.push(trueMinus(lineText));
   parts.push(trueMinus(priceText));
   return parts.join(', ');

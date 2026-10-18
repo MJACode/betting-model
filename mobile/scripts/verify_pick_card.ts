@@ -189,7 +189,8 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     'line-only move with a current slip link names the line and uses that link',
     linked?.bookmaker === 'draftkings' && linked.price === -110 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
       signalsCtaLabel(bookLabel(linked.bookmaker), formatAmerican(linked.price), sideLine) ===
-        `Bet DK ${MINUS}8.5 ${MINUS}110`,
+        `Bet now · DK ${MINUS}8.5 ${MINUS}110` &&
+      linked.bookCount === 1,
     JSON.stringify(linked),
   );
   const today = todayBoardHandoff(linked, hero);
@@ -213,7 +214,7 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   ], hero);
   check(
     'line-only move prefers a book still at the scored line',
-    shop?.bookmaker === 'betmgm' && shop.price === -112 && shop.link === 'mgm://7.5',
+    shop?.bookmaker === 'betmgm' && shop.price === -112 && shop.link === 'mgm://7.5' && shop.bookCount === 1,
     JSON.stringify(shop),
   );
   const shopToday = todayBoardHandoff(shop, hero);
@@ -279,7 +280,8 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     linked?.price === -105 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
       linked.link !== pick.dk_bet_link &&
       signalsCtaLabel(bookLabel(linked!.bookmaker), formatAmerican(linked!.price), sideLine) ===
-        `Bet DK ${MINUS}8.5 ${MINUS}105`,
+        `Bet now · DK ${MINUS}8.5 ${MINUS}105` &&
+      linked.bookCount === 1,
     JSON.stringify(linked),
   );
   const todayMovedPrice = todayBoardHandoff(linked, heroAmericanForPick(pick, row, linkedRows));
@@ -1266,15 +1268,18 @@ check(
     'price and book use a true minus',
     signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`,
   );
-  check('CTA names the best book, word is Bet', signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`);
-  check('CTA names the line when that bet is at a moved line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`);
+  check('one book: button is Bet now', signalsCtaLabel('MGM', '-110') === `Bet now · MGM ${MINUS}110`);
+  check('one book names the line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet now · DK ${MINUS}8.5 ${MINUS}105`);
+  check('one book VoiceOver is Bet now, book, price', signalsCtaSpeech('Caesars', '-125') === `Bet now, Caesars, ${MINUS}125`);
   check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
   check(
-    'a different book or price is Best now on the button',
+    'several books: Best now on the button and in VoiceOver',
     signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105` &&
       signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105` &&
       signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105` &&
-      !signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'),
+      signalsCtaSpeech('Caesars', '-125', null, { bestNow: true }) === `Best now, Caesars, ${MINUS}125` &&
+      !signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·') &&
+      !signalsCtaSpeech('Caesars', '-125').includes('·'),
   );
   check(
     'stake cell names units to bet and units to win',
@@ -1292,7 +1297,10 @@ check(
   check('the picked-at line is not under the hero', !card.includes('signalsPickedAtLine') && !/pickedAt:/.test(card));
   check(
     'Today uses the same Best now wording as Signals',
-    /bestNow: boardHandoff\.verb === 'Best'/.test(card) &&
+    /const signalsBestNow = \(handoff\?\.bookCount \?\? 0\) > 1/.test(card) &&
+      /bestNow: signalsBestNow/.test(card) &&
+      /bestNow: \(boardHandoff\.bookCount \?\? 0\) > 1/.test(card) &&
+      !card.includes('buttonDiffers') &&
       card.includes('const boardHandoff = todayBoardHandoff(handoff, heroPrice)') &&
       card.includes('openBookBetslip(boardHandoff.bookmaker, boardHandoff.link)') &&
       signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`,

@@ -198,11 +198,11 @@ const rows = [
 const hero = heroAmericanForPick(pick, latest({ over_price: -130 }), rows);
 eq([hero?.kind, hero?.price, hero?.book], ['now', -130, MODEL_BOOK], 'hero is Now DK -130');
 const h = bestHandoffForPick(pick, rows, hero);
-eq([h?.bookmaker, h?.price, h?.verb, h?.link], ['fanduel', -115, 'Best', 'fd://now'], 'M4 re-rank -> FD -115');
+eq([h?.bookmaker, h?.price, h?.verb, h?.link, h?.bookCount], ['fanduel', -115, 'Best', 'fd://now', 2], 'M4 re-rank -> FD -115');
 // Still DK when DK's CURRENT price is the best.
 const rows2 = [{ bookmaker: 'draftkings', over_price: -112, total_line: 8.5 }, { bookmaker: 'fanduel', over_price: -115, total_line: 8.5 }];
 const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, latest({ over_price: -112 }), rows2));
-eq([h2?.bookmaker, h2?.price, h2?.verb], [MODEL_BOOK, -112, 'Bet'], 'DK now -112 beats FD -115');
+eq([h2?.bookmaker, h2?.price, h2?.verb, h2?.bookCount], [MODEL_BOOK, -112, 'Bet', 2], 'DK now -112 beats FD -115, two books');
 """
     proc = subprocess.run(
         [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
@@ -616,7 +616,8 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     cta_block = re.search(r"const ctaAtMovedLine = Boolean\((.*?)\);", card, re.S)
     assert cta_block and "kind === 'now'" not in cta_block.group(1)
     markets = _read(LIB / "markets.ts")
-    assert "if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book)" in markets
+    assert "if (hero != null && lineMoved)" in markets
+    assert "if (best.isRecord && best.bookmaker === hero.book)" in markets
     assert "else if (hero.kind !== 'now')" not in markets
     assert "heroPrice.stale || heroPrice.untracked" in card
     assert "Stake unavailable" in card and ">Stake<" not in card
@@ -625,8 +626,12 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "flexBasis: '30%'" in card and "maxWidth: '32%'" in card
     assert "flexBasis: '46%'" not in card
     assert "flexBasis: '100%'" not in card
-    assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine" not in card
-    assert "bestNow: boardHandoff.verb === 'Best'" in card
+    assert "signalsPickedAtLine" not in card
+    assert "const signalsBestNow = (handoff?.bookCount ?? 0) > 1" in card
+    assert "bestNow: signalsBestNow" in card
+    assert "bestNow: (boardHandoff.bookCount ?? 0) > 1" in card
+    assert "bestNow: (actionHandoff.bookCount ?? 0) > 1" in card
+    assert "buttonDiffers" not in card
     assert "const boardHandoff = todayBoardHandoff(handoff, heroPrice)" in card
     assert "openBookBetslip(boardHandoff.bookmaker, boardHandoff.link)" in card
     assert "export function todayBoardHandoff" in markets
@@ -634,8 +639,7 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win'" in stake
     assert "SIGNALS_STAKE_FORM === 'single'" not in stake
     assert "SIGNALS_STAKE_FORM === 'risk-win'" in stake
-    differs = re.search(r"const buttonDiffers = Boolean\((.*?)\);", card, re.S)
-    assert differs and "ctaAtMovedLine" in differs.group(1)
+    assert "ctaAtMovedLine ? signalsMovedLineText : null" in card
     assert "buttonNowSpoken" not in card
     assert "signalsMuted" in card and "tintSoft:" in _read(SRC / "lib" / "theme.ts")
     assert "colors.tintSoft" in _read(SRC / "components" / "TrackButton.tsx")
@@ -759,15 +763,17 @@ ok(!signalsCardSpeech({
   paused: null, gameStatus: null, sharp: null, started: null,
 }).includes('models agree'), 'agreement count is not on the card');
 ok(signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`, 'price book');
-ok(signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`, 'cta');
-ok(signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`, 'cta names a moved line');
+ok(signalsCtaLabel('MGM', '-110') === `Bet now · MGM ${MINUS}110`, 'one book');
+ok(signalsCtaLabel('DK', '-105', '-8.5') === `Bet now · DK ${MINUS}8.5 ${MINUS}105`, 'one book names a moved line');
+ok(signalsCtaSpeech('Caesars', '-125') === `Bet now, Caesars, ${MINUS}125`, 'one book spoken');
 ok(signalsCtaLabel('DK', null) === 'Open DK', 'no invented price');
-ok(signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`, 'best now');
-ok(signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105`, 'best now names the line');
+ok(signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`, 'several books');
+ok(signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105`, 'several books names the line');
 ok(signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105`, 'spoken best now');
 ok(signalsCtaSpeech('DraftKings', '-105', '-8.5', { bestNow: true }) === `Best now, DraftKings, ${MINUS}8.5, ${MINUS}105`, 'spoken best now names the line');
 ok(signalsCtaSpeech('DraftKings', null) === 'Open DraftKings', 'spoken open');
 ok(!signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'), 'spoken label has no middle dot');
+ok(!signalsCtaSpeech('Caesars', '-125').includes('·'), 'one book spoken has no middle dot');
 const moved = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DK' });
 const priced = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DK' });
 ok(moved === `DK line now ${MINUS}8.5 (${MINUS}110)`, 'moved line');

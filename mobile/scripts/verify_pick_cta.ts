@@ -181,12 +181,12 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   check('M4 setup: hero is Now DK −130', hero?.kind === 'now' && hero.price === -130 && hero.book === MODEL_BOOK, JSON.stringify(hero));
   const h = bestHandoffForPick(pick, rows, hero);
   check('M4: record DK −110 / now DK −130 / FD −115 → hand-off FD −115 ("Best"), never "Bet DK −130"',
-    h?.bookmaker === 'fanduel' && h.price === -115 && h.verb === 'Best' && h.link === 'fd://now', JSON.stringify(h));
+    h?.bookmaker === 'fanduel' && h.price === -115 && h.verb === 'Best' && h.link === 'fd://now' && h.bookCount === 2, JSON.stringify(h));
   // Still DK when DK's CURRENT price is the best one.
   const lo2 = latest({ over_price: -112 });
   const rows2: BookPricedRow[] = [{ bookmaker: 'draftkings', over_price: -112, total_line: 8.5 }, { bookmaker: 'fanduel', over_price: -115, total_line: 8.5 }];
   const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, lo2, rows2));
-  check('M4: DK now −112 beats FD −115 → "Bet DK −112" (the current number)', h2?.bookmaker === MODEL_BOOK && h2.price === -112 && h2.verb === 'Bet', JSON.stringify(h2));
+  check('M4: DK now −112 beats FD −115 → "Bet DK −112" (the current number)', h2?.bookmaker === MODEL_BOOK && h2.price === -112 && h2.verb === 'Bet' && h2.bookCount === 2, JSON.stringify(h2));
 }
 {
   // Third review (2026-10-09): DraftKings moved IN the bettor's favour. The
@@ -202,7 +202,7 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   check('DK better: setup, hero is Now DK −102', hero?.kind === 'now' && hero.price === -102 && hero.book === MODEL_BOOK, JSON.stringify(hero));
   const h = bestHandoffForPick(pick, rows, hero);
   check('DK better: locked DK −110 / now DK −102 / MGM −105 → "Bet DK −102", never "Best MGM −105"',
-    h?.bookmaker === MODEL_BOOK && h.price === -102 && h.verb === 'Bet', JSON.stringify(h));
+    h?.bookmaker === MODEL_BOOK && h.price === -102 && h.verb === 'Bet' && h.bookCount === 2, JSON.stringify(h));
   // DK's current price at a MOVED line is a different bet, so it is not
   // ranked against the books still at the pick's line.
   const moved: BookPricedRow[] = [
@@ -213,7 +213,15 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   check('DK better, moved line: setup, hero is Now DK −102 at 9', movedHero?.kind === 'now' && movedHero.price === -102 && movedHero.line === 9, JSON.stringify(movedHero));
   const hm = bestHandoffForPick(pick, moved, movedHero);
   check('DK better, moved line: DK −102 at 9 is not swapped in → "Best MGM −105"',
-    hm?.bookmaker === 'betmgm' && hm.price === -105 && hm.verb === 'Best', JSON.stringify(hm));
+    hm?.bookmaker === 'betmgm' && hm.price === -105 && hm.verb === 'Best' && hm.bookCount === 1, JSON.stringify(hm));
+  const twoAtLine: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -102, total_line: 9 },
+    { bookmaker: 'betmgm', over_price: -105, total_line: 8.5 },
+    { bookmaker: 'fanduel', over_price: -108, total_line: 8.5 },
+  ];
+  const ht = bestHandoffForPick(pick, twoAtLine, heroAmericanForPick(pick, latest({ over_price: -102, total_line: 9 }), twoAtLine));
+  check('moved line, two books still at 8.5 → bookCount 2',
+    ht?.bookCount === 2 && ht.bookmaker === 'betmgm' && ht.price === -105, JSON.stringify(ht));
   // The M4 case at a moved line does not re-rank DK's price into the
   // same-line list. The record line is gone, so the book still at 8.5 wins:
   // FD −115, never "Bet DK −130".
@@ -224,7 +232,7 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const m4Hero = heroAmericanForPick(pick, latest({ over_price: -130, total_line: 9 }), m4moved);
   const h4 = bestHandoffForPick(pick, m4moved, m4Hero);
   check('M4, moved line: record DK −110 / now DK −130 at 9 / FD −115 → "Best FD −115"',
-    h4?.bookmaker === 'fanduel' && h4.price === -115 && h4.verb === 'Best', JSON.stringify(h4));
+    h4?.bookmaker === 'fanduel' && h4.price === -115 && h4.verb === 'Best' && h4.bookCount === 1, JSON.stringify(h4));
   // Reviewer #965: DK's current price at a moved line must not enter the
   // same-line ranking, even when the record chip is the one that ranked first.
   const stealPick = mkPick({
@@ -243,7 +251,7 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const hs = bestHandoffForPick(stealPick, steal, stealHero);
   check(
     'moved line: DK −105 at −8.5 does not beat MGM −112 still at −7.5',
-    hs?.bookmaker === 'betmgm' && hs.price === -112 && hs.verb === 'Best' && hs.link === 'mgm://line',
+    hs?.bookmaker === 'betmgm' && hs.price === -112 && hs.verb === 'Best' && hs.link === 'mgm://line' && hs.bookCount === 1,
     JSON.stringify({ hero: stealHero, handoff: hs }),
   );
 }
@@ -430,6 +438,18 @@ check('PickCard: the label speaks the reason and the lock (heroPriceText)',
 check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(decisionEdge\(pick\)\)/.test(card) && /flagged \? 'EV —'/.test(card));
 check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEdge = pick\.signal_type !== 'BET';/.test(card) && /edgeSecondary: \{[\s\S]*?font\.size\.footnote[\s\S]*?colors\.textSecondary/.test(card));
 check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));
+check('PickCard CTA: Bet now for one book, Best now when several can be compared',
+  /const signalsBestNow = \(handoff\?\.bookCount \?\? 0\) > 1/.test(card) &&
+  /bestNow: signalsBestNow/.test(card) &&
+  /bestNow: \(boardHandoff\.bookCount \?\? 0\) > 1/.test(card) &&
+  /bestNow: \(actionHandoff\.bookCount \?\? 0\) > 1/.test(card) &&
+  !/buttonDiffers/.test(card));
+{
+  const only = bestHandoffForPick(mkPick(), [
+    { bookmaker: 'draftkings', over_price: -125, total_line: 8.5 },
+  ]);
+  check('one bettable book is bookCount 1', only?.bookCount === 1 && only.bookmaker === MODEL_BOOK && only.verb === 'Bet', JSON.stringify(only));
+}
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('PickDetail: hand-off (BookLinesRow) only while cta.handoff, started line otherwise',
   /cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));

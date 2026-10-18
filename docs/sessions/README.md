@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, bet-card CTA: Bet now for one book, Best now when several can be compared; Open DK unchanged |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 branch merged origin/master `b63f6396`; session logs keep both sides; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, X posts every released pre-game pick; X_POST_ALL_PICKS=0 restores free-pick-only; team hashtags, four-tag cap |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1: Today line-only move with no book at the picked line is Open DK and does not open the new line; stored headlines drop opener, wind, stake, and NEW tags |
