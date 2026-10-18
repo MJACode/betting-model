@@ -7,6 +7,7 @@ import {
   Keyboard,
   PixelRatio,
   Platform,
+  useWindowDimensions,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -30,6 +31,7 @@ import { HitModeSheet } from '@/components/HitModeSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
+import { AnytimeMatchupCell } from '@/components/AnytimeMatchupCell';
 import { BookMark } from '@/components/BookMark';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { InfoTooltip } from '@/components/InfoTooltip';
@@ -48,6 +50,7 @@ import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { usePreferredBooks, BOOKS } from '@/hooks/usePreferredBooks';
 import {
+  fetchPositionDefenseRanks,
   fetchPropLinesForDates,
   fetchRecentGames,
   fetchH2HStatValues,
@@ -57,7 +60,7 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { bookLabel, bookName, booksLabel, booksName, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
+import { bookLabel, bookLabelShort, bookName, booksLabel, booksName, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
@@ -110,6 +113,7 @@ import {
   HIT_RATE_PRESETS,
   HIT_RATE_STEP,
   buildSlateGameIndex,
+  fixtureForRow,
   h2hMatchups,
   nextGameByTeam,
   buildTonightSlate,
@@ -201,6 +205,29 @@ import {
   type RulerScale,
 } from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
+import {
+  ATD_COPY,
+  ATD_HIT_W,
+  ATD_MATCHUP_W,
+  ATD_ODDS_W,
+  ATD_POS_GROUPS,
+  ATD_STACK_BELOW_WIDTH,
+  ATD_STACK_FONT_SCALE,
+  anyBlended,
+  buildAnytimeMatchup,
+  namedGap,
+  compareAnytimeRows,
+  defenseKey,
+  isAnytimeTdBoard,
+  meetsTierFloor,
+  nextMatchupSort,
+  TIER_FLOORS,
+  type AnytimeMatchupView,
+  type DefenseRank,
+  type MatchupSort,
+  type MatchupTier,
+} from '@/lib/anytimeMatchup';
+import { nflPositionGroup } from '@/lib/positionVsOpponent';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
@@ -211,6 +238,7 @@ import type {
   HitRatePlayer,
   RecentGameRow,
   H2HStatValuesRow,
+  PositionDefenseRankRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   TeamSeasonStats,
@@ -398,6 +426,7 @@ export function StatsScreen() {
   // Every clock-derived cell on this board reads THIS value, so the start
   // time, the Live/Final label and the "is it still bettable" filter all age
   // together on one tick (useNow).
+  const windowWidth = useWindowDimensions().width;
   const now = useNow();
   const etDay = etDate(new Date(now));
   // The user came from the betslip to find a leg — banner + auto-return.
@@ -428,6 +457,11 @@ export function StatsScreen() {
   // better" is the question ("show me the soft spots"); nobody asks for the
   // hardest matchups on the board.
   const [minGrade, setMinGrade] = useState<MatchupGrade | null>(null);
+  const [minTier, setMinTier] = useState<MatchupTier | null>(null);
+  const [matchupOrder, setMatchupOrder] = useState<MatchupSort | null>(null);
+  const [defenseRanks, setDefenseRanks] = useState<Map<string, DefenseRank>>(new Map());
+  const [rankStatus, setRankStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [rankReload, setRankReload] = useState(0);
   // Default ON: a dash means we hold no rating for that defence, not that the
   // spot is bad, and on an NCAAF Saturday the ungraded rows are the FCS
   // visitors — the softest spots on the board. Excluding them by default made
@@ -916,6 +950,7 @@ export function StatsScreen() {
 
   const refreshBoard = useCallback(() => {
     setSlateReload((n) => n + 1);
+    setRankReload((n) => n + 1);
     void load();
   }, [load]);
 
@@ -1422,6 +1457,63 @@ export function StatsScreen() {
     () => buildSlateGameIndex(slateGames, slate, new Date(now).toISOString()),
     [slateGames, slate, now],
   );
+  const atdOn = isAnytimeTdBoard(sport, stat ? String(stat.key) : null);
+  const stackAtd =
+    atdOn &&
+    (PixelRatio.getFontScale() >= ATD_STACK_FONT_SCALE || windowWidth < ATD_STACK_BELOW_WIDTH);
+  const leagueHasGames = h2hIndex.size > 0 || slateGameIndex.size > 0;
+
+  // One read per position group. The board ranks every defense, not one
+  // player, so seven calls cover the slate. Leaving the board drops the
+  // tier cut and the matchup sort — they have no column anywhere else.
+  useEffect(() => {
+    if (!atdOn) {
+      setMinTier(null);
+      setMatchupOrder(null);
+      setDefenseRanks((prev) => (prev.size === 0 ? prev : new Map()));
+      setRankStatus('idle');
+      return;
+    }
+    let cancelled = false;
+    setRankStatus('loading');
+    const seasons = [SEASON, SEASON - 1];
+    Promise.all(
+      ATD_POS_GROUPS.map((group) =>
+        fetchPositionDefenseRanks(seasons, 'rush_rec_tds', group).then((rows) => ({ group, rows })),
+      ),
+    )
+      .then((groups) => {
+        if (cancelled) return;
+        const map = new Map<string, DefenseRank>();
+        for (const { group, rows } of groups) {
+          for (const r of rows) {
+            if (!r.defense) continue;
+            const avg = r.avg_allowed == null || r.avg_allowed === '' ? null : Number(r.avg_allowed);
+            map.set(defenseKey(group, r.defense), {
+              defense: r.defense,
+              avgAllowed: avg != null && Number.isFinite(avg) ? avg : null,
+              playerGames: Number(r.player_games) || 0,
+              seasonTeamGames: Number(r.season_team_games) || 0,
+              windowTeamGames: Number(r.window_team_games) || 0,
+              blended: r.blended === true,
+              rank: r.rank_most_allowed == null ? null : Number(r.rank_most_allowed),
+              teamsRanked: Number(r.teams_ranked) || 0,
+            });
+          }
+        }
+        setDefenseRanks(map);
+        setRankStatus('ok');
+      })
+      .catch((err: unknown) => {
+        if (cancelled || isAbortError(err)) return;
+        setDefenseRanks(new Map());
+        setRankStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [atdOn, rankReload]);
+
   const sublineFor = useCallback(
     (row: { team?: string | null; player_name?: string | null; opponent?: string | null }): string | null => {
       // UNDER H2H THE SUBLINE IS PART OF THE NUMBER, not decoration beside it.
@@ -1444,7 +1536,9 @@ export function StatsScreen() {
         }
         return `vs ${row.opponent}`;
       }
-      const match = slateGameFor(row, slateGameIndex);
+      // Slate date first, then the next game already loaded for H2H. A Sunday
+      // team opened on Thursday used to have no opponent line at all.
+      const match = fixtureForRow(row, slateGameIndex, h2hIndex);
       if (!match) return null;
       // Two rules, both learned the hard way (UX review, 2026-09-05):
       //   - the status is looked up by the key the row actually MATCHED on, not
@@ -1476,7 +1570,7 @@ export function StatsScreen() {
       const m = row.team ? matchupByTeam.get(row.team) : undefined;
       if (m) return gradeMatchup(sport, playerType, m);
       if (!gradesOnDefence(sport)) return null;
-      const match = slateGameFor(row, slateGameIndex);
+      const match = fixtureForRow(row, slateGameIndex, h2hIndex);
       const opponent = match?.game.opponent ?? null;
       const opp = opponent ? defenceByTeam.get(opponent) ?? null : null;
       return gradeOpponentDefence(
@@ -1486,7 +1580,47 @@ export function StatsScreen() {
         defenceSeason,
       );
     },
-    [matchupByTeam, sport, playerType, slateGameIndex, defenceByTeam, defenceSeason],
+    [matchupByTeam, sport, playerType, slateGameIndex, h2hIndex, defenceByTeam, defenceSeason],
+  );
+
+  /**
+   * The Anytime TD cell. Rank 1 is the defense that allows the most to this
+   * position. A missing opponent is a named dash, never the A–F grade.
+   * `inactive` stays unset: this board has no injury feed, so "Not playing"
+   * is not invented from a blank status.
+   */
+  const atdViewFor = useCallback(
+    (row: {
+      team?: string | null;
+      player_name?: string | null;
+      opponent?: string | null;
+      pos?: string | null;
+    }): AnytimeMatchupView => {
+      const status = rankStatus === 'error' ? 'error' : rankStatus === 'ok' ? 'ok' : 'loading';
+      const fixture = fixtureForRow(row, slateGameIndex, h2hIndex);
+      const named = row.opponent?.trim() ? row.opponent.trim() : null;
+      const opponent = named ?? fixture?.game.opponent ?? null;
+      const group = nflPositionGroup(row.pos);
+      const rank =
+        status === 'ok' && opponent && group
+          ? defenseRanks.get(defenseKey(group, opponent)) ?? null
+          : null;
+      return buildAnytimeMatchup({
+        status,
+        placement: {
+          pos: row.pos,
+          team: row.team,
+          opponent,
+          leagueHasGames,
+          // H2H names the opponent on the row even when the kickoff index has
+          // not caught up. A named opponent is a game.
+          teamHasGame: !!fixture || !!named,
+          inactive: null,
+        },
+        rank,
+      });
+    },
+    [rankStatus, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames],
   );
 
   /** Does the column have anything to say for this sport at all? */
@@ -1603,9 +1737,30 @@ export function StatsScreen() {
   // and last-N Hit Rates); null everywhere else, where the segment only picks
   // the chips and the caption under them says so. Never inferred from a stat
   // line (lib/statSegments.ts).
+  // Season and H2H gain `pos` only after position_defense_ranks_nfl lands.
+  // Until a row actually carries one, the chips stay off and the fallback
+  // note stays true. A blank string is not a position.
+  const rowsHavePos = useMemo(() => {
+    const has = (pos: unknown) => typeof pos === 'string' && pos.trim() !== '';
+    if (effectiveMode === 'totals') return rows.some((r) => has(r.pos));
+    if (timeWindow === 'h2h') {
+      if (h2hValues.statKey !== String(stat?.key ?? '')) return false;
+      return h2hValues.rows.some((r) => has(r.pos));
+    }
+    if (timeWindow === 'season') {
+      if (seasonValues.statKey !== String(stat?.key ?? '')) return false;
+      return seasonValues.rows.some((r) => has(r.pos));
+    }
+    return recentRows.some((r) => has(r.pos));
+  }, [effectiveMode, rows, timeWindow, h2hValues, seasonValues, recentRows, stat]);
   const segmentPositions = useMemo(
-    () => positionsForSegment(sport, segment, readCarriesPosition(sport, effectiveMode, timeWindow)),
-    [sport, segment, effectiveMode, timeWindow],
+    () =>
+      positionsForSegment(
+        sport,
+        segment,
+        readCarriesPosition(sport, effectiveMode, timeWindow) || rowsHavePos,
+      ),
+    [sport, segment, effectiveMode, timeWindow, rowsHavePos],
   );
   // A search is a NAME: "Kelce" on the QB tab must find Kelce, not print
   // "Nothing matched" (Reviewer, #830). The position cut stands down while
@@ -1632,10 +1787,10 @@ export function StatsScreen() {
       const q = query.trim().toLowerCase();
       return lineOnlyPlayers(pricedByKey, boardNames)
         .filter((p) => !gamesPicked || gamePicker.selected.has(p.gameId))
-        .filter(() => !minGrade || includeUngraded)
+        .filter(() => (atdOn ? !minTier || includeUngraded : !minGrade || includeUngraded))
         .filter((p) => !q || p.name.toLowerCase().includes(q));
     },
-    [pricedByKey, query, gamesPicked, gamePicker.selected, minGrade, includeUngraded],
+    [pricedByKey, query, gamesPicked, gamePicker.selected, minGrade, includeUngraded, atdOn, minTier],
   );
 
   // Everything but the position cut, sorted. The position cut runs last
@@ -1652,7 +1807,11 @@ export function StatsScreen() {
       }))
       .filter((r) => !tonightActive || gamesPicked || isOnSlate(r, slate))
       .filter((r) => !gameTeams || (!!r.team && gameTeams.includes(r.team)))
-      .filter((r) => !minGrade || meetsGradeFloor(matchupFor(r)?.grade, minGrade, includeUngraded))
+      .filter((r) => {
+        if (!atdOn) return !minGrade || meetsGradeFloor(matchupFor(r)?.grade, minGrade, includeUngraded);
+        const view = atdViewFor(r);
+        return meetsTierFloor(view.kind === 'rank' ? view.tier : null, minTier, includeUngraded);
+      })
       .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
       .map((r) => {
         const total = statValue(r, stat);
@@ -1660,11 +1819,31 @@ export function StatsScreen() {
         const value = basis === 'perGame' && gp > 0 ? total / gp : total;
         return { row: r, value, total, gp };
       })
-      .sort((a, b) =>
-        compareRows({ primary: a.value, games: a.gp }, { primary: b.value, games: b.gp }),
-      );
+      .sort((a, b) => {
+        const base = compareRows(
+          { primary: a.value, games: a.gp },
+          { primary: b.value, games: b.gp },
+        );
+        if (!(atdOn && matchupOrder)) return base;
+        const va = atdViewFor(a.row);
+        const vb = atdViewFor(b.row);
+        const cmp = compareAnytimeRows(
+          {
+            rank: va.kind === 'rank' ? va.rank : null,
+            primary: a.value,
+            price: quoteFor(a.row)?.price ?? null,
+          },
+          {
+            rank: vb.kind === 'rank' ? vb.rank : null,
+            primary: b.value,
+            price: quoteFor(b.row)?.price ?? null,
+          },
+          matchupOrder,
+        );
+        return cmp || base;
+      });
     return ranked;
-  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey]);
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor]);
 
   // A filter preserves order, so the cut costs one pass and no re-sort.
   const ranked = useMemo(
@@ -1704,6 +1883,7 @@ export function StatsScreen() {
           pct,
           avg,
           opponent: r.opponent,
+          pos: r.pos ?? null,
         });
       }
     } else if (timeWindow === 'season') {
@@ -1724,6 +1904,7 @@ export function StatsScreen() {
           total,
           pct,
           avg,
+          pos: r.pos ?? null,
         });
       }
     } else {
@@ -1769,13 +1950,37 @@ export function StatsScreen() {
       }))
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
-      .filter((p) => !minGrade || meetsGradeFloor(matchupFor(p)?.grade, minGrade, includeUngraded))
+      .filter((p) => {
+        if (!atdOn) return !minGrade || meetsGradeFloor(matchupFor(p)?.grade, minGrade, includeUngraded);
+        const view = atdViewFor(p);
+        return meetsTierFloor(view.kind === 'rank' ? view.tier : null, minTier, includeUngraded);
+      })
       .filter((p) => !q || p.player_name.toLowerCase().includes(q))
-      .sort((a, b) =>
-        compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
-      );
+      .sort((a, b) => {
+        const base = compareRows(
+          { primary: a.pct, games: a.total },
+          { primary: b.pct, games: b.total },
+        );
+        if (!(atdOn && matchupOrder)) return base;
+        const va = atdViewFor(a);
+        const vb = atdViewFor(b);
+        const cmp = compareAnytimeRows(
+          {
+            rank: va.kind === 'rank' ? va.rank : null,
+            primary: a.pct,
+            price: quoteFor(a)?.price ?? null,
+          },
+          {
+            rank: vb.kind === 'rank' ? vb.rank : null,
+            primary: b.pct,
+            price: quoteFor(b)?.price ?? null,
+          },
+          matchupOrder,
+        );
+        return cmp || base;
+      });
     return sorted;
-  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey]);
+  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor]);
 
   // The position cut, last and separate for the same reason as `ranked`.
   const hitRateBase = useMemo<HitRatePlayer[]>(
@@ -1857,6 +2062,26 @@ export function StatsScreen() {
               started={started}
               showOdds={showOdds}
               showMatchup={showMatchupCol}
+              atdView={
+                atdOn
+                  ? rankStatus === 'error'
+                    ? buildAnytimeMatchup({
+                        status: 'error',
+                        placement: { leagueHasGames, teamHasGame: false },
+                        rank: null,
+                      })
+                    : rankStatus !== 'ok'
+                      ? buildAnytimeMatchup({
+                          status: 'loading',
+                          placement: { leagueHasGames, teamHasGame: false },
+                          rank: null,
+                        })
+                      : game
+                        ? namedGap('no_position')
+                        : atdViewFor({ player_name: p.name })
+                  : undefined
+              }
+              atdStack={stackAtd}
               statLabel={betLabel}
               hitMode={hitMode}
               sport={sport}
@@ -2037,8 +2262,13 @@ export function StatsScreen() {
     // A filter the badge does not count is one the user cannot find their way
     // back from.
     if (tonightActive && !gamesPicked) n += 1;
-    if (minGrade) n += 1;
-    if (minGrade && !includeUngraded) n += 1;
+    if (atdOn) {
+      if (minTier) n += 1;
+      if (minTier && !includeUngraded) n += 1;
+    } else {
+      if (minGrade) n += 1;
+      if (minGrade && !includeUngraded) n += 1;
+    }
     if (query.trim()) n += 1;
     if (effectiveMode === 'hitRate') {
       if (bandActive) n += 1;
@@ -2047,7 +2277,7 @@ export function StatsScreen() {
     }
     return n;
   }, [gamePicker.selected, tonightActive, gamesPicked, minGrade, includeUngraded, query,
-      effectiveMode, bandActive, basis]);
+      effectiveMode, bandActive, basis, atdOn, minTier]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -2061,6 +2291,8 @@ export function StatsScreen() {
     clearBand();
     setTonightOnly(false);
     setMinGrade(null);
+    setMinTier(null);
+    setMatchupOrder(null);
     setIncludeUngraded(true);
     gamePicker.clear();
   }, [gamePicker, clearBand]);
@@ -2079,7 +2311,16 @@ export function StatsScreen() {
         onRemove: () => gamePicker.clear(),
       });
     }
-    if (minGrade) {
+    if (atdOn && minTier) {
+      out.push({
+        key: 'tier',
+        label: `${minTier} or easier${includeUngraded ? '' : ', ranked only'}`,
+        onRemove: () => {
+          setMinTier(null);
+          setIncludeUngraded(true);
+        },
+      });
+    } else if (!atdOn && minGrade) {
       out.push({
         key: 'grade',
         label: `${minGrade} or better${includeUngraded ? '' : ', graded only'}`,
@@ -2106,7 +2347,8 @@ export function StatsScreen() {
     }
     return out;
   }, [query, tonightActive, gamesPicked, slateLabel, effectiveMode, bandActive,
-      bandSummary, basis, clearBand, gamePicker, pickableGames, minGrade, includeUngraded]);
+      bandSummary, basis, clearBand, gamePicker, pickableGames, minGrade, includeUngraded,
+      atdOn, minTier]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
   // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
@@ -2627,23 +2869,51 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
+      {atdOn && rankStatus === 'ok' && anyBlended(defenseRanks.values()) ? (
+        <View style={styles.noLinesRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>{ATD_COPY.earlySeason}</Text>
+        </View>
+      ) : null}
+
+      {atdOn && rankStatus === 'error' ? (
+        <Pressable
+          onPress={() => setRankReload((n) => n + 1)}
+          hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
+          accessibilityRole="button"
+          accessibilityLabel={`${ATD_COPY.unavailableNote} Try again.`}
+          accessibilityHint="Loads the defense ranks again."
+          style={({ pressed }) => [styles.atdRetryRow, pressed && styles.pressed]}
+        >
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>{ATD_COPY.unavailableNote}</Text>
+        </Pressable>
+      ) : null}
+
       {boardChrome.showHeader ? (
         <ColumnHeader
           rightLabel={rightLabel}
-          sorted={boardChrome.headerSorted}
+          sorted={boardChrome.headerSorted && !(atdOn && matchupOrder)}
           showOdds={showOdds}
           // Named for the book it prints — "FD", "DK", "MGM" — so a FanDuel
           // user never reads an unlabelled number as someone else's. With
           // several books selected the cells no longer share one, so the
           // header names the rule ("BEST") and each pill carries its badge.
-          oddsLabel={booksLabel(books)}
+          oddsLabel={atdOn ? ATD_COPY.priceHeader : booksLabel(books)}
           // On an off day the lines belong to a FUTURE date, and an undated
           // header would read as "now" (UX_REVIEW §3). Dated off the same value
           // the pill captions are the exception to, so the header and the
-          // column can never name different days.
-          oddsDateLabel={oddsHeaderDate && oddsHeaderDate !== todayET() ? weekdayET(oddsHeaderDate) : null}
-          showMatchup={showMatchupCol}
+          // column can never name different days. Anytime TD keeps the day on
+          // the subline: the price header is BEST, and the book sits under it.
+          oddsDateLabel={
+            atdOn ? null : oddsHeaderDate && oddsHeaderDate !== todayET() ? weekdayET(oddsHeaderDate) : null
+          }
+          showMatchup={showMatchupCol || atdOn}
           matchupTooltip={matchupTooltip}
+          atd={atdOn}
+          atdStack={stackAtd}
+          matchupOrder={matchupOrder}
+          onMatchupSort={() => setMatchupOrder((current) => nextMatchupSort(current))}
         />
       ) : null}
 
@@ -2665,6 +2935,8 @@ export function StatsScreen() {
                 player={item}
                 matchup={matchupFor(item)}
                 showMatchup={showMatchupCol}
+                atdView={atdOn ? atdViewFor(item) : undefined}
+                atdStack={stackAtd}
                 gradeColorful={gradesColorful}
                 subline={sublineFor(item)}
                 quote={quote}
@@ -2727,6 +2999,8 @@ export function StatsScreen() {
                 basis={basis}
                 matchup={matchupFor(item.row)}
                 showMatchup={showMatchupCol}
+                atdView={atdOn ? atdViewFor(item.row) : undefined}
+                atdStack={stackAtd}
                 gradeColorful={gradesColorful}
                 subline={sublineFor(item.row)}
                 quote={quote}
@@ -2908,9 +3182,45 @@ export function StatsScreen() {
           </Text>
         </FilterSection>
 
-        {/* TOUGHNESS. Only where the sport can answer it — a control over a
-            column of dashes is a filter that silently does nothing. */}
-        {showMatchupCol ? (
+        {/* TOUGHNESS. Anytime TD ranks the defense for the position. Every
+            other board keeps the A–F floor. A control over a column of dashes
+            is a filter that silently does nothing. */}
+        {atdOn ? (
+          <FilterSection
+            title={ATD_COPY.filterTitle}
+            subtitle={ATD_COPY.filterSubtitle}
+            summary={minTier ? `${minTier} or easier` : 'Any matchup'}
+            defaultOpen={minTier != null}
+            onClear={minTier ? () => { setMinTier(null); setIncludeUngraded(true); } : undefined}
+          >
+            <View style={styles.chipWrap}>
+              <FilterChip
+                label={ATD_COPY.filterAny}
+                active={minTier == null}
+                onPress={() => setMinTier(null)}
+              />
+              {TIER_FLOORS.map((tier) => (
+                <FilterChip
+                  key={tier}
+                  label={tier}
+                  active={minTier === tier}
+                  accessibilityLabel={`${tier} or easier`}
+                  onPress={() => setMinTier(minTier === tier ? null : tier)}
+                />
+              ))}
+            </View>
+            {minTier ? (
+              <View style={styles.ungradedRow}>
+                <Text style={styles.ungradedLabel}>{ATD_COPY.includeUnranked}</Text>
+                <Switch
+                  value={includeUngraded}
+                  onValueChange={setIncludeUngraded}
+                  accessibilityLabel={ATD_COPY.includeUnranked}
+                />
+              </View>
+            ) : null}
+          </FilterSection>
+        ) : showMatchupCol ? (
           <FilterSection
             title="Matchup grade"
             // The comparison is stated once, here, so the chip, this summary
@@ -3459,6 +3769,8 @@ function OddsCell({
   sport,
   dayLabel,
   onPress,
+  bestPrice = false,
+  priceFixed = false,
 }: {
   quote: StatsOddsQuote | null;
   started?: 'Live' | 'Final' | null;
@@ -3473,13 +3785,19 @@ function OddsCell({
    *  about the day exactly as it was before the odds window widened. */
   dayLabel?: string | null;
   onPress?: () => void;
+  /** Anytime TD: neutral pill, book abbreviation under the price, line chip
+   *  only when the book's line differs. The day stays on the subline. */
+  bestPrice?: boolean;
+  /** Lock the column width. Off once the metrics have stacked under the name. */
+  priceFixed?: boolean;
 }) {
+  const wrapStyle = [styles.oddsWrap, bestPrice && priceFixed && styles.oddsWrapFixed];
   if (quote == null) {
     // A game in progress has no line a user can still take (unstartedGameIds),
     // and the cell says so — a dash there read as "the book never priced him".
     if (started) {
       return (
-        <View style={styles.oddsWrap} accessible accessibilityLabel={`${playerName}, game ${started.toLowerCase()}`}>
+        <View style={wrapStyle} accessible accessibilityLabel={`${playerName}, game ${started.toLowerCase()}`}>
           <Text style={styles.oddsStarted}>{started}</Text>
         </View>
       );
@@ -3487,7 +3805,7 @@ function OddsCell({
     // The dash is not read out: the row's own label already says the player and
     // the stat, and "em dash" is not information.
     return (
-      <View style={styles.oddsWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <View style={wrapStyle} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.oddsEmpty}>—</Text>
       </View>
     );
@@ -3517,7 +3835,40 @@ function OddsCell({
   // 2026-09-12). The day is what a third line would have carried.
   // VoiceOver reads both regardless — see `label` above.
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
-  const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
+  const caption = bestPrice ? null : [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
+  if (bestPrice) {
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={!onPress}
+        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityHint="Asks to add this line to your betslip"
+        style={({ pressed }) => [
+          styles.oddsBestWrap,
+          priceFixed && styles.oddsWrapFixed,
+          pressed && styles.pressed,
+        ]}
+      >
+        <View style={[styles.oddsPill, styles.oddsPillNeutral]}>
+          <Text style={[styles.oddsText, { color: colors.textPrimary }]} numberOfLines={1}>
+            {priceText}
+          </Text>
+        </View>
+        <Text style={styles.oddsBook} numberOfLines={1}>
+          {bookLabelShort(quote.book)}
+        </Text>
+        {quote.offLine && lineCaption ? (
+          <View style={styles.lineChip}>
+            <Text style={styles.lineChipText} numberOfLines={1}>
+              {lineCaption}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
+    );
+  }
   return (
     <Pressable
       onPress={onPress}
@@ -3634,6 +3985,10 @@ function ColumnHeader({
   oddsDateLabel,
   showMatchup,
   matchupTooltip,
+  atd = false,
+  atdStack = false,
+  matchupOrder = null,
+  onMatchupSort,
 }: {
   rightLabel: string;
   /** False when the ranked list is empty. A line-only board is not sorted. */
@@ -3645,7 +4000,129 @@ function ColumnHeader({
   oddsDateLabel?: string | null;
   showMatchup: boolean;
   matchupTooltip: string;
+  /** NFL Anytime TD: fixed Hit % / Matchup / Best columns, and a sort. */
+  atd?: boolean;
+  /** Metrics sit on a second header line so they still line up when stacked. */
+  atdStack?: boolean;
+  matchupOrder?: MatchupSort | null;
+  onMatchupSort?: () => void;
 }) {
+  const hitLabel =
+    atd && rightLabel === 'Hit Rate'
+      ? ATD_COPY.hitHeader
+      : atd && rightLabel !== 'Avg'
+        ? ATD_COPY.totalHeader
+        : rightLabel.toUpperCase();
+  const sortSpoken =
+    matchupOrder === 'easiest'
+      ? ATD_COPY.sortEasiest
+      : matchupOrder === 'toughest'
+        ? ATD_COPY.sortToughest
+        : ATD_COPY.sortOff;
+  const valueHead = (
+    <View
+      style={[styles.colHeaderSorted, atd && styles.atdHitHead]}
+      accessible={!sorted}
+      accessibilityLabel={sorted ? `${rightLabel}, sorted highest first` : rightLabel}
+    >
+      <Text
+        style={[styles.colHeaderRight, styles.colHeaderSortLabel, atd && styles.atdHitHeadText]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+      >
+        {hitLabel}
+      </Text>
+      {sorted ? <Ionicons name="arrow-down" size={9} color={colors.textTertiary} /> : null}
+    </View>
+  );
+  const oddsHead = showOdds ? (
+    <Text
+      style={[styles.colHeaderRight, styles.colHeaderOdds, atd && styles.atdOddsHeadText]}
+      numberOfLines={1}
+    >
+      {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
+    </Text>
+  ) : null;
+  const matchupHead = showMatchup ? (
+    atd ? (
+      <View style={[styles.colHeaderMatchup, styles.atdMatchupHead]}>
+        {/* Sibling of the info button. Wrapping the tooltip makes VoiceOver
+            activate the sort when the reader asked what the column means. */}
+        <Pressable
+          onPress={onMatchupSort}
+          hitSlop={{ top: 16, bottom: 16, left: 4, right: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel={sortSpoken}
+          accessibilityHint={ATD_COPY.sortHint}
+          style={styles.atdSortBtn}
+        >
+          <Text
+            style={[styles.colHeaderRight, styles.colHeaderSortLabel]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.8}
+          >
+            {ATD_COPY.header}
+          </Text>
+          {matchupOrder === 'easiest' ? (
+            <Ionicons name="arrow-down" size={9} color={colors.textTertiary} />
+          ) : null}
+          {matchupOrder === 'toughest' ? (
+            <Ionicons name="arrow-up" size={9} color={colors.textTertiary} />
+          ) : null}
+        </Pressable>
+        <InfoTooltip
+          title={ATD_COPY.infoTitle}
+          body={ATD_COPY.infoBody}
+          accessibilityLabel="What the matchup means"
+        />
+      </View>
+    ) : (
+      <View style={styles.colHeaderMatchup}>
+        <Text style={styles.colHeaderRight} numberOfLines={1}>
+          GRADE
+        </Text>
+        {/* The column's only legend, so it has to describe the grade the
+            reader is ACTUALLY looking at. It named the two baseball answers
+            alone and asserted "this season" -- both wrong for the three
+            sports now graded on defence, whose numbers come from the season
+            this text names, which on opening night is LAST season (UX
+            review, 2026-09-09). */}
+        <InfoTooltip
+          title="Matchup grade"
+          body={matchupTooltip}
+          accessibilityLabel="What the matchup grade means"
+        />
+      </View>
+    )
+  ) : null;
+  const metrics = atd ? (
+    <>
+      {valueHead}
+      {matchupHead}
+      {oddsHead}
+    </>
+  ) : (
+    <>
+      {valueHead}
+      {oddsHead}
+      {matchupHead}
+    </>
+  );
+  if (atd && atdStack) {
+    return (
+      <View style={styles.colHeaderStack}>
+        <View style={[styles.colHeader, styles.colHeaderStackLine]}>
+          <Text style={styles.colHeaderRank}>RK</Text>
+          <Text style={styles.colHeaderName}>PLAYER</Text>
+        </View>
+        <View style={[styles.colHeader, styles.colHeaderStackLine, styles.atdHeaderMetrics]}>
+          {metrics}
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={styles.colHeader}>
       <Text style={styles.colHeaderRank}>RK</Text>
@@ -3661,39 +4138,7 @@ function ColumnHeader({
           Averages mode is the stat's own name ("PASSING YARDS"), which
           overflows that box on its own. The label shrinks; the arrow does
           not. */}
-      <View
-        style={styles.colHeaderSorted}
-        accessible={!sorted}
-        accessibilityLabel={sorted ? `${rightLabel}, sorted highest first` : rightLabel}
-      >
-        <Text style={[styles.colHeaderRight, styles.colHeaderSortLabel]} numberOfLines={1}>
-          {rightLabel.toUpperCase()}
-        </Text>
-        {sorted ? <Ionicons name="arrow-down" size={9} color={colors.textTertiary} /> : null}
-      </View>
-      {showOdds ? (
-        <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
-          {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
-        </Text>
-      ) : null}
-      {showMatchup ? (
-        <View style={styles.colHeaderMatchup}>
-          <Text style={styles.colHeaderRight} numberOfLines={1}>
-            GRADE
-          </Text>
-          {/* The column's only legend, so it has to describe the grade the
-              reader is ACTUALLY looking at. It named the two baseball answers
-              alone and asserted "this season" -- both wrong for the three
-              sports now graded on defence, whose numbers come from the season
-              this text names, which on opening night is LAST season (UX
-              review, 2026-09-09). */}
-          <InfoTooltip
-            title="Matchup grade"
-            body={matchupTooltip}
-            accessibilityLabel="What the matchup grade means"
-          />
-        </View>
-      ) : null}
+      {metrics}
     </View>
   );
 }
@@ -3706,6 +4151,8 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
+  atdView,
+  atdStack = false,
   gradeColorful,
   subline,
   quote,
@@ -3726,6 +4173,10 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** Set on NFL Anytime TD. Replaces the A–F grade on this board only. */
+  atdView?: AnytimeMatchupView;
+  /** Metrics move under the name once Dynamic Type would clip the price. */
+  atdStack?: boolean;
   /** False when every visible grade lands in one colour band. */
   gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
@@ -3744,9 +4195,7 @@ function LeaderRow({
   tappable: boolean;
   onPress: () => void;
 }) {
-  const body = (
-    <>
-      <Text style={styles.rank}>{rank}</Text>
+  const nameBlock = (
       <View
         style={styles.rowMain}
         accessible={tappable}
@@ -3776,9 +4225,13 @@ function LeaderRow({
           </Text>
         ) : null}
       </View>
-      <View style={styles.valueWrap}>
+  );
+  const metrics = (
+    <>
+      <View style={atdView ? (atdStack ? styles.atdHitStack : styles.atdHitWrap) : styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
       </View>
+      {atdView ? <AnytimeMatchupCell view={atdView} grow={atdStack} /> : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -3789,12 +4242,30 @@ function LeaderRow({
           sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
+          bestPrice={!!atdView}
+          priceFixed={!!atdView && !atdStack}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
+      {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
     </>
   );
-  if (!tappable) return <View style={styles.row}>{body}</View>;
+  const body = atdView && atdStack ? (
+    <>
+      <View style={styles.rowTop}>
+        <Text style={styles.rank}>{rank}</Text>
+        {nameBlock}
+      </View>
+      <View style={styles.atdMetricRow}>{metrics}</View>
+    </>
+  ) : (
+    <>
+      <Text style={styles.rank}>{rank}</Text>
+      {nameBlock}
+      {metrics}
+    </>
+  );
+  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked];
+  if (!tappable) return <View style={rowStyle}>{body}</View>;
   return (
     // accessible={false}: a Pressable is accessible by default, which collapses
     // the row into ONE VoiceOver element — the nested price pill stops being a
@@ -3804,7 +4275,7 @@ function LeaderRow({
     <Pressable
       onPress={onPress}
       accessible={false}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      style={({ pressed }) => [rowStyle, pressed && styles.pressed]}
     >
       {body}
     </Pressable>
@@ -3824,6 +4295,8 @@ function LineOnlyRow({
   started,
   showOdds,
   showMatchup,
+  atdView,
+  atdStack = false,
   statLabel,
   hitMode,
   sport,
@@ -3837,6 +4310,8 @@ function LineOnlyRow({
   started: 'Live' | 'Final' | null;
   showOdds: boolean;
   showMatchup: boolean;
+  atdView?: AnytimeMatchupView;
+  atdStack?: boolean;
   statLabel: string;
   hitMode: HitMode;
   sport?: string;
@@ -3845,9 +4320,7 @@ function LineOnlyRow({
   /** The log itself is empty. "no games" would describe the feed as the player. */
   omitNoGames?: boolean;
 }) {
-  const body = (
-    <>
-      <Text style={styles.rank} />
+  const nameBlock = (
       <View
         style={styles.rowMain}
         accessible
@@ -3866,14 +4339,18 @@ function LineOnlyRow({
           </Text>
         ) : null}
       </View>
+  );
+  const metrics = (
+    <>
       <View
-        style={styles.valueWrap}
+        style={atdView ? (atdStack ? styles.atdHitStack : styles.atdHitWrap) : styles.valueWrap}
         accessibilityElementsHidden={omitNoGames}
         importantForAccessibility={omitNoGames ? 'no-hide-descendants' : 'auto'}
       >
         <Text style={[styles.value, { color: colors.textSecondary }]}>—</Text>
         {omitNoGames ? null : <Text style={styles.valueLabel}>no games</Text>}
       </View>
+      {atdView ? <AnytimeMatchupCell view={atdView} grow={atdStack} /> : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -3884,14 +4361,31 @@ function LineOnlyRow({
           sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
+          bestPrice={!!atdView}
+          priceFixed={!!atdView && !atdStack}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={null} /> : null}
+      {!atdView && showMatchup ? <MatchupCell matchup={null} /> : null}
+    </>
+  );
+  const body = atdView && atdStack ? (
+    <>
+      <View style={styles.rowTop}>
+        <Text style={styles.rank} />
+        {nameBlock}
+      </View>
+      <View style={styles.atdMetricRow}>{metrics}</View>
+    </>
+  ) : (
+    <>
+      <Text style={styles.rank} />
+      {nameBlock}
+      {metrics}
     </>
   );
   // Not a button. There is no player id, and PlayerStats with a blank id is
   // an empty page. The price pill stays its own control.
-  return <View style={styles.row}>{body}</View>;
+  return <View style={[styles.row, atdView && atdStack && styles.rowStacked]}>{body}</View>;
 }
 
 function HitRateRow({
@@ -3899,6 +4393,8 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
+  atdView,
+  atdStack = false,
   gradeColorful,
   subline,
   quote,
@@ -3918,6 +4414,8 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  atdView?: AnytimeMatchupView;
+  atdStack?: boolean;
   /** False when every visible grade lands in one colour band. */
   gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
@@ -3945,9 +4443,7 @@ function HitRateRow({
   // detail screen and full green on the board. Scoped to H2H because every
   // other window has a uniform denominator, where the rule would say nothing.
   const pctColor = hitRateColor(player.pct, colorful && !(thinSample && player.total < 3));
-  const body = (
-    <>
-      <Text style={styles.rank}>{rank}</Text>
+  const nameBlock = (
       <View
         style={styles.rowMain}
         accessible={tappable}
@@ -3977,7 +4473,10 @@ function HitRateRow({
           </Text>
         ) : null}
       </View>
-      <View style={styles.valueWrap}>
+  );
+  const metrics = (
+    <>
+      <View style={atdView ? (atdStack ? styles.atdHitStack : styles.atdHitWrap) : styles.valueWrap}>
         <Text style={[styles.value, { color: pctColor }]}>
           {Math.round(player.pct * 100)}%
         </Text>
@@ -3985,6 +4484,7 @@ function HitRateRow({
           {player.hits}/{player.total}
         </Text>
       </View>
+      {atdView ? <AnytimeMatchupCell view={atdView} grow={atdStack} /> : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -3995,12 +4495,30 @@ function HitRateRow({
           sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
+          bestPrice={!!atdView}
+          priceFixed={!!atdView && !atdStack}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
+      {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
     </>
   );
-  if (!tappable) return <View style={styles.row}>{body}</View>;
+  const body = atdView && atdStack ? (
+    <>
+      <View style={styles.rowTop}>
+        <Text style={styles.rank}>{rank}</Text>
+        {nameBlock}
+      </View>
+      <View style={styles.atdMetricRow}>{metrics}</View>
+    </>
+  ) : (
+    <>
+      <Text style={styles.rank}>{rank}</Text>
+      {nameBlock}
+      {metrics}
+    </>
+  );
+  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked];
+  if (!tappable) return <View style={rowStyle}>{body}</View>;
   return (
     // accessible={false}: a Pressable is accessible by default, which collapses
     // the row into ONE VoiceOver element — the nested price pill stops being a
@@ -4010,7 +4528,7 @@ function HitRateRow({
     <Pressable
       onPress={onPress}
       accessible={false}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      style={({ pressed }) => [rowStyle, pressed && styles.pressed]}
     >
       {body}
     </Pressable>
@@ -4411,6 +4929,50 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
+  // Anytime TD locks the three metric columns so the header cannot drift.
+  // Large text drops the lock and stacks them (rowStacked).
+  atdHitHead: {
+    width: ATD_HIT_W,
+    minWidth: ATD_HIT_W,
+    maxWidth: ATD_HIT_W,
+    flexShrink: 0,
+  },
+  atdHitHeadText: { width: undefined, maxWidth: ATD_HIT_W - 12 },
+  atdOddsHeadText: {
+    width: ATD_ODDS_W,
+    minWidth: ATD_ODDS_W,
+    maxWidth: ATD_ODDS_W,
+    flexShrink: 0,
+  },
+  atdMatchupHead: {
+    width: ATD_MATCHUP_W,
+    minWidth: ATD_MATCHUP_W,
+    maxWidth: ATD_MATCHUP_W,
+    flexShrink: 0,
+    // 12pt matches the info icon's hitSlop, so that slop stays in the gap
+    // instead of covering the word MATCHUP.
+    gap: 12,
+  },
+  atdSortBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+    flexShrink: 1,
+    minHeight: 44,
+  },
+  colHeaderStack: {
+    backgroundColor: colors.bgCard,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  colHeaderStackLine: {
+    borderBottomWidth: 0,
+  },
+  atdHeaderMetrics: {
+    justifyContent: 'flex-end',
+    paddingTop: 0,
+  },
   // The sorted column: label + a fixed arrow, in one 48pt cell.
   colHeaderSorted: {
     width: 48,
@@ -4438,6 +5000,14 @@ const styles = StyleSheet.create({
     lineHeight: font.size.caption * 1.35,
   },
   noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
+  atdRetryRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    minHeight: 44,
+  },
   // A row, not a Text: the legend lives in the header (see MATCHUP_W).
   colHeaderMatchup: {
     minWidth: MATCHUP_W,
@@ -4447,6 +5017,34 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   // Rows are deliberately compact — more players visible per screen.
+  rowStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    paddingVertical: 8,
+  },
+  rowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  atdMetricRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: 4,
+  },
+  atdHitWrap: {
+    alignItems: 'flex-end',
+    width: ATD_HIT_W,
+    flexShrink: 0,
+  },
+  atdHitStack: {
+    alignItems: 'flex-end',
+    minWidth: ATD_HIT_W,
+    flexShrink: 1,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4515,6 +5113,21 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     alignItems: 'flex-end',
   },
+  oddsWrapFixed: {
+    width: ATD_ODDS_W,
+    minWidth: ATD_ODDS_W,
+    maxWidth: ATD_ODDS_W,
+    flexShrink: 0,
+  },
+  // 44pt on purpose: the pill plus the book under it is the bet control, and
+  // the verifier reads minHeight rather than the conditional width.
+  oddsBestWrap: {
+    minWidth: ATD_ODDS_W,
+    minHeight: 44,
+    flexShrink: 1,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
   // Filled in the book's own colour — the pill IS the bet button, and the mark
   // beside the price says whose price it is.
   oddsPill: {
@@ -4530,6 +5143,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.noneSoft,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.tint,
+  },
+  // Anytime TD price: neutral, never DraftKings green. The book sits under it.
+  oddsPillNeutral: {
+    backgroundColor: colors.noneSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separatorOpaque,
+    alignSelf: 'flex-end',
+  },
+  oddsBook: {
+    fontSize: font.size.nano,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    textAlign: 'right',
+    marginTop: 1,
+  },
+  lineChip: {
+    marginTop: 2,
+    paddingHorizontal: 4,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separatorOpaque,
+    alignSelf: 'flex-end',
+  },
+  lineChipText: {
+    fontSize: font.size.nano,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+    textAlign: 'right',
   },
   oddsText: {
     fontSize: font.size.caption,

@@ -74,6 +74,7 @@ import type {
   SavantStatsRow,
   H2HStatValuesRow,
   PositionVsOpponentRow,
+  PositionDefenseRankRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
@@ -654,6 +655,25 @@ export async function fetchPositionVsOpponent(
     );
   }
   return [];
+}
+
+/**
+ * Every defense's rank for one NFL position group and stat. 32 rows, so it
+ * is not paged. Rank 1 allows the most. The Anytime TD board calls it once
+ * per group (position_defense_ranks_nfl).
+ */
+export async function fetchPositionDefenseRanks(
+  seasons: number[],
+  statKey: string,
+  posGroup: string,
+): Promise<PositionDefenseRankRow[]> {
+  const { data, error } = await supabase.rpc('position_defense_ranks_nfl', {
+    p_seasons: seasons,
+    p_stat: statKey,
+    p_pos_group: posGroup,
+  });
+  if (error) throw error;
+  return (data ?? []) as PositionDefenseRankRow[];
 }
 
 /**

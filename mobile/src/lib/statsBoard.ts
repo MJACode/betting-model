@@ -814,6 +814,28 @@ export function h2hMatchups(
  * alone left every UFC row advertising a start time hours after the fight
  * ended (UX review, 2026-09-05).
  */
+/**
+ * The game a row is about: the slate-date game when he plays that day, otherwise
+ * his next game in the window already loaded for H2H (`nextGameByTeam`).
+ *
+ * `buildSlateGameIndex` is one date. On an NFL Tuesday that date is Thursday,
+ * so a Sunday team had no opponent under the name and no defense to grade.
+ * The seven-day window is already in memory; this reads it instead of fetching.
+ */
+export function fixtureForRow(
+  row: { team?: string | null; player_name?: string | null },
+  slateIndex: Map<string, SlateGame>,
+  nextByTeam: Map<string, SlateGame>,
+): { key: string; game: SlateGame } | null {
+  const onSlate = slateGameFor(row, slateIndex);
+  if (onSlate) return onSlate;
+  if (row.team) {
+    const next = nextByTeam.get(row.team);
+    if (next) return { key: row.team, game: next };
+  }
+  return null;
+}
+
 export function slateGameFor(
   row: { team?: string | null; player_name?: string | null },
   index: Map<string, SlateGame>,

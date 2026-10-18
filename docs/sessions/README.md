@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, NFL Anytime TD matchup column: five bars, a tier word, and a rank; position_defense_ranks_nfl is in the migration list and was not applied |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 merged origin/master `d67b75a6` (#992); session logs keep both sides, newest first; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, live NFL wind card gates CREATE/RLS/REVOKE on schema_is_current so the poll does not reload PostgREST; a missing table still gets created, then read |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 review: verify_unpriced_pnl Yesterday block is 2.00u on 2.40u risked; DayStakeStats no longer stores units in profitFlat; the script runs in pytest |

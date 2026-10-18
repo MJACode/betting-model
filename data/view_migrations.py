@@ -368,6 +368,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-10-17: NHL Players board sums, same RPC shape as the other
     # sports. After the stats views. Does not rewrite the record.
     "add_nhl_skater_window_totals_2026_10_17.sql",
+    # 2026-10-18: Anytime TD matchup ranks, one row per defense, plus `pos`
+    # on the NFL season and H2H stat reads. Display only. Does not rewrite
+    # v_public_track_record. Sits with the other display reads, before the
+    # posted-stake pair. Guards each piece so the DDL fires once.
+    "position_defense_ranks_nfl_2026_10_18.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
