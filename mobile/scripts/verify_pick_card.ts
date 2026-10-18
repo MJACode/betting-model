@@ -27,6 +27,7 @@ import {
   playerNameFromPickLabel,
   snapshotMatchesLock,
   splitPickTitle,
+  todayBoardHandoff,
   MODEL_BOOK,
 } from '../src/lib/markets';
 import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
@@ -39,6 +40,7 @@ import {
   signalsCtaLabel,
   signalsCtaSpeech,
   signalsHeroSpeech,
+  signalsLabelHeadline,
   signalsModelCaption,
   signalsNowLine,
   signalsPriceText,
@@ -190,6 +192,21 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
         `Bet DK ${MINUS}8.5 ${MINUS}110`,
     JSON.stringify(linked),
   );
+  const today = todayBoardHandoff(linked, hero);
+  const todayLabel = signalsCtaLabel(
+    bookLabel(today?.bookmaker ?? ''),
+    today?.price == null ? null : formatAmerican(today.price),
+    null,
+    { bestNow: today?.verb === 'Best' },
+  );
+  check(
+    'Today line-only move, no book at the picked line: Open DK, and the slip is not the new line',
+    today?.verb === 'Open' && today.price == null && today.link == null &&
+      todayLabel === 'Open DK' &&
+      !todayLabel.startsWith('Bet') &&
+      !todayLabel.startsWith('Best now'),
+    JSON.stringify({ today, todayLabel }),
+  );
   const shop = bestHandoffForPick(pick, [
     { bookmaker: 'draftkings', home_price: -110, away_price: -110, spread_home: -8.5 },
     { bookmaker: 'betmgm', home_price: -112, away_price: -108, spread_home: -7.5, home_link: 'mgm://7.5' },
@@ -198,6 +215,13 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     'line-only move prefers a book still at the scored line',
     shop?.bookmaker === 'betmgm' && shop.price === -112 && shop.link === 'mgm://7.5',
     JSON.stringify(shop),
+  );
+  const shopToday = todayBoardHandoff(shop, hero);
+  check(
+    'Today still hands off to a book that is at the picked line',
+    shopToday?.bookmaker === 'betmgm' && shopToday.price === -112 && shopToday.link === 'mgm://7.5' &&
+      shopToday.verb === 'Best',
+    JSON.stringify(shopToday),
   );
 }
 {
@@ -257,6 +281,12 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
       signalsCtaLabel(bookLabel(linked!.bookmaker), formatAmerican(linked!.price), sideLine) ===
         `Bet DK ${MINUS}8.5 ${MINUS}105`,
     JSON.stringify(linked),
+  );
+  const todayMovedPrice = todayBoardHandoff(linked, heroAmericanForPick(pick, row, linkedRows));
+  check(
+    'Today keeps a price-and-line move as a Bet at the current link',
+    todayMovedPrice?.verb === 'Bet' && todayMovedPrice.price === -105 && todayMovedPrice.link === 'dk://now-8.5',
+    JSON.stringify(todayMovedPrice),
   );
 }
 {
@@ -1065,6 +1095,84 @@ check(
         label: 'Scottie Scheffler to Win (MB (exch.))',
       }) === 'Scottie Scheffler to Win',
   );
+  // Stored labels from the publishers and the pick-integrity fixtures.
+  // The stake and the "NEW 0m" tag are not the last token together, and the
+  // opener / wind / book parentheticals are not the bet.
+  const openerChi = 'CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, fanatics) · 0.98u · NEW 0m';
+  const openerNyg = 'TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u · NEW 0m';
+  const openerTen = 'HOU @ TEN — TEN +9.5 (Opener +2 vs Pinnacle, BR) · 1.67u · NEW 0m';
+  const openerBuf = 'BUF @ HOU — BUF +1 (Opener -2 vs Pinnacle, fanatics) · 0.98u';
+  const windSf = 'WAS @ SF Under 51.5 (Wind 11 mph, MGM) · 1.01u';
+  const windBuf = 'NE @ BUF Under 49 (Wind 11 mph, fanatics) · 1.01u';
+  const blocked = 'Charlie McAvoy Under 1.5 Blocked Shots (DK)';
+  const reb = 'Paige Bueckers Under 3.5 Reb (DK)';
+  const rec = 'Jadarian Price Over 1.5 Rec (FD)';
+  check(
+    'a stored opener label drops the note, the stake and the NEW tag',
+    signalsLabelHeadline(openerChi) === 'CHI @ ATL — CHI +0.5' &&
+      signalsLabelHeadline(openerNyg) === `TEN @ NYG — NYG ${MINUS}1` &&
+      signalsLabelHeadline(openerTen) === 'HOU @ TEN — TEN +9.5' &&
+      signalsLabelHeadline(openerBuf) === 'BUF @ HOU — BUF +1' &&
+      !signalsLabelHeadline(openerChi)!.includes('Opener') &&
+      !signalsLabelHeadline(openerChi)!.includes('NEW') &&
+      !signalsLabelHeadline(openerChi)!.includes('0.98u'),
+  );
+  check(
+    'a stored wind label drops the forecast and the stake',
+    signalsLabelHeadline(windSf) === 'WAS @ SF Under 51.5' &&
+      signalsLabelHeadline(windBuf) === 'NE @ BUF Under 49' &&
+      !signalsLabelHeadline(windSf)!.includes('Wind') &&
+      !signalsLabelHeadline(windSf)!.includes('MGM') &&
+      !signalsLabelHeadline(windSf)!.includes('1.01u'),
+  );
+  check(
+    'a stored prop label drops the book suffix',
+    signalsLabelHeadline(blocked) === 'Charlie McAvoy Under 1.5 Blocked Shots' &&
+      signalsLabelHeadline(reb) === 'Paige Bueckers Under 3.5 Reb' &&
+      signalsLabelHeadline(rec) === 'Jadarian Price Over 1.5 Rec' &&
+      !signalsLabelHeadline(blocked)!.includes('(DK)') &&
+      !signalsLabelHeadline(rec)!.includes('(FD)'),
+  );
+  check(
+    'an opener age that is not NEW, and a stake after it, still come off',
+    signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · 0.98u · up 5h') === 'CHI @ ATL — CHI +0.5' &&
+      signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · age unknown') === 'CHI @ ATL — CHI +0.5' &&
+      signalsLabelHeadline('CHI @ ATL — CHI +0.5 · NEW 0m · 0.98u') === 'CHI @ ATL — CHI +0.5',
+  );
+  check(
+    '(Regulation) and (matchup) stay when the stake and the age come off',
+    signalsLabelHeadline('Boston Bruins (Regulation)') === 'Boston Bruins (Regulation)' &&
+      signalsLabelHeadline('Boston Bruins (Regulation) · 1.10u · NEW 0m') === 'Boston Bruins (Regulation)' &&
+      signalsLabelHeadline('Scottie Scheffler over Rory McIlroy (matchup) · 0.50u · NEW 0m') ===
+        'Scottie Scheffler over Rory McIlroy (matchup)',
+  );
+  check(
+    'the hero of a stored opener, wind or prop label is the clean pick',
+    signalsBetHeadline({
+      side: 'away', line: -0.5, market: 'spreads', homeTeam: 'ATL', awayTeam: 'CHI', label: openerChi,
+    }) === 'CHI +0.5' &&
+      signalsBetHeadline({
+        side: 'home', line: -1, market: 'spreads', homeTeam: 'NYG', awayTeam: 'TEN', label: openerNyg,
+      }) === `NYG ${MINUS}1` &&
+      signalsBetHeadline({
+        side: 'home', line: 9.5, market: 'spreads', homeTeam: 'TEN', awayTeam: 'HOU', label: openerTen,
+      }) === 'TEN +9.5' &&
+      signalsBetHeadline({
+        side: 'under', line: 51.5, market: 'totals', homeTeam: 'SF', awayTeam: 'WAS', label: windSf,
+      }) === 'Under 51.5' &&
+      signalsBetHeadline({
+        side: 'under', line: 1.5, market: 'player_blocked_shots', player: null, label: blocked,
+      }) === 'Charlie McAvoy Under 1.5 Blocked Shots' &&
+      signalsBetHeadline({
+        side: 'under', line: 3.5, market: 'player_rebounds', player: null, label: reb,
+      }) === 'Paige Bueckers Under 3.5 Reb' &&
+      !signalsBetHeadline({
+        side: 'under', line: 51.5, market: 'totals', label: windSf,
+      }).includes('Wind') &&
+      !signalsBetHeadline({
+        side: 'away', line: -0.5, market: 'spreads', homeTeam: 'ATL', awayTeam: 'CHI', label: openerChi,
+      }).includes('NEW'),
+  );
   check(
     'wind reason is the forecast, and other models stay quiet',
     signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14 }) === 'Wind 14 mph at kickoff' &&
@@ -1182,7 +1290,13 @@ check(
   );
   const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
   check('the picked-at line is not under the hero', !card.includes('signalsPickedAtLine') && !/pickedAt:/.test(card));
-  check('Today uses the same Best now wording as Signals', /bestNow: handoff\.verb === 'Best'/.test(card));
+  check(
+    'Today uses the same Best now wording as Signals',
+    /bestNow: boardHandoff\.verb === 'Best'/.test(card) &&
+      card.includes('const boardHandoff = todayBoardHandoff(handoff, heroPrice)') &&
+      card.includes('openBookBetslip(boardHandoff.bookmaker, boardHandoff.link)') &&
+      signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`,
+  );
   const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
   check(
     'All, Signals and Live use the new card',

@@ -3,8 +3,10 @@
  *
  * Pure — no React Native — so the card, VoiceOver and the verify script
  * share one sentence. The headline is the bet only, built from the pick's
- * side, line, market and teams. A stake suffix ("· 0.77u") and a
- * parenthetical ("Wind 14 mph, FD", "no bet, DK") never become the bet.
+ * side, line, market and teams. A stake suffix ("· 0.77u"), an opener age
+ * ("· NEW 0m", "· up 5h", "· age unknown") and a parenthetical
+ * ("Wind 14 mph, FD", "Opener -2 vs Pinnacle, fanatics", "(DK)") never
+ * become the bet. "(Regulation)" and "(matchup)" stay.
  * A signed number uses U+2212; a hyphen inside a name
  * ("Louisiana-Monroe") stays a hyphen.
  *
@@ -92,19 +94,37 @@ const STRUCTURED_SIDES = new Set(['home', 'away', 'over', 'under', 'draw']);
 const KEPT_PAREN = /^(regulation|matchup)$/i;
 
 /**
- * The stored label, with the stake suffix and any parenthetical that is not
- * the bet taken off. Null when there is nothing left to show.
+ * Stake ("· 0.98u") and opener age ("· NEW 0m", "· up 5h", "· up 2d",
+ * "· age unknown") sit at the end, in either order. Peel whichever is
+ * last until neither remains.
+ */
+function stripTrailingLabelNoise(text: string): string {
+  let prev = '';
+  while (prev !== text) {
+    prev = text;
+    text = text
+      .replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/iu, '')
+      .replace(/\s*·\s*NEW\s+\d+m\s*$/iu, '')
+      .replace(/\s*·\s*up\s+\d+(?:\.\d+)?[hd]\s*$/iu, '')
+      .replace(/\s*·\s*age unknown\s*$/iu, '');
+  }
+  return text;
+}
+
+/**
+ * The stored label, with the stake, the opener age, and any parenthetical
+ * that is not the bet taken off. Null when there is nothing left to show.
  */
 export function signalsLabelHeadline(label: string | null | undefined): string | null {
   if (!label) return null;
-  let text = label.trim().replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/u, '');
+  let text = stripTrailingLabelNoise(label.trim());
   let prev = '';
   while (prev !== text) {
     prev = text;
     text = text.replace(/\s*\(([^()]*)\)/g, (full, inner: string) =>
       KEPT_PAREN.test(inner.trim()) ? full : '');
   }
-  text = text.replace(/\s{2,}/g, ' ').trim();
+  text = stripTrailingLabelNoise(text).replace(/\s{2,}/g, ' ').trim();
   return text ? trueMinus(text) : null;
 }
 

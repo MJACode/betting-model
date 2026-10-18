@@ -1299,7 +1299,9 @@ export function bestHandoffForPick(
   }
   // movedLine is a Now handoff whether or not kind is 'now'. A book still
   // quoting the scored line wins. Otherwise a side link on the current row
-  // is that quote and the button names the line. With no such link the
+  // is that quote. Signals names the line on its button. Today does not:
+  // todayBoardHandoff turns this Bet into Open, so the button does not
+  // read "Bet DK −110" and open the new line. With no current link the
   // button opens the book and does not use the lock's slip.
   if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book) {
     const stillThere = quotes.filter((q) => !(q.isRecord && q.bookmaker === hero.book));
@@ -1336,6 +1338,36 @@ export function bestHandoffForPick(
     link: best.link,
     verb,
   };
+}
+
+/**
+ * The Today button. It prints the lock and does not name a line.
+ *
+ * When the deciding book has moved its line but not its price, and no
+ * other book is still at the scored line, `bestHandoffForPick` returns
+ * a Bet whose link is the current row — the new line, at the old price.
+ * Putting that on Today reads "Bet DK −110" and opens a different bet.
+ * This case is the existing Open hand-off: no price, and no slip link.
+ * A book still at the scored line is unchanged, including "Best now".
+ * Signals names the line and does not call this.
+ */
+export function todayBoardHandoff(
+  handoff: BoardHandoff | null,
+  hero: HeroAmerican | null | undefined,
+): BoardHandoff | null {
+  if (
+    handoff != null &&
+    hero != null &&
+    hero.movedLine != null &&
+    hero.kind !== 'now' &&
+    handoff.verb === 'Bet' &&
+    handoff.bookmaker === hero.book &&
+    handoff.price != null &&
+    handoff.price === hero.price
+  ) {
+    return { bookmaker: handoff.bookmaker, price: null, link: null, verb: 'Open' };
+  }
+  return handoff;
 }
 
 /**

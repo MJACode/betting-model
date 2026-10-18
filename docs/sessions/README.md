@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1: Today line-only move with no book at the picked line is Open DK and does not open the new line; stored headlines drop opener, wind, stake, and NEW tags |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 branch merged Signals `955673fe` (master `499fb3ee` inside it); session logs keep both sides; #994 base moves to master; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 designer re-check: live lock and a NEUTRAL edge use secondary ink; dome suppression removed; label fallback drops any book parenthetical |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 engineer review: verdict chip and muted NONE/AVOID headline, golf and UFC method fall back to the label, regulation is not ML, wind reason from the label, green live lock |

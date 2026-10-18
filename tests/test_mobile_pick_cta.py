@@ -626,7 +626,10 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "flexBasis: '46%'" not in card
     assert "flexBasis: '100%'" not in card
     assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine" not in card
-    assert "bestNow: handoff.verb === 'Best'" in card
+    assert "bestNow: boardHandoff.verb === 'Best'" in card
+    assert "const boardHandoff = todayBoardHandoff(handoff, heroPrice)" in card
+    assert "openBookBetslip(boardHandoff.bookmaker, boardHandoff.link)" in card
+    assert "export function todayBoardHandoff" in markets
     stake = _read(LIB / "signalsCard.ts")
     assert "export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win'" in stake
     assert "SIGNALS_STAKE_FORM === 'single'" not in stake
@@ -663,7 +666,7 @@ def test_signals_card_copy(tmp_path):
         src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = r"""
-import { signalsBetHeadline, signalsCardSpeech, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsCtaSpeech, signalsHeroSpeech, signalsModelCaption, signalsNowLine, signalsPriceText, signalsReasonLine, signalsStakeLine, signalsStakeSpeech } from './signalsCard.ts';
+import { signalsBetHeadline, signalsCardSpeech, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsCtaSpeech, signalsHeroSpeech, signalsLabelHeadline, signalsModelCaption, signalsNowLine, signalsPriceText, signalsReasonLine, signalsStakeLine, signalsStakeSpeech } from './signalsCard.ts';
 const MINUS = '\u2212';
 const ok = (cond, what) => { if (!cond) throw new Error(what); };
 const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
@@ -709,6 +712,33 @@ ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: null, label: 'KC @
 ok(signalsBetHeadline({ side: 'over', line: 1.5, market: 'player_custom', player: null, label: 'Someone Over 1.5 Custom (betonlineag) · 1.00u' }) === 'Someone Over 1.5 Custom', 'an unknown book code stays off the headline');
 ok(signalsBetHeadline({ side: 'over', line: 1.5, market: 'player_custom', player: null, label: 'Someone Over 1.5 Custom (FanDuel)' }) === 'Someone Over 1.5 Custom', 'a full book name stays off the headline');
 ok(signalsBetHeadline({ side: 'yes', line: null, market: null, homeTeam: 'The Masters', label: 'Scottie Scheffler to Win (MB (exch.))' }) === 'Scottie Scheffler to Win', 'a nested book tag stays off the headline');
+const openerChi = 'CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, fanatics) · 0.98u · NEW 0m';
+const openerNyg = 'TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u · NEW 0m';
+const openerTen = 'HOU @ TEN — TEN +9.5 (Opener +2 vs Pinnacle, BR) · 1.67u · NEW 0m';
+const windSf = 'WAS @ SF Under 51.5 (Wind 11 mph, MGM) · 1.01u';
+const windBuf = 'NE @ BUF Under 49 (Wind 11 mph, fanatics) · 1.01u';
+ok(signalsLabelHeadline(openerChi) === 'CHI @ ATL — CHI +0.5', 'opener drops the note, the stake and NEW');
+ok(signalsLabelHeadline(openerNyg) === `TEN @ NYG — NYG ${MINUS}1`, 'opener minus is a true minus');
+ok(signalsLabelHeadline(openerTen) === 'HOU @ TEN — TEN +9.5', 'opener plus stays');
+ok(signalsLabelHeadline('BUF @ HOU — BUF +1 (Opener -2 vs Pinnacle, fanatics) · 0.98u') === 'BUF @ HOU — BUF +1', 'opener stake with no age tag');
+ok(!signalsLabelHeadline(openerChi).includes('Opener') && !signalsLabelHeadline(openerChi).includes('NEW') && !signalsLabelHeadline(openerChi).includes('0.98u'), 'opener noise is gone');
+ok(signalsLabelHeadline(windSf) === 'WAS @ SF Under 51.5', 'wind drops the forecast and the stake');
+ok(signalsLabelHeadline(windBuf) === 'NE @ BUF Under 49', 'wind fanatics label');
+ok(!signalsLabelHeadline(windSf).includes('Wind') && !signalsLabelHeadline(windSf).includes('1.01u'), 'wind noise is gone');
+ok(signalsLabelHeadline('Charlie McAvoy Under 1.5 Blocked Shots (DK)') === 'Charlie McAvoy Under 1.5 Blocked Shots', 'blocked shots drops DK');
+ok(signalsLabelHeadline('Paige Bueckers Under 3.5 Reb (DK)') === 'Paige Bueckers Under 3.5 Reb', 'reb drops DK');
+ok(signalsLabelHeadline('Jadarian Price Over 1.5 Rec (FD)') === 'Jadarian Price Over 1.5 Rec', 'rec drops FD');
+ok(signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · 0.98u · up 5h') === 'CHI @ ATL — CHI +0.5', 'up hours comes off');
+ok(signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · age unknown') === 'CHI @ ATL — CHI +0.5', 'age unknown comes off');
+ok(signalsLabelHeadline('Boston Bruins (Regulation) · 1.10u · NEW 0m') === 'Boston Bruins (Regulation)', 'regulation stays');
+ok(signalsLabelHeadline('Scottie Scheffler over Rory McIlroy (matchup) · 0.50u · NEW 0m') === 'Scottie Scheffler over Rory McIlroy (matchup)', 'matchup stays');
+ok(signalsBetHeadline({ side: 'away', line: -0.5, market: 'spreads', homeTeam: 'ATL', awayTeam: 'CHI', label: openerChi }) === 'CHI +0.5', 'opener hero is the pick');
+ok(signalsBetHeadline({ side: 'home', line: -1, market: 'spreads', homeTeam: 'NYG', awayTeam: 'TEN', label: openerNyg }) === `NYG ${MINUS}1`, 'opener hero uses the fields');
+ok(signalsBetHeadline({ side: 'under', line: 51.5, market: 'totals', homeTeam: 'SF', awayTeam: 'WAS', label: windSf }) === 'Under 51.5', 'wind hero is the total');
+ok(signalsBetHeadline({ side: 'under', line: 1.5, market: 'player_blocked_shots', player: null, label: 'Charlie McAvoy Under 1.5 Blocked Shots (DK)' }) === 'Charlie McAvoy Under 1.5 Blocked Shots', 'blocked shots fallback');
+ok(signalsBetHeadline({ side: 'under', line: 3.5, market: 'player_rebounds', player: null, label: 'Paige Bueckers Under 3.5 Reb (DK)' }) === 'Paige Bueckers Under 3.5 Reb', 'reb fallback');
+ok(!signalsBetHeadline({ side: 'under', line: 51.5, market: 'totals', label: windSf }).includes('Wind'), 'wind hero has no forecast');
+ok(!signalsBetHeadline({ side: 'away', line: -0.5, market: 'spreads', homeTeam: 'ATL', awayTeam: 'CHI', label: openerChi }).includes('NEW'), 'opener hero has no age tag');
 ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null, 'other models stay quiet');
 ok(signalsModelCaption('Wind Totals (Under)', 'Posted 11:07 AM ET') === 'Wind Totals (Under) model · Posted 11:07 AM ET', 'caption');
 ok(signalsCardSpeech({

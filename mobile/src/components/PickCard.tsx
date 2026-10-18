@@ -24,6 +24,7 @@ import {
   propMarketForPick,
   splitPickTitle,
   storedQuoteBook,
+  todayBoardHandoff,
   type Movement,
 } from '@/lib/markets';
 import { modelLong, isPropModel } from '@/lib/modelMeta';
@@ -236,6 +237,10 @@ export function PickCard({
   const handoff = offersBook && cta.handoff
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge)
     : null;
+  // Today prints the lock and does not name a line. A line-only move with
+  // no book left at the picked line is Open: no "Bet DK −110", and no slip
+  // at the new line. Signals names the line, so it keeps `handoff`.
+  const boardHandoff = todayBoardHandoff(handoff, heroPrice);
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
   // "Game started · picked at −125 DK" in the hand-off's place (H5). Not gated
@@ -457,19 +462,22 @@ export function PickCard({
   // Nested buttons inside an accessible card aren't separately focusable on
   // iOS — VoiceOver groups the card — so Track, Betslip and the book hand-off
   // are also offered as custom actions (swipe up/down on the card).
+  // Today uses boardHandoff, which is Open when the slip would be a
+  // different line from the lock the button would otherwise quote.
+  const actionHandoff = signals ? handoff : boardHandoff;
   const a11yActions = [
-    ...(handoff
+    ...(actionHandoff
       ? [{
           name: 'book',
           label: signals && signalsCtaSpoken
             ? signalsCtaSpoken
-            : handoff.price == null
-              ? `Open ${bookName(handoff.bookmaker)} to check the live price`
+            : actionHandoff.price == null
+              ? `Open ${bookName(actionHandoff.bookmaker)} to check the live price`
               : signalsCtaSpeech(
-                  bookName(handoff.bookmaker),
-                  formatAmerican(handoff.price),
+                  bookName(actionHandoff.bookmaker),
+                  formatAmerican(actionHandoff.price),
                   null,
-                  { bestNow: handoff.verb === 'Best' },
+                  { bestNow: actionHandoff.verb === 'Best' },
                 ),
         }]
       : []),
@@ -489,7 +497,7 @@ export function PickCard({
       accessibilityActions={a11yActions.length > 0 ? a11yActions : undefined}
       onAccessibilityAction={(e) => {
         const name = e.nativeEvent.actionName;
-        if (name === 'book' && handoff) void openBookBetslip(handoff.bookmaker, handoff.link);
+        if (name === 'book' && actionHandoff) void openBookBetslip(actionHandoff.bookmaker, actionHandoff.link);
         else if (name === 'slip' && canSlip) onToggleSlip!();
         else if (name === 'track' && canTrack) onToggleTrack!();
       }}
@@ -728,7 +736,7 @@ export function PickCard({
         </View>
       ) : null}
 
-      {handoff || startedText || canTrack || canSlip ? (
+      {boardHandoff || startedText || canTrack || canSlip ? (
         <View style={styles.actionsRow}>
           {startedText ? (
             // Not a button: the pick was made at this price, before the start.
@@ -751,38 +759,38 @@ export function PickCard({
                 {startedText}
               </Text>
             </View>
-          ) : handoff ? (
+          ) : boardHandoff ? (
             <Pressable
               onPress={() => {
-                void openBookBetslip(handoff.bookmaker, handoff.link);
+                void openBookBetslip(boardHandoff.bookmaker, boardHandoff.link);
               }}
               hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
               accessibilityLabel={
-                handoff.price == null
-                  ? `Open ${bookName(handoff.bookmaker)} to check the live price`
+                boardHandoff.price == null
+                  ? `Open ${bookName(boardHandoff.bookmaker)} to check the live price`
                   : signalsCtaSpeech(
-                      bookName(handoff.bookmaker),
-                      formatAmerican(handoff.price),
+                      bookName(boardHandoff.bookmaker),
+                      formatAmerican(boardHandoff.price),
                       null,
-                      { bestNow: handoff.verb === 'Best' },
+                      { bestNow: boardHandoff.verb === 'Best' },
                     )
               }
               style={({ pressed }) => [
                 styles.handoff,
-                handoff.bookmaker === 'draftkings' && styles.handoffDk,
+                boardHandoff.bookmaker === 'draftkings' && styles.handoffDk,
                 pressed && styles.pressed,
               ]}
             >
               <Text
-                style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
+                style={[styles.handoffText, boardHandoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
                 numberOfLines={1}
               >
                 {signalsCtaLabel(
-                  bookLabel(handoff.bookmaker),
-                  handoff.price == null ? null : formatAmerican(handoff.price),
+                  bookLabel(boardHandoff.bookmaker),
+                  boardHandoff.price == null ? null : formatAmerican(boardHandoff.price),
                   null,
-                  { bestNow: handoff.verb === 'Best' },
+                  { bestNow: boardHandoff.verb === 'Best' },
                 )}
               </Text>
             </Pressable>
