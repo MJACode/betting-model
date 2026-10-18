@@ -2483,7 +2483,7 @@ export function StatsScreen() {
             <ThresholdDoneBar onCancel={lineEditBar.cancel} onDone={lineEditBar.commit} />
           ) : null}
           {lineNotice ? (
-            <View style={styles.lineNotice} accessibilityLiveRegion="polite">
+            <View style={styles.lineNotice} accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}>
               <Ionicons name="information-circle-outline" size={14} color={colors.tint} />
               <Text style={styles.lineNoticeText}>{lineNotice}</Text>
             </View>
@@ -3323,8 +3323,21 @@ function LineRuler({
   const openedValue = useRef(value);
   const bubbleBox = useRef<BubbleBox | null>(null);
   // A tap that started on the bubble also lands on the tick underneath.
-  // That tick must not move the line.
+  // That tick must not move the line. The tick's onPress can arrive after
+  // the tap handler's END, so the guard stays up through this turn and drops
+  // on the next frame, or sooner when the next touch begins.
   const suppressTick = useRef(false);
+  const suppressRelease = useRef<number | null>(null);
+  const releaseTickGuard = () => {
+    if (suppressRelease.current != null) cancelAnimationFrame(suppressRelease.current);
+    suppressRelease.current = requestAnimationFrame(() => {
+      suppressRelease.current = null;
+      suppressTick.current = false;
+    });
+  };
+  useEffect(() => () => {
+    if (suppressRelease.current != null) cancelAnimationFrame(suppressRelease.current);
+  }, []);
   const scrollToValue = (v: number) => {
     skipSettleRef.current = true;
     skipCountRef.current = 2;
@@ -3352,7 +3365,11 @@ function LineRuler({
     const restore = openedValue.current;
     closeDraft();
     onNotice?.(outcome.notice);
-    if (outcome.notice) AccessibilityInfo.announceForAccessibility(outcome.notice);
+    // Android speaks the notice from accessibilityLiveRegion. Announcing
+    // here as well reads the clamp twice. iOS does not speak that region.
+    if (outcome.notice && Platform.OS !== 'android') {
+      AccessibilityInfo.announceForAccessibility(outcome.notice);
+    }
     if (outcome.apply == null) {
       scrollToValue(restore);
     } else if (outcome.apply !== value) {
@@ -3367,6 +3384,9 @@ function LineRuler({
     commitTaken.current = true;
     closeDraft();
     onNotice?.(null);
+    // Strip only. The board is still the value the edit opened on: a tick
+    // under the bubble is ignored while the guard is up, and onChange here
+    // would move the board.
     scrollToValue(openedValue.current);
     Keyboard.dismiss();
   };
@@ -3419,18 +3439,22 @@ function LineRuler({
     const { state, x, y } = e.nativeEvent;
     const inside = box != null && pointInBubble(x, y, box);
     if (state === State.BEGAN) {
+      if (suppressRelease.current != null) {
+        cancelAnimationFrame(suppressRelease.current);
+        suppressRelease.current = null;
+      }
       suppressTick.current = inside;
       setBubblePressed(inside);
       return;
     }
     if (state === State.FAILED || state === State.CANCELLED) {
-      suppressTick.current = false;
       setBubblePressed(false);
+      if (suppressTick.current) releaseTickGuard();
       return;
     }
     if (state === State.END && inside) openDraft();
-    suppressTick.current = false;
     setBubblePressed(false);
+    if (suppressTick.current) releaseTickGuard();
   };
 
   const draftSelection =
@@ -3573,6 +3597,7 @@ function LineRuler({
                   value={draft}
                   onChangeText={onType}
                   onEndEditing={commitDraft}
+                  onBlur={commitDraft}
                   onSubmitEditing={commitDraft}
                   selection={draftSelection}
                   keyboardType="decimal-pad"
@@ -3610,6 +3635,10 @@ function LineRuler({
             accessibilityRole="button"
             accessibilityLabel={thresholdBubbleLabel(faceOf(value), statLabel)}
             accessibilityHint={THRESHOLD_TYPE_HINT}
+            accessibilityActions={[{ name: 'activate' }]}
+            onAccessibilityAction={(e) => {
+              if (e.nativeEvent.actionName === 'activate') openDraft();
+            }}
             onAccessibilityTap={openDraft}
             pointerEvents="none"
             style={[
@@ -3628,13 +3657,7 @@ function LineRuler({
       </View>
       {parseTyped && Platform.OS === 'ios' ? (
         <InputAccessoryView nativeID={RULER_ACCESSORY_ID}>
-          <ThresholdDoneBar
-            onCancel={cancelDraft}
-            onDone={() => {
-              commitDraft();
-              Keyboard.dismiss();
-            }}
-          />
+          <ThresholdDoneBar onCancel={cancelDraft} onDone={commitDraft} />
         </InputAccessoryView>
       ) : null}
     </View>

@@ -672,6 +672,8 @@ check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 4
 check('Stats threshold bubble: the name is the label and the gesture is the hint',
   /accessibilityLabel=\{thresholdBubbleLabel\(faceOf\(value\), statLabel\)\}/.test(read('src/screens/StatsScreen.tsx')) &&
     /accessibilityHint=\{THRESHOLD_TYPE_HINT\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityActions=\{\[\{ name: 'activate' \}\]\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /actionName === 'activate'\) openDraft\(\)/.test(read('src/screens/StatsScreen.tsx')) &&
     /return `Threshold \$\{value\}`;/.test(read('src/lib/lineRuler.ts')) &&
     /export const THRESHOLD_TYPE_HINT = 'double tap to type a value';/.test(read('src/lib/lineRuler.ts')));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',

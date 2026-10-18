@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: TalkBack opens the threshold field via an activate action; the tick under the bubble cannot move the board; the clamp is announced once |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: the editing field is 64pt (128 at 2x); the type gesture is a hint; Android and web Done/Cancel span the row |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Stats threshold bubble is the field: tap to type, Cancel restores, navy clamp text; the pencil button is gone |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NHL: "LAK ML" voided (contradicted "BOS (Regulation)" on one game); the regulation model decides in the moneyline model's game-day window; one game never gets two picks that cannot both win |

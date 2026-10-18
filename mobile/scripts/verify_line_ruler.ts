@@ -386,6 +386,8 @@ for (const def of STAT_CATALOG) {
       screen.includes("label: 'Type a line'") &&
       screen.includes('thresholdBubbleLabel(faceOf(value), statLabel)') &&
       screen.includes('accessibilityHint={THRESHOLD_TYPE_HINT}') &&
+      screen.includes("name: 'activate'") &&
+      screen.includes("actionName === 'activate'") &&
       screen.includes('onAccessibilityTap={openDraft}') &&
       screen.includes('accessibilityLabel="Cancel"') &&
       screen.includes('accessibilityLabel="Done"'),
@@ -432,6 +434,32 @@ for (const def of STAT_CATALOG) {
       /doneBar: \{[^}]*alignSelf: 'stretch'/.test(screen) &&
       rulerFn.includes('InputAccessoryView') &&
       !rulerFn.includes("Platform.OS !== 'ios'"),
+  );
+  const tapHandler = screen.slice(screen.indexOf('const onBubbleTap'), screen.indexOf('const draftSelection'));
+  const guard = screen.slice(screen.indexOf('const releaseTickGuard'), screen.indexOf('const scrollToValue'));
+  check(
+    'a bubble tap holds the tick guard until the next frame',
+    guard.includes('requestAnimationFrame') &&
+      guard.indexOf('suppressTick.current = false') > guard.indexOf('requestAnimationFrame') &&
+      tapHandler.includes('releaseTickGuard()') &&
+      tapHandler.includes('suppressTick.current = inside') &&
+      !tapHandler.includes('suppressTick.current = false'),
+  );
+  const cancelBody = screen.slice(screen.indexOf('const cancelDraft = () => {'), screen.indexOf('const commitRef'));
+  check(
+    'Cancel puts the strip back and does not move the board',
+    cancelBody.includes('scrollToValue(openedValue.current)') && !cancelBody.includes('onChange('),
+  );
+  check(
+    'the field commits on blur, and the clamp is announced once',
+    screen.includes('onBlur={commitDraft}') &&
+      screen.includes("outcome.notice && Platform.OS !== 'android'") &&
+      screen.includes("accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}"),
+  );
+  const accessory = screen.slice(screen.indexOf('<InputAccessoryView'), screen.indexOf('</InputAccessoryView>'));
+  check(
+    'the iOS Done bar does not dismiss the keyboard a second time',
+    accessory.includes('onDone={commitDraft}') && !accessory.includes('Keyboard.dismiss()'),
   );
   check(
     '2x text or landscape scrolls the line control',
