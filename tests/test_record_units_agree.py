@@ -209,8 +209,8 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "Units unavailable" in hero
     assert "unknownCountSpeech('— settled picks')" in hero
     assert "since ${LIVE_RECORD_START_SHORT}" in hero
-    # Yesterday's book is named "flat-bet ROI" on the Yesterday sheet.
-    # This screen says "Return on bets".
+    # Yesterday now uses this same posted stake. This screen says
+    # "Return on bets", and it does not say "flat-bet ROI".
     for blob in (screen, card, hero):
         assert "Flat-bet ROI" not in blob
         assert "flat-bet ROI" not in blob
@@ -235,7 +235,8 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "pnlColor(summary.roi, 1, 100)" in card
     assert "summary.units != null" in card
     assert "overall.units == null" in screen
-    assert "Yesterday and Models use a flat $100 bet" in hero
+    assert "Models use a flat $100 bet" in hero
+    assert "Yesterday and Models use a flat $100 bet" not in hero
     assert "unpriced, staked at 1u" in screen
     assert "flat $100" not in curve
     assert "colors.positive" not in curve
