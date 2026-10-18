@@ -51,6 +51,9 @@ export const colors = {
 
   // Tints
   tint: BRAND_INK, // primary actions, links, selection
+  // Selected Signals Slip / Track. A light wash of tint, so the ON state
+  // reads as selected and the label stays tint (measured on this wash).
+  tintSoft: '#E6E8EC',
   // A STATUS colour, never a control: the old system blue kept for the one
   // grade/pill/fill that means "good / in progress" and must not look like a
   // button now that tint is near-black (UX review 2026-09-03).

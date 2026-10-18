@@ -19,8 +19,17 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #963 merged origin/master `9b664d14` (#994); session logs keep both sides; Lines board state and NCAAF abbreviations both stay; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #963 merged origin/master `b63f6396`; session logs keep both sides; Lines pytest stays on the PR list beside master's; the PR stays a draft |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 branch merged origin/master `b63f6396`; session logs keep both sides; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, X posts every released pre-game pick; X_POST_ALL_PICKS=0 restores free-pick-only; team hashtags, four-tag cap |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1: Today line-only move with no book at the picked line is Open DK and does not open the new line; stored headlines drop opener, wind, stake, and NEW tags |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 branch merged Signals `955673fe` (master `499fb3ee` inside it); session logs keep both sides; #994 base moves to master; the PR stays a draft |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 designer re-check: live lock and a NEUTRAL edge use secondary ink; dome suppression removed; label fallback drops any book parenthetical |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 engineer review: verdict chip and muted NONE/AVOID headline, golf and UFC method fall back to the label, regulation is not ML, wind reason from the label, green live lock |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 follow-up: three figures on one row, new card on All / Signals / Live, matchup beside the score, plain prop words, paused chip on every view |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Signals card Option 1 on unmerged #965: bet-only headline from fields, wind reason, wrapping matchup, stake row, model footer. Today and Live stay on the board |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, origin/master `499fb3ee` merged into the Signals card branch (#965); session logs keep both sides, newest first; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: Cancel wins on web when blur fires before the click; a blur anywhere else still commits |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: TalkBack opens the threshold field via an activate action; the tick under the bubble cannot move the board; the clamp is announced once |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: the editing field is 64pt (128 at 2x); the type gesture is a hint; Android and web Done/Cancel span the row |
@@ -57,6 +66,15 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Record hero shows posted-stake units at two decimals (the Discord figure); ROI stays on the line under it; stacked on #964 |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, a bet Discord posted keeps its edge, probability and price cuts in the app (mike: "Yes"); DUPLICATE copies are never an action; display only |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Luukkonen Under 25.5 Saves (pick 3628128) voided on the evening box pass with no start logged for him; goalie void now needs both teams' starts; regraded LOSS, 2026-10-15 restates |
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, origin/master `58f205d9` merged into the Signals card branch; session logs kept both sides; the behavioural check runs both verify scripts through `tsx_cmd` |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals reviewer lows: a flagged or stale leg already in the slip can be removed; a line-only move is `Best now · DK −8.5 −110`; the single stake form is gone; the Today handoff is one line |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals re-check: stake wording waits on Matt (`SIGNALS_STAKE_FORM`), Picked-at line dropped, Now line is `MGM line now −4.5 (−110)`, Today Best matches Signals |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals designer fixes: Best now when the button differs, Picked at under the price, flagged and stale cards drop Bet and Slip, footnote book, 2×2 metrics, tintSoft on selected Slip and Track |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, a moved line is a Now handoff without requiring kind now: book still at the scored line, else the current slip link with the line named, else Open DK |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals button after a moved line: a book still at the scored line, else the current slip link with the line named, else Open DK. Team Total headlines keep the club |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals Stake cell shows units to bet and units to win (`Bet 1.5u · Win 0.4u`) from stakeFor, on its own wrapping row |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals card review on #965: a Now line when the book's line or price differs, the Bet button names that line only when it is the current bet, the fourth cell is To win |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Signals pick card (Designer Option A, Matt approved): one compact line, 22pt bet as the hero, four cells, navy Bet button. Today and Live stay on the board layout |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, The Citadel: The Odds API's "Citadel Bulldogs" joins `NCAAF_ODDS_API_MAP` (CFBD says "The Citadel", the fold keeps the article); `ncaaf_citadel_alias_2026_10_16.sql` consolidates five alias rows (Texas A&M 2026-10-17 held 605 odds, Charlotte 2026-09-05 8,639; no picks) onto the CFBD ids; the migration is executed on a scratch Postgres in its test |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NBA projection model (`nba_prop_projection`) live: six calibrated cells, every qualifying proposition, never one the rule holds, projected about 65 minutes before tip and decided in the window; three verifiers and a pre-merge review confirmed; live-path replay matches the graded predictions; the shared window moved to 45-57 (#970) and two missing markets fetched |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, session close: #957, #977, #978, #980 merged (14:03Z to 17:05Z); worker and pollers SUCCESS, OTA run 38936964872 success; full suite on master 46ad3562 5,947 passed / 0 failed / 0 skipped in 257.65 s, no postgres.exe left; machine installs (node wheel, embedded-postgres, mobile/node_modules) and Matt's two commands |

@@ -628,7 +628,7 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard label carries game status + time (gameStatusSpeech)', /gameStatusSpeech\(gameStatus\(game, liveState\), gameDayLabelET\(game\?\.commence_time\)\)/.test(card));
 check('PickCard label carries the stake, in words', /stakeCaption \? `Stake \$\{unitsSpeech\(stakeCaption\)\}` : null/.test(card));
 check('PickCard label carries when it posted and the started line', /timing \? timing\.label : null/.test(card) && /startedSpoken,/.test(card));
-check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && handoff/.test(card));
+check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && actionHandoff/.test(card));
 check('PickCard: "Game started" is spoken once — in cardLabel (gameStartedSpeech, full book name), the nested line hidden',
   /startedSpoken,\n/.test(card) && /gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)/.test(card) &&
     /style=\{styles\.startedLine\}\s*accessibilityRole="text"\s*accessibilityElementsHidden\s*importantForAccessibility="no-hide-descendants"/.test(card));
