@@ -1333,6 +1333,10 @@ favourite. It never sets a rule's own number.
 **Smoke run:** the 160 full-game cells on 2020-21 alone, which checks the plumbing and is never a
 result. The 96 first-half, first-quarter and team-total cells run on synthetic games only.
 
+One more line, 2026-10-18, after the 2020-21 smoke and before any other P2 grade. It changes no
+cell. `--full` also refuses when no results folder is named, so P2's cells never land beside the
+second search's 422, which the pass/fail script would read together.
+
 ### 8.3 P3, the second search's signals on the derivative markets: choices fixed before any P3 cell was graded (2026-10-18)
 
 Section 8 names the two signals and their cuts; these lines fix everything it leaves open. Lab:
