@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD tiers are Great through Very tough; the cell opens the explainer; columns are 40/66/62 and stack only at large text |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, NFL Anytime TD matchup column: five bars, a tier word, and a rank; position_defense_ranks_nfl is in the migration list and was not applied |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: Cancel wins on web when blur fires before the click; a blur anywhere else still commits |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: TalkBack opens the threshold field via an activate action; the tick under the bubble cannot move the board; the clamp is announced once |

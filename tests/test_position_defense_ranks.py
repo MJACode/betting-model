@@ -109,6 +109,11 @@ def test_the_role_and_stat_cuts_match_the_player_card():
     assert rank_stat == _whens(old, "WHEN 'passing_yards'")
     assert new.count("WHEN 'rush_rec_tds'") == 3
     assert "pos text" in new
+    # Re-run skips the drop once pos is already on the result type.
+    assert "already returns pos — skipping" in new
+    assert "pg_get_function_identity_arguments" in new
+    assert "position_defense_ranks_nfl already present — skipping" in new
+    assert "per qualifying player-game" in new
 
 
 def test_the_app_calls_the_function_by_its_literal_name():
@@ -121,6 +126,9 @@ def test_the_app_calls_the_function_by_its_literal_name():
     assert "ATD_COPY" in screen
     # Season and H2H rows keep the position the migration adds.
     assert "pos: r.pos ?? null" in screen
+    assert "Promise.allSettled" in screen
+    assert "groupsUsedByBoard" in screen
+    assert "ATD_POS_GROUPS" not in screen
 
 
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")

@@ -3,9 +3,11 @@
  *
  * The A–F grade stays on every other board. This one answers "how easy is
  * the defense for this position?" with five bars, a tier word, and a rank
- * line ("3rd easiest"). Rank 1 allows the most touchdowns to the position.
+ * line ("3rd easiest", or "3rd toughest" when that end is nearer). Rank 1
+ * allows the most touchdowns to the position.
  *
- * Tiers, over 32 teams: 1–6, 7–13, 14–19, 20–26, 27–32.
+ * Tiers, over 32 teams: 1–6 Great, 7–13 Good, 14–19 Average, 20–26 Tough,
+ * 27–32 Very tough.
  * The server blends last season until a defense has played
  * BLEND_UNTIL_TEAM_GAMES this season (the same 8 the SQL comments name).
  *
@@ -17,31 +19,42 @@ import { nflPositionGroup, type NflPositionGroup } from './positionVsOpponent';
 /** Must match the `< 8` / `>= 8` cuts in position_defense_ranks_nfl. */
 export const BLEND_UNTIL_TEAM_GAMES = 8;
 
-/** Metrics move under the name at this Dynamic Type scale, before a fixed
- *  column clips the price (the board's own note: about 1.3). */
+/** Metrics move under the name at this Dynamic Type scale. A phone-width
+ *  cutoff stacked every phone and doubled the row, so width does not. */
 export const ATD_STACK_FONT_SCALE = 1.3;
 
-/** And on a phone narrower than this: Hit 56 + Matchup 96 + Best 72 leave
- *  the name about 67pt on a 375pt screen, which clips the opponent. */
-export const ATD_STACK_BELOW_WIDTH = 430;
+/** The board's column widths. Hit % 40, Matchup 66, Best price 62. */
+export const ATD_HIT_W = 40;
+export const ATD_MATCHUP_W = 66;
+export const ATD_ODDS_W = 62;
 
-export const ATD_HIT_W = 56;
-export const ATD_MATCHUP_W = 96;
-export const ATD_ODDS_W = 72;
+/** Stable order for the groups a board actually has rows for. */
+const GROUP_ORDER: readonly NflPositionGroup[] = ['QB', 'RB', 'WR', 'TE', 'DL', 'LB', 'DB'];
 
-export const ATD_POS_GROUPS: readonly NflPositionGroup[] = [
-  'QB', 'RB', 'WR', 'TE', 'DL', 'LB', 'DB',
-];
-
-export type MatchupTier = 'Easiest' | 'Easy' | 'Average' | 'Tough' | 'Toughest';
+export type MatchupTier = 'Great' | 'Good' | 'Average' | 'Tough' | 'Very tough';
 
 /** Best (easiest) first. The index is the order a floor compares. */
 export const TIER_ORDER: readonly MatchupTier[] = [
-  'Easiest', 'Easy', 'Average', 'Tough', 'Toughest',
+  'Great', 'Good', 'Average', 'Tough', 'Very tough',
 ];
 
-/** Floors a person can set. Toughest includes everyone, so it is not a chip. */
-export const TIER_FLOORS: readonly MatchupTier[] = ['Easiest', 'Easy', 'Average', 'Tough'];
+/** Floors a person can set. Very tough includes everyone, so it is not a chip. */
+export const TIER_FLOORS: readonly MatchupTier[] = ['Great', 'Good', 'Average', 'Tough'];
+
+/** The chip and the pill. "Tough" alone hides that the floor includes Great. */
+export function tierFloorLabel(tier: MatchupTier): string {
+  return `${tier} or easier`;
+}
+
+/** Position groups present on the rows, in GROUP_ORDER. An unmapped pos adds nothing. */
+export function groupsUsedByBoard(positions: Iterable<string | null | undefined>): NflPositionGroup[] {
+  const found = new Set<NflPositionGroup>();
+  for (const pos of positions) {
+    const group = nflPositionGroup(pos);
+    if (group) found.add(group);
+  }
+  return GROUP_ORDER.filter((g) => found.has(g));
+}
 
 export type GapReason = 'no_game' | 'bye' | 'not_playing' | 'too_early' | 'no_position';
 
@@ -72,17 +85,21 @@ export const ATD_COPY = {
   infoTitle: 'Matchup',
   infoBody:
     'How easy this week’s defense is for the player’s position.\n\n'
-    + 'Five bars. Easiest is five filled, Toughest is one. The line under the word is the rank: 1st easiest allows the most touchdowns to that position, 32nd the fewest.\n\n'
-    + 'Tiers: 1st–6th Easiest, 7th–13th Easy, 14th–19th Average, 20th–26th Tough, 27th–32nd Toughest.\n\n'
-    + 'This season’s games, once a defense has played 8. Before that, this season and last are combined. One note on the board says when that blend is on.\n\n'
+    + 'Counted: touchdowns that defense has allowed to this position, per player-game. Rank 1 allows the most. Ties share a rank, and the next rank skips.\n\n'
+    + 'The line counts from the nearer end. 1st easiest allows the most. 1st toughest allows the fewest.\n\n'
+    + 'Five bars. Great is five filled, Very tough is one.\n\n'
+    + 'Tiers: 1st–6th Great, 7th–13th Good, 14th–19th Average, 20th–26th Tough, 27th–32nd Very tough.\n\n'
+    + 'This season’s games, once a defense has played 8. Before that, this season and last are combined. A short sample can move the rank. One note on the board says when that blend is on.\n\n'
     + 'A dash is not an average. The reason sits under it: No game, Bye, Not playing, No rank, or No position.\n\n'
-    + 'Tap Matchup to sort. Ties go to the higher hit rate, then the better price.',
+    + 'Tap the Matchup header to sort. Ties go to the higher hit rate, then the better price.',
+  explainHint: 'Opens what this matchup means.',
+  partialNote: 'Some defense ranks didn’t load. Those matchups say Unavailable.',
   filterTitle: 'Matchup',
   filterSubtitle:
     'How easy the defense is for this position. A tier includes every easier tier.',
   filterAny: 'Any',
   includeUnranked: 'Include matchups we can’t rank',
-  unavailableNote: 'Defense ranks didn’t load, so matchups are blank.',
+  unavailableNote: 'Defense ranks didn’t load. Ranked matchups say Unavailable.',
   gaps: {
     no_game: 'No game',
     bye: 'Bye',
@@ -106,11 +123,11 @@ export const ATD_COPY = {
 } as const;
 
 const TIER_BANDS: readonly { max: number; tier: MatchupTier; bars: number }[] = [
-  { max: 6, tier: 'Easiest', bars: 5 },
-  { max: 13, tier: 'Easy', bars: 4 },
+  { max: 6, tier: 'Great', bars: 5 },
+  { max: 13, tier: 'Good', bars: 4 },
   { max: 19, tier: 'Average', bars: 3 },
   { max: 26, tier: 'Tough', bars: 2 },
-  { max: 32, tier: 'Toughest', bars: 1 },
+  { max: 32, tier: 'Very tough', bars: 1 },
 ];
 
 export function ordinal(n: number): string {
@@ -130,8 +147,16 @@ export function tierForRank(rank: number | null | undefined): { tier: MatchupTie
   return { tier: band.tier, bars: band.bars };
 }
 
-export function rankLine(rank: number): string {
-  return `${ordinal(rank)} easiest`;
+/**
+ * Count from the nearer end of the ranked defenses. Rank 3 of 32 is
+ * "3rd easiest". Rank 30 of 32 is "3rd toughest". A tie (equal distance)
+ * stays on the easy end. Missing team count uses 32.
+ */
+export function rankLine(rank: number, teamsRanked?: number | null): string {
+  const listed = teamsRanked != null && teamsRanked >= rank ? teamsRanked : Math.max(rank, 32);
+  const fromTough = listed - rank + 1;
+  if (rank <= fromTough) return `${ordinal(rank)} easiest`;
+  return `${ordinal(fromTough)} toughest`;
 }
 
 /** Spoken group, full words. Abbreviations in the cell would be spelled out. */
@@ -145,9 +170,9 @@ const GROUP_SPOKEN: Record<NflPositionGroup, string> = {
   DB: 'defensive backs',
 };
 
-export function matchupSpoken(tier: MatchupTier, rank: number, bars: number, group: NflPositionGroup | null): string {
+export function matchupSpoken(tier: MatchupTier, line: string, group: NflPositionGroup | null): string {
   const who = group ? `, ${GROUP_SPOKEN[group]}` : '';
-  return `Matchup, ${tier}, ${rankLine(rank)}, ${bars} of 5 bars${who}.`;
+  return `Matchup, ${tier}, ${line}${who}.`;
 }
 
 export function meetsTierFloor(
@@ -236,40 +261,40 @@ export type AnytimeMatchupView =
       group: NflPositionGroup;
     };
 
+function gapView(reason: GapReason): AnytimeMatchupView {
+  return {
+    kind: 'gap',
+    reason,
+    label: ATD_COPY.gaps[reason],
+    spoken: ATD_COPY.gapSpoken[reason],
+  };
+}
+
 export function buildAnytimeMatchup(args: {
   status: 'loading' | 'error' | 'ok';
   placement: MatchupPlacement;
   rank: DefenseRank | null;
 }): AnytimeMatchupView {
+  // A bye, a missing game, a known absence, or no position does not need a
+  // rank. Those stay labeled when the fetch is still running or has failed.
+  const structural = gapReason(args.placement, false);
+  if (structural && structural !== 'too_early') return gapView(structural);
   if (args.status === 'loading') return { kind: 'loading' };
   if (args.status === 'error') return { kind: 'unavailable' };
   const group = nflPositionGroup(args.placement.pos);
   const ranked = args.rank?.rank != null && group != null;
   const gap = gapReason(args.placement, ranked);
-  if (gap) {
-    return {
-      kind: 'gap',
-      reason: gap,
-      label: ATD_COPY.gaps[gap],
-      spoken: ATD_COPY.gapSpoken[gap],
-    };
-  }
+  if (gap) return gapView(gap);
   const hit = tierForRank(args.rank!.rank);
-  if (!hit || !group || args.rank!.rank == null) {
-    return {
-      kind: 'gap',
-      reason: 'too_early',
-      label: ATD_COPY.gaps.too_early,
-      spoken: ATD_COPY.gapSpoken.too_early,
-    };
-  }
+  if (!hit || !group || args.rank!.rank == null) return gapView('too_early');
+  const line = rankLine(args.rank!.rank, args.rank!.teamsRanked);
   return {
     kind: 'rank',
     tier: hit.tier,
     bars: hit.bars,
     rank: args.rank!.rank,
-    line: rankLine(args.rank!.rank),
-    spoken: matchupSpoken(hit.tier, args.rank!.rank, hit.bars, group),
+    line,
+    spoken: matchupSpoken(hit.tier, line, group),
     group,
   };
 }

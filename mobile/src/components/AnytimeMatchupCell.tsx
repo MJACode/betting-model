@@ -1,10 +1,11 @@
 /**
- * The Anytime TD matchup cell: five bars, a tier word, and "3rd easiest".
- * A dash names the reason. Colour is the grade ramp, and the word is always
- * there, so the bars are not the only signal.
+ * The Anytime TD matchup cell: five bars, a tier word, and "3rd easiest"
+ * (or "3rd toughest" from the other end). A dash names the reason. Colour
+ * is the grade ramp, and the word is always there, so the bars are not the
+ * only signal. The cell itself opens the explainer. The header has no icon.
  */
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   ATD_COPY,
@@ -17,7 +18,7 @@ import { colors, font } from '@/lib/theme';
 const BAR_COUNT = 5;
 
 function tierColor(tier: MatchupTier): string {
-  if (tier === 'Easiest' || tier === 'Easy') return colors.gradeGood;
+  if (tier === 'Great' || tier === 'Good') return colors.gradeGood;
   if (tier === 'Average') return colors.gradeMid;
   return colors.gradeBad;
 }
@@ -32,7 +33,7 @@ function Meter({ filled, color }: { filled: number; color: string }) {
       {Array.from({ length: BAR_COUNT }, (_, i) => (
         <View
           key={i}
-          style={[styles.bar, { backgroundColor: i < filled ? color : colors.separatorOpaque }]}
+          style={[styles.bar, { backgroundColor: i < filled ? color : colors.none }]}
         />
       ))}
     </View>
@@ -41,68 +42,77 @@ function Meter({ filled, color }: { filled: number; color: string }) {
 
 export function AnytimeMatchupCell({
   view,
-  grow = false,
+  fullWidth = false,
+  onExplain,
 }: {
   view: AnytimeMatchupView;
-  /** Large text: the column may grow so the tier word is not clipped. */
-  grow?: boolean;
+  /** Large text: the matchup sits on its own line, as wide as the row. */
+  fullWidth?: boolean;
+  onExplain: () => void;
 }) {
-  if (view.kind === 'loading') {
-    return (
-      <View style={[styles.wrap, grow && styles.wrapGrow]} accessible accessibilityLabel={ATD_COPY.loadingSpoken}>
-        <Text style={styles.dash}>—</Text>
-        <Text style={styles.reason} numberOfLines={1}>
-          {ATD_COPY.loadingLabel}
-        </Text>
-      </View>
-    );
-  }
-  if (view.kind === 'unavailable') {
-    return (
-      <View style={[styles.wrap, grow && styles.wrapGrow]} accessible accessibilityLabel={ATD_COPY.unavailableSpoken}>
-        <Text style={styles.dash}>—</Text>
-        <Text style={styles.reason} numberOfLines={1}>
-          {ATD_COPY.unavailableLabel}
-        </Text>
-      </View>
-    );
-  }
-  if (view.kind === 'gap') {
-    return (
-      <View style={[styles.wrap, grow && styles.wrapGrow]} accessible accessibilityLabel={view.spoken}>
-        <Text style={styles.dash}>—</Text>
-        <Text style={styles.reason} numberOfLines={1}>
-          {view.label}
-        </Text>
-      </View>
-    );
-  }
-  const color = tierColor(view.tier);
+  const spoken =
+    view.kind === 'loading' ? ATD_COPY.loadingSpoken
+    : view.kind === 'unavailable' ? ATD_COPY.unavailableSpoken
+    : view.kind === 'gap' ? view.spoken
+    : view.spoken;
+  const shrink = !fullWidth;
   return (
-    <View style={[styles.wrap, grow && styles.wrapGrow]} accessible accessibilityLabel={view.spoken}>
-      <Meter filled={view.bars} color={color} />
-      <Text style={[styles.tier, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-        {view.tier}
-      </Text>
-      <Text style={styles.rank} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-        {view.line}
-      </Text>
-    </View>
+    <Pressable
+      onPress={onExplain}
+      accessibilityRole="button"
+      accessibilityLabel={spoken}
+      accessibilityHint={ATD_COPY.explainHint}
+      style={({ pressed }) => [styles.wrap, fullWidth && styles.wrapFull, pressed && styles.pressed]}
+    >
+      {view.kind === 'rank' ? (
+        <>
+          <Meter filled={view.bars} color={tierColor(view.tier)} />
+          <Text
+            style={[styles.tier, { color: tierColor(view.tier) }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={shrink}
+            minimumFontScale={shrink ? 0.75 : 1}
+          >
+            {view.tier}
+          </Text>
+          <Text
+            style={styles.rank}
+            numberOfLines={1}
+            adjustsFontSizeToFit={shrink}
+            minimumFontScale={shrink ? 0.8 : 1}
+          >
+            {view.line}
+          </Text>
+        </>
+      ) : (
+        <>
+          <Text style={styles.dash}>—</Text>
+          <Text style={styles.reason} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {view.kind === 'loading'
+              ? ATD_COPY.loadingLabel
+              : view.kind === 'unavailable'
+                ? ATD_COPY.unavailableLabel
+                : view.label}
+          </Text>
+        </>
+      )}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
     width: ATD_MATCHUP_W,
+    minHeight: 44,
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  wrapGrow: {
-    width: undefined,
-    minWidth: ATD_MATCHUP_W,
-    maxWidth: 140,
-    flexShrink: 1,
+  wrapFull: {
+    width: '100%',
+    maxWidth: undefined,
+    alignSelf: 'stretch',
   },
+  pressed: { opacity: 0.65 },
   meter: {
     flexDirection: 'row',
     gap: 2,

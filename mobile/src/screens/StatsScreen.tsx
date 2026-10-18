@@ -36,7 +36,7 @@ import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { AnytimeMatchupCell } from '@/components/AnytimeMatchupCell';
 import { BookMark } from '@/components/BookMark';
 import { SegmentTabs } from '@/components/GroupTabs';
-import { InfoTooltip } from '@/components/InfoTooltip';
+import { InfoSheet, InfoTooltip } from '@/components/InfoTooltip';
 import { SectionTitle } from '@/components/SectionTitle';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
@@ -223,17 +223,17 @@ import {
   ATD_HIT_W,
   ATD_MATCHUP_W,
   ATD_ODDS_W,
-  ATD_POS_GROUPS,
-  ATD_STACK_BELOW_WIDTH,
   ATD_STACK_FONT_SCALE,
   anyBlended,
   buildAnytimeMatchup,
   namedGap,
   compareAnytimeRows,
   defenseKey,
+  groupsUsedByBoard,
   isAnytimeTdBoard,
   meetsTierFloor,
   nextMatchupSort,
+  tierFloorLabel,
   TIER_FLOORS,
   type AnytimeMatchupView,
   type DefenseRank,
@@ -481,8 +481,10 @@ export function StatsScreen() {
   const [minTier, setMinTier] = useState<MatchupTier | null>(null);
   const [matchupOrder, setMatchupOrder] = useState<MatchupSort | null>(null);
   const [defenseRanks, setDefenseRanks] = useState<Map<string, DefenseRank>>(new Map());
-  const [rankStatus, setRankStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [rankStatus, setRankStatus] = useState<'idle' | 'loading' | 'ok' | 'partial' | 'error'>('idle');
+  const [failedGroups, setFailedGroups] = useState<ReadonlySet<string>>(new Set());
   const [rankReload, setRankReload] = useState(0);
+  const [matchupInfoOpen, setMatchupInfoOpen] = useState(false);
   // Default ON: a dash means we hold no rating for that defence, not that the
   // spot is bad, and on an NCAAF Saturday the ungraded rows are the FCS
   // visitors — the softest spots on the board. Excluding them by default made
@@ -1481,61 +1483,9 @@ export function StatsScreen() {
     [slateGames, slate, now],
   );
   const atdOn = isAnytimeTdBoard(sport, stat ? String(stat.key) : null);
-  const stackAtd =
-    atdOn &&
-    (PixelRatio.getFontScale() >= ATD_STACK_FONT_SCALE || windowWidth < ATD_STACK_BELOW_WIDTH);
+  const stackAtd = atdOn && PixelRatio.getFontScale() >= ATD_STACK_FONT_SCALE;
   const leagueHasGames = h2hIndex.size > 0 || slateGameIndex.size > 0;
-
-  // One read per position group. The board ranks every defense, not one
-  // player, so seven calls cover the slate. Leaving the board drops the
-  // tier cut and the matchup sort — they have no column anywhere else.
-  useEffect(() => {
-    if (!atdOn) {
-      setMinTier(null);
-      setMatchupOrder(null);
-      setDefenseRanks((prev) => (prev.size === 0 ? prev : new Map()));
-      setRankStatus('idle');
-      return;
-    }
-    let cancelled = false;
-    setRankStatus('loading');
-    const seasons = [SEASON, SEASON - 1];
-    Promise.all(
-      ATD_POS_GROUPS.map((group) =>
-        fetchPositionDefenseRanks(seasons, 'rush_rec_tds', group).then((rows) => ({ group, rows })),
-      ),
-    )
-      .then((groups) => {
-        if (cancelled) return;
-        const map = new Map<string, DefenseRank>();
-        for (const { group, rows } of groups) {
-          for (const r of rows) {
-            if (!r.defense) continue;
-            const avg = r.avg_allowed == null || r.avg_allowed === '' ? null : Number(r.avg_allowed);
-            map.set(defenseKey(group, r.defense), {
-              defense: r.defense,
-              avgAllowed: avg != null && Number.isFinite(avg) ? avg : null,
-              playerGames: Number(r.player_games) || 0,
-              seasonTeamGames: Number(r.season_team_games) || 0,
-              windowTeamGames: Number(r.window_team_games) || 0,
-              blended: r.blended === true,
-              rank: r.rank_most_allowed == null ? null : Number(r.rank_most_allowed),
-              teamsRanked: Number(r.teams_ranked) || 0,
-            });
-          }
-        }
-        setDefenseRanks(map);
-        setRankStatus('ok');
-      })
-      .catch((err: unknown) => {
-        if (cancelled || isAbortError(err)) return;
-        setDefenseRanks(new Map());
-        setRankStatus('error');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [atdOn, rankReload]);
+  const openMatchupInfo = useCallback(() => setMatchupInfoOpen(true), []);
 
   const sublineFor = useCallback(
     (row: { team?: string | null; player_name?: string | null; opponent?: string | null }): string | null => {
@@ -1619,11 +1569,17 @@ export function StatsScreen() {
       opponent?: string | null;
       pos?: string | null;
     }): AnytimeMatchupView => {
-      const status = rankStatus === 'error' ? 'error' : rankStatus === 'ok' ? 'ok' : 'loading';
       const fixture = fixtureForRow(row, slateGameIndex, h2hIndex);
       const named = row.opponent?.trim() ? row.opponent.trim() : null;
       const opponent = named ?? fixture?.game.opponent ?? null;
       const group = nflPositionGroup(row.pos);
+      const groupFailed = group != null && failedGroups.has(group);
+      const status: 'loading' | 'error' | 'ok' =
+        rankStatus === 'error' || groupFailed
+          ? 'error'
+          : rankStatus === 'ok' || rankStatus === 'partial'
+            ? 'ok'
+            : 'loading';
       const rank =
         status === 'ok' && opponent && group
           ? defenseRanks.get(defenseKey(group, opponent)) ?? null
@@ -1643,7 +1599,7 @@ export function StatsScreen() {
         rank,
       });
     },
-    [rankStatus, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames],
+    [rankStatus, failedGroups, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames],
   );
 
   /** Does the column have anything to say for this sport at all? */
@@ -1789,6 +1745,96 @@ export function StatsScreen() {
   // "Nothing matched" (Reviewer, #830). The position cut stands down while
   // one is typed.
   const activePositions = query.trim() ? null : segmentPositions;
+
+  // Only the position groups this board's rows actually use. DL/LB/DB are not
+  // on Anytime TD unless a row maps to one. One group's failure leaves the
+  // others on the board. Leaving the board drops the tier cut and the sort.
+  const atdGroupKey = useMemo(() => {
+    if (!atdOn) return '';
+    const poss: Array<string | null | undefined> = [];
+    const consider = (pos: unknown) => {
+      if (!matchesPosition(pos, activePositions)) return;
+      poss.push(typeof pos === 'string' ? pos : null);
+    };
+    if (effectiveMode === 'totals') {
+      for (const r of rows) consider(r.pos);
+    } else if (timeWindow === 'h2h') {
+      if (h2hValues.statKey === String(stat?.key ?? '')) {
+        for (const r of h2hValues.rows) consider(r.pos);
+      }
+    } else if (timeWindow === 'season') {
+      if (seasonValues.statKey === String(stat?.key ?? '')) {
+        for (const r of seasonValues.rows) consider(r.pos);
+      }
+    } else {
+      for (const r of recentRows) consider(r.pos);
+    }
+    return groupsUsedByBoard(poss).join(',');
+  }, [atdOn, effectiveMode, timeWindow, rows, h2hValues, seasonValues, recentRows, stat, activePositions]);
+
+  const boardSettled = !loading && !rowsAreStale && shownKey === readKey;
+
+  useEffect(() => {
+    if (atdOn && atdGroupKey) return;
+    if (!atdOn) {
+      setMinTier(null);
+      setMatchupOrder(null);
+      setRankStatus('idle');
+    } else {
+      setRankStatus(boardSettled ? 'ok' : 'loading');
+    }
+    setDefenseRanks((prev) => (prev.size === 0 ? prev : new Map()));
+    setFailedGroups((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [atdOn, atdGroupKey, boardSettled]);
+
+  useEffect(() => {
+    if (!atdOn || !atdGroupKey) return;
+    let cancelled = false;
+    setRankStatus('loading');
+    const seasons = [SEASON, SEASON - 1];
+    const groups = atdGroupKey.split(',');
+    Promise.allSettled(
+      groups.map((group) =>
+        fetchPositionDefenseRanks(seasons, 'rush_rec_tds', group).then((rows) => ({ group, rows })),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const map = new Map<string, DefenseRank>();
+      const failed = new Set<string>();
+      let succeeded = 0;
+      results.forEach((result, i) => {
+        const group = groups[i];
+        if (result.status === 'rejected') {
+          failed.add(group);
+          return;
+        }
+        succeeded += 1;
+        for (const r of result.value.rows) {
+          if (!r.defense) continue;
+          const avg = r.avg_allowed == null || r.avg_allowed === '' ? null : Number(r.avg_allowed);
+          map.set(defenseKey(group, r.defense), {
+            defense: r.defense,
+            avgAllowed: avg != null && Number.isFinite(avg) ? avg : null,
+            playerGames: Number(r.player_games) || 0,
+            seasonTeamGames: Number(r.season_team_games) || 0,
+            windowTeamGames: Number(r.window_team_games) || 0,
+            blended: r.blended === true,
+            rank: r.rank_most_allowed == null ? null : Number(r.rank_most_allowed),
+            teamsRanked: Number(r.teams_ranked) || 0,
+          });
+        }
+      });
+      if (cancelled) return;
+      setDefenseRanks(map);
+      setFailedGroups(failed);
+      if (failed.size === 0) setRankStatus('ok');
+      else if (succeeded === 0) setRankStatus('error');
+      else setRankStatus('partial');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [atdOn, atdGroupKey, rankReload]);
 
   // ── Anytime TD: everyone with a line (Matt, 2026-10-09) ────────────────────
   // Who any book prices in this market on the slate, at any line. A priced
@@ -2087,23 +2133,12 @@ export function StatsScreen() {
               showMatchup={showMatchupCol}
               atdView={
                 atdOn
-                  ? rankStatus === 'error'
-                    ? buildAnytimeMatchup({
-                        status: 'error',
-                        placement: { leagueHasGames, teamHasGame: false },
-                        rank: null,
-                      })
-                    : rankStatus !== 'ok'
-                      ? buildAnytimeMatchup({
-                          status: 'loading',
-                          placement: { leagueHasGames, teamHasGame: false },
-                          rank: null,
-                        })
-                      : game
-                        ? namedGap('no_position')
-                        : atdViewFor({ player_name: p.name })
+                  ? game
+                    ? namedGap('no_position')
+                    : atdViewFor({ player_name: p.name })
                   : undefined
               }
+              onMatchupExplain={openMatchupInfo}
               atdStack={stackAtd}
               statLabel={betLabel}
               hitMode={hitMode}
@@ -2337,7 +2372,7 @@ export function StatsScreen() {
     if (atdOn && minTier) {
       out.push({
         key: 'tier',
-        label: `${minTier} or easier${includeUngraded ? '' : ', ranked only'}`,
+        label: `${tierFloorLabel(minTier)}${includeUngraded ? '' : ', ranked only'}`,
         onRemove: () => {
           setMinTier(null);
           setIncludeUngraded(true);
@@ -2906,24 +2941,26 @@ export function StatsScreen() {
         </Pressable>
       ) : null}
 
-      {atdOn && rankStatus === 'ok' && anyBlended(defenseRanks.values()) ? (
+      {atdOn && (rankStatus === 'ok' || rankStatus === 'partial') && anyBlended(defenseRanks.values()) ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
           <Text style={styles.noLinesText}>{ATD_COPY.earlySeason}</Text>
         </View>
       ) : null}
 
-      {atdOn && rankStatus === 'error' ? (
+      {atdOn && (rankStatus === 'error' || rankStatus === 'partial') ? (
         <Pressable
           onPress={() => setRankReload((n) => n + 1)}
           hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
           accessibilityRole="button"
-          accessibilityLabel={`${ATD_COPY.unavailableNote} Try again.`}
+          accessibilityLabel={`${rankStatus === 'partial' ? ATD_COPY.partialNote : ATD_COPY.unavailableNote} Try again.`}
           accessibilityHint="Loads the defense ranks again."
           style={({ pressed }) => [styles.atdRetryRow, pressed && styles.pressed]}
         >
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{ATD_COPY.unavailableNote}</Text>
+          <Text style={styles.noLinesText}>
+            {rankStatus === 'partial' ? ATD_COPY.partialNote : ATD_COPY.unavailableNote}
+          </Text>
         </Pressable>
       ) : null}
 
@@ -2974,6 +3011,7 @@ export function StatsScreen() {
                 showMatchup={showMatchupCol}
                 atdView={atdOn ? atdViewFor(item) : undefined}
                 atdStack={stackAtd}
+                onMatchupExplain={openMatchupInfo}
                 gradeColorful={gradesColorful}
                 subline={sublineFor(item)}
                 quote={quote}
@@ -3038,6 +3076,7 @@ export function StatsScreen() {
                 showMatchup={showMatchupCol}
                 atdView={atdOn ? atdViewFor(item.row) : undefined}
                 atdStack={stackAtd}
+                onMatchupExplain={openMatchupInfo}
                 gradeColorful={gradesColorful}
                 subline={sublineFor(item.row)}
                 quote={quote}
@@ -3079,6 +3118,12 @@ export function StatsScreen() {
         />
       )}
 
+      <InfoSheet
+        visible={matchupInfoOpen}
+        title={ATD_COPY.infoTitle}
+        body={ATD_COPY.infoBody}
+        onClose={() => setMatchupInfoOpen(false)}
+      />
       <SportsbookPickerSheet
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
@@ -3226,7 +3271,7 @@ export function StatsScreen() {
           <FilterSection
             title={ATD_COPY.filterTitle}
             subtitle={ATD_COPY.filterSubtitle}
-            summary={minTier ? `${minTier} or easier` : 'Any matchup'}
+            summary={minTier ? tierFloorLabel(minTier) : 'Any matchup'}
             defaultOpen={minTier != null}
             onClear={minTier ? () => { setMinTier(null); setIncludeUngraded(true); } : undefined}
           >
@@ -3239,9 +3284,8 @@ export function StatsScreen() {
               {TIER_FLOORS.map((tier) => (
                 <FilterChip
                   key={tier}
-                  label={tier}
+                  label={tierFloorLabel(tier)}
                   active={minTier === tier}
-                  accessibilityLabel={`${tier} or easier`}
                   onPress={() => setMinTier(minTier === tier ? null : tier)}
                 />
               ))}
@@ -4327,7 +4371,7 @@ function ColumnHeader({
         style={[styles.colHeaderRight, styles.colHeaderSortLabel, atd && styles.atdHitHeadText]}
         numberOfLines={1}
         adjustsFontSizeToFit
-        minimumFontScale={0.8}
+        minimumFontScale={atd ? 0.6 : 0.8}
       >
         {hitLabel}
       </Text>
@@ -4344,9 +4388,9 @@ function ColumnHeader({
   ) : null;
   const matchupHead = showMatchup ? (
     atd ? (
-      <View style={[styles.colHeaderMatchup, styles.atdMatchupHead]}>
-        {/* Sibling of the info button. Wrapping the tooltip makes VoiceOver
-            activate the sort when the reader asked what the column means. */}
+      <View style={[styles.colHeaderMatchup, atdStack ? styles.atdMatchupHeadFull : styles.atdMatchupHead]}>
+        {/* The cell opens the explainer. This button only sorts, so MATCHUP
+            is not sharing the column with an info icon. */}
         <Pressable
           onPress={onMatchupSort}
           hitSlop={{ top: 16, bottom: 16, left: 4, right: 4 }}
@@ -4370,11 +4414,6 @@ function ColumnHeader({
             <Ionicons name="arrow-up" size={9} color={colors.textTertiary} />
           ) : null}
         </Pressable>
-        <InfoTooltip
-          title={ATD_COPY.infoTitle}
-          body={ATD_COPY.infoBody}
-          accessibilityLabel="What the matchup means"
-        />
       </View>
     ) : (
       <View style={styles.colHeaderMatchup}>
@@ -4415,8 +4454,10 @@ function ColumnHeader({
           <Text style={styles.colHeaderRank}>RK</Text>
           <Text style={styles.colHeaderName}>PLAYER</Text>
         </View>
+        <View style={[styles.colHeader, styles.colHeaderStackLine]}>{matchupHead}</View>
         <View style={[styles.colHeader, styles.colHeaderStackLine, styles.atdHeaderMetrics]}>
-          {metrics}
+          {valueHead}
+          {oddsHead}
         </View>
       </View>
     );
@@ -4451,6 +4492,7 @@ function LeaderRow({
   showMatchup,
   atdView,
   atdStack = false,
+  onMatchupExplain,
   gradeColorful,
   subline,
   quote,
@@ -4475,6 +4517,7 @@ function LeaderRow({
   atdView?: AnytimeMatchupView;
   /** Metrics move under the name once Dynamic Type would clip the price. */
   atdStack?: boolean;
+  onMatchupExplain: () => void;
   /** False when every visible grade lands in one colour band. */
   gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
@@ -4527,9 +4570,13 @@ function LeaderRow({
   const metrics = (
     <>
       <View style={atdView ? (atdStack ? styles.atdHitStack : styles.atdHitWrap) : styles.valueWrap}>
-        <Text style={styles.value}>{fmtValue(value, basis)}</Text>
+        <Text style={styles.value} numberOfLines={1} adjustsFontSizeToFit={!!atdView} minimumFontScale={0.7}>
+          {fmtValue(value, basis)}
+        </Text>
       </View>
-      {atdView ? <AnytimeMatchupCell view={atdView} grow={atdStack} /> : null}
+      {atdView && !atdStack ? (
+        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
+      ) : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -4553,6 +4600,9 @@ function LeaderRow({
         <Text style={styles.rank}>{rank}</Text>
         {nameBlock}
       </View>
+      {atdView ? (
+        <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+      ) : null}
       <View style={styles.atdMetricRow}>{metrics}</View>
     </>
   ) : (
@@ -4595,6 +4645,7 @@ function LineOnlyRow({
   showMatchup,
   atdView,
   atdStack = false,
+  onMatchupExplain,
   statLabel,
   hitMode,
   sport,
@@ -4610,6 +4661,7 @@ function LineOnlyRow({
   showMatchup: boolean;
   atdView?: AnytimeMatchupView;
   atdStack?: boolean;
+  onMatchupExplain: () => void;
   statLabel: string;
   hitMode: HitMode;
   sport?: string;
@@ -4645,10 +4697,19 @@ function LineOnlyRow({
         accessibilityElementsHidden={omitNoGames}
         importantForAccessibility={omitNoGames ? 'no-hide-descendants' : 'auto'}
       >
-        <Text style={[styles.value, { color: colors.textSecondary }]}>—</Text>
+        <Text
+          style={[styles.value, { color: colors.textSecondary }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit={!!atdView}
+          minimumFontScale={0.7}
+        >
+          —
+        </Text>
         {omitNoGames ? null : <Text style={styles.valueLabel}>no games</Text>}
       </View>
-      {atdView ? <AnytimeMatchupCell view={atdView} grow={atdStack} /> : null}
+      {atdView && !atdStack ? (
+        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
+      ) : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -4672,6 +4733,9 @@ function LineOnlyRow({
         <Text style={styles.rank} />
         {nameBlock}
       </View>
+      {atdView ? (
+        <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+      ) : null}
       <View style={styles.atdMetricRow}>{metrics}</View>
     </>
   ) : (
@@ -4693,6 +4757,7 @@ function HitRateRow({
   showMatchup,
   atdView,
   atdStack = false,
+  onMatchupExplain,
   gradeColorful,
   subline,
   quote,
@@ -4714,6 +4779,7 @@ function HitRateRow({
   showMatchup: boolean;
   atdView?: AnytimeMatchupView;
   atdStack?: boolean;
+  onMatchupExplain: () => void;
   /** False when every visible grade lands in one colour band. */
   gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
@@ -4775,14 +4841,21 @@ function HitRateRow({
   const metrics = (
     <>
       <View style={atdView ? (atdStack ? styles.atdHitStack : styles.atdHitWrap) : styles.valueWrap}>
-        <Text style={[styles.value, { color: pctColor }]}>
+        <Text
+          style={[styles.value, { color: pctColor }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit={!!atdView}
+          minimumFontScale={0.7}
+        >
           {Math.round(player.pct * 100)}%
         </Text>
         <Text style={styles.valueLabel}>
           {player.hits}/{player.total}
         </Text>
       </View>
-      {atdView ? <AnytimeMatchupCell view={atdView} grow={atdStack} /> : null}
+      {atdView && !atdStack ? (
+        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
+      ) : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -4806,6 +4879,9 @@ function HitRateRow({
         <Text style={styles.rank}>{rank}</Text>
         {nameBlock}
       </View>
+      {atdView ? (
+        <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+      ) : null}
       <View style={styles.atdMetricRow}>{metrics}</View>
     </>
   ) : (
@@ -5293,7 +5369,9 @@ const styles = StyleSheet.create({
     maxWidth: ATD_HIT_W,
     flexShrink: 0,
   },
-  atdHitHeadText: { width: undefined, maxWidth: ATD_HIT_W - 12 },
+  // No maxWidth: the 40pt column has to keep "HIT %" whole down to the stack.
+  // The arrow sits in the leftover, and the label shrinks instead of clipping.
+  atdHitHeadText: { width: undefined, flexShrink: 1 },
   atdOddsHeadText: {
     width: ATD_ODDS_W,
     minWidth: ATD_ODDS_W,
@@ -5305,9 +5383,13 @@ const styles = StyleSheet.create({
     minWidth: ATD_MATCHUP_W,
     maxWidth: ATD_MATCHUP_W,
     flexShrink: 0,
-    // 12pt matches the info icon's hitSlop, so that slop stays in the gap
-    // instead of covering the word MATCHUP.
-    gap: 12,
+    gap: 2,
+  },
+  // Large text: the header word sits on its own line, so it is not locked to 66pt.
+  atdMatchupHeadFull: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: 'flex-end',
   },
   atdSortBtn: {
     flexDirection: 'row',

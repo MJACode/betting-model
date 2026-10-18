@@ -160,6 +160,8 @@ const PAIRS: Pair[] = [
   // Red icons keep the bright hue where it already clears 3:1.
   T('avoid', 'avoidSoft', 'SignIn error-banner icon (non-text)', 3),
   T('avoid', 'bgCard', 'remove-leg / trash icons (non-text)', 3),
+  // Empty matchup bars sit on the white card. separatorOpaque is 1.7:1 there.
+  T('none', 'bgCard', 'Anytime TD empty matchup bar (non-text)', 3),
 ];
 console.log('\n  token          hex        ground              ratio  min');
 for (const p of PAIRS) {

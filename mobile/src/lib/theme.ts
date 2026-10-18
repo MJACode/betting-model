@@ -57,6 +57,9 @@ export const colors = {
   betSoft: '#E8F8EC',
   avoid: '#FF3B30', // red
   avoidSoft: '#FDECEB',
+  // Also the empty Anytime TD meter bar. #C6C6C8 on the white card is
+  // 1.7:1; this gray is 3.26:1 on bgCard, which clears the 3:1 non-text floor
+  // (Designer review of #995).
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
 
