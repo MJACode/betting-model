@@ -1208,6 +1208,120 @@ Section 8 names the recipe; these lines fix everything it leaves open. Lab:
   0.003.
 - The first-half, first-quarter and team-total cells run on synthetic games only.
 
+### 8.2 P2, the first search's market rules: choices fixed before any P2 cell was graded (2026-10-18)
+
+Section 8 names the two rules and their cuts; these lines fix everything it leaves open. Lab:
+`scripts/nba_game4_p2.py`. None of them was chosen from a betting result. The two rules are the
+first search's own code, imported (`sharp_pairs` and `gap_candidates` in
+`scripts/nba_game_market_lab.py`). They run on the shared harness's quotes, and only the harness
+grades.
+
+**Cells (256)**
+
+- **Same number, 152 cells:** every market × 2 sides × EV ≥ 0.00 / 0.01 / 0.02 / 0.03. The full
+  game's moneyline, spread and total at A, B, C and D make 96. The first half's and first
+  quarter's at D make 48. Team totals at D make 8.
+- **Off number, 104 cells:** spreads and totals only, because a moneyline has no number. The full
+  game at A, B, C and D makes 64. The first half and first quarter at D make 32. Team totals at D
+  make 8.
+- **Team totals:** both teams' markets form one cell per side and cut, as in P1. A game can carry
+  a bet on each team's total, and every bet keeps its real market. This is the only way the
+  registered 256 adds up.
+- One family label, `P2`, with the rule in its own column. So a gap cut is never read as an EV
+  cut's neighbour.
+- Expected to clear the 95% interval by chance alone: 256 × 0.025 ≈ 6.4 cells, before
+  correlation.
+
+**Same number**
+
+- A deciding book is compared with Pinnacle only when both quotes come from the same purchase.
+  This is the first search's rule. A soft quote from an earlier purchase could be a line that has
+  since moved.
+- Spreads and totals pair only at Pinnacle's number. Moneylines always pair.
+- Pinnacle's no-vig price is the proportional one. There is no second method, because section 8
+  registers no such axis.
+- Expected value = Pinnacle's no-vig chance of the side × the book's decimal price − 1. A push is
+  ignored, as in the first search. The harness hands a push's stake back and leaves it out of the
+  denominator, so this is the value per unit risked when there is no push.
+- The best qualifying offer at a deciding book is bet, at −200 or better.
+
+**Off number**
+
+- Again the deciding book and Pinnacle must be in the same purchase.
+- The side the gap favours is bet. On a spread it is the side getting the extra points. On a
+  total it is the under at a higher number, or the over at a lower one.
+- That side's gap is the number the cut reads. The other side of the same quote reads minus the
+  gap. A quote at Pinnacle's number reads 0. The gap is read to within 1e-9, as in the first
+  search.
+- There is no expected-value floor. Section 8 registers the gap alone.
+- When several offers qualify, the best expected value is bet. Each offer is priced around
+  Pinnacle: the centre is solved from Pinnacle's own number and price at the decision time, and
+  the shape is the spread of past results (below). The first search's bell curve is not used.
+
+**Which number a book hangs** (measured by counting quotes in the cache; no result was read)
+
+- Two books, BetRivers and betPARX, list four to seven team-total numbers in one purchase.
+- Those two and Hard Rock often list a single first-half or first-quarter number 2 or more points
+  from Pinnacle's, while the median book sits within half a point of Pinnacle on most games.
+  Their two prices sit about 22 points apart in implied chance, against about 3 for the other
+  quotes: alternate lines, not disagreements.
+- A book's number is its rung with prices closest to even, the first search's "main" rung. Ties
+  go to the lower number.
+- In the same-number rule, a book's rung at Pinnacle's number is used when it lists one. The first
+  search compared every rung at Pinnacle's number.
+- A first-half, first-quarter or team-total spread or total more than 1 point from the median of
+  the deciding books' numbers is an alternate line. It is never bet, never a blind bet, and never
+  sets the market's fair line. This is the first search's ladder rule (1 point), extended to team
+  totals. Pinnacle's quote is never dropped. The full game is not filtered this way: its
+  purchases list one number per book and market (in 2024-25, 252 of 586,148 list two; those are
+  read at the main rung).
+
+**Pricing.** It orders offers at different numbers, prices the blind bets and names the
+favourite. It never sets a rule's own number.
+
+- **Full game:** the harness's. The spread of results around Pinnacle's last pre-game price, on
+  seasons before the graded one.
+- **First half, first quarter, team totals:** the spread of results around Pinnacle's number at
+  the per-game purchase, on earlier seasons holding these prices, once they hold 300 or more
+  games.
+- The first season the cache prices these markets has no earlier one. It is priced on a stand-in
+  that needs no first-half or team-total price, from the seasons before it:
+  - first half and first quarter: the period's result around half (or a quarter) of Pinnacle's
+    full-game closing spread or total, by minutes played;
+  - team totals: F6d's recorded definition, imported. Each team's score around the team total
+    Pinnacle's full-game close implies, both teams pooled, 300 or more earlier games.
+- A season's own results never price it. A market with no pricing in a season has no blind bet
+  and no off-number choice there.
+
+**Seasons and decision points**
+
+- **Full game:** A, B, C and D, the harness's. Choosing seasons 2021-22 → 2024-25, pooled with
+  2025-26. 2020-21 is reported apart.
+- **First half, first quarter, team totals:** D only, each game's one purchase when it falls 45–75
+  minutes before tip.
+- Every season the cache prices these markets in is graded: today 2024-25 and 2025-26, and
+  2023-24 once its purchase lands. Nothing in P2 is fitted on these prices, so the first priced
+  season is graded too (as in P3, unlike P1). The harness's choosing seasons are all of them but
+  2025-26.
+- `--full` lists these seasons from any row in the cache. So a season bought part-way is named,
+  and then refused, because it is priced on fewer than 90% of its games. It always requires
+  2024-25 and 2025-26.
+
+**Not measurable on the first-half, first-quarter and team-total markets, reported as such**
+
+- Closing-line value: one purchase per game, so there is no later price.
+- "Still offered at the next purchase": there is no next purchase, so it reads 0.
+
+**Placebo:** 20 runs, seed = run number.
+
+- Same number: Pinnacle's no-vig chance is shuffled between games on the same date in the same
+  market. Prices and numbers stay.
+- Off number: the gap is shuffled among the offers on the same date, in the same market, on the
+  same side. A placebo bets other offers at the same rate. Prices stay at the market's fair line.
+
+**Smoke run:** the 160 full-game cells on 2020-21 alone, which checks the plumbing and is never a
+result. The 96 first-half, first-quarter and team-total cells run on synthetic games only.
+
 ### 8.3 P3, the second search's signals on the derivative markets: choices fixed before any P3 cell was graded (2026-10-18)
 
 Section 8 names the two signals and their cuts; these lines fix everything it leaves open. Lab:
