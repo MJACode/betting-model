@@ -1577,11 +1577,11 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X gets exactly what the FREE Discord channel gets -- one pick a day,
-        # never the paid slate (mike, 2026-08-30: "A without links"). Posting
-        # the paid signals publicly would be giving away what members pay for.
-        # Ledgered independently of Discord, so one surface failing never
-        # suppresses the other.
+        # X posts the free pick (the same one the free Discord channel got)
+        # and, unless X_POST_ALL_PICKS=0, every other released pre-game pick.
+        # mike, 2026-10-18. Ledgered independently of Discord, so one surface
+        # failing never suppresses the other. The free pick stays labeled
+        # "Free pick" and is not posted a second time as a plain pick.
         try:
             from tracking.x_publisher import notify_x_free_pick
             notify_x_free_pick(target_date=run_date, dry_run=dry_run)
