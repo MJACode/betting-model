@@ -58,7 +58,7 @@ SEASONS
   confirmed on 2026, every graded season pooled (section 6.7).
 
     PYTHONPATH=. python -m scripts.nba_game4_p1 --smoke
-    NBA_GAME2_GO=1 PYTHONPATH=. python -m scripts.nba_game4_p1 --full
+    NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> PYTHONPATH=. python -m scripts.nba_game4_p1 --full
 
 --smoke: 2020-21 only, full-game cells, an in-season split (fit before
 2021-03-10, grade from it): plumbing, never a result; the derivative cells run
@@ -700,10 +700,18 @@ def refuse(lines: list[str]) -> None:
     raise SystemExit(2)
 
 
+RESULTS_ENV = "NBA_GAME2_RESULTS"
+
+
 def full_refusals(cache: Path) -> list[str]:
     """The cheap refusals before the hour-long projection: the go flag, the
-    lineup segments the ratings read, the fetch ledger (P.refuse_full)."""
-    return P.refuse_full(cache)
+    lineup segments the ratings read, the fetch ledger (P.refuse_full), and
+    an unnamed results folder: the default is the second search's, where the
+    verdict would read P1's cells beside its 422."""
+    why = P.refuse_full(cache)
+    if not os.environ.get(RESULTS_ENV):
+        why.append(f"{RESULTS_ENV} is not set: name the fourth search's results folder")
+    return why
 
 
 def load_inputs(cache: Path):
@@ -750,18 +758,34 @@ def smoke(cache: Path) -> dict:
     pop = pd.concat(pops, ignore_index=True)
     pop.to_parquet(out / "population_P1.parquet")
     (out / "fits_P1.json").write_text(json.dumps(fits, indent=1, default=str), encoding="utf-8")
-    # derivative purchases the cache holds: game counts only, no price read into a result
-    games_p = H.with_periods(H.load_games(cache), cache)
-    pe = H.load_per_event(games_p, cache)
-    held = derivative_seasons(pe)
-    dcounts = pe.groupby(["market", "season"])["game_id"].nunique().unstack(1).to_dict()
     summary = {"points": counts, "cells_written": len(rows), "fits": fits,
                "bets_2021_after_split": pop.groupby(["point", "market", "side", "cut"])["bets"].sum()
                .reset_index().to_dict("records"),
-               "derivative_seasons_held": held, "derivative_plan": derivative_plan(held),
-               "derivative_games_by_season": dcounts}
+               "derivative_plumbing": derivative_plumbing(cache)}
     print(json.dumps(summary, indent=1, default=str))
     return summary
+
+
+def derivative_plumbing(cache: Path) -> dict:
+    """The --full derivative path on the real cache up to the market's fair line
+    at T: held seasons, decision times, pricing distributions and fair rows.
+    Counts only: no model is fit and no bet is chosen or graded."""
+    games_p = H.with_periods(H.load_games(cache), cache)
+    pe = H.load_per_event(games_p, cache)
+    held = derivative_seasons(pe)
+    pe = H.load_per_event(games_p, cache, require_seasons=held)
+    dd = derivative_data(games_p, pe, held)
+    dsig = H.close_dist(H.pinnacle_close(dd), dd.games)
+    t = derivative_times(dd)
+    pt = make_point(dd, DERIV_POINT, t, dsig, pd.DataFrame())
+    season = dd.games.set_index("game_id")["season"]
+    fair = pt.fair.assign(season=pt.fair["game_id"].map(season))
+    return {"held": held, "plan": derivative_plan(held),
+            "games_with_trusted_periods": dd.games.groupby("season")["home_h1"].count().to_dict(),
+            "decision_times": t["game_id"].map(season).value_counts().sort_index().to_dict(),
+            "pricing_distributions": sorted(f"{s} {m}: {v.label}" for (s, m), v in dsig.items()),
+            "fair_rows": fair.groupby(["market", "season"]).size().unstack(1).to_dict(),
+            "fair_from_pinnacle_share": round(float((fair["ref"] == "pinnacle").mean()), 4)}
 
 
 def full(cache: Path) -> None:

@@ -428,3 +428,11 @@ def test_the_graded_run_refuses_without_the_go_flag(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as e:
         M.main(["--full"])
     assert e.value.code == 2
+
+
+def test_the_graded_run_refuses_without_a_named_results_folder(monkeypatch, tmp_path):
+    monkeypatch.setenv(M.GO_ENV, "1")
+    monkeypatch.delenv(M.RESULTS_ENV, raising=False)
+    assert any(M.RESULTS_ENV in x for x in M.full_refusals(tmp_path))
+    monkeypatch.setenv(M.RESULTS_ENV, str(tmp_path))
+    assert not any(M.RESULTS_ENV in x for x in M.full_refusals(tmp_path))

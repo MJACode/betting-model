@@ -1405,3 +1405,14 @@ Prices never move.
 
 **Smoke run:** every P3 cell runs on synthetic games only. On real data `--smoke` prints counts
 only: the seasons held, D coverage, and the games with a shooting-luck number.
+
+Three more lines, 2026-10-18, still before any P1 cell was graded:
+
+- A fitting season with no season before it (2020-21 for the full game; the first derivative
+  season the cache holds) has its centres solved through its own season's spread of results,
+  the shared harness's fallback. Those centres are only ever fitted on, never bet.
+- With 2025-26 as the only graded derivative season, no choosing season is left. The placebo
+  bar is judged on the choosing seasons, so it cannot pass either, as well as "seasons mostly
+  positive". Both fail by construction until 2023-24 is in the cache.
+- `--full` also refuses when no results folder is named, so P1's cells never land beside the
+  second search's 422.
