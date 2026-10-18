@@ -479,6 +479,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "position_vs_opponent_ncaaf",
     "position_vs_opponent_nfl",
     "position_vs_opponent_wnba",
+    # Anytime TD board: one rank per defense for a position group
+    # (data/migrations/position_defense_ranks_nfl_2026_10_18.sql).
+    "position_defense_ranks_nfl",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",

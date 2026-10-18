@@ -19,6 +19,11 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: next-game fallback is NFL only; a tough-end tie reads 1st toughest; the stack check allows 1.2999999 |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD stacks at font scale 1.3; the stacked header is two lines and the matchup line sits under the name |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD headers use the column width; large text is one left-aligned line; the row stacks above the default text size |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD tiers are Great through Very tough; the cell opens the explainer; columns are 40/66/62 and stack only at large text |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, NFL Anytime TD matchup column: five bars, a tier word, and a rank; position_defense_ranks_nfl is in the migration list and was not applied |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 branch merged origin/master `b63f6396`; session logs keep both sides; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, X posts every released pre-game pick; X_POST_ALL_PICKS=0 restores free-pick-only; team hashtags, four-tag cap |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1: Today line-only move with no book at the picked line is Open DK and does not open the new line; stored headlines drop opener, wind, stake, and NEW tags |
