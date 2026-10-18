@@ -107,6 +107,13 @@ ANON_READABLE: tuple[str, ...] = (
     "v_player_season_totals_ncaaf",
     "v_player_season_totals_nfl",
     "v_player_season_totals_wnba",
+    # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
+    # .from() these yet; tests/test_anon_readable.py keeps them on an
+    # explicit ahead-of-the-app list so the stale-entry check stays strict
+    # for everything else.
+    "v_nhl_player_prop_odds",
+    "v_player_season_totals_nhl",
+    "v_team_season_totals_nhl",
     "v_public_track_record",
     "v_public_track_record_daily",
 )
@@ -203,6 +210,13 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "latest_odds",
     "latest_prop_odds",
     "latest_live_game_state",
+    # security_invoker bases of the NHL Stats views. The logs were created
+    # with RLS on and no policy (add_nhl_game_logs.sql). The stats migration
+    # adds a SELECT policy; the caller still needs the grant, and nothing in
+    # the app .from()s the tables themselves.
+    "nhl_goalie_game_log",
+    "nhl_skater_game_log",
+    "nhl_team_game_log",
 )
 
 # ── worker-only tables: the second lock ──────────────────────────────────────
@@ -260,6 +274,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "nba_game_inactives",
     "nba_game_officials",
     "nba_player_game_adv",
+    # Action Network NBA ticket/money splits, archive and pre-tip polls.
+    # Created on demand by data/ingestors/nba_public_splits_ingestor.py;
+    # research control input, never read by the app.
+    "nba_public_splits",
     # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
     # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
     # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
@@ -268,6 +286,15 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "nba_period_scores",
     "nba_player_dnp",
     "nba_schedule",
+    # Free ESPN play-by-play (sportsdataverse release), its box scores, the
+    # ESPN -> NBA.com player id map and the lineup segments derived from them.
+    # Created on demand by data/ingestors/nba_pbp.py; research input for the
+    # NBA game-market search, never read by the app.
+    "nba_pbp",
+    "nba_pbp_box",
+    "nba_pbp_games",
+    "nba_player_id_map",
+    "nba_stints",
     # The NBA prop card's decisions ledger: one row per game it has decided,
     # so a game is decided once (scripts/nba_prop_market_card.py, which
     # creates it on demand). Read by the card and the window job, never by
@@ -285,6 +312,14 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # odds_history_pulls: a fixed name, never read by the app.
     "nhl_derivative_odds_pulls",
     "odds_history_pulls",
+    # NBA purchase fetches OFF the hour (a gap fill at 23:30Z): odds_history_pulls
+    # keys on an integer hour and cannot hold them. Created on demand by
+    # data/ingestors/nba_odds_history.py, never read by the app.
+    "odds_history_fetches",
+    # The NBA game-market search's graded cells and populations, stored by
+    # scripts/nba_game2_store.py before anything reads them; never read by the app.
+    "nba_game2_cells",
+    "nba_game2_population",
     "threshold_reviews",
     "worker_jobs",
 )
@@ -426,6 +461,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_season_stat_values_ncaaf",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
+    # NHL hit-rate arrays (per game, last 5, last 10, season). The app does
+    # not call it until the Stats tab exists.
+    "player_stat_values_nhl",
     # H2H window: one row per slate player, that player's values against the
     # team he is about to play, over the last two seasons
     # (data/migrations/add_player_h2h_stat_values_rpcs.sql).
@@ -446,6 +484,10 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_ncaaf",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
+    # NHL Players board. Reads nhl_skater_game_log (shots, ending-year
+    # season, game_type 2). The table's anon SELECT and RLS policy are
+    # #962, still unapplied; this grant is EXECUTE on the function only.
+    "player_window_totals_nhl",
     "fighter_window_totals_ufc",
     "team_stats_board",
     # custom model builder

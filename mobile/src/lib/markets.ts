@@ -91,17 +91,20 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
  * is not the proposition the book sells.
  *
  * Almost always they are the same thing: an "Over 5.5 Receptions" board row
- * buys Over 5.5 receptions. `player_anytime_td` is the exception — the board
- * asked it as "Rush+Rec TDs" with a 0.5 line (the chip has been named
+ * buys Over 5.5 receptions. Two markets are not. `player_anytime_td` — the
+ * board asked it as "Rush+Rec TDs" with a 0.5 line (the chip has been named
  * "Anytime TD" since 2026-09-25), but no book sells that; they
  * sell "Anytime Touchdown Scorer", which also pays on a return touchdown the
- * board's rush+rec history never counted. A betslip leg reading "Over 0.5
- * Rush+Rec TDs" is a proposition the user cannot find at their sportsbook,
- * so the LEG and the sheet use this name while the column header keeps its
- * own (UX review, 2026-09-05).
+ * board's rush+rec history never counted. `player_goal_scorer_anytime` is the
+ * same split: the chip stays "Goals" because that is the average, and the
+ * book lists the bet as Anytime Goal Scorer, Yes. A leg reading "Over 0.5
+ * Goals" is a proposition the user cannot find at their sportsbook, so the
+ * LEG and the sheet use this name while the column header keeps its own
+ * (UX review, 2026-09-05 and 2026-10-16).
  */
 export function propDisplayLabel(market: string | null, statLabel: string): string {
   if (market === 'player_anytime_td') return 'Anytime TD';
+  if (market === 'player_goal_scorer_anytime') return 'Anytime Goal';
   return statLabel;
 }
 
@@ -113,6 +116,9 @@ export function propDisplayLabel(market: string | null, statLabel: string): stri
  * dashes and a column of dashes with a reason.
  */
 export function oneWayMarket(market: string | null, side: 'over' | 'under'): boolean {
+  // Anytime goal scorer is the same Yes/No shape: the book posts Yes (over
+  // 0.5) and no No, stored as player_goal_scorer_anytime.
+  if (market === 'player_goal_scorer_anytime') return side === 'under';
   return market === 'player_anytime_td' && side === 'under';
 }
 

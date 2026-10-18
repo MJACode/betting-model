@@ -287,6 +287,10 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // signal (Discord and push never carry it either). Checked on the row, so an
   // unpause does not turn it into one.
   if (isPausedRow(p)) return false;
+  // The extra copy of an event bet twice is never an action either: the record
+  // already drops it (passesRecordFilter), and it shares its original's Discord
+  // key, so the posted shortcut below would otherwise keep it on the board.
+  if (isDuplicateCopy(p)) return false;
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.
   if (RETIRED_MODELS.has(p.model_id)) return false;
@@ -297,19 +301,28 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // decision_* since the flip, DraftKings before it. Same clause the scorer,
   // the Discord and push producers and the record views apply.
   //
-  // The price floor decides what a model may bet NEXT. A bet Discord has
-  // already posted keeps the floor it was written under: display follows
-  // Discord. Re-cutting it at today's floor dropped the posted -980
-  // SEA @ DEN bet from the day's pending list and greyed its edge when
-  // nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-15 ET).
+  // The price floor, the probability floor and the edge cut decide what a
+  // model may bet NEXT. A bet Discord has already posted keeps the cuts it
+  // was written under: display follows Discord. Re-cutting it at today's
+  // values drops it from the day's pending list and greys its edge until it
+  // grades -- as nearly happened to the posted -980 SEA @ DEN bet when
+  // nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-15 ET;
+  // the probability and edge cuts joined on mike's "Yes", 2026-10-16 ET).
+  // "Posted" is per Discord key, and a pre-game key carries no side (it must
+  // not: tracking/publish_keys.py). So when a model writes BOTH sides of one
+  // event under one key, both rows read as posted and both keep their cuts;
+  // one such pre-game key between 2026-08-17 and 2026-10-16, none open, and
+  // the later copy is marked DUPLICATE, refused above. Pause, retirement,
+  // VOID, DUPLICATE and the paused-row marker still apply.
   const odds = decisionOdds(p);
   const edge = decisionEdge(p);
   const posted = p.discordPublish === 'published';
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
     if (sv.paused) return false;
+    if (posted) return true;
     if (p.model_probability < sv.min_prob) return false;
-    if (!posted && !passesMinOdds(odds, sv.min_odds)) return false;
+    if (!passesMinOdds(odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
     return edge >= sv.min_edge;
   }
@@ -317,8 +330,9 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
+  if (posted) return true;
   if (p.model_probability < t.min_prob) return false;
-  if (!posted && !passesMinOdds(odds, t.min_odds)) return false;
+  if (!passesMinOdds(odds, t.min_odds)) return false;
   if (PROB_ONLY_MODELS.has(p.model_id)) return true;
   return edge >= t.min_edge;
 }
@@ -502,6 +516,27 @@ export function unitsFor(
   dkOdds: number | null | undefined = null,
 ): number {
   return stakeFor(serverKellyFraction, dkOdds).risk;
+}
+
+/**
+ * Units won or lost, and units risked, at the posted stake.
+ *
+ * The same pair as `published_pick_unit_profit` / `published_pick_unit_risked`
+ * and `tracking.published_units`. `stakeFor` is the price math; this only
+ * applies the result. A win pays `stake.win` (1, unless the 3u cap bound).
+ * A loss costs `stake.risk`. A push, a void, and an ungraded pick risk
+ * nothing. A missing price is 1 unit, not a made-up −110.
+ */
+export function postedPickUnits(p: {
+  kelly_fraction?: number | null;
+  dk_odds?: number | null;
+  decision_odds?: number | null;
+  result?: string | null;
+}): { units: number; risked: number } {
+  const stake = stakeFor(p.kelly_fraction, decisionOdds(p));
+  if (p.result === 'WIN') return { units: stake.win, risked: stake.risk };
+  if (p.result === 'LOSS') return { units: -stake.risk, risked: stake.risk };
+  return { units: 0, risked: 0 };
 }
 
 /** "1.1u to win 1u"; just "1u" when the pick carries no price. */
