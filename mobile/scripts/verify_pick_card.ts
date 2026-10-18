@@ -30,7 +30,7 @@ import {
   MODEL_BOOK,
 } from '../src/lib/markets';
 import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
-import { formatAmerican, MINUS } from '../src/lib/format';
+import { formatAmerican, gameStatus, MINUS } from '../src/lib/format';
 import {
   signalsBetHeadline,
   signalsCardSpeech,
@@ -989,7 +989,13 @@ check(
     'prop headline is the player, the side, the line and the stat',
     signalsBetHeadline({
       side: 'under', line: 9.5, market: 'player_tackles_assists', player: 'Roquan Smith',
-    }) === 'Roquan Smith Under 9.5 Tkl+Ast',
+    }) === 'Roquan Smith Under 9.5 Tackles + Assists' &&
+      signalsBetHeadline({
+        side: 'over', line: 2.5, market: 'player_threes', player: 'Karl-Anthony Towns',
+      }) === 'Karl-Anthony Towns Over 2.5 Three-pointers' &&
+      signalsBetHeadline({
+        side: 'over', line: 32.5, market: 'player_points_rebounds_assists', player: 'Jalen Brunson',
+      }) === 'Jalen Brunson Over 32.5 Points + Rebounds + Assists',
   );
   check(
     'the headline has no stake suffix and no wind parenthetical',
@@ -1011,7 +1017,7 @@ check(
       signalsModelCaption('Wind Totals (Under)', null) === 'Wind Totals (Under) model',
   );
   check(
-    'VoiceOver reads bet, price, reason, matchup, figures, stake, model, posted',
+    'VoiceOver reads bet, price, game, reason, figures, stake, model, posted',
     signalsCardSpeech({
       bet: 'Under 56',
       price: `${MINUS}110 DraftKings`,
@@ -1028,7 +1034,7 @@ check(
       gameStatus: null,
       sharp: null,
       started: null,
-    }) === `Under 56. ${MINUS}110 DraftKings. Wind 14 mph at kickoff. Kansas City at Buffalo. 8:00 PM ET. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`,
+    }) === `Under 56. ${MINUS}110 DraftKings. Kansas City at Buffalo. 8:00 PM ET. Wind 14 mph at kickoff. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`,
   );
   check(
     'paused, live, locked and flagged speech keep their place',
@@ -1087,7 +1093,51 @@ check(
   check('the picked-at line is not under the hero', !card.includes('signalsPickedAtLine') && !/pickedAt:/.test(card));
   check('Today uses the same Best now wording as Signals', /bestNow: handoff\.verb === 'Best'/.test(card));
   const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
-  check('Signals board opts into the signals layout', /layout=\{view === 'signals' \? 'signals' : 'board'\}/.test(home));
+  check(
+    'All, Signals and Live use the new card',
+    /layout="signals"/.test(home) && !/layout=\{view === 'signals'/.test(home),
+  );
+  check(
+    'a paused card is paused on every view, including Signals',
+    /paused=\{isPausedForDisplay\(item\.pick\)\}/.test(home) &&
+      !/paused=\{view === 'today' && isPausedForDisplay/.test(home),
+  );
+  check(
+    'NCAAF abbreviations load for every view',
+    /useNcaafAbbrevs\(sport === 'NCAAF'\)/.test(home) && /teamAbbrevs=\{ncaafAbbrevs\}/.test(home),
+  );
+  {
+    const liveGame = gameStatus(
+      {
+        sport: 'MLB',
+        home_score: null,
+        away_score: null,
+        commence_time: '2020-01-01T00:00:00Z',
+      },
+      {
+        abstract_game_state: 'Live',
+        home_score: 3,
+        away_score: 2,
+        inning: 7,
+        inning_half: 'bottom',
+        outs: 1,
+        bases_state: null,
+      },
+    );
+    const matchupAt = card.indexOf('<Text style={styles.matchupLine}>');
+    const betAt = card.indexOf('{betHeadline}');
+    const between = matchupAt >= 0 && betAt > matchupAt ? card.slice(matchupAt, betAt) : '';
+    check(
+      'a live snapshot stays live, and the score badge sits on the matchup row',
+      liveGame.kind === 'live' &&
+        liveGame.awayScore === 2 &&
+        liveGame.homeScore === 3 &&
+        liveGame.inning === 7 &&
+        between.includes('<GameStatusPill') &&
+        between.includes("kind !== 'pre'") &&
+        !/numberOfLines/.test(between),
+    );
+  }
   check('hero is 22pt', /betLeft: \{[\s\S]*?font\.size\.title2/.test(card) && /betRight: \{[\s\S]*?font\.size\.title2/.test(card));
   check(
     'three figures use the plain words, and Stake is not a fourth cell',
@@ -1127,7 +1177,8 @@ check(
       /Stake unavailable/.test(card) &&
       /\{signalsStakeShown \?\? '—'\}/.test(card) &&
       !/numberOfLines[\s\S]{0,120}signalsStakeShown \?\?/.test(card) &&
-      /metric: \{[\s\S]*?flexBasis: '46%'[\s\S]*?maxWidth: '48%'/.test(card) &&
+      /metric: \{[\s\S]*?flexBasis: '30%'[\s\S]*?maxWidth: '32%'/.test(card) &&
+      !/flexBasis: '46%'/.test(card) &&
       !/flexBasis: '100%'/.test(card),
   );
   check(

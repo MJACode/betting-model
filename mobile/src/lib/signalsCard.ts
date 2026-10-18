@@ -20,50 +20,49 @@ export function trueMinus(text: string): string {
 }
 
 /**
- * The stat word a prop label uses, keyed by the odds market. Single-market
- * models and the multi-market cards (`nba_prop_market`, `nba_prop_projection`,
- * `nfl_prop_market`) share these words with the scorer, so the headline does
- * not have to parse `pick_label` to name the stat.
+ * The stat word a prop headline uses, keyed by the odds market. Plain words
+ * ("Tackles + Assists", "Three-pointers", "Points + Rebounds + Assists"),
+ * not the scorer's short forms, so the headline does not parse `pick_label`.
  */
 const PROP_BET_STAT: Readonly<Record<string, string>> = {
-  pitcher_strikeouts: 'Ks',
+  pitcher_strikeouts: 'Strikeouts',
   pitcher_hits_allowed: 'Hits',
-  pitcher_earned_runs: 'ER',
+  pitcher_earned_runs: 'Earned runs',
   pitcher_outs: 'Outs',
   pitcher_walks: 'Walks',
   batter_hits: 'Hits',
-  batter_total_bases: 'TB',
-  batter_home_runs: 'HR',
-  batter_rbis: 'RBI',
+  batter_total_bases: 'Total bases',
+  batter_home_runs: 'Home runs',
+  batter_rbis: 'Runs batted in',
   batter_runs_scored: 'Runs',
-  batter_stolen_bases: 'SB',
+  batter_stolen_bases: 'Stolen bases',
   batter_walks: 'Walks',
-  player_points: 'Pts',
-  player_rebounds: 'Reb',
-  player_assists: 'Ast',
-  player_threes: '3PM',
-  player_points_rebounds_assists: 'PRA',
+  player_points: 'Points',
+  player_rebounds: 'Rebounds',
+  player_assists: 'Assists',
+  player_threes: 'Three-pointers',
+  player_points_rebounds_assists: 'Points + Rebounds + Assists',
   player_steals: 'Steals',
   player_blocks: 'Blocks',
-  player_blocks_steals: 'Blocks+Steals',
-  player_rebounds_assists: 'Reb+Ast',
+  player_blocks_steals: 'Blocks + Steals',
+  player_rebounds_assists: 'Rebounds + Assists',
   player_turnovers: 'Turnovers',
-  player_double_double: 'DD',
-  player_pass_yds: 'Pass Yds',
-  player_pass_attempts: 'Pass Att',
-  player_pass_completions: 'Comp',
-  player_pass_tds: 'Pass TD',
-  player_rush_yds: 'Rush Yds',
+  player_double_double: 'Double-double',
+  player_pass_yds: 'Pass yards',
+  player_pass_attempts: 'Pass attempts',
+  player_pass_completions: 'Completions',
+  player_pass_tds: 'Pass touchdowns',
+  player_rush_yds: 'Rush yards',
   player_rush_attempts: 'Carries',
-  player_reception_yds: 'Rec Yds',
-  player_receptions: 'Rec',
-  player_rush_reception_yds: 'Ru+Re Yds',
-  player_anytime_td: 'Anytime TD',
-  player_tackles_assists: 'Tkl+Ast',
+  player_reception_yds: 'Receiving yards',
+  player_receptions: 'Receptions',
+  player_rush_reception_yds: 'Rushing + receiving yards',
+  player_anytime_td: 'Anytime touchdown',
+  player_tackles_assists: 'Tackles + Assists',
   player_sacks: 'Sacks',
-  player_blocked_shots: 'Blocked Shots',
+  player_blocked_shots: 'Blocked shots',
   player_total_saves: 'Saves',
-  player_shots_on_goal: 'Shots on Goal',
+  player_shots_on_goal: 'Shots on goal',
 };
 
 export interface SignalsBetFields {
@@ -113,7 +112,7 @@ function isPropMarket(market: string | null, player: string | null): boolean {
 
 /**
  * The bet the card headlines. "Under 56", "Sam Houston −7.5", "Sam Houston ML",
- * "Roquan Smith Under 9.5 Tkl+Ast". A first-five market keeps " F5". A team
+ * "Roquan Smith Under 9.5 Tackles + Assists". A first-five market keeps " F5". A team
  * total names the club the market belongs to ("Boston Bruins Over 3.5").
  */
 export function signalsBetHeadline(fields: SignalsBetFields): string {
@@ -186,10 +185,9 @@ export function signalsModelCaption(longName: string, when: string | null | unde
 }
 
 /**
- * VoiceOver for the Option 1 card, in visual order: the bet, the price on
- * that row, the reason, the matchup, the time, the three figures, the stake
- * sentence, the model, when it posted, then paused / live / sharp / started.
- * Boards 01–05 were not in this workspace; this is that stack.
+ * VoiceOver for the Option 1 card (Designer, #994): the bet, the price and
+ * book, the game (teams, then time), the reason, the three figures, the
+ * stake, the model, when it posted, then paused / status / sharp / started.
  */
 export function signalsCardSpeech(input: {
   bet: string;
@@ -211,9 +209,9 @@ export function signalsCardSpeech(input: {
   const parts = [
     input.bet,
     input.price,
-    input.reason,
     input.teams,
     input.time,
+    input.reason,
     input.edge,
     input.modelChance,
     input.expectedReturn,

@@ -578,13 +578,16 @@ def test_price_check_is_display_only():
 
 
 def test_signals_card_quotes_the_bet_and_names_the_best_book():
-    """Signals (Designer Option 1, on the Option A structure). The headline is
-    the bet from structured fields, the matchup wraps under a reason line, the
-    stake sentence is its own row, and the model name is the footer. Today and
-    Live keep the board layout."""
+    """Signals (Designer Option 1). The headline is the bet from structured
+    fields, the matchup wraps above it beside the score, the stake sentence is
+    its own row, and the model name is the footer. All, Signals and Live use
+    this card."""
     card = _read(SRC / "components" / "PickCard.tsx")
     home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
-    assert "layout={view === 'signals' ? 'signals' : 'board'}" in home
+    assert 'layout="signals"' in home
+    assert "layout={view === 'signals' ? 'signals' : 'board'}" not in home
+    assert "paused={isPausedForDisplay(item.pick)}" in home
+    assert "paused={view === 'today' && isPausedForDisplay" not in home
     assert "signalsBetHeadline({" in card
     assert "signalsBetHeadline(pick.pick_label)" not in card
     assert "signalsReasonLine(" in card and "signalsModelCaption(" in card
@@ -607,7 +610,8 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "Stake unavailable" in card and ">Stake<" not in card
     assert "styles.stakeRow" in card and "{signalsStakeShown ?? '—'}" in card
     assert "To win unavailable" not in card and ">To win<" not in card
-    assert "flexBasis: '46%'" in card and "maxWidth: '48%'" in card
+    assert "flexBasis: '30%'" in card and "maxWidth: '32%'" in card
+    assert "flexBasis: '46%'" not in card
     assert "flexBasis: '100%'" not in card
     assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine" not in card
     assert "bestNow: handoff.verb === 'Best'" in card
@@ -672,7 +676,9 @@ ok(!signalsBetHeadline({ side: 'under', line: 56, market: 'totals' }).includes('
 ok(signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Over 3.5', 'team total names the club');
 ok(signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Under 2.5', 'away team total');
 ok(signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'Los Angeles', awayTeam: 'New York' }) === 'Over 8.5', 'two-word teams are not a qualifier');
-ok(signalsBetHeadline({ side: 'under', line: 9.5, market: 'player_tackles_assists', player: 'Roquan Smith' }) === 'Roquan Smith Under 9.5 Tkl+Ast', 'prop');
+ok(signalsBetHeadline({ side: 'under', line: 9.5, market: 'player_tackles_assists', player: 'Roquan Smith' }) === 'Roquan Smith Under 9.5 Tackles + Assists', 'prop');
+ok(signalsBetHeadline({ side: 'over', line: 2.5, market: 'player_threes', player: 'Karl-Anthony Towns' }) === 'Karl-Anthony Towns Over 2.5 Three-pointers', 'three pointers');
+ok(signalsBetHeadline({ side: 'over', line: 32.5, market: 'player_points_rebounds_assists', player: 'Jalen Brunson' }) === 'Jalen Brunson Over 32.5 Points + Rebounds + Assists', 'pra');
 ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14 }) === 'Wind 14 mph at kickoff', 'wind reason');
 ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14, dome: 1 }) === null, 'dome is quiet');
 ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null, 'other models stay quiet');
@@ -683,7 +689,7 @@ ok(signalsCardSpeech({
   modelChance: 'Model chance 58%', expectedReturn: 'Expected return +4.0%',
   stake: 'Stake, Bet 1.1 units, win 1 unit', modelName: 'Wind Totals (Under) model',
   posted: 'Posted 11:07 AM ET', paused: null, gameStatus: null, sharp: null, started: null,
-}) === `Under 56. ${MINUS}110 DraftKings. Wind 14 mph at kickoff. Kansas City at Buffalo. 8:00 PM ET. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`, 'voiceover order');
+}) === `Under 56. ${MINUS}110 DraftKings. Kansas City at Buffalo. 8:00 PM ET. Wind 14 mph at kickoff. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`, 'voiceover order');
 ok(!signalsCardSpeech({
   bet: 'Under 56', price: null, reason: null, teams: null, time: null, edge: null,
   modelChance: null, expectedReturn: null, stake: null, modelName: null, posted: null,

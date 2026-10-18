@@ -94,13 +94,12 @@ interface Props {
   /** Today board only: BET/AVOID/NONE sits immediately before the label.
    * Signals and Live are already BET-only, so the small badge is omitted. */
   showSignalBadge?: boolean;
-  /** All board only: this pick's model is PAUSED (Matt, 2026-09-26). The card
-   * shows the model's number but nothing that reads as a bet — a PAUSED chip in
-   * place of the signal badge, no stake, no Sharp Score, no book hand-off and no
-   * betslip button (the slip resolves legs from active models only). */
+  /** This pick's model is PAUSED (Matt, 2026-09-26). Every picks view passes
+   * it. The card shows the model's number but nothing that reads as a bet —
+   * a PAUSED chip, the reference sentence, no stake, no Sharp Score, no book
+   * hand-off and no betslip button. */
   paused?: boolean;
-  /** Signals board (Designer Option A): the bet is the hero. Today and Live
-   * keep the board layout. */
+  /** Option 1 card. Picks home uses it on All, Signals and Live. */
   layout?: 'board' | 'signals';
   /** NCAAF school → abbreviation for the Signals compact line. */
   teamAbbrevs?: ReadonlyMap<string, string> | null;
@@ -806,8 +805,17 @@ export function PickCard({
       </>
       ) : (
       <>
-      {preview || paused || flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
       <View style={styles.contextRow}>
+        <Text style={styles.matchupLine}>
+          {signalsContextLine({
+            sport: contextSport,
+            away: game?.away_team ?? '',
+            home: game?.home_team ?? '',
+            timeLabel: contextTime,
+            abbrevs: teamAbbrevs,
+          })}
+        </Text>
+        {preview || paused || flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
         <View style={styles.contextTrail}>
           {preview ? (
             <View style={[styles.labelChip, styles.previewBadge]}>
@@ -851,8 +859,8 @@ export function PickCard({
             <GameStatusPill game={game} live={liveState} />
           ) : null}
         </View>
+        ) : null}
       </View>
-      ) : null}
 
       <View style={styles.betRow}>
         <Text style={[styles.betLeft, signalsMuted && styles.betMuted]}>
@@ -868,15 +876,6 @@ export function PickCard({
       {reasonLine ? (
         <Text style={[styles.reasonLine, signalsMuted && styles.betMuted]}>{reasonLine}</Text>
       ) : null}
-      <Text style={styles.matchupLine}>
-        {signalsContextLine({
-          sport: contextSport,
-          away: game?.away_team ?? '',
-          home: game?.home_team ?? '',
-          timeLabel: contextTime,
-          abbrevs: teamAbbrevs,
-        })}
-      </Text>
       {signalsNow ? (
         <Text style={styles.nowLine}>{signalsNow}</Text>
       ) : null}
@@ -1478,9 +1477,12 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.medium,
     color: colors.textSecondary,
   },
-  // The matchup is its own line under the reason and wraps with the card.
+  // Matchup sits above the bet, beside the score. It wraps; the badge does not.
   matchupLine: {
-    marginBottom: spacing.xs,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '60%',
+    minWidth: 0,
     fontSize: font.size.footnote,
     fontWeight: font.weight.medium,
     color: colors.textSecondary,
@@ -1517,13 +1519,13 @@ const styles = StyleSheet.create({
     rowGap: spacing.sm,
     marginBottom: spacing.xs,
   },
-  // Three figures. Basis leaves room for the column gap so a long value
-  // wraps inside its cell at large text. Stake is the row under them.
+  // Three figures across one row. ~30% leaves room for the column gap.
+  // Stake is the row under them.
   metric: {
     flexGrow: 1,
     flexShrink: 1,
-    flexBasis: '46%',
-    maxWidth: '48%',
+    flexBasis: '30%',
+    maxWidth: '32%',
     minWidth: 0,
   },
   metricValue: {
