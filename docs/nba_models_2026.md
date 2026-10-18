@@ -1207,3 +1207,87 @@ Section 8 names the recipe; these lines fix everything it leaves open. Lab:
   checks the plumbing and is never a result. With one fitting season the penalty falls to
   0.003.
 - The first-half, first-quarter and team-total cells run on synthetic games only.
+
+### 8.3 P3, the second search's signals on the derivative markets: choices fixed before any P3 cell was graded (2026-10-18)
+
+Section 8 names the two signals and their cuts; these lines fix everything it leaves open. Lab:
+`scripts/nba_game4_p3.py`. None of them was chosen from a betting result.
+
+**Cells (72)**
+
+- **Shooting luck (F4), 24 cells:** first-half total, home team total and away team total ×
+  over / under × gap ≥ 1 / 2 / 3 / 4. The two team totals are separate cells, because that is
+  the only way the registered 72 adds up. (P1 pools them; P3 does not.)
+- **Ratings projection (F1), 48 cells:** first-half and first-quarter moneyline, spread and
+  total × 2 sides × EV ≥ 0.02 / 0.04 / 0.06 / 0.08.
+- Each signal carries its own family label (`P3_F4`, `P3_F1`). Both bet the first-half total
+  at the same cut positions, so without the labels a gap cut would be read as an EV cut's
+  neighbour.
+- Expected to clear the 95% interval by chance alone: 72 × 0.025 ≈ 1.8 cells, before
+  correlation.
+
+**Decision and seasons**
+
+- Each game's one per-game purchase, used only when it falls 45–75 minutes before tip (D).
+  Measured on the cache: it reaches 99.5% of 2024-25 games and 99.0% of 2025-26 games, at a
+  median 54 minutes before tip.
+- **Graded: every season the cache prices these markets in**, today 2024-25 and 2025-26;
+  2023-24 joins when its purchase lands. Nothing in P3 is fitted on derivative prices, so,
+  unlike P1, the first priced season is graded too. All graded seasons are pooled. The
+  harness's "choosing" seasons (which the placebo bar reads) are all of them but 2025-26.
+- `--full` refuses any of these seasons priced on fewer than 90% of its games (a purchase still
+  running), and always requires 2024-25 and 2025-26.
+
+**Shooting luck: what the gap is**
+
+- **First-half total:** F4's own full-game number, unscaled: the luck-adjusted minus the raw
+  projected game total, in full-game points. The first half's line is taken to follow the
+  same raw ratings, so the same number ranks the same games, and the registered cuts keep
+  their §6.3 meaning (gap ≥ 3 is the near miss of §6.6 and §6.7). No share is fitted.
+- **Team totals:** the team's own part of that number. That is the luck in its opponent's
+  defence (the three-point and free-throw shooting the opponent allowed, replaced by the
+  league's rate so far), times the game's pace, in that team's points. The home and away parts
+  add up to F4's total gap.
+- Everything else is F4's: box scores of the same season dated before the game; both teams
+  with 10 or more games this season; a side bet at its best deciding offer under the market's
+  fair line.
+
+**Ratings projection: the period scaling**
+
+- For each graded season S and each period (first half, first quarter):
+  - the period's home margin = a + b × the projection's full-game home margin;
+  - the period's total = a + b × the projection's full-game total.
+- a and b are least squares on the projection's walk-forward numbers for seasons 2020-21
+  through the season before S, at tip − 60, each calibrated by its own season's model. Only
+  games whose period scores pass the first search's check are used. 2019-20 is left out: its
+  projection has no calibration.
+- The projection is priced with its own period error: that same fit's residuals, re-centred,
+  as the harness's empirical distribution. Seasons before S only, with no fallback to S.
+- **Moneyline:** the chance the period's home margin is above zero, out of above or below
+  zero. A level period voids the bet, so that mass is removed.
+- The graded number is the projection at the purchase instant; the fit's numbers sit at
+  tip − 60. The projection itself (ratings, minutes, the injury report, its calibration) is the
+  second search's, unchanged. There is no 10-game rule: F1 never had one.
+
+**The market's own pricing** (the fair line that picks a side's best offer, the blind bets, the
+favourite)
+
+- **First-half and first-quarter spreads and totals:** the spread of the period's result around
+  a + b × Pinnacle's full-game closing number (the home margin its spread implies, or its
+  total). Fit on the seasons before S, from 2020-21; 300 or more earlier games; no fallback.
+- **Team totals:** F6d's recorded definition (§6.5, third amendment), imported unchanged.
+- The purchases' own prices are not used for this. The first priced season has no earlier one,
+  so it would be priced on its own results.
+- A season or market with no such pricing stops the run before any cell is graded.
+
+**Not measurable here, reported as such**
+
+- Closing-line value: one purchase per game, so there is no later price.
+- "Still offered at the next purchase": there is no next purchase, so it reads 0.
+
+**Placebo:** 20 runs, seed = run number. Shooting luck: the gap is shuffled between games on
+the same date in the same market. Projection: its fair numbers are shuffled the same way.
+Prices never move.
+
+**Smoke run:** every P3 cell runs on synthetic games only. On real data `--smoke` prints counts
+only: the seasons held, D coverage, and the games with a shooting-luck number.
