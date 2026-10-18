@@ -1391,7 +1391,8 @@ Section 8 names the two signals and their cuts; these lines fix everything it le
   games whose period scores pass the first search's check are used. 2019-20 is left out: its
   projection has no calibration.
 - The projection is priced with its own period error: that same fit's residuals, re-centred,
-  as the harness's empirical distribution. Seasons before S only, with no fallback to S.
+  as the harness's empirical distribution. Seasons before S only, 300 or more earlier games,
+  with no fallback to S: fewer stops the run.
 - **Moneyline:** the chance the period's home margin is above zero, out of above or below
   zero. A level period voids the bet, so that mass is removed.
 - The graded number is the projection at the purchase instant; the fit's numbers sit at
