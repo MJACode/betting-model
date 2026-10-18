@@ -3,13 +3,15 @@
  *
  * Pure — no React Native — so the card, VoiceOver and the verify script
  * share one sentence. The headline is the bet only, built from the pick's
- * side, line, market and teams. It does not read `pick_label`, so a card
- * suffix ("· 0.77u") and a parenthetical ("Wind 14 mph, FD") never become
- * the bet. A signed number uses U+2212; a hyphen inside a name
+ * side, line, market and teams. A stake suffix ("· 0.77u") and a
+ * parenthetical ("Wind 14 mph, FD", "no bet, DK") never become the bet.
+ * A signed number uses U+2212; a hyphen inside a name
  * ("Louisiana-Monroe") stays a hyphen.
  *
  * The player name is the one token a prop has no column for. The card
- * passes it in. This function still does not accept a label string.
+ * passes it in. `label` is the stored pick_label, used only when those
+ * fields cannot name the bet. The wind reason reads that label when the
+ * weather row has no number.
  */
 
 import { MINUS } from './format';
@@ -57,7 +59,7 @@ const PROP_BET_STAT: Readonly<Record<string, string>> = {
   player_reception_yds: 'Receiving yards',
   player_receptions: 'Receptions',
   player_rush_reception_yds: 'Rushing + receiving yards',
-  player_anytime_td: 'Anytime touchdown',
+  player_anytime_td: 'Anytime TD',
   player_tackles_assists: 'Tackles + Assists',
   player_sacks: 'Sacks',
   player_blocked_shots: 'Blocked shots',
@@ -66,7 +68,9 @@ const PROP_BET_STAT: Readonly<Record<string, string>> = {
 };
 
 export interface SignalsBetFields {
-  side: 'home' | 'away' | 'over' | 'under' | 'draw';
+  /** `home` / `away` / `over` / `under` / `draw`, or a side those five cannot
+   * name (golf `yes`, a UFC method class). Anything else uses `label`. */
+  side: string;
   line: number | string | null;
   /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, a prop key). */
   market: string | null;
@@ -74,8 +78,43 @@ export interface SignalsBetFields {
   awayTeam?: string | null;
   /** Prop player. Game markets leave this empty. */
   player?: string | null;
-  /** Overrides `PROP_BET_STAT` when the market is not in that map. */
+  /** Overrides `PROP_BET_STAT` when the market is not in that map.
+   * A non-prop total appends it ("Under 2.5 Rounds"). */
   stat?: string | null;
+  /** Stored `pick_label`. Fallback only — see `signalsLabelHeadline`. */
+  label?: string | null;
+}
+
+const STRUCTURED_SIDES = new Set(['home', 'away', 'over', 'under', 'draw']);
+
+/**
+ * Parentheticals that are not the bet: the wind forecast, "no bet", a live
+ * tag, and a short book code. `(Regulation)` and `(matchup)` stay — they
+ * are the bet.
+ */
+/**
+ * The stored label, with the stake suffix and the book/wind parenthetical
+ * taken off. Null when there is nothing left to show. `(Regulation)` and
+ * `(matchup)` stay — they are the bet.
+ */
+export function signalsLabelHeadline(label: string | null | undefined): string | null {
+  if (!label) return null;
+  const noise =
+    /\s*\((?:Wind\b[^)]*|no bet\b[^)]*|live|FD|DK|MGM|CZR|ESPN|BR|BOV|PIN)\)/gi;
+  const text = label
+    .trim()
+    .replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/u, '')
+    .replace(noise, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return text ? trueMinus(text) : null;
+}
+
+/** "Wind 14 mph" inside a stored label. The publisher rounds to an integer. */
+function windMphFromLabel(label: string | null | undefined): number | null {
+  if (!label) return null;
+  const match = /Wind\s+(\d+(?:\.\d+)?)\s*mph/i.exec(label);
+  return match ? finiteLine(match[1]) : null;
 }
 
 function finiteLine(line: number | string | null | undefined): number | null {
@@ -88,7 +127,7 @@ function finiteLine(line: number | string | null | undefined): number | null {
 function totalNumber(line: number): string {
   const n = Math.round(line * 1000) / 1000;
   if (Object.is(n, -0) || n === 0) return '0';
-  return Number.isInteger(n) ? String(n) : String(n);
+  return String(n);
 }
 
 /**
@@ -96,7 +135,7 @@ function totalNumber(line: number): string {
  * stays whole (`+3`, `−7`), a tenth stays a tenth (`−7.5`). U+2212 for a minus.
  * Forcing `.0` made the lock disagree with the Now line on the same card.
  */
-function spreadNumber(line: number, side: SignalsBetFields['side'], market: string): string {
+function spreadNumber(line: number, side: string, market: string): string {
   const shown = market.startsWith('spreads') && side === 'away' ? -line : line;
   const n = Object.is(shown, -0) ? 0 : shown;
   const body = String(Math.abs(n));
@@ -114,6 +153,9 @@ function isPropMarket(market: string | null, player: string | null): boolean {
  * The bet the card headlines. "Under 56", "Sam Houston −7.5", "Sam Houston ML",
  * "Roquan Smith Under 9.5 Tackles + Assists". A first-five market keeps " F5". A team
  * total names the club the market belongs to ("Boston Bruins Over 3.5").
+ * Regulation moneyline is "(Regulation)", not "ML" — it pays only on a
+ * regulation win. Golf and UFC method of victory have no structured market,
+ * so the stored label is the headline.
  */
 export function signalsBetHeadline(fields: SignalsBetFields): string {
   const market = fields.market;
@@ -122,12 +164,19 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
   const home = (fields.homeTeam ?? '').trim();
   const away = (fields.awayTeam ?? '').trim();
   const player = (fields.player ?? '').trim();
+  const stored = signalsLabelHeadline(fields.label);
   const f5 = market != null && market.includes('1st_5');
   const team = side === 'away' ? away : home;
+  const regulation = market != null && market.startsWith('h2h_3way');
+
+  if (!STRUCTURED_SIDES.has(side)) {
+    return stored ?? trueMinus(team || side);
+  }
 
   let bet: string;
+  let fromLabel = false;
   if (side === 'draw') {
-    bet = 'Draw';
+    bet = regulation ? 'Draw (Regulation)' : 'Draw';
   } else if (market != null && market.startsWith('team_totals')) {
     const club = market === 'team_totals_away' ? away : home;
     const word = side === 'over' ? 'Over' : side === 'under' ? 'Under' : '';
@@ -136,6 +185,8 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
   } else if (market != null && market.startsWith('spreads')) {
     const num = line == null ? '' : spreadNumber(line, side, market);
     bet = [team, num].filter((part) => part.length > 0).join(' ');
+  } else if (regulation) {
+    bet = team ? `${team} (Regulation)` : 'Regulation';
   } else if (
     market != null && market.startsWith('h2h')
     || (market == null && (side === 'home' || side === 'away') && !player)
@@ -143,32 +194,46 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     bet = team ? `${team} ML` : 'ML';
   } else if (side === 'over' || side === 'under') {
     const word = side === 'over' ? 'Over' : 'Under';
-    const num = line == null ? '' : totalNumber(line);
     const prop = isPropMarket(market, player);
-    const stat = prop ? ((fields.stat ?? '').trim() || (market ? PROP_BET_STAT[market] ?? '' : '')) : '';
-    const subject = prop ? player : '';
-    bet = [subject, word, num, stat].filter((part) => part.length > 0).join(' ');
+    const stat = (fields.stat ?? '').trim() || (prop && market ? PROP_BET_STAT[market] ?? '' : '');
+    if (prop && market === 'player_anytime_td' && player) {
+      bet = `${player} Anytime TD`;
+    } else if (prop && (!player || !stat) && stored) {
+      bet = stored;
+      fromLabel = true;
+    } else if (prop && market === 'player_anytime_td') {
+      bet = stored ?? 'Anytime TD';
+      fromLabel = stored != null;
+    } else {
+      const num = line == null ? '' : totalNumber(line);
+      const subject = prop ? player : '';
+      const extra = prop ? stat : (fields.stat ?? '').trim();
+      bet = [subject, word, num, extra].filter((part) => part.length > 0).join(' ');
+    }
   } else {
-    bet = team || side;
+    bet = stored ?? (team || side);
+    fromLabel = stored != null && bet === stored;
   }
-  if (f5 && bet) bet = `${bet} F5`;
-  return trueMinus(bet);
+  if (f5 && bet && !fromLabel) bet = `${bet} F5`;
+  return fromLabel ? bet : trueMinus(bet);
 }
 
 /**
- * The short line under the headline. Wind totals name the forecast the card
- * was built on: "Wind 14 mph at kickoff". A dome, a missing wind, and every
- * other model stay quiet — a reason is not invented, and "N models agree"
- * is not this line.
+ * The short line under the headline. Wind totals name the forecast the bet
+ * was taken at: "Wind 14 mph at kickoff". That number is the one in the
+ * stored label. `windMph` is used only when the label has none. A dome, a
+ * missing wind, and every other model stay quiet — a reason is not
+ * invented, and "N models agree" is not this line.
  */
 export function signalsReasonLine(input: {
   modelId: string;
   windMph: number | string | null | undefined;
   dome?: boolean | number | null;
+  label?: string | null;
 }): string | null {
   if (input.modelId !== 'nfl_wind_totals') return null;
   if (input.dome === true || input.dome === 1) return null;
-  const n = finiteLine(input.windMph ?? null);
+  const n = windMphFromLabel(input.label) ?? finiteLine(input.windMph ?? null);
   if (n == null) return null;
   return `Wind ${Math.round(n)} mph at kickoff`;
 }
@@ -185,11 +250,13 @@ export function signalsModelCaption(longName: string, when: string | null | unde
 }
 
 /**
- * VoiceOver for the Option 1 card (Designer, #994): the bet, the price and
- * book, the game (teams, then time), the reason, the three figures, the
- * stake, the model, when it posted, then paused / status / sharp / started.
+ * VoiceOver for the Option 1 card: the verdict (BET / AVOID / NEUTRAL),
+ * the bet, the price and book, the game (teams, then time), the reason,
+ * the three figures, the stake, the model, when it posted, then paused /
+ * status / sharp / started. NONE is spoken as NEUTRAL.
  */
 export function signalsCardSpeech(input: {
+  verdict?: string | null;
   bet: string;
   price: string | null;
   reason: string | null;
@@ -207,6 +274,7 @@ export function signalsCardSpeech(input: {
   started: string | null;
 }): string {
   const parts = [
+    input.verdict,
     input.bet,
     input.price,
     input.teams,

@@ -1000,8 +1000,62 @@ check(
   check(
     'the headline has no stake suffix and no wind parenthetical',
     signalsBetHeadline({ side: 'under', line: 43.5, market: 'totals', homeTeam: 'MIA', awayTeam: 'NYJ' }) === 'Under 43.5' &&
-      !signalsBetHeadline({ side: 'under', line: 56, market: 'totals' }).includes('0.77u') &&
-      !signalsBetHeadline({ side: 'under', line: 56, market: 'totals' }).includes('Wind'),
+      signalsBetHeadline({
+        side: 'under', line: 56, market: 'totals',
+        label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u',
+      }) === 'Under 56',
+  );
+  check(
+    'golf and UFC method use the stored label, not the event or the home fighter',
+    signalsBetHeadline({
+      side: 'yes', line: null, market: null, homeTeam: 'The Masters', awayTeam: 'FIELD',
+      label: 'Scottie Scheffler to Win',
+    }) === 'Scottie Scheffler to Win' &&
+      signalsBetHeadline({
+        side: '1845', line: null, market: null, homeTeam: 'The Masters',
+        label: 'Scottie Scheffler over Rory McIlroy (matchup)',
+      }) === 'Scottie Scheffler over Rory McIlroy (matchup)' &&
+      signalsBetHeadline({
+        side: 'ko_tko', line: null, market: null, homeTeam: 'Islam Makhachev', awayTeam: 'Alex Pereira',
+        label: 'Alex Pereira vs Islam Makhachev — KO/TKO',
+      }) === 'Alex Pereira vs Islam Makhachev — KO/TKO' &&
+      signalsBetHeadline({
+        side: 'decision', line: null, market: null, homeTeam: 'Islam Makhachev',
+        label: 'Alex Pereira vs Islam Makhachev — Decision',
+      }) === 'Alex Pereira vs Islam Makhachev — Decision',
+  );
+  check(
+    'a regulation moneyline is not a full-game ML',
+    signalsBetHeadline({
+      side: 'home', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins', awayTeam: 'Toronto Maple Leafs',
+    }) === 'Boston Bruins (Regulation)' &&
+      signalsBetHeadline({
+        side: 'away', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins', awayTeam: 'Toronto Maple Leafs',
+      }) === 'Toronto Maple Leafs (Regulation)' &&
+      signalsBetHeadline({
+        side: 'draw', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins', awayTeam: 'Toronto Maple Leafs',
+      }) === 'Draw (Regulation)' &&
+      !signalsBetHeadline({
+        side: 'home', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins',
+      }).includes('ML'),
+  );
+  check(
+    'UFC rounds names the market, and an anytime touchdown drops the 0.5',
+    signalsBetHeadline({ side: 'under', line: 2.5, market: 'totals', stat: 'Rounds' }) === 'Under 2.5 Rounds' &&
+      signalsBetHeadline({
+        side: 'over', line: 0.5, market: 'player_anytime_td', player: "Ja'Marr Chase",
+      }) === "Ja'Marr Chase Anytime TD",
+  );
+  check(
+    'a prop with no player or no stat falls back to the cleaned label',
+    signalsBetHeadline({
+      side: 'under', line: 9.5, market: 'player_tackles_assists', player: null,
+      label: 'Roquan Smith Under 9.5 Tackles (FD) · 0.50u',
+    }) === 'Roquan Smith Under 9.5 Tackles' &&
+      signalsBetHeadline({
+        side: 'over', line: 1.5, market: 'player_custom', player: 'Someone',
+        label: 'Someone Over 1.5 Custom (DK)',
+      }) === 'Someone Over 1.5 Custom',
   );
   check(
     'wind reason is the forecast, and other models stay quiet',
@@ -1009,7 +1063,23 @@ check(
       signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14.2 }) === 'Wind 14 mph at kickoff' &&
       signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14, dome: 1 }) === null &&
       signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null &&
-      signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: null }) === null,
+      signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: null }) === null &&
+      signalsReasonLine({
+        modelId: 'nfl_wind_totals', windMph: null,
+        label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u',
+      }) === 'Wind 14 mph at kickoff' &&
+      signalsReasonLine({
+        modelId: 'nfl_wind_totals', windMph: 21,
+        label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u',
+      }) === 'Wind 14 mph at kickoff' &&
+      signalsReasonLine({
+        modelId: 'nfl_wind_totals', windMph: null, dome: 1,
+        label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u',
+      }) === null &&
+      signalsReasonLine({
+        modelId: 'nfl_opener_spread', windMph: null,
+        label: 'KC @ BUF — KC -3 (Wind 14 mph, FD)',
+      }) === null,
   );
   check(
     'model caption is modelLong plus when it posted',
@@ -1034,7 +1104,25 @@ check(
       gameStatus: null,
       sharp: null,
       started: null,
-    }) === `Under 56. ${MINUS}110 DraftKings. Kansas City at Buffalo. 8:00 PM ET. Wind 14 mph at kickoff. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`,
+    }) === `Under 56. ${MINUS}110 DraftKings. Kansas City at Buffalo. 8:00 PM ET. Wind 14 mph at kickoff. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET` &&
+      signalsCardSpeech({
+        verdict: 'NEUTRAL',
+        bet: 'Under 43.5',
+        price: null,
+        reason: null,
+        teams: null,
+        time: null,
+        edge: null,
+        modelChance: null,
+        expectedReturn: null,
+        stake: null,
+        modelName: null,
+        posted: null,
+        paused: null,
+        gameStatus: null,
+        sharp: null,
+        started: null,
+      }) === 'NEUTRAL. Under 43.5',
   );
   check(
     'paused, live, locked and flagged speech keep their place',
@@ -1161,6 +1249,32 @@ check(
     /signalsMuted = signals && \(flagged \|\| Boolean\(heroPrice\?\.stale\) \|\| paused\)/.test(card) &&
       card.split('>PAUSED<').length === 3,
   );
+  {
+    const signalsJsx = card.slice(card.indexOf('styles.contextRow'));
+    check(
+      'the new card shows the verdict, and a non-bet headline is not bold',
+        /<SignalBadge signal=\{pick\.signal_type\} small \/>/.test(signalsJsx) &&
+        signalsJsx.indexOf('<SignalBadge') < signalsJsx.indexOf('styles.matchupLine') &&
+        /quietHeadline && styles\.betMuted/.test(signalsJsx) &&
+        /verdict: signalsVerdict/.test(card) &&
+        /const signalsVerdict = preview/.test(card) &&
+        /paused: null/.test(card),
+    );
+    check(
+      'a live lock stays green, and the grey caption does not repeat it',
+      /name="lock-closed-outline"/.test(signalsJsx) &&
+        /color=\{colors\.betInk\}/.test(signalsJsx) &&
+        /timing\?\.kind === 'live' \? null/.test(card),
+    );
+  }
+  {
+    const queries = readFileSync(join(__dirname, '../src/lib/queries.ts'), 'utf-8');
+    const nflFn = queries.split('export async function fetchUpcomingNflPicks')[1]?.split('export async function ')[0] ?? '';
+    check(
+      'look-ahead NFL picks do not read game_weather',
+      !/\.from\('game_weather'\)/.test(nflFn) && /weather: null/.test(nflFn),
+    );
+  }
   check(
     'a long bet keeps its line with the name; the price does not steal the row',
     /betLeft: \{[\s\S]*?flexShrink: 0[\s\S]*?maxWidth: '100%'/.test(card) &&

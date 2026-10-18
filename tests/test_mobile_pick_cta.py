@@ -590,6 +590,18 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "paused={view === 'today' && isPausedForDisplay" not in home
     assert "signalsBetHeadline({" in card
     assert "signalsBetHeadline(pick.pick_label)" not in card
+    assert "label: pick.pick_label" in card
+    assert "verdict: signalsVerdict" in card
+    assert "const signalsVerdict = preview" in card
+    assert "quietHeadline && styles.betMuted" in card
+    assert "pick.model_id === 'ufc_total_rounds' ? 'Rounds'" in card
+    assert "timing?.kind === 'live' ? null" in card
+    queries = _read(LIB / "queries.ts")
+    nfl = queries.split("export async function fetchUpcomingNflPicks", 1)[1].split(
+        "export async function ", 1
+    )[0]
+    assert ".from('game_weather')" not in nfl
+    assert "weather: null" in nfl
     assert "signalsReasonLine(" in card and "signalsModelCaption(" in card
     assert "signalsCardSpeech(" in card
     assert "Model chance" in card and "Expected return" in card
@@ -679,7 +691,21 @@ ok(signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'Lo
 ok(signalsBetHeadline({ side: 'under', line: 9.5, market: 'player_tackles_assists', player: 'Roquan Smith' }) === 'Roquan Smith Under 9.5 Tackles + Assists', 'prop');
 ok(signalsBetHeadline({ side: 'over', line: 2.5, market: 'player_threes', player: 'Karl-Anthony Towns' }) === 'Karl-Anthony Towns Over 2.5 Three-pointers', 'three pointers');
 ok(signalsBetHeadline({ side: 'over', line: 32.5, market: 'player_points_rebounds_assists', player: 'Jalen Brunson' }) === 'Jalen Brunson Over 32.5 Points + Rebounds + Assists', 'pra');
+ok(signalsBetHeadline({ side: 'yes', line: null, market: null, homeTeam: 'The Masters', awayTeam: 'FIELD', label: 'Scottie Scheffler to Win' }) === 'Scottie Scheffler to Win', 'golf outright');
+ok(signalsBetHeadline({ side: '1845', line: null, market: null, homeTeam: 'The Masters', label: 'Scottie Scheffler over Rory McIlroy (matchup)' }) === 'Scottie Scheffler over Rory McIlroy (matchup)', 'golf matchup keeps (matchup)');
+ok(signalsBetHeadline({ side: 'ko_tko', line: null, market: null, homeTeam: 'Islam Makhachev', awayTeam: 'Alex Pereira', label: 'Alex Pereira vs Islam Makhachev — KO/TKO' }) === 'Alex Pereira vs Islam Makhachev — KO/TKO', 'ufc method');
+ok(!signalsBetHeadline({ side: 'decision', line: null, market: null, homeTeam: 'Islam Makhachev', label: 'Alex Pereira vs Islam Makhachev — Decision' }).includes('ML'), 'ufc method is not a moneyline');
+ok(signalsBetHeadline({ side: 'home', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins', awayTeam: 'Toronto Maple Leafs' }) === 'Boston Bruins (Regulation)', 'regulation moneyline');
+ok(signalsBetHeadline({ side: 'draw', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins', awayTeam: 'Toronto Maple Leafs' }) === 'Draw (Regulation)', 'regulation draw');
+ok(!signalsBetHeadline({ side: 'home', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins' }).includes('ML'), 'regulation is not ML');
+ok(signalsBetHeadline({ side: 'under', line: 2.5, market: 'totals', stat: 'Rounds' }) === 'Under 2.5 Rounds', 'rounds');
+ok(signalsBetHeadline({ side: 'over', line: 0.5, market: 'player_anytime_td', player: "Ja'Marr Chase" }) === "Ja'Marr Chase Anytime TD", 'anytime td');
+ok(signalsBetHeadline({ side: 'under', line: 9.5, market: 'player_tackles_assists', player: null, label: 'Roquan Smith Under 9.5 Tackles (FD) · 0.50u' }) === 'Roquan Smith Under 9.5 Tackles', 'prop falls back to the label');
+ok(signalsBetHeadline({ side: 'under', line: 56, market: 'totals', label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Under 56', 'structured total ignores the label');
 ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14 }) === 'Wind 14 mph at kickoff', 'wind reason');
+ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: null, label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Wind 14 mph at kickoff', 'wind from the label');
+ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 21, label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Wind 14 mph at kickoff', 'label wind beats a later number');
+ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: null, label: 'KC @ BUF — KC -3 (Wind 14 mph, FD)' }) === null, 'other models do not grow a wind line');
 ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14, dome: 1 }) === null, 'dome is quiet');
 ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null, 'other models stay quiet');
 ok(signalsModelCaption('Wind Totals (Under)', 'Posted 11:07 AM ET') === 'Wind Totals (Under) model · Posted 11:07 AM ET', 'caption');
@@ -690,6 +716,11 @@ ok(signalsCardSpeech({
   stake: 'Stake, Bet 1.1 units, win 1 unit', modelName: 'Wind Totals (Under) model',
   posted: 'Posted 11:07 AM ET', paused: null, gameStatus: null, sharp: null, started: null,
 }) === `Under 56. ${MINUS}110 DraftKings. Kansas City at Buffalo. 8:00 PM ET. Wind 14 mph at kickoff. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`, 'voiceover order');
+ok(signalsCardSpeech({
+  verdict: 'NEUTRAL', bet: 'Under 43.5', price: null, reason: null, teams: null, time: null,
+  edge: null, modelChance: null, expectedReturn: null, stake: null, modelName: null,
+  posted: null, paused: null, gameStatus: null, sharp: null, started: null,
+}) === 'NEUTRAL. Under 43.5', 'verdict is spoken first');
 ok(!signalsCardSpeech({
   bet: 'Under 56', price: null, reason: null, teams: null, time: null, edge: null,
   modelChance: null, expectedReturn: null, stake: null, modelName: null, posted: null,

@@ -91,8 +91,8 @@ interface Props {
   /** Freshest live snapshot for this pick's game — drives the score + inning
    * beside the LIVE badge. Omitted (or null) falls back to a bare badge. */
   liveState?: LiveGameStateRow | null;
-  /** Today board only: BET/AVOID/NONE sits immediately before the label.
-   * Signals and Live are already BET-only, so the small badge is omitted. */
+  /** Board layout, All only: BET / AVOID / NEUTRAL before the stored label.
+   * The signals layout always shows that chip — All includes NONE rows. */
   showSignalBadge?: boolean;
   /** This pick's model is PAUSED (Matt, 2026-09-26). Every picks view passes
    * it. The card shows the model's number but nothing that reads as a bet —
@@ -229,6 +229,9 @@ export function PickCard({
   // Today keeps both (a stale Today leg already in the slip can still come out).
   const signals = layout === 'signals';
   const signalsMuted = signals && (flagged || Boolean(heroPrice?.stale) || paused);
+  // NONE and AVOID are not a bet. On this card the headline and the price
+  // drop to the secondary ink so a NEUTRAL row does not read as a 22pt bet.
+  const quietHeadline = signalsMuted || (signals && demoteEdge);
   const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted;
   const handoff = offersBook && cta.handoff
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge)
@@ -384,13 +387,21 @@ export function PickCard({
     player: signalsPropMarket && isPropModel(pick.model_id)
       ? playerNameFromPickLabel(pick.pick_label)
       : null,
+    stat: pick.model_id === 'ufc_total_rounds' ? 'Rounds' : null,
+    label: pick.pick_label,
   });
   const reasonLine = signalsReasonLine({
     modelId: pick.model_id,
     windMph: weather?.wind_mph,
     dome: weather?.is_dome_game,
+    label: pick.pick_label,
   });
-  const modelCaption = signalsModelCaption(modelLong(pick.model_id), timing?.label ?? null);
+  // A live lock keeps its own green row. The grey caption is the model name,
+  // so the lock sentence is not printed twice.
+  const modelCaption = signalsModelCaption(
+    modelLong(pick.model_id),
+    timing?.kind === 'live' ? null : (timing?.label ?? null),
+  );
   const signalsPriceSpoken =
     signals && lockedAmerican && quoteBookKey && heroPrice && !heroPrice.stale && !heroPrice.untracked
       ? signalsHeroSpeech({
@@ -403,8 +414,16 @@ export function PickCard({
     ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}`
     : 'Stake unavailable';
   const statusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+  // The first spoken word is the chip on the card. A paused or preview row
+  // does not say BET before the member hears that it is not a bet.
+  const signalsVerdict = preview
+    ? (previewLabel ?? 'Preview')
+    : paused
+      ? 'Paused model, not a bet'
+      : signalDisplayName(pick.signal_type);
   const cardLabel = signals
     ? signalsCardSpeech({
+        verdict: signalsVerdict,
         bet: betHeadline,
         price: signalsPriceSpoken,
         reason: reasonLine,
@@ -416,7 +435,7 @@ export function PickCard({
         stake: signalsStakeSpoken,
         modelName: `${modelLong(pick.model_id)} model`,
         posted: timing?.label ?? null,
-        paused: paused ? 'Paused model, not a bet' : null,
+        paused: null,
         gameStatus: gameStatus(game, liveState).kind !== 'pre' ? statusSpeech : null,
         sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
         started: startedSpoken,
@@ -806,6 +825,19 @@ export function PickCard({
       ) : (
       <>
       <View style={styles.contextRow}>
+        {preview ? (
+          <View style={[styles.labelChip, styles.previewBadge]}>
+            <Text style={styles.previewBadgeText}>PREVIEW</Text>
+          </View>
+        ) : paused ? (
+          <View style={[styles.labelChip, styles.previewBadge]}>
+            <Text style={styles.previewBadgeText}>PAUSED</Text>
+          </View>
+        ) : (
+          <View style={styles.labelChip}>
+            <SignalBadge signal={pick.signal_type} small />
+          </View>
+        )}
         <Text style={styles.matchupLine}>
           {signalsContextLine({
             sport: contextSport,
@@ -815,17 +847,8 @@ export function PickCard({
             abbrevs: teamAbbrevs,
           })}
         </Text>
-        {preview || paused || flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
+        {flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
         <View style={styles.contextTrail}>
-          {preview ? (
-            <View style={[styles.labelChip, styles.previewBadge]}>
-              <Text style={styles.previewBadgeText}>PREVIEW</Text>
-            </View>
-          ) : paused ? (
-            <View style={[styles.labelChip, styles.previewBadge]}>
-              <Text style={styles.previewBadgeText}>PAUSED</Text>
-            </View>
-          ) : null}
           {flagged ? (
             <View
               style={[styles.labelChip, styles.priceCheckChip]}
@@ -863,11 +886,11 @@ export function PickCard({
       </View>
 
       <View style={styles.betRow}>
-        <Text style={[styles.betLeft, signalsMuted && styles.betMuted]}>
+        <Text style={[styles.betLeft, quietHeadline && styles.betMuted]}>
           {betHeadline}
         </Text>
         {lockedAmerican && quoteBookKey ? (
-          <Text style={[styles.betRight, signalsMuted && styles.betMuted]}>
+          <Text style={[styles.betRight, quietHeadline && styles.betMuted]}>
             {trueMinus(lockedAmerican)}
             <Text style={styles.betBook}> {bookLabel(quoteBookKey)}</Text>
           </Text>
@@ -1063,6 +1086,25 @@ export function PickCard({
         </View>
       ) : null}
 
+      {timing?.kind === 'live' ? (
+        <View style={styles.timingRow}>
+          <Ionicons
+            name="lock-closed-outline"
+            size={13}
+            color={colors.betInk}
+            style={styles.extraIcon}
+          />
+          <Text
+            style={[
+              styles.extraText,
+              styles.timingText,
+              { color: colors.betInk, fontWeight: font.weight.medium },
+            ]}
+          >
+            {timing.label}
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.modelCaption}>{modelCaption}</Text>
       </>
       )}
