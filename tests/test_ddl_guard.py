@@ -61,6 +61,9 @@ class GuardConn:
                 return []
         return C()
 
+    def executemany(self, sql, params=None):
+        self.execute(sql, params)
+
     def commit(self):
         pass
 
@@ -159,6 +162,25 @@ def _dk_direct_feed(conn):
     dk_direct_feed._ensure_schema(conn)
 
 
+def _kickoff_wind(conn):
+    """The live card's poll. Import by file: nfl/data_ingest is not a package."""
+    import importlib.util
+
+    import pandas as pd
+
+    path = Path(__file__).parent.parent / "nfl" / "data_ingest" / "kickoff_wind_reads.py"
+    spec = importlib.util.spec_from_file_location("kickoff_wind_reads_ddl", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    mod._connect = lambda: conn
+    games = pd.DataFrame([{
+        "game_id": "2026_01_CLE_JAX",
+        "forecast_wind": 14.0,
+    }])
+    mod.attach_live_wind_reads(games, now="2026-10-18T16:17:00Z")
+
+
 SITES = [
     ("monitoring.store", _monitoring,
      (True, [], ["idx_api_call_ts", "idx_api_call_api_ts"], 0)),
@@ -179,6 +201,11 @@ SITES = [
       ["worker_jobs_pending_idx", "worker_jobs_dedupe_idx"], 0)),
     ("data.ingestors.dk_direct_feed", _dk_direct_feed,
      (False, ["source"], ["idx_odds_source_inplay"], 0)),
+    # Live card: hourly, and every 10 minutes inside 24h of kickoff. The three
+    # columns, RLS, and the revoke are what attach_live_wind_reads asks the
+    # guard for. granted=0 means anon and authenticated hold nothing.
+    ("nfl.data_ingest.kickoff_wind_reads", _kickoff_wind,
+     (True, ["game_id", "observed_at", "wind_mph"], [], 0)),
 ]
 
 
@@ -314,8 +341,15 @@ def test_every_write_time_ddl_module_goes_through_the_guard():
     repo accumulates work. Any NEW module that runs lock-taking, cache-busting
     DDL has to either use the guard or justify itself in DDL_GUARD_EXEMPT.
     """
+    modules = list(_modules_with_write_time_ddl())
+    # The live wind card polls on a timer. Name it here so a scan that stopped
+    # seeing nfl/ (or a rewrite that moved the DDL out of a .py file the scan
+    # reads) cannot go green while the poll is still unguarded.
+    assert "nfl/data_ingest/kickoff_wind_reads.py" in {rel for rel, _ in modules}, (
+        "nfl/data_ingest/kickoff_wind_reads.py left the offender scan"
+    )
     offenders = [
-        rel for rel, src in _modules_with_write_time_ddl()
+        rel for rel, src in modules
         if rel not in DDL_GUARD_EXEMPT and not _is_guarded(src)
     ]
     assert offenders == [], (
@@ -332,10 +366,35 @@ def test_the_exemption_list_stays_honest():
     assert stale == [], f"exempted files no longer carry write-time DDL: {stale}"
 
 
+def test_kickoff_wind_reads_still_writes_and_reads_when_ddl_is_skipped():
+    """Skipping the schema statements must not skip the poll's insert or the
+    window read. A missing table is the other SITES case: DDL still runs."""
+    conn = GuardConn((True, ["game_id", "observed_at", "wind_mph"], [], 0))
+    _kickoff_wind(conn)
+    text = " ".join(conn.statements).upper()
+    assert "CREATE " not in text
+    assert "ALTER " not in text
+    assert "REVOKE " not in text
+    assert "INSERT INTO" in text
+    assert "SELECT GAME_ID" in text
+
+
+def test_kickoff_wind_reads_still_creates_then_reads_when_the_table_is_missing():
+    """schema_is_current returns False when the table is absent, so the poll
+    still creates it and then does the same insert and window read."""
+    conn = GuardConn(None)
+    _kickoff_wind(conn)
+    text = " ".join(conn.statements).upper()
+    assert "CREATE TABLE IF NOT EXISTS" in text
+    assert "ENABLE ROW LEVEL SECURITY" in text
+    assert "REVOKE ALL" in text
+    assert text.index("CREATE TABLE") < text.index("INSERT INTO") < text.index("SELECT GAME_ID")
+
+
 def test_the_hot_modules_are_guarded_not_exempted():
-    """The seven modules the outage was traced to must never be exempted back
-    out. An allowlist is easier to append to than a guard is to add, and this is
-    the line that makes that shortcut fail."""
+    """The modules the outage was traced to, and the live wind card, must never
+    be exempted back out. An allowlist is easier to append to than a guard is
+    to add, and this is the line that makes that shortcut fail."""
     must_guard = (
         "monitoring/store.py",
         "tracking/run_ledger.py",
@@ -344,6 +403,9 @@ def test_the_hot_modules_are_guarded_not_exempted():
         "tracking/threshold_review.py",
         "models/probability_calibration.py",
         "data/ingestors/dk_direct_feed.py",
+        # Live card, not one of the 2026-09-01 seven. Same failure mode: the
+        # poll re-ran CREATE / ENABLE RLS / REVOKE on every pass.
+        "nfl/data_ingest/kickoff_wind_reads.py",
     )
     root = Path(__file__).parent.parent
     for rel in must_guard:
