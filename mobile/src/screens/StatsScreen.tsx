@@ -224,6 +224,7 @@ import {
   ATD_MATCHUP_W,
   ATD_ODDS_W,
   ATD_STACK_FONT_SCALE,
+  matchupHeaderFontSize,
   anyBlended,
   buildAnytimeMatchup,
   namedGap,
@@ -1483,7 +1484,7 @@ export function StatsScreen() {
     [slateGames, slate, now],
   );
   const atdOn = isAnytimeTdBoard(sport, stat ? String(stat.key) : null);
-  const stackAtd = atdOn && PixelRatio.getFontScale() > ATD_STACK_FONT_SCALE;
+  const stackAtd = atdOn && windowFontScale >= ATD_STACK_FONT_SCALE;
   const leagueHasGames = h2hIndex.size > 0 || slateGameIndex.size > 0;
   const openMatchupInfo = useCallback(() => setMatchupInfoOpen(true), []);
 
@@ -4183,13 +4184,16 @@ function OddsCell({
       <Pressable
         onPress={onPress}
         disabled={!onPress}
-        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+        // Vertical slop crossed into the matchup line and the next name once
+        // the stacked gap shrank to 2pt. The 44pt box is the target.
+        hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityHint="Asks to add this line to your betslip"
         style={({ pressed }) => [
           styles.oddsBestWrap,
           priceFixed && styles.oddsWrapFixed,
+          !priceFixed && styles.oddsBestAlignStart,
           pressed && styles.pressed,
         ]}
       >
@@ -4349,6 +4353,15 @@ function ColumnHeader({
   matchupOrder?: MatchupSort | null;
   onMatchupSort?: () => void;
 }) {
+  const { width: headerWidth, fontScale } = useWindowDimensions();
+  // Room for MATCHUP on the stacked header line, after RK, PLAYER, and the
+  // arrow. Below the stack, the word is held to the 66pt column.
+  const playerHeaderW = 48 * Math.max(fontScale, 1);
+  const stackedMatchupRoom = headerWidth - spacing.lg * 2 - 20 - spacing.sm - playerHeaderW - spacing.sm;
+  const matchupFont = matchupHeaderFontSize(
+    fontScale,
+    atdStack ? Math.max(ATD_MATCHUP_W, stackedMatchupRoom) : ATD_MATCHUP_W,
+  );
   const hitLabel =
     atd && rightLabel === 'Hit Rate'
       ? ATD_COPY.hitHeader
@@ -4407,7 +4420,7 @@ function ColumnHeader({
   ) : null;
   const matchupHead = showMatchup ? (
     atd ? (
-      <View style={[styles.colHeaderMatchup, atdStack ? styles.atdMatchupHeadFull : styles.atdMatchupHead]}>
+      <View style={[styles.colHeaderMatchup, atdStack ? styles.atdMatchupHeadInline : styles.atdMatchupHead]}>
         {/* The cell opens the explainer. This button only sorts, so MATCHUP
             is not sharing the column with an info icon. */}
         <Pressable
@@ -4416,13 +4429,17 @@ function ColumnHeader({
           accessibilityRole="button"
           accessibilityLabel={sortSpoken}
           accessibilityHint={ATD_COPY.sortHint}
-          style={[styles.atdSortBtn, atdStack && styles.atdSortBtnStack]}
+          style={[atdStack ? styles.atdSortBtnInline : styles.atdSortBtn, atdStack && styles.atdSortBtnStack]}
         >
           {/* The word gets the column. colHeaderRight is 48pt, and MATCHUP
               needs ~57, so that style is not used here. */}
           <Text
-            style={[styles.atdMatchupLabel, atdStack && styles.atdMatchupLabelStack]}
-            numberOfLines={2}
+            style={[
+              styles.atdMatchupLabel,
+              atdStack && styles.atdMatchupLabelStack,
+              { fontSize: matchupFont },
+            ]}
+            numberOfLines={1}
           >
             {ATD_COPY.header}
           </Text>
@@ -4467,13 +4484,15 @@ function ColumnHeader({
     </>
   );
   if (atd && atdStack) {
+    // Two lines. A third line (MATCHUP on its own) is what made the header
+    // a stack of three at large text.
     return (
       <View style={styles.colHeaderStack}>
         <View style={[styles.colHeader, styles.colHeaderStackLine]}>
           <Text style={styles.colHeaderRank}>RK</Text>
           <Text style={styles.colHeaderName}>PLAYER</Text>
+          {matchupHead}
         </View>
-        <View style={[styles.colHeader, styles.colHeaderStackLine]}>{matchupHead}</View>
         <View style={[styles.colHeader, styles.colHeaderStackLine, styles.atdHeaderMetrics]}>
           {valueHead}
           {oddsHead}
@@ -4620,7 +4639,9 @@ function LeaderRow({
         {nameBlock}
       </View>
       {atdView ? (
-        <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+        <View style={styles.atdStackMatchup}>
+          <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+        </View>
       ) : null}
       <View style={styles.atdMetricRow}>{metrics}</View>
     </>
@@ -4753,7 +4774,9 @@ function LineOnlyRow({
         {nameBlock}
       </View>
       {atdView ? (
-        <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+        <View style={styles.atdStackMatchup}>
+          <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+        </View>
       ) : null}
       <View style={styles.atdMetricRow}>{metrics}</View>
     </>
@@ -4899,7 +4922,9 @@ function HitRateRow({
         {nameBlock}
       </View>
       {atdView ? (
-        <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+        <View style={styles.atdStackMatchup}>
+          <AnytimeMatchupCell view={atdView} fullWidth onExplain={onMatchupExplain} />
+        </View>
       ) : null}
       <View style={styles.atdMetricRow}>{metrics}</View>
     </>
@@ -5447,11 +5472,14 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   // Large text: the header word sits on its own line, the width of the row.
-  atdMatchupHeadFull: {
-    flex: 1,
-    minHeight: 44,
-    alignItems: 'stretch',
-    justifyContent: 'center',
+  // On the same line as PLAYER. Not a third header line, and not locked to 66pt,
+  // because at 2× the word is wider than the column.
+  atdMatchupHeadInline: {
+    flexShrink: 1,
+    minWidth: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   atdSortBtn: {
     flexDirection: 'row',
@@ -5462,8 +5490,17 @@ const styles = StyleSheet.create({
     minWidth: 44,
     width: '100%',
   },
+  atdSortBtnInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 0,
+    flexShrink: 1,
+    minHeight: 44,
+    minWidth: 44,
+  },
   atdSortBtnStack: {
-    justifyContent: 'flex-start',
+    justifyContent: 'flex-end',
   },
   colHeaderStack: {
     backgroundColor: colors.bgCard,
@@ -5475,7 +5512,7 @@ const styles = StyleSheet.create({
   },
   atdHeaderMetrics: {
     justifyContent: 'flex-end',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     paddingTop: 0,
   },
   // The sorted column: label + a fixed arrow, in one 48pt cell.
@@ -5525,7 +5562,8 @@ const styles = StyleSheet.create({
   rowStacked: {
     flexDirection: 'column',
     alignItems: 'stretch',
-    paddingVertical: 8,
+    paddingVertical: 2,
+    gap: 2,
   },
   rowTop: {
     flexDirection: 'row',
@@ -5534,11 +5572,15 @@ const styles = StyleSheet.create({
   },
   atdMetricRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     justifyContent: 'flex-end',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.sm,
-    marginTop: 4,
+  },
+  // Rank is 20 wide and the name row has an 8pt gap, so the line starts
+  // where the name starts, not under the rank numeral.
+  atdStackMatchup: {
+    marginLeft: 20 + spacing.sm,
   },
   atdHitWrap: {
     alignItems: 'flex-end',
@@ -5632,6 +5674,11 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     alignItems: 'flex-end',
     justifyContent: 'center',
+  },
+  // Stacked: the price sits against the matchup line. The 44pt target stays,
+  // and the spare is below the price rather than between the two lines.
+  oddsBestAlignStart: {
+    justifyContent: 'flex-start',
   },
   // Filled in the book's own colour — the pill IS the bet button, and the mark
   // beside the price says whose price it is.

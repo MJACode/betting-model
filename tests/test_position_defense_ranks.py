@@ -147,18 +147,23 @@ def test_the_matchup_header_fills_its_column_and_large_text_is_one_line():
     word = screen.split("{ATD_COPY.header}", 1)[0].rsplit("<Text", 1)[1]
     assert "atdMatchupLabel" in word
     assert "colHeaderRight" not in word
-    assert "numberOfLines={2}" in word
+    assert "numberOfLines={1}" in word
+    assert "matchupHeaderFontSize" in screen
     assert "atdHitLabelWithArrow" in screen
-    assert "flexWrap: 'wrap'" in screen
+    assert "atdStackMatchup" in screen
+    assert "marginLeft: 20 + spacing.sm" in screen
+    stacked_header = screen.split("if (atd && atdStack) {", 1)[1].split("\n  return (", 1)[0]
+    assert stacked_header.count("colHeaderStackLine") == 2
+    assert "flexWrap: 'nowrap'" in screen.split("atdHeaderMetrics:", 1)[1].split("},", 1)[0]
     line = cell.split("lineFull: {", 1)[1].split("},", 1)[0]
     assert "textAlign: 'left'" in line
     assert "width: '100%'" in line
     full = cell.split("wrapFull: {", 1)[1].split("},", 1)[0]
     assert "alignItems: 'flex-start'" in full
+    assert "justifyContent: 'flex-end'" in full
     assert "stackedMatchupLine(view.tier, view.line)" in cell
-    # Scale 1 keeps the 66pt column. The first step above it stacks, because
-    # MATCHUP plus the arrow fills 66pt and clips as soon as the type grows.
-    assert "PixelRatio.getFontScale() > ATD_STACK_FONT_SCALE" in screen
+    # 1.3, not the first step above 1. Below that, the header word shrinks.
+    assert "windowFontScale >= ATD_STACK_FONT_SCALE" in screen
 
 
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")

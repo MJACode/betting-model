@@ -125,6 +125,10 @@ const styles = StyleSheet.create({
     maxWidth: undefined,
     alignSelf: 'stretch',
     alignItems: 'flex-start',
+    // The line sits on the bottom edge of the 44pt target, against the
+    // hit rate and the price. The spare is above the words.
+    justifyContent: 'flex-end',
+    paddingBottom: 0,
   },
   lineFull: {
     width: '100%',

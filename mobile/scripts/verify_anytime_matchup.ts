@@ -9,8 +9,10 @@
  */
 import {
   ATD_COPY,
+  ATD_HEADER_ARROW_W,
   ATD_HIT_W,
   ATD_MATCHUP_W,
+  ATD_MATCHUP_WORD_W,
   ATD_ODDS_W,
   ATD_STACK_FONT_SCALE,
   BLEND_UNTIL_TEAM_GAMES,
@@ -27,6 +29,7 @@ import {
   nextMatchupSort,
   ordinal,
   rankLine,
+  matchupHeaderFontSize,
   stackedMatchupLine,
   tierFloorLabel,
   tierForRank,
@@ -40,7 +43,13 @@ function check(name: string, cond: boolean, detail = '') {
 }
 
 check('blend window is 8 team games', BLEND_UNTIL_TEAM_GAMES === 8);
-check('metrics stack once text is larger than the default', ATD_STACK_FONT_SCALE === 1);
+check('metrics stack at font scale 1.3', ATD_STACK_FONT_SCALE === 1.3);
+check(
+  'MATCHUP stays inside 66pt below the stack',
+  matchupHeaderFontSize(1) === 11
+    && matchupHeaderFontSize(1.2) < 11
+    && ATD_MATCHUP_WORD_W * (matchupHeaderFontSize(1.2) / 11) * 1.2 + ATD_HEADER_ARROW_W <= ATD_MATCHUP_W + 0.01,
+);
 check('columns are Hit 40, Matchup 66, Price 62', ATD_HIT_W === 40 && ATD_MATCHUP_W === 66 && ATD_ODDS_W === 62);
 
 check('1st 2nd 3rd 4th', ordinal(1) === '1st' && ordinal(2) === '2nd' && ordinal(3) === '3rd' && ordinal(4) === '4th');

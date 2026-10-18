@@ -19,11 +19,30 @@ import { nflPositionGroup, type NflPositionGroup } from './positionVsOpponent';
 /** Must match the `< 8` / `>= 8` cuts in position_defense_ranks_nfl. */
 export const BLEND_UNTIL_TEAM_GAMES = 8;
 
-/** Metrics move under the name once Dynamic Type is above the default.
- *  MATCHUP plus its arrow fills the 66pt column at scale 1 and clips as
- *  soon as the type grows, so the stack starts at the first step above 1.
- *  A phone-width cutoff stacked every phone at the default size. */
-export const ATD_STACK_FONT_SCALE = 1;
+/** The row stacks at this Dynamic Type scale and above. Below it, MATCHUP
+ *  shrinks to the 66pt column instead of stacking the row. A phone-width
+ *  cutoff stacked every phone at the default size. */
+export const ATD_STACK_FONT_SCALE = 1.3;
+
+/** "MATCHUP" at 11pt semibold, letterSpacing 0. Measured in Inter. */
+export const ATD_MATCHUP_WORD_W = 57;
+/** The sort arrow beside the header word. */
+export const ATD_HEADER_ARROW_W = 9;
+
+/**
+ * Font size for the MATCHUP header. Dynamic Type multiplies the result, so
+ * this cancels the part of the scale that would push the word and the arrow
+ * out of `columnPt`. At scale 1.3 the row stacks and the column stops being
+ * the limit.
+ */
+export function matchupHeaderFontSize(fontScale: number, columnPt = ATD_MATCHUP_W): number {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  const room = columnPt - ATD_HEADER_ARROW_W;
+  const natural = ATD_MATCHUP_WORD_W * scale;
+  const base = 11;
+  if (room <= 0 || natural <= room) return base;
+  return base * (room / natural);
+}
 
 /** The board's column widths. Hit % 40, Matchup 66, Best price 62. */
 export const ATD_HIT_W = 40;
