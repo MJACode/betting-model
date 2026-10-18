@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 designer re-check: live lock and a NEUTRAL edge use secondary ink; dome suppression removed; label fallback drops any book parenthetical |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 engineer review: verdict chip and muted NONE/AVOID headline, golf and UFC method fall back to the label, regulation is not ML, wind reason from the label, green live lock |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 follow-up: three figures on one row, new card on All / Signals / Live, matchup beside the score, plain prop words, paused chip on every view |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Signals card Option 1 on unmerged #965: bet-only headline from fields, wind reason, wrapping matchup, stake row, model footer. Today and Live stay on the board |

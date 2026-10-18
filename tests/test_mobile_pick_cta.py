@@ -706,7 +706,9 @@ ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14 }) === 'Wind 14 m
 ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: null, label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Wind 14 mph at kickoff', 'wind from the label');
 ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 21, label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Wind 14 mph at kickoff', 'label wind beats a later number');
 ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: null, label: 'KC @ BUF — KC -3 (Wind 14 mph, FD)' }) === null, 'other models do not grow a wind line');
-ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14, dome: 1 }) === null, 'dome is quiet');
+ok(signalsBetHeadline({ side: 'over', line: 1.5, market: 'player_custom', player: null, label: 'Someone Over 1.5 Custom (betonlineag) · 1.00u' }) === 'Someone Over 1.5 Custom', 'an unknown book code stays off the headline');
+ok(signalsBetHeadline({ side: 'over', line: 1.5, market: 'player_custom', player: null, label: 'Someone Over 1.5 Custom (FanDuel)' }) === 'Someone Over 1.5 Custom', 'a full book name stays off the headline');
+ok(signalsBetHeadline({ side: 'yes', line: null, market: null, homeTeam: 'The Masters', label: 'Scottie Scheffler to Win (MB (exch.))' }) === 'Scottie Scheffler to Win', 'a nested book tag stays off the headline');
 ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null, 'other models stay quiet');
 ok(signalsModelCaption('Wind Totals (Under)', 'Posted 11:07 AM ET') === 'Wind Totals (Under) model · Posted 11:07 AM ET', 'caption');
 ok(signalsCardSpeech({

@@ -87,26 +87,24 @@ export interface SignalsBetFields {
 
 const STRUCTURED_SIDES = new Set(['home', 'away', 'over', 'under', 'draw']);
 
+/** Parentheticals that are the bet. Every other one is noise: a book code,
+ * a full book name, the wind forecast, "no bet", or "live". */
+const KEPT_PAREN = /^(regulation|matchup)$/i;
+
 /**
- * Parentheticals that are not the bet: the wind forecast, "no bet", a live
- * tag, and a short book code. `(Regulation)` and `(matchup)` stay — they
- * are the bet.
- */
-/**
- * The stored label, with the stake suffix and the book/wind parenthetical
- * taken off. Null when there is nothing left to show. `(Regulation)` and
- * `(matchup)` stay — they are the bet.
+ * The stored label, with the stake suffix and any parenthetical that is not
+ * the bet taken off. Null when there is nothing left to show.
  */
 export function signalsLabelHeadline(label: string | null | undefined): string | null {
   if (!label) return null;
-  const noise =
-    /\s*\((?:Wind\b[^)]*|no bet\b[^)]*|live|FD|DK|MGM|CZR|ESPN|BR|BOV|PIN)\)/gi;
-  const text = label
-    .trim()
-    .replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/u, '')
-    .replace(noise, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  let text = label.trim().replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/u, '');
+  let prev = '';
+  while (prev !== text) {
+    prev = text;
+    text = text.replace(/\s*\(([^()]*)\)/g, (full, inner: string) =>
+      KEPT_PAREN.test(inner.trim()) ? full : '');
+  }
+  text = text.replace(/\s{2,}/g, ' ').trim();
   return text ? trueMinus(text) : null;
 }
 
@@ -221,18 +219,17 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
 /**
  * The short line under the headline. Wind totals name the forecast the bet
  * was taken at: "Wind 14 mph at kickoff". That number is the one in the
- * stored label. `windMph` is used only when the label has none. A dome, a
- * missing wind, and every other model stay quiet — a reason is not
- * invented, and "N models agree" is not this line.
+ * stored label. `windMph` is used only when the label has none. A missing
+ * wind, and every other model, stay quiet — a reason is not invented, and
+ * "N models agree" is not this line. There is no dome flag on an NFL
+ * look-ahead row, so a dome does not get its own branch.
  */
 export function signalsReasonLine(input: {
   modelId: string;
   windMph: number | string | null | undefined;
-  dome?: boolean | number | null;
   label?: string | null;
 }): string | null {
   if (input.modelId !== 'nfl_wind_totals') return null;
-  if (input.dome === true || input.dome === 1) return null;
   const n = windMphFromLabel(input.label) ?? finiteLine(input.windMph ?? null);
   if (n == null) return null;
   return `Wind ${Math.round(n)} mph at kickoff`;

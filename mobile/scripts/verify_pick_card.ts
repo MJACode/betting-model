@@ -1054,14 +1054,21 @@ check(
     }) === 'Roquan Smith Under 9.5 Tackles' &&
       signalsBetHeadline({
         side: 'over', line: 1.5, market: 'player_custom', player: 'Someone',
-        label: 'Someone Over 1.5 Custom (DK)',
-      }) === 'Someone Over 1.5 Custom',
+        label: 'Someone Over 1.5 Custom (FanDuel)',
+      }) === 'Someone Over 1.5 Custom' &&
+      signalsBetHeadline({
+        side: 'over', line: 1.5, market: 'player_custom', player: null,
+        label: 'Someone Over 1.5 Custom (betonlineag) · 1.00u',
+      }) === 'Someone Over 1.5 Custom' &&
+      signalsBetHeadline({
+        side: 'yes', line: null, market: null, homeTeam: 'The Masters',
+        label: 'Scottie Scheffler to Win (MB (exch.))',
+      }) === 'Scottie Scheffler to Win',
   );
   check(
     'wind reason is the forecast, and other models stay quiet',
     signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14 }) === 'Wind 14 mph at kickoff' &&
       signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14.2 }) === 'Wind 14 mph at kickoff' &&
-      signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14, dome: 1 }) === null &&
       signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null &&
       signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: null }) === null &&
       signalsReasonLine({
@@ -1072,10 +1079,6 @@ check(
         modelId: 'nfl_wind_totals', windMph: 21,
         label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u',
       }) === 'Wind 14 mph at kickoff' &&
-      signalsReasonLine({
-        modelId: 'nfl_wind_totals', windMph: null, dome: 1,
-        label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u',
-      }) === null &&
       signalsReasonLine({
         modelId: 'nfl_opener_spread', windMph: null,
         label: 'KC @ BUF — KC -3 (Wind 14 mph, FD)',
@@ -1260,11 +1263,18 @@ check(
         /const signalsVerdict = preview/.test(card) &&
         /paused: null/.test(card),
     );
+    const lockAt = signalsJsx.indexOf('name="lock-closed-outline"');
+    const lockBlock = lockAt >= 0 ? signalsJsx.slice(lockAt, lockAt + 500) : '';
     check(
-      'a live lock stays green, and the grey caption does not repeat it',
-      /name="lock-closed-outline"/.test(signalsJsx) &&
-        /color=\{colors\.betInk\}/.test(signalsJsx) &&
+      'a live lock is secondary ink, and the grey caption does not repeat it',
+      lockAt >= 0 &&
+        /color=\{colors\.textSecondary\}/.test(lockBlock) &&
+        !/betInk/.test(lockBlock) &&
         /timing\?\.kind === 'live' \? null/.test(card),
+    );
+    check(
+      'a NEUTRAL edge uses neutral ink',
+      /pick\.signal_type === 'NONE'[\s\S]{0,120}colors\.textSecondary/.test(signalsJsx),
     );
   }
   {

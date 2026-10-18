@@ -393,11 +393,11 @@ export function PickCard({
   const reasonLine = signalsReasonLine({
     modelId: pick.model_id,
     windMph: weather?.wind_mph,
-    dome: weather?.is_dome_game,
     label: pick.pick_label,
   });
-  // A live lock keeps its own green row. The grey caption is the model name,
-  // so the lock sentence is not printed twice.
+  // A live lock is its own row. The sentence is neutral, so it uses secondary
+  // ink. Green stays on the BET chip and on a BET's edge. The grey caption is
+  // the model name, so the lock sentence is not printed twice.
   const modelCaption = signalsModelCaption(
     modelLong(pick.model_id),
     timing?.kind === 'live' ? null : (timing?.label ?? null),
@@ -908,7 +908,11 @@ export function PickCard({
 
       <View style={styles.metrics}>
         <View style={styles.metric}>
-          <Text style={[styles.metricValue, { color: flagged || signalsMuted ? colors.textSecondary : edgeColor }]}>
+          <Text style={[styles.metricValue, {
+            color: flagged || signalsMuted || pick.signal_type === 'NONE'
+              ? colors.textSecondary
+              : edgeColor,
+          }]}>
             {edgeText}
           </Text>
           <Text style={styles.metricLabel}>Edge</Text>
@@ -1091,14 +1095,14 @@ export function PickCard({
           <Ionicons
             name="lock-closed-outline"
             size={13}
-            color={colors.betInk}
+            color={colors.textSecondary}
             style={styles.extraIcon}
           />
           <Text
             style={[
               styles.extraText,
               styles.timingText,
-              { color: colors.betInk, fontWeight: font.weight.medium },
+              { color: colors.textSecondary, fontWeight: font.weight.medium },
             ]}
           >
             {timing.label}
