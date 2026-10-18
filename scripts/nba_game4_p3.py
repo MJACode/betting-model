@@ -56,7 +56,7 @@ PLACEBO: 20 runs, seed = run number. F4: the gap shuffled between games on the
 
     PYTHONPATH=. python -m scripts.nba_game4_p3 --smoke
     PYTHONPATH=. python -m scripts.nba_game4_p3 --quality   # price-free, never 2025-26
-    NBA_GAME2_GO=1 PYTHONPATH=. python -m scripts.nba_game4_p3 --full
+    NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> PYTHONPATH=. python -m scripts.nba_game4_p3 --full
 
 --smoke runs every cell on SYNTHETIC games only, then prints counts on the real
 cache (seasons held, D coverage, games with a shooting-luck number, the
@@ -87,6 +87,7 @@ from scripts.nba_game2_market import team_total_dist  # noqa: E402
 RESULTS = Path(os.environ.get("NBA_GAME2_RESULTS",
                               "C:/Users/micha/AppData/Local/Temp/nba_game_edge/results"))
 GO_ENV = "NBA_GAME2_GO"
+RESULTS_ENV = "NBA_GAME2_RESULTS"
 POINT = "D"
 ALWAYS_GRADED = (2025, 2026)                         # 2024-25 and 2025-26 are bought
 FULL_GAME_SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)  # 2021-2026: the closes the pricing reads
@@ -518,14 +519,20 @@ def write_rows(rows: list[dict], pop: pd.DataFrame, family: str, out: Path) -> N
 
 def refuse_full(cache: Path) -> list[str]:
     """The go flag, the lineup segments (F1's ratings) and the fetch ledger
-    (the full-game closes the market pricing reads): P.refuse_full's checks."""
-    return P.refuse_full(cache)
+    (the full-game closes the market pricing reads): P.refuse_full's checks.
+    And a NAMED results folder, as P1 and P2 require: the default is the
+    second search's, where the verdict would read P3's cells beside its 422."""
+    why = P.refuse_full(cache)
+    if not os.environ.get(RESULTS_ENV):
+        why.append(f"{RESULTS_ENV} is not set: name the fourth search's results folder")
+    return why
 
 
-def full(cache: Path = H.CACHE, out: Path = RESULTS) -> None:
+def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
     why = refuse_full(cache)
     if why:
         P.refuse(why)
+    out = Path(os.environ[RESULTS_ENV]) if out is None else out
     synthetic_checks()
     try:
         data = H.load(cache, seasons=FULL_GAME_SEASONS, require_seasons=FULL_GAME_SEASONS)

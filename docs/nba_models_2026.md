@@ -1421,3 +1421,7 @@ Prices never move.
 
 **Smoke run:** every P3 cell runs on synthetic games only. On real data `--smoke` prints counts
 only: the seasons held, D coverage, and the games with a shooting-luck number.
+
+One more line, 2026-10-18, still before any P3 cell was graded: `--full` also refuses when no
+results folder is named, as P1's and P2's do, so P3's cells never land beside the second
+search's 422.

@@ -380,3 +380,15 @@ def test_full_refuses_without_the_owners_go_before_reading_anything(monkeypatch,
     with pytest.raises(SystemExit):
         Q.full(tmp_path, out=tmp_path / "out")
     assert not (tmp_path / "out").exists()
+
+
+def test_full_refuses_an_unnamed_results_folder(monkeypatch, tmp_path):
+    # the default folder holds the second search's 422 cells; P3's must not land beside them
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.delenv("NBA_GAME2_RESULTS", raising=False)
+    for f in ("nba_stints.parquet", "nba_fetch_ledger.parquet"):
+        (tmp_path / f).write_bytes(b"")
+    why = Q.refuse_full(tmp_path)
+    assert why and all("NBA_GAME2_RESULTS" in w for w in why)
+    monkeypatch.setenv("NBA_GAME2_RESULTS", str(tmp_path / "out"))
+    assert Q.refuse_full(tmp_path) == []
