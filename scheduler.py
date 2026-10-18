@@ -1807,8 +1807,11 @@ def build_scheduler() -> BlockingScheduler:
         #
         # The point of polling this densely is the LOCK: the first moment a bet
         # qualifies it is written and timestamped, and it can never be
-        # re-priced. Every later tick records whether the conditions still hold
-        # (nfl_pick_status_history) without touching the bet.
+        # re-priced. For wind, qualifying is a kickoff forecast that has held
+        # at or above 11 mph across the 12-hour window (wind_totals.ruling_wind),
+        # not the first poll that prints 11. Every later tick records whether
+        # the conditions still hold (nfl_pick_status_history) without touching
+        # the bet.
         sched.add_job(
             run_nfl_poll,
             CronTrigger(minute=0, timezone=TIMEZONE),
