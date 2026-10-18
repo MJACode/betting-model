@@ -33,9 +33,13 @@ import {
   clampTypedLine,
   clampedFieldText,
   clearSettleSkip,
+  commitTypedThreshold,
   defaultLineN,
   maxLineN,
+  pointInBubble,
+  previewTypedLine,
   programmaticPick,
+  rulerChromeHeight,
   rulerHi,
   rulerScaleFor,
   rulerStepFor,
@@ -44,8 +48,11 @@ import {
   stopAt,
   stopCount,
   stopIndexOf,
+  thresholdBubbleLabel,
+  thresholdControlsScroll,
   type RulerScale,
 } from '../src/lib/lineRuler';
+import { hitModeLineLabel } from '../src/lib/hitMode';
 import { parseTypedLine, stepLineFrom } from '../src/lib/playerLog';
 import { STAT_CATALOG, defaultThresholdFor, type StatDef } from '../src/lib/statCatalog';
 import { HIT_MODES, selectionFor } from '../src/lib/hitMode';
@@ -353,19 +360,121 @@ for (const def of STAT_CATALOG) {
   );
   check(
     'a typed line is clamped to the VoiceOver ceiling, not scale.max',
-    /clampTypedLine\(parseTypedLine\(text, hitMode\), rulerScale\.min, rulerCeiling\)/.test(screen) &&
-      /const rulerCeiling = rulerHi\(rulerScale\)/.test(screen) &&
+    /commitTypedThreshold\(draft, typed, min, hi, faceOf\)/.test(screen) &&
       /const hi = rulerHi\(scale\)/.test(screen) &&
-      !/clampTypedLine\([\s\S]{0,120}rulerScale\.max\)/.test(screen) &&
+      !/clampTypedLine\(/.test(screen) &&
+      !/rulerScale\.max/.test(screen) &&
       !screen.includes('Below one stop is refused'),
   );
   check(
-    'a clamped typed line is written into the field before the field closes',
-    screen.includes('clampedFieldText(draft, typed, faceOf)') &&
-      screen.includes('clampedText !== draft') &&
-      screen.includes('setDraft(clampedText)') &&
-      screen.includes('pendingClose.current = true'),
+    'the bubble is the field and the separate pencil button is gone',
+    !screen.includes('typeLineBtn') &&
+      screen.includes('styles.thresholdBubble') &&
+      screen.includes('name="pencil"') &&
+      screen.includes('borderColor: colors.tint') &&
+      screen.includes('minWidth: THRESHOLD_BUBBLE_W') &&
+      screen.includes('minHeight: THRESHOLD_BUBBLE_H') &&
+      screen.includes('TapGestureHandler') &&
+      screen.includes('maxDist={THRESHOLD_TAP_MAX_DIST}') &&
+      screen.includes('pointerEvents="none"'),
   );
+  check(
+    'the bubble button is a sibling of the adjustable, and Type a line stays',
+    screen.includes('accessibilityRole="adjustable"') &&
+      screen.includes("label: 'Type a line'") &&
+      screen.includes('thresholdBubbleLabel(faceOf(value), statLabel)') &&
+      screen.includes('onAccessibilityTap={openDraft}') &&
+      screen.includes('accessibilityLabel="Cancel"') &&
+      screen.includes('accessibilityLabel="Done"'),
+  );
+  check(
+    'a typed correction is navy text with an info icon',
+    screen.includes('name="information-circle-outline"') &&
+      screen.includes('styles.lineNoticeText') &&
+      /lineNoticeText: \{[^}]*color: colors\.tint/.test(screen) &&
+      !/lineNoticeText: \{[^}]*colors\.avoid/.test(screen),
+  );
+  check(
+    'the field opens on the current face, and the strip follows keystrokes',
+    screen.includes('setDraft(faceOf(value))') &&
+      !screen.includes('setDraft(\'\')') &&
+      screen.includes('previewTypedLine(') &&
+      screen.includes('selectTextOnFocus'),
+  );
+  const doneBar = screen.slice(
+    screen.indexOf('function ThresholdDoneBar'),
+    screen.indexOf('function LineRuler'),
+  );
+  check(
+    'Cancel and Done are 44pt targets, the notice uses a spacing token, and a tap dims the bubble',
+    (doneBar.match(/hitSlop=\{\{ top: 8, bottom: 8, left: 8, right: 8 \}\}/g) ?? []).length === 2 &&
+      /doneBtn: \{[^}]*minWidth: 44/.test(screen) &&
+      /lineNotice: \{[^}]*gap: spacing\.xs/.test(screen) &&
+      screen.includes('bubblePressed && styles.pressed') &&
+      screen.includes('setBubblePressed(false)'),
+  );
+  check(
+    '2x text or landscape scrolls the line control',
+    screen.includes('thresholdControlsScroll(windowFontScale, windowWidth, windowHeight)') &&
+      screen.includes('automaticallyAdjustKeyboardInsets') &&
+      screen.includes('function ThresholdChromeScroll'),
+  );
+}
+
+// ── 9. Tap-to-type on the threshold bubble ────────────────────────────────
+{
+  const pass = find('NFL', 'passing_yards');
+  const scale = rulerScaleFor(pass, 'atLeast');
+  const hi = rulerHi(scale);
+  const face = String;
+  check('Pass Yards runs 5 to 675', scale.min === 5 && hi === 675, `min ${scale.min} hi ${hi}`);
+  const typed225 = parseTypedLine('225', 'atLeast');
+  check('typed 225 in At Least is stop 225', typed225 === 225);
+  check(
+    'and that stop is still Over 224.5',
+    hitModeLineLabel(typed225 ?? 0, 'atLeast') === 'Over 224.5',
+  );
+  check('a whole number in Over is the next half-point stop', parseTypedLine('50', 'over') === 51);
+  check('a whole number in Under is that same next half-point stop', parseTypedLine('50', 'under') === 51);
+  const overMax = commitTypedThreshold('999', parseTypedLine('999', 'atLeast'), scale.min, hi, face);
+  check(
+    'over max clamps and says the ceiling',
+    overMax.apply === hi && overMax.notice === 'Max is 675, set to 675',
+    `${overMax.apply} ${overMax.notice}`,
+  );
+  const underMin = commitTypedThreshold('1', parseTypedLine('1', 'atLeast'), scale.min, hi, face);
+  check(
+    'under min clamps and says the floor',
+    underMin.apply === scale.min && underMin.notice === 'Min is 5, set to 5',
+    `${underMin.apply} ${underMin.notice}`,
+  );
+  const junk = commitTypedThreshold('abc', parseTypedLine('abc', 'atLeast'), scale.min, hi, face);
+  check(
+    'non-numeric restores and names the range',
+    junk.apply === null && junk.notice === 'Enter 5 to 675',
+    `${junk.apply} ${junk.notice}`,
+  );
+  const empty = commitTypedThreshold('  ', null, scale.min, hi, face);
+  check('empty restores silently', empty.apply === null && empty.notice === null);
+  const off = commitTypedThreshold('47', parseTypedLine('47', 'atLeast'), scale.min, hi, face);
+  check('an off-grid 47 is kept as typed', off.apply === 47 && off.notice === null);
+  check('the strip would park that 47 on 45', snapStop(47, scale) === 45);
+  const live = previewTypedLine('47', 47, scale.min, hi);
+  check('a keystroke of 47 previews 47, not the parked tick', live === 47);
+  check('a keystroke of 999 previews the ceiling', previewTypedLine('999', 999, scale.min, hi) === hi);
+  check('a half-typed decimal does not move the strip', previewTypedLine('22.', null, scale.min, hi) === null);
+  check('an empty keystroke does not move the strip', previewTypedLine('', null, scale.min, hi) === null);
+  const box = { x: 40, y: 20, width: 64, height: 44 };
+  check('a point inside the bubble hits', pointInBubble(50, 30, box));
+  check('a point outside the bubble misses', !pointInBubble(10, 30, box));
+  check(
+    'the bubble is announced with the face and the stat',
+    thresholdBubbleLabel('225', 'Pass Yards') === 'Threshold 225 Pass Yards, double tap to type a value',
+  );
+  check('2x text scrolls the line control', thresholdControlsScroll(2, 390, 844));
+  check('landscape scrolls the line control', thresholdControlsScroll(1, 844, 390));
+  check('portrait at 1x does not', !thresholdControlsScroll(1, 390, 844));
+  check('the bubble has room to grow at 2x', rulerChromeHeight(2) > rulerChromeHeight(1));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

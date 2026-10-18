@@ -237,3 +237,105 @@ export function settleHold(hold: RulerHold, offsetStops: number, scale: RulerSca
   if (hold.skipNextSettle) return { value: hold.value, skipNextSettle: false };
   return { value: stopAt(offsetStops, scale), skipNextSettle: false };
 }
+
+/** The threshold bubble's tap box. 64 wide so a three-digit face and the
+ *  pencil fit; 44 tall, the HIG floor. */
+export const THRESHOLD_BUBBLE_W = 64;
+export const THRESHOLD_BUBBLE_H = 44;
+
+/** A quick tap. Past this the finger is dragging the strip, and the tap fails
+ *  so the scroll keeps the gesture. */
+export const THRESHOLD_TAP_MAX_DIST = 12;
+export const THRESHOLD_TAP_MAX_MS = 250;
+
+export interface BubbleBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What a typed line does on Done, Return, or blur.
+ *
+ * `parsed` is the mode's own reading of the draft (`parseTypedLine`), NOT
+ * pre-clamped — clamping here is what tells a too-high line from a legal one.
+ * Empty restores the value editing started at and says nothing. Anything that
+ * does not parse restores that value and says the range. A number outside the
+ * ruler is pulled to that end and says so. An in-range number is kept as
+ * typed, including one the strip can only park near. */
+export interface ThresholdCommit {
+  apply: number | null;
+  notice: string | null;
+}
+
+export function commitTypedThreshold(
+  draft: string,
+  parsed: number | null,
+  lo: number,
+  hi: number,
+  face: (n: number) => string,
+): ThresholdCommit {
+  if (draft.trim() === '') return { apply: null, notice: null };
+  const floor = Math.min(lo, hi);
+  const ceil = Math.max(lo, hi);
+  const loText = face(floor);
+  const hiText = face(ceil);
+  if (parsed == null || !Number.isFinite(parsed)) {
+    return { apply: null, notice: `Enter ${loText} to ${hiText}` };
+  }
+  if (parsed > ceil) return { apply: ceil, notice: `Max is ${hiText}, set to ${hiText}` };
+  if (parsed < floor) return { apply: floor, notice: `Min is ${loText}, set to ${loText}` };
+  return { apply: parsed, notice: null };
+}
+
+/**
+ * Where the strip parks while a draft is being typed.
+ *
+ * A keystroke that parses moves the strip to that number, clamped into the
+ * ruler so 999 does not scroll into empty space. The clamp is only the
+ * scroll; the field keeps the digits, and Done decides the value. Empty and
+ * unparseable drafts return null. The screen scrolls an empty field back to
+ * the value the edit opened on, and leaves the strip where it is for a
+ * half-typed decimal such as "22.".
+ */
+export function previewTypedLine(
+  draft: string,
+  parsed: number | null,
+  lo: number,
+  hi: number,
+): number | null {
+  if (draft.trim() === '') return null;
+  if (parsed == null || !Number.isFinite(parsed)) return null;
+  const floor = Math.min(lo, hi);
+  const ceil = Math.max(lo, hi);
+  return Math.min(ceil, Math.max(floor, parsed));
+}
+
+export function pointInBubble(x: number, y: number, box: BubbleBox): boolean {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+}
+
+/** VoiceOver name for the bubble. The stat label is the unit ("Pass Yards"). */
+export function thresholdBubbleLabel(face: string, statLabel: string): string {
+  const unit = statLabel.trim();
+  const value = unit.length > 0 ? `${face} ${unit}` : face;
+  return `Threshold ${value}, double tap to type a value`;
+}
+
+/**
+ * The line control scrolls when 2x text or a landscape window would push it
+ * off the page. Portrait at the default size does not.
+ */
+export function thresholdControlsScroll(fontScale: number, width: number, height: number): boolean {
+  if (!Number.isFinite(fontScale) || !Number.isFinite(width) || !Number.isFinite(height)) return false;
+  if (fontScale >= 2) return true;
+  return width > height;
+}
+
+/** How tall the strip is so a 44pt bubble, grown with text, is not clipped. */
+export function rulerChromeHeight(fontScale: number): number {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  const bubble = Math.max(THRESHOLD_BUBBLE_H, Math.round(THRESHOLD_BUBBLE_H * Math.min(scale, 2)));
+  return Math.max(72, 26 + bubble);
+}

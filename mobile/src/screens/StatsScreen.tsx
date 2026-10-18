@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   InputAccessoryView,
@@ -14,8 +15,10 @@ import {
   Switch,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { ScrollView as GestureScrollView, State, TapGestureHandler } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -186,11 +189,13 @@ import {
 } from '@/lib/statSegments';
 import {
   baseStopCount,
-  clampTypedLine,
-  clampedFieldText,
   clearSettleSkip,
+  commitTypedThreshold,
   defaultLineN,
+  pointInBubble,
+  previewTypedLine,
   programmaticPick,
+  rulerChromeHeight,
   rulerHi,
   rulerScaleFor,
   settleHold,
@@ -198,6 +203,13 @@ import {
   stopAt,
   stopCount,
   stopIndexOf,
+  THRESHOLD_BUBBLE_H,
+  THRESHOLD_BUBBLE_W,
+  THRESHOLD_TAP_MAX_DIST,
+  THRESHOLD_TAP_MAX_MS,
+  thresholdBubbleLabel,
+  thresholdControlsScroll,
+  type BubbleBox,
   type RulerScale,
 } from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
@@ -421,6 +433,11 @@ export function StatsScreen() {
   // can be and no book prices.
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [hitMode, setHitMode] = useState<HitMode>('atLeast');
+  // Shown under the ruler after a typed line is clamped or refused. Navy,
+  // not a toast: the correction belongs next to the number it changed.
+  const [lineNotice, setLineNotice] = useState<string | null>(null);
+  const { width: windowWidth, height: windowHeight, fontScale: windowFontScale } = useWindowDimensions();
+  const lineScroll = thresholdControlsScroll(windowFontScale, windowWidth, windowHeight);
   const [modeOpen, setModeOpen] = useState<boolean>(false);
   // TOUGHNESS as a filter, which is the half of Matt's ask the grade alone did
   // not answer: the column is truthful on every sport now, but until this the
@@ -994,10 +1011,12 @@ export function StatsScreen() {
   // keeps `lineN` on it — three copies of this arithmetic is three chances to
   // leave the board on a number the strip cannot scroll back to.
   const rulerScale: RulerScale = useMemo(() => rulerScaleFor(stat, hitMode), [stat, hitMode]);
-  // The last stop the adjustable will step to. Not `rulerScale.max`: that
-  // can sit off the grid, and a typed number parked there cannot be stepped
-  // down (`next <= hi` inside LineRuler).
-  const rulerCeiling = rulerHi(rulerScale);
+  // A clamp message is about the line that was just typed. A different stat
+  // or direction is a different ruler, so the old sentence must not linger.
+  const noticeStatKey = stat ? String(stat.key) : '';
+  useEffect(() => {
+    setLineNotice(null);
+  }, [noticeStatKey, hitMode]);
 
   // Leaving Under drops the one extra stop Under needs ("n-1 or fewer" has to
   // reach a ceiling At Least says as "n+"), so a user parked on it would keep
@@ -2365,7 +2384,10 @@ export function StatsScreen() {
 
       {/* Line picker: the mode, a tick ruler, then the headline. */}
       {effectiveMode === 'hitRate' ? (
-        <>
+        <ThresholdChromeScroll
+          enabled={lineScroll}
+          maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
+        >
           <View style={styles.lineRow}>
             {/* Locked to the one side the member's books actually sell. It
                 loses the chevron AND the chip's fill and border, because a
@@ -2424,14 +2446,13 @@ export function StatsScreen() {
                   : hitModeHeadline(n, hitMode, stat?.label ?? '')
               }
               a11yLabel={`${stat?.label ?? ''} line`}
+              statLabel={stat?.label ?? ''}
+              onNotice={setLineNotice}
               // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
-              // that line in Over/Under). The number is clamped onto the
-              // stops VoiceOver can step: below the first stop it is raised
-              // to that stop, and above the last on-grid stop it is brought
-              // down to that stop. Junk still parses as nothing.
-              parseTyped={(text) =>
-                clampTypedLine(parseTypedLine(text, hitMode), rulerScale.min, rulerCeiling)
-              }
+              // that line in Over/Under). Clamping happens on commit, against
+              // the stops VoiceOver can step — LineRuler's `hi`, not
+              // `scale.max`. Junk still parses as nothing.
+              parseTyped={(text) => parseTypedLine(text, hitMode)}
             />
             {/* At Least only, and a footnote rather than a headline. The row
                 this replaces restated the stat, the number and the direction —
@@ -2450,7 +2471,13 @@ export function StatsScreen() {
               </Text>
             ) : null}
           </View>
-        </>
+          {lineNotice ? (
+            <View style={styles.lineNotice} accessibilityLiveRegion="polite">
+              <Ionicons name="information-circle-outline" size={14} color={colors.tint} />
+              <Text style={styles.lineNoticeText}>{lineNotice}</Text>
+            </View>
+          ) : null}
+        </ThresholdChromeScroll>
       ) : null}
 
       {/* Time window strip (L3…L20), with Hit Rates | Averages riding the end.
@@ -3067,6 +3094,60 @@ const LABEL_W = 44;
  * Label cadence adapts to the range (every stop for short rulers, every
  * 5th/10th for yard-scale ones) so the strip stays legible at any size.
  */
+/** Scrolls the line control when 2x text or landscape would push it off. At
+ *  the default portrait size it is a fragment, so the row is not a nested
+ *  scroller fighting the strip. */
+function ThresholdChromeScroll({
+  enabled,
+  maxHeight,
+  children,
+}: {
+  enabled: boolean;
+  maxHeight: number;
+  children: React.ReactNode;
+}) {
+  if (!enabled) return <>{children}</>;
+  return (
+    <View style={[styles.fixedRow, styles.thresholdChrome, { maxHeight, minHeight: 72 }]}>
+      <ScrollView
+        style={styles.thresholdChromeScroll}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="none"
+      >
+        {children}
+        <BetslipBarSpacer />
+      </ScrollView>
+    </View>
+  );
+}
+
+function ThresholdDoneBar({ onCancel, onDone }: { onCancel: () => void; onDone: () => void }) {
+  return (
+    <View style={styles.doneBar}>
+      <Pressable
+        onPress={onCancel}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+      >
+        <Text style={styles.cancelText}>Cancel</Text>
+      </Pressable>
+      <Pressable
+        onPress={onDone}
+        accessibilityRole="button"
+        accessibilityLabel="Done"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+      >
+        <Text style={styles.doneText}>Done</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function LineRuler({
   value,
   scale,
@@ -3075,14 +3156,20 @@ function LineRuler({
   format,
   describe,
   a11yLabel,
+  statLabel = '',
+  onNotice,
   parseTyped,
 }: {
   a11yLabel: string;
-  /** Reads a typed line into a stop, or null to refuse it. When given, the
-   *  number in the centre is a field (Matt, 2026-10-09: "need to allow user
-   *  to edit manually"). A typed number need not sit on the strip's grid —
-   *  the strip scrolls to the nearest stop and the centre shows the number
-   *  typed, until the next drag. */
+  /** The stat's own name, spoken with the face: "Threshold 225 Pass Yards". */
+  statLabel?: string;
+  /** A clamp or a refused draft. Null clears it. */
+  onNotice?: (message: string | null) => void;
+  /** Reads a typed line into a stop, or null to refuse it. UNCLAMPED — the
+   *  commit decides min / max. When given, the centre bubble is the field
+   *  (Matt, 2026-10-09: "need to allow user to edit manually"). A typed
+   *  number need not sit on the strip's grid — the strip parks at the
+   *  nearest stop and the value stays what was typed, until the next drag. */
   parseTyped?: (text: string) => number | null;
   /** The ruler's whole-number STOP. What the user sees is `format(value)`. */
   value: number;
@@ -3102,11 +3189,20 @@ function LineRuler({
   describe?: (n: number) => string;
 }) {
   const [width, setWidth] = useState(0);
+  const { fontScale } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
+  const tapRef = useRef<React.ComponentRef<typeof TapGestureHandler>>(null);
   const reportedRef = useRef(value);
   // One programmatic scroll's settle (the animated scrollTo in pickTick).
   // Cleared when that settle arrives, or sooner if a finger drag starts.
   const skipSettleRef = useRef(false);
+  // scrollTo fires onScrollEndDrag and onMomentumScrollEnd. settleHold
+  // consumes one skip; this covers the second so an off-grid line is not
+  // snapped to the tick the strip parked on.
+  const skipCountRef = useRef(0);
+  // True while the bubble is the field. A preview scroll's settle must not
+  // commit the tick it parked on.
+  const editingRef = useRef(false);
   const { min, step } = scale;
   const count = stopCount(scale);
   /** The last reachable stop — the same ceiling a typed line is clamped to. */
@@ -3172,8 +3268,16 @@ function LineRuler({
       scale,
     );
     skipSettleRef.current = next.skipNextSettle;
+    // A preview scroll while the field is open must not replace the typed
+    // number with the tick it parked on. A finger drag clears that below.
+    if (editingRef.current) return;
+    if (skipCountRef.current > 0) {
+      skipCountRef.current -= 1;
+      return;
+    }
     if (next.value !== reportedRef.current) {
       reportedRef.current = next.value;
+      onNotice?.(null);
       onChange(next.value);
     }
   };
@@ -3182,51 +3286,120 @@ function LineRuler({
     const next = programmaticPick(v);
     reportedRef.current = next.value;
     skipSettleRef.current = next.skipNextSettle;
+    skipCountRef.current = 2;
     scrollRef.current?.scrollTo({ x: offsetFor(v), animated: true });
     onChange(v);
   };
 
   const [draft, setDraft] = useState<string | null>(null);
+  // The resting bubble is pointerEvents none, so Pressable's pressed style
+  // never runs. Dim it for the moment the tap is down inside the box.
+  const [bubblePressed, setBubblePressed] = useState(false);
+  // Select the whole face on open. Cleared on the first keystroke so the
+  // cursor is not pinned to "all" after that.
+  const [forceSelect, setForceSelect] = useState(false);
+  const [bubbleFrame, setBubbleFrame] = useState<BubbleBox | null>(null);
   // Android fires onSubmitEditing and onEndEditing for one Done press, in the
   // same turn with the same draft; the latch applies it once (the player
-  // card's commitTypedLineOnce, same reason).
+  // card's commitTypedLineOnce, same reason). Cancel sets it too, so the
+  // blur that follows a Cancel does not commit the typed text.
   const commitTaken = useRef(false);
-  // A clamped commit writes the applied face into the field first. Closing
-  // in that same setState would drop it — React keeps the last value — so
-  // the close waits until that face has painted.
-  const pendingClose = useRef(false);
-  useEffect(() => {
-    if (!pendingClose.current || draft == null) return;
-    pendingClose.current = false;
-    setDraft(null);
-  }, [draft]);
+  const openedValue = useRef(value);
+  const bubbleBox = useRef<BubbleBox | null>(null);
+  // A tap that started on the bubble also lands on the tick underneath.
+  // That tick must not move the line.
+  const suppressTick = useRef(false);
+  const scrollToValue = (v: number) => {
+    skipSettleRef.current = true;
+    skipCountRef.current = 2;
+    scrollRef.current?.scrollTo({ x: offsetFor(v), animated: false });
+  };
   const openDraft = () => {
+    if (!parseTyped || draft != null) return;
     commitTaken.current = false;
-    pendingClose.current = false;
-    setDraft('');
+    editingRef.current = true;
+    openedValue.current = value;
+    onNotice?.(null);
+    setForceSelect(true);
+    setDraft(faceOf(value));
+  };
+  const closeDraft = () => {
+    editingRef.current = false;
+    setForceSelect(false);
+    setDraft(null);
   };
   const commitDraft = () => {
     if (commitTaken.current || draft == null) return;
     commitTaken.current = true;
-    if (!parseTyped || draft.trim() === '') {
-      setDraft(null);
-      return;
-    }
-    const typed = parseTyped(draft);
-    if (typed == null) {
-      setDraft(null);
-      showToast(`Enter a line from ${faceOf(min)} up`);
-      return;
-    }
-    const clampedText = clampedFieldText(draft, typed, faceOf);
-    if (clampedText != null && clampedText !== draft) {
-      setDraft(clampedText);
-      pendingClose.current = true;
+    const typed = parseTyped ? parseTyped(draft) : null;
+    const outcome = commitTypedThreshold(draft, typed, min, hi, faceOf);
+    const restore = openedValue.current;
+    closeDraft();
+    onNotice?.(outcome.notice);
+    if (outcome.notice) AccessibilityInfo.announceForAccessibility(outcome.notice);
+    if (outcome.apply == null) {
+      scrollToValue(restore);
+    } else if (outcome.apply !== value) {
+      pickTick(outcome.apply);
     } else {
-      setDraft(null);
+      scrollToValue(outcome.apply);
     }
-    if (typed !== value) pickTick(typed);
+    Keyboard.dismiss();
   };
+  const cancelDraft = () => {
+    if (draft == null) return;
+    commitTaken.current = true;
+    closeDraft();
+    onNotice?.(null);
+    scrollToValue(openedValue.current);
+    Keyboard.dismiss();
+  };
+  const onType = (text: string) => {
+    setForceSelect(false);
+    setDraft(text);
+    if (!parseTyped) return;
+    if (text.trim() === '') {
+      scrollToValue(openedValue.current);
+      return;
+    }
+    const preview = previewTypedLine(text, parseTyped(text), min, hi);
+    if (preview == null) return;
+    scrollToValue(preview);
+  };
+  const onBubbleLayout = (e: { nativeEvent: { layout: BubbleBox } }) => {
+    const box = e.nativeEvent.layout;
+    bubbleBox.current = box;
+    setBubbleFrame((prev) =>
+      prev &&
+      prev.x === box.x &&
+      prev.y === box.y &&
+      prev.width === box.width &&
+      prev.height === box.height
+        ? prev
+        : box,
+    );
+  };
+  const onBubbleTap = (e: { nativeEvent: { state: number; x: number; y: number } }) => {
+    const box = bubbleBox.current;
+    const { state, x, y } = e.nativeEvent;
+    const inside = box != null && pointInBubble(x, y, box);
+    if (state === State.BEGAN) {
+      suppressTick.current = inside;
+      setBubblePressed(inside);
+      return;
+    }
+    if (state === State.FAILED || state === State.CANCELLED) {
+      suppressTick.current = false;
+      setBubblePressed(false);
+      return;
+    }
+    if (state === State.END && inside) openDraft();
+    suppressTick.current = false;
+    setBubblePressed(false);
+  };
+
+  const draftSelection =
+    forceSelect && draft != null ? { start: 0, end: draft.length } : undefined;
 
   return (
     // ONE adjustable element, not N tick buttons. VoiceOver gets the number
@@ -3235,148 +3408,195 @@ function LineRuler({
     // landed: in Under mode the ruler's number and the headline's deliberately
     // differ by one, so a screen-reader user who cannot reach the ruler cannot
     // tell which bet the board is on (UX review, 2026-09-05).
+    // The bubble is a SIBLING of that adjustable. The adjustable hides its
+    // children, so a button drawn inside it never becomes its own element.
     <View style={styles.rulerRow}>
-    <View
-      style={styles.rulerWrap}
-      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      // Not while typing, so VoiceOver can reach the field.
-      accessible={draft == null}
-      accessibilityRole="adjustable"
-      accessibilityLabel={a11yLabel}
-      // `text` overrides `now` for VoiceOver, which is the point: the stop
-      // index is meaningless to a user, and in Over mode the face is 0.5
-      // where the index is 1. It announces the whole BET rather than the bare
-      // face, because the side and the stat live on other elements and this is
-      // the one element a screen-reader user actually drives (UX review).
-      accessibilityValue={{ min, max: hi, now: value, text: describeOf(value) }}
-      accessibilityActions={[
-        { name: 'increment' },
-        { name: 'decrement' },
-        // Typing is the fastest way to a far line — fifty swipes reach 250 on
-        // a step-5 ruler — so it is an action on the adjustable itself, which
-        // hides its children from VoiceOver (UX review, 2026-10-09).
-        ...(parseTyped ? [{ name: 'edit', label: 'Type a line' }] : []),
-      ]}
-      onAccessibilityAction={(e) => {
-        if (e.nativeEvent.actionName === 'edit') {
-          openDraft();
-          return;
-        }
-        // One STOP per action, so VoiceOver moves the line by the same amount
-        // a drag notch does. A hard-coded 1 here would leave a step-5 ruler
-        // reachable only by touch, at four values it can never settle on.
-        // stepLineFrom lands a typed, off-grid line on the grid first, so
-        // the next stop is one VoiceOver can keep stepping from.
-        const next = stepLineFrom(value, e.nativeEvent.actionName === 'increment' ? 1 : -1, step);
-        if (next >= min && next <= hi) pickTick(next);
-      }}
-    >
-      {width > 0 ? (
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={tickW}
-          decelerationRate="fast"
-          contentOffset={{ x: offsetFor(value), y: 0 }}
-          contentContainerStyle={{ paddingHorizontal: sidePad }}
-          onMomentumScrollEnd={settle}
-          onScrollEndDrag={settle}
-          onScrollBeginDrag={() => {
-            const next = clearSettleSkip({
-              value: reportedRef.current,
-              skipNextSettle: skipSettleRef.current,
-            });
-            skipSettleRef.current = next.skipNextSettle;
-          }}
+      <View style={styles.rulerStrip}>
+        <TapGestureHandler
+          ref={tapRef}
+          enabled={parseTyped != null && draft == null}
+          maxDurationMs={THRESHOLD_TAP_MAX_MS}
+          maxDist={THRESHOLD_TAP_MAX_DIST}
+          simultaneousHandlers={scrollRef}
+          onHandlerStateChange={onBubbleTap}
         >
-          {Array.from({ length: count }, (_, i) => {
-            const v = stopAt(i, scale);
-            const labeled = v % labelUnits === 0 || v === min || v === hi;
-            return (
-              <Pressable
-                key={v}
-                onPress={() => pickTick(v)}
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                style={[styles.tickCol, { width: tickW }]}
+          <View
+            style={[styles.rulerWrap, { height: rulerChromeHeight(fontScale) }]}
+            collapsable={false}
+            onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+            // Not while typing, so VoiceOver can reach the field.
+            accessible={draft == null}
+            accessibilityRole="adjustable"
+            accessibilityLabel={a11yLabel}
+            // `text` overrides `now` for VoiceOver, which is the point: the stop
+            // index is meaningless to a user, and in Over mode the face is 0.5
+            // where the index is 1. It announces the whole BET rather than the bare
+            // face, because the side and the stat live on other elements and this is
+            // the one element a screen-reader user actually drives (UX review).
+            accessibilityValue={{ min, max: hi, now: value, text: describeOf(value) }}
+            accessibilityActions={[
+              { name: 'increment' },
+              { name: 'decrement' },
+              // Typing is the fastest way to a far line — fifty swipes reach 250 on
+              // a step-5 ruler — so it is an action on the adjustable itself, which
+              // hides its children from VoiceOver (UX review, 2026-10-09).
+              ...(parseTyped ? [{ name: 'edit', label: 'Type a line' }] : []),
+            ]}
+            onAccessibilityAction={(e) => {
+              if (e.nativeEvent.actionName === 'edit') {
+                openDraft();
+                return;
+              }
+              // One STOP per action, so VoiceOver moves the line by the same amount
+              // a drag notch does. A hard-coded 1 here would leave a step-5 ruler
+              // reachable only by touch, at four values it can never settle on.
+              // stepLineFrom lands a typed, off-grid line on the grid first, so
+              // the next stop is one VoiceOver can keep stepping from.
+              const next = stepLineFrom(value, e.nativeEvent.actionName === 'increment' ? 1 : -1, step);
+              if (next >= min && next <= hi) pickTick(next);
+            }}
+          >
+            {width > 0 ? (
+              <GestureScrollView
+                ref={scrollRef}
+                simultaneousHandlers={tapRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={tickW}
+                decelerationRate="fast"
+                contentOffset={{ x: offsetFor(value), y: 0 }}
+                contentContainerStyle={{ paddingHorizontal: sidePad }}
+                onMomentumScrollEnd={settle}
+                onScrollEndDrag={settle}
+                onScrollBeginDrag={() => {
+                  // A drag is the finger taking the strip. Drop an open draft
+                  // so the settle lands on the dragged stop, and so the blur
+                  // that follows does not commit the half-typed number.
+                  if (editingRef.current) {
+                    commitTaken.current = true;
+                    editingRef.current = false;
+                    setForceSelect(false);
+                    setDraft(null);
+                    onNotice?.(null);
+                    Keyboard.dismiss();
+                  }
+                  skipCountRef.current = 0;
+                  const next = clearSettleSkip({
+                    value: reportedRef.current,
+                    skipNextSettle: skipSettleRef.current,
+                  });
+                  skipSettleRef.current = next.skipNextSettle;
+                }}
               >
-                <View style={[styles.tick, labeled && styles.tickMajor]} />
-                {/* The label is wider than its tick column — centre it with a
-                    negative margin so it can't clip, and only label ticks far
-                    enough apart (labelEvery) that neighbours can't collide. */}
-                <Text
-                  style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
-                  numberOfLines={1}
-                  // The box is a fixed LABEL_W, so a face that outgrows it
-                  // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
-                  // truncation, it reads as a different number. Capping the
-                  // scale is the sanctioned trade for numerals in a dense
-                  // strip (UX_REVIEW §5); it matters more now that the wide
-                  // branch labels EVERY stop on a five-character Over face.
-                  maxFontSizeMultiplier={1.3}
+                {Array.from({ length: count }, (_, i) => {
+                  const v = stopAt(i, scale);
+                  const labeled = v % labelUnits === 0 || v === min || v === hi;
+                  return (
+                    // VoiceOver: the strip is one adjustable, so a tick is not its
+                    // own control (accessible={false}). The bubble beside it is.
+                    <Pressable
+                      key={v}
+                      onPress={() => {
+                        if (suppressTick.current) return;
+                        pickTick(v);
+                      }}
+                      accessible={false}
+                      accessibilityElementsHidden
+                      importantForAccessibility="no-hide-descendants"
+                      style={[styles.tickCol, { width: tickW }]}
+                    >
+                      <View style={[styles.tick, labeled && styles.tickMajor]} />
+                      {/* The label is wider than its tick column — centre it with a
+                          negative margin so it can't clip, and only label ticks far
+                          enough apart (labelEvery) that neighbours can't collide. */}
+                      <Text
+                        style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
+                        numberOfLines={1}
+                        // The box is a fixed LABEL_W, so a face that outgrows it
+                        // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
+                        // truncation, it reads as a different number. Capping the
+                        // scale is the sanctioned trade for numerals in a dense
+                        // strip (UX_REVIEW §5); it matters more now that the wide
+                        // branch labels EVERY stop on a five-character Over face.
+                        maxFontSizeMultiplier={1.3}
+                      >
+                        {labeled ? faceOf(v) : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </GestureScrollView>
+            ) : null}
+            {/* The bubble is pointerEvents none so a drag that starts on the
+                number reaches the strip. A quick tap is the gesture handler
+                on the wrap: it fails past THRESHOLD_TAP_MAX_DIST, and the
+                scroll keeps the gesture. The field takes touch only while open. */}
+            <View pointerEvents="box-none" style={styles.centerMarker}>
+              <View pointerEvents="none" style={styles.centerLine} />
+              {draft != null ? (
+                <TextInput
+                  value={draft}
+                  onChangeText={onType}
+                  onEndEditing={commitDraft}
+                  onSubmitEditing={commitDraft}
+                  selection={draftSelection}
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                  autoFocus
+                  selectTextOnFocus
+                  maxLength={6}
+                  inputAccessoryViewID={Platform.OS === 'ios' ? RULER_ACCESSORY_ID : undefined}
+                  style={[styles.thresholdBubble, styles.tickValueActive, styles.thresholdInput]}
+                  accessibilityLabel={`Type a ${a11yLabel}, now ${describeOf(value)}`}
+                />
+              ) : (
+                <View
+                  pointerEvents="none"
+                  style={[styles.thresholdBubble, bubblePressed && styles.pressed]}
+                  onLayout={onBubbleLayout}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
                 >
-                  {labeled ? faceOf(v) : ''}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : null}
-      {/* Fixed centre marker + the selected value, over the scrolling strip.
-          Touch passes through it to the strip, so a drag can start on the
-          number; the field takes touch only while it is open. */}
-      <View pointerEvents="box-none" style={styles.centerMarker}>
-        <View pointerEvents="none" style={styles.centerLine} />
-        {draft != null ? (
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            onEndEditing={commitDraft}
-            onSubmitEditing={commitDraft}
-            placeholder={faceOf(value)}
-            placeholderTextColor={colors.textSecondary}
-            keyboardType="decimal-pad"
-            returnKeyType="done"
-            autoFocus
-            maxLength={6}
-            inputAccessoryViewID={Platform.OS === 'ios' ? RULER_ACCESSORY_ID : undefined}
-            style={[styles.tickValueBox, styles.tickValueActive, styles.tickValueInput]}
-            accessibilityLabel={`Type a ${a11yLabel}, now ${describeOf(value)}`}
-          />
-        ) : (
-          <View pointerEvents="none" style={styles.tickValueBox}>
-            <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
+                  <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
+                  {parseTyped ? <Ionicons name="pencil" size={12} color={colors.tint} /> : null}
+                </View>
+              )}
+            </View>
           </View>
-        )}
+        </TapGestureHandler>
+        {parseTyped && draft == null ? (
+          <View
+            accessible
+            accessibilityRole="button"
+            accessibilityLabel={thresholdBubbleLabel(faceOf(value), statLabel)}
+            onAccessibilityTap={openDraft}
+            pointerEvents="none"
+            style={[
+              styles.thresholdA11y,
+              bubbleFrame
+                ? {
+                    left: bubbleFrame.x,
+                    top: bubbleFrame.y,
+                    width: Math.max(bubbleFrame.width, THRESHOLD_BUBBLE_W),
+                    height: Math.max(bubbleFrame.height, THRESHOLD_BUBBLE_H),
+                  }
+                : null,
+            ]}
+          />
+        ) : null}
       </View>
-    </View>
-      {/* Its own 44pt control beside the strip, not the centre number: a
-          button there swallowed the drag where a thumb lands (UX review). The
-          ruler's VoiceOver 'edit' action is the same path from the
-          adjustable itself. */}
-      {parseTyped ? (
-        <Pressable
-          onPress={openDraft}
-          accessibilityRole="button"
-          accessibilityLabel={`Type a ${a11yLabel}`}
-          style={({ pressed }) => [styles.typeLineBtn, pressed && styles.pressed]}
-        >
-          <Ionicons name="pencil" size={16} color={colors.tint} />
-        </Pressable>
+      {draft != null && Platform.OS !== 'ios' ? (
+        <ThresholdDoneBar onCancel={cancelDraft} onDone={commitDraft} />
       ) : null}
       {parseTyped && Platform.OS === 'ios' ? (
         <InputAccessoryView nativeID={RULER_ACCESSORY_ID}>
-          <View style={styles.doneBar}>
-            <Pressable
-              onPress={() => Keyboard.dismiss()}
-              accessibilityRole="button"
-              accessibilityLabel="Done"
-              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
-            >
-              <Text style={styles.doneText}>Done</Text>
-            </Pressable>
-          </View>
+          <ThresholdDoneBar
+            onCancel={cancelDraft}
+            onDone={() => {
+              commitDraft();
+              Keyboard.dismiss();
+            }}
+          />
         </InputAccessoryView>
       ) : null}
     </View>
@@ -4176,23 +4396,20 @@ const styles = StyleSheet.create({
   },
   rulerRow: {
     flex: 1,
+    minWidth: 164,
+    justifyContent: 'center',
+  },
+  rulerStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 164,
-  },
-  // The typed-line control. 44pt square, the HIG floor, tinted like a link.
-  typeLineBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   rulerWrap: {
     flex: 1,
     // A floor, so nothing sharing the row can shrink the strip out of
-    // existence. Below this the ticks are unusable anyway.
+    // existence. Below this the ticks are unusable anyway. The rendered
+    // height comes from rulerChromeHeight so a 44pt bubble is not clipped.
     minWidth: 120,
-    height: 58,
+    minHeight: 72,
     justifyContent: 'center',
   },
   tickCol: {
@@ -4238,42 +4455,89 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     backgroundColor: colors.tint,
   },
-  tickValueBox: {
+  // The value itself is the field. Navy outline plus the pencil say it can
+  // be typed; the box is at least 64×44. pointerEvents stays none on the
+  // resting bubble so a drag still reaches the strip.
+  thresholdBubble: {
+    minWidth: THRESHOLD_BUBBLE_W,
+    minHeight: THRESHOLD_BUBBLE_H,
     marginTop: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: spacing.sm,
     borderRadius: radii.sm,
     backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
+    borderWidth: 2,
+    borderColor: colors.tint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  thresholdInput: {
+    textAlign: 'center',
+    paddingVertical: 0,
+  },
+  // Sits on the bubble for VoiceOver. pointerEvents none: a real button
+  // here swallowed the drag. Activation is onAccessibilityTap.
+  thresholdA11y: {
+    position: 'absolute',
+    width: THRESHOLD_BUBBLE_W,
+    height: THRESHOLD_BUBBLE_H,
   },
   tickValueActive: {
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  tickValueInput: {
-    minWidth: 56,
-    textAlign: 'center',
-    paddingVertical: 2,
-  },
   doneBar: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.lg,
     backgroundColor: colors.bgGrouped,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
+  // "Done" is about the width of the word. minWidth plus the same 8pt
+  // hit slop the other accessory bars use keeps a 44pt target, and the
+  // 16pt gap between Cancel and Done is where the two slops meet.
   doneBtn: {
     minHeight: 44,
+    minWidth: 44,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   doneText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.tint,
+  },
+  cancelText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  thresholdChrome: {
+    flexShrink: 1,
+  },
+  thresholdChromeScroll: {
+    flexGrow: 0,
+  },
+  // Neutral navy, with the info icon. Not a warning colour: a clamp is a
+  // correction, and red would read as the bet failing.
+  lineNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+  },
+  lineNoticeText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    lineHeight: font.size.footnote * 1.35,
   },
   // The book's half-point line, sitting at the end of the ruler row. A
   // footnote, not a headline: it qualifies the number the ruler is showing.
