@@ -1449,3 +1449,96 @@ Three more lines, 2026-10-18, after the review and still before any P3 cell was 
 - `--full` also refuses unless `NBA_GAME2_BETS` is set.
 - `--full` writes the two families' cells only after both are built, so a failure in the
   projection leaves no half set for the pass/fail script to read.
+
+### 8.4 Results (graded 2026-10-18)
+
+Run `2026-10-18-fourth`: 456 cells, stored in Supabase (`nba_game2_cells`,
+`nba_game2_population`). Every lab ran `--full` after the review fixes (each book's main number,
+the bets written in the same run) and after 2023-24's first-half, first-quarter and team-total
+prices reached the cache: all 1,230 games, 99.6% of purchases 45-75 minutes before tip, team
+totals on 1,138 games. Pass/fail: `python -m scripts.nba_game2_verdict --house`.
+
+**2 of 456 cells pass the house standard. 16 clear the 95% interval alone, against about 11.4
+expected by chance before correlation.**
+
+| Family | Cells | With 200+ bets | Clear the interval | Pass | Best cell with 200+ bets |
+|---|---|---|---|---|---|
+| P1, market-anchored | 128 | 113 | 0 | 0 | full-game total over, EV >= 0.06, decided in the morning: 856 bets, +41.8 units, +4.5%, interval -2.0% to +10.7%, 4 of 5 seasons positive |
+| P2, the first search's market rules | 256 | 104 | 14, all on 1 to 51 bets | 0 | moneyline away 3-6 hours before tip, same number, EV >= 0.03: 296 bets, +7.6 units, +10.7%, interval -13.4% to +35.1% |
+| P3, ratings projection on the derivative markets | 48 | 48 | 0 | 0 | first-quarter spread away, EV >= 0.06: 562 bets, +0.3 units, 0.0% |
+| P3, shooting luck on the derivative markets | 24 | 14 | 2 | 2 | below |
+
+The market-anchored model (the NHL recipe) found nothing in the NBA: no cell's interval clears
+zero. Its pooled returns on the 113 cells with 200 or more bets have a median of -1.3%.
+
+**The two passing cells**, both shooting luck, decided at each game's one purchase 45-75 minutes
+before tip (measured median 54, not the 60 the lab's text says), 2023-24 to 2025-26 pooled:
+
+| Cell | Bets | Units | Return | 95% interval | Seasons |
+|---|---|---|---|---|---|
+| C1: first-half total over, full-game gap >= 2 | 595 | +51.5 | +8.0% | +0.4% to +15.4% | +4.0%, +11.6%, +9.9% |
+| C2: home team total under, the home team's part of the gap >= 2 | 349 | +64.7 | +16.6% | +6.4% to +26.4% | +13.9%, +18.7%, +18.0% |
+
+Both were then put through six independent checks and a judge (workflow
+`nba-derivative-candidates-verify`, scripts under `%TEMP%/nba_game_edge/verify4/`):
+replication and settlement, prices and books, look-ahead, mechanism, overlap with the shipped
+full-game model, and chance. Replication and look-ahead found no fault in either: every figure
+reproduces exactly, every bet settles the same way from the cache, and changing a game's own
+box score moves none of the signals.
+
+**C1 is not built.** It passed the house standard, which section 8 says is built live; this is
+a judgement against that, made after looking, and is reported as such.
+- The effect is incoherent. A total set wrong by shooting luck should be wrong in both halves.
+  Against games with a gap between -1 and +1, C1's games ran +1.89 points over in the first half
+  (interval +0.68 to +3.09) and -0.45 in the second (-1.80 to +0.87); the difference is +2.34
+  (+0.63 to +4.07). The full game on the same games: +1.45 (-0.45 to +3.33).
+- The pass has no margin. It needs all eight deciding books: DraftKings alone puts the lower
+  bound at -1.0%, the best of the four biggest books at -0.04%. Turning two half-point wins
+  into losses takes it to zero.
+- 323 of its 595 bets are on games the shipped full-game overs model already bets, at +4.0%
+  (interval -6.7% to +14.2%). The other 272 (gap 2 to 3) made +12.75%, but that band was picked
+  out after looking and is not a registered strategy.
+- By chance: in 5,000 shuffled 24-cell families, a pass at +8.0% or better appears in 3.0% to
+  4.1% of them, depending on the shuffle.
+
+**C2 is built live** as `nba_team_total_luck`.
+- Not one book: DraftKings alone 340 bets, +14.8% (interval +4.4% to +24.8%); FanDuel alone
+  +16.9%; the worst deciding offer +13.5% (+3.3% to +23.4%); with any one book removed and the
+  bet re-picked, +15.9% to +16.7%. Bets at exactly Pinnacle's number did best: 175 bets, +22.2%.
+- Not chance: its return is reached by 0 to 3 of 5,000 shuffled worlds. A pass of its size
+  appears in at most 5 of 5,000 shuffled families. All six season halves are positive.
+- The mechanism holds after taking out each game's own shooting: the home team scored 2.47
+  points under the market number (interval -3.60 to -1.34).
+- The weakness: the same rule on the AWAY team's total made nothing (-0.9% at cut 2). Its
+  points moved the same way (-0.80, interval -2.08 to +0.49), weaker, and after taking out
+  each game's own shooting the away number was also set too high (-1.64, -2.67 to -0.62): the
+  away teams in those games happened to shoot hot. The judge's reading is one effect at both
+  venues, with the home figure overstated. Both venues pooled at cut 2: 713 bets, +61.3 units,
+  +7.7% (interval +0.6% to +14.9%). Expect something nearer +7.7% than +16.6%.
+- Prices it lays: -122 to +110, median -112. Lines 101.5 to 135.5. Settled on the home team's
+  final score including overtime (DraftKings' house rule for team totals); counting overtime cost
+  it 3 bets.
+
+**Corrections to what was said before grading**
+- The earlier search's full-game UNDERS on this signal did not lose. At the newest price before
+  tip they returned -0.1%, +0.1%, +1.3% and +7.6% at gaps 1 to 4. "Overs only" described which
+  side passed, not a losing under.
+- The home team-total overs were +0.3% and +0.6% at gaps 2 and 4, not flat or negative.
+- The chance rate was measured across this 24-cell family only, not across all 456 cells.
+
+**Two flaws in the bars, for the next search (this one is not re-graded)**
+- The neighbouring-cut bar compares nested cuts: the gap >= 1 cell contains every gap >= 2 bet.
+  So it never tests the band below the cut. That band lost for both cells: C1's 1-to-2 band
+  -5.4% on 445 bets, C2's -6.3% on 540. C2 still holds because every band above its cut is
+  positive (+17.5%, +13.9%, +17.7%). The next search should compare bands, not nested cuts.
+- The placebo bar's 20 shuffles are coarse: one of C1's 20 placebos beat it on the seasons the
+  bar judges, and C1 cleared only because the bar is the 95th percentile.
+
+**An assessment to run on the shipped full-game overs model** (not a pause, nothing changes):
+in 2023-24 to 2025-26, at gaps of 2 or more, full-game totals ran +1.74 points over the middle
+games. +1.21 of that came from both teams shooting above the league rate in that same game;
+what is left is +0.51 (interval -1.22 to +2.20). Its premise says a game's own shooting
+averages out, so in this window most of its over result may be hot shooting rather than a
+number set too low. It gets the full assessment a live model gets. C2's version of the same
+test was favourable (above).
+
