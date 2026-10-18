@@ -756,3 +756,181 @@ def test_a_split_that_cannot_fit_says_how_many_it_dropped():
     assert len(text) <= xp.MAX_TWEET
     assert "more" in text, "sports were dropped without saying so"
     assert text.endswith(xp.hashtags_for(None)), "the tags were truncated away"
+
+
+# ── 6. every released pick, plus the free pick once ──────────────────────────
+# mike, 2026-10-18: post the slate for now. X_POST_ALL_PICKS=0 is the old
+# free-pick-only scope. The free pick stays the labeled tweet, posted once.
+
+def _slate():
+    return [
+        {"lock_key": "k-free", "label": "NYY ML", "sport": "MLB",
+         "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home",
+         "good_to": None},
+        {"lock_key": "k-total", "label": "NYY vs BOS Over 8.5", "sport": "MLB",
+         "dk_odds": -110, "home": "NYY", "away": "BOS", "side": "over",
+         "good_to": None},
+        {"lock_key": "k-nfl", "label": "SF -3.5", "sport": "NFL",
+         "dk_odds": -110, "home": "SF", "away": "SEA", "side": "home",
+         "good_to": None},
+    ]
+
+
+def _wire_slate(monkeypatch, slate, already=None):
+    """Creds on, Discord chose k-free, ledger and network replaced."""
+    _creds_on(monkeypatch)
+    import data.db
+    from tracking import discord_notifier as dn
+
+    monkeypatch.setattr(dn, "_free_pick_candidates",
+                        lambda conn, d: [slate[0]])
+    monkeypatch.setattr(
+        dn, "_new_signals",
+        lambda conn, d, include_already_posted=False: list(slate))
+    monkeypatch.setattr(data.db, "get_connection",
+                        lambda *a, **k: _fake_conn("k-free"))
+    sent = already or set()
+
+    def _sent(conn, key, kind):
+        return (key, kind) in sent
+
+    monkeypatch.setattr(xp, "_already_sent", _sent)
+    ledgered = []
+
+    def _remember(conn, key, kind, tweet_id):
+        ledgered.append((key, kind, tweet_id))
+        sent.add((key, kind))
+
+    monkeypatch.setattr(xp, "_ledger", _remember)
+    posted = []
+
+    def _deliver(text, dry_run=False, reply_to=None):
+        posted.append(text)
+        return f"id{len(posted)}", False
+
+    monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
+    return posted, ledgered
+
+
+def test_team_hashtags_use_the_nickname():
+    from tracking.x_teams import team_hashtag, team_tags
+    assert team_hashtag("MLB", "NYY") == "Yankees"
+    assert team_hashtag("MLB", "BOS") == "RedSox"
+    assert team_hashtag("NFL", "SF") == "49ers"
+    assert team_hashtag("NFL", "WAS") == "Commanders"
+    assert team_hashtag("NHL", "TOR") == "MapleLeafs"
+    assert team_hashtag("NBA", "PHI") == "76ers"
+    side = team_tags({"sport": "MLB", "home": "NYY", "away": "BOS", "side": "home"})
+    assert side == ["#Yankees"]
+    total = team_tags({"sport": "MLB", "home": "NYY", "away": "BOS", "side": "over"})
+    assert total == ["#Yankees", "#RedSox"]
+
+
+def test_college_nicknames_and_a_shared_mascot_falls_back_to_the_school():
+    from tracking.x_teams import team_tags
+    both = team_tags(
+        {"sport": "NCAAF", "home": "Ohio State", "away": "Michigan", "side": "under"},
+        {"Ohio State": "Buckeyes", "Michigan": "Wolverines"})
+    assert both == ["#Buckeyes", "#Wolverines"]
+    shared = team_tags(
+        {"sport": "NCAAF", "home": "USC", "away": "Troy", "side": "under"},
+        {"USC": "Trojans", "Troy": "Trojans"})
+    assert shared == ["#USC", "#Troy"]
+
+
+def test_a_free_pick_keeps_its_label_and_freepicks_tag():
+    free = xp.render_free_pick(
+        {"sport": "MLB", "label": "NYY ML", "dk_odds": -115,
+         "home": "NYY", "away": "BOS", "side": "home"}, "2026-10-18")
+    plain = xp.render_pick(
+        {"sport": "MLB", "label": "NYY vs BOS Over 8.5", "dk_odds": -110,
+         "home": "NYY", "away": "BOS", "side": "over"})
+    assert "Free pick — NYY ML" in free
+    assert "#Yankees" in free and "#FreePicks" in free and "#MLB" in free
+    assert "Free pick" not in plain and "#FreePicks" not in plain
+    assert "#Yankees" in plain and "#RedSox" in plain
+    assert free.count("#") <= xp.MAX_PICK_HASHTAGS
+    assert plain.count("#") <= xp.MAX_PICK_HASHTAGS
+    assert len(free) <= xp.MAX_TWEET and len(plain) <= xp.MAX_TWEET
+    xp._assert_no_link(free)
+    xp._assert_no_link(plain)
+
+
+def test_a_long_post_drops_reach_tags_before_team_tags():
+    body = "X" * 270
+    text = xp.assemble_text(
+        body, ["#Yankees", "#RedSox"], ["#MLB", "#GamblingX", "#BettingTips"])
+    assert len(text) <= xp.MAX_TWEET
+    assert text.endswith("#Yankees #RedSox")
+    for dropped in ("#MLB", "#GamblingX", "#BettingTips"):
+        assert dropped not in text
+
+
+def test_the_reach_pool_is_configurable_and_freepicks_stays_on_the_free_pick(monkeypatch):
+    monkeypatch.setenv("X_HASHTAG_POOL", "FreePicks,CustomTag")
+    pick = {"sport": "MLB", "home": "NYY", "away": "BOS", "side": "home"}
+    _teams, plain = xp.pick_hashtags(pick, free=False)
+    _teams, free = xp.pick_hashtags(pick, free=True)
+    assert "#CustomTag" in plain and "#FreePicks" not in plain
+    assert "#GamblingX" not in plain
+    assert "#FreePicks" in free and "#CustomTag" in free
+
+
+def test_all_released_picks_are_posted_and_the_free_pick_once(monkeypatch):
+    slate = _slate()
+    posted, ledgered = _wire_slate(monkeypatch, slate)
+    assert xp.notify_x_free_pick("2026-10-18") == 1
+    assert len(posted) == 3, posted
+    free = [t for t in posted if "Free pick" in t]
+    assert len(free) == 1
+    assert "NYY ML" in free[0] and "#Yankees" in free[0]
+    assert any("Over 8.5" in t and "#Yankees" in t and "#RedSox" in t for t in posted)
+    assert any("SF -3.5" in t and "#49ers" in t for t in posted)
+    # The free pick's label is not also sent as a plain tweet.
+    assert sum("NYY ML" in t for t in posted) == 1
+    assert ("k-free", "x_pick", "id1") in ledgered
+
+
+def test_the_flag_off_posts_only_the_free_pick(monkeypatch):
+    monkeypatch.setenv("X_POST_ALL_PICKS", "0")
+    posted, _ledgered = _wire_slate(monkeypatch, _slate())
+    assert xp.notify_x_free_pick("2026-10-18") == 1
+    assert len(posted) == 1
+    assert "Free pick" in posted[0]
+    assert "#Yankees" in posted[0]
+
+
+def test_a_pick_already_tweeted_is_not_posted_again(monkeypatch):
+    posted, ledgered = _wire_slate(
+        monkeypatch, _slate(), already={("k-total", "x_pick")})
+    assert xp.notify_x_free_pick("2026-10-18") == 1
+    assert not any("Over 8.5" in t for t in posted)
+    assert any("SF -3.5" in t for t in posted)
+    assert not any(key == "k-total" for key, _kind, _id in ledgered)
+
+
+def test_a_rate_limit_stops_the_slate_and_does_not_ledger_the_miss(monkeypatch):
+    slate = _slate()
+    posted, ledgered = _wire_slate(monkeypatch, slate)
+    calls = {"n": 0}
+
+    def _deliver(text, dry_run=False, reply_to=None):
+        calls["n"] += 1
+        posted.append(text)
+        # The free pick is call 1. The first plain pick is call 2, and it
+        # is the one X refuses. The third pick must not be attempted.
+        if calls["n"] == 2:
+            posted.pop()
+            return None, True
+        return f"id{calls['n']}", False
+
+    monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
+    # _wire_slate already appended into `posted` via the previous mock.
+    # Replace the list the new mock closes over — it is the same list.
+    posted.clear()
+    assert xp.notify_x_free_pick("2026-10-18") == 1
+    assert len(posted) == 1, posted
+    assert "Free pick" in posted[0]
+    assert not any("SF -3.5" in t or "Over 8.5" in t for t in posted)
+    assert not any(key == "k-total" for key, _kind, _id in ledgered)
+    assert calls["n"] == 2
