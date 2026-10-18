@@ -64,6 +64,24 @@ def test_blur_commits_and_the_clamp_is_announced_once():
     assert "Keyboard.dismiss()" not in accessory
 
 
+def test_cancel_wins_when_blur_fires_before_the_click():
+    # Web blurs the field on mouse-down, before Cancel's click, and
+    # react-native-web delays onPressIn by 50ms, so a latch set there is
+    # already late. Cancel's host calls preventDefault on that mouse-down,
+    # which keeps the field focused. Done does not. A blur elsewhere still
+    # commits: onBlur stays wired to commitDraft.
+    stats = _read(MOBILE / "src/screens/StatsScreen.tsx")
+    bar = _slice(stats, "function ThresholdDoneBar", "function LineRuler")
+    cancel, done = bar.split('accessibilityLabel="Done"', 1)
+    assert "addEventListener('mousedown', keepFocus)" in cancel
+    assert "event.preventDefault()" in cancel
+    assert "ref={cancelHost}" in cancel
+    assert "preventDefault" not in done
+    assert "onPress={onCancel}" in cancel
+    assert "onBlur={commitDraft}" in stats
+    assert "cancelPending" not in stats
+
+
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")
 def test_verify_line_ruler_script():
     proc = subprocess.run(

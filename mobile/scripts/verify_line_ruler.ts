@@ -453,6 +453,10 @@ for (const def of STAT_CATALOG) {
   check(
     'the field commits on blur, and the clamp is announced once',
     screen.includes('onBlur={commitDraft}') &&
+      screen.includes("addEventListener('mousedown', keepFocus)") &&
+      screen.includes('event.preventDefault()') &&
+      screen.includes('ref={cancelHost}') &&
+      !screen.includes('cancelPending') &&
       screen.includes("outcome.notice && Platform.OS !== 'android'") &&
       screen.includes("accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}"),
   );

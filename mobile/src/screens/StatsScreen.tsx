@@ -3136,9 +3136,28 @@ function ThresholdChromeScroll({
 }
 
 function ThresholdDoneBar({ onCancel, onDone }: { onCancel: () => void; onDone: () => void }) {
+  const cancelHost = useRef<React.ElementRef<typeof Pressable> | null>(null);
+  useEffect(() => {
+    // Web blurs the field on mouse-down, before Cancel's click, and that blur
+    // commits. react-native-web waits 50ms before onPressIn
+    // (PressResponder DEFAULT_PRESS_DELAY_MS), so a latch set there is already
+    // late. preventDefault on this mouse-down keeps the field focused, and
+    // Cancel's click still runs. A blur from anywhere else still commits.
+    const node = cancelHost.current as unknown as {
+      addEventListener?: (type: string, listener: (event: Event) => void) => void;
+      removeEventListener?: (type: string, listener: (event: Event) => void) => void;
+    } | null;
+    if (node?.addEventListener == null || node.removeEventListener == null) return;
+    const keepFocus = (event: Event) => {
+      event.preventDefault();
+    };
+    node.addEventListener('mousedown', keepFocus);
+    return () => node.removeEventListener?.('mousedown', keepFocus);
+  }, []);
   return (
     <View style={styles.doneBar}>
       <Pressable
+        ref={cancelHost}
         onPress={onCancel}
         accessibilityRole="button"
         accessibilityLabel="Cancel"
