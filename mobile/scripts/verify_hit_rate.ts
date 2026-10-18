@@ -328,7 +328,9 @@ check(
   // and in Under mode its number deliberately differs from the headline's.
   check('the ruler is adjustable by VoiceOver',
     screen.includes('accessibilityRole="adjustable"')
-      && screen.includes("accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}"));
+      && screen.includes("{ name: 'increment' }")
+      && screen.includes("{ name: 'decrement' }")
+      && screen.includes("label: 'Type a line'"));
   check('its ticks are decoration', /accessibilityElementsHidden[\s\S]{0,120}styles\.tickCol/.test(screen));
 
   // Every mode resolves a stop to the same line, so a mode change leaves the

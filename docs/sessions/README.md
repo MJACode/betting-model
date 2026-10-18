@@ -19,6 +19,10 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: Cancel wins on web when blur fires before the click; a blur anywhere else still commits |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: TalkBack opens the threshold field via an activate action; the tick under the bubble cannot move the board; the clamp is announced once |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #993: the editing field is 64pt (128 at 2x); the type gesture is a hint; Android and web Done/Cancel span the row |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Stats threshold bubble is the field: tap to type, Cancel restores, navy clamp text; the pencil button is gone |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 merged origin/master `d67b75a6` (#992); session logs keep both sides, newest first; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, live NFL wind card gates CREATE/RLS/REVOKE on schema_is_current so the poll does not reload PostgREST; a missing table still gets created, then read |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 review: verify_unpriced_pnl Yesterday block is 2.00u on 2.40u risked; DayStakeStats no longer stores units in profitFlat; the script runs in pytest |
