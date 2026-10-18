@@ -266,10 +266,10 @@ export function DailyResultsModal({
                   {sportFilter === 'ALL' ? 'All models' : sportFilter} — return on bets
                 </Text>
                 <Text
-                  style={[styles.heroRoi, { color: scoped.record.risked > 0 ? roiColor(scoped.record.roiFlat) : colors.textSecondary }]}
+                  style={[styles.heroRoi, { color: scoped.record.risked > 0 ? roiColor(scoped.record.roi) : colors.textSecondary }]}
                   accessibilityLabel={scoped.record.risked > 0 ? undefined : 'Return on bets unavailable'}
                 >
-                  {dayRoiText(scoped.record.risked, scoped.record.roiFlat)}
+                  {dayRoiText(scoped.record.risked, scoped.record.roi)}
                 </Text>
                 <Text style={styles.heroRecord}>{recordLine(scoped.record)}</Text>
                 {/* How the day splits. Both halves count identically — a live
@@ -338,10 +338,10 @@ export function DailyResultsModal({
                     <Text style={styles.sportName}>{s.sport}</Text>
                     {s.total.picks > 0 ? (
                       <Text
-                        style={[styles.sportRoi, { color: s.total.risked > 0 ? roiColor(s.total.roiFlat) : colors.textSecondary }]}
+                        style={[styles.sportRoi, { color: s.total.risked > 0 ? roiColor(s.total.roi) : colors.textSecondary }]}
                         accessibilityLabel={s.total.risked > 0 ? undefined : 'Return on bets unavailable'}
                       >
-                        {dayRoiText(s.total.risked, s.total.roiFlat)}
+                        {dayRoiText(s.total.risked, s.total.roi)}
                       </Text>
                     ) : s.pending > 0 ? (
                       <Text style={styles.sportEmptyNote}>
@@ -451,10 +451,10 @@ function ModelRow({ model }: { model: ModelDayStats }) {
         </View>
       </View>
       <Text
-        style={[styles.modelRoi, { color: priced ? roiColor(model.roiFlat) : colors.textSecondary }]}
+        style={[styles.modelRoi, { color: priced ? roiColor(model.roi) : colors.textSecondary }]}
         accessibilityLabel={priced ? undefined : 'Return on bets unavailable'}
       >
-        {dayRoiText(model.risked, model.roiFlat)}
+        {dayRoiText(model.risked, model.roi)}
       </Text>
     </View>
   );
@@ -472,7 +472,8 @@ function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
   // The row shows the same money the day's total added: postedPickUnits.
   const profit = postedPickUnits(pick).units;
-  const missingPrice = decisionOdds(pick) == null;
+  const price = decisionOdds(pick);
+  const missingPrice = price == null;
   const unitsLabel = unitsSpeech(dayUnitsText(profit));
   return (
     <View style={styles.modelRow}>
@@ -487,9 +488,7 @@ function PickRow({ pick }: { pick: Pick }) {
           {modelShort(pick.model_id)}
           {missingPrice
             ? ' · no price'
-            : decisionOdds(pick) != null
-              ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`
-              : ''}
+            : ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(price)}`}
         </Text>
       </View>
       <Text

@@ -175,7 +175,7 @@ for (const line of expected.lines) {
     continue;
   }
   const units = appUnits(stats.units);
-  const roi = stats.risked > 0 ? dayRoiText(stats.risked, stats.roiFlat).replaceAll(MINUS, '-') : null;
+  const roi = stats.risked > 0 ? dayRoiText(stats.risked, stats.roi).replaceAll(MINUS, '-') : null;
   // Discord's :+ format keeps a plus on a value that rounds to zero.
   // formatSigned prints that zero unsigned, the same rule as the Record hero.
   const unitsOk = units === line.units || (line.units === '+0.00u' && units === '0.00u');
@@ -184,21 +184,21 @@ for (const line of expected.lines) {
   check(`${line.scope} roi text`, roiOk, `got ${roi} want ${line.roi}`);
 }
 
-// The 2026-10-17 book, as stored on results_snapshots (daily) and the
-// posted-stake view. Two decimals, the same rounding Discord prints.
-check('2026-10-17 overall is +7.31u', dayUnitsText(7.3111) === '+7.31u', dayUnitsText(7.3111));
-check('2026-10-17 NCAAF is +6.45u', dayUnitsText(6.446666666666667) === '+6.45u', dayUnitsText(6.446666666666667));
-check('2026-10-17 NHL is −0.14u', dayUnitsText(-0.13555555555555555) === `${MINUS}0.14u`, dayUnitsText(-0.13555555555555555));
-check('2026-10-17 WNBA is +1.00u', dayUnitsText(1) === '+1.00u', dayUnitsText(1));
-check('2026-10-17 overall ROI is +32.5%',
+// Formatting only. The inputs are the unrounded totals measured on
+// results_snapshots for 2026-10-17. This block does not load that day's picks.
+check('format 7.3111 as +7.31u', dayUnitsText(7.3111) === '+7.31u', dayUnitsText(7.3111));
+check('format 6.4466… as +6.45u', dayUnitsText(6.446666666666667) === '+6.45u', dayUnitsText(6.446666666666667));
+check('format −0.13555… as −0.14u', dayUnitsText(-0.13555555555555555) === `${MINUS}0.14u`, dayUnitsText(-0.13555555555555555));
+check('format 1 as +1.00u', dayUnitsText(1) === '+1.00u', dayUnitsText(1));
+check('format 7.3111 / 22.481 as +32.5%',
   dayRoiText(22.481, 7.3111 / 22.481) === '+32.5%', dayRoiText(22.481, 7.3111 / 22.481));
-check('2026-10-17 NCAAF ROI is +48.8%',
+check('format 6.4466… / 13.2055… as +48.8%',
   dayRoiText(13.205474432595023, 6.446666666666667 / 13.205474432595023) === '+48.8%',
   dayRoiText(13.205474432595023, 6.446666666666667 / 13.205474432595023));
-check('2026-10-17 NHL ROI is −1.7%',
+check('format −0.13555… / 7.9756… as −1.7%',
   dayRoiText(7.975569050832209, -0.13555555555555555 / 7.975569050832209) === `${MINUS}1.7%`,
   dayRoiText(7.975569050832209, -0.13555555555555555 / 7.975569050832209));
-check('2026-10-17 WNBA ROI is +76.9%',
+check('format 1 / 1.3 as +76.9%',
   dayRoiText(1.3, 1 / 1.3) === '+76.9%', dayRoiText(1.3, 1 / 1.3));
 check('a push-only book prints 0.00u and no ROI',
   dayUnitsText(0) === '0.00u' && dayRoiText(0, 0) === '—',

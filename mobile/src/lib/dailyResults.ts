@@ -17,14 +17,27 @@ import {
   postedPickUnits,
 } from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
-import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
 import { decisionEdge } from '@/lib/decisionPrice';
 
-/** One day's posted-stake book. `units` / `risked` are what Discord adds. */
-export interface DayStakeStats extends CustomModelStats {
+/**
+ * One day's posted-stake book. `units` and `risked` are what Discord adds.
+ * `roi` is units divided by units risked (0 when nothing was risked).
+ *
+ * This is not `CustomModelStats`. That type's `profitFlat` and `stakedFlat`
+ * are the Models tab's flat book, stored per 100 of one flat unit. Putting
+ * the posted units in those fields made a day total look like that book.
+ */
+export interface DayStakeStats {
+  picks: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  /** wins / (wins + losses). 0 when nothing was decided. */
+  winRate: number;
   units: number;
   risked: number;
+  roi: number;
 }
 
 export interface ModelDayStats extends DayStakeStats {
@@ -157,13 +170,9 @@ function finalize(acc: Acc): DayStakeStats {
     losses: acc.losses,
     pushes: acc.pushes,
     winRate: decided > 0 ? acc.wins / decided : 0,
-    // Same three numbers, under the shared stats names, so a reader of
-    // roiFlat on this object is the posted-stake ROI and not a second book.
-    profitFlat: acc.units,
-    stakedFlat: acc.risked,
-    roiFlat: roi,
     units: acc.units,
     risked: acc.risked,
+    roi,
   };
 }
 
@@ -173,11 +182,9 @@ export const EMPTY_DAILY: DayStakeStats = {
   losses: 0,
   pushes: 0,
   winRate: 0,
-  profitFlat: 0,
-  stakedFlat: 0,
-  roiFlat: 0,
   units: 0,
   risked: 0,
+  roi: 0,
 };
 
 /** Discord's `{units:+.2f}u`, with the app's unsigned zero and U+2212. */

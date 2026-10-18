@@ -117,6 +117,9 @@ def test_the_day_screen_reads_the_posted_stake_and_not_the_flat_book():
     assert "dayUnitsText" in modal
     assert "dayRoiText" in modal
     assert "formatSigned(units, 2, 'u')" in daily
+    assert "extends CustomModelStats" not in daily
+    assert "profitFlat:" not in daily
+    assert "stakedFlat:" not in daily
     assert "flat-bet ROI" not in modal
     assert "profitFlat / 100" not in modal
     assert "not in the money" not in modal
@@ -167,8 +170,8 @@ def test_yesterday_matches_discord_on_the_fixture_day(tmp_path: Path):
     assert "\nALL PASS" in proc.stdout
     assert "[PASS] overall units" in proc.stdout
     assert "[PASS] overall units text" in proc.stdout
-    assert "[PASS] 2026-10-17 overall is +7.31u" in proc.stdout
-    assert "[PASS] 2026-10-17 NHL is" in proc.stdout
+    assert "[PASS] format 7.3111 as +7.31u" in proc.stdout
+    assert "[PASS] format 1 / 1.3 as +76.9%" in proc.stdout
 
 
 @needs_node
@@ -190,3 +193,42 @@ def test_the_existing_daily_recap_verifier_passes(tmp_path: Path):
     )
     assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
     assert "\nALL PASS" in proc.stdout
+
+
+UNPRICED_LIBS = LIBS + (
+    "customModelBacktest.ts",
+    "customModelFilters.ts",
+    "modelMeta.ts",
+)
+
+
+@needs_node
+def test_the_unpriced_pnl_verifier_passes(tmp_path: Path):
+    """Yesterday's block in verify_unpriced_pnl.ts is the posted stake.
+
+    The Models checks in that script stay on the flat book. The day block
+    is one unpriced win plus one win at -140: 2.00u on 2.40u risked.
+    """
+    assert NODE is not None
+    script_src = (MOBILE / "scripts" / "verify_unpriced_pnl.ts").read_text(encoding="utf-8")
+    recap = script_src.split("Yesterday's-results recap", 1)[1]
+    assert "profitFlat" not in recap
+    assert "stakedFlat" not in recap
+    assert "2.4" in recap
+    assert "contributes no\n * money to any record" not in script_src
+    script = _rewrite(script_src)
+    (tmp_path / "verify_unpriced_pnl.ts").write_text(script, encoding="utf-8")
+    for name in UNPRICED_LIBS:
+        (tmp_path / name).write_text(
+            _rewrite((LIB / name).read_text(encoding="utf-8")), encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"type": "module"}\n', encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "--experimental-strip-types", "verify_unpriced_pnl.ts"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
+    assert "\nAll checks passed." in proc.stdout
+    assert "[PASS] Daily recap: both wins count (2-0) at the posted stake" in proc.stdout

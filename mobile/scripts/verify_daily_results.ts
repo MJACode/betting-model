@@ -199,7 +199,7 @@ check('overall record 6-2-1', r.overall.wins === 6 && r.overall.losses === 2 && 
   `${r.overall.wins}-${r.overall.losses}-${r.overall.pushes}`);
 check('overall units = 3.8', near(r.overall.units, 3.8), `got ${r.overall.units}`);
 check('overall risked = 8.8', near(r.overall.risked, 8.8), `got ${r.overall.risked}`);
-check('overall roiFlat = 3.8/8.8', near(r.overall.roiFlat, 3.8 / 8.8), `got ${r.overall.roiFlat}`);
+check('overall roi = 3.8/8.8', near(r.overall.roi, 3.8 / 8.8), `got ${r.overall.roi}`);
 check('overall winRate = 0.75', near(r.overall.winRate, 0.75, 0.001), `got ${r.overall.winRate}`);
 
 // Pending: the two BET/null picks count; the AVOID/null and NO_ACTION do not.
@@ -222,7 +222,7 @@ const wnba = r.sports.find((s) => s.sport === 'WNBA')!;
 check('MLB total 6-1-0', mlb.total.wins === 6 && mlb.total.losses === 1 && mlb.total.pushes === 0,
   `${mlb.total.wins}-${mlb.total.losses}-${mlb.total.pushes}`);
 check('MLB units = 4.9', near(mlb.total.units, 4.9), `got ${mlb.total.units}`);
-check('MLB roiFlat = 4.9/7.7', near(mlb.total.roiFlat, 4.9 / 7.7), `got ${mlb.total.roiFlat}`);
+check('MLB roi = 4.9/7.7', near(mlb.total.roi, 4.9 / 7.7), `got ${mlb.total.roi}`);
 
 // MLB models: f5, the in-play win, the paused model's win, moneyline. No HR.
 check('MLB has 4 models (paused graded row included, retired HR absent)', mlb.models.length === 4, `got ${mlb.models.length}`);
@@ -257,8 +257,8 @@ check('a retired pre-game model contributes no row',
 check('WNBA total 0-1-1', wnba.total.wins === 0 && wnba.total.losses === 1 && wnba.total.pushes === 1,
   `${wnba.total.wins}-${wnba.total.losses}-${wnba.total.pushes}`);
 check('WNBA units = -1.1 and the push is not risked',
-  near(wnba.total.units, -1.1) && near(wnba.total.risked, 1.1) && near(wnba.total.roiFlat, -1),
-  `units ${wnba.total.units} risked ${wnba.total.risked} roi ${wnba.total.roiFlat}`);
+  near(wnba.total.units, -1.1) && near(wnba.total.risked, 1.1) && near(wnba.total.roi, -1),
+  `units ${wnba.total.units} risked ${wnba.total.risked} roi ${wnba.total.roi}`);
 
 // Per-sport pending counts
 check('MLB pending = 1', mlb.pending === 1, `got ${mlb.pending}`);
