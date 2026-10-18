@@ -1076,3 +1076,31 @@ Same command; cells in `cells_IG-1.parquet`, the verdict in `verdict_house_IG-1.
 - HT-1's full set of halftime snapshots: 117,270 credits for 2021-22 → 2025-26 (measured grid).
 - The 5-minute in-play archive, to replay a rule that bets the first time a price crosses its
   cut: 586,710 credits for moneyline only, 1,760,130 for all three markets.
+
+## 8. Fourth search: pre-game moneyline, spread, total, first half, first quarter, team totals (pre-registered 2026-10-18, before any grid)
+
+mike, 2026-10-18: *"I want pre game ml / spread / totals. Also look at 1q 1H."* The in-game
+build was stopped; nothing in-game ships. Two gaps made this search:
+
+- Nothing pre-game outside §6.7 was ever judged under the house standard. That covers the first
+  search's 978 full-game cells and its 2,772 first-half / first-quarter / team-total cells.
+- The recipe behind the newest profitable game-market model here, `nhl_moneyline`, was never
+  tried for NBA. That recipe is the market's own no-vig price as an unpenalised offset, moved
+  by an L2 model on prior-game inputs (`models/nhl_moneyline_anchored.py`).
+
+**Bars: the house standard of §6.7, from the start**, applied once to every cell below. The
+derivative markets pool their graded seasons (2024-25 and 2025-26, plus 2023-24 once bought).
+Expected passes by chance at the interval alone: about 2.5% of cells, reported beside.
+
+**Data added:** 2023-24 first-half, first-quarter and team-total prices at tip − 60, bought
+2026-10-18 (~86,000 credits; the floor for this run was 2,000,000).
+
+| # | Family | Markets × sides | Decision | Cut axis | Cells |
+|---|---|---|---|---|---|
+| P1 | **Market-anchored model (the NHL recipe).** Offset = the market's no-vig at T (Pinnacle, else the deciding books' median): logit for moneylines, centre for spreads and totals. L2 on prior-game inputs only: second-search ratings (box score + adjusted plus-minus), the shooting-luck gap, availability from the injury report, rest / travel / schedule, pace. Walk-forward: fit on seasons before S. | full game: moneyline, spread, total × 2 sides; first half, first quarter: moneyline, spread, total × 2; team totals × over, under | full game at A, C and D; derivative markets at their purchase (D) | EV ≥ 0.02 / 0.04 / 0.06 / 0.08 | 128 |
+| P2 | **The first search's market rules, re-graded on the shared harness.** Sharp vs soft at the same number (Pinnacle's no-vig against each deciding book). Off-market number (a deciding book's number differs from Pinnacle's). | the same markets × 2 sides | full game at A, B, C and D; derivative markets at D | same number: EV ≥ 0.00 / 0.01 / 0.02 / 0.03; off-number: gap ≥ 0.5 / 1 / 1.5 / 2 | 256 |
+| P3 | **Second-search signals on the derivative markets.** The shooting-luck gap (F4) on first-half totals and team totals. The ratings projection (F1) on first-half and first-quarter moneyline, spread and total. | as named × 2 sides | D | F4: gap ≥ 1 / 2 / 3 / 4; F1: EV ≥ 0.02 / 0.04 / 0.06 / 0.08 | 72 |
+
+**Settlement:** first-half and first-quarter markets settle on the period line scores
+(`nba_period_scores`), never on the full-game score. Team totals settle on the team's own score.
+**A cell that passes is built LIVE** as a pre-game model.
