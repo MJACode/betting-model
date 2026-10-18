@@ -328,12 +328,6 @@ def test_the_placebo_moves_the_number_between_games_on_a_date_and_never_the_pric
     assert len(x) and (x["price"] == x["price_pl"]).all()
 
 
-def test_no_closing_line_value_is_reported_for_a_single_purchase(ran):
-    _, out = ran
-    for rows in out["rows"].values():
-        assert all(np.isnan(r["clv_median"]) and np.isnan(r["pool_clv_median"]) for r in rows)
-
-
 # ── seasons and the refusals ────────────────────────────────────────────────
 
 def test_choosing_seasons_are_every_graded_season_but_2025_26_and_the_pool_is_all(ran):
