@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 merged origin/master `d67b75a6` (#992); session logs keep both sides, newest first; the PR stays a draft |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, live NFL wind card gates CREATE/RLS/REVOKE on schema_is_current so the poll does not reload PostgREST; a missing table still gets created, then read |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 review: verify_unpriced_pnl Yesterday block is 2.00u on 2.40u risked; DayStakeStats no longer stores units in profitFlat; the script runs in pytest |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Yesterday uses Discord's posted stake (1u to win, risk capped at 3); the 2026-10-17 screenshot was the flat $100 book (+9.7u, +42.1%) on the same 15-8 |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NHL: "LAK ML" voided (contradicted "BOS (Regulation)" on one game); the regulation model decides in the moneyline model's game-day window; one game never gets two picks that cannot both win |
@@ -90,6 +92,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-12 | [2026-10](./2026-10.md) | 2026-10-12, dead-zone picks read NEUTRAL instead of NONE (Matt), one `signalDisplayName` for the badge, filters and VoiceOver; withdrawn picks show WITHDRAWN; the explainer no longer gives a ±3% cut; the sportsbook button on non-BET cards waits on Matt |
 | 2026-10-11 | [2026-10](./2026-10.md) | 2026-10-11, the NFL edge search (mike: "why did we retire live nfl betting ... find a profitable nfl model"): 14 ideas tested at zero credits, each verified twice; only the in-play rushing-attempt under survives (960 bets +11.79%, in-sample, no 2026 quotes stored); `nfl_prop_market` has bet nothing since 09-19 (0.20 EV floor + a borrowed calibration offset), floor grid in `docs/nfl_edge_search.md` §5 |
 | 2026-10-11 | [2026-10](./2026-10.md) | 2026-10-11, "nfl_live_worker has gone silent" was a false alarm: off on purpose since 10-04, it alarmed from the check-in row its last run left; switched-off watched jobs are now marked disabled at startup |
+| 2026-10-11 | [2026-10](./2026-10.md) | 2026-10-11, nfl_wind_totals locks on the 12-hour minimum kickoff forecast (3 readings, 13-hour lookback), not the first hourly read of 11 mph; 2026 settled 8–10, −2.73 units on 18 vs 5–7, −2.36 units on 12; hourly history before 2026 does not exist |
 | 2026-10-11 | [2026-10](./2026-10.md) | 2026-10-11, the fast NFL poll went silent for ~5.7 hours on a Sunday: the board archive re-copied the whole day's file every wind tick (18 to 232 minutes a run); now incremental, batched and time-boxed, and every NFL poll step has a timeout |
 | 2026-10-11 | [2026-10](./2026-10.md) | 2026-10-09 → 10-11, say each thing once: the rule moved to the global instructions (sessions from other folders never loaded it), and a display filter cuts repeated sentences from finished replies; its guards come from a first live run that cut a new report as a repeat |
 | 2026-10-10 | [2026-10](./2026-10.md) | 2026-10-10, Reviewer lows on #912: a typed line clamps to the last on-grid stop VoiceOver steps to, and an ET-date change marks the slate checking before the refetch so yesterday's teams are not used |

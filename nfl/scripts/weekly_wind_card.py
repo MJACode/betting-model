@@ -42,9 +42,11 @@ from _nfl_models import load_nfl_model
 # scheduled run. See _nfl_models.py.
 _wind_totals = load_nfl_model("wind_totals")
 select_bets = _wind_totals.select_bets
+ruling_wind = _wind_totals.ruling_wind
 UNIT_PCT = _wind_totals.UNIT_PCT
 MAX_CALIBRATED_LEAD = _wind_totals.MAX_CALIBRATED_LEAD
 MAX_FIRE_LEAD = _wind_totals.MAX_FIRE_LEAD
+STABLE_SPAN_HOURS = _wind_totals.STABLE_SPAN_HOURS
 
 # Books carrying home/away sign flips in the Odds API feed. Screened across all
 # 40 books on 1.4M quotes; see scripts/screen_books.py. Excluded everywhere.
@@ -194,8 +196,23 @@ def main() -> int:
         print("No outdoor games in window.")
         return 0
 
+    # The live check. `forecast_wind` stays the reading just fetched, which is
+    # what the table below prints. `wind_reads` is the recent polls, and the
+    # threshold is applied to their minimum once the window is covered. A
+    # database miss returns only this poll, which does not cover it, so this
+    # run cannot lock on a single reading.
+    from data_ingest.kickoff_wind_reads import attach_live_wind_reads
+    wind_reads = attach_live_wind_reads(g)
+    g["stable_wind"] = [
+        w if (w := ruling_wind(wind_reads.get(gid) or [])) is not None else float("nan")
+        for gid in g.game_id
+    ]
+
     print("\n--- forecast wind at kickoff (all outdoor games) ---")
-    show = g[["matchup", "stadium_id", "lead_days", "forecast_wind", "exp_true_wind", "gust", "temp"]]
+    print(f"stable_wind is the {STABLE_SPAN_HOURS:.0f}h minimum the bet uses; "
+          f"blank means the window is not covered yet")
+    show = g[["matchup", "stadium_id", "lead_days", "forecast_wind", "stable_wind",
+              "exp_true_wind", "gust", "temp"]]
     print(show.sort_values("forecast_wind", ascending=False).to_string(index=False,
           float_format=lambda x: f"{x:.1f}"))
 
@@ -208,11 +225,12 @@ def main() -> int:
         try:
             from data_ingest.pick_eval import dump_eval_rows
             evaluate_board = load_nfl_model("wind_totals").evaluate_board
-            dump_eval_rows(evaluate_board(g, threshold=a.threshold))
+            dump_eval_rows(evaluate_board(g, threshold=a.threshold, wind_reads=wind_reads))
         except Exception as exc:                               # noqa: BLE001
             print(f"WARNING: wind pick-eval dump failed: {exc}", file=sys.stderr)
 
-    bets = select_bets(g, threshold=a.threshold, bankroll=a.bankroll)
+    bets = select_bets(g, threshold=a.threshold, bankroll=a.bankroll,
+                       wind_reads=wind_reads)
 
     # Games that clear the wind bar but are not yet inside the firing window.
     # Reported on EVERY run, not just dry runs: the card is polled from T-10 and
@@ -220,12 +238,14 @@ def main() -> int:
     # week and it has to be distinguishable from "no wind anywhere". Without
     # this, the dry-run line below counted every game over the threshold and
     # invited a rerun that could not fire any of them.
-    windy = g[g.forecast_wind >= a.threshold]
+    # The bar the bet uses, not the reading this poll just fetched. A game at
+    # 14 mph whose window is not covered yet is not "over the bar".
+    windy = g[g.stable_wind >= a.threshold]
     waiting = windy[windy.lead_days > MAX_FIRE_LEAD]
     if len(waiting):
         print(f"\n{len(waiting)} game(s) over the wind bar but outside the "
               f"{MAX_FIRE_LEAD:.0f}-day firing window -- watching, not betting:")
-        print(waiting[["matchup", "lead_days", "forecast_wind"]]
+        print(waiting[["matchup", "lead_days", "stable_wind"]]
               .sort_values("lead_days").to_string(index=False,
                                                   float_format=lambda x: f"{x:.1f}"))
 

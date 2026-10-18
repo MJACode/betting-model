@@ -112,6 +112,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # tests/test_everything_in_supabase.py had failed on since 2026-09-12).
     # Written by data/ingestors/nfl_weather_cache_import.py.
     "add_nfl_stadium_weather_hourly.sql",
+    # 2026-10-11: the live wind card's kickoff-hour readings. The 11 mph check
+    # uses the minimum over a covered 12-hour window; without these rows the
+    # card fails closed and locks nothing. Not a pick.
+    "add_nfl_kickoff_wind_reads.sql",
     # 2026-09-20: per-game NHL team / goalie / skater logs from the NHL's free
     # stats API. The NHL models read one SEASON-FINAL row per goalie and
     # carried-forward team rates; an as-of-date feature needs the games it is
