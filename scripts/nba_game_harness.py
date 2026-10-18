@@ -1050,7 +1050,7 @@ def real_side_shares(bets: pd.DataFrame, neutral: pd.DataFrame) -> dict:
 def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: pd.DataFrame,
               cuts, sides_by_market: dict, close=None, sig=None, placebo=None,
               strength: str = "ev", choose_seasons=CHOOSE,
-              times: pd.DataFrame | None = None) -> list[dict]:
+              times: pd.DataFrame | None = None, market_groups: dict | None = None) -> list[dict]:
     """Grade one family at one decision point over its cut axis and sides.
 
     `cand`: offers with p_win / p_push / ev. A model family leaves strength="ev"
@@ -1061,14 +1061,23 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
     `times`: the decision times the cells used (default: the slate fetches);
     at D any choosing season they reach on fewer than 95% of games is dropped
     from `choose_seasons` and named in the row (§6.5 amendment).
+    `market_groups`: {label: (market, ...)} pools several real markets into one
+    cell group (§8: team totals, both teams' markets, as one cell per side and
+    cut). A `sides_by_market` key that names a group takes every member's
+    offers; the row's `market` is the label, while every bet keeps its real
+    market, which pricing and settlement read. Keys not named run alone.
     One row per (market, side, cut) with every number section 6 reports."""
     rows = []
     cov = point_coverage(data, point, times)
     asked = tuple(choose_seasons)
     choose_seasons, dropped = gated_seasons(cov, asked, point)
+    groups = market_groups or {}
     for market, sides in sides_by_market.items():
-        cm = cand[cand["market"] == market]
-        nm = neutral[neutral["market"] == market]
+        members = tuple(groups.get(market, (market,)))
+        if market in groups:
+            kind(list(members))                         # a group's members must be real markets
+        cm = cand[cand["market"].isin(members)]
+        nm = neutral[neutral["market"].isin(members)]
         population = set(cm["game_id"])
         blinds = blind_by_real_side(nm, population, data.games, choose_seasons)
         bpool = blind_pool(nm, population, data.games, tuple(choose_seasons) + (CONFIRM,),
@@ -1088,7 +1097,7 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                 dk = grade(pick(cm, books=(DK,)), data.games)
                 pl = []
                 for pc in placebo or []:
-                    gp = grade(pick(pc[pc["market"] == market]), data.games)
+                    gp = grade(pick(pc[pc["market"].isin(members)]), data.games)
                     pl.append(roi(gp[gp["season"].isin(choose_seasons)]) if len(gp) else np.nan)
                 ch, cf = rep["choose"], rep["confirm"]
                 shares = real_side_shares(g[g["season"].isin(choose_seasons)] if len(g) else g, nm)
