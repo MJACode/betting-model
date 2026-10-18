@@ -231,6 +231,7 @@ import {
   compareAnytimeRows,
   defenseKey,
   groupsUsedByBoard,
+  ranksInGroup,
   isAnytimeTdBoard,
   meetsTierFloor,
   nextMatchupSort,
@@ -1484,7 +1485,7 @@ export function StatsScreen() {
     [slateGames, slate, now],
   );
   const atdOn = isAnytimeTdBoard(sport, stat ? String(stat.key) : null);
-  const stackAtd = atdOn && windowFontScale >= ATD_STACK_FONT_SCALE;
+  const stackAtd = atdOn && windowFontScale >= ATD_STACK_FONT_SCALE - 0.001;
   const leagueHasGames = h2hIndex.size > 0 || slateGameIndex.size > 0;
   const openMatchupInfo = useCallback(() => setMatchupInfoOpen(true), []);
 
@@ -1510,9 +1511,13 @@ export function StatsScreen() {
         }
         return `vs ${row.opponent}`;
       }
-      // Slate date first, then the next game already loaded for H2H. A Sunday
-      // team opened on Thursday used to have no opponent line at all.
-      const match = fixtureForRow(row, slateGameIndex, h2hIndex);
+      // NFL reads the next loaded game when the slate date has no opponent.
+      // A Sunday team opened on Thursday used to have no opponent line at all.
+      // Every other sport stays on the slate date.
+      const match =
+        sport === 'NFL'
+          ? fixtureForRow(row, slateGameIndex, h2hIndex)
+          : slateGameFor(row, slateGameIndex);
       if (!match) return null;
       // Two rules, both learned the hard way (UX review, 2026-09-05):
       //   - the status is looked up by the key the row actually MATCHED on, not
@@ -1523,7 +1528,7 @@ export function StatsScreen() {
       const started = showOdds ? null : startedTeams.get(match.key) ?? null;
       return slateSubline(match.game, started);
     },
-    [slateGameIndex, startedTeams, showOdds, timeWindow, h2hIndex],
+    [slateGameIndex, startedTeams, showOdds, timeWindow, h2hIndex, sport],
   );
 
   /**
@@ -1544,7 +1549,10 @@ export function StatsScreen() {
       const m = row.team ? matchupByTeam.get(row.team) : undefined;
       if (m) return gradeMatchup(sport, playerType, m);
       if (!gradesOnDefence(sport)) return null;
-      const match = fixtureForRow(row, slateGameIndex, h2hIndex);
+      const match =
+        sport === 'NFL'
+          ? fixtureForRow(row, slateGameIndex, h2hIndex)
+          : slateGameFor(row, slateGameIndex);
       const opponent = match?.game.opponent ?? null;
       const opp = opponent ? defenceByTeam.get(opponent) ?? null : null;
       return gradeOpponentDefence(
@@ -1598,6 +1606,7 @@ export function StatsScreen() {
           inactive: null,
         },
         rank,
+        groupRanks: group ? ranksInGroup(defenseRanks, group) : null,
       });
     },
     [rankStatus, failedGroups, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames],
@@ -4361,6 +4370,7 @@ function ColumnHeader({
   const matchupFont = matchupHeaderFontSize(
     fontScale,
     atdStack ? Math.max(ATD_MATCHUP_W, stackedMatchupRoom) : ATD_MATCHUP_W,
+    font.size.micro,
   );
   const hitLabel =
     atd && rightLabel === 'Hit Rate'

@@ -163,7 +163,20 @@ def test_the_matchup_header_fills_its_column_and_large_text_is_one_line():
     assert "justifyContent: 'flex-end'" in full
     assert "stackedMatchupLine(view.tier, view.line)" in cell
     # 1.3, not the first step above 1. Below that, the header word shrinks.
-    assert "windowFontScale >= ATD_STACK_FONT_SCALE" in screen
+    # 0.001 covers a font scale that lands at 1.2999999.
+    assert "windowFontScale >= ATD_STACK_FONT_SCALE - 0.001" in screen
+    header_call = screen.split("matchupHeaderFontSize(", 1)[1].split(");", 1)[0]
+    assert "font.size.micro" in header_call
+    lib = _read(LIB)
+    assert "const base = 11" not in lib
+    assert "FONT_SIZE_MICRO" in lib
+    # Subline and the A–F grade. The Anytime TD cell keeps the fallback.
+    gated = (
+        "sport === 'NFL'\n"
+        "          ? fixtureForRow(row, slateGameIndex, h2hIndex)\n"
+        "          : slateGameFor(row, slateGameIndex)"
+    )
+    assert screen.count(gated) == 2
 
 
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")

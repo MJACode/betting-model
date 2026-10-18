@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 
 import type { MatchupGrade } from './matchup';
 import { pnlTone } from './tone';
+import { FONT_SIZE_MICRO } from './typeScale';
 
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
@@ -160,7 +161,7 @@ export const font = {
     // sub-caption line from inventing a third size nobody agreed to
     // (UX review, 2026-09-05).
     nano: 10,
-    micro: 11,
+    micro: FONT_SIZE_MICRO,
     caption: 12,
     footnote: 13,
     body: 15,

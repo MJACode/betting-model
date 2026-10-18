@@ -15,6 +15,7 @@
  * list. Matt signs that list off; do not paraphrase it in the component.
  */
 import { nflPositionGroup, type NflPositionGroup } from './positionVsOpponent';
+import { FONT_SIZE_MICRO } from './typeScale';
 
 /** Must match the `< 8` / `>= 8` cuts in position_defense_ranks_nfl. */
 export const BLEND_UNTIL_TEAM_GAMES = 8;
@@ -24,7 +25,7 @@ export const BLEND_UNTIL_TEAM_GAMES = 8;
  *  cutoff stacked every phone at the default size. */
 export const ATD_STACK_FONT_SCALE = 1.3;
 
-/** "MATCHUP" at 11pt semibold, letterSpacing 0. Measured in Inter. */
+/** "MATCHUP" at FONT_SIZE_MICRO semibold, letterSpacing 0. Measured in Inter. */
 export const ATD_MATCHUP_WORD_W = 57;
 /** The sort arrow beside the header word. */
 export const ATD_HEADER_ARROW_W = 9;
@@ -35,13 +36,17 @@ export const ATD_HEADER_ARROW_W = 9;
  * out of `columnPt`. At scale 1.3 the row stacks and the column stops being
  * the limit.
  */
-export function matchupHeaderFontSize(fontScale: number, columnPt = ATD_MATCHUP_W): number {
+export function matchupHeaderFontSize(
+  fontScale: number,
+  columnPt = ATD_MATCHUP_W,
+  base = FONT_SIZE_MICRO,
+): number {
   const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
   const room = columnPt - ATD_HEADER_ARROW_W;
   const natural = ATD_MATCHUP_WORD_W * scale;
-  const base = 11;
-  if (room <= 0 || natural <= room) return base;
-  return base * (room / natural);
+  const size = Number.isFinite(base) && base > 0 ? base : FONT_SIZE_MICRO;
+  if (room <= 0 || natural <= room) return size;
+  return size * (room / natural);
 }
 
 /** The board's column widths. Hit % 40, Matchup 66, Best price 62. */
@@ -174,13 +179,49 @@ export function tierForRank(rank: number | null | undefined): { tier: MatchupTie
 }
 
 /**
- * Count from the nearer end of the ranked defenses. Rank 3 of 32 is
- * "3rd easiest". Rank 30 of 32 is "3rd toughest". A tie (equal distance)
- * stays on the easy end. Missing team count uses 32.
+ * 1 plus how many peers allow strictly fewer. SQL `rank()` gives every member
+ * of a tie the easiest number, so `teamsRanked - rank + 1` counts those peers
+ * as if they were tougher. Six defenses at zero, all rank 27 of 32, have
+ * nobody strictly below them: this returns 1.
  */
-export function rankLine(rank: number, teamsRanked?: number | null): string {
+export function toughEndRank(rank: number, peers: Iterable<{ rank: number | null }>): number {
+  let fewer = 0;
+  for (const peer of peers) {
+    if (peer.rank != null && peer.rank > rank) fewer += 1;
+  }
+  return fewer + 1;
+}
+
+/** Defenses in one position group. Keys are `defenseKey(group, team)`. */
+export function ranksInGroup(ranks: Iterable<[string, DefenseRank]>, group: string): DefenseRank[] {
+  const prefix = `${group.toUpperCase()}|`;
+  const out: DefenseRank[] = [];
+  for (const [key, row] of ranks) {
+    if (key.startsWith(prefix)) out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Count from the nearer end of the ranked defenses. Rank 3 of 32 is
+ * "3rd easiest". Rank 30 of 32 is "3rd toughest". A tie at equal distance
+ * stays on the easy end. Missing team count uses 32.
+ *
+ * `fromToughEnd` is `toughEndRank` for the position group. Omit it and a
+ * unique rank keeps `teamsRanked - rank + 1`. A tie at rank 1 stays
+ * "1st easiest" either way.
+ */
+export function rankLine(
+  rank: number,
+  teamsRanked?: number | null,
+  fromToughEnd?: number | null,
+): string {
   const listed = teamsRanked != null && teamsRanked >= rank ? teamsRanked : Math.max(rank, 32);
-  const fromTough = listed - rank + 1;
+  const fromFormula = listed - rank + 1;
+  const fromTough =
+    fromToughEnd != null && Number.isFinite(fromToughEnd) && fromToughEnd >= 1
+      ? fromToughEnd
+      : fromFormula;
   if (rank <= fromTough) return `${ordinal(rank)} easiest`;
   return `${ordinal(fromTough)} toughest`;
 }
@@ -300,6 +341,8 @@ export function buildAnytimeMatchup(args: {
   status: 'loading' | 'error' | 'ok';
   placement: MatchupPlacement;
   rank: DefenseRank | null;
+  /** The position group's ranks. A bottom tie counts from this list. */
+  groupRanks?: readonly { rank: number | null }[] | null;
 }): AnytimeMatchupView {
   // A bye, a missing game, a known absence, or no position does not need a
   // rank. Those stay labeled when the fetch is still running or has failed.
@@ -313,7 +356,12 @@ export function buildAnytimeMatchup(args: {
   if (gap) return gapView(gap);
   const hit = tierForRank(args.rank!.rank);
   if (!hit || !group || args.rank!.rank == null) return gapView('too_early');
-  const line = rankLine(args.rank!.rank, args.rank!.teamsRanked);
+  const peers = args.groupRanks;
+  const line = rankLine(
+    args.rank!.rank,
+    args.rank!.teamsRanked,
+    peers && peers.length > 0 ? toughEndRank(args.rank!.rank, peers) : null,
+  );
   return {
     kind: 'rank',
     tier: hit.tier,

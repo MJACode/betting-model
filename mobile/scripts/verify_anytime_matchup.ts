@@ -7,6 +7,7 @@
  * screen is allowed to show. The screen reads ATD_COPY; it does not invent
  * a second wording.
  */
+import { FONT_SIZE_MICRO } from '../src/lib/typeScale';
 import {
   ATD_COPY,
   ATD_HEADER_ARROW_W,
@@ -29,6 +30,8 @@ import {
   nextMatchupSort,
   ordinal,
   rankLine,
+  ranksInGroup,
+  toughEndRank,
   matchupHeaderFontSize,
   stackedMatchupLine,
   tierFloorLabel,
@@ -46,10 +49,11 @@ check('blend window is 8 team games', BLEND_UNTIL_TEAM_GAMES === 8);
 check('metrics stack at font scale 1.3', ATD_STACK_FONT_SCALE === 1.3);
 check(
   'MATCHUP stays inside 66pt below the stack',
-  matchupHeaderFontSize(1) === 11
-    && matchupHeaderFontSize(1.2) < 11
-    && ATD_MATCHUP_WORD_W * (matchupHeaderFontSize(1.2) / 11) * 1.2 + ATD_HEADER_ARROW_W <= ATD_MATCHUP_W + 0.01,
+  matchupHeaderFontSize(1) === FONT_SIZE_MICRO
+    && matchupHeaderFontSize(1.2) < FONT_SIZE_MICRO
+    && ATD_MATCHUP_WORD_W * (matchupHeaderFontSize(1.2) / FONT_SIZE_MICRO) * 1.2 + ATD_HEADER_ARROW_W <= ATD_MATCHUP_W + 0.01,
 );
+check('the header size is the shared micro constant', FONT_SIZE_MICRO === 11 && matchupHeaderFontSize(1, ATD_MATCHUP_W, FONT_SIZE_MICRO) === FONT_SIZE_MICRO);
 check('columns are Hit 40, Matchup 66, Price 62', ATD_HIT_W === 40 && ATD_MATCHUP_W === 66 && ATD_ODDS_W === 62);
 
 check('1st 2nd 3rd 4th', ordinal(1) === '1st' && ordinal(2) === '2nd' && ordinal(3) === '3rd' && ordinal(4) === '4th');
@@ -68,6 +72,16 @@ check('rank 3 of 32 reads 3rd easiest', rankLine(3, 32) === '3rd easiest');
 check('rank 30 of 32 reads 3rd toughest', rankLine(30, 32) === '3rd toughest');
 check('rank 32 of 32 reads 1st toughest', rankLine(32, 32) === '1st toughest');
 check('the midpoint stays on the easy end', rankLine(16, 32) === '16th easiest' && rankLine(17, 32) === '16th toughest');
+const sixAtZero = Array.from({ length: 6 }, () => ({ rank: 27 as number | null }));
+check(
+  'six defenses tied at zero read 1st toughest',
+  toughEndRank(27, sixAtZero) === 1 && rankLine(27, 32, toughEndRank(27, sixAtZero)) === '1st toughest',
+);
+check(
+  'a tie at rank 1 stays 1st easiest',
+  rankLine(1, 32) === '1st easiest'
+    && rankLine(1, 32, toughEndRank(1, [{ rank: 1 }, { rank: 1 }, { rank: 1 }])) === '1st easiest',
+);
 check('Very tough is not a filter chip', !TIER_FLOORS.includes('Very tough') && TIER_FLOORS.length === 4);
 check('the Tough chip says Tough or easier', tierFloorLabel('Tough') === 'Tough or easier' && tierFloorLabel('Great') === 'Great or easier');
 
@@ -144,6 +158,27 @@ const rank: DefenseRank = {
   teamsRanked: 32,
 };
 const view = buildAnytimeMatchup({ status: 'ok', placement: place, rank });
+const tiedZero: DefenseRank = {
+  defense: 'MIA',
+  avgAllowed: 0,
+  playerGames: 8,
+  seasonTeamGames: 8,
+  windowTeamGames: 8,
+  blended: false,
+  rank: 27,
+  teamsRanked: 32,
+};
+const tiedGroup = ['MIA', 'BUF', 'NYJ', 'NE', 'KC', 'DAL'].map((defense) => ({ ...tiedZero, defense }));
+const tiedView = buildAnytimeMatchup({
+  status: 'ok',
+  placement: place,
+  rank: tiedGroup[0],
+  groupRanks: tiedGroup,
+});
+check(
+  'a loaded group of six zeros says 1st toughest',
+  tiedView.kind === 'rank' && tiedView.line === '1st toughest' && tiedView.tier === 'Very tough',
+);
 check('a rank view says the tier and the line', view.kind === 'rank' && view.tier === 'Great' && view.line === '3rd easiest' && view.bars === 5);
 check(
   'the spoken line names the group and skips the bar count',
@@ -172,6 +207,10 @@ check('college anytime TD keeps the grade', !isAnytimeTdBoard('NCAAF', 'rush_rec
 check('another NFL prop keeps the grade', !isAnytimeTdBoard('NFL', 'receiving_yards') && !isAnytimeTdBoard('NFL', null));
 
 check('the key ignores case', defenseKey('wr', 'mia') === 'WR|MIA');
+check(
+  'a group read keeps that group only',
+  ranksInGroup([['WR|MIA', tiedZero], ['RB|BUF', { ...tiedZero, defense: 'BUF' }]], 'WR').map((r) => r.defense).join(',') === 'MIA',
+);
 check(
   'one blended defense turns the board note on',
   anyBlended([rank, { ...rank, defense: 'NYJ', blended: true }]) && !anyBlended([rank]),

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: next-game fallback is NFL only; a tough-end tie reads 1st toughest; the stack check allows 1.2999999 |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD stacks at font scale 1.3; the stacked header is two lines and the matchup line sits under the name |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD headers use the column width; large text is one left-aligned line; the row stacks above the default text size |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD tiers are Great through Very tough; the cell opens the explainer; columns are 40/66/62 and stack only at large text |
