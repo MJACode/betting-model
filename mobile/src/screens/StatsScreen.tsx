@@ -207,8 +207,10 @@ import {
   THRESHOLD_BUBBLE_W,
   THRESHOLD_TAP_MAX_DIST,
   THRESHOLD_TAP_MAX_MS,
+  THRESHOLD_TYPE_HINT,
   thresholdBubbleLabel,
   thresholdControlsScroll,
+  thresholdFieldWidth,
   type BubbleBox,
   type RulerScale,
 } from '@/lib/lineRuler';
@@ -436,6 +438,10 @@ export function StatsScreen() {
   // Shown under the ruler after a typed line is clamped or refused. Navy,
   // not a toast: the correction belongs next to the number it changed.
   const [lineNotice, setLineNotice] = useState<string | null>(null);
+  // Android and web have no keyboard accessory, so Cancel and Done render in
+  // the row. iOS keeps them on the keyboard. The ruler fills the callbacks
+  // while a draft is open.
+  const [lineEditBar, setLineEditBar] = useState<{ cancel: () => void; commit: () => void } | null>(null);
   const { width: windowWidth, height: windowHeight, fontScale: windowFontScale } = useWindowDimensions();
   const lineScroll = thresholdControlsScroll(windowFontScale, windowWidth, windowHeight);
   const [modeOpen, setModeOpen] = useState<boolean>(false);
@@ -2388,6 +2394,7 @@ export function StatsScreen() {
           enabled={lineScroll}
           maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
         >
+          <View style={styles.lineStack}>
           <View style={styles.lineRow}>
             {/* Locked to the one side the member's books actually sell. It
                 loses the chevron AND the chip's fill and border, because a
@@ -2448,6 +2455,7 @@ export function StatsScreen() {
               a11yLabel={`${stat?.label ?? ''} line`}
               statLabel={stat?.label ?? ''}
               onNotice={setLineNotice}
+              onEditBar={setLineEditBar}
               // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
               // that line in Over/Under). Clamping happens on commit, against
               // the stops VoiceOver can step — LineRuler's `hi`, not
@@ -2471,12 +2479,16 @@ export function StatsScreen() {
               </Text>
             ) : null}
           </View>
+          {Platform.OS !== 'ios' && lineEditBar ? (
+            <ThresholdDoneBar onCancel={lineEditBar.cancel} onDone={lineEditBar.commit} />
+          ) : null}
           {lineNotice ? (
             <View style={styles.lineNotice} accessibilityLiveRegion="polite">
               <Ionicons name="information-circle-outline" size={14} color={colors.tint} />
               <Text style={styles.lineNoticeText}>{lineNotice}</Text>
             </View>
           ) : null}
+          </View>
         </ThresholdChromeScroll>
       ) : null}
 
@@ -3158,6 +3170,7 @@ function LineRuler({
   a11yLabel,
   statLabel = '',
   onNotice,
+  onEditBar,
   parseTyped,
 }: {
   a11yLabel: string;
@@ -3165,6 +3178,9 @@ function LineRuler({
   statLabel?: string;
   /** A clamp or a refused draft. Null clears it. */
   onNotice?: (message: string | null) => void;
+  /** Android and web draw Cancel and Done under the whole row. iOS ignores
+   *  this and uses the keyboard accessory. Null when the field is closed. */
+  onEditBar?: (bar: { cancel: () => void; commit: () => void } | null) => void;
   /** Reads a typed line into a stop, or null to refuse it. UNCLAMPED — the
    *  commit decides min / max. When given, the centre bubble is the field
    *  (Matt, 2026-10-09: "need to allow user to edit manually"). A typed
@@ -3354,6 +3370,25 @@ function LineRuler({
     scrollToValue(openedValue.current);
     Keyboard.dismiss();
   };
+  // The row's bar calls these after the draft has changed. Refs, so the
+  // effect below does not re-bind on every keystroke.
+  const commitRef = useRef(commitDraft);
+  const cancelRef = useRef(cancelDraft);
+  commitRef.current = commitDraft;
+  cancelRef.current = cancelDraft;
+  const fieldOpen = draft != null;
+  useEffect(() => {
+    if (Platform.OS === 'ios' || !onEditBar) return;
+    if (!fieldOpen) {
+      onEditBar(null);
+      return;
+    }
+    onEditBar({
+      cancel: () => cancelRef.current(),
+      commit: () => commitRef.current(),
+    });
+    return () => onEditBar(null);
+  }, [fieldOpen, onEditBar]);
   const onType = (text: string) => {
     setForceSelect(false);
     setDraft(text);
@@ -3546,7 +3581,12 @@ function LineRuler({
                   selectTextOnFocus
                   maxLength={6}
                   inputAccessoryViewID={Platform.OS === 'ios' ? RULER_ACCESSORY_ID : undefined}
-                  style={[styles.thresholdBubble, styles.tickValueActive, styles.thresholdInput]}
+                  style={[
+                    styles.thresholdBubble,
+                    styles.tickValueActive,
+                    styles.thresholdInput,
+                    { width: thresholdFieldWidth(fontScale), maxWidth: thresholdFieldWidth(fontScale) },
+                  ]}
                   accessibilityLabel={`Type a ${a11yLabel}, now ${describeOf(value)}`}
                 />
               ) : (
@@ -3569,6 +3609,7 @@ function LineRuler({
             accessible
             accessibilityRole="button"
             accessibilityLabel={thresholdBubbleLabel(faceOf(value), statLabel)}
+            accessibilityHint={THRESHOLD_TYPE_HINT}
             onAccessibilityTap={openDraft}
             pointerEvents="none"
             style={[
@@ -3585,9 +3626,6 @@ function LineRuler({
           />
         ) : null}
       </View>
-      {draft != null && Platform.OS !== 'ios' ? (
-        <ThresholdDoneBar onCancel={cancelDraft} onDone={commitDraft} />
-      ) : null}
       {parseTyped && Platform.OS === 'ios' ? (
         <InputAccessoryView nativeID={RULER_ACCESSORY_ID}>
           <ThresholdDoneBar
@@ -4357,6 +4395,12 @@ const styles = StyleSheet.create({
   },
 
   // ── Line picker ──
+  // The row, and on Android and web the Cancel/Done bar under it. The bar
+  // is a sibling of the row so it is as wide as the row, not as wide as the
+  // ruler column between the direction pill and the book line.
+  lineStack: {
+    alignSelf: 'stretch',
+  },
   lineRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4472,9 +4516,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
   },
+  // Width is thresholdFieldWidth(fontScale), applied on the field. A bare
+  // width here is the 1× bubble; the live style replaces it so 2× text does
+  // not keep a 64pt box or fall back to the browser's default input width.
   thresholdInput: {
+    width: THRESHOLD_BUBBLE_W,
+    maxWidth: THRESHOLD_BUBBLE_W,
     textAlign: 'center',
     paddingVertical: 0,
+    alignSelf: 'center',
+    flexGrow: 0,
   },
   // Sits on the bubble for VoiceOver. pointerEvents none: a real button
   // here swallowed the drag. Activation is onAccessibilityTap.
@@ -4492,6 +4543,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
+    alignSelf: 'stretch',
     gap: spacing.lg,
     backgroundColor: colors.bgGrouped,
     borderTopWidth: StyleSheet.hairlineWidth,

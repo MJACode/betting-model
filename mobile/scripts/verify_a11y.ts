@@ -669,6 +669,11 @@ check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
+check('Stats threshold bubble: the name is the label and the gesture is the hint',
+  /accessibilityLabel=\{thresholdBubbleLabel\(faceOf\(value\), statLabel\)\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityHint=\{THRESHOLD_TYPE_HINT\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /return `Threshold \$\{value\}`;/.test(read('src/lib/lineRuler.ts')) &&
+    /export const THRESHOLD_TYPE_HINT = 'double tap to type a value';/.test(read('src/lib/lineRuler.ts')));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
   ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'RecordInfoSheet', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);

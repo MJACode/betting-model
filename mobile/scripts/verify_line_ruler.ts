@@ -48,8 +48,10 @@ import {
   stopAt,
   stopCount,
   stopIndexOf,
+  THRESHOLD_TYPE_HINT,
   thresholdBubbleLabel,
   thresholdControlsScroll,
+  thresholdFieldWidth,
   type RulerScale,
 } from '../src/lib/lineRuler';
 import { hitModeLineLabel } from '../src/lib/hitMode';
@@ -383,6 +385,7 @@ for (const def of STAT_CATALOG) {
     screen.includes('accessibilityRole="adjustable"') &&
       screen.includes("label: 'Type a line'") &&
       screen.includes('thresholdBubbleLabel(faceOf(value), statLabel)') &&
+      screen.includes('accessibilityHint={THRESHOLD_TYPE_HINT}') &&
       screen.includes('onAccessibilityTap={openDraft}') &&
       screen.includes('accessibilityLabel="Cancel"') &&
       screen.includes('accessibilityLabel="Done"'),
@@ -412,6 +415,23 @@ for (const def of STAT_CATALOG) {
       /lineNotice: \{[^}]*gap: spacing\.xs/.test(screen) &&
       screen.includes('bubblePressed && styles.pressed') &&
       screen.includes('setBubblePressed(false)'),
+  );
+  check(
+    'the editing field is the bubble width, grown with the text',
+    screen.includes('width: thresholdFieldWidth(fontScale)') &&
+      screen.includes('maxWidth: thresholdFieldWidth(fontScale)') &&
+      /thresholdInput: \{[^}]*width: THRESHOLD_BUBBLE_W/.test(screen) &&
+      /thresholdInput: \{[^}]*alignSelf: 'center'/.test(screen) &&
+      /thresholdInput: \{[^}]*flexGrow: 0/.test(screen),
+  );
+  const rulerFn = screen.slice(screen.indexOf('function LineRuler'), screen.indexOf('function StatSegmentRow'));
+  check(
+    'Android and web draw Cancel and Done across the row, not inside the ruler column',
+    screen.includes('styles.lineStack') &&
+      screen.includes("Platform.OS !== 'ios' && lineEditBar") &&
+      /doneBar: \{[^}]*alignSelf: 'stretch'/.test(screen) &&
+      rulerFn.includes('InputAccessoryView') &&
+      !rulerFn.includes("Platform.OS !== 'ios'"),
   );
   check(
     '2x text or landscape scrolls the line control',
@@ -468,9 +488,16 @@ for (const def of STAT_CATALOG) {
   check('a point inside the bubble hits', pointInBubble(50, 30, box));
   check('a point outside the bubble misses', !pointInBubble(10, 30, box));
   check(
-    'the bubble is announced with the face and the stat',
-    thresholdBubbleLabel('225', 'Pass Yards') === 'Threshold 225 Pass Yards, double tap to type a value',
+    'the bubble name is the face and the stat',
+    thresholdBubbleLabel('225', 'Pass Yards') === 'Threshold 225 Pass Yards',
   );
+  check(
+    'the gesture is the hint, not the name',
+    THRESHOLD_TYPE_HINT === 'double tap to type a value' &&
+      !thresholdBubbleLabel('225', 'Pass Yards').includes('double tap'),
+  );
+  check('the field is 64pt at 1x and 128pt at 2x', thresholdFieldWidth(1) === 64 && thresholdFieldWidth(2) === 128);
+  check('the field stops growing past 2x', thresholdFieldWidth(3) === 128 && thresholdFieldWidth(0) === 64);
   check('2x text scrolls the line control', thresholdControlsScroll(2, 390, 844));
   check('landscape scrolls the line control', thresholdControlsScroll(1, 844, 390));
   check('portrait at 1x does not', !thresholdControlsScroll(1, 390, 844));

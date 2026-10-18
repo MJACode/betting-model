@@ -316,11 +316,29 @@ export function pointInBubble(x: number, y: number, box: BubbleBox): boolean {
   return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
 }
 
-/** VoiceOver name for the bubble. The stat label is the unit ("Pass Yards"). */
+/** VoiceOver name for the bubble. The stat label is the unit ("Pass Yards").
+ *  The gesture lives in THRESHOLD_TYPE_HINT, not in this name: VoiceOver
+ *  reads a hint after the name, and a name that already says "double tap"
+ *  says it twice. */
 export function thresholdBubbleLabel(face: string, statLabel: string): string {
   const unit = statLabel.trim();
   const value = unit.length > 0 ? `${face} ${unit}` : face;
-  return `Threshold ${value}, double tap to type a value`;
+  return `Threshold ${value}`;
+}
+
+/** How the bubble is activated. A hint, not part of the name. */
+export const THRESHOLD_TYPE_HINT = 'double tap to type a value';
+
+/** Width of the editing field.
+ *
+ * A web TextInput with no width uses the browser's default (about 20
+ * characters: 222pt, and 424pt once the font doubles). That box covered the
+ * strip and the direction control. The field is the bubble's width, grown
+ * with the text the same way the strip grows, and capped at 2× so it stays
+ * a bubble. */
+export function thresholdFieldWidth(fontScale: number): number {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  return Math.round(THRESHOLD_BUBBLE_W * Math.min(scale, 2));
 }
 
 /**
