@@ -1104,3 +1104,106 @@ Expected passes by chance at the interval alone: about 2.5% of cells, reported b
 **Settlement:** first-half and first-quarter markets settle on the period line scores
 (`nba_period_scores`), never on the full-game score. Team totals settle on the team's own score.
 **A cell that passes is built LIVE** as a pre-game model.
+
+### 8.1 P1, the market-anchored model: choices fixed before any P1 cell was graded (2026-10-18)
+
+Section 8 names the recipe; these lines fix everything it leaves open. Lab:
+`scripts/nba_game4_p1.py`. None of them was chosen from a betting result.
+
+**Seasons**
+
+- **Full game:** 2021-22 → 2025-26 graded and pooled (2025-26 is still reported apart as the
+  confirmation season). 2020-21 is a fitting season only: no earlier priced season exists to
+  fit it on.
+- **First half, first quarter, team totals:** the first season the cache prices is a fitting
+  season only, for the same reason. With 2023-24 in the cache, 2024-25 and 2025-26 are graded.
+  With the cache as it stood on 2026-10-18 (2024-25 and 2025-26 only), 2025-26 is the only
+  graded season. The house standard's "seasons mostly positive" needs two seasons with 30 or
+  more bets, so every one of these cells fails it until 2023-24 is in. That is the data, not a
+  miss.
+- `--full` reads which of these seasons the cache holds from row counts, requires all eight
+  markets to hold the same seasons, and refuses a season priced on fewer than 90% of its games
+  (a purchase still running).
+- A model is fitted only on 300 or more training rows. Fewer means no model and no bet that
+  season.
+
+**The model**
+
+- One model per market per decision point, trained on the same decision point's rows from
+  earlier seasons. Team totals: one model for both teams' markets, one row per team, with a
+  home flag.
+- **Moneylines**, every period: `OffsetLogit` and `choose_C` from
+  `models/nhl_moneyline_anchored.py`, imported unchanged. The offset is the log-odds of the
+  market's no-vig home price, unpenalised. Penalty grid 0.003 to 0.3. The penalty is chosen on
+  the last three training seasons that have 800 or more earlier rows, each scored by a fit on
+  the seasons before it, by mean log loss. With no such season it is 0.003, the grid's first
+  value.
+- First-half and first-quarter moneylines are trained on decided periods only. A level period
+  voids the two-way bet, so the no-vig price is the home side's chance given a winner.
+- **Spreads, totals and team totals** (the centre): the same fit, on squared error.
+  - Target: (result − the market's centre) divided by its spread on the training rows.
+  - Inputs standardised on the training rows. Intercept unpenalised. Penalty and grid as above.
+  - The penalty is chosen by the same rule, scored on mean squared error.
+  - The model's centre is the market's centre plus the fitted move, in points.
+  - It is priced through the same distribution the market's centre was solved through. A
+    model with nothing to say returns the market's fair line exactly.
+- **The market's number at T** is the shared harness's: Pinnacle's no-vig where it quotes,
+  else the deciding books' median. A centre is solved through the spread of results around
+  Pinnacle's last price on seasons before the graded one. For the derivative markets that last
+  price is the purchase itself (tip − 60).
+
+**Inputs** (each dated at or before T, built the same way for training and graded rows)
+
+- **Ratings:** the second search's projected home margin and total at T. These are box-score
+  plus-minus plus adjusted plus-minus from lineup segments, times projected minutes from the
+  injury report (`scripts/nba_game2_projection.py`, its own walk-forward models).
+- **Availability:** that projection's absence terms at T: minutes missing by player tier,
+  starters out, Questionable or Doubtful exposure, first game back. Home minus away for margin
+  models, home plus away for totals. Nobody missing reads 0.
+- **Shooting luck:** the second search's gap (luck-adjusted minus raw, margin and total), from
+  the season's games before the date. It reads 0 until both teams have 10 games this season.
+- **Pace:** each team's as-of pace from the projection, home plus away.
+- **Schedule** (`features/nba_schedule_features.py`): each team's rest days, back-to-back,
+  third game in four nights, game number on the current road trip, miles travelled, time-zone
+  shift; whether the venue is at altitude. Not the road trip's total length, which reads the
+  schedule as it was played. Not national TV, which is filled in for three seasons only.
+- **Team totals:** the team's own projected points ((total ± margin) / 2) and its own luck gap,
+  its own and its opponent's absences and schedule, both paces, and the home flag.
+- **Scaled to the period:** for the first half and first quarter, every input measured in
+  points is multiplied by the period's share of full-game points, from period scores of
+  seasons before the graded one. Within one fit that share is a constant, so after
+  standardising it moves no prediction. It only states the inputs in the period's points.
+- The first-half, first-quarter and team-total models decide at the per-game purchase (tip − 60,
+  inside D's 45–75 minutes). The projection is recomputed at that moment, not taken from the
+  full-game D fetch.
+
+**Population**
+
+- The 10-game early-season rule (CLAUDE.md §3) is not applied as a filter. Section 8 registers
+  none, and the projection works from the first game on prior-season ratings, which is §3's own
+  baseline. The bets in either team's first 10 games are counted beside every cell, so that
+  window can be read on its own.
+- A game with no model number (no projection, or no market number at T) is not in the cell's
+  population, and so not in its blind comparison either.
+
+**Placebo**
+
+- 20 runs, seed = run number. The model's move off the market (in log-odds for moneylines, in
+  points for centres) is shuffled between games on the same date in the same market. Each
+  shuffled move is added to that game's own market number and re-priced. Shuffling the whole
+  probability would hand each game another game's market price, which any model beats.
+
+**Cells**
+
+- Team totals form one group per side and cut (over and under × 4 cuts = 8 cells), both teams'
+  markets pooled. One game can carry a bet on each team's total. Every bet keeps its real
+  market.
+- 72 full-game + 48 first-half and first-quarter + 8 team-total = **128**.
+
+**Smoke run**
+
+- 2020-21 has no earlier priced season. So `--smoke` fits on 2020-21 games dated before
+  2021-03-10 (the day the season's second half began) and grades those from that date on. It
+  checks the plumbing and is never a result. With one fitting season the penalty falls to
+  0.003.
+- The first-half, first-quarter and team-total cells run on synthetic games only.
