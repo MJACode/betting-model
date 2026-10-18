@@ -19,7 +19,10 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 merged origin/master `d67b75a6` (#992); session logs keep both sides, newest first; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, live NFL wind card gates CREATE/RLS/REVOKE on schema_is_current so the poll does not reload PostgREST; a missing table still gets created, then read |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #991 review: verify_unpriced_pnl Yesterday block is 2.00u on 2.40u risked; DayStakeStats no longer stores units in profitFlat; the script runs in pytest |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Yesterday uses Discord's posted stake (1u to win, risk capped at 3); the 2026-10-17 screenshot was the flat $100 book (+9.7u, +42.1%) on the same 15-8 |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, NHL: "LAK ML" voided (contradicted "BOS (Regulation)" on one game); the regulation model decides in the moneyline model's game-day window; one game never gets two picks that cannot both win |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984 merged origin/master `9175740c` (#962, with #964/#983 already in that history); skater window totals follow the NHL stats views; published_record_units stays last |
 | 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, #984: the two-line odds caption is NHL only; a whole-number off-line sentence says Over 2, not 2.5 or more |

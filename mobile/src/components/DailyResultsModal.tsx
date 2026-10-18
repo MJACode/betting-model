@@ -13,17 +13,21 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
-import { addDays, formatAmerican, formatPctSigned, formatSignedUnits } from '@/lib/format';
+import { unitsSpeech } from '@/lib/a11y';
+import { addDays, formatAmerican } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
-import { flatPnl } from '@/lib/thresholds';
+import { postedPickUnits } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
-import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import {
   ALL_SPORTS,
+  dayRoiText,
+  dayUnitsText,
+  dayWinRateText,
   EMPTY_DAILY,
   scopeDailyResults,
   type DailyResults,
   type DayGameSummary,
+  type DayStakeStats,
   type ModelDayStats,
   type SportDayBreakdown,
 } from '@/lib/dailyResults';
@@ -259,13 +263,13 @@ export function DailyResultsModal({
             {scoped.record.picks > 0 ? (
               <View style={styles.hero}>
                 <Text style={styles.heroLabel}>
-                  {sportFilter === 'ALL' ? 'All models' : sportFilter} — flat-bet ROI
+                  {sportFilter === 'ALL' ? 'All models' : sportFilter} — return on bets
                 </Text>
                 <Text
-                  style={[styles.heroRoi, { color: hasPricedStake(scoped.record) ? roiColor(scoped.record.roiFlat) : colors.textSecondary }]}
-                  accessibilityLabel={hasPricedStake(scoped.record) ? undefined : 'ROI unavailable, no priced picks'}
+                  style={[styles.heroRoi, { color: scoped.record.risked > 0 ? roiColor(scoped.record.roi) : colors.textSecondary }]}
+                  accessibilityLabel={scoped.record.risked > 0 ? undefined : 'Return on bets unavailable'}
                 >
-                  {hasPricedStake(scoped.record) ? formatPctSigned(scoped.record.roiFlat) : '—'}
+                  {dayRoiText(scoped.record.risked, scoped.record.roi)}
                 </Text>
                 <Text style={styles.heroRecord}>{recordLine(scoped.record)}</Text>
                 {/* How the day splits. Both halves count identically — a live
@@ -278,21 +282,17 @@ export function DailyResultsModal({
                     {scoped.record.picks - scoped.live} pre-game · {scoped.live} in-play
                   </Text>
                 ) : null}
-                {unpricedOf(scoped.record) > 0 ? (
-                  <Text style={styles.splitNote}>
-                    {unpricedOf(scoped.record)} unpriced · not in the money
-                  </Text>
-                ) : null}
                 <View style={styles.heroStats}>
                   <HeroStat label="Picks" value={String(scoped.record.picks)} />
                   <HeroStat
                     label="Units"
-                    value={hasPricedStake(scoped.record) ? formatSignedUnits(scoped.record.profitFlat / 100) : '—'}
-                    color={hasPricedStake(scoped.record) ? unitsColor(scoped.record.profitFlat / 100) : colors.textSecondary}
+                    value={dayUnitsText(scoped.record.units)}
+                    color={unitsColor(scoped.record.units)}
                   />
                   <HeroStat
                     label="Win rate"
-                    value={formatPctSigned(scoped.record.winRate).replace('+', '')}
+                    value={dayWinRateText(scoped.record.wins, scoped.record.losses, scoped.record.winRate)}
+                    color={scoped.record.wins + scoped.record.losses > 0 ? undefined : colors.textSecondary}
                   />
                 </View>
                 {scoped.pending > 0 ? (
@@ -337,8 +337,11 @@ export function DailyResultsModal({
                   <View style={styles.sportHeader}>
                     <Text style={styles.sportName}>{s.sport}</Text>
                     {s.total.picks > 0 ? (
-                      <Text style={[styles.sportRoi, { color: hasPricedStake(s.total) ? roiColor(s.total.roiFlat) : colors.textSecondary }]}>
-                        {hasPricedStake(s.total) ? formatPctSigned(s.total.roiFlat) : '—'}
+                      <Text
+                        style={[styles.sportRoi, { color: s.total.risked > 0 ? roiColor(s.total.roi) : colors.textSecondary }]}
+                        accessibilityLabel={s.total.risked > 0 ? undefined : 'Return on bets unavailable'}
+                      >
+                        {dayRoiText(s.total.risked, s.total.roi)}
                       </Text>
                     ) : s.pending > 0 ? (
                       <Text style={styles.sportEmptyNote}>
@@ -346,7 +349,7 @@ export function DailyResultsModal({
                       </Text>
                     ) : (
                       <Text style={styles.sportEmptyNote}>
-                        {formatSignedUnits(s.total.profitFlat / 100)}
+                        {dayUnitsText(s.total.units)}
                       </Text>
                     )}
                   </View>
@@ -359,7 +362,7 @@ export function DailyResultsModal({
                     <Text style={styles.sportSub}>Signals fired — results not graded yet</Text>
                   ) : (
                     <Text style={styles.sportSub}>
-                      {recordLine(s.total)} · {formatSignedUnits(s.total.profitFlat / 100)}
+                      {recordLine(s.total)} · {dayUnitsText(s.total.units)}
                     </Text>
                   )}
                   {s.models.map((m) => (
@@ -405,8 +408,12 @@ export function DailyResultsModal({
             ) : null}
 
             <Text style={styles.footer}>
-              Settled BET picks, as posted. Results are in units — one
-              unit is one flat bet per pick. Open picks settle after their games go final.
+              Settled picks that Discord posted. Each pick risks the amount
+              needed to win 1 unit. At −110 that’s 1.1 units to win 1. Risk is
+              capped at 3 units, and a pick with no price counts as 1 unit. The
+              percentage is units won or lost divided by units risked. The Models
+              tab uses a flat $100 bet, so its percentages won’t match. Open
+              picks settle after their games go final.
             </Text>
           </ScrollView>
         )}
@@ -426,7 +433,7 @@ function HeroStat({ label, value, color }: { label: string; value: string; color
 }
 
 function ModelRow({ model }: { model: ModelDayStats }) {
-  const priced = hasPricedStake(model);
+  const priced = model.risked > 0;
   return (
     <View style={styles.modelRow}>
       <View style={styles.modelLeft}>
@@ -443,8 +450,11 @@ function ModelRow({ model }: { model: ModelDayStats }) {
           </Text>
         </View>
       </View>
-      <Text style={[styles.modelRoi, { color: priced ? roiColor(model.roiFlat) : colors.textSecondary }]}>
-        {priced ? formatPctSigned(model.roiFlat) : '—'}
+      <Text
+        style={[styles.modelRoi, { color: priced ? roiColor(model.roi) : colors.textSecondary }]}
+        accessibilityLabel={priced ? undefined : 'Return on bets unavailable'}
+      >
+        {dayRoiText(model.risked, model.roi)}
       </Text>
     </View>
   );
@@ -460,11 +470,11 @@ const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }>
 
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
-  // The row shows the same money the day's total added: flatPnl(pick).profit
-  // at the taken price. A stake of 0 means both prices were null, so the
-  // stored profit was filled in and is not shown.
-  const profit = flatPnl(pick).profit;
-  const unpriced = flatPnl(pick).staked === 0;
+  // The row shows the same money the day's total added: postedPickUnits.
+  const profit = postedPickUnits(pick).units;
+  const price = decisionOdds(pick);
+  const missingPrice = price == null;
+  const unitsLabel = unitsSpeech(dayUnitsText(profit));
   return (
     <View style={styles.modelRow}>
       <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>
@@ -476,18 +486,16 @@ function PickRow({ pick }: { pick: Pick }) {
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
-          {unpriced
-            ? ' · unpriced'
-            : decisionOdds(pick) != null
-              ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`
-              : ''}
+          {missingPrice
+            ? ' · no price'
+            : ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(price)}`}
         </Text>
       </View>
       <Text
-        style={[styles.modelRoi, { color: unpriced ? colors.textSecondary : unitsColor(profit / 100) }]}
-        accessibilityLabel={unpriced ? 'unpriced' : undefined}
+        style={[styles.modelRoi, { color: unitsColor(profit) }]}
+        accessibilityLabel={missingPrice ? `no price, ${unitsLabel}` : unitsLabel}
       >
-        {unpriced ? '—' : formatSignedUnits(profit / 100)}
+        {dayUnitsText(profit)}
       </Text>
     </View>
   );
@@ -537,25 +545,14 @@ function GameScoreRow({ game, showSport }: { game: DayGameSummary; showSport: bo
   );
 }
 
-function recordLine(s: CustomModelStats): string {
+function recordLine(s: DayStakeStats): string {
   const base = `${s.wins}–${s.losses}`;
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
 }
 
-function unpricedOf(s: { picks: number; stakedFlat: number }): number {
-  return s.picks - Math.round(s.stakedFlat / 100);
-}
-
-function hasPricedStake(s: { stakedFlat: number }): boolean {
-  return s.stakedFlat > 0;
-}
-
-/** Units for a total that has graded picks. An all-unpriced total is an em
- *  dash, the same as the Models row; a priced push stays 0.0u. */
-function stakeLine(s: CustomModelStats): string {
-  const units = hasPricedStake(s) ? formatSignedUnits(s.profitFlat / 100) : '—';
-  const n = unpricedOf(s);
-  return n > 0 ? `${units} · ${n} unpriced` : units;
+/** Units beside a record line. A push-only total is 0.00u, not a dash. */
+function stakeLine(s: DayStakeStats): string {
+  return dayUnitsText(s.units);
 }
 
 // Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
@@ -566,13 +563,10 @@ function roiColor(roi: number): string {
   return pnlColor(roi, 1, 100);
 }
 
-/** Colour a units figure by what formatSignedUnits prints, so a day that
- *  rounds to "0.0u" never reads as a win or a loss. */
+/** Colour a units figure by what dayUnitsText prints (2 dp), so a day that
+ *  rounds to "0.00u" never reads as a win or a loss. */
 function unitsColor(units: number): string {
-  // The value formatSignedUnits prints (magnitude rounded half-up to 1 dp,
-  // then the sign), toned in ink, not the bright heat-map fills (audit H2).
-  const shown = Math.sign(units) * (Math.round(Math.abs(units) * 10) / 10);
-  return pnlColor(shown, 1);
+  return pnlColor(units, 2);
 }
 
 function prettyDate(date: string): string {
