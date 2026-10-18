@@ -434,3 +434,28 @@ def test_the_96_derivative_cells_run_on_synthetic_games():
     br = pt.vis_main[pt.vis_main["book"] == "betrivers"]
     assert "spreads_h1" not in set(br["market"])
     assert not br.duplicated(["game_id", "market"]).any() and "team_totals_home" in set(br["market"])
+
+
+def test_the_shared_main_number_view_keeps_one_number_per_book_and_no_ladder():
+    """P1 and P3 import this (sections 8.1 and 8.3, 2026-10-18)."""
+    g = _game("G", 0, 110, 100)
+    q = pd.DataFrame(list(reversed(_ladder())) + [
+        _q(g, "pinnacle", "team_totals_home", 60, 111.5, -110, -110),
+        _q(g, "hardrockbet", "spreads_h1", 60, 1.5, -165, 130),
+        _q(g, "fanduel", "spreads_h1", 60, -2.0, -110, -110),
+        _q(g, "draftkings", "spreads_h1", 60, -2.0, -110, -110)])
+    times = pd.DataFrame({"game_id": ["G"], "T": [g["tip"] - pd.Timedelta(minutes=60)]})
+    v = P.visible_numbers(q, times)
+    assert not v.duplicated(["game_id", "market", "book"]).any()
+    got = v.set_index(["market", "book"])["line"].to_dict()
+    assert got[("team_totals_home", "betrivers")] == 111.5
+    assert ("spreads_h1", "hardrockbet") not in got
+
+
+def test_full_refuses_without_a_bets_folder(monkeypatch, tmp_path):
+    _no_real_load(monkeypatch)
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.setenv("NBA_GAME2_RESULTS", str(tmp_path))
+    monkeypatch.delenv("NBA_GAME2_BETS", raising=False)
+    with pytest.raises(SystemExit, match="NBA_GAME2_BETS"):
+        P.run("full")

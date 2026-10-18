@@ -432,7 +432,59 @@ def test_the_graded_run_refuses_without_the_go_flag(monkeypatch, tmp_path):
 
 def test_the_graded_run_refuses_without_a_named_results_folder(monkeypatch, tmp_path):
     monkeypatch.setenv(M.GO_ENV, "1")
+    monkeypatch.setenv("NBA_GAME2_BETS", str(tmp_path / "bets"))
     monkeypatch.delenv(M.RESULTS_ENV, raising=False)
     assert any(M.RESULTS_ENV in x for x in M.full_refusals(tmp_path))
     monkeypatch.setenv(M.RESULTS_ENV, str(tmp_path))
     assert not any(M.RESULTS_ENV in x for x in M.full_refusals(tmp_path))
+
+
+def _rung(book, market, line, pa, pb, tip, gid="G", lead=60):
+    return {"game_id": gid, "season": 2026, "game_date": "2024-01-15", "tip": tip,
+            "market": market, "book": book, "fetch_at": tip - pd.Timedelta(minutes=lead),
+            "snapshot_at": tip - pd.Timedelta(minutes=lead + 5), "line": float(line),
+            "price_a": float(pa), "price_b": float(pb), "coherent": True}
+
+
+def _ladder_quotes(tip):
+    """BetRivers hangs three team-total numbers in one purchase, its main one
+    (prices closest to even) first in the file; Hard Rock hangs a first-half
+    total 3 points from the deciding books' median."""
+    return pd.DataFrame([
+        _rung("betrivers", "team_totals_home", 111.5, -112, -108, tip),
+        _rung("betrivers", "team_totals_home", 109.5, -190, 150, tip),
+        _rung("betrivers", "team_totals_home", 114.5, 150, -190, tip),
+        _rung("pinnacle", "team_totals_home", 111.5, -110, -110, tip),
+        _rung("fanduel", "team_totals_home", 111.5, -110, -110, tip),
+        _rung("hardrockbet", "totals_h1", 117.5, 135, -165, tip),
+        _rung("fanduel", "totals_h1", 114.5, -110, -110, tip),
+        _rung("draftkings", "totals_h1", 114.5, -110, -110, tip),
+        _rung("pinnacle", "totals_h1", 114.5, -110, -110, tip)])
+
+
+def _offered(off):
+    return {k: sorted(set(v)) for k, v in off.groupby(["market", "book"])["line"]}
+
+
+def test_a_book_listing_several_numbers_is_offered_at_its_main_number_only(monkeypatch):
+    """Section 8.1, 2026-10-18 (the review): the harness alone keeps whichever
+    rung of a ladder is last in the file. P1 reads P2's rule: each book's main
+    number, and no deciding book's derivative alternate."""
+    times = pd.DataFrame({"game_id": ["G"], "T": [TIP - pd.Timedelta(minutes=60)]})
+    monkeypatch.setattr(H, "market_fair", lambda vis, sig: pd.DataFrame())
+    monkeypatch.setattr(H, "fair_offers", lambda off, fair: off)
+    data = H.Data(games=pd.DataFrame(), quotes=_ladder_quotes(TIP), fetches=pd.DataFrame())
+    got = _offered(M.make_point(data, "D", times, {}, pd.DataFrame()).off)
+    assert got[("team_totals_home", "betrivers")] == [111.5]
+    assert ("totals_h1", "hardrockbet") not in got
+    assert got[("totals_h1", "fanduel")] == [114.5] and got[("totals_h1", "pinnacle")] == [114.5]
+
+
+def test_the_graded_run_refuses_without_a_bets_folder(monkeypatch, tmp_path):
+    """A passing cell's figures and its first-10-games split read its bets."""
+    monkeypatch.setenv(M.GO_ENV, "1")
+    monkeypatch.setenv(M.RESULTS_ENV, str(tmp_path))
+    monkeypatch.delenv("NBA_GAME2_BETS", raising=False)
+    assert any("NBA_GAME2_BETS" in x for x in M.full_refusals(tmp_path))
+    monkeypatch.setenv("NBA_GAME2_BETS", str(tmp_path / "bets"))
+    assert not any("NBA_GAME2_BETS" in x for x in M.full_refusals(tmp_path))

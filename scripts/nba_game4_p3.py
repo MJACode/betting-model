@@ -56,7 +56,7 @@ PLACEBO: 20 runs, seed = run number. F4: the gap shuffled between games on the
 
     PYTHONPATH=. python -m scripts.nba_game4_p3 --smoke
     PYTHONPATH=. python -m scripts.nba_game4_p3 --quality   # price-free, never 2025-26
-    NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> PYTHONPATH=. python -m scripts.nba_game4_p3 --full
+    NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets PYTHONPATH=. python -m scripts.nba_game4_p3 --full
 
 --smoke runs every cell on SYNTHETIC games only, then prints counts on the real
 cache (seasons held, D coverage, games with a shooting-luck number, the
@@ -81,6 +81,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from scripts import nba_game2_luck as L  # noqa: E402
 from scripts import nba_game2_projection as P  # noqa: E402
+from scripts import nba_game4_p2 as P2  # noqa: E402
 from scripts import nba_game_harness as H  # noqa: E402
 from scripts.nba_game2_market import team_total_dist  # noqa: E402
 
@@ -475,11 +476,18 @@ def synthetic_world(seed: int = 0, prior=(2021, 2022, 2023, 2024), graded=(2025,
             "choose": choosing(graded)}
 
 
+def decision_quotes(pe: pd.DataFrame, times: pd.DataFrame) -> pd.DataFrame:
+    """The quotes both families see at T: one number per book, a deciding
+    book's alternate line never bet, never a blind bet and never the market's
+    fair line (P2's rule, section 8.3, 2026-10-18)."""
+    return P2.visible_numbers(pe, times)
+
+
 def run_world(world: dict, n_placebo: int = 2, min_prior: int = MIN_PRIOR_GAMES) -> dict:
     """Both families end to end on a world (synthetic_world's keys)."""
     games_p, pe, graded, choose = world["games_p"], world["pe"], world["graded"], world["choose"]
     times = H.per_event_times(pe, POINT)
-    vis = H.visible(pe, times)
+    vis = decision_quotes(pe, times)
     off = H.offers(vis)
     pricing = market_pricing(world["close"], games_p, graded, min_prior)
     require_pricing(pricing, graded, PRICED_MARKETS, "the market's own pricing")
@@ -525,6 +533,8 @@ def refuse_full(cache: Path) -> list[str]:
     why = P.refuse_full(cache)
     if not os.environ.get(RESULTS_ENV):
         why.append(f"{RESULTS_ENV} is not set: name the fourth search's results folder")
+    if not os.environ.get("NBA_GAME2_BETS"):
+        why.append("NBA_GAME2_BETS is not set: a passing cell's figures read its bets")
     return why
 
 
@@ -546,7 +556,7 @@ def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
     choose = choosing(graded)
     print("graded seasons", graded, "choosing", choose, "| full-game rows:", data.notes)
     times = H.per_event_times(pe, POINT)
-    vis = H.visible(pe, times)
+    vis = decision_quotes(pe, times)
     off = H.offers(vis)
     close = H.pinnacle_close(data)
     pricing = market_pricing(close, games_p, graded)
@@ -558,17 +568,19 @@ def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
     box, _ = L._load_box(cache)
     proj4 = L.f4_projections(graded_games, L.team_box(box, data.games))
     rows4, cand4 = emit_f4(dd, times, neutral, f4_signal(proj4), choose)
-    write_rows(rows4, population(F4_FAMILY, rows4, dd, times, off, cand4, "strength", graded),
-               F4_FAMILY, out)
+    pop4 = population(F4_FAMILY, rows4, dd, times, off, cand4, "strength", graded)
 
     w = P.load_world(cache, max_season=H.CONFIRM)
     _, st, models, refs, _ = P.run_projection_setup(w, H.CONFIRM)
     maps, dists = period_maps(calibrated_refs(refs, models), games_p, graded)
     fair = f1_fair(project_at(w, st, models, graded_games, times), maps, dists)
     rows1, cand1 = emit_f1(dd, times, off, neutral, fair, choose)
-    write_rows(rows1, population(F1_FAMILY, rows1, dd, times, off, cand1, "ev", graded),
-               F1_FAMILY, out)
+    pop1 = population(F1_FAMILY, rows1, dd, times, off, cand1, "ev", graded)
     assert len(rows4) + len(rows1) == 72
+    # both families written only once both are built: a failed projection
+    # leaves no half set for the verdict to read
+    write_rows(rows4, pop4, F4_FAMILY, out)
+    write_rows(rows1, pop1, F1_FAMILY, out)
 
 
 def smoke(cache: Path = H.CACHE) -> dict:

@@ -1219,6 +1219,18 @@ Three more lines, 2026-10-18, still before any P1 cell was graded:
 - `--full` also refuses when no results folder is named, so P1's cells never land beside the
   second search's 422.
 
+Two more lines, 2026-10-18, after the review and still before any P1 cell was graded:
+
+- **Which number a book hangs** is P2's rule (§8.2), imported, not copied: each book's rung with
+  prices closest to even, and no deciding book's first-half, first-quarter or team-total spread
+  or total more than 1 point from the deciding books' median. The review counted the gap: two
+  books list four to seven team-total numbers in one purchase, and reading whichever came last
+  in the file kept a number 2 to 3 points off Pinnacle's on half the games. This governs the
+  offers, the blind bets and the market's fair line. The model's own input, the market's
+  number, is Pinnacle's on 98.7% of rows and barely moves.
+- `--full` also refuses unless `NBA_GAME2_BETS` is set, so a passing cell's bets (its reported
+  figures and the first-10-games split) are written in the same run.
+
 ### 8.2 P2, the first search's market rules: choices fixed before any P2 cell was graded (2026-10-18)
 
 Section 8 names the two rules and their cuts; these lines fix everything it leaves open. Lab:
@@ -1425,3 +1437,15 @@ only: the seasons held, D coverage, and the games with a shooting-luck number.
 One more line, 2026-10-18, still before any P3 cell was graded: `--full` also refuses when no
 results folder is named, as P1's and P2's do, so P3's cells never land beside the second
 search's 422.
+
+Three more lines, 2026-10-18, after the review and still before any P3 cell was graded:
+
+- **Which number a book hangs** is P2's rule (§8.2), imported: each book's rung with prices
+  closest to even, and no deciding book's first-half, first-quarter or team-total spread or
+  total more than 1 point from the deciding books' median. The review counted 6,719 of the
+  7,320 team-total quotes the lab would have read at BetRivers and betPARX as alternates (a
+  median 2 points off the main number). This governs both families' offers, blind bets and the
+  market's fair line. The moneylines are untouched.
+- `--full` also refuses unless `NBA_GAME2_BETS` is set.
+- `--full` writes the two families' cells only after both are built, so a failure in the
+  projection leaves no half set for the pass/fail script to read.

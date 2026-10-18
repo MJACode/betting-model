@@ -58,7 +58,7 @@ SEASONS
   confirmed on 2026, every graded season pooled (section 6.7).
 
     PYTHONPATH=. python -m scripts.nba_game4_p1 --smoke
-    NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> PYTHONPATH=. python -m scripts.nba_game4_p1 --full
+    NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets PYTHONPATH=. python -m scripts.nba_game4_p1 --full
 
 --smoke: 2020-21 only, full-game cells, an in-season split (fit before
 2021-03-10, grade from it): plumbing, never a result; the derivative cells run
@@ -84,6 +84,7 @@ from features import nba_schedule_features as NSF  # noqa: E402
 from models.nhl_moneyline_anchored import C_GRID, OffsetLogit, choose_C, market_logit  # noqa: E402
 from scripts import nba_game2_luck as L  # noqa: E402
 from scripts import nba_game2_projection as P  # noqa: E402
+from scripts import nba_game4_p2 as P2  # noqa: E402
 from scripts import nba_game_harness as H  # noqa: E402
 
 RESULTS = Path(os.environ.get("NBA_GAME2_RESULTS",
@@ -484,8 +485,9 @@ class Point:
 
 
 def make_point(data: H.Data, point: str, times: pd.DataFrame, sig: dict, base: pd.DataFrame) -> Point:
-    """What a bettor sees at each game's T and the market's own fair line there."""
-    vis = H.visible(data.quotes, times)
+    """What a bettor sees at each game's T, one number per book (P2's rule,
+    section 8.1, 2026-10-18), and the market's own fair line there."""
+    vis = P2.visible_numbers(data.quotes, times)
     off = H.offers(vis)
     fair = H.market_fair(vis, sig)
     return Point(point, times, off, fair, H.fair_offers(off, fair), base)
@@ -711,6 +713,9 @@ def full_refusals(cache: Path) -> list[str]:
     why = P.refuse_full(cache)
     if not os.environ.get(RESULTS_ENV):
         why.append(f"{RESULTS_ENV} is not set: name the fourth search's results folder")
+    if not os.environ.get("NBA_GAME2_BETS"):
+        why.append("NBA_GAME2_BETS is not set: a passing cell's figures and its first-10-games "
+                   "split read its bets")
     return why
 
 

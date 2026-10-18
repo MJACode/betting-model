@@ -226,6 +226,18 @@ def ladder_mask(vis: pd.DataFrame, vis_main: pd.DataFrame) -> np.ndarray:
     return deriv(vis) & vis["book"].isin(H.BETTABLE).to_numpy() & far
 
 
+def visible_numbers(q: pd.DataFrame, times: pd.DataFrame) -> pd.DataFrame:
+    """What a bettor sees at each game's T, one number per book: its main rung
+    in each fetch (main_rungs), the harness's newest fresh quote (H.visible),
+    and no deciding book's first-half, first-quarter or team-total alternate
+    (ladder_mask). P1 and P3 read their offers and the market's fair line
+    through this, so the three families price the same quotes (sections 8.1
+    and 8.3, 2026-10-18). H.visible alone keeps whichever rung of a ladder is
+    last in the file."""
+    vm = H.visible(main_rungs(q), times)
+    return vm[~ladder_mask(vm, vm)].reset_index(drop=True)
+
+
 @dataclass
 class Point:
     times: pd.DataFrame
@@ -685,11 +697,15 @@ def synthetic_checks() -> None:
 # ── main ────────────────────────────────────────────────────────────────────
 
 def results_guard(full: bool, env=os.environ) -> None:
-    """--full needs its results folder NAMED: the default is the second
-    search's, where the verdict would read P2's cells beside its 422."""
+    """--full needs its results folder NAMED (the default is the second
+    search's, where the verdict would read P2's cells beside its 422) and
+    NBA_GAME2_BETS set, so a passing cell's bets are written in the same run."""
     if full and not env.get("NBA_GAME2_RESULTS"):
         raise SystemExit("--full refuses to run: set NBA_GAME2_RESULTS to the fourth search's "
                          "results folder")
+    if full and not env.get("NBA_GAME2_BETS"):
+        raise SystemExit("--full refuses to run: set NBA_GAME2_BETS so a passing cell's bets "
+                         "are written (its figures and the first-10-games split read them)")
 
 
 def run(mode: str, runs: int = PLACEBO_RUNS) -> dict:
