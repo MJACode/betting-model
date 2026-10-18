@@ -1,15 +1,20 @@
 """
-Post the daily free pick and the settled recap to X (@signalbasepicks).
+Post every released pre-game pick, and the settled recap, to X
+(@signalbasepicks).
 
-SCOPE. mike, 2026-08-30, chose "A without links": the free pick of the day
-plus the settled recap, and not the paid slate. mike, 2026-10-18, widened
-that for now: every pre-game pick the system releases is posted as well.
-The free pick is still posted, still labeled "Free pick", and it is still
-the pick the free Discord channel was given. The others are additional
-posts. Live picks stay off X; they were never in the free-pick feed.
+SCOPE. mike, 2026-08-30, chose "A without links": one free pick plus the
+settled recap. mike, 2026-10-18, widened that to every pre-game pick the
+system releases, and later the same day took the free-pick concept off X:
+every pick post is the same format. No "Free pick" label, no "More in
+Discord", no #FreePicks, and X does not read or wait on Discord's free-pick
+choice. Discord's own free pick is unchanged and is not an input here.
+Live picks stay off X.
 
-Revert the widening without a deploy of old code: X_POST_ALL_PICKS=0
-restores free-pick-only. The default is 1.
+X_POST_ALL_PICKS defaults to on, which posts that slate. 0, false, no, or
+off posts no pick slate. Off used to mean "the free pick only"; that mode
+is gone, because X has no free pick to fall back to. The settled recap is
+notify_x_results and is not affected by this flag. RUN_X_PUBLISHER=0 still
+stops both.
 
 WHY NO LINKS, ENFORCED IN CODE. X moved to pay-per-use in February 2026 and
 charges $0.015 per post -- but $0.20 if the post contains a URL, added April
@@ -35,10 +40,11 @@ Env (Railway Variables, all four required or this no-ops):
     X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET
 Kill switch: RUN_X_PUBLISHER=0
 Slate switch: X_POST_ALL_PICKS=1 (default) posts every released pre-game
-    pick; =0 posts only the free pick, which is the 2026-08-30 behaviour.
+    pick, each in the same format. =0 posts no pick slate. It does not
+    restore a free-pick-only tweet; X no longer has one.
 Reach tags: X_HASHTAG_POOL=GamblingX,SportsBetting,BettingTips
-    (comma-separated, with or without the '#'). #FreePicks is not in the
-    pool; it is added only on the free pick.
+    (comma-separated, with or without the '#'). #FreePicks is dropped if
+    it is put in the pool. It is not added on any pick.
 
 GETTING THOSE FOUR KEYS. Written down because it is fiddly, the two traps are
 silent, and the answers are not guessable -- the first draft of these
@@ -137,8 +143,10 @@ def _enabled() -> bool:
 def post_all_picks() -> bool:
     """True unless X_POST_ALL_PICKS is explicitly off.
 
-    Off ('0', 'false', 'no', 'off') is the 2026-08-30 free-pick-only scope.
-    Anything else, including an unset variable, posts the released slate.
+    Off ('0', 'false', 'no', 'off') posts no pick slate. The settled recap
+    is a different function and still runs. Anything else, including an
+    unset variable, posts every released pre-game pick. There is no
+    free-pick-only mode on X.
     """
     raw = os.environ.get("X_POST_ALL_PICKS", "1").strip().lower()
     return raw not in ("0", "false", "no", "off")
@@ -246,7 +254,9 @@ def hashtags_for(sport: str | None) -> str:
 # is a different post. Four is the ceiling, not a target to fill.
 MAX_PICK_HASHTAGS = 4
 _DEFAULT_REACH_POOL = ("#GamblingX", "#SportsBetting", "#BettingTips")
-_FREE_PICK_TAG = "#FreePicks"
+# Not a reach tag. A pool entry of this name is dropped so it cannot land
+# on a pick post.
+_BANNED_PICK_TAG = "#FreePicks"
 # NCAAB is not a live sport. The tag is here so a later id does not fall
 # through to no league tag. NCAAF stays #CFB.
 _SPORT_TAG["NCAAB"] = "#CBB"
@@ -254,10 +264,11 @@ _SPORT_TAG["CBB"] = "#CBB"
 
 
 def reach_pool() -> tuple[str, ...]:
-    """The configurable reach tags, in priority order. #FreePicks is excluded.
+    """The configurable reach tags, in priority order.
 
     X_HASHTAG_POOL is comma-separated. Empty or unset uses the default pool.
-    A token may arrive with or without the leading '#'.
+    A token may arrive with or without the leading '#'. #FreePicks is
+    dropped wherever it appears.
     """
     raw = os.environ.get("X_HASHTAG_POOL", "").strip()
     source = raw.split(",") if raw else _DEFAULT_REACH_POOL
@@ -268,21 +279,20 @@ def reach_pool() -> tuple[str, ...]:
             continue
         if not token.startswith("#"):
             token = "#" + token
-        if token.lower() == _FREE_PICK_TAG.lower():
+        if token.lower() == _BANNED_PICK_TAG.lower():
             continue
         if token not in tags:
             tags.append(token)
     return tuple(tags)
 
 
-def pick_hashtags(pick: dict, *, free: bool,
+def pick_hashtags(pick: dict, *,
                   mascots: dict | None = None) -> tuple[list[str], list[str]]:
     """(team tags, reach tags). Together they never exceed MAX_PICK_HASHTAGS.
 
     Team tags are kept in full up to the cap. Reach fills whatever slots
-    remain, sport league first, then #FreePicks on the free pick only, then
-    the pool. The caller drops reach tags, never team tags, when the
-    character limit bites.
+    remain: the league tag, then the pool. The caller drops reach tags,
+    never team tags, when the character limit bites.
     """
     from tracking.x_teams import team_tags
 
@@ -297,8 +307,6 @@ def pick_hashtags(pick: dict, *, free: bool,
             slots -= 1
 
     _add(_SPORT_TAG.get((pick.get("sport") or "").upper()))
-    if free:
-        _add(_FREE_PICK_TAG)
     for tag in reach_pool():
         _add(tag)
     return teams, reach
@@ -350,18 +358,17 @@ def _american(odds) -> str:
     return f"+{v}" if v > 0 else str(v)
 
 
-def render_free_pick(pick: dict, target_date: str,
-                     mascots: dict | None = None) -> str:
-    """The daily free pick, in one tweet. No link, by design.
+def render_pick(pick: dict, mascots: dict | None = None) -> str:
+    """One released pick, in one tweet. Every pick uses this format.
 
-    IT LEADS WITH THE BEST BETTABLE PRICE AND THE BOOK THAT HAS IT, the same way
-    the Discord card does. mike, 2026-09-03: "it just needs to post the best
-    book and price and for bonus, post a good to xx odds."
+    IT LEADS WITH THE BEST BETTABLE PRICE AND THE BOOK THAT HAS IT, the same
+    way the Discord card does. mike, 2026-09-03: "it just needs to post the
+    best book and price and for bonus, post a good to xx odds."
 
-    An earlier version of this appended "(+100 at ESPN BET)" after the
-    DraftKings price. That buried the number the reader is meant to act on
-    behind the number the MODEL happens to decide on. The best price is now the
-    headline; DraftKings appears only when it IS the best.
+    An earlier version appended "(+100 at ESPN BET)" after the DraftKings
+    price, and a later one prefixed "Free pick —" and closed with "More in
+    Discord." The best price is the headline. DraftKings appears only when
+    it IS the best. There is no free-pick label and no Discord line.
 
     Qualification is unchanged and still measured on DraftKings (CLAUDE.md §6).
     This changes where a reader places the bet, not whether the bet exists.
@@ -371,38 +378,24 @@ def render_free_pick(pick: dict, target_date: str,
     placed. Dropped rather than truncated when the tweet would overflow — a
     half-written price is worse than none.
     """
-    text = _render_pick(pick, free=True, mascots=mascots)
+    text = _render_pick(pick, mascots=mascots)
     _assert_no_link(text)
     return text
 
 
-def render_pick(pick: dict, mascots: dict | None = None) -> str:
-    """One released pick, in one tweet. Not labeled as the free pick.
-
-    Same price and book as the free pick. No "Free pick" line and no
-    "More in Discord" — those two are what mark the free post.
-    """
-    text = _render_pick(pick, free=False, mascots=mascots)
-    _assert_no_link(text)
-    return text
-
-
-def _render_pick(pick: dict, *, free: bool, mascots: dict | None) -> str:
+def _render_pick(pick: dict, *, mascots: dict | None) -> str:
     emoji = _SPORT_EMOJI.get(pick.get("sport"), "🎯")
     odds, book = _publish_price(pick)
-    head = f"{emoji} Free pick — {pick['label']}" if free else f"{emoji} {pick['label']}"
+    head = f"{emoji} {pick['label']}"
     price = ""
     if odds is not None:
         price = f"{_american(odds)} at {book}" if book else _american(odds)
-    tail = "More in Discord." if free else ""
-    teams, reach = pick_hashtags(pick, free=free, mascots=mascots)
+    teams, reach = pick_hashtags(pick, mascots=mascots)
 
     def _body(good_to: str | None) -> str:
         parts = [head, price]
         if good_to:
             parts.append(f"Good to {good_to}.")
-        if tail:
-            parts.append(tail)
         return " ".join(p for p in parts if p)
 
     base = _body(None)
@@ -649,8 +642,8 @@ def _ledger(conn, lock_key: str, kind: str, tweet_id: str | None) -> None:
         logger.error(f"X publisher: ledger write failed ({exc})")
 
 
-# One row per pick. The free pick's tweet is also recorded under this kind,
-# so the slate pass does not post that same pick a second time.
+# One row per pick, on the pick's own lock key. A later pass sees the row
+# and does not tweet that pick again.
 X_PICK_KIND = "x_pick"
 
 
@@ -680,17 +673,15 @@ def _college_mascots(conn, picks: list[dict]) -> dict[str, str]:
     return {row[0]: row[1] for row in rows if row[0] and row[1]}
 
 
-def _post_released_picks(conn, target_date: str, dry_run: bool = False,
-                         hold: set[str] | None = None) -> int:
+def _post_released_picks(conn, target_date: str, dry_run: bool = False) -> int:
     """Tweet every released pre-game pick that does not already have an X row.
 
     The set is _new_signals with the Discord ledger ignored: the same picks
-    Discord releases, including a game dated ahead of today, excluding live
-    and started games. Each pick is ledgered as x_pick on its own lock_key
-    after a confirmed post. A 429 stops the batch; nothing unsent is ledgered,
-    so the next pass continues. `hold` is the free pick (and, while Discord
-    has not chosen, every free-pick candidate) so that pick is not also
-    tweeted as a plain post.
+    Discord's sport channels release, including a game dated ahead of today,
+    excluding live and started games. Discord's free-pick choice is not
+    consulted. Each pick is ledgered as x_pick on its own lock_key after a
+    confirmed post. A 429 stops the batch; nothing unsent is ledgered, so
+    the next pass continues.
     """
     if not post_all_picks():
         return 0
@@ -698,12 +689,8 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
         from tracking.discord_notifier import _new_signals
         picks = _new_signals(conn, target_date, include_already_posted=True)
     except Exception as exc:                                  # noqa: BLE001
-        logger.error(f"X slate failed (free pick unaffected): {exc}")
+        logger.error(f"X slate failed: {exc}")
         return 0
-    held = set(hold or ())
-    free_key = _discord_free_pick_key(conn, target_date)
-    if free_key:
-        held.add(free_key)
     try:
         mascots = _college_mascots(conn, picks)
     except Exception as exc:                                  # noqa: BLE001
@@ -712,7 +699,7 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
     posted = 0
     for pick in picks:
         key = pick.get("lock_key")
-        if not key or key in held:
+        if not key:
             continue
         if _already_sent(conn, key, X_PICK_KIND):
             continue
@@ -736,114 +723,29 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
     return posted
 
 
-def _discord_free_pick_key(conn, target_date: str) -> str | None:
-    """The lock_key Discord published as the free pick of the day, or None.
+def notify_x_picks(target_date: str | None = None,
+                   dry_run: bool = False) -> int:
+    """Tweet every released pre-game pick that is not already on X.
 
-    Written by notify_discord_free_pick into push_sent.message_id at the moment
-    it posts. None means Discord has not posted yet (or the row pre-dates this
-    column being used), which is a reason to WAIT rather than to choose again.
+    One format for every pick. This does not read Discord's free-pick row,
+    does not wait for that choice, and does not label one tweet differently.
+    Each pick is ledgered on its own lock key, so a later pass posts only
+    picks that were not confirmed.
+
+    X_POST_ALL_PICKS=0 returns 0 and posts nothing. Returns the number of
+    tweets confirmed on this call.
     """
-    try:
-        row = conn.execute(
-            "SELECT message_id FROM push_sent "
-            "WHERE lock_key = %s AND kind = 'discord_free_pick'",
-            (f"discord_free:{target_date}",)).fetchone()
-    except Exception as exc:                                  # noqa: BLE001
-        logger.warning(f"X publisher: free-pick ledger read failed ({exc})")
-        return None
-    return (row[0] or None) if row else None
-
-
-def notify_x_free_pick(target_date: str | None = None,
-                       dry_run: bool = False) -> int:
-    """Tweet the day's free pick. Ledgered per date; every later pass no-ops.
-
-    IT IS THE SAME PICK DISCORD POSTED, not another draw from the same pool.
-    _pick_free ends in random.choice, and this used to call it a second time:
-    over the 22-candidate MLB pools of early September the two surfaces agreed
-    about 4% of the time, so the pick tweeted publicly was almost never the one
-    the free channel was given — while the module's whole charter is that X gets
-    exactly what the free Discord channel gets. mike, 2026-09-02, on the recap:
-    "needs to be the same and fired at the same time"; the same answer applies
-    to the pick, and a seeded RNG would NOT have fixed it (2026-08-30's two
-    posts went out twelve hours apart, over pools that had changed underneath).
-
-    So Discord chooses, records its choice, and X mirrors it. If Discord has not
-    posted yet this returns 0 and the next pass retries — both surfaces publish
-    the same pick or neither does. The one exception is a deployment with no
-    free Discord channel configured at all, where there is no choice to mirror
-    and X falls back to choosing its own.
-
-    WITH X_POST_ALL_PICKS ON (the default), the same call also tweets every
-    other released pre-game pick. The free pick is still this one tweet, and
-    its lock_key is held out of the plain posts. While Discord has not chosen,
-    the free-pick candidates are held too, so the one it later labels free is
-    not tweeted as a plain pick first. X_POST_ALL_PICKS=0 skips that slate.
-    """
-    if not _enabled() or not _creds():
+    if not _enabled() or not _creds() or not post_all_picks():
         return 0
     if target_date is None:
         target_date = datetime.now(ET).date().isoformat()
-    import config
     from data.db import get_connection
-    from tracking.discord_notifier import _free_pick_candidates, _pick_free
 
-    lock = f"x_free:{target_date}"
     conn = get_connection()
     try:
-        if _already_sent(conn, lock, "x_free_pick"):
-            # The free tweet already went. Picks released since that pass
-            # still need their own posts.
-            _post_released_picks(conn, target_date, dry_run=dry_run)
-            return 0
-        candidates = _free_pick_candidates(conn, target_date)
-        if not candidates:
-            _post_released_picks(conn, target_date, dry_run=dry_run)
-            return 0
-        chosen_key = _discord_free_pick_key(conn, target_date)
-        if chosen_key:
-            pick = next((c for c in candidates
-                         if c["lock_key"] == chosen_key), None)
-            if pick is None:
-                # Discord published something this pool no longer contains (a
-                # model paused, a threshold moved). Posting a DIFFERENT pick is
-                # the bug this branch exists to prevent, so post nothing as
-                # the free pick. The rest of the slate still goes.
-                logger.warning(
-                    f"X free pick: Discord's pick {chosen_key} is no longer a "
-                    f"candidate for {target_date} — not substituting another")
-                _post_released_picks(conn, target_date, dry_run=dry_run,
-                                     hold={chosen_key})
-                return 0
-        elif config.DISCORD_WEBHOOK_FREE:
-            logger.info(f"X free pick: waiting for Discord to choose "
-                        f"for {target_date}")
-            # Hold the candidates. Any one of them may become the free pick,
-            # and that tweet has to be the labeled one, posted once.
-            _post_released_picks(
-                conn, target_date, dry_run=dry_run,
-                hold={c["lock_key"] for c in candidates})
-            return 0
-        else:
-            pick = _pick_free(candidates)
-            if not pick:
-                _post_released_picks(conn, target_date, dry_run=dry_run)
-                return 0
-        mascots = _college_mascots(conn, [pick])
-        tweet_id = post_tweet(
-            render_free_pick(pick, target_date, mascots=mascots),
-            dry_run=dry_run)
-        if not tweet_id:
-            return 0
-        if not dry_run:
-            _ledger(conn, lock, "x_free_pick", tweet_id)
-            _ledger(conn, pick["lock_key"], X_PICK_KIND, tweet_id)
-        logger.info(f"X: free pick tweeted ({tweet_id})")
-        _post_released_picks(conn, target_date, dry_run=dry_run,
-                             hold={pick["lock_key"]})
-        return 1
+        return _post_released_picks(conn, target_date, dry_run=dry_run)
     except Exception as exc:                                  # noqa: BLE001
-        logger.error(f"X free pick failed: {exc}")
+        logger.error(f"X picks failed: {exc}")
         return 0
     finally:
         conn.close()
