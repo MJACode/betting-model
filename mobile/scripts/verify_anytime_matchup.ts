@@ -27,6 +27,7 @@ import {
   nextMatchupSort,
   ordinal,
   rankLine,
+  stackedMatchupLine,
   tierFloorLabel,
   tierForRank,
   type DefenseRank,
@@ -39,7 +40,7 @@ function check(name: string, cond: boolean, detail = '') {
 }
 
 check('blend window is 8 team games', BLEND_UNTIL_TEAM_GAMES === 8);
-check('metrics stack at font scale 1.3', ATD_STACK_FONT_SCALE === 1.3);
+check('metrics stack once text is larger than the default', ATD_STACK_FONT_SCALE === 1);
 check('columns are Hit 40, Matchup 66, Price 62', ATD_HIT_W === 40 && ATD_MATCHUP_W === 66 && ATD_ODDS_W === 62);
 
 check('1st 2nd 3rd 4th', ordinal(1) === '1st' && ordinal(2) === '2nd' && ordinal(3) === '3rd' && ordinal(4) === '4th');
@@ -178,10 +179,17 @@ check(
     && ATD_COPY.infoBody.includes('short sample')
     && ATD_COPY.infoBody.includes('1st–6th Great')
     && ATD_COPY.infoBody.includes('27th–32nd Very tough')
-    && ATD_COPY.infoBody.includes('higher hit rate'),
+    && ATD_COPY.infoBody.includes('higher hit rate')
+    && ATD_COPY.infoBody.includes('Five bars in the compact column')
+    && ATD_COPY.infoBody.includes('At larger text the tier and the rank are one line'),
 );
 check('the board fetches only groups its rows use', groupsUsedByBoard(['WR', 'TE', 'K', 'FB']).join(',') === 'RB,WR,TE' && groupsUsedByBoard(['CB']).join(',') === 'DB' && groupsUsedByBoard([null, 'OL']).length === 0);
 check('headers are HIT %, MATCHUP, BEST', ATD_COPY.hitHeader === 'HIT %' && ATD_COPY.header === 'MATCHUP' && ATD_COPY.priceHeader === 'BEST');
+check(
+  'large text joins the tier and the rank on one line',
+  stackedMatchupLine('Great', '5th easiest') === 'Great · 5th easiest'
+    && stackedMatchupLine('Very tough', '1st toughest') === 'Very tough · 1st toughest',
+);
 check('the unavailable note is one sentence', ATD_COPY.unavailableNote === 'Defense ranks didn’t load. Ranked matchups say Unavailable.');
 check('a partial load names the groups that failed', ATD_COPY.partialNote === 'Some defense ranks didn’t load. Those matchups say Unavailable.');
 

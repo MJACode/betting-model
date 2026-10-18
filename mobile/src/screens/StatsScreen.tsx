@@ -1483,7 +1483,7 @@ export function StatsScreen() {
     [slateGames, slate, now],
   );
   const atdOn = isAnytimeTdBoard(sport, stat ? String(stat.key) : null);
-  const stackAtd = atdOn && PixelRatio.getFontScale() >= ATD_STACK_FONT_SCALE;
+  const stackAtd = atdOn && PixelRatio.getFontScale() > ATD_STACK_FONT_SCALE;
   const leagueHasGames = h2hIndex.size > 0 || slateGameIndex.size > 0;
   const openMatchupInfo = useCallback(() => setMatchupInfoOpen(true), []);
 
@@ -4363,15 +4363,30 @@ function ColumnHeader({
         : ATD_COPY.sortOff;
   const valueHead = (
     <View
-      style={[styles.colHeaderSorted, atd && styles.atdHitHead]}
+      style={[
+        atd ? (atdStack ? styles.atdHeadFree : styles.atdHitHead) : styles.colHeaderSorted,
+      ]}
       accessible={!sorted}
       accessibilityLabel={sorted ? `${rightLabel}, sorted highest first` : rightLabel}
     >
       <Text
-        style={[styles.colHeaderRight, styles.colHeaderSortLabel, atd && styles.atdHitHeadText]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={atd ? 0.6 : 0.8}
+        style={
+          atd
+            ? [
+                styles.atdHeaderLabel,
+                atdStack
+                  ? styles.atdHeaderLabelFree
+                  : sorted
+                    ? styles.atdHitLabelWithArrow
+                    : styles.atdHitLabel,
+              ]
+            : [styles.colHeaderRight, styles.colHeaderSortLabel]
+        }
+        // Two lines so "HIT %" wraps beside the arrow inside 40pt. One line
+        // ellipsizes on web, where the font does not scale down to fit.
+        numberOfLines={atd ? 2 : 1}
+        adjustsFontSizeToFit={!atd}
+        minimumFontScale={0.8}
       >
         {hitLabel}
       </Text>
@@ -4380,8 +4395,12 @@ function ColumnHeader({
   );
   const oddsHead = showOdds ? (
     <Text
-      style={[styles.colHeaderRight, styles.colHeaderOdds, atd && styles.atdOddsHeadText]}
-      numberOfLines={1}
+      style={
+        atd
+          ? [styles.atdHeaderLabel, atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText]
+          : [styles.colHeaderRight, styles.colHeaderOdds]
+      }
+      numberOfLines={atd ? 2 : 1}
     >
       {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
     </Text>
@@ -4397,13 +4416,13 @@ function ColumnHeader({
           accessibilityRole="button"
           accessibilityLabel={sortSpoken}
           accessibilityHint={ATD_COPY.sortHint}
-          style={styles.atdSortBtn}
+          style={[styles.atdSortBtn, atdStack && styles.atdSortBtnStack]}
         >
+          {/* The word gets the column. colHeaderRight is 48pt, and MATCHUP
+              needs ~57, so that style is not used here. */}
           <Text
-            style={[styles.colHeaderRight, styles.colHeaderSortLabel]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.8}
+            style={[styles.atdMatchupLabel, atdStack && styles.atdMatchupLabelStack]}
+            numberOfLines={2}
           >
             {ATD_COPY.header}
           </Text>
@@ -5362,42 +5381,89 @@ const styles = StyleSheet.create({
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
   // Anytime TD locks the three metric columns so the header cannot drift.
-  // Large text drops the lock and stacks them (rowStacked).
+  // The labels do not use colHeaderRight: that style is 48pt wide, and a
+  // later `width: undefined` does not clear it, so MATCHUP drew in 48pt.
+  atdHeaderLabel: {
+    flexShrink: 1,
+    textAlign: 'right',
+    fontSize: font.size.micro,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    letterSpacing: 0,
+  },
+  // Stacked: the word is as wide as it is. A 40pt or 62pt cap clips it at 2×.
+  atdHeaderLabelFree: {
+    flexShrink: 0,
+    maxWidth: '100%',
+  },
   atdHitHead: {
     width: ATD_HIT_W,
     minWidth: ATD_HIT_W,
     maxWidth: ATD_HIT_W,
     flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 1,
   },
-  // No maxWidth: the 40pt column has to keep "HIT %" whole down to the stack.
-  // The arrow sits in the leftover, and the label shrinks instead of clipping.
-  atdHitHeadText: { width: undefined, flexShrink: 1 },
+  atdHeadFree: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 1,
+  },
+  // Full 40pt when there is no arrow. With the arrow, 10pt is reserved so
+  // "HIT" wraps and "%" drops under it instead of becoming "HIT…".
+  atdHitLabel: { width: ATD_HIT_W, flexShrink: 1 },
+  atdHitLabelWithArrow: { width: ATD_HIT_W - 10 },
   atdOddsHeadText: {
     width: ATD_ODDS_W,
     minWidth: ATD_ODDS_W,
     maxWidth: ATD_ODDS_W,
     flexShrink: 0,
+    textAlign: 'right',
+  },
+  // MATCHUP is ~57pt. letterSpacing 0 keeps the word plus the 9pt arrow
+  // inside this 66pt column. The button is the whole column, so the target
+  // stays above 44pt.
+  atdMatchupLabel: {
+    flexShrink: 0,
+    textAlign: 'right',
+    fontSize: font.size.micro,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    letterSpacing: 0,
+  },
+  atdMatchupLabelStack: {
+    flexShrink: 1,
+    textAlign: 'left',
+    maxWidth: '100%',
   },
   atdMatchupHead: {
     width: ATD_MATCHUP_W,
     minWidth: ATD_MATCHUP_W,
     maxWidth: ATD_MATCHUP_W,
     flexShrink: 0,
-    gap: 2,
   },
-  // Large text: the header word sits on its own line, so it is not locked to 66pt.
+  // Large text: the header word sits on its own line, the width of the row.
   atdMatchupHeadFull: {
     flex: 1,
     minHeight: 44,
-    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+    justifyContent: 'center',
   },
   atdSortBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 2,
-    flexShrink: 1,
+    gap: 0,
     minHeight: 44,
+    minWidth: 44,
+    width: '100%',
+  },
+  atdSortBtnStack: {
+    justifyContent: 'flex-start',
   },
   colHeaderStack: {
     backgroundColor: colors.bgCard,
@@ -5409,6 +5475,7 @@ const styles = StyleSheet.create({
   },
   atdHeaderMetrics: {
     justifyContent: 'flex-end',
+    flexWrap: 'wrap',
     paddingTop: 0,
   },
   // The sorted column: label + a fixed arrow, in one 48pt cell.

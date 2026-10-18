@@ -10,6 +10,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   ATD_COPY,
   ATD_MATCHUP_W,
+  stackedMatchupLine,
   type AnytimeMatchupView,
   type MatchupTier,
 } from '@/lib/anytimeMatchup';
@@ -55,7 +56,11 @@ export function AnytimeMatchupCell({
     : view.kind === 'unavailable' ? ATD_COPY.unavailableSpoken
     : view.kind === 'gap' ? view.spoken
     : view.spoken;
-  const shrink = !fullWidth;
+  const gapLabel =
+    view.kind === 'loading' ? ATD_COPY.loadingLabel
+    : view.kind === 'unavailable' ? ATD_COPY.unavailableLabel
+    : view.kind === 'gap' ? view.label
+    : '';
   return (
     <Pressable
       onPress={onExplain}
@@ -65,34 +70,42 @@ export function AnytimeMatchupCell({
       style={({ pressed }) => [styles.wrap, fullWidth && styles.wrapFull, pressed && styles.pressed]}
     >
       {view.kind === 'rank' ? (
-        <>
-          <Meter filled={view.bars} color={tierColor(view.tier)} />
-          <Text
-            style={[styles.tier, { color: tierColor(view.tier) }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit={shrink}
-            minimumFontScale={shrink ? 0.75 : 1}
-          >
-            {view.tier}
+        fullWidth ? (
+          // One line, the width of the row. A right-aligned tier over the
+          // rank clipped both at 2× ("Tough…", "5th easie…").
+          <Text style={[styles.lineFull, { color: tierColor(view.tier) }]} numberOfLines={2}>
+            {stackedMatchupLine(view.tier, view.line)}
           </Text>
-          <Text
-            style={styles.rank}
-            numberOfLines={1}
-            adjustsFontSizeToFit={shrink}
-            minimumFontScale={shrink ? 0.8 : 1}
-          >
-            {view.line}
-          </Text>
-        </>
+        ) : (
+          <>
+            <Meter filled={view.bars} color={tierColor(view.tier)} />
+            <Text
+              style={[styles.tier, { color: tierColor(view.tier) }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+            >
+              {view.tier}
+            </Text>
+            <Text
+              style={styles.rank}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+            >
+              {view.line}
+            </Text>
+          </>
+        )
+      ) : fullWidth ? (
+        <Text style={styles.lineFull} numberOfLines={2}>
+          {`— ${gapLabel}`}
+        </Text>
       ) : (
         <>
           <Text style={styles.dash}>—</Text>
           <Text style={styles.reason} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-            {view.kind === 'loading'
-              ? ATD_COPY.loadingLabel
-              : view.kind === 'unavailable'
-                ? ATD_COPY.unavailableLabel
-                : view.label}
+            {gapLabel}
           </Text>
         </>
       )}
@@ -111,6 +124,14 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: undefined,
     alignSelf: 'stretch',
+    alignItems: 'flex-start',
+  },
+  lineFull: {
+    width: '100%',
+    textAlign: 'left',
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    color: colors.textSecondary,
   },
   pressed: { opacity: 0.65 },
   meter: {

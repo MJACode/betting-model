@@ -19,9 +19,11 @@ import { nflPositionGroup, type NflPositionGroup } from './positionVsOpponent';
 /** Must match the `< 8` / `>= 8` cuts in position_defense_ranks_nfl. */
 export const BLEND_UNTIL_TEAM_GAMES = 8;
 
-/** Metrics move under the name at this Dynamic Type scale. A phone-width
- *  cutoff stacked every phone and doubled the row, so width does not. */
-export const ATD_STACK_FONT_SCALE = 1.3;
+/** Metrics move under the name once Dynamic Type is above the default.
+ *  MATCHUP plus its arrow fills the 66pt column at scale 1 and clips as
+ *  soon as the type grows, so the stack starts at the first step above 1.
+ *  A phone-width cutoff stacked every phone at the default size. */
+export const ATD_STACK_FONT_SCALE = 1;
 
 /** The board's column widths. Hit % 40, Matchup 66, Best price 62. */
 export const ATD_HIT_W = 40;
@@ -44,6 +46,11 @@ export const TIER_FLOORS: readonly MatchupTier[] = ['Great', 'Good', 'Average', 
 /** The chip and the pill. "Tough" alone hides that the floor includes Great. */
 export function tierFloorLabel(tier: MatchupTier): string {
   return `${tier} or easier`;
+}
+
+/** Large text: one left-aligned line. "Great · 5th easiest". */
+export function stackedMatchupLine(tier: MatchupTier, line: string): string {
+  return `${tier} · ${line}`;
 }
 
 /** Position groups present on the rows, in GROUP_ORDER. An unmapped pos adds nothing. */
@@ -87,10 +94,10 @@ export const ATD_COPY = {
     'How easy this week’s defense is for the player’s position.\n\n'
     + 'Counted: touchdowns that defense has allowed to this position, per player-game. Rank 1 allows the most. Ties share a rank, and the next rank skips.\n\n'
     + 'The line counts from the nearer end. 1st easiest allows the most. 1st toughest allows the fewest.\n\n'
-    + 'Five bars. Great is five filled, Very tough is one.\n\n'
+    + 'Five bars in the compact column. Great is five filled, Very tough is one. At larger text the tier and the rank are one line.\n\n'
     + 'Tiers: 1st–6th Great, 7th–13th Good, 14th–19th Average, 20th–26th Tough, 27th–32nd Very tough.\n\n'
     + 'This season’s games, once a defense has played 8. Before that, this season and last are combined. A short sample can move the rank. One note on the board says when that blend is on.\n\n'
-    + 'A dash is not an average. The reason sits under it: No game, Bye, Not playing, No rank, or No position.\n\n'
+    + 'A dash is not an average. The reason sits under it in the compact column, and beside it at larger text: No game, Bye, Not playing, No rank, or No position.\n\n'
     + 'Tap the Matchup header to sort. Ties go to the higher hit rate, then the better price.',
   explainHint: 'Opens what this matchup means.',
   partialNote: 'Some defense ranks didn’t load. Those matchups say Unavailable.',

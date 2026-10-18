@@ -22,6 +22,7 @@ SIBLING = ROOT / "data/migrations/add_position_vs_opponent_nfl.sql"
 LIB = ROOT / "mobile/src/lib/anytimeMatchup.ts"
 QUERIES = ROOT / "mobile/src/lib/queries.ts"
 SCREEN = ROOT / "mobile/src/screens/StatsScreen.tsx"
+CELL = ROOT / "mobile/src/components/AnytimeMatchupCell.tsx"
 MOBILE = ROOT / "mobile"
 
 from tests._node import tsx_cmd  # noqa: E402
@@ -129,6 +130,35 @@ def test_the_app_calls_the_function_by_its_literal_name():
     assert "Promise.allSettled" in screen
     assert "groupsUsedByBoard" in screen
     assert "ATD_POS_GROUPS" not in screen
+
+
+def test_the_matchup_header_fills_its_column_and_large_text_is_one_line():
+    """MATCHUP was drawing in the 48pt header style, inside a 66pt column.
+    Large text was a right-aligned tier over the rank."""
+    screen = _read(SCREEN)
+    cell = _read(CELL)
+    sort_btn = screen.split("atdSortBtn: {", 1)[1].split("},", 1)[0]
+    assert "minHeight: 44" in sort_btn
+    assert "minWidth: 44" in sort_btn
+    assert "width: '100%'" in sort_btn
+    label = screen.split("atdMatchupLabel: {", 1)[1].split("},", 1)[0]
+    assert "letterSpacing: 0" in label
+    assert "width:" not in label
+    word = screen.split("{ATD_COPY.header}", 1)[0].rsplit("<Text", 1)[1]
+    assert "atdMatchupLabel" in word
+    assert "colHeaderRight" not in word
+    assert "numberOfLines={2}" in word
+    assert "atdHitLabelWithArrow" in screen
+    assert "flexWrap: 'wrap'" in screen
+    line = cell.split("lineFull: {", 1)[1].split("},", 1)[0]
+    assert "textAlign: 'left'" in line
+    assert "width: '100%'" in line
+    full = cell.split("wrapFull: {", 1)[1].split("},", 1)[0]
+    assert "alignItems: 'flex-start'" in full
+    assert "stackedMatchupLine(view.tier, view.line)" in cell
+    # Scale 1 keeps the 66pt column. The first step above it stacks, because
+    # MATCHUP plus the arrow fills 66pt and clips as soon as the type grows.
+    assert "PixelRatio.getFontScale() > ATD_STACK_FONT_SCALE" in screen
 
 
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")
