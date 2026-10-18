@@ -1988,13 +1988,8 @@ def notify_discord_free_pick(target_date: str | None = None,
         if not _post(url, {"embeds": [embed]}):
             return 0                       # un-ledgered: retried next pass
 
-        # The chosen pick's lock_key is recorded in message_id (empty on this
-        # kind, and this is what it is for now): X's free pick reads it back and
-        # publishes THE SAME PICK. Two independent random.choice calls over a
-        # 22-candidate pool agreed about 4% of the time, so the free pick tweeted
-        # publicly was almost never the free pick the free channel was given —
-        # against this module's own charter that X gets exactly what the free
-        # Discord channel gets. See tracking/x_publisher.notify_x_free_pick.
+        # The chosen pick's lock_key is recorded in message_id so the day's
+        # free-channel choice is the one that was posted. X does not read it.
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
             "VALUES (%s, 'discord_free_pick', %s, %s) "
