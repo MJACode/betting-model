@@ -348,6 +348,36 @@ def test_an_occasional_kind_is_not_flagged_for_being_quiet(monkeypatch):
     assert "count(DISTINCT substring(sent_at, 1, 10)) >=" in src
 
 
+def test_recap_error_kinds_are_findings_and_a_success_is_not():
+    """A later success on the same lock is not an open failure.
+
+    The rows are one push_sent line each: (lock_key, kind, sent_at).
+    """
+    out = pw.findings_from_delivery([
+        ("discord_results:2026-10-02", "discord_results",
+         "2026-10-14T06:00:00-04:00"),
+        ("discord_results:2026-10-05", "discord_results_error",
+         "2026-10-14T06:01:00-04:00"),
+        ("discord_results:2026-10-03", "discord_results_error",
+         "2026-10-14T05:00:00-04:00"),
+        ("discord_results:2026-10-03", "discord_results",
+         "2026-10-14T08:00:00-04:00"),
+        ("restate:a", "discord_results_restate_error",
+         "2026-10-14T07:01:00-04:00"),
+        ("restate:b", "discord_results_restate_error",
+         "2026-10-14T07:02:00-04:00"),
+    ])
+    assert any(f.startswith("`discord_results_error`") and "1 delivery-failure"
+               in f and "latest failure 2026-10-14T06:01:00-04:00" in f
+               for f in out)
+    assert any(f.startswith("`discord_results_restate_error`")
+               and "2 delivery-failure" in f for f in out)
+    assert not any("2026-10-14T05:00:00" in f for f in out)
+    assert not any(f.startswith("`discord_results` ") for f in out)
+    assert pw.findings_from_delivery([]) == []
+    assert pw.findings_from_delivery(None) == []
+
+
 def test_the_silence_finding_says_how_regular_the_kind_was(monkeypatch):
     """"X is quiet" is unactionable without knowing it used to fire daily."""
     conn = _Conn(rows=[("live_signal", 14, "2026-08-20T00:00:00-04:00")])

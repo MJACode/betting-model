@@ -129,6 +129,7 @@ const PAIRS: Pair[] = [
   T('betInk', 'bg', 'Parlay stat row on the grouped ground (H2)'),
   T('betInk', 'betSoft', 'BET badge, HIGH tier, sharp pill, W letter (H1/H2/M5/M6)'),
   T('tint', 'bgCard', 'Tracking / In slip ON: tint outline, checkmark and label (Designer ruling)'),
+  T('tint', 'tintSoft', 'Signals Slip/Track selected wash (Designer, #965)'),
   W('betInk', 'bet', 'parlay "Great" grade (H2)'),
   T('avoidInk', 'bgCard', 'loss text, error text, destructive labels (H2/H8/M1)'),
   T('avoidInk', 'bg', 'loss text on the grouped ground (H2)'),
@@ -160,6 +161,8 @@ const PAIRS: Pair[] = [
   // Red icons keep the bright hue where it already clears 3:1.
   T('avoid', 'avoidSoft', 'SignIn error-banner icon (non-text)', 3),
   T('avoid', 'bgCard', 'remove-leg / trash icons (non-text)', 3),
+  // Empty matchup bars sit on the white card. separatorOpaque is 1.7:1 there.
+  T('none', 'bgCard', 'Anytime TD empty matchup bar (non-text)', 3),
 ];
 console.log('\n  token          hex        ground              ratio  min');
 for (const p of PAIRS) {
@@ -390,9 +393,9 @@ for (const rel of ['src/components/SportsbookPickerSheet.tsx', 'src/components/H
 }
 // Designer H2 / L9 misses: the equity-curve total and the share text.
 const eq = read('src/components/EquityCurve.tsx');
-check('EquityCurve total is pnlColor ink + formatSignedUnits (no bright text, no hyphen)', /<Text style=\{\[styles\.units, \{ color: pnlColor\(last, 1\) \}\]\}>\{formatSignedUnits\(last\)\}<\/Text>/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
+check('EquityCurve end pill is pnlColor ink + formatSigned, line is betInk (no bright green)', /formatSigned\(endUnits, 2, 'u'\)/.test(eq) && /pnlColor\(endUnits, 2\)/.test(eq) && /colors\.betInk/.test(eq) && !/colors\.positive/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
 const share = read('src/lib/shareRecord.ts');
-check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roiFlat\)/.test(share) && /formatSignedUnits\(opts\.endUnits\)/.test(share) && !/\? '\+' : ''/.test(share));
+check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roi\)/.test(share) && /formatSigned\(opts\.endUnits, 2, 'u'\)/.test(share) && !/\? '\+' : ''/.test(share));
 check('DailyResults "No picks" rows: no opacity, textTertiary', /sportCardEmpty: \{ paddingVertical: spacing\.sm \}/.test(read('src/components/DailyResultsModal.tsx')));
 // Every pnlColor() names the display's precision: `, 1, 100)` for a ratio
 // printed by formatPctSigned, `, 2)` for dollars, `, 1)` for pp (Reviewer

@@ -158,7 +158,8 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const sheet = read('src/components/AddLineSheet.tsx');
   check('the sheet says under its title where the book is chosen', sheet.includes('you’ll choose the sportsbook there'));
   check('the sheet marks the member\'s own books', sheet.includes(">Yours<") && sheet.includes('usePreferredBooks()'));
-  check('the sheet\'s title is the proposition', sheet.includes('const title = spec ? lineLegLabel(spec) : \'\';'));
+  check('the sheet\'s title is the proposition',
+    sheet.includes('const title = input?.title ?? (spec ? lineLegLabel(spec) : \'\');'));
   check('the close control is a button to VoiceOver', /accessibilityRole="button" accessibilityLabel="Close add line"/.test(sheet));
   check('no fixed-size badge and no hex literal', !/badge: \{[^}]*\bwidth: 40/.test(sheet) && !sheet.includes("'#000'"));
 }

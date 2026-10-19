@@ -1577,16 +1577,15 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X gets exactly what the FREE Discord channel gets -- one pick a day,
-        # never the paid slate (mike, 2026-08-30: "A without links"). Posting
-        # the paid signals publicly would be giving away what members pay for.
-        # Ledgered independently of Discord, so one surface failing never
-        # suppresses the other.
+        # X posts every released pre-game pick, each in the same format.
+        # Discord's free pick is not an input. X_POST_ALL_PICKS=0 posts no
+        # pick slate. Ledgered independently of Discord, so one surface
+        # failing never suppresses the other.
         try:
-            from tracking.x_publisher import notify_x_free_pick
-            notify_x_free_pick(target_date=run_date, dry_run=dry_run)
+            from tracking.x_publisher import notify_x_picks
+            notify_x_picks(target_date=run_date, dry_run=dry_run)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"X free pick failed (Discord unaffected): {exc}")
+            logger.error(f"X picks failed (Discord unaffected): {exc}")
         if d or fp or rs:
             logger.success(
                 f"✓ Discord: {d} signal(s) posted"
@@ -1747,6 +1746,18 @@ def step_settle(settle_date: str) -> bool:
             logger.info(f"Results restated: {n} post(s)")
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+
+    # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
+    # first Monday, the previous calendar month. Later passes retry a miss.
+    # Both are ledgered, so a posted window is not posted again.
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        if n:
+            logger.info(f"Period results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Period results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 

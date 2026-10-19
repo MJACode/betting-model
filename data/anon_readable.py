@@ -49,6 +49,11 @@ ANON_READABLE: tuple[str, ...] = (
     # and the default grant since the Teams board shipped; declared now that
     # a `.from()` names it.
     "nfl_team_game_stats",
+    # Signals compact line: school name → abbreviation. The anon SELECT
+    # policy has been on this table since the Teams board
+    # (data/migrations/add_team_stats_board.sql, "anon read ncaaf_teams").
+    # Declared now that a `.from()` names it. A miss stays the school name.
+    "ncaaf_teams",
     "odds",
     "parlay_correlations",
     "parlay_track_record",
@@ -102,6 +107,13 @@ ANON_READABLE: tuple[str, ...] = (
     "v_player_season_totals_ncaaf",
     "v_player_season_totals_nfl",
     "v_player_season_totals_wnba",
+    # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
+    # .from() these yet; tests/test_anon_readable.py keeps them on an
+    # explicit ahead-of-the-app list so the stale-entry check stays strict
+    # for everything else.
+    "v_nhl_player_prop_odds",
+    "v_player_season_totals_nhl",
+    "v_team_season_totals_nhl",
     "v_public_track_record",
     "v_public_track_record_daily",
 )
@@ -198,6 +210,13 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "latest_odds",
     "latest_prop_odds",
     "latest_live_game_state",
+    # security_invoker bases of the NHL Stats views. The logs were created
+    # with RLS on and no policy (add_nhl_game_logs.sql). The stats migration
+    # adds a SELECT policy; the caller still needs the grant, and nothing in
+    # the app .from()s the tables themselves.
+    "nhl_goalie_game_log",
+    "nhl_skater_game_log",
+    "nhl_team_game_log",
 )
 
 # ── worker-only tables: the second lock ──────────────────────────────────────
@@ -442,6 +461,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_season_stat_values_ncaaf",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
+    # NHL hit-rate arrays (per game, last 5, last 10, season). The app does
+    # not call it until the Stats tab exists.
+    "player_stat_values_nhl",
     # H2H window: one row per slate player, that player's values against the
     # team he is about to play, over the last two seasons
     # (data/migrations/add_player_h2h_stat_values_rpcs.sql).
@@ -457,11 +479,18 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "position_vs_opponent_ncaaf",
     "position_vs_opponent_nfl",
     "position_vs_opponent_wnba",
+    # Anytime TD board: one rank per defense for a position group
+    # (data/migrations/position_defense_ranks_nfl_2026_10_18.sql).
+    "position_defense_ranks_nfl",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
+    # NHL Players board. Reads nhl_skater_game_log (shots, ending-year
+    # season, game_type 2). The table's anon SELECT and RLS policy are
+    # #962, still unapplied; this grant is EXECUTE on the function only.
+    "player_window_totals_nhl",
     "fighter_window_totals_ufc",
     "team_stats_board",
     # custom model builder
