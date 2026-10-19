@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { DiscordPublish } from '@/lib/discordPublish';
 import type { PlayerLogSport } from '@/lib/playerLog';
 
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
@@ -193,10 +194,9 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
-  // Stamped by the record readers (#942) and read by teamDetail and the model
-  // detail screen; Pick carries it, this type did not, so master's type check
-  // failed and the over-the-air update stopped publishing (2026-10-14).
-  discordPublish?: 'published' | 'unpublished' | 'unknown';
+  // Client-only. attachDiscordPublish stamps it after the fetch. Not a
+  // column, so it stays out of SETTLED_PICK_COLUMNS and the cache key.
+  discordPublish?: DiscordPublish;
 };
 
 export interface LiveGameState {
