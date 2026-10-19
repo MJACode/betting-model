@@ -4,6 +4,7 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 
 import { routeForPush, type PushRoute } from '@/lib/pushRoute';
 import { setSportForVisit } from '@/hooks/useSportFilter';
+import { notePushTap } from '@/lib/reloadGuard';
 import type { RootStackParamList } from '@/types';
 
 type NavRef = NavigationContainerRef<RootStackParamList>;
@@ -12,8 +13,9 @@ type NavRef = NavigationContainerRef<RootStackParamList>;
  * Identifiers already acted on in THIS JS runtime. Survives a remount of the
  * hook (Fast Refresh, a parent re-create). Does NOT survive
  * `Updates.reloadAsync()` — that starts a new runtime, which is why the
- * native last-response must also be cleared. `useOtaUpdates` reloads on
- * launch and on foreground whenever a bundle is waiting.
+ * native last-response must also be cleared. `useOtaUpdates` reloads only on
+ * a return from the background with a bundle already downloaded, and waits
+ * when a tap was just handled (`notePushTap`, src/lib/reloadGuard.ts).
  */
 const handledResponseIds = new Set<string>();
 
@@ -107,6 +109,9 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
 
     const handle = (response: Notifications.NotificationResponse | null) => {
       if (!response) return;
+      // Tells useOtaUpdates not to reload over the route this tap is about
+      // to open: the native copy is cleared below.
+      notePushTap();
       // The listener AND getLast can both deliver the same tap (Android
       // cold start; a remount while the native last-response is still set).
       // Act once. An empty identifier is rare; we still clear the native

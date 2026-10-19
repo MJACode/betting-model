@@ -18,7 +18,17 @@
  */
 
 import {
+  NO_RELOAD_ROUTES,
+  PUSH_TAP_QUIET_MS,
+  notePushTap,
+  reloadBlockedReason,
+  resetReloadGuardForTests,
+  setFocusedRoute,
+} from '../src/lib/reloadGuard';
+import {
   applyPendingUpdate,
+  nextAction,
+  reloadDownloaded,
   shouldCheck,
   MIN_BACKGROUND_MS,
   MIN_CHECK_INTERVAL_MS,
@@ -100,6 +110,43 @@ check(
   `${MIN_BACKGROUND_MS}ms`,
 );
 
+// ── nextAction: launch never reloads (2026-10-19) ───────────────────────────
+// Reloading during cold start was the "crashes the first time I open it" bug:
+// it happened only on the first open after a new bundle shipped.
+
+const away = NOW - MIN_BACKGROUND_MS;
+check('launch only downloads, never reloads',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: null, trigger: 'launch', pending: false }) === 'download');
+check('launch with a bundle already pending still only downloads',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: null, trigger: 'launch', pending: true }) === 'download');
+check('a real return with a downloaded bundle reloads it',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground', pending: true }) === 'reload');
+check('the pending reload is not held back by the check throttle',
+  nextAction({ now: NOW, lastCheckAt: NOW - 1_000, backgroundedAt: away, trigger: 'foreground', pending: true }) === 'reload');
+check('a brief absence never reloads, even with a bundle pending',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: NOW - (MIN_BACKGROUND_MS - 1), trigger: 'foreground', pending: true }) === 'skip');
+check('a real return with nothing pending only downloads (no reload while the member is on screen)',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground', pending: false }) === 'download');
+check('a real return inside the throttle with nothing pending is skipped',
+  nextAction({ now: NOW, lastCheckAt: NOW - 1_000, backgroundedAt: away, trigger: 'foreground', pending: false }) === 'skip');
+
+// ── reloadGuard: a reload must not lose a tapped pick or a draft ────────────
+
+resetReloadGuardForTests();
+check('nothing recorded: a reload may go ahead', reloadBlockedReason(NOW) === null);
+notePushTap(NOW);
+check('a push tap just handled blocks the reload', reloadBlockedReason(NOW + 1_000) === 'push_tap');
+check('the tap stops blocking after PUSH_TAP_QUIET_MS', reloadBlockedReason(NOW + PUSH_TAP_QUIET_MS) === null);
+resetReloadGuardForTests();
+for (const r of ['Feedback', 'FeedbackThread', 'ModelEdit', 'Betslip']) {
+  setFocusedRoute(r);
+  check(`a draft-holding screen blocks the reload: ${r}`, reloadBlockedReason(NOW) === 'editing');
+}
+setFocusedRoute('PicksHome');
+check('an ordinary screen does not block the reload', reloadBlockedReason(NOW) === null);
+check('the draft list is exactly the four in-memory editors', NO_RELOAD_ROUTES.size === 4);
+resetReloadGuardForTests();
+
 // ── applyPendingUpdate ───────────────────────────────────────────────────────
 
 interface Calls { checked: number; fetched: number; reloaded: number }
@@ -166,6 +213,29 @@ async function main(): Promise<void> {
       out === 'reloaded' && calls.checked === 1 && calls.fetched === 1 && calls.reloaded === 1,
       `${out} checked=${calls.checked} fetched=${calls.fetched} reloaded=${calls.reloaded}`,
     );
+  }
+
+  {
+    // Launch mode: the bundle is fetched and NOT reloaded.
+    const { api, calls } = fakeApi({ available: true, isNew: true });
+    const out = await applyPendingUpdate(api, 'download');
+    check(
+      'download mode fetches a new bundle and does NOT reload',
+      out === 'downloaded' && calls.fetched === 1 && calls.reloaded === 0,
+      `${out} reloaded=${calls.reloaded}`,
+    );
+  }
+
+  {
+    const { api, calls } = fakeApi({});
+    const out = await reloadDownloaded(api);
+    check('a pending bundle is applied with no network call',
+      out === 'reloaded' && calls.reloaded === 1 && calls.checked === 0 && calls.fetched === 0, out);
+    api.reloadAsync = async () => { throw new Error('refused'); };
+    check('a failed pending reload is swallowed', (await reloadDownloaded(api)) === 'error');
+    const off = fakeApi({ isEnabled: false });
+    check('a pending reload is a no-op when updates are disabled',
+      (await reloadDownloaded(off.api)) === 'disabled' && off.calls.reloaded === 0);
   }
 
   {

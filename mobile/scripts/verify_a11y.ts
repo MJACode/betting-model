@@ -27,8 +27,10 @@
  *   5. Every <TextInput> and <Switch> has accessibilityLabel.
  *   6. M7: every vertical ScrollView / FlatList / SectionList that the betslip
  *      bar can float over — not inside a <Modal>, not horizontal, not on a
- *      route in App.tsx's NO_BETSLIP_BAR_ROUTES — ends with BetslipBarSpacer
- *      (last ScrollView child, or the FlatList's ListFooterComponent).
+ *      route in App.tsx's NO_BETSLIP_BAR_ROUTES, and not the crash fallback
+ *      (AppErrorBoundary replaces the tree, so the bar is unmounted) — ends
+ *      with BetslipBarSpacer (last ScrollView child, or the FlatList's
+ *      ListFooterComponent).
  * Plus the H9 section (effective height of the chip rows inside their
  * horizontal ScrollViews, with the known-short cases and why), pins for the
  * tab semantics (H9/M8), the audited slop numbers, and the
@@ -516,9 +518,13 @@ function closeOf(src: string, start: number, tagName: string): number {
 }
 const uncovered: string[] = [];
 let covered = 0;
+// The crash fallback is not a route. It replaces the tree under it, including
+// BetslipBar, so that ScrollView has no bar to pad.
+const noBarFiles = new Set(exemptFiles);
+noBarFiles.add('src/components/AppErrorBoundary.tsx');
 for (const f of files) {
   const rel = relPosix(f);
-  if (exemptFiles.has(rel)) continue;
+  if (noBarFiles.has(rel)) continue;
   const src = readUtf8(f);
   const modals = ranges(src, /<Modal\b/g, '</Modal>');
   for (const m of src.matchAll(/(?<![\w.])<(ScrollView|FlatList|SectionList)\s/g)) {

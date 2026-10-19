@@ -325,9 +325,15 @@ def test_reassurance_prop_is_picks_home_only():
     home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
     assert "PICKS_REASSURANCE = 'Nothing is wrong with your picks.'" in home
     assert home.count("reassurance={PICKS_REASSURANCE}") == 2
+    # The crash fallback passes its own second-Retry line. It must not reuse
+    # the picks sentence. The copy itself is unchanged.
+    boundary = _read(SRC / "components" / "AppErrorBoundary.tsx")
+    assert "reassurance={this.state.attempt > 0 ? REPEAT : undefined}" in boundary
+    assert "PICKS_REASSURANCE" not in boundary
+    allowed = {"PicksHomeScreen.tsx", "ErrorState.tsx", "AppErrorBoundary.tsx"}
     others = [
         str(p.relative_to(MOBILE)) for p in SRC.rglob("*.tsx")
-        if p.name not in {"PicksHomeScreen.tsx", "ErrorState.tsx"} and re.search(r"\breassurance=", _read(p))
+        if p.name not in allowed and re.search(r"\breassurance=", _read(p))
     ]
     assert not others, others
 

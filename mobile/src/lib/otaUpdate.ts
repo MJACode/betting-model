@@ -18,8 +18,20 @@
  * older bundle.
  *
  * So the app checks for itself: at cold start, and on every real return from
- * the background. A fetched update is applied immediately with reloadAsync()
- * rather than being left for a relaunch that may never come.
+ * the background. A fetched update is applied with reloadAsync() rather than
+ * being left for a relaunch that may never come.
+ *
+ * BUT NOT AT COLD START (2026-10-19). Reloading at launch tore the app down
+ * while it was still starting — fonts, navigation, the first screen's reads,
+ * the push handler — and Matt saw it as "crashes every now and then when I
+ * open it the first time, then works": it happened only on the first open
+ * after a new bundle shipped (nine shipped 2026-10-17 → 10-19). So a check
+ * only ever DOWNLOADS — at launch and on a return alike, because a reload a
+ * few seconds after the app is on screen interrupts whatever the member just
+ * started. A downloaded bundle is applied at the instant of the next real
+ * return, as the app comes back to the foreground (unless src/lib/
+ * reloadGuard.ts says to wait), or by expo-updates itself at the next cold
+ * start, whichever comes first.
  *
  * Split out of the hook so the decision logic is testable off-device:
  * `shouldCheck` is pure, and `applyPendingUpdate` takes the expo-updates
@@ -60,6 +72,27 @@ export function shouldCheck(s: CheckState): boolean {
   return true;
 }
 
+/**
+ * What to do for one trigger. Pure. Nothing here reloads after a network
+ * call: every reload is of a bundle ALREADY downloaded, at the instant of a
+ * return.
+ *
+ *   download  launch, or a real return with nothing pending: check and
+ *             fetch, never reload (see the header)
+ *   reload    a real return with a bundle already downloaded: apply it, no
+ *             network needed, and the throttle does not apply — the check
+ *             that found it already happened
+ *   skip      not a real return, or inside the throttle window
+ */
+export type UpdateAction = 'download' | 'reload' | 'skip';
+
+export function nextAction(s: CheckState & { pending: boolean }): UpdateAction {
+  if (s.trigger === 'launch') return 'download';
+  if (s.backgroundedAt == null || s.now - s.backgroundedAt < MIN_BACKGROUND_MS) return 'skip';
+  if (s.pending) return 'reload';
+  return shouldCheck(s) ? 'download' : 'skip';
+}
+
 /** The slice of expo-updates this module uses. Injectable so the behaviour can
  *  be verified without a device. */
 export interface UpdatesApi {
@@ -70,7 +103,10 @@ export interface UpdatesApi {
   reloadAsync(): Promise<void>;
 }
 
-export type UpdateOutcome = 'disabled' | 'none' | 'reloaded' | 'error';
+export type UpdateOutcome = 'disabled' | 'none' | 'downloaded' | 'reloaded' | 'error';
+
+/** `download` stops after the fetch; `apply` reloads into a new bundle. */
+export type UpdateMode = 'download' | 'apply';
 
 /**
  * Check, fetch and APPLY. Returns what happened rather than throwing: an
@@ -82,7 +118,7 @@ export type UpdateOutcome = 'disabled' | 'none' | 'reloaded' | 'error';
  * 'reloaded' is returned optimistically after the call is issued, and any
  * throw from it is still caught.
  */
-export async function applyPendingUpdate(api: UpdatesApi): Promise<UpdateOutcome> {
+export async function applyPendingUpdate(api: UpdatesApi, mode: UpdateMode = 'apply'): Promise<UpdateOutcome> {
   if (!api.isEnabled) return 'disabled';
   try {
     const check = await api.checkForUpdateAsync();
@@ -91,6 +127,18 @@ export async function applyPendingUpdate(api: UpdatesApi): Promise<UpdateOutcome
     // isNew false means the fetch resolved to the bundle already running —
     // reloading would be a pointless flash.
     if (!fetched.isNew) return 'none';
+    if (mode === 'download') return 'downloaded';
+    await api.reloadAsync();
+    return 'reloaded';
+  } catch {
+    return 'error';
+  }
+}
+
+/** Apply a bundle an earlier `download` already fetched. Never throws. */
+export async function reloadDownloaded(api: UpdatesApi): Promise<UpdateOutcome> {
+  if (!api.isEnabled) return 'disabled';
+  try {
     await api.reloadAsync();
     return 'reloaded';
   } catch {

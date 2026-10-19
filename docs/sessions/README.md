@@ -19,6 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, PR #1003: a failed OTA reload restores stage running; crash enqueue writes are serialized; master 31f01a4c merged |
+| 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, First-open crash: launch downloads an OTA bundle and no longer reloads mid-startup |
+| 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, Crash logging: app_errors + log_app_error, root error boundary, launch-stage marker for the first-open crash |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, game-facts branch merged origin/master `e51e4714`; session logs keep both sides; the PR stays a draft |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, Daily results: sports with picks first, collapsible sport cards, quiet sports on one line |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, X pick posts show the event date and a prop matchup; weekly and monthly recaps post Monday 7:30am ET on X and in #results |
