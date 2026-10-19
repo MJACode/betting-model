@@ -429,6 +429,15 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   lets a later pass post the recap again. If the error row was not
   recorded, that same alert says so and a later pass may post again.
   A rejected post (no success) stays retryable.
+- **The week and the month post on the same webhook.** Monday 7:30am ET
+  (`period_recaps`, and again from later `step_settle` passes) posts the
+  prior Monday–Sunday. The first Monday of a month also posts the previous
+  calendar month. Both use `_settled_rows_since` over that window, the same
+  graded picks as the daily recap, and ledger `discord_results_week` /
+  `discord_results_month` on the window's start. A posted window is not
+  posted again. X posts the same windows through `notify_x_period`. An
+  empty window is not ledgered. A window still unposted when the next one
+  opens is not caught up. Period recaps do not write `results_snapshots`.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.

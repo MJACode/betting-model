@@ -518,6 +518,27 @@ export function unitsFor(
   return stakeFor(serverKellyFraction, dkOdds).risk;
 }
 
+/**
+ * Units won or lost, and units risked, at the posted stake.
+ *
+ * The same pair as `published_pick_unit_profit` / `published_pick_unit_risked`
+ * and `tracking.published_units`. `stakeFor` is the price math; this only
+ * applies the result. A win pays `stake.win` (1, unless the 3u cap bound).
+ * A loss costs `stake.risk`. A push, a void, and an ungraded pick risk
+ * nothing. A missing price is 1 unit, not a made-up −110.
+ */
+export function postedPickUnits(p: {
+  kelly_fraction?: number | null;
+  dk_odds?: number | null;
+  decision_odds?: number | null;
+  result?: string | null;
+}): { units: number; risked: number } {
+  const stake = stakeFor(p.kelly_fraction, decisionOdds(p));
+  if (p.result === 'WIN') return { units: stake.win, risked: stake.risk };
+  if (p.result === 'LOSS') return { units: -stake.risk, risked: stake.risk };
+  return { units: 0, risked: 0 };
+}
+
 /** "1.1u to win 1u"; just "1u" when the pick carries no price. */
 export function formatStake(stake: UnitStake): string {
   if (!stake.priced) return formatUnits(stake.conviction);

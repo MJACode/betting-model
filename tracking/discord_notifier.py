@@ -12,7 +12,8 @@ Producers, each independently enabled by whether its webhook is configured:
     (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
     channel, else the sport's pre-game channel.
   • notify_discord_results — one morning recap after settlement: yesterday's
-    record, P&L and ROI, overall and by sport.
+    record, P&L and ROI, overall and by sport. The same webhook also gets
+    the Monday weekly recap and the first-Monday monthly recap.
   • notify_discord_void — one gray notice per sport for picks that are already
     VOID and already posted. Writes push_sent kind discord_void only after
     Discord accepts the message. Does not edit or delete the original post.
@@ -716,7 +717,8 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
     )
 
 
-def _new_signals(conn, target_date: str) -> list[dict]:
+def _new_signals(conn, target_date: str, *,
+                 include_already_posted: bool = False) -> list[dict]:
     """Bettable picks that have not been posted to Discord yet.
 
     READS `picks`, NOT `opening_signals` (2026-09-05, Matt: "the app and discord
@@ -752,6 +754,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     the same one §1c calls the bet of record. The synthesised lock_key matches
     the key capture minted (`game:model[:player]`), so the push_sent ledger
     carries over and nothing already posted posts twice.
+
+    `include_already_posted` drops only the Discord-ledger filter. X uses it
+    so a pick Discord just posted in this same pass is still visible; X has
+    its own ledger and must not treat "already on Discord" as "already tweeted".
     """
     rows = conn.execute(f"""
         WITH bet AS (
@@ -808,7 +814,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
-        WHERE NOT ({channel_lock_held_sql('bet.lock_key', 'discord_signal')})
+        {"" if include_already_posted else "WHERE NOT (" + channel_lock_held_sql('bet.lock_key', 'discord_signal') + ")"}
         ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{
@@ -839,6 +845,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         "game_date": r[18],
         # What tracking/pick_integrity checks the label against.
         "side": r[20], "line": r[21],
+        "prop_market": r[22] if len(r) > 22 else None,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -1294,7 +1301,8 @@ def recaps_needing_restatement(conn, through: str | None = None,
     out = []
     for d, published_at, settled in snaps:
         d = str(d)
-        late = conn.execute(
+        late = _execute_settled(
+            conn,
             _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
             (d, published_at)).fetchall()
         if late:
@@ -1414,7 +1422,8 @@ def post_missed_recap(now: datetime | None = None,
 
     conn = get_connection()
     try:
-        discord_done, x_sent_at, settled = conn.execute(
+        discord_done, x_sent_at, settled = _execute_settled(
+            conn,
             _missed_recap_state_sql(),
             (f"discord_results:{game_date}", f"x_results:{game_date}",
              game_date)).fetchone()
@@ -1453,7 +1462,8 @@ def _restate_x_if_behind(game_date: str, x_sent_at, dry_run: bool) -> int:
     from tracking.x_publisher import notify_x_results
     conn = get_connection()
     try:
-        late = conn.execute(
+        late = _execute_settled(
+            conn,
             _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
             (game_date, x_sent_at)).fetchall()
     finally:
@@ -1993,13 +2003,8 @@ def notify_discord_free_pick(target_date: str | None = None,
         if not _post(url, {"embeds": [embed]}):
             return 0                       # un-ledgered: retried next pass
 
-        # The chosen pick's lock_key is recorded in message_id (empty on this
-        # kind, and this is what it is for now): X's free pick reads it back and
-        # publishes THE SAME PICK. Two independent random.choice calls over a
-        # 22-candidate pool agreed about 4% of the time, so the free pick tweeted
-        # publicly was almost never the free pick the free channel was given —
-        # against this module's own charter that X gets exactly what the free
-        # Discord channel gets. See tracking/x_publisher.notify_x_free_pick.
+        # The chosen pick's lock_key is recorded in message_id so the day's
+        # free-channel choice is the one that was posted. X does not read it.
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
             "VALUES (%s, 'discord_free_pick', %s, %s) "
@@ -2089,7 +2094,9 @@ _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction,
                COALESCE(p.decision_odds, p.dk_odds),
                CASE WHEN p.clv_method = 'standard_v2' THEN p.clv_pct END,
-               p.is_live
+               p.is_live,
+               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result),
+               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
@@ -2102,10 +2109,66 @@ _SETTLED_SQL = r"""
     + "\n          AND " + posted_sql("p") + "\n"
 
 
+_UNIT_COLUMN_SQL = (
+    ",\n               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+    ",\n               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+)
+
+
+def _sql_without_unit_functions(sql: str) -> str:
+    """The same query with the two function columns removed.
+
+    A shorter tuple is what `_tally` already prices with `stake_for`.
+    """
+    if _UNIT_COLUMN_SQL not in sql:
+        raise RuntimeError("settled sql has no posted-stake columns to drop")
+    return sql.replace(_UNIT_COLUMN_SQL, "")
+
+
+def _unit_functions_missing(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    if "published_pick_unit_" not in text:
+        return False
+    return "does not exist" in text or "no such function" in text
+
+
+def _execute_settled(conn, sql: str, params: tuple):
+    """Run a query built on `_SETTLED_SQL`.
+
+    The functions live in their own migration, and settle runs before that
+    migration on the morning the code deploys. A missing function is not a
+    failed settlement: drop the columns and let `_tally` use `stake_for`,
+    which the function body is pinned equal to. Any other error propagates.
+    """
+    try:
+        return conn.execute(sql, params)
+    except Exception as exc:
+        if not _unit_functions_missing(exc):
+            raise
+        # Postgres aborts the transaction on the error, so the retry needs a
+        # rollback. That rollback is safe only because every caller reads
+        # here and writes afterwards: notify_discord_results inserts
+        # push_sent after both tallies return, and the scan, the missed
+        # recap, and the X catch-up select and then close. An uncommitted
+        # insert already on `conn` would be lost. sqlite3.rollback undoes
+        # the test's open inserts instead, and the statement error did not
+        # abort that connection.
+        if type(exc).__module__.startswith("psycopg"):
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(
+            "published stake functions are not installed yet; "
+            "tallying with stake_for"
+        )
+        return conn.execute(_sql_without_unit_functions(sql), params)
+
+
 def _settled_rows(conn, game_date: str) -> list[tuple]:
     """One settled day."""
-    return conn.execute(_SETTLED_SQL.format(window="= %s"),
-                        (game_date,)).fetchall()
+    return _execute_settled(conn, _SETTLED_SQL.format(window="= %s"),
+                            (game_date,)).fetchall()
 
 
 def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
@@ -2114,7 +2177,8 @@ def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
     Bounded ABOVE by the recapped date so the all-time figure is as of that
     recap and never quietly includes a later day: a number published on Monday
     must still reproduce on Friday."""
-    return conn.execute(
+    return _execute_settled(
+        conn,
         _SETTLED_SQL.format(window="BETWEEN %s AND %s"),
         (start_date, through)).fetchall()
 
@@ -2180,14 +2244,25 @@ def _tally(rows: list[tuple]) -> dict:
             t["l"] += 1
         else:
             t["p"] += 1
-        stake = stake_for(kelly, price)
-        if result == "WIN":
-            t["units"] += stake.win
-        elif result == "LOSS":
-            t["units"] -= stake.risk
-        # PUSH returns the stake: no unit change.
-        if result != "PUSH":
-            t["risked"] += stake.risk
+        # A row from _SETTLED_SQL carries the shared SQL functions in the
+        # last two columns (published_pick_unit_profit, published_pick_unit_risked).
+        # Those are the Record tab's units and risked. A shorter tuple is a
+        # unit test of this formatter; it uses stake_for, which the function
+        # body is pinned equal to.
+        if len(row) >= 9:
+            t["units"] += float(row[7] or 0)
+            t["risked"] += float(row[8] or 0)
+        else:
+            stake = stake_for(kelly, price)
+            if result == "WIN":
+                t["units"] += stake.win
+            elif result == "LOSS":
+                t["units"] -= stake.risk
+            # PUSH returns the stake: no unit change, and it was not risked.
+            # WIN and LOSS only. A push, a void, and an ungraded row
+            # laid nothing — the same rule as published_pick_unit_risked.
+            if result in ("WIN", "LOSS"):
+                t["risked"] += stake.risk
     return t
 
 
@@ -2577,6 +2652,197 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         return 1
     finally:
         conn.close()
+
+
+# ── Weekly and monthly recaps ────────────────────────────────────────────────
+# The daily recap above is yesterday, inside the 6:00am ET pipeline. These
+# two use that same settled query and the same results webhook. They open
+# Monday at 7:30am ET, after that daily post and after the 7:00am retry.
+# A missed Monday keeps trying until the next window opens. The ledger is
+# what makes the retry post once.
+
+PERIOD_RECAP_HOUR_ET = 7
+PERIOD_RECAP_MINUTE_ET = 30
+
+
+def _at_et(day: date, hour: int, minute: int) -> datetime:
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=ET)
+
+
+def _first_monday(year: int, month: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(0 - first.weekday()) % 7)
+
+
+def _previous_month(year: int, month: int) -> tuple[date, date]:
+    if month == 1:
+        start = date(year - 1, 12, 1)
+    else:
+        start = date(year, month - 1, 1)
+    end = date(year, month, 1) - timedelta(days=1)
+    return start, end
+
+
+def _week_ending(sunday: date) -> tuple[date, date]:
+    return sunday - timedelta(days=6), sunday
+
+
+def recap_periods_due(now: datetime | None = None) -> list[dict]:
+    """The week, and on its window the month, whose posting time has passed.
+
+    The week that ended Sunday opens the following Monday at 7:30am ET and
+    stays due until the next Monday at 7:30am. The previous calendar month
+    opens on the first Monday of the new month at that same minute, and
+    stays due until the next month's first Monday. Before 7:30am on the
+    opening Monday, that window is not due yet.
+    """
+    now = now or datetime.now(ET)
+    now = now.astimezone(ET) if now.tzinfo else now.replace(tzinfo=ET)
+    today = now.date()
+    due: list[dict] = []
+
+    if today.weekday() == 6:
+        sunday = today - timedelta(days=7)
+    else:
+        sunday = today - timedelta(days=today.weekday() + 1)
+    week_opens = _at_et(sunday + timedelta(days=1),
+                        PERIOD_RECAP_HOUR_ET, PERIOD_RECAP_MINUTE_ET)
+    if now >= week_opens:
+        start, end = _week_ending(sunday)
+        due.append({
+            "span": "week", "start": start, "end": end,
+            "heading": period_heading("week", start, end),
+        })
+
+    opened: list[tuple[datetime, int, int]] = []
+    for year, month in ((today.year, today.month),
+                        *_shift_month(today.year, today.month, -1)):
+        first = _first_monday(year, month)
+        opens = _at_et(first, PERIOD_RECAP_HOUR_ET, PERIOD_RECAP_MINUTE_ET)
+        if now >= opens:
+            opened.append((opens, year, month))
+    if opened:
+        _opens, year, month = max(opened)
+        start, end = _previous_month(year, month)
+        due.append({
+            "span": "month", "start": start, "end": end,
+            "heading": period_heading("month", start, end),
+        })
+    return due
+
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[tuple[int, int]]:
+    month += delta
+    if month < 1:
+        month += 12
+        year -= 1
+    elif month > 12:
+        month -= 12
+        year += 1
+    return ((year, month),)
+
+
+def period_heading(span: str, start: date, end: date) -> str:
+    """The title both surfaces use, without the word 'results'."""
+    if span == "month":
+        return start.strftime("%B")
+    left = f"{start.strftime('%b')} {start.day}"
+    if start.month == end.month and start.year == end.year:
+        right = str(end.day)
+    else:
+        right = f"{end.strftime('%b')} {end.day}"
+    return f"Week of {left}-{right}"
+
+
+def notify_discord_period(span: str, start: date, end: date,
+                          heading: str, dry_run: bool = False) -> int:
+    """One weekly or monthly recap, on the daily recap's webhook.
+
+    Same settled picks as the daily recap (`_settled_rows_since` is that
+    query over a window). Ledgered on the window's start date, and only
+    after Discord returns a message id.
+    """
+    url = _results_webhook()
+    if not url:
+        return 0
+    kind = f"discord_results_{span}"
+    lock_key = f"{kind}:{start.isoformat()}"
+    conn = get_connection()
+    try:
+        if conn.execute(
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (lock_key, kind),
+        ).fetchone():
+            return 0
+        rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
+        if not rows:
+            return 0
+        overall = _tally(rows)
+        if (overall["w"] + overall["l"] + overall["p"]) == 0:
+            return 0
+        by_sport: dict[str, list] = {}
+        for row in rows:
+            by_sport.setdefault(row[0], []).append(row)
+        fields = [{
+            "name": sport,
+            "value": _tally_line(_tally(group), with_clv=True),
+            "inline": False,
+        } for sport, group in sorted(by_sport.items())]
+        color = (_COLOR_RESULTS_UP if overall["units"] > 0
+                 else _COLOR_RESULTS_DOWN if overall["units"] < 0
+                 else _COLOR_RESULTS_FLAT)
+        embed = {
+            "title": f"\U0001F4CA Results — {heading}",
+            "description": (
+                f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                f"{len(rows)} settled"),
+            "color": color,
+            "fields": fields,
+        }
+        if dry_run:
+            logger.info(f"[dry-run] discord({span}) {heading} → "
+                        f"{_tally_line(overall)}")
+            return 0
+        message_id = _post(url, {"embeds": [embed]})
+        stored_id = (message_id if isinstance(message_id, str)
+                     and message_id not in ("", _POST_OK_NO_ID) else None)
+        if not stored_id:
+            logger.error(f"Discord({span}) {heading} not confirmed")
+            return 0
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, kind, datetime.now(ET).isoformat(), stored_id),
+        )
+        conn.commit()
+        logger.success(f"✓ Discord({span}): posted {heading}")
+        return 1
+    finally:
+        conn.close()
+
+
+def post_period_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+    """Post each due week and month, Discord then X. A ledgered window is 0.
+
+    Called by the Monday 7:30am job and again from later settle passes, so
+    a failed post is retried and a successful one is not repeated.
+    """
+    posted = 0
+    for window in recap_periods_due(now):
+        try:
+            posted += notify_discord_period(
+                window["span"], window["start"], window["end"],
+                window["heading"], dry_run=dry_run)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"Discord {window['span']} recap failed: {exc}")
+        try:
+            from tracking.x_publisher import notify_x_period
+            posted += notify_x_period(
+                window["span"], window["start"], window["end"],
+                window["heading"], dry_run=dry_run)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"X {window['span']} recap failed: {exc}")
+    return posted
 
 
 # ── Void notice ──────────────────────────────────────────────────────────────
