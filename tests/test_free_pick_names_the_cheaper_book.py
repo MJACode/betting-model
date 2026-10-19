@@ -44,7 +44,7 @@ def test_the_tweet_names_the_cheaper_book():
     """The cheaper book is the HEADLINE as of 2026-09-03, not a footnote after
     the DraftKings price — mike, "it just needs to post the best book and
     price". The earlier assertion here expected both prices in the tweet."""
-    t = xp.render_free_pick(_pick(), "2026-09-02")
+    t = xp.render_pick(_pick())
     assert "+100 at ESPN BET" in t
     assert "-102" not in t, "the DK price is no longer the published one"
 
@@ -52,19 +52,17 @@ def test_the_tweet_names_the_cheaper_book():
 def test_the_tweet_still_has_no_link():
     """A book name is not a URL, and the 13x link rate must not be reachable
     through this clause."""
-    xp._assert_no_link(xp.render_free_pick(_pick(), "2026-09-02"))
+    xp._assert_no_link(xp.render_pick(_pick()))
 
 
 def test_the_tweet_says_draftkings_when_draftkings_is_best():
-    t = xp.render_free_pick(_pick(best_book="draftkings", best_odds=-102.0),
-                            "2026-09-02")
+    t = xp.render_pick(_pick(best_book="draftkings", best_odds=-102.0))
     assert "-102 at DraftKings" in t
 
 
 @pytest.mark.parametrize("worse", [-130.0, -102.0])
 def test_the_tweet_never_publishes_a_worse_price_than_draftkings(worse):
-    t = xp.render_free_pick(_pick(best_book="betmgm", best_odds=worse),
-                            "2026-09-02")
+    t = xp.render_pick(_pick(best_book="betmgm", best_odds=worse))
     assert "BetMGM" not in t
     assert "-102 at DraftKings" in t
 
@@ -78,18 +76,28 @@ def test_the_good_to_clause_is_dropped_not_truncated_when_it_will_not_fit():
     overflows on its own and hits the pre-existing `[:MAX_TWEET]` truncation,
     which is a different (and already tested) behaviour.
     """
-    label = "X" * 200
-    base = xp.render_free_pick(_pick(label=label), "2026-09-02")
+    # 235 is the measured length where the body plus #Royals #Marlins still
+    # fits, and "Good to -115." does not — even after every reach tag is
+    # dropped. 230 still fits the clause once #MLB is dropped. The old 205
+    # was measured against the longer "Free pick" / "More in Discord" body.
+    label = "X" * 235
+    base = xp.render_pick(_pick(label=label))
     assert len(base) <= xp.MAX_TWEET, "fixture no longer fits without the clause"
 
-    t = xp.render_free_pick(_pick(label=label, good_to=-115), "2026-09-02")
+    t = xp.render_pick(_pick(label=label, good_to=-115))
     assert len(t) <= xp.MAX_TWEET
     assert "Good to" not in t, "the clause was added and then truncated"
-    assert t.endswith(xp.hashtags_for("MLB")), "the tags were pushed off the end"
+    # Team tags stay, and they stay ahead of whatever reach tags still fit.
+    # The two longest reach tags do not fit in this fixture, so they go.
+    assert "#Royals" in t and "#Marlins" in t
+    assert t.index("#Royals") < t.index("#Marlins")
+    assert "#GamblingX" not in t and "#FreePicks" not in t
+    if "#MLB" in t:
+        assert t.index("#Marlins") < t.index("#MLB")
 
 
 def test_the_tweet_publishes_the_good_to_bound_when_it_fits():
-    t = xp.render_free_pick(_pick(good_to=-115), "2026-09-02")
+    t = xp.render_pick(_pick(good_to=-115))
     assert "Good to -115." in t
 
 

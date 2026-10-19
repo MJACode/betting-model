@@ -112,6 +112,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # tests/test_everything_in_supabase.py had failed on since 2026-09-12).
     # Written by data/ingestors/nfl_weather_cache_import.py.
     "add_nfl_stadium_weather_hourly.sql",
+    # 2026-10-11: the live wind card's kickoff-hour readings. The 11 mph check
+    # uses the minimum over a covered 12-hour window; without these rows the
+    # card fails closed and locks nothing. Not a pick.
+    "add_nfl_kickoff_wind_reads.sql",
     # 2026-09-20: per-game NHL team / goalie / skater logs from the NHL's free
     # stats API. The NHL models read one SEASON-FINAL row per goalie and
     # carried-forward team rates; an as-of-date feature needs the games it is
@@ -216,6 +220,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # written by data/ingestors/player_positions_ingestor.py. Guards on the
     # table existing.
     "add_player_positions.sql",
+    # 2026-10-06: ESPN athletes with no game-log row (mostly rookies). The
+    # position pass remembers them so it does not re-fetch them every morning.
+    # Guards on the table existing. Not applied in the session that added it;
+    # the worker's migration pass applies it after merge.
+    "add_player_position_unmatched.sql",
     # 2026-10-06 (Matt, phase 3): the card's NBA / WNBA / NCAAF functions,
     # joining player_positions. MUST run after add_player_positions.sql.
     "add_position_vs_opponent_bball_ncaaf.sql",
@@ -344,8 +353,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # run_ledger._abort_orphans, this run_id only, and only while it is
     # still unfinished. Boot closes the next one; this closes the one
     # already open. Does not touch picks, thresholds, or pauses.
-    # Sits before clv_standard_v2: that file reads the live view. Anything
-    # after clv must not recreate that view (tests/test_published_record.py).
+    # Sits immediately before clv_standard_v2: that file reads the live view.
+    # published_record_units also reads the live view and is last, so it
+    # keeps the CLV columns. Every other file after the CLV stamp must not
+    # rewrite v_public_track_record (tests/test_published_record.py,
+    # tests/test_record_units_agree.py). The NHL stats views are display-only
+    # and stay after CLV. The skater window totals follow those views.
+    # Both stay before the posted-stake pair.
     "abort_deploy_killed_evening_2026_10_16.sql",
     # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
     # is the market-edge column. Recomputes rows not yet standard_v2 and
@@ -362,6 +376,30 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Does not touch picks or the record views. Win, loss, or push.
     # No spread, price, or line filter.
     "byom_backtest_rpc_2026_10_16.sql",
+    # 2026-10-16: NHL Stats-tab reads (season totals, per-game value arrays,
+    # team totals, latest pre-game prop quote). Display only. Does not
+    # rewrite v_public_track_record and does not run before the CLV stamp.
+    "add_nhl_stats_views_2026_10_16.sql",
+    # 2026-10-17: NHL Players board sums, same RPC shape as the other
+    # sports. After the stats views. Does not rewrite the record.
+    "add_nhl_skater_window_totals_2026_10_17.sql",
+    # 2026-10-18: Anytime TD matchup ranks, one row per defense, plus `pos`
+    # on the NFL season and H2H stat reads. Display only. Does not rewrite
+    # v_public_track_record. Sits with the other display reads, before the
+    # posted-stake pair. Guards each piece so the DDL fires once.
+    "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-10-17: the posted-stake functions, committed on their own.
+    # The view patch is the next file. A failure there must not roll
+    # these back, or settlement's query names a function that does not
+    # exist. Does not rewrite snapshots, picks, or push_sent.
+    "published_pick_units_2026_10_17.sql",
+    # 2026-10-16: Discord #results and the Record tab share one stake.
+    # The two record views gain units and risked from the functions
+    # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
+    # Reads the live view, so it runs after every owner above, including
+    # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
+    # and does not post. This file stays last.
+    "published_record_units_2026_10_16.sql",
 ]
 
 

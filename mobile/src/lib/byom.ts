@@ -11,7 +11,7 @@
  * string with the result.
  */
 
-import { byomFilters, type ByomFilters } from './byomFilters';
+import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
 import { supabase } from './supabase';
 
 export { byomFilters, type ByomFilters };
@@ -87,9 +87,10 @@ export function parseBacktestRow(value: unknown): ByomBacktestRow {
 }
 
 function parseFilters(value: unknown): ByomFilters {
-  const row = asRecord(value);
-  if (row == null) return {};
-  return byomFilters(row as ByomFilters);
+  // A stored row can carry a key this build does not grade. Drop that key
+  // and keep the rest, so one unknown key does not drop the whole list.
+  // byomFilters still rejects the same key on save.
+  return readStoredFilters(value);
 }
 
 function parseSnapshot(value: unknown): ByomSnapshot {

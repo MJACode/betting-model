@@ -45,3 +45,21 @@ export function byomFilters(input: ByomFilters | null | undefined): ByomFilters 
   }
   return out;
 }
+
+/** A stored row. One unknown key is dropped. A save still goes through byomFilters. */
+export function readStoredFilters(value: unknown): ByomFilters {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return {};
+  const src: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (;;) {
+    try {
+      return byomFilters(src as ByomFilters);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      const match = /^unknown filter key: (.+)$/.exec(message);
+      if (match == null || !Object.prototype.hasOwnProperty.call(src, match[1])) {
+        throw err;
+      }
+      delete src[match[1]];
+    }
+  }
+}

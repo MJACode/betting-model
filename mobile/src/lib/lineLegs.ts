@@ -44,6 +44,7 @@
 
 import { americanToDecimal } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
+import { nhlOffLineCount } from '@/lib/nhlBoard';
 import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
@@ -148,8 +149,34 @@ export function lineLegLabel(s: LineLegSpec): string {
     const side = s.side === 'under' ? 'Under' : 'Over';
     return `${home} vs ${away} ${side} ${s.line == null ? '' : fmtLine(s.line)}`.trim();
   }
+  if (s.sport === 'NHL') {
+    const phrase = nhlLegPhrase(s.line, s.side, s.market);
+    if (phrase) return `${s.player_name} ${phrase}`.trim();
+  }
   const side = s.side === 'under' ? 'Under' : 'Over';
   return `${s.player_name} ${side} ${s.line} ${s.statLabel}`.trim();
+}
+
+const NHL_COUNT_NOUN: Record<string, string> = {
+  player_shots_on_goal: 'shots',
+  player_points: 'points',
+  player_assists: 'assists',
+  player_goal_scorer_anytime: 'goals',
+};
+
+/** "Over 2.5 shots (3 or more)". A line that is not a half-point keeps the old label. */
+export function nhlLegPhrase(line: number, side: LineSide, market: string): string | null {
+  const noun = NHL_COUNT_NOUN[market];
+  const words = nhlOffLineCount(line, side);
+  if (!noun || !words) return null;
+  const word = side === 'under' ? 'Under' : 'Over';
+  return `${word} ${line} ${noun} (${words})`;
+}
+
+/** "DraftKings lists this as Over 1.5." The sheet title keeps the plain sentence. */
+export function nhlBookListing(book: string, line: number, side: LineSide): string {
+  const word = side === 'under' ? 'Under' : 'Over';
+  return `${bookName(book)} lists this as ${word} ${line}.`;
 }
 
 /** The priced side of an odds row for a game spec. */
@@ -278,6 +305,9 @@ export interface LineSheetInput {
   spec: LineLegSpec;
   prices: { book: string; price: number }[];
   explainer?: string;
+  /** Sheet title when it should match the board's sentence. The betslip leg
+   *  still uses lineLegLabel. */
+  title?: string;
 }
 
 function bettablePrices<R extends { bookmaker: string }>(
@@ -324,12 +354,18 @@ export function propLineSheetInput(
     statLabel,
   };
   const prices = bettablePrices(rows, (r) => num(quote.side === 'under' ? r.under_price : r.over_price));
-  const explainer =
+  const choose = 'Add it to your betslip now — you’ll choose the sportsbook there.';
+  // An off-line quote is a different bet from the ruler. Say that first, then
+  // how the book prints the number. NHL says the book line on every sheet.
+  const offLineClause =
     quote.offLine && boardHeadline
       ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${
           numberLabel(quote.line, quote.side)
-        }. Add it to your betslip now — you’ll choose the sportsbook there.`
-      : undefined;
+        }.`
+      : null;
+  const listing = sport === 'NHL' ? nhlBookListing(quote.book, quote.line, quote.side) : null;
+  const explainer =
+    offLineClause || listing ? [offLineClause, listing, choose].filter(Boolean).join(' ') : undefined;
   return { spec, prices, explainer };
 }
 

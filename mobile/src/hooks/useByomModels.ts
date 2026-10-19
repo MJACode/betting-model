@@ -3,7 +3,7 @@
  * fail until a session exists. This hook does not turn sign-in on.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   deleteByomModel,
@@ -18,16 +18,22 @@ export function useByomModels() {
   const [models, setModels] = useState<ByomModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A response lands only when no newer load has started.
+  const seq = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++seq.current;
     setLoading(true);
     setError(null);
     try {
-      setModels(await fetchByomModels());
+      const next = await fetchByomModels();
+      if (seq.current !== id) return;
+      setModels(next);
     } catch (e: unknown) {
+      if (seq.current !== id) return;
       if (!isAbortError(e)) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (seq.current === id) setLoading(false);
     }
   }, []);
 
