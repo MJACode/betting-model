@@ -510,10 +510,13 @@ export function gameStartState(
 }
 
 /**
- * Has the game started — LIVE, FINAL or ENDED? The H5 test for "no hand-off at
- * the in-play price". Same (game, live) leading signature as draft #846's
- * `gameIsOver`, so the two helpers sit side by side once both land. Pass the
- * pick's `game_time` as `scheduledStart` so a missing games row fails closed.
+ * Has the game started — in play, or over? The H5 test for "no hand-off at
+ * the in-play price". A finished game is `gameStartState(...) === 'over'`
+ * on this same signature (scores, the blind window, or the pick's own
+ * `game_time` when the games row is missing). That is the over test Track
+ * and Slip use for a finished VOID, so there is no second `gameIsOver`.
+ * Pass the pick's `game_time` as `scheduledStart` so a missing games row
+ * fails closed.
  */
 export function gameHasStarted(
   game: GameLike | null | undefined,
@@ -672,7 +675,6 @@ export function toIsoDate(value: string): string {
   return value.slice(0, 10);
 }
 
-/** Add `days` to a YYYY-MM-DD string. Returns YYYY-MM-DD. */
 /**
  * A slate DAY (YYYY-MM-DD, ET kickoff date) as the app writes it:
  * 'Today' / 'Tomorrow' / 'Yesterday' / 'Sat 11/28'.
@@ -709,6 +711,7 @@ export function dayLabelSpokenET(date: string, today: string = todayET()): strin
   }).format(d);
 }
 
+/** Add `days` to a YYYY-MM-DD string. Returns YYYY-MM-DD. */
 export function addDays(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);

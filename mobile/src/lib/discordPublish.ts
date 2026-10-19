@@ -93,6 +93,22 @@ export function openForAction(p: {
     && p.discordPublish === 'published';
 }
 
+/**
+ * openForAction, once the caller knows whether the game is over.
+ *
+ * A VOID never settles (`result` stays `NO_ACTION`), so openForAction alone
+ * would leave Track and Slip on after the game is finished. An unsettled
+ * pick stays open until it grades, over or not. `over` is
+ * `gameStartState(...) === 'over'` — the helper the app already uses, not
+ * a second copy of it.
+ */
+export function openForActionNow(
+  p: Parameters<typeof openForAction>[0],
+  over: boolean,
+): boolean {
+  return openForAction(p) && (p.result == null || !over);
+}
+
 const CHUNK = 80;
 
 /**

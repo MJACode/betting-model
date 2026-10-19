@@ -102,6 +102,7 @@ import {
   effectiveDateSelection,
   isDateSelected,
   rowsByDay,
+  toggleDateSelection,
   type DayRow,
 } from '@/lib/dateFilter';
 import { slipKeyForPick } from '@/lib/parlay';
@@ -385,13 +386,8 @@ export function PicksHomeScreen() {
     [pickedDates, dateOptions],
   );
   const toggleDate = useCallback((date: string) => {
-    setPickedDates((prev) => {
-      const next = new Set(prev);
-      if (next.has(date)) next.delete(date);
-      else next.add(date);
-      return next;
-    });
-  }, []);
+    setPickedDates((prev) => toggleDateSelection(prev, date, dateOptions));
+  }, [dateOptions]);
   const clearDates = useCallback(() => setPickedDates(new Set()), []);
   const datedItems = useMemo(
     () => activeItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates)),

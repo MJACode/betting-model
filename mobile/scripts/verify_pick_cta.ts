@@ -414,7 +414,10 @@ check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
   /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));
 const startedDef = card.match(/const startedText =[^;]*;/)?.[0] ?? '';
 check('PickCard: the started line is NOT gated on paused (no new paused gating)',
-  /pick\.signal_type === 'BET' && !preview && open && cta\.startedLine/.test(startedDef) && !/paused|offersBook/.test(startedDef), startedDef.replace(/\s+/g, ' ').slice(0, 120));
+  /pick\.signal_type === 'BET' && !preview && cta\.startedLine && \(open \|\| pillSilent\)/.test(startedDef) &&
+  !/paused|offersBook/.test(startedDef) &&
+  /boardStatus\.kind === 'ended' \|\| \(boardStatus\.kind === 'pre' && !boardStatus\.timeLabel\)/.test(card),
+  startedDef.replace(/\s+/g, ' ').slice(0, 160));
 const started = card.match(/<View\s+style=\{styles\.startedLine\}[\s\S]*?<\/View>/)?.[0] ?? '';
 check('PickCard: the started line is role text, lock icon, not a Pressable',
   /accessibilityRole="text"/.test(started) && /name="lock-closed"/.test(started) && !/Pressable|onPress/.test(started));
@@ -432,13 +435,15 @@ check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEd
 check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('PickDetail: hand-off (BookLinesRow) only while cta.handoff, started line otherwise',
-  /cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
+  /cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine &&/.test(detail) && /openHere \|\| detailPillSilent/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
 check('PickDetail: betslip card needs cta.slip; Track unchanged', /&& !voided && cta\.slip \?/.test(detail) && /const canTrack = openHere;/.test(detail));
 check('PickDetail: cta = pickCtaFor(pick, game, liveState)', /const cta = pickCtaFor\(pick, game, liveState\);/.test(detail));
 check('PickDetail: AllBooksCard (rows open betslips) hidden when !cta.handoff (H5)',
   /\{live \|\| !cta\.handoff \? null : <AllBooksCard\b/.test(detail) && (detail.match(/<AllBooksCard\b/g) ?? []).length === 1);
 check('PickDetail: the started line is NOT gated on paused',
-  /\{pick\.signal_type === 'BET' && !preview && !retired && !voided && cta\.startedLine && openHere \? \(/.test(detail));
+  /\{pick\.signal_type === 'BET' && !preview && !retired && !voided && cta\.startedLine &&/.test(detail) &&
+  /\(openHere \|\| detailPillSilent\) \? \(/.test(detail) &&
+  /detailStatus\.kind === 'ended' \|\| \(detailStatus\.kind === 'pre' && !detailStatus\.timeLabel\)/.test(detail));
 check('ReasoningCard: heading from reasoningHeading', /reasoningHeading\(pick\.signal_type/.test(read('src/components/ReasoningCard.tsx')) && !/>Why this bet\?</.test(read('src/components/ReasoningCard.tsx')));
 check('LineMovementCard: rows from recentChanges', /recentChanges\(/.test(read('src/lib/lineMovementView.ts')) && /view\.rows\.map\(/.test(read('src/components/LineMovementCard.tsx')) && !/snaps\.slice\(-8\)/.test(read('src/lib/lineMovementView.ts')));
 const home = read('src/screens/PicksHomeScreen.tsx');

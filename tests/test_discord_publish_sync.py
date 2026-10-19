@@ -313,10 +313,11 @@ for (const [result, condition_status, discordPublish, want] of cases) {
     card = (ROOT / "mobile/src/components/PickCard.tsx").read_text(encoding="utf-8")
     detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
     for src in (card, detail):
-        assert "openForAction(pick)" in src
+        assert "openForActionNow(pick, over)" in src
         assert "canTrack = pick.result == null" not in src
         assert "Boolean(onToggleTrack) && pick.result == null" not in src
         assert "hasPricedLine(pick) && pick.result == null" not in src
+    assert "openForAction(pick)" in card
 
 
 @needs_node
@@ -341,7 +342,8 @@ if (win !== "won") throw new Error("win " + win);
     perf = (ROOT / "mobile/src/screens/PerformanceScreen.tsx").read_text(encoding="utf-8")
     assert "case 'not_graded':" in perf
     detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
-    assert "openForAction(pick) && (pick.result == null || !over)" in detail
+    assert "gameStartState(game, liveState, pick.game_time) === 'over'" in detail
+    assert "openForActionNow(pick, over)" in detail
     assert "hasPricedLine(pick) && openHere" in detail
 
 

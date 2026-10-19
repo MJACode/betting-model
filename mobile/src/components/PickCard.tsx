@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
+import { formatGameTimeET, formatSigned, gameDayLabelET, gameStartState, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
@@ -37,7 +37,7 @@ import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
-import { openForAction } from '@/lib/discordPublish';
+import { openForAction, openForActionNow } from '@/lib/discordPublish';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { gameStatusSpeech, sharpScoreSpeech, unitsSpeech } from '@/lib/a11y';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
@@ -241,13 +241,24 @@ export function PickCard({
   // no book left at the picked line is Open: no "Bet DK −110", and no slip
   // at the new line. Signals names the line, so it keeps `handoff`.
   const boardHandoff = todayBoardHandoff(handoff, heroPrice);
-  // Open = unsettled, or a VOID Discord still shows (openForAction).
-  const open = openForAction(pick);
+  // Open = unsettled, or a VOID Discord still shows — until that game is
+  // over. A VOID never settles, so openForAction alone left Track and Slip
+  // on a finished VOID. Over is gameStartState === 'over' (scores, the
+  // blind window, or the pick's game_time when the games row is missing).
+  const over = gameStartState(game, liveState, pick.game_time) === 'over';
+  const open = openForActionNow(pick, over);
   // "Game started · picked at −125 DK" in the hand-off's place (H5). Not gated
-  // on paused: it states a fact about the pick, and this PR adds no paused
-  // gating (the existing !paused gates flip in the paused-on-All PR).
+  // on paused: it states a fact about the pick. Track and Slip use `open`
+  // and switch off when a VOID's game is over. This line stays when that
+  // would leave the card with no word that the bet link is off: the status
+  // pill draws nothing for 'ended', and nothing when it has no kickoff to
+  // print (a missing games row). A FINAL pill already says the game is over,
+  // so the line stays hidden then.
+  const boardStatus = gameStatus(game, liveState);
+  const pillSilent =
+    boardStatus.kind === 'ended' || (boardStatus.kind === 'pre' && !boardStatus.timeLabel);
   const startedText =
-    pick.signal_type === 'BET' && !preview && open && cta.startedLine
+    pick.signal_type === 'BET' && !preview && cta.startedLine && (open || pillSilent)
       ? gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))
       : null;
   // Track stays after the start; it scores the pick at its lock.

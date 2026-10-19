@@ -532,8 +532,9 @@ def test_pick_card_wiring():
     assert re.search(r"const canTrack = [^;]*&& open && cta\.track;", card)
     # The started line is not gated on paused: no NEW paused gating (#847).
     started_def = re.search(r"const startedText =[^;]*;", card)
-    assert started_def and "pick.signal_type === 'BET' && !preview && open && cta.startedLine" in started_def.group(0)
+    assert started_def and "pick.signal_type === 'BET' && !preview && cta.startedLine && (open || pillSilent)" in started_def.group(0)
     assert "paused" not in started_def.group(0) and "offersBook" not in started_def.group(0)
+    assert "boardStatus.kind === 'ended' || (boardStatus.kind === 'pre' && !boardStatus.timeLabel)" in card
     started = re.search(r"<View\s+style=\{styles\.startedLine\}.*?</View>", card, re.S)
     assert started, "no Game started line"
     block = started.group(0)
@@ -550,13 +551,16 @@ def test_pick_card_wiring():
 def test_pick_detail_board_and_copy_wiring():
     detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
     assert re.search(r"cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>", detail)
-    assert "cta.startedLine && openHere" in detail
+    assert "cta.startedLine &&" in detail
+    assert "(openHere || detailPillSilent)" in detail
     assert "gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))" in detail
     assert "&& !voided && cta.slip ?" in detail and "const canTrack = openHere;" in detail
     assert "const cta = pickCtaFor(pick, game, liveState);" in detail
     # H5: AllBooksCard's rows open betslips, so it goes with the hand-off.
     assert "{live || !cta.handoff ? null : <AllBooksCard" in detail and detail.count("<AllBooksCard") == 1
-    assert "{pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (" in detail
+    assert "{pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine &&" in detail
+    assert "(openHere || detailPillSilent) ? (" in detail
+    assert "detailStatus.kind === 'ended' || (detailStatus.kind === 'pre' && !detailStatus.timeLabel)" in detail
     reasoning = _read(SRC / "components" / "ReasoningCard.tsx")
     assert "reasoningHeading(pick.signal_type" in reasoning and ">Why this bet?<" not in reasoning
     movement = _read(SRC / "components" / "LineMovementCard.tsx")

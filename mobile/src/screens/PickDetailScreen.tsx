@@ -38,9 +38,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
 import { clvBetQuote } from '@/lib/clvBet';
-import { openForAction } from '@/lib/discordPublish';
+import { openForActionNow } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStartState, gameStatus } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
@@ -218,11 +218,15 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Live picks track by a stable proposition key so the delete+rescore
   // churn can't drop them (useTrackedBets).
-  // A VOID Discord still shows is open too (openForAction).
-  // A VOID never settles, so its actions switch off when the game ends
-  // instead (the board already drops finished games; this screen does not).
-  const over = ['final', 'ended'].includes(gameStatus(game, liveState).kind);
-  const openHere = openForAction(pick) && (pick.result == null || !over);
+  // A VOID Discord still shows is open too, until the game is over
+  // (openForActionNow). A VOID never settles, so its actions switch off
+  // when the game is over. Same over test as the card: gameStartState,
+  // which falls back to the pick's game_time when the games row is missing.
+  const over = gameStartState(game, liveState, pick.game_time) === 'over';
+  const openHere = openForActionNow(pick, over);
+  const detailStatus = gameStatus(game, liveState);
+  const detailPillSilent =
+    detailStatus.kind === 'ended' || (detailStatus.kind === 'pre' && !detailStatus.timeLabel);
   const canTrack = openHere;
   // H5 (lib/pickCta.ts): once a PRE-GAME pick's game has started, no hand-off
   // at the in-play price and no betslip — "Game started · picked at …" says
@@ -408,10 +412,14 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             </View>
           ) : null
         ) : null}
-        {/* "Game started · picked at …" — not gated on paused: it states a fact
-            about the pick, and this PR adds no paused gating (the existing
-            !paused gates flip in the paused-on-All PR). */}
-        {pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (
+        {/* "Game started · picked at …" — not gated on paused. It stays when
+            a finished VOID would otherwise leave this screen with no word
+            that the bet link is off: the status pill draws nothing for
+            'ended', and nothing when it has no kickoff to print. A FINAL
+            pill already says the game is over, so the line stays hidden
+            then. Track and Slip still follow openHere. */}
+        {pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine &&
+        (openHere || detailPillSilent) ? (
           <View
             style={styles.startedCard}
             accessibilityRole="text"

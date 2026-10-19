@@ -171,6 +171,7 @@ jobs:
             tests/test_mobile_contrast_tokens.py \
             tests/test_mobile_error_states.py \
             tests/test_mobile_pick_cta.py \
+            tests/test_mobile_finished_void_date.py \
             tests/test_mobile_line_movement.py \
             tests/test_mobile_a11y.py \
             tests/test_mobile_nhl_lookahead.py \
