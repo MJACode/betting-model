@@ -1200,7 +1200,18 @@ export function currentLineQuotes(
   bookRows: BookPricedRow[] | undefined,
   hero?: HeroAmerican | null,
   priceAge?: PriceAgeContext,
+  /** The member's own books (usePreferredBooks). A quote at any other book
+   *  is dropped and the rest re-ranked (Matt, 2026-10-19). Omitted: every
+   *  bettable book, as before. */
+  allowedBooks?: readonly string[],
 ): LineQuote[] {
+  if (allowedBooks) {
+    const allowed = new Set(allowedBooks);
+    const all = currentLineQuotes(pick, bookRows, hero, priceAge);
+    const kept = all.filter((q) => allowed.has(q.bookmaker));
+    if (kept.length === all.length) return all;
+    return kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
+  }
   const quotes = pickLineQuotes(pick, freshBookRows(pick, bookRows, priceAge));
   if (!priceAgeApplies(pick, priceAge)) return quotes;
   // A book is stale when we hold rows for it and none is current.
@@ -1249,8 +1260,13 @@ export function bestHandoffForPick(
   bookRows: BookPricedRow[] | undefined,
   hero?: HeroAmerican | null,
   priceAge?: PriceAgeContext,
+  /** The member's own books (usePreferredBooks). A book outside them is
+   *  never handed off to (Matt, 2026-10-19), the record book included.
+   *  Omitted: every book, as before. */
+  allowedBooks?: readonly string[],
 ): BoardHandoff | null {
   if (pick.is_live === true) {
+    if (allowedBooks && !allowedBooks.includes(MODEL_BOOK)) return null;
     // No live number to quote after the bet: open the book without one,
     // rather than print the lock as if it were still on offer.
     if (hero?.untracked) {
@@ -1267,7 +1283,7 @@ export function bestHandoffForPick(
   }
   // No hand-off to a book whose newest price is older than the bound
   // (currentLineQuotes; Pick Detail's chips read the same list).
-  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge);
+  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   if (quotes.length === 0) return null;
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet

@@ -35,6 +35,7 @@ import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { FeedbackScreen } from '@/screens/FeedbackScreen';
 import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
@@ -200,6 +201,9 @@ startCrashLogging();
 
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
+  // A member who saw the intro before the sportsbook step existed gets that
+  // step on its own, once (OnboardingModal booksOnly).
+  const { needsChoice: needsBooks } = usePreferredBooks();
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   useModelClvPedigree(); // hydrate per-model CLV pedigree for the Sharp Score
   usePushNotifications(); // register push token when user opts in
@@ -242,8 +246,12 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
     <AppErrorBoundary onReset={resetNav}>
-      <OnboardingModal visible={ready && !seen} onDone={markSeen} />
-      <DailyRecap onboardingDone={ready && seen} />
+      <OnboardingModal
+        visible={ready && (!seen || needsBooks)}
+        booksOnly={seen && needsBooks}
+        onDone={markSeen}
+      />
+      <DailyRecap onboardingDone={ready && seen && !needsBooks} />
       <NavigationContainer
         ref={navRef}
         theme={NAV_THEME}

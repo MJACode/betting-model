@@ -416,9 +416,9 @@ export function SettingsScreen() {
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Your sportsbooks</Text>
           <Text style={styles.bookHint}>
-            The books you bet at. The Stats page prints the best line among them beside each
-            player, and the betslip’s bet button opens the one taking your slip. It changes
-            nothing about how picks are priced.
+            The books you can bet at. Picks and Stats show the best price among them. You get
+            the most value by using every book you can. Model records and stats still use the
+            best price across all books.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
