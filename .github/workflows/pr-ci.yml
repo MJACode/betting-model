@@ -59,6 +59,9 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Install Postgres for scratch-cluster tests
+        run: sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql
+
       - name: Install minimal test deps
         run: |
           python -m pip install -U pip
@@ -95,7 +98,7 @@ jobs:
           SUPABASE_URL: ""
           SUPABASE_KEY: ""
         run: |
-          python -m pytest -q \
+          python -m pytest -q -rs \
             tests/test_config.py \
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
@@ -107,9 +110,13 @@ jobs:
             tests/test_publisher_lock.py \
             tests/test_live_lock.py \
             tests/test_settle_self_heal.py \
+            tests/test_settle_clv_timeout.py \
             tests/test_settled_record_is_immutable.py \
             tests/test_live_money_no_record_only.py \
             tests/test_published_record.py \
+            tests/test_record_units_agree.py \
+            tests/test_record_hero.py \
+            tests/test_yesterday_discord_units.py \
             tests/test_settlement_timing.py \
             tests/test_nhl_boxscore.py \
             tests/test_nba_espn_box.py \
@@ -158,6 +165,7 @@ jobs:
             tests/test_mobile_tsc_baseline.py \
             tests/test_mobile_player_detail.py \
             tests/test_position_vs_opponent.py \
+            tests/test_position_defense_ranks.py \
             tests/test_player_positions.py \
             tests/test_mobile_betslip_combine.py \
             tests/test_mobile_contrast_tokens.py \
@@ -169,6 +177,7 @@ jobs:
             tests/test_discord_publish_sync.py \
             tests/test_discord_void_notice.py \
             tests/test_anon_readable.py \
+            tests/test_nhl_stats_views.py \
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
@@ -180,4 +189,11 @@ jobs:
             tests/test_view_migration_lock_noop.py \
             tests/test_record_correction_post.py \
             tests/test_voided_pick_not_rechosen.py \
-            tests/test_mobile_stat_segments.py
+            tests/test_x_publisher.py \
+            tests/test_free_pick_names_the_cheaper_book.py \
+            tests/test_period_recaps.py \
+            tests/test_mobile_stat_segments.py \
+            tests/test_mobile_line_ruler.py \
+            tests/test_mobile_nhl_skater_stats.py \
+            tests/test_ddl_guard.py \
+            tests/test_nfl_wind_stability.py

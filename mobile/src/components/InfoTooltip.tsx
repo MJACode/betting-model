@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -33,6 +34,64 @@ interface Props {
  * centered tooltip modal with the full copy. Tap the backdrop or the "Got it"
  * button to dismiss.
  */
+/** The centered explanation InfoTooltip opens. One copy, so the matchup cell
+ *  can open the same sheet without a second header icon. */
+export function InfoSheet({
+  visible,
+  title,
+  body,
+  onClose,
+  warn = false,
+}: {
+  visible: boolean;
+  title: string;
+  body: string;
+  onClose: () => void;
+  warn?: boolean;
+}) {
+  const accent = warn ? colors.gradeBad : colors.tint;
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.backdrop}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel={`Close ${title}`}
+        />
+        <Pressable
+          style={[styles.card, { marginTop: insets.top, marginBottom: insets.bottom }]}
+          onPress={() => {}}
+          accessible={false}
+          accessibilityViewIsModal
+        >
+          <View style={styles.cardHeader}>
+            <Ionicons
+              name={warn ? 'warning' : 'information-circle'}
+              size={22}
+              color={accent}
+            />
+            <Text style={styles.cardTitle}>{title}</Text>
+          </View>
+          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} bounces={false}>
+            <Text style={styles.cardBody}>{body}</Text>
+          </ScrollView>
+          <Pressable
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Got it"
+            style={({ pressed }) => [styles.dismissBtn, pressed && styles.pressed]}
+          >
+            <Text style={styles.dismissText}>Got it</Text>
+          </Pressable>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
 export function InfoTooltip({
   title,
   body,
@@ -92,52 +151,13 @@ export function InfoTooltip({
           <Ionicons name="information-circle-outline" size={20} color={colors.tint} />
         )}
       </Pressable>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        {/* Backdrop and card follow ParlayDkHandoff exactly: the backdrop is a
-            labelled Close button rather than a full-screen unlabelled element,
-            and the card is a modal container VoiceOver cannot wander out of.
-            `accessible={false}` on the card so its children stay individually
-            reachable rather than collapsing into one element. */}
-        <View style={styles.backdrop}>
-          {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
-              parent: an accessible Pressable groups everything inside it into
-              one VoiceOver element, so a backdrop that wrapped the sheet hid the
-              sheet's rows and buttons from VoiceOver (audit PR 4). */}
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setOpen(false)}
-            accessibilityRole="button"
-            accessibilityLabel={`Close ${title}`}
-          />
-          {/* Inner Pressable swallows taps so touching the card doesn't dismiss. */}
-          <Pressable
-            style={styles.card}
-            onPress={() => {}}
-            accessible={false}
-            accessibilityViewIsModal
-          >
-            <View style={styles.cardHeader}>
-              <Ionicons
-                name={warn ? 'warning' : 'information-circle'}
-                size={22}
-                color={accent}
-              />
-              <Text style={styles.cardTitle}>{title}</Text>
-            </View>
-            <Text style={styles.cardBody}>{body}</Text>
-            <Pressable
-              // ~40pt button: 4pt slop each way reaches 44.
-              hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-              onPress={() => setOpen(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Got it"
-              style={({ pressed }) => [styles.dismissBtn, pressed && styles.pressed]}
-            >
-              <Text style={styles.dismissText}>Got it</Text>
-            </Pressable>
-          </Pressable>
-        </View>
-      </Modal>
+      <InfoSheet
+        visible={open}
+        title={title}
+        body={body}
+        warn={warn}
+        onClose={() => setOpen(false)}
+      />
     </>
   );
 }
@@ -200,10 +220,13 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 360,
+    maxHeight: '80%',
     backgroundColor: colors.bgCard,
     borderRadius: radii.lg,
     padding: spacing.lg,
   },
+  sheetScroll: { flexGrow: 0, flexShrink: 1 },
+  sheetContent: { paddingBottom: spacing.xs },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
