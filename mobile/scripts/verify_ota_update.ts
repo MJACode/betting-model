@@ -130,7 +130,7 @@ resetUpdateReadyForTests();
   check('Settings is told once', heard === 1, String(heard));
   off();
   check('the note says when it loads and offers no action',
-    /next time you open/i.test(UPDATE_READY_MESSAGE) && !/tap|restart|refresh/i.test(UPDATE_READY_MESSAGE));
+    /next time the app starts/i.test(UPDATE_READY_MESSAGE) && !/\bopen\b/i.test(UPDATE_READY_MESSAGE) && !/tap|restart|refresh/i.test(UPDATE_READY_MESSAGE));
 }
 resetUpdateReadyForTests();
 

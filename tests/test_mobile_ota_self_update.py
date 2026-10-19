@@ -109,6 +109,10 @@ def test_a_downloaded_update_is_announced_quietly_once() -> None:
     hook = _read("src/hooks/useOtaUpdates.ts")
     assert "=== 'downloaded' && markUpdateReady()" in hook
     assert "showToast(UPDATE_READY_MESSAGE, { durationMs: 6_000, announce: true })" in hook
+    assert "AppState.currentState === 'active'" in hook and "noteOwed.current = true" in hook, \
+        "a download that lands in the background must hold the note for the next return"
     settings = _read("src/screens/SettingsScreen.tsx")
     assert "useSyncExternalStore(subscribeUpdateReady, isUpdateReady)" in settings
-    assert settings.count("UPDATE_READY_SETTINGS") >= 3, "visible line and VoiceOver label both carry it"
+    assert "{updateReady ? <Text style={styles.version}>{UPDATE_READY_SETTINGS}</Text> : null}" in settings
+    toast = _read("src/components/Toast.tsx")
+    assert "announceForAccessibilityWithOptions(message, { queue: true })" in toast

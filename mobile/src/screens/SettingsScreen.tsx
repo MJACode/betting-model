@@ -308,7 +308,7 @@ export function SettingsScreen() {
   };
 
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
-  // A newer bundle is downloaded and runs at the next open (src/lib/updateReady.ts).
+  // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
   const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
   const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
 
@@ -661,16 +661,18 @@ export function SettingsScreen() {
         <Pressable
           onPress={() => openLink(WEBSITE_URL, 'the website')}
           accessibilityRole="link"
-          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}${updateReady ? `, ${UPDATE_READY_SETTINGS}` : ''}, ${websiteLabel}`}
+          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}, ${websiteLabel}`}
           accessibilityHint="Opens the website"
           hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>
-            Signalbase v{APP_VERSION} · {BUILD_STAMP}
-            {updateReady ? ` · ${UPDATE_READY_SETTINGS}` : ''} · {websiteLabel}
+            Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
           </Text>
         </Pressable>
+        {/* Its own line, outside the website link, so the status is not buried
+            in a wrapped caption (UX review, 2026-10-19). */}
+        {updateReady ? <Text style={styles.version}>{UPDATE_READY_SETTINGS}</Text> : null}
         <BetslipBarSpacer />
       </ScrollView>
       <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />

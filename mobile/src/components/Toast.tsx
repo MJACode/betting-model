@@ -25,7 +25,9 @@ type Listener = (msg: string, durationMs: number) => void;
 const listeners = new Set<Listener>();
 
 export function showToast(message: string, options: ToastOptions = {}): void {
-  if (options.announce) AccessibilityInfo.announceForAccessibility(message);
+  // Queued, so it waits for VoiceOver to finish what it is reading (at
+  // launch, the screen) instead of cutting it off. iOS honours queue.
+  if (options.announce) AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
   listeners.forEach((fn) => fn(message, options.durationMs ?? VISIBLE_MS));
 }
 

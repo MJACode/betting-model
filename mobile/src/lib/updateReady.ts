@@ -1,6 +1,6 @@
 /**
  * Whether a newer app bundle has been downloaded and is waiting for the next
- * time the app is opened from scratch (src/lib/otaUpdate.ts: the app never
+ * time the app starts (a cold start, not a return from the background) (src/lib/otaUpdate.ts: the app never
  * applies one while running, Matt 2026-10-19).
  *
  * Matt, same day: tell the member, quietly, with no button. useOtaUpdates
@@ -34,11 +34,13 @@ export function subscribeUpdateReady(fn: () => void): () => void {
 }
 
 /** The once-per-session note (a toast, no action). */
+// "Starts", not "open": on iOS a return from the background resumes the old
+// bundle, so "open" would read as broken (UX review, 2026-10-19).
 export const UPDATE_READY_MESSAGE =
-  'A new version of Signalbase is ready. It loads the next time you open the app.';
+  'A new version of Signalbase is ready. It loads the next time the app starts.';
 
 /** Appended to the Settings version line while a bundle is waiting. */
-export const UPDATE_READY_SETTINGS = 'update ready, loads next open';
+export const UPDATE_READY_SETTINGS = 'Update ready, loads on next start.';
 
 /** Test hook. */
 export function resetUpdateReadyForTests(): void {
