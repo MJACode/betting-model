@@ -140,6 +140,7 @@ jobs:
             tests/test_mobile_pick_cta.py \
             tests/test_mobile_line_movement.py \
             tests/test_mobile_a11y.py \
+            tests/test_mobile_daily_sport_sections.py \
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
             tests/test_discord_void_notice.py \

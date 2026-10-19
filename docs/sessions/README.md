@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, Daily results: switching a sport chip collapses the open card; the picks-versus-quiet split is a tested helper |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, Daily results: sports with picks first, collapsible sport cards, quiet sports on one line |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, X pick posts show the event date and a prop matchup; weekly and monthly recaps post Monday 7:30am ET on X and in #results |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, X pick posts are one format; no free-pick label, CTA, or #FreePicks; X_POST_ALL_PICKS=0 posts no pick slate |

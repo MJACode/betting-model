@@ -34,6 +34,7 @@ import {
 import type { Pick } from '@/types';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
+import { partitionDailySportSections } from '@/lib/dailySportSections';
 
 /**
  * Daily results: how every model did on a given day — a consolidated "All"
@@ -116,13 +117,11 @@ export function DailyResultsModal({
   // Sports that had picks come first (canonical order kept); the quiet ones are
   // still listed — never dropped — but as one line underneath, so they don't
   // split up the sports that did play.
-  const activeSections = visibleSections.filter(sportHasActivity);
-  const quietSections = visibleSections.filter((s) => !sportHasActivity(s));
+  const { active: activeSections, noPicks: noPickSports, notPosted: notPostedSports } =
+    partitionDailySportSections(visibleSections);
   // One sport filtered, or only one sport played: its card opens — collapsing
   // the only card would add a tap and hide nothing.
   const single = sportFilter !== 'ALL' || activeSections.length === 1;
-  const noPickSports = quietSections.filter((s) => s.unpublished === 0).map((s) => s.sport);
-  const notPostedSports = quietSections.filter((s) => s.unpublished > 0).map((s) => s.sport);
 
   // The displayed results can lag the selected date by one render while a new
   // day loads — treat that as loading so we never show day A under day B's header.
@@ -272,7 +271,14 @@ export function DailyResultsModal({
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
                     key={s}
-                    onPress={() => setSportFilter(s)}
+                    // A different chip starts collapsed. Cleared in this press,
+                    // with the filter, so a card opened under All is not still
+                    // open for a frame after coming back.
+                    onPress={() => {
+                      if (s === sportFilter) return;
+                      setSportFilter(s);
+                      setExpanded(new Set());
+                    }}
                     style={[styles.sportChip, active && styles.sportChipActive]}
                     accessibilityLabel={s === 'ALL' ? 'All sports' : s}
                   >
@@ -368,7 +374,7 @@ export function DailyResultsModal({
             ))}
 
             {/* Every sport is still accounted for: the quiet ones share one line. */}
-            {quietSections.length > 0 ? (
+            {noPickSports.length > 0 || notPostedSports.length > 0 ? (
               <View style={[styles.sportCard, styles.sportCardEmpty]}>
                 {noPickSports.length > 0 ? (
                   <Text style={styles.quietLine}>
@@ -425,10 +431,6 @@ export function DailyResultsModal({
       </SafeAreaProvider>
     </Modal>
   );
-}
-
-function sportHasActivity(s: SportDayBreakdown): boolean {
-  return s.total.picks > 0 || s.pending > 0 || s.models.length > 0;
 }
 
 /** One sport's day: the header is its record; opening it lists the models. */
