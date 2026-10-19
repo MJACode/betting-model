@@ -38,9 +38,10 @@ const COPY = {
   kind: 'server' as const,
 };
 const REPEAT = 'If this keeps happening, close Signalbase and open it again.';
-// From the second Retry the cause gains the next step. In the cause, not the
-// `reassurance` prop, which verify_error_states.ts keeps to Picks home.
-const REPEAT_COPY = { ...COPY, cause: `${COPY.cause} ${REPEAT}` };
+// After a Retry that crashes again, the cause gains the next step, as its own
+// paragraph. In the cause, not the `reassurance` prop, which
+// verify_error_states.ts keeps to Picks home.
+const REPEAT_COPY = { ...COPY, cause: `${COPY.cause}\n\n${REPEAT}` };
 
 export class AppErrorBoundary extends React.Component<Props, State> {
   state: State = { hasError: false, attempt: 0 };
