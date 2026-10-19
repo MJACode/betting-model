@@ -65,6 +65,9 @@ ncaaf_live/data/artifacts/*
 models/saved/_baseline/
 # analysis dumps, never committed (2026-09-11)
 data/local/prop_dump/
+# The NBA research cache (scripts/nba_research_cache.py): millions of price
+# rows, regenerable from Supabase in one command, so it is not committed.
+data/local/nba/
 data/local/*.csv
 data/local/over_lean*.csv
 
@@ -96,16 +99,7 @@ models/saved/*_????????_??????.pkl
 !models/saved/mlb_prop_pitcher_outs_20260903_233111.pkl
 !models/saved/mlb_prop_pitcher_walks_20260620_164336.pkl
 !models/saved/mlb_runline_20260823_105841.pkl
-!models/saved/nba_moneyline_20260619_120533.pkl
-!models/saved/nba_prop_player_assists_20260619_140445.pkl
-!models/saved/nba_prop_player_blocks_20260619_155307.pkl
-!models/saved/nba_prop_player_dd_20260619_172853.pkl
-!models/saved/nba_prop_player_points_20260619_124633.pkl
-!models/saved/nba_prop_player_pra_20260619_152317.pkl
-!models/saved/nba_prop_player_rebounds_20260619_132555.pkl
-!models/saved/nba_prop_player_steals_20260619_162228.pkl
-!models/saved/nba_prop_player_threes_20260619_143841.pkl
-!models/saved/nba_prop_player_turnovers_20260619_165437.pkl
+!models/saved/nba_prop_projection_20261016_091702.pkl
 !models/saved/ncaaf_moneyline_20260821_113517.pkl
 !models/saved/ncaaf_over_under_20260825_204305.pkl
 !models/saved/ncaaf_spread_20260828_103438.pkl
@@ -123,6 +117,7 @@ models/saved/*_????????_??????.pkl
 !models/saved/nfl_prop_sacks_20260907_052908.pkl
 !models/saved/nfl_prop_tackles_assists_20260909_160911.pkl
 !models/saved/nhl_moneyline_20260920_131606.pkl
+!models/saved/nhl_moneyline_20261013_225002.pkl
 !models/saved/nhl_moneyline_regulation_20260920_133544.pkl
 !models/saved/nhl_prop_assists_20261001_193441.pkl
 !models/saved/nhl_prop_blocked_shots_20261001_171818.pkl
@@ -155,3 +150,22 @@ models/saved/*_????????_??????.pkl
 nfl/data/live_model/prop_snaps/
 nfl/data/live_model/_quotes_graded.parquet
 nfl/data/live_model/_quotes_state.parquet
+
+# graphify rewrites .claude/settings.json on every `graphify claude install` and
+# leaves a rolling backup beside it; the backup is machine-local.
+.claude/settings.json.graphify-bak
+
+# graphify knowledge graph. The graph, its report, the hand-written community
+# names and the browser page are COMMITTED (2026-10-16) so every checkout has
+# them; graph.json is rewritten whole on every build, so a large diff to it in
+# a PR is expected. What stays local: the 36 MB extraction cache, the dated
+# backups, cost.json, and the two machine-path files (.graphify_python,
+# .graphify_root). Refresh with `graphify update .`; rebuild with /graphify .
+graphify-out/cache/
+graphify-out/20*/
+graphify-out/cost.json
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.graphify_*.json
+!graphify-out/.graphify_labels.json
+!graphify-out/.graphify_labels.pending.json

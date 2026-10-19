@@ -23,6 +23,8 @@ import {
   PROB_ONLY_MODELS,
   RETIRED_PROB_ONLY_MODELS,
   RETIRED_MODELS,
+  RECORD_EXCLUDED_MODELS,
+  DUPLICATE_STATUS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
 } from './thresholds.generated';
@@ -35,6 +37,8 @@ export {
   PROB_ONLY_MODELS,
   RETIRED_PROB_ONLY_MODELS,
   RETIRED_MODELS,
+  RECORD_EXCLUDED_MODELS,
+  DUPLICATE_STATUS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
 };
@@ -68,6 +72,18 @@ export const PAUSED_NOTE = 'model paused';
 
 export function isPausedRow(p: { downgrade_reason?: string | null }): boolean {
   return p.downgrade_reason === PAUSED_NOTE;
+}
+
+/**
+ * The second copy of ONE bet: the same model bet one real event under two
+ * game ids (a UFC fight under both fighter orders, an Eastern and a UTC date).
+ * mike, 2026-10-09: "Count each fight once." The extra copy carries
+ * condition_status DUPLICATE_STATUS (config.DUPLICATE_STATUS, set by a guarded
+ * migration); its result is never touched, and the copy that stays counts.
+ * Same clause as the record views and the Discord recap.
+ */
+export function isDuplicateCopy(p: { condition_status?: string | null }): boolean {
+  return p.condition_status === DUPLICATE_STATUS;
 }
 
 export function isProbOnlyModel(modelId: string): boolean {
@@ -104,30 +120,12 @@ export function isContaminatedPregamePick(pick: {
   return pick.is_live === true && !isLiveModel(pick.model_id);
 }
 
-// Record-only models — their picks still grade and their W-L record is shown,
-// but they NEVER count toward any displayed record, P&L, or ROI total. Mirrors
-// the DB views: v_public_track_record excludes HR entirely (2026-07-04) and
-// v_model_full_outcome_record forces units=0 / roi NULL for HR (2026-07-05).
-// Rationale: most HR picks carry no real DK price, so counting them adds pure
-// W-L drag with a fabricated -110 P&L.
-// 2026-09-02: HR is RETIRED, and passesActionFilter refuses a retired model
-// before this set is ever consulted — so no live model is record-only today.
-// The mechanism stays for the next prob-only longshot market.
-export const RECORD_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
-
-// A settled pick with NO book price contributes no money — no profit, no
-// stake. Its W-L still counts. Settlement grades an unpriced pick at a -110
-// that never existed (tracking/paper_tracker), so its profit_flat is
-// fabricated: +$90.91 on a win nobody could have placed. The DB side already
-// refuses that money — v_public_track_record / _daily keep the W-L and sum
-// profit and stake over priced picks only (migration
-// require_price_for_published_units, 2026-08-31) — and Discord's recap tallies
-// it as record-only. Every app tally goes through here so the Models tab, the
-// custom-model fallback and the daily recap can never price a pick the Record
-// tab refuses to. Found on the UFC card, 2026-09-03: the Models tab summed 11
-// unpriced picks and showed Total Rounds +13.0% on the same 8-5 the Record tab
-// printed at -26.6%. config.REQUIRE_DK_PRICE stops new unpriced BETs; this
-// covers the ones that already exist.
+// A settled pick's units are its stored profit at the price it was taken at.
+// Settlement writes profit_flat from COALESCE(decision_odds, dk_odds). When
+// both prices are null that stored profit was filled in at -110, which was
+// never on the board, so those units stay out. Every priced graded pick is
+// in the units. There is no second set that counts in the record and not
+// in the money.
 export function flatPnl(p: {
   dk_odds: number | null;
   profit_flat: number | null;
@@ -136,8 +134,6 @@ export function flatPnl(p: {
   profit: number;
   staked: number;
 } {
-  // "Priced" means a price the pick was decided at; settlement fabricates
-  // -110 only when there was none (decision_odds AND dk_odds both NULL).
   if (p.decision_odds == null && p.dk_odds == null) return { profit: 0, staked: 0 };
   return { profit: Number(p.profit_flat ?? 0), staked: 100 };
 }
@@ -291,6 +287,10 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // signal (Discord and push never carry it either). Checked on the row, so an
   // unpause does not turn it into one.
   if (isPausedRow(p)) return false;
+  // The extra copy of an event bet twice is never an action either: the record
+  // already drops it (passesRecordFilter), and it shares its original's Discord
+  // key, so the posted shortcut below would otherwise keep it on the board.
+  if (isDuplicateCopy(p)) return false;
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.
   if (RETIRED_MODELS.has(p.model_id)) return false;
@@ -300,11 +300,27 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // The cut is applied at the price the pick was DECIDED at (2026-09-09):
   // decision_* since the flip, DraftKings before it. Same clause the scorer,
   // the Discord and push producers and the record views apply.
+  //
+  // The price floor, the probability floor and the edge cut decide what a
+  // model may bet NEXT. A bet Discord has already posted keeps the cuts it
+  // was written under: display follows Discord. Re-cutting it at today's
+  // values drops it from the day's pending list and greys its edge until it
+  // grades -- as nearly happened to the posted -980 SEA @ DEN bet when
+  // nfl_live_leader_ml's floor went from -5000 to -140 (mike, 2026-10-15 ET;
+  // the probability and edge cuts joined on mike's "Yes", 2026-10-16 ET).
+  // "Posted" is per Discord key, and a pre-game key carries no side (it must
+  // not: tracking/publish_keys.py). So when a model writes BOTH sides of one
+  // event under one key, both rows read as posted and both keep their cuts;
+  // one such pre-game key between 2026-08-17 and 2026-10-16, none open, and
+  // the later copy is marked DUPLICATE, refused above. Pause, retirement,
+  // VOID, DUPLICATE and the paused-row marker still apply.
   const odds = decisionOdds(p);
   const edge = decisionEdge(p);
+  const posted = p.discordPublish === 'published';
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
     if (sv.paused) return false;
+    if (posted) return true;
     if (p.model_probability < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
@@ -314,6 +330,7 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
+  if (posted) return true;
   if (p.model_probability < t.min_prob) return false;
   if (!passesMinOdds(odds, t.min_odds)) return false;
   if (PROB_ONLY_MODELS.has(p.model_id)) return true;
@@ -335,9 +352,11 @@ export function passesActionFilter(p: ActionFilterable): boolean {
  * evening before and every record surface re-applied `paused` to settled rows.
  *
  * A settled pick leaves the record by exactly two deliberate acts: a VOID,
- * checked here, and an entry in config.RECORD_EXCLUSIONS, which is enforced
- * SERVER-SIDE in v_public_track_record and is unreachable from the app (its
- * only entry predates the published window). Model state is checked nowhere.
+ * checked here, and an entry in config.RECORD_EXCLUSIONS, enforced in the
+ * record views AND here, through RECORD_EXCLUDED_MODELS (generated from that
+ * list; nfl_live_prop, struck 2026-10-04). Model state is checked nowhere.
+ * The second copy of one bet (isDuplicateCopy) is not a bet leaving: the
+ * event still counts, once.
  *
  * Use passesActionFilter instead for anything the reader could still BET —
  * there a paused model must not be offered. The two filters answering two
@@ -353,16 +372,34 @@ export function passesRecordFilter(p: RecordFilterable): boolean {
   // A VOIDed pick is not a bet of record (CLAUDE.md 1c). Server-side the same
   // exclusion happens via result='NO_ACTION'.
   if (p.condition_status === 'VOID') return false;
+  // The second copy of one bet under another game id counts once, as the
+  // copy that stays (2026-10-09). Same clause as the record views.
+  if (isDuplicateCopy(p)) return false;
   // A pick written while its model was paused was never posted or staked, so
   // it was never bet (2026-09-28). The ROW's marker, never the model's present
   // state: a live model's settled bets stay in the record after a pause.
   // Same clause as v_public_track_record and the Discord recap.
   if (isPausedRow(p)) return false;
+  // Struck from the record on an explicit instruction (config.RECORD_EXCLUSIONS,
+  // CLAUDE.md 1c) -- the same clause the record views and the Discord recap add.
+  if (RECORD_EXCLUDED_MODELS.has(p.model_id)) return false;
   // A pre-game model's in-play pick does not count; a dedicated live lane does.
   // Pre-game and in-play prices never mix (CLAUDE.md 6). Same helper the rest
   // of the record path uses, so this cannot drift from the DB views.
   if (isContaminatedPregamePick(p)) return false;
   return true;
+}
+
+/**
+ * The published record is the picks Discord still has.
+ *
+ * `unpublished` is the only state that leaves. Omitted and `unknown` stay:
+ * the ledger was not read, or the read failed, and either one must not wipe
+ * a settled bet. This is not inside passesRecordFilter. A custom backtest
+ * still sees every scored pick.
+ */
+export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null }): boolean {
+  return p.discordPublish !== 'unpublished';
 }
 
 /**
@@ -479,6 +516,27 @@ export function unitsFor(
   dkOdds: number | null | undefined = null,
 ): number {
   return stakeFor(serverKellyFraction, dkOdds).risk;
+}
+
+/**
+ * Units won or lost, and units risked, at the posted stake.
+ *
+ * The same pair as `published_pick_unit_profit` / `published_pick_unit_risked`
+ * and `tracking.published_units`. `stakeFor` is the price math; this only
+ * applies the result. A win pays `stake.win` (1, unless the 3u cap bound).
+ * A loss costs `stake.risk`. A push, a void, and an ungraded pick risk
+ * nothing. A missing price is 1 unit, not a made-up −110.
+ */
+export function postedPickUnits(p: {
+  kelly_fraction?: number | null;
+  dk_odds?: number | null;
+  decision_odds?: number | null;
+  result?: string | null;
+}): { units: number; risked: number } {
+  const stake = stakeFor(p.kelly_fraction, decisionOdds(p));
+  if (p.result === 'WIN') return { units: stake.win, risked: stake.risk };
+  if (p.result === 'LOSS') return { units: -stake.risk, risked: stake.risk };
+  return { units: 0, risked: 0 };
 }
 
 /** "1.1u to win 1u"; just "1u" when the pick carries no price. */

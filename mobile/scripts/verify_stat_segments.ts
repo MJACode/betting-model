@@ -15,6 +15,9 @@
  * and the segmented-control text cap.
  */
 import { readFileSync } from 'node:fs';
+// Source is read with LF whatever the checkout: autocrlf gives CRLF on
+// Windows, and regexes below that end a match at a newline never matched.
+const readUtf8 = (p: string) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
 import { join } from 'node:path';
 
 import type { Sport } from '../src/hooks/useSportFilter';
@@ -110,9 +113,9 @@ const WANT_CHIPS: [Sport, StatSegment, string[]][] = [
     'Rushing:rushing_yards', 'Rushing:carries', 'Rushing:rush_rec_tds',
     'Receiving:receptions', 'Receiving:receiving_yards',
   ]],
+  // No Targets (Matt, 2026-10-06: "Remove targets").
   ['NFL', 'wrte', [
-    'Receiving:receptions', 'Receiving:receiving_yards', 'Receiving:targets',
-    'Receiving:rush_rec_tds',
+    'Receiving:receptions', 'Receiving:receiving_yards', 'Receiving:rush_rec_tds',
   ]],
   ['NFL', 'def', ['Defense:def_sacks', 'Defense:def_interceptions']],
   ['NCAAF', 'qb', [
@@ -161,12 +164,13 @@ for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC'] as Sport[]) {
 }
 
 // Omissions are listed, never filled.
-check('NCAAF WR/TE omits exactly Receiving:targets', eq(omittedChips('NCAAF', 'wrte'), ['Receiving:targets']));
+// Targets left the spec with the NFL chip (2026-10-06), so no sport omits it.
+check('NCAAF WR/TE omits nothing', eq(omittedChips('NCAAF', 'wrte'), []));
+check('no football catalog offers Targets', !(['NFL', 'NCAAF'] as Sport[]).some((sp) => def(sp, 'Receiving', 'targets') != null));
 {
   const other: string[] = [];
   for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC'] as Sport[]) {
     for (const seg of segmentsForSport(sport)) {
-      if (sport === 'NCAAF' && seg === 'wrte') continue;
       other.push(...omittedChips(sport, seg).map((k) => `${sport}/${seg}/${k}`));
     }
   }
@@ -175,7 +179,7 @@ check('NCAAF WR/TE omits exactly Receiving:targets', eq(omittedChips('NCAAF', 'w
 
 // The sport switch still lands on the sport's default stat, and that stat is
 // on the segment the switch selects.
-for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC'] as Sport[]) {
+for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC', 'NHL'] as Sport[]) {
   const d = defaultStatFor(sport);
   check(
     `${sport}: the default stat (${ck(d)}) is on the default segment (${defaultSegmentFor(sport)})`,
@@ -190,7 +194,7 @@ const cases: [string, Sport, StatDef | null, StatSegment, string][] = [
   ['RB Receptions → WR/TE keeps Receptions', 'NFL', def('NFL', 'Receiving', 'receptions'), 'wrte', 'Receiving:receptions'],
   ['RB Anytime TD → WR/TE keeps Anytime TD (the Receiving chip)', 'NFL', def('NFL', 'Rushing', 'rush_rec_tds'), 'wrte', 'Receiving:rush_rec_tds'],
   ['WR/TE Anytime TD → RB keeps Anytime TD (the Rushing chip)', 'NFL', def('NFL', 'Receiving', 'rush_rec_tds'), 'rb', 'Rushing:rush_rec_tds'],
-  ['WR/TE Targets → RB lands on Rush Yards', 'NFL', def('NFL', 'Receiving', 'targets'), 'rb', 'Rushing:rushing_yards'],
+  ['WR/TE Rec Yards → RB keeps Rec Yards', 'NFL', def('NFL', 'Receiving', 'receiving_yards'), 'rb', 'Receiving:receiving_yards'],
   ['RB Rush Yards → QB keeps Rush Yards', 'NFL', def('NFL', 'Rushing', 'rushing_yards'), 'qb', 'Rushing:rushing_yards'],
   ['DEF Sacks → QB lands on Pass Yards', 'NFL', def('NFL', 'Defense', 'def_sacks'), 'qb', 'Passing:passing_yards'],
   ['QB Pass TDs → DEF lands on Sacks', 'NFL', def('NFL', 'Passing', 'passing_tds'), 'def', 'Defense:def_sacks'],
@@ -303,7 +307,7 @@ check('no caption: the Teams board', noteFor('NFL', 'teams', 'hitRate', 'season'
 check('no caption: non-football', noteFor('MLB', 'hitters', 'hitRate', 'season') === null &&
   noteFor('NBA', 'players', 'hitRate', 'h2h') === null && noteFor('NHL', 'players', 'totals', 'season') === null);
 check('empty text: WR/TE, last 10',
-  positionEmptyText('wrte', 'Targets', 10) === 'No receivers or tight ends with Targets in the last 10 games. Try another position.');
+  positionEmptyText('wrte', 'Receptions', 10) === 'No receivers or tight ends with Receptions in the last 10 games. Try another position.');
 check('empty text: QB, Averages season',
   positionEmptyText('qb', 'Pass Yds', 'season') === 'No quarterbacks with Pass Yds this season. Try another position.');
 check('empty text: DEF, last 3',
@@ -342,7 +346,7 @@ check('empty text: DEF, last 3',
 }
 
 // ── 5. The screen uses the module, and the dropdown is gone ─────────────────
-const stats = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
+const stats = readUtf8(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'));
 check('StatsScreen: the chip row reads chipsForSegment', /chipsForSegment\(sport, segment\)\.map/.test(stats));
 check('StatsScreen: no StatGroupSheet (the category dropdown is gone)', !stats.includes('StatGroupSheet'));
 check('StatsScreen: both boards apply the position filter, last',
@@ -371,7 +375,7 @@ check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed s
   check('StatSegmentRow: passes accessibilityLabelFor and fit to SegmentTabs',
     /<SegmentTabs/.test(tabs) && /accessibilityLabelFor=\{segmentAccessibilityLabel\}/.test(tabs) && /\bfit\b/.test(tabs), tabs.replace(/\s+/g, ' '));
 }
-const groupTabs = readFileSync(join(import.meta.dirname, '..', 'src/components/GroupTabs.tsx'), 'utf-8');
+const groupTabs = readUtf8(join(import.meta.dirname, '..', 'src/components/GroupTabs.tsx'));
 check('SegmentTabs: fit labels cap at 2x and floor at 0.75, nothing else is capped',
   /maxFontSizeMultiplier=\{fit \? 2 : undefined\}/.test(groupTabs) &&
     /minimumFontScale=\{fit \? 0\.75 : undefined\}/.test(groupTabs) &&

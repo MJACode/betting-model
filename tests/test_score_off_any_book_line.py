@@ -365,12 +365,12 @@ def test_the_app_reads_the_column_but_does_not_claim_a_settled_one():
 
 
 def test_no_app_copy_calls_the_line_draftkings_unconditionally():
-    """The two blockers the UX review caught: a recap row that says 'record
-    only' about units the day's total already counted, and a reasoning row
+    """The two blockers the UX review caught: a recap row that left a graded
+    pick out of the units the day's total already counted, and a reasoning row
     that names DraftKings as the source of a line DraftKings never posted."""
     recap = _src("mobile/src/components/DailyResultsModal.tsx")
-    assert "decisionOdds(pick) == null" in recap
-    assert "RECORD_ONLY_MODELS.has(pick.model_id) || pick.dk_odds == null" not in recap
+    assert "postedPickUnits(pick)" in recap
+    assert ("RECORD" + "_ONLY_MODELS") not in recap
     reasoning = _src("mobile/src/components/ReasoningCard.tsx")
     assert "The DK line when we generated this pick." not in reasoning
     assert "lineBook(pick)" in reasoning

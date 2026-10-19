@@ -91,6 +91,7 @@ import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
@@ -157,6 +158,9 @@ export function PicksHomeScreen() {
   const slip = useParlaySlip();
 
   const [view, setView] = useState<PicksView>('today');
+  // School abbreviations for the Signals compact line. Other sports already
+  // store abbreviations on the game row.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
@@ -205,9 +209,9 @@ export function PicksHomeScreen() {
   // kept drawing a green BET badge and a stake here while Discord and push
   // had already stopped on `model_action_thresholds.paused`. The surfaces
   // show the same picks (CLAUDE.md §1b); this is the Live board's half.
-  // Deliberately NOT the full passesActionFilter: nfl_live_prop's cut is EV
-  // server-side, and its bundled row would hide BETs the lane legitimately
-  // wrote.
+  // Deliberately NOT the full passesActionFilter: an in-play model whose cut is
+  // applied server-side would have its bundled row hide BETs it legitimately
+  // wrote (nfl_live_prop was that case until it was retired 2026-10-04).
   const liveInProgress = useMemo(
     () =>
       allLiveData.filter(
@@ -816,7 +820,9 @@ export function PicksHomeScreen() {
               onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
               liveState={liveStates.get(item.pick.game_id) ?? null}
               showSignalBadge={view === 'today'}
-              paused={view === 'today' && isPausedForDisplay(item.pick)}
+              paused={isPausedForDisplay(item.pick)}
+              layout="signals"
+              teamAbbrevs={ncaafAbbrevs}
             />
           );
         }}

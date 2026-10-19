@@ -251,12 +251,18 @@ def score_game(conn: DBConnection,
                features: dict,
                bankroll: float,
                dry_run: bool = False,
-               commence_time: str | None = None) -> list[dict]:
+               commence_time: str | None = None,
+               write: bool = True) -> list[dict]:
     """
     Score one game with one model. Generates 0, 1, or 2 pick rows
     (BET and/or AVOID signals).
 
     Returns list of pick dicts ready for DB insert.
+
+    `write=False` returns the rows without inserting them, so the caller can
+    check them against the game's other picks first (_apply_side_conflicts).
+    Only the stock path and the NHL 3-way path honour it, which covers every
+    model in side_checked_models(); run_scorer passes it for those alone.
     """
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
@@ -343,7 +349,7 @@ def score_game(conn: DBConnection,
     if market == "h2h_3way":
         return _score_nhl_3way(conn, game_id, model_id, sport, game_date,
                                home_team, away_team, clf, x, features,
-                               bankroll, dry_run, commence_time)
+                               bankroll, dry_run, commence_time, write=write)
 
     # A model can decline to BET a game and still have something worth
     # showing. When a rule's gate/preconditions fail we set a reason here and
@@ -377,6 +383,19 @@ def score_game(conn: DBConnection,
     elif artifact.get("kind") == "cross_book_opener":
         home_prob, away_prob, no_signal = _opener_rule(
             conn, game_id, model_id, market, artifact)
+        if home_prob is None:
+            return []
+    elif artifact.get("kind") == "anchored_logit":
+        # nhl_moneyline, rebuilt 2026-10-13 (mike: "Look at and rebuild the
+        # money line model"; models/nhl_moneyline_anchored.py,
+        # docs/nhl_moneyline_rebuild.md): DraftKings' no-vig price, moved by
+        # inputs built from the per-game logs. It decides ONCE -- 16:00Z to
+        # 18:00Z on game day, with both teams' listed goalies -- because that is
+        # what the walk-forward graded; any other run writes its number as NONE
+        # with the reason. No DraftKings price, nothing to anchor on: skip,
+        # never prob-only.
+        home_prob, away_prob, no_signal = _anchored_probability(
+            conn, game_id, game_date, home_team, away_team, commence_time, artifact)
         if home_prob is None:
             return []
     elif artifact.get("kind") == "total_regression":
@@ -575,6 +594,19 @@ def score_game(conn: DBConnection,
     if no_signal:
         _apply_no_signal(picks, no_signal)
 
+    if artifact.get("kind") == "anchored_logit":
+        # Its rule is EV at the price and nothing else; AVOID is not part of
+        # it. With the edge cut at 0.0 the stock path would otherwise label the
+        # other side of nearly every game AVOID.
+        for p in picks:
+            if p.get("signal_type") == "AVOID":
+                p["signal_type"] = "NONE"
+            # The stock tier reads the DraftKings EDGE: for an EV rule it labels
+            # most bets LOW, and an underdog lower than a favourite at the same
+            # EV (UX review, 2026-10-15). The other EV rules (NHL props, NHL
+            # totals) write a fixed MED from their cards; so does this one.
+            p["confidence_tier"] = "MED"
+
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
 
@@ -582,7 +614,7 @@ def score_game(conn: DBConnection,
                             dry_run=dry_run)
 
     # Write to DB
-    if picks and not dry_run:
+    if picks and not dry_run and write:
         _insert_picks(conn, picks)
 
     return picks
@@ -802,6 +834,187 @@ def _score_f5_prob_only(
 _UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
 
 
+def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
+                          away_team: str, commence_time: str | None,
+                          artifact: dict) -> tuple:
+    """(home_prob, away_prob, no_signal) for the anchored NHL moneyline, or
+    (None, None, None) to skip the game: no DraftKings price to anchor on, or
+    an input the logs cannot supply.
+
+    `no_signal` is the reason this run may not decide (outside 16:00Z-18:00Z
+    on game day, or a team with no listed goalie yet). The number is still
+    written, as NONE -- an empty board and a broken pipeline look identical.
+    """
+    import models.nhl_moneyline_anchored as anc
+    odds = _get_dk_odds(conn, game_id, "h2h")
+    if not odds or odds.get("home_price") is None or odds.get("away_price") is None:
+        logger.debug(f"  {game_id}/nhl_moneyline: no DK moneyline — nothing to anchor on")
+        return None, None, None
+    hi = american_to_implied_prob(odds["home_price"])
+    ai = american_to_implied_prob(odds["away_price"])
+    if not hi or not ai:
+        return None, None, None
+    try:
+        rows, goalies, stale = anc.inputs_for_date(conn, game_date)
+    except Exception as exc:  # noqa: BLE001 - one game's inputs must not stop the pass
+        logger.error(f"  {game_id}/nhl_moneyline: inputs failed: {exc}")
+        return None, None, None
+    if game_id not in rows.index:
+        logger.debug(f"  {game_id}/nhl_moneyline: no input row")
+        return None, None, None
+    x = rows.loc[game_id, anc.FEATURES].astype(float).values
+    if np.isnan(x).any():
+        missing = [f for f, v in zip(anc.FEATURES, x) if np.isnan(v)]
+        logger.debug(f"  {game_id}/nhl_moneyline: inputs missing {missing}")
+        return None, None, None
+    offset = anc.market_logit([hi / (hi + ai)])
+    p_home = float(artifact["model"].predict_proba(x.reshape(1, -1), offset)[0, 1])
+    reason = _nhl_game_day_reason(game_id, game_date, home_team, away_team,
+                                  commence_time, goalies, stale)
+    return p_home, 1.0 - p_home, reason
+
+
+def _nhl_game_day_reason(game_id: str, game_date: str, home_team: str,
+                         away_team: str, commence_time: str | None,
+                         goalies: dict, stale: set) -> str | None:
+    """None when this run may decide an NHL side on game `game_id`; otherwise
+    the reason it may not. ONE gate for both NHL side models, so the moneyline
+    and the regulation model always decide at the same moment on the same
+    facts (mike, 2026-10-17): 16:00Z-18:00Z on game day, both listed goalies,
+    and last night's games in the logs."""
+    import models.nhl_moneyline_anchored as anc
+    reason = anc.decision_window(game_date, commence_time)
+    if reason is None and ((game_id, home_team) not in goalies or (game_id, away_team) not in goalies):
+        reason = "waiting for both listed goalies"
+    if reason is None and (home_team in stale or away_team in stale):
+        reason = "waiting for last night's game logs"
+    return reason
+
+
+def _nhl_regulation_reason(conn, game_id: str, game_date: str, home_team: str,
+                           away_team: str, commence_time: str | None) -> str | None:
+    """The regulation model's copy of the moneyline model's decision gate.
+
+    It used to decide the moment DraftKings posted the 3-way line and lock:
+    every one of its 33 BETs this season was written 10-72 hours before puck
+    drop. On 2026-10-17 that put "BOS (Regulation)" (locked 18:26Z the day
+    before, before Boston's game at Anaheim that night) on the same game as
+    the moneyline model's "LAK ML" (16:22Z on game day, knowing Boston was on
+    a back-to-back). Graded on the 120 finished 2026-27 games, the game-day
+    decision bet 7 times for +1.1 units where the early one bet 31 times for
+    -4.9 (scripts/nhl_regulation_game_day_grade.py).
+
+    Fails CLOSED: inputs that cannot be read mean no decision this pass, the
+    rows still written as NONE with the reason, and the next pass retries.
+    """
+    import models.nhl_moneyline_anchored as anc
+    reason = anc.decision_window(game_date, commence_time)
+    if reason is not None:
+        return reason
+    try:
+        _, goalies, stale = anc.inputs_for_date(conn, game_date)
+    except Exception as exc:  # noqa: BLE001 - one game's gate must not stop the pass
+        logger.error(f"  {game_id}/nhl_moneyline_regulation: game-day check failed: {exc}")
+        return "game-day check failed; not deciding this pass"
+    return _nhl_game_day_reason(game_id, game_date, home_team, away_team,
+                                commence_time, goalies, stale)
+
+
+# ── One game never gets two picks that cannot both win (mike, 2026-10-17) ────
+#
+# "It can't be both." On 2026-10-17 two NHL models posted "BOS (Regulation)"
+# and "LAK ML" on the same game: if LA won only one paid, if Boston won in
+# regulation only the other, and a Boston overtime win lost both. It had
+# happened once before, on 2026-10-04 ("FLA ML" and "ANA (Regulation)",
+# Anaheim won after regulation, both lost). Nothing compared one model's pick
+# with another's.
+#
+# Each pick is mapped to the game endings it wins on. Two picks whose endings
+# do not overlap cannot both win, and a game gets at most one of them:
+#   - a BET already standing on the game (an earlier pass) keeps it, because a
+#     pick is a pick (CLAUDE.md 1c) -- the new one is written NONE with why;
+#   - two such BETs decided in the SAME pass are both written NONE: the models
+#     disagree about the game and there is no telling which is wrong.
+#
+# Only markets listed here are checked. Assessed across every sport on
+# 2026-10-17: no other pair of pre-game models has bet outcomes that cannot
+# both win since 2026-08-01 (the only opposite-side pair, MLB first-five
+# moneyline against the full-game +1.5 run line, can both win). A market that
+# can conflict joins by adding its endings here.
+_SIDE_ENDINGS: dict[tuple[str, str], dict[str, frozenset]] = {
+    ("NHL", "h2h"): {
+        "home": frozenset({"home_regulation", "home_overtime"}),
+        "away": frozenset({"away_regulation", "away_overtime"}),
+    },
+    ("NHL", "h2h_3way"): {
+        "home": frozenset({"home_regulation"}),
+        "away": frozenset({"away_regulation"}),
+        "draw": frozenset({"home_overtime", "away_overtime"}),
+    },
+}
+
+
+def _endings_won(pick: dict) -> frozenset | None:
+    """The game endings this pick wins on, or None for a market not listed."""
+    sport, market, _ = MODELS.get(pick.get("model_id"), (None, None, None))
+    return _SIDE_ENDINGS.get((sport, market), {}).get(pick.get("pick_side"))
+
+
+def picks_cannot_both_win(a: dict, b: dict) -> bool:
+    wa, wb = _endings_won(a), _endings_won(b)
+    return wa is not None and wb is not None and not (wa & wb)
+
+
+def side_checked_models() -> set:
+    """The models whose picks are held back for the check before writing."""
+    return {mid for mid, (sport, market, _) in MODELS.items()
+            if (sport, market) in _SIDE_ENDINGS}
+
+
+def _apply_side_conflicts(conn, game_id: str, picks: list[dict]) -> int:
+    """Turn every BET in `picks` that cannot win alongside another BET on the
+    game into NONE with the reason. Mutates in place; returns how many.
+
+    A standing BET counts unless it is VOID or was written while its model was
+    paused (not a signal, so it holds nothing).
+    """
+    def bets(p):
+        return (p.get("signal_type") == "BET" and not _is_paused_row(p)
+                and _endings_won(p) is not None)
+
+    new = [p for p in picks if bets(p)]
+    if not new:
+        return 0
+    standing = [
+        {"model_id": m, "pick_side": s, "pick_label": label}
+        for m, s, label in conn.execute("""
+            SELECT model_id, pick_side, pick_label FROM picks
+            WHERE game_id = %s AND signal_type = 'BET'
+              AND model_id = ANY(%s)
+              AND condition_status IS DISTINCT FROM 'VOID'
+              AND downgrade_reason IS DISTINCT FROM %s
+        """, (game_id, sorted(side_checked_models()), config.PAUSED_NOTE)).fetchall()]
+    notes: dict[int, str] = {}
+    for p in new:
+        held = next((s for s in standing if picks_cannot_both_win(p, s)), None)
+        if held is not None:
+            notes[id(p)] = (f"cannot both win with {held['pick_label']}, "
+                            f"already bet on this game")
+    rest = [p for p in new if id(p) not in notes]
+    for i, a in enumerate(rest):
+        for b in rest[i + 1:]:
+            if picks_cannot_both_win(a, b):
+                notes.setdefault(id(a), f"cannot both win with {b['pick_label']}, "
+                                        f"decided in the same pass; neither is bet")
+                notes.setdefault(id(b), f"cannot both win with {a['pick_label']}, "
+                                        f"decided in the same pass; neither is bet")
+    for p in new:
+        if id(p) in notes:
+            logger.info(f"  {game_id}: {p['pick_label']} not bet -- {notes[id(p)]}")
+            p.update(_downgrade(p, notes[id(p)]))
+    return len(notes)
+
+
 # Class index → pick_side for the NHL regulation 3-way model. Must match the
 # target encoding in feature_engine._compute_target (0=away, 1=draw, 2=home).
 NHL_3WAY_CLASSES = ["away", "draw", "home"]
@@ -810,7 +1023,8 @@ NHL_3WAY_CLASSES = ["away", "draw", "home"]
 def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                     game_date: str, home_team: str, away_team: str,
                     clf, x, features: dict, bankroll: float,
-                    dry_run: bool, commence_time: str | None) -> list[dict]:
+                    dry_run: bool, commence_time: str | None,
+                    write: bool = True) -> list[dict]:
     """
     NHL regulation-result scoring — 3-class (away reg win / draw / home reg
     win) priced against DraftKings' 3-way regulation market. Each side with a
@@ -872,6 +1086,12 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
     # The best bettable price on each side, and the decision re-made there
     # (2026-09-09) -- the same step the two-way game path takes.
     _stamp_best_game_prices(conn, picks, "h2h_3way")
+    # Decides only when the moneyline model does (mike, 2026-10-17). Outside
+    # that moment every row is still written, NONE, with the reason.
+    reason = _nhl_regulation_reason(conn, game_id, game_date, home_team,
+                                    away_team, commence_time)
+    if reason:
+        _apply_no_signal(picks, reason)
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
     for p in picks:
@@ -884,7 +1104,7 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                 f"bet=${p['recommended_bet']:.0f} | [{p['confidence_tier']}]"
             )
 
-    if picks and not dry_run:
+    if picks and not dry_run and write:
         _insert_picks(conn, picks)
     return picks
 
@@ -1746,9 +1966,71 @@ def _best_of(quotes: list[dict]) -> dict | None:
     return best[1] if best else None
 
 
-def _fresh_quotes(quotes: list[dict]) -> list[dict]:
+def _utcnow() -> datetime:
+    """The wall clock, UTC. One seam, so a test can pin "now"."""
+    return datetime.now(timezone.utc)
+
+
+def _price_age_floor(now: datetime | None = None) -> datetime:
+    """now minus config.PREGAME_PRICE_MAX_AGE_MIN: the one place the bound is
+    turned into a moment. The per-market read (_pregame_price_floor) and the
+    entry checks' SQL text (_current_price_since) both come from here, so the
+    two cannot drift apart."""
+    return (now or _utcnow()) - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN)
+
+
+def _pregame_price_floor(cutoff: str | None,
+                         now: datetime | None = None) -> datetime | None:
+    """The oldest snapshot_at a pre-game DECISION may stand on, or None for
+    no bound (config.PREGAME_PRICE_MAX_AGE_MIN; the measurements are there).
+
+    Bounded only while the game has not started. After first pitch the last
+    pre-game row is the close, and its age is not a question: the in-play
+    models read it as a feature (live_scorer._pregame_features) and the replay
+    scripts read completed games, so both see exactly what they saw before.
+
+    No cutoff means "do not bound", the convention _pregame_cutoff already
+    documents: a game with no start time keeps the old behaviour rather than
+    losing every price. Measured 2026-10-09: 0 of 873 unplayed games in the
+    next five months have neither commence_time nor first_pitch_at.
+    """
+    if not cutoff:
+        return None
+    start = _parse_snapshot(cutoff)
+    if start is None:
+        return None
+    now = now or _utcnow()
+    if start <= now:
+        return None
+    return _price_age_floor(now)
+
+
+def _current_price_since(now: datetime | None = None) -> str:
+    """The same floor as SQL text, 'YYYY-MM-DDTHH:MM:SS' UTC, for a
+    `snapshot_at >= ?` comparison. Safe as text: every odds.snapshot_at is ISO
+    with a 'T' and UTC (_get_dk_odds' docstring), so the first 19 characters
+    order the rows; a date-only historical row sorts before it, i.e. stale.
+    It takes no kickoff, unlike _pregame_price_floor: run_scorer skips a
+    started game whatever the entry checks admit."""
+    return _price_age_floor(now).astimezone(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S")
+
+
+def _quote_is_current(snapshot_at, floor: datetime | None) -> bool:
+    """True unless `snapshot_at` is older than `floor`. A row with no
+    parseable stamp is kept, failing open like _fresh_quotes; every odds row
+    carries an ISO stamp (measured in _get_dk_odds' docstring)."""
+    if floor is None:
+        return True
+    ts = _parse_snapshot(snapshot_at)
+    return ts is None or ts >= floor
+
+
+def _fresh_quotes(quotes: list[dict],
+                  floor: datetime | None = None) -> list[dict]:
     """Drop quotes that lag the newest quote in the shop by more than
-    config.BEST_LINE_MAX_LAG_MIN minutes.
+    config.BEST_LINE_MAX_LAG_MIN minutes, and (when `floor` is given) any
+    quote older than `floor`.
 
     Since 2026-09-09 the best price DECIDES the pick, so a book that stopped
     pricing an hour ago must not qualify it on a number it no longer offers.
@@ -1756,7 +2038,16 @@ def _fresh_quotes(quotes: list[dict]) -> list[dict]:
     behind DraftKings across 13 books), so on a live board nothing is dropped;
     this bites only when a book has genuinely gone quiet. Quotes with no
     parseable stamp are kept -- failing open, like every guard here.
+
+    THE LAG ALONE COMPARES BOOKS WITH EACH OTHER, so when every book goes
+    quiet together nothing lags and nothing is dropped. That is what the feed
+    did to 31 NCAAF games in September (config.PREGAME_PRICE_MAX_AGE_MIN).
+    `floor` is the absolute half: _best_game_price_one passes the pre-game
+    floor; player props pass nothing, because their normal age is hours.
     """
+    if floor is not None:
+        quotes = [q for q in quotes
+                  if _quote_is_current(q.get("snapshot_at"), floor)]
     stamps = []
     for q in quotes:
         ts = _parse_snapshot(q.get("snapshot_at"))
@@ -1823,6 +2114,10 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     sibling = _sibling_ufc_game_id(game_id)
     if not sibling:
         return None
+    # The same rule as _get_dk_odds: an id whose own DraftKings rows went stale
+    # is the abandoned copy and shops nothing (_ufc_id_never_priced).
+    if not _ufc_id_never_priced(conn, game_id, market, cutoff):
+        return None
     # Totals are orientation-independent (over/under at a line); h2h is not, so
     # "home" on this row is "away" on the sibling.
     side = pick_side if market.startswith("totals") else _OPPOSITE_SIDE.get(
@@ -1872,7 +2167,7 @@ def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
                 continue
         quotes.append({"book": book, "odds": r[1], "link": r[2],
                        "snapshot_at": r[5] if len(r) > 5 else None})
-    return _best_of(_fresh_quotes(quotes))
+    return _best_of(_fresh_quotes(quotes, floor=_pregame_price_floor(cutoff)))
 
 
 def _best_prop_price(conn: DBConnection, game_id: str, player_name: str,
@@ -2221,7 +2516,37 @@ def _has_real_game_price(odds: dict | None, market: str) -> bool:
 
 def _latest_book_game_odds(conn: DBConnection, game_id: str, market: str,
                            bookmaker: str, cutoff: str | None) -> dict | None:
-    """Newest pre-game snapshot for one book, bounded at first pitch."""
+    """Newest pre-game snapshot for one book, bounded at first pitch.
+
+    AND, WHILE THE GAME HAS NOT STARTED, NO OLDER THAN
+    config.PREGAME_PRICE_MAX_AGE_MIN. Every game-market model reads its line
+    and price through here (_get_dk_odds, _get_scoring_odds, the NCAAF margin,
+    totals and opener rules, the feature row, the NHL 3-way), so a row the
+    book has stopped refreshing is no row: the model gets "no DraftKings
+    price" and writes nothing for that market. Until 2026-10-09 the newest row
+    was returned whatever its age, and 31 NCAAF games the feed had dropped in
+    early September were decided off those rows into October.
+    """
+    odds = _newest_book_game_row(conn, game_id, market, bookmaker, cutoff)
+    if odds is None:
+        return None
+    if not _quote_is_current(odds.get("snapshot_at"), _pregame_price_floor(cutoff)):
+        logger.debug(f"  {game_id}/{market}: newest {bookmaker} row is from "
+                     f"{odds.get('snapshot_at')}, older than "
+                     f"{config.PREGAME_PRICE_MAX_AGE_MIN} min -- not a current price")
+        return None
+    return odds
+
+
+def _newest_book_game_row(conn: DBConnection, game_id: str, market: str,
+                          bookmaker: str, cutoff: str | None) -> dict | None:
+    """The newest pre-game row for one book, WHATEVER ITS AGE.
+
+    Not a price: _latest_book_game_odds is the read a decision goes through.
+    This half exists so the UFC fallback can tell an id that was never priced
+    (borrow the swapped id's row) from an id the feed abandoned (its own rows
+    are all older than the bound: no price, never the other id's).
+    """
     spread_filter = _game_spread_filter_sql(game_id, market)
     pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
     row = conn.execute(f"""
@@ -2243,6 +2568,109 @@ def _latest_book_game_odds(conn: DBConnection, game_id: str, market: str,
     if not row:
         return None
     return dict(zip(_GAME_ODDS_COLS, row))
+
+
+def _ufc_id_never_priced(conn: DBConnection, game_id: str, market: str,
+                         cutoff: str | None) -> bool:
+    """May this UFC id borrow its swapped twin's price for this market?
+
+    Only when DraftKings has NEVER stored a pre-game row for it in this
+    market. An id with rows, all older than config.PREGAME_PRICE_MAX_AGE_MIN,
+    is the copy the feed abandoned when it flipped home and away: it gets no
+    price, so the "is this fight real" check skips it. (That alone does not
+    make one id per fight: a never-priced id still borrows, and for up to 3
+    hours after a flip both ids hold fresh rows of their own. run_scorer
+    scores a fight present under both ids on one of them,
+    _ufc_one_id_per_fight.) Before the age bound its own stale row answered,
+    which was wrong too; with the bound and without this check, the read fell
+    through to the live copy's fresh price and BOTH ids decided the same fight
+    (2026-10-09:
+    UFC_2026-10-10_rj-harris_allen-frye-jr has DraftKings rows to 10-08 18:17Z
+    and none since; the swapped id has rows from 10-08 18:38Z on). Per MARKET,
+    not per id: on the 2026-08-29 card UFC_2026-08-29_andre-lima_namsrai-
+    batbayar had DraftKings moneyline rows up to 09:56Z on fight day and no
+    totals row ever, while its swapped id had both. That totals borrow is what
+    the fallback was built for, and a per-id check would refuse it.
+    """
+    return _newest_book_game_row(conn, game_id, market, "draftkings",
+                                 cutoff) is None
+
+
+def _ufc_own_newest_dk(conn: DBConnection, game_id: str,
+                       markets: tuple) -> datetime | None:
+    """The newest pre-game DraftKings row stored under THIS id, any of
+    `markets`, whatever its age; None when it has none. One LIMIT 1 read per
+    market on idx_odds_book_snap (the same read _ufc_id_never_priced makes;
+    5.9 ms on production, 2026-10-09). Only ids whose twin is also on the
+    board are read: 2 fights on the 10-10 card."""
+    cutoff = _pregame_cutoff(conn, game_id)
+    best = None
+    for market in markets:
+        row = _newest_book_game_row(conn, game_id, market, ODDS_API_BOOKMAKER,
+                                    cutoff)
+        ts = _parse_snapshot(row.get("snapshot_at")) if row else None
+        if ts is not None and (best is None or ts > best):
+            best = ts
+    return best
+
+
+def _ufc_one_id_per_fight(conn: DBConnection, games) -> dict:
+    """{id left out: id scored} for every UFC fight in `games` under both
+    orientations (second review, 2026-10-09).
+
+    The per-market rule (_ufc_id_never_priced) stops only the abandoned copy.
+    An id DraftKings never priced still borrows its twin's price, and for up to
+    3 hours after the feed flips home and away both ids hold fresh rows of
+    their own, so both passed the "is this fight real" check and the fight was
+    decided twice in one pass, and could be bet twice (picks 332605 and
+    332615 are one fight, BET and graded under both orientations on
+    2026-06-20; that cause was never established).
+
+    The id scored is the one whose own newest DraftKings row is newer: the
+    feed's current orientation. When neither has a row of its own, the first
+    in sort order (neither can pass the real-fight check then anyway). Only
+    the scoring pass is affected: the chosen id still borrows a market only
+    its twin carries (_get_dk_odds), which is the 2026-08-29 totals case the
+    fallback exists for.
+    """
+    markets = tuple(sorted({mk for sp, mk, _ in MODELS.values() if sp == "UFC"}))
+    ids = {g[0] for g in games if g[1] == "UFC"}
+    out: dict = {}
+    for a in sorted(ids):
+        b = _sibling_ufc_game_id(a)
+        if not b or b not in ids or b < a:
+            continue
+        ta = _ufc_own_newest_dk(conn, a, markets)
+        tb = _ufc_own_newest_dk(conn, b, markets)
+        keep = b if tb is not None and (ta is None or tb > ta) else a
+        out[a if keep == b else b] = keep
+    return out
+
+
+def _clear_left_out_ufc_id(conn: DBConnection, game_id: str) -> None:
+    """Clear the unsettled no-bet and avoid rows of a UFC id run_scorer leaves
+    out (_ufc_one_id_per_fight), so they leave the board this pass. The same
+    statement as the per-game clear in run_scorer: BETs, in-play rows and NFL
+    props are never touched. The sweep after the loop would also catch these
+    rows, but it yields when it cannot get its locks within 10 s. Housekeeping
+    only, so a failure is logged and never fails the pass."""
+    try:
+        conn.execute("""
+            DELETE FROM picks
+            WHERE game_id = %s
+              AND result IS NULL
+              AND signal_type != 'BET'
+              AND is_live IS NOT TRUE
+              AND model_id NOT LIKE 'nfl_prop_%%'
+        """, (game_id,))
+        conn.commit()
+    except Exception as exc:                                  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:                                     # noqa: BLE001
+            pass
+        logger.warning(f"  {game_id}: clearing the left-out id's rows failed "
+                       f"({exc!r}); the sweep after the loop retries")
 
 
 def _fallback_game_line_quote(conn: DBConnection, game_id: str, market: str,
@@ -2338,8 +2766,11 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     # prob-only fallback even though DK had priced the fight. Verified on the
     # 2026-08-29 card: three fights had 195 DK totals rows on one orientation
     # and zero on the other, and all three picks landed on the empty one.
+    # ONLY for an id DraftKings never priced in this market: an id whose own
+    # rows went stale is the abandoned copy, and borrowing would score the
+    # fight twice (_ufc_id_never_priced).
     sibling = _sibling_ufc_game_id(game_id)
-    if sibling:
+    if sibling and _ufc_id_never_priced(conn, game_id, market, cutoff):
         odds = _latest_book_game_odds(conn, sibling, market, "draftkings", cutoff)
         if odds:
             # totals are orientation-independent (over/under/line); h2h is NOT,
@@ -2941,10 +3372,20 @@ def _log_pipeline(conn, run_date, status, records_in, records_out,
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
+def _model_id_filter(model_ids) -> tuple[str, tuple]:
+    """(` AND model_id IN (...)`, params) for a no-bet clear that must touch
+    only these models' rows. Never builds `IN ()`: no models means no rows."""
+    ids = sorted(set(model_ids))
+    if not ids:
+        return " AND FALSE", ()
+    return f" AND model_id IN ({','.join(['%s'] * len(ids))})", tuple(ids)
+
+
 # ── Main Daily Run ────────────────────────────────────────────────────────────
 
 def run_scorer(target_date: str = None, dry_run: bool = False,
-               only_games: set | None = None) -> dict:
+               only_games: set | None = None,
+               game_models_only: bool = False) -> dict:
     """
     Score all games scheduled for target_date across all models.
 
@@ -2962,6 +3403,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                      It is deliberately distinct from None: conflating them
                      would turn a quiet poll into a full re-score, which is the
                      entire cost this parameter exists to avoid.
+        game_models_only:
+                     Clear only the rows of the game-level models this call
+                     re-scores (config.MODELS), and leave every other model's
+                     unsettled no-bet rows where they are. ONLY the pre-game
+                     poller passes it: it re-runs this scorer and nothing else,
+                     so the player-prop NONE/AVOID rows its clears used to take
+                     were never re-written before the game started (see the
+                     per-game clear below). The refresh pass and the daily
+                     pipeline must NOT pass it: their clear is what releases a
+                     prop player held at NONE by the first-signal lock
+                     (_locked_prop_keys) so the prop scorers that run next can
+                     score him again.
 
     Returns:
         Summary dict with total picks and breakdown.
@@ -3077,6 +3530,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # refresh 82578720862b4c88990a974ff33ed81d still cancelled the old
         # form at statement_timeout; _select_isolated's savepoint is what
         # keeps that from aborting the rest of scoring.
+        #
+        # "PRICES" MEANS PRICES NOW (2026-10-09). This asked whether DK had
+        # EVER stored a row for the game. DK listed the big games in early
+        # September, pulled them, and re-lists them about ten days out; 31 of
+        # them were scored off their 09-04..09-06 rows into October (16 BETs).
+        # A game is admitted only with a DK row inside
+        # config.PREGAME_PRICE_MAX_AGE_MIN, the same bound
+        # _latest_book_game_odds applies per market, so this stays a COST
+        # filter. snapshot_at, not created_at: it is indexed (idx_odds_date)
+        # and the same clock the row check reads. EXPLAIN ANALYZE 2026-10-09 on
+        # the live window: 66 games admitted in 65 ms (old form: 0.725 s).
         ncaaf_unpriced: set = set()
         if any(g[1] == "NCAAF" for g in games):
             try:
@@ -3091,13 +3555,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                           SELECT 1 FROM odds o
                           WHERE o.game_id = g.game_id
                             AND o.bookmaker = ?
+                            AND o.snapshot_at >= ?
                       )
-                """, (target_date, ncaaf_horizon, ODDS_API_BOOKMAKER))}
+                """, (target_date, ncaaf_horizon, ODDS_API_BOOKMAKER,
+                      _current_price_since()))}
                 ncaaf_unpriced = {g[0] for g in games
                                   if g[1] == "NCAAF" and g[0] not in priced}
                 if ncaaf_unpriced:
                     logger.info(f"NCAAF: skipping {len(ncaaf_unpriced)} game(s) "
-                                f"{ODDS_API_BOOKMAKER} does not price")
+                                f"{ODDS_API_BOOKMAKER} has not priced in the last "
+                                f"{config.PREGAME_PRICE_MAX_AGE_MIN} min")
             except Exception as exc:
                 # Fail OPEN — a filter that can't be built must never be able to
                 # empty the board. Worst case we pay the old cost. The
@@ -3107,6 +3574,25 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 logger.warning(
                     "NCAAF price pre-filter traceback:\n" + traceback.format_exc())
                 ncaaf_unpriced = set()
+
+        # The FBS registry, read ONCE per pass, for the refusal LOG only. The
+        # gate itself never sees it (it reads the team's snapshot, and the
+        # snapshot read deliberately carries no classification). It lets the
+        # log tell "an FCS opponent" (expected, debug) from "a school the
+        # registry calls FBS that has no SP+ rating" (named, WARNING) — without
+        # it the second case logged at debug like the first. Fails open: no
+        # registry means the old debug line, never a different score.
+        ncaaf_fbs_registry = None
+        if any(g[1] == "NCAAF" for g in games):
+            try:
+                ncaaf_fbs_registry = {
+                    r[0]: r[1] for r in _select_isolated(
+                        conn, "ncaaf_fbs_registry",
+                        "SELECT school, classification FROM ncaaf_teams", ())}
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning(f"NCAAF FBS registry read failed ({exc}); "
+                               f"refusal log falls back to debug")
+                ncaaf_fbs_registry = None
 
         # THE SAME GATE FOR THE NEW LOOK-AHEAD SPORTS, and here it is not only
         # a cost filter — it is the rule.
@@ -3121,7 +3607,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # TODAY'S GAMES ARE NEVER FILTERED. They were scored before this change
         # whether or not DK had posted, several models handle a missing price
         # themselves, and quietly dropping them here would be a behaviour
-        # change nobody asked for hiding inside a look-ahead feature.
+        # change nobody asked for hiding inside a look-ahead feature. (A
+        # today's game with no CURRENT price still gets no pick: the per-market
+        # read refuses the row, _latest_book_game_odds.)
+        #
+        # Same recency bound as the NCAAF filter above: two NHL BETs fired on
+        # 2026-09-30 for 10-01 games off 09-26 rows, while the odds step was
+        # failing on every pass.
         #
         # Fails OPEN for the same reason as the NCAAF filter above.
         ahead_unpriced: set = set()
@@ -3138,14 +3630,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                           SELECT 1 FROM odds o
                           WHERE o.game_id = g.game_id
                             AND o.bookmaker = ?
+                            AND o.snapshot_at >= ?
                       )
-                """, ([g[0] for g in _ahead], ODDS_API_BOOKMAKER))}
+                """, ([g[0] for g in _ahead], ODDS_API_BOOKMAKER,
+                      _current_price_since()))}
                 ahead_unpriced = {g[0] for g in _ahead if g[0] not in priced}
                 if ahead_unpriced:
                     logger.info(
                         f"Look-ahead: skipping {len(ahead_unpriced)} of "
                         f"{len(_ahead)} future game(s) {ODDS_API_BOOKMAKER} "
-                        f"has not priced yet")
+                        f"has not priced in the last "
+                        f"{config.PREGAME_PRICE_MAX_AGE_MIN} min")
             except Exception as exc:                          # noqa: BLE001
                 logger.warning(f"Look-ahead price pre-filter failed ({exc}); "
                                f"scoring all")
@@ -3153,6 +3648,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     "Look-ahead price pre-filter traceback:\n"
                     + traceback.format_exc())
                 ahead_unpriced = set()
+
+        # ONE ID PER UFC FIGHT (second review, 2026-10-09). A fight the feed
+        # holds under both home/away orientations is scored on the id
+        # _ufc_one_id_per_fight picks; the other is skipped in the loop below.
+        # Fails OPEN like the filters above: if the read breaks, both ids are
+        # scored, which is the behaviour before this change.
+        ufc_left_out: dict = {}
+        if sum(1 for g in games if g[1] == "UFC") > 1:
+            ufc_left_out = _fail_open(
+                conn, "sp_ufc_one_id",
+                lambda: _ufc_one_id_per_fight(conn, games),
+                {}, "UFC one-id-per-fight read")
 
         # Check for postponed MLB games via the official schedule API
         postponed_ids = _get_postponed_games(target_date)
@@ -3267,6 +3774,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if locked_pairs:
                 logger.info(f"Pick lock: {len(locked_pairs)} game-model pick(s) "
                             f"already locked for {target_date} — preserving")
+            # A UFC fight is ONE proposition under either orientation, so a
+            # BET on one id locks that model on its swapped id too. Without
+            # this, the id scored after a flip could bet a fight a second
+            # time, at any point after the flip (second review, 2026-10-09).
+            for gid, mid in list(locked_pairs):
+                twin = _sibling_ufc_game_id(gid)
+                if twin:
+                    locked_pairs.add((twin, mid))
 
         # Only delete unsettled picks for games that haven't started yet.
         # This preserves picks for games already in progress or completed so
@@ -3312,6 +3827,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         skipped_started = 0
         skipped_postponed = 0
         skipped_locked = 0
+        skipped_twin = 0
+        side_models = side_checked_models()
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
@@ -3342,6 +3859,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 skipped_started += 1
                 continue
 
+            # The same fight under its other orientation is the id scored.
+            # This id's old no-bet and avoid rows leave the board now; the
+            # sweep after the loop would also clear them, but it yields when
+            # it cannot get its locks. BETs are never deleted.
+            if game_id in ufc_left_out:
+                skipped_twin += 1
+                logger.info(f"  [SKIP] {away_team} vs {home_team} — the same "
+                            f"fight is scored as {ufc_left_out[game_id]} "
+                            f"(_ufc_one_id_per_fight)")
+                if not dry_run:
+                    _clear_left_out_ufc_id(conn, game_id)
+                continue
+
             # Build features once per game, reuse across all models for that sport
             odds_mlb_h2h  = _get_dk_odds(conn, game_id, "h2h")
 
@@ -3357,6 +3887,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             f"odds (unconfirmed/speculative bout)")
                 continue
 
+            # A sport with no game model in config.MODELS has nothing to score
+            # here. NBA since 2026-10-15: its models are cards (docs/
+            # nba_models_2026.md), and building features for a game no model
+            # reads only spends database time.
+            if not any(sp == sport for sp, _, _ in MODELS.values()):
+                continue
+
             if sport == "MLB":
                 features = build_mlb_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
@@ -3365,12 +3902,6 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             elif sport == "WNBA":
                 from features.wnba_feature_engine import build_wnba_game_features
                 features = build_wnba_game_features(
-                    conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_mlb_h2h
-                )
-            elif sport == "NBA":
-                from features.nba_feature_engine import build_nba_game_features
-                features = build_nba_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
@@ -3384,13 +3915,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 from features.ncaaf_feature_engine import build_ncaaf_game_features
                 features = build_ncaaf_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_mlb_h2h
+                    odds_row=odds_mlb_h2h, fbs_registry=ncaaf_fbs_registry
                 )
-            else:  # NHL
+            elif sport == "NHL":
                 features = build_nhl_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
+            else:
+                # Never borrow another sport's features: an NBA game once fell
+                # through to the NHL builder by being the last `else`.
+                logger.warning(f"  [SKIP] {game_id}: no game feature builder for {sport}")
+                continue
 
             if not features:
                 continue
@@ -3407,6 +3943,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             game_picks: list[dict] = []
             for attempt in (1, 2):
                 game_picks = []
+                held_back: list[dict] = []
                 try:
                     if not dry_run:
                         # '%%' not '%': psycopg2 %-interpolates the statement
@@ -3415,6 +3952,39 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         # of range (#243, and again on 2026-09-22 after #813
                         # added this clause unescaped — every hourly scoring
                         # step failed mid-loop after pick-lock).
+                        #
+                        # WHOSE ROWS (2026-10-12). By default every model's
+                        # no-bet rows on the game, player props included: on
+                        # the refresh pass and the daily run the prop scorers
+                        # run right after this, and this clear is what lets
+                        # them re-score a player the prop lock holds at NONE.
+                        # The pre-game poller (game_models_only) clears only
+                        # the game-level models re-scored just below, because
+                        # it re-writes nothing else. On MLB_2026-10-11_LAD_MIL
+                        # its run at 00:17:18Z took 103 prop NONE/AVOID rows
+                        # 2m41s before first pitch; the game ended with only
+                        # its one prop BET.
+                        #
+                        # NOT EXEMPTED: a game that starts while this pass is
+                        # running (now_utc and commence_time are read before
+                        # the loop). Its prop rows are still cleared and the
+                        # prop scorers usually skip it, so they are lost
+                        # (WNBA_2026-10-09_ATL_NY, 91 rows at 23:36:48Z, 2m48s
+                        # after its start). Sparing them is NOT bet-neutral:
+                        # the odds feed pushes a start back around first
+                        # pitch/tip and the poller writes that into
+                        # games.commence_time every 30s. The prop scorers
+                        # re-read it, score the game as pre-game, and a kept
+                        # NONE row would hold that player in _locked_prop_keys
+                        # where this clear frees him. docs/signal_timing.md,
+                        # trap 4.
+                        #
+                        # The game-level rows are cleared and re-scored exactly
+                        # as before on both paths: a stale row left in place
+                        # would turn the re-insert into a silent no-op
+                        # (uq_picks_one_row_per_pick, ON CONFLICT DO NOTHING).
+                        _mf, _mp = (_model_id_filter(relevant_models)
+                                    if game_models_only else ("", ()))
                         conn.execute("""
                             DELETE FROM picks
                             WHERE game_id = %s
@@ -3422,7 +3992,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                               AND signal_type != 'BET'
                               AND is_live IS NOT TRUE
                               AND model_id NOT LIKE 'nfl_prop_%%'
-                        """, (game_id,))
+                        """ + _mf, (game_id,) + _mp)
                     for model_id in relevant_models:
                         # Pick lock: this pair has already produced a BET, so it is
                         # frozen — the number given is the bet of record and nothing
@@ -3455,12 +4025,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             # never reaches this log. Bind model_id: the loop
                             # variable would otherwise score every model as
                             # the last one.
+                            # A side model's rows come back unwritten
+                            # (write=False) for the check below; every other
+                            # model is called exactly as before.
+                            hold = model_id in side_models
                             picks = _call_in_savepoint(
                                 conn, "sp_model_game",
                                 lambda model_id=model_id: score_game(
                                     conn, game_id, model_id, features,
                                     bankroll, dry_run=dry_run,
-                                    commence_time=commence_time))
+                                    commence_time=commence_time,
+                                    **({"write": False} if model_id in side_models else {})))
                         except ConnectionLost:
                             raise                      # the game's unit, not the model's
                         except Exception as exc:
@@ -3470,6 +4045,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                 f"{traceback.format_exc()}")
                             continue
                         game_picks.extend(picks)
+                        if hold:
+                            held_back.extend(picks)
 
                         for p in picks:
                             signal = p["signal_type"]
@@ -3489,6 +4066,32 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                 f"bet=${p['recommended_bet']:.0f} | "
                                 f"[{tier}]"
                             )
+                    # One game never gets two picks that cannot both win
+                    # (mike, 2026-10-17). The side models' rows were held
+                    # back above; they are checked against each other and
+                    # against any BET already standing on the game, then
+                    # written. Fails CLOSED: if the check cannot run, none of
+                    # them is written this pass (loud, and the next pass
+                    # re-scores them) -- writing them unchecked is the bug.
+                    if held_back:
+                        try:
+                            _call_in_savepoint(
+                                conn, "sp_side_conflicts",
+                                lambda: _apply_side_conflicts(conn, game_id, held_back))
+                            if not dry_run:
+                                _call_in_savepoint(
+                                    conn, "sp_side_insert",
+                                    lambda: _insert_picks(conn, held_back))
+                        except ConnectionLost:
+                            raise
+                        except Exception as exc:
+                            model_failures.append(f"{game_id} side check: {exc!r}")
+                            logger.error(
+                                f"  {game_id}: side check FAILED, its "
+                                f"{len(held_back)} held row(s) not written: {exc!r}\n"
+                                f"{traceback.format_exc()}")
+                            kept = {id(p) for p in held_back}
+                            game_picks = [p for p in game_picks if id(p) not in kept]
                     if not dry_run:
                         conn.commit()
                     rescored.add(game_id)
@@ -3563,6 +4166,15 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # %-interpolates the whole statement. A bare % is a format spec and
         # raises IndexError: tuple index out of range (same class as #243;
         # produced every scoring pass after #813 until escaped).
+        #
+        # ONE MORE LIMIT (2026-10-12), the same as the per-game clear: the
+        # pre-game poller (game_models_only) sweeps only game-level models'
+        # rows. It re-writes nothing else, so player-prop rows and the NFL
+        # opener and wind no-bet rows stay for the writers that own them.
+        # "Not started" stays on now_utc (read before the loop) for the same
+        # reason the per-game clear does not exempt a game that started
+        # mid-pass: a start the feed pushes back makes that exemption hold
+        # prop players the prop scorers would otherwise have re-scored.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -3570,6 +4182,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if rescored:
                 _keep = f" AND game_id NOT IN ({','.join(['%s'] * len(rescored))})"
                 _keep_p = tuple(sorted(rescored))
+            _mf, _mp = (_model_id_filter(MODELS) if game_models_only
+                        else ("", ()))
             try:
                 conn.execute("SET LOCAL lock_timeout = '10s'")
                 conn.execute("""
@@ -3582,7 +4196,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                   SELECT game_id FROM games
                   WHERE game_date >= %s AND game_date <= %s
                     AND (commence_time IS NULL OR commence_time > %s)
-              )""" + _sc + _keep,
+              )""" + _sc + _keep + _mf,
             (target_date,
              # EVERY look-ahead horizon, not just the two that existed when
              # this was written. The bound has to cover the whole window
@@ -3591,7 +4205,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
              # ever clearing the last one — duplicates on exactly the games
              # this change just started scoring.
              max(ncaaf_horizon, ufc_horizon, game_horizon),
-             now_utc) + _sp + _keep_p)
+             now_utc) + _sp + _keep_p + _mp)
                 conn.commit()
             except Exception as exc:                          # noqa: BLE001
                 # A sweep that cannot get its locks in 10s yields; the
@@ -3607,6 +4221,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             logger.info(f"Skipped {skipped_started} games already started (picks locked)")
         if skipped_locked:
             logger.info(f"Skipped {skipped_locked} game-model pick(s) locked from an earlier run today")
+        if skipped_twin:
+            logger.info(f"Skipped {skipped_twin} UFC id(s) whose fight is scored under its other id")
 
         if not dry_run:
             conn.commit()
@@ -4834,215 +5450,6 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
 
     logger.success(
         f"WNBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
-    )
-    return {
-        "target_date": target_date,
-        "prop_picks":  total_picks,
-        "bets":        total_bets,
-        "dry_run":     dry_run,
-    }
-
-
-# ── NBA Prop Config ───────────────────────────────────────────────────────────
-
-# Per-model: DK market name + stat label. Counts are Poisson over/under; the
-# double-double model is logistic + over-only (Yes/No, 0.5 line) and prob-only
-# (decided on model probability — DK juices DD heavily; see PROB_ONLY_MODELS).
-_NBA_PROP_CONFIG: dict[str, dict] = {
-    "nba_prop_player_points":    {"market": "player_points",                  "stat_label": "Pts"},
-    "nba_prop_player_rebounds":  {"market": "player_rebounds",                "stat_label": "Reb"},
-    "nba_prop_player_assists":   {"market": "player_assists",                 "stat_label": "Ast"},
-    "nba_prop_player_threes":    {"market": "player_threes",                  "stat_label": "3PM"},
-    "nba_prop_player_pra":       {"market": "player_points_rebounds_assists", "stat_label": "PRA"},
-    "nba_prop_player_blocks":    {"market": "player_blocks",                  "stat_label": "Blk"},
-    "nba_prop_player_steals":    {"market": "player_steals",                  "stat_label": "Stl"},
-    "nba_prop_player_turnovers": {"market": "player_turnovers",               "stat_label": "TO"},
-    "nba_prop_player_dd":        {"market": "player_double_double",           "stat_label": "DD",
-                                  "over_only": True},
-}
-
-
-def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
-    """
-    Score NBA player prop markets (points/reb/ast/threes/PRA/blocks/steals/
-    turnovers + double-double).
-
-    Poisson models: predict lambda → P(over line) via Poisson CDF → edge vs DK.
-    Logistic model (double-double): predict_proba → P(Yes), prob-only signal.
-    Candidate players come from build_nba_prop_scoring_rows (recent rotation).
-
-    Idempotent: deletes unsettled NBA prop picks for target_date before insert.
-    """
-    from features.nba_prop_feature_engine import build_nba_prop_scoring_rows
-
-    if target_date is None:
-        target_date = today_et()
-
-    logger.info(f"NBA Prop Scorer — {target_date}")
-
-    conn = get_connection()
-    bankroll = _get_current_bankroll(conn)
-    ct_map = _commence_time_map(conn, target_date, "NBA")
-    cut_map = _pregame_cutoff_map(conn, target_date, "NBA")
-    final_ids = _final_game_ids(conn, target_date, "NBA")
-    total_picks = 0
-    total_bets  = 0
-
-    try:
-        locked_prop_keys = _locked_prop_keys(conn, target_date, _NBA_PROP_CONFIG.keys())
-        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
-            for mid in _NBA_PROP_CONFIG:
-                conn.execute("""
-                    DELETE FROM picks
-                    WHERE game_date = %s AND model_id = %s AND result IS NULL
-                """, (target_date, mid))
-            conn.commit()
-
-        for model_id, cfg in _NBA_PROP_CONFIG.items():
-            market     = cfg["market"]
-            stat_label = cfg["stat_label"]
-            over_only  = cfg.get("over_only", False)
-
-            artifact = load_model(model_id)
-            if artifact is None:
-                logger.debug(f"  No trained model for {model_id} — skipping")
-                continue
-
-            model_type   = artifact.get("model_type", "poisson")
-            feature_cols = artifact["feature_cols"]
-            model_obj    = artifact["model"]
-
-            df = build_nba_prop_scoring_rows(target_date, model_id)
-            if df.empty:
-                logger.info(f"  {model_id}: no scoring rows for {target_date}")
-                continue
-
-            df, X = prop_feature_matrix(df, feature_cols, model_id)
-            if df.empty:
-                logger.info(f"  {model_id}: every row is missing a feature -- nothing scored this pass")
-                continue
-            if model_type == "logistic":
-                probs_over = model_obj.predict_proba(X)[:, 1]
-                lambdas    = None
-            else:
-                lambdas    = np.clip(model_obj.predict(X), 1e-6, None)
-                probs_over = None
-
-            is_prob_only = model_id in PROB_ONLY_MODELS
-
-            model_picks = []
-            for i, row in df.iterrows():
-                player_name = row["player_name"]
-                game_id     = row["game_id"]
-                player_id   = row.get("player_id")
-                if (game_id, model_id, player_id) in locked_prop_keys:
-                    continue  # first-signal prop lock — already locked today
-                if _game_started(cut_map.get(game_id)) or game_id in final_ids:
-                    continue  # game underway or already final — no pre-game price left
-
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              cut_map.get(game_id))
-                _best_ctx = (game_id,
-                             (prop_odds or {}).get("player_name") or player_name,
-                             market, cut_map.get(game_id))
-                if prop_odds is None or prop_odds.get("line") is None:
-                    if not is_prob_only:
-                        continue
-                    # prob-only (double-double): DK may not list it — still emit
-                    # the model's pick with NULL pricing on the 0.5 over side.
-                    line        = 0.5
-                    over_price  = None
-                    under_price = None
-                    over_link   = None
-                    under_link  = None
-                else:
-                    line        = float(prop_odds["line"])
-                    over_price  = prop_odds.get("over_price")
-                    under_price = prop_odds.get("under_price")
-                    over_link   = prop_odds.get("over_link")
-                    under_link  = prop_odds.get("under_link")
-
-                if model_type == "logistic":
-                    p_over = float(probs_over[i])
-                else:
-                    p_over = _poisson_over_prob(float(lambdas[i]), line)
-                p_under = 1.0 - p_over
-
-                # ── Score over ────────────────────────────────────────────────
-                if over_price is not None:
-                    dk_ip_over = american_to_implied_prob(over_price)
-                    if dk_ip_over:
-                        pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                            game_id=game_id, model_id=model_id,
-                            game_date=target_date,
-                            player_name=player_name, pick_side="over",
-                            model_prob=p_over, dk_implied_prob=dk_ip_over,
-                            edge=p_over - dk_ip_over,
-                            dk_odds=over_price, line=line,
-                            bankroll=bankroll, stat_label=stat_label,
-                            player_id=player_id, sport="NBA",
-                            dk_bet_link=over_link,
-                            commence_time=ct_map.get(game_id),
-                        )
-                        if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
-                elif is_prob_only:
-                    pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                        game_id=game_id, model_id=model_id,
-                        game_date=target_date,
-                        player_name=player_name, pick_side="over",
-                        model_prob=p_over, dk_implied_prob=None,
-                        edge=None, dk_odds=None, line=line,
-                        bankroll=bankroll, stat_label=stat_label,
-                        player_id=player_id, sport="NBA",
-                        dk_bet_link=over_link,
-                        commence_time=ct_map.get(game_id),
-                    )
-                    if pick:
-                        model_picks.append(_tag_prop(pick, _best_ctx, conn))
-
-                # ── Score under ───────────────────────────────────────────────
-                if under_price is not None and not over_only:
-                    dk_ip_under = american_to_implied_prob(under_price)
-                    if dk_ip_under:
-                        pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                            game_id=game_id, model_id=model_id,
-                            game_date=target_date,
-                            player_name=player_name, pick_side="under",
-                            model_prob=p_under, dk_implied_prob=dk_ip_under,
-                            edge=p_under - dk_ip_under,
-                            dk_odds=under_price, line=line,
-                            bankroll=bankroll, stat_label=stat_label,
-                            player_id=player_id, sport="NBA",
-                            dk_bet_link=under_link,
-                            commence_time=ct_map.get(game_id),
-                        )
-                        if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
-
-            bets = [p for p in model_picks if p["signal_type"] == "BET"]
-            logger.info(
-                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
-                f"({len(df)} players evaluated)"
-            )
-            if model_picks and not dry_run:
-                _insert_picks(conn, model_picks)
-                conn.commit()
-            total_picks += len(model_picks)
-            total_bets  += len(bets)
-
-    except Exception as exc:
-        conn.rollback()
-        logger.error(f"NBA prop scorer failed: {exc}")
-        raise
-    finally:
-        conn.close()
-
-    logger.success(
-        f"NBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
     )
     return {
         "target_date": target_date,

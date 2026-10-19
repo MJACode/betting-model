@@ -39,11 +39,19 @@
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+// Source is read with LF regardless of checkout: autocrlf gives CRLF on
+// Windows, and the regexes below that end a match at a newline never
+// matched there.
+const readUtf8 = (p: string) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
+
 const ROOT = join(import.meta.dirname, '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
+// Baselines and allowlists below are written with '/'. Node's relative()
+// yields '\' on Windows, which made every entry look stale there.
+const relPosix = (f: string) => relative(ROOT, f).split(sep).join('/');
+const read = (p: string) => readUtf8(join(ROOT, p));
 
 let failures = 0;
 let passes = 0;
@@ -130,8 +138,7 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/filters/FilterSheet.tsx', 'pressed', 1], // 31.5pt
   ['src/components/filters/FilterSheet.tsx', 'showBtn,showBtnEmpty,pressed', 1], // 43.0pt
   ['src/components/filters/GameFilterSection.tsx', '', 1], // 32.0pt
-  ['src/screens/BuiltInModelDetailScreen.tsx', 'pickRow', 3], // 41.8, 41.8, 41.8pt
-  ['src/screens/BuiltInModelDetailScreen.tsx', 'showMoreBtn', 4], // 39.5, 39.5, 39.5, 39.5pt
+  ['src/screens/BuiltInModelDetailScreen.tsx', 'pickRow', 2], // 41.8, 41.8pt — the sweep row is gone
   ['src/screens/FeedbackScreen.tsx', 'chip,chipActive', 1], // 41.5pt
   ['src/screens/FeedbackScreen.tsx', 'pressed', 1], // 39.5pt
   ['src/screens/FeedbackScreen.tsx', 'sendBtn,sendBtnDisabled', 1], // 41.8pt
@@ -176,7 +183,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
-  ['src/screens/StatsScreen.tsx', 'retryBtn,pressed', 1], // 39.5pt
 ];
 
 function walk(d: string, out: string[] = []): string[] {
@@ -371,8 +377,8 @@ const baselineLeft = new Map<string, number>(SHORT_BASELINE.map(([f, r, n]) => [
 const badExempt: string[] = [];
 
 for (const f of files) {
-  const rel = relative(ROOT, f);
-  const src = readFileSync(f, 'utf-8');
+  const rel = relPosix(f);
+  const src = readUtf8(f);
   for (const m of src.matchAll(/<Pressable\b/g)) {
     pressables++;
     const tag = openTag(src, m.index!);
@@ -453,8 +459,8 @@ console.log(`  (${pressables} Pressables; ${exemptSwallow} non-elements via acce
 // (backdrop or X) names its sheet: "Close stake editor".
 const bareClose: string[] = [];
 for (const f of files) {
-  const src = readFileSync(f, 'utf-8');
-  for (const m of src.matchAll(/accessibilityLabel=(?:"Close"|\{'Close'\}|\{"Close"\})/g)) bareClose.push(`${relative(ROOT, f)}:${src.slice(0, m.index).split('\n').length}`);
+  const src = readUtf8(f);
+  for (const m of src.matchAll(/accessibilityLabel=(?:"Close"|\{'Close'\}|\{"Close"\})/g)) bareClose.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
 }
 check(`every close control names what it closes (${bareClose.length} bare "Close")`, bareClose.length === 0, bareClose.join('; '));
 
@@ -462,11 +468,11 @@ console.log('\nRule 5: text inputs and switches');
 const unlabelled: string[] = [];
 let inputs = 0;
 for (const f of files) {
-  const src = readFileSync(f, 'utf-8');
+  const src = readUtf8(f);
   for (const m of src.matchAll(/<(TextInput|Switch)\s/g)) {
     inputs++;
     if (!/accessibilityLabel=/.test(openTag(src, m.index!))) {
-      unlabelled.push(`${relative(ROOT, f)}:${src.slice(0, m.index).split('\n').length}`);
+      unlabelled.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
     }
   }
 }
@@ -511,9 +517,9 @@ function closeOf(src: string, start: number, tagName: string): number {
 const uncovered: string[] = [];
 let covered = 0;
 for (const f of files) {
-  const rel = relative(ROOT, f);
+  const rel = relPosix(f);
   if (exemptFiles.has(rel)) continue;
-  const src = readFileSync(f, 'utf-8');
+  const src = readUtf8(f);
   const modals = ranges(src, /<Modal\b/g, '</Modal>');
   for (const m of src.matchAll(/(?<![\w.])<(ScrollView|FlatList|SectionList)\s/g)) {
     if (/(useRef|createRef|RefObject)$/.test(src.slice(Math.max(0, m.index! - 12), m.index))) continue;
@@ -613,7 +619,7 @@ const H9_SHORT: { where: string; eff: number; reason: string }[] = [
 const statsUses = (read('src/screens/StatsScreen.tsx').match(/<SportToggle\b[^>]*\/>/g) ?? []);
 check(`every <SportToggle> is reached (Picks, Models) or listed short (${statsUses.length} on Stats, all plain)`,
   statsUses.length > 0 && statsUses.every((t) => t === '<SportToggle />') &&
-    files.every((f) => { const r = relative(ROOT, f); const n = (readFileSync(f, 'utf-8').match(/<SportToggle\b/g) ?? []).length; return n === 0 || ['src/screens/PicksHomeScreen.tsx', 'src/screens/ModelsScreen.tsx', 'src/screens/StatsScreen.tsx'].includes(r); }));
+    files.every((f) => { const r = relPosix(f); const n = (readUtf8(f).match(/<SportToggle\b/g) ?? []).length; return n === 0 || ['src/screens/PicksHomeScreen.tsx', 'src/screens/ModelsScreen.tsx', 'src/screens/StatsScreen.tsx'].includes(r); }));
 check('every H9 short entry carries a reason and is really short', H9_SHORT.every((x) => x.reason.length > 40 && x.eff < MIN_TAP_V));
 for (const x of H9_SHORT) console.log(`  (short: ${x.where} ≈ ${x.eff}pt — ${x.reason})`);
 
@@ -622,16 +628,23 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard label carries game status + time (gameStatusSpeech)', /gameStatusSpeech\(gameStatus\(game, liveState\), gameDayLabelET\(game\?\.commence_time\)\)/.test(card));
 check('PickCard label carries the stake, in words', /stakeCaption \? `Stake \$\{unitsSpeech\(stakeCaption\)\}` : null/.test(card));
 check('PickCard label carries when it posted and the started line', /timing \? timing\.label : null/.test(card) && /startedSpoken,/.test(card));
-check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && handoff/.test(card));
+check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && actionHandoff/.test(card));
 check('PickCard: "Game started" is spoken once — in cardLabel (gameStartedSpeech, full book name), the nested line hidden',
   /startedSpoken,\n/.test(card) && /gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)/.test(card) &&
     /style=\{styles\.startedLine\}\s*accessibilityRole="text"\s*accessibilityElementsHidden\s*importantForAccessibility="no-hide-descendants"/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('Pick Detail: the started card speaks gameStartedSpeech, like the card (#847)', /styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)\}/.test(detail));
 check('PicksHome: "—" header counts speak "count not available", like the sub-tabs (#845)', /<Text style=\{styles\.subtitle\} accessibilityLabel=\{unknownCountSpeech\(unitsSpeech\(subtitle\)\)\}>/.test(read('src/screens/PicksHomeScreen.tsx')));
-check('TrackRecord: "— settled picks" speaks "count not available"', /accessibilityLabel=\{notLoaded \? unknownCountSpeech\('— settled picks'\) : undefined\}/.test(read('src/screens/TrackRecordScreen.tsx')));
+check('TrackRecord hero is one stop, units first, and a missing count still says so',
+  /accessibilityRole="summary"/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /accessibilityLabel=\{heroLabel\}/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /unknownCountSpeech\('— settled picks'\)/.test(read('src/lib/recordHero.ts')) &&
+  /Units unavailable/.test(read('src/lib/recordHero.ts')));
+// The sentence itself lives in lib/heroPriceText.ts ("looks off", or for an
+// old price which book has not updated it and since when); the pytest pin
+// and verify_pick_cta run it.
 check('PickCard: "Price check" is spoken once — in cardLabel, the nested chip hidden',
-  /flagged \? 'Price check: this price looks off, so edge and EV are hidden' : `Edge \$\{edgeText\}`/.test(card) &&
+  /flagged \? priceCheckSpeech\(check, heroPrice\) : `Edge \$\{edgeText\}`/.test(card) &&
     /styles\.priceCheckChip\]\}\s*accessibilityRole="text"\s*accessibilityElementsHidden\s*importantForAccessibility="no-hide-descendants"/.test(card) &&
     !/accessibilityLabel="Price check/.test(card));
 check('PickCard: no nested element inside the card is separately accessible', !/\n\s+accessible\n/.test(card.slice(card.indexOf('accessibilityLabel={cardLabel}'))));
@@ -656,8 +669,15 @@ check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
+check('Stats threshold bubble: the name is the label and the gesture is the hint',
+  /accessibilityLabel=\{thresholdBubbleLabel\(faceOf\(value\), statLabel\)\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityHint=\{THRESHOLD_TYPE_HINT\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityActions=\{\[\{ name: 'activate' \}\]\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /actionName === 'activate'\) openDraft\(\)/.test(read('src/screens/StatsScreen.tsx')) &&
+    /return `Threshold \$\{value\}`;/.test(read('src/lib/lineRuler.ts')) &&
+    /export const THRESHOLD_TYPE_HINT = 'double tap to type a value';/.test(read('src/lib/lineRuler.ts')));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
-  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
+  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'RecordInfoSheet', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);
     return /<View style=\{styles\.backdrop\}>/.test(s) && !/<Pressable\s+style=\{styles\.backdrop\}/.test(s);
   }));

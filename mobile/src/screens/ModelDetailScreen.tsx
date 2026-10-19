@@ -29,6 +29,7 @@ import { BACKTEST_START } from '@/lib/recordStart';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { signalDisplayName } from '@/lib/tone';
 
 /**
  * The minimums a rule actually carries. Every floor is optional — a rule with
@@ -187,7 +188,7 @@ export function ModelDetailScreen() {
               upcoming.map((ep) => (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={[ep.pick.pick_label, ep.pick.signal_type, modelShort(ep.pick.model_id), `${gameDayLabelET(ep.pick.game_time) ?? 'Today'}${ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}`, `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`].filter(Boolean).join(', ')}
+                  accessibilityLabel={[ep.pick.pick_label, signalDisplayName(ep.pick.signal_type), modelShort(ep.pick.model_id), `${gameDayLabelET(ep.pick.game_time) ?? 'Today'}${ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}`, `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`].filter(Boolean).join(', ')}
                   key={ep.pick.pick_id}
                   style={styles.pickRow}
                   onPress={() => navigation.navigate('PickDetail', { pickId: ep.pick.pick_id })}
@@ -220,7 +221,7 @@ export function ModelDetailScreen() {
         renderItem={({ item }) => (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={[item.pick_label, item.signal_type, modelShort(item.model_id)].filter(Boolean).join(', ')}
+            accessibilityLabel={[item.pick_label, signalDisplayName(item.signal_type), modelShort(item.model_id)].filter(Boolean).join(', ')}
             style={styles.pickRow}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick_id })}
           >

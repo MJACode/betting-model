@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchDayGames, fetchDayPicks } from '@/lib/queries';
+import { attachDiscordPublish } from '@/lib/discordPublish';
 import { computeDailyResults, emptyDailyResults, type DailyResults } from '@/lib/dailyResults';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { GameRow } from '@/types';
@@ -33,7 +34,9 @@ export function useDailyResults(date: string, reloadToken = 0) {
         fetchDayGames(date).catch(() => [] as GameRow[]),
       ]);
       if (seq.current !== id) return;
-      setResults(computeDailyResults(date, dayPicks, dayGames));
+      const stamped = await attachDiscordPublish(dayPicks);
+      if (seq.current !== id) return;
+      setResults(computeDailyResults(date, stamped, dayGames));
     } catch (e: unknown) {
       if (seq.current !== id) return;
       if (!isAbortError(e)) setError(errorText(e));

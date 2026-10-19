@@ -114,7 +114,7 @@ FLAT_CAP = 0.01          # 1% of bankroll. Keep this binding.
 # is what actually determines growth. They are different numbers and conflating
 # them silently inflates every stake by roughly half a unit.
 # ---------------------------------------------------------------------------
-UNIT_PCT = 0.01          # 1 unit = 1% of bankroll. No unit bump (2026 paper-track).
+UNIT_PCT = 0.01          # 1 unit = 1% of bankroll. No unit bump (2026 live track).
 REF_KELLY = 0.0911       # full Kelly on the reference bet: lead 3, thr 11, -110
 MAX_UNITS = 2.0          # hard per-bet cap
 SLATE_UNIT_CAP = 3.0     # total units live on any one day
@@ -184,6 +184,72 @@ MAX_FIRE_LEAD = 4.0
 # truth, so live probabilities floor at the lead-1 row. Using the lead-0 row
 # there would inflate P(under) by 3pp and the stake by 0.7 units.
 MIN_LIVE_LEAD = 1
+
+# How long the kickoff-hour forecast has to hold before the 11 mph check can
+# pass on a LIVE poll. The check itself is unchanged: raw wind >= threshold.
+# What changed is which number that comparison sees.
+#
+# The live card is polled hourly from four days out and every 10 minutes inside
+# 24 hours (scheduler NFL_FAST_WINDOW_HOURS). Open-Meteo moves 3-5 mph between
+# hourly updates, and the first poll at or above 11 mph used to lock the under
+# insert-once. The validation this probability table was built on is one issued
+# forecast at a fixed lead (`previous_dayN`), not the maximum of ~40 looks.
+# Measured on the 2026 status-history series (nfl_pick_status_history): a flat
+# 11.2 mph that then died (LV @ NE, 2026-10-11) held for 6.2 hours, so a 6-hour
+# window still locks that shape. 12 hours is the shortest window in that
+# neighbourhood that does not. 18 hours drops two further losses and looks
+# better on 10 bets; that is a peak on a tiny sample, not a reason to wait
+# longer. The 12-hour rule does not claim the bets it keeps are profitable.
+#
+# LOOKBACK is an hour longer than the span so a poll that runs late still sees
+# the reading from 12 hours earlier. Three readings is the minimum that is not
+# two sparse points with a hole between them (PHI @ JAX, 2026-10-11, had two).
+# A single issued forecast — the replay and calibration path — does not come
+# through here. Those callers omit `wind_reads` and the threshold is applied to
+# that one number, which is the population the rule was validated on.
+STABLE_SPAN_HOURS = 12.0
+STABLE_LOOKBACK_HOURS = 13.0
+STABLE_MIN_READS = 3
+
+
+def _as_utc(ts) -> pd.Timestamp:
+    t = pd.Timestamp(ts)
+    if t.tzinfo is None:
+        return t.tz_localize("UTC")
+    return t.tz_convert("UTC")
+
+
+def ruling_wind(reads, *, now=None) -> float | None:
+    """Minimum kickoff-hour forecast over a covered window, or None.
+
+    `reads` is a sequence of `(observed_at, wind_mph)` for ONE game, the live
+    polls of the kickoff-hour forecast. None means the window is not covered
+    yet, so the threshold check does not pass. A covered window returns the
+    minimum, including a minimum below the threshold — the caller compares it
+    the same way it compares a single forecast.
+
+    `now` defaults to the newest reading. Readings outside
+    `[now - STABLE_LOOKBACK_HOURS, now]` are ignored.
+    """
+    if not reads:
+        return None
+    parsed: list[tuple[pd.Timestamp, float]] = []
+    for item in reads:
+        ts, mph = item[0], item[1]
+        if mph is None or pd.isna(mph):
+            continue
+        parsed.append((_as_utc(ts), float(mph)))
+    if not parsed:
+        return None
+    end = _as_utc(now) if now is not None else max(t for t, _ in parsed)
+    start = end - pd.Timedelta(hours=STABLE_LOOKBACK_HOURS)
+    window = [(t, w) for t, w in parsed if start <= t <= end]
+    if len(window) < STABLE_MIN_READS:
+        return None
+    oldest = min(t for t, _ in window)
+    if end - oldest < pd.Timedelta(hours=STABLE_SPAN_HOURS) - pd.Timedelta(seconds=1):
+        return None
+    return min(w for _, w in window)
 
 
 def american_to_decimal(px: float) -> float:
@@ -315,15 +381,39 @@ class Bet:
         return asdict(self)
 
 
+def _apply_ruling_wind(games: pd.DataFrame, wind_reads: dict | None) -> pd.DataFrame:
+    """The number the threshold compares. One issued forecast, or the window min.
+
+    `wind_reads is None` is the replay path: `forecast_wind` is already the
+    single issued number and is left alone. A dict — including an empty one —
+    is the live path. A game with no covered window is set to NaN, which fails
+    `>= threshold`, so a missing history cannot lock on the current reading.
+    """
+    if wind_reads is None:
+        return games
+    g = games.copy()
+    ruled = []
+    for gid in g.game_id:
+        w = ruling_wind(wind_reads.get(gid) or [])
+        ruled.append(np.nan if w is None else w)
+    g["forecast_wind"] = ruled
+    return g
+
+
 def select_bets(games: pd.DataFrame, threshold: float = 11.0,
                 min_edge: float = MIN_EDGE, bankroll: float = 1.0,
-                max_fire_lead: float = MAX_FIRE_LEAD) -> pd.DataFrame:
+                max_fire_lead: float = MAX_FIRE_LEAD,
+                wind_reads: dict | None = None) -> pd.DataFrame:
     """
     Apply the frozen rule to a slate.
 
-    The threshold is applied to the RAW forecast, because that is exactly how
-    the rule was validated. `expected_true_wind` is carried through for the card
-    but never selects.
+    The threshold is applied to the RAW forecast number, because that is exactly
+    how the rule was validated. On the live card that number is the minimum
+    kickoff-hour forecast over a covered `STABLE_SPAN_HOURS` window
+    (`ruling_wind`); a window that is not covered yet does not pass. Callers
+    that replay one issued forecast omit `wind_reads` and the threshold is
+    applied to `forecast_wind` as stored. `expected_true_wind` is carried
+    through for the card but never selects.
 
     `games` must carry, per game: game_id, matchup, kick_utc, stadium_id, roof,
     lead_days, forecast_wind, exp_true_wind, and the best available UNDER quote
@@ -335,6 +425,7 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
     from data_ingest.weather import open_air_mask
 
     g = games[open_air_mask(games)].copy()
+    g = _apply_ruling_wind(g, wind_reads)
     g = g[g.forecast_wind >= threshold]
     # Nothing fires outside the firing window. The card is run against the
     # 10-day poll horizon so the eval board sees the whole slate, so without
@@ -401,7 +492,8 @@ def _under_quote(r) -> dict:
 
 def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
                    min_edge: float = MIN_EDGE,
-                   max_fire_lead: float = MAX_FIRE_LEAD) -> list[dict]:
+                   max_fire_lead: float = MAX_FIRE_LEAD,
+                   wind_reads: dict | None = None) -> list[dict]:
     """
     Model's current view of EVERY outdoor game in the window, qualifying or
     not. Feeds the locked-pick history; it never selects anything.
@@ -451,6 +543,31 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
                                 **quote, **common))
             continue
         wind = float(wind)
+
+        # Live polls pass `wind_reads`. The threshold then sees the window
+        # minimum (`ruling_wind`), the same comparison as a single issued
+        # forecast. A window that is not covered yet is not a pass, and it is
+        # not a collapsed premise: the monitor's GONE markers must not match
+        # this reason. Omit `wind_reads` and the current reading is the check,
+        # which is the replay path.
+        if wind_reads is not None:
+            stable = ruling_wind(wind_reads.get(getattr(r, "game_id", None)) or [])
+            if stable is None:
+                if wind < threshold:
+                    out.append(eval_row(
+                        qualifies=False,
+                        reason=(f"forecast wind {wind:.1f} mph below the "
+                                f"{threshold:.0f} mph threshold"),
+                        **quote, **common))
+                else:
+                    out.append(eval_row(
+                        qualifies=False,
+                        reason=(f"wind {wind:.1f} mph, not stable yet: the "
+                                f"{STABLE_SPAN_HOURS:.0f}h forecast window "
+                                f"is not covered"),
+                        **quote, **common))
+                continue
+            wind = float(stable)
 
         if wind < threshold:
             out.append(eval_row(
