@@ -41,6 +41,9 @@ import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useOtaUpdates } from '@/hooks/useOtaUpdates';
 import { usePushDeepLink } from '@/hooks/usePushDeepLink';
 import { installNotificationHandler } from '@/lib/pushPresentation';
+import { startCrashLogging } from '@/lib/crashLogSetup';
+import { setCrashScreen } from '@/lib/crashLog';
+import { AppErrorBoundary } from '@/components/AppErrorBoundary';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
@@ -191,6 +194,9 @@ function DailyRecap({ onboardingDone }: { onboardingDone: boolean }) {
 // Module scope, so it is in place before any screen mounts and before a
 // notification that launched the app is handed over.
 installNotificationHandler();
+// Same reason: catch an error from the first render, and record how the
+// previous launch ended before this one can overwrite the marker.
+startCrashLogging();
 
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
@@ -210,8 +216,13 @@ export default function App() {
   const [navReady, setNavReady] = useState(false);
   const tabBarHeight = useTabBarHeight();
   const syncRoute = useCallback(() => {
-    setRouteName(navRef.getCurrentRoute()?.name);
+    const name = navRef.getCurrentRoute()?.name;
+    setCrashScreen(name);
+    setRouteName(name);
   }, [navRef]);
+  // Retry after a crash remounts the navigator; onReady sets this back, and
+  // usePushDeepLink replays a pending notification route when it does.
+  const resetNav = useCallback(() => setNavReady(false), []);
   const onNavReady = useCallback(() => {
     setNavReady(true);
     syncRoute();
@@ -230,6 +241,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
+    <AppErrorBoundary onReset={resetNav}>
       <OnboardingModal visible={ready && !seen} onDone={markSeen} />
       <DailyRecap onboardingDone={ready && seen} />
       <NavigationContainer
@@ -341,6 +353,7 @@ export default function App() {
         onOpen={openBetslip}
       />
       <ToastHost />
+    </AppErrorBoundary>
     </SafeAreaProvider>
     </GestureHandlerRootView>
   );

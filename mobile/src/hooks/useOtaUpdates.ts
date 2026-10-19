@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as Updates from 'expo-updates';
 
+import { markOtaReload } from '@/lib/crashLog';
 import {
   applyPendingUpdate,
   shouldCheck,
@@ -52,7 +53,12 @@ export function useOtaUpdates(): void {
           isEnabled: Updates.isEnabled,
           checkForUpdateAsync: () => Updates.checkForUpdateAsync(),
           fetchUpdateAsync: () => Updates.fetchUpdateAsync(),
-          reloadAsync: () => Updates.reloadAsync(),
+          // Mark the stage first: if the app dies during the reload, the next
+          // launch reports an early_exit at "ota_reload" (src/lib/crashLog.ts).
+          reloadAsync: async () => {
+            await markOtaReload();
+            await Updates.reloadAsync();
+          },
         };
         await applyPendingUpdate(api);
       } finally {

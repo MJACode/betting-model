@@ -502,6 +502,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "feedback_submit",
     "feedback_threads_for_device",
     "feedback_unread_count",
+    # crash logging -- SECURITY DEFINER, insert-only, returns nothing
+    # (data/migrations/add_app_errors.sql, mobile/src/lib/crashLogSetup.ts)
+    "log_app_error",
     # NOT called by the app, but REQUIRED by it: custom_model_picks and
     # custom_model_backtest are SECURITY INVOKER and both call this helper, so
     # the CALLER needs EXECUTE. Revoking it breaks the custom-model screen with
