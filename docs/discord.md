@@ -419,6 +419,16 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   46 settle passes between 7am ET and midnight.
   The trade: a recap whose snapshot fails is ledgered with no snapshot, so
   that date can never be restated; the warning in the log is its only trace.
+  A success response with no message id is not one of those retries. The
+  body may already be in the channel, and the refresh passes would post
+  another copy each time. That recap is `discord_results_error` or
+  `discord_results_restate_error` with the reason "no message id". Once
+  that row exists, later passes do not post it. One ops alert is raised
+  on the pass that records the row. Check the channel before deleting
+  that `_error` row; the message may already be there. Deleting the row
+  lets a later pass post the recap again. If the error row was not
+  recorded, that same alert says so and a later pass may post again.
+  A rejected post (no success) stays retryable.
 - **The week and the month post on the same webhook.** Monday 7:30am ET
   (`period_recaps`, and again from later `step_settle` passes) posts the
   prior Monday–Sunday. The first Monday of a month also posts the previous

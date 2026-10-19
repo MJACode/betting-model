@@ -79,10 +79,6 @@ _MAX_429_WAIT = 30.0
 # 204). Keeps _post's boolean contract without pretending we can address
 # the message later -- the delete path ignores it.
 _POST_OK_NO_ID = "ok"
-# What the last _post call actually got back. The recap reads this so a
-# rejected post is a row, not only a log line that disappears with the
-# container. status is the HTTP code, or None when the request never got one.
-_last_delivery: dict = {"status": None, "detail": ""}
 _INTER_POST_SLEEP = 0.6         # webhooks allow ~5 req / 2s; stay well under
 
 _COLOR_SIGNAL = 0x2ECC71        # green
@@ -358,11 +354,33 @@ def _redact_delivery_error(exc: BaseException, url: str) -> str:
     return f"{type(exc).__name__}: {text}"
 
 
-def _remember_delivery(status, detail: str) -> None:
-    """Keep the last webhook outcome, with any webhook URL removed."""
-    text = _WEBHOOK_IN_TEXT.sub("[webhook]", detail or "")
-    _last_delivery["status"] = status
-    _last_delivery["detail"] = text[:180]
+class _Posted(str):
+    """One confirmed webhook result. status and detail belong to this call.
+
+    A module dict of the last outcome is shared by every caller in the
+    process, so two posts can record each other's HTTP status. This object
+    is the outcome of the call that returned it.
+    """
+
+    status: int | None
+    detail: str
+
+    def __new__(cls, text: str, status, detail: str = ""):
+        obj = str.__new__(cls, text)
+        obj.status = status
+        obj.detail = detail or ""
+        return obj
+
+
+class _Rejected:
+    """A webhook answer that was not a delivery. Falsy, and not a message id."""
+
+    def __init__(self, status, detail: str = ""):
+        self.status = status
+        self.detail = detail or ""
+
+    def __bool__(self) -> bool:
+        return False
 
 
 def _post(url: str, payload: dict) -> str | None:
@@ -392,10 +410,8 @@ def _post(url: str, payload: dict) -> str | None:
                 except Exception:  # noqa: BLE001 — 204, or a body we can't parse
                     mid = ""
                 if mid:
-                    _remember_delivery(resp.status_code, "")
-                    return mid
-                _remember_delivery(resp.status_code, "no message id")
-                return _POST_OK_NO_ID
+                    return _Posted(mid, resp.status_code, "")
+                return _Posted(_POST_OK_NO_ID, resp.status_code, "no message id")
             if resp.status_code == 429:
                 try:
                     wait = float(resp.json().get("retry_after", 1.0))
@@ -416,8 +432,8 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook rejected ({resp.status_code}): {resp.text[:200]}")
-            _remember_delivery(resp.status_code, resp.text[:180])
-            return None
+            return _Rejected(resp.status_code, _WEBHOOK_IN_TEXT.sub(
+                "[webhook]", resp.text[:180]))
         except Exception as exc:  # noqa: BLE001 — delivery must never break a run
             # A timeout (or a dropped connection) can mean Discord already
             # accepted this POST and the response never arrived. Retrying
@@ -428,10 +444,8 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook post failed: {_redact_delivery_error(exc, url)}")
-            _remember_delivery(None, _redact_delivery_error(exc, url))
             return False
     logger.error("Discord webhook still rate-limited after retries; will retry next pass")
-    _remember_delivery(429, "rate limited after retries")
     return None
 
 
@@ -2357,12 +2371,20 @@ def _record_delivery_failure(conn, lock_key: str, kind: str, detail: str) -> Non
     except Exception as exc:                              # noqa: BLE001
         logger.error(f"Discord delivery failure was not recorded "
                      f"({type(exc).__name__})")
+        # The insert aborted the transaction. The no-id path reads the
+        # row back next, and that read raises until this rolls back.
+        try:
+            conn.rollback()
+        except Exception:                                 # noqa: BLE001
+            pass
 
 
-def _delivery_failure_reason(message_id) -> str:
-    status = _last_delivery.get("status")
-    detail = (_last_delivery.get("detail") or "").strip()
-    if message_id == _POST_OK_NO_ID:
+def _delivery_failure_reason(raw) -> str:
+    """Why this call was not a message id. raw is the object _post returned."""
+    status = getattr(raw, "status", None)
+    detail = (getattr(raw, "detail", "") or "").strip()
+    detail = _WEBHOOK_IN_TEXT.sub("[webhook]", detail)
+    if isinstance(raw, str) and raw == _POST_OK_NO_ID:
         reason = "Discord returned no message id"
     else:
         reason = "Discord post was not confirmed"
@@ -2371,6 +2393,51 @@ def _delivery_failure_reason(message_id) -> str:
     if detail and detail not in reason:
         reason = f"{reason}; {detail}"
     return reason[:180]
+
+
+def _recap_missing_id_recorded(conn, lock_key: str, kind: str) -> bool:
+    """True when this recap already has a no-message-id error row.
+
+    That row means Discord answered success and did not give an id. Posting
+    again can put another copy in the channel on every later pass. The row
+    is the stop.
+    """
+    row = conn.execute(
+        "SELECT message_id FROM push_sent WHERE lock_key = %s AND kind = %s",
+        (lock_key, f"{kind}_error"),
+    ).fetchone()
+    if not row or row[0] is None:
+        return False
+    return "no message id" in str(row[0]).lower()
+
+
+def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
+                            lock_key: str, *, recorded: bool) -> None:
+    """One ops alert. The lock key is the row to delete, and a restatement's
+    key includes the published_at of the recap it corrects.
+
+    recorded means that row is in push_sent, so later passes do not post.
+    An insert that failed leaves nothing to stop the next pass, and the
+    alert says so.
+    """
+    from tracking.watch_util import post_ops_alert
+
+    if recorded:
+        tail = (
+            "It will not be posted again automatically. "
+            f"Delete the {kind}_error row for that lock to post it again."
+        )
+    else:
+        tail = ("The error row was not recorded, so a later pass may post "
+                "it again.")
+    try:
+        post_ops_alert(
+            "Results recap has no message id",
+            f"{kind} for {game_date} came back without a message id ({reason}). "
+            f"Lock {lock_key}. {tail}",
+        )
+    except Exception as exc:                       # noqa: BLE001
+        logger.error(f"recap no-message-id alert failed ({type(exc).__name__})")
 
 
 def _record_restate_exception(item: dict, exc: BaseException) -> None:
@@ -2472,6 +2539,11 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             (lock_key, kind),
         ).fetchone():
             return 0
+        # A success response with no message id is ledgered as {kind}_error.
+        # The message may already be in the channel. Another pass would post
+        # another copy. One such row stops this recap for good.
+        if _recap_missing_id_recorded(conn, lock_key, kind):
+            return 0
 
         rows = _settled_rows(conn, game_date)
         if not rows:
@@ -2526,16 +2598,29 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # blocked every retry, and the message could not be opened. Measured
         # 2026-10-14: the Oct 13 restatement is that row (null message_id)
         # and it is not a message anyone can find. No id is not a delivery.
-        _last_delivery["status"] = None
-        _last_delivery["detail"] = ""
-        message_id = _post(url, {"embeds": [embed]})
-        stored_id = (message_id if isinstance(message_id, str)
+        # It is also not a miss we can safely repeat: the body may have
+        # landed. One error row, one alert, and no later pass posts it.
+        raw = _post(url, {"embeds": [embed]})
+        message_id = raw if isinstance(raw, str) else None
+        stored_id = (message_id if message_id
                      and message_id not in ("", _POST_OK_NO_ID) else None)
         if not stored_id:
-            reason = _delivery_failure_reason(message_id)
+            reason = _delivery_failure_reason(raw)
             logger.error(f"Discord(results) {game_date} "
                          f"{'restate ' if restate else ''}not confirmed ({reason})")
             _record_delivery_failure(conn, lock_key, kind, reason)
+            if isinstance(raw, str) and raw == _POST_OK_NO_ID:
+                try:
+                    recorded = _recap_missing_id_recorded(conn, lock_key, kind)
+                except Exception as exc:                  # noqa: BLE001
+                    logger.error(f"Discord(results) {game_date} error row "
+                                 f"could not be read back ({type(exc).__name__})")
+                    recorded = False
+                # A missing row does not stop the next pass. Alert either
+                # way: once when the stop is stored, and on this pass when
+                # the insert did not stick.
+                _alert_recap_missing_id(
+                    game_date, kind, reason, lock_key, recorded=recorded)
             return 0
 
         published_at = datetime.now(ET).isoformat()
