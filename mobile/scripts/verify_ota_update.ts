@@ -18,6 +18,14 @@
  */
 
 import {
+  NO_RELOAD_ROUTES,
+  PUSH_TAP_QUIET_MS,
+  notePushTap,
+  reloadBlockedReason,
+  resetReloadGuardForTests,
+  setFocusedRoute,
+} from '../src/lib/reloadGuard';
+import {
   applyPendingUpdate,
   nextAction,
   reloadDownloaded,
@@ -117,10 +125,27 @@ check('the pending reload is not held back by the check throttle',
   nextAction({ now: NOW, lastCheckAt: NOW - 1_000, backgroundedAt: away, trigger: 'foreground', pending: true }) === 'reload');
 check('a brief absence never reloads, even with a bundle pending',
   nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: NOW - (MIN_BACKGROUND_MS - 1), trigger: 'foreground', pending: true }) === 'skip');
-check('a real return with nothing pending checks and applies',
-  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground', pending: false }) === 'apply');
+check('a real return with nothing pending only downloads (no reload while the member is on screen)',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground', pending: false }) === 'download');
 check('a real return inside the throttle with nothing pending is skipped',
   nextAction({ now: NOW, lastCheckAt: NOW - 1_000, backgroundedAt: away, trigger: 'foreground', pending: false }) === 'skip');
+
+// ── reloadGuard: a reload must not lose a tapped pick or a draft ────────────
+
+resetReloadGuardForTests();
+check('nothing recorded: a reload may go ahead', reloadBlockedReason(NOW) === null);
+notePushTap(NOW);
+check('a push tap just handled blocks the reload', reloadBlockedReason(NOW + 1_000) === 'push_tap');
+check('the tap stops blocking after PUSH_TAP_QUIET_MS', reloadBlockedReason(NOW + PUSH_TAP_QUIET_MS) === null);
+resetReloadGuardForTests();
+for (const r of ['Feedback', 'FeedbackThread', 'ModelEdit', 'Betslip']) {
+  setFocusedRoute(r);
+  check(`a draft-holding screen blocks the reload: ${r}`, reloadBlockedReason(NOW) === 'editing');
+}
+setFocusedRoute('PicksHome');
+check('an ordinary screen does not block the reload', reloadBlockedReason(NOW) === null);
+check('the draft list is exactly the four in-memory editors', NO_RELOAD_ROUTES.size === 4);
+resetReloadGuardForTests();
 
 // ── applyPendingUpdate ───────────────────────────────────────────────────────
 

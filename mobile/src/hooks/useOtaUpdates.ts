@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import * as Updates from 'expo-updates';
 
 import { markOtaReload } from '@/lib/crashLog';
+import { RELOAD_SETTLE_MS, reloadBlockedReason } from '@/lib/reloadGuard';
 import {
   applyPendingUpdate,
   nextAction,
@@ -17,13 +18,15 @@ import {
  * all — publishing an OTA is not the same as delivering it, and the gap is
  * measured in days, not minutes.
  *
- * Mounted once at the app root. At cold start it only DOWNLOADS a new bundle
- * (a reload mid-startup was the first-open crash, 2026-10-19). On a real
- * return from the background it applies a bundle already downloaded, or
- * checks, fetches and applies one. A reload at that moment is a flash, not an
- * interruption — the parlay
- * slip and every other persisted preference survive it (they are restored from
- * storage on mount, exactly as they are on a normal launch).
+ * Mounted once at the app root. A check, at cold start or on a real return
+ * from the background, only DOWNLOADS a new bundle (a reload mid-startup was
+ * the first-open crash, 2026-10-19). A downloaded bundle is applied at the
+ * instant of the next real return, unless a push tap was just handled or the
+ * member is on a screen holding an unsaved draft (src/lib/reloadGuard.ts).
+ * A reload starts a new runtime: the parlay slip and other preferences kept
+ * in storage survive it; the navigation stack, scroll position and any text
+ * typed but not saved do not. If a launch download is still running when a
+ * return arrives, that return is spent and the update waits one more.
  *
  * Silent by design: an update check is not something a user asked for, and the
  * failure modes (offline, EAS unreachable) resolve themselves. The running
@@ -68,11 +71,17 @@ export function useOtaUpdates(): void {
           },
         };
         if (action === 'reload') {
+          // Let a push tap arriving with this return be handled first, then
+          // leave the bundle pending if a reload now would lose the tapped
+          // pick or an unsaved draft (src/lib/reloadGuard.ts).
+          await new Promise((r) => setTimeout(r, RELOAD_SETTLE_MS));
+          if (unmounted || reloadBlockedReason() != null) return;
           await reloadDownloaded(api);
         } else {
-          // Launch only downloads: reloading mid-startup was the first-open
-          // crash (src/lib/otaUpdate.ts header).
-          const out = await applyPendingUpdate(api, action === 'download' ? 'download' : 'apply');
+          // Only ever download: a reload mid-startup was the first-open
+          // crash, and one seconds after a return interrupts the member
+          // (src/lib/otaUpdate.ts header).
+          const out = await applyPendingUpdate(api, 'download');
           if (out === 'downloaded') pending.current = true;
         }
       } finally {

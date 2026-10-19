@@ -25,10 +25,13 @@
  * while it was still starting — fonts, navigation, the first screen's reads,
  * the push handler — and Matt saw it as "crashes every now and then when I
  * open it the first time, then works": it happened only on the first open
- * after a new bundle shipped (nine shipped 2026-10-17 → 10-19). So launch now
- * DOWNLOADS only. The downloaded bundle is applied on the next real return
- * from the background (a reload at a moment the app was not on screen), or by
- * expo-updates itself on the next cold start, whichever comes first.
+ * after a new bundle shipped (nine shipped 2026-10-17 → 10-19). So a check
+ * only ever DOWNLOADS — at launch and on a return alike, because a reload a
+ * few seconds after the app is on screen interrupts whatever the member just
+ * started. A downloaded bundle is applied at the instant of the next real
+ * return, as the app comes back to the foreground (unless src/lib/
+ * reloadGuard.ts says to wait), or by expo-updates itself at the next cold
+ * start, whichever comes first.
  *
  * Split out of the hook so the decision logic is testable off-device:
  * `shouldCheck` is pure, and `applyPendingUpdate` takes the expo-updates
@@ -70,22 +73,24 @@ export function shouldCheck(s: CheckState): boolean {
 }
 
 /**
- * What to do for one trigger. Pure.
+ * What to do for one trigger. Pure. Nothing here reloads after a network
+ * call: every reload is of a bundle ALREADY downloaded, at the instant of a
+ * return.
  *
- *   download  launch: check and fetch, never reload (see the header)
+ *   download  launch, or a real return with nothing pending: check and
+ *             fetch, never reload (see the header)
  *   reload    a real return with a bundle already downloaded: apply it, no
  *             network needed, and the throttle does not apply — the check
  *             that found it already happened
- *   apply     a real return with nothing pending: check, fetch, reload
  *   skip      not a real return, or inside the throttle window
  */
-export type UpdateAction = 'download' | 'reload' | 'apply' | 'skip';
+export type UpdateAction = 'download' | 'reload' | 'skip';
 
 export function nextAction(s: CheckState & { pending: boolean }): UpdateAction {
   if (s.trigger === 'launch') return 'download';
   if (s.backgroundedAt == null || s.now - s.backgroundedAt < MIN_BACKGROUND_MS) return 'skip';
   if (s.pending) return 'reload';
-  return shouldCheck(s) ? 'apply' : 'skip';
+  return shouldCheck(s) ? 'download' : 'skip';
 }
 
 /** The slice of expo-updates this module uses. Injectable so the behaviour can
