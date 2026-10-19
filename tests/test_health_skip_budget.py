@@ -142,6 +142,19 @@ def test_the_default_budget_is_short_enough_to_surface_a_stuck_gate():
     assert sh.DEFAULT_SKIP_BUDGET_DAYS <= 31
 
 
+def test_mlb_game_day_feeds_stay_skipped_through_the_longest_measured_offseason():
+    """Consecutive MLB finals in `games` gap by at most 179 days
+    (2010-10-03 to 2011-03-31, queried 2026-10-17). The lookback still
+    checks the first 8 days after that final, so the SKIPPED streak is
+    171 days. The 14-day default would turn the streak into STALE and
+    fail the daily step for the rest of the winter.
+    """
+    for check in ("mlb_bullpen_workload", "mlb_player_game_log", "umpires"):
+        results = [_res(check, detail="offseason")]
+        sh._apply_skip_budgets(results, {check: 171})
+        assert results[0]["status"] == SKIPPED, (check, results[0])
+
+
 # ── the persist ordering ─────────────────────────────────────────────────────
 
 def test_model_calibration_is_persisted():
