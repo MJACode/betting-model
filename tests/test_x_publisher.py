@@ -850,6 +850,60 @@ def test_every_pick_post_uses_the_same_format():
     assert "#GamblingX" in total
 
 
+def test_a_pick_shows_the_event_date_in_et_and_a_prop_shows_the_matchup():
+    """A start after midnight UTC is still the previous evening in New York."""
+    prop = xp.render_pick({
+        "sport": "MLB", "label": "Aaron Judge Over 1.5 Hits", "dk_odds": -110,
+        "home": "BOS", "away": "NYY", "side": "over",
+        "prop_market": "player_hits",
+        "commence": "2026-10-21T02:10:00+00:00",
+    })
+    assert "Tue 10/20" in prop
+    assert "NYY @ BOS" in prop
+    assert prop.index("NYY @ BOS") < prop.index("Tue 10/20")
+    assert "#Yankees" in prop and "#RedSox" in prop
+    assert len(prop) <= xp.MAX_TWEET
+
+
+def test_a_side_that_omits_the_opponent_gains_the_matchup_when_it_fits():
+    text = xp.render_pick({
+        "sport": "MLB", "label": "NYY ML", "dk_odds": -115,
+        "best_book": "draftkings", "best_odds": -115,
+        "home": "BOS", "away": "NYY", "side": "away",
+        "commence": "2026-10-20T23:10:00+00:00",
+    })
+    assert "NYY ML" in text
+    assert "NYY @ BOS" in text
+    assert "Tue 10/20" in text
+    assert "#Yankees" in text and "#RedSox" not in text
+    assert text.index("Tue 10/20") < text.index("#Yankees")
+
+
+def test_a_total_that_already_names_both_clubs_does_not_repeat_the_matchup():
+    text = xp.render_pick({
+        "sport": "MLB", "label": "NYY vs BOS Over 8.5", "dk_odds": -105,
+        "best_book": "fanduel", "best_odds": -105,
+        "home": "BOS", "away": "NYY", "side": "over",
+        "commence": "2026-10-20T23:10:00+00:00",
+    })
+    assert text.count("NYY") == 1 or "NYY vs BOS" in text
+    assert "NYY @ BOS" not in text
+    assert "Tue 10/20" in text
+
+
+def test_a_long_post_drops_reach_tags_before_the_date_and_the_matchup():
+    body = "X" * 250
+    text = xp.assemble_text(
+        body, ["#Yankees", "#RedSox"],
+        ["#MLB", "#GamblingX", "#BettingTips"],
+        keep=["NYY @ BOS", "Tue 10/20"])
+    assert len(text) <= xp.MAX_TWEET
+    assert "NYY @ BOS" in text and "Tue 10/20" in text
+    assert text.index("Tue 10/20") < text.index("#Yankees")
+    for dropped in ("#MLB", "#GamblingX", "#BettingTips"):
+        assert dropped not in text
+
+
 def test_a_long_post_drops_reach_tags_before_team_tags():
     body = "X" * 270
     text = xp.assemble_text(
