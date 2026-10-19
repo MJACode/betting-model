@@ -12,7 +12,8 @@ Producers, each independently enabled by whether its webhook is configured:
     (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
     channel, else the sport's pre-game channel.
   • notify_discord_results — one morning recap after settlement: yesterday's
-    record, P&L and ROI, overall and by sport.
+    record, P&L and ROI, overall and by sport. The same webhook also gets
+    the Monday weekly recap and the first-Monday monthly recap.
   • notify_discord_void — one gray notice per sport for picks that are already
     VOID and already posted. Writes push_sent kind discord_void only after
     Discord accepts the message. Does not edit or delete the original post.
@@ -2566,6 +2567,197 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         return 1
     finally:
         conn.close()
+
+
+# ── Weekly and monthly recaps ────────────────────────────────────────────────
+# The daily recap above is yesterday, inside the 6:00am ET pipeline. These
+# two use that same settled query and the same results webhook. They open
+# Monday at 7:30am ET, after that daily post and after the 7:00am retry.
+# A missed Monday keeps trying until the next window opens. The ledger is
+# what makes the retry post once.
+
+PERIOD_RECAP_HOUR_ET = 7
+PERIOD_RECAP_MINUTE_ET = 30
+
+
+def _at_et(day: date, hour: int, minute: int) -> datetime:
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=ET)
+
+
+def _first_monday(year: int, month: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(0 - first.weekday()) % 7)
+
+
+def _previous_month(year: int, month: int) -> tuple[date, date]:
+    if month == 1:
+        start = date(year - 1, 12, 1)
+    else:
+        start = date(year, month - 1, 1)
+    end = date(year, month, 1) - timedelta(days=1)
+    return start, end
+
+
+def _week_ending(sunday: date) -> tuple[date, date]:
+    return sunday - timedelta(days=6), sunday
+
+
+def recap_periods_due(now: datetime | None = None) -> list[dict]:
+    """The week, and on its window the month, whose posting time has passed.
+
+    The week that ended Sunday opens the following Monday at 7:30am ET and
+    stays due until the next Monday at 7:30am. The previous calendar month
+    opens on the first Monday of the new month at that same minute, and
+    stays due until the next month's first Monday. Before 7:30am on the
+    opening Monday, that window is not due yet.
+    """
+    now = now or datetime.now(ET)
+    now = now.astimezone(ET) if now.tzinfo else now.replace(tzinfo=ET)
+    today = now.date()
+    due: list[dict] = []
+
+    if today.weekday() == 6:
+        sunday = today - timedelta(days=7)
+    else:
+        sunday = today - timedelta(days=today.weekday() + 1)
+    week_opens = _at_et(sunday + timedelta(days=1),
+                        PERIOD_RECAP_HOUR_ET, PERIOD_RECAP_MINUTE_ET)
+    if now >= week_opens:
+        start, end = _week_ending(sunday)
+        due.append({
+            "span": "week", "start": start, "end": end,
+            "heading": period_heading("week", start, end),
+        })
+
+    opened: list[tuple[datetime, int, int]] = []
+    for year, month in ((today.year, today.month),
+                        *_shift_month(today.year, today.month, -1)):
+        first = _first_monday(year, month)
+        opens = _at_et(first, PERIOD_RECAP_HOUR_ET, PERIOD_RECAP_MINUTE_ET)
+        if now >= opens:
+            opened.append((opens, year, month))
+    if opened:
+        _opens, year, month = max(opened)
+        start, end = _previous_month(year, month)
+        due.append({
+            "span": "month", "start": start, "end": end,
+            "heading": period_heading("month", start, end),
+        })
+    return due
+
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[tuple[int, int]]:
+    month += delta
+    if month < 1:
+        month += 12
+        year -= 1
+    elif month > 12:
+        month -= 12
+        year += 1
+    return ((year, month),)
+
+
+def period_heading(span: str, start: date, end: date) -> str:
+    """The title both surfaces use, without the word 'results'."""
+    if span == "month":
+        return start.strftime("%B")
+    left = f"{start.strftime('%b')} {start.day}"
+    if start.month == end.month and start.year == end.year:
+        right = str(end.day)
+    else:
+        right = f"{end.strftime('%b')} {end.day}"
+    return f"Week of {left}-{right}"
+
+
+def notify_discord_period(span: str, start: date, end: date,
+                          heading: str, dry_run: bool = False) -> int:
+    """One weekly or monthly recap, on the daily recap's webhook.
+
+    Same settled picks as the daily recap (`_settled_rows_since` is that
+    query over a window). Ledgered on the window's start date, and only
+    after Discord returns a message id.
+    """
+    url = _results_webhook()
+    if not url:
+        return 0
+    kind = f"discord_results_{span}"
+    lock_key = f"{kind}:{start.isoformat()}"
+    conn = get_connection()
+    try:
+        if conn.execute(
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (lock_key, kind),
+        ).fetchone():
+            return 0
+        rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
+        if not rows:
+            return 0
+        overall = _tally(rows)
+        if (overall["w"] + overall["l"] + overall["p"]) == 0:
+            return 0
+        by_sport: dict[str, list] = {}
+        for row in rows:
+            by_sport.setdefault(row[0], []).append(row)
+        fields = [{
+            "name": sport,
+            "value": _tally_line(_tally(group), with_clv=True),
+            "inline": False,
+        } for sport, group in sorted(by_sport.items())]
+        color = (_COLOR_RESULTS_UP if overall["units"] > 0
+                 else _COLOR_RESULTS_DOWN if overall["units"] < 0
+                 else _COLOR_RESULTS_FLAT)
+        embed = {
+            "title": f"\U0001F4CA Results — {heading}",
+            "description": (
+                f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                f"{len(rows)} settled"),
+            "color": color,
+            "fields": fields,
+        }
+        if dry_run:
+            logger.info(f"[dry-run] discord({span}) {heading} → "
+                        f"{_tally_line(overall)}")
+            return 0
+        message_id = _post(url, {"embeds": [embed]})
+        stored_id = (message_id if isinstance(message_id, str)
+                     and message_id not in ("", _POST_OK_NO_ID) else None)
+        if not stored_id:
+            logger.error(f"Discord({span}) {heading} not confirmed")
+            return 0
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, kind, datetime.now(ET).isoformat(), stored_id),
+        )
+        conn.commit()
+        logger.success(f"✓ Discord({span}): posted {heading}")
+        return 1
+    finally:
+        conn.close()
+
+
+def post_period_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+    """Post each due week and month, Discord then X. A ledgered window is 0.
+
+    Called by the Monday 7:30am job and again from later settle passes, so
+    a failed post is retried and a successful one is not repeated.
+    """
+    posted = 0
+    for window in recap_periods_due(now):
+        try:
+            posted += notify_discord_period(
+                window["span"], window["start"], window["end"],
+                window["heading"], dry_run=dry_run)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"Discord {window['span']} recap failed: {exc}")
+        try:
+            from tracking.x_publisher import notify_x_period
+            posted += notify_x_period(
+                window["span"], window["start"], window["end"],
+                window["heading"], dry_run=dry_run)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"X {window['span']} recap failed: {exc}")
+    return posted
 
 
 # ── Void notice ──────────────────────────────────────────────────────────────

@@ -158,6 +158,7 @@ jobs:
             tests/test_voided_pick_not_rechosen.py \
             tests/test_x_publisher.py \
             tests/test_free_pick_names_the_cheaper_book.py \
+            tests/test_period_recaps.py \
             tests/test_mobile_stat_segments.py \
             tests/test_mobile_line_ruler.py \
             tests/test_mobile_nhl_skater_stats.py \

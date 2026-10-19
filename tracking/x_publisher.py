@@ -1,5 +1,5 @@
 """
-Post every released pre-game pick, and the settled recap, to X
+Post every released pre-game pick, and the settled recaps, to X
 (@signalbasepicks).
 
 SCOPE. mike, 2026-08-30, chose "A without links": one free pick plus the
@@ -12,9 +12,11 @@ Live picks stay off X.
 
 X_POST_ALL_PICKS defaults to on, which posts that slate. 0, false, no, or
 off posts no pick slate. Off used to mean "the free pick only"; that mode
-is gone, because X has no free pick to fall back to. The settled recap is
-notify_x_results and is not affected by this flag. RUN_X_PUBLISHER=0 still
-stops both.
+is gone, because X has no free pick to fall back to. The daily recap is
+notify_x_results (yesterday, inside the 6:00am ET pipeline) and is not
+affected by this flag. The week and the previous calendar month are
+notify_x_period, the same renderer, Monday 7:30am ET. RUN_X_PUBLISHER=0
+still stops the slate and every recap.
 
 WHY NO LINKS, ENFORCED IN CODE. X moved to pay-per-use in February 2026 and
 charges $0.015 per post -- but $0.20 if the post contains a URL, added April
@@ -114,6 +116,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import time
 import urllib.parse
@@ -312,26 +315,29 @@ def pick_hashtags(pick: dict, *,
     return teams, reach
 
 
-def assemble_text(body: str, team_tags: list[str], reach_tags: list[str]) -> str:
-    """Body, then team tags, then as many reach tags as fit in 280 characters.
+def assemble_text(body: str, team_tags: list[str], reach_tags: list[str],
+                  keep: list[str] | None = None) -> str:
+    """Body, then pinned text, then team tags, then as many reach tags as fit.
 
-    Reach tags are dropped from the end first. Team tags stay. If the body
-    plus the team tags still overflow, the body is shortened and the team
-    tags are kept whole.
+    Reach tags are dropped from the end first. `keep` (the event date and the
+    matchup) and the team tags stay. If the body plus those still overflow,
+    the body is shortened and the pinned text and team tags are kept whole.
     """
+    pinned = [p for p in (keep or []) if p]
     teams = [t for t in team_tags if t]
     reach = [t for t in reach_tags if t]
+    protected = pinned + teams
 
     def _join(text: str, extra: list[str]) -> str:
         parts = [text.strip(), " ".join(extra)]
         return " ".join(p for p in parts if p)
 
-    while reach and len(_join(body, teams + reach)) > MAX_TWEET:
+    while reach and len(_join(body, protected + reach)) > MAX_TWEET:
         reach.pop()
-    text = _join(body, teams + reach)
+    text = _join(body, protected + reach)
     if len(text) <= MAX_TWEET:
         return text
-    suffix = " ".join(teams)
+    suffix = " ".join(protected)
     if not suffix:
         return text[:MAX_TWEET]
     room = MAX_TWEET - len(suffix) - 1
@@ -373,6 +379,12 @@ def render_pick(pick: dict, mascots: dict | None = None) -> str:
     Qualification is unchanged and still measured on DraftKings (CLAUDE.md §6).
     This changes where a reader places the bet, not whether the bet exists.
 
+    Every pick names the event date in America/New_York ('Tue 10/20'), from
+    the game's start, or from game_date when the start is missing. A prop
+    also names the matchup ('NYY @ BOS'). A side or total that does not
+    already name both clubs gets that clause when it fits. Over 280
+    characters, reach tags drop before the date, the matchup, or a team tag.
+
     "Good to" is the worst price the model would still have fired at, so it is
     book-agnostic: at or better than that number the bet holds wherever it is
     placed. Dropped rather than truncated when the tweet would overflow — a
@@ -383,6 +395,66 @@ def render_pick(pick: dict, mascots: dict | None = None) -> str:
     return text
 
 
+def event_date_label(pick: dict) -> str | None:
+    """'Tue 10/20' in America/New_York, from the game's start.
+
+    commence_time wins. A row with no start falls back to game_date, which
+    is the event's date. A row with neither has nothing honest to print.
+    """
+    local = _commence_et(pick.get("commence"))
+    if local is None:
+        raw = pick.get("game_date")
+        if not raw:
+            return None
+        try:
+            day = datetime.fromisoformat(str(raw)[:10]).date()
+        except ValueError:
+            return None
+        return f"{day.strftime('%a')} {day.month}/{day.day}"
+    return f"{local.strftime('%a')} {local.month}/{local.day}"
+
+
+def _commence_et(value) -> datetime | None:
+    """The start, in ET. Naive values are UTC, the same rule as Discord."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        ts = value
+    else:
+        try:
+            ts = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    return ts.astimezone(ET)
+
+
+def _label_shows_team(label: str, name: str) -> bool:
+    if not name:
+        return False
+    return re.search(
+        rf"(?<![A-Za-z0-9]){re.escape(str(name))}(?![A-Za-z0-9])",
+        label or "") is not None
+
+
+def matchup_clause(pick: dict) -> tuple[str | None, bool]:
+    """(away @ home, required). None when the label already names both clubs.
+
+    A prop has to name the game. A side or total that does not already show
+    both clubs gets the same clause only when it fits.
+    """
+    home, away = pick.get("home"), pick.get("away")
+    if not home or not away:
+        return None, False
+    if (_label_shows_team(pick.get("label") or "", str(home))
+            and _label_shows_team(pick.get("label") or "", str(away))):
+        return None, False
+    required = bool(pick.get("prop_market")) or (
+        "prop" in str(pick.get("model_id") or ""))
+    return f"{away} @ {home}", required
+
+
 def _render_pick(pick: dict, *, mascots: dict | None) -> str:
     emoji = _SPORT_EMOJI.get(pick.get("sport"), "🎯")
     odds, book = _publish_price(pick)
@@ -391,6 +463,8 @@ def _render_pick(pick: dict, *, mascots: dict | None) -> str:
     if odds is not None:
         price = f"{_american(odds)} at {book}" if book else _american(odds)
     teams, reach = pick_hashtags(pick, mascots=mascots)
+    when = event_date_label(pick)
+    matchup, matchup_required = matchup_clause(pick)
 
     def _body(good_to: str | None) -> str:
         parts = [head, price]
@@ -398,31 +472,51 @@ def _render_pick(pick: dict, *, mascots: dict | None) -> str:
             parts.append(f"Good to {good_to}.")
         return " ".join(p for p in parts if p)
 
+    def _keep(include_matchup: bool) -> list[str]:
+        pinned: list[str] = []
+        if include_matchup and matchup:
+            pinned.append(matchup)
+        if when:
+            pinned.append(when)
+        return pinned
+
     base = _body(None)
+    # A prop matchup stays even when the label has to shorten. Any other
+    # matchup is added only when the label, the price, the date and the
+    # team tags still fit after every reach tag is dropped.
+    include_matchup = bool(matchup) and (
+        matchup_required or _fits_whole(base, teams, [], keep=_keep(True)))
+    keep = _keep(include_matchup)
     good_to = pick.get("good_to")
     if good_to:
         richer = _body(_american(good_to))
         # The clause is dropped whole. A half-written price is worse than
-        # none, and it does not get to push a team tag off the post.
-        # _fits_whole may drop reach tags. It will not shorten the body.
-        if _fits_whole(richer, teams, reach):
-            return assemble_text(richer, teams, reach)
-    return assemble_text(base, teams, reach)
+        # none, and it does not get to push the date, the matchup, or a
+        # team tag off the post. Reach tags may go.
+        if _fits_whole(richer, teams, reach, keep=keep):
+            return assemble_text(richer, teams, reach, keep=keep)
+    return assemble_text(base, teams, reach, keep=keep)
 
 
-def _fits_whole(body: str, team_tags: list[str], reach_tags: list[str]) -> bool:
-    """True when body + tags fit without assemble_text shortening the body."""
-    parts = [body.strip(), " ".join(team_tags), " ".join(reach_tags)]
-    text = " ".join(p for p in parts if p)
-    if len(text) <= MAX_TWEET:
+def _fits_whole(body: str, team_tags: list[str], reach_tags: list[str],
+                keep: list[str] | None = None) -> bool:
+    """True when body + pinned text + tags fit without shortening the body."""
+    pinned = [p for p in (keep or []) if p]
+    teams = [t for t in team_tags if t]
+    protected = " ".join(pinned + teams)
+
+    def _text(extra: list[str]) -> str:
+        parts = [body.strip(), protected, " ".join(extra)]
+        return " ".join(p for p in parts if p)
+
+    reach = [t for t in reach_tags if t]
+    if len(_text(reach)) <= MAX_TWEET:
         return True
-    # Reach tags may be dropped. The body and the team tags may not.
-    reach = list(reach_tags)
+    # Reach tags may be dropped. The body, the date, the matchup and the
+    # team tags may not.
     while reach:
         reach.pop()
-        parts = [body.strip(), " ".join(team_tags), " ".join(reach)]
-        text = " ".join(p for p in parts if p)
-        if len(text) <= MAX_TWEET:
+        if len(_text(reach)) <= MAX_TWEET:
             return True
     return False
 
@@ -471,7 +565,8 @@ def _publish_price(pick: dict) -> tuple[float | None, str | None]:
     return best, _BOOK_DISPLAY.get(book, book)
 
 
-def render_results(recap: dict, game_date: str, restate: bool = False) -> str:
+def render_results(recap: dict, game_date: str, restate: bool = False,
+                   heading: str | None = None) -> str:
     """The settled day, in one tweet. Numbers only — the record is the pitch.
 
     THE HEADLINE MUST MATCH THE DISCORD RECAP EXACTLY. mike, 2026-09-02:
@@ -490,6 +585,8 @@ def render_results(recap: dict, game_date: str, restate: bool = False) -> str:
     Same zero-strip the Discord embed uses.
     """
     pretty = datetime.fromisoformat(game_date).strftime("%b %d").replace(" 0", " ")
+    # A week or a month passes its own heading. The daily title stays here so
+    # the settled-day tweet cannot drift from the one already posted.
     w, l = int(recap.get("wins", 0)), int(recap.get("losses", 0))
     pushes = int(recap.get("pushes", 0))
     rec = f"{w}-{l}" + (f"-{pushes}" if pushes else "")
@@ -501,7 +598,10 @@ def render_results(recap: dict, game_date: str, restate: bool = False) -> str:
         tally = f"{rec}, {units:+.2f}u"
     # "(restated)" when a late settlement invalidated the tweet before it --
     # the embed says "restated" in its title; the two must agree.
-    head = f"{pretty} results (restated)" if restate else f"{pretty} results"
+    if heading:
+        head = heading
+    else:
+        head = f"{pretty} results (restated)" if restate else f"{pretty} results"
     lines = [f"\U0001F4CA {head}: {tally}"]
     # The day's closing-line figure, exactly as the embed states it -- share
     # of graded bets that beat the close, WITH its denominator (discord_notifier
@@ -835,6 +935,63 @@ def notify_x_results(game_date: str, dry_run: bool = False,
         return 1
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"X results failed: {exc}")
+        return 0
+    finally:
+        conn.close()
+
+
+def notify_x_period(span: str, start, end, heading: str,
+                    dry_run: bool = False) -> int:
+    """Tweet one week or one month. Same settled picks as the daily recap.
+
+    The heading is the one Discord uses, plus 'results', so the two surfaces
+    name the window the same way. Ledgered on the window's start, only after
+    a confirmed post.
+    """
+    if not _enabled() or not _creds():
+        return 0
+    from data.db import get_connection
+    from tracking.discord_notifier import _settled_rows_since, _tally, clv_line
+
+    kind = f"x_results_{span}"
+    lock = f"{kind}:{start.isoformat()}"
+    conn = get_connection()
+    try:
+        if _already_sent(conn, lock, kind):
+            return 0
+        rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
+        if not rows:
+            return 0
+        t = _tally(rows)
+        if (t["w"] + t["l"] + t["p"]) == 0:
+            return 0
+        by_sport: dict[str, list] = {}
+        for r in rows:
+            by_sport.setdefault(r[0], []).append(r)
+        ordered = sorted(by_sport.items())
+        recap = {
+            "wins": t["w"], "losses": t["l"], "pushes": t["p"],
+            "units": t["units"], "risked": t["risked"],
+            "clv": clv_line(t),
+            "by_sport": [
+                {"sport": sport, "wins": g["w"], "losses": g["l"],
+                 "pushes": g["p"]}
+                for sport, group in ordered
+                for g in (_tally(group),)
+            ],
+        }
+        tweet_id = post_tweet(
+            render_results(recap, start.isoformat(),
+                           heading=f"{heading} results"),
+            dry_run=dry_run)
+        if not tweet_id:
+            return 0
+        if not dry_run:
+            _ledger(conn, lock, kind, tweet_id)
+        logger.info(f"X: {span} results tweeted ({tweet_id})")
+        return 1
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"X {span} results failed: {exc}")
         return 0
     finally:
         conn.close()

@@ -1746,6 +1746,18 @@ def step_settle(settle_date: str) -> bool:
             logger.info(f"Results restated: {n} post(s)")
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+
+    # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
+    # first Monday, the previous calendar month. Later passes retry a miss.
+    # Both are ledgered, so a posted window is not posted again.
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        if n:
+            logger.info(f"Period results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Period results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 
