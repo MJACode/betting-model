@@ -13,9 +13,9 @@
  *   - render               a screen that threw while rendering (ErrorBoundary)
  *   - early_exit           the PREVIOUS launch never reached RUNNING_AFTER_MS.
  *                          JS cannot see a native crash, but it can see that
- *                          the last launch died young, and at which stage —
- *                          including "ota_reload", the moment before
- *                          Updates.reloadAsync().
+ *                          the last launch died young. (Rows before
+ *                          2026-10-19 may carry stage "ota_reload", from
+ *                          when the app still reloaded itself.)
  *   - emergency_launch     expo-updates rolled back a bundle that crashed
  *
  * A report is written to AsyncStorage FIRST and sent second, so a fatal error
@@ -29,7 +29,7 @@
 export type ReportKind = 'js_fatal' | 'js_error' | 'render' | 'early_exit' | 'emergency_launch';
 
 /** Startup stages, in order. `running` = this launch survived its first 15s. */
-export type LaunchStage = 'launching' | 'ota_reload' | 'running';
+export type LaunchStage = 'launching' | 'running';
 
 export interface CrashReport {
   kind: ReportKind;
@@ -221,10 +221,9 @@ async function writeMarker(stage: LaunchStage): Promise<void> {
 /**
  * What the previous launch's marker says about how it ended. Pure.
  *
- * A marker still at `launching` or `ota_reload` means that launch never lived
- * RUNNING_AFTER_MS. That is a crash OR a user closing the app inside 15s OR
- * (for `ota_reload`) the reload itself. `gap_ms` tells them apart: a reload
- * that worked starts the next launch about a second after its marker.
+ * A marker not at `running` means that launch never lived RUNNING_AFTER_MS:
+ * a crash, or a user closing the app inside 15s. `gap_ms` (marker to next
+ * launch) is carried so the two can be weighed.
  */
 export function earlyExitFrom(prev: LaunchMarker | null, now: number, updateIdNow: string | null): CrashReport | null {
   if (!prev || prev.stage === 'running') return null;
@@ -284,21 +283,6 @@ export async function beginLaunch(): Promise<void> {
   setTimeout(() => {
     void writeMarker('running');
   }, RUNNING_AFTER_MS);
-}
-
-/** Written immediately before Updates.reloadAsync(). */
-export function markOtaReload(): Promise<void> {
-  return writeMarker('ota_reload');
-}
-
-/**
- * reloadAsync threw after markOtaReload. This session is still alive, so
- * the in-memory stage goes back to `running` and the stored marker is
- * replaced with one. Leaving `ota_reload` would label later errors, and the
- * next launch's early_exit, as an OTA-reload death.
- */
-export function clearOtaReload(): Promise<void> {
-  return writeMarker('running');
 }
 
 interface ErrorUtilsShape {

@@ -5,7 +5,7 @@ left nothing to trace. Two halves are pinned here:
 
 * the client logic -- mobile/scripts/verify_crash_log.ts, run under node. Each
   property it asserts was watched failing by breaking the code it guards
-  (fatal handler not waiting, a failed send dropped, an ota_reload marker
+  (fatal handler not waiting, a failed send dropped, an early-exit marker
   ignored, nothing stored before the send);
 * the server surface -- add_app_errors.sql is write-only for the anon key:
   RLS on, table grants revoked by name, one SECURITY DEFINER insert function.
@@ -46,9 +46,7 @@ def test_the_crash_log_logic_holds():
         "offline: the report stays queued",
         "fatal: the native handler ran after the report was sent",
         "fatal with a hung send: the native handler still runs within FATAL_FLUSH_MS",
-        "died at ota_reload: reported as early_exit with that stage",
-        "a failed reload restores the marker to running",
-        "later errors are labelled running, not ota_reload",
+        "died while launching: reported as early_exit with that stage",
         "two concurrent enqueues both survive",
     ):
         assert f"[PASS] {line}" in proc.stdout, line
@@ -91,14 +89,6 @@ def test_the_app_calls_the_rpc_and_mounts_the_boundary():
     assert "startCrashLogging();" in app
     assert "<AppErrorBoundary onReset={resetNav}>" in app and "</AppErrorBoundary>" in app
     assert "setNavReady(false)" in app, "Retry must reset navReady so a pending deep link replays"
-    ota = (MOBILE / "src" / "hooks" / "useOtaUpdates.ts").read_text(encoding="utf-8")
-    body = ota.split("reloadAsync: async () => {", 1)[1].split("},", 1)[0]
-    assert body.index("markOtaReload()") < body.index("Updates.reloadAsync()"), \
-        "the ota_reload stage must be written before the reload starts"
-    assert body.index("Updates.reloadAsync()") < body.index("clearOtaReload()"), \
-        "a failed reload must clear the ota_reload marker"
-    assert "throw" in body.split("clearOtaReload()", 1)[1], \
-        "the reload error must still propagate after the marker is cleared"
 
 
 def test_the_fallback_never_renders_blank():
