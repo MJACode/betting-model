@@ -1200,6 +1200,23 @@ def step_public_betting(run_date: str) -> bool:
         return False
 
 
+def step_nba_public_splits(run_date: str) -> bool:
+    """
+    NBA public betting splits (Action Network, free): archive yesterday's
+    finished games, then snapshot today's games that have not reached their
+    listed start, stamped with the fetch time. Writes nba_public_splits only --
+    never public_betting, which the scorer copies onto every pick. Best-effort.
+    """
+    try:
+        from data.ingestors.nba_public_splits_ingestor import run_forward
+        result = run_forward(run_date)
+        logger.success(f"✓ NBA public splits: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA public splits failed: {exc}")
+        return False
+
+
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score pitcher + batter props across the look-ahead window.
 
@@ -1563,16 +1580,15 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X gets exactly what the FREE Discord channel gets -- one pick a day,
-        # never the paid slate (mike, 2026-08-30: "A without links"). Posting
-        # the paid signals publicly would be giving away what members pay for.
-        # Ledgered independently of Discord, so one surface failing never
-        # suppresses the other.
+        # X posts every released pre-game pick, each in the same format.
+        # Discord's free pick is not an input. X_POST_ALL_PICKS=0 posts no
+        # pick slate. Ledgered independently of Discord, so one surface
+        # failing never suppresses the other.
         try:
-            from tracking.x_publisher import notify_x_free_pick
-            notify_x_free_pick(target_date=run_date, dry_run=dry_run)
+            from tracking.x_publisher import notify_x_picks
+            notify_x_picks(target_date=run_date, dry_run=dry_run)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"X free pick failed (Discord unaffected): {exc}")
+            logger.error(f"X picks failed (Discord unaffected): {exc}")
         if d or fp or rs:
             logger.success(
                 f"✓ Discord: {d} signal(s) posted"
@@ -1733,6 +1749,18 @@ def step_settle(settle_date: str) -> bool:
             logger.info(f"Results restated: {n} post(s)")
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+
+    # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
+    # first Monday, the previous calendar month. Later passes retry a miss.
+    # Both are ledgered, so a posted window is not posted again.
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        if n:
+            logger.info(f"Period results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Period results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 
@@ -2255,7 +2283,7 @@ Examples:
                                  "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news", "player-positions",
                                  "player-news-refresh",
-                                 "umpires", "public-betting", "scoring",
+                                 "umpires", "public-betting", "nba-public-splits", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
@@ -2325,6 +2353,7 @@ Examples:
             "player-positions": lambda: step_player_positions(run_date),
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
+            "nba-public-splits": lambda: step_nba_public_splits(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
             "game-log-today": lambda: step_game_log(run_date, run_date),

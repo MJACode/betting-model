@@ -202,7 +202,8 @@ def test_the_publisher_does_not_fire_the_pass_only_surfaces():
     src = (Path(__file__).parent.parent / "tracking"
            / "signal_publisher.py").read_text(encoding="utf-8")
     for forbidden in ("notify_discord_free_pick", "notify_discord_restate",
-                      "notify_x_free_pick", "notify_line_changes"):
+                      "notify_x_free_pick", "notify_x_picks",
+                      "notify_line_changes"):
         assert f"{forbidden}(" not in src, (
             f"{forbidden} is reachable from a 30-second loop")
 

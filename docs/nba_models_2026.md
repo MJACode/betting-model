@@ -336,3 +336,290 @@ from this machine against production), storing every player's mean in
 fetch. Each game is decided once (`nba_prop_projection_decisions`). The injury list each
 game was projected with is kept in `nba_injury_asof`, which also holds the 2018-19..2025-26
 history from the official report.
+
+## 6. Second search: spread, moneyline and total (pre-registered 2026-10-17, before any grid)
+
+mike, 2026-10-16: *"We need nba spread / ml / totals models … find edge and I don't care how
+long it takes."* §4.1 closed these markets for 2026-27 after 978 game-market cells (3,750
+counting first half, first quarter and team totals). This search tests only hypotheses that
+bring **information the first search never used** — §1's kill criterion forbids re-cutting a
+closed family — and each comes from outside evidence (published studies, practitioner methods)
+or from a gap the audit of the first search found. Scouting reports: build machine,
+`C:/Users/micha/AppData/Local/Temp/nba_game_edge/scout_out/`.
+
+**Written before any cell of this search was graded. Nothing below is changed after a result
+is seen; a later change gets its own dated line and reason.**
+
+### 6.1 What is already known, and what that costs this search
+
+- **2025-26 has been looked at.** The first search graded all 3,750 cells on it. It is still
+  the confirmation season here (the only priced season left), so the price of looking twice
+  is paid in the multiple-testing count (6.4), not hidden.
+- **The archive's clock.** A stored price's `snapshot_at` is the book's `last_update`, which
+  the feed refreshes on every poll: it sits within 0.41 h of the fetch (p99 0.17–0.28 h). It
+  stands in for the fetch time; it does **not** say when a price changed. Movement is read from
+  changes in the line or price across fetches.
+- **Fetch hours.** Per game date: 22Z the evening before; 15Z, 19Z, 22Z, 23Z; 00Z–03Z next
+  UTC day. Nothing 03Z–15Z or 19Z–22Z. 337 afternoon and late tips (16–18Z, 20–21Z, 04Z) have
+  no fetch in their last hour. Pinnacle is quoted from 15Z to tip on 96–98% of games; its
+  overnight opener is missing on 51–87% of games.
+- **2020-21 is its own regime** (crowds, compressed schedule, three injury reports a day,
+  10-minute snapshot spacing): graded and reported separately, never used to choose.
+- **The injury report** is stamped with its printed time. When each file became downloadable
+  is unknown, so a report is treated as known **30 minutes after** its printed time.
+
+### 6.2 Rules every cell is graded under (one shared harness)
+
+1. **Price.** Best bettable price among `config.BEST_LINE_BOOKMAKERS` (8 books; Pinnacle and
+   Bovada never a deciding price), two-way quote coherent (implied sum 1.00–1.15), −200 floor.
+   DraftKings alone reported beside every result.
+2. **What a bettor sees at decision time T:** for each (game, book, market), the newest quote
+   with `snapshot_at ≤ T` and no older than 60 minutes; spreads and totals at the number that
+   book hangs.
+3. **Decision points** (each a separate cell axis): **A** the 15Z fetch (game morning);
+   **B** the newest fetch 3–6 h before tip; **C** the newest fetch 60–180 min before tip;
+   **D** the newest fetch 45–75 min before tip (where the live NBA cards decide). Never a fetch
+   inside the last 15 minutes. Each game decided once per cell.
+4. **Units.** One unit to win, risk capped at 3. **A push returns the stake: 0 units, and its
+   risk leaves the denominator.** ROI with the stake kept is reported beside.
+5. **Seasons.** Models fit on 2018-19 (box scores) or 2020-21 (prices) onward, walk-forward:
+   season S predicted by a model fit on seasons before S. **Cuts chosen on 2021-22 → 2024-25;
+   confirmed on 2025-26.** 2020-21 reported, never chosen on.
+6. **Robustness reported for every cell (not a selection rule):** units on bets whose deciding
+   price is still offered at the same number at the next stored fetch; units without the best
+   book's single outlier (best price more than 20 cents better than the next book).
+
+### 6.3 The hypothesis families and their cells
+
+Each family's cells are enumerated here; nothing outside this list is a candidate.
+
+| # | Family (new information) | Outside evidence | Markets × sides | Decision points | Cut axis | Cells |
+|---|---|---|---|---|---|---|
+| F1 | **Team strength independent of the market**: as-of player ratings (box-score plus-minus model, and adjusted plus-minus from free play-by-play stints) × projected minutes, with the injury report; projects margin and total, priced against every posted number through the empirical margin/total distribution | EPM / DARKO / 538 practice; audit gaps 1 and 12 | spread, total, moneyline × 2 sides | A, B, C, D | EV ≥ 0, .01, .02, .03, .05, .08 | 144 |
+| F1b | **The same projection predicting the line's move**: bet when the model's projected close differs from the decision line by ≥ k | audit gap 7 | spread, total × 2 | A, B, C | k = 0.5, 1, 1.5, 2 pts | 48 |
+| F2 | **Spread-implied win probability against the moneyline**: the spread mapped to a win probability through the empirical margin distribution, compared with each book's moneyline | Moskowitz & Vasudevan 2020 | moneyline × favourite / underdog | A, B, C, D | EV ≥ 0, .01, .02, .03, .05, .08 × reference (Pinnacle spread / consensus spread) | 96 |
+| F3 | **Betting against part of each line move** from the first stored quote to the decision | Moskowitz 2021 | spread, total × fade | B, C, D | move ≥ 0.5, 1, 1.5, 2 pts (consensus) | 24 |
+| F4 | **Shooting-luck-adjusted ratings**: opponent three-point and free-throw percentage replaced by their expectation; bet the gap between luck-adjusted and raw rating where the line follows the raw | Ringer / Paine on opponent 3P% persistence | spread, total × 2 | A, C | gap ≥ 1, 2, 3, 4 pts | 32 |
+| F5 | **Absences valued beyond minutes**: player tier from the as-of ratings, starters out, Questionable as a probability, first game back; bet the gap between the availability-adjusted projection and the line | audit gap 2; practitioner minutes reallocation | spread, total × 2 | B, C, D | gap ≥ 1, 2, 3 pts | 36 |
+| F6a | Overtime tail: over when the spread is within k | academic overtime item | total over | B, C | abs(spread) ≤ 1, 2, 3, 4 | 8 |
+| F6b | Player points props summed per team against the total and spread (2023-24 on; choose on 2023-24 + 2024-25) | audit gap 6 | spread, total × 2 | D | gap ≥ 2, 4, 6 pts | 12 |
+| F6c | Late-season motivation: seed locked, eliminated, tanking (as of the date, from `games`) | Krieger 2015 | spread, against the team | A, C | 3 situations | 6 |
+| F6d | One book against itself: moneyline against its own spread; total and spread against its own team totals (2024-25 on) | audit gap 6 | moneyline, total × 2 | C, D | EV ≥ .01, .03 | 16 |
+
+**New cells: 422.**
+
+**Controls, graded and reported, never candidates:** every blind side; win/loss streaks; big
+home underdogs; fading the public (Action Network splits, free); early-season unders; the
+published schedule spots; the soft-book consensus outlier (the refuted mechanism).
+
+### 6.4 Bars
+
+§1's thirteen bars, unchanged, with three additions fixed now:
+
+- **Multiple testing.** Benjamini–Hochberg at q = 0.05 over **m = 4,172** (this search's 422
+  cells plus the first search's 3,750, the earlier ones entered at p = 1), one-sided whole-day
+  bootstrap p on 2025-26 alone.
+- **Confirmation** is 2025-26 alone: ≥ 200 bets, ROI > 0, 90% CI above zero.
+- **Closing-line value is a bar where the archive has a later price** (decision points A–C):
+  the median bet beats Pinnacle's last pre-tip no-vig price.
+
+A family with no cell clearing every bar is closed, with its grid recorded here.
+
+### 6.5 Data this search adds (all into Supabase first)
+
+- Free play-by-play with wall-clock times (sportsdataverse ESPN release, 2018-19 → 2025-26):
+  stints for adjusted plus-minus, garbage time, shot-level three-point luck.
+- Free historical closing lines before 2021 (single book, no timestamps): supporting evidence
+  for closing-line-only checks, never a bar.
+- Action Network public splits (free GET): controls only.
+- **Bought (Odds API history, pre-approved):** the missing fetch hours — 16Z, 17Z, 18Z, 20Z,
+  21Z and 04Z on every game date 2020-21 → 2025-26 — so afternoon and late tips get a quote in
+  their last hour and decision points C and D cover every tip time. Cost measured on one call
+  before buying; balance read before and after.
+- **Live game-line history kept from 2026-27 on.** Every NBA price change from every book is
+  retained (only exact repeats thinned), so 2026-27 becomes an untouched season and the true
+  opener becomes observable.
+
+**Amendment, 2026-10-17, before any cell is graded: the hours alone miss the half-hour tips.**
+Measured on the cached archive (full-game moneyline, spread and total; pre-tip quotes only):
+the 45–75-minute window (decision point D) is reached on 93% of tips on the hour but on 3% of
+the 2,195 tips on the half hour (7:30 ET and the like). Every season sits at 64–72% of games.
+A half-hour evening tip's fetches sit 30 and 90 minutes out, and the hours listed above do not
+change that. So the purchase also buys, for every game no held fetch reaches, a fetch at
+tip − 60 (closes D and C) and tip − 240 (closes B where 3–6 hours is empty), each at the
+5-minute snapshot at or before. Seasons are bought in the order 2021-22, 2022-23, 2023-24,
+2024-25, 2025-26, 2020-21, so a floor stop leaves the least-needed season short.
+
+Two rules follow, fixed now:
+
+- **A cell's decision time is the fetch instant**, read from the two purchase ledgers
+  (`odds_history_pulls` on the hour, `odds_history_fetches` off it). A quote's stamp is the
+  book's last update, up to ~25 minutes before the fetch, so it does not name the window.
+- **Gate before any D cell is graded:** D is reached on ≥ 95% of games in **every** season cuts
+  are chosen on, not on average. A season short of it is reported and not chosen on.
+
+**Amendment, 2026-10-17, before any cell is graded: how each bar is read.** Written into
+`scripts/nba_game2_verdict.py` and committed with this line; the labs only emit cells.
+
+- **Each cell bets one side**, so bar 9 applies to every cell. The blind bet is that side on
+  every game with a price at that decision point, at the best deciding offer under the
+  market's own fair line (Pinnacle's no-vig, else the median of the deciding books), with no
+  cut. (The first search compared at the first fetch instead.)
+- **Placebo:** the cell's ROI must beat the 95th percentile of 20 placebo runs. Each run
+  shuffles the model's fair numbers between games on the same date in the same market (seed =
+  run number).
+- **Plateau:** the neighbours are the cut one step either side, everything else equal. A
+  neighbouring decision point is not a neighbour.
+- **Closing-line value** is measured on the choosing seasons' bets.
+- **p values:** whole-day bootstrap, 4,000 resamples; any p under 0.01 is recomputed with
+  400,000 (same seed), because the best cell's bar is 1.2e-5, finer than 4,000 can show.
+- **Fewer choosing seasons where the data starts later:** F6b chooses on 2023-24 and 2024-25;
+  F6d's team-total cells on 2024-25 alone.
+- **Per-game purchases** (team totals, props) are dated by the feed's own snapshot time and
+  count only at D.
+- **Open before the verdict runs (mike):** whether the Benjamini–Hochberg p is read on 2025-26
+  alone over m = 4,172 (as written above) or on the four choosing seasons over this search's
+  cells, with the 2025-26 confirmation bar unchanged. The script computes both; it is run on
+  real cells only after that is decided.
+
+**Amendment, 2026-10-17 (second), before any priced season is graded: what the lab reviews
+changed.** Each family's lab was reviewed for look-ahead and for drift from §6.3. These follow,
+and all land before any cell is graded:
+
+- **The empirical distribution, as §6.3 says** (the first builds used a bell curve). Two
+  sources. The market's own pricing (F2, F6a, F6d, the market's fair line, the blind bet,
+  closing value) uses the spread of results around Pinnacle's closing number on earlier
+  seasons. A projection built without prices (F1, F1b, F5) uses the spread of results around
+  that projection on earlier seasons, so it is never priced with the market's smaller error.
+  Results are whole numbers: a result placed between two integers is split between them by
+  distance, so whole-number lines carry push mass and half-point lines none.
+- **Bar 9 is read as §1 words it. This replaces the earlier line "each cell bets one side".**
+  When more than 70% of a cell's choosing-season bets fall on one side of home/away,
+  favourite/underdog (by the market's fair line at T) or over/under, the cell must beat that
+  side bet on every game of its own priced population at that point, with no cut. The
+  population is the games its model or rule produced a number for. A dominant side with no
+  blind number fails.
+- **The 95% gate at D is applied by the harness**, season by season. Every cell row records
+  each season's coverage and any season it dropped.
+- **A graded run refuses a stale cache:** any season it needs priced on fewer than 90% of
+  games, or more than 5% of rows matching no purchase record.
+- **Controls are never judged** and do not count in m.
+- **A categorical axis has no neighbours** (F6c's situations); bar 7 there reduces to the
+  cell's own ROI above zero.
+- **Corrections inside the labs:**
+  - F4 adjusts only opponent three-point and free-throw percentage. A term regressing each
+    team's own three-point percentage came from the build instructions, not §6.3, and is
+    removed.
+  - F6a's cut reads the posted spread (Pinnacle's, else the deciding books' median), not a
+    centre solved from the price.
+  - F2 leaves a level reference (pick'em) with no favourite.
+  - F6d's "one book against itself" takes both of that book's quotes from the same fetch.
+  - F1b's strength is the predicted move (predicted close minus the consensus number at T) in
+    the bettor's favour. The build used the offered number minus the predicted close, which
+    rewards a soft book's off-consensus number: the refuted outlier mechanism.
+- **Lab definitions §6.3 does not fix,** recorded so they are not read as registered: F6c's
+  "seed locked", "eliminated" and "tanking" (bottom three after the trade deadline) and its
+  deadline dates; F6b's points distribution (the spread of a player's points around his
+  season average on earlier seasons); F1's roster, minutes and injury-probability settings
+  (in the lab's docstring).
+
+**Coverage after the purchase, 2026-10-17 03:46Z** (before any cell is graded). The purchase
+bought 5,736 extra-hour fetches and 1,552 gap fetches: 218,670 credits, balance 2,300,945
+afterwards. Measured on the refreshed cache with `python -m scripts.nba_game_harness
+--coverage`: the share of each season's games with a decision at each point.
+
+| Season | A (15Z) | B (3–6 h) | C (60–180 min) | D (45–75 min) |
+|---|---|---|---|---|
+| 2020-21 | 0.996 | 1.000 | 1.000 | 0.996 |
+| 2021-22 | 1.000 | 1.000 | 1.000 | 0.994 |
+| 2022-23 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2023-24 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2024-25 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2025-26 | 0.999 | 1.000 | 1.000 | 1.000 |
+
+The D gate (≥ 95% in every choosing season) passes in all four. Of 2,733,316 full-game rows,
+2,732,723 join their purchase record exactly; 593 (0.02%) were placed by their stamp.
+
+**Amendment, 2026-10-17 (third), before any priced season is graded: what the re-reviews
+changed.**
+
+- **The empirical distribution is the spread, not the average miss.** Residuals are
+  re-centred on zero before use. Uncentred, a projection's earlier average miss would move its
+  centre a second time: measured on 2020-21, about 1 point toward the away team and 1.4–2.3
+  points toward the under, on top of a calibration that already corrects it. For the market's
+  own pricing, the centre is solved from the price, so this changes nothing there.
+- **Only F1 is priced with the projection's own error.** F1b, F5 and F6b cut on a gap in
+  points and take the best offer under the market's fair line, like every rule family.
+- **Every "gap against the line" is measured against the consensus number at T**
+  (Pinnacle's, else the deciding books' median), not against each book's offered number. This
+  covers F1b, F5 and F6b. Measured against each book's own number, a soft book's
+  off-consensus line raises the gap, which is the refuted outlier mechanism.
+- **Two lab definitions recorded:**
+  - F6d's team-total distribution is the team's score minus the team total implied by
+    Pinnacle's closing spread and total, home and away pooled, on earlier seasons only, with
+    no fallback to the season's own games.
+  - F2's placebo shuffles the favourite's win probability between games on a date; each game
+    keeps its own favourite side.
+- **Public splits:** the stored history (2020-21 to 2025-26) is the CLOSING split (measured
+  in `docs/nba_public_splits.md`). It is known only after tip, so the public-fade control has
+  no pre-tip bets before 2026-27. The 2022-03-09 slate is reversed home-for-away at the source
+  and is excluded.
+
+**Amendment, 2026-10-17 (fourth), before any priced season is graded.**
+
+- **A categorical cell is its own population for bar 9.** F6c's situations have no cut inside
+  a cell, so the blind comparison runs over the games in that situation only. It asks
+  whether betting against the team beats betting the dominant real side (home, away,
+  favourite, underdog) in those same games. Threshold families keep every game the rule
+  produced a number for. The placebo still moves the flag across every game on the date.
+- **Lab definition recorded:** F4's "expectation" for opponent three-point and free-throw
+  percentage is the league's rate so far that season, from games final before the date.
+
+### 6.6 Results (graded 2026-10-17): every family closed for 2026-27
+
+All 422 cells were graded walk-forward at bought prices and stored before any return was read
+(`nba_game2_cells`, run `2026-10-17-full`). The pass/fail script then ran once on each
+multiple-testing basis: **0 of 422 pass on either**, so the open question in §6.4 changes
+nothing.
+
+- 113 cells are positive on the choosing seasons, 91 on 2025-26, and 32 on both.
+- 342 cells have ≥ 200 bets on the choosing seasons. 4 of them have a 90% interval above zero,
+  all in F4.
+- 247 cells have ≥ 200 bets in 2025-26. None has a 90% interval above zero there.
+
+The nearest cell in each family (most bets-backed: highest lower interval bound among cells with
+≥ 200 choosing-season bets, else the best there is). Units are one unit to win.
+
+| Family | Nearest cell | Choosing seasons: bets, units, ROI (90% CI) | 2025-26: bets, units, ROI | Bars failed |
+|---|---|---|---|---|
+| F1 player strength | moneyline away, morning, EV ≥ 0.02 | 2,339, +38.2, +2.8% (−1.5..+7.2) | 484, −5.1, −2.0% | 5, 6, 11, confirm, BH |
+| F1b predicted move | total under, morning, move ≥ 0.5 | 115, +1.0, +0.8% (−13.6..+15.3) | 6, −0.2 | 6, 7, 8, 11, confirm, BH |
+| F2 spread vs moneyline | underdog, consensus, morning, EV ≥ 0.01 | 1,060, +22.6, +9.0% (−1.9..+19.3) | 119, −5.1, −25.0% | 5, 6, 11, confirm, BH |
+| F3 fade the move | total, 45–75 min, move ≥ 0.5 | 4,399, −120.2, −2.5% (−4.9..−0.3) | 1,105, −54.7, −4.6% | 5, 6, 7, 8, 10, confirm, BH |
+| F4 shooting luck | over, morning, gap ≥ 3 | 426, +49.4, +10.7% (+3.2..+18.2) | 81, +7.6, +8.5% | 11, confirm, BH |
+| F5 absences | home spread, 3–6 h, gap ≥ 3 | 381, +32.9, +8.0% (−0.3..+15.9) | 131, +11.7, +8.3% | 6, 7, 11, confirm, BH |
+| F6a overtime tail | over, spread within 4 | 1,777, −83.4, −4.3% (−7.9..−0.6) | 403, −47.5, −10.9% | every bar |
+| F6b props summed | away spread, gap ≥ 2 | 1,034, −11.5, −1.0% (−5.8..+3.9) | 510, −7.9, −1.5% | 5, 6, 7, 8, 10, confirm, BH |
+| F6c motivation | against an eliminated team, morning | 282, +18.5, +6.0% (−3.1..+14.7) | 89, +7.1, +7.3% | 5, 6, 11, confirm, BH |
+| F6d one book vs itself | moneyline home, 60–180 min, EV ≥ 0.01 | 1,156, +5.0, +0.4% (−4.6..+5.4) | 266, −27.4, −8.5% | 5, 6, 8, 11, confirm, BH |
+
+**The one near miss is F4 overs**: betting the over in the morning when the luck-adjusted
+projection is at least 3 points above the raw one.
+
+- **What it clears:** positive in every choosing season (+15.3%, +5.3%, +2.5%, +20.6%), a
+  plateau, both halves, the blind over and the placebo.
+- **Why it fails:**
+  - **Closing-line value:** the median bet is 2.4% worse than Pinnacle's no-vig close. The
+    market moves away from these bets, not toward them.
+  - **2025-26 has only 81 bets** (+7.6 units), against the 200 the confirmation needs.
+  - **2020-21 lost** 8.5% on 103 bets.
+- **Verdict:** closed by §1's kill criterion, because no cut passes bars 4–11.
+
+**A defect found after the results, fixed, with the outcome unchanged.** Six cells with 1–14
+bets that all won had a resampled p of exactly 0 and cleared the correction alone; every one
+fails the 200-bet bar. Such a cell now enters the correction at p = 1. That only makes the bar
+stricter; it is still 0 of 422.
+
+**What comes next is 2026-27.** It is a season nobody has looked at, with every price move kept
+from opening night (#985). The grids above, and F4's overs in particular, can be re-graded on it
+with the same harness and no new choices.

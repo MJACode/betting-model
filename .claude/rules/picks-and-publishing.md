@@ -79,6 +79,13 @@ answer is "nothing".
   BookMoveClock` and keeps its state key to what changes on an EVENT (score,
   period, possession). A new loop that prices without it is that bet again.
   Evidence: `docs/rules_evidence.md`; tests: `tests/test_live_book_move_guard.py`.
+- **ONE GAME NEVER CARRIES TWO BETS THAT CANNOT BOTH WIN.** (mike,
+  2026-10-17: *"It can't be both"*, after "BOS (Regulation)" and "LAK ML"
+  posted on one game.) The scorer holds a side model's rows back and checks
+  them against the game's other BETs (`models/scorer._apply_side_conflicts`,
+  endings in `_SIDE_ENDINGS`). The standing BET keeps the game, and two from
+  one pass both go NONE. A market that can conflict joins the table; a new
+  model on a listed market is checked without doing anything.
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
