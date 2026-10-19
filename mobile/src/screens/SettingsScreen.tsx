@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -55,6 +55,7 @@ import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
 import { describeSubscription } from '@/lib/billingHelpers';
 import { BUILD_STAMP } from '@/lib/buildStamp';
+import { isUpdateReady, subscribeUpdateReady, UPDATE_READY_SETTINGS } from '@/lib/updateReady';
 import {
   APP_VERSION,
   DISCORD_URL,
@@ -307,6 +308,8 @@ export function SettingsScreen() {
   };
 
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
+  // A newer bundle is downloaded and runs at the next open (src/lib/updateReady.ts).
+  const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
   const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
 
   return (
@@ -658,13 +661,14 @@ export function SettingsScreen() {
         <Pressable
           onPress={() => openLink(WEBSITE_URL, 'the website')}
           accessibilityRole="link"
-          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}, ${websiteLabel}`}
+          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}${updateReady ? `, ${UPDATE_READY_SETTINGS}` : ''}, ${websiteLabel}`}
           accessibilityHint="Opens the website"
           hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>
-            Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
+            Signalbase v{APP_VERSION} · {BUILD_STAMP}
+            {updateReady ? ` · ${UPDATE_READY_SETTINGS}` : ''} · {websiteLabel}
           </Text>
         </Pressable>
         <BetslipBarSpacer />

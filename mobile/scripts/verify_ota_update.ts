@@ -20,6 +20,13 @@ import {
   MIN_CHECK_INTERVAL_MS,
   type UpdatesApi,
 } from '../src/lib/otaUpdate';
+import {
+  isUpdateReady,
+  markUpdateReady,
+  resetUpdateReadyForTests,
+  subscribeUpdateReady,
+  UPDATE_READY_MESSAGE,
+} from '../src/lib/updateReady';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -110,6 +117,22 @@ check('a real return inside the throttle does nothing',
 check('no trigger can ask for anything but download or skip',
   ['launch', 'foreground'].every((trigger) =>
     ['download', 'skip'].includes(nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: trigger as 'launch' }))));
+
+// ── updateReady: the quiet note shows once per session ──────────────────────
+
+resetUpdateReadyForTests();
+{
+  let heard = 0;
+  const off = subscribeUpdateReady(() => { heard++; });
+  check('nothing downloaded: not ready', !isUpdateReady());
+  check('the first download is the one that shows the note', markUpdateReady() === true && isUpdateReady());
+  check('a second download in the same session does not show it again', markUpdateReady() === false);
+  check('Settings is told once', heard === 1, String(heard));
+  off();
+  check('the note says when it loads and offers no action',
+    /next time you open/i.test(UPDATE_READY_MESSAGE) && !/tap|restart|refresh/i.test(UPDATE_READY_MESSAGE));
+}
+resetUpdateReadyForTests();
 
 // ── downloadUpdate ──────────────────────────────────────────────────────────
 

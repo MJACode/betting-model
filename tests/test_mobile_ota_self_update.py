@@ -100,3 +100,15 @@ def test_every_trigger_only_downloads() -> None:
     body = lib.split("export function nextAction", 1)[1].split("\n}\n", 1)[0]
     assert "if (s.trigger === 'launch') return 'download';" in body
     assert "pending" not in body, "a downloaded bundle must not stop later checks"
+
+
+def test_a_downloaded_update_is_announced_quietly_once() -> None:
+    """Matt, 2026-10-19: tell the member an update is waiting, with no button
+    (a button would mean the in-process reload that crashed). One toast per
+    session, read out to VoiceOver, and an "update ready" note in Settings."""
+    hook = _read("src/hooks/useOtaUpdates.ts")
+    assert "=== 'downloaded' && markUpdateReady()" in hook
+    assert "showToast(UPDATE_READY_MESSAGE, { durationMs: 6_000, announce: true })" in hook
+    settings = _read("src/screens/SettingsScreen.tsx")
+    assert "useSyncExternalStore(subscribeUpdateReady, isUpdateReady)" in settings
+    assert settings.count("UPDATE_READY_SETTINGS") >= 3, "visible line and VoiceOver label both carry it"

@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as Updates from 'expo-updates';
 
+import { showToast } from '@/components/Toast';
+import { markUpdateReady, UPDATE_READY_MESSAGE } from '@/lib/updateReady';
 import {
   downloadUpdate,
   nextAction,
@@ -21,10 +23,10 @@ import {
  * a newer one downloads it over the first. If a download is still running
  * when a return arrives, that return is skipped.
  *
- * Silent by design: an update check is not something a user asked for, and
- * the failure modes (offline, EAS unreachable) resolve themselves. The
- * running bundle's build date is shown on the Settings screen so "am I
- * current?" is still answerable.
+ * Quiet by design: a check is silent, and so are its failures (offline, EAS
+ * unreachable). When a newer bundle lands, the member gets one toast per
+ * session saying it loads at the next open (Matt, 2026-10-19), and Settings
+ * adds "update ready" beside the running bundle's build date.
  */
 export function useOtaUpdates(): void {
   const inFlight = useRef(false);
@@ -54,7 +56,11 @@ export function useOtaUpdates(): void {
           checkForUpdateAsync: () => Updates.checkForUpdateAsync(),
           fetchUpdateAsync: () => Updates.fetchUpdateAsync(),
         };
-        await downloadUpdate(api);
+        // Tell the member once, quietly: no button, because applying it now
+        // would mean the in-process reload this hook no longer does.
+        if ((await downloadUpdate(api)) === 'downloaded' && markUpdateReady() && !unmounted) {
+          showToast(UPDATE_READY_MESSAGE, { durationMs: 6_000, announce: true });
+        }
       } finally {
         if (!unmounted) inFlight.current = false;
       }

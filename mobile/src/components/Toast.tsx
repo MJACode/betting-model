@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text } from 'react-native';
+import { AccessibilityInfo, Animated, StyleSheet, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -11,14 +11,23 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * root and call showToast(msg) from anywhere.
  */
 
-type Listener = (msg: string) => void;
-const listeners = new Set<Listener>();
+const VISIBLE_MS = 2200;
 
-export function showToast(message: string): void {
-  listeners.forEach((fn) => fn(message));
+export interface ToastOptions {
+  /** How long it stays up. Default VISIBLE_MS, for a few-word confirmation;
+   *  a two-sentence note needs longer to be read. */
+  durationMs?: number;
+  /** Also read it out to VoiceOver / TalkBack. */
+  announce?: boolean;
 }
 
-const VISIBLE_MS = 2200;
+type Listener = (msg: string, durationMs: number) => void;
+const listeners = new Set<Listener>();
+
+export function showToast(message: string, options: ToastOptions = {}): void {
+  if (options.announce) AccessibilityInfo.announceForAccessibility(message);
+  listeners.forEach((fn) => fn(message, options.durationMs ?? VISIBLE_MS));
+}
 
 export function ToastHost() {
   const insets = useSafeAreaInsets();
@@ -27,7 +36,7 @@ export function ToastHost() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const listener: Listener = (m) => {
+    const listener: Listener = (m, durationMs) => {
       setMsg(m);
       if (timer.current) clearTimeout(timer.current);
       Animated.timing(opacity, { toValue: 1, duration: 160, useNativeDriver: true }).start();
@@ -37,7 +46,7 @@ export function ToastHost() {
             if (finished) setMsg(null);
           },
         );
-      }, VISIBLE_MS);
+      }, durationMs);
     };
     listeners.add(listener);
     return () => {
