@@ -257,12 +257,15 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         })
       : null;
   const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
+  // Their number on its own line at secondary weight (UX review); the record
+  // note is a separate caption under it.
   const myBooksLine =
     myView?.status === 'mine' && myView.best && myView.edge != null && myView.ev != null
-      ? `At your books: ${bookName(myView.best.bookmaker)} ${formatAmerican(myView.best.price)} · edge ${formatPctSigned(myView.edge)} · return ${formatPctSigned(myView.ev)}. ${RECORD_AT_BEST_BOOK_NOTE}`
+      ? `At your books: ${bookName(myView.best.bookmaker)} ${formatAmerican(myView.best.price)} · edge ${formatPctSigned(myView.edge)} · return ${formatPctSigned(myView.ev)}`
       : myView?.status === 'none'
         ? `${NOT_AT_MY_BOOKS}. Change your books in Settings.`
         : null;
+  const myBooksRecordNote = myView?.status === 'mine' ? RECORD_AT_BEST_BOOK_NOTE : null;
   const inSlip = slip.has(slipKeyForPick(pick));
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
@@ -381,7 +384,8 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           {quoteProvenance ? (
             <Text style={styles.quoteProvenance}>{quoteProvenance}</Text>
           ) : null}
-          {myBooksLine ? <Text style={styles.quoteProvenance}>{myBooksLine}</Text> : null}
+          {myBooksLine ? <Text style={styles.myBooksLine}>{myBooksLine}</Text> : null}
+          {myBooksRecordNote ? <Text style={styles.quoteProvenance}>{myBooksRecordNote}</Text> : null}
           {/* Why there is no book or betslip below: the deciding book stopped
               updating this price (the card's "Old price"). */}
           {staleNote ? <Text style={styles.quoteProvenance}>{staleNote}</Text> : null}
@@ -889,6 +893,14 @@ const styles = StyleSheet.create({
   quoteProvenance: {
     fontSize: font.size.caption,
     color: colors.textTertiary,
+    marginBottom: 4,
+  },
+  // The member's own price (lib/myBooks.ts): the number they came for, so it
+  // reads above the tertiary provenance captions.
+  myBooksLine: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
     marginBottom: 4,
   },
   matchupRow: {

@@ -382,7 +382,7 @@ def test_a_stale_card_offers_no_bet():
     slip = re.search(r"const canSlip =[^;]*;", card).group(0)
     assert "(!heroPrice?.stale || Boolean(inSlip))" in slip and slip.endswith("&& cta.slip;")
     assert re.search(r"const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview"
-                     r" \|\| paused \|\| heroPrice\?\.stale \|\| signalsMuted( \|\| notAtMyBooks)?\s*\?\s*null", card)
+                     r" \|\| paused \|\| heroPrice\?\.stale \|\| signalsMuted( \|\| notAtMyBooks \|\| noEdgeAtMine)?\s*\?\s*null", card)
     # The words come from the reasons (lib/heroPriceText.ts).
     assert "{priceCheckChipText(check)}" in card and ">Price check<" not in card
     assert "flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`" in card

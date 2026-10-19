@@ -43,7 +43,6 @@ import {
   foundAtText,
   myBooksView,
   NOT_AT_MY_BOOKS,
-  RECORD_AT_BEST_BOOK_NOTE,
 } from '@/lib/myBooks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
@@ -192,8 +191,14 @@ export function PickCard({
   // "Found at HRB +110" under a price from one of their books, and the line
   // that says the record is not kept at their price.
   const modelPrice = decisionOdds(pick);
+  // No edge left at their price: said in words, and no stake is offered.
+  const noEdgeAtMine = myView?.status === 'mine' && (myView.edge ?? 0) <= 0;
+  // One short line on a scanned board (UX review): where the model found it,
+  // and that the record is kept there. The longer sentence is on Pick Detail.
   const myBooksNote = myQuote && modelPrice != null
-    ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}. ${RECORD_AT_BEST_BOOK_NOTE}`
+    ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}${
+        noEdgeAtMine ? ' · No edge at your books' : ' · record uses best price'
+      }`
     : notAtMyBooks
       ? NOT_AT_MY_BOOKS
       : null;
@@ -330,7 +335,7 @@ export function PickCard({
   // No stake on a stale price: EV reads "—" there, and a stake is an
   // instruction to bet at a number the book no longer offers.
   const stakeCaption =
-    pick.signal_type !== 'BET' || preview || paused || heroPrice?.stale || signalsMuted || notAtMyBooks
+    pick.signal_type !== 'BET' || preview || paused || heroPrice?.stale || signalsMuted || notAtMyBooks || noEdgeAtMine
       ? null
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
@@ -1267,7 +1272,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.caption,
     color: colors.textTertiary,
-    lineHeight: 16,
   },
   card: {
     // Declared tap floor (verify_a11y); the card is already ~150pt, so this

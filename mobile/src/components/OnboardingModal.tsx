@@ -102,7 +102,14 @@ export function OnboardingModal({
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.skipRow}>
           {onBooks ? (
-            <View style={styles.skipSpacer} />
+            // Same height as Skip at any text size, so the title does not jump.
+            <Text
+              style={[styles.skip, styles.hidden]}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              Skip
+            </Text>
           ) : (
             <Pressable
               onPress={skip}
@@ -163,12 +170,12 @@ export function OnboardingModal({
             accessibilityRole="button"
             accessibilityLabel={
               onBooks
-                ? `Save ${selected.length} sportsbook${selected.length === 1 ? '' : 's'} and get started`
+                ? `Save ${selected.length} sportsbook${selected.length === 1 ? '' : 's'}${booksOnly ? '' : ' and get started'}`
                 : `Next, ${pageLabel(step + 1, total).toLowerCase()}`
             }
             style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
           >
-            <Text style={styles.btnText}>{onBooks ? 'Save and get started' : 'Next'}</Text>
+            <Text style={styles.btnText}>{onBooks ? (booksOnly ? 'Save' : 'Save and get started') : 'Next'}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -184,7 +191,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   skip: { fontSize: font.size.body, color: colors.textTertiary, fontWeight: font.weight.medium },
-  skipSpacer: { height: 22 },
+  hidden: { opacity: 0 },
   booksBody: {
     flex: 1,
     paddingHorizontal: spacing.xl,

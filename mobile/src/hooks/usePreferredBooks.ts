@@ -65,6 +65,10 @@ export type { BookKey };
 export const BOOKS: BookKey[] = BETTABLE_BOOKS;
 
 const STORAGE_KEY = 'preferredBooks.selected';
+/** Set when a launch's server answer said "never chosen". The NEXT launch
+ *  opens the books step at startup, so it never slides up over a board the
+ *  member is already using (UX review, 2026-10-19). */
+const PROMPT_DUE_KEY = 'preferredBooks.promptDue';
 /** The v1 single-book key, read once to migrate and then left alone. */
 const LEGACY_KEY = 'preferredBook.selected';
 /** Every book: the default until the member chooses (Matt, 2026-10-19). */
@@ -82,6 +86,8 @@ interface State {
 const listeners = new Set<(s: State) => void>();
 let cached: State | null = null;
 let serverSynced = false;
+/** Read once at launch: this launch may ask. */
+let promptDueAtLaunch = false;
 
 function isBookKey(v: unknown): v is BookKey {
   return typeof v === 'string' && (BETTABLE_BOOKS as string[]).includes(v);
@@ -103,6 +109,7 @@ function publish(next: State) {
 async function loadLocal(): Promise<State> {
   if (cached) return cached;
   try {
+    promptDueAtLaunch = (await AsyncStorage.getItem(PROMPT_DUE_KEY)) === '1';
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw != null) {
       cached = { books: normalize(JSON.parse(raw)), chosen: true, checked: false };
@@ -144,6 +151,7 @@ async function syncServer(): Promise<void> {
       return;
     }
     if (local.chosen) await writeServer(local.books);
+    else await AsyncStorage.setItem(PROMPT_DUE_KEY, '1');
     publish({ ...(cached ?? local), checked: true });
   } catch (err) {
     // Offline or the migration has not landed: the local cache stands, and
@@ -166,6 +174,11 @@ async function save(v: BookKey[]) {
     await writeServer(books);
   } catch (err) {
     console.warn('[preferredBooks] server save failed', err);
+  }
+  try {
+    await AsyncStorage.removeItem(PROMPT_DUE_KEY);
+  } catch {
+    // The flag only re-asks a member who has already chosen; harmless.
   }
 }
 
@@ -196,8 +209,10 @@ export function usePreferredBooks() {
     save(v).catch((err) => console.warn('[preferredBooks] set failed', err));
   }, []);
 
-  // `needsChoice`: the onboarding step should ask. Only once the server has
-  // answered, so a member who chose on another phone is not asked again.
-  const needsChoice = ready && state.checked && !state.chosen;
+  // `needsChoice`: the books step should open on its own. Only at a launch
+  // that follows one whose server answer said "never chosen", so it opens at
+  // startup, never mid-session, and never for a member who chose elsewhere.
+  // (A brand-new member gets the step inside the intro instead.)
+  const needsChoice = ready && promptDueAtLaunch && !state.chosen;
   return { books: state.books, chosen: state.chosen, needsChoice, setBooks, ready };
 }
