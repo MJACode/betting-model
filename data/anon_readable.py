@@ -517,6 +517,11 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "feedback_submit",
     "feedback_threads_for_device",
     "feedback_unread_count",
+    # the member's own sportsbooks -- SECURITY DEFINER, device/user-scoped
+    # (data/migrations/member_sportsbooks_2026_10_19.sql, which carries its own
+    # GRANT; apply_anon_grants skips them until the worker has applied it)
+    "member_books_get",
+    "member_books_set",
     # crash logging -- SECURITY DEFINER, insert-only, returns nothing
     # (data/migrations/add_app_errors.sql, mobile/src/lib/crashLogSetup.ts)
     "log_app_error",

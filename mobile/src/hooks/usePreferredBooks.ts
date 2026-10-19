@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
-import { BETTABLE_BOOKS, MODEL_BOOK, type BookKey } from '@/lib/markets';
+import { getDeviceId } from '@/hooks/useDeviceId';
+import { BETTABLE_BOOKS, type BookKey } from '@/lib/markets';
+import { supabase } from '@/lib/supabase';
 
 /**
  * The member's own sportsbooks — a SET, not one book (Matt, 2026-09-04, with a
@@ -23,13 +25,32 @@ import { BETTABLE_BOOKS, MODEL_BOOK, type BookKey } from '@/lib/markets';
  *      with" row beside it still lists EVERY book we price, selected or not,
  *      with its coverage, so the set narrows the default and never the options.
  *
- * It does NOT reach pricing. Picks, Signals, the pick detail and every parlay
- * are priced, staked and graded at DraftKings — the book the models score
- * against (§6). A member cannot switch that.
+ *   3. THE PICK BOARDS AND THE PICK DETAIL (Matt, 2026-10-19: "if someone
+ *      doesn't have that Sportsbook in their state we shouldn't show it").
+ *      The card shows the best price at THEIR books, with the edge and return
+ *      worked out at that price, and "Not offered at your books" when none
+ *      of theirs has the bet (lib/myBooks.ts).
  *
- * THE SET IS NEVER EMPTY. Clearing the last book would blank the Stats column
+ * It does NOT reach the models. Every pick is still decided, staked and
+ * graded at the best bettable price (§6), and the record and every published
+ * surface stay there. The set changes what this member SEES, nothing else.
+ *
+ * NEW MEMBERS START WITH EVERY BOOK (Matt, 2026-10-19): the value is in
+ * shopping every book, so onboarding opens with all of them checked and the
+ * member unchecks the ones they cannot use. `chosen` is false until they have
+ * confirmed a set once, which is what brings the onboarding step back up for
+ * a member who installed before it existed.
+ *
+ * STORED IN SUPABASE (`member_books_get` / `member_books_set`, migration
+ * member_sportsbooks_2026_10_19.sql), under the install and, when signed in,
+ * under the member, so it follows them to a new phone. AsyncStorage is a
+ * cache of that row (CLAUDE.md §1b): it answers first so the board does not
+ * flash, and the server answer wins when it lands. A member who chose on
+ * this phone before the table existed has that choice pushed up once.
+ *
+ * THE SET IS NEVER EMPTY. Clearing the last book would blank every price
  * with no way to read why, so the last one cannot be unchecked and a stored
- * empty set loads as DraftKings.
+ * empty set loads as every book.
  *
  * Only BETTABLE books are selectable (2026-09-03): a book that cannot be bet
  * from the US — Pinnacle, Bovada — is a price the member cannot take, the same
@@ -46,10 +67,21 @@ export const BOOKS: BookKey[] = BETTABLE_BOOKS;
 const STORAGE_KEY = 'preferredBooks.selected';
 /** The v1 single-book key, read once to migrate and then left alone. */
 const LEGACY_KEY = 'preferredBook.selected';
-const DEFAULT_BOOKS: BookKey[] = [MODEL_BOOK];
+/** Every book: the default until the member chooses (Matt, 2026-10-19). */
+const DEFAULT_BOOKS: BookKey[] = BETTABLE_BOOKS;
 
-const listeners = new Set<(b: BookKey[]) => void>();
-let cached: BookKey[] | null = null;
+interface State {
+  books: BookKey[];
+  /** The member has confirmed a set at least once (here or on another device). */
+  chosen: boolean;
+  /** The server has answered this launch (or failed to). Until then a
+   *  not-chosen local cache may still be overruled by another device. */
+  checked: boolean;
+}
+
+const listeners = new Set<(s: State) => void>();
+let cached: State | null = null;
+let serverSynced = false;
 
 function isBookKey(v: unknown): v is BookKey {
   return typeof v === 'string' && (BETTABLE_BOOKS as string[]).includes(v);
@@ -63,50 +95,96 @@ function normalize(keys: unknown): BookKey[] {
   return out.length > 0 ? out : DEFAULT_BOOKS;
 }
 
-async function load(): Promise<BookKey[]> {
+function publish(next: State) {
+  cached = next;
+  listeners.forEach((fn) => fn(next));
+}
+
+async function loadLocal(): Promise<State> {
   if (cached) return cached;
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw != null) {
-      cached = normalize(JSON.parse(raw));
+      cached = { books: normalize(JSON.parse(raw)), chosen: true, checked: false };
       return cached;
     }
     // First run since multi-select shipped: carry the single book forward.
     const legacy = await AsyncStorage.getItem(LEGACY_KEY);
-    cached = isBookKey(legacy) ? [legacy] : DEFAULT_BOOKS;
+    cached = isBookKey(legacy)
+      ? { books: [legacy], chosen: true, checked: false }
+      : { books: DEFAULT_BOOKS, chosen: false, checked: false };
   } catch {
-    cached = DEFAULT_BOOKS;
+    cached = { books: DEFAULT_BOOKS, chosen: false, checked: false };
   }
   return cached;
 }
 
-async function save(v: BookKey[]) {
-  const next = normalize(v);
-  cached = next;
-  listeners.forEach((fn) => fn(next));
+async function writeServer(books: BookKey[]): Promise<void> {
+  const deviceId = await getDeviceId();
+  const { error } = await supabase.rpc('member_books_set', {
+    p_device_id: deviceId,
+    p_books: books,
+  });
+  if (error) throw error;
+}
+
+/** Once per launch: the server row wins; a local-only choice is pushed up. */
+async function syncServer(): Promise<void> {
+  if (serverSynced) return;
+  serverSynced = true;
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    const local = await loadLocal();
+    const deviceId = await getDeviceId();
+    const { data, error } = await supabase.rpc('member_books_get', { p_device_id: deviceId });
+    if (error) throw error;
+    if (Array.isArray(data) && data.length > 0) {
+      const books = normalize(data);
+      publish({ books, chosen: true, checked: true });
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(books));
+      return;
+    }
+    if (local.chosen) await writeServer(local.books);
+    publish({ ...(cached ?? local), checked: true });
+  } catch (err) {
+    // Offline or the migration has not landed: the local cache stands, and
+    // the next launch tries again.
+    serverSynced = false;
+    publish({ ...(cached ?? { books: DEFAULT_BOOKS, chosen: false }), checked: true });
+    console.warn('[preferredBooks] server sync failed', err);
+  }
+}
+
+async function save(v: BookKey[]) {
+  const books = normalize(v);
+  publish({ books, chosen: true, checked: true });
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(books));
   } catch (err) {
     console.warn('[preferredBooks] save failed', err);
+  }
+  try {
+    await writeServer(books);
+  } catch (err) {
+    console.warn('[preferredBooks] server save failed', err);
   }
 }
 
 export function usePreferredBooks() {
-  const [books, setBooksState] = useState<BookKey[]>(cached ?? DEFAULT_BOOKS);
+  const [state, setState] = useState<State>(cached ?? { books: DEFAULT_BOOKS, chosen: false, checked: false });
   // False until storage has answered. Every consumer that renders a book name
-  // or hands off must gate on it: the seeded default is DraftKings, so without
-  // it a FanDuel member sees DK for a frame — and a tap in that window opened
-  // the wrong book (UX review, 2026-09-04).
+  // or hands off must gate on it: without it the default shows for a frame —
+  // and a tap in that window opened the wrong book (UX review, 2026-09-04).
   const [ready, setReady] = useState<boolean>(cached != null);
 
   useEffect(() => {
     let mounted = true;
-    load().then((b) => {
+    loadLocal().then((s) => {
       if (!mounted) return;
-      setBooksState(b);
+      setState(s);
       setReady(true);
+      void syncServer();
     });
-    const listener = (b: BookKey[]) => setBooksState(b);
+    const listener = (s: State) => setState(s);
     listeners.add(listener);
     return () => {
       mounted = false;
@@ -118,5 +196,8 @@ export function usePreferredBooks() {
     save(v).catch((err) => console.warn('[preferredBooks] set failed', err));
   }, []);
 
-  return { books, setBooks, ready };
+  // `needsChoice`: the onboarding step should ask. Only once the server has
+  // answered, so a member who chose on another phone is not asked again.
+  const needsChoice = ready && state.checked && !state.chosen;
+  return { books: state.books, chosen: state.chosen, needsChoice, setBooks, ready };
 }

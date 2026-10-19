@@ -11,7 +11,9 @@ import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/li
 import {
   bestHandoffForPick,
   bookLabel,
+  bookLabelShort,
   bookName,
+  currentLineQuotes,
   formatSideLine,
   gameMarketForModel,
   heroAmericanForPick,
@@ -25,6 +27,8 @@ import {
   splitPickTitle,
   storedQuoteBook,
   todayBoardHandoff,
+  MODEL_BOOK,
+  type HeroAmerican,
   type Movement,
 } from '@/lib/markets';
 import { modelLong, isPropModel } from '@/lib/modelMeta';
@@ -34,6 +38,13 @@ import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
 import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import {
+  foundAtText,
+  myBooksView,
+  NOT_AT_MY_BOOKS,
+  RECORD_AT_BEST_BOOK_NOTE,
+} from '@/lib/myBooks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
@@ -114,6 +125,9 @@ export function PickCard({
   teamAbbrevs = null,
 }: Props) {
   const { pick, game, weather } = item;
+  // The member's own books (Matt, 2026-10-19). Display only: what this card
+  // SHOWS, never what the pick is (lib/myBooks.ts).
+  const { books: myBooks, ready: myBooksReady } = usePreferredBooks();
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -129,20 +143,68 @@ export function PickCard({
   // gradeGood / gradeBad, not bet/avoid: Edge is now the hero number and
   // colors.bet is 2.22:1 on bgCard (theme.ts). The ramp already exists for
   // a readable good/bad (UX review).
-  const edgeColor = qualifies
-    ? colors.gradeGood
-    : pick.signal_type === 'AVOID'
-      ? colors.gradeBad
-      : colors.textSecondary;
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
-  const ev = expectedValue(pick.model_probability, decisionOdds(pick));
+  const modelEv = expectedValue(pick.model_probability, decisionOdds(pick));
   // H4 price check (display only, lib/priceCheck.ts): an implausible edge or a
   // lock far from the book's current price shows "Price check" and "—" for
   // edge and EV instead of headlining the board. After the start "Now" is the
   // in-play price, so only the edge rule applies then (Reviewer #847).
   const check = priceCheckForItem(item, liveState);
   const flagged = check.flagged;
-  const edgeText = flagged ? '—' : formatPctSigned(decisionEdge(pick));
+  // The scorer's price-age rule (markets.PREGAME_PRICE_MAX_AGE_MIN): before
+  // the start, a deciding price the book stopped updating is no price, so
+  // the card shows "Now —" and offers no hand-off at it. Same start test
+  // as the price check above.
+  const priceAge = priceAgeFor(pick, game, liveState);
+  const modelHero = heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge);
+  // At THEIR books. 'mine': the record book is not theirs but one of theirs
+  // has the same bet, so the card shows that price with the edge and return
+  // at it. 'none': none of theirs has it. Only on an open BET with a price;
+  // a settled or non-BET row keeps the pick's own numbers.
+  const myView =
+    myBooksReady && pick.signal_type === 'BET' && hasPricedLine(pick) && openForAction(pick)
+      ? myBooksView({
+          quotes: currentLineQuotes(pick, item.bookRows, modelHero, priceAge),
+          recordBook: pick.is_live === true ? MODEL_BOOK : storedQuoteBook(pick),
+          myBooks,
+          modelProbability: pick.model_probability,
+        })
+      : null;
+  const myQuote = myView?.status === 'mine' ? myView.best : null;
+  const notAtMyBooks = myView?.status === 'none';
+  // The price the card shows. On 'mine' it is their best book at the scored
+  // line, drawn as a plain decision price (no Now/Locked pill: there is no
+  // lock at that book to compare against).
+  const heroPrice: HeroAmerican | null = myQuote
+    ? {
+        kind: 'decision',
+        price: myQuote.price,
+        book: myQuote.bookmaker,
+        line: numOrNull(pick.scored_line),
+        link: myQuote.link,
+        lockedPrice: myQuote.price,
+        showLockedCaption: false,
+      }
+    : modelHero;
+  const shownEdge = myView?.status === 'mine' && myView.edge != null ? myView.edge : decisionEdge(pick);
+  const ev = myView?.status === 'mine' ? myView.ev : modelEv;
+  const edgeText = flagged ? '—' : formatPctSigned(shownEdge);
+  // "Found at HRB +110" under a price from one of their books, and the line
+  // that says the record is not kept at their price.
+  const modelPrice = decisionOdds(pick);
+  const myBooksNote = myQuote && modelPrice != null
+    ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}. ${RECORD_AT_BEST_BOOK_NOTE}`
+    : notAtMyBooks
+      ? NOT_AT_MY_BOOKS
+      : null;
+  // Green only when the edge on screen is one they can take: at their price
+  // it may be gone, and off their books there is nothing to take.
+  const myEdgeGone = (myView?.status === 'mine' && (myView.edge ?? 0) <= 0) || notAtMyBooks;
+  const edgeColor = qualifies && !myEdgeGone
+    ? colors.gradeGood
+    : pick.signal_type === 'AVOID'
+      ? colors.gradeBad
+      : colors.textSecondary;
   // H4: on NONE / AVOID the edge is a secondary line, not the hero number —
   // a non-bet must not read like a BET. BET keeps the hero edge.
   const demoteEdge = pick.signal_type !== 'BET';
@@ -166,12 +228,6 @@ export function PickCard({
   const clvTone = pnlTone(pick.clv_pct, 1);
   const clvInk = clvTone === 'textSecondary' ? colors.textTertiary : colors[clvTone];
 
-  // The scorer's price-age rule (markets.PREGAME_PRICE_MAX_AGE_MIN): before
-  // the start, a deciding price the book stopped updating is no price, so
-  // the card shows "Now —" and offers no hand-off at it. Same start test
-  // as the price check above.
-  const priceAge = priceAgeFor(pick, game, liveState);
-  const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge);
   // Compare home-relative as numbers: PostgREST can send NUMERIC as a string,
   // and "-1" !== -1 would print a line on every card. Print from the pick's
   // side so an away spread that has moved (NYJ +5, scored −5, Now −4.5)
@@ -193,7 +249,9 @@ export function PickCard({
         );
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
-  const stake = stakeFor(pick.kelly_fraction, decisionOdds(pick));
+  // On 'mine' the risk is grossed up at their price, so "Bet 0.95u · Win 1u"
+  // is what that book takes to win the same unit.
+  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick));
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
@@ -233,9 +291,10 @@ export function PickCard({
   // NONE and AVOID are not a bet. On this card the headline and the price
   // drop to the secondary ink so a NEUTRAL row does not read as a 22pt bet.
   const quietHeadline = signalsMuted || (signals && demoteEdge);
-  const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted;
+  // None of their books has it: no hand-off, no slip, no stake.
+  const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted && !notAtMyBooks;
   const handoff = offersBook && cta.handoff
-    ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge)
+    ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : null;
   // Today prints the lock and does not name a line. A line-only move with
   // no book left at the picked line is Open: no "Bet DK −110", and no slip
@@ -259,6 +318,7 @@ export function PickCard({
   // review). A leg already in the slip can still be taken out here.
   const canSlip =
     Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused &&
+    (!notAtMyBooks || Boolean(inSlip)) &&
     (!heroPrice?.stale || Boolean(inSlip)) && (!signalsMuted || Boolean(inSlip)) && cta.slip;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
@@ -270,7 +330,7 @@ export function PickCard({
   // No stake on a stale price: EV reads "—" there, and a stake is an
   // instruction to bet at a number the book no longer offers.
   const stakeCaption =
-    pick.signal_type !== 'BET' || preview || paused || heroPrice?.stale || signalsMuted
+    pick.signal_type !== 'BET' || preview || paused || heroPrice?.stale || signalsMuted || notAtMyBooks
       ? null
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
@@ -437,7 +497,7 @@ export function PickCard({
         edge: flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         modelChance: `Model chance ${formatPct(pick.model_probability)}`,
         expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
-        stake: signalsStakeSpoken,
+        stake: myBooksNote ? `${signalsStakeSpoken}. ${myBooksNote}` : signalsStakeSpoken,
         modelName: `${modelLong(pick.model_id)} model`,
         posted: timing?.label ?? null,
         paused: null,
@@ -456,6 +516,7 @@ export function PickCard({
         flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
         stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
+        myBooksNote,
         timing ? timing.label : null,
         startedSpoken,
       ]);
@@ -629,6 +690,17 @@ export function PickCard({
         <Text style={styles.captionLine} numberOfLines={2}>
           {caption}
         </Text>
+      ) : null}
+      {myBooksNote ? (
+        <View style={styles.myBooksRow}>
+          <Ionicons
+            name={notAtMyBooks ? 'remove-circle-outline' : 'information-circle-outline'}
+            size={13}
+            color={colors.textTertiary}
+            style={styles.extraIcon}
+          />
+          <Text style={styles.myBooksText}>{trueMinus(myBooksNote)}</Text>
+        </View>
       ) : null}
 
       {hasExtras ? (
@@ -945,6 +1017,17 @@ export function PickCard({
       <Text style={[styles.stakeRow, signalsStakeShown == null ? styles.metricMuted : null]}>
         {signalsStakeShown ?? '—'}
       </Text>
+      {myBooksNote ? (
+        <View style={styles.myBooksRow}>
+          <Ionicons
+            name={notAtMyBooks ? 'remove-circle-outline' : 'information-circle-outline'}
+            size={13}
+            color={colors.textTertiary}
+            style={styles.extraIcon}
+          />
+          <Text style={styles.myBooksText}>{trueMinus(myBooksNote)}</Text>
+        </View>
+      ) : null}
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
@@ -1174,6 +1257,18 @@ function tierFg(tier: 'HIGH' | 'MED' | 'LOW') {
 }
 
 const styles = StyleSheet.create({
+  // "Found at HRB +110 …" / "Not offered at your books" (lib/myBooks.ts).
+  myBooksRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.xs,
+  },
+  myBooksText: {
+    flex: 1,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: 16,
+  },
   card: {
     // Declared tap floor (verify_a11y); the card is already ~150pt, so this
     // changes nothing on screen.

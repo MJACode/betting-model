@@ -383,6 +383,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # v_public_track_record. Sits with the other display reads, before the
     # posted-stake pair. Guards each piece so the DDL fires once.
     "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-10-19: the member's own sportsbooks (onboarding + Settings).
+    # Display only: one new table behind two device-scoped RPCs. No model,
+    # pick or record view reads it. Returns on a catalog read once applied.
+    "member_sportsbooks_2026_10_19.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

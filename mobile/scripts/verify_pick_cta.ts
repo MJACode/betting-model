@@ -427,7 +427,7 @@ check('PickCard: no slip offer and no stake on a stale price (a slip leg can sti
 check('PickCard: the label speaks the reason and the lock (heroPriceText)',
   /flagged \? priceCheckSpeech\(check, heroPrice\) : `Edge \$\{edgeText\}`/.test(card) &&
   /heroPrice \? heroPriceSpeech\(heroPrice, cta\.priceTag\) : null/.test(card) && /\{lockedCaptionText\(heroPrice\)\}/.test(card));
-check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(decisionEdge\(pick\)\)/.test(card) && /flagged \? 'EV —'/.test(card));
+check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(shownEdge\)/.test(card) && /: decisionEdge\(pick\);/.test(card) && /flagged \? 'EV —'/.test(card));
 check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEdge = pick\.signal_type !== 'BET';/.test(card) && /edgeSecondary: \{[\s\S]*?font\.size\.footnote[\s\S]*?colors\.textSecondary/.test(card));
 check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');

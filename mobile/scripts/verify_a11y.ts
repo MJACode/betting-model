@@ -667,7 +667,8 @@ check('M10: tracked rows offer Untrack / Edit stake as accessibilityActions (Und
 const tip = read('src/components/InfoTooltip.tsx');
 check('M18: InfoTooltip icon slop 12 (20 + 24 = 44)', /hitSlop=\{12\}\s*accessibilityRole="button"/.test(tip));
 const onboarding = read('src/components/OnboardingModal.tsx');
-check('M19: Skip and Next have roles; dots read "Page N of 4"', /accessibilityLabel="Skip intro"/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, SLIDES\.length\)\}/.test(onboarding) && /accessibilityLabel=\{last \? 'Get started'/.test(onboarding));
+// The sportsbook step (2026-10-19) is page 5 of 5, so the dots count SLIDES + 1.
+check('M19: Skip and Next have roles; dots read "Page N of 5"', /accessibilityLabel="Skip intro"/.test(onboarding) && /const total = SLIDES\.length \+ 1;/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, total\)\}/.test(onboarding) && /\? `Save \$\{selected\.length\} sportsbook/.test(onboarding) && /: `Next, \$\{pageLabel\(step \+ 1, total\)/.test(onboarding));
 const manual = read('src/components/ManualBetModal.tsx');
 check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
   /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));
