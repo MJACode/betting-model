@@ -5,7 +5,8 @@ import * as Updates from 'expo-updates';
 import { markOtaReload } from '@/lib/crashLog';
 import {
   applyPendingUpdate,
-  shouldCheck,
+  nextAction,
+  reloadDownloaded,
   type CheckTrigger,
   type UpdatesApi,
 } from '@/lib/otaUpdate';
@@ -16,9 +17,11 @@ import {
  * all — publishing an OTA is not the same as delivering it, and the gap is
  * measured in days, not minutes.
  *
- * Mounted once at the app root. Checks at cold start and on every real return
- * from the background; when a new bundle is fetched it reloads immediately.
- * A reload at those two moments is a flash, not an interruption — the parlay
+ * Mounted once at the app root. At cold start it only DOWNLOADS a new bundle
+ * (a reload mid-startup was the first-open crash, 2026-10-19). On a real
+ * return from the background it applies a bundle already downloaded, or
+ * checks, fetches and applies one. A reload at that moment is a flash, not an
+ * interruption — the parlay
  * slip and every other persisted preference survive it (they are restored from
  * storage on mount, exactly as they are on a normal launch).
  *
@@ -31,6 +34,8 @@ export function useOtaUpdates(): void {
   const inFlight = useRef(false);
   const lastCheckAt = useRef<number | null>(null);
   const backgroundedAt = useRef<number | null>(null);
+  /** A bundle was downloaded at launch and is waiting for a real return. */
+  const pending = useRef(false);
 
   useEffect(() => {
     let unmounted = false;
@@ -38,14 +43,16 @@ export function useOtaUpdates(): void {
     const run = async (trigger: CheckTrigger, awayAt: number | null): Promise<void> => {
       if (inFlight.current) return;
       const now = Date.now();
-      if (!shouldCheck({
+      const action = nextAction({
         now,
         lastCheckAt: lastCheckAt.current,
         backgroundedAt: awayAt,
         trigger,
-      })) return;
+        pending: pending.current,
+      });
+      if (action === 'skip') return;
       inFlight.current = true;
-      lastCheckAt.current = now;
+      if (action !== 'reload') lastCheckAt.current = now;
       try {
         // `Updates` is a module namespace, not a plain object — spread the
         // three calls we use so the injectable shape is explicit.
@@ -60,7 +67,14 @@ export function useOtaUpdates(): void {
             await Updates.reloadAsync();
           },
         };
-        await applyPendingUpdate(api);
+        if (action === 'reload') {
+          await reloadDownloaded(api);
+        } else {
+          // Launch only downloads: reloading mid-startup was the first-open
+          // crash (src/lib/otaUpdate.ts header).
+          const out = await applyPendingUpdate(api, action === 'download' ? 'download' : 'apply');
+          if (out === 'downloaded') pending.current = true;
+        }
       } finally {
         if (!unmounted) inFlight.current = false;
       }

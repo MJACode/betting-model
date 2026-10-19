@@ -15,7 +15,14 @@ crash reporting and no error boundary.
 | `emergency_launch` | expo-updates rolled back to the built-in bundle because the downloaded one crashed | `message` is expo-updates' own reason |
 
 `stage` is `launching` (first 15 s), `ota_reload` (written just before
-`Updates.reloadAsync()` in `useOtaUpdates`) or `running`. `update_id` /
+`Updates.reloadAsync()` in `useOtaUpdates`) or `running`.
+
+**Since the same PR, launch no longer reloads** (`nextAction` returns
+`download` at launch; the bundle is applied on the next return from the
+background). So an `ota_reload` row now comes from a foreground reload, and
+the measure of the fix is `early_exit` rows at stage `launching` with a gap of
+tens of seconds after a new bundle ships: those are what a first-open crash
+looks like, and there should be few. `update_id` /
 `update_created_at` name the OTA bundle running when the report was made; NULL
 is the bundle built into the binary.
 

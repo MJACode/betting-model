@@ -62,3 +62,17 @@ def test_the_updater_actually_applies_the_update() -> None:
 ])
 def test_the_pieces_exist(path: str) -> None:
     assert (MOBILE / path).is_file(), f"missing {path}"
+
+
+def test_cold_start_never_reloads() -> None:
+    """2026-10-19: the app crashed "every now and then" on the first open after
+    a new bundle shipped, because launch reloaded mid-startup. Launch must
+    only download; the reload waits for a real return from the background."""
+    hook = _read("src/hooks/useOtaUpdates.ts")
+    assert "void run('launch', null);" in hook
+    assert "nextAction(" in hook, "the hook must route every trigger through nextAction"
+    assert "applyPendingUpdate(api);" not in hook, (
+        "a bare applyPendingUpdate(api) is apply mode, i.e. it reloads at launch")
+    lib = _read("src/lib/otaUpdate.ts")
+    body = lib.split("export function nextAction", 1)[1].split("\n}\n", 1)[0]
+    assert "if (s.trigger === 'launch') return 'download';" in body
