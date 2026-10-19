@@ -20,6 +20,7 @@ import {
   earlyExitFrom,
   flushCrashQueue,
   installGlobalErrorHandler,
+  clearOtaReload,
   markOtaReload,
   MARKER_KEY,
   MAX_QUEUED,
@@ -175,6 +176,30 @@ async function main() {
     t = 6_000;
     await markOtaReload();
     check('markOtaReload moves the marker to ota_reload', JSON.parse(store.data.get(MARKER_KEY)!).stage === 'ota_reload');
+  }
+  {
+    // reloadAsync threw after markOtaReload. The session is still this one,
+    // so the marker and later reports must not stay labelled ota_reload.
+    const { store, sent } = setup();
+    await markOtaReload();
+    await recordError('js_error', new Error('mid-reload'));
+    check('an error while the reload marker is set is labelled ota_reload', sent[0]?.stage === 'ota_reload');
+    await clearOtaReload();
+    const marker = JSON.parse(store.data.get(MARKER_KEY)!) as { stage: string };
+    check('a failed reload restores the marker to running', marker.stage === 'running');
+    await recordError('js_error', new Error('after-reload'));
+    check('later errors are labelled running, not ota_reload', sent[1]?.stage === 'running', sent[1]?.stage ?? '');
+  }
+  {
+    const { queue } = setup({ sendFails: () => true });
+    await Promise.all([
+      recordError('js_error', new Error('first')),
+      recordError('js_error', new Error('second')),
+    ]);
+    const messages = queue().map((r) => r.message);
+    check('two concurrent enqueues both survive',
+      queue().length === 2 && messages.includes('Error: first') && messages.includes('Error: second'),
+      JSON.stringify(messages));
   }
   {
     const { sent } = setup({ ctx: { isEmergencyLaunch: true, emergencyLaunchReason: 'update crashed' } });

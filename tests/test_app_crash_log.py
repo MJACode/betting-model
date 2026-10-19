@@ -47,6 +47,9 @@ def test_the_crash_log_logic_holds():
         "fatal: the native handler ran after the report was sent",
         "fatal with a hung send: the native handler still runs within FATAL_FLUSH_MS",
         "died at ota_reload: reported as early_exit with that stage",
+        "a failed reload restores the marker to running",
+        "later errors are labelled running, not ota_reload",
+        "two concurrent enqueues both survive",
     ):
         assert f"[PASS] {line}" in proc.stdout, line
 
@@ -67,6 +70,8 @@ def test_app_errors_is_write_only_for_the_anon_key():
     assert "SECURITY DEFINER" in fn and "SET search_path = public, pg_temp" in fn
     assert "RETURNS VOID" in fn, "the RPC must not hand rows back to the caller"
     assert re.search(r"GRANT EXECUTE ON FUNCTION public\.log_app_error\([^)]*\)\s*TO anon, authenticated", sql)
+    assert "ON app_errors (device_id, received_at DESC)" in sql, \
+        "the 60/hour cap filters device_id and received_at and needs that index"
 
 
 def test_kinds_agree_between_app_and_server():
@@ -87,9 +92,13 @@ def test_the_app_calls_the_rpc_and_mounts_the_boundary():
     assert "<AppErrorBoundary onReset={resetNav}>" in app and "</AppErrorBoundary>" in app
     assert "setNavReady(false)" in app, "Retry must reset navReady so a pending deep link replays"
     ota = (MOBILE / "src" / "hooks" / "useOtaUpdates.ts").read_text(encoding="utf-8")
-    body = ota.split("reloadAsync: async () => {", 1)[1]
+    body = ota.split("reloadAsync: async () => {", 1)[1].split("},", 1)[0]
     assert body.index("markOtaReload()") < body.index("Updates.reloadAsync()"), \
         "the ota_reload stage must be written before the reload starts"
+    assert body.index("Updates.reloadAsync()") < body.index("clearOtaReload()"), \
+        "a failed reload must clear the ota_reload marker"
+    assert "throw" in body.split("clearOtaReload()", 1)[1], \
+        "the reload error must still propagate after the marker is cleared"
 
 
 def test_the_fallback_never_renders_blank():

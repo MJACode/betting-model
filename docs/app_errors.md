@@ -15,7 +15,9 @@ crash reporting and no error boundary.
 | `emergency_launch` | expo-updates rolled back to the built-in bundle because the downloaded one crashed | `message` is expo-updates' own reason |
 
 `stage` is `launching` (first 15 s), `ota_reload` (written just before
-`Updates.reloadAsync()` in `useOtaUpdates`) or `running`.
+`Updates.reloadAsync()` in `useOtaUpdates`) or `running`. If `reloadAsync()`
+throws, `clearOtaReload()` writes `running` again and replaces the marker, so
+later errors in that same session are not labelled `ota_reload`.
 
 **Since the same PR, launch no longer reloads** (`nextAction` returns
 `download` at launch; the bundle is applied on the next return from the

@@ -85,6 +85,19 @@ let deps: CrashLogDeps | null = null;
 let currentScreen: string | null = null;
 let currentStage: LaunchStage = 'launching';
 let flushing: Promise<void> | null = null;
+/**
+ * Every read-modify-write of the queue runs on this chain. Two reports
+ * enqueued together during launch (the previous launch's early_exit, and a
+ * render or js_error on the first frame) otherwise both read the same list
+ * and the later setItem drops the earlier report.
+ */
+let queueWrite: Promise<void> = Promise.resolve();
+
+function withQueueWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queueWrite.then(fn, fn);
+  queueWrite = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 export function configureCrashLog(d: CrashLogDeps): void {
   deps = d;
@@ -119,11 +132,13 @@ async function readQueue(store: KeyValueStore): Promise<CrashReport[]> {
   }
 }
 
-async function enqueue(report: CrashReport): Promise<void> {
-  if (!deps) return;
-  const queue = await readQueue(deps.storage);
-  queue.push(report);
-  await deps.storage.setItem(QUEUE_KEY, JSON.stringify(queue.slice(-MAX_QUEUED)));
+function enqueue(report: CrashReport): Promise<void> {
+  return withQueueWrite(async () => {
+    if (!deps) return;
+    const queue = await readQueue(deps.storage);
+    queue.push(report);
+    await deps.storage.setItem(QUEUE_KEY, JSON.stringify(queue.slice(-MAX_QUEUED)));
+  });
 }
 
 /**
@@ -151,9 +166,13 @@ export function flushCrashQueue(): Promise<void> {
         }
       }
       if (sent > 0) {
-        // Re-read: a report may have been queued while this flush was sending.
-        const now = await readQueue(d.storage);
-        await d.storage.setItem(QUEUE_KEY, JSON.stringify(now.slice(sent)));
+        // Re-read under the same lock as enqueue: a report may have been
+        // queued while this flush was sending, and its write must not race
+        // this one.
+        await withQueueWrite(async () => {
+          const now = await readQueue(d.storage);
+          await d.storage.setItem(QUEUE_KEY, JSON.stringify(now.slice(sent)));
+        });
       }
     } catch {
       // never throw from the logger
@@ -272,6 +291,16 @@ export function markOtaReload(): Promise<void> {
   return writeMarker('ota_reload');
 }
 
+/**
+ * reloadAsync threw after markOtaReload. This session is still alive, so
+ * the in-memory stage goes back to `running` and the stored marker is
+ * replaced with one. Leaving `ota_reload` would label later errors, and the
+ * next launch's early_exit, as an OTA-reload death.
+ */
+export function clearOtaReload(): Promise<void> {
+  return writeMarker('running');
+}
+
 interface ErrorUtilsShape {
   getGlobalHandler(): (error: unknown, isFatal?: boolean) => void;
   setGlobalHandler(handler: (error: unknown, isFatal?: boolean) => void): void;
@@ -323,4 +352,5 @@ export function resetCrashLogForTests(): void {
   currentStage = 'launching';
   flushing = null;
   installed = false;
+  queueWrite = Promise.resolve();
 }

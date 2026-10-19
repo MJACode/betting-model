@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as Updates from 'expo-updates';
 
-import { markOtaReload } from '@/lib/crashLog';
+import { clearOtaReload, markOtaReload } from '@/lib/crashLog';
 import { RELOAD_SETTLE_MS, reloadBlockedReason } from '@/lib/reloadGuard';
 import {
   applyPendingUpdate,
@@ -67,7 +67,14 @@ export function useOtaUpdates(): void {
           // launch reports an early_exit at "ota_reload" (src/lib/crashLog.ts).
           reloadAsync: async () => {
             await markOtaReload();
-            await Updates.reloadAsync();
+            try {
+              await Updates.reloadAsync();
+            } catch (err) {
+              // The reload did not happen, so this session must not stay
+              // labelled ota_reload (src/lib/crashLog.ts clearOtaReload).
+              await clearOtaReload();
+              throw err;
+            }
           },
         };
         if (action === 'reload') {

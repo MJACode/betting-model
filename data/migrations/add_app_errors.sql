@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS app_errors (
 
 CREATE INDEX IF NOT EXISTS idx_app_errors_received ON app_errors(received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_app_errors_kind ON app_errors(kind, received_at DESC);
+-- The 60/hour cap in log_app_error filters (device_id, received_at). This
+-- file is not in ACTIVE_MIGRATIONS and is not re-applied by this change.
+CREATE INDEX IF NOT EXISTS idx_app_errors_device_received
+    ON app_errors (device_id, received_at DESC);
 
 ALTER TABLE app_errors ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE app_errors FROM anon, authenticated;
