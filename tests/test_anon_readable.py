@@ -44,14 +44,28 @@ def test_every_relation_the_app_reads_is_declared():
         f"`python -m scripts.apply_anon_grants --apply`.")
 
 
+# Relations declared for a screen that does not exist yet. A name lands here
+# only with the migration that creates it, and it leaves the moment mobile/src
+# reads it -- an allowlist must not hide a grant the app already uses.
+AHEAD_OF_THE_APP = frozenset({
+    "v_nhl_player_prop_odds",
+    "v_player_season_totals_nhl",
+    "v_team_season_totals_nhl",
+})
+
+
 def test_the_manifest_does_not_grow_stale_entries():
     """A relation nobody reads should not keep a grant. Not fatal -- a screen
     may be mid-build -- but it must be deliberate, so it is asserted."""
     app = _app_relations()
-    unused = sorted(set(all_readable()) - app)
+    unused = sorted(set(all_readable()) - app - AHEAD_OF_THE_APP)
     assert not unused, (
         f"{unused} are granted but nothing in mobile/src reads them. Remove "
         f"them from data/anon_readable.py, or add the query that needs them.")
+    already = sorted(AHEAD_OF_THE_APP & app)
+    assert not already, (
+        f"{already} are in AHEAD_OF_THE_APP but mobile/src already reads them. "
+        f"Take them off the allowlist; the stale check is what they belong to.")
 
 
 def test_the_view_base_tables_are_granted_but_never_read_directly():

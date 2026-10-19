@@ -369,7 +369,7 @@ def test_no_app_copy_calls_the_line_draftkings_unconditionally():
     pick out of the units the day's total already counted, and a reasoning row
     that names DraftKings as the source of a line DraftKings never posted."""
     recap = _src("mobile/src/components/DailyResultsModal.tsx")
-    assert "flatPnl(pick).profit" in recap
+    assert "postedPickUnits(pick)" in recap
     assert ("RECORD" + "_ONLY_MODELS") not in recap
     reasoning = _src("mobile/src/components/ReasoningCard.tsx")
     assert "The DK line when we generated this pick." not in reasoning
