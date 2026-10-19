@@ -11,7 +11,7 @@
  *   * a fatal error is held back from the native handler until its report
  *     is sent or FATAL_FLUSH_MS passes, and the native handler still runs;
  *   * a launch that died before RUNNING_AFTER_MS is reported on the next one,
- *     with the stage it died in (ota_reload is the OTA-reload suspect).
+ *     with the stage it died in and the gap to the next launch.
  */
 
 import {
@@ -20,8 +20,6 @@ import {
   earlyExitFrom,
   flushCrashQueue,
   installGlobalErrorHandler,
-  clearOtaReload,
-  markOtaReload,
   MARKER_KEY,
   MAX_QUEUED,
   QUEUE_KEY,
@@ -158,14 +156,14 @@ async function main() {
   check('previous launch reached running: nothing reported',
     earlyExitFrom({ stage: 'running', at: 0, updateId: 'a' }, 10, 'a') === null);
   {
-    const r = earlyExitFrom({ stage: 'ota_reload', at: 1_000, updateId: 'upd-A' }, 1_800, 'upd-B');
-    check('died at ota_reload: reported as early_exit with that stage', r?.kind === 'early_exit' && r?.stage === 'ota_reload');
+    const r = earlyExitFrom({ stage: 'launching', at: 1_000, updateId: 'upd-A' }, 1_800, 'upd-B');
+    check('died while launching: reported as early_exit with that stage', r?.kind === 'early_exit' && r?.stage === 'launching');
     check('the gap and both bundle ids are carried',
       r?.extra?.gap_ms === 800 && r?.extra?.prev_update_id === 'upd-A'
       && r?.extra?.update_id_now === 'upd-B' && r?.extra?.bundle_changed === true, JSON.stringify(r?.extra));
   }
   {
-    let t = 5_000;
+    const t = 5_000;
     const { store, sent } = setup({ now: () => t });
     store.data.set(MARKER_KEY, JSON.stringify({ stage: 'launching', at: 1_000, updateId: 'upd-A' }));
     await beginLaunch();
@@ -173,22 +171,6 @@ async function main() {
     check('beginLaunch reports the previous launch that died young', sent.length === 1 && sent[0]?.stage === 'launching');
     const m = JSON.parse(store.data.get(MARKER_KEY)!);
     check('beginLaunch writes this launch as launching', m.stage === 'launching' && m.at === 5_000 && m.updateId === 'upd-B');
-    t = 6_000;
-    await markOtaReload();
-    check('markOtaReload moves the marker to ota_reload', JSON.parse(store.data.get(MARKER_KEY)!).stage === 'ota_reload');
-  }
-  {
-    // reloadAsync threw after markOtaReload. The session is still this one,
-    // so the marker and later reports must not stay labelled ota_reload.
-    const { store, sent } = setup();
-    await markOtaReload();
-    await recordError('js_error', new Error('mid-reload'));
-    check('an error while the reload marker is set is labelled ota_reload', sent[0]?.stage === 'ota_reload');
-    await clearOtaReload();
-    const marker = JSON.parse(store.data.get(MARKER_KEY)!) as { stage: string };
-    check('a failed reload restores the marker to running', marker.stage === 'running');
-    await recordError('js_error', new Error('after-reload'));
-    check('later errors are labelled running, not ota_reload', sent[1]?.stage === 'running', sent[1]?.stage ?? '');
   }
   {
     const { queue } = setup({ sendFails: () => true });

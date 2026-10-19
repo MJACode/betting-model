@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -55,6 +55,7 @@ import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
 import { describeSubscription } from '@/lib/billingHelpers';
 import { BUILD_STAMP } from '@/lib/buildStamp';
+import { isUpdateReady, subscribeUpdateReady, UPDATE_READY_SETTINGS } from '@/lib/updateReady';
 import {
   APP_VERSION,
   DISCORD_URL,
@@ -307,6 +308,8 @@ export function SettingsScreen() {
   };
 
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
+  // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
+  const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
   const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
 
   return (
@@ -667,6 +670,9 @@ export function SettingsScreen() {
             Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
           </Text>
         </Pressable>
+        {/* Its own line, outside the website link, so the status is not buried
+            in a wrapped caption (UX review, 2026-10-19). */}
+        {updateReady ? <Text style={styles.version}>{UPDATE_READY_SETTINGS}</Text> : null}
         <BetslipBarSpacer />
       </ScrollView>
       <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />

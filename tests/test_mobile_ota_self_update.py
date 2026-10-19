@@ -1,5 +1,6 @@
 """
-The app must apply published OTA bundles by itself.
+The app must download published OTA bundles by itself, and never apply one
+to a running app.
 
 WHY THIS IS A TEST. `.github/workflows/mobile-ota.yml` publishes every JS-only
 merge to the production channel within minutes, and it does. Publishing is not
@@ -22,6 +23,7 @@ files contain (see CLAUDE.md §7).
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -44,15 +46,37 @@ def test_app_root_mounts_the_ota_updater() -> None:
     )
 
 
-def test_the_updater_actually_applies_the_update() -> None:
-    """A checker that fetches but never reloads is the pre-fix behaviour."""
+def test_the_updater_downloads_the_update() -> None:
+    """The 2026-08-31 gap: the app must FIND and FETCH a published bundle by
+    itself, so the next cold start runs it."""
     lib = _read("src/lib/otaUpdate.ts")
-    for call in ("checkForUpdateAsync", "fetchUpdateAsync", "reloadAsync"):
+    for call in ("api.checkForUpdateAsync()", "api.fetchUpdateAsync()"):
         assert call in lib, f"otaUpdate.ts no longer calls {call}"
-    assert "api.reloadAsync()" in lib, (
-        "the fetched bundle is never applied — fetching without reloading leaves "
-        "the update for a relaunch that may never happen"
-    )
+    hook = _read("src/hooks/useOtaUpdates.ts")
+    assert "downloadUpdate(api)" in hook
+
+
+def _code_only(src: str) -> str:
+    """Source with // and /* */ comments removed, so a comment that NAMES the
+    banned call does not count as calling it."""
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return "\n".join(line.split("//", 1)[0] for line in src.splitlines())
+
+
+def test_nothing_in_the_app_reloads_a_running_app() -> None:
+    """Matt, 2026-10-19 (option A): never apply a bundle to a running app. The
+    TestFlight crash of 10:41 ET was expo-updates' ErrorRecovery aborting on a
+    fatal JS error inside its 10 s post-render window, in a process launched at
+    09:04, i.e. right after an in-process reload on return from the background.
+    So no app code may call reloadAsync, and UpdatesApi does not offer it."""
+    callers = []
+    for path in [MOBILE / "App.tsx", *(MOBILE / "src").rglob("*.ts*")]:
+        if re.search(r"reloadAsync\s*\(", _code_only(path.read_text(encoding="utf-8"))):
+            callers.append(str(path.relative_to(MOBILE)))
+    assert not callers, f"these call reloadAsync: {callers}"
+    lib = _code_only(_read("src/lib/otaUpdate.ts"))
+    api = lib.split("export interface UpdatesApi", 1)[1].split("}", 1)[0]
+    assert "reloadAsync" not in api
 
 
 @pytest.mark.parametrize("path", [
@@ -64,31 +88,31 @@ def test_the_pieces_exist(path: str) -> None:
     assert (MOBILE / path).is_file(), f"missing {path}"
 
 
-def test_cold_start_never_reloads() -> None:
-    """2026-10-19: the app crashed "every now and then" on the first open after
-    a new bundle shipped, because launch reloaded mid-startup. Launch must
-    only download; the reload waits for a real return from the background."""
+def test_every_trigger_only_downloads() -> None:
+    """Launch and a real return both download, and a return keeps checking
+    after a download so a second bundle in one session is not a launch late
+    (UX review, 2026-10-19)."""
     hook = _read("src/hooks/useOtaUpdates.ts")
     assert "void run('launch', null);" in hook
     assert "nextAction(" in hook, "the hook must route every trigger through nextAction"
-    assert "applyPendingUpdate(api);" not in hook, (
-        "a bare applyPendingUpdate(api) is apply mode, i.e. it reloads at launch")
     lib = _read("src/lib/otaUpdate.ts")
+    assert "export type UpdateAction = 'download' | 'skip';" in lib
     body = lib.split("export function nextAction", 1)[1].split("\n}\n", 1)[0]
     assert "if (s.trigger === 'launch') return 'download';" in body
-    assert "'apply'" not in body, "no trigger may check, fetch AND reload in one go"
-    assert "applyPendingUpdate(api, 'download')" in hook
-    assert "'apply')" not in hook
+    assert "pending" not in body, "a downloaded bundle must not stop later checks"
 
 
-def test_a_reload_waits_for_a_push_tap_and_for_drafts() -> None:
-    """UX review, 2026-10-19: a reload right after a handled push tap lands on
-    Picks instead of the tapped pick, and one on an editing screen drops the
-    draft. The hook asks reloadGuard first; the push hook and App feed it."""
+def test_a_downloaded_update_is_announced_quietly_once() -> None:
+    """Matt, 2026-10-19: tell the member an update is waiting, with no button
+    (a button would mean the in-process reload that crashed). One toast per
+    session, read out to VoiceOver, and an "update ready" note in Settings."""
     hook = _read("src/hooks/useOtaUpdates.ts")
-    body = hook.split("if (action === 'reload') {", 1)[1].split("} else {", 1)[0]
-    assert body.index("RELOAD_SETTLE_MS") < body.index("reloadBlockedReason()") < body.index("reloadDownloaded(api)")
-    push = _read("src/hooks/usePushDeepLink.ts")
-    handle = push.split("const handle = (response", 1)[1]
-    assert handle.index("notePushTap()") < handle.index("clearNativeLastResponse()")
-    assert "setFocusedRoute(name);" in _read("App.tsx")
+    assert "=== 'downloaded' && markUpdateReady()" in hook
+    assert "showToast(UPDATE_READY_MESSAGE, { durationMs: 6_000, announce: true })" in hook
+    assert "AppState.currentState === 'active'" in hook and "noteOwed.current = true" in hook, \
+        "a download that lands in the background must hold the note for the next return"
+    settings = _read("src/screens/SettingsScreen.tsx")
+    assert "useSyncExternalStore(subscribeUpdateReady, isUpdateReady)" in settings
+    assert "{updateReady ? <Text style={styles.version}>{UPDATE_READY_SETTINGS}</Text> : null}" in settings
+    toast = _read("src/components/Toast.tsx")
+    assert "announceForAccessibilityWithOptions(message, { queue: true })" in toast

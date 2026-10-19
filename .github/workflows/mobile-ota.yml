@@ -9,7 +9,9 @@
 # that does not happen.
 #
 # OTA vs TestFlight — the rule that makes this safe:
-#   * JS/TS only            -> OTA. Reaches installed builds in seconds.
+#   * JS/TS only            -> OTA. Downloaded at the next open or return;
+#                              runs at the next cold start (the app never
+#                              reloads itself, 2026-10-19).
 #   * NATIVE module or any
 #     app.json native config -> FULL BUILD (mobile-build.yml). An OTA bundle
 #     that imports a native module missing from the installed binary CRASHES

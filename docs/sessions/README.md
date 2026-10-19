@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, OTA: the app never reloads itself; bundles download and run at the next cold start (TestFlight crash: in-process reload) |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, Crash fallback retry hint moves into the cause (master check fix); app_errors device index applied |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, PR #1003: a failed OTA reload restores stage running; crash enqueue writes are serialized; master 31f01a4c merged |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, First-open crash: launch downloads an OTA bundle and no longer reloads mid-startup |

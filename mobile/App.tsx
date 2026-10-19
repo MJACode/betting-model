@@ -43,7 +43,6 @@ import { usePushDeepLink } from '@/hooks/usePushDeepLink';
 import { installNotificationHandler } from '@/lib/pushPresentation';
 import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
-import { setFocusedRoute } from '@/lib/reloadGuard';
 import { AppErrorBoundary } from '@/components/AppErrorBoundary';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
@@ -219,7 +218,6 @@ export default function App() {
   const syncRoute = useCallback(() => {
     const name = navRef.getCurrentRoute()?.name;
     setCrashScreen(name);
-    setFocusedRoute(name);
     setRouteName(name);
   }, [navRef]);
   // Retry after a crash remounts the navigator; onReady sets this back, and

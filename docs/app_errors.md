@@ -11,20 +11,19 @@ crash reporting and no error boundary.
 | `js_fatal` | uncaught JS error that closes the app | message + stack. The native handler waits up to 1.5 s for the send, then the report is kept on the phone and sent next launch |
 | `js_error` | uncaught JS error the app survived | message + stack |
 | `render` | a screen threw while rendering | message, stack and React's component stack. The member sees "Something went wrong / Retry" instead of the app closing (`AppErrorBoundary`) |
-| `early_exit` | the PREVIOUS launch never lived 15 s | JS cannot see a native crash, but it can see the last launch died young and at which `stage`. **Not every row is a crash**: a member closing the app inside 15 s and a successful OTA reload also land here. `extra.gap_ms` (marker → next launch) separates them: a reload that worked comes back in about a second |
+| `early_exit` | the PREVIOUS launch never lived 15 s | JS cannot see a native crash, but it can see the last launch died young and at which `stage`. **Not every row is a crash**: a member closing the app inside 15 s also lands here. `extra.gap_ms` is the marker → next launch gap |
 | `emergency_launch` | expo-updates rolled back to the built-in bundle because the downloaded one crashed | `message` is expo-updates' own reason |
 
-`stage` is `launching` (first 15 s), `ota_reload` (written just before
-`Updates.reloadAsync()` in `useOtaUpdates`) or `running`. If `reloadAsync()`
-throws, `clearOtaReload()` writes `running` again and replaces the marker, so
-later errors in that same session are not labelled `ota_reload`.
-
-**Since the same PR, launch no longer reloads** (`nextAction` returns
-`download` at launch; the bundle is applied on the next return from the
-background). So an `ota_reload` row now comes from a foreground reload, and
-the measure of the fix is `early_exit` rows at stage `launching` with a gap of
-tens of seconds after a new bundle ships: those are what a first-open crash
-looks like, and there should be few. `update_id` /
+`stage` is `launching` (first 15 s) or `running`. Rows from 2026-10-19 may
+carry `ota_reload`, written just before `Updates.reloadAsync()` while the app
+still applied bundles in-process. **It no longer does** (Matt, option A): a
+check only downloads, and expo-updates runs the bundle at the next cold start.
+The TestFlight report that settled it (10:41 ET, process launched 09:04) died
+in expo-updates' `ErrorRecovery.crash()`, i.e. a fatal JS error inside the
+10 s window after an in-process reload. If a crash like that comes back, look
+for a `js_fatal` row: the global handler sees the error before expo-updates
+re-throws it.
+`update_id` /
 `update_created_at` name the OTA bundle running when the report was made; NULL
 is the bundle built into the binary.
 
@@ -59,9 +58,8 @@ LIMIT 50;
 ```
 
 ```sql
--- The first-open crash question: launches that died, by stage, with the gap.
--- A cluster of ota_reload rows with gap_ms in the tens of seconds = the app
--- died during the OTA reload and the member reopened it by hand.
+-- Launches that died young, by stage, with the gap to the next launch.
+-- (ota_reload rows exist only from before the 2026-10-19 never-reload change.)
 SELECT stage,
        count(*)                                         AS n,
        count(*) FILTER (WHERE (extra->>'gap_ms')::bigint <  5000) AS back_under_5s,

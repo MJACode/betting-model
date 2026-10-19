@@ -2,43 +2,41 @@ import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as Updates from 'expo-updates';
 
-import { clearOtaReload, markOtaReload } from '@/lib/crashLog';
-import { RELOAD_SETTLE_MS, reloadBlockedReason } from '@/lib/reloadGuard';
+import { showToast } from '@/components/Toast';
+import { markUpdateReady, UPDATE_READY_MESSAGE } from '@/lib/updateReady';
 import {
-  applyPendingUpdate,
+  downloadUpdate,
   nextAction,
-  reloadDownloaded,
   type CheckTrigger,
   type UpdatesApi,
 } from '@/lib/otaUpdate';
 
 /**
- * Keeps the installed app on the latest published JS bundle without anyone
- * having to force-quit it. See src/lib/otaUpdate.ts for why this is needed at
- * all — publishing an OTA is not the same as delivering it, and the gap is
- * measured in days, not minutes.
+ * Keeps the installed app's NEXT launch on the latest published JS bundle.
+ * See src/lib/otaUpdate.ts for why it checks at all (publishing is not
+ * delivering) and why it never applies a bundle to a running app (the
+ * 2026-10-19 crash: a reload inside a running process).
  *
- * Mounted once at the app root. A check, at cold start or on a real return
- * from the background, only DOWNLOADS a new bundle (a reload mid-startup was
- * the first-open crash, 2026-10-19). A downloaded bundle is applied at the
- * instant of the next real return, unless a push tap was just handled or the
- * member is on a screen holding an unsaved draft (src/lib/reloadGuard.ts).
- * A reload starts a new runtime: the parlay slip and other preferences kept
- * in storage survive it; the navigation stack, scroll position and any text
- * typed but not saved do not. If a launch download is still running when a
- * return arrives, that return is spent and the update waits one more.
+ * Mounted once at the app root. Checks at cold start and on every real
+ * return from the background, and only downloads. expo-updates launches the
+ * newest downloaded bundle at the next cold start; a later return that finds
+ * a newer one downloads it over the first. If a download is still running
+ * when a return arrives, that return is skipped.
  *
- * Silent by design: an update check is not something a user asked for, and the
- * failure modes (offline, EAS unreachable) resolve themselves. The running
- * bundle's build date is shown on the Settings screen so "am I current?" is
- * still answerable.
+ * Quiet by design: a check is silent, and so are its failures (offline, EAS
+ * unreachable). When a newer bundle lands, the member gets one toast per
+ * session saying it loads the next time the app starts (Matt, 2026-10-19), and Settings
+ * adds "update ready" beside the running bundle's build date.
  */
+const showUpdateNote = (): void =>
+  showToast(UPDATE_READY_MESSAGE, { durationMs: 6_000, announce: true });
+
 export function useOtaUpdates(): void {
   const inFlight = useRef(false);
   const lastCheckAt = useRef<number | null>(null);
   const backgroundedAt = useRef<number | null>(null);
-  /** A bundle was downloaded at launch and is waiting for a real return. */
-  const pending = useRef(false);
+  /** The update note is owed: a download landed while the app was away. */
+  const noteOwed = useRef(false);
 
   useEffect(() => {
     let unmounted = false;
@@ -51,45 +49,25 @@ export function useOtaUpdates(): void {
         lastCheckAt: lastCheckAt.current,
         backgroundedAt: awayAt,
         trigger,
-        pending: pending.current,
       });
       if (action === 'skip') return;
       inFlight.current = true;
-      if (action !== 'reload') lastCheckAt.current = now;
+      lastCheckAt.current = now;
       try {
-        // `Updates` is a module namespace, not a plain object — spread the
-        // three calls we use so the injectable shape is explicit.
+        // `Updates` is a module namespace, not a plain object — name the two
+        // calls used so the injectable shape is explicit. No reloadAsync.
         const api: UpdatesApi = {
           isEnabled: Updates.isEnabled,
           checkForUpdateAsync: () => Updates.checkForUpdateAsync(),
           fetchUpdateAsync: () => Updates.fetchUpdateAsync(),
-          // Mark the stage first: if the app dies during the reload, the next
-          // launch reports an early_exit at "ota_reload" (src/lib/crashLog.ts).
-          reloadAsync: async () => {
-            await markOtaReload();
-            try {
-              await Updates.reloadAsync();
-            } catch (err) {
-              // The reload did not happen, so this session must not stay
-              // labelled ota_reload (src/lib/crashLog.ts clearOtaReload).
-              await clearOtaReload();
-              throw err;
-            }
-          },
         };
-        if (action === 'reload') {
-          // Let a push tap arriving with this return be handled first, then
-          // leave the bundle pending if a reload now would lose the tapped
-          // pick or an unsaved draft (src/lib/reloadGuard.ts).
-          await new Promise((r) => setTimeout(r, RELOAD_SETTLE_MS));
-          if (unmounted || reloadBlockedReason() != null) return;
-          await reloadDownloaded(api);
-        } else {
-          // Only ever download: a reload mid-startup was the first-open
-          // crash, and one seconds after a return interrupts the member
-          // (src/lib/otaUpdate.ts header).
-          const out = await applyPendingUpdate(api, 'download');
-          if (out === 'downloaded') pending.current = true;
+        // Tell the member once, quietly: no button, because applying it now
+        // would mean the in-process reload this hook no longer does. If the
+        // download finished while the app was in the background, hold the
+        // note for the next return so it is not spent unseen.
+        if ((await downloadUpdate(api)) === 'downloaded' && markUpdateReady() && !unmounted) {
+          if (AppState.currentState === 'active') showUpdateNote();
+          else noteOwed.current = true;
         }
       } finally {
         if (!unmounted) inFlight.current = false;
@@ -100,6 +78,10 @@ export function useOtaUpdates(): void {
 
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') {
+        if (noteOwed.current) {
+          noteOwed.current = false;
+          showUpdateNote();
+        }
         // Read and clear together: how long we were away is the input to the
         // decision, and it must not survive into the next foreground event.
         const awayAt = backgroundedAt.current;
