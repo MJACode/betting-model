@@ -127,6 +127,8 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     # after the CLV stamp. Every other file after that stamp must not
     # rewrite the record. The NHL stats views and the skater window
     # totals are display-only and sit between the stamp and that pair.
+    # byom_facts_schema is the same kind of display file: it does not
+    # name v_public_track_record, so it may sit after the stamp.
     assert ACTIVE_MIGRATIONS[-1] == units
     assert ACTIVE_MIGRATIONS.index(clv) < len(ACTIVE_MIGRATIONS) - 1
     assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
@@ -134,6 +136,9 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     totals = "add_nhl_skater_window_totals_2026_10_17.sql"
     assert ACTIVE_MIGRATIONS.index(clv) < ACTIVE_MIGRATIONS.index(views) < ACTIVE_MIGRATIONS.index(totals)
     assert ACTIVE_MIGRATIONS.index(totals) < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
+    assert "byom_facts_schema_2026_10_16.sql" in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(clv) < ACTIVE_MIGRATIONS.index("byom_facts_schema_2026_10_16.sql")
+    assert ACTIVE_MIGRATIONS.index("byom_facts_schema_2026_10_16.sql") < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
     for name in ACTIVE_MIGRATIONS[ACTIVE_MIGRATIONS.index(clv) + 1:]:
         if name == units:
             continue

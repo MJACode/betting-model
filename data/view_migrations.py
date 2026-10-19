@@ -366,6 +366,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
+    # catalog return on the second pass. Win, loss, or push. The line
+    # basis is a label. Does not touch picks, the record views, or a
+    # live model. Unapplied until the worker's next pass.
+    "byom_facts_schema_2026_10_16.sql",
     # 2026-10-16: NHL Stats-tab reads (season totals, per-game value arrays,
     # team totals, latest pre-game prop quote). Display only. Does not
     # rewrite v_public_track_record and does not run before the CLV stamp.

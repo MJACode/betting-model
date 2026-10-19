@@ -56,13 +56,27 @@ AHEAD_OF_THE_APP = frozenset({
 
 def test_the_manifest_does_not_grow_stale_entries():
     """A relation nobody reads should not keep a grant. Not fatal -- a screen
-    may be mid-build -- but it must be deliberate, so it is asserted."""
+    may be mid-build -- but it must be deliberate, so it is asserted.
+
+    AHEAD_OF_THE_APP is the only exemption: tables granted before the screen
+    that reads them exists. Growing it without naming the new relation in
+    tests/test_byom_facts_schema.py is the failure this still catches.
+    """
+    from data.anon_readable import AHEAD_OF_THE_APP as DECLARED_AHEAD
+
     app = _app_relations()
-    unused = sorted(set(all_readable()) - app - AHEAD_OF_THE_APP)
+    # NHL display views stay on the frozenset above. The facts tables are
+    # the module tuple. Either list alone would flag the other as unused.
+    ahead = set(AHEAD_OF_THE_APP) | set(DECLARED_AHEAD)
+    assert ahead <= set(ANON_READABLE)
+    assert ahead.isdisjoint(app), (
+        f"{sorted(ahead & app)} is read by the app now. Remove it from "
+        f"AHEAD_OF_THE_APP.")
+    unused = sorted(set(all_readable()) - app - ahead)
     assert not unused, (
         f"{unused} are granted but nothing in mobile/src reads them. Remove "
         f"them from data/anon_readable.py, or add the query that needs them.")
-    already = sorted(AHEAD_OF_THE_APP & app)
+    already = sorted(ahead & app)
     assert not already, (
         f"{already} are in AHEAD_OF_THE_APP but mobile/src already reads them. "
         f"Take them off the allowlist; the stale check is what they belong to.")
@@ -114,6 +128,35 @@ def test_the_plan_revokes_before_it_grants():
     plan = _plan()
     assert plan[0] == REVOKE_DEFAULT, plan[0]
     assert all(s.startswith("GRANT SELECT") for s in plan[1:]), plan[1:3]
+
+
+def test_unapplied_facts_tables_are_not_granted_until_they_exist():
+    """GRANT and has_table_privilege raise on a missing relation. The two
+    facts tables are in the dry-run plan and out of the apply plan until
+    the migration has created them."""
+    from scripts.apply_anon_grants import MAY_BE_UNAPPLIED, _anon_can_read
+
+    assert MAY_BE_UNAPPLIED == ("byom_game_facts", "byom_prop_facts")
+    dry = " | ".join(_plan())
+    for rel in MAY_BE_UNAPPLIED:
+        assert f'ON public."{rel}"' in dry
+
+    class Missing:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchall(self):
+            return []
+
+        def fetchone(self):
+            raise AssertionError("privilege check ran on a missing relation")
+
+    applied = " | ".join(_plan(Missing()))
+    for rel in MAY_BE_UNAPPLIED:
+        assert f'ON public."{rel}"' not in applied
+    assert 'ON public."picks"' in applied
+    assert _anon_can_read(Missing(), "byom_game_facts") is True
+    assert _anon_can_read(Missing(), "byom_prop_facts") is True
 
 
 def test_every_declared_relation_is_granted_exactly_once():
