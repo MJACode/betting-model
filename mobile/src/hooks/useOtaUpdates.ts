@@ -17,8 +17,8 @@ import {
  *
  * Mounted once at the app root. Checks at cold start and on every real
  * return from the background, and only downloads. expo-updates launches the
- * downloaded bundle at the next cold start. Once a bundle is downloaded, no
- * further checks run this session. If a launch download is still running
+ * newest downloaded bundle at the next cold start; a later return that finds
+ * a newer one downloads it over the first. If a download is still running
  * when a return arrives, that return is skipped.
  *
  * Silent by design: an update check is not something a user asked for, and
@@ -30,8 +30,6 @@ export function useOtaUpdates(): void {
   const inFlight = useRef(false);
   const lastCheckAt = useRef<number | null>(null);
   const backgroundedAt = useRef<number | null>(null);
-  /** A bundle is downloaded and waiting for the next cold start. */
-  const pending = useRef(false);
 
   useEffect(() => {
     let unmounted = false;
@@ -44,7 +42,6 @@ export function useOtaUpdates(): void {
         lastCheckAt: lastCheckAt.current,
         backgroundedAt: awayAt,
         trigger,
-        pending: pending.current,
       });
       if (action === 'skip') return;
       inFlight.current = true;
@@ -57,7 +54,7 @@ export function useOtaUpdates(): void {
           checkForUpdateAsync: () => Updates.checkForUpdateAsync(),
           fetchUpdateAsync: () => Updates.fetchUpdateAsync(),
         };
-        if ((await downloadUpdate(api)) === 'downloaded') pending.current = true;
+        await downloadUpdate(api);
       } finally {
         if (!unmounted) inFlight.current = false;
       }

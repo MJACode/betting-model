@@ -20,7 +20,9 @@
  * So the app checks for itself: at cold start, and on every real return from
  * the background, and DOWNLOADS what it finds. It never applies a bundle to a
  * running app. expo-updates launches the newest downloaded bundle at the next
- * cold start, so the 2026-08-31 gap is now "one fresh start", not "two".
+ * cold start, so the 2026-08-31 gap is now "one fresh start", not "two". A
+ * return keeps checking after a download, so a second bundle published in
+ * the same session replaces the first rather than waiting a launch.
  *
  * WHY IT NEVER RELOADS (Matt, 2026-10-19, option A). Applying a bundle meant
  * Updates.reloadAsync(), which starts a new JS runtime inside the running
@@ -77,16 +79,14 @@ export function shouldCheck(s: CheckState): boolean {
 /**
  * What to do for one trigger. Pure.
  *
- *   download  launch, or a real return with nothing downloaded yet and the
- *             throttle clear: check and fetch
- *   skip      a bundle is already downloaded and waiting for the next cold
- *             start, or not a real return, or inside the throttle window
+ *   download  launch, or a real return with the throttle clear: check and
+ *             fetch (a newer bundle replaces one already downloaded)
+ *   skip      not a real return, or inside the throttle window
  */
 export type UpdateAction = 'download' | 'skip';
 
-export function nextAction(s: CheckState & { pending: boolean }): UpdateAction {
+export function nextAction(s: CheckState): UpdateAction {
   if (s.trigger === 'launch') return 'download';
-  if (s.pending) return 'skip';
   return shouldCheck(s) ? 'download' : 'skip';
 }
 

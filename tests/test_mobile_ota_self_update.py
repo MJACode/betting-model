@@ -89,8 +89,9 @@ def test_the_pieces_exist(path: str) -> None:
 
 
 def test_every_trigger_only_downloads() -> None:
-    """Launch and a real return both download; a downloaded bundle waits for
-    the next cold start and no further check runs this session."""
+    """Launch and a real return both download, and a return keeps checking
+    after a download so a second bundle in one session is not a launch late
+    (UX review, 2026-10-19)."""
     hook = _read("src/hooks/useOtaUpdates.ts")
     assert "void run('launch', null);" in hook
     assert "nextAction(" in hook, "the hook must route every trigger through nextAction"
@@ -98,4 +99,4 @@ def test_every_trigger_only_downloads() -> None:
     assert "export type UpdateAction = 'download' | 'skip';" in lib
     body = lib.split("export function nextAction", 1)[1].split("\n}\n", 1)[0]
     assert "if (s.trigger === 'launch') return 'download';" in body
-    assert "if (s.pending) return 'skip';" in body
+    assert "pending" not in body, "a downloaded bundle must not stop later checks"

@@ -96,22 +96,20 @@ check(
   `${MIN_BACKGROUND_MS}ms`,
 );
 
-// ── nextAction: download only, and once per session ─────────────────────────
+// ── nextAction: download only ─────────────────────────
 
 const away = NOW - MIN_BACKGROUND_MS;
 check('launch downloads',
-  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: null, trigger: 'launch', pending: false }) === 'download');
-check('a real return with nothing downloaded checks again',
-  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground', pending: false }) === 'download');
-check('a real return with a bundle already downloaded does nothing (it waits for the next cold start)',
-  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground', pending: true }) === 'skip');
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: null, trigger: 'launch' }) === 'download');
+check('a real return checks again, even after a download (a newer bundle replaces it)',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground' }) === 'download');
 check('a brief absence does nothing',
-  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: NOW - (MIN_BACKGROUND_MS - 1), trigger: 'foreground', pending: false }) === 'skip');
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: NOW - (MIN_BACKGROUND_MS - 1), trigger: 'foreground' }) === 'skip');
 check('a real return inside the throttle does nothing',
-  nextAction({ now: NOW, lastCheckAt: NOW - 1_000, backgroundedAt: away, trigger: 'foreground', pending: false }) === 'skip');
+  nextAction({ now: NOW, lastCheckAt: NOW - 1_000, backgroundedAt: away, trigger: 'foreground' }) === 'skip');
 check('no trigger can ask for anything but download or skip',
-  [true, false].every((pending) => ['launch', 'foreground'].every((trigger) =>
-    ['download', 'skip'].includes(nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: trigger as 'launch', pending })))));
+  ['launch', 'foreground'].every((trigger) =>
+    ['download', 'skip'].includes(nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: trigger as 'launch' }))));
 
 // ── downloadUpdate ──────────────────────────────────────────────────────────
 
