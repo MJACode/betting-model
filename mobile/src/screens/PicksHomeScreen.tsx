@@ -91,6 +91,7 @@ import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
@@ -157,6 +158,9 @@ export function PicksHomeScreen() {
   const slip = useParlaySlip();
 
   const [view, setView] = useState<PicksView>('today');
+  // School abbreviations for the Signals compact line. Other sports already
+  // store abbreviations on the game row.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
@@ -816,7 +820,9 @@ export function PicksHomeScreen() {
               onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
               liveState={liveStates.get(item.pick.game_id) ?? null}
               showSignalBadge={view === 'today'}
-              paused={view === 'today' && isPausedForDisplay(item.pick)}
+              paused={isPausedForDisplay(item.pick)}
+              layout="signals"
+              teamAbbrevs={ncaafAbbrevs}
             />
           );
         }}

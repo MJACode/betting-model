@@ -183,7 +183,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
-  ['src/screens/StatsScreen.tsx', 'retryBtn,pressed', 1], // 39.5pt
 ];
 
 function walk(d: string, out: string[] = []): string[] {
@@ -629,14 +628,18 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard label carries game status + time (gameStatusSpeech)', /gameStatusSpeech\(gameStatus\(game, liveState\), gameDayLabelET\(game\?\.commence_time\)\)/.test(card));
 check('PickCard label carries the stake, in words', /stakeCaption \? `Stake \$\{unitsSpeech\(stakeCaption\)\}` : null/.test(card));
 check('PickCard label carries when it posted and the started line', /timing \? timing\.label : null/.test(card) && /startedSpoken,/.test(card));
-check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && handoff/.test(card));
+check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && actionHandoff/.test(card));
 check('PickCard: "Game started" is spoken once — in cardLabel (gameStartedSpeech, full book name), the nested line hidden',
   /startedSpoken,\n/.test(card) && /gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)/.test(card) &&
     /style=\{styles\.startedLine\}\s*accessibilityRole="text"\s*accessibilityElementsHidden\s*importantForAccessibility="no-hide-descendants"/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('Pick Detail: the started card speaks gameStartedSpeech, like the card (#847)', /styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)\}/.test(detail));
 check('PicksHome: "—" header counts speak "count not available", like the sub-tabs (#845)', /<Text style=\{styles\.subtitle\} accessibilityLabel=\{unknownCountSpeech\(unitsSpeech\(subtitle\)\)\}>/.test(read('src/screens/PicksHomeScreen.tsx')));
-check('TrackRecord: "— settled picks" speaks "count not available"', /accessibilityLabel=\{notLoaded \? unknownCountSpeech\('— settled picks'\) : undefined\}/.test(read('src/screens/TrackRecordScreen.tsx')));
+check('TrackRecord hero is one stop, units first, and a missing count still says so',
+  /accessibilityRole="summary"/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /accessibilityLabel=\{heroLabel\}/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /unknownCountSpeech\('— settled picks'\)/.test(read('src/lib/recordHero.ts')) &&
+  /Units unavailable/.test(read('src/lib/recordHero.ts')));
 // The sentence itself lives in lib/heroPriceText.ts ("looks off", or for an
 // old price which book has not updated it and since when); the pytest pin
 // and verify_pick_cta run it.
@@ -666,8 +669,15 @@ check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
+check('Stats threshold bubble: the name is the label and the gesture is the hint',
+  /accessibilityLabel=\{thresholdBubbleLabel\(faceOf\(value\), statLabel\)\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityHint=\{THRESHOLD_TYPE_HINT\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityActions=\{\[\{ name: 'activate' \}\]\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /actionName === 'activate'\) openDraft\(\)/.test(read('src/screens/StatsScreen.tsx')) &&
+    /return `Threshold \$\{value\}`;/.test(read('src/lib/lineRuler.ts')) &&
+    /export const THRESHOLD_TYPE_HINT = 'double tap to type a value';/.test(read('src/lib/lineRuler.ts')));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
-  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
+  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'RecordInfoSheet', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);
     return /<View style=\{styles\.backdrop\}>/.test(s) && !/<Pressable\s+style=\{styles\.backdrop\}/.test(s);
   }));
