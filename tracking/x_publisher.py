@@ -20,7 +20,9 @@ still stops the slate and every recap.
 
 Manual marketing posts are not rendered here. They are rows in
 social_post_queue, drained by tracking.social_posts, and they call
-deliver_tweet below. Pick and recap posts do not.
+deliver_tweet below. That drain can also upload a jpeg, png, or webp
+with POST /2/media/upload, signed the same way, and pass the returned
+ids as media_ids. Pick and recap posts do not.
 
 WHY NO LINKS, ENFORCED IN CODE. X moved to pay-per-use in February 2026 and
 charges $0.015 per post -- but $0.20 if the post contains a URL, added April
@@ -134,7 +136,12 @@ logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 
 X_POST_URL = "https://api.x.com/2/tweets"
+X_MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload"
 MAX_TWEET = 280
+# One-shot tweet_image on POST /2/media/upload. GIF and video use a different
+# category and are not accepted here.
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_TWEET_IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp")
 
 # Anything that would make X charge the link rate, or that reads as a URL to
 # their parser. Kept broad on purpose: the cost of a false positive is a
@@ -663,7 +670,8 @@ class TweetDelivery:
 
 def post_tweet(text: str, dry_run: bool = False,
                reply_to: str | None = None,
-               allow_link: bool = False) -> str | None:
+               allow_link: bool = False,
+               media_ids: list[str] | None = None) -> str | None:
     """POST one tweet. Returns its id, or None when it did not post.
 
     Never raises into a caller: a publishing surface must not be able to break
@@ -673,15 +681,22 @@ def post_tweet(text: str, dry_run: bool = False,
     allow_link defaults off. Pick and recap posts leave it off, so a URL is
     still refused before the request. A manual row passes True only when that
     row's allow_link column is set — X bills a URL at $0.20 instead of $0.015.
+
+    media_ids defaults off. Pick and recap posts leave it unset, so the JSON
+    body has no media key. A manual row passes ids only after each image has
+    already been uploaded.
     """
+    extra = {"media_ids": media_ids} if media_ids else {}
     tweet_id, _limited = _deliver_tweet(
-        text, dry_run=dry_run, reply_to=reply_to, allow_link=allow_link)
+        text, dry_run=dry_run, reply_to=reply_to, allow_link=allow_link,
+        **extra)
     return tweet_id
 
 
 def _deliver_tweet(text: str, dry_run: bool = False,
                    reply_to: str | None = None,
-                   allow_link: bool = False) -> tuple[str | None, bool]:
+                   allow_link: bool = False,
+                   media_ids: list[str] | None = None) -> tuple[str | None, bool]:
     """(tweet id or None, rate_limited).
 
     POST /2/tweets allows 100 posts per user per 15 minutes. A 429 is not a
@@ -690,7 +705,8 @@ def _deliver_tweet(text: str, dry_run: bool = False,
     the old "posted" sentinel so existing callers do not treat it as a miss.
     """
     delivered = deliver_tweet(
-        text, dry_run=dry_run, reply_to=reply_to, allow_link=allow_link)
+        text, dry_run=dry_run, reply_to=reply_to, allow_link=allow_link,
+        media_ids=media_ids)
     if delivered.outcome == "posted_without_id":
         return "posted", False
     return delivered.tweet_id, delivered.rate_limited
@@ -698,13 +714,17 @@ def _deliver_tweet(text: str, dry_run: bool = False,
 
 def deliver_tweet(text: str, dry_run: bool = False,
                   reply_to: str | None = None,
-                  allow_link: bool = False) -> TweetDelivery:
+                  allow_link: bool = False,
+                  media_ids: list[str] | None = None) -> TweetDelivery:
     """POST one tweet and say why it did or did not.
 
     rejected is an HTTP 4xx other than 429: X refused, so the tweet was not
     created. transport is a network error or a 5xx: the tweet may already
     exist, and a retry can double-post. Callers that must not double-post
     treat transport as uncertain rather than as a miss.
+
+    media_ids, when passed, is sent as media.media_ids. When it is None or
+    empty the key is omitted, which is the pick and recap body.
     """
     if not _enabled():
         logger.info("X publisher: RUN_X_PUBLISHER=0 — skipping")
@@ -731,6 +751,14 @@ def deliver_tweet(text: str, dry_run: bool = False,
         payload: dict = {"text": text}
         if reply_to:
             payload["reply"] = {"in_reply_to_tweet_id": str(reply_to)}
+        if media_ids:
+            cleaned = [str(item) for item in media_ids]
+            if (len(cleaned) > 4
+                    or any(not re.fullmatch(r"[0-9]{1,19}", item) for item in cleaned)):
+                return TweetDelivery(
+                    None, False, "refused",
+                    "media_ids must be 1 to 4 numeric ids")
+            payload["media"] = {"media_ids": cleaned}
         resp = requests.post(
             X_POST_URL,
             json=payload,
@@ -755,6 +783,136 @@ def deliver_tweet(text: str, dry_run: bool = False,
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"X publisher: post failed ({exc})")
         return TweetDelivery(None, False, "transport", str(exc)[:200])
+
+
+class ImageFetch:
+    """Bytes downloaded for one manual-post image. outcome is fetched,
+    failed, or rate_limited. Pick and recap posts never construct one."""
+
+    def __init__(self, content: bytes | None, media_type: str | None,
+                 outcome: str, detail: str = ""):
+        self.content = content
+        self.media_type = media_type
+        self.outcome = outcome
+        self.detail = detail
+
+
+class MediaUpload:
+    """One POST /2/media/upload. outcome is uploaded, rejected, transport,
+    rate_limited, or skipped. A missing media_id is not uploaded."""
+
+    def __init__(self, media_id: str | None, outcome: str, detail: str = ""):
+        self.media_id = media_id
+        self.outcome = outcome
+        self.detail = detail
+
+
+def _sniff_tweet_image(content: bytes) -> str | None:
+    """The type X's one-shot tweet_image call accepts, from the file bytes."""
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def fetch_https_image(url: str) -> ImageFetch:
+    """GET one https image. Does not tweet and does not upload.
+
+    The final URL after redirects must stay https. The type is taken from
+    the bytes, not the response header. GIF is refused: the one-shot
+    tweet_image category does not list it.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return ImageFetch(None, None, "failed", "image URL must be https")
+    try:
+        resp = requests.get(url, timeout=30, stream=True)
+    except Exception as exc:  # noqa: BLE001 — the caller marks the row failed
+        return ImageFetch(None, None, "failed", f"image fetch failed: {exc}"[:200])
+    try:
+        final = urllib.parse.urlparse(resp.url)
+        if final.scheme != "https":
+            return ImageFetch(None, None, "failed", "image URL redirected off https")
+        if resp.status_code == 429:
+            return ImageFetch(None, None, "rate_limited", "image host HTTP 429")
+        if resp.status_code != 200:
+            return ImageFetch(None, None, "failed", f"image fetch HTTP {resp.status_code}")
+        buf = bytearray()
+        for chunk in resp.iter_content(65536):
+            if not chunk:
+                continue
+            buf.extend(chunk)
+            if len(buf) > MAX_IMAGE_BYTES:
+                return ImageFetch(None, None, "failed", "image is over 5MB")
+        content = bytes(buf)
+    except Exception as exc:  # noqa: BLE001
+        return ImageFetch(None, None, "failed", f"image fetch failed: {exc}"[:200])
+    finally:
+        resp.close()
+    if content.startswith(b"GIF87a") or content.startswith(b"GIF89a"):
+        return ImageFetch(
+            None, None, "failed",
+            "gif is not a one-shot tweet_image; use jpeg, png, or webp")
+    media_type = _sniff_tweet_image(content)
+    if media_type not in _TWEET_IMAGE_TYPES:
+        return ImageFetch(None, None, "failed", "image is not jpeg, png, or webp")
+    if not content:
+        return ImageFetch(None, None, "failed", "image is empty")
+    return ImageFetch(content, media_type, "fetched", "")
+
+
+def upload_tweet_image(content: bytes, media_type: str) -> MediaUpload:
+    """POST /2/media/upload with the same OAuth 1.0a header as a tweet.
+
+    The JSON body is not part of the signature. Does not create a tweet.
+    A 2xx whose data.id is missing, or whose processing state is not ready,
+    returns no media id so the caller does not attach one.
+    """
+    if media_type not in _TWEET_IMAGE_TYPES:
+        return MediaUpload(None, "rejected", f"unsupported media_type {media_type}")
+    if not content or len(content) > MAX_IMAGE_BYTES:
+        return MediaUpload(None, "rejected", "image is empty or over 5MB")
+    if not _enabled():
+        return MediaUpload(None, "skipped", "RUN_X_PUBLISHER=0")
+    creds = _creds()
+    if not creds:
+        return MediaUpload(None, "skipped", "credentials not configured")
+    payload = {
+        "media": base64.b64encode(content).decode("ascii"),
+        "media_category": "tweet_image",
+        "media_type": media_type,
+    }
+    try:
+        resp = requests.post(
+            X_MEDIA_UPLOAD_URL,
+            json=payload,
+            headers={"Authorization": _auth_header("POST", X_MEDIA_UPLOAD_URL, creds),
+                     "Content-Type": "application/json"},
+            timeout=60,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return MediaUpload(None, "transport", str(exc)[:200])
+    if resp.status_code not in (200, 201):
+        detail = f"HTTP {resp.status_code} {resp.text[:200]}"
+        if resp.status_code == 429:
+            return MediaUpload(None, "rate_limited", detail)
+        if 400 <= resp.status_code < 500:
+            return MediaUpload(None, "rejected", detail)
+        return MediaUpload(None, "transport", detail)
+    try:
+        data = (resp.json() or {}).get("data") or {}
+    except Exception as exc:  # noqa: BLE001
+        return MediaUpload(None, "rejected", f"upload 2xx was not json: {exc}"[:200])
+    media_id = str(data.get("id") or "")
+    if not re.fullmatch(r"[0-9]{1,19}", media_id):
+        return MediaUpload(None, "rejected", "upload 2xx with no media id")
+    state = str((data.get("processing_info") or {}).get("state") or "")
+    if state in ("pending", "in_progress", "failed"):
+        return MediaUpload(None, "rejected", f"image not ready ({state})")
+    return MediaUpload(media_id, "uploaded", "")
 
 
 # ── Ledgered publishing ───────────────────────────────────────────────────────
