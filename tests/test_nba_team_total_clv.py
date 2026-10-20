@@ -192,11 +192,14 @@ def test_a_line_pick_with_only_a_pinnacle_close_does_not_crash(model_id, market,
 
 def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
     """RULE: closing-line value is optional, grading is not. A capture that
-    raises is logged and rolled back, and the game, prop, UFC and golf picks
-    are still graded on the same pass."""
+    raises is rolled back to its savepoint (tracking.paper_tracker._clv_attempt),
+    and the game, prop, UFC and golf picks are still graded on the same pass."""
     calls: list[str] = []
 
     class Conn:
+        def execute(self, sql, *a, **k):
+            calls.append(" ".join(str(sql).split()[:3]))
+
         def commit(self):
             calls.append("commit")
 
@@ -207,6 +210,7 @@ def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
             pass
 
     def boom(*a, **k):
+        calls.append("capture")
         raise AttributeError("'NoneType' object has no attribute 'get'")
 
     zero = (0, 0, 0, 0, 0.0, 0.0)
@@ -229,7 +233,9 @@ def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
     pt.settle_picks("2026-10-10")
     assert {"_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
             "_settle_golf_picks"} <= set(calls)
-    assert "rollback" in calls[:calls.index("_settle_game_picks_window")]
+    before = calls[:calls.index("_settle_game_picks_window")]
+    assert "capture" in before
+    assert "ROLLBACK TO SAVEPOINT" in before[before.index("capture"):]
 
 
 def _lateral(sql: str, alias: str) -> str:

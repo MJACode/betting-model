@@ -794,19 +794,21 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
     'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
   // The market's fair chance plus the walk-forward uplift (+0.1022 for
-  // 2026-27): on the 349 graded bets that is their own 62% win rate, at
-  // prices implying 53%. docs/thresholds.md plans on +7.7%, not +16.6%.
+  // 2026-27): on the 349 graded bets, 61.6% won where the market's fair
+  // chance averaged 51.4%. docs/thresholds.md plans on +7.7%, not +16.6%.
   nba_team_total_luck:
-    'What our model says is the chance this side hits: the market’s fair chance plus about 10 points, ' +
-    'the extra these bets won over the last three NBA seasons (62% won, at prices implying 53%). Read it ' +
-    'as an upper bound: plan on a return nearer 8% than the 17% those seasons made.',
+    'What our model says is the chance this side hits: the market’s fair chance plus about 10 percentage ' +
+    'points, the extra these bets won over the last three NBA seasons (62% won where the market’s fair ' +
+    'chance averaged 51%). Read it as an upper bound: plan on a return nearer 8% than the 17% those ' +
+    'seasons made.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
   return PROBABILITY_NOTE[modelId] ?? 'What our model says is the chance this side hits.';
 }
 
-// The NBA models that post each game once, about an hour before tip: the
+// The NBA models that check each game once, about an hour before tip, and
+// post only the bets they find: the
 // full-game totals overs (scripts/nba_total_luck_card.py, 60-66 minutes out),
 // the home team-total unders (scripts/nba_team_total_luck_card.py, 45-66) and
 // the two prop models (scripts/nba_prop_market_card.py,
@@ -825,17 +827,22 @@ export interface ModelPageTiming {
   body: string;
   /** The empty state's subtitle: when the page will change. */
   empty: string;
+  /** The line under today's picks when the model is not paused. */
+  note: string;
 }
 
 /** When a model's page fills, said on its own page. */
 export function modelPageTiming(modelId: string): ModelPageTiming {
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {
     return {
-      title: 'Posted once per game',
+      title: 'Checked once per game',
       body:
-        'This model posts each game once, about an hour before tip-off, and never re-prices it. ' +
-        'A bet stays at the line and price it posted at.',
-      empty: 'This model posts each game about an hour before tip-off. Nothing has posted yet for today’s slate.',
+        'This model checks each game once, about an hour before tip-off, and posts a bet only when it ' +
+        'finds one. A posted bet is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model checks each game about an hour before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted about an hour before tip-off and never re-priced.',
     };
   }
   return {
@@ -844,6 +851,7 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       "A pick locks the first time this model scores it today and never changes after that — it can't flip between BET and AVOID as lines move.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm, but only newly-priced games get scored on later refreshes.",
     empty:
       "This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab.",
+    note: "Locked for the day once scored — won't change again until the game ends.",
   };
 }
 

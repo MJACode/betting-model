@@ -27,6 +27,7 @@ import {
   playerNameFromPickLabel,
   snapshotMatchesLock,
   splitPickTitle,
+  pickRowTitle,
   todayBoardHandoff,
   MODEL_BOOK,
 } from '../src/lib/markets';
@@ -858,6 +859,17 @@ check(
     tt.primary === 'MIL Team Total Under 115.5' && tt.secondary === null,
     JSON.stringify(tt),
   );
+  // One-line rows (a model's page, the tracked list) show the bet, not the
+  // matchup; a prop row keeps its player name.
+  check(
+    'a team-total row reads the bet',
+    pickRowTitle({ pick_label: 'BOS @ MIL — MIL Team Total Under 115.5' }) === 'MIL Team Total Under 115.5',
+  );
+  check(
+    'a prop row keeps the whole label',
+    pickRowTitle({ pick_label: 'Roquan Smith Under 9.5 Tackles' }) === 'Roquan Smith Under 9.5 Tackles' &&
+      pickRowTitle({ pick_label: 'BOS vs MIL Over 225.5' }) === 'BOS vs MIL Over 225.5',
+  );
 }
 {
   const prop = splitPickTitle({ pick_label: 'Roquan Smith Under 9.5 Tackles' });
@@ -1020,8 +1032,8 @@ check(
   );
   check(
     'a team total names the club the market belongs to',
-    signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Over 3.5' &&
-      signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Under 2.5' &&
+    signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Team Total Over 3.5' &&
+      signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Team Total Under 2.5' &&
       signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Over 8.5',
   );
   check(

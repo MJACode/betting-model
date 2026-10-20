@@ -30,7 +30,7 @@ import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickRowTitle, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -197,7 +197,7 @@ export function BuiltInModelDetailScreen() {
             <Text style={styles.sectionNote}>
               {paused
                 ? 'Paused, so there are no picks today.'
-                : "Locked for the day once scored — won't change again until the game ends."}
+                : modelPageTiming(modelId).note}
             </Text>
           </>
         }
@@ -433,7 +433,7 @@ function TodayPickRow({
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
-            {pick.pick_label}
+            {pickRowTitle(pick)}
           </Text>
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
@@ -478,7 +478,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
-            {pick.pick_label}
+            {pickRowTitle(pick)}
           </Text>
           <View style={styles.pickMeta}>
             <Text style={styles.pickMetaText}>{dayLabelET(pick.game_date)}</Text>

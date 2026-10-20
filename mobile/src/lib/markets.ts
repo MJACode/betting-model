@@ -171,19 +171,40 @@ export function playerNameFromPickLabel(label: string): string | null {
  * any suffix the scorer already wrote). The label is quoted, never rebuilt
  * (CLAUDE.md §00 / §1c).
  */
+/**
+ * A team total's bet, quoted from its label after the dash:
+ * "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total Under 115.5".
+ * Null for any other label. The whole label is wider than a phone's one-line
+ * title, so it clipped the side and the number, the part the row is for.
+ */
+export function teamTotalBet(label: string): string | null {
+  const dash = label.indexOf(' — ');
+  if (dash > 0 && label.slice(dash + 3).includes(' Team Total ')) {
+    return label.slice(dash + 3).trim();
+  }
+  return null;
+}
+
+/**
+ * The text of a one-line pick row (a model's page, the tracked list): a team
+ * total's bet without the matchup (the row's date already places the game, the
+ * home team plays once a night), every other label as stored. A prop keeps its
+ * player name. The row's accessibility label keeps the whole stored label.
+ */
+export function pickRowTitle(pick: { pick_label: string }): string {
+  const label = pick.pick_label ?? '';
+  return teamTotalBet(label) ?? label;
+}
+
 export function splitPickTitle(pick: { pick_label: string }): {
   primary: string;
   secondary: string | null;
 } {
   const label = pick.pick_label ?? '';
-  // A team total ("BOS @ MIL — MIL Team Total Under 115.5"): the bold line is
-  // the bet, quoted from the label after its dash. The card's header already
-  // shows the matchup, and the whole label is wider than a phone's title line,
-  // so it clipped the team whose total it is.
-  const dash = label.indexOf(' — ');
-  if (dash > 0 && label.slice(dash + 3).includes(' Team Total ')) {
-    return { primary: label.slice(dash + 3).trim(), secondary: null };
-  }
+  // A team total: the bold line is the bet (the card's header already shows
+  // the matchup).
+  const bet = teamTotalBet(label);
+  if (bet) return { primary: bet, secondary: null };
   const player = playerNameFromPickLabel(label);
   if (!player || /\s(?:vs|@)\s/.test(player)) {
     return { primary: label, secondary: null };

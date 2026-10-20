@@ -158,13 +158,17 @@ eq(betSlotForModel('nba_team_total_luck', 'game'), null, 'not a picker slot');
 // The probability is the graded seasons' own win rate: the note says to plan on less.
 const note = modelProbabilityNote('nba_team_total_luck');
 eq([note.includes('upper bound'), note.includes('nearer 8%')], [true, true], note);
-// Its page says when it fills: once a game, about an hour before tip, not the morning run.
+// Its page says when it fills: each game is checked once, about an hour before
+// tip, and only some games get a bet; not the morning run.
 for (const id of ['nba_team_total_luck', 'nba_total_luck', 'nba_prop_market', 'nba_prop_projection']) {
   const t = modelPageTiming(id);
-  eq([t.title, t.empty.includes('about an hour before tip-off'), t.body.includes('hourly')],
-     ['Posted once per game', true, false], id);
+  eq([t.title, t.empty.includes('about an hour before tip-off'), t.empty.includes('only some'),
+      t.body.includes('hourly'), t.note],
+     ['Checked once per game', true, true, false, 'Posted about an hour before tip-off and never re-priced.'], id);
 }
-eq(modelPageTiming('mlb_over_under').title, 'Picks lock for the day', 'every other model keeps its copy');
+eq([modelPageTiming('mlb_over_under').title, modelPageTiming('mlb_over_under').note],
+   ['Picks lock for the day', "Locked for the day once scored — won't change again until the game ends."],
+   'every other model keeps its copy');
 """)
 
 
