@@ -1284,9 +1284,9 @@
     "semantic_hash": "66c3e0c1c83c0187587c5324793e6ec3"
   },
   "mobile/scripts/verify_a11y.ts": {
-    "mtime": 1792479401.3853538,
-    "seen": 1792479553.2822003,
-    "ast_hash": "9f4995245ecab9c95e4e140ca9aace27",
+    "mtime": 1792499173.3233008,
+    "seen": 1792499292.4523668,
+    "ast_hash": "426df9a9af5282ea2d0f6800c01bc3b8",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_auth.ts": {
@@ -1332,9 +1332,9 @@
     "semantic_hash": "a8595df550ecebf2fe37f9c6a2278f09"
   },
   "mobile/scripts/verify_contrast_tokens.ts": {
-    "mtime": 1792479401.3865316,
-    "seen": 1792479553.2822144,
-    "ast_hash": "0d627e07bd2611f567d03053a3aac8c1",
+    "mtime": 1792499173.3253057,
+    "seen": 1792499292.4523826,
+    "ast_hash": "6edca890f9ec37fefc96e8706c7a4497",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_custom_model_filters.ts": {
@@ -1734,10 +1734,10 @@
     "semantic_hash": ""
   },
   "mobile/src/components/ErrorState.tsx": {
-    "mtime": 1792300984.2443328,
-    "seen": 1792479553.282332,
-    "ast_hash": "8363a7888851dc8ea23f82236cdb2693",
-    "semantic_hash": "8363a7888851dc8ea23f82236cdb2693"
+    "mtime": 1792499173.3273132,
+    "seen": 1792499292.4525177,
+    "ast_hash": "7fd92444bc60115c402bdf32f6f979d9",
+    "semantic_hash": ""
   },
   "mobile/src/components/GameStatusPill.tsx": {
     "mtime": 1792300984.2455006,
@@ -2340,10 +2340,10 @@
     "semantic_hash": "b1d67d979bb425ef3d3da081d89bffcb"
   },
   "mobile/src/lib/a11y.ts": {
-    "mtime": 1792300984.304638,
-    "seen": 1792479553.2824867,
-    "ast_hash": "72692487f4a7f4a358f5f0b6fa367990",
-    "semantic_hash": "72692487f4a7f4a358f5f0b6fa367990"
+    "mtime": 1792499173.3273132,
+    "seen": 1792499292.4526985,
+    "ast_hash": "a461d5ebf55730163e54b8bd4edb0db6",
+    "semantic_hash": ""
   },
   "mobile/src/lib/auth.ts": {
     "mtime": 1792300984.304638,
@@ -2706,9 +2706,9 @@
     "semantic_hash": "52c428d16a6b05319b42472d153274be"
   },
   "mobile/src/lib/queries.ts": {
-    "mtime": 1792479401.4113286,
-    "seen": 1792479553.2825902,
-    "ast_hash": "b6e2654e98735d282f862d9d22b56c7e",
+    "mtime": 1792499173.329321,
+    "seen": 1792499292.4528234,
+    "ast_hash": "0d74f9ce2bf70a03ca74ae33d437e335",
     "semantic_hash": ""
   },
   "mobile/src/lib/rangeSlider.ts": {
@@ -2760,10 +2760,10 @@
     "semantic_hash": "af897e2c702882dca3e90af0015d8cc2"
   },
   "mobile/src/lib/sportsbookLinks.ts": {
-    "mtime": 1792300984.3355062,
-    "seen": 1792479553.2826066,
-    "ast_hash": "94964a27b29c6c09d1c03bb92986ef4a",
-    "semantic_hash": "94964a27b29c6c09d1c03bb92986ef4a"
+    "mtime": 1792499173.331328,
+    "seen": 1792499292.4528415,
+    "ast_hash": "b0729366492ab0b9806a44aac47d0f49",
+    "semantic_hash": ""
   },
   "mobile/src/lib/statCatalog.ts": {
     "mtime": 1792300984.3355062,
@@ -2814,9 +2814,9 @@
     "semantic_hash": "0e2b257ef3161e5aaf3fd2f37c130742"
   },
   "mobile/src/lib/theme.ts": {
-    "mtime": 1792479401.4145217,
-    "seen": 1792479553.2826214,
-    "ast_hash": "906020ba7c68179a8d1107612d812244",
+    "mtime": 1792499173.331328,
+    "seen": 1792499292.4528592,
+    "ast_hash": "111f4d1c1258507ff8757b2e479ee771",
     "semantic_hash": ""
   },
   "mobile/src/lib/thresholds.generated.ts": {
@@ -2928,9 +2928,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/PicksHomeScreen.tsx": {
-    "mtime": 1792479401.4165535,
-    "seen": 1792479553.282654,
-    "ast_hash": "474c3d0fccde05f9b3383ec62f9cb1b7",
+    "mtime": 1792499173.3333342,
+    "seen": 1792499292.4528952,
+    "ast_hash": "758de5e0a26d015620010104ff229c5e",
     "semantic_hash": ""
   },
   "mobile/src/screens/PlayerStatsScreen.tsx": {
@@ -2976,9 +2976,9 @@
     "semantic_hash": ""
   },
   "mobile/src/types/index.ts": {
-    "mtime": 1792479401.4226427,
-    "seen": 1792479553.2826657,
-    "ast_hash": "88e74377fcfabe75657853236f966e9a",
+    "mtime": 1792499173.3333342,
+    "seen": 1792499292.4529088,
+    "ast_hash": "7733906bb26fec1a5ddb02392a11755f",
     "semantic_hash": ""
   },
   "mobile/tsconfig.json": {
@@ -6054,9 +6054,9 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_contrast_tokens.py": {
-    "mtime": 1792300991.0369377,
-    "seen": 1792479553.283547,
-    "ast_hash": "1fb0327c7209f7c8164c85ea98258249",
+    "mtime": 1792499173.3333342,
+    "seen": 1792499292.4539182,
+    "ast_hash": "b486990cf055f9caa65bee24cb4ddbfc",
     "semantic_hash": ""
   },
   "tests/test_mobile_error_states.py": {
@@ -7698,9 +7698,9 @@
     "semantic_hash": "73af88cc98c906998786e1420f223517"
   },
   ".github/workflows/pr-ci.yml": {
-    "mtime": 1792479401.2856135,
-    "seen": 1792479553.2840757,
-    "ast_hash": "c237e0ecc0031b46b0ea63bde6205e9d",
+    "mtime": 1792499173.3181798,
+    "seen": 1792499292.4545395,
+    "ast_hash": "184b0f42df9589639f2660e15d263c72",
     "semantic_hash": ""
   },
   ".github/workflows/prune-merged-branches.yml": {
@@ -9573,6 +9573,48 @@
     "mtime": 1792301867.0542438,
     "seen": 1792479553.28395,
     "ast_hash": "e32f2b2790a5b0865f08ef2c41da13f2",
+    "semantic_hash": ""
+  },
+  "data/migrations/add_draw_price_to_latest_odds_view_2026_10_16.sql": {
+    "mtime": 1792499173.3181798,
+    "seen": 1792499292.4520986,
+    "ast_hash": "bdd8a7b93561054fc6d2f57f6708577a",
+    "semantic_hash": ""
+  },
+  "mobile/scripts/verify_lines_board.ts": {
+    "mtime": 1792499173.3253057,
+    "seen": 1792499292.4524102,
+    "ast_hash": "fc3dfc076cd099b31f40cac88209383c",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/AllBooksSheet.tsx": {
+    "mtime": 1792499173.3253057,
+    "seen": 1792499292.4524908,
+    "ast_hash": "eae9b3f95adaf5508b50f672b1fc8b1d",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/LinesBoard.tsx": {
+    "mtime": 1792499173.3273132,
+    "seen": 1792499292.452529,
+    "ast_hash": "c5eafe1b7183dbb6a5907e762456500d",
+    "semantic_hash": ""
+  },
+  "mobile/src/hooks/useLinesBoard.ts": {
+    "mtime": 1792499173.3273132,
+    "seen": 1792499292.4526336,
+    "ast_hash": "9aa8de7e4725d92ad27183d4e9ff7b3d",
+    "semantic_hash": ""
+  },
+  "mobile/src/lib/linesBoard.ts": {
+    "mtime": 1792499173.329321,
+    "seen": 1792499292.4527702,
+    "ast_hash": "1cf817f27257436096bc4d0a4309441f",
+    "semantic_hash": ""
+  },
+  "tests/test_mobile_lines_board.py": {
+    "mtime": 1792499173.3353405,
+    "seen": 1792499292.4539247,
+    "ast_hash": "8ff8f4e63941511f07af53cb12e00176",
     "semantic_hash": ""
   }
 }
