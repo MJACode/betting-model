@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, migration guards use to_regclass so a missing table does not fail the file; a locked social_post_queue stays a no-op |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual posts to @SignalBasePicks: social_post_queue drained by the existing X client; ledger thread seeded queued; nothing posted |
