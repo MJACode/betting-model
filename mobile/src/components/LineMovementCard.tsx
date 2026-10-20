@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { gameStartAt, historyFrom, sincePick, type PickWindow } from '@/lib/lineHistory';
 import { lineMovementView, type Snap } from '@/lib/lineMovementView';
-import { canShowLineMovementHistory, gameMarketForModel, historyBookForPick, propMarketForModel } from '@/lib/markets';
+import { canShowLineMovementHistory, gameMarketForModel, historyBookForPick, propMarketForPick } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -45,7 +45,8 @@ export function LineMovementCard({ pick, playerName, commenceTime }: Props) {
   const [hist, setHist] = useState<PickWindow<Snap> | null>(null);
 
   const isProp = pick.model_id.includes('prop');
-  const market = isProp ? propMarketForModel(pick.model_id) : gameMarketForModel(pick.model_id);
+  // propMarketForPick: a multi-market rule's market is on the row, not the model.
+  const market = isProp ? propMarketForPick(pick) : gameMarketForModel(pick.model_id);
   const historyBook = historyBookForPick(pick);
   const startAt = gameStartAt(commenceTime, pick.game_time);
   // The pick, or the start when a pre-game pick sits after it; null for a live pick.

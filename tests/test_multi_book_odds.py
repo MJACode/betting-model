@@ -166,7 +166,8 @@ def test_feature_engines_whitelist_draftkings():
     engines = [
         "features/feature_engine.py",
         "features/wnba_feature_engine.py",
-        "features/nba_feature_engine.py",
+        # features/nba_feature_engine.py was deleted 2026-10-15 with the
+        # retired NBA game models; no NBA training feature reads `odds` now.
     ]
     for rel in engines:
         src = _source(rel)
@@ -217,19 +218,21 @@ def test_prune_predicates_date_by_game_not_snapshot():
     The `odds` table has NO date column — dating a row by its snapshot would
     prune a future UFC/golf event's only line-shop row (those are priced up to
     7 days ahead). Both tables must key retention on the GAME's date.
+
+    `odds` is visited a game at a time from `games` by game_date, and the
+    game's date is bound into the statement; props carry game_date on the row.
     """
-    from data.prune_odds import _TABLES, _older_than
-    by_table = {t: (ident, sql) for t, ident, sql in _TABLES}
+    import inspect
+    from data import prune_odds
+    by_table = {t: row_date for t, _, row_date in prune_odds._TABLES}
 
-    odds_sql = _older_than(by_table["odds"][1], "<", "cutoff")
-    assert "games" in odds_sql and "game_date" in odds_sql, (
-        "odds retention must resolve game_date via the games table"
-    )
-
-    prop_sql = _older_than(by_table["player_prop_odds"][1], "<", "cutoff")
-    assert prop_sql.startswith("game_date <"), (
-        "player_prop_odds carries game_date directly"
-    )
+    assert by_table["odds"] == "%(game_day)s", (
+        "odds retention must use the game's date from `games`")
+    assert "FROM games WHERE game_date" in inspect.getsource(prune_odds._games_on)
+    assert by_table["player_prop_odds"] == "game_date", (
+        "player_prop_odds carries game_date directly")
+    for row_date in by_table.values():
+        assert "snapshot" not in row_date
 
 
 def test_prune_identity_matches_the_all_books_views():

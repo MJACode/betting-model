@@ -37,6 +37,7 @@ def _cases():
     import models.mlb_game_market as mlb_game
     import models.mlb_prop_market as mlb
     import models.mlb_total_public_fade as fade
+    import models.nba_prop_market as nba
     import models.nhl_totals_market as nhl_totals
     import models.nfl_prop_market as nfl
     import models.wnba_prop_market as wnba
@@ -56,6 +57,9 @@ def _cases():
         ("mlb public-fade soft", fade.SOFT_BOOKS, general),
         ("nhl totals soft", nhl_totals.SOFT_BOOKS, general),
         ("nhl totals sharp", (nhl_totals.SHARP_BOOK,), general),
+        # The NBA prop pull uses the general param (prop_odds_ingestor).
+        ("nba props soft", nba.SOFT_BOOKS, general),
+        ("nba props sharp", (nba.SHARP_BOOK,), general),
     ]
     return out
 
@@ -75,6 +79,7 @@ def test_a_sharp_reference_is_never_also_a_soft_book():
     our own number, and §5c's placebo depends on the sets being disjoint."""
     import models.mlb_game_market as mlb_game
     import models.mlb_prop_market as mlb
+    import models.nba_prop_market as nba
     import models.nfl_prop_market as nfl
     import models.nhl_totals_market as nhl_totals
     import models.wnba_prop_market as wnba
@@ -85,6 +90,7 @@ def test_a_sharp_reference_is_never_also_a_soft_book():
         ("mlb", {mlb.SHARP_BOOK}, set(mlb.SOFT_BOOKS)),
         ("mlb_game", {mlb_game.SHARP_BOOK}, set(mlb_game.SOFT_BOOKS)),
         ("nhl_totals", {nhl_totals.SHARP_BOOK}, set(nhl_totals.SOFT_BOOKS)),
+        ("nba_props", {nba.SHARP_BOOK}, set(nba.SOFT_BOOKS)),
     ):
         assert not (sharp & soft), f"{label}: {sorted(sharp & soft)} is both"
 

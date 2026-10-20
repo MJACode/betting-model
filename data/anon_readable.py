@@ -49,6 +49,11 @@ ANON_READABLE: tuple[str, ...] = (
     # and the default grant since the Teams board shipped; declared now that
     # a `.from()` names it.
     "nfl_team_game_stats",
+    # Signals compact line: school name → abbreviation. The anon SELECT
+    # policy has been on this table since the Teams board
+    # (data/migrations/add_team_stats_board.sql, "anon read ncaaf_teams").
+    # Declared now that a `.from()` names it. A miss stays the school name.
+    "ncaaf_teams",
     "odds",
     "parlay_correlations",
     "parlay_track_record",
@@ -67,6 +72,12 @@ ANON_READABLE: tuple[str, ...] = (
     # NO policy -- deny-all -- so the grant alone read as an empty screen.
     # The policy is data/migrations/anon_read_public_betting_2026_09_20.sql.
     "public_betting",
+    # Build Your Own Model facts (2026-10-16). Granted before the screen
+    # exists: an undeclared table arrives with no SELECT and the first read
+    # is an empty error. Nothing in mobile/src names these yet, so they are
+    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
+    "byom_game_facts",
+    "byom_prop_facts",
     "tracked_bets",
     "ufc_fight_log",
     "umpires",
@@ -102,9 +113,25 @@ ANON_READABLE: tuple[str, ...] = (
     "v_player_season_totals_ncaaf",
     "v_player_season_totals_nfl",
     "v_player_season_totals_wnba",
+    # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
+    # .from() these yet; tests/test_anon_readable.py keeps them on an
+    # explicit ahead-of-the-app list so the stale-entry check stays strict
+    # for everything else.
+    "v_nhl_player_prop_odds",
+    "v_player_season_totals_nhl",
+    "v_team_season_totals_nhl",
     "v_public_track_record",
     "v_public_track_record_daily",
 )
+
+# In ANON_READABLE, and not yet named by a mobile `.from()`. The stale-entry
+# test subtracts this tuple and fails if anything else is granted unread.
+# Build Your Own Model facts: the NFL tables land before the screen.
+AHEAD_OF_THE_APP: tuple[str, ...] = (
+    "byom_game_facts",
+    "byom_prop_facts",
+)
+
 
 # Readable ONLY by a signed-in user. `anon` has never held SELECT on
 # subscriptions -- its grant was write-only until 2026-09-03, so revoking the
@@ -198,6 +225,13 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "latest_odds",
     "latest_prop_odds",
     "latest_live_game_state",
+    # security_invoker bases of the NHL Stats views. The logs were created
+    # with RLS on and no policy (add_nhl_game_logs.sql). The stats migration
+    # adds a SELECT policy; the caller still needs the grant, and nothing in
+    # the app .from()s the tables themselves.
+    "nhl_goalie_game_log",
+    "nhl_skater_game_log",
+    "nhl_team_game_log",
 )
 
 # ── worker-only tables: the second lock ──────────────────────────────────────
@@ -244,11 +278,75 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().
     "model_auto_pauses",
+    # The league's NBA injury report archive and its pull ledger. Created on
+    # demand by data/ingestors/nba_injury_report.py; model input, never read
+    # by the app.
+    "nba_injury_report",
+    "nba_injury_report_pulls",
+    # NBA box-score detail: starters, exact minutes, DNP reasons, usage; the
+    # referee crews; the inactive lists. Created on demand by
+    # data/ingestors/nba_box_enrich.py; model input, never read by the app.
+    "nba_game_inactives",
+    "nba_game_officials",
+    "nba_player_game_adv",
+    # Action Network NBA ticket/money splits, archive and pre-tip polls.
+    # Created on demand by data/ingestors/nba_public_splits_ingestor.py;
+    # research control input, never read by the app.
+    "nba_public_splits",
+    # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
+    # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
+    # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
+    # on demand by their writers; model and settlement input, never read by the
+    # app.
+    "nba_period_scores",
+    "nba_player_dnp",
+    "nba_schedule",
+    # Free ESPN play-by-play (sportsdataverse release), its box scores, the
+    # ESPN -> NBA.com player id map and the lineup segments derived from them.
+    # Created on demand by data/ingestors/nba_pbp.py; research input for the
+    # NBA game-market search, never read by the app.
+    "nba_pbp",
+    "nba_pbp_box",
+    "nba_pbp_games",
+    "nba_player_id_map",
+    "nba_stints",
+    # The NBA prop card's decisions ledger: one row per game it has decided,
+    # so a game is decided once (scripts/nba_prop_market_card.py, which
+    # creates it on demand). Read by the card and the window job, never by
+    # the app.
+    "nba_prop_market_decisions",
+    # The NBA totals card's decisions ledger: one row per game it has decided,
+    # bet or not, with the reason (scripts/nba_total_luck_card.py, which
+    # creates it on demand). Read by the card, never by the app.
+    "nba_total_luck_decisions",
+    # The NBA home team-total model's two: its decisions ledger, one row per
+    # decided game with the home team's part of the gap and the best under
+    # offer (scripts/nba_team_total_luck_card.py), and its fetch ledger, one
+    # row per Odds API call with the credits it billed
+    # (data/ingestors/nba_team_total_odds.py). Each created on demand by its
+    # writer; read by the card and the window job, never by the app.
+    "nba_team_total_luck_decisions",
+    "nba_team_total_fetches",
+    # The NBA projection model's three (scripts/nba_prop_projection_card.py,
+    # which creates them on demand): its decisions ledger, each player's
+    # stored projection, and the injury list each game was projected with.
+    # Read by the card and the window job, never by the app.
+    "nba_prop_projection_decisions",
+    "nba_prop_projections",
+    "nba_injury_asof",
     # NHL derivative-totals pull ledger. Created on demand by
     # data/ingestors/nhl_derivative_odds_history.py, same shape as
     # odds_history_pulls: a fixed name, never read by the app.
     "nhl_derivative_odds_pulls",
     "odds_history_pulls",
+    # NBA purchase fetches OFF the hour (a gap fill at 23:30Z): odds_history_pulls
+    # keys on an integer hour and cannot hold them. Created on demand by
+    # data/ingestors/nba_odds_history.py, never read by the app.
+    "odds_history_fetches",
+    # The NBA game-market search's graded cells and populations, stored by
+    # scripts/nba_game2_store.py before anything reads them; never read by the app.
+    "nba_game2_cells",
+    "nba_game2_population",
     "threshold_reviews",
     "worker_jobs",
 )
@@ -390,6 +488,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_season_stat_values_ncaaf",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
+    # NHL hit-rate arrays (per game, last 5, last 10, season). The app does
+    # not call it until the Stats tab exists.
+    "player_stat_values_nhl",
     # H2H window: one row per slate player, that player's values against the
     # team he is about to play, over the last two seasons
     # (data/migrations/add_player_h2h_stat_values_rpcs.sql).
@@ -405,11 +506,18 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "position_vs_opponent_ncaaf",
     "position_vs_opponent_nfl",
     "position_vs_opponent_wnba",
+    # Anytime TD board: one rank per defense for a position group
+    # (data/migrations/position_defense_ranks_nfl_2026_10_18.sql).
+    "position_defense_ranks_nfl",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
+    # NHL Players board. Reads nhl_skater_game_log (shots, ending-year
+    # season, game_type 2). The table's anon SELECT and RLS policy are
+    # #962, still unapplied; this grant is EXECUTE on the function only.
+    "player_window_totals_nhl",
     "fighter_window_totals_ufc",
     "team_stats_board",
     # custom model builder
@@ -421,6 +529,14 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "feedback_submit",
     "feedback_threads_for_device",
     "feedback_unread_count",
+    # the member's own sportsbooks -- SECURITY DEFINER, device/user-scoped
+    # (data/migrations/member_sportsbooks_2026_10_19.sql, which carries its own
+    # GRANT; apply_anon_grants skips them until the worker has applied it)
+    "member_books_get",
+    "member_books_set",
+    # crash logging -- SECURITY DEFINER, insert-only, returns nothing
+    # (data/migrations/add_app_errors.sql, mobile/src/lib/crashLogSetup.ts)
+    "log_app_error",
     # NOT called by the app, but REQUIRED by it: custom_model_picks and
     # custom_model_backtest are SECURITY INVOKER and both call this helper, so
     # the CALLER needs EXECUTE. Revoking it breaks the custom-model screen with

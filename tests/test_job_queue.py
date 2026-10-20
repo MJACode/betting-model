@@ -448,16 +448,26 @@ def test_the_connection_only_sets_a_timeout_when_asked(monkeypatch):
 
     import data.db
 
-    # The timeout logic moved into data.db._connect on 2026-09-06 when
-    # get_connection gained a session_mode branch; both modes route through it,
-    # so the property is unchanged and this reads the function that now owns it.
-    src = inspect.getsource(data.db._connect)
+    # The env read moved from _connect into _session_options on 2026-10-16.
+    # _connect and _open pass that string into the DSN, and a reconnect
+    # re-reads it. Both get_connection modes still route through _connect.
+    src = inspect.getsource(data.db._session_options)
     assert 'os.environ.get("DB_STATEMENT_TIMEOUT_MS"' in src
     assert "isdigit()" in src, "a non-numeric value must not reach the DSN"
-    # ...and both modes must actually go through it, or one of them silently
-    # loses the timeout opt-in.
+    assert "_session_options(" in inspect.getsource(data.db._connect)
+    assert "_session_options(" in inspect.getsource(data.db._open)
     outer = inspect.getsource(data.db.get_connection)
     assert outer.count("_connect(") >= 2
+
+    # Absent or non-numeric: the database's own timeout. A number is the
+    # only value that sets one.
+    monkeypatch.delenv("DB_STATEMENT_TIMEOUT_MS", raising=False)
+    monkeypatch.delenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", raising=False)
+    assert data.db._session_options() is None
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT_MS", "nope")
+    assert data.db._session_options() is None
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT_MS", "120000")
+    assert data.db._session_options() == "-c statement_timeout=120000"
 
 
 def test_a_reclaim_gives_the_attempt_back():

@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from tracking import paper_tracker as pt
-from tracking.clv_math import price_clv_pct
+from tracking.clv_math import market_edge_clv, same_book_clv
 
 GAME = "NHL_2026-10-03_STL_COL"
 LOCK_TS, CLOSE_TS = "2026-10-03T04:17:53+00:00", "2026-10-04T00:00:58+00:00"
@@ -87,34 +87,40 @@ class _Conn:
         raise AssertionError(f"unexpected statement: {s[:80]}")
 
 
-def test_a_pick_at_a_line_draftkings_never_hung_is_closed_at_pinnacle():
+def test_a_pick_draftkings_never_hung_closes_at_the_bet_book():
+    """Primary CLV is Hard Rock's own raw close. Pinnacle is the market-edge
+    column and is not written into closing_dk_odds."""
     conn = _Conn([PICK], QUOTES)
     assert pt._capture_clv(conn, "2026-10-03", "TS") == 1
     (u,) = conn.updates
-    # The bet is -115 at Hard Rock, de-vigged against Hard Rock's own lock
-    # two-way; the close is Pinnacle's last pre-game quote at the same line.
-    want, _ = price_clv_pct(-115.0, -166, [125], book="pinnacle",
-                            bet_other_prices=[-115], bet_book="hardrockbet")
-    assert (u["clv_close_book"], u["closing_dk_odds"], u["clv_method"]) == ("pinnacle", -166, "no_vig")
-    assert u["clv_pct"] == want == 8.41
+    pct, pp = same_book_clv(-115.0, -135)
+    m_pct, m_pp, method = market_edge_clv(-115.0, -166, [125], book="pinnacle")
+    assert (u["clv_close_book"], u["closing_dk_odds"], u["clv_method"],
+            u["clv_bet_book"]) == ("hardrockbet", -135, "standard_v2", "hardrockbet")
+    assert (u["clv_pct"], u["clv_pp"]) == (pct, pp)
+    assert pct > 0
     assert u["clv_beat_close"] is True
+    assert u["pinnacle_close_odds"] == -166
+    assert (u["market_clv_pct"], u["market_clv_pp"], u["market_clv_method"]) == (
+        m_pct, m_pp, method)
 
 
-def test_without_pinnacle_the_close_is_the_deciding_book_not_draftkings():
+def test_without_pinnacle_the_primary_is_still_the_bet_book():
     conn = _Conn([PICK], [q for q in QUOTES if q[0] != "pinnacle"])
     assert pt._capture_clv(conn, "2026-10-03", "TS") == 1
     (u,) = conn.updates
-    want, _ = price_clv_pct(-115.0, -135, [-125], book="hardrockbet",
-                            bet_other_prices=[-115], bet_book="hardrockbet")
-    assert (u["clv_close_book"], u["closing_dk_odds"]) == ("hardrockbet", -135)
-    assert u["clv_pct"] == want
+    pct, _ = same_book_clv(-115.0, -135)
+    assert (u["clv_close_book"], u["closing_dk_odds"], u["clv_pct"],
+            u["clv_bet_book"]) == ("hardrockbet", -135, pct, "hardrockbet")
+    assert u["market_clv_pct"] is None
+    assert u["pinnacle_close_odds"] is None
 
 
 def test_a_row_that_carries_dk_odds_keeps_its_book_and_price():
     """The market-relative cards put the SOFT book's price in dk_odds and the
     book in the label suffix, with decision_odds NULL (nfl_prop_market 90/90,
     wnba_prop_market 23/23 measured 2026-10-08). They must still close at the
-    label book and grade dk_odds."""
+    label book and grade dk_odds, raw against that book's own close."""
     soft = {**PICK, "model_id": "nfl_prop_market", "dk_odds": -120.0, "decision_odds": None,
             "decision_book": None, "pick_label": "Brock Nelson Under 2.5 Shots on Goal (FD)"}
     quotes = [("fanduel", LOCK_TS, 2.5, 100, -120), ("fanduel", CLOSE_TS, 2.5, 110, -140),
@@ -122,9 +128,10 @@ def test_a_row_that_carries_dk_odds_keeps_its_book_and_price():
     conn = _Conn([soft], quotes)
     assert pt._capture_clv(conn, "2026-10-03", "TS") == 1
     (u,) = conn.updates
-    want, _ = price_clv_pct(-120.0, -140, [110], book="fanduel",
-                            bet_other_prices=[100], bet_book="fanduel")
-    assert (u["clv_close_book"], u["clv_pct"]) == ("fanduel", want)
+    pct, _ = same_book_clv(-120.0, -140)
+    assert (u["clv_close_book"], u["clv_bet_book"], u["clv_pct"],
+            u["closing_dk_odds"]) == ("fanduel", "fanduel", pct, -140)
+    assert u["pinnacle_close_odds"] is None
 
 
 def test_the_backfill_queues_the_dates_of_those_picks():

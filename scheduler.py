@@ -18,6 +18,22 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * Daily full pipeline   6:00am ET            -> python run_pipeline.py
   * Hourly refresh        :17, 7am-5pm ET      -> bash scripts/refresh_pass.sh
   * Evening 10-min refresh every :00..:50, 6-11pm ET -> bash scripts/refresh_pass.sh
+  * NBA prop window       every 5 min, 24x7     -> run_nba_prop_window
+  * NBA totals window     every minute, 24x7    -> run_nba_total_luck_window
+        (scripts/nba_total_luck_window.py: the NBA board fetched, and the
+        nba_total_luck card run, when an undecided game is 61-66 minutes
+        from tip; scripts/nba_team_total_luck_window.py: one team-total call
+        per game, and the nba_team_total_luck card run, when an undecided
+        game is 45-56 minutes from tip, and the closing team totals of its bet
+        games 12-25 minutes out. One planning read for both,
+        scripts/nba_pregame_window.py; a tick with nothing due makes no API
+        call)
+        (scripts/nba_prop_window.py: props for exactly the NBA games 40-62
+        minutes from tip and not yet decided, then the nba_prop_market card,
+        the closing snapshot for bet games 12-25 minutes out, and publish.
+        Returns without an API call when no game is in either range. mike,
+        2026-10-16: "we're not leaving our games" -- the hourly passes put no
+        look 45-57 minutes before any tip at or before 6pm ET.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -152,6 +168,14 @@ RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
 # write picks for a model in config.RETIRED_MODELS -- do not, without a new
 # model id and the go-live gate (CLAUDE.md §2).
 RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"
+
+# NFL in-play LEADER MONEYLINE loop (nfl_live_leader/, run from the repo root)
+# -- a different model and a different loop from the retired worker above,
+# which stays off. LIVE since 2026-10-13 (mike: "reenable the model"), so ON
+# by default; set RUN_NFL_LIVE_LEADER=0 to stop it without a code change
+# (a Railway variable takes effect on the redeploy that applying it starts).
+RUN_NFL_LIVE_LEADER = (os.environ.get("RUN_NFL_LIVE_LEADER", "1").strip().lower()
+                       not in ("0", "false", "off", "no"))
 
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
@@ -337,6 +361,20 @@ def run_pipeline_watch() -> None:
         log.exception("ERROR daily catch-up after pipeline-watch crashed")
 
 
+def run_period_recaps() -> None:
+    """Monday 7:30am ET: the prior week, and the prior month on its Monday.
+
+    The function itself decides whether a window is due, and the ledger
+    decides whether it already went out. A raise must not kill the scheduler.
+    """
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        log.info("period recaps: %s post(s)", n)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR period recaps crashed")
+
+
 def run_failure_alerter() -> None:
     """Deliver what the health check already decided, to the ops channel.
 
@@ -397,6 +435,31 @@ def run_calibration_watch() -> None:
         log.info("CalibrationWatch: %s", result.get("status"))
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR calibration-watch crashed")
+
+
+def run_social_post_queue() -> None:
+    """Publish manual rows in social_post_queue. Does not post picks or recaps.
+
+    A raise must not kill the scheduler. The claim in tracking.social_posts is
+    what stops two services posting the same row; this job does not take the
+    session lock the worker_jobs queue uses.
+    """
+    try:
+        from data.db import get_connection
+        from tracking.social_posts import drain_social_posts
+        conn = get_connection()
+        try:
+            result = drain_social_posts(conn)
+        finally:
+            conn.close()
+        posted = result.get("posted") or 0
+        bad = [item for item in result.get("results", [])
+               if item.get("status") in ("failed", "uncertain")]
+        if posted or bad or result.get("status") not in ("ok", "skipped", "no_table"):
+            log.info("social post queue: status=%s posted=%s",
+                     result.get("status"), posted)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR social-post-queue crashed")
 
 
 def run_job_queue() -> None:
@@ -542,6 +605,7 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
+                  "period_recaps",
                   # "nfl_poll_fast", not "nfl_poll_10min": the id was renamed
                   # when the fast tier moved to T-24h and this entry was not,
                   # so it named a job that does not exist. Inert today because
@@ -555,7 +619,13 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "failure_alerter",
                   "calibration_watch",
                   "model_quality",
-                  "kalshi_ladders", "kalshi_game_markets"}
+                  "kalshi_ladders", "kalshi_game_markets",
+                  # Writes picks through the same card as the refresh pass,
+                  # so it lives beside the passes, not with the loops.
+                  "nba_prop_window",
+                  # Writes picks through its own cards (nba_total_luck and
+                  # nba_team_total_luck), with their own fetches.
+                  "nba_total_luck_window"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -565,6 +635,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
 # either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
 # or the poller service gets its own volume.
 _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
+                # Writes only to Supabase (picks, odds) and needs no volume,
+                # so it sits with the other live loops -- unlike
+                # nfl_live_worker above.
+                "nfl_live_leader",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -654,6 +728,28 @@ def run_ncaaf_live_loop() -> None:
         [sys.executable, "-m", "ncaaf_live.gameday", "--source", "cfbd"],
         "ncaaf-live-loop",
     )
+
+
+def run_nfl_live_leader() -> None:
+    # The NFL in-play leader moneyline loop (nfl_live_leader/gameday.py), the
+    # same supervisor shape as run_ncaaf_live_loop: the loop polls ESPN core
+    # (free; site.api is 403 from the worker) every 20 s and EXITS after a
+    # few idle ticks with no NFL game in progress, so this */10 cron relaunches
+    # it and max_instances=1 makes the ticks during a slate no-ops. Run from the
+    # REPO ROOT, not nfl/ (the import trap in data/live_quote_guard.py).
+    #
+    # Odds API credits are spent ONLY when an in-window game (4th quarter,
+    # <= 10:00, lead 4-16) is due its 5-minute evaluation: one bulk
+    # DraftKings h2h call covers every due game, capped per process by
+    # NFL_LIVE_LEADER_CREDIT_CAP (default 2000).
+    outcome = _run(
+        [sys.executable, "-m", "nfl_live_leader.gameday"],
+        "nfl-live-leader",
+    )
+    if outcome != "ok":
+        # A loop that dies on every launch (a bad import, a missing artifact)
+        # must not read as a healthy job: raising makes the heartbeat 'fail'.
+        raise RuntimeError(f"nfl-live-leader loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -955,6 +1051,154 @@ def run_nfl_prop_card() -> None:
     # Getting that pick onto the app and into Discord is this call, and waiting
     # for the next refresh pass to do it is what lost a UFC bet on 2026-09-05.
     _publish_new_signals("nfl-prop-card")
+
+
+# Each step of an NBA prop window tick is bounded, and the DECIDING steps
+# (fetch, both cards, close) fit inside one five-minute tick together
+# (max_instances=1 turns one stuck step into skipped ticks -- the 2026-10-11 NFL
+# poll, see _run). The fetch is one event call per game about to be decided;
+# the cards and the close are a read and a handful of writes, plus one event
+# call per bet game owed a close. The PROJECTING steps run after them, on the
+# tick about an hour before tip, so a slow frame never delays a decision: the
+# ESPN injury pull, then the frame over every box line since 2018-19.
+NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "card": 60, "projection_card": 60, "close": 60,
+                             "injuries": 60, "project": 240}
+
+
+def run_nba_prop_window() -> None:
+    """One NBA prop window tick: every game decided inside its window.
+
+    nba_prop_market and nba_prop_projection decide a game once, 45-57 minutes
+    before tip. The refresh passes cannot put a look there for any tip at or
+    before 6pm ET (hourly at :17 until 5pm), so this tick runs every five
+    minutes, 24x7. It reads what is stored first (scripts/nba_prop_window.plan)
+    and returns without an API call when no game is 40-62 minutes out and
+    undecided, no bet game is owed its closing snapshot and no game is due its
+    projection -- most ticks of most days.
+
+    Otherwise: fetch props for exactly the games to decide, run nba_prop_market's
+    card and then the projection card on that fetch, take any closing snapshot
+    that is due, and publish what the cards wrote. THEN, for the games about 65
+    minutes from tip, pull the ESPN injury list and store their projections (the
+    projection card prices them two ticks later, inside the window). A step
+    that fails or is killed raises AFTER publishing, so the heartbeat records
+    "error" and the failure alerter reports it, while a bet that was written
+    still goes out.
+    """
+    from scripts.nba_prop_window import plan_tick
+    plan = plan_tick()
+    if not plan.decide and not plan.close and not plan.project:
+        if plan.publish:
+            # Only a game near its tip: post anything still unposted for it.
+            _publish_new_signals("nba-prop-window")
+        return
+    log.info("NBA prop window: deciding %s; closes due %s; projecting %s",
+             plan.decide, plan.close, plan.project)
+    t = NBA_PROP_WINDOW_TIMEOUT_S
+    outcomes: dict[str, str] = {}
+    if plan.decide:
+        outcomes["nba-prop-window-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
+            "nba-prop-window-fetch", timeout=t["fetch"])
+        outcomes["nba-prop-market"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-market"],
+            "nba-prop-market", timeout=t["card"])
+        outcomes["nba-prop-projection"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-projection"],
+            "nba-prop-projection", timeout=t["projection_card"])
+    if plan.close:
+        outcomes["nba-prop-close"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-close"],
+            "nba-prop-close", timeout=t["close"])
+    _publish_new_signals("nba-prop-window")
+    if plan.project:
+        outcomes["nba-injuries"] = _run(
+            [sys.executable, "-m", "data.ingestors.injury_ingestor", "--sport", "NBA"],
+            "nba-injuries", timeout=t["injuries"])
+        outcomes["nba-prop-project"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_projection_card", "--project", *plan.project],
+            "nba-prop-project", timeout=t["project"])
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    if bad:
+        raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")
+
+
+# The NBA totals window's steps are bounded, so a stuck step cannot hold the
+# job past the ticks that follow it (max_instances=1): the fetch is one bulk
+# Odds API call; the card reads one season of box scores and the due games'
+# quotes and prices them in seconds.
+NBA_TOTAL_LUCK_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180}
+# nba_team_total_luck's steps in the same job, bounded the same way: the fetch
+# is the event list plus one event call per due game (15 s each at most,
+# odds_ingestor._get_event_odds); the card is the full-game card's reads; the
+# close is the same calls for the bet games.
+NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
+
+
+def run_nba_total_luck_window() -> None:
+    """One NBA totals window tick: every game due a decision from either NBA
+    totals model, and every team-total bet game due its closing snapshot.
+
+    nba_total_luck decides a game once, on a fetch that landed 60-66 minutes
+    before tip (models/nba_total_luck.py). Riding the refresh pass it had one
+    look per game, and a pass that overran its ten minutes made the scheduler
+    skip the next tick, and with it every game that tick would have decided.
+    So this job runs every minute, 24x7. nba_team_total_luck decides a game
+    once, on its own team-total fetch 45-66 minutes before tip
+    (models/nba_team_total_luck.py), planned 45-56 minutes out. ONE planning
+    read serves both (scripts/nba_pregame_window.plan), and the tick returns
+    without an API call when nothing is due -- most ticks of most days.
+
+    Otherwise, nba_total_luck first, as it ran alone: fetch the NBA board, run
+    its card. Then nba_team_total_luck: its team-total fetch for exactly the
+    due games, its card; then the closing team totals of its bet games. Then
+    publish what the cards wrote. A tick that runs both models can pass a
+    minute and the next tick coalesces into it; each window holds six ticks or
+    more, so one skipped tick loses no game. A step that fails or is killed
+    raises AFTER publishing, so the heartbeat records "error" and the failure
+    alerter reports it, while a bet that was written still goes out. The next
+    tick, a minute later, tries any game still undecided again. A model whose
+    plan raises runs nothing that tick; the other model's steps still run, and
+    the tick raises after them.
+    """
+    from scripts.nba_pregame_window import plan_tick
+    plan = plan_tick()
+    if not plan:
+        return
+    team = plan.team_total
+    outcomes: dict[str, str] = {}
+    if plan.total_luck:
+        log.info("NBA totals window: deciding %s", plan.total_luck)
+        t = NBA_TOTAL_LUCK_WINDOW_TIMEOUT_S
+        outcomes["nba-total-luck-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_total_luck_window", "--fetch"],
+            "nba-total-luck-fetch", timeout=t["fetch"])
+        outcomes["nba-total-luck"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-total-luck"],
+            "nba-total-luck", timeout=t["card"])
+    t = NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S
+    if team.decide:
+        log.info("NBA totals window: team totals deciding %s", team.decide)
+        outcomes["nba-team-total-luck-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_team_total_luck_window", "--fetch",
+             *team.decide],
+            "nba-team-total-luck-fetch", timeout=t["fetch"])
+        outcomes["nba-team-total-luck"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-team-total-luck"],
+            "nba-team-total-luck", timeout=t["card"])
+    if team.close:
+        log.info("NBA totals window: team totals closing snapshot for %s", team.close)
+        outcomes["nba-team-total-luck-close"] = _run(
+            [sys.executable, "-m", "scripts.nba_team_total_luck_window", "--close",
+             *team.close],
+            "nba-team-total-luck-close", timeout=t["close"])
+    if outcomes:
+        _publish_new_signals("nba-total-luck-window")
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    # A model whose plan raised ran nothing this tick; the other model did.
+    bad.update({f"{model} plan": err for model, err in plan.errors.items()})
+    if bad:
+        raise RuntimeError(f"NBA totals window step(s) did not finish: {bad}")
 
 
 def run_nfl_opener_card() -> None:
@@ -1279,6 +1523,38 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         return {"status": "error", "reason": "catch-up raised"}
 
 
+def abort_orphaned_refresh_runs() -> int:
+    """Close refresh ledger rows the previous container left unfinished.
+
+    2026-10-16: evening run 06b9db72a43c4323ad5ed84abf00b591 was still open
+    at 11:25Z. The 04:17Z deploy killed it, later hourlies finished, and
+    `_abort_orphans` only closes the kind that is starting — so the evening
+    stayed unfinished until the next evening and `refresh_pass_completion`
+    counted it as stuck.
+
+    Once, before this process starts a pass. Only the service that owns the
+    refresh jobs: a poller restart must not stamp a pass the pipeline
+    service is still running. The cutoff freezes on the first call, so a
+    second call cannot abort a pass this process has since opened. Does not
+    touch `daily`. Best-effort: a ledger failure must not stop the scheduler.
+    """
+    if not owns("hourly_refresh"):
+        log.info("refresh orphan sweep: SERVICE_ROLE=%s does not own hourly_refresh",
+                 SERVICE_ROLE)
+        return 0
+    try:
+        from data.db import get_connection
+        from tracking.run_ledger import abort_prior_refresh_orphans
+        conn = get_connection()
+        try:
+            return abort_prior_refresh_orphans(conn)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — never block startup
+        log.exception("refresh orphan sweep failed (scheduler continues)")
+        return 0
+
+
 def catch_up_refresh_pass(*, source: str = "boot") -> dict:
     """Re-run the :17 refresh pass a deploy killed, rather than lose the hour.
 
@@ -1445,6 +1721,16 @@ def build_scheduler() -> BlockingScheduler:
         name="Worker job queue (every 5 min)",
     )
 
+    # Manual posts to @SignalBasePicks. Separate from the pick slate and the
+    # recap jobs: it only reads social_post_queue. Five minutes matches the
+    # worker job queue. It does not move any other trigger.
+    sched.add_job(
+        run_social_post_queue,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="social_post_queue",
+        name="Manual X posts (every 5 min)",
+    )
+
     # Pipeline watch — 7:15am ET daily, the slot the Sentinel agent used.
     #
     # After the 6am pipeline and before the 8am backlog run, so the morning
@@ -1458,6 +1744,19 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=7, minute=15, timezone=TIMEZONE),
         id="pipeline_watch",
         name="Pipeline watch (daily 7:15am ET)",
+    )
+
+    # Weekly results, and the monthly results on the first Monday. 7:30am ET
+    # is after the 6:00am daily recap and after the 7:00am retry of a missed
+    # day. Later Monday settle passes call the same function; the ledger
+    # posts each window once. The pipeline service owns it (X credentials
+    # live there).
+    sched.add_job(
+        run_period_recaps,
+        CronTrigger(day_of_week="mon", hour=7, minute=30, timezone=TIMEZONE),
+        id="period_recaps",
+        name="Weekly and monthly results (Mon 7:30am ET)",
+        max_instances=1, coalesce=True, misfire_grace_time=3600,
     )
 
     # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has
@@ -1661,8 +1960,11 @@ def build_scheduler() -> BlockingScheduler:
         #
         # The point of polling this densely is the LOCK: the first moment a bet
         # qualifies it is written and timestamped, and it can never be
-        # re-priced. Every later tick records whether the conditions still hold
-        # (nfl_pick_status_history) without touching the bet.
+        # re-priced. For wind, qualifying is a kickoff forecast that has held
+        # at or above 11 mph across the 12-hour window (wind_totals.ruling_wind),
+        # not the first poll that prints 11. Every later tick records whether
+        # the conditions still hold (nfl_pick_status_history) without touching
+        # the bet.
         sched.add_job(
             run_nfl_poll,
             CronTrigger(minute=0, timezone=TIMEZONE),
@@ -1714,6 +2016,20 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_NFL_LIVE=0 — NFL in-play worker NOT scheduled.")
 
+    # NFL in-play leader moneyline. Every day 9am-midnight ET for the same
+    # reason as the worker above (Thursday, Saturday, Monday and the 9:30am ET
+    # international kickoffs); an idle launch reads ESPN and exits.
+    if RUN_NFL_LIVE_LEADER:
+        sched.add_job(
+            run_nfl_live_leader,
+            CronTrigger(hour="9-23", minute="*/10", timezone=TIMEZONE),
+            id="nfl_live_leader",
+            name="NFL in-play leader moneyline loop supervisor (9am-midnight ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NFL_LIVE_LEADER=0 — NFL in-play leader loop NOT scheduled.")
+
     if RUN_NFL_PROP_CARD:
         sched.add_job(
             run_nfl_prop_card,
@@ -1723,6 +2039,36 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_PROP_CARD=0 — NFL prop card NOT scheduled.")
+
+    # NBA prop window — every 5 minutes, 24x7 (run_nba_prop_window). Around
+    # the clock because the cost of an idle tick is one database read, and a
+    # schedule with hours in it is a schedule that can miss a tip: the hourly
+    # passes missed every one at or before 6pm ET. Unconditional: the card has
+    # no write switch (scripts/nba_prop_market_card.py) and neither does this.
+    sched.add_job(
+        run_nba_prop_window,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="nba_prop_window",
+        name="NBA prop window (every 5 min, 24x7: games 40-62 min from tip)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
+    # NBA totals window -- every minute, 24x7 (run_nba_total_luck_window). The
+    # nba_total_luck and nba_team_total_luck cards decide here and nowhere
+    # else: on the refresh pass a skipped tick lost every game it would have
+    # decided. Every minute so the 61-66-minute window holds six ticks and the
+    # team totals' 45-56 twelve; misfire_grace_time 30 because a tick
+    # overtaken by the next one has nothing left to add. One job for both
+    # models, not two: each job's heartbeat opens a connection every tick
+    # (scripts/nba_pregame_window.py). No write switch, like the cards.
+    sched.add_job(
+        run_nba_total_luck_window,
+        CronTrigger(minute="*", timezone=TIMEZONE),
+        id="nba_total_luck_window",
+        name="NBA totals window (every minute, 24x7: full-game totals 61-66 min, "
+             "home team totals 45-56 min from tip)",
+        max_instances=1, coalesce=True, misfire_grace_time=30,
+    )
 
     # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow
     # Kalshi response cannot delay anything that places a bet.
@@ -1791,6 +2137,11 @@ def main() -> None:
         log.exception("Monitoring failed to start (pipeline continues)")
 
     sched = build_scheduler()
+
+    # Before any pass this process starts, and before sched.start() can fire
+    # the :17 cron. Same-kind orphan cleanup does not run again for an
+    # evening until the next evening window.
+    abort_orphaned_refresh_runs()
 
     # Before the first cron fires: run any weekly job whose data is already
     # stale. Ownership is checked per job INSIDE the catch-up rather than here:

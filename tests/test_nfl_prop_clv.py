@@ -69,8 +69,9 @@ def test_the_market_relative_rules_take_their_market_from_the_row():
     assert "_bet_price_and_book(" in src
     assert "_book_from_label(pick_label)" in _fn("_bet_price_and_book")
     assert "_first_prop_close(" in src
-    assert "pick_book=close_fallback" in src and "_SUFFIX_LABEL_PRICED_MODELS" in src, (
-        "the close prefers Pinnacle then the pick's book, never a silent DK")
+    assert "pick_book=bookmaker" in src and "pick_book=sharp" in src, (
+        "the headline close is the bet book; Pinnacle is a second lookup")
+    assert "_SUFFIX_LABEL_PRICED_MODELS" in _fn("_bet_price_and_book")
 
 
 def _book_from_label_fn():

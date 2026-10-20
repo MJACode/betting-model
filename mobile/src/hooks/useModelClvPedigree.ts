@@ -16,7 +16,9 @@ import type { TrackRecordRow } from '@/types';
  * is optional — when absent, sharpScore() treats every model as "unproven" and
  * leans on the edge + contrarian components.
  */
-const CACHE_KEY = 'modelClvPedigree.v1';
+// v2 (2026-10-14): the beat rate is same-book raw CLV (standard_v2). A v1
+// cache still holds the old no-vig beat rate.
+const CACHE_KEY = 'modelClvPedigree.v2';
 
 /** Aggregate the per-(sport, model) rows up to one CLV record per model_id. */
 export function buildModelClvMap(rows: TrackRecordRow[]): Record<string, ModelClv> {

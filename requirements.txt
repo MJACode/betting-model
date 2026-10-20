@@ -26,6 +26,9 @@ MLB-StatsAPI>=1.7.2
 # ── WNBA / NBA Data ──────────────────────────────────────────────────────────
 # nba_api wraps stats.nba.com; WNBA via LeagueID='10', NBA via '00'. Free, no key.
 nba_api>=1.4.1
+# The league's injury report PDFs (data/ingestors/nba_injury_report.py): word
+# positions and ruled lines, which the 2023-24-on layout needs to be read at all.
+pdfplumber>=0.11.0
 
 # ── UFC Data ─────────────────────────────────────────────────────────────────
 # ufcstats.com scraper (no official free UFC API). Already a transitive dep of

@@ -21,6 +21,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+from tests._node import node_exe, node_strips_types  # noqa: E402
+
+NODE = node_exe() or "node"
 MOBILE = ROOT / "mobile"
 SRC = MOBILE / "src"
 LIB = SRC / "lib"
@@ -31,11 +35,7 @@ def _read(path: Path) -> str:
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 needs_node = pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
@@ -45,7 +45,7 @@ needs_node = pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 n
 def test_verify_a11y_script_passes():
     """The whole scan: roles, labels, 44pt/hitSlop, inputs, the M7 inset."""
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "scripts/verify_a11y.ts"],
+        [NODE, "--experimental-strip-types", "scripts/verify_a11y.ts"],
         cwd=MOBILE, capture_output=True, text=True, timeout=120,
     )
     assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-2000:]
@@ -63,7 +63,7 @@ def _run(tmp_path: Path, files: list[str], script: str) -> subprocess.CompletedP
         src = re.sub(r"from '\./(\w+)';", r"from './\1.ts';", src)
         (tmp_path / name).write_text(src, encoding="utf-8")
     return subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
 
@@ -94,7 +94,7 @@ eq(slopFor(31), { top: 7, bottom: 7, left: 0, right: 0 }, 'slop');
 eq(unknownCountSpeech('Sep 28 · — bets · — scored'), 'Sep 28, bets count not available, scored count not available', 'unknown counts');
 eq(unknownCountSpeech(unitsSpeech('Sep 28 · — pre-game signals · 1.2u staked')), 'Sep 28, pre-game signals count not available, 1.2 units staked', 'unknown + units');
 eq(unknownCountSpeech('3 in play'), '3 in play', 'known count');
-eq(gameStartedSpeech(-125, 'DraftKings'), 'Game started. Picked at -125 at DraftKings. Betting links are off once a game starts.', 'started speech');
+eq(gameStartedSpeech(-125, 'DraftKings'), 'Game started. Picked at \u2212125 at DraftKings. Betting links are off once a game starts.', 'started speech');
 eq(gameStartedSpeech(null, 'DraftKings'), 'Game started. Betting links are off once a game starts.', 'started, no price');
 // The visible line is unchanged from #847.
 eq(gameStartedLine(-125, 'DK'), 'Game started · picked at -125 DK', 'visible line');

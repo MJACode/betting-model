@@ -1,19 +1,17 @@
 /**
- * Standalone verification: a settled pick with NO book price contributes no
- * money to any record the app shows.
- *
- * Settlement grades an unpriced pick at a -110 that never existed
- * (tracking/paper_tracker), so its profit_flat is fabricated: +$90.91 on a win
- * that could not have been placed. The DB side already refuses that money —
- * v_public_track_record / _daily count the W-L but sum profit and stake over
- * priced picks only (migration require_price_for_published_units, 2026-08-31).
- * The app's own tallies did
- * not, so on 2026-09-03 the Models tab showed UFC Total Rounds at +13.0% and
- * the Record tab showed the same 8-5 at -26.6%.
+ * Models and the flat book: a settled pick with NO book price contributes
+ * no money. Settlement grades an unpriced pick at a −110 that never existed
+ * (tracking/paper_tracker), so its profit_flat is fabricated: +90.91 per 100
+ * on a win that could not have been placed. flatPnl drops that money. On
+ * 2026-09-03 the Models tab showed UFC Total Rounds at +13.0% because it
+ * had not. The Record tab now uses the posted stake (1 unit when the price
+ * is missing). Yesterday does too. The block at the bottom pins that day:
+ * an unpriced win plus a win at −140 is 2.00u on 2.40u risked, not the old
+ * flat-book +71.43 on one priced pick.
  *
  * The fixture below is the REAL UFC settled set behind that screenshot (every
  * BET pick since 2026-04-14, values copied from the picks table), so the
- * expected numbers are the ones the Record tab printed.
+ * Models numbers are the ones that tab printed.
  *
  *   npx tsx scripts/verify_unpriced_pnl.ts
  */
@@ -183,6 +181,25 @@ check('Models tab moneyline (control): fully priced, unchanged at 2-1 +$57.40 / 
     && near(ml.roiFlat, 0.1913, 0.0005),
   `${ml.wins}-${ml.losses} profit=${ml.profitFlat} staked=${ml.stakedFlat} roi=${ml.roiFlat}`);
 
+const silentWin = mk({
+  model_id: 'ufc_moneyline', pick_side: 'home', scored_line: null,
+  model_probability: 0.7, edge: 0.15, dk_odds: -110, result: 'WIN', profit_flat: 90.91,
+  discordPublish: 'unpublished',
+});
+const mlSilent = computeBuiltInModelStats('ufc_moneyline', [...SETTLED, silentWin]);
+check('Models tab moneyline: an unpublished graded win stays out',
+  mlSilent.picks === 3 && mlSilent.wins === 2 && near(mlSilent.profitFlat, 57.4),
+  `${mlSilent.picks} picks, ${mlSilent.wins}-${mlSilent.losses}, profit=${mlSilent.profitFlat}`);
+const unknownLoss = mk({
+  model_id: 'ufc_moneyline', pick_side: 'away', scored_line: null,
+  model_probability: 0.7, edge: 0.15, dk_odds: -110, result: 'LOSS', profit_flat: -100,
+  discordPublish: 'unknown',
+});
+const mlUnknown = computeBuiltInModelStats('ufc_moneyline', [...ML, unknownLoss]);
+check('Models tab moneyline: an unread ledger stamp still counts',
+  mlUnknown.picks === 4 && mlUnknown.wins === 2 && mlUnknown.losses === 2,
+  `${mlUnknown.picks} picks, ${mlUnknown.wins}-${mlUnknown.losses}`);
+
 // ── Custom models on the settled fallback (computeCustomModelStats) ────────
 const custom: CustomModel = {
   id: 'c1', name: 'Rounds, any', rules: [{ model_id: 'ufc_total_rounds' }],
@@ -192,20 +209,31 @@ const cs = computeCustomModelStats(custom, SETTLED);
 check('Custom model on UFC rounds: same 13 picks, 8-5, -$185.92 on $700',
   cs.picks === 13 && cs.wins === 8 && cs.losses === 5 && near(cs.profitFlat, -185.92) && cs.stakedFlat === 700,
   `${cs.picks} picks, ${cs.wins}-${cs.losses}, profit=${cs.profitFlat} staked=${cs.stakedFlat}`);
+const customSilent = computeCustomModelStats(
+  { ...custom, rules: [{ model_id: 'ufc_moneyline' }] },
+  [...ML, silentWin],
+);
+check('Custom backtest still counts the unpublished win',
+  customSilent.picks === 4 && customSilent.wins === 3,
+  `${customSilent.picks} picks, ${customSilent.wins}-${customSilent.losses}`);
 
 // ── Yesterday's-results recap (computeDailyResults) ────────────────────────
+// Posted stake, not the flat book. An unpriced win is 1 unit to win 1.
+// A win at −140 risks 1.40 to win 1. Together: 2.00u on 2.40u risked.
 const DAY = '2026-08-22';
 const day = computeDailyResults(DAY, [
   mk({ game_date: DAY, model_probability: 0.6208, edge: 0.1208, dk_odds: null, result: 'WIN', profit_flat: 90.91 }),
   mk({ game_date: DAY, model_probability: 0.671, edge: 0.0876, dk_odds: -140, result: 'WIN', profit_flat: 71.43 }),
 ]);
-check('Daily recap: both wins count (2-0), only the priced one is money (+$71.43 on $100)',
-  day.overall.wins === 2 && day.overall.losses === 0 && near(day.overall.profitFlat, 71.43) && day.overall.stakedFlat === 100,
-  `${day.overall.wins}-${day.overall.losses} profit=${day.overall.profitFlat} staked=${day.overall.stakedFlat}`);
+check('Daily recap: both wins count (2-0) at the posted stake, 2.00u on 2.40u risked',
+  day.overall.wins === 2 && day.overall.losses === 0
+    && near(day.overall.units, 2) && near(day.overall.risked, 2.4)
+    && near(day.overall.roi, 2 / 2.4),
+  `${day.overall.wins}-${day.overall.losses} units=${day.overall.units} risked=${day.overall.risked} roi=${day.overall.roi}`);
 const ufcDay = day.sports.find((s) => s.sport === 'UFC')?.total;
-check('Daily recap: the sport row carries the same money as the overall',
-  !!ufcDay && near(ufcDay.profitFlat, 71.43) && ufcDay.stakedFlat === 100,
-  ufcDay ? `profit=${ufcDay.profitFlat} staked=${ufcDay.stakedFlat}` : 'no UFC row');
+check('Daily recap: the sport row carries the same posted stake as the overall',
+  !!ufcDay && near(ufcDay.units, 2) && near(ufcDay.risked, 2.4) && near(ufcDay.roi, 2 / 2.4),
+  ufcDay ? `units=${ufcDay.units} risked=${ufcDay.risked} roi=${ufcDay.roi}` : 'no UFC row');
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

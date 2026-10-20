@@ -1,3 +1,6 @@
+import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
+import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
+import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
@@ -12,12 +15,13 @@ import {
   type PlayerLogEntry,
   type PlayerLogSport,
 } from './playerLog';
+import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
 import {
   gameMarketForModel,
   lineShopForPick,
   numOrNull,
   playerNameFromPickLabel,
-  propMarketForModel,
+  propMarketForPick,
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
@@ -71,6 +75,7 @@ import type {
   SavantStatsRow,
   H2HStatValuesRow,
   PositionVsOpponentRow,
+  PositionDefenseRankRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
@@ -122,6 +127,42 @@ const UFC_TOTALS_COLUMNS =
   'sig_strikes, takedowns, knockdowns, sub_attempts';
 
 /**
+ * Season or last-N skater totals from player_window_totals_nhl.
+ *
+ * The same shape as the other sports: one row per player, summed in SQL,
+ * p_window null for the season. The function reads nhl_skater_game_log
+ * (`shots`, regular season, season = the ending year). The first label
+ * with rows wins.
+ *
+ * The function is SECURITY INVOKER. Before this migration is applied the
+ * call is PGRST202 or 42883 (the function is not in the schema). Before
+ * #962 grants the log it is 42501 (permission denied). Those two are an
+ * empty average, so posted lines still render. Every other error is thrown.
+ */
+async function fetchNhlSkaterBoard(
+  calendarYear: number,
+  window: number | null,
+  teams?: SlateTeams,
+): Promise<SeasonTotalsRow[]> {
+  const fn = 'player_window_totals_nhl';
+  try {
+    for (const s of nhlSeasonCandidates(calendarYear, monthET())) {
+      const rows = await pageRpc<SeasonTotalsRow>(
+        fn,
+        { p_season: s, p_window: window },
+        teams,
+        totalsRowKey,
+      );
+      if (rows.length) return rows;
+    }
+    return [];
+  } catch (e) {
+    if (nhlSkaterReadMissing(e)) return [];
+    throw e;
+  }
+}
+
+/**
  * The Stats board's slate narrowing — the teams whose players the board is
  * about, or null/[] for "the whole league".
  *
@@ -156,6 +197,7 @@ export async function fetchSeasonTotals(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
     for (const s of footballSeasonCandidates(season)) {
@@ -242,10 +284,7 @@ export async function fetchWindowTotals(
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  if (sport === 'NHL') {
-    // No per-player skater leaderboard for NHL (team + goalie stats only).
-    return [];
-  }
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
   if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
@@ -386,7 +425,9 @@ export async function fetchRecentGames(
     }
     return [];
   }
-  return []; // UFC / NHL / GOLF: no per-game player logs
+  // UFC / GOLF have no log. NHL hit rate stays off. The averages board
+  // reads player_window_totals_nhl in fetchWindowTotals.
+  return [];
 }
 
 /** (player, game) is the row's identity; `rn` orders a player's games. */
@@ -554,6 +595,30 @@ export async function fetchH2HStatValues(
 }
 
 /**
+ * Whether `season` has started for `sport`: at least one FINAL game.
+ *
+ * A row in `games` is not enough. Measured 2026-10-06: NBA season 2027
+ * already had 46 games on the schedule and 0 with `home_win` set (first
+ * date 2026-10-20). Counting rows would open this season before opening
+ * night. The read is `limit(1)` — 0 or 1 row, under the 1,000-row cap.
+ * `games` is already on the anon read surface.
+ */
+export async function fetchSeasonStarted(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF',
+  season: number,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('game_id')
+    .eq('sport', sport)
+    .eq('season', season)
+    .not('home_win', 'is', null)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
+/**
  * Every qualifying player-game at one NFL position group against one defence,
  * this season and last, with the defence's league rank on each row. Backs the
  * player page's "WRs vs ATL" card (Matt, 2026-10-05).
@@ -618,6 +683,25 @@ export async function fetchPositionVsOpponent(
 }
 
 /**
+ * Every defense's rank for one NFL position group and stat. 32 rows, so it
+ * is not paged. Rank 1 allows the most. The Anytime TD board calls it once
+ * per group (position_defense_ranks_nfl).
+ */
+export async function fetchPositionDefenseRanks(
+  seasons: number[],
+  statKey: string,
+  posGroup: string,
+): Promise<PositionDefenseRankRow[]> {
+  const { data, error } = await supabase.rpc('position_defense_ranks_nfl', {
+    p_seasons: seasons,
+    p_stat: statKey,
+    p_pos_group: posGroup,
+  });
+  if (error) throw error;
+  return (data ?? []) as PositionDefenseRankRow[];
+}
+
+/**
  * One player's position, for the sports whose game log carries none
  * (NBA, WNBA, NCAAF — data/migrations/add_player_positions.sql). One row by
  * primary key, or null when the roster pull has not placed him.
@@ -644,8 +728,9 @@ const PICK_COLUMNS =
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
   'is_live, inning_at_pick, score_diff_at_pick, player_key, prop_market, ' +
   'public_bet_pct, public_money_pct, ' +
-  'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
-  'clv_captured_at, clv_method, clv_close_book, clv_bet_book, dk_bet_link, ' +
+  'closing_dk_odds, closing_line, clv_pct, clv_pp, line_clv_pts, clv_beat_close, ' +
+  'clv_captured_at, clv_method, clv_close_book, clv_bet_book, ' +
+  'market_clv_pct, market_clv_pp, market_clv_method, pinnacle_close_odds, dk_bet_link, ' +
   'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, downgrade_reason, ' +
   'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 
@@ -656,8 +741,8 @@ const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
-  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
-  'is_live, downgrade_reason';
+  'public_bet_pct, injury_flag, clv_pct, clv_method, decision_book, decision_odds, decision_edge, ' +
+  'is_live, downgrade_reason, player_key, prop_market';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -875,6 +960,78 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
 }
 
 /**
+ * Today's NHL and NBA games for the Lines board — every game, not the ones
+ * a model picked. Measured 2026-10-16: 11 NHL games on 2026-10-15, 2 on
+ * 2026-10-16, 3 NBA games on 2026-10-20. Well under the 1,000-row cap.
+ */
+export async function fetchGamesForLinesBoard(date: string): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .in('sport', [...LINES_SPORTS])
+    .eq('game_date', date)
+    .order('commence_time')
+    .order('game_id');
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
+/**
+ * Every book's latest line for those games.
+ *
+ * Measured 2026-10-16 on v_latest_odds_all_books: NHL 2026-10-13 was 592
+ * rows, the largest NHL day from 2026-10-01 through that read; NBA
+ * 2026-10-21 was 363. A day with both full slates can pass the 1,000-row
+ * cap, so this is paged and narrowed to the board's game ids and to
+ * LINES_ODDS_MARKETS (h2h, h2h_3way, spreads, totals) — not the whole slate.
+ */
+function drawPriceNotOnView(e: unknown): boolean {
+  const msg = e instanceof Error
+    ? e.message
+    : e && typeof e === 'object' && 'message' in e
+      ? String((e as { message: unknown }).message)
+      : '';
+  return /draw_price/i.test(msg);
+}
+
+/**
+ * Set after one select learns the view has no draw_price column. Later loads
+ * in this process skip that failing select. A new app session tries again,
+ * which is how the tie appears after the hand-applied view lands.
+ */
+let linesDrawPriceMissing = false;
+
+export async function fetchLinesBoardOdds(gameIds: readonly string[]): Promise<OddsByBookRow[]> {
+  if (gameIds.length === 0) return [];
+  // draw_price is on latest_odds and missing from the view until Matt applies
+  // add_draw_price_to_latest_odds_view_2026_10_16.sql. The first miss retries
+  // without the column. linesDrawPriceMissing keeps every later load off that
+  // failing select.
+  const read = (columns: string) =>
+    fetchAllPages<OddsByBookRow>(
+      (from, to) =>
+        supabase
+          .from('v_latest_odds_all_books')
+          .select(columns)
+          .in('game_id', [...gameIds])
+          .in('market', [...LINES_ODDS_MARKETS])
+          .order('game_id')
+          .order('market')
+          .order('bookmaker')
+          .range(from, to),
+      (row) => `${row.game_id}|${row.market}|${row.bookmaker}`,
+    );
+  if (linesDrawPriceMissing) return read(ODDS_BY_BOOK_COLUMNS);
+  try {
+    return await read(`${ODDS_BY_BOOK_COLUMNS}, draw_price`);
+  } catch (e: unknown) {
+    if (!drawPriceNotOnView(e)) throw e;
+    linesDrawPriceMissing = true;
+    return read(ODDS_BY_BOOK_COLUMNS);
+  }
+}
+
+/**
  * Every book's latest line for ONE player and market — what a Stats LINE leg
  * re-prices from each time the betslip resolves (lib/lineLegs.ts). A few
  * dozen rows, bounded by game_id; no paging needed.
@@ -982,7 +1139,8 @@ export async function fetchPicksForDate(
       lineGames.add(p.game_id);
       continue;
     }
-    const propMarket = propMarketForModel(p.model_id);
+    // propMarketForPick: a multi-market rule's market is on the row, not the model.
+    const propMarket = propMarketForPick(p);
     const player = propMarket ? playerNameFromPickLabel(p.pick_label) : null;
     if (propMarket && player) {
       propGames.add(p.game_id);
@@ -1066,7 +1224,8 @@ export async function fetchPicksForDate(
       ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
       : [];
     if (bookRows.length === 0) {
-      const propMarket = propMarketForModel(pick.model_id);
+      // The row's prop_market for a multi-market rule (propMarketForPick).
+      const propMarket = propMarketForPick(pick);
       const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
       if (propMarket && player) {
         bookRows = propBooksByKey.get(`${pick.game_id}|${propMarket}|${player}`) ?? [];
@@ -1315,6 +1474,9 @@ export async function fetchUpcomingNflPicks(
     return {
       pick,
       game: gameById.get(pick.game_id) ?? null,
+      // game_weather has no NFL rows. nfl_kickoff_wind_reads is a later
+      // observation and its mph does not match the bet. The kickoff-hour
+      // forecast is the "Wind N mph" parenthetical on the label.
       weather: null,
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
       ...bookEnrichment(pick, booksByGameMarket),
@@ -1680,7 +1842,8 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
   if (!data) return null;
   const [pick] = await attachDiscordPublish([data as Pick]);
   const market = gameMarketForModel(pick.model_id);
-  const propMarket = market ? null : propMarketForModel(pick.model_id);
+  // The row's prop_market for a multi-market rule (propMarketForPick).
+  const propMarket = market ? null : propMarketForPick(pick);
   const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
 
   const [gameRes, weatherRes, bookRes] = await Promise.all([
@@ -2031,19 +2194,6 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }
 
-export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
-  const { data, error } = await supabase
-    .from('games')
-    .select(GAME_COLUMNS)
-    .or(`home_team.eq.${team},away_team.eq.${team}`)
-    .lt('game_date', beforeDate)
-    .not('home_score', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []) as GameRow[];
-}
-
 export async function fetchPlayerRecentGames(
   playerId: string,
   beforeDate: string,
@@ -2180,15 +2330,47 @@ export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<stri
  * Backed by v_public_track_record, which applies the same prob/edge cuts as
  * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
  */
+const TRACK_RECORD_SELECT =
+  'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked, ' +
+  'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
+  'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
+  'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
+  'market_clv_settled, market_clv_beat, avg_market_clv_pct';
+
+/** The select from before units and risked existed. An OTA can ship first. */
+const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, risked', '');
+
+/**
+ * The units columns are not on the view until the migration runs.
+ *
+ * PostgREST puts `42703` on `error.code` for an undefined column, and
+ * `PGRST204` when the schema cache has no such column. The message names
+ * the column. Any other error still throws.
+ */
+export function postedStakeColumnsMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (!message.includes('units') && !message.includes('risked')) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === '42703' || code === 'PGRST204'
+    || message.includes('does not exist')
+    || message.includes('schema cache');
+}
+
 export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
-  const { data, error } = await supabase
-    .from('v_public_track_record')
-    .select(
-      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
-        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date',
-    );
-  if (error) throw error;
-  return (data ?? []) as TrackRecordRow[];
+  const first = await supabase.from('v_public_track_record').select(TRACK_RECORD_SELECT);
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record')
+      .select(TRACK_RECORD_SELECT_WITHOUT_UNITS);
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordRow[];
 }
 
 /**
@@ -2215,13 +2397,27 @@ export async function fetchActionThresholds(): Promise<Record<string, ServerThre
 }
 
 /** Daily settled totals for the equity curve (v_public_track_record_daily). */
+const TRACK_RECORD_DAILY_SELECT =
+  'game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked';
+
+const TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS =
+  TRACK_RECORD_DAILY_SELECT.replace(', units, risked', '');
+
 export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
-  const { data, error } = await supabase
+  const first = await supabase
     .from('v_public_track_record_daily')
-    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat')
+    .select(TRACK_RECORD_DAILY_SELECT)
     .order('game_date', { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as TrackRecordDailyRow[];
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record_daily')
+      .select(TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS)
+      .order('game_date', { ascending: true });
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordDailyRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordDailyRow[];
 }
 
 /** The daily canonical cross-game parlays (public parlay track record). */
@@ -2543,8 +2739,9 @@ export async function fetchTeamStats(
 
 /**
  * A team's most recent finished games IN ONE SPORT, newest first. Scoped by
- * sport, unlike fetchTeamRecentGames: 'BUF' is Buffalo in the NFL and the
- * NHL, and a form strip that mixes the two is wrong on both.
+ * sport: 'BUF' is Buffalo in the NFL and the NHL, and a form strip that mixes
+ * the two is wrong on both. The only team-form read: the unscoped one it
+ * replaced put Red Sox and Bruins games on a Celtics pick (2026-10-17).
  */
 export async function fetchTeamRecentGamesForSport(
   sport: string,
@@ -2699,7 +2896,7 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       ...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p) && !isDuplicateCopy(p)),
     );
   }
-  return out;
+  return attachDiscordPublish(out);
 }
 
 /**
@@ -2738,10 +2935,11 @@ export async function fetchSettledPropPicksForPlayer(args: {
   if (error) throw error;
   // A game-level pick can never match a player_id; the label match could in
   // theory catch a team whose name starts a label, so keep prop rows only.
-  return ((data ?? []) as unknown as SettledPick[]).filter(
+  const rows = ((data ?? []) as unknown as SettledPick[]).filter(
     (p) =>
       (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p) && !isDuplicateCopy(p),
   );
+  return attachDiscordPublish(rows);
 }
 
 /**

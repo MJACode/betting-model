@@ -14,10 +14,8 @@ The fix keeps ONE extra row per (proposition, book) — the earliest snapshot �
 while still pruning the ~21 intraday snapshots in between. These tests pin
 both halves of that: openers survive, redundant snapshots still go.
 
-The SQL is Postgres-specific (window functions, %(name)s params, NOT IN
-%(tuple)s), so rather than stand up a database these tests assert on the
-generated SQL and on the protection predicate, which is where the regression
-would actually occur.
+The keep rules run on SQLite here (tests/test_prune_bounded's stand-in), so
+these check what survives, not only the SQL text.
 """
 
 from __future__ import annotations
@@ -31,31 +29,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.prune_odds import (  # noqa: E402
     PROTECTED_BOOKMAKERS, PROTECTED_BOOKMAKER_PREFIXES, _unprotected,
 )
-
-_SOURCE = (Path(__file__).parent.parent / "data" / "prune_odds.py").read_text(
-    encoding="utf-8")
+from tests.test_prune_bounded import StandIn  # noqa: E402
+from tests.test_prune_keeps_the_close import DOOMED, _prune, _quotes  # noqa: E402
 
 
 # ── the opener guard itself ───────────────────────────────────────────────────
 
 def test_openers_subquery_exists_and_orders_ascending():
     """
-    The opener set must be built with ORDER BY snapshot_at ASC. Ordering DESC
+    The opener must be ranked with ORDER BY snapshot_at ASC. Ordering DESC
     here would silently 'protect' the newest row instead of the oldest, which
     looks identical in row counts and destroys every opener.
     """
-    # Renamed to select_keepers on 2026-09-03 when the CLOSING snapshot
-    # joined the opener in the same keep-set (mike: "keep one non-dk
-    # snapshot per day"). Both keep-rules ride on ONE scan because two
-    # anti-joins timed the pruner out — see tests/test_prune_keeps_the_close.
-    # The opener rule itself is unchanged and still asserted below.
-    assert "select_keepers" in _SOURCE, "opener-protection subquery is gone"
-    m = re.search(r"select_keepers\s*=\s*f?\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
-    assert m, "could not locate the select_keepers block"
-    block = m.group(1)
-    assert "ORDER BY snapshot_at ASC" in block, (
+    assert "ORDER BY snapshot_at ASC" in DOOMED, (
         "openers must be the EARLIEST snapshot per proposition")
-    assert "rn_first = 1" in block
+    assert "rn_first = 1" in DOOMED
 
 
 def test_both_delete_tiers_exclude_openers():
@@ -64,24 +52,27 @@ def test_both_delete_tiers_exclude_openers():
     Exempting only one still loses them — tier 1 alone would delete the opener
     of every settled game.
     """
-    tier1 = re.search(r"where_old\s*=\s*f\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
-    tier2 = re.search(r"select_superseded\s*=\s*f\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
-    assert tier1 and tier2
-    assert "NOT IN ({select_keepers})" in tier1.group(1), (
-        "tier 1 deletes openers for settled games")
-    assert "NOT IN ({select_keepers})" in tier2.group(1), (
-        "tier 2 deletes openers inside the retention window")
+    conn = StandIn()
+    _quotes(conn, "OLD", "2026-10-10", [(1, "in_play", 1), (2, "in_play", 2)])
+    _quotes(conn, "WIN", "2026-10-19", [(11, "in_play", 1), (12, "in_play", 2),
+                                        (13, "in_play", 3)])
+    _prune(conn)
+    assert 1 in conn.ids("odds"), "tier 1 deletes openers for settled games"
+    assert 11 in conn.ids("odds"), "tier 2 deletes openers inside the retention window"
 
 
 def test_tier2_still_prunes_intermediate_snapshots():
     """
     The storage win must survive. Tier 2 keeps newest + opener and drops the
-    rest, so `rn > 1` must still be there — without it the pruner becomes a
-    no-op and non-DK history grows unbounded again.
+    rest — without that the pruner becomes a no-op and non-DK history grows
+    unbounded again.
     """
-    tier2 = re.search(r"select_superseded\s*=\s*f\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
-    assert "rn > 1" in tier2.group(1)
-    assert "ORDER BY snapshot_at DESC" in tier2.group(1)
+    assert "rn_newest > 1" in DOOMED
+    assert "ORDER BY snapshot_at DESC" in DOOMED
+    conn = StandIn()
+    _quotes(conn, "WIN", "2026-10-19", [(i, "open", i) for i in range(1, 7)])
+    _prune(conn)
+    assert conn.ids("odds") == {1, 6}
 
 
 # ── protection predicate ──────────────────────────────────────────────────────

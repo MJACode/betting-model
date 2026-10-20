@@ -20,6 +20,7 @@ crons had).
 | Job | When (ET) | Command |
 |---|---|---|
 | Daily full pipeline | 6:00am | `python run_pipeline.py` |
+| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered |
 | Model quality monitor | 11:00am | `tracking.model_quality.run_model_quality()` — also Step 13 of the daily; report only, `model_quality_checks`. Kill switch: `RUN_MODEL_QUALITY=0` |
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
@@ -29,6 +30,10 @@ crons had).
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
+
+Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
+a separate job. They do not move the pick slate or the recap jobs above.
+See `docs/social_posts.md`.
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
@@ -61,6 +66,22 @@ this hour, it runs `refresh_pass.sh` once. The evening pass is never replaced
 (its next tick is at most ten minutes away). **It buys odds — about 1,000
 credits a re-run** (1,018 measured on the 09-20 19:17 UTC pass). Kill switch:
 `RUN_REFRESH_RETRY=0`. See `tracking/refresh_retry.py`.
+
+**A deploy-killed refresh row is closed at boot (2026-10-16).**
+`_abort_orphans` only stamps the kind that is starting. Evening
+`06b9db72a43c4323ad5ed84abf00b591` (started 03:50Z) was still the only
+unfinished `pipeline_runs` row later that morning: later hourlies finished,
+and the next evening `start_run` is the next evening, so
+`refresh_pass_completion` stayed on its stuck branch.
+`scheduler.abort_orphaned_refresh_runs` runs once before the scheduler
+starts, on the service that owns `hourly_refresh`, and stamps unfinished
+`hourly` and `evening` rows that started before this process
+(`finished_at`, `ok=false`, `failed_steps='aborted'`). It does not touch
+`daily`. The cutoff freezes on the first call, so a second call cannot
+abort a pass this process has opened. The one-off
+`abort_deploy_killed_evening_2026_10_16.sql` closes that row on the next
+view-migration pass if boot has not already. This sweep does not re-run
+the pass.
 
 ### NFL polling (changed 2026-08-22)
 
@@ -361,7 +382,9 @@ so adding that channel later still delivers the rest of the day's picks.
 |---|---|---|
 | **New BET signal** | The pick's first cross of the action thresholds — the same cut the app's Signals tab uses. Fires on the 6am run and each refresh pass as signals lock. | The sport's channel |
 | **Live (in-play) signal** | End of each MLB / NCAAF live pass; after every NFL live BET the in-play worker writes | `DISCORD_WEBHOOK_LIVE_{SPORT}`, else `DISCORD_WEBHOOK_LIVE`, else the sport's |
-| **Results recap** | After settlement, once per settled day | `DISCORD_WEBHOOK_RESULTS` |
+| **Results recap** | After settlement, once per settled day. The 6:00am ET daily settles yesterday. A miss retries from 7:00am ET on later settle passes. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
+| **Weekly results** | Monday 7:30am ET, the prior Monday–Sunday. Later settle passes retry until the next Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
+| **Monthly results** | The first Monday of the month, 7:30am ET, the previous calendar month. Later settle passes retry until the next month's first Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Watchdog alert / recovery** | Database unreachable, or no completed pass in `WATCHDOG_STALE_MINUTES`. Checked every 15 minutes, around the clock. | `DISCORD_WEBHOOK_OPS` |
 | **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |
 
@@ -388,6 +411,15 @@ The recap fires from the **6am daily run**, which settles *yesterday*. It refuse
 any date that is not already over, so the `--step settle` that runs on every
 refresh pass (grading games as they finish) can never post a partial mid-slate
 record and then ledger it.
+
+The week and the month use that same settled query and the same `#results`
+webhook. `period_recaps` fires Monday at 7:30am ET, after the daily post and
+after the 7:00am retry. The week is the Monday–Sunday that just ended. The
+month is the previous calendar month, and only when that Monday is the first
+Monday of the month. A window that did not post stays due until the next one
+opens; the ledger (`discord_results_week`, `discord_results_month`, and the
+`x_results_*` pair, keyed on the window's start date) posts it once. X uses
+the daily recap's renderer with the window's heading.
 
 ### Guarantees
 
