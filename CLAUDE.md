@@ -552,7 +552,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 64 models carry their
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 65 models carry their
   own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
@@ -592,6 +592,7 @@ to be known BEFORE deciding which file to open.
 | Test suite coverage | `docs/testing.md` |
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
+| **App crashes: `app_errors`, what each kind means, the queries** | `docs/app_errors.md` |
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |
@@ -620,6 +621,7 @@ to be known BEFORE deciding which file to open.
 | **MLB market-handicap features (public/RLM/steam; RL+OU matrix; retrain next)** | `docs/mlb_market_handicap_features.md` |
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
+| **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —

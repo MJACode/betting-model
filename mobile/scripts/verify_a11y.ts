@@ -27,8 +27,10 @@
  *   5. Every <TextInput> and <Switch> has accessibilityLabel.
  *   6. M7: every vertical ScrollView / FlatList / SectionList that the betslip
  *      bar can float over — not inside a <Modal>, not horizontal, not on a
- *      route in App.tsx's NO_BETSLIP_BAR_ROUTES — ends with BetslipBarSpacer
- *      (last ScrollView child, or the FlatList's ListFooterComponent).
+ *      route in App.tsx's NO_BETSLIP_BAR_ROUTES, and not the crash fallback
+ *      (AppErrorBoundary replaces the tree, so the bar is unmounted) — ends
+ *      with BetslipBarSpacer (last ScrollView child, or the FlatList's
+ *      ListFooterComponent).
  * Plus the H9 section (effective height of the chip rows inside their
  * horizontal ScrollViews, with the known-short cases and why), pins for the
  * tab semantics (H9/M8), the audited slop numbers, and the
@@ -516,9 +518,13 @@ function closeOf(src: string, start: number, tagName: string): number {
 }
 const uncovered: string[] = [];
 let covered = 0;
+// The crash fallback is not a route. It replaces the tree under it, including
+// BetslipBar, so that ScrollView has no bar to pad.
+const noBarFiles = new Set(exemptFiles);
+noBarFiles.add('src/components/AppErrorBoundary.tsx');
 for (const f of files) {
   const rel = relPosix(f);
-  if (exemptFiles.has(rel)) continue;
+  if (noBarFiles.has(rel)) continue;
   const src = readUtf8(f);
   const modals = ranges(src, /<Modal\b/g, '</Modal>');
   for (const m of src.matchAll(/(?<![\w.])<(ScrollView|FlatList|SectionList)\s/g)) {
@@ -661,7 +667,8 @@ check('M10: tracked rows offer Untrack / Edit stake as accessibilityActions (Und
 const tip = read('src/components/InfoTooltip.tsx');
 check('M18: InfoTooltip icon slop 12 (20 + 24 = 44)', /hitSlop=\{12\}\s*accessibilityRole="button"/.test(tip));
 const onboarding = read('src/components/OnboardingModal.tsx');
-check('M19: Skip and Next have roles; dots read "Page N of 4"', /accessibilityLabel="Skip intro"/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, SLIDES\.length\)\}/.test(onboarding) && /accessibilityLabel=\{last \? 'Get started'/.test(onboarding));
+// The sportsbook step (2026-10-19) is page 5 of 5, so the dots count SLIDES + 1.
+check('M19: Skip and Next have roles; dots read "Page N of 5"', /accessibilityLabel="Skip intro"/.test(onboarding) && /const total = SLIDES\.length \+ 1;/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, total\)\}/.test(onboarding) && /\? `Save \$\{selected\.length\} sportsbook/.test(onboarding) && /: `Next, \$\{pageLabel\(step \+ 1, total\)/.test(onboarding));
 const manual = read('src/components/ManualBetModal.tsx');
 check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
   /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));

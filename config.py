@@ -617,6 +617,17 @@ ACTION_THRESHOLDS: dict = {
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
     "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA full-game totals, OVER only (2026-10-17, mike: "Find it ... edge like
+    # we have with other sports"): models/nba_total_luck.py, written by
+    # scripts/nba_total_luck_card.py. THE CUT IS THE GAP (luck-adjusted minus raw
+    # projected total >= 3 points), applied in the card; the offer is the
+    # best expected value under the market's fair line. Graded walk-forward at
+    # bought prices, 2021-22..2025-26 pooled: 508 bets, +55.6 units, +10.1%,
+    # 95% interval +2.0..+18.3, 5 of 5 seasons positive (docs/nba_models_2026.md
+    # 6.7). prob / edge are 0.0 so every publisher shows exactly what the card
+    # wrote: a decision edge is the EV divided by the decimal price, so it is
+    # >= 0 exactly when the bet clears its 0.00 EV floor.
+    "nba_total_luck":           {"min_prob": 0.0, "min_edge": 0.0},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1862,6 +1873,10 @@ MODEL_MIN_ODDS: dict = {
     # The projection model was graded at the same -200 floor; it lays -200 to
     # +3000 (median +110; the long tail is threes overs at 0.5 from one book).
     "nba_prop_projection":       -200,
+    # NBA totals overs (2026-10-17, mike): graded at the same -200 floor; it laid
+    # -115 to +100 on its 611 graded bets (median -110). Pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it off its evidence.
+    "nba_total_luck":            -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2096,6 +2111,13 @@ MODEL_OWN_EV_FLOOR: dict = {
     # The lowest of its six cells' floors (rebounds unders). Each market's own
     # floor (0.01-0.05) is applied on top, in models/nba_prop_projection.CARD.
     "nba_prop_projection":       0.01,
+    # NBA totals overs (2026-10-17, mike). The cut is the gap, not EV, so this
+    # floor must not become a second cut. The card applies it to p x decimal - 1
+    # (a push scored as a loss), the same quantity the publishers filter on, so
+    # nothing it writes is dropped downstream. On its 508 graded bets, at the
+    # 2026-27 uplift (+0.0659), it removes one: NBA_2023-01-24_DEN_NOP, FanDuel
+    # over 232.0, -0.012. The next smallest is +0.030, the median +0.090.
+    "nba_total_luck":           0.00,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2222,6 +2244,11 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # artifact (a Platt map fitted on the graded seasons' main-line pairs); a
     # second, pooled map would move every number it was graded on.
     "nba_prop_projection",
+    # 2026-10-17 (mike). The NBA totals overs: its probability is the market's
+    # fair P(over) plus the gap >= 3 bucket's walk-forward uplift, which is
+    # what its floor was set on. It has no record, so its promoted map would
+    # be the offset borrowed from other models.
+    "nba_total_luck",
 })
 
 
@@ -2333,6 +2360,10 @@ SCORING_METHODS: dict = {
     # Trained and registered (scripts/nba_prop_projection_train.py), scored by
     # scripts/nba_prop_projection_card.py.
     "nba_prop_projection": SCORING_ARTIFACT,
+    # A rule with a parameter artifact committed under models/saved/ (the
+    # residual sample and the bucket counts, models/nba_total_luck.py), never
+    # registered: the card loads it by its pinned path.
+    "nba_total_luck":      "rule",
 }
 
 
@@ -2360,6 +2391,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
+    "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2448,6 +2480,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
+    "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS

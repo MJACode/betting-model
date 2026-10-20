@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { BookChecklist, toggleBook } from '@/components/BookChecklist';
 import { usePreferredBooks, BOOKS, type BookKey } from '@/hooks/usePreferredBooks';
-import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
-import { DK_GREEN } from '@/lib/sportsbookLinks';
+import { MODEL_BOOK } from '@/lib/markets';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -14,12 +14,11 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * FanDuel and the Stats board prints whichever pays more on each line, badged
  * with the book that won it.
  *
- * Scope is the whole point of this sheet's copy. The setting used to price
- * every board, and the Picks header carried a line saying so. It no longer
- * does: Picks and Signals show the best line across every book we price, off a
- * pick modeled at DraftKings, and a member cannot change that. What the set
- * decides is the Stats board's lines and where the betslip's bet button sends
- * them.
+ * Scope (Matt, 2026-10-19): the set decides which prices a member SEES —
+ * the pick cards, the pick detail, the Stats board's lines and where the
+ * betslip's bet button sends them. It never reaches the models: every pick is
+ * still decided and graded at the best bettable price (usePreferredBooks).
+ * Onboarding opens the same list (OnboardingModal), with every book checked.
  *
  * THE LAST BOOK CANNOT BE UNCHECKED. An empty set would blank the Stats column
  * with nothing on screen to explain it, so the final checkmark is inert and
@@ -75,14 +74,7 @@ export function SportsbookPickerSheet({
   }, [visible, books]);
 
   const allOn = selected.length === BOOKS.length;
-  const toggle = (b: BookKey) => {
-    setSelected((prev) => {
-      if (!prev.includes(b)) return BOOKS.filter((x) => x === b || prev.includes(x));
-      // The last one stays on: an empty set has no honest Stats column.
-      if (prev.length === 1) return prev;
-      return prev.filter((x) => x !== b);
-    });
-  };
+  const toggle = (b: BookKey) => setSelected((prev) => toggleBook(prev, b));
   const toggleAll = () => setSelected(allOn ? [MODEL_BOOK] : [...BOOKS]);
 
   const apply = () => {
@@ -120,8 +112,8 @@ export function SportsbookPickerSheet({
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Your Stats lines show the best of these, and the betslip opens the one taking
-            your slip.
+            Picks and Stats show the best price at these books. The most value comes from
+            using every book you can.
           </Text>
 
           <Pressable
@@ -141,69 +133,7 @@ export function SportsbookPickerSheet({
           </Pressable>
 
           <ScrollView style={styles.list} bounces={false}>
-            {BOOKS.map((b) => {
-              const active = selected.includes(b);
-              const isModel = b === MODEL_BOOK;
-              const last = active && selected.length === 1;
-              // The lock line wins the one sub-line slot: it explains a
-              // control the member just tried to use, which the coverage note
-              // does not.
-              //
-              // The note is deliberately SELECTION-INDEPENDENT — it answers
-              // "what does this book have", not "what do your books have", so
-              // it reads the same whether the row is checked or not. `last`
-              // above reads the DRAFT (`selected`); do not be tempted to make
-              // the note follow it.
-              const note = last ? null : (coverageNote?.(b) ?? null);
-              return (
-                <Pressable
-                  key={b}
-                  onPress={() => toggle(b)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: active }}
-                  accessibilityLabel={
-                    last
-                      ? `${bookName(b)}, selected. Your only sportsbook — choose another before removing it.`
-                      : note
-                        ? `${bookName(b)}. ${note}`
-                        : bookName(b)
-                  }
-                  style={({ pressed }) => [
-                    styles.row,
-                    active && styles.rowActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <View style={[styles.badge, isModel && styles.badgeDk]}>
-                    <Text style={[styles.badgeText, isModel && styles.badgeTextDk]}>
-                      {bookLabel(b)}
-                    </Text>
-                  </View>
-                  <View style={styles.rowBody}>
-                    <Text style={styles.rowName}>{bookName(b)}</Text>
-                    {last ? (
-                      <View style={styles.lockRow}>
-                        <Ionicons name="lock-closed" size={11} color={colors.textTertiary} />
-                        <Text style={styles.rowSub}>
-                          Your only sportsbook — add another before removing this one
-                        </Text>
-                      </View>
-                    ) : note ? (
-                      <Text style={styles.rowSub}>{note}</Text>
-                    ) : null}
-                  </View>
-                  {active ? (
-                    // Green even when locked: in this sheet green means
-                    // selected, and greying the one book that is definitively
-                    // on made it look the most off (UX review). The lock icon
-                    // beside the sub-line carries the state instead.
-                    <Ionicons name="checkmark-circle" size={24} color={colors.tint} />
-                  ) : (
-                    <View style={styles.emptyCircle} />
-                  )}
-                </Pressable>
-              );
-            })}
+            <BookChecklist selected={selected} onToggle={toggle} coverageNote={coverageNote} />
           </ScrollView>
 
           {/* One sentence, not a paragraph: Settings states the scope above
@@ -265,70 +195,12 @@ const styles = StyleSheet.create({
   list: {
     flexGrow: 0,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  rowActive: {
-    borderColor: colors.tint,
-  },
-  badge: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.sm,
-    backgroundColor: colors.noneSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeDk: {
-    backgroundColor: DK_GREEN,
-  },
-  badgeText: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.bold,
-    color: colors.textSecondary,
-  },
-  badgeTextDk: {
-    color: colors.textPrimary,
-  },
-  rowBody: {
-    flex: 1,
-  },
-  rowName: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  rowSub: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    marginTop: 1,
-  },
-  emptyCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: colors.separatorOpaque,
-  },
   emptyCircleSm: {
     width: 20,
     height: 20,
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
-  },
-  lockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
   },
   selectAllRow: {
     flexDirection: 'row',

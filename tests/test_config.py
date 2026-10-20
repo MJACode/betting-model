@@ -201,7 +201,10 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # 2026-10-16 (mike: "build the projection model"): its probability is
          # calibrated per market inside its own artifact, on the graded seasons'
          # main-line pairs, and every floor was chosen on that number.
-         "nba_prop_projection"}
+         "nba_prop_projection",
+         # 2026-10-17 (mike): the NBA totals overs; market-fair P(over) plus the
+         # gap >= 3 bucket's walk-forward uplift, and no record to fit a map on.
+         "nba_total_luck"}
     )
 
 
@@ -270,5 +273,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         # prop rule decides on Pinnacle's no-vig under, its own number.
         "nba_prop_market",
         "nba_prop_projection",      # 2026-10-16 (mike): calibrated inside its own artifact
+        "nba_total_luck",           # 2026-10-17 (mike): market-fair P(over) + its bucket's uplift
     }
     assert not not_named_here

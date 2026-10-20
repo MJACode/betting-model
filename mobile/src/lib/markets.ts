@@ -44,9 +44,11 @@ export function gameMarketForModel(modelId: string): string | null {
   // so without this it fell through to 'h2h' and its totals price could never
   // resolve. Live rows come from v_latest_inplay_odds_all_books, not the
   // pre-game views (which exclude snapshot_type='in_play' by design).
-  // Same trap: `mlb_total_market` / `mlb_total_public_fade` have neither
-  // 'over_under' nor 'spread'. Without this they fall through to 'h2h'.
+  // Same trap: `mlb_total_market` / `mlb_total_public_fade` / `nba_total_luck`
+  // have neither 'over_under' nor 'spread'. Without this they fall through to
+  // 'h2h', and every price, movement and line-shop lookup reads moneyline rows.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
+  if (modelId === 'nba_total_luck') return 'totals';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';
@@ -201,8 +203,10 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId.startsWith('mlb_prop_pitcher_')) return 'pitching_prop';
   if (modelId.includes('prop')) return 'off_prop'; // batter / player scoring props
   if (modelId.includes('over_under') || modelId.includes('total_runs')) return 'game_total';
-  // Same trap as gameMarketForModel: mlb_total_* has neither substring.
+  // Same trap as gameMarketForModel: mlb_total_* and nba_total_luck have
+  // neither substring.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
+  if (modelId === 'nba_total_luck') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1200,7 +1204,18 @@ export function currentLineQuotes(
   bookRows: BookPricedRow[] | undefined,
   hero?: HeroAmerican | null,
   priceAge?: PriceAgeContext,
+  /** The member's own books (usePreferredBooks). A quote at any other book
+   *  is dropped and the rest re-ranked (Matt, 2026-10-19). Omitted: every
+   *  bettable book, as before. */
+  allowedBooks?: readonly string[],
 ): LineQuote[] {
+  if (allowedBooks) {
+    const allowed = new Set(allowedBooks);
+    const all = currentLineQuotes(pick, bookRows, hero, priceAge);
+    const kept = all.filter((q) => allowed.has(q.bookmaker));
+    if (kept.length === all.length) return all;
+    return kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
+  }
   const quotes = pickLineQuotes(pick, freshBookRows(pick, bookRows, priceAge));
   if (!priceAgeApplies(pick, priceAge)) return quotes;
   // A book is stale when we hold rows for it and none is current.
@@ -1249,8 +1264,13 @@ export function bestHandoffForPick(
   bookRows: BookPricedRow[] | undefined,
   hero?: HeroAmerican | null,
   priceAge?: PriceAgeContext,
+  /** The member's own books (usePreferredBooks). A book outside them is
+   *  never handed off to (Matt, 2026-10-19), the record book included.
+   *  Omitted: every book, as before. */
+  allowedBooks?: readonly string[],
 ): BoardHandoff | null {
   if (pick.is_live === true) {
+    if (allowedBooks && !allowedBooks.includes(MODEL_BOOK)) return null;
     // No live number to quote after the bet: open the book without one,
     // rather than print the lock as if it were still on offer.
     if (hero?.untracked) {
@@ -1267,7 +1287,7 @@ export function bestHandoffForPick(
   }
   // No hand-off to a book whose newest price is older than the bound
   // (currentLineQuotes; Pick Detail's chips read the same list).
-  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge);
+  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   if (quotes.length === 0) return null;
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet
@@ -1812,10 +1832,13 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // NO_ACTION for an nba_player with no box-score row in a logged game).
   // The NBA projection model (scripts/nba_prop_projection_card.py) posts in
   // the same window, the same way, and voids the same way, over or under.
+  // The NBA totals overs card (scripts/nba_total_luck_card.py) posts each game
+  // once, about an hour before tip, and is a game line: nothing to void.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
+    pick.model_id === 'nba_total_luck' ||
     nbaPosted
   ) {
     return {

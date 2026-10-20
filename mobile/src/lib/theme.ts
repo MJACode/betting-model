@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 
 import type { MatchupGrade } from './matchup';
 import { pnlTone } from './tone';
+import { FONT_SIZE_MICRO } from './typeScale';
 
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
@@ -64,6 +65,9 @@ export const colors = {
   betSoft: '#E8F8EC',
   avoid: '#FF3B30', // red
   avoidSoft: '#FDECEB',
+  // Also the empty Anytime TD meter bar. #C6C6C8 on the white card is
+  // 1.7:1; this gray is 3.26:1 on bgCard, which clears the 3:1 non-text floor
+  // (Designer review of #995).
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
 
@@ -164,7 +168,7 @@ export const font = {
     // sub-caption line from inventing a third size nobody agreed to
     // (UX review, 2026-09-05).
     nano: 10,
-    micro: 11,
+    micro: FONT_SIZE_MICRO,
     caption: 12,
     footnote: 13,
     body: 15,

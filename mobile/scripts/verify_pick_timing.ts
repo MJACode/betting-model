@@ -14,7 +14,7 @@
 
 import { formatStampET, normalizeStamp, todayET } from '../src/lib/format';
 import { UNLOCKED_LOOKAHEAD_SPORTS } from '../src/lib/thresholds';
-import { pickTimingInfo } from '../src/lib/markets';
+import { gameMarketForModel, pickTimingInfo } from '../src/lib/markets';
 import type { Pick, PickSide } from '../src/types';
 
 let failures = 0;
@@ -183,6 +183,13 @@ function mkPick(over: Partial<Pick>): Pick {
   check('NHL totals take the posted-once note', Boolean(totals?.note.startsWith('Posted once and never re-priced')), totals?.note);
   check('NHL totals note claims no daily run', Boolean(totals && !totals.note.includes('first scoring run')));
   check('NHL totals note has no void line', Boolean(totals && !totals.note.includes('Void')));
+  // The NBA totals overs post once, about an hour before tip: a game line,
+  // so the posted-once note with no void line.
+  const nbaTotals = pickTimingInfo(mkPick({ sport: 'NBA', model_id: 'nba_total_luck', created_at: NOW }));
+  check('NBA totals overs take the posted-once note',
+    nbaTotals?.kind === 'posted' && Boolean(nbaTotals?.note.startsWith('Posted once and never re-priced')),
+    nbaTotals?.note);
+  check('NBA totals overs note has no void line', Boolean(nbaTotals && !nbaTotals.note.includes('Void')));
 
   const yesterday = pickTimingInfo(mkPick({ created_at: THREE_DAYS_AGO }));
   check(
@@ -266,6 +273,11 @@ function mkPick(over: Partial<Pick>): Pick {
   check('and its same-day pick still is', pickTimingInfo({ ...ahead, game_date: todayET() })?.kind === 'posted');
   UNLOCKED_LOOKAHEAD_SPORTS.delete('UFC');
 }
+
+// The NBA totals overs model's picks are totals: their prices, movement and
+// line shop read the game's totals rows, never its moneyline rows.
+check('an nba_total_luck pick reads the totals market', gameMarketForModel('nba_total_luck') === 'totals',
+  String(gameMarketForModel('nba_total_luck')));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 if (failures > 0) process.exit(1);

@@ -367,14 +367,17 @@ def step_player_positions(run_date: str) -> bool:
     """NBA / WNBA / NCAAF positions for the player page's "same position vs
     the next opponent" card (data/ingestors/player_positions_ingestor.py).
 
-    Once a day is enough: rosters change slowly, and the ESPN half re-fetches
-    only athletes not stored in the last 7 days, so a steady-state pass is the
-    ~45 roster-list calls plus that week's signings (ESPN has IP-blocked this
-    worker twice). CFBD /roster is one call. Verified on the worker
-    2026-10-06 by dry runs 405765 / 406072 before this was scheduled."""
+    Once a day is enough: rosters change slowly. The ESPN half re-fetches an
+    athlete only after a 7-day window plus a per-id jitter, skips unmatched
+    ids it has already cached, and stops at MAX_ATHLETE_HTTP so a cold morning
+    cannot walk every roster (ESPN has IP-blocked this worker twice). NCAAF
+    uses the fall-year season of `run_date` — January through July belong to
+    the previous season — so a January run still reads the roster that has
+    game logs. CFBD /roster is one call. Verified on the worker 2026-10-06
+    by dry runs 405765 / 406072 before this was scheduled."""
     try:
         from data.ingestors.player_positions_ingestor import ingest_player_positions
-        result = ingest_player_positions(dry_run=False)
+        result = ingest_player_positions(dry_run=False, run_date=run_date)
         logger.success(f"✓ Player positions: {result}")
         return True
     except Exception as exc:
@@ -1380,6 +1383,29 @@ def step_nba_prop_projection(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_total_luck(dry_run: bool = False) -> bool:
+    """NBA full-game totals, overs (`nba_total_luck`): the shooting-luck gap.
+
+    Decides each regular-season game once, on an odds fetch that landed 60-66
+    minutes before tip, and writes the over at the best bettable price when
+    the luck-adjusted projected total is at least 3 points above the raw one
+    (scripts/nba_total_luck_card.py). LIVE, no write switch (mike,
+    2026-10-17). Runs only in the NBA totals window job, right after that
+    job's own fetch, under a time limit there
+    (scheduler.run_nba_total_luck_window). A run with no game to decide
+    writes nothing and logs why.
+    """
+    try:
+        from scripts.nba_total_luck_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA totals card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA totals card failed: {exc}")
+        return False
+
+
 def step_nba_prop_project() -> bool:
     """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
     --project): the frame over every box line since 2018-19, the newest ESPN injury
@@ -1577,16 +1603,15 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X posts the free pick (the same one the free Discord channel got)
-        # and, unless X_POST_ALL_PICKS=0, every other released pre-game pick.
-        # mike, 2026-10-18. Ledgered independently of Discord, so one surface
-        # failing never suppresses the other. The free pick stays labeled
-        # "Free pick" and is not posted a second time as a plain pick.
+        # X posts every released pre-game pick, each in the same format.
+        # Discord's free pick is not an input. X_POST_ALL_PICKS=0 posts no
+        # pick slate. Ledgered independently of Discord, so one surface
+        # failing never suppresses the other.
         try:
-            from tracking.x_publisher import notify_x_free_pick
-            notify_x_free_pick(target_date=run_date, dry_run=dry_run)
+            from tracking.x_publisher import notify_x_picks
+            notify_x_picks(target_date=run_date, dry_run=dry_run)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"X free pick failed (Discord unaffected): {exc}")
+            logger.error(f"X picks failed (Discord unaffected): {exc}")
         if d or fp or rs:
             logger.success(
                 f"✓ Discord: {d} signal(s) posted"
@@ -1747,6 +1772,18 @@ def step_settle(settle_date: str) -> bool:
             logger.info(f"Results restated: {n} post(s)")
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+
+    # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
+    # first Monday, the previous calendar month. Later passes retry a miss.
+    # Both are ledgered, so a posted window is not posted again.
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        if n:
+            logger.info(f"Period results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Period results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 
@@ -2275,6 +2312,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
+                                 "nba-total-luck",
                                  "nhl-over-under",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nfl-results",
@@ -2360,6 +2398,7 @@ Examples:
             "nba-prop-close": lambda: step_nba_prop_close(),
             "nba-prop-projection": lambda: step_nba_prop_projection(dry_run=args.dry_run),
             "nba-prop-project": lambda: step_nba_prop_project(),
+            "nba-total-luck": lambda: step_nba_total_luck(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),

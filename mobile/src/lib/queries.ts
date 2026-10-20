@@ -75,6 +75,7 @@ import type {
   SavantStatsRow,
   H2HStatValuesRow,
   PositionVsOpponentRow,
+  PositionDefenseRankRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
@@ -594,6 +595,30 @@ export async function fetchH2HStatValues(
 }
 
 /**
+ * Whether `season` has started for `sport`: at least one FINAL game.
+ *
+ * A row in `games` is not enough. Measured 2026-10-06: NBA season 2027
+ * already had 46 games on the schedule and 0 with `home_win` set (first
+ * date 2026-10-20). Counting rows would open this season before opening
+ * night. The read is `limit(1)` — 0 or 1 row, under the 1,000-row cap.
+ * `games` is already on the anon read surface.
+ */
+export async function fetchSeasonStarted(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF',
+  season: number,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('game_id')
+    .eq('sport', sport)
+    .eq('season', season)
+    .not('home_win', 'is', null)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
+/**
  * Every qualifying player-game at one NFL position group against one defence,
  * this season and last, with the defence's league rank on each row. Backs the
  * player page's "WRs vs ATL" card (Matt, 2026-10-05).
@@ -655,6 +680,25 @@ export async function fetchPositionVsOpponent(
     );
   }
   return [];
+}
+
+/**
+ * Every defense's rank for one NFL position group and stat. 32 rows, so it
+ * is not paged. Rank 1 allows the most. The Anytime TD board calls it once
+ * per group (position_defense_ranks_nfl).
+ */
+export async function fetchPositionDefenseRanks(
+  seasons: number[],
+  statKey: string,
+  posGroup: string,
+): Promise<PositionDefenseRankRow[]> {
+  const { data, error } = await supabase.rpc('position_defense_ranks_nfl', {
+    p_seasons: seasons,
+    p_stat: statKey,
+    p_pos_group: posGroup,
+  });
+  if (error) throw error;
+  return (data ?? []) as PositionDefenseRankRow[];
 }
 
 /**
@@ -2150,19 +2194,6 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }
 
-export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
-  const { data, error } = await supabase
-    .from('games')
-    .select(GAME_COLUMNS)
-    .or(`home_team.eq.${team},away_team.eq.${team}`)
-    .lt('game_date', beforeDate)
-    .not('home_score', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []) as GameRow[];
-}
-
 export async function fetchPlayerRecentGames(
   playerId: string,
   beforeDate: string,
@@ -2708,8 +2739,9 @@ export async function fetchTeamStats(
 
 /**
  * A team's most recent finished games IN ONE SPORT, newest first. Scoped by
- * sport, unlike fetchTeamRecentGames: 'BUF' is Buffalo in the NFL and the
- * NHL, and a form strip that mixes the two is wrong on both.
+ * sport: 'BUF' is Buffalo in the NFL and the NHL, and a form strip that mixes
+ * the two is wrong on both. The only team-form read: the unscoped one it
+ * replaced put Red Sox and Bruins games on a Celtics pick (2026-10-17).
  */
 export async function fetchTeamRecentGamesForSport(
   sport: string,

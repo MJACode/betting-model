@@ -18,7 +18,8 @@ import pytest
 
 from data.ingestors import nba_results_ingestor as nri
 from data.ingestors.nba_espn_box import (
-    box_team_totals, fill_missing, parse_nba_box, parse_nba_dnp, parse_nba_scoreboard,
+    box_team_totals, fill_missing, parse_nba_box, parse_nba_dnp, parse_nba_postponed,
+    parse_nba_scoreboard,
 )
 
 FIX = Path(__file__).parent / "fixtures"
@@ -197,13 +198,20 @@ class FakeStore:
         self.dnp = {}
         self.xwalk = xwalk or {}
         self.writes = []
+        self.postponed = {}
 
     def window_games(self, start, end):
         out = {}
         for gid, g in self.games.items():
             if start <= g["game_date"] <= end:
-                out[gid] = {**g, "logged": self.is_logged(gid)}
+                out[gid] = {**g, "logged": self.is_logged(gid),
+                            "postponed": gid in self.postponed}
         return out
+
+    def mark_postponed(self, gid, status):
+        self.writes.append(("postponed", gid))
+        self.postponed[gid] = status
+        return 1
 
     def resolver(self, since):
         return nri.PlayerResolver(self.xwalk, [(k[0], r["player_name"], r["team"])
@@ -375,8 +383,67 @@ def test_a_game_missed_during_an_outage_is_healed_past_the_lookback():
     assert t["scores_filled"] == 1 and t["dates_fetched"] == 1
     store2, espn2 = FakeStore([_game()]), _ESPN()
     nri.ingest_nba_results(run_date="2026-04-20", get_json=espn2, store=store2,
-                           sleep=0, now=later, heal_days=0)
+                           sleep=0, now=later, heal_days=0, heal_season=False)
     assert espn2.calls == [], "the lookback alone does not reach ten days back"
+
+
+def test_a_box_still_missing_since_opening_week_is_retried_all_season():
+    """A box that has not landed blocks every nba_total_luck decision after it
+    (models/nba_total_luck.missing_inputs checks the whole league), so the
+    retry reaches back to the season's opening, not just 14 days."""
+    store = FakeStore([_game(game_date="2025-10-24", season=2026, home_score=100,
+                             away_score=118, commence_time="2025-10-24T23:00:00+00:00")])
+    espn = _ESPN()
+    nri.ingest_nba_results(run_date="2026-01-15", get_json=espn, store=store, sleep=0,
+                           now=datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc))
+    assert ("scoreboard", {"dates": "20251024"}) in espn.calls, espn.calls
+
+
+def test_a_placeholder_game_with_no_teams_is_not_work():
+    """nba_schedule seeds the NBA Cup knockout slots before their teams are
+    known (home and away 'NaN'); they never get a score, and must not cost an
+    ESPN call on every pass for the rest of the season."""
+    store, espn = FakeStore([_game(game_id="NBA_2026-04-10_nan_nan", home="NaN",
+                                   away="NaN")]), _ESPN()
+    t = _run(store, espn)
+    assert espn.calls == [] and t["dates_fetched"] == 0
+
+
+POSTPONED_BOARD = _load("espn_nba_scoreboard_2025-01-09_postponed.json")
+PPD_GID = "NBA_2025-01-09_CHA_LAL"
+
+
+def _ppd_game(**kw):
+    return _game(game_id=PPD_GID, game_date="2025-01-09", season=2025, home="LAL",
+                 away="CHA", commence_time="2025-01-10T03:30:00+00:00", **kw)
+
+
+def test_espn_s_postponed_game_is_read_as_postponed():
+    got = parse_nba_postponed(POSTPONED_BOARD, "2025-01-09")
+    assert [(g["game_id"], g["status"]) for g in got] == [(PPD_GID, "Postponed")]
+    assert all(e["game_id"] != PPD_GID for e in parse_nba_scoreboard(POSTPONED_BOARD, "2025-01-09"))
+
+
+def test_a_postponed_game_is_recorded_once_and_then_costs_nothing():
+    """ESPN keeps a postponed game on its original date. Recording it lets the
+    totals model stop waiting for its score, and stops the daily refetch."""
+    later = datetime(2025, 1, 10, 12, 0, tzinfo=timezone.utc)
+    store, espn = FakeStore([_ppd_game()]), _ESPN(board=POSTPONED_BOARD)
+    t = nri.ingest_nba_results(dates=["2025-01-09"], get_json=espn, store=store, sleep=0,
+                               now=later)
+    assert store.postponed == {PPD_GID: "Postponed"} and t["postponed"] == 1
+    espn2 = _ESPN(board=POSTPONED_BOARD)
+    nri.ingest_nba_results(dates=["2025-01-09"], get_json=espn2, store=store, sleep=0,
+                           now=later)
+    assert espn2.calls == [], "a recorded postponement is not work"
+
+
+def test_a_dry_run_records_no_postponement():
+    later = datetime(2025, 1, 10, 12, 0, tzinfo=timezone.utc)
+    store, espn = FakeStore([_ppd_game()]), _ESPN(board=POSTPONED_BOARD)
+    t = nri.ingest_nba_results(dates=["2025-01-09"], get_json=espn, store=store, sleep=0,
+                               now=later, dry_run=True)
+    assert store.postponed == {} and t["planned_postponed"] == [PPD_GID]
 
 
 def test_dry_run_writes_nothing_and_returns_the_plan():

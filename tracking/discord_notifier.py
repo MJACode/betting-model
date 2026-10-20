@@ -12,7 +12,8 @@ Producers, each independently enabled by whether its webhook is configured:
     (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
     channel, else the sport's pre-game channel.
   • notify_discord_results — one morning recap after settlement: yesterday's
-    record, P&L and ROI, overall and by sport.
+    record, P&L and ROI, overall and by sport. The same webhook also gets
+    the Monday weekly recap and the first-Monday monthly recap.
   • notify_discord_void — one gray notice per sport for picks that are already
     VOID and already posted. Writes push_sent kind discord_void only after
     Discord accepts the message. Does not edit or delete the original post.
@@ -78,10 +79,6 @@ _MAX_429_WAIT = 30.0
 # 204). Keeps _post's boolean contract without pretending we can address
 # the message later -- the delete path ignores it.
 _POST_OK_NO_ID = "ok"
-# What the last _post call actually got back. The recap reads this so a
-# rejected post is a row, not only a log line that disappears with the
-# container. status is the HTTP code, or None when the request never got one.
-_last_delivery: dict = {"status": None, "detail": ""}
 _INTER_POST_SLEEP = 0.6         # webhooks allow ~5 req / 2s; stay well under
 
 _COLOR_SIGNAL = 0x2ECC71        # green
@@ -357,11 +354,33 @@ def _redact_delivery_error(exc: BaseException, url: str) -> str:
     return f"{type(exc).__name__}: {text}"
 
 
-def _remember_delivery(status, detail: str) -> None:
-    """Keep the last webhook outcome, with any webhook URL removed."""
-    text = _WEBHOOK_IN_TEXT.sub("[webhook]", detail or "")
-    _last_delivery["status"] = status
-    _last_delivery["detail"] = text[:180]
+class _Posted(str):
+    """One confirmed webhook result. status and detail belong to this call.
+
+    A module dict of the last outcome is shared by every caller in the
+    process, so two posts can record each other's HTTP status. This object
+    is the outcome of the call that returned it.
+    """
+
+    status: int | None
+    detail: str
+
+    def __new__(cls, text: str, status, detail: str = ""):
+        obj = str.__new__(cls, text)
+        obj.status = status
+        obj.detail = detail or ""
+        return obj
+
+
+class _Rejected:
+    """A webhook answer that was not a delivery. Falsy, and not a message id."""
+
+    def __init__(self, status, detail: str = ""):
+        self.status = status
+        self.detail = detail or ""
+
+    def __bool__(self) -> bool:
+        return False
 
 
 def _post(url: str, payload: dict) -> str | None:
@@ -391,10 +410,8 @@ def _post(url: str, payload: dict) -> str | None:
                 except Exception:  # noqa: BLE001 — 204, or a body we can't parse
                     mid = ""
                 if mid:
-                    _remember_delivery(resp.status_code, "")
-                    return mid
-                _remember_delivery(resp.status_code, "no message id")
-                return _POST_OK_NO_ID
+                    return _Posted(mid, resp.status_code, "")
+                return _Posted(_POST_OK_NO_ID, resp.status_code, "no message id")
             if resp.status_code == 429:
                 try:
                     wait = float(resp.json().get("retry_after", 1.0))
@@ -415,8 +432,8 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook rejected ({resp.status_code}): {resp.text[:200]}")
-            _remember_delivery(resp.status_code, resp.text[:180])
-            return None
+            return _Rejected(resp.status_code, _WEBHOOK_IN_TEXT.sub(
+                "[webhook]", resp.text[:180]))
         except Exception as exc:  # noqa: BLE001 — delivery must never break a run
             # A timeout (or a dropped connection) can mean Discord already
             # accepted this POST and the response never arrived. Retrying
@@ -427,10 +444,8 @@ def _post(url: str, payload: dict) -> str | None:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook post failed: {_redact_delivery_error(exc, url)}")
-            _remember_delivery(None, _redact_delivery_error(exc, url))
             return False
     logger.error("Discord webhook still rate-limited after retries; will retry next pass")
-    _remember_delivery(429, "rate limited after retries")
     return None
 
 
@@ -1988,13 +2003,8 @@ def notify_discord_free_pick(target_date: str | None = None,
         if not _post(url, {"embeds": [embed]}):
             return 0                       # un-ledgered: retried next pass
 
-        # The chosen pick's lock_key is recorded in message_id (empty on this
-        # kind, and this is what it is for now): X's free pick reads it back and
-        # publishes THE SAME PICK. Two independent random.choice calls over a
-        # 22-candidate pool agreed about 4% of the time, so the free pick tweeted
-        # publicly was almost never the free pick the free channel was given —
-        # against this module's own charter that X gets exactly what the free
-        # Discord channel gets. See tracking/x_publisher.notify_x_free_pick.
+        # The chosen pick's lock_key is recorded in message_id so the day's
+        # free-channel choice is the one that was posted. X does not read it.
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
             "VALUES (%s, 'discord_free_pick', %s, %s) "
@@ -2361,12 +2371,20 @@ def _record_delivery_failure(conn, lock_key: str, kind: str, detail: str) -> Non
     except Exception as exc:                              # noqa: BLE001
         logger.error(f"Discord delivery failure was not recorded "
                      f"({type(exc).__name__})")
+        # The insert aborted the transaction. The no-id path reads the
+        # row back next, and that read raises until this rolls back.
+        try:
+            conn.rollback()
+        except Exception:                                 # noqa: BLE001
+            pass
 
 
-def _delivery_failure_reason(message_id) -> str:
-    status = _last_delivery.get("status")
-    detail = (_last_delivery.get("detail") or "").strip()
-    if message_id == _POST_OK_NO_ID:
+def _delivery_failure_reason(raw) -> str:
+    """Why this call was not a message id. raw is the object _post returned."""
+    status = getattr(raw, "status", None)
+    detail = (getattr(raw, "detail", "") or "").strip()
+    detail = _WEBHOOK_IN_TEXT.sub("[webhook]", detail)
+    if isinstance(raw, str) and raw == _POST_OK_NO_ID:
         reason = "Discord returned no message id"
     else:
         reason = "Discord post was not confirmed"
@@ -2375,6 +2393,51 @@ def _delivery_failure_reason(message_id) -> str:
     if detail and detail not in reason:
         reason = f"{reason}; {detail}"
     return reason[:180]
+
+
+def _recap_missing_id_recorded(conn, lock_key: str, kind: str) -> bool:
+    """True when this recap already has a no-message-id error row.
+
+    That row means Discord answered success and did not give an id. Posting
+    again can put another copy in the channel on every later pass. The row
+    is the stop.
+    """
+    row = conn.execute(
+        "SELECT message_id FROM push_sent WHERE lock_key = %s AND kind = %s",
+        (lock_key, f"{kind}_error"),
+    ).fetchone()
+    if not row or row[0] is None:
+        return False
+    return "no message id" in str(row[0]).lower()
+
+
+def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
+                            lock_key: str, *, recorded: bool) -> None:
+    """One ops alert. The lock key is the row to delete, and a restatement's
+    key includes the published_at of the recap it corrects.
+
+    recorded means that row is in push_sent, so later passes do not post.
+    An insert that failed leaves nothing to stop the next pass, and the
+    alert says so.
+    """
+    from tracking.watch_util import post_ops_alert
+
+    if recorded:
+        tail = (
+            "It will not be posted again automatically. "
+            f"Delete the {kind}_error row for that lock to post it again."
+        )
+    else:
+        tail = ("The error row was not recorded, so a later pass may post "
+                "it again.")
+    try:
+        post_ops_alert(
+            "Results recap has no message id",
+            f"{kind} for {game_date} came back without a message id ({reason}). "
+            f"Lock {lock_key}. {tail}",
+        )
+    except Exception as exc:                       # noqa: BLE001
+        logger.error(f"recap no-message-id alert failed ({type(exc).__name__})")
 
 
 def _record_restate_exception(item: dict, exc: BaseException) -> None:
@@ -2476,6 +2539,11 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             (lock_key, kind),
         ).fetchone():
             return 0
+        # A success response with no message id is ledgered as {kind}_error.
+        # The message may already be in the channel. Another pass would post
+        # another copy. One such row stops this recap for good.
+        if _recap_missing_id_recorded(conn, lock_key, kind):
+            return 0
 
         rows = _settled_rows(conn, game_date)
         if not rows:
@@ -2530,16 +2598,29 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # blocked every retry, and the message could not be opened. Measured
         # 2026-10-14: the Oct 13 restatement is that row (null message_id)
         # and it is not a message anyone can find. No id is not a delivery.
-        _last_delivery["status"] = None
-        _last_delivery["detail"] = ""
-        message_id = _post(url, {"embeds": [embed]})
-        stored_id = (message_id if isinstance(message_id, str)
+        # It is also not a miss we can safely repeat: the body may have
+        # landed. One error row, one alert, and no later pass posts it.
+        raw = _post(url, {"embeds": [embed]})
+        message_id = raw if isinstance(raw, str) else None
+        stored_id = (message_id if message_id
                      and message_id not in ("", _POST_OK_NO_ID) else None)
         if not stored_id:
-            reason = _delivery_failure_reason(message_id)
+            reason = _delivery_failure_reason(raw)
             logger.error(f"Discord(results) {game_date} "
                          f"{'restate ' if restate else ''}not confirmed ({reason})")
             _record_delivery_failure(conn, lock_key, kind, reason)
+            if isinstance(raw, str) and raw == _POST_OK_NO_ID:
+                try:
+                    recorded = _recap_missing_id_recorded(conn, lock_key, kind)
+                except Exception as exc:                  # noqa: BLE001
+                    logger.error(f"Discord(results) {game_date} error row "
+                                 f"could not be read back ({type(exc).__name__})")
+                    recorded = False
+                # A missing row does not stop the next pass. Alert either
+                # way: once when the stop is stored, and on this pass when
+                # the insert did not stick.
+                _alert_recap_missing_id(
+                    game_date, kind, reason, lock_key, recorded=recorded)
             return 0
 
         published_at = datetime.now(ET).isoformat()
@@ -2571,6 +2652,197 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         return 1
     finally:
         conn.close()
+
+
+# ── Weekly and monthly recaps ────────────────────────────────────────────────
+# The daily recap above is yesterday, inside the 6:00am ET pipeline. These
+# two use that same settled query and the same results webhook. They open
+# Monday at 7:30am ET, after that daily post and after the 7:00am retry.
+# A missed Monday keeps trying until the next window opens. The ledger is
+# what makes the retry post once.
+
+PERIOD_RECAP_HOUR_ET = 7
+PERIOD_RECAP_MINUTE_ET = 30
+
+
+def _at_et(day: date, hour: int, minute: int) -> datetime:
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=ET)
+
+
+def _first_monday(year: int, month: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(0 - first.weekday()) % 7)
+
+
+def _previous_month(year: int, month: int) -> tuple[date, date]:
+    if month == 1:
+        start = date(year - 1, 12, 1)
+    else:
+        start = date(year, month - 1, 1)
+    end = date(year, month, 1) - timedelta(days=1)
+    return start, end
+
+
+def _week_ending(sunday: date) -> tuple[date, date]:
+    return sunday - timedelta(days=6), sunday
+
+
+def recap_periods_due(now: datetime | None = None) -> list[dict]:
+    """The week, and on its window the month, whose posting time has passed.
+
+    The week that ended Sunday opens the following Monday at 7:30am ET and
+    stays due until the next Monday at 7:30am. The previous calendar month
+    opens on the first Monday of the new month at that same minute, and
+    stays due until the next month's first Monday. Before 7:30am on the
+    opening Monday, that window is not due yet.
+    """
+    now = now or datetime.now(ET)
+    now = now.astimezone(ET) if now.tzinfo else now.replace(tzinfo=ET)
+    today = now.date()
+    due: list[dict] = []
+
+    if today.weekday() == 6:
+        sunday = today - timedelta(days=7)
+    else:
+        sunday = today - timedelta(days=today.weekday() + 1)
+    week_opens = _at_et(sunday + timedelta(days=1),
+                        PERIOD_RECAP_HOUR_ET, PERIOD_RECAP_MINUTE_ET)
+    if now >= week_opens:
+        start, end = _week_ending(sunday)
+        due.append({
+            "span": "week", "start": start, "end": end,
+            "heading": period_heading("week", start, end),
+        })
+
+    opened: list[tuple[datetime, int, int]] = []
+    for year, month in ((today.year, today.month),
+                        *_shift_month(today.year, today.month, -1)):
+        first = _first_monday(year, month)
+        opens = _at_et(first, PERIOD_RECAP_HOUR_ET, PERIOD_RECAP_MINUTE_ET)
+        if now >= opens:
+            opened.append((opens, year, month))
+    if opened:
+        _opens, year, month = max(opened)
+        start, end = _previous_month(year, month)
+        due.append({
+            "span": "month", "start": start, "end": end,
+            "heading": period_heading("month", start, end),
+        })
+    return due
+
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[tuple[int, int]]:
+    month += delta
+    if month < 1:
+        month += 12
+        year -= 1
+    elif month > 12:
+        month -= 12
+        year += 1
+    return ((year, month),)
+
+
+def period_heading(span: str, start: date, end: date) -> str:
+    """The title both surfaces use, without the word 'results'."""
+    if span == "month":
+        return start.strftime("%B")
+    left = f"{start.strftime('%b')} {start.day}"
+    if start.month == end.month and start.year == end.year:
+        right = str(end.day)
+    else:
+        right = f"{end.strftime('%b')} {end.day}"
+    return f"Week of {left}-{right}"
+
+
+def notify_discord_period(span: str, start: date, end: date,
+                          heading: str, dry_run: bool = False) -> int:
+    """One weekly or monthly recap, on the daily recap's webhook.
+
+    Same settled picks as the daily recap (`_settled_rows_since` is that
+    query over a window). Ledgered on the window's start date, and only
+    after Discord returns a message id.
+    """
+    url = _results_webhook()
+    if not url:
+        return 0
+    kind = f"discord_results_{span}"
+    lock_key = f"{kind}:{start.isoformat()}"
+    conn = get_connection()
+    try:
+        if conn.execute(
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (lock_key, kind),
+        ).fetchone():
+            return 0
+        rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
+        if not rows:
+            return 0
+        overall = _tally(rows)
+        if (overall["w"] + overall["l"] + overall["p"]) == 0:
+            return 0
+        by_sport: dict[str, list] = {}
+        for row in rows:
+            by_sport.setdefault(row[0], []).append(row)
+        fields = [{
+            "name": sport,
+            "value": _tally_line(_tally(group), with_clv=True),
+            "inline": False,
+        } for sport, group in sorted(by_sport.items())]
+        color = (_COLOR_RESULTS_UP if overall["units"] > 0
+                 else _COLOR_RESULTS_DOWN if overall["units"] < 0
+                 else _COLOR_RESULTS_FLAT)
+        embed = {
+            "title": f"\U0001F4CA Results — {heading}",
+            "description": (
+                f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                f"{len(rows)} settled"),
+            "color": color,
+            "fields": fields,
+        }
+        if dry_run:
+            logger.info(f"[dry-run] discord({span}) {heading} → "
+                        f"{_tally_line(overall)}")
+            return 0
+        message_id = _post(url, {"embeds": [embed]})
+        stored_id = (message_id if isinstance(message_id, str)
+                     and message_id not in ("", _POST_OK_NO_ID) else None)
+        if not stored_id:
+            logger.error(f"Discord({span}) {heading} not confirmed")
+            return 0
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, kind, datetime.now(ET).isoformat(), stored_id),
+        )
+        conn.commit()
+        logger.success(f"✓ Discord({span}): posted {heading}")
+        return 1
+    finally:
+        conn.close()
+
+
+def post_period_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+    """Post each due week and month, Discord then X. A ledgered window is 0.
+
+    Called by the Monday 7:30am job and again from later settle passes, so
+    a failed post is retried and a successful one is not repeated.
+    """
+    posted = 0
+    for window in recap_periods_due(now):
+        try:
+            posted += notify_discord_period(
+                window["span"], window["start"], window["end"],
+                window["heading"], dry_run=dry_run)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"Discord {window['span']} recap failed: {exc}")
+        try:
+            from tracking.x_publisher import notify_x_period
+            posted += notify_x_period(
+                window["span"], window["start"], window["end"],
+                window["heading"], dry_run=dry_run)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"X {window['span']} recap failed: {exc}")
+    return posted
 
 
 # ── Void notice ──────────────────────────────────────────────────────────────

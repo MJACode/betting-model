@@ -86,6 +86,13 @@ bounds it:
 - Retention is keyed on the **game's** date, not the snapshot's — `odds` has no date column, so
   it joins `games` (the view's convention). Dating by snapshot would prune a future UFC/golf
   event's only line-shop row, since those are priced up to 7 days ahead.
+- **NBA keeps its whole price path in `odds`** (2026-10-17, for the game-market search in
+  `docs/nba_models_2026.md` §6.5). Neither tier touches an NBA row. Instead `thin_repeats`
+  runs first, in its own transactions, on settled games of the last 21 days: it deletes the
+  middle of every unchanged run per (game, market, book, pre-game or in-play), keeping the row
+  where each book moved and the last row it held. Every as-of read is unchanged. Paid history
+  (any non-NULL `source`) is never thinned. Measured dry run on the opening week's rows: 766,140
+  of 773,041 would go, 38.9 s for five game dates.
 - **Pruned history is gone permanently.** Raise `PRUNE_NON_DK_KEEP_DAYS` before building
   anything that needs non-DK history (e.g. "did the best book beat DK at close?").
 

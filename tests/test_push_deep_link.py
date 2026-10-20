@@ -267,12 +267,11 @@ def test_the_last_response_is_consumed_so_a_remount_cannot_reopen_it():
     """The comment used to say 'consumed exactly once'. The code did not.
 
     Expo keeps returning the same tap from getLastNotificationResponseAsync
-    until clearLastNotificationResponseAsync runs. This app reloads its JS
-    on launch and on foreground whenever an OTA bundle is waiting
-    (useOtaUpdates → Updates.reloadAsync), and that is a NEW runtime: a
-    module-level once-guard dies with it. Without the native clear, a tap
-    that opened a pick is replayed after the reload and the user cannot
-    leave the screen.
+    until clearLastNotificationResponseAsync runs. A cold start (or a dev
+    reload) is a NEW runtime: a module-level once-guard dies with it. The
+    app stopped reloading itself for OTA updates on 2026-10-19, but without
+    the native clear a tap that opened a pick could still be replayed in a
+    later runtime and the user could not leave the screen.
 
     The identifier set is the same-runtime half (listener + getLast both
     fire; Fast Refresh remounts the hook). Both halves have to be present.

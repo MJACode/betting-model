@@ -30,6 +30,21 @@ Usage:
     python -m data.ingestors.nba_stats_ingestor --season 2025
     python -m data.ingestors.nba_stats_ingestor --date 2025-11-15
     python -m data.ingestors.nba_stats_ingestor --game-log-date 2025-11-14
+    python -m data.ingestors.nba_stats_ingestor --replace-box NBA_2026-11-14_BOS_NYK
+    python -m data.ingestors.nba_stats_ingestor --repair-boxes 2027
+
+REPLACING A BOX (--replace-box / --repair-boxes). The upserts above key on
+(player_id, game_id). The results ingestor stores a player it cannot map under
+'espn:<id>', so loading NBA.com's box over a game ESPN already wrote stores
+that player twice and his points count twice. A box ESPN never finished is
+short. Either way the team's box no longer adds up to its final score, and
+nba_total_luck declines every later game of the season until it does
+(models/nba_total_luck.missing_inputs, 'box_missing' / 'box_mismatch').
+replace_game_boxes() repairs it for exactly the games named, one game per
+transaction: the game's rows are deleted and NBA.com's inserted, and only when
+NBA.com's own rows add up to the final score stored in `games`; otherwise the
+game is left as it was and reported. --repair-boxes SEASON names every game of
+the season whose box is missing or does not add up.
 """
 
 import argparse
@@ -542,6 +557,108 @@ def _ingest_season(conn: DBConnection, season: int, as_of_date: str,
     return {"games": n_games, "player_rows": n_player, "team_rows": n_team}
 
 
+# ── Replacing one game's box ────────────────────────────────────────────────────
+
+def _box_adds_up(rows: list[dict], home: str, away: str, home_score, away_score) -> str | None:
+    """None when each team's summed points equal its final score, else why not."""
+    pts: dict[str, int] = {}
+    for r in rows:
+        if r.get("points") is None:
+            return f"a player row with no points ({r.get('player_id')})"
+        pts[r["team"]] = pts.get(r["team"], 0) + int(r["points"])
+    if set(pts) != {home, away}:
+        return f"teams {sorted(pts)} are not {sorted({home, away})}"
+    if home_score is None or away_score is None:
+        return "the game has no final score in games"
+    if (pts[home], pts[away]) != (int(home_score), int(away_score)):
+        return (f"NBA.com's box sums {away} {pts[away]} - {home} {pts[home]}, the final is "
+                f"{int(away_score)} - {int(home_score)}")
+    return None
+
+
+def replace_game_boxes(game_ids: list[str], conn: DBConnection | None = None) -> dict:
+    """Replace each named game's nba_player_game_log rows with NBA.com's.
+
+    One season's league game log per season named (two stats.nba.com calls),
+    then one transaction per game: DELETE the game's rows, INSERT NBA.com's.
+    A game is written only when NBA.com's rows add up to the final score
+    stored in `games` (_box_adds_up); a game NBA.com does not list, or whose
+    box does not add up, is left exactly as it was. is_starter, which the
+    league log does not carry, is kept from the replaced rows by player.
+    -> {"replaced": [game ids], "refused": {game_id: why}}.
+    """
+    own = conn is None
+    conn = conn or get_connection()
+    out: dict = {"replaced": [], "refused": {}}
+    try:
+        stored = {r[0]: r for r in conn.execute("""
+            SELECT game_id, season, home_team, away_team, home_score, away_score
+            FROM games WHERE sport = 'NBA' AND game_id = ANY(%s)
+        """, (list(game_ids),)).fetchall()}
+        conn.rollback()
+        for gid in game_ids:
+            if gid not in stored:
+                out["refused"][gid] = "not an NBA game in games"
+        by_season: dict[int, list[str]] = {}
+        for gid, row in stored.items():
+            by_season.setdefault(int(row[1]), []).append(gid)
+        for season, gids in sorted(by_season.items()):
+            team_df = _fetch_league_game_log(season, "T")
+            time.sleep(REQUEST_SLEEP)
+            player_df = _fetch_league_game_log(season, "P")
+            _, id_map = _build_game_rows(_pair_games(team_df, season))
+            nba_rows = _build_player_log_rows(player_df, id_map, season)
+            for gid in sorted(gids):
+                _, _, home, away, hs, as_ = stored[gid]
+                rows = [r for r in nba_rows if r["game_id"] == gid]
+                if not rows:
+                    out["refused"][gid] = "NBA.com's regular-season log does not list it"
+                    continue
+                why = _box_adds_up(rows, home, away, hs, as_)
+                if why:
+                    out["refused"][gid] = why
+                    continue
+                try:
+                    starter = {r[0]: r[1] for r in conn.execute(
+                        "SELECT player_id, is_starter FROM nba_player_game_log WHERE game_id = %s",
+                        (gid,)).fetchall()}
+                    for r in rows:
+                        r["is_starter"] = starter.get(r["player_id"], r["is_starter"])
+                    conn.execute("DELETE FROM nba_player_game_log WHERE game_id = %s", (gid,))
+                    _upsert_player_log(conn, rows)
+                    conn.commit()
+                    out["replaced"].append(gid)
+                    logger.success(f"{gid}: box replaced with NBA.com's ({len(rows)} players)")
+                except Exception as exc:                       # noqa: BLE001
+                    conn.rollback()
+                    out["refused"][gid] = f"write failed: {exc}"
+        for gid, why in sorted(out["refused"].items()):
+            logger.error(f"{gid}: box NOT replaced: {why}")
+    finally:
+        if own:
+            conn.close()
+    return out
+
+
+def boxes_to_repair(season: int, conn: DBConnection | None = None) -> list[str]:
+    """Every scored regular-season game of `season` whose box is missing a
+    team or does not add up to its final score, by nba_total_luck's own
+    definition (scripts/nba_total_luck_card.load_season,
+    models/nba_total_luck.team_box and box_mismatches)."""
+    import models.nba_total_luck as tl
+    from scripts.nba_total_luck_card import load_season
+    own = conn is None
+    conn = conn or get_connection()
+    try:
+        final, box, _ = load_season(conn, int(season), "9999-12-31")
+    finally:
+        if own:
+            conn.close()
+    tb = tl.team_box(box, final)
+    unboxed = set(final["game_id"]) - set(tb["game_id"])
+    return sorted(unboxed | tl.box_mismatches(final, tb))
+
+
 # ── Main entry points ──────────────────────────────────────────────────────────
 
 def run_nba_stats_ingestor(season: int = None, as_of_date: str = None) -> dict:
@@ -665,11 +782,23 @@ if __name__ == "__main__":
     parser.add_argument("--season", type=int, help="Season (ending year; 2025 = 2024-25)")
     parser.add_argument("--date", dest="as_of_date", help="As-of / game date YYYY-MM-DD")
     parser.add_argument("--game-log-date", help="Ingest games + box scores for this date only")
+    parser.add_argument("--replace-box", nargs="+", metavar="GAME_ID",
+                        help="Replace these games' box scores with NBA.com's (only when it "
+                             "adds up to the final score)")
+    parser.add_argument("--repair-boxes", type=int, metavar="SEASON",
+                        help="Replace every box of SEASON that is missing or does not add up")
     parser.add_argument("--backfill", nargs=2, type=int, metavar=("START", "END"),
                         help="Backfill seasons START through END (ending years)")
     args = parser.parse_args()
 
-    if args.backfill:
+    if args.replace_box or args.repair_boxes:
+        ids = args.replace_box or boxes_to_repair(args.repair_boxes)
+        logger.info(f"Replacing {len(ids)} box score(s): {ids}")
+        result = replace_game_boxes(ids) if ids else {"replaced": [], "refused": {}}
+        logger.info(f"Done: {result}")
+        if result["refused"]:
+            sys.exit(1)
+    elif args.backfill:
         backfill_nba_stats(args.backfill[0], args.backfill[1])
     elif args.game_log_date:
         result = ingest_nba_game_log_for_date(args.game_log_date)

@@ -145,6 +145,56 @@ def verdict(cells: pd.DataFrame, bh_basis: str = "confirm", m_first: int = M_FIR
     return c
 
 
+HOUSE_BARS = ["h1_bets", "h2_ci95", "h3_seasons", "h4_blind", "h5_plateau", "h6_placebo"]
+
+
+def house_bar4(row: pd.Series) -> bool:
+    """Beats the blind same real side, pooled (bar 9's rule on pooled numbers)."""
+    for split, (a, b) in SPLITS.items():
+        share = row.get(f"pool_share_{split}", np.nan)
+        if not np.isfinite(share):
+            continue
+        side = a if share > DOMINANT else b if share < 1 - DOMINANT else None
+        if side is None:
+            continue
+        blind = row.get(f"blind_pool_{side}", np.nan)
+        if not (np.isfinite(blind) and row["pool_roi"] > blind):
+            return False
+    return True
+
+
+def house_verdict(cells: pd.DataFrame) -> pd.DataFrame:
+    """§6.7: the standard the repo's shipped models were held to, one fixed list.
+
+    1 pooled bets >= 200; 2 pooled 95% interval above zero; 3 of the graded
+    seasons with >= 30 bets, all but at most one positive; 4 beats the blind
+    same real side, pooled; 5 every existing cut neighbour positive, pooled;
+    6 placebo (bar 10). Closing-line value is reported, never a bar."""
+    c = cells[~cells["family"].astype(str).str.startswith(CONTROL_PREFIX)].copy()
+    axes = axes_of(c)
+    c["key"] = [cell_key(r, axes) for _, r in c.iterrows()]
+    assert c["key"].is_unique, "two cells share every axis"
+    c["h1_bets"] = c["pool_n"] >= MIN_BETS
+    c["h2_ci95"] = c["pool_ci95_lo"] > 0
+    c["h3_seasons"] = (c["pool_seasons_counted"] >= 2) & (
+        c["pool_seasons_counted"] - c["pool_seasons_positive"] <= 1)
+    c["h4_blind"] = c.apply(house_bar4, axis=1) & c["pool_roi"].notna()
+    ok = pd.Series(True, index=c.index)
+    for _, grp in c.groupby(axes, dropna=False, sort=False):
+        by_k = grp.set_index("cut_index")["pool_roi"]
+        for i, row in grp.iterrows():
+            nb = [by_k.get(row["cut_index"] - 1), by_k.get(row["cut_index"] + 1)]
+            ok[i] = all(np.isfinite(x) and x > 0 for x in nb if x is not None)
+    c["h5_plateau"] = ok & (c["pool_roi"] > 0)
+    p95 = c["placebo_rois"].apply(lambda v: np.percentile(_floats(v), 95)
+                                  if len(_floats(v)) else np.nan)
+    c["h6_placebo"] = c["roi_choose"] > p95.fillna(np.inf)
+    c["house_passes"] = c[HOUSE_BARS].all(axis=1)
+    c["house_failed"] = c[HOUSE_BARS].apply(lambda r: ",".join(b for b in HOUSE_BARS if not r[b]),
+                                            axis=1)
+    return c
+
+
 def load_cells(results: Path) -> pd.DataFrame:
     parts = [pd.read_parquet(p) for p in sorted(results.glob("cells_*.parquet"))]
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
@@ -154,8 +204,17 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--results", type=Path, required=True)
     ap.add_argument("--bh-basis", choices=["confirm", "choose"], default="confirm")
+    ap.add_argument("--house", action="store_true", help="the house standard of §6.7")
     a = ap.parse_args()
     cells = load_cells(a.results)
+    if a.house:
+        h = house_verdict(cells)
+        h.drop(columns=["placebo_rois"]).to_parquet(a.results / "verdict_house.parquet")
+        print(f"{len(h)} cells; {int(h['house_passes'].sum())} pass the house standard; "
+              f"{int(h['h2_ci95'].sum())} clear the 95% interval alone "
+              f"(about {0.025 * len(h):.1f} expected by chance before correlation)")
+        print(h.groupby("family")[HOUSE_BARS + ["house_passes"]].sum())
+        return
     v = verdict(cells, a.bh_basis)
     v.drop(columns=["placebo_rois"]).to_parquet(a.results / f"verdict_{a.bh_basis}.parquet")
     print(f"{len(v)} cells; {int(v['passes'].sum())} pass (BH basis {a.bh_basis}, m = {v['bh_m'].iloc[0]})")
