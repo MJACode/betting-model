@@ -137,6 +137,9 @@ ET = ZoneInfo("America/New_York")
 
 X_POST_URL = "https://api.x.com/2/tweets"
 X_MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload"
+X_PROFILE_URL = "https://api.x.com/1.1/account/update_profile.json"
+PROFILE_NAME_MAX = 50
+PROFILE_DESCRIPTION_MAX = 160
 MAX_TWEET = 280
 # One-shot tweet_image on POST /2/media/upload. GIF and video use a different
 # category and are not accepted here.
@@ -202,7 +205,8 @@ def signature_base_string(method: str, url: str, params: dict) -> str:
 
 
 def _auth_header(method: str, url: str, creds: tuple,
-                 nonce: str | None = None, timestamp: str | None = None) -> str:
+                 nonce: str | None = None, timestamp: str | None = None,
+                 extra_params: dict | None = None) -> str:
     api_key, api_secret, token, token_secret = creds
     oauth = {
         "oauth_consumer_key": api_key,
@@ -212,9 +216,16 @@ def _auth_header(method: str, url: str, creds: tuple,
         "oauth_token": token,
         "oauth_version": "1.0",
     }
-    # The JSON body is NOT part of the signature for a JSON-bodied request --
-    # only oauth_* params are, since there is no form-encoded payload to fold in.
-    base = signature_base_string(method, url, oauth)
+    # A JSON body is not part of the signature. A form body is: RFC 5849 folds
+    # application/x-www-form-urlencoded fields into the same parameter list as
+    # the oauth_* fields. extra_params is that form. The Authorization header
+    # still lists only oauth_* fields. Tweet posts pass no extra_params.
+    signed = dict(oauth)
+    for key, value in (extra_params or {}).items():
+        if value is None:
+            continue
+        signed[str(key)] = str(value)
+    base = signature_base_string(method, url, signed)
     signing_key = f"{_quote(api_secret)}&{_quote(token_secret)}"
     digest = hmac.new(signing_key.encode(), base.encode(), hashlib.sha1).digest()
     oauth["oauth_signature"] = base64.b64encode(digest).decode()
@@ -913,6 +924,73 @@ def upload_tweet_image(content: bytes, media_type: str) -> MediaUpload:
     if state in ("pending", "in_progress", "failed"):
         return MediaUpload(None, "rejected", f"image not ready ({state})")
     return MediaUpload(media_id, "uploaded", "")
+
+
+class ProfileUpdate:
+    """One POST /1.1/account/update_profile.json.
+
+    outcome is updated, skipped, rejected, or transport. rejected is an HTTP
+    4xx, including 429: the profile drain does not retry those. skipped means
+    the call was not made. Pick and recap posts never construct one.
+    """
+
+    def __init__(self, outcome: str, detail: str = "", body: str = ""):
+        self.outcome = outcome
+        self.detail = detail
+        self.body = body
+
+
+def update_profile(*, name: str | None = None, description: str | None = None,
+                   url: str | None = None) -> ProfileUpdate:
+    """Set the account name, description, and url. Does not create a tweet.
+
+    Omitted fields (None) are left off the form, so X leaves them as they are.
+    A name over 50 characters or a description over 160 is refused here, before
+    the request. RUN_X_PUBLISHER=0 returns skipped and does not call X.
+    """
+    if not _enabled():
+        return ProfileUpdate("skipped", "RUN_X_PUBLISHER=0")
+    creds = _creds()
+    if not creds:
+        return ProfileUpdate("skipped", "credentials not configured")
+    fields: dict[str, str] = {}
+    if name is not None:
+        fields["name"] = str(name)
+    if description is not None:
+        fields["description"] = str(description)
+    if url is not None:
+        fields["url"] = str(url)
+    if not fields:
+        return ProfileUpdate("rejected", "nothing to update")
+    if "name" in fields and len(fields["name"]) > PROFILE_NAME_MAX:
+        return ProfileUpdate(
+            "rejected",
+            f"name is {len(fields['name'])} characters; the limit is {PROFILE_NAME_MAX}")
+    if "description" in fields and len(fields["description"]) > PROFILE_DESCRIPTION_MAX:
+        return ProfileUpdate(
+            "rejected",
+            f"description is {len(fields['description'])} characters; "
+            f"the limit is {PROFILE_DESCRIPTION_MAX}")
+    try:
+        resp = requests.post(
+            X_PROFILE_URL,
+            data=fields,
+            headers={
+                "Authorization": _auth_header(
+                    "POST", X_PROFILE_URL, creds, extra_params=fields),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            timeout=20,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ProfileUpdate("transport", str(exc)[:500])
+    body = (resp.text or "")[:4000]
+    if resp.status_code in (200, 201):
+        return ProfileUpdate("updated", "", body)
+    detail = f"HTTP {resp.status_code} {body[:500]}"
+    if 400 <= resp.status_code < 500:
+        return ProfileUpdate("rejected", detail, body)
+    return ProfileUpdate("transport", detail, body)
 
 
 # ── Ledgered publishing ───────────────────────────────────────────────────────

@@ -438,11 +438,13 @@ def run_calibration_watch() -> None:
 
 
 def run_social_post_queue() -> None:
-    """Publish manual rows in social_post_queue. Does not post picks or recaps.
+    """Publish manual rows in social_post_queue, then one profile update.
 
-    A raise must not kill the scheduler. The claim in tracking.social_posts is
-    what stops two services posting the same row; this job does not take the
-    session lock the worker_jobs queue uses.
+    Does not post picks or recaps. A raise must not kill the scheduler.
+    The claim in each drain is what stops two services sending the same
+    row; this job does not take the session lock the worker_jobs queue uses.
+    The profile pass is its own try, so a post-queue failure does not skip
+    it and a profile failure does not change the post pass.
     """
     try:
         from data.db import get_connection
@@ -460,6 +462,22 @@ def run_social_post_queue() -> None:
                      result.get("status"), posted)
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR social-post-queue crashed")
+    try:
+        from data.db import get_connection
+        from tracking.social_profile import drain_social_profile
+        conn = get_connection()
+        try:
+            result = drain_social_profile(conn)
+        finally:
+            conn.close()
+        applied = result.get("applied") or 0
+        bad = [item for item in result.get("results", [])
+               if item.get("status") == "failed"]
+        if applied or bad or result.get("status") not in ("ok", "skipped", "no_table"):
+            log.info("social profile: status=%s applied=%s",
+                     result.get("status"), applied)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR social-profile crashed")
 
 
 def run_job_queue() -> None:
@@ -1724,9 +1742,9 @@ def build_scheduler() -> BlockingScheduler:
         name="Worker job queue (every 5 min)",
     )
 
-    # Manual posts to @SignalBasePicks. Separate from the pick slate and the
-    # recap jobs: it only reads social_post_queue. Five minutes matches the
-    # worker job queue. It does not move any other trigger.
+    # Manual posts to @SignalBasePicks, and one queued profile update.
+    # Separate from the pick slate and the recap jobs. Five minutes matches
+    # the worker job queue. It does not move any other trigger.
     sched.add_job(
         run_social_post_queue,
         CronTrigger(minute="*/5", timezone=TIMEZONE),
