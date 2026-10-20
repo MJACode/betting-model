@@ -212,23 +212,22 @@ def _rolling_points_live(conn: DBConnection, team: str, as_of_date: str,
     return round(float(np.mean(pts)), 2) if len(pts) >= 3 else None
 
 
-def _rest_days_live(conn: DBConnection, team: str, as_of_date: str) -> int | None:
-    row = conn.execute("""
-        SELECT game_date FROM games
-        WHERE sport = 'WNBA'
-          AND (home_team = ? OR away_team = ?)
-          AND game_date < ?
-          AND home_score IS NOT NULL
-        ORDER BY game_date DESC LIMIT 1
-    """, (team, team, as_of_date)).fetchone()
-    if not row:
-        return None
-    try:
-        d0 = datetime.strptime(row[0], "%Y-%m-%d")
-        d1 = datetime.strptime(as_of_date, "%Y-%m-%d")
-        return (d1 - d0).days
-    except (ValueError, TypeError):
-        return None
+def _rest_days_live(conn: DBConnection, team: str, as_of_date: str,
+                    game_id: str) -> int | None:
+    """Rest at TIP, from the stored schedule (data/schedule_context).
+
+    This read only SCORED games until 2026-10-20. A team's previous game that
+    was still being played, or not yet ingested, was invisible: 11 of
+    wnba_moneyline's 40 BETs were written that way and 8 of them read a
+    different d_rest_days (pick 3698318 read 10 days for both teams where the
+    truth was 2; pick 480442 had IND truly on a back-to-back and read 12).
+    Training reads every completed game, which for a game in the past is
+    every game the team played -- the same thing this now returns, so the
+    training value does not change and there is no retrain. A row the odds
+    feed wrote that no book ever priced is not a game (2026: four such rows,
+    each beside the real one)."""
+    from data.schedule_context import rest_days_as_of_kickoff
+    return rest_days_as_of_kickoff(conn, "WNBA", team, game_id, as_of_date)
 
 
 def build_wnba_game_features(conn: DBConnection, game_id: str, game_date: str,
@@ -251,8 +250,8 @@ def build_wnba_game_features(conn: DBConnection, game_id: str, game_date: str,
         _rolling_points_live(conn, home_team, game_date, 5),
         _rolling_points_live(conn, away_team, game_date, 3),
         _rolling_points_live(conn, away_team, game_date, 5),
-        _rest_days_live(conn, home_team, game_date),
-        _rest_days_live(conn, away_team, game_date),
+        _rest_days_live(conn, home_team, game_date, game_id),
+        _rest_days_live(conn, away_team, game_date, game_id),
         home_inj, away_inj, odds_row,
     )
 

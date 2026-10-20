@@ -266,3 +266,133 @@ def test_a_paused_models_held_row_keeps_the_pause_note(monkeypatch):
                    paused=True)
     assert picks and {p["signal_type"] for p in picks} == {"NONE"}
     assert {p["downgrade_reason"] for p in picks} == {config.PAUSED_NOTE}
+
+
+
+# ── NCAAF: the night-game stub takes CFBD's schedule row ─────────────────────
+
+def _ncaaf_db():
+    import sqlite3
+    from data.db_setup import SCHEMA_SQL
+    from data.ingestors.cfbd_ingestor import ncaaf_season_for_date
+    c = sqlite3.connect(":memory:")
+    c.executescript(SCHEMA_SQL)
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS game_weather (game_id TEXT, temp_f REAL,
+            wind_mph REAL, precip_mm REAL);
+        CREATE TABLE IF NOT EXISTS ncaaf_venues (venue_id INTEGER, latitude REAL,
+            longitude REAL, elevation_ft REAL, capacity INTEGER, grass INTEGER,
+            dome INTEGER);""")
+    season = ncaaf_season_for_date(TODAY.isoformat())
+    for team, sp in (("Army", 2.0), ("Navy", 1.0)):
+        c.execute("INSERT INTO ncaaf_team_stats (team, season, as_of_date, games_played, "
+                  "sp_overall, conference, classification) VALUES (?, ?, ?, 6, ?, "
+                  "'American Athletic', 'fbs')", (team, season, _d(-30), sp))
+    return c, season
+
+
+def _game(c, gid, gdate, home, away, start, *, week=None, neutral=None, venue=None,
+          hs=None, as_=None, season=2026):
+    c.execute("INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, "
+              "commence_time, week, neutral_site, conference_game, venue_id, home_score, "
+              "away_score) VALUES (?, 'NCAAF', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+              (gid, season, gdate, home, away, start, week, neutral, venue, hs, as_))
+
+
+def test_army_navy_on_its_stub_reads_week_15_at_a_neutral_site():
+    """The odds feed's NCAAF_2026-12-12_army_navy has no week; CFBD's
+    NCAAF_2026-12-12_navy_army (swapped) says week 15, neutral site."""
+    from features.ncaaf_feature_engine import build_ncaaf_game_features
+    c, season = _ncaaf_db()
+    stub = f"NCAAF_{_d(40)}_army_navy"
+    _game(c, stub, _d(40), "Navy", "Army", _t(40 * 24 + 4), season=season)
+    _game(c, f"NCAAF_{_d(40)}_navy_army", _d(40), "Army", "Navy", _t(40 * 24 + 4),
+          week=15, neutral=1, venue=3839, season=season)
+    f = build_ncaaf_game_features(c, stub, _d(40), "Navy", "Army", season)
+    assert f is not None
+    assert f["week"] == 15 and f["is_neutral_site"] == 1
+
+
+def test_a_night_game_stub_reads_the_utc_dated_cfbd_row():
+    from features.ncaaf_feature_engine import build_ncaaf_game_features
+    c, season = _ncaaf_db()
+    stub = f"NCAAF_{_d(17)}_army_navy"
+    _game(c, stub, _d(17), "Navy", "Army", _t(17 * 24 + 23), season=season)
+    _game(c, f"NCAAF_{_d(18)}_army_navy", _d(18), "Navy", "Army", _t(17 * 24 + 23),
+          week=10, neutral=0, season=season)
+    f = build_ncaaf_game_features(c, stub, _d(17), "Navy", "Army", season)
+    assert f is not None and f["week"] == 10
+
+
+def test_a_stub_with_no_cfbd_row_is_not_scored_on_blanks():
+    from features.ncaaf_feature_engine import build_ncaaf_game_features
+    c, season = _ncaaf_db()
+    stub = f"NCAAF_{_d(17)}_army_navy"
+    _game(c, stub, _d(17), "Navy", "Army", _t(17 * 24 + 23), season=season)
+    assert build_ncaaf_game_features(c, stub, _d(17), "Navy", "Army", season) is None
+
+
+# ── rest as of kickoff, from the stored schedule ─────────────────────────────
+
+def test_ncaaf_rest_counts_the_game_still_to_be_played():
+    """Pick 3094504's shape: decided nine days out with a game in between.
+    Rest read off played games saw that game as a bye (14 days); at kickoff
+    it is 7. Navy (home) has a real bye; Army (away) plays in two days."""
+    from features.ncaaf_feature_engine import build_ncaaf_game_features
+    c, season = _ncaaf_db()
+    target = f"NCAAF_{_d(9)}_army_navy"
+    _game(c, target, _d(9), "Navy", "Army", _t(9 * 24), week=8, neutral=0, season=season)
+    _game(c, f"NCAAF_{_d(2)}_tulane_army", _d(2), "Army", "Tulane", _t(2 * 24),
+          week=7, neutral=0, season=season)                                # not played yet
+    for team in ("Army", "Navy"):
+        _game(c, f"NCAAF_{_d(-5)}_rice_{team.lower()}", _d(-5), team, "Rice",
+              _t(-5 * 24), week=6, neutral=0, hs=30, as_=20, season=season)
+    f = build_ncaaf_game_features(c, target, _d(9), "Navy", "Army", season)
+    assert f is not None
+    assert f["d_rest_days"] == 14 - 7                     # home rest minus away rest
+
+
+def _wnba_db():
+    import sqlite3
+    from data.db_setup import SCHEMA_SQL
+    c = sqlite3.connect(":memory:")
+    c.executescript(SCHEMA_SQL)
+    return c
+
+
+def _wnba_game(c, gid, gdate, home, away, start, hs=None, as_=None, priced=True):
+    c.execute("INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, "
+              "commence_time, home_score, away_score) VALUES (?, 'WNBA', 2026, ?, ?, ?, ?, ?, ?)",
+              (gid, gdate, home, away, start, hs, as_))
+    if priced:
+        c.execute("INSERT INTO odds (game_id, sport, market, bookmaker, snapshot_type, "
+                  "snapshot_at) VALUES (?, 'WNBA', 'h2h', 'draftkings', 'open', ?)",
+                  (gid, start))
+
+
+def test_wnba_rest_counts_the_game_still_being_played():
+    """Pick 480442: IND truly on a back-to-back (at LA, still being quoted when
+    the pick was written) and read as 12 days' rest, so away_b2b was 0."""
+    from features.wnba_feature_engine import build_wnba_game_features
+    c = _wnba_db()
+    target = f"WNBA_{_d(1)}_IND_PHX"
+    _wnba_game(c, target, _d(1), "PHX", "IND", _t(26))
+    _wnba_game(c, f"WNBA_{_d(0)}_IND_LA", _d(0), "LA", "IND", _t(-1.5))   # on now
+    _wnba_game(c, f"WNBA_{_d(-12)}_IND_NY", _d(-12), "NY", "IND", _t(-12 * 24), 80, 70)
+    _wnba_game(c, f"WNBA_{_d(-2)}_PHX_SEA", _d(-2), "SEA", "PHX", _t(-2 * 24), 80, 70)
+    f = build_wnba_game_features(c, target, _d(1), "PHX", "IND", 2026)
+    assert f["away_b2b"] == 1
+    assert f["d_rest_days"] == 3 - 1
+
+
+def test_wnba_rest_ignores_a_row_no_book_ever_priced():
+    """WNBA_2026-10-03_NY_ATL beside the real 10-04 game: unscored, 0 odds
+    rows. Counted, it would be a back-to-back that never happened."""
+    from features.wnba_feature_engine import build_wnba_game_features
+    c = _wnba_db()
+    target = f"WNBA_{_d(3)}_NY_ATL"
+    _wnba_game(c, target, _d(3), "ATL", "NY", _t(72))
+    _wnba_game(c, f"WNBA_{_d(2)}_NY_ATL", _d(2), "ATL", "NY", _t(47), priced=False)
+    _wnba_game(c, f"WNBA_{_d(0)}_NY_ATL", _d(0), "ATL", "NY", _t(-6), 92, 88)
+    f = build_wnba_game_features(c, target, _d(3), "ATL", "NY", 2026)
+    assert f["home_b2b"] == 0 and f["away_b2b"] == 0 and f["d_rest_days"] == 0
