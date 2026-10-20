@@ -163,7 +163,10 @@ def test_the_narrowing_migration_is_property_guarded_and_registered():
     assert NARROW.name in ACTIVE_MIGRATIONS
     assert ACTIVE_MIGRATIONS.index("discord_post_one_pick_2026_10_14.sql") < \
         ACTIVE_MIGRATIONS.index(NARROW.name)
-    assert ACTIVE_MIGRATIONS[-1] == "published_picks_record_2026_10_14.sql"
+    assert ACTIVE_MIGRATIONS.index(NARROW.name) < \
+        ACTIVE_MIGRATIONS.index("published_picks_record_2026_10_14.sql")
+    # published_record_units reads the live view and stays last.
+    assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
     assert sql.count("$mig$") == 2
     assert "CREATE INDEX CONCURRENTLY" not in code
     assert "CONCURRENTLY" in sql

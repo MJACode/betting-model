@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 CI: narrowing migration stays ahead of the published-record pass; tail pin is published_record_units; period-recap double accepts allow_link |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #945 merged the updated #941 branch `32fe055f` (master `8e3d5262` already in it); session logs keep both sides |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #945 merged origin/master `8e3d5262`; session logs keep both sides; no code, test, config, or migration conflict |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 merged origin/master `8e3d5262`; session logs keep both sides; no code, test, config, or migration conflict |
