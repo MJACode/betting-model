@@ -564,6 +564,25 @@ def step_nhl_stats(run_date: str) -> bool:
         return False
 
 
+def step_nhl_goalie_designations(today_only: bool = False) -> bool:
+    """Who ESPN and DailyFaceoff say will start in goal, stored as it changes,
+    and the game's goalie row rewritten when ESPN confirms someone else
+    (data/ingestors/nhl_goalie_designations.py). No NHL model bets until both
+    starting goalies are confirmed (mike, 2026-10-20; models/nhl_goalie_gate.py),
+    and the gate reads what this stores. Free endpoints. `today_only` is the
+    five-minute NHL job's poll; the refresh pass and the 6am run add tomorrow.
+    """
+    try:
+        from data.ingestors.nhl_goalie_designations import run
+        result = run(today_only=today_only)
+        logger.success(f"✓ NHL goalie designations: stored {result['stored']}, "
+                       f"rewrote {len(result['swapped'])}, DailyFaceoff {result['dailyfaceoff']}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL goalie designations failed: {exc}")
+        return False
+
+
 def step_nhl_results(run_date: str) -> bool:
     """
     Ingest NHL final scores + regulation outcomes for the trailing few days.
@@ -2028,6 +2047,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
 
     logger.info("Step 4/7: NHL team + goalie stats...")
     results["nhl_stats"] = step_nhl_stats(run_date)
+    # Who each source says will start in goal, right after the 6am goalie
+    # rows: the history starts the morning, and a row ESPN has already
+    # contradicted with a confirmation is rewritten before anything scores.
+    results["nhl_goalie_designations"] = step_nhl_goalie_designations()
     time.sleep(1)
 
     # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
@@ -2354,6 +2377,7 @@ Examples:
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck",
                                  "nhl-over-under",
+                                 "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
@@ -2433,6 +2457,8 @@ Examples:
             "mlb-game-market": lambda: step_mlb_game_market(run_date, dry_run=args.dry_run),
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
+            "nhl-goalie-designations": lambda: step_nhl_goalie_designations(),
+            "nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "nba-props": lambda: step_nba_props(dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),

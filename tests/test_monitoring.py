@@ -342,6 +342,7 @@ INSTRUMENTED_ENTRYPOINTS = [
     "scripts/nba_total_luck_window.py",
     "scripts/nba_team_total_luck_window.py",
     "scripts/nba_prop_projection_card.py",
+    "scripts/nhl_goalie_window.py",
 ]
 
 

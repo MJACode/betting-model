@@ -89,6 +89,10 @@ MAX_SILENCE: dict = {
     # One job for both NBA totals models, nba_total_luck and
     # nba_team_total_luck (scripts/nba_pregame_window.py), so one entry.
     "nba_total_luck_window": 20,
+    # Every five minutes, 11:00-23:55 ET, and it beats on the idle ticks too.
+    # Off overnight by design (23:55 to 11:00 is 665 minutes), so the bound has
+    # to clear that gap, as the NFL in-play worker's does.
+    "nhl_goalie_window": 700,
 }
 
 
