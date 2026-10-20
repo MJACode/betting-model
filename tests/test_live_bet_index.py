@@ -3,10 +3,14 @@
 uq_picks_one_live_row first covered every non-DUPLICATE live row. The NFL
 writer inserts the AVOID, then the BET, with ON CONFLICT DO NOTHING. The
 AVOID held the key and the BET was dropped. The index is standing BETs
-only. A second BET still conflicts. The AVOID is not deleted.
+only: not DUPLICATE, not VOID, and result not NO_ACTION. A second standing
+BET still conflicts. The AVOID is not deleted. A voided live BET does not
+hold the lane.
 
-Measured read-only on 2026-10-14: production already has the wider index,
-and zero live identity groups have two standing BETs.
+Measured read-only on 2026-10-14: production still has the wider index.
+One live BET is condition_status VOID (pick 2476480). Eight more are
+result NO_ACTION. Zero identity groups have two standing live BETs under
+the predicate the migration builds.
 """
 from __future__ import annotations
 
@@ -17,9 +21,10 @@ ROOT = Path(__file__).resolve().parent.parent
 NARROW = ROOT / "data/migrations/live_row_index_bets_only_2026_10_14.sql"
 
 # Catalog text of the two indexes. The publish-lock string is the definition
-# read from production on 2026-10-14. The live strings are that day's wider
-# definition, and the same text with signal_type = 'BET' added the way
-# Postgres prints the other index's predicate.
+# read from production on 2026-10-14. LIVE_WIDE is that day's live indexdef.
+# LIVE_EXACT is the same btree list with the WHERE Postgres prints for the
+# standing-BET predicate (each term parenthesized, ::text casts), matching
+# how the publish-lock predicate is stored.
 PUBLISH_DEF = """CREATE UNIQUE INDEX uq_picks_one_bet_per_publish_lock ON public.picks USING btree ((
 CASE
     WHEN COALESCE(is_live, false) THEN (((((((('live:'::text || game_id) || ':'::text) || model_id) || ':'::text) || COALESCE(pick_side, ''::text)) || COALESCE((':'::text || player_id), ''::text)) || COALESCE((':'::text || player_key), ''::text)) || COALESCE((':'::text || prop_market), ''::text))
@@ -41,9 +46,24 @@ LIVE_NARROW_CAST = LIVE_WIDE.replace(
     "(is_live IS TRUE) AND ",
     "(is_live IS TRUE) AND ((signal_type)::text = 'BET'::text) AND ",
 )
+LIVE_EXACT = (
+    "CREATE UNIQUE INDEX uq_picks_one_live_row ON public.picks USING btree "
+    "(game_date, model_id, game_id, COALESCE(player_id, ''::text), "
+    "COALESCE(player_key, ''::text), COALESCE(prop_market, ''::text), "
+    "pick_side) WHERE ((is_live IS TRUE) AND (signal_type = 'BET'::text) "
+    "AND (condition_status IS DISTINCT FROM 'DUPLICATE'::text) "
+    "AND (condition_status IS DISTINCT FROM 'VOID'::text) "
+    "AND (result IS DISTINCT FROM 'NO_ACTION'::text))"
+)
+_STANDING = (
+    "is_live IS TRUE AND signal_type = 'BET' "
+    "AND condition_status IS DISTINCT FROM 'DUPLICATE' "
+    "AND condition_status IS DISTINCT FROM 'VOID' "
+    "AND result IS DISTINCT FROM 'NO_ACTION'"
+)
 
 _COLS = ("game_date, model_id, game_id, player_id, player_key, prop_market, "
-         "pick_side, signal_type, is_live, condition_status, label")
+         "pick_side, signal_type, is_live, condition_status, result, label")
 
 
 def _db(where: str) -> sqlite3.Connection:
@@ -53,7 +73,7 @@ def _db(where: str) -> sqlite3.Connection:
             game_date TEXT, model_id TEXT, game_id TEXT,
             player_id TEXT, player_key TEXT, prop_market TEXT,
             pick_side TEXT, signal_type TEXT, is_live INT,
-            condition_status TEXT, label TEXT
+            condition_status TEXT, result TEXT, label TEXT
         )
     """)
     db.execute(f"""
@@ -68,13 +88,13 @@ def _db(where: str) -> sqlite3.Connection:
     return db
 
 
-def _insert(db, signal, *, side="under", status=None, label="row"):
+def _insert(db, signal, *, side="under", status=None, result=None, label="row"):
     db.execute(
-        f"INSERT INTO picks ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+        f"INSERT INTO picks ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT DO NOTHING",
         ("2026-10-18", "nfl_live_prop", "NFL_2026_07_BUF_HOU",
          "CJ STROUD", "CJ STROUD", "player_rush_attempts",
-         side, signal, 1, status, label),
+         side, signal, 1, status, result, label),
     )
 
 
@@ -93,20 +113,14 @@ def test_the_wide_index_drops_the_bet_that_follows_an_avoid():
 
 
 def test_a_live_bet_survives_an_avoid_on_the_same_lane():
-    db = _db(
-        "is_live IS TRUE AND signal_type = 'BET' "
-        "AND condition_status IS DISTINCT FROM 'DUPLICATE'"
-    )
+    db = _db(_STANDING)
     _insert(db, "AVOID", label="avoid")
     _insert(db, "BET", label="bet")
     assert _signals(db) == [("AVOID", "avoid"), ("BET", "bet")]
 
 
 def test_a_second_live_bet_on_the_same_lane_still_conflicts():
-    db = _db(
-        "is_live IS TRUE AND signal_type = 'BET' "
-        "AND condition_status IS DISTINCT FROM 'DUPLICATE'"
-    )
+    db = _db(_STANDING)
     _insert(db, "BET", label="first")
     _insert(db, "BET", label="second")
     assert _signals(db) == [("BET", "first")]
@@ -116,6 +130,28 @@ def test_a_second_live_bet_on_the_same_lane_still_conflicts():
     assert kinds.count("BET") == 3
     assert ("BET", "first") in _signals(db)
     assert ("BET", "second") not in _signals(db)
+
+
+def test_a_void_or_no_action_live_bet_does_not_hold_the_lane():
+    """The bet index already ignores these. The live index must too."""
+    held = (
+        "is_live IS TRUE AND signal_type = 'BET' "
+        "AND condition_status IS DISTINCT FROM 'DUPLICATE'"
+    )
+    blocked = _db(held)
+    _insert(blocked, "BET", status="VOID", result="NO_ACTION", label="voided")
+    _insert(blocked, "BET", label="next")
+    assert _signals(blocked) == [("BET", "voided")]
+
+    voided = _db(_STANDING)
+    _insert(voided, "BET", status="VOID", result="NO_ACTION", label="voided")
+    _insert(voided, "BET", label="next")
+    assert _signals(voided) == [("BET", "voided"), ("BET", "next")]
+
+    no_action = _db(_STANDING)
+    _insert(no_action, "BET", result="NO_ACTION", label="no action")
+    _insert(no_action, "BET", label="next")
+    assert _signals(no_action) == [("BET", "no action"), ("BET", "next")]
 
 
 def test_the_narrowing_migration_is_property_guarded_and_registered():
@@ -136,36 +172,51 @@ def test_the_narrowing_migration_is_property_guarded_and_registered():
     assert "CONCURRENTLY" in sql
     assert "UPDATE public.picks" not in code
     assert "INSERT INTO push_sent" not in code
-    assert "position('signal_type' in def)" in sql
-    assert "position('BET' in def)" in sql
+    guard = code.split("IF def IS NOT NULL", 1)[1].split("THEN", 1)[0]
+    assert "position('signal_type = ''BET''' in def)" in guard
+    assert "position('signal_type' in def)" not in sql
+    assert "position('BET' in def)" not in sql
+    assert "IS DISTINCT FROM ''VOID''" in guard
+    assert "IS DISTINCT FROM ''NO_ACTION''" in guard
+    assert "SET LOCAL lock_timeout = '10s'" in code
+    assert code.index("SET LOCAL lock_timeout") < code.index(
+        "CREATE UNIQUE INDEX uq_picks_one_live_row_v2")
     assert "uq_picks_one_live_row_v2" in sql
     assert "DROP INDEX IF EXISTS public.uq_picks_one_live_row;" in code
     assert code.index("CREATE UNIQUE INDEX uq_picks_one_live_row_v2") < \
         code.index("DROP INDEX IF EXISTS public.uq_picks_one_live_row;")
+    rebuild = code.split("RETURN;", 1)[1]
+    assert rebuild.index(
+        "DROP INDEX IF EXISTS public.uq_picks_one_live_row_v2;") < \
+        rebuild.index("CREATE UNIQUE INDEX uq_picks_one_live_row_v2")
     where = sql.split("CREATE UNIQUE INDEX uq_picks_one_live_row_v2", 1)[1]
     where = where.split("WHERE", 1)[1].split(";", 1)[0]
     assert "signal_type = 'BET'" in where
     assert "is_live IS TRUE" in where
     assert "DUPLICATE" in where
+    assert "VOID" in where
+    assert "NO_ACTION" in where
+    dupes = code.split("SELECT count(*) INTO dupes", 1)[1].split(
+        "IF dupes > 0 THEN", 1)[0]
+    assert "VOID" in dupes
+    assert "NO_ACTION" in dupes
     assert "IF dupes > 0 THEN" in sql
     assert "RAISE EXCEPTION" not in sql
 
 
-def test_the_health_check_accepts_both_definitions_and_rejects_the_wide_one():
+def test_the_health_check_compares_the_exact_definitions():
     from tracking.system_health import pick_unique_index_problems
     assert pick_unique_index_problems([
         ("uq_picks_one_bet_per_publish_lock", PUBLISH_DEF),
-        ("uq_picks_one_live_row", LIVE_NARROW),
+        ("uq_picks_one_live_row", LIVE_EXACT),
     ]) == []
-    assert pick_unique_index_problems([
-        ("uq_picks_one_bet_per_publish_lock", PUBLISH_DEF),
-        ("uq_picks_one_live_row", LIVE_NARROW_CAST),
-    ]) == []
-    wide = pick_unique_index_problems([
-        ("uq_picks_one_bet_per_publish_lock", PUBLISH_DEF),
-        ("uq_picks_one_live_row", LIVE_WIDE),
-    ])
-    assert any("uq_picks_one_live_row" in p and "signal_type" in p for p in wide)
+    for wrong in (LIVE_WIDE, LIVE_NARROW, LIVE_NARROW_CAST,
+                  LIVE_EXACT + " AND (model_id IS NOT NULL)"):
+        problems = pick_unique_index_problems([
+            ("uq_picks_one_bet_per_publish_lock", PUBLISH_DEF),
+            ("uq_picks_one_live_row", wrong),
+        ])
+        assert problems == ["uq_picks_one_live_row definition does not match"]
     missing = pick_unique_index_problems([])
     assert any("uq_picks_one_live_row is missing" in p for p in missing)
     assert any("uq_picks_one_bet_per_publish_lock is missing" in p for p in missing)
