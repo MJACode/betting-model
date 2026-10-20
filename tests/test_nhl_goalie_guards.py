@@ -575,3 +575,13 @@ def test_a_refresh_pass_waits_for_the_window_instead_of_skipping(monkeypatch):
     scheduler.run_refresh_pass("evening")
     assert ran and ran[0] >= released["at"]
     assert not scheduler._NHL_WINDOW_LOCK.locked()
+
+
+def test_the_wait_covers_everything_the_window_may_take_under_its_lock():
+    """A pass that gave up before the window could legitimately finish would
+    overlap it, which is what the lock is for."""
+    import scheduler
+    t = scheduler.NHL_GOALIE_WINDOW_TIMEOUT_S
+    held = sum(t[k] for k in ("prop_odds", "score", "totals", "props"))
+    assert set(scheduler.NHL_GOALIE_WINDOW_LOCKED_STEPS) == {"prop_odds", "score", "totals", "props"}
+    assert scheduler._nhl_window_wait_s() > held

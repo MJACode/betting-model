@@ -328,7 +328,17 @@ _REFRESH_LOCK = threading.Lock()
 # waits: it stands down when a pass or the daily run is in progress, since
 # those run the same NHL deciders.
 _NHL_WINDOW_LOCK = threading.Lock()
-NHL_WINDOW_WAIT_S = 600
+# Slack over the deciding steps' own timeouts, for the publish that follows
+# them inside the lock (NHL_GOALIE_WINDOW_TIMEOUT_S, below).
+NHL_WINDOW_WAIT_SLACK_S = 300
+
+
+def _nhl_window_wait_s() -> float:
+    """How long a pass waits for the window: every step the window runs while
+    holding the lock at its full timeout, plus the publish. Derived, so the
+    wait cannot fall short of what the window may legitimately take."""
+    t = NHL_GOALIE_WINDOW_TIMEOUT_S
+    return sum(t[k] for k in NHL_GOALIE_WINDOW_LOCKED_STEPS) + NHL_WINDOW_WAIT_SLACK_S
 
 
 def _wait_for_nhl_window(label: str) -> bool:
@@ -336,11 +346,12 @@ def _wait_for_nhl_window(label: str) -> bool:
     when this caller now holds the lock and must release it."""
     if _NHL_WINDOW_LOCK.acquire(blocking=False):
         return True
+    wait = _nhl_window_wait_s()
     log.info("%s: the NHL goalie window is writing picks — waiting for it", label)
-    if _NHL_WINDOW_LOCK.acquire(timeout=NHL_WINDOW_WAIT_S):
+    if _NHL_WINDOW_LOCK.acquire(timeout=wait):
         return True
     log.warning("%s: the NHL goalie window held its lock past %ss — running anyway",
-                label, NHL_WINDOW_WAIT_S)
+                label, wait)
     return False
 
 
@@ -1217,6 +1228,8 @@ def run_nba_prop_window() -> None:
 # for the named games; the cards are reads and a handful of writes.
 NHL_GOALIE_WINDOW_TIMEOUT_S = {"poll": 120, "prop_odds": 120, "score": 180,
                                "totals": 120, "props": 180}
+# The steps run while _NHL_WINDOW_LOCK is held (the poll runs before it).
+NHL_GOALIE_WINDOW_LOCKED_STEPS = ("prop_odds", "score", "totals", "props")
 # {game_id: known_at} this process has run the deciders on. A restart empties
 # it and the next tick runs them once more for every known game; every NHL
 # decider is insert-once, so that re-run writes nothing already written.
