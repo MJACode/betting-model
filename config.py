@@ -2100,8 +2100,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # nhl_moneyline was REBUILT 2026-10-13 (mike; shipped on his "Yes",
     # 2026-10-15) and swept on its own walk-forward: a plateau from EV 0.02 to
     # 0.08 at the best price with the -200 floor (see ACTION_THRESHOLDS);
-    # 0.06 sits inside it (+6.3% on 1,326, interval +1.1..+11.4). Re-sweep on
-    # its own record at ~250 settled bets.
+    # 0.06 sits inside it (+6.3% on 1,326, interval +1.1..+11.4). That
+    # walk-forward decided at each game's FIRST stored quote (95.8% the day
+    # before, median lead ~27h), not at 16:00Z on game day. Re-graded
+    # 2026-10-20 with the goalies who actually started, at 0.06 and the best
+    # price: +5.08% on 1,588 at the 16:00Z game-day quote (+0.3..+10.0),
+    # +5.21% on 1,633 at the last pre-game quote (+0.6..+10.0). Live, it
+    # decides once both starting goalies are confirmed (docs/sports/nhl.md).
+    # Re-sweep on its own record at ~250 settled bets.
     "nhl_moneyline":             0.06,
     "nhl_moneyline_regulation":  0.20,   # n=0, no written bet
     "nhl_puckline":              0.20,   # n=0, no written bet
@@ -4024,7 +4030,9 @@ NHL_PROP_CLOSE_WINDOW_MIN = int(os.environ.get("NHL_PROP_CLOSE_WINDOW_MIN", "70"
 # feed's time: the feed lists NHL starts at :10, ten minutes after the
 # scheduled puck drop, so a later fetch could hold in-play prices. Thirteen
 # minutes wide, so the ten-minute evening passes always land one inside it.
-# Measured cost: 5 credits a game, about 6,600 credits a season.
+# Measured cost: 5 credits a game, about 6,600 credits a season (measured
+# before the alternate-lines call was added; a snapshot is now two calls,
+# 10-11 credits a game on 2026-10-19 in api_call_log).
 NHL_PROP_FINAL_OPENS_MIN = int(os.environ.get("NHL_PROP_FINAL_OPENS_MIN", "25"))
 NHL_PROP_FINAL_CLOSES_MIN = int(os.environ.get("NHL_PROP_FINAL_CLOSES_MIN", "12"))
 # One run's ceiling. Measured 2026-10-01 on the live endpoint; see

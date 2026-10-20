@@ -173,7 +173,20 @@ card via `pagePlayerId`) can be the other player. Fix: pick detail passes the
 pick's game id or teams; when the by-name log holds more than one id, keep the
 rows whose team plays in that game.
 
-## [ ] [needs-decision] NHL game picks are decided before the night's goalie is known (found 2026-10-13)
+## [x] NHL game picks are decided before the night's goalie is known — DECIDED 2026-10-20 (mike): no NHL bet until both goalies are confirmed
+
+mike, 2026-10-20: *"We should absolutely always know the goalie matchup
+before making a bet as well."* Built on branch `nhl-goalie-confirmed`, for
+all eight NHL models: one gate (`models/nhl_goalie_gate.py`) at the scorer,
+the totals card, both prop cards and every INSERT that can write an NHL pick;
+ESPN's and DailyFaceoff's designations stored as they change
+(`nhl_goalie_designations`); the game's goalie row rewritten when ESPN
+confirms someone else; the side models' 16:00Z-18:00Z clock removed; a
+five-minute NHL goalie window. Detail: `docs/sports/nhl.md` (2026-10-20). The
+existence-only guard proposed below would not have been enough: the 6am
+goalie did not start in 65 of 251 team-games 2026-10-01..10-19. Still open:
+`nhl_over_under` now decides on game day after the confirmations, a regime
+its prior-day evidence does not grade. The original item:
 
 "OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am
 ET, on Linus Ullmark's goalie row: he started for Ottawa the night before.
@@ -211,6 +224,25 @@ on all games or on the 350 back-to-back games, and move the Ottawa game by
 0.0001 (`docs/nhl_market_lab.md`, "Rest, back-to-back and road trip in the
 production models"; branch `nhl-rest-candidate`). The goalie is what moves
 a back-to-back game, which is why the timing above is the fix.
+
+## [ ] nhl_over_under now decides after the goalies are confirmed; that moment is ungraded (found 2026-10-20)
+
+The goalie rule (above) moved the totals card's decision from a game's first
+qualifying fetch, often the day before, to the first qualifying fetch after
+both goalies are confirmed on game day. Its six-season grade
+(`models/nhl_totals_market.py`, `docs/thresholds.md`) leans on the prior-day
+quotes. Next: grade the same rule at the game-day fetches on the stored
+seasons, with the goalies who actually started, and report it beside the
+current grid.
+
+## [ ] DailyFaceoff from the worker: answered or not? (found 2026-10-20)
+
+The goalie poll reads DailyFaceoff's starting-goalies page as a veto
+(`data/ingestors/nhl_goalie_designations.py`). It answered this machine. It
+sits behind Cloudflare and has never been called from Railway, so it fails
+open. After the first deploy: count `nhl_goalie_designations` rows with
+`source = 'dailyfaceoff'`, and read the worker log for "DailyFaceoff ... not
+read". None means the gate runs on ESPN alone.
 
 ## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
 
