@@ -202,7 +202,7 @@ def _wire(monkeypatch, board, feature_module, feature_attr, *,
                         features)
 
     def score_game(conn, game_id, model_id, features, bankroll,
-                   dry_run=False, commence_time=None):
+                   dry_run=False, commence_time=None, **_hold):
         conn.db.execute(
             "INSERT INTO picks (game_id, model_id, game_date, pick_side, "
             "signal_type, created_at) VALUES (?,?,?,?,?, 'this pass')",
