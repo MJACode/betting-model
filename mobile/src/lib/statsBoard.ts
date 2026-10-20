@@ -128,6 +128,41 @@ export function needsTouchSet(sport: string, statKey: string | null | undefined)
 }
 
 /**
+ * List a priced player the board's read has no row for.
+ *
+ * Football Anytime TD already does this (the touch set). NHL does it for
+ * every skater chip: the log read can come back empty (the anon grant on
+ * nhl_skater_game_log is #962 and is not applied) while
+ * the books have still posted a line, and that player is the row.
+ */
+export function listsPricedWithoutLog(sport: string, statKey: string | null | undefined): boolean {
+  return needsTouchSet(sport, statKey) || (sport === 'NHL' && statKey != null);
+}
+
+/**
+ * Header, empty state, and filter count around a line-only tail.
+ *
+ * Football Anytime TD already listed those names under a ranked board. That
+ * board stays as it was: the header is the ranked list's, the empty state
+ * still shows when that list is empty, and the filter count does not add the
+ * tail. NHL is the exception, because an empty skater log makes the tail the
+ * whole board.
+ */
+export function rankedBoardChrome(
+  sport: string,
+  rankedCount: number,
+  lineOnlyCount: number,
+): { showHeader: boolean; headerSorted: boolean; suppressEmpty: boolean; resultCount: number } {
+  const nhlTail = sport === 'NHL' && lineOnlyCount > 0;
+  return {
+    showHeader: rankedCount > 0 || (nhlTail && rankedCount === 0),
+    headerSorted: rankedCount > 0,
+    suppressEmpty: nhlTail && rankedCount === 0,
+    resultCount: rankedCount + (nhlTail ? lineOnlyCount : 0),
+  };
+}
+
+/**
  * The touch set a late response is allowed to commit, or null when a newer
  * load has taken the board.
  *
@@ -420,11 +455,17 @@ export const LINE_ONLY_ROW_TAIL = ', no games logged yet';
 /**
  * The line-only row's accessibility label. Name, then the spoken fixture,
  * then the tail — VoiceOver reads that the row has no games after it has
- * said who and which game. The row is not a button and has no hint.
+ * said who and which game. Pass `tail: ''` when the log itself is empty:
+ * "no games" would describe the feed as the player. The row is not a button
+ * and has no hint.
  */
-export function lineOnlyRowLabel(name: string, spokenSubline: string | null): string {
+export function lineOnlyRowLabel(
+  name: string,
+  spokenSubline: string | null,
+  tail: string = LINE_ONLY_ROW_TAIL,
+): string {
   const head = spokenSubline ? `${name}, ${spokenSubline}` : name;
-  return `${head}${LINE_ONLY_ROW_TAIL}`;
+  return tail ? `${head}${tail}` : head;
 }
 
 /**
@@ -773,6 +814,28 @@ export function h2hMatchups(
  * alone left every UFC row advertising a start time hours after the fight
  * ended (UX review, 2026-09-05).
  */
+/**
+ * The game a row is about: the slate-date game when he plays that day, otherwise
+ * his next game in the window already loaded for H2H (`nextGameByTeam`).
+ *
+ * `buildSlateGameIndex` is one date. On an NFL Tuesday that date is Thursday,
+ * so a Sunday team had no opponent under the name and no defense to grade.
+ * The seven-day window is already in memory; this reads it instead of fetching.
+ */
+export function fixtureForRow(
+  row: { team?: string | null; player_name?: string | null },
+  slateIndex: Map<string, SlateGame>,
+  nextByTeam: Map<string, SlateGame>,
+): { key: string; game: SlateGame } | null {
+  const onSlate = slateGameFor(row, slateIndex);
+  if (onSlate) return onSlate;
+  if (row.team) {
+    const next = nextByTeam.get(row.team);
+    if (next) return { key: row.team, game: next };
+  }
+  return null;
+}
+
 export function slateGameFor(
   row: { team?: string | null; player_name?: string | null },
   index: Map<string, SlateGame>,

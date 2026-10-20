@@ -15,6 +15,7 @@ import pytest
 from byom.constants import LINE_BASIS
 from byom.prop_facts import (
     ANYTIME_TD_MARKET,
+    backtest,
     facts_for_game,
     is_standard_market,
 )
@@ -125,14 +126,17 @@ def test_anytime_td_is_rush_plus_rec_and_ignores_passing_and_returns():
     assert "passing_tds" not in text.split("player_anytime_td")[1].split(")")[0]
 
 
-def test_missing_log_is_not_a_loss_and_a_non_participant_is_zero():
+def test_missing_log_is_not_a_loss_and_a_non_participant_is_ungraded():
     quotes = [
         _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -110, -110),
         _q("Zay Flowers", "player_receptions", "draftkings", 10, 4.5, -120, 100),
     ]
     missing = facts_for_game(_game(), quotes, [])
     assert {f["log_status"] for f in missing} == {"missing_log"}
-    assert all(f["over_result"] is None and f["actual"] is None for f in missing)
+    assert all(
+        f["over_result"] is None and f["under_result"] is None and f["actual"] is None
+        for f in missing
+    )
     logged = facts_for_game(
         _game(), quotes, [_log("Lamar Jackson", passing_yards=180)])
     lamar = _one(logged, "player_pass_yds")
@@ -141,8 +145,110 @@ def test_missing_log_is_not_a_loss_and_a_non_participant_is_zero():
     assert lamar["actual"] == Decimal(180)
     assert lamar["over_result"] == "loss"
     assert flowers["log_status"] == "non_participant"
-    assert flowers["actual"] == Decimal(0)
-    assert flowers["over_result"] == "loss"
+    assert flowers["actual"] is None
+    assert flowers["over_result"] is None
+    assert flowers["under_result"] is None
+
+
+def test_missing_log_over_and_under_stay_ungraded_and_anytime_no_is_not_a_win():
+    """A missing log grades neither side. Anytime TD 'No' is not a win
+    when the player has no log row."""
+    quotes = [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -110, -110),
+        _q("Lamar Jackson", ANYTIME_TD_MARKET, "draftkings", 10, None, -150, 120),
+    ]
+    facts = facts_for_game(_game(), quotes, [])
+    assert {f["log_status"] for f in facts} == {"missing_log"}
+    yards = _one(facts, "player_pass_yds")
+    td = _one(facts, ANYTIME_TD_MARKET)
+    assert yards["line"] == Decimal("220.5")
+    assert yards["over_result"] is None
+    assert yards["under_result"] is None
+    assert yards["actual"] is None
+    assert td["line"] == Decimal("0.5")
+    assert td["over_result"] is None
+    assert td["under_result"] is None
+    assert td["under_result"] != "win"
+    scored = backtest(facts)
+    assert scored["totals"] == 0
+    assert scored["over_wins"] == 0
+    assert scored["under_wins"] == 0
+    assert scored["over_success"] is None
+    assert scored["under_success"] is None
+    assert scored["total_actual"] == Decimal(0)
+    assert scored["record_over"] == "0-0-0"
+    assert scored["record_under"] == "0-0-0"
+
+
+def test_a_player_who_did_not_play_is_excluded_from_scoring():
+    """Matt, 2026-10-20: a player who did not play is out of the record,
+    the success stats, and the totals. A logged zero is still a result."""
+    quotes = [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -110, -110),
+        _q("Zay Flowers", ANYTIME_TD_MARKET, "draftkings", 10, 0.5, -140, 110),
+        _q("Mark Andrews", ANYTIME_TD_MARKET, "draftkings", 10, 0.5, -130, 100),
+    ]
+    facts = facts_for_game(_game(), quotes, [
+        _log("Lamar Jackson", passing_yards=280),
+        _log("Mark Andrews", rushing_tds=0, receiving_tds=0),
+    ])
+    lamar = _one(facts, "player_pass_yds")
+    flowers = _one(facts, ANYTIME_TD_MARKET, "Zay Flowers")
+    andrews = _one(facts, ANYTIME_TD_MARKET, "Mark Andrews")
+    assert lamar["log_status"] == "logged"
+    assert lamar["over_result"] == "win"
+    assert flowers["log_status"] == "non_participant"
+    assert flowers["actual"] is None
+    assert flowers["over_result"] is None
+    assert flowers["under_result"] is None
+    assert andrews["log_status"] == "logged"
+    assert andrews["actual"] == Decimal(0)
+    assert andrews["under_result"] == "win"
+    played = backtest([lamar, andrews])
+    with_scratch = backtest(facts)
+    assert with_scratch == played
+    assert with_scratch["totals"] == 2
+    assert with_scratch["under_wins"] == 1
+    assert with_scratch["over_wins"] == 1
+    assert with_scratch["over_success"] == 0.5
+    assert with_scratch["record_over"] == "1-1-0"
+    assert with_scratch["total_actual"] == Decimal(280)
+    scratch_only = backtest([flowers])
+    assert scratch_only["totals"] == 0
+    assert scratch_only["under_wins"] == 0
+    assert scratch_only["under_success"] is None
+    assert scratch_only["record_under"] == "0-0-0"
+
+
+def test_a_row_with_no_posted_line_is_skipped_not_graded():
+    """The backtest includes a prop only where a line existed. A quote
+    with no line is not graded into a win or a loss."""
+    facts = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, None, -110, -110),
+        _q("Mark Andrews", "player_receptions", "draftkings", 10, 3.5, -110, -110),
+    ], [
+        _log("Lamar Jackson", passing_yards=250),
+        _log("Mark Andrews", receptions=5),
+    ])
+    assert len(facts) == 1
+    assert facts[0]["market"] == "player_receptions"
+    assert facts[0]["line"] == Decimal("3.5")
+    assert facts[0]["over_result"] == "win"
+    phantom = {
+        "line": None,
+        "log_status": "logged",
+        "actual": Decimal(0),
+        "over_result": "win",
+        "under_result": "loss",
+    }
+    scored = backtest(facts + [phantom])
+    assert scored["totals"] == 1
+    assert scored["over_wins"] == 1
+    assert scored["over_losses"] == 0
+    assert scored["over_success"] == 1.0
+    assert scored["record_over"] == "1-0-0"
+    assert scored["total_actual"] == Decimal(5)
+    assert backtest([phantom])["totals"] == 0
 
 
 def test_an_unplayed_game_keeps_the_line_and_nulls_the_result():
@@ -181,17 +287,18 @@ def test_a_long_line_is_still_graded():
 
 
 def test_a_nickname_miss_is_a_non_participant():
-    """Josh and Joshua do not meet. The miss stays actual 0 until Matt
-    says otherwise."""
+    """Josh and Joshua do not meet. Matt, 2026-10-20: the miss is ungraded.
+    It is not an under win."""
     facts = facts_for_game(_game(), [
         _q("Josh Allen", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,
            team="BUF"),
     ], [_log("Joshua Allen", team="BUF", passing_yards=300)])
     fact = _one(facts, "player_pass_yds", "Josh Allen")
     assert fact["log_status"] == "non_participant"
-    assert fact["actual"] == Decimal(0)
-    assert fact["over_result"] == "loss"
-    assert fact["under_result"] == "win"
+    assert fact["actual"] is None
+    assert fact["over_result"] is None
+    assert fact["under_result"] is None
+    assert backtest([fact])["totals"] == 0
 
 
 def test_an_offense_only_log_leaves_a_defender_as_a_non_participant():
@@ -201,8 +308,9 @@ def test_an_offense_only_log_leaves_a_defender_as_a_non_participant():
     ], [_log("Lamar Jackson", passing_yards=250)])
     fact = _one(facts, "player_sacks", "Kyle Hamilton")
     assert fact["log_status"] == "non_participant"
-    assert fact["actual"] == Decimal(0)
-    assert fact["over_result"] == "loss"
+    assert fact["actual"] is None
+    assert fact["over_result"] is None
+    assert fact["under_result"] is None
 
 
 def test_the_quote_team_breaks_a_shared_name():

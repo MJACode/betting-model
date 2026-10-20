@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchTeamRecentGames } from '@/lib/queries';
+import { fetchTeamRecentGamesForSport } from '@/lib/queries';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { GameRow, TeamGameStat, TrendBuckets } from '@/types';
 
@@ -24,20 +24,30 @@ function reduce(games: TeamGameStat[]): TrendBuckets {
   };
 }
 
-export function useTeamTrends(team: string | null, beforeDate: string | null) {
+/**
+ * A team's recent form IN ONE SPORT. The sport is required: `games` stores the
+ * Celtics, the Red Sox and the Bruins all as 'BOS', so a team code alone mixed
+ * baseball and hockey games into an NBA pick's form strip. Null for any
+ * argument loads nothing.
+ */
+export function useTeamTrends(
+  sport: string | null,
+  team: string | null,
+  beforeDate: string | null,
+) {
   const [games, setGames] = useState<TeamGameStat[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!team || !beforeDate) {
+    if (!sport || !team || !beforeDate) {
       setGames([]);
       return;
     }
     let mounted = true;
     setLoading(true);
     setError(null);
-    fetchTeamRecentGames(team, beforeDate, 25)
+    fetchTeamRecentGamesForSport(sport, team, beforeDate, 25)
       .then((rows: GameRow[]) => {
         if (!mounted) return;
         const mapped = rows.map((g) => {
@@ -73,7 +83,7 @@ export function useTeamTrends(team: string | null, beforeDate: string | null) {
     return () => {
       mounted = false;
     };
-  }, [team, beforeDate]);
+  }, [sport, team, beforeDate]);
 
   return { games, trends: reduce(games), loading, error };
 }

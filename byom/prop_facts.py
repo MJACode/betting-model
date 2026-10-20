@@ -5,16 +5,19 @@ game start. A missing line is not a prop. There is no price and no
 unit. Standard markets only. A key ending in `_alternate` is an alt
 ladder and is not a fact.
 
-Thin data, recorded on the row as log_status:
+Thin data, recorded on the row as log_status. Only `logged` is graded.
+A player who did not play is left ungraded: no actual, no result, and
+the row is excluded from the record, the success stats, and the totals.
+A quote with no posted line is not a row. The backtest skips it.
 
 - logged: the game has a log and this player's normalised name matches
   one row. actual is that row's stat.
 - non_participant: the game has a log and this name matches nobody.
-  actual is 0. A player who played but whose row never landed looks the
-  same as a scratch. The row says which rule fired.
+  The player did not play, or the row never landed. actual and both
+  results stay NULL. The status stays so the row can be told apart.
 - missing_log: the game has been played and the log has zero rows. The
   ingest has not arrived. actual and both results stay NULL. A missing
-  file is not a loss.
+  file is not a loss and is not in the record.
 - unplayed: the game has no final score. Results stay NULL.
 - ambiguous: two log rows normalise to the same name and the quote's
   team does not pick exactly one of them. No guess. Results stay NULL.
@@ -29,7 +32,8 @@ grade. The row stores the sum we have.
 
 Name match is data.name_match.normalize_player_name: case, accents,
 punctuation, and a trailing suffix. It does not expand nicknames
-(Josh/Joshua). A nickname miss on a logged game is non_participant.
+(Josh/Joshua). A nickname miss on a logged game is non_participant
+and stays ungraded.
 """
 from __future__ import annotations
 
@@ -117,8 +121,74 @@ def log_status(played: bool, game_row_count: int, matches: int) -> str:
     if matches > 1:
         return "ambiguous"
     if matches == 0:
+        # Diagnostic only. A player who did not play is not graded as 0.
         return "non_participant"
     return "logged"
+
+
+_RESULTS = frozenset({"win", "loss", "push"})
+
+
+def in_backtest(fact: dict) -> bool:
+    """True when this row is scored.
+
+    The line has to be one that was posted, and the player has to have
+    logged the game. A missing line is skipped. A player who did not
+    play, a missing log, an unplayed game, and an ambiguous name are
+    outside the record, the success stats, and the totals.
+    """
+    if fact.get("line") is None:
+        return False
+    if fact.get("log_status") != "logged":
+        return False
+    return (
+        fact.get("over_result") in _RESULTS
+        and fact.get("under_result") in _RESULTS
+    )
+
+
+def backtest(facts: list[dict]) -> dict:
+    """Record, success, and totals for the rows that count.
+
+    Success is wins among decided rows. A push is in the total and out
+    of the rate. Over and under are both counted, so an Anytime TD 'No'
+    on a player who did not play cannot become an under win.
+    """
+    over_wins = over_losses = under_wins = under_losses = pushes = 0
+    total_actual = Decimal(0)
+    for fact in facts:
+        if not in_backtest(fact):
+            continue
+        over = fact["over_result"]
+        under = fact["under_result"]
+        if over == "win":
+            over_wins += 1
+        elif over == "loss":
+            over_losses += 1
+        if under == "win":
+            under_wins += 1
+        elif under == "loss":
+            under_losses += 1
+        if over == "push":
+            pushes += 1
+        actual = fact.get("actual")
+        if actual is not None:
+            total_actual += Decimal(str(actual))
+    over_decided = over_wins + over_losses
+    under_decided = under_wins + under_losses
+    return {
+        "record_over": f"{over_wins}-{over_losses}-{pushes}",
+        "record_under": f"{under_wins}-{under_losses}-{pushes}",
+        "over_wins": over_wins,
+        "over_losses": over_losses,
+        "under_wins": under_wins,
+        "under_losses": under_losses,
+        "pushes": pushes,
+        "totals": over_wins + over_losses + pushes,
+        "total_actual": total_actual,
+        "over_success": (over_wins / over_decided) if over_decided else None,
+        "under_success": (under_wins / under_decided) if under_decided else None,
+    }
 
 
 def _line_of(quote: dict, market: str):
@@ -196,6 +266,8 @@ def facts_for_game(game: dict, quotes: list[dict],
     grouped: dict[tuple, list[dict]] = {}
     for quote in quotes:
         row = _pre_start(quote)
+        # No posted line: skip. Do not grade it, and do not invent a number.
+        # Anytime TD has already filled 0.5 when the feed omitted the point.
         if row is None or row.get("point") is None:
             continue
         grouped.setdefault((row["player_key"], row["market"]), []).append(row)
@@ -226,11 +298,10 @@ def _one(canonical, season, week, key, market, line, quote,
          status, matches) -> dict:
     actual = None
     graded = None
-    if status == "logged" and matches:
+    # Anyone who did not play, and any row still missing a line, stays
+    # ungraded. actual 0 would book the under, and Anytime TD 'No', as a win.
+    if status == "logged" and matches and line is not None:
         actual = actual_from_log(matches[0], market)
-        graded = grade_ou(actual, line)
-    elif status == "non_participant":
-        actual = Decimal(0)
         graded = grade_ou(actual, line)
     over_result = under_result = None
     if graded is not None:

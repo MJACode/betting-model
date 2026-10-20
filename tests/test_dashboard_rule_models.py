@@ -36,6 +36,9 @@ KNOWN_RULES = {
     # 2026-10-15 (mike): the NBA prop rule, Pinnacle's no-vig under vs the
     # bettable books (models/nba_prop_market.py).
     "nba_prop_market",
+    # 2026-10-17 (mike): NBA totals overs on the shooting-luck gap
+    # (models/nba_total_luck.py); its artifact holds parameters, not an estimator.
+    "nba_total_luck",
 }
 
 

@@ -117,6 +117,9 @@ par weather-refresh
 # both are no-ops that never open a socket.
 par player-news-refresh
 par public-betting
+# NBA splits: a pre-tip snapshot per pass into nba_public_splits (never
+# public_betting, which the scorer reads), plus yesterday's archive once.
+par nba-public-splits
 par_wait
 
 # NHL total goals (nhl_over_under): Pinnacle's no-vig price against the
@@ -127,6 +130,11 @@ par_wait
 # writer to picks runs one at a time. Insert-once under the model's own lock,
 # so every later pass on a game already bet is a no-op.
 step nhl-over-under
+# NBA full-game totals, overs (nba_total_luck) is NOT run here. It decides on a
+# fetch 60-66 minutes before tip in its own one-minute job with its own fetch
+# (scheduler.run_nba_total_luck_window), because a pass that overruns its ten
+# minutes makes the scheduler skip the next one, and a skipped deciding tick
+# lost the game.
 # NBA player props (nba_prop_market): same-line unders against Pinnacle IN THE
 # PROP FETCH `par nba-prop-odds` JUST STORED. It decides only games whose tip
 # is 45-57 minutes away, so it runs here, minutes after the fetch, rather than

@@ -3064,3 +3064,29 @@ ALTER TABLE picks ADD COLUMN IF NOT EXISTS model_probability_cal NUMERIC;
 -- revoked; the trigger functions are SECURITY DEFINER with search_path pinned.
 -- Declared in data/anon_readable.VIEW_BASE_TABLES, not ANON_READABLE: nothing
 -- in mobile/src names them directly.
+
+-- ── App crash and error reports ─────────────────────────────────────────────
+-- Applied via migration add_app_errors (2026-10-19). One row per report from
+-- the mobile app: js_fatal | js_error | render | early_exit | emergency_launch.
+-- Write-only for the anon key: RLS on, no policies, table grants revoked; the
+-- only way in is log_app_error(), SECURITY DEFINER, insert-only, 60/device/hour.
+-- Full DDL and the reasoning: data/migrations/add_app_errors.sql. Reading it:
+-- docs/app_errors.md.
+CREATE TABLE IF NOT EXISTS app_errors (
+    id                BIGSERIAL PRIMARY KEY,
+    received_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    occurred_at       TIMESTAMPTZ,
+    device_id         TEXT NOT NULL,
+    kind              TEXT NOT NULL CHECK (kind IN
+                        ('js_fatal', 'js_error', 'render', 'early_exit', 'emergency_launch')),
+    message           TEXT,
+    stack             TEXT,
+    component_stack   TEXT,
+    screen            TEXT,
+    stage             TEXT,
+    app_version       TEXT,
+    update_id         TEXT,
+    update_created_at TEXT,
+    platform          TEXT,
+    extra             JSONB
+);

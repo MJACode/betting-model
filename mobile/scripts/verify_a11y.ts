@@ -27,8 +27,10 @@
  *   5. Every <TextInput> and <Switch> has accessibilityLabel.
  *   6. M7: every vertical ScrollView / FlatList / SectionList that the betslip
  *      bar can float over — not inside a <Modal>, not horizontal, not on a
- *      route in App.tsx's NO_BETSLIP_BAR_ROUTES — ends with BetslipBarSpacer
- *      (last ScrollView child, or the FlatList's ListFooterComponent).
+ *      route in App.tsx's NO_BETSLIP_BAR_ROUTES, and not the crash fallback
+ *      (AppErrorBoundary replaces the tree, so the bar is unmounted) — ends
+ *      with BetslipBarSpacer (last ScrollView child, or the FlatList's
+ *      ListFooterComponent).
  * Plus the H9 section (effective height of the chip rows inside their
  * horizontal ScrollViews, with the known-short cases and why), pins for the
  * tab semantics (H9/M8), the audited slop numbers, and the
@@ -183,7 +185,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
-  ['src/screens/StatsScreen.tsx', 'retryBtn,pressed', 1], // 39.5pt
 ];
 
 function walk(d: string, out: string[] = []): string[] {
@@ -517,9 +518,13 @@ function closeOf(src: string, start: number, tagName: string): number {
 }
 const uncovered: string[] = [];
 let covered = 0;
+// The crash fallback is not a route. It replaces the tree under it, including
+// BetslipBar, so that ScrollView has no bar to pad.
+const noBarFiles = new Set(exemptFiles);
+noBarFiles.add('src/components/AppErrorBoundary.tsx');
 for (const f of files) {
   const rel = relPosix(f);
-  if (exemptFiles.has(rel)) continue;
+  if (noBarFiles.has(rel)) continue;
   const src = readUtf8(f);
   const modals = ranges(src, /<Modal\b/g, '</Modal>');
   for (const m of src.matchAll(/(?<![\w.])<(ScrollView|FlatList|SectionList)\s/g)) {
@@ -629,14 +634,18 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard label carries game status + time (gameStatusSpeech)', /gameStatusSpeech\(gameStatus\(game, liveState\), gameDayLabelET\(game\?\.commence_time\)\)/.test(card));
 check('PickCard label carries the stake, in words', /stakeCaption \? `Stake \$\{unitsSpeech\(stakeCaption\)\}` : null/.test(card));
 check('PickCard label carries when it posted and the started line', /timing \? timing\.label : null/.test(card) && /startedSpoken,/.test(card));
-check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && handoff/.test(card));
+check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && actionHandoff/.test(card));
 check('PickCard: "Game started" is spoken once — in cardLabel (gameStartedSpeech, full book name), the nested line hidden',
   /startedSpoken,\n/.test(card) && /gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)/.test(card) &&
     /style=\{styles\.startedLine\}\s*accessibilityRole="text"\s*accessibilityElementsHidden\s*importantForAccessibility="no-hide-descendants"/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('Pick Detail: the started card speaks gameStartedSpeech, like the card (#847)', /styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)\}/.test(detail));
 check('PicksHome: "—" header counts speak "count not available", like the sub-tabs (#845)', /<Text style=\{styles\.subtitle\} accessibilityLabel=\{unknownCountSpeech\(unitsSpeech\(subtitle\)\)\}>/.test(read('src/screens/PicksHomeScreen.tsx')));
-check('TrackRecord: "— settled picks" speaks "count not available"', /accessibilityLabel=\{notLoaded \? unknownCountSpeech\('— settled picks'\) : undefined\}/.test(read('src/screens/TrackRecordScreen.tsx')));
+check('TrackRecord hero is one stop, units first, and a missing count still says so',
+  /accessibilityRole="summary"/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /accessibilityLabel=\{heroLabel\}/.test(read('src/components/RecordHeroCard.tsx')) &&
+  /unknownCountSpeech\('— settled picks'\)/.test(read('src/lib/recordHero.ts')) &&
+  /Units unavailable/.test(read('src/lib/recordHero.ts')));
 // The sentence itself lives in lib/heroPriceText.ts ("looks off", or for an
 // old price which book has not updated it and since when); the pytest pin
 // and verify_pick_cta run it.
@@ -658,7 +667,8 @@ check('M10: tracked rows offer Untrack / Edit stake as accessibilityActions (Und
 const tip = read('src/components/InfoTooltip.tsx');
 check('M18: InfoTooltip icon slop 12 (20 + 24 = 44)', /hitSlop=\{12\}\s*accessibilityRole="button"/.test(tip));
 const onboarding = read('src/components/OnboardingModal.tsx');
-check('M19: Skip and Next have roles; dots read "Page N of 4"', /accessibilityLabel="Skip intro"/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, SLIDES\.length\)\}/.test(onboarding) && /accessibilityLabel=\{last \? 'Get started'/.test(onboarding));
+// The sportsbook step (2026-10-19) is page 5 of 5, so the dots count SLIDES + 1.
+check('M19: Skip and Next have roles; dots read "Page N of 5"', /accessibilityLabel="Skip intro"/.test(onboarding) && /const total = SLIDES\.length \+ 1;/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, total\)\}/.test(onboarding) && /\? `Save \$\{selected\.length\} sportsbook/.test(onboarding) && /: `Next, \$\{pageLabel\(step \+ 1, total\)/.test(onboarding));
 const manual = read('src/components/ManualBetModal.tsx');
 check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
   /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));
@@ -666,8 +676,15 @@ check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
+check('Stats threshold bubble: the name is the label and the gesture is the hint',
+  /accessibilityLabel=\{thresholdBubbleLabel\(faceOf\(value\), statLabel\)\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityHint=\{THRESHOLD_TYPE_HINT\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /accessibilityActions=\{\[\{ name: 'activate' \}\]\}/.test(read('src/screens/StatsScreen.tsx')) &&
+    /actionName === 'activate'\) openDraft\(\)/.test(read('src/screens/StatsScreen.tsx')) &&
+    /return `Threshold \$\{value\}`;/.test(read('src/lib/lineRuler.ts')) &&
+    /export const THRESHOLD_TYPE_HINT = 'double tap to type a value';/.test(read('src/lib/lineRuler.ts')));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
-  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
+  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'RecordInfoSheet', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);
     return /<View style=\{styles\.backdrop\}>/.test(s) && !/<Pressable\s+style=\{styles\.backdrop\}/.test(s);
   }));

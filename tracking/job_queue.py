@@ -1980,8 +1980,9 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Not in
-    # jobs/declared_jobs.json, so a merge does not enqueue a writer.
+    # NFL Build Your Own Model game facts. apply defaults false. Not listed
+    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
     # NFL prop facts. apply defaults false. Listed in declared_jobs.json
     # with enabled false and apply false, so a merge does not enqueue a

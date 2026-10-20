@@ -131,6 +131,11 @@ export function yearET(): number {
   return Number(todayET().slice(0, 4));
 }
 
+/** Calendar month in ET, 1–12. Same clock as `yearET`. */
+export function monthET(): number {
+  return Number(todayET().slice(5, 7));
+}
+
 const ET_HOUR = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
   hour: '2-digit',
