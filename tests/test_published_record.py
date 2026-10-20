@@ -194,6 +194,7 @@ def test_the_app_record_leaves_an_unpublished_graded_bet_out():
     assert "both keep picks whose posting status is unknown" in screen
     assert "useModelPickHistory" not in screen
     assert "v_model_full_outcome_picks" not in screen
+    assert "clears today's thresholds" not in screen
     for rel in ("mobile/src/lib/teamDetail.ts", "mobile/src/lib/playerDetail.ts"):
         assert "publishedRecordKeeps(p)" in (ROOT / rel).read_text(encoding="utf-8")
     hook = (ROOT / "mobile/src/hooks/useCustomModelStats.ts").read_text(encoding="utf-8")

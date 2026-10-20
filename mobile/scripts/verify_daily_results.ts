@@ -12,8 +12,6 @@
  * miss today's cut — that is the record filter. A retired
  * model contributes nothing to any total.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { ALL_SPORTS, computeDailyResults, scopeDailyResults } from '../src/lib/dailyResults';
 import { isModelPaused, postedPickUnits } from '../src/lib/thresholds';
 import type { GameRow, Pick } from '../src/types';
@@ -402,18 +400,6 @@ check('a day of only unpublished bets reports that count and an empty record',
   unpostedDay.overall.picks === 0 && unpostedDay.unpublished === 1
     && unpostedDay.gradedPicks.length === 0,
   JSON.stringify({ picks: unpostedDay.overall.picks, unpublished: unpostedDay.unpublished }));
-
-const detail = readFileSync(
-  join(import.meta.dirname, '../src/screens/BuiltInModelDetailScreen.tsx'),
-  'utf8',
-);
-check('model detail does not list the re-graded full-outcome picks',
-  !detail.includes('useModelPickHistory') && detail.includes("p.discordPublish === 'published'"));
-check('model detail CLV uses standard_v2',
-  detail.includes("p.clv_method === 'standard_v2'")
-    && !detail.includes('countsTowardViewClv'));
-check('the thresholds sentence is gone from model detail',
-  !detail.includes("clears today's thresholds"));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
