@@ -204,4 +204,5 @@ jobs:
             tests/test_mobile_my_books.py \
             tests/test_member_sportsbooks_migration.py \
             tests/test_ddl_guard.py \
-            tests/test_nfl_wind_stability.py
+            tests/test_nfl_wind_stability.py \
+            tests/test_mobile_lines_board.py

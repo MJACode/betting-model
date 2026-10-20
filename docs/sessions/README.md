@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #963 merged origin/master `f3ed68bc`; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; draw_price stays off that list; the PR stays a draft |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #985 and #990 merged; view migrations, threshold sync and the totals artifact stored from this machine; a mistaken `data.db_setup` run (rolled back, nothing changed) and the ops doc corrected |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, `nba_team_total_luck` LIVE: NBA home team-total unders when the home team's part of the shooting-luck gap is 2+ (the fourth search's C2: 349 bets, +16.6%; plan on +7.7%); its own per-event fetch storing each book's main number, decided 45-66 minutes before tip inside the NBA totals window job (one planning read for both models), a closing snapshot for bet games; settles on the home team's final score; live code replays 349 of 349 lab bets; odds prune skips the ladder sources; no production write |
 | 2026-10-19 | [2026-10](./2026-10.md) | 2026-10-19, Your sportsbooks: onboarding step, picks and detail shown at the member's own books (display only, member_sportsbooks) |
@@ -36,6 +37,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD headers use the column width; large text is one left-aligned line; the row stacks above the default text size |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #995: Anytime TD tiers are Great through Very tough; the cell opens the explainer; columns are 40/66/62 and stack only at large text |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, NFL Anytime TD matchup column: five bars, a tier word, and a rank; position_defense_ranks_nfl is in the migration list and was not applied |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #963 merged origin/master `9b664d14` (#994); session logs keep both sides; Lines board state and NCAAF abbreviations both stay; the PR stays a draft |
+| 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, #963 merged origin/master `b63f6396`; session logs keep both sides; Lines pytest stays on the PR list beside master's; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1 branch merged origin/master `b63f6396`; session logs keep both sides; the PR stays a draft |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, X posts every released pre-game pick; X_POST_ALL_PICKS=0 restores free-pick-only; team hashtags, four-tag cap |
 | 2026-10-18 | [2026-10](./2026-10.md) | 2026-10-18, Option 1: Today line-only move with no book at the picked line is Open DK and does not open the new line; stored headlines drop opener, wind, stake, and NEW tags |
@@ -108,6 +111,10 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL game-facts builder: lock at the first DK snapshot inside 120h (UNCONFIRMED), grade at the best price on that line, 24h and close stored, no 2015-2019, job not declared, not run on production |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL facts schema: byom_game_facts and byom_prop_facts, anon SELECT, RLS read policy, unapplied, worker-registered; DK archive starts at 2020; games.week is NULL |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-15/16, NBA rebuilt: the twelve old models retired (no bet ever written); ~900k credits of price history, the official injury reports, box detail, schedule and quarter scores into Supabase; every game and prop market graded against pre-registered bars (docs/nba_models_2026.md); schedule and injuries are in the line; nba_prop_market (Pinnacle same-line unders, one a game, four a night) live |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Paused pick chip ink. `#5C5C62` on noneSoft is 5.79:1; textTertiary stays 4.56:1 |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Lines board reviewer follow-up. The Lines pytest is on PR CI. Missing draw_price is remembered, midnight ET reloads, one Best row on a full tie, Retry speech is a sentence |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Lines board designer fixes. Green is the winning price, each side has its own Bet, tie hidden until draw_price. Hand-applied view migration, not in ACTIVE_MIGRATIONS |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Picks Lines board (NHL/NBA/All). v_latest_odds_all_books anon SELECT already granted; no migration. Fliff Bet does not fall through to DraftKings |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, deploy-killed evening `06b9db72a43c4323ad5ed84abf00b591` was the only unfinished `pipeline_runs` row and held `refresh_pass_completion` on the stuck branch; boot stamps prior hourly/evening orphans aborted, and a worker migration closes that row |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, NHL prop odds age is the open-to-close gate (PIT_COL and BOS_ANA latest snapshot 2026-10-16T04:18:19Z); three SOG BETs 3160491, 3160496, 3462585 have no later quote at the bet's line; live fetch now stores the five alternate keys |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, Discord #results and the Record tab book one stake: same 818 picks (439-377-2); stake_for +22.6501u / +2.4697% versus flat $100 +27.8585u / +3.4057%; both surfaces now sum published_pick_unit_profit and published_pick_unit_risked; migration not applied |

@@ -26,6 +26,10 @@ export const colors = {
   // Opaque #6C6C70 is 5.23:1 on bgCard, 4.69:1 on bg and 4.56:1 on noneSoft —
   // still lighter than textSecondary, so the hierarchy holds (audit H7).
   textTertiary: '#6C6C70',
+  // The paused-pick chip is this grey on noneSoft. textTertiary is 4.56:1
+  // there, on the floor. #5C5C62 is 5.79:1 on noneSoft and still lighter
+  // than textSecondary (9.55:1), so the chip stays quieter than a Pick chip.
+  pausedInk: '#5C5C62',
   textInverse: '#FFFFFF',
 
   // Separators
