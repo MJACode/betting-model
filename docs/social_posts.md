@@ -179,6 +179,47 @@ Leave `media_ids` alone. Those ids are already uploaded. Clearing them
 uploads the same images again; it does not change the "one tweet" rule,
 but it is wasted work and the row does not need it.
 
+## Profile
+
+The same 5-minute job applies queued rows in `social_profile_update` after
+it drains posts. It does not tweet. The call is
+`POST https://api.x.com/1.1/account/update_profile.json` with form fields
+`name`, `description`, and `url`, signed with the same OAuth 1.0a header
+and the same four `X_*` variables. Form fields are part of the signature.
+`RUN_X_PUBLISHER=0` leaves the row `queued`.
+
+A row is claimed with `UPDATE ... WHERE status = 'queued'` before the
+request. A second drain does not send it. An HTTP 4xx, including 429, is
+`failed` and is not retried. A timeout or a 5xx is `failed` and is not
+retried either. `response` stores X's body. `error` stores the failure.
+`applied_at` is set only when X accepted the update.
+
+The migration seeds one row, and only when the table has no row yet. A
+later pass returns before that insert, so a deleted row is not put back.
+The seeded name is 30 characters and the description is 156, so neither
+was trimmed. X's limits are 50 and 160. The URL is the sheet.
+
+```text
+name: SignalBase | Model Picks + CLV
+description: Model-driven picks: NHL, NFL, CFB, NBA & more. Every posted pick graded, every closing line tracked. Full record below. Discord: discord.gg/Sge4Djj2xT · 21+
+url: https://docs.google.com/spreadsheets/d/1FaUkZnjirMrh0G3Je3RpNoO6d9wq6CcKGZr9bbSovXo/edit?usp=sharing
+```
+
+Another update, after this one has left `queued`, is a new row. The SQL
+editor (the table owner) can insert it. `anon` cannot.
+
+```sql
+INSERT INTO social_profile_update (name, description, url)
+VALUES (
+  'SignalBase | Model Picks + CLV',
+  'Model-driven picks: NHL, NFL, CFB, NBA & more. Every posted pick graded, every closing line tracked. Full record below. Discord: discord.gg/Sge4Djj2xT · 21+',
+  'https://docs.google.com/spreadsheets/d/1FaUkZnjirMrh0G3Je3RpNoO6d9wq6CcKGZr9bbSovXo/edit?usp=sharing'
+);
+```
+
+A name over 50 characters or a description over 160 is refused before the
+request and the row is `failed`.
+
 ## Pinning
 
 Not available with this client. The signed call is `POST https://api.x.com/2/tweets`

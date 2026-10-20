@@ -406,6 +406,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Nullable columns only. Does not rewrite the ledger seed, picks, or
     # push_sent. Returns before ALTER once the columns and checks exist.
     "social_post_media_2026_10_20.sql",
+    # 2026-10-20: one queued X profile update for @SignalBasePicks.
+    # A new table. Does not rewrite the post queue, picks, or push_sent.
+    # Returns before CREATE once the table is locked down, so a second
+    # pass does not insert the seed again.
+    "social_profile_update_2026_10_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
