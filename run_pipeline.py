@@ -275,7 +275,10 @@ def step_prune_odds(run_date: str) -> bool:
     that unread history would grow ~2.7 GB/month, so this prunes it to a flat
     working set. draftkings + sbr_consensus are never touched, and today's rows
     are left alone so this can't race with an ingest. Non-fatal: a failed prune
-    costs disk, never picks.
+    costs disk, never picks, so the run goes on. But it returns False, so the
+    run's ledger names it as a failed step. Its backlog shows it last finished
+    around 2026-09-03, and it timed out every day the logs reach (10-14 to
+    10-20) while this returned True, so nothing said so.
     """
     try:
         from data.prune_odds import run_prune_odds
@@ -284,8 +287,8 @@ def step_prune_odds(run_date: str) -> bool:
         logger.success(f"✓ Odds prune: {total:,} line-shop rows removed")
         return True
     except Exception as exc:
-        logger.warning(f"⚠ Odds prune failed (non-fatal): {exc}")
-        return True
+        logger.warning(f"⚠ Odds prune failed (non-fatal, step marked failed): {exc}")
+        return False
 
 
 

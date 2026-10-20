@@ -20,6 +20,10 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, NBA props: 36 opening-night props voided (mike); one bet a game and 4 a night across both NBA prop models, ranked by each model's own EV percentile (+9.7% graded, about 1,000 units a season below no limit) |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual posts to @SignalBasePicks: social_post_queue drained by the existing X client; ledger thread seeded queued; nothing posted |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #1007 merged and its production steps; the daily odds cleanup (not finished since about 09-03) rebuilt as small bounded statements; two stale master tests; NBA Cup placeholder games skipped |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #963 merged origin/master `f3ed68bc`; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; draw_price stays off that list; the PR stays a draft |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #985 and #990 merged; view migrations, threshold sync and the totals artifact stored from this machine; a mistaken `data.db_setup` run (rolled back, nothing changed) and the ops doc corrected |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, `nba_team_total_luck` LIVE: NBA home team-total unders when the home team's part of the shooting-luck gap is 2+ (the fourth search's C2: 349 bets, +16.6%; plan on +7.7%); its own per-event fetch storing each book's main number, decided 45-66 minutes before tip inside the NBA totals window job (one planning read for both models), a closing snapshot for bet games; settles on the home team's final score; live code replays 349 of 349 lab bets; odds prune skips the ladder sources; no production write |
