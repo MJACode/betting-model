@@ -121,15 +121,24 @@ class QueueConn:
             hit.update(status="posted", tweet_url=url, posted_at=posted_at,
                        pin_status=pin_status, pin_note=pin_note)
             return _Rows([(hit["id"],)])
+        if sql == sp.SAVE_MEDIA_SQL:
+            media_ids, row_id = params
+            hit = self._one(row_id, status="posting", tweet_id=None)
+            if hit is None:
+                return _Rows([])
+            hit["media_ids"] = list(media_ids)
+            return _Rows([(hit["id"],)])
         if sql == sp.EXISTS_SQL:
             found = [r for r in self.rows if r["thread_key"] == params[0]]
             return _Rows([(1,)] if found else [])
         if sql == sp.INSERT_SQL:
-            thread_key, position, body, allow_link, pin, scheduled_at = params
+            (thread_key, position, body, allow_link, pin, scheduled_at,
+             media_urls, reply_to_tweet_id) = params
             new_id = max((r["id"] for r in self.rows), default=0) + 1
             self.rows.append(_blank(
                 new_id, thread_key, position, body, allow_link=allow_link, pin=pin,
-                scheduled_at=scheduled_at))
+                scheduled_at=scheduled_at, media_urls=media_urls,
+                reply_to_tweet_id=reply_to_tweet_id))
             return _Rows([(new_id,)])
         raise AssertionError(f"unexpected SQL: {sql}")
 
@@ -168,6 +177,9 @@ def _blank(row_id, thread, position, body, **overrides):
         "pin_status": None,
         "pin_note": None,
         "error": None,
+        "media_urls": None,
+        "media_ids": None,
+        "reply_to_tweet_id": None,
     }
     row.update(overrides)
     return row
@@ -179,9 +191,10 @@ class Poster:
         self.outcomes = list(outcomes or [])
         self.ids = list(ids or ["111", "222", "333", "444"])
 
-    def __call__(self, text, reply_to=None, allow_link=False, dry_run=False):
+    def __call__(self, text, reply_to=None, allow_link=False, dry_run=False,
+                 media_ids=None):
         self.calls.append({"text": text, "reply_to": reply_to, "allow_link": allow_link,
-                           "dry_run": dry_run})
+                           "dry_run": dry_run, "media_ids": media_ids})
         outcome = self.outcomes.pop(0) if self.outcomes else "posted"
         if outcome == "raise":
             raise RuntimeError("boom")
@@ -196,9 +209,10 @@ class Poster:
         raise AssertionError(outcome)
 
 
-def _drain(conn, poster, monkeypatch, now=NOW):
+def _drain(conn, poster, monkeypatch, now=NOW, fetch=None, upload=None):
     _creds(monkeypatch)
-    return sp.drain_social_posts(conn, now=now, deliver=poster)
+    return sp.drain_social_posts(
+        conn, now=now, deliver=poster, fetch_image=fetch, upload_image=upload)
 
 
 def test_a_thread_posts_in_order_and_a_second_drain_sends_nothing(monkeypatch):
@@ -237,7 +251,7 @@ def test_a_later_post_replies_to_the_id_already_stored(monkeypatch):
     result = _drain(conn, poster, monkeypatch)
     assert result["posted"] == 1
     assert poster.calls == [{"text": "Second", "reply_to": "900", "allow_link": False,
-                             "dry_run": False}]
+                             "dry_run": False, "media_ids": None}]
 
 
 def test_a_row_that_already_has_a_tweet_id_is_not_sent(monkeypatch):
@@ -482,6 +496,8 @@ def test_the_pick_and_recap_paths_do_not_opt_into_links():
     for fn in (xp._post_released_picks, xp.notify_x_results, xp.notify_x_period):
         src = inspect.getsource(fn)
         assert "allow_link" not in src, fn.__name__
+        assert "media_ids" not in src, fn.__name__
+        assert "upload_tweet_image" not in src, fn.__name__
     queue = inspect.getsource(sp.drain_social_posts)
     assert "notify_x_picks" not in queue
     assert "notify_x_results" not in queue
@@ -531,6 +547,7 @@ def test_allow_link_is_off_on_the_pick_client(monkeypatch):
     assert sent[0][0] == xp.X_POST_URL
     assert sent[0][1]["text"] == "see discord.gg/example"
     assert "reply" not in sent[0][1]
+    assert "media" not in sent[0][1]
 
 
 def test_a_5xx_is_transport_and_not_a_tweet_id(monkeypatch):
@@ -549,3 +566,272 @@ def test_a_5xx_is_transport_and_not_a_tweet_id(monkeypatch):
     assert delivered.outcome == "transport"
     assert delivered.tweet_id is None
     assert xp.post_tweet("hello") is None
+
+
+CARD = "https://cdn.example/card.png"
+CARD_2 = "https://cdn.example/card-2.png"
+
+
+class _Fetcher:
+    def __init__(self, outcome="fetched", detail=""):
+        self.urls = []
+        self.outcome = outcome
+        self.detail = detail
+
+    def __call__(self, url):
+        self.urls.append(url)
+        from tracking.x_publisher import ImageFetch
+        if self.outcome != "fetched":
+            return ImageFetch(None, None, self.outcome, self.detail)
+        return ImageFetch(b"\x89PNG\r\n\x1a\n", "image/png", "fetched", "")
+
+
+class _Uploader:
+    def __init__(self, ids=("11", "22", "33", "44"), fail_at=None, rate_at=None):
+        self.calls = []
+        self.ids = list(ids)
+        self.fail_at = fail_at
+        self.rate_at = rate_at
+
+    def __call__(self, content, media_type):
+        from tracking.x_publisher import MediaUpload
+        self.calls.append({"type": media_type, "n": len(content)})
+        n = len(self.calls)
+        if self.rate_at == n:
+            return MediaUpload(None, "rate_limited", "HTTP 429")
+        if self.fail_at == n:
+            return MediaUpload(None, "rejected", "HTTP 400 bad image")
+        return MediaUpload(self.ids.pop(0), "uploaded", "")
+
+
+def _no_network(url):
+    raise AssertionError(f"fetched {url}")
+
+
+def test_an_image_is_uploaded_then_attached(monkeypatch):
+    conn = QueueConn([_blank(1, "card", 1, "Tonight's card", media_urls=[CARD, CARD_2])])
+    poster = Poster(ids=["900"])
+    fetch, upload = _Fetcher(), _Uploader()
+    result = _drain(conn, poster, monkeypatch, fetch=fetch, upload=upload)
+    assert result["posted"] == 1
+    assert fetch.urls == [CARD, CARD_2]
+    assert len(upload.calls) == 2
+    assert poster.calls[0]["media_ids"] == ["11", "22"]
+    assert poster.calls[0]["reply_to"] is None
+    assert conn.rows[0]["status"] == "posted"
+    assert conn.rows[0]["media_ids"] == ["11", "22"]
+    assert conn.rows[0]["tweet_id"] == "900"
+
+
+def test_a_failed_upload_does_not_tweet(monkeypatch):
+    conn = QueueConn([_blank(1, "card", 1, "Tonight's card", media_urls=[CARD])])
+    poster = Poster()
+    upload = _Uploader(fail_at=1)
+    result = _drain(conn, poster, monkeypatch, fetch=_Fetcher(), upload=upload)
+    assert poster.calls == []
+    assert result["posted"] == 0
+    assert conn.rows[0]["status"] == "failed"
+    assert conn.rows[0]["tweet_id"] is None
+    assert "not posted" in conn.rows[0]["error"]
+    assert conn.rows[0]["media_ids"] is None
+
+
+def test_a_partial_upload_is_not_repeated_on_requeue(monkeypatch):
+    conn = QueueConn([_blank(1, "card", 1, "Tonight's card", media_urls=[CARD, CARD_2])])
+    poster = Poster()
+    first_fetch, first_upload = _Fetcher(), _Uploader(fail_at=2)
+    _drain(conn, poster, monkeypatch, fetch=first_fetch, upload=first_upload)
+    assert poster.calls == []
+    assert conn.rows[0]["status"] == "failed"
+    assert conn.rows[0]["media_ids"] == ["11"]
+    assert conn.rows[0]["tweet_id"] is None
+    conn.rows[0]["status"] = "queued"
+    conn.rows[0]["error"] = None
+    conn.rows[0]["claimed_at"] = None
+    again = Poster(ids=["901"])
+    second_fetch, second_upload = _Fetcher(), _Uploader(ids=["22"])
+    result = _drain(conn, again, monkeypatch, fetch=second_fetch, upload=second_upload)
+    assert second_fetch.urls == [CARD_2]
+    assert len(second_upload.calls) == 1
+    assert again.calls[0]["media_ids"] == ["11", "22"]
+    assert result["posted"] == 1
+    assert conn.rows[0]["tweet_id"] == "901"
+
+
+def test_a_tweet_rate_limit_after_upload_does_not_upload_again(monkeypatch):
+    conn = QueueConn([_blank(1, "card", 1, "Tonight's card", media_urls=[CARD])])
+    poster = Poster(outcomes=["rate_limited"])
+    fetch, upload = _Fetcher(), _Uploader()
+    _drain(conn, poster, monkeypatch, fetch=fetch, upload=upload)
+    assert len(upload.calls) == 1
+    assert conn.rows[0]["status"] == "queued"
+    assert conn.rows[0]["media_ids"] == ["11"]
+    assert conn.rows[0]["tweet_id"] is None
+    again = Poster(ids=["903"])
+    result = _drain(conn, again, monkeypatch, fetch=_no_network, upload=_no_network)
+    assert result["posted"] == 1
+    assert again.calls[0]["media_ids"] == ["11"]
+    assert conn.rows[0]["tweet_id"] == "903"
+
+
+def test_stored_media_ids_are_not_uploaded_again(monkeypatch):
+    conn = QueueConn([_blank(
+        1, "card", 1, "Tonight's card",
+        media_urls=[CARD], media_ids=["11"])])
+    poster = Poster(ids=["902"])
+    _drain(conn, poster, monkeypatch, fetch=_no_network, upload=_no_network)
+    assert poster.calls[0]["media_ids"] == ["11"]
+    assert conn.rows[0]["tweet_id"] == "902"
+
+
+def test_a_row_that_already_has_a_tweet_id_does_not_upload(monkeypatch):
+    conn = QueueConn([_blank(
+        1, "card", 1, "Tonight's card", status="queued", tweet_id="900",
+        media_urls=[CARD], media_ids=["11"])])
+    poster = Poster()
+    _drain(conn, poster, monkeypatch, fetch=_no_network, upload=_no_network)
+    assert poster.calls == []
+    assert conn.rows[0]["tweet_id"] == "900"
+
+
+def test_more_than_four_images_fails_without_uploading(monkeypatch):
+    urls = [f"https://cdn.example/{i}.png" for i in range(5)]
+    conn = QueueConn([_blank(1, "card", 1, "Tonight's card", media_urls=urls)])
+    poster = Poster()
+    result = _drain(conn, poster, monkeypatch, fetch=_no_network, upload=_no_network)
+    assert poster.calls == []
+    assert result["posted"] == 0
+    assert conn.rows[0]["status"] == "failed"
+    assert "4" in conn.rows[0]["error"]
+    assert conn.rows[0]["tweet_id"] is None
+
+
+def test_a_non_https_image_fails_without_uploading(monkeypatch):
+    conn = QueueConn([_blank(
+        1, "card", 1, "Tonight's card", media_urls=["http://cdn.example/card.png"])])
+    poster = Poster()
+    _drain(conn, poster, monkeypatch, fetch=_no_network, upload=_no_network)
+    assert poster.calls == []
+    assert conn.rows[0]["status"] == "failed"
+    assert "https" in conn.rows[0]["error"]
+
+
+def test_a_rate_limit_after_one_upload_keeps_that_id(monkeypatch):
+    conn = QueueConn([_blank(1, "card", 1, "Tonight's card", media_urls=[CARD, CARD_2])])
+    poster = Poster()
+    upload = _Uploader(rate_at=2)
+    _drain(conn, poster, monkeypatch, fetch=_Fetcher(), upload=upload)
+    assert poster.calls == []
+    assert conn.rows[0]["status"] == "queued"
+    assert conn.rows[0]["media_ids"] == ["11"]
+    assert conn.rows[0]["tweet_id"] is None
+
+
+def test_an_upload_rate_limit_requeues_and_does_not_tweet(monkeypatch):
+    conn = QueueConn([
+        _blank(1, "card", 1, "Tonight's card", media_urls=[CARD]),
+        _blank(2, "other", 1, "Later"),
+    ])
+    poster = Poster()
+    upload = _Uploader(rate_at=1)
+    result = _drain(conn, poster, monkeypatch, fetch=_Fetcher(), upload=upload)
+    assert poster.calls == []
+    assert conn.rows[0]["status"] == "queued"
+    assert conn.rows[0]["tweet_id"] is None
+    assert conn.rows[1]["status"] == "queued"
+    assert result["posted"] == 0
+    assert any(item["status"] == "queued" for item in result["results"])
+
+
+def test_a_null_reply_target_keeps_the_thread_chain(monkeypatch):
+    conn = QueueConn([
+        _blank(1, "t", 1, "First"),
+        _blank(2, "t", 2, "Second"),
+    ])
+    poster = Poster()
+    _drain(conn, poster, monkeypatch)
+    assert [c["reply_to"] for c in poster.calls] == [None, "111"]
+    assert [c["media_ids"] for c in poster.calls] == [None, None]
+
+
+def test_a_reply_target_is_used_and_the_next_post_still_chains(monkeypatch):
+    conn = QueueConn([
+        _blank(1, "t", 1, "First", reply_to_tweet_id="555"),
+        _blank(2, "t", 2, "Second"),
+    ])
+    poster = Poster()
+    _drain(conn, poster, monkeypatch)
+    assert [c["reply_to"] for c in poster.calls] == ["555", "111"]
+
+
+def test_a_bad_reply_target_fails_without_posting(monkeypatch):
+    conn = QueueConn([_blank(1, "t", 1, "First", reply_to_tweet_id="nope")])
+    poster = Poster()
+    _drain(conn, poster, monkeypatch, fetch=_no_network, upload=_no_network)
+    assert poster.calls == []
+    assert conn.rows[0]["status"] == "failed"
+    assert "reply_to_tweet_id" in conn.rows[0]["error"]
+
+
+def test_dry_run_does_not_fetch_or_upload(monkeypatch):
+    conn = QueueConn([_blank(1, "card", 1, "Tonight's card", media_urls=[CARD],
+                             reply_to_tweet_id="555")])
+    poster = Poster()
+    result = sp.drain_social_posts(
+        conn, dry_run=True, now=NOW, deliver=poster,
+        fetch_image=_no_network, upload_image=_no_network)
+    assert result["results"][0]["status"] == "would_post"
+    assert result["results"][0]["reply_to"] == "555"
+    assert poster.calls == []
+    assert conn.rows[0]["status"] == "queued"
+    assert conn.rows[0]["media_ids"] is None
+
+
+def test_enqueue_stores_images_and_a_reply_target():
+    conn = QueueConn([])
+    ids = sp.enqueue(
+        conn, "pick-card-2026-10-21", ["Tonight's card"],
+        media_urls=[CARD], reply_to_tweet_id="1234567890")
+    assert ids == [1]
+    assert conn.rows[0]["media_urls"] == [CARD]
+    assert conn.rows[0]["reply_to_tweet_id"] == "1234567890"
+    assert conn.rows[0]["media_ids"] is None
+    assert conn.rows[0]["status"] == "queued"
+    with pytest.raises(sp.QueueRejected, match="https"):
+        sp.enqueue(conn, "bad-card", ["x"], media_urls=["http://cdn.example/a.png"])
+    with pytest.raises(sp.QueueRejected, match="4"):
+        sp.enqueue(conn, "too-many", ["x"], media_urls=[f"https://cdn.example/{i}.png" for i in range(5)])
+    assert len(conn.rows) == 1
+
+
+def test_the_media_migration_is_registered_after_the_table():
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    media = "social_post_media_2026_10_20.sql"
+    table = "social_post_queue_2026_10_20.sql"
+    assert media in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(table) < ACTIVE_MIGRATIONS.index(media)
+    assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
+    sql = (ROOT / "data" / "migrations" / media).read_text(encoding="utf-8")
+    assert sql.count("$mig$") == 2
+    assert sql.index("RETURN;") < sql.index("ALTER TABLE")
+    assert "media_urls" in sql and "media_ids" in sql and "reply_to_tweet_id" in sql
+    assert "INSERT" not in sql
+    assert "all-time-ledger" not in sql
+
+
+def test_the_cli_can_enqueue_one_image_without_posting(monkeypatch, tmp_path):
+    body = tmp_path / "card.txt"
+    body.write_text("Tonight's card", encoding="utf-8")
+    conn = QueueConn([])
+    monkeypatch.setattr("data.db.get_connection", lambda: conn)
+    code = sp.main([
+        "--enqueue", "--thread-key", "pick-card-2026-10-21",
+        "--body-file", str(body),
+        "--media-url", CARD,
+        "--reply-to", "1234567890",
+    ])
+    assert code == 0
+    assert conn.closed
+    assert conn.rows[0]["media_urls"] == [CARD]
+    assert conn.rows[0]["reply_to_tweet_id"] == "1234567890"
+    assert conn.rows[0]["status"] == "queued"

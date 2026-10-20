@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual posts to @SignalBasePicks: social_post_queue drained by the existing X client; ledger thread seeded queued; nothing posted |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #1007 merged and its production steps; the daily odds cleanup (not finished since about 09-03) rebuilt as small bounded statements; two stale master tests; NBA Cup placeholder games skipped |

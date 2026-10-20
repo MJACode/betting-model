@@ -68,6 +68,68 @@ VALUES
 
 `scheduled_at` in the future waits. Status stays `queued` until the drain.
 
+## How to enqueue a post with an image
+
+`media_urls` is a list of up to 4 https URLs. Each file must be jpeg, png,
+or webp, and at most 5MB. The drain downloads the bytes and uploads them
+with `POST https://api.x.com/2/media/upload` (`media_category` =
+`tweet_image`), using the same OAuth 1.0a header as a tweet. No new
+secret. GIF is refused.
+
+A public Supabase Storage object URL is a valid value. This repo does not
+create the bucket. Upload the card to a public bucket (for example
+`social-post-media`) and paste the object URL.
+
+One card, posted on the next drain:
+
+```sql
+INSERT INTO social_post_queue
+  (thread_key, position, body, media_urls)
+VALUES (
+  'pick-card-2026-10-21',
+  1,
+  'Tonight''s card',
+  ARRAY['https://PROJECT.supabase.co/storage/v1/object/public/social-post-media/pick-card.png']
+);
+```
+
+`reply_to_tweet_id` is optional. Null leaves the row as it was: position 1
+is a new post, and a later position replies to the previous post in the
+same `thread_key`. Set it to reply to some other tweet. The id is the
+numeric status id, up to 19 digits.
+
+```sql
+INSERT INTO social_post_queue
+  (thread_key, position, body, media_urls, reply_to_tweet_id)
+VALUES (
+  'pick-card-reply-2026-10-21',
+  1,
+  'The card from last night',
+  ARRAY['https://PROJECT.supabase.co/storage/v1/object/public/social-post-media/pick-card.png'],
+  '1234567890123456789'
+);
+```
+
+From the worker, one image on one post (more than one `--body-file` cannot
+carry `--media-url`; put those images on in SQL):
+
+```bash
+python -m tracking.social_posts --enqueue \
+  --thread-key pick-card-2026-10-21 \
+  --body-file card.txt \
+  --media-url 'https://PROJECT.supabase.co/storage/v1/object/public/social-post-media/pick-card.png' \
+  --reply-to 1234567890123456789
+```
+
+That inserts and does not post.
+
+After each successful upload the drain writes that id into `media_ids` and
+commits before the tweet. A later pass uploads only indexes that do not
+already have an id. If an upload fails, the row is `failed`, `error` says
+why, and the tweet is not created — the text does not go out without the
+image. A 429 from the upload or the image host puts the row back to
+`queued` and stops the pass. Do not clear `media_ids` when you requeue.
+
 Or from the worker, one UTF-8 file per post, exact contents:
 
 ```bash
@@ -97,6 +159,11 @@ A `thread_key` that already has a row is refused. Use a new key.
   becomes `uncertain` and is not retried.
 - A URL with `allow_link` false is `failed` and is not sent.
 - A body over 280 characters is `failed`. The text is not shortened.
+- More than 4 images, a non-https URL, or a file that is not jpeg, png, or
+  webp is `failed`. Nothing is tweeted.
+- An image that fails to download or upload is `failed`. The tweet is not
+  sent without the image.
+- A row that already has a `tweet_id` is not uploaded again.
 
 To send a `failed` or `uncertain` row again, check the account first, then:
 
@@ -107,6 +174,10 @@ UPDATE social_post_queue
    AND status IN ('failed', 'uncertain')
    AND tweet_id IS NULL;
 ```
+
+Leave `media_ids` alone. Those ids are already uploaded. Clearing them
+uploads the same images again; it does not change the "one tweet" rule,
+but it is wasted work and the row does not need it.
 
 ## Pinning
 
