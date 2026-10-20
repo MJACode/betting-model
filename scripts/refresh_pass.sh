@@ -135,20 +135,18 @@ step nhl-over-under
 # (scheduler.run_nba_total_luck_window), because a pass that overruns its ten
 # minutes makes the scheduler skip the next one, and a skipped deciding tick
 # lost the game.
-# NBA player props (nba_prop_market): same-line unders against Pinnacle IN THE
-# PROP FETCH `par nba-prop-odds` JUST STORED. It decides only games whose tip
-# is 45-57 minutes away, so it runs here, minutes after the fetch, rather than
-# in the scoring group. SEQUENTIAL, like every writer to picks; each game is
-# decided once (nba_prop_market_decisions) under the model's own lock, every
-# qualifying proposition bet. The five-minute window job
-# (scheduler.run_nba_prop_window) runs this same card for the tip times these
-# passes cannot reach.
-step nba-prop-market
-# The NBA projection model (nba_prop_projection), on the same fetch and AFTER
-# nba_prop_market, so it never takes a proposition the rule holds. It prices
-# the projections the window job stored about 65 minutes before tip; a game with
-# none is not decided here. SEQUENTIAL, a writer to picks.
-step nba-prop-projection
+# NBA player props, BOTH models (nba_prop_market: same-line unders against
+# Pinnacle; nba_prop_projection: the projections the window job stored about
+# 65 minutes before tip) IN THE PROP FETCH `par nba-prop-odds` JUST STORED. They
+# decide only games whose tip is 45-57 minutes away, so they run here, minutes
+# after the fetch, rather than in the scoring group. ONE step: the two cards'
+# candidates meet in one choice, one bet a game across both models and at most 4
+# a night, ranked by each model's own EV percentile (scripts/nba_props_card.py;
+# mike, 2026-10-20). SEQUENTIAL,
+# like every writer to picks; each game decided once per model under both
+# models' locks. The five-minute window job (scheduler.run_nba_prop_window)
+# runs this same step for the tip times these passes cannot reach.
+step nba-props
 # Its closing snapshot, for closing-line value only: one event call per bet
 # game, 12-25 minutes before tip, filed 'close' so no card decides on it. A
 # pass with no bet game in that window spends nothing.

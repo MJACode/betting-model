@@ -672,7 +672,7 @@ def test_x_posts_without_reading_discords_free_pick(monkeypatch):
 
     posted = []
 
-    def _deliver(text, dry_run=False, reply_to=None):
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
         posted.append(text)
         return "id1", False
 
@@ -796,7 +796,7 @@ def _wire_slate(monkeypatch, slate, already=None):
     monkeypatch.setattr(xp, "_ledger", _remember)
     posted = []
 
-    def _deliver(text, dry_run=False, reply_to=None):
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
         posted.append(text)
         return f"id{len(posted)}", False
 
@@ -966,7 +966,7 @@ def test_a_rate_limit_stops_the_slate_and_does_not_ledger_the_miss(monkeypatch):
     posted, ledgered = _wire_slate(monkeypatch, slate)
     calls = {"n": 0}
 
-    def _deliver(text, dry_run=False, reply_to=None):
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
         calls["n"] += 1
         posted.append(text)
         # The first pick posts. The second is the one X refuses. The third
@@ -985,3 +985,139 @@ def test_a_rate_limit_stops_the_slate_and_does_not_ledger_the_miss(monkeypatch):
     assert not any("SF -3.5" in t or "Over 8.5" in t for t in posted)
     assert not any(key == "k-total" for key, _kind, _id in ledgered)
     assert calls["n"] == 2
+
+
+def test_a_tweet_without_media_omits_the_media_key(monkeypatch):
+    _creds_on(monkeypatch)
+    sent = {}
+
+    class _R:
+        status_code = 201
+        text = ""
+
+        def json(self):
+            return {"data": {"id": "55"}}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        sent["url"] = url
+        sent["json"] = json
+        return _R()
+
+    monkeypatch.setattr(xp.requests, "post", _post)
+    assert xp.deliver_tweet("hello").tweet_id == "55"
+    assert sent["url"] == xp.X_POST_URL
+    assert sent["json"] == {"text": "hello"}
+
+
+def test_media_ids_are_attached_and_a_bad_id_is_not_sent(monkeypatch):
+    _creds_on(monkeypatch)
+    sent = []
+
+    class _R:
+        status_code = 201
+        text = ""
+
+        def json(self):
+            return {"data": {"id": "56"}}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        sent.append(json)
+        return _R()
+
+    monkeypatch.setattr(xp.requests, "post", _post)
+    delivered = xp.deliver_tweet("hello", media_ids=["11", "22"])
+    assert delivered.outcome == "posted"
+    assert sent == [{"text": "hello", "media": {"media_ids": ["11", "22"]}}]
+    refused = xp.deliver_tweet("hello", media_ids=["nope"])
+    assert refused.outcome == "refused"
+    assert len(sent) == 1
+
+
+def test_upload_tweet_image_uses_the_oauth_header_and_does_not_tweet(monkeypatch):
+    import base64
+    _creds_on(monkeypatch)
+    png = b"\x89PNG\r\n\x1a\n" + b"pixels"
+    sent = {}
+
+    class _R:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"data": {"id": "1146654567674912769", "media_key": "3_1"}}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        sent["url"] = url
+        sent["json"] = json
+        sent["auth"] = headers["Authorization"]
+        sent["timeout"] = timeout
+        return _R()
+
+    monkeypatch.setattr(xp.requests, "post", _post)
+    uploaded = xp.upload_tweet_image(png, "image/png")
+    assert uploaded.outcome == "uploaded"
+    assert uploaded.media_id == "1146654567674912769"
+    assert sent["url"] == xp.X_MEDIA_UPLOAD_URL
+    assert sent["url"] != xp.X_POST_URL
+    assert sent["json"]["media_category"] == "tweet_image"
+    assert sent["json"]["media_type"] == "image/png"
+    assert sent["json"]["media"] == base64.b64encode(png).decode("ascii")
+    assert sent["auth"].startswith("OAuth ")
+    assert "oauth_signature" in sent["auth"]
+    assert sent["timeout"] == 60
+
+
+def test_a_refused_upload_returns_no_media_id(monkeypatch):
+    _creds_on(monkeypatch)
+
+    class _R:
+        status_code = 403
+        text = "forbidden"
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(xp.requests, "post", lambda *a, **k: _R())
+    uploaded = xp.upload_tweet_image(b"\x89PNG\r\n\x1a\n", "image/png")
+    assert uploaded.outcome == "rejected"
+    assert uploaded.media_id is None
+    assert "403" in uploaded.detail
+
+
+def test_fetch_https_image_sniffs_bytes_and_refuses_gif(monkeypatch):
+    png = b"\x89PNG\r\n\x1a\n" + b"pixels"
+    gif = b"GIF89a" + b"pixels"
+
+    class _Resp:
+        def __init__(self, body, status=200, url="https://cdn.example/a.png"):
+            self._body = body
+            self.status_code = status
+            self.url = url
+            self.closed = False
+
+        def iter_content(self, _n):
+            yield self._body
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(xp.requests, "get", lambda url, timeout=None, stream=None: _Resp(png))
+    fetched = xp.fetch_https_image("https://cdn.example/a.png")
+    assert fetched.outcome == "fetched"
+    assert fetched.media_type == "image/png"
+    assert fetched.content == png
+
+    monkeypatch.setattr(xp.requests, "get", lambda url, timeout=None, stream=None: _Resp(gif))
+    refused = xp.fetch_https_image("https://cdn.example/a.gif")
+    assert refused.outcome == "failed"
+    assert refused.content is None
+    assert "gif" in refused.detail
+
+    monkeypatch.setattr(
+        xp.requests, "get",
+        lambda url, timeout=None, stream=None: _Resp(b"\xff\xd8\xff" + b"x" * (xp.MAX_IMAGE_BYTES + 1)))
+    huge = xp.fetch_https_image("https://cdn.example/huge.jpg")
+    assert huge.outcome == "failed"
+    assert "5MB" in huge.detail
+
+    assert xp.fetch_https_image("http://cdn.example/a.png").outcome == "failed"
