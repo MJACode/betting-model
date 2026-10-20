@@ -27,6 +27,7 @@ import { applySettledMarkers } from '@/lib/settledPickMarkers';
 import { isDuplicateCopy } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
+import { attachDiscordPublish } from '@/lib/discordPublish';
 import { errorText, isAbortError } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, SettledPick, SignalType } from '@/types';
@@ -60,14 +61,23 @@ export function useSettledPicksSincePaperStart() {
   const [records, setRecords] = useState<Record<string, FullOutcomeRecord>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const seq = useRef(0);
 
   const load = useCallback(async (opts?: { full?: boolean }) => {
+    const id = ++seq.current;
     setLoading(true);
     setError(null);
     try {
       const cached = opts?.full ? [] : await readSettledCache();
-      // Show what we already have while the network catches up.
-      if (cached.length > 0) setRows(cached);
+      if (seq.current !== id) return;
+      // Stamp before paint. The cache itself stays unstamped: discordPublish
+      // is a read of the ledger, not part of the pick, and a cached stamp
+      // would go stale the moment a post or a void notice lands.
+      if (cached.length > 0) {
+        const stampedCache = await attachDiscordPublish(cached);
+        if (seq.current !== id) return;
+        setRows(stampedCache);
+      }
 
       const from = refreshFrom(cached, PAPER_START);
 
@@ -88,16 +98,19 @@ export function useSettledPicksSincePaperStart() {
         fetchSettledPickMarkers(PAPER_START).catch(() => null),
       ]);
 
+      if (seq.current !== id) return;
       const merged = mergeSettled(applySettledMarkers(cached, markers, PAPER_START), fresh, from);
-      setRows(merged);
-      setRecords(recs);
       void writeSettledCache(merged);
+      const stamped = await attachDiscordPublish(merged);
+      if (seq.current !== id) return;
+      setRows(stamped);
+      setRecords(recs);
     } catch (e: unknown) {
       // Cached rows stay on screen — a failed refresh shouldn't blank the
       // backtest, it just leaves it as stale as the last successful load.
-      if (!isAbortError(e)) setError(errorText(e));
+      if (seq.current === id && !isAbortError(e)) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (seq.current === id) setLoading(false);
     }
   }, []);
 

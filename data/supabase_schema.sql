@@ -975,13 +975,18 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
     closing_dk_odds    NUMERIC,            -- close American on the pick side (book in clv_close_book)
     closing_line       NUMERIC,            -- close total/spread on the pick side (NULL for moneyline)
-    clv_pct            NUMERIC,            -- (fair_close_p - fair_bet_p) in pp, SAME-LINE ONLY. docs/clv.md
-    line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for moneyline
-    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
-    clv_method         TEXT,               -- no_vig | zero_vig | raw_one_way | raw_one_sided (legacy)
-    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close
-    clv_bet_book       TEXT,               -- book the bet side was graded at: the book the pick was taken at
+    clv_pct            NUMERIC,            -- same-book raw price CLV in percent: (taken_decimal/close_decimal - 1)*100. SAME-LINE ONLY. docs/clv.md
+    clv_pp             NUMERIC,            -- same pair of raw prices, in probability points
+    line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close; NULL for moneyline. Not a beat.
+    clv_beat_close     BOOLEAN,            -- clv_pct > 0. NULL when the primary price CLV is NULL
+    clv_captured_at    TEXT,               -- when a measurable CLV was recorded
+    clv_method         TEXT,               -- standard_v2 is the pedigree. Older stamps stay out of averages
+    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close (the bet book)
+    clv_bet_book       TEXT,               -- book the bet was taken at
+    market_clv_pct     NUMERIC,            -- secondary: raw taken vs Pinnacle fair close, in percent
+    market_clv_pp      NUMERIC,            -- that comparison in probability points
+    market_clv_method  TEXT,               -- power | power_3way | zero_vig
+    pinnacle_close_odds NUMERIC,           -- Pinnacle American on our side, same line
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
@@ -1141,7 +1146,11 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     under_link      TEXT,                        -- DK betslip deep link (under)
     over_sid        TEXT,
     under_sid       TEXT,
-    created_at      TEXT DEFAULT (NOW()::TEXT)
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    -- The BOOK'S own last_update for the market (the feed's market clock),
+    -- added 2026-10-16. NULL on every row written before that, and on any
+    -- row the feed sent without one. snapshot_at is OUR fetch time.
+    book_last_update TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_prop_odds_game   ON player_prop_odds(game_id, market);
@@ -1998,7 +2007,7 @@ CREATE TABLE IF NOT EXISTS opening_signals (
     locked_at          TEXT NOT NULL,
     closing_dk_odds    NUMERIC,
     closing_line       NUMERIC,
-    clv_pct            NUMERIC,              -- no-vig close vs opening lock, SAME-LINE ONLY. docs/clv.md
+    clv_pct            NUMERIC,              -- same-book raw CLV in probability points vs the opening lock. Shadow track. docs/clv.md
     line_move_dir      TEXT,                 -- toward | against | flat
     public_side        TEXT,                 -- with_public | contrarian | even
     result             TEXT,                 -- WIN | LOSS | PUSH | NO_ACTION
@@ -3055,3 +3064,29 @@ ALTER TABLE picks ADD COLUMN IF NOT EXISTS model_probability_cal NUMERIC;
 -- revoked; the trigger functions are SECURITY DEFINER with search_path pinned.
 -- Declared in data/anon_readable.VIEW_BASE_TABLES, not ANON_READABLE: nothing
 -- in mobile/src names them directly.
+
+-- ── App crash and error reports ─────────────────────────────────────────────
+-- Applied via migration add_app_errors (2026-10-19). One row per report from
+-- the mobile app: js_fatal | js_error | render | early_exit | emergency_launch.
+-- Write-only for the anon key: RLS on, no policies, table grants revoked; the
+-- only way in is log_app_error(), SECURITY DEFINER, insert-only, 60/device/hour.
+-- Full DDL and the reasoning: data/migrations/add_app_errors.sql. Reading it:
+-- docs/app_errors.md.
+CREATE TABLE IF NOT EXISTS app_errors (
+    id                BIGSERIAL PRIMARY KEY,
+    received_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    occurred_at       TIMESTAMPTZ,
+    device_id         TEXT NOT NULL,
+    kind              TEXT NOT NULL CHECK (kind IN
+                        ('js_fatal', 'js_error', 'render', 'early_exit', 'emergency_launch')),
+    message           TEXT,
+    stack             TEXT,
+    component_stack   TEXT,
+    screen            TEXT,
+    stage             TEXT,
+    app_version       TEXT,
+    update_id         TEXT,
+    update_created_at TEXT,
+    platform          TEXT,
+    extra             JSONB
+);

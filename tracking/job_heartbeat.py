@@ -66,6 +66,10 @@ MAX_SILENCE: dict = {
     # Every 10 minutes, 9am-midnight ET. Off overnight by design, so the bound
     # has to clear the gap: ~9h of silence is legitimate.
     "nfl_live_worker": 700,
+    # Same cadence and the same overnight gap. The beat lands when a launch
+    # RETURNS, and one launch can run a whole Sunday slate (1pm to ~7:30pm
+    # ET, ~6.5h), which 700 also clears.
+    "nfl_live_leader": 700,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -73,6 +77,18 @@ MAX_SILENCE: dict = {
     "heartbeat_watchdog": 45,
     # Every 5 minutes, 24x7.
     "job_queue": 30,
+    # Manual X posts. Same cadence as the job queue. Silence means the drain
+    # stopped; queued copy would sit unpublished. Picks and recaps are not
+    # this job.
+    "social_post_queue": 30,
+    # Every 5 minutes, 24x7, and it beats on the idle ticks too (it returns
+    # after one read when no NBA game is near), so silence means stopped.
+    "nba_prop_window": 30,
+    # Every minute, 24x7, and it beats on the idle ticks too (one read, then
+    # return), so 20 minutes is 20 missed ticks: a stopped job, not a quiet one.
+    # One job for both NBA totals models, nba_total_luck and
+    # nba_team_total_luck (scripts/nba_pregame_window.py), so one entry.
+    "nba_total_luck_window": 20,
 }
 
 

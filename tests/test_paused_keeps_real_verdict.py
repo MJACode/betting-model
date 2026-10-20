@@ -313,12 +313,14 @@ def test_the_recap_excludes_a_settled_paused_bet_and_keeps_a_live_models_bet():
     if sqlite3.sqlite_version_info < (3, 39):
         pytest.skip("IS DISTINCT FROM needs SQLite >= 3.39")
     db = sqlite3.connect(":memory:")
+    from tracking.published_units import install_sqlite
+    install_sqlite(db)
     # condition_status: the recap also skips the second copy of one bet
     # (config.DUPLICATE_STATUS, 2026-10-09); NULL here, as on almost every row.
     db.execute("""CREATE TABLE picks (sport, model_id, result, kelly_fraction,
                   dk_odds, decision_odds, clv_pct, is_live, game_date, signal_type,
                   downgrade_reason, condition_status, game_id, pick_side,
-                  player_id, player_key, prop_market)""")
+                  player_id, player_key, prop_market, clv_method)""")
     db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
         ("MLB", "m_live", "WIN", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None, "g1"),
@@ -405,7 +407,7 @@ def test_the_app_filters_the_paused_row_out_of_signals_and_the_record():
     for const in ("const PICK_COLUMNS =", "const SETTLED_PICK_COLUMNS ="):
         block = q.split(const)[1].split(";")[0]
         assert "downgrade_reason" in block, const
-    assert "const KEY = 'settledPicks.v7';" in _src("mobile/src/lib/settledPickCache.ts")
+    assert "const KEY = 'settledPicks.v9';" in _src("mobile/src/lib/settledPickCache.ts")
 
 
 # ── post-#850 review: the leaks the first pass missed ────────────────────────

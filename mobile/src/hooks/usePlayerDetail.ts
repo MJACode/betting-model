@@ -32,13 +32,14 @@ import {
   fetchLineupSlot,
   fetchPlayerPositionGroup,
   fetchPositionVsOpponent,
+  fetchSeasonStarted,
   fetchPropLineRows,
   fetchPropOddsHistory,
   fetchSavantStats,
   fetchSettledPropPicksForPlayer,
   fetchSlateGames,
 } from '@/lib/queries';
-import { propMarketForStat, type StatDef } from '@/lib/statCatalog';
+import { isLogDerivedStat, propMarketForStat, type StatDef } from '@/lib/statCatalog';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
@@ -136,6 +137,12 @@ export function usePlayerDetail(args: {
   const now = useNow();
   const team = games[0]?.team ?? null;
   const market = useMemo(() => propMarketForStat(stat), [stat]);
+  // Blocks+Steals and Reb+Ast are summed on the phone from the log; the
+  // head-to-head and same-position reads are server functions that have no
+  // branch for either key and return nothing, which the cards would print as
+  // "no meetings". Those two cards are not shown for them
+  // (statCatalog.LOG_DERIVED_STATS).
+  const serverStat = !isLogDerivedStat(stat);
   // Pull-to-refresh: every section keys on this, so one slow read still
   // cannot hold the others back (UX review: an error with no retry).
   const [nonce, setNonce] = useState(0);
@@ -213,7 +220,7 @@ export function usePlayerDetail(args: {
   // values, so a chip tap refetches here where it does not for the chart.
   const h2hRow = useSection<H2HStatValuesRow | null>(
     null,
-    team && opponent && stat
+    team && opponent && stat && serverStat
       ? async () => {
           const rows = await fetchH2HStatValues(
             sport,
@@ -230,13 +237,13 @@ export function usePlayerDetail(args: {
     [sport, team, opponent, playerId, stat?.key, playerType, nonce],
   );
   const h2h: PlayerHeadToHead | null = useMemo(() => {
-    if (!opponent || threshold == null) return null;
+    if (!opponent || threshold == null || !serverStat) return null;
     const row = h2hRow.data;
     // An opponent with no stored meeting is still an answer — "they have not
     // played" is what the card says, and it needs the opponent's name to say
     // it. A null row is therefore an EMPTY head-to-head, not a missing one.
     return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], selection.line, selection.side);
-  }, [h2hRow.data, opponent, threshold, selection.line, selection.side]);
+  }, [h2hRow.data, opponent, threshold, selection.line, selection.side, serverStat]);
 
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(
@@ -312,26 +319,50 @@ export function usePlayerDetail(args: {
   // last stat's numbers under the new stat's label for one round trip (UX
   // review, 2026-10-05). The GROUP is in the tag too: an MLB hitter's group
   // moves when tonight's lineup lands after the log, and without it the new
-  // title drew over the old group's rows (UX review, 2026-10-06).
+  // title drew over the old group's rows (UX review, 2026-10-06). The
+  // OPPONENT is in the tag for the same reason: the card stays mounted when
+  // the next opponent changes, and the auto-open would otherwise lock onto
+  // the previous opponent's rows for the one render before the refetch's
+  // loading flag flips (UX review, 2026-10-06).
   // A mismatch is "still loading" only while the read
   // has not failed. The catch resets the payload to the untagged initial
   // (`statKey: ''`), and the card's error line sits behind
   // `loading && rows.length === 0` — counting that reset as loading leaves
   // the spinner up and the error never shows.
-  const pvo = useSection<{ statKey: string; group: string; rows: PositionVsOpponentRow[] }>(
-    { statKey: '', group: '', rows: [] },
-    opponent && stat && posGroup && pvoSeason != null
-      ? async () => ({
-          statKey: String(stat.key),
-          group: posGroup,
-          rows: await fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
-        })
+  const pvo = useSection<{
+    statKey: string;
+    group: string;
+    opponent: string;
+    seasonStarted: boolean | null;
+    rows: PositionVsOpponentRow[];
+  }>(
+    { statKey: '', group: '', opponent: '', seasonStarted: null, rows: [] },
+    opponent && stat && serverStat && posGroup && pvoSeason != null
+      ? async () => {
+          const [rows, seasonStarted] = await Promise.all([
+            fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
+            fetchSeasonStarted(sport, pvoSeason).catch((err) => {
+              // The card still draws. Unknown means it does not auto-open
+              // last season; a failed probe must not hide the rows.
+              console.warn('[positionVsOpponent] season-started read failed', err);
+              return null;
+            }),
+          ]);
+          return {
+            statKey: String(stat.key),
+            group: posGroup,
+            opponent,
+            seasonStarted,
+            rows,
+          };
+        }
       : null,
     [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
   );
 
-  // The rows on screen are the rows for THIS stat and THIS group, or none.
-  const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '');
+  // The rows on screen are the rows for THIS stat, group and opponent, or none.
+  const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '')
+    && pvo.data.opponent === opponent;
 
   return {
     reload,
@@ -342,14 +373,17 @@ export function usePlayerDetail(args: {
     nextGame,
     h2h,
     h2hLoading: h2hRow.loading,
+    // Blocks+Steals or Reb+Ast with an opponent to read against: the two
+    // cards above are not shown, and the page says why in their place.
+    serverReadsSkipped: !serverStat && stat != null && opponent != null,
     // The card's place while a roster sport's position is read, or why it
     // failed; null once the read succeeds (row or no row) and elsewhere.
     positionVsOpponentPending:
-      isRosterSport && opponent && stat && !posGroup && (rosterPos.loading || rosterPos.error)
+      serverStat && isRosterSport && opponent && stat && !posGroup && (rosterPos.loading || rosterPos.error)
         ? { opponent, loading: rosterPos.loading, error: rosterPos.error }
         : null,
     positionVsOpponent:
-      opponent && posGroup && pvoSeason != null
+      opponent && serverStat && posGroup && pvoSeason != null
         ? {
             opponent,
             group: posGroup,
@@ -357,6 +391,7 @@ export function usePlayerDetail(args: {
             rows: pvoFresh ? pvo.data.rows : [],
             loading: pvo.loading || (pvo.error == null && !pvoFresh),
             error: pvo.error,
+            seasonStarted: pvoFresh ? pvo.data.seasonStarted : null,
             groupBasis,
             sport,
           }

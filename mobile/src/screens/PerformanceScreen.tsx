@@ -26,7 +26,7 @@ import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance'
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickRowTitle, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -458,7 +458,7 @@ function TrackedBetsCard({
             >
               <View style={{ flex: 1 }}>
                 <Text style={styles.manualDesc} numberOfLines={1}>
-                  {row.pick.pick_label}
+                  {pickRowTitle(row.pick)}
                 </Text>
                 <Text style={styles.manualSub} numberOfLines={1}>
                   {[

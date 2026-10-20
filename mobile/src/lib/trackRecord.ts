@@ -16,11 +16,25 @@ export interface TrackRecordSummary {
   pushes: number;
   profitFlat: number;
   stakedFlat: number;
-  roiFlat: number; // profit / staked
+  /** Posted-stake units (published_pick_unit_profit). Same total as Discord. */
+  units?: number;
+  /** Units laid on wins and losses. A push, a void, and an ungraded pick add nothing. */
+  risked?: number;
+  /** Posted-stake ROI: units / risked. Absent columns leave this at 0 and risked unset. */
+  roi: number;
   winRate: number; // wins / (wins + losses)
   clvSettled: number;
   clvBeat: number;
-  clvBeatRate: number | null; // clvBeat / clvSettled
+  clvBeatRate: number | null; // clvBeat / clvSettled, same-book price
+  clvGameSettled: number;
+  clvGameBeat: number;
+  clvGameBeatRate: number | null;
+  clvPropSettled: number;
+  clvPropBeat: number;
+  clvPropBeatRate: number | null;
+  marketClvSettled: number;
+  marketClvBeat: number;
+  marketClvBeatRate: number | null;
 }
 
 export const EMPTY_SUMMARY: TrackRecordSummary = {
@@ -30,11 +44,22 @@ export const EMPTY_SUMMARY: TrackRecordSummary = {
   pushes: 0,
   profitFlat: 0,
   stakedFlat: 0,
-  roiFlat: 0,
+  units: 0,
+  risked: 0,
+  roi: 0,
   winRate: 0,
   clvSettled: 0,
   clvBeat: 0,
   clvBeatRate: null,
+  clvGameSettled: 0,
+  clvGameBeat: 0,
+  clvGameBeatRate: null,
+  clvPropSettled: 0,
+  clvPropBeat: 0,
+  clvPropBeatRate: null,
+  marketClvSettled: 0,
+  marketClvBeat: 0,
+  marketClvBeatRate: null,
 };
 
 export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
@@ -43,9 +68,20 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
   let pushes = 0;
   let profitFlat = 0;
   let stakedFlat = 0;
+  let units = 0;
+  let risked = 0;
   let clvSettled = 0;
   let clvBeat = 0;
+  let clvGameSettled = 0;
+  let clvGameBeat = 0;
+  let clvPropSettled = 0;
+  let clvPropBeat = 0;
+  let marketClvSettled = 0;
+  let marketClvBeat = 0;
 
+  // The OTA select falls back without these columns. Treating the gap as
+  // zero would print a 0.00 record. Leave them unset so the screen shows a dash.
+  const postedKnown = rows.some((r) => r.units != null || r.risked != null);
   for (const r of rows) {
     // The view drops a retired model once threshold_sync prunes its row; until
     // then the row survives and would count. Same guard as passesActionFilter.
@@ -55,8 +91,16 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     pushes += Number(r.pushes ?? 0);
     profitFlat += Number(r.profit_flat ?? 0);
     stakedFlat += Number(r.staked_flat ?? 0);
+    units += Number(r.units ?? 0);
+    risked += Number(r.risked ?? 0);
     clvSettled += Number(r.clv_settled ?? 0);
     clvBeat += Number(r.clv_beat ?? 0);
+    clvGameSettled += Number(r.clv_game_settled ?? 0);
+    clvGameBeat += Number(r.clv_game_beat ?? 0);
+    clvPropSettled += Number(r.clv_prop_settled ?? 0);
+    clvPropBeat += Number(r.clv_prop_beat ?? 0);
+    marketClvSettled += Number(r.market_clv_settled ?? 0);
+    marketClvBeat += Number(r.market_clv_beat ?? 0);
   }
 
   const decided = wins + losses;
@@ -67,18 +111,29 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     pushes,
     profitFlat,
     stakedFlat,
-    roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+    units: postedKnown ? units : undefined,
+    risked: postedKnown ? risked : undefined,
+    roi: postedKnown && risked > 0 ? units / risked : 0,
     winRate: decided > 0 ? wins / decided : 0,
     clvSettled,
     clvBeat,
     clvBeatRate: clvSettled > 0 ? clvBeat / clvSettled : null,
+    clvGameSettled,
+    clvGameBeat,
+    clvGameBeatRate: clvGameSettled > 0 ? clvGameBeat / clvGameSettled : null,
+    clvPropSettled,
+    clvPropBeat,
+    clvPropBeatRate: clvPropSettled > 0 ? clvPropBeat / clvPropSettled : null,
+    marketClvSettled,
+    marketClvBeat,
+    marketClvBeatRate: marketClvSettled > 0 ? marketClvBeat / marketClvSettled : null,
   };
 }
 
 export interface SportGroup {
   sport: string;
   summary: TrackRecordSummary;
-  models: TrackRecordRow[]; // sorted by profit desc
+  models: TrackRecordRow[]; // posted-stake units desc, or model id when units are absent
 }
 
 /** Group per-model rows by sport, dropping models with no settled picks. */
@@ -94,8 +149,13 @@ export function groupBySport(rows: TrackRecordRow[]): SportGroup[] {
 
   const groups: SportGroup[] = [];
   for (const [sport, list] of bySport) {
-    const models = [...list].sort(
-      (a, b) => Number(b.profit_flat ?? 0) - Number(a.profit_flat ?? 0),
+    // Without the units column every row sorts as 0, which is just the
+    // order the query returned. The model id does not move between loads.
+    const unitsKnown = list.some((r) => r.units != null);
+    const models = [...list].sort((a, b) =>
+      unitsKnown
+        ? Number(b.units ?? 0) - Number(a.units ?? 0)
+        : String(a.model_id).localeCompare(String(b.model_id)),
     );
     groups.push({ sport, summary: summarize(list), models });
   }

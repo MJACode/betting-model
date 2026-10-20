@@ -15,6 +15,9 @@
  * and the segmented-control text cap.
  */
 import { readFileSync } from 'node:fs';
+// Source is read with LF whatever the checkout: autocrlf gives CRLF on
+// Windows, and regexes below that end a match at a newline never matched.
+const readUtf8 = (p: string) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
 import { join } from 'node:path';
 
 import type { Sport } from '../src/hooks/useSportFilter';
@@ -176,7 +179,7 @@ check('no football catalog offers Targets', !(['NFL', 'NCAAF'] as Sport[]).some(
 
 // The sport switch still lands on the sport's default stat, and that stat is
 // on the segment the switch selects.
-for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC'] as Sport[]) {
+for (const sport of ['NFL', 'NCAAF', 'MLB', 'NBA', 'WNBA', 'UFC', 'NHL'] as Sport[]) {
   const d = defaultStatFor(sport);
   check(
     `${sport}: the default stat (${ck(d)}) is on the default segment (${defaultSegmentFor(sport)})`,
@@ -343,7 +346,7 @@ check('empty text: DEF, last 3',
 }
 
 // ── 5. The screen uses the module, and the dropdown is gone ─────────────────
-const stats = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
+const stats = readUtf8(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'));
 check('StatsScreen: the chip row reads chipsForSegment', /chipsForSegment\(sport, segment\)\.map/.test(stats));
 check('StatsScreen: no StatGroupSheet (the category dropdown is gone)', !stats.includes('StatGroupSheet'));
 check('StatsScreen: both boards apply the position filter, last',
@@ -372,7 +375,7 @@ check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed s
   check('StatSegmentRow: passes accessibilityLabelFor and fit to SegmentTabs',
     /<SegmentTabs/.test(tabs) && /accessibilityLabelFor=\{segmentAccessibilityLabel\}/.test(tabs) && /\bfit\b/.test(tabs), tabs.replace(/\s+/g, ' '));
 }
-const groupTabs = readFileSync(join(import.meta.dirname, '..', 'src/components/GroupTabs.tsx'), 'utf-8');
+const groupTabs = readUtf8(join(import.meta.dirname, '..', 'src/components/GroupTabs.tsx'));
 check('SegmentTabs: fit labels cap at 2x and floor at 0.75, nothing else is capped',
   /maxFontSizeMultiplier=\{fit \? 2 : undefined\}/.test(groupTabs) &&
     /minimumFontScale=\{fit \? 0\.75 : undefined\}/.test(groupTabs) &&

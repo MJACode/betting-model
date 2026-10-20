@@ -445,13 +445,15 @@ check(
     nearestLine([1.5, 3.5], 2.5, 'over') === 1.5 && nearestLine([1.5, 3.5], 2.5, 'under') === 3.5);
   check('an off-line row prices the side it posts even with the other side missing', under.get('george springer')?.price === 230);
   const stats = read('src/screens/StatsScreen.tsx');
-  // The BOARD's idiom, whichever one that is (2026-09-06). Abbreviated and
-  // capped at one line: "Under 224.5" wrapped inside the 62pt odds column and
-  // made one row of a 25-row board taller than its neighbours (UX review).
+  // The BOARD's idiom, whichever one that is (2026-09-06). Other sports stay
+  // on one line: "Under 224.5" wrapped inside the 62pt odds column and made
+  // one row of a 25-row board taller than its neighbours (UX review). NHL may
+  // use a second line for "3 or fewer". The assertion is the caption's own
+  // numberOfLines, not a `{1}` that also appears on the price.
   check('the pill prints the off-line number under the price, in the board\'s idiom',
-    stats.includes('const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;')
+    stats.includes('const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;')
       && /styles\.oddsCaption, !lineCaption && styles\.oddsCaptionDay\]/.test(stats)
-      && /numberOfLines=\{1\}/.test(stats)
+      && /style=\{\[styles\.oddsCaption[\s\S]{0,180}?numberOfLines=\{sport === 'NHL' \? 2 : 1\}/.test(stats)
       && modeLineLabel(1.5, 'over', 'atLeast', true) === '2+'
       && modeLineLabel(1.5, 'over', 'over', true) === 'O 1.5'
       && modeLineLabel(1.5, 'under', 'under', true) === 'U 1.5');
@@ -477,6 +479,18 @@ check(
   check('an alternate that duplicates the book\'s standard line is dropped', folded.filter((x) => x.bookmaker === 'draftkings').map((x) => `${x.line}:${x.over_price}`).join() === '0.5:-250,1.5:230');
   check('another book\'s alternate at that line is kept (that book has no standard row)', folded.some((x) => x.bookmaker === 'fanduel' && x.line === 0.5));
   check('order is preserved', folded.map((x) => x.over_price).join() === '-250,230,-240');
+  const nhl = [
+    { ...r('player_shots_on_goal', 'hardrockbet', 2.5, -165), game_id: 'NHL_2026-10-16_PIT_COL' },
+    { ...r('player_shots_on_goal_alternate', 'hardrockbet', 3.5, -110), game_id: 'NHL_2026-10-16_PIT_COL' },
+    { ...r('player_points_alternate', 'draftkings', 1.5, 140), game_id: 'NBA_2026-10-16_BOS_NYK' },
+  ];
+  const nhlFolded = foldAlternateRows(nhl);
+  check('an NHL alternate row stays out of the ruler and the betslip',
+    nhlFolded.every((x) => !x.market.endsWith('_alternate') && !String(x.game_id).startsWith('NHL_') || x.market === 'player_shots_on_goal')
+      && nhlFolded.some((x) => x.game_id.startsWith('NHL_') && x.line === 2.5)
+      && !nhlFolded.some((x) => x.line === 3.5));
+  check('an NBA alternate on the shared points key still folds',
+    nhlFolded.some((x) => x.game_id.startsWith('NBA_') && x.market === 'player_points' && x.line === 1.5));
   check('the paging key carries the line', propLineRowKey(rows[2]!) !== propLineRowKey(rows[1]!) && propLineRowKey(rows[2]!).endsWith('|1.5'));
   // The quote index sees one market with every line: a 1.5 ruler finds the
   // alternate row where the standard line is 0.5.
