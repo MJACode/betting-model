@@ -121,6 +121,26 @@ def test_one_connection_and_one_slate_read_plan_both_nba_totals_models(monkeypat
     assert plan.total_luck == ["G63"] and plan.team_total.decide == ["G50"]
 
 
+def test_the_shared_plan_skips_a_placeholder_for_both_nba_totals_models(monkeypatch):
+    """RULE: on the scheduler's path (one slate read for both models), an NBA
+    Cup placeholder with no teams is planned by neither model: one rule
+    (scripts/nba_total_luck_window.has_teams), applied by each model's plan.
+    Production holds three such games rows for 2026-27, each tipping at
+    midnight Eastern (read 2026-10-20)."""
+    import scripts.nba_total_luck_card as tlcard
+    games = _slate(G63=63, G50=50)
+    games["NBA_2026-12-04_nan_nan"] = {**games["G63"], "home": "NaN", "away": "NaN"}
+    games["NBA_2026-12-05_nan_nan"] = {**games["G50"], "home": "NaN", "away": "NaN"}
+    db = _db()
+    monkeypatch.setattr(pw, "get_connection", lambda: db)
+    monkeypatch.setattr(tlcard, "slate", lambda conn, now, skipped=None, horizon_min=None: games)
+    monkeypatch.setattr(tlcard, "decided_games", lambda conn, ids: set())
+    plan = pw.plan_tick(NOW)
+    assert plan.errors == {}
+    assert plan.total_luck == ["G63"]
+    assert plan.team_total.decide == ["G50"] and plan.team_total.close == []
+
+
 def test_the_shared_slate_reaches_both_windows():
     import scripts.nba_total_luck_window as tlw
     assert pw.HORIZON_MIN >= tlw.LOOK_AHEAD_MIN[1]

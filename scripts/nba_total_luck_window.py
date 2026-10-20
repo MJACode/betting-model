@@ -39,6 +39,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config  # noqa: E402
 import models.nba_total_luck as tl  # noqa: E402
 import scripts.nba_total_luck_card as card  # noqa: E402
 from data.db import get_connection  # noqa: E402
@@ -50,6 +51,25 @@ _ET = ZoneInfo("America/New_York")
 # after it is asked for) and not above its top.
 LOOK_AHEAD_MIN = (61.0, 66.0)
 
+# The teams a game must have to be planned, by either NBA totals model: this
+# plan and nba_team_total_luck's (scripts/nba_team_total_luck_window.py) both
+# apply has_teams, so the rule is written once. The schedule holds NBA Cup
+# knockout placeholders before their teams are known: three games rows,
+# NBA_2026-12-04_nan_nan, NBA_2026-12-05_nan_nan and NBA_2026-12-08_nan_nan,
+# home and away the string 'NaN', tipping at midnight Eastern and listed
+# 'regular' (production, read 2026-10-20). No event in the feed is that game.
+# Planned, it would fetch the NBA board on every tick of its window: the card
+# finds no price for it, records no decision, and the next tick fetches again.
+# The rule reads the teams, not the id, so a placeholder row whose teams are
+# filled in is planned. The set is the abbreviations odds are stored under
+# (data/ingestors/odds_ingestor.py maps the feed's names through this map).
+TEAMS = frozenset(config.NBA_ODDS_API_MAP.values())
+
+
+def has_teams(game: dict) -> bool:
+    """Both teams are real NBA teams."""
+    return game.get("home") in TEAMS and game.get("away") in TEAMS
+
 
 def plan(conn, now: datetime, games: dict[str, dict] | None = None) -> list[str]:
     """The undecided games this tick must fetch and decide. Reads only: it
@@ -57,11 +77,13 @@ def plan(conn, now: datetime, games: dict[str, dict] | None = None) -> list[str]
 
     `games` is a slate already read this tick, reaching at least
     LOOK_AHEAD_MIN[1] (scripts/nba_pregame_window, which plans this model and
-    nba_team_total_luck on one read); without it, the plan reads its own."""
+    nba_team_total_luck on one read); without it, the plan reads its own. A
+    game without two real teams (has_teams) is never planned."""
     if games is None:
         games = card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
     near = sorted(g for g, v in games.items()
-                  if LOOK_AHEAD_MIN[0] <= tl.lead_minutes(v["tip"], now) <= LOOK_AHEAD_MIN[1])
+                  if has_teams(v)
+                  and LOOK_AHEAD_MIN[0] <= tl.lead_minutes(v["tip"], now) <= LOOK_AHEAD_MIN[1])
     if not near:
         return []
     done = card.decided_games(conn, near)

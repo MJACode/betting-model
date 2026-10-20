@@ -55,6 +55,10 @@ import models.nba_team_total_luck as tt  # noqa: E402
 import scripts.nba_team_total_luck_card as card  # noqa: E402
 import scripts.nba_total_luck_card as tlcard  # noqa: E402
 from data.db import get_connection  # noqa: E402
+# The teams a game must have to be planned: one rule for both NBA totals
+# models, written beside nba_total_luck's plan (NBA Cup placeholders with no
+# teams; the evidence is there).
+from scripts.nba_total_luck_window import has_teams  # noqa: E402
 
 # Minutes before tip in which a bet game's closing snapshot is taken: one call,
 # [tip - 25, tip - 12). Twelve is the inside edge because the tip is the
@@ -63,16 +67,6 @@ from data.db import get_connection  # noqa: E402
 CLOSE_LEAD_MIN = (12.0, 25.0)
 # How far ahead the plan reads the slate: the top of the fetch window.
 PLAN_HORIZON_MIN = max(tt.FETCH_LEAD_MIN[1], CLOSE_LEAD_MIN[1])
-# The teams a game must have to be planned. The schedule holds NBA Cup
-# knockout placeholders before their teams are known (games rows such as
-# NBA_2026-12-04_nan_nan, home and away 'NaN', tipping at midnight Eastern,
-# listed 'regular'; read 2026-10-20): no event in the feed is that game, so
-# planning one would fail its call on every tick of its window.
-TEAMS = frozenset(tt.config.NBA_ODDS_API_MAP.values())
-
-
-def _matchup(g: dict) -> bool:
-    return g.get("home") in TEAMS and g.get("away") in TEAMS
 
 
 @dataclass
@@ -94,7 +88,9 @@ def plan(conn, now: datetime, games: dict[str, dict] | None = None) -> Plan:
     reads its own. Reads only."""
     if games is None:
         games = tlcard.slate(conn, now, horizon_min=PLAN_HORIZON_MIN)
-    games = {g: v for g, v in games.items() if _matchup(v)}
+    # An NBA Cup placeholder with no teams has no feed event: its call would
+    # fail on every tick of its window (has_teams).
+    games = {g: v for g, v in games.items() if has_teams(v)}
     lo, hi = tt.FETCH_LEAD_MIN
     near = sorted(g for g, v in games.items() if lo <= tt.lead_minutes(v["tip"], now) <= hi)
     done = card.decided_games(conn, near) if near else set()
