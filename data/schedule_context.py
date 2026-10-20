@@ -10,8 +10,8 @@ WHY
 Several pre-game models decide days before kickoff, and every one of them read
 a team's recent history from games ALREADY PLAYED. A game the team still had
 to play before this one was invisible, so it looked like a bye. Measured on
-production (read-only, 2026-10-20; the audit queries are in
-docs/sessions/2026-10.md):
+production (read-only, 2026-10-20; summarised in docs/sessions/2026-10.md and
+the sport docs):
 
   * ncaaf_over_under decided 9 of its 77 kept BETs before one of the two teams
     played an intermediate game. On all 8 graded ones the rest read 12-21 days
@@ -93,7 +93,8 @@ class Rules:
                      data gap: reported, and neither waited for nor counted.
     needs_price      An unscored row counts only when a book has priced it.
     played_from_log  The log, not a score in `games`, says the game happened
-                     (UFC: the odds feed's fight rows are never scored).
+                     (UFC: 367 of the odds feed's 579 fight rows have no
+                     score; results land on the mirror's own rows).
     log              Which log the inputs read; None means the score in
                      `games` is what they read.
     price_book       needs_price reads this book's h2h row only (None: any row).
