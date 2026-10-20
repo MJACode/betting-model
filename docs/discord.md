@@ -419,13 +419,38 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   46 settle passes between 7am ET and midnight.
   The trade: a recap whose snapshot fails is ledgered with no snapshot, so
   that date can never be restated; the warning in the log is its only trace.
+  A success response with no message id is not one of those retries. The
+  body may already be in the channel, and the refresh passes would post
+  another copy each time. That recap is `discord_results_error` or
+  `discord_results_restate_error` with the reason "no message id". Once
+  that row exists, later passes do not post it. One ops alert is raised
+  on the pass that records the row. Check the channel before deleting
+  that `_error` row; the message may already be there. Deleting the row
+  lets a later pass post the recap again. If the error row was not
+  recorded, that same alert says so and a later pass may post again.
+  A rejected post (no success) stays retryable.
+- **The week and the month post on the same webhook.** Monday 7:30am ET
+  (`period_recaps`, and again from later `step_settle` passes) posts the
+  prior Monday–Sunday. The first Monday of a month also posts the previous
+  calendar month. Both use `_settled_rows_since` over that window, the same
+  graded picks as the daily recap, and ledger `discord_results_week` /
+  `discord_results_month` on the window's start. A posted window is not
+  posted again. X posts the same windows through `notify_x_period`. An
+  empty window is not ledgered. A window still unposted when the next one
+  opens is not caught up. Period recaps do not write `results_snapshots`.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.
 - **Failures never propagate.** Discord gets its own try block in both the
   pipeline step and the live loop, so a broken webhook can't fail the step or
   mask the mobile push that already succeeded.
-- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20).
+- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20), **except a pick whose game
+  starts within `DISCORD_UNCAPPED_WITHIN_MIN` (120) minutes**, which always posts in the run that finds it
+  (2026-10-16). A held pick only gets the next pass, and no pass posts a game that has started, so near
+  the tip the cap was a loss, not a delay: the two NBA prop models decide every game 55 minutes before
+  tip, up to about 175 bets in one slot (eight games tip together at 6pm ET on 2027-04-11). The NBA
+  window job also publishes on every tick while an NBA game is within 62 minutes of tip, so a failed
+  post retries before the game starts.
   Overflow is left un-ledgered and drips out on the next pass rather than
   dumping a full locked slate into a channel the moment a webhook is added.
 - Discord's own limits are respected: 10 embeds/message (`_post_embeds` chunks),

@@ -58,9 +58,10 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // The published-record stamp builds the Discord lock from those columns. On
 // a v7 envelope both are undefined, a posted prop's key is short, and the
 // stamp marks it unpublished.
-// v9 (2026-10-14): clv_method. Model detail CLV counts no_vig and zero_vig
-// only, the same predicate as v_public_track_record. A v8 envelope has no
-// method, so that filter would drop every CLV value.
+// v9 (2026-10-14): SETTLED_PICK_COLUMNS gained clv_method. Model detail
+// averages standard_v2 only. On a v8 envelope the field is undefined, the
+// filter drops every row, and a pre-migration cache would also show the old
+// probability-point number as a percent.
 const KEY = 'settledPicks.v9';
 
 /**

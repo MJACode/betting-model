@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { DiscordPublish } from '@/lib/discordPublish';
 import type { PlayerLogSport } from '@/lib/playerLog';
 
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
@@ -71,29 +72,37 @@ export interface Pick {
   // full-game pick where splits weren't available at score time.
   public_bet_pct: number | null;
   public_money_pct: number | null;
-  // Closing line value (CLV) — last pre-game snapshot on the pick side
-  // (Pinnacle when present). NULL until the game has started and settled.
+  // Closing line value (CLV). closing_dk_odds is the bet book's American
+  // at the close (the column name is historical). NULL until captured.
   closing_dk_odds: number | null;
   closing_line: number | null;
-  // Price CLV, in pp: fair_close_p − fair_bet_p (positive = beat the
-  // close). SAME-LINE ONLY — NULL when the number moved. docs/clv.md.
+  // Primary CLV, in percent: (taken_decimal / that book's close_decimal − 1)
+  // × 100. Both sides raw, same book, same line. NULL when that book has no
+  // pre-start close on the line. docs/clv.md.
   clv_pct: number | null;
+  // Same pair of prices, in probability points. Optional on rows fetched
+  // before the column was selected.
+  clv_pp?: number | null;
   // Line CLV, in points: how far the number moved toward our side between the
-  // signal and the close (positive = we beat the close on the number). This is
-  // the measure that survives a moved line. NULL for moneyline, which has none.
+  // signal and the close (positive = the number moved our way). NULL for
+  // moneyline. A moved line does not count as a price beat.
   line_clv_pts: number | null;
-  // The one verdict, from whichever of the two applies: line_clv_pts > 0 where
-  // the number moved, clv_pct > 0 where it held.
+  // Headline beat: clv_pct > 0. NULL when the primary price CLV is NULL.
   clv_beat_close: boolean | null;
   clv_captured_at: string | null;
-  // How clv_pct was computed. Pedigree averages no_vig / zero_vig only.
+  // How clv_pct was computed. Pedigree averages standard_v2 only.
   clv_method: string | null;
   // Book whose snapshot is the close. closing_dk_odds is that book's American.
   clv_close_book: string | null;
-  // Book the bet side of clv_pct was graded at: the book the pick was taken at
-  // (paper_tracker._bet_price_and_book). NULL on rows captured before
-  // 2026-10-08; lib/clvBet.ts derives the same book for those.
+  // Book the bet was taken at (paper_tracker._bet_price_and_book). The
+  // primary close is this book's own last pre-start price.
   clv_bet_book: string | null;
+  // Secondary market edge: raw taken vs Pinnacle's power-de-vigged close.
+  // NULL when Pinnacle has no pre-start close on the same line.
+  market_clv_pct?: number | null;
+  market_clv_pp?: number | null;
+  market_clv_method?: string | null;
+  pinnacle_close_odds?: number | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
   inning_at_pick: number | null;
@@ -162,6 +171,7 @@ export type SettledPickKey =
   | 'public_bet_pct'
   | 'injury_flag'
   | 'clv_pct'
+  | 'clv_method'
   | 'decision_book'
   | 'decision_odds'
   | 'decision_edge'
@@ -184,10 +194,9 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
-  // Selected with the settled columns. Optional like the lock tail: a
-  // hand-built row still type-checks. Detail CLV counts no_vig and zero_vig
-  // only, so a cache from before v9 (no method) must not be reused.
-  clv_method?: string | null;
+  // Client-only. attachDiscordPublish stamps it after the fetch. Not a
+  // column, so it stays out of SETTLED_PICK_COLUMNS and the cache key.
+  discordPublish?: DiscordPublish;
 };
 
 export interface LiveGameState {
@@ -294,6 +303,8 @@ export interface OddsByBookRow {
   over_link: string | null;
   under_link: string | null;
   snapshot_at: string;
+  /** NHL 60-min tie. Absent until the view migration is applied. */
+  draw_price?: number | null;
 }
 
 /** One row from v_latest_prop_odds_all_books — latest prop line per
@@ -632,12 +643,27 @@ export interface TrackRecordRow {
   losses: number;
   pushes: number;
   profit_flat: number;    // sum of profit_flat on $100 flat stakes
-  staked_flat: number;    // 100 * picks
-  clv_settled: number;    // settled picks with a captured CLV
-  clv_beat: number;       // of those, how many beat the close (clv_pct > 0)
+  staked_flat: number;    // 100 * priced picks
+  /** Posted stake: published_pick_unit_profit. Same units as Discord #results. */
+  units?: number;
+  /** Units laid (published_pick_unit_risked). Pushes contribute 0. */
+  risked?: number;
+  clv_settled: number;    // settled picks with a same-book price CLV
+  clv_beat: number;       // of those, how many beat that book's close (clv_pct > 0)
   avg_clv_pct: number | null;
   first_date: string;
   last_date: string;
+  // Appended by clv_standard_v2. Optional so a row from before that
+  // migration still type-checks; the track-record select asks for them.
+  clv_game_settled?: number | null;
+  clv_game_beat?: number | null;
+  avg_clv_game_pct?: number | null;
+  clv_prop_settled?: number | null;
+  clv_prop_beat?: number | null;
+  avg_clv_prop_pct?: number | null;
+  market_clv_settled?: number | null;
+  market_clv_beat?: number | null;
+  avg_market_clv_pct?: number | null;
 }
 
 /** One row from v_public_track_record_daily — daily settled totals (equity curve). */
@@ -650,6 +676,9 @@ export interface TrackRecordDailyRow {
   pushes: number;
   profit_flat: number;
   staked_flat: number;
+  /** Posted stake for that day, same function as the model rows. */
+  units?: number;
+  risked?: number;
 }
 
 /** One row from parlay_track_record — the daily canonical cross-game parlay. */
@@ -675,7 +704,7 @@ export interface ParlayTrackRow {
  * push router in lib/ — and lib/ importing a type from screens/ inverts the
  * layering. It was spelled out inline in all three.
  */
-export type PicksView = 'today' | 'signals' | 'live';
+export type PicksView = 'today' | 'signals' | 'live' | 'lines';
 
 export type TabParamList = {
   // Merged Picks home (Today | Signals | Live) replaces the old Picks +
@@ -848,6 +877,11 @@ export interface SeasonTotalsRow {
   def_solo?: number | string;
   def_tfl?: number | string;
   def_pd?: number;
+  // NHL skaters (player_window_totals_nhl over nhl_skater_game_log).
+  // `shots` is the log column. The book's market is player_shots_on_goal.
+  // Season on the log is the ending year.
+  goals?: number;
+  shots?: number;
 }
 
 /**
@@ -909,9 +943,10 @@ export interface HitRatePlayer {
   player_name: string;
   team: string | null;
   player_type?: PlayerType;
-  /** The row's position, set only from the last-N read: nflverse `pos` on
-   *  NFL, null on NCAAF (player_recent_games_ncaaf has no position). Unset
-   *  (absent) on the Season and H2H reads, which carry no position at all. */
+  /** The row's position. Last-N reads it off the game log. NFL Season and
+   *  H2H read it off player_season_stat_values_nfl / player_h2h_stat_values_nfl
+   *  once that migration has landed; until then the field is absent and the
+   *  position chips stay off (matchesPosition lets a missing pos through). */
   pos?: string | null;
   games: RecentGameRow[]; // newest-first, length ≤ N ([] in Season/H2H mode)
   values: number[]; // per-game stat values, newest-first (dot strip source)
@@ -933,6 +968,8 @@ export interface SeasonStatValuesRow {
   player_id: string;
   player_name: string;
   team: string | null;
+  /** NFL only, from player_season_stat_values_nfl. Absent on the other sports. */
+  pos?: string | null;
   player_type?: PlayerType; // MLB only
   games: number;
   values: number[];
@@ -953,6 +990,22 @@ export interface SeasonStatValuesRow {
  * (data/migrations/add_position_vs_opponent_nfl.sql). The last four fields are
  * the defence's season standing, repeated on every row of that season.
  */
+/**
+ * One defense from position_defense_ranks_nfl. Rank 1 allows the most.
+ * `blended` is true while that defense has played fewer than 8 games
+ * this season and the rate still includes last season.
+ */
+export interface PositionDefenseRankRow {
+  defense: string;
+  avg_allowed: number | string | null;
+  player_games: number;
+  season_team_games: number;
+  window_team_games: number;
+  blended: boolean;
+  rank_most_allowed: number | null;
+  teams_ranked: number;
+}
+
 export interface PositionVsOpponentRow {
   season: number;
   player_id: string;
@@ -974,6 +1027,8 @@ export interface H2HStatValuesRow {
   player_id: string;
   player_name: string;
   team: string | null;
+  /** NFL only, from player_h2h_stat_values_nfl. Absent on the other sports. */
+  pos?: string | null;
   player_type?: PlayerType; // MLB only
   /** The team these meetings were against — the player's NEXT opponent. */
   opponent: string;

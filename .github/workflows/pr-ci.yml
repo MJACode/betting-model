@@ -18,6 +18,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  mobile-tsc:
+    # Own job so a baseline mismatch cannot skip the pytest subset.
+    # Stricter than mobile-ota.yml on purpose. OTA ignores queries.ts and every scripts/
+    # file (harnesses are not in the bundle). This job fails a new diagnostic
+    # anywhere tsc reports one, including inside queries.ts. scripts/ entries in
+    # mobile/tsc-baseline.txt are file + TS code only, so a new field on Pick /
+    # ParlayLeg / TrackRecordSummary does not fail an unrelated PR. A baseline
+    # entry tsc no longer reports warns and does not fail. #846's
+    # mobile/ci/tsc-baseline.txt is a different gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile deps
+        working-directory: mobile
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck mobile against the known-error baseline
+        working-directory: mobile
+        run: |
+          npx tsc --noEmit > tsc.log 2>&1 || true
+          python3 scripts/check_tsc_baseline.py tsc.log tsc-baseline.txt
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -29,6 +59,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Scratch-cluster tests (tests/byom_scratch.py and the discord void
+      # notice) shell out to initdb. The runner has no Postgres until this
+      # step; without it those tests skip and CI never applies the SQL.
+      - name: Install Postgres for scratch-cluster tests
+        run: sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql
+
       - name: Install minimal test deps
         run: |
           python -m pip install -U pip
@@ -36,6 +72,8 @@ jobs:
           # only needs pytest + the modules those tests import. Install the
           # declared test pin and the light runtime deps config/scorer need.
           python -m pip install "pytest>=8.0.0" python-dotenv numpy pandas loguru psycopg2-binary requests scipy joblib scikit-learn xgboost-cpu optuna apscheduler beautifulsoup4
+          # tests/test_nba_injury_report.py parses real report PDFs (requirements.txt pin).
+          python -m pip install "pdfplumber>=0.11.0"
 
       - name: Mobile thresholds drift check
         run: python -m scripts.generate_mobile_thresholds --check
@@ -49,7 +87,8 @@ jobs:
 
       # test_discord_publish_sync runs the app predicate with
       # node --experimental-strip-types. The runner image's node is not
-      # that, and a missing flag fails the subset.
+      # that, and a missing flag fails the subset. npm ci for tsc is the
+      # mobile-tsc job, not this one.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -62,7 +101,7 @@ jobs:
           SUPABASE_URL: ""
           SUPABASE_KEY: ""
         run: |
-          python -m pytest -q \
+          python -m pytest -q -rs \
             tests/test_config.py \
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
@@ -74,13 +113,30 @@ jobs:
             tests/test_publisher_lock.py \
             tests/test_live_lock.py \
             tests/test_settle_self_heal.py \
+            tests/test_settle_clv_timeout.py \
             tests/test_settled_record_is_immutable.py \
             tests/test_live_money_no_record_only.py \
             tests/test_published_record.py \
             tests/test_snapshot_pass_order.py \
+            tests/test_record_units_agree.py \
+            tests/test_record_hero.py \
+            tests/test_app_crash_log.py \
+            tests/test_yesterday_discord_units.py \
             tests/test_settlement_timing.py \
             tests/test_nhl_boxscore.py \
             tests/test_nba_espn_box.py \
+            tests/test_nba_box_enrich.py \
+            tests/test_nba_injury_report.py \
+            tests/test_nba_odds_history.py \
+            tests/test_nba_period_scores.py \
+            tests/test_nba_prop_close.py \
+            tests/test_nba_prop_market.py \
+            tests/test_nba_prop_settle_stats.py \
+            tests/test_nba_props.py \
+            tests/test_nba_results_ingestor.py \
+            tests/test_nba_results_wiring.py \
+            tests/test_nba_schedule_ingestor.py \
+            tests/test_prop_odds_book_last_update.py \
             tests/test_prop_box_scores.py \
             tests/test_intraday_freshness.py \
             tests/test_dk_freshness_parse.py \
@@ -111,8 +167,10 @@ jobs:
             ncaaf_live/tests/test_cfbd_yardline.py \
             tests/test_nfl_prop_market_kalshi.py \
             tests/test_mobile_team_detail.py \
+            tests/test_mobile_tsc_baseline.py \
             tests/test_mobile_player_detail.py \
             tests/test_position_vs_opponent.py \
+            tests/test_position_defense_ranks.py \
             tests/test_player_positions.py \
             tests/test_mobile_betslip_combine.py \
             tests/test_mobile_contrast_tokens.py \
@@ -124,6 +182,9 @@ jobs:
             tests/test_discord_publish_sync.py \
             tests/test_discord_void_notice.py \
             tests/test_anon_readable.py \
+            tests/test_nhl_stats_views.py \
+            tests/test_byom_facts_schema.py \
+            tests/test_byom_game_facts.py \
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
@@ -131,5 +192,18 @@ jobs:
             tests/test_results_recap_message_id.py \
             tests/test_backfill_results_recap.py \
             tests/test_job_queue.py \
+            tests/test_idle_read_transaction.py \
+            tests/test_view_migration_lock_noop.py \
+            tests/test_record_correction_post.py \
             tests/test_voided_pick_not_rechosen.py \
-            tests/test_mobile_stat_segments.py
+            tests/test_x_publisher.py \
+            tests/test_free_pick_names_the_cheaper_book.py \
+            tests/test_period_recaps.py \
+            tests/test_mobile_stat_segments.py \
+            tests/test_mobile_line_ruler.py \
+            tests/test_mobile_nhl_skater_stats.py \
+            tests/test_mobile_my_books.py \
+            tests/test_member_sportsbooks_migration.py \
+            tests/test_ddl_guard.py \
+            tests/test_nfl_wind_stability.py \
+            tests/test_mobile_lines_board.py

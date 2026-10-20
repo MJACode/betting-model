@@ -130,3 +130,179 @@ def test_the_markets_are_the_ones_the_priced_history_holds():
     import config
     from data.ingestors.nhl_prop_odds_history import PROP_MARKETS
     assert sorted(config.PROP_MARKETS_NHL) == sorted(PROP_MARKETS)
+    assert not any(m.endswith("_alternate") for m in config.PROP_MARKETS_NHL)
+
+
+def test_the_cards_still_read_the_featured_market_only():
+    """An alternate row is a different market key. The card's quote query is
+    equality on the featured key, so a second line cannot enter best_bet."""
+    import inspect
+
+    import scripts.nhl_prop_card as blocked_card
+    import scripts.nhl_props_card as props_card
+
+    for card in (props_card, blocked_card):
+        src = inspect.getsource(card.latest_quotes)
+        assert "AND market = %s" in src
+        assert "_alternate" not in src
+
+
+def test_a_moved_featured_line_keeps_the_old_number_under_the_alternate_key():
+    """Cale Makar Under 3.5 was the open. The next featured snapshot was 2.5
+    and 3.5 was gone, because this feed stores one featured line per player.
+    The alternate key is one row per line, and a duplicate of the featured
+    line is dropped so the card still sees a single featured number."""
+    import config
+    from data.ingestors.prop_odds_ingestor import _parse_prop_markets
+
+    markets = [
+        {"key": "player_shots_on_goal", "outcomes": [
+            {"name": "Over", "description": "Cale Makar", "price": -165, "point": 2.5},
+            {"name": "Under", "description": "Cale Makar", "price": 120, "point": 2.5},
+        ]},
+        {"key": "player_shots_on_goal_alternate", "outcomes": [
+            {"name": "Over", "description": "Cale Makar", "price": -165, "point": 2.5},
+            {"name": "Under", "description": "Cale Makar", "price": 120, "point": 2.5},
+            {"name": "Over", "description": "Cale Makar", "price": -110, "point": 3.5},
+            {"name": "Under", "description": "Cale Makar", "price": -120, "point": 3.5},
+        ]},
+    ]
+    rows = _parse_prop_markets(
+        markets, "NHL_2026-10-16_PIT_COL", "2026-10-16", "open",
+        "2026-10-16T04:18:19+00:00",
+        allowed_markets=set(config.PROP_MARKETS_NHL) | set(ing.NHL_LIVE_ALT_MARKETS),
+        bookmaker="hardrockbet")
+    featured = [(r["line"], r["under_price"]) for r in rows if r["market"] == "player_shots_on_goal"]
+    alt = [(r["line"], r["under_price"]) for r in rows if r["market"] == "player_shots_on_goal_alternate"]
+    assert featured == [(2.5, 120)]
+    assert alt == [(3.5, -120)]
+
+
+def test_a_rejected_alternate_call_keeps_the_featured_lines(monkeypatch):
+    asked: list[str] = []
+
+    class Resp:
+        def __init__(self, status, markets):
+            self.status_code = status
+            self.headers = {"x-requests-last": "4"}
+            self.text = "unsupported"
+            self._markets = markets
+
+        def json(self):
+            return {"bookmakers": [{
+                "key": "draftkings",
+                "markets": [{"key": m, "outcomes": []} for m in self._markets],
+            }]}
+
+    def fake_get(url, params, timeout=20):
+        markets = params["markets"]
+        asked.append(markets)
+        status = 422 if "_alternate" in markets else 200
+        return Resp(status, markets.split(","))
+
+    monkeypatch.setattr(ing.requests, "get", fake_get)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(ing, "record_quota_headers", lambda _resp: None)
+    books, cost = ing._event_props("ev")
+    assert asked[0] == ",".join(ing.PROP_MARKETS_NHL)
+    assert "_alternate" in asked[1]
+    got = {m["key"] for _book, markets in books for m in markets}
+    assert got == set(ing.PROP_MARKETS_NHL)
+    assert cost == 8
+
+
+def _book(markets: list[str]) -> list[tuple[str, list[dict]]]:
+    return [("draftkings", [{"key": m, "outcomes": [
+        {"name": "Over", "description": "Cale Makar", "price": -165, "point": 2.5},
+        {"name": "Under", "description": "Cale Makar", "price": 120, "point": 2.5},
+    ]} for m in markets])]
+
+
+def test_a_200_on_both_calls_merges_the_alternate_lines(monkeypatch):
+    asked: list[str] = []
+
+    def fake_fetch(event_id, markets):
+        asked.append(",".join(markets))
+        return _book(markets), 6, 200
+
+    monkeypatch.setattr(ing, "_fetch_event_markets", fake_fetch)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+    books, cost = ing._event_props("ev")
+    assert asked == [",".join(ing.PROP_MARKETS_NHL), ",".join(ing.NHL_LIVE_ALT_MARKETS)]
+    got = {m["key"] for _book, markets in books for m in markets}
+    assert got == set(ing.PROP_MARKETS_NHL) | set(ing.NHL_LIVE_ALT_MARKETS)
+    assert cost == 12
+
+
+def test_an_exception_on_the_alternate_call_keeps_the_featured_lines(monkeypatch):
+    def fake_fetch(event_id, markets):
+        if any(m.endswith("_alternate") for m in markets):
+            raise ValueError("bad json")
+        return _book(markets), 4, 200
+
+    monkeypatch.setattr(ing, "_fetch_event_markets", fake_fetch)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+    books, cost = ing._event_props("ev")
+    got = {m["key"] for _book, markets in books for m in markets}
+    assert got == set(ing.PROP_MARKETS_NHL)
+    assert cost == 4
+
+
+def test_open_close_and_final_each_ask_for_the_alternate_lines(monkeypatch):
+    """The extra call is part of the snapshot, whichever of the three is due."""
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime(2026, 10, 17, 1, 10, tzinfo=timezone.utc)
+    asked: list[tuple[str, str]] = []
+    state = {"stored": [], "final": False}
+
+    class Conn:
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_fetch(event_id, markets):
+        kind = "alt" if any(m.endswith("_alternate") for m in markets) else "featured"
+        asked.append((state["phase"], kind))
+        return _book(list(markets)), 5, 200
+
+    def fake_stored(_conn, game_ids):
+        gid = game_ids[0]
+        finals = {gid} if state["final"] else set()
+        return {gid: list(state["stored"])}, finals
+
+    def fake_insert(_conn, rows):
+        return len(rows)
+
+    monkeypatch.setattr(ing, "ODDS_API_KEY", "test")
+    monkeypatch.setattr(ing, "_fetch_event_markets", fake_fetch)
+    monkeypatch.setattr(ing, "_events", lambda _today: ([{
+        "id": "ev", "home": "Colorado Avalanche", "away": "Pittsburgh Penguins", "start": start,
+    }], 0))
+    monkeypatch.setattr(ing, "_existing_game_ids", lambda _conn, ids: set(ids))
+    monkeypatch.setattr(ing, "_stored_snapshots", fake_stored)
+    monkeypatch.setattr(ing, "_insert_prop_odds", fake_insert)
+    monkeypatch.setattr(ing, "get_connection", lambda: Conn())
+    monkeypatch.setattr(ing, "persist_quota", lambda _conn: None)
+    monkeypatch.setattr(ing.time, "sleep", lambda _s: None)
+
+    state["phase"] = "open"
+    opened = ing.run_nhl_prop_odds_ingestor(now=datetime(2026, 10, 16, 14, 0, tzinfo=timezone.utc))
+    state["phase"] = "close"
+    state["stored"] = [datetime(2026, 10, 16, 14, 0, tzinfo=timezone.utc)]
+    closed = ing.run_nhl_prop_odds_ingestor(now=start - timedelta(minutes=65))
+    state["phase"] = "final"
+    state["stored"] = [
+        datetime(2026, 10, 16, 14, 0, tzinfo=timezone.utc),
+        start - timedelta(minutes=65),
+    ]
+    finaled = ing.run_nhl_prop_odds_ingestor(now=start - timedelta(minutes=20))
+
+    assert opened["open"] == 1 and closed["close"] == 1 and finaled["final"] == 1
+    assert asked == [
+        ("open", "featured"), ("open", "alt"),
+        ("close", "featured"), ("close", "alt"),
+        ("final", "featured"), ("final", "alt"),
+    ]

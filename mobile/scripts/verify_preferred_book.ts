@@ -440,6 +440,37 @@ check('mlb_total_market resolves to totals (id has no over_under)', gameMarketFo
 check('mlb_total_public_fade resolves to totals (id has no over_under)', gameMarketForModel('mlb_total_public_fade') === 'totals');
 check('mlb_total_market is a game_total for parlay correlation', marketClassForModel('mlb_total_market') === 'game_total');
 check('mlb_total_public_fade is a game_total for parlay correlation', marketClassForModel('mlb_total_public_fade') === 'game_total');
+// nba_total_luck (NBA full-game totals, overs) has neither 'over_under' nor
+// 'total_runs' in its id: without its own case every price, line-shop and
+// movement lookup for its picks read the game's moneyline rows.
+check('nba_total_luck resolves to totals (id has no over_under)', gameMarketForModel('nba_total_luck') === 'totals');
+check('nba_total_luck is a game_total for parlay correlation', marketClassForModel('nba_total_luck') === 'game_total');
+// nba_team_total_luck bets the HOME team's own points: its prices, line shop
+// and movement read the team_totals_home rows, never the game's totals rows
+// (a number twice as big) and never its moneyline rows.
+check('nba_team_total_luck resolves to team_totals_home', gameMarketForModel('nba_team_total_luck') === 'team_totals_home',
+  String(gameMarketForModel('nba_team_total_luck')));
+check('nba_team_total_luck is a game_total for parlay correlation', marketClassForModel('nba_team_total_luck') === 'game_total');
+{
+  // A team total's number is stored in total_line, like a game total. Read
+  // anywhere else, no other book's row is the same bet and the line shop is empty.
+  const ttPick = {
+    model_id: 'nba_team_total_luck', pick_side: 'under', dk_odds: -115, scored_line: 115.5,
+    pick_label: 'BOS @ MIL — MIL Team Total Under 115.5',
+  } as unknown as Pick;
+  const ttRows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -105, under_price: -115, total_line: 115.5 },
+    { bookmaker: 'fanduel', over_price: -115, under_price: -105, total_line: 115.5 },
+    // A better price on another number is a different bet.
+    { bookmaker: 'betmgm', over_price: -130, under_price: 110, total_line: 114.5 },
+  ];
+  const shop = lineShopForPick(ttPick, ttRows);
+  check('a team-total pick line-shops other books at its own number',
+    shop?.bookmaker === 'fanduel' && shop?.price === -105, `${shop?.bookmaker} ${shop?.price}`);
+  const shown = displayQuoteForPick(ttPick, ttRows, 'fanduel');
+  check('a team-total quote carries the book\'s team-total number',
+    shown?.line === 115.5 && shown?.price === -105, `${shown?.line} ${shown?.price}`);
+}
 check('mlb_spread_market resolves to spreads', gameMarketForModel('mlb_spread_market') === 'spreads');
 check('live runline resolves to spreads', gameMarketForModel('mlb_live_runline') === 'spreads');
 check('live win prob resolves to h2h', gameMarketForModel('mlb_live_win_prob') === 'h2h');

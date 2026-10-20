@@ -50,11 +50,13 @@ def test_recompute_rewrites_snapshots_only_while_the_old_column_exists():
 def test_published_rewrite_runs_once_and_uses_the_view_clv_rule():
     from data.view_migrations import ACTIVE_MIGRATIONS
     raw = PUBLISHED.read_text(encoding="utf-8")
-    assert "clv_rule = 'no_vig'" in raw
+    assert "clv_rule = 'standard_v2'" in raw
     body = _between(raw, "IF rewrite THEN", "SNAPSHOT_REWRITE_END")
     assert body.count("UPDATE public.results_snapshots") == 1
     assert "IS DISTINCT FROM" in body
-    assert "clv_method IN ('no_vig', 'zero_vig')" in body
+    assert "clv_method = 'standard_v2'" in body
+    assert "no_vig" not in body
+    assert "zero_vig" not in body
     assert "g.is_live IS NOT TRUE" not in body
     outside = raw.replace(body, "", 1)
     assert "UPDATE public.results_snapshots" not in outside

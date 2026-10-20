@@ -548,9 +548,26 @@ class TestSettlement:
         sat = _bet(db, "nhl_prop_saves", "8476999", "Linus Ullmark", 25.5, -110.0, "Saves", "player_total_saves")
         _in_goal(db, 8478048, "Igor Shesterkin", "NYR", 0, 4)   # relieved the starter: four saves, under 25.5
         _in_goal(db, 8470000, "The Starter", "NYR", 1, 12)
+        _in_goal(db, 8476883, "Jeremy Swayman", "BOS", 1, 30)
         pt._settle_prop_picks(_Shim(db), "2026-10-01", "TS")
         assert _result(db, relief) == ("NO_ACTION", 0)
         assert _result(db, sat) == ("NO_ACTION", 0)
+
+    def test_a_game_missing_a_starter_waits_then_grades(self, db):
+        """2026-10-15 BUF@TOR: the evening box held the backups (no start) but
+        not Luukkonen's start, and his under was voided. He started and made
+        26 saves. A game without both starts is not loaded yet; it waits, and
+        grades on the saves once the starts arrive."""
+        bet = _bet(db, "nhl_prop_saves", "8480045", "Ukko-Pekka Luukkonen", 25.5, -110.0, "Saves",
+                   "player_total_saves")
+        _in_goal(db, 8481551, "C. Ellis", "BOS", 0, 0)
+        _in_goal(db, 8476932, "A. Stolarz", "NYR", 0, 0)
+        _in_goal(db, 8475683, "Sergei Bobrovsky", "NYR", 1, 29)   # one team's start only
+        pt._settle_prop_picks(_Shim(db), "2026-10-01", "TS")
+        assert _result(db, bet) == (None, None)
+        _in_goal(db, 8480045, "Ukko-Pekka Luukkonen", "BOS", 1, 26)
+        pt._settle_prop_picks(_Shim(db), "2026-10-01", "TS")
+        assert _result(db, bet) == ("LOSS", -100.0)
 
     def test_a_game_with_no_goalie_log_yet_waits(self, db):
         waiting = _bet(db, "nhl_prop_saves", "8478048", "Igor Shesterkin", 25.5, -125.0, "Saves", "player_total_saves")

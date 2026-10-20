@@ -338,6 +338,10 @@ INSTRUMENTED_ENTRYPOINTS = [
     "nfl/scripts/daily_opener_card.py",
     "scripts/nfl_pick_monitor.py",
     "scripts/nfl_prop_market_card.py",
+    "scripts/nba_prop_window.py",
+    "scripts/nba_total_luck_window.py",
+    "scripts/nba_team_total_luck_window.py",
+    "scripts/nba_prop_projection_card.py",
 ]
 
 

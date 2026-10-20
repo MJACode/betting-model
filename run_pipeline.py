@@ -238,18 +238,27 @@ def step_apply_view_migrations(run_date: str) -> bool:
     after the first. Same reasoning as tracking/run_ledger.py creating its own
     table at runtime."""
     try:
-        from data.view_migrations import apply_view_migrations, ACTIVE_MIGRATIONS
-        n = apply_view_migrations()
-        if n < len(ACTIVE_MIGRATIONS):
+        from data.view_migrations import (
+            ACTIVE_MIGRATIONS,
+            apply_view_migrations,
+            format_view_migration_failure,
+        )
+        result = apply_view_migrations()
+        total = len(ACTIVE_MIGRATIONS)
+        if result.failed or result.applied < total:
             # The STEP fails; the pass does not (refresh_pass.sh and the daily
             # both carry on past a failed step). Until 2026-09-21 this logged
             # "✓ 31/33 applied" as a success on every pass the logs still hold while
             # two migrations raised, so the ledger and the failure alerter saw
             # nothing and the published-units gate they owned had lapsed.
-            logger.error(f"✗ View migrations: {n}/{len(ACTIVE_MIGRATIONS)} applied — "
-                         f"{len(ACTIVE_MIGRATIONS) - n} FAILED (see 'View migration FAILED' above)")
+            # The filenames are IN this line: _timed_step stores the last ERROR
+            # in pipeline_log, and the per-file "View migration FAILED (name)"
+            # lines are not that last line. The 2026-10-16 03:30Z pass stored
+            # "59/60 applied — 1 FAILED (see 'View migration FAILED' above)".
+            logger.error(format_view_migration_failure(
+                result.applied, total, result.failed))
             return False
-        logger.success(f"✓ View migrations: {n}/{len(ACTIVE_MIGRATIONS)} applied")
+        logger.success(f"✓ View migrations: {result.applied}/{total} applied")
         return True
     except Exception as exc:
         # Never fail the pass for a view refinement.
@@ -266,7 +275,10 @@ def step_prune_odds(run_date: str) -> bool:
     that unread history would grow ~2.7 GB/month, so this prunes it to a flat
     working set. draftkings + sbr_consensus are never touched, and today's rows
     are left alone so this can't race with an ingest. Non-fatal: a failed prune
-    costs disk, never picks.
+    costs disk, never picks, so the run goes on. But it returns False, so the
+    run's ledger names it as a failed step. Its backlog shows it last finished
+    around 2026-09-03, and it timed out every day the logs reach (10-14 to
+    10-20) while this returned True, so nothing said so.
     """
     try:
         from data.prune_odds import run_prune_odds
@@ -275,8 +287,8 @@ def step_prune_odds(run_date: str) -> bool:
         logger.success(f"✓ Odds prune: {total:,} line-shop rows removed")
         return True
     except Exception as exc:
-        logger.warning(f"⚠ Odds prune failed (non-fatal): {exc}")
-        return True
+        logger.warning(f"⚠ Odds prune failed (non-fatal, step marked failed): {exc}")
+        return False
 
 
 
@@ -358,14 +370,17 @@ def step_player_positions(run_date: str) -> bool:
     """NBA / WNBA / NCAAF positions for the player page's "same position vs
     the next opponent" card (data/ingestors/player_positions_ingestor.py).
 
-    Once a day is enough: rosters change slowly, and the ESPN half re-fetches
-    only athletes not stored in the last 7 days, so a steady-state pass is the
-    ~45 roster-list calls plus that week's signings (ESPN has IP-blocked this
-    worker twice). CFBD /roster is one call. Verified on the worker
-    2026-10-06 by dry runs 405765 / 406072 before this was scheduled."""
+    Once a day is enough: rosters change slowly. The ESPN half re-fetches an
+    athlete only after a 7-day window plus a per-id jitter, skips unmatched
+    ids it has already cached, and stops at MAX_ATHLETE_HTTP so a cold morning
+    cannot walk every roster (ESPN has IP-blocked this worker twice). NCAAF
+    uses the fall-year season of `run_date` — January through July belong to
+    the previous season — so a January run still reads the roster that has
+    game logs. CFBD /roster is one call. Verified on the worker 2026-10-06
+    by dry runs 405765 / 406072 before this was scheduled."""
     try:
         from data.ingestors.player_positions_ingestor import ingest_player_positions
-        result = ingest_player_positions(dry_run=False)
+        result = ingest_player_positions(dry_run=False, run_date=run_date)
         logger.success(f"✓ Player positions: {result}")
         return True
     except Exception as exc:
@@ -693,6 +708,28 @@ def step_wnba_results(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ WNBA results failed: {exc}")
+        return False
+
+
+def step_nba_results(run_date: str) -> bool:
+    """
+    NBA final scores + player box scores from ESPN for the trailing 3 days
+    (data/ingestors/nba_results_ingestor.py). Must run BEFORE settlement: NBA
+    game picks settle off games.home_score and NBA props off
+    nba_player_game_log, and until 2026-10-15 nothing on the worker wrote
+    either (nba_api is blocked here). Self-limiting: no ESPN call unless a
+    started NBA game still lacks a score or a box. The NBA analog of
+    step_wnba_results.
+    """
+    try:
+        from data.ingestors.nba_results_ingestor import ingest_nba_results
+        result = ingest_nba_results(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in result.items()
+                   if k not in ("planned_scores", "planned_box")}
+        logger.success(f"✓ NBA results (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA results failed: {exc}")
         return False
 
 
@@ -1166,6 +1203,23 @@ def step_public_betting(run_date: str) -> bool:
         return False
 
 
+def step_nba_public_splits(run_date: str) -> bool:
+    """
+    NBA public betting splits (Action Network, free): archive yesterday's
+    finished games, then snapshot today's games that have not reached their
+    listed start, stamped with the fetch time. Writes nba_public_splits only --
+    never public_betting, which the scorer copies onto every pick. Best-effort.
+    """
+    try:
+        from data.ingestors.nba_public_splits_ingestor import run_forward
+        result = run_forward(run_date)
+        logger.success(f"✓ NBA public splits: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA public splits failed: {exc}")
+        return False
+
+
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score pitcher + batter props across the look-ahead window.
 
@@ -1291,15 +1345,131 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
-def step_nba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
-    """Score NBA player props (9 markets incl. double-double) and write picks to DB."""
+def step_nba_prop_market(dry_run: bool = False) -> bool:
+    """NBA player props (`nba_prop_market`): same-line unders against Pinnacle.
+
+    Decides each game once, at the first look 45-57 minutes before its tip
+    whose newest prop fetch holds Pinnacle, and writes every qualifying
+    proposition with the game's decision row, under the model's lock
+    (scripts/nba_prop_market_card.py; no game or night cap, mike 2026-10-16).
+    Run by the refresh pass, the 6am run and the five-minute window job. LIVE,
+    no write switch (mike, 2026-10-15). A look with no game in its window
+    writes nothing and logs why.
+    """
     try:
-        from models.scorer import run_nba_prop_scorer
-        result = run_nba_prop_scorer(target_date=run_date, dry_run=dry_run)
-        logger.success(f"✓ NBA prop scoring: {result}")
+        from scripts.nba_prop_market_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA prop market card: "
+                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
         return True
     except Exception as exc:
-        logger.error(f"✗ NBA prop scoring failed: {exc}")
+        logger.error(f"✗ NBA prop market card failed: {exc}")
+        return False
+
+
+def step_nba_prop_projection(dry_run: bool = False) -> bool:
+    """The NBA projection model (`nba_prop_projection`): price the stored projections.
+
+    Decides each game once, in the same window as nba_prop_market and after it
+    (scripts/nba_prop_projection_card.py), on the projections the window job
+    stored about 65 minutes before tip. Never a proposition nba_prop_market holds.
+    LIVE, no write switch. A look with no game in its window writes nothing.
+    """
+    try:
+        from scripts.nba_prop_projection_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA projection card: "
+                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA projection card failed: {exc}")
+        return False
+
+
+def step_nba_total_luck(dry_run: bool = False) -> bool:
+    """NBA full-game totals, overs (`nba_total_luck`): the shooting-luck gap.
+
+    Decides each regular-season game once, on an odds fetch that landed 60-66
+    minutes before tip, and writes the over at the best bettable price when
+    the luck-adjusted projected total is at least 3 points above the raw one
+    (scripts/nba_total_luck_card.py). LIVE, no write switch (mike,
+    2026-10-17). Runs only in the NBA totals window job, right after that
+    job's own fetch, under a time limit there
+    (scheduler.run_nba_total_luck_window). A run with no game to decide
+    writes nothing and logs why.
+    """
+    try:
+        from scripts.nba_total_luck_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA totals card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA totals card failed: {exc}")
+        return False
+
+
+def step_nba_team_total_luck(dry_run: bool = False) -> bool:
+    """NBA home team totals, unders (`nba_team_total_luck`): the home team's
+    part of the shooting-luck gap.
+
+    Decides each regular-season game once, on this model's own team-total
+    fetch 45-66 minutes before tip, and writes the home team total under at
+    the best bettable price when the home team's part of the gap is 2 points
+    or more toward the under (scripts/nba_team_total_luck_card.py). LIVE, no
+    write switch. Runs only in the NBA totals window job, right after the
+    team-total fetch, under a time limit there
+    (scheduler.run_nba_total_luck_window). A run with no game to decide
+    writes nothing and logs why.
+    """
+    try:
+        from scripts.nba_team_total_luck_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA team total card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA team total card failed: {exc}")
+        return False
+
+
+def step_nba_prop_project() -> bool:
+    """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
+    --project): the frame over every box line since 2018-19, the newest ESPN injury
+    list, each player's projected mean per market, stored. No API call."""
+    try:
+        from scripts.nba_prop_projection_card import run_project
+        n = run_project()
+        logger.success(f"✓ NBA projections: {n} player(s) projected")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA projections failed: {exc}")
+        return False
+
+
+def step_nba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
+    """The old name, kept so existing callers keep working: it runs the NBA prop
+    card. The generic NBA prop scorer it used to run was retired with its nine
+    models on 2026-10-15 (config.RETIRED_MODELS)."""
+    return step_nba_prop_market(dry_run=dry_run)
+
+
+def step_nba_prop_close() -> bool:
+    """The closing prop snapshot for each game holding an nba_prop_market bet,
+    for closing-line value only (data/ingestors/nba_prop_close_ingestor.py).
+    Safe on every pass: a pass with no bet game 12-25 minutes from tip spends
+    nothing."""
+    from config import RUN_NBA_PROP_CLOSE
+    if not RUN_NBA_PROP_CLOSE:
+        logger.info("NBA prop close: RUN_NBA_PROP_CLOSE=0 — skipped")
+        return True
+    try:
+        from data.ingestors.nba_prop_close_ingestor import run_nba_prop_close_ingestor
+        result = run_nba_prop_close_ingestor()
+        logger.success(f"✓ NBA prop close: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA prop close failed: {exc}")
         return False
 
 
@@ -1460,16 +1630,15 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X gets exactly what the FREE Discord channel gets -- one pick a day,
-        # never the paid slate (mike, 2026-08-30: "A without links"). Posting
-        # the paid signals publicly would be giving away what members pay for.
-        # Ledgered independently of Discord, so one surface failing never
-        # suppresses the other.
+        # X posts every released pre-game pick, each in the same format.
+        # Discord's free pick is not an input. X_POST_ALL_PICKS=0 posts no
+        # pick slate. Ledgered independently of Discord, so one surface
+        # failing never suppresses the other.
         try:
-            from tracking.x_publisher import notify_x_free_pick
-            notify_x_free_pick(target_date=run_date, dry_run=dry_run)
+            from tracking.x_publisher import notify_x_picks
+            notify_x_picks(target_date=run_date, dry_run=dry_run)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"X free pick failed (Discord unaffected): {exc}")
+            logger.error(f"X picks failed (Discord unaffected): {exc}")
         if d or fp or rs:
             logger.success(
                 f"✓ Discord: {d} signal(s) posted"
@@ -1630,6 +1799,18 @@ def step_settle(settle_date: str) -> bool:
             logger.info(f"Results restated: {n} post(s)")
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+
+    # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
+    # first Monday, the previous calendar month. Later passes retry a miss.
+    # Both are ledgered, so a posted window is not posted again.
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        if n:
+            logger.info(f"Period results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Period results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 
@@ -1700,6 +1881,14 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # NBA game logs still come from the local job (off-season until ~Oct 2026).
     logger.info("Step 0e: Ingesting WNBA finals + box scores from ESPN (pre-settle)...")
     results["wnba_results"] = step_wnba_results(run_date)
+    time.sleep(1)
+
+    # ── Step 0e2: NBA finals + box scores via ESPN (MUST precede settlement) ─
+    # The worker's only NBA results source: nba_api is blocked here, and the
+    # local job last ran 2026-08-30. No ESPN call unless a started game still
+    # lacks a score or a box (data/ingestors/nba_results_ingestor.py).
+    logger.info("Step 0e2: Ingesting NBA finals + box scores from ESPN (pre-settle)...")
+    results["nba_results"] = step_nba_results(run_date)
     time.sleep(1)
 
     # ── Step 0f: NFL finals via nflverse (MUST precede settlement) ───────────
@@ -1794,6 +1983,14 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # need a residential IP).
     logger.info("Step 2c2: Fetching DK NBA player prop lines...")
     results["nba_prop_odds"] = step_nba_prop_odds(run_date, snapshot_type="open")
+    # The NBA prop card reads the fetch just stored (it decides only games
+    # 45-57 minutes from tip, so at 6am it normally writes nothing), then the
+    # closing snapshot for any bet game whose close is due.
+    logger.info("Step 2c3: NBA prop card (same-line unders vs Pinnacle)...")
+    results["nba_prop_market"] = step_nba_prop_market(dry_run=dry_run)
+    results["nba_prop_projection"] = step_nba_prop_projection(dry_run=dry_run)
+    if not dry_run:
+        results["nba_prop_close"] = step_nba_prop_close()
     time.sleep(2)
 
     # ── Step 2d: Golf field + odds (DataGolf) ────────────────────────────────
@@ -1886,9 +2083,9 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
     results["wnba_prop_market"]  = step_wnba_prop_market(run_date, dry_run=dry_run)
 
-    # ── Step 8b2: NBA prop scoring ─────────────────────────────────────────────
-    logger.info("Step 8b2: Generating NBA player prop picks...")
-    results["nba_prop_scoring"] = step_nba_prop_scoring(run_date, dry_run=dry_run)
+    # ── Step 8b2: NBA props ────────────────────────────────────────────────────
+    # The NBA prop card ran at Step 2c3, right after its fetch. The generic NBA
+    # prop scorer that ran here was retired with its models (2026-10-15).
 
     # ── Step 8c: Golf scoring ──────────────────────────────────────────────────
     logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
@@ -2136,13 +2333,16 @@ Examples:
                                  "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news", "player-positions",
                                  "player-news-refresh",
-                                 "umpires", "public-betting", "scoring",
+                                 "umpires", "public-betting", "nba-public-splits", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
+                                 "nba-prop-market", "nba-prop-close",
+                                 "nba-prop-projection", "nba-prop-project",
+                                 "nba-total-luck", "nba-team-total-luck",
                                  "nhl-over-under",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nfl-results",
+                                 "nhl-results", "wnba-results", "nba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
@@ -2204,6 +2404,7 @@ Examples:
             "player-positions": lambda: step_player_positions(run_date),
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
+            "nba-public-splits": lambda: step_nba_public_splits(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
             "game-log-today": lambda: step_game_log(run_date, run_date),
@@ -2220,10 +2421,17 @@ Examples:
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
+            "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
+            "nba-prop-close": lambda: step_nba_prop_close(),
+            "nba-prop-projection": lambda: step_nba_prop_projection(dry_run=args.dry_run),
+            "nba-prop-project": lambda: step_nba_prop_project(),
+            "nba-total-luck": lambda: step_nba_total_luck(dry_run=args.dry_run),
+            "nba-team-total-luck": lambda: step_nba_team_total_luck(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
+            "nba-results":  lambda: step_nba_results(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
             "ncaaf-results": lambda: step_ncaaf_results(run_date),
             "ncaaf-stats":  lambda: step_ncaaf_stats(run_date),

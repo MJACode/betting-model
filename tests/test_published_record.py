@@ -34,6 +34,8 @@ def test_the_recap_query_drops_an_unposted_bet_and_a_voided_lock():
     if sqlite3.sqlite_version_info < (3, 39):
         pytest.skip("IS DISTINCT FROM needs SQLite >= 3.39")
     db = sqlite3.connect(":memory:")
+    from tracking.published_units import install_sqlite
+    install_sqlite(db)
     db.execute("""CREATE TABLE picks (
         sport, model_id, result, kelly_fraction, dk_odds, decision_odds,
         clv_pct, is_live, game_date, signal_type, downgrade_reason,
@@ -47,7 +49,12 @@ def test_the_recap_query_drops_an_unposted_bet_and_a_voided_lock():
         ("NFL", "nfl_live_prop", "WIN", 0.02, -110, None, None, 1, "2026-10-01", "BET", None, None, "g4", "over", "p", "p", "player_pass_attempts", None),
         ("MLB", "m_void_result", "NO_ACTION", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, "VOID", "g5", None, None, None, None, None),
     ]
-    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany(
+        "INSERT INTO picks (sport, model_id, result, kelly_fraction, dk_odds, "
+        "decision_odds, clv_pct, is_live, game_date, signal_type, downgrade_reason, "
+        "condition_status, game_id, pick_side, player_id, player_key, prop_market, "
+        "clv_method) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     db.executemany(
         "INSERT INTO push_sent VALUES (?, ?, ?)",
         [
@@ -113,7 +120,31 @@ def test_the_snapshot_stake_is_stake_for_not_a_flat_unit():
 def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
-    assert ACTIVE_MIGRATIONS[-1] == MIG.name
+    clv = "clv_standard_v2_2026_10_14.sql"
+    units = "published_record_units_2026_10_16.sql"
+    assert clv in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(MIG.name) < ACTIVE_MIGRATIONS.index(clv)
+    # The posted-stake view patch reads the live view, so it is last and
+    # after the CLV stamp. Every other file after that stamp must not
+    # rewrite the record. The NHL stats views and the skater window
+    # totals are display-only and sit between the stamp and that pair.
+    # byom_facts_schema is the same kind of display file: it does not
+    # name v_public_track_record, so it may sit after the stamp.
+    assert ACTIVE_MIGRATIONS[-1] == units
+    assert ACTIVE_MIGRATIONS.index(clv) < len(ACTIVE_MIGRATIONS) - 1
+    assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
+    views = "add_nhl_stats_views_2026_10_16.sql"
+    totals = "add_nhl_skater_window_totals_2026_10_17.sql"
+    assert ACTIVE_MIGRATIONS.index(clv) < ACTIVE_MIGRATIONS.index(views) < ACTIVE_MIGRATIONS.index(totals)
+    assert ACTIVE_MIGRATIONS.index(totals) < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
+    assert "byom_facts_schema_2026_10_16.sql" in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(clv) < ACTIVE_MIGRATIONS.index("byom_facts_schema_2026_10_16.sql")
+    assert ACTIVE_MIGRATIONS.index("byom_facts_schema_2026_10_16.sql") < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
+    for name in ACTIVE_MIGRATIONS[ACTIVE_MIGRATIONS.index(clv) + 1:]:
+        if name == units:
+            continue
+        body = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
+        assert "v_public_track_record" not in body, name
     i = ACTIVE_MIGRATIONS.index(MIG.name)
     for owner in (
         "record_strikes_nfl_live_prop_2026_10_04.sql",
@@ -174,4 +205,5 @@ def test_the_app_record_leaves_an_unpublished_graded_bet_out():
     assert queries.count("return attachDiscordPublish(") == 2
     cache = (ROOT / "mobile/src/lib/settledPickCache.ts").read_text(encoding="utf-8")
     assert "const KEY = 'settledPicks.v9';" in cache
-    assert "countsTowardViewClv" in screen
+    assert "p.clv_method === 'standard_v2'" in screen
+    assert "countsTowardViewClv" not in screen

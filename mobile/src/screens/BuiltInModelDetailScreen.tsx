@@ -23,15 +23,14 @@ import {
   formatSigned,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
-import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
+import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
-import { countsTowardViewClv } from '@/lib/publishedRecord';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickRowTitle, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -132,8 +131,10 @@ export function BuiltInModelDetailScreen() {
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
+  // The long name: three prop rules share the short label "Prop Mkt", so a
+  // short title made their screens indistinguishable. The chip keeps it.
   useEffect(() => {
-    navigation.setOptions({ title: modelShort(modelId) });
+    navigation.setOptions({ title: modelLong(modelId) });
   }, [navigation, modelId]);
 
   // Prop models are Poisson count projections, so the model card labels their
@@ -188,17 +189,15 @@ export function BuiltInModelDetailScreen() {
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeader}>Today's potential picks</Text>
               <InfoTooltip
-                title="Picks lock for the day"
-                body={
-                  "A pick locks the first time this model scores it today and never changes after that — it can't flip between BET and AVOID as lines move.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm, but only newly-priced games get scored on later refreshes."
-                }
+                title={modelPageTiming(modelId).title}
+                body={modelPageTiming(modelId).body}
                 accessibilityLabel="About today's potential picks"
               />
             </View>
             <Text style={styles.sectionNote}>
               {paused
                 ? 'Paused, so there are no picks today.'
-                : "Locked for the day once scored — won't change again until the game ends."}
+                : modelPageTiming(modelId).note}
             </Text>
           </>
         }
@@ -216,7 +215,7 @@ export function BuiltInModelDetailScreen() {
           ) : (
             <EmptyState
               title="No live BET picks right now"
-              subtitle="This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab."
+              subtitle={modelPageTiming(modelId).empty}
             />
           )
         }
@@ -331,12 +330,12 @@ export function BuiltInModelDetailScreen() {
                 <View style={styles.statRow}>
                   <StatTile
                     label="Avg CLV"
-                    value={formatSigned(clv.avg, 1, 'pp')}
+                    value={formatSigned(clv.avg, 1, '%')}
                     tint={roundsToZero(clv.avg, 1) ? undefined : pnlColor(clv.avg, 1)}
                     caption={
                       ledgerUnread
                         ? 'Discord check did not finish, so this includes picks whose posting status is unknown'
-                        : 'vs the closing price'
+                        : 'vs the book we bet'
                     }
                   />
                   <StatTile
@@ -434,7 +433,7 @@ function TodayPickRow({
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
-            {pick.pick_label}
+            {pickRowTitle(pick)}
           </Text>
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
@@ -479,7 +478,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
-            {pick.pick_label}
+            {pickRowTitle(pick)}
           </Text>
           <View style={styles.pickMeta}>
             <Text style={styles.pickMetaText}>{dayLabelET(pick.game_date)}</Text>
@@ -503,15 +502,16 @@ function edgeColorStyle(edge: number) {
   return { color: pnlColor(edge, 1, 100) };
 }
 
-// Closing line value for the same posted bets as the list above.
-// v_public_track_record counts a pick when clv_pct is present and clv_method
-// is no_vig or zero_vig. Beat is clv_pct > 0 on that set.
+// Aggregate closing line value across this model's settled BET picks that
+// clear the current action thresholds — same pick set as the record above.
+// Positive avg CLV = the model consistently beats the closing price — the
+// strongest available evidence its edge is real.
 function computeClvStats(
   modelId: string,
   settled: SettledPick[],
 ): { avg: number; beatRate: number; count: number } | null {
   const vals = settled
-    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && countsTowardViewClv(p))
+    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && p.clv_method === 'standard_v2' && p.clv_pct != null)
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;

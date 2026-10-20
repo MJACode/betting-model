@@ -1,12 +1,14 @@
-"""No-vig CLV arithmetic — the OddsShopper contract.
+"""Standard CLV arithmetic.
 
-Production `picks.clv_pct` used raw `american_to_implied_prob` on a single
-DraftKings close (tracking/paper_tracker._capture_clv, through 2026-09-14).
-That is the number the vig flatters. These tests pin the honest formula
-BEFORE it is wired into capture, and they were watched failing against the
-old one-sided helper.
+Primary: raw price taken vs that same book's raw close. Neither side is
+de-vigged. Percent is taken_decimal / close_decimal − 1. Probability points
+are close implied − taken implied.
 
-    python -m pytest -q tests/test_clv_math.py
+Secondary: raw taken vs a power-de-vigged close (Pinnacle in production).
+De-vigging the price we took is the bug this replaces: it inflated CLV and,
+on pick 2387645, flipped the sign of the market-edge number.
+
+    python -m pytest -q tests/test_clv_math.py tests/test_clv_standard_v2.py
 """
 from __future__ import annotations
 
@@ -14,149 +16,135 @@ import pytest
 
 from models.market_relative import implied
 from tracking.clv_math import (
-    CLV_METHOD_NO_VIG,
-    CLV_METHOD_ONE_WAY,
+    CLV_METHOD_STANDARD,
     CLV_METHOD_ZERO_VIG,
+    DEVIG_POWER,
+    DEVIG_POWER_3WAY,
+    PEDIGREE_CLV_METHODS,
     ZERO_VIG_BOOKS,
+    american_to_decimal,
     close_book_candidates,
-    fair_close_probability,
     implied_to_american,
+    market_edge_clv,
     other_side_prices,
-    price_clv_pct,
+    power_fair,
+    same_book_clv,
 )
 
 
-# ── OddsShopper worked example ───────────────────────────────────────────────
+def test_primary_is_raw_on_both_sides_and_reports_percent_and_pp():
+    """−120 taken, −145 close. The close is shorter, so we beat it.
 
-def test_oddsshopper_dodgers_no_vig_close():
-    """Bet Dodgers −130; close −150 / +135 → fair ≈ 58.5% ≈ −141, not raw −150.
-
-    Source: https://www.oddsshopper.com/articles/betting-101/closing-line-value-explained
-    (updated 2026-06-05). Their write-up rounds 58.5%; we pin the exact
-    multiplicative de-vig and the rounded pp the capture path stores.
+    taken implied 120/220, close implied 145/245.
+    percent = (1 + 100/120) / (1 + 100/145) − 1.
     """
-    fair, method = fair_close_probability(-150, [+135], book="draftkings")
-    assert method == CLV_METHOD_NO_VIG
-    padres = 100.0 / 235.0
-    assert fair == pytest.approx(0.60 / (0.60 + padres))
-    assert fair == pytest.approx(0.58505, abs=5e-5)
-    assert implied_to_american(fair) == -141
-
-    clv, method = price_clv_pct(-130, -150, [+135], book="draftkings")
-    assert method == CLV_METHOD_NO_VIG
-    bet = 130.0 / 230.0
-    assert clv == round((fair - bet) * 100, 2)
-    assert clv == pytest.approx(1.98, abs=0.01)
+    pct, pp = same_book_clv(-120, -145)
+    taken_p = 120.0 / 220.0
+    close_p = 145.0 / 245.0
+    taken_d = 1.0 + 100.0 / 120.0
+    close_d = 1.0 + 100.0 / 145.0
+    assert pct == round((taken_d / close_d - 1.0) * 100.0, 2)
+    assert pp == round((close_p - taken_p) * 100.0, 2)
+    assert pct == pytest.approx(8.50, abs=0.01)
+    assert pp == pytest.approx(4.64, abs=0.01)
+    assert pct > 0 and pp > 0
 
 
-def test_raw_close_flatters_the_dodgers_example():
-    """The bug: one-sided implied on −150 reports ~+3.48pp; no-vig is ~+1.98."""
-    raw = round((implied(-150) - implied(-130)) * 100, 2)
-    no_vig, _ = price_clv_pct(-130, -150, [+135], book="pinnacle")
-    assert raw == pytest.approx(3.48, abs=0.01)
-    assert no_vig == pytest.approx(1.98, abs=0.01)
-    assert no_vig < raw
+def test_a_worse_close_is_negative_and_equal_prices_are_zero():
+    pct, pp = same_book_clv(-140, -120)
+    assert pct < 0 and pp < 0
+    assert same_book_clv(-160, -160) == (0.0, 0.0)
 
 
-# ── Two-way multiplicative de-vig ────────────────────────────────────────────
-
-def test_a_fair_market_devigs_to_a_coin_flip():
-    fair, method = fair_close_probability(-110, [-110], book="draftkings")
-    assert method == CLV_METHOD_NO_VIG
-    assert fair == pytest.approx(0.5)
+def test_primary_does_not_move_when_the_other_side_changes():
+    """Vig on the other side is not our CLV. The primary sees one price."""
+    assert same_book_clv(-110, -110) == (0.0, 0.0)
 
 
-def test_vig_widening_at_close_is_not_clv():
-    """Both sides going −110 → −115 is more hold, not a move toward us.
+def test_devigging_the_taken_price_is_not_what_primary_does():
+    """−110/−110 taken, close −115/−115. Raw close implied rises, so primary
+    is positive: we hold −110 and the same book is now −115. De-vigging BOTH
+    two-ways reports exactly 0, which hides the price we actually got."""
+    pct, pp = same_book_clv(-110, -115)
+    assert pct > 0 and pp > 0
+    fair = power_fair([-115, -115])
+    assert fair[0] == pytest.approx(0.5)
+    # The old both-sides de-vig: fair close 0.5 − fair bet 0.5 = 0.
+    assert round((0.5 - 0.5) * 100, 2) == 0.0
+    assert pp != 0.0
 
-    Raw one-sided implied on our −115 close reads as +1.11pp of 'CLV'. The
-    fair number did not move. This is the trap OddsShopper names.
 
-    Close-only de-vig (no lock two-way) vs raw bet is −2.38pp — juice you
-    paid, not a beat. De-vigging both two-ways is exactly 0.
+def test_power_devig_of_a_balanced_market_is_a_coin_flip():
+    fair = power_fair([-110, -110])
+    assert fair[0] == pytest.approx(0.5)
+    assert fair[1] == pytest.approx(0.5)
+
+
+def test_market_edge_devigs_only_the_close():
+    """OddsShopper's Dodgers: bet −130, close −150 / +135.
+
+    Their write-up de-vigs the close multiplicatively and leaves the bet
+    raw, and quotes +1.98pp (fair ≈ −141). Power de-vig is the method we
+    store: +2.31pp, fair −143. Raw one-sided is +3.48pp. All three leave
+    the bet raw; none of them de-vigs the price we took.
     """
-    raw = round((implied(-115) - implied(-110)) * 100, 2)
-    assert raw == pytest.approx(1.11, abs=0.01)
-    close_only, method = price_clv_pct(-110, -115, [-115], book="draftkings")
-    assert method == CLV_METHOD_NO_VIG
-    assert close_only < 0
-    assert close_only != raw
-    clv, method = price_clv_pct(
-        -110, -115, [-115], book="draftkings", bet_other_prices=[-110])
-    assert method == CLV_METHOD_NO_VIG
-    assert clv == 0.0
+    pct, pp, method = market_edge_clv(-130, -150, [135], book="pinnacle")
+    assert method == DEVIG_POWER
+    raw_pp = (implied(-150) - implied(-130)) * 100
+    assert raw_pp == pytest.approx(3.48, abs=0.02)
+    assert pp < raw_pp
+    assert pp == pytest.approx(2.31, abs=0.02)
+    taken_d = american_to_decimal(-130)
+    fair = power_fair([-150, 135])[0]
+    assert pct == round((taken_d * fair - 1.0) * 100.0, 2)
+    assert pct == pytest.approx(4.08, abs=0.02)
+    assert implied_to_american(fair) == -143
 
 
-def test_a_real_price_move_still_grades_positive():
-    """−110 in, close −150 / +130: the market DID move; no-vig stays positive."""
-    clv, method = price_clv_pct(-110, -150, [+130], book="pinnacle")
-    assert method == CLV_METHOD_NO_VIG
-    assert clv > 0
+def test_three_way_power_uses_all_three_sides():
+    """NHL regulation. Dropping the draw would hand its mass to the other two."""
+    three = power_fair([-150, 180, 400])
+    two = power_fair([-150, 180])
+    assert three is not None and two is not None
+    assert abs(sum(three) - 1.0) < 1e-9
+    assert three[0] != pytest.approx(two[0])
+    _pct, _pp, method = market_edge_clv(-150, -150, [180, 400], book="pinnacle")
+    assert method == DEVIG_POWER_3WAY
 
 
-def test_three_way_devigs_all_three_sides():
-    """NHL regulation: home / away / draw. Dropping draw would steal its mass."""
-    fair, method = fair_close_probability(-150, [+180, +400], book="draftkings")
-    assert method == CLV_METHOD_NO_VIG
-    h, a, d = implied(-150), implied(+180), implied(+400)
-    assert fair == pytest.approx(h / (h + a + d))
-    two_way, _ = fair_close_probability(-150, [+180], book="draftkings")
-    assert fair != pytest.approx(two_way)
+def test_a_one_way_close_is_not_de_vigged():
+    assert power_fair([-200]) is None
+    assert market_edge_clv(-200, -200, [None], book="pinnacle") == (None, None, None)
+    assert market_edge_clv(-200, -200, [], book="pinnacle") == (None, None, None)
 
 
-# ── Zero-vig books must not be de-vigged ─────────────────────────────────────
-
-def test_kalshi_is_not_devigged():
-    """Kalshi is already no-vig. De-vigging −150/+135 would pull 60% down to
-    58.5% and manufacture a sportsbook hold the exchange does not take."""
-    fair, method = fair_close_probability(-150, [+135], book="kalshi")
+def test_kalshi_close_is_not_de_vigged():
+    assert "kalshi" in ZERO_VIG_BOOKS
+    pct, pp, method = market_edge_clv(-130, -150, [135], book="kalshi")
     assert method == CLV_METHOD_ZERO_VIG
-    assert fair == pytest.approx(implied(-150))
-    clv, _ = price_clv_pct(-130, -150, [+135], book="kalshi")
-    raw = round((implied(-150) - implied(-130)) * 100, 2)
-    assert clv == raw
+    assert pp == round((implied(-150) - implied(-130)) * 100, 2)
+    assert pct == round((american_to_decimal(-130) * implied(-150) - 1) * 100, 2)
 
 
 def test_polymarket_is_in_the_zero_vig_set():
     assert "polymarket" in ZERO_VIG_BOOKS
-    fair, method = fair_close_probability(-150, [+135], book="polymarket")
-    assert method == CLV_METHOD_ZERO_VIG
-    assert fair == pytest.approx(implied(-150))
 
 
-# ── One-way / thin ───────────────────────────────────────────────────────────
-
-def test_a_one_way_market_is_not_silently_devigged():
-    """Anytime TD and other one-sided quotes have no second side. Returning
-    the raw implied as if it were fair would bake the juice into CLV."""
-    fair, method = fair_close_probability(-200, [None], book="draftkings")
-    assert method == CLV_METHOD_ONE_WAY
-    assert fair == pytest.approx(implied(-200))
-    _, method2 = fair_close_probability(-200, [], book="draftkings")
-    assert method2 == CLV_METHOD_ONE_WAY
-
-
-# ── Same-line vs moved-line is the caller's job, but the other-side helper
-#    has to find the opposite American so capture can de-vig. ───────────────
-
-def test_other_side_prices_for_totals_and_h2h():
-    tot = {"over_price": -110, "under_price": -110, "total_line": 44.5}
-    assert other_side_prices(tot, "over") == [-110]
+def test_other_side_prices_include_the_draw_on_a_three_way():
+    row = {"home_price": -150, "away_price": 180, "draw_price": 400}
+    assert other_side_prices(row, "home") == [180, 400]
+    assert other_side_prices(row, "draw") == [-150, 180]
+    tot = {"over_price": -110, "under_price": -105}
     assert other_side_prices(tot, "under") == [-110]
-    h2h = {"home_price": -150, "away_price": +130}
-    assert other_side_prices(h2h, "home") == [+130]
-    assert other_side_prices(h2h, "away") == [-150]
 
 
-def test_other_side_prices_include_draw_on_a_three_way():
-    row = {"home_price": -150, "away_price": +180, "draw_price": +400}
-    assert other_side_prices(row, "home") == [+180, +400]
-    assert other_side_prices(row, "draw") == [-150, +180]
-
-
-# ── Sharp book preference ────────────────────────────────────────────────────
-
-def test_pinnacle_is_tried_before_the_pick_book():
-    assert close_book_candidates("draftkings") == ["pinnacle", "draftkings"]
-    assert close_book_candidates("fanduel") == ["pinnacle", "fanduel"]
+def test_sharp_close_books_do_not_fall_back_to_the_pick_book():
+    assert close_book_candidates("draftkings") == ["pinnacle"]
+    assert close_book_candidates("fanduel") == ["pinnacle"]
     assert close_book_candidates("pinnacle") == ["pinnacle"]
+
+
+def test_pedigree_is_only_the_standard_method():
+    assert PEDIGREE_CLV_METHODS == frozenset({CLV_METHOD_STANDARD})
+    assert "no_vig" not in PEDIGREE_CLV_METHODS
+    assert "zero_vig" not in PEDIGREE_CLV_METHODS

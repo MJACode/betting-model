@@ -16,8 +16,9 @@
 --
 -- Idempotent. Before totals are inserted once, from the latest all-time rows.
 -- The snapshot UPDATE runs once, until results_snapshot_published_backfill
--- records clv_rule = 'no_vig' (the same CLV predicate as v_public_track_record:
--- clv_pct IS NOT NULL AND clv_method IN ('no_vig','zero_vig')). A later pass
+-- records clv_rule = 'standard_v2' (the same CLV predicate as
+-- v_public_track_record: clv_pct IS NOT NULL AND clv_method = 'standard_v2').
+-- A later pass
 -- does not recompute history. The one pass that does run also skips a row
 -- whose wins, losses, pushes, settled, units, risked, roi and CLV already
 -- match. The view patch skips once v_discord_published is already in the live
@@ -87,7 +88,7 @@ BEGIN
   SELECT NOT EXISTS (
     SELECT 1
     FROM public.results_snapshot_published_backfill
-    WHERE clv_rule = 'no_vig'
+    WHERE clv_rule = 'standard_v2'
   ) INTO rewrite;
 
   IF rewrite THEN
@@ -185,19 +186,19 @@ BEGIN
         ELSE NULL
       END AS roi_pct,
       COALESCE(COUNT(*) FILTER (
-        WHERE g.clv_pct IS NOT NULL AND g.clv_method IN ('no_vig', 'zero_vig')), 0)::integer AS clv_graded,
+        WHERE g.clv_pct IS NOT NULL AND g.clv_method = 'standard_v2'), 0)::integer AS clv_graded,
       COALESCE(COUNT(*) FILTER (
         WHERE g.clv_pct IS NOT NULL AND g.clv_pct > 0
-          AND g.clv_method IN ('no_vig', 'zero_vig')), 0)::integer AS clv_beat,
+          AND g.clv_method = 'standard_v2'), 0)::integer AS clv_beat,
       CASE
         WHEN COUNT(*) FILTER (
-          WHERE g.clv_pct IS NOT NULL AND g.clv_method IN ('no_vig', 'zero_vig')) > 0
+          WHERE g.clv_pct IS NOT NULL AND g.clv_method = 'standard_v2') > 0
         THEN round(
           COUNT(*) FILTER (
             WHERE g.clv_pct IS NOT NULL AND g.clv_pct > 0
-              AND g.clv_method IN ('no_vig', 'zero_vig'))::numeric
+              AND g.clv_method = 'standard_v2')::numeric
           / COUNT(*) FILTER (
-            WHERE g.clv_pct IS NOT NULL AND g.clv_method IN ('no_vig', 'zero_vig'))
+            WHERE g.clv_pct IS NOT NULL AND g.clv_method = 'standard_v2')
           * 100, 4)
         ELSE NULL
       END AS clv_pct
@@ -239,11 +240,11 @@ BEGIN
     AND COALESCE(s.sport, '') = b.sport;
 
   UPDATE public.results_snapshot_published_backfill
-  SET clv_rule = 'no_vig';
+  SET clv_rule = 'standard_v2';
   IF NOT EXISTS (SELECT 1 FROM public.results_snapshot_published_backfill) THEN
     INSERT INTO public.results_snapshot_published_backfill
       (sport, as_of_date, clv_rule)
-    VALUES ('', '1970-01-01', 'no_vig');
+    VALUES ('', '1970-01-01', 'standard_v2');
   END IF;
   -- SNAPSHOT_REWRITE_END
   END IF;

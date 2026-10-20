@@ -121,6 +121,8 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id = 'nfl_wind_totals'    THEN 'totals'
+            WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market' OR p.model_id = 'mlb_total_public_fade' THEN 'totals'
+            WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
@@ -154,7 +156,7 @@ When I ask "what are today's picks?" or similar:
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
    - Matchup: "AWY @ HOM"
    - Pick: pick_label as stored, word for word. NEVER rebuild the line from scored_line: for spreads it is the HOME team's number, so an away pick's line is its negation (a "BUF +1" pick stores -1)
-   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL)
+   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL / TT). TT is a team total (model_id 'nba_team_total_luck'): the HOME team's own points, overtime included, never the game total
    - Model %: model_probability × 100, 1 decimal (e.g. 67.3%)
    - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110).
    - Edge: edge × 100, 1 decimal, signed (+12.5%)
