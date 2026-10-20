@@ -92,6 +92,21 @@ step apply-view-migrations
 # that afternoon never posted. Must follow apply-view-migrations (a
 # migration can change the auto-pause set this sync then mirrors).
 step sync-thresholds
+# Who ESPN and DailyFaceoff say will start in goal for each NHL game, and the
+# goalie row rewritten when ESPN confirms someone else. No NHL model bets until
+# both starting goalies are confirmed (mike, 2026-10-20; models/
+# nhl_goalie_gate.py), so this runs before every NHL decider below:
+# nhl-over-under, nhl-prop-odds (a game confirmed after its newest prop fetch
+# owes one more), nhl-prop-scoring and scoring. SEQUENTIAL and BEFORE group 1:
+# it opens its own connection (the pool note on probables-refresh below), and
+# here it delays no priced fetch. Tomorrow's games on the hourly passes only:
+# ESPN has IP-blocked this worker twice, and a tomorrow game cannot be decided
+# today anyway (its goalie row does not exist yet).
+if [ "$MODE" = "hourly" ]; then
+step nhl-goalie-designations
+else
+step nhl-goalie-designations-today
+fi
 
 # GROUP 1 — market + model inputs. Every one of these is an independent
 # producer writing its own table (odds, player_prop_odds, lineups, injuries,
