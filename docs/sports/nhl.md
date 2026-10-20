@@ -4,6 +4,101 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+> **2026-10-20 (mike): NO NHL BET OF ANY KIND UNTIL BOTH STARTING GOALIES ARE
+> CONFIRMED.** *"We should absolutely always know the goalie matchup before
+> making a bet as well."* All eight NHL models (`nhl_moneyline`,
+> `nhl_moneyline_regulation`, `nhl_over_under`, `nhl_puckline` and the four
+> prop models) and any added later. No exemptions.
+>
+> **Why.** `nhl_goalie_stats` held one row per team per game, written once at
+> ~10:06Z from ESPN's probable starter (`data/ingestors/nhl_stats_ingestor.py`).
+> ESPN says whether that name is `expected` or `confirmed`; the parser kept
+> the flag and the writer threw it away. The 6am goalie did not start in 65
+> of 251 team-games 2026-10-01..10-19, and in 22 of 70 (31%) for
+> 10-14..10-19. On 10-20, MTL (a Fowler row; Dobes confirmed) and SEA
+> (Daccord; Grubauer confirmed) changed after the write. The moneyline gate
+> only checked that a row existed. The totals card and the prop cards had no
+> goalie gate.
+>
+> **Known**, for a game (`models/nhl_goalie_gate.py`), means for both teams:
+> ESPN's latest designation is `confirmed`; the game's `nhl_goalie_stats` row
+> names the same goalie; and DailyFaceoff, if it has named anyone for that
+> team, names the same goalie. DailyFaceoff's status is not required: it is
+> a veto on a disagreement. ESPN's "confirmed" follows the morning skate and
+> is looser than DailyFaceoff's (10-20: ESPN confirmed Kuemper while
+> DailyFaceoff said Likely). Names compare with accents stripped and a small
+> first-name alias step (Matt/Matthew, Dan/Daniel); ids decide when both
+> sides have one. The gate fails closed: a read that fails means not known.
+>
+> **Where it holds.** The scorer: both side models decide through
+> `_nhl_game_day_reason`, which reads the gate, and `score_game` applies it to
+> every NHL model by sport (puckline, and any later kind). The totals card and
+> both prop cards drop unknown games before anything is pooled, so an unknown
+> game cannot take the one prop bet a game allows. And the last line, at every
+> INSERT that can write an NHL pick: `_insert_picks` turns an unknown BET into
+> NONE with the reason, and the two prop cards' `publish` drop it.
+> `tests/test_nhl_goalie_guards.py` fails on any file that inserts into
+> `picks` without the guard and is not on its allowlist. The allowlist is the
+> NBA/NFL/WNBA cards, and `tracking/first_signal_repair.py`: it restores a
+> BET that already existed (CLAUDE.md §1c), and refusing it would erase a
+> pick rather than stop a bet.
+>
+> **When the side models decide.** No clock. The 16:00Z-18:00Z window is gone.
+> Both side models decide at the first scoring run where the matchup is
+> known, last night's games are in the logs (`stale_teams`, unchanged), and
+> the game has not started. The lower bound is data: a game is known only
+> once its game-day goalie row exists (the ~10:06Z write), and the poll
+> rewrites rows, never creates them. The 16:00Z window was justified as
+> "what the walk-forward decided against". It did not: the original grade
+> decided at each game's first stored quote, 95.8% of them the day before
+> (median lead about 27 hours). Re-graded with the goalies who actually
+> started (as-built artifact, EV ≥ 0.06, −200 floor, best price, the games
+> all four timings share): at the 16:00Z game-day quote +5.08% on 1,588 bets
+> (bootstrap 95% +0.3..+10.0); at the last pre-game quote +5.21% on 1,633
+> (+0.6..+10.0). A confirmed-goalie decision lands between the two.
+>
+> **`nhl_over_under`'s decision moment moved.** It took a game's first
+> qualifying fetch, often the day before puck drop, and its evidence leans on
+> those prior-day quotes. It now takes the first qualifying fetch after both
+> goalies are confirmed on game day. That regime has not been graded on its
+> own.
+>
+> **The history: `nhl_goalie_designations`** (append-only; migration
+> `add_nhl_goalie_designations_2026_10_20.sql`, RLS on, anon locked out). One
+> row per (game, team, source) each time the named goalie or the status
+> changes: `source` `espn` or `dailyfaceoff`; `status` `confirmed`,
+> `expected`, `likely`, `unconfirmed`, `none` (listed with no starter);
+> `player_id` resolved the way the 6am write resolves a name;
+> `source_player_id`. Written by `data/ingestors/nhl_goalie_designations.py`,
+> which also rewrites the game's goalie row when ESPN confirms someone else
+> (same row builder as the 6am write: `nhl_stats_ingestor.goalie_row`). Only
+> today's games are rewritten, a started game is never touched, and a run on
+> unchanged data writes nothing. DailyFaceoff sits behind Cloudflare and has
+> not been tested from the worker, so it fails open with one warning.
+>
+> **When it runs.** Early in every refresh pass (step
+> `nhl-goalie-designations`, before any NHL decider; today and tomorrow on
+> the hourly passes, today only on the evening ones), after `nhl_stats` in
+> the 6am run, and every five minutes from 11:00 to 23:55 ET in the NHL
+> goalie window (`scheduler.run_nhl_goalie_window`,
+> `scripts/nhl_goalie_window.py`). The window polls today's games; for any
+> game that has just become known it runs the NHL prop odds step, the NHL
+> game models for exactly those games (`run_scorer(only_games=...)`, the
+> pre-game poller's entry point), the totals card and the prop cards, then
+> publishes. A matinee confirmed at warmups falls between two hourly passes;
+> this is for that. It stands down while a refresh pass or the daily run is
+> in progress, and a pass that starts while it is writing waits for it.
+> An unchanged slate costs ESPN the listing plus one call a game, a tick.
+>
+> **Props decide on a fetch taken after the confirmation.** A game whose
+> matchup became known after its newest prop fetch owes one more opening
+> snapshot (`nhl_prop_odds_ingestor.due`), and the cards will not decide it
+> on the older fetch. That is one extra snapshot per such game per night:
+> two event calls (featured + alternates). The older "5 credits a game per
+> snapshot" below predates the alternates call; `api_call_log` measured the
+> pair at 10-11 credits on the quiet evening passes of 2026-10-19 (featured
+> 5-6, alternates 5). A saves bet is taken on the confirmed starter only.
+
 > **2026-10-17 (mike, "Build the fix"): ONE NHL GAME NEVER GETS TWO PICKS
 > THAT CANNOT BOTH WIN, AND THE TWO SIDE MODELS DECIDE AT THE SAME MOMENT.**
 > That day the regulation model had locked "BOS (Regulation)" at 18:26Z the
@@ -14,7 +109,8 @@
 > on 2026-10-04 "FLA ML" and "ANA (Regulation)" both lost. Two changes:
 > - `nhl_moneyline_regulation` now decides only in the moneyline model's
 >   window: 16:00Z-18:00Z on game day, both listed goalies, last night's logs
->   in. Every other run writes its rows NONE with the reason. Both models read
+>   in (superseded 2026-10-20: no clock, both goalies CONFIRMED, above).
+>   Every other run writes its rows NONE with the reason. Both models read
 >   one gate (`models/scorer._nhl_game_day_reason`). Before this change, every
 >   one of its 33 BETs this season was written 10-72 hours before puck drop.
 >   Graded on the 120 finished 2026-27 games
@@ -22,9 +118,9 @@
 >   7 bets for +1.1 units, against 31 for -4.9 the early one actually made.
 >   The 7 are all among the 31 and on the same outcome, at a better average
 >   price (+173 against +159). The 24 it would not have made lost 5.8 units.
->   About 120 games: this rules out "clearly worse", nothing more. A game
->   that starts by 16:00Z has no window, so neither model bets it. None of
->   the first 136 games of 2026-27 did; a Europe game would.
+>   About 120 games: this rules out "clearly worse", nothing more. (Until
+>   2026-10-20 a game that started by 16:00Z had no window; with the clock
+>   gone, a Europe game is decided once its goalies are confirmed.)
 > - Both side models' rows for a game are held back and checked before they
 >   are written (`_apply_side_conflicts`). Each pick maps to the endings it
 >   wins on. A BET already standing on the game keeps it, and the new pick is
@@ -140,8 +236,10 @@
 >   closing snapshot per game, six markets, ten books
 >   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step
 >   `nhl-prop-odds`, kill switch `RUN_NHL_PROP_ODDS=0`). Measured on the live
->   endpoint: 5 credits a game per snapshot. Four of the six markets now have a
->   model; points and anytime scorer do not.
+>   endpoint: 5 credits a game per snapshot. (Since the alternate-lines call
+>   was added, a snapshot is two calls: 10-11 credits a game on 2026-10-19,
+>   `api_call_log`.) Four of the six markets now have a model; points and
+>   anytime scorer do not.
 > - A returning starter is now matched to his own history before his first
 >   game of the season (`GoalieBook.player_named`); until 2026-10-01, 28 of 32
 >   probable starters carried the league-average line.
@@ -204,10 +302,11 @@ rating, goalie workload, home ice, travel). It is NOT fit by
 `models.trainer` (`OWN_FIT_PATH` refuses it): refit with
 `scripts/nhl_moneyline_anchored_train.py`, grade with
 `scripts/nhl_moneyline_anchored_backtest.py` (it must reproduce before a new
-artifact goes live). **One decision a game: 16:00Z-18:00Z on game day, with
-both teams' game-day goalie rows in `nhl_goalie_stats`, and both teams' games
-of the last two days already in `nhl_team_game_log`** (they land ~10:05Z; if
-that ingest is late the model waits rather than read stale rest and form);
+artifact goes live). **One decision a game, at the first scoring run where
+both starting goalies are confirmed (the NHL goalie gate, top of this file;
+no clock since 2026-10-20), with both teams' games of the last two days
+already in `nhl_team_game_log`** (they land ~10:05Z; if that ingest is late
+the model waits rather than read stale rest and form);
 every other run writes NONE with the reason, and it never writes AVOID. EV ≥ 0.06 on its own
 probability at the best price, −200 floor; evidence in `docs/thresholds.md`
 and `docs/nhl_moneyline_rebuild.md`. Gate standing: 0 settled bets, live by

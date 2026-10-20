@@ -448,8 +448,10 @@ the per-game logs (`models/nhl_moneyline_anchored.py`,
 `docs/nhl_moneyline_rebuild.md`). **The cut is EV ≥ 0.06** on the model's OWN
 probability (`MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY`), at the best
 bettable price, under the −200 price floor; the action cut is 0.0 / 0.0 so
-every surface shows what the scorer wrote. One decision a game, 16:00Z-18:00Z
-on game day with both listed goalies. Walk-forward 2021-22 → 2025-26
+every surface shows what the scorer wrote. One decision a game, at the first
+scoring run where both starting goalies are confirmed (no clock since
+2026-10-20, `docs/sports/nhl.md`; the walk-forward below decided at each
+game's first stored quote, mostly the day before). Walk-forward 2021-22 → 2025-26
 (`scripts/nhl_moneyline_anchored_backtest.py`):
 
 | EV floor | bets | units | return | 95% interval | beat Pinnacle's close |
