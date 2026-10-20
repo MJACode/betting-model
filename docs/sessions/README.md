@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, the NBA schedule refreshed daily on the worker from ESPN (`nba-schedule`, health check `nba_schedule_refresh`); ESPN never moves the league's tip alone; both NBA prop models price every regular-season game, listed or not, and the projection's rest reads them; play-in, playoffs and the Cup final stay out (no graded props) |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual posts to @SignalBasePicks: social_post_queue drained by the existing X client; ledger thread seeded queued; nothing posted |
