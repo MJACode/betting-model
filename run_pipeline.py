@@ -367,14 +367,17 @@ def step_player_positions(run_date: str) -> bool:
     """NBA / WNBA / NCAAF positions for the player page's "same position vs
     the next opponent" card (data/ingestors/player_positions_ingestor.py).
 
-    Once a day is enough: rosters change slowly, and the ESPN half re-fetches
-    only athletes not stored in the last 7 days, so a steady-state pass is the
-    ~45 roster-list calls plus that week's signings (ESPN has IP-blocked this
-    worker twice). CFBD /roster is one call. Verified on the worker
-    2026-10-06 by dry runs 405765 / 406072 before this was scheduled."""
+    Once a day is enough: rosters change slowly. The ESPN half re-fetches an
+    athlete only after a 7-day window plus a per-id jitter, skips unmatched
+    ids it has already cached, and stops at MAX_ATHLETE_HTTP so a cold morning
+    cannot walk every roster (ESPN has IP-blocked this worker twice). NCAAF
+    uses the fall-year season of `run_date` — January through July belong to
+    the previous season — so a January run still reads the roster that has
+    game logs. CFBD /roster is one call. Verified on the worker 2026-10-06
+    by dry runs 405765 / 406072 before this was scheduled."""
     try:
         from data.ingestors.player_positions_ingestor import ingest_player_positions
-        result = ingest_player_positions(dry_run=False)
+        result = ingest_player_positions(dry_run=False, run_date=run_date)
         logger.success(f"✓ Player positions: {result}")
         return True
     except Exception as exc:
@@ -1624,16 +1627,15 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X gets exactly what the FREE Discord channel gets -- one pick a day,
-        # never the paid slate (mike, 2026-08-30: "A without links"). Posting
-        # the paid signals publicly would be giving away what members pay for.
-        # Ledgered independently of Discord, so one surface failing never
-        # suppresses the other.
+        # X posts every released pre-game pick, each in the same format.
+        # Discord's free pick is not an input. X_POST_ALL_PICKS=0 posts no
+        # pick slate. Ledgered independently of Discord, so one surface
+        # failing never suppresses the other.
         try:
-            from tracking.x_publisher import notify_x_free_pick
-            notify_x_free_pick(target_date=run_date, dry_run=dry_run)
+            from tracking.x_publisher import notify_x_picks
+            notify_x_picks(target_date=run_date, dry_run=dry_run)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"X free pick failed (Discord unaffected): {exc}")
+            logger.error(f"X picks failed (Discord unaffected): {exc}")
         if d or fp or rs:
             logger.success(
                 f"✓ Discord: {d} signal(s) posted"
@@ -1794,6 +1796,18 @@ def step_settle(settle_date: str) -> bool:
             logger.info(f"Results restated: {n} post(s)")
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+
+    # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
+    # first Monday, the previous calendar month. Later passes retry a miss.
+    # Both are ledgered, so a posted window is not posted again.
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        if n:
+            logger.info(f"Period results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Period results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 

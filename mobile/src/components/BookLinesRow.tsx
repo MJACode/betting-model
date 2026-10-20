@@ -12,9 +12,9 @@
 // at that book, at that book's latest price. The record chip (DK, or the NFL
 // card's soft book) is the stored number the pick was given at and never
 // re-prices. The best payout says "best" in words, not just colour. No chip is
-// marked as the user's: the book picker sets the Stats lines and the betslip's
-// bet button, never how a pick is priced or how these chips are ordered
-// (Matt, 2026-09-04).
+// marked as the user's, but since 2026-10-19 (Matt) a chip at a book the
+// member has not chosen is not shown (`allowedBooks`): a price they cannot
+// bet in their state is not a line. The order is still best payout first.
 //
 // Live picks (is_live) get one DraftKings chip; the Live board's header and
 // the detail screen's provenance line say why (the in-play model prices and
@@ -57,9 +57,12 @@ interface Props {
    *  before. */
   hero?: HeroAmerican | null;
   priceAge?: PriceAgeContext;
+  /** The member's own books (usePreferredBooks). Chips at any other book are
+   *  not shown (Matt, 2026-10-19). Omitted: every bettable book. */
+  allowedBooks?: readonly string[];
 }
 
-export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3, hero, priceAge }: Props) {
+export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3, hero, priceAge, allowedBooks }: Props) {
   if (hero?.untracked) {
     const book = hero.book;
     return (
@@ -86,7 +89,7 @@ export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3, hero, price
       </View>
     );
   }
-  const quotes = currentLineQuotes(pick, bookRows, hero, priceAge);
+  const quotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   if (quotes.length === 0) return null;
   // Card (onMore set) vs detail: the card is scanned, so it drops the per-chip
   // icon and the hint — the a11y label and the header say the chip opens the

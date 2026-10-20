@@ -361,6 +361,20 @@ def run_pipeline_watch() -> None:
         log.exception("ERROR daily catch-up after pipeline-watch crashed")
 
 
+def run_period_recaps() -> None:
+    """Monday 7:30am ET: the prior week, and the prior month on its Monday.
+
+    The function itself decides whether a window is due, and the ledger
+    decides whether it already went out. A raise must not kill the scheduler.
+    """
+    try:
+        from tracking.discord_notifier import post_period_recaps
+        n = post_period_recaps()
+        log.info("period recaps: %s post(s)", n)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR period recaps crashed")
+
+
 def run_failure_alerter() -> None:
     """Deliver what the health check already decided, to the ops channel.
 
@@ -566,6 +580,7 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
+                  "period_recaps",
                   # "nfl_poll_fast", not "nfl_poll_10min": the id was renamed
                   # when the fast tier moved to T-24h and this entry was not,
                   # so it named a job that does not exist. Inert today because
@@ -1696,6 +1711,19 @@ def build_scheduler() -> BlockingScheduler:
         name="Pipeline watch (daily 7:15am ET)",
     )
 
+    # Weekly results, and the monthly results on the first Monday. 7:30am ET
+    # is after the 6:00am daily recap and after the 7:00am retry of a missed
+    # day. Later Monday settle passes call the same function; the ledger
+    # posts each window once. The pipeline service owns it (X credentials
+    # live there).
+    sched.add_job(
+        run_period_recaps,
+        CronTrigger(day_of_week="mon", hour=7, minute=30, timezone=TIMEZONE),
+        id="period_recaps",
+        name="Weekly and monthly results (Mon 7:30am ET)",
+        max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
+
     # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has
     # settled the weekend and the 5:30am Savant pull has landed.
     #
@@ -1897,8 +1925,11 @@ def build_scheduler() -> BlockingScheduler:
         #
         # The point of polling this densely is the LOCK: the first moment a bet
         # qualifies it is written and timestamped, and it can never be
-        # re-priced. Every later tick records whether the conditions still hold
-        # (nfl_pick_status_history) without touching the bet.
+        # re-priced. For wind, qualifying is a kickoff forecast that has held
+        # at or above 11 mph across the 12-hour window (wind_totals.ruling_wind),
+        # not the first poll that prints 11. Every later tick records whether
+        # the conditions still hold (nfl_pick_status_history) without touching
+        # the bet.
         sched.add_job(
             run_nfl_poll,
             CronTrigger(minute=0, timezone=TIMEZONE),

@@ -5,8 +5,9 @@
  * line (`_tally_line`: `{units:+.2f}u`). The same string is the equity
  * curve's end pill. The grid's return is that stake's units / risked, the
  * percentage beside Discord's units. The visible name is "Return on bets".
- * VoiceOver still hears Discord's "All-time". Yesterday and Models still
- * use a flat $100 bet. Do not put Yesterday's name for its book on this card.
+ * VoiceOver still hears Discord's "All-time". Yesterday uses this same
+ * posted stake. Models still use a flat $100 bet. Do not put the Models
+ * tab's book on this card.
  */
 
 import { spokenDate, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
@@ -133,8 +134,8 @@ export function roiSheetBody(): string {
     'At −110 that\u2019s 1.1 units to win 1. ' +
     'Risk is capped at 3 units, and a pick with no price counts as 1 unit. ' +
     'This number is units won or lost divided by units risked. ' +
-    'It matches the percentage in Discord\u2019s all-time line. ' +
-    'Yesterday and Models use a flat $100 bet, so their percentages won\u2019t match.'
+    'It matches the percentage in Discord\u2019s all-time line and on Yesterday. ' +
+    'Models use a flat $100 bet, so their percentages won\u2019t match.'
   );
 }
 

@@ -214,8 +214,9 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const hm = bestHandoffForPick(pick, moved, movedHero);
   check('DK better, moved line: DK −102 at 9 is not swapped in → "Best MGM −105"',
     hm?.bookmaker === 'betmgm' && hm.price === -105 && hm.verb === 'Best', JSON.stringify(hm));
-  // The M4 case at a moved line keeps its re-rank: record DK −110 ranks
-  // first, DK now −130 at 9, FD −115 at 8.5 → FD −115, never "Bet DK −130".
+  // The M4 case at a moved line does not re-rank DK's price into the
+  // same-line list. The record line is gone, so the book still at 8.5 wins:
+  // FD −115, never "Bet DK −130".
   const m4moved: BookPricedRow[] = [
     { bookmaker: 'draftkings', over_price: -130, total_line: 9 },
     { bookmaker: 'fanduel', over_price: -115, total_line: 8.5, over_link: 'fd://now' },
@@ -224,6 +225,27 @@ check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track 
   const h4 = bestHandoffForPick(pick, m4moved, m4Hero);
   check('M4, moved line: record DK −110 / now DK −130 at 9 / FD −115 → "Best FD −115"',
     h4?.bookmaker === 'fanduel' && h4.price === -115 && h4.verb === 'Best', JSON.stringify(h4));
+  // Reviewer #965: DK's current price at a moved line must not enter the
+  // same-line ranking, even when the record chip is the one that ranked first.
+  const stealPick = mkPick({
+    model_id: 'ncaaf_spread', sport: 'NCAAF', pick_side: 'home' as PickSide,
+    pick_label: 'Sam Houston -7.5', scored_line: -7.5, dk_odds: -110, decision_odds: -110,
+  });
+  const steal: BookPricedRow[] = [
+    { bookmaker: 'draftkings', home_price: -105, away_price: -115, spread_home: -8.5 },
+    { bookmaker: 'betmgm', home_price: -112, away_price: -108, spread_home: -7.5, home_link: 'mgm://line' },
+  ];
+  const stealHero = heroAmericanForPick(
+    stealPick,
+    latest({ market: 'spreads', spread_home: -8.5, total_line: null, home_price: -105, away_price: -115, over_price: null, under_price: null }),
+    steal,
+  );
+  const hs = bestHandoffForPick(stealPick, steal, stealHero);
+  check(
+    'moved line: DK −105 at −8.5 does not beat MGM −112 still at −7.5',
+    hs?.bookmaker === 'betmgm' && hs.price === -112 && hs.verb === 'Best' && hs.link === 'mgm://line',
+    JSON.stringify({ hero: stealHero, handoff: hs }),
+  );
 }
 
 // ── H4: price check ─────────────────────────────────────────────────────────
@@ -400,12 +422,12 @@ check('PickCard: started line is textSecondary', /startedText: \{[\s\S]*?color: 
 check('PickCard: the tag reads cta.priceTag (Now / Live price)', (card.match(/cta\.priceTag/g) ?? []).length >= 2 && !/kind === 'now' \? 'Now'/.test(card));
 check('PickCard: "Price check" / "Old price" chip on medSoft, medInk icon', /\{priceCheckChipText\(check\)\}/.test(card) && /priceCheckChip: \{[\s\S]*?colors\.medSoft/.test(card) && /alert-circle-outline"[\s\S]{0,80}colors\.medInk/.test(card));
 check('PickCard: no slip offer and no stake on a stale price (a slip leg can still come out)',
-  /const canSlip =[^;]*\(!heroPrice\?\.stale \|\| Boolean\(inSlip\)\) && cta\.slip;/.test(card) &&
+  /const canSlip =[^;]*\(!heroPrice\?\.stale \|\| Boolean\(inSlip\)\) && \(!signalsMuted \|\| Boolean\(inSlip\)\) && cta\.slip;/.test(card) &&
   /const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview \|\| paused \|\| heroPrice\?\.stale/.test(card));
 check('PickCard: the label speaks the reason and the lock (heroPriceText)',
   /flagged \? priceCheckSpeech\(check, heroPrice\) : `Edge \$\{edgeText\}`/.test(card) &&
   /heroPrice \? heroPriceSpeech\(heroPrice, cta\.priceTag\) : null/.test(card) && /\{lockedCaptionText\(heroPrice\)\}/.test(card));
-check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(decisionEdge\(pick\)\)/.test(card) && /flagged \? 'EV —'/.test(card));
+check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(shownEdge\)/.test(card) && /: decisionEdge\(pick\);/.test(card) && /flagged \? 'EV —'/.test(card));
 check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEdge = pick\.signal_type !== 'BET';/.test(card) && /edgeSecondary: \{[\s\S]*?font\.size\.footnote[\s\S]*?colors\.textSecondary/.test(card));
 check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');

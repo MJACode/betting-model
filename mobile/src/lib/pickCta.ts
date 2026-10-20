@@ -20,7 +20,7 @@
  * "started": no "Game started" line, and no hand-off or Slip either — there is
  * no game to bet. Track stays.
  */
-import { formatAmerican, gameStartState } from './format';
+import { formatAmerican, gameStartState, MINUS } from './format';
 
 export interface PickCtaInput {
   /** pick.is_live — an in-play signal, made after the start by design. */
@@ -81,12 +81,14 @@ export function gameStartedLine(decisionPrice: number | null | undefined, decisi
 
 /**
  * The started line as VoiceOver should say it (audit PR 4): the full book
- * name, no "·" separator, and why there's no button — "Game started. Picked
- * at -125 at DraftKings. Betting links are off once a game starts."
+ * name, no "·" separator, and why there's no button. The price uses U+2212.
+ * "Game started. Picked at −125 at DraftKings. Betting links are off once a
+ * game starts."
  */
 export function gameStartedSpeech(decisionPrice: number | null | undefined, decisionBookName: string): string {
+  const price = decisionPrice == null ? null : formatAmerican(decisionPrice).replace(/-/g, MINUS);
   const picked =
-    decisionPrice == null ? '' : ` Picked at ${formatAmerican(decisionPrice)}${decisionBookName ? ` at ${decisionBookName}` : ''}.`;
+    price == null ? '' : ` Picked at ${price}${decisionBookName ? ` at ${decisionBookName}` : ''}.`;
   return `Game started.${picked} Betting links are off once a game starts.`;
 }
 

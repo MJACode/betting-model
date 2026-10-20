@@ -261,12 +261,18 @@ def score_game(conn: DBConnection,
                features: dict,
                bankroll: float,
                dry_run: bool = False,
-               commence_time: str | None = None) -> list[dict]:
+               commence_time: str | None = None,
+               write: bool = True) -> list[dict]:
     """
     Score one game with one model. Generates 0, 1, or 2 pick rows
     (BET and/or AVOID signals).
 
     Returns list of pick dicts ready for DB insert.
+
+    `write=False` returns the rows without inserting them, so the caller can
+    check them against the game's other picks first (_apply_side_conflicts).
+    Only the stock path and the NHL 3-way path honour it, which covers every
+    model in side_checked_models(); run_scorer passes it for those alone.
     """
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
@@ -353,7 +359,7 @@ def score_game(conn: DBConnection,
     if market == "h2h_3way":
         return _score_nhl_3way(conn, game_id, model_id, sport, game_date,
                                home_team, away_team, clf, x, features,
-                               bankroll, dry_run, commence_time)
+                               bankroll, dry_run, commence_time, write=write)
 
     # A model can decline to BET a game and still have something worth
     # showing. When a rule's gate/preconditions fail we set a reason here and
@@ -618,7 +624,7 @@ def score_game(conn: DBConnection,
                             dry_run=dry_run)
 
     # Write to DB
-    if picks and not dry_run:
+    if picks and not dry_run and write:
         _insert_picks(conn, picks)
 
     return picks
@@ -873,12 +879,150 @@ def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
         return None, None, None
     offset = anc.market_logit([hi / (hi + ai)])
     p_home = float(artifact["model"].predict_proba(x.reshape(1, -1), offset)[0, 1])
+    reason = _nhl_game_day_reason(game_id, game_date, home_team, away_team,
+                                  commence_time, goalies, stale)
+    return p_home, 1.0 - p_home, reason
+
+
+def _nhl_game_day_reason(game_id: str, game_date: str, home_team: str,
+                         away_team: str, commence_time: str | None,
+                         goalies: dict, stale: set) -> str | None:
+    """None when this run may decide an NHL side on game `game_id`; otherwise
+    the reason it may not. ONE gate for both NHL side models, so the moneyline
+    and the regulation model always decide at the same moment on the same
+    facts (mike, 2026-10-17): 16:00Z-18:00Z on game day, both listed goalies,
+    and last night's games in the logs."""
+    import models.nhl_moneyline_anchored as anc
     reason = anc.decision_window(game_date, commence_time)
     if reason is None and ((game_id, home_team) not in goalies or (game_id, away_team) not in goalies):
         reason = "waiting for both listed goalies"
     if reason is None and (home_team in stale or away_team in stale):
         reason = "waiting for last night's game logs"
-    return p_home, 1.0 - p_home, reason
+    return reason
+
+
+def _nhl_regulation_reason(conn, game_id: str, game_date: str, home_team: str,
+                           away_team: str, commence_time: str | None) -> str | None:
+    """The regulation model's copy of the moneyline model's decision gate.
+
+    It used to decide the moment DraftKings posted the 3-way line and lock:
+    every one of its 33 BETs this season was written 10-72 hours before puck
+    drop. On 2026-10-17 that put "BOS (Regulation)" (locked 18:26Z the day
+    before, before Boston's game at Anaheim that night) on the same game as
+    the moneyline model's "LAK ML" (16:22Z on game day, knowing Boston was on
+    a back-to-back). Graded on the 120 finished 2026-27 games, the game-day
+    decision bet 7 times for +1.1 units where the early one bet 31 times for
+    -4.9 (scripts/nhl_regulation_game_day_grade.py).
+
+    Fails CLOSED: inputs that cannot be read mean no decision this pass, the
+    rows still written as NONE with the reason, and the next pass retries.
+    """
+    import models.nhl_moneyline_anchored as anc
+    reason = anc.decision_window(game_date, commence_time)
+    if reason is not None:
+        return reason
+    try:
+        _, goalies, stale = anc.inputs_for_date(conn, game_date)
+    except Exception as exc:  # noqa: BLE001 - one game's gate must not stop the pass
+        logger.error(f"  {game_id}/nhl_moneyline_regulation: game-day check failed: {exc}")
+        return "game-day check failed; not deciding this pass"
+    return _nhl_game_day_reason(game_id, game_date, home_team, away_team,
+                                commence_time, goalies, stale)
+
+
+# ── One game never gets two picks that cannot both win (mike, 2026-10-17) ────
+#
+# "It can't be both." On 2026-10-17 two NHL models posted "BOS (Regulation)"
+# and "LAK ML" on the same game: if LA won only one paid, if Boston won in
+# regulation only the other, and a Boston overtime win lost both. It had
+# happened once before, on 2026-10-04 ("FLA ML" and "ANA (Regulation)",
+# Anaheim won after regulation, both lost). Nothing compared one model's pick
+# with another's.
+#
+# Each pick is mapped to the game endings it wins on. Two picks whose endings
+# do not overlap cannot both win, and a game gets at most one of them:
+#   - a BET already standing on the game (an earlier pass) keeps it, because a
+#     pick is a pick (CLAUDE.md 1c) -- the new one is written NONE with why;
+#   - two such BETs decided in the SAME pass are both written NONE: the models
+#     disagree about the game and there is no telling which is wrong.
+#
+# Only markets listed here are checked. Assessed across every sport on
+# 2026-10-17: no other pair of pre-game models has bet outcomes that cannot
+# both win since 2026-08-01 (the only opposite-side pair, MLB first-five
+# moneyline against the full-game +1.5 run line, can both win). A market that
+# can conflict joins by adding its endings here.
+_SIDE_ENDINGS: dict[tuple[str, str], dict[str, frozenset]] = {
+    ("NHL", "h2h"): {
+        "home": frozenset({"home_regulation", "home_overtime"}),
+        "away": frozenset({"away_regulation", "away_overtime"}),
+    },
+    ("NHL", "h2h_3way"): {
+        "home": frozenset({"home_regulation"}),
+        "away": frozenset({"away_regulation"}),
+        "draw": frozenset({"home_overtime", "away_overtime"}),
+    },
+}
+
+
+def _endings_won(pick: dict) -> frozenset | None:
+    """The game endings this pick wins on, or None for a market not listed."""
+    sport, market, _ = MODELS.get(pick.get("model_id"), (None, None, None))
+    return _SIDE_ENDINGS.get((sport, market), {}).get(pick.get("pick_side"))
+
+
+def picks_cannot_both_win(a: dict, b: dict) -> bool:
+    wa, wb = _endings_won(a), _endings_won(b)
+    return wa is not None and wb is not None and not (wa & wb)
+
+
+def side_checked_models() -> set:
+    """The models whose picks are held back for the check before writing."""
+    return {mid for mid, (sport, market, _) in MODELS.items()
+            if (sport, market) in _SIDE_ENDINGS}
+
+
+def _apply_side_conflicts(conn, game_id: str, picks: list[dict]) -> int:
+    """Turn every BET in `picks` that cannot win alongside another BET on the
+    game into NONE with the reason. Mutates in place; returns how many.
+
+    A standing BET counts unless it is VOID or was written while its model was
+    paused (not a signal, so it holds nothing).
+    """
+    def bets(p):
+        return (p.get("signal_type") == "BET" and not _is_paused_row(p)
+                and _endings_won(p) is not None)
+
+    new = [p for p in picks if bets(p)]
+    if not new:
+        return 0
+    standing = [
+        {"model_id": m, "pick_side": s, "pick_label": label}
+        for m, s, label in conn.execute("""
+            SELECT model_id, pick_side, pick_label FROM picks
+            WHERE game_id = %s AND signal_type = 'BET'
+              AND model_id = ANY(%s)
+              AND condition_status IS DISTINCT FROM 'VOID'
+              AND downgrade_reason IS DISTINCT FROM %s
+        """, (game_id, sorted(side_checked_models()), config.PAUSED_NOTE)).fetchall()]
+    notes: dict[int, str] = {}
+    for p in new:
+        held = next((s for s in standing if picks_cannot_both_win(p, s)), None)
+        if held is not None:
+            notes[id(p)] = (f"cannot both win with {held['pick_label']}, "
+                            f"already bet on this game")
+    rest = [p for p in new if id(p) not in notes]
+    for i, a in enumerate(rest):
+        for b in rest[i + 1:]:
+            if picks_cannot_both_win(a, b):
+                notes.setdefault(id(a), f"cannot both win with {b['pick_label']}, "
+                                        f"decided in the same pass; neither is bet")
+                notes.setdefault(id(b), f"cannot both win with {a['pick_label']}, "
+                                        f"decided in the same pass; neither is bet")
+    for p in new:
+        if id(p) in notes:
+            logger.info(f"  {game_id}: {p['pick_label']} not bet -- {notes[id(p)]}")
+            p.update(_downgrade(p, notes[id(p)]))
+    return len(notes)
 
 
 # Class index → pick_side for the NHL regulation 3-way model. Must match the
@@ -889,7 +1033,8 @@ NHL_3WAY_CLASSES = ["away", "draw", "home"]
 def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                     game_date: str, home_team: str, away_team: str,
                     clf, x, features: dict, bankroll: float,
-                    dry_run: bool, commence_time: str | None) -> list[dict]:
+                    dry_run: bool, commence_time: str | None,
+                    write: bool = True) -> list[dict]:
     """
     NHL regulation-result scoring — 3-class (away reg win / draw / home reg
     win) priced against DraftKings' 3-way regulation market. Each side with a
@@ -951,6 +1096,12 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
     # The best bettable price on each side, and the decision re-made there
     # (2026-09-09) -- the same step the two-way game path takes.
     _stamp_best_game_prices(conn, picks, "h2h_3way")
+    # Decides only when the moneyline model does (mike, 2026-10-17). Outside
+    # that moment every row is still written, NONE, with the reason.
+    reason = _nhl_regulation_reason(conn, game_id, game_date, home_team,
+                                    away_team, commence_time)
+    if reason:
+        _apply_no_signal(picks, reason)
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
     for p in picks:
@@ -963,7 +1114,7 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                 f"bet=${p['recommended_bet']:.0f} | [{p['confidence_tier']}]"
             )
 
-    if picks and not dry_run:
+    if picks and not dry_run and write:
         _insert_picks(conn, picks)
     return picks
 
@@ -3704,6 +3855,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         skipped_postponed = 0
         skipped_locked = 0
         skipped_twin = 0
+        side_models = side_checked_models()
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
@@ -3818,6 +3970,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             game_picks: list[dict] = []
             for attempt in (1, 2):
                 game_picks = []
+                held_back: list[dict] = []
                 try:
                     if not dry_run:
                         # '%%' not '%': psycopg2 %-interpolates the statement
@@ -3899,12 +4052,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             # never reaches this log. Bind model_id: the loop
                             # variable would otherwise score every model as
                             # the last one.
+                            # A side model's rows come back unwritten
+                            # (write=False) for the check below; every other
+                            # model is called exactly as before.
+                            hold = model_id in side_models
                             picks = _call_in_savepoint(
                                 conn, "sp_model_game",
                                 lambda model_id=model_id: score_game(
                                     conn, game_id, model_id, features,
                                     bankroll, dry_run=dry_run,
-                                    commence_time=commence_time))
+                                    commence_time=commence_time,
+                                    **({"write": False} if model_id in side_models else {})))
                         except ConnectionLost:
                             raise                      # the game's unit, not the model's
                         except Exception as exc:
@@ -3914,6 +4072,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                 f"{traceback.format_exc()}")
                             continue
                         game_picks.extend(picks)
+                        if hold:
+                            held_back.extend(picks)
 
                         for p in picks:
                             signal = p["signal_type"]
@@ -3933,6 +4093,32 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                 f"bet=${p['recommended_bet']:.0f} | "
                                 f"[{tier}]"
                             )
+                    # One game never gets two picks that cannot both win
+                    # (mike, 2026-10-17). The side models' rows were held
+                    # back above; they are checked against each other and
+                    # against any BET already standing on the game, then
+                    # written. Fails CLOSED: if the check cannot run, none of
+                    # them is written this pass (loud, and the next pass
+                    # re-scores them) -- writing them unchecked is the bug.
+                    if held_back:
+                        try:
+                            _call_in_savepoint(
+                                conn, "sp_side_conflicts",
+                                lambda: _apply_side_conflicts(conn, game_id, held_back))
+                            if not dry_run:
+                                _call_in_savepoint(
+                                    conn, "sp_side_insert",
+                                    lambda: _insert_picks(conn, held_back))
+                        except ConnectionLost:
+                            raise
+                        except Exception as exc:
+                            model_failures.append(f"{game_id} side check: {exc!r}")
+                            logger.error(
+                                f"  {game_id}: side check FAILED, its "
+                                f"{len(held_back)} held row(s) not written: {exc!r}\n"
+                                f"{traceback.format_exc()}")
+                            kept = {id(p) for p in held_back}
+                            game_picks = [p for p in game_picks if id(p) not in kept]
                     if not dry_run:
                         conn.commit()
                     rescored.add(game_id)
