@@ -396,3 +396,103 @@ def test_wnba_rest_ignores_a_row_no_book_ever_priced():
     _wnba_game(c, f"WNBA_{_d(0)}_NY_ATL", _d(0), "ATL", "NY", _t(-6), 92, 88)
     f = build_wnba_game_features(c, target, _d(3), "ATL", "NY", 2026)
     assert f["home_b2b"] == 0 and f["away_b2b"] == 0 and f["d_rest_days"] == 0
+
+
+# ── NFL: the opener and wind cards, gated where their BETs are written ───────
+
+class _PublishConn:
+    """Records the publisher's statements; answers its schedule and lock reads."""
+
+    def __init__(self, schedule):
+        self.schedule = schedule
+        self.sql: list[tuple] = []
+
+    def execute(self, sql, params=None):
+        flat = " ".join(sql.split())
+        self.sql.append((flat, params))
+        rows = []
+        if "commence_time, home_score, away_score FROM games" in flat:
+            rows = self.schedule
+
+        class R:
+            rowcount = 0
+
+            def fetchall(self_r):
+                return rows
+
+            def fetchone(self_r):
+                return rows[0] if rows else None
+        return R()
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+    def bets_written(self):
+        return [p for s, p in self.sql
+                if s.startswith("INSERT INTO picks") and p.get("signal_type") == "BET"]
+
+
+CAR_GB = "NFL_2026_08_CAR_GB"
+
+
+def _nfl_schedule(week7_scored: bool):
+    s = 24.0 if week7_scored else None
+    return [
+        (CAR_GB, _d(9), "GB", "CAR", _t(9 * 24), None, None),
+        ("NFL_2026_07_TB_CAR", _d(5), "CAR", "TB", _t(-4) if week7_scored else _t(5 * 24),
+         s, 17.0 if s else None),
+        ("NFL_2026_07_GB_DET", _d(5), "DET", "GB", _t(-4) if week7_scored else _t(5 * 24),
+         s, 20.0 if s else None),
+        ("NFL_2026_06_CAR_NO", _d(-2), "NO", "CAR", _t(-50), 10.0, 13.0),
+    ]
+
+
+def _publish_opener(monkeypatch, tmp_path, conn):
+    import data.db as db
+    import scripts.nfl_wind_publisher as pub
+    (tmp_path / f"opener_card_{TODAY.isoformat()}.csv").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(pub, "CARDS_DIR", tmp_path)
+    monkeypatch.setattr(db, "get_connection", lambda: conn)
+    monkeypatch.setattr(pub, "_lock_model", lambda *a, **k: None)
+    monkeypatch.setattr(pub, "_flush_snapshots_safe", lambda *a, **k: None)
+    monkeypatch.setattr(pub, "read_card", lambda path: [])
+    game = {"game_id": CAR_GB, "sport": "NFL", "season": 2026, "game_date": _d(9),
+            "home_team": "GB", "away_team": "CAR", "commence_time": _t(9 * 24)}
+    pick = {"game_id": CAR_GB, "model_id": pub.NFL_OPENER_MODEL_ID, "signal_type": "BET",
+            "pick_label": "CAR @ GB — CAR +3.5 (FD)"}
+    monkeypatch.setattr(pub, "build_opener_rows", lambda rows, bankroll: ([game], [pick]))
+    return pub.publish_opener(TODAY.isoformat())
+
+
+def test_the_nfl_opener_does_not_lock_before_both_teams_week_seven_games(monkeypatch, tmp_path):
+    """CAR @ GB, evaluated 2026-10-20 while both teams still had to play 10-25."""
+    conn = _PublishConn(_nfl_schedule(week7_scored=False))
+    assert _publish_opener(monkeypatch, tmp_path, conn) == 0
+    assert conn.bets_written() == []
+
+
+def test_the_nfl_opener_locks_once_those_games_are_scored(monkeypatch, tmp_path):
+    conn = _PublishConn(_nfl_schedule(week7_scored=True))
+    assert _publish_opener(monkeypatch, tmp_path, conn) == 1
+    assert len(conn.bets_written()) == 1
+
+
+def test_a_held_nfl_game_still_shows_its_number_as_none_with_the_reason():
+    import scripts.nfl_wind_publisher as pub
+    games = {CAR_GB: {"home_team": "GB", "away_team": "CAR", "game_date": _d(9),
+                      "commence_time": _t(9 * 24)}}
+    fired = {"game_id": CAR_GB, "model_id": "nfl_opener_spread", "qualifies": "1",
+             "current_line": "-3.5", "current_price": "-110", "current_book": "fanduel",
+             "reason": "deviation 1.5 vs Pinnacle"}
+    latest = {(CAR_GB, "nfl_opener_spread"): fired}
+    assert pub.build_scored_rows(latest, games, 1000.0) == []        # the BET lands instead
+    why = f"waiting for CAR's {_d(5)} game and GB's {_d(5)} game to be played and logged"
+    (row,) = pub.build_scored_rows(latest, games, 1000.0, {CAR_GB: why})
+    assert row["signal_type"] == "NONE" and row["downgrade_reason"] == why
+    assert row["scored_line"] == -3.5                                # the HOME number

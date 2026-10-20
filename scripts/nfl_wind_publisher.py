@@ -719,6 +719,66 @@ def _fmt_spread(line: float) -> str:
     return "PK" if float(line) == 0 else f"{line:+g}"
 
 
+# ── The schedule gate (mike, 2026-10-20) ─────────────────────────────────────
+#
+# "The repo/models should look ahead schedules for all markets and sports and
+# models." The opener fires from 10 days out and NFL games are 7 days apart, so
+# a Thursday game can be decided before both teams' Sunday games: at
+# 2026-10-20 20:00Z the opener evaluated CAR @ GB (10-29) while both teams
+# still had to play on 10-25. Neither rule reads a team log, but the rule
+# stands for every pre-game model: no decision while either team has an
+# earlier game not played, being played, or without its result in `games`
+# (data/schedule_context; nflverse fills the score, measured 4.2-20.5h after a
+# Sunday kickoff in 2026 weeks 1-6).
+#
+# A held game's BET is not written. Its number is written as NONE with the
+# reason, by publish_scored, so the board still shows it; NONE never locks, so
+# the first tick after the games are scored decides it. Read from the
+# DATABASE schedule (nflverse, daily), never the frozen nfl/data/games.csv.
+
+SCHEDULE_UNREADABLE = "schedule check failed; not deciding this pass"
+
+
+def _schedule_holds(conn, games: dict[str, dict],
+                    now: datetime | None = None) -> dict[str, str]:
+    """{game_id: reason} for the games a pre-game NFL rule may not decide yet.
+
+    `games` maps game_id -> {home_team, away_team, game_date, commence_time}.
+    Fails CLOSED: a schedule that cannot be read holds every game this pass
+    (the read runs before anything is written, so the rollback loses
+    nothing)."""
+    if not games:
+        return {}
+    from data.schedule_context import ScheduleBook
+    now = now or datetime.now(timezone.utc)
+    try:
+        book = ScheduleBook.load(conn, "NFL", [(gid, g["game_date"])
+                                                for gid, g in games.items()])
+        out = {}
+        for gid, g in games.items():
+            why = book.pending_reason(gid, g["game_date"], g["home_team"],
+                                      g["away_team"], g.get("commence_time"), now)
+            if why:
+                out[gid] = why
+        return out
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"WARNING: NFL schedule check failed ({exc!r}); holding "
+              f"{len(games)} game(s) this pass", file=sys.stderr)
+        try:
+            conn.rollback()
+        except Exception:                                      # noqa: BLE001
+            pass
+        return {gid: SCHEDULE_UNREADABLE for gid in games}
+
+
+def _held_out(pick_rows: list[dict], holds: dict[str, str], label: str) -> list[dict]:
+    """The pick rows still to write, after printing every held one."""
+    for p in pick_rows:
+        if p["game_id"] in holds:
+            print(f"  {label} {p['game_id']}: not decided -- {holds[p['game_id']]}")
+    return [p for p in pick_rows if p["game_id"] not in holds]
+
+
 def publish(run_date: str | None = None) -> int:
     """
     Mirror the day's card into games + picks. Returns picks written.
@@ -743,6 +803,8 @@ def publish(run_date: str | None = None) -> int:
     now_iso = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     try:
+        # Before any write: a failed read rolls back nothing (_schedule_holds).
+        holds = _schedule_holds(conn, {g["game_id"]: g for g in game_rows})
         for g in game_rows:
             conn.execute("""
                 INSERT INTO games (game_id, sport, season, game_date,
@@ -787,6 +849,8 @@ def publish(run_date: str | None = None) -> int:
         if skipped:
             print(f"  {len(skipped)} game(s) already locked — not re-priced: "
                   + ", ".join(sorted({p["game_id"] for p in skipped})))
+        # A team's earlier game still to be played or scored: no BET yet.
+        pick_rows = _held_out(pick_rows, holds, "wind")
 
         for p in pick_rows:
             _clear_scored_row(conn, p["game_id"], p["model_id"])
@@ -843,6 +907,8 @@ def publish_opener(run_date: str | None = None) -> int:
     conn = get_connection()
     written = 0
     try:
+        # Before any write: a failed read rolls back nothing (_schedule_holds).
+        holds = _schedule_holds(conn, {g["game_id"]: g for g in game_rows})
         for g in game_rows:
             conn.execute("""
                 INSERT INTO games (game_id, sport, season, game_date,
@@ -853,6 +919,10 @@ def publish_opener(run_date: str | None = None) -> int:
                 SET commence_time = EXCLUDED.commence_time,
                     game_date     = EXCLUDED.game_date
             """, g)
+
+        # A team's earlier game still to be played or scored: no BET yet. The
+        # first qualifying tick AFTER that is the one that locks.
+        pick_rows = _held_out(pick_rows, holds, "opener")
 
         # Serialise against publish_scored before the insert-once reads.
         _lock_model(conn, NFL_OPENER_MODEL_ID)
@@ -939,21 +1009,30 @@ def latest_eval_rows(rows: list[dict]) -> dict[tuple[str, str], dict]:
 
 
 def build_scored_rows(latest: dict[tuple[str, str], dict],
-                      games: dict[str, dict], bankroll: float) -> list[dict]:
+                      games: dict[str, dict], bankroll: float,
+                      holds: dict[str, str] | None = None) -> list[dict]:
     """
     Pure transform: newest eval row per (game, model) -> NONE pick rows.
 
     `games` maps game_id -> {home_team, away_team, game_date, commence_time}.
     A game the platform does not know (FK), or a row with no line or price,
     is skipped: a NONE row is only worth writing if it carries a real quote.
+
+    `holds` maps game_id -> the schedule gate's reason (_schedule_holds). A
+    held game's row carries that reason, and is written even when the model
+    fired: the BET writers write no BET for it, so this row is the board's
+    only view of the game until the earlier games are scored.
     """
+    holds = holds or {}
     out: list[dict] = []
     for (game_id, model_id), r in sorted(latest.items()):
+        held = holds.get(game_id)
         # The model FIRED on this tick. Its BET row is the publisher's to
         # write (publish / publish_opener); a "(no bet)" row carrying the
         # firing edge would be a bet dressed as a pass. Write nothing and
-        # let the BET land (Reviewer, #838 post-merge).
-        if str(r.get("qualifies") or "").strip() == "1":
+        # let the BET land (Reviewer, #838 post-merge) -- unless the game is
+        # held, in which case no BET will land this tick.
+        if str(r.get("qualifies") or "").strip() == "1" and not held:
             continue
         g = games.get(game_id)
         line, price = _num(r.get("current_line")), _num(r.get("current_price"))
@@ -996,7 +1075,7 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
             "recommended_bet": 0.0,
             "bankroll_at_pick": bankroll,
             "signal_type": "NONE",
-            "downgrade_reason": (r.get("reason") or "")[:500] or None,
+            "downgrade_reason": (held or r.get("reason") or "")[:500] or None,
         })
     return out
 
@@ -1063,6 +1142,9 @@ def publish_scored(run_date: str | None = None) -> int:
                 continue            # frozen at its last pre-game view
             games[gid] = {"home_team": home, "away_team": away,
                           "game_date": gdate, "commence_time": kick}
+        # The same schedule answer the BET writers act on, read before any
+        # write (_schedule_holds).
+        holds = _schedule_holds(conn, games, now)
 
         # Same per-model lock the BET writers take, in a fixed order (no
         # deadlock), BEFORE the BET set is read: an opener/wind BET can no
@@ -1098,7 +1180,7 @@ def publish_scored(run_date: str | None = None) -> int:
             if key in existing and key[0] in games:
                 cleared += _clear_scored_row(conn, *key)
 
-        for p in build_scored_rows(latest, games, config.BANKROLL):
+        for p in build_scored_rows(latest, games, config.BANKROLL, holds):
             key = (p["game_id"], p["model_id"])
             if key in bet:
                 continue            # the pick of record stands; no NONE beside it
