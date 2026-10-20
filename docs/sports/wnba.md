@@ -44,7 +44,10 @@ Both read the stored schedule through `data/schedule_context.py`.
   played, or without its score in `games` (the WNBA game inputs read the score
   and the team stats the results step rebuilds from it). The rows are written
   NONE with the reason; the first pass after the result lands decides it. A
-  past game with no result stops holding after 4 days.
+  past game with no result stops holding after 4 days. The cost: the results
+  step runs after scoring in a refresh pass and not at all in the 10-minute
+  evening passes, so game N+1 is decided from the first pass after game N's
+  result is stored (the 2026 postseason box scores landed 00:20-00:27 ET).
 - **Rest at tip.** `_rest_days_live` read scored games only. 11 of 40
   `wnba_moneyline` BETs were written before a team's previous game was in the
   database, and 8 of them read a different rest difference (3698318 read 10

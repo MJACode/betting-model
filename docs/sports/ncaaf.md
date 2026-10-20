@@ -227,6 +227,12 @@ and models."* Three changes, all reading the stored schedule through one module
   would be held. Every team's previous game is scored and logged, and no team
   has a game before this week's. The gate bites when DraftKings prices a game
   more than a week out.
+- **What it costs.** A Saturday game reaches the team log in the next morning's
+  6am ET run: 439 of 446 Saturday games since 2026-09-01 were logged on the
+  Sunday, 6 on the Monday (log `created_at`, which an upsert never rewrites;
+  median 14.2 hours after kickoff). So the next Saturday's game can be decided
+  from Sunday morning, about 6.5 days before kickoff, against a median BET lead
+  of 5.2 days.
 
 ### Data / conventions (load-bearing)
 
