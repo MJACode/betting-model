@@ -43,6 +43,10 @@ never got a scored row, and it is the "did the best book beat DK at close?"
 feature the caveat below used to warn about. Cost, measured: about +6 MB/day
 against the ~210 MB/day that keeping everything would cost.
 
+NBA keeps its whole price path (2026-10-17): the two tiers skip every
+`PATH_KEPT_SPORTS` row, and `thin_repeats` deletes only the middle of an
+unchanged run, keeping the row where each book moved and the last row it held.
+
 Caveat: pruned history is still gone permanently, and what survives is TWO rows
 per proposition per book, not a series. Anything needing intraday non-DK
 movement must raise `keep_days` BEFORE relying on it.
@@ -150,6 +154,20 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # Nothing protected them because nothing named them. Now something does.
 PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,)
 
+# Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
+# need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
+# §6.5). The game-market search needs 2026-27 as a season nobody has looked at,
+# with the movement that the opener-and-close survivors cannot show: when each
+# book moved, and from what. So the two tiers below never touch these sports'
+# rows, and thin_repeats() removes only rows that say nothing new.
+#
+# Cost, measured 2026-10-17 on 2026-10-15's NBA rows (46 games listed, 10
+# books): 33,654 rows a day, of which 1,337 were a price or line differing from
+# the same book's previous row (642 of them the first row of a proposition).
+# Keeping each run's first and last row is about twice the change count; the
+# rest are exact repeats.
+PATH_KEPT_SPORTS = ("NBA",)
+
 
 def _unprotected(params: dict, table: str | None = None) -> str:
     """
@@ -175,6 +193,8 @@ def _unprotected(params: dict, table: str | None = None) -> str:
     if table == "odds":
         params["protected_sources"] = PROTECTED_SOURCES
         clauses.append("(source IS NULL OR source NOT IN %(protected_sources)s)")
+        params["path_kept_sports"] = PATH_KEPT_SPORTS
+        clauses.append("(sport IS NULL OR sport NOT IN %(path_kept_sports)s)")
     return "(" + " AND ".join(clauses) + ")"
 
 # (table, identity columns that define one "proposition", how to date a row)
@@ -329,6 +349,68 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
     return res
 
 
+# One row's whole quote, as text that compares NULL-safely in Postgres and in
+# SQLite (the test stand-in): a NULL renders as an empty field.
+_QUOTE_KEY = " || '|' || ".join(
+    f"COALESCE(CAST({c} AS TEXT), '')"
+    for c in ("home_price", "away_price", "draw_price", "spread_home", "total_line",
+              "over_price", "under_price"))
+
+THIN_REPEATS_SQL = f"""
+    SELECT odds_id FROM (
+        SELECT odds_id, {_QUOTE_KEY} AS q,
+               LAG({_QUOTE_KEY}) OVER w AS q_prev,
+               LEAD({_QUOTE_KEY}) OVER w AS q_next
+          FROM odds
+         WHERE game_id IN ({{ids}})
+           AND source IS NULL
+        WINDOW w AS (PARTITION BY game_id, market, bookmaker,
+                     (snapshot_type IS NULL OR snapshot_type <> 'in_play')
+                     ORDER BY snapshot_at, odds_id)
+    ) t
+    WHERE q = q_prev AND q = q_next
+"""
+
+
+def thin_repeats(conn: DBConnection, today: str, sports: tuple[str, ...] = PATH_KEPT_SPORTS,
+                 lookback_days: int = 21, dry_run: bool = False) -> dict:
+    """Delete the middle of every unchanged run in a path-kept sport's `odds` rows.
+
+    A run is consecutive rows of one (game, market, book, pre-game-or-in-play)
+    with the same price and line. Its FIRST row says when the book moved there
+    and its LAST says it was still quoting there, so both stay; the rows
+    between say nothing either one does not. Lossless for every as-of read:
+    "the newest row at or before T" returns the same price before and after.
+
+    Settled games only (game_date < today), one game date per transaction, so
+    a slow day cannot hold a lock over a live ingest and a failure loses one
+    date's thinning, not the run. Paid history (any non-NULL source) is never
+    touched. The bound is `lookback_days` so the job stays small every day; a
+    date it misses is thinned by a wider run, never lost."""
+    start = (date.fromisoformat(today) - timedelta(days=lookback_days)).isoformat()
+    out = {"sports": list(sports), "since": start, "dates": 0, "rows": 0, "dry_run": dry_run}
+    marks = ", ".join(["%s"] * len(sports))
+    dates = [str(r[0])[:10] for r in conn.execute(
+        f"SELECT DISTINCT game_date FROM games WHERE sport IN ({marks}) "
+        f"AND game_date >= %s AND game_date < %s ORDER BY 1",
+        (*sports, start, today)).fetchall()]
+    for d in dates:
+        ids = [r[0] for r in conn.execute(
+            f"SELECT game_id FROM games WHERE sport IN ({marks}) AND game_date = %s",
+            (*sports, d)).fetchall()]
+        if not ids:
+            continue
+        sql = THIN_REPEATS_SQL.format(ids=", ".join(["%s"] * len(ids)))
+        if dry_run:
+            n = int(conn.execute(f"SELECT COUNT(*) FROM ({sql}) s", ids).fetchone()[0])
+        else:
+            n = conn.execute(f"DELETE FROM odds WHERE odds_id IN ({sql})", ids).rowcount
+            conn.commit()
+        out["dates"] += 1
+        out["rows"] += max(int(n or 0), 0)
+    return out
+
+
 def run_prune_odds(run_date: str = None, keep_days: int = None,
                    dry_run: bool = False) -> dict:
     """Prune line-shop snapshots in both odds tables. Safe to run any time."""
@@ -340,6 +422,17 @@ def run_prune_odds(run_date: str = None, keep_days: int = None,
                          "blank the live line-shopping board")
 
     summary = {"today": today, "keep_days": keep, "tables": []}
+
+    # First, and committed on its own: the table prune below has failed on a
+    # statement timeout, and a failure there must not take the path thinning
+    # down with it.
+    with get_connection() as conn:
+        summary["thinned"] = thin_repeats(conn, today, dry_run=dry_run)
+        logger.info(f"{'[dry-run] ' if dry_run else ''}path-kept sports "
+                    f"{summary['thinned']['sports']}: "
+                    f"{summary['thinned']['rows']:,} repeated rows "
+                    f"{'would be ' if dry_run else ''}thinned over "
+                    f"{summary['thinned']['dates']} game dates")
 
     with get_connection() as conn:
         for table, identity, date_sql in _TABLES:
