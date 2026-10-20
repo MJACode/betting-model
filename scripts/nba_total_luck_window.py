@@ -51,10 +51,15 @@ _ET = ZoneInfo("America/New_York")
 LOOK_AHEAD_MIN = (61.0, 66.0)
 
 
-def plan(conn, now: datetime) -> list[str]:
+def plan(conn, now: datetime, games: dict[str, dict] | None = None) -> list[str]:
     """The undecided games this tick must fetch and decide. Reads only: it
-    creates no table (card.decided_games reads none that does not exist)."""
-    games = card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
+    creates no table (card.decided_games reads none that does not exist).
+
+    `games` is a slate already read this tick, reaching at least
+    LOOK_AHEAD_MIN[1] (scripts/nba_pregame_window, which plans this model and
+    nba_team_total_luck on one read); without it, the plan reads its own."""
+    if games is None:
+        games = card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
     near = sorted(g for g, v in games.items()
                   if LOOK_AHEAD_MIN[0] <= tl.lead_minutes(v["tip"], now) <= LOOK_AHEAD_MIN[1])
     if not near:

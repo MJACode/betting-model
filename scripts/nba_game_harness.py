@@ -259,20 +259,24 @@ def frame_quotes(o: pd.DataFrame, extra=()) -> pd.DataFrame:
     the four prices), the game's season / game_date / tip, a parsed
     snapshot_at and the fetch instant `fetch_at`. Kept: rows from a fetch
     before tip whose own stamp is before tip, with both prices. `line` is the
-    side-A number (spread_home or the total), price_a / price_b the side-A /
-    side-B prices, `coherent` the 1.00-1.15 implied-sum test.
+    side-A number (spread_home for a spread, total_line for a total, none for
+    a moneyline: kind(), so a first-half or team total reads like the full
+    game's), price_a / price_b the side-A / side-B prices, `coherent` the
+    1.00-1.15 implied-sum test.
 
     ONE copy: load() runs it on the archive (fetch_at from the purchase
-    ledger), and models/nba_total_luck.py runs it on the live odds table
-    (fetch_at = created_at, the moment the refresh pass stored the fetch), so
-    the live model and the graded cells see the same quotes. `extra` names
+    ledger), and models/nba_total_luck.py and models/nba_team_total_luck.py
+    run it on the live odds table (fetch_at = created_at, the moment the fetch
+    was stored), so the live model and the graded cells see the same quotes;
+    on team-total rows it gives what load_per_event gives. `extra` names
     further columns to keep (the live model's betslip links)."""
     o = o[o["fetch_at"].notna() & (o["snapshot_at"] < o["tip"]) & (o["fetch_at"] < o["tip"])]
     o = o.rename(columns={"bookmaker": "book"})
-    o["line"] = np.where(o["market"] == "spreads", o["spread_home"],
-                         np.where(o["market"] == "totals", o["total_line"], np.nan))
-    o["price_a"] = np.where(o["market"] == "totals", o["over_price"], o["home_price"])
-    o["price_b"] = np.where(o["market"] == "totals", o["under_price"], o["away_price"])
+    k = kind(o["market"])
+    o["line"] = np.where(k == "spread", o["spread_home"],
+                         np.where(k == "total", o["total_line"], np.nan))
+    o["price_a"] = np.where(k == "total", o["over_price"], o["home_price"])
+    o["price_b"] = np.where(k == "total", o["under_price"], o["away_price"])
     o = o[o["price_a"].notna() & o["price_b"].notna()]
     s = imp(o["price_a"]) + imp(o["price_b"])
     o["coherent"] = (s >= COHERENT[0]) & (s <= COHERENT[1])

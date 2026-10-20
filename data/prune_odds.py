@@ -148,7 +148,22 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # non-DK book by the next 6am prune; measured 2026-09-07, session 252:
 # pinnacle / bovada / fanduel at 1.00 rows per (game, market) for May 2024.
 # Nothing protected them because nothing named them. Now something does.
-PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,)
+#
+# Three LADDER sources join it (2026-10-19). The keepers below are one row per
+# (game, market, book) with no line, so a market a book quotes at many lines
+# in one fetch (team totals, alternate totals, half and quarter lines) would be
+# thinned to one or two arbitrary rungs per game: the paid NBA derivative and
+# NHL totals purchases (data/ingestors/nba_odds_history.DERIV_SOURCE,
+# nhl_derivative_odds_history.SOURCE), and the live NBA team-total feed
+# (data/ingestors/nba_team_total_odds.SOURCE), whose alternates, decision
+# fetches and closes are nba_team_total_luck's record. Literals here, pinned to
+# the writers' constants by tests/test_nba_team_total_odds.py
+# (test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name), so
+# the pruner does not import the purchase modules.
+PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
+                     "odds_api_nba_derivative_history",
+                     "odds_api_nhl_totals_history",
+                     "odds_api_nba_team_totals_live")
 
 
 def _unprotected(params: dict, table: str | None = None) -> str:
@@ -171,7 +186,8 @@ def _unprotected(params: dict, table: str | None = None) -> str:
         clauses.append(f"bookmaker NOT LIKE %({key})s")
     # Only `odds` has a `source` column (player_prop_odds does not, checked
     # against the live schema 2026-09-07); referencing it there would abort
-    # the prop prune. Live rows carry NULL and stay prunable.
+    # the prop prune. Live rows carry NULL and stay prunable; the one live
+    # feed with a marker, the NBA team totals, is a ladder (PROTECTED_SOURCES).
     if table == "odds":
         params["protected_sources"] = PROTECTED_SOURCES
         clauses.append("(source IS NULL OR source NOT IN %(protected_sources)s)")

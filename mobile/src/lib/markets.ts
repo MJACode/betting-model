@@ -49,6 +49,9 @@ export function gameMarketForModel(modelId: string): string | null {
   // 'h2h', and every price, movement and line-shop lookup reads moneyline rows.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
   if (modelId === 'nba_total_luck') return 'totals';
+  // The NBA home team total (unders): the home team's own points, stored
+  // under its own market, never the game's 'totals' rows.
+  if (modelId === 'nba_team_total_luck') return 'team_totals_home';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';
@@ -156,7 +159,8 @@ export function playerNameFromPickLabel(label: string): string | null {
 
 /**
  * PickCard title parts. Props show the bet on the primary (bold) line and
- * the player name on a caption line; game markets stay a single `pick_label`.
+ * the player name on a caption line; game markets stay a single `pick_label`,
+ * except a team total, which shows the part of the label after its dash.
  *
  * Secondary is set only when `playerNameFromPickLabel` returns a name that
  * is not a game-total matchup. `_build_pick_label` writes totals as
@@ -172,6 +176,14 @@ export function splitPickTitle(pick: { pick_label: string }): {
   secondary: string | null;
 } {
   const label = pick.pick_label ?? '';
+  // A team total ("BOS @ MIL — MIL Team Total Under 115.5"): the bold line is
+  // the bet, quoted from the label after its dash. The card's header already
+  // shows the matchup, and the whole label is wider than a phone's title line,
+  // so it clipped the team whose total it is.
+  const dash = label.indexOf(' — ');
+  if (dash > 0 && label.slice(dash + 3).includes(' Team Total ')) {
+    return { primary: label.slice(dash + 3).trim(), secondary: null };
+  }
   const player = playerNameFromPickLabel(label);
   if (!player || /\s(?:vs|@)\s/.test(player)) {
     return { primary: label, secondary: null };
@@ -207,6 +219,8 @@ export function marketClassForModel(modelId: string): MarketClass {
   // neither substring.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
   if (modelId === 'nba_total_luck') return 'game_total';
+  // One team's points move with the game total, so the nearest class.
+  if (modelId === 'nba_team_total_luck') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1328,7 +1342,10 @@ export function formatSideLine(
 /** Line value (total or spread) from a snapshot, if the market carries one. */
 export function lineFromSnapshot(snap: PricedSnapshot, market: string | null): number | null {
   if (market == null) return null;
-  if (market.startsWith('totals')) return numOrNull(snap.total_line);
+  // A team total's number is stored in total_line too (team_totals_home/_away).
+  if (market.startsWith('totals') || market.startsWith('team_totals')) {
+    return numOrNull(snap.total_line);
+  }
   if (market.startsWith('spreads')) return numOrNull(snap.spread_home);
   return numOrNull(snap.line); // prop markets
 }
@@ -1464,10 +1481,19 @@ export function computeMovement(
  * (scripts/nba_prop_projection_card.py pick_rows): decision_book always set,
  * scored_line the main line that book quotes. So it is here too, on either
  * side, since it bets overs as well as unders.
+ *
+ * The two NBA totals cards (scripts/nba_total_luck_card.py, the full-game
+ * overs; scripts/nba_team_total_luck_card.py, the home team-total unders)
+ * store the deciding book's own number too, and leave line_book empty
+ * whenever DraftKings hung the same number. Read as DraftKings' line, a move
+ * at the deciding book showed as a price move in the bettor's favour
+ * (designer review, 2026-10-20).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_prop_market',
   'nba_prop_projection',
+  'nba_team_total_luck',
+  'nba_total_luck',
   'nfl_prop_market',
   'wnba_prop_market',
 ];
@@ -1731,12 +1757,14 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // The NBA projection model (scripts/nba_prop_projection_card.py) posts in
   // the same window, the same way, and voids the same way, over or under.
   // The NBA totals overs card (scripts/nba_total_luck_card.py) posts each game
-  // once, about an hour before tip, and is a game line: nothing to void.
+  // once, about an hour before tip, and is a game line: nothing to void. The
+  // NBA home team-total unders post the same way, in the same hour.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
     pick.model_id === 'nba_total_luck' ||
+    pick.model_id === 'nba_team_total_luck' ||
     nbaPosted
   ) {
     return {

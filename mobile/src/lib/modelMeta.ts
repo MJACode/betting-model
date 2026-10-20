@@ -420,6 +420,22 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA home team total points, unders only (models/nba_team_total_luck.py).
+  // The same luck read as nba_total_luck, on one team: when the away
+  // defence's opponents have shot luckily enough that its plain rating
+  // overstates the home team's score by at least 2 points, it bets the home
+  // team's own total under, once, about an hour before tip, at the best
+  // price. It settles on the home team's final score, overtime included,
+  // never the game total. The label is "BOS @ MIL — MIL Team Total Under
+  // 115.5". A game line, not a picker slot.
+  nba_team_total_luck: {
+    // Market plus method, as 'O/U Luck': TT is the team total.
+    shortLabel: 'TT Luck',
+    longLabel: 'Home Team Total (Unders)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -777,10 +793,58 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   nba_prop_projection:
     'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
     'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
+  // The market's fair chance plus the walk-forward uplift (+0.1022 for
+  // 2026-27): on the 349 graded bets that is their own 62% win rate, at
+  // prices implying 53%. docs/thresholds.md plans on +7.7%, not +16.6%.
+  nba_team_total_luck:
+    'What our model says is the chance this side hits: the market’s fair chance plus about 10 points, ' +
+    'the extra these bets won over the last three NBA seasons (62% won, at prices implying 53%). Read it ' +
+    'as an upper bound: plan on a return nearer 8% than the 17% those seasons made.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
   return PROBABILITY_NOTE[modelId] ?? 'What our model says is the chance this side hits.';
+}
+
+// The NBA models that post each game once, about an hour before tip: the
+// full-game totals overs (scripts/nba_total_luck_card.py, 60-66 minutes out),
+// the home team-total unders (scripts/nba_team_total_luck_card.py, 45-66) and
+// the two prop models (scripts/nba_prop_market_card.py,
+// nba_prop_projection_card.py, 45-57). Their page is empty most of the day,
+// and the morning-run copy sent people back at the wrong time.
+const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
+  'nba_prop_market',
+  'nba_prop_projection',
+  'nba_team_total_luck',
+  'nba_total_luck',
+];
+
+export interface ModelPageTiming {
+  /** The tooltip beside "Today's potential picks". */
+  title: string;
+  body: string;
+  /** The empty state's subtitle: when the page will change. */
+  empty: string;
+}
+
+/** When a model's page fills, said on its own page. */
+export function modelPageTiming(modelId: string): ModelPageTiming {
+  if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {
+    return {
+      title: 'Posted once per game',
+      body:
+        'This model posts each game once, about an hour before tip-off, and never re-prices it. ' +
+        'A bet stays at the line and price it posted at.',
+      empty: 'This model posts each game about an hour before tip-off. Nothing has posted yet for today’s slate.',
+    };
+  }
+  return {
+    title: 'Picks lock for the day',
+    body:
+      "A pick locks the first time this model scores it today and never changes after that — it can't flip between BET and AVOID as lines move.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm, but only newly-priced games get scored on later refreshes.",
+    empty:
+      "This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab.",
+  };
 }
 
 /**

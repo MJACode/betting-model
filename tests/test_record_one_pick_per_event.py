@@ -479,9 +479,12 @@ def _node(tmp_path: Path, script: str) -> str:
 def test_the_team_record_counts_the_kept_copy_once(tmp_path: Path):
     """Run the real teamPickRecords: one NCAAF game under an Eastern and a UTC
     date, the same bet on both, the extra copy marked. One bet counts."""
+    # markets.ts (and its clvBet.ts): teamDetail reads gameMarketForModel to
+    # keep team-total picks out of the team's tiles.
     _copy_for_node(tmp_path, ("teamDetail.ts", "format.ts", "decisionPrice.ts",
                               "thresholds.ts", "thresholds.generated.ts",
-                              "discordPublish.ts", "teamStatCatalog.ts", "teamBoard.ts"))
+                              "discordPublish.ts", "teamStatCatalog.ts", "teamBoard.ts",
+                              "markets.ts", "clvBet.ts"))
     script = """
 import { teamPickRecords } from './teamDetail.ts';
 const games = [

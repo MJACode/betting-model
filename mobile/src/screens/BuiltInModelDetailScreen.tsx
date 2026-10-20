@@ -23,7 +23,7 @@ import {
   formatSigned,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
-import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
+import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
@@ -189,10 +189,8 @@ export function BuiltInModelDetailScreen() {
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeader}>Today's potential picks</Text>
               <InfoTooltip
-                title="Picks lock for the day"
-                body={
-                  "A pick locks the first time this model scores it today and never changes after that — it can't flip between BET and AVOID as lines move.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm, but only newly-priced games get scored on later refreshes."
-                }
+                title={modelPageTiming(modelId).title}
+                body={modelPageTiming(modelId).body}
                 accessibilityLabel="About today's potential picks"
               />
             </View>
@@ -217,7 +215,7 @@ export function BuiltInModelDetailScreen() {
           ) : (
             <EmptyState
               title="No live BET picks right now"
-              subtitle="This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab."
+              subtitle={modelPageTiming(modelId).empty}
             />
           )
         }

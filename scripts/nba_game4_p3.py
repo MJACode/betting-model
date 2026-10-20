@@ -81,9 +81,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from scripts import nba_game2_luck as L  # noqa: E402
 from scripts import nba_game2_projection as P  # noqa: E402
-from scripts import nba_game4_p2 as P2  # noqa: E402
 from scripts import nba_game_harness as H  # noqa: E402
 from scripts.nba_game2_market import team_total_dist  # noqa: E402
+from models import nba_book_numbers as NB  # noqa: E402
 
 RESULTS = Path(os.environ.get("NBA_GAME2_RESULTS",
                               "C:/Users/micha/AppData/Local/Temp/nba_game_edge/results"))
@@ -479,8 +479,9 @@ def synthetic_world(seed: int = 0, prior=(2021, 2022, 2023, 2024), graded=(2025,
 def decision_quotes(pe: pd.DataFrame, times: pd.DataFrame) -> pd.DataFrame:
     """The quotes both families see at T: one number per book, a deciding
     book's alternate line never bet, never a blind bet and never the market's
-    fair line (P2's rule, section 8.3, 2026-10-18)."""
-    return P2.visible_numbers(pe, times)
+    fair line (P2's rule, section 8.3, 2026-10-18; models/nba_book_numbers.py,
+    the one copy the live nba_team_total_luck also reads)."""
+    return NB.visible_numbers(pe, times)
 
 
 def run_world(world: dict, n_placebo: int = 2, min_prior: int = MIN_PRIOR_GAMES) -> dict:

@@ -66,9 +66,11 @@ def test_the_plan_creates_no_table(monkeypatch):
 
 def _tick(monkeypatch, due, result="ok"):
     import scheduler
-    import scripts.nba_total_luck_window as win
+    import scripts.nba_pregame_window as pw
     ran, published = [], []
-    monkeypatch.setattr(win, "plan_tick", lambda now=None: due)
+    # One planning read for both NBA totals models (scripts/nba_pregame_window);
+    # nba_team_total_luck has nothing due here.
+    monkeypatch.setattr(pw, "plan_tick", lambda now=None: pw.PregamePlan(total_luck=due))
     monkeypatch.setattr(scheduler, "_run",
                         lambda cmd, label, **kw: ran.append((label, cmd, kw)) or
                         (result if label == "nba-total-luck-fetch" else "ok"))
@@ -93,9 +95,9 @@ def test_a_tick_fetches_then_decides_then_publishes_each_step_bounded(monkeypatc
 
 def test_a_failed_step_is_recorded_as_an_error_after_publishing(monkeypatch):
     import scheduler
-    import scripts.nba_total_luck_window as win
+    import scripts.nba_pregame_window as pw
     published = []
-    monkeypatch.setattr(win, "plan_tick", lambda now=None: ["G1"])
+    monkeypatch.setattr(pw, "plan_tick", lambda now=None: pw.PregamePlan(total_luck=["G1"]))
     monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw:
                         "timeout" if label == "nba-total-luck-fetch" else "ok")
     monkeypatch.setattr(scheduler, "_publish_new_signals", published.append)

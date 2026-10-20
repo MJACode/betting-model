@@ -190,6 +190,13 @@ function mkPick(over: Partial<Pick>): Pick {
     nbaTotals?.kind === 'posted' && Boolean(nbaTotals?.note.startsWith('Posted once and never re-priced')),
     nbaTotals?.note);
   check('NBA totals overs note has no void line', Boolean(nbaTotals && !nbaTotals.note.includes('Void')));
+  // The NBA home team-total unders post the same way, in the same hour.
+  const nbaTeamTotal = pickTimingInfo(mkPick({ sport: 'NBA', model_id: 'nba_team_total_luck', created_at: NOW }));
+  check('NBA home team-total unders take the posted-once note',
+    nbaTeamTotal?.kind === 'posted' && Boolean(nbaTeamTotal?.note.startsWith('Posted once and never re-priced')),
+    nbaTeamTotal?.note);
+  check('NBA home team-total unders note has no void line',
+    Boolean(nbaTeamTotal && !nbaTeamTotal.note.includes('Void')));
 
   const yesterday = pickTimingInfo(mkPick({ created_at: THREE_DAYS_AGO }));
   check(
@@ -278,6 +285,10 @@ function mkPick(over: Partial<Pick>): Pick {
 // line shop read the game's totals rows, never its moneyline rows.
 check('an nba_total_luck pick reads the totals market', gameMarketForModel('nba_total_luck') === 'totals',
   String(gameMarketForModel('nba_total_luck')));
+// The home team-total unders read the home team's own team-total rows.
+check('an nba_team_total_luck pick reads the home team-total market',
+  gameMarketForModel('nba_team_total_luck') === 'team_totals_home',
+  String(gameMarketForModel('nba_team_total_luck')));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 if (failures > 0) process.exit(1);

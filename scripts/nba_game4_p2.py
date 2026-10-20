@@ -32,7 +32,8 @@ THE TWO RULES
                at T (H.market_fair -> H.fair_offers); the first search's normal
                model is not used.
 
-WHICH QUOTE IS A BOOK'S NUMBER (ladders)
+WHICH QUOTE IS A BOOK'S NUMBER (ladders; the main rung and the ladder rule are
+models/nba_book_numbers.py, ONE copy shared with the live nba_team_total_luck)
   Two deciding books (betrivers, betparx) hang 5-7 team-total rungs in one
   purchase, and three (betrivers, betparx, hardrockbet) list single first-half
   and first-quarter rungs 2+ points off every other book at lopsided prices.
@@ -120,11 +121,14 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from scripts import nba_game_harness as H  # noqa: E402
-from scripts.nba_derivative_lab import OFF_MED_PTS  # noqa: E402
 from scripts.nba_game2_market import (  # noqa: E402
     MIN_PRIOR_GAMES, PLACEBO_RUNS, go_guard, population_rows, results_dir, team_total_resid,
     write_cells)
 from scripts.nba_game_market_lab import gap_candidates, sharp_pairs  # noqa: E402
+# The main-number rule lives in ONE place, shared with the live model
+# nba_team_total_luck; the names stay importable from here for P1 and P3.
+from models.nba_book_numbers import (  # noqa: E402,F401
+    RUNG_KEY, _one_rung, even_gap, ladder_mask, main_rungs, visible_numbers)
 
 FAMILY = "P2"
 RULES = ("same_number", "off_number")
@@ -144,7 +148,6 @@ EXPECTED_CELLS = 256
 SMOKE_SEASONS = (2021,)
 FULL_SEASONS = (2021, 2022, 2023, 2024, 2025, 2026)
 NEED_DERIV = (2025, 2026)
-RUNG_KEY = ["game_id", "market", "book", "fetch_at"]
 OFFER_COLS = ["game_id", "season", "game_date", "tip", "market", "book", "snapshot_at", "fetch_at",
               "T", "line", "coherent", "side", "price"]
 
@@ -180,24 +183,6 @@ def cell_plan() -> list[tuple]:
 
 # ── which quote is a book's number ──────────────────────────────────────────
 
-def even_gap(q: pd.DataFrame) -> np.ndarray:
-    return np.abs(H.imp(q["price_a"]) - H.imp(q["price_b"]))
-
-
-def _one_rung(x: pd.DataFrame, first: list[str]) -> pd.DataFrame:
-    x = x.assign(_inc=~x["coherent"].astype(bool), _eg=even_gap(x), _ln=x["line"].fillna(0.0))
-    x = x.sort_values(RUNG_KEY + first + ["_inc", "_eg", "_ln"], kind="mergesort")
-    drop = ["_inc", "_eg", "_ln"] + first
-    return x.drop_duplicates(RUNG_KEY).drop(columns=drop).reset_index(drop=True)
-
-
-def main_rungs(q: pd.DataFrame) -> pd.DataFrame:
-    """One quote per (game, market, book, fetch): the rung whose two prices are
-    closest to even (the first search's `main`), coherent first, ties to the
-    lower number."""
-    return _one_rung(q, [])
-
-
 def rungs_at_pinnacle(q: pd.DataFrame) -> pd.DataFrame:
     """The same-number rule's quote per (game, market, book, fetch): the rung at
     Pinnacle's main number in that fetch when the book hangs one, else its
@@ -208,34 +193,6 @@ def rungs_at_pinnacle(q: pd.DataFrame) -> pd.DataFrame:
     at = x["coherent"].astype(bool) & np.isclose(x["line"].to_numpy(float),
                                                  x["_pl"].to_numpy(float))
     return _one_rung(x.assign(_away=~at).drop(columns="_pl"), ["_away"])
-
-
-def ladder_mask(vis: pd.DataFrame, vis_main: pd.DataFrame) -> np.ndarray:
-    """True for a deciding book's first-half, first-quarter or team-total spread
-    or total more than OFF_MED_PTS from the median of the deciding books' main
-    numbers at T (vis_main): an alternate rung, not the number it hangs."""
-    def deriv(v):
-        return (H.scope(v["market"]) != "game") & (H.kind(v["market"]) != "ml")
-    if vis.empty:
-        return np.zeros(0, bool)
-    m = vis_main[deriv(vis_main) & vis_main["book"].isin(H.BETTABLE).to_numpy()
-                 & vis_main["coherent"].to_numpy(bool)]
-    med = m.groupby(["game_id", "market"])["line"].median().rename("_med").reset_index()
-    x = vis[["game_id", "market", "book", "line"]].merge(med, on=["game_id", "market"], how="left")
-    far = (x["line"] - x["_med"]).abs().to_numpy() > OFF_MED_PTS
-    return deriv(vis) & vis["book"].isin(H.BETTABLE).to_numpy() & far
-
-
-def visible_numbers(q: pd.DataFrame, times: pd.DataFrame) -> pd.DataFrame:
-    """What a bettor sees at each game's T, one number per book: its main rung
-    in each fetch (main_rungs), the harness's newest fresh quote (H.visible),
-    and no deciding book's first-half, first-quarter or team-total alternate
-    (ladder_mask). P1 and P3 read their offers and the market's fair line
-    through this, so the three families price the same quotes (sections 8.1
-    and 8.3, 2026-10-18). H.visible alone keeps whichever rung of a ladder is
-    last in the file."""
-    vm = H.visible(main_rungs(q), times)
-    return vm[~ladder_mask(vm, vm)].reset_index(drop=True)
 
 
 @dataclass

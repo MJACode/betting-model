@@ -659,6 +659,15 @@ check(
 
 // ── splitPickTitle (PickCard two-line prop titles) ─────────────────────────
 {
+  // The header above the title already reads "BOS @ MIL".
+  const tt = splitPickTitle({ pick_label: 'BOS @ MIL — MIL Team Total Under 115.5' });
+  check(
+    'a team total titles the bet, quoted from the label',
+    tt.primary === 'MIL Team Total Under 115.5' && tt.secondary === null,
+    JSON.stringify(tt),
+  );
+}
+{
   const prop = splitPickTitle({ pick_label: 'Roquan Smith Under 9.5 Tackles' });
   check(
     'prop primary is the bet only',

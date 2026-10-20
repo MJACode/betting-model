@@ -384,7 +384,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-10-16 (mike): the NBA projection model; calibrated inside its own artifact.
          "nba_prop_projection",
          # 2026-10-17 (mike): the NBA totals overs; market-fair P(over) + its bucket's uplift.
-         "nba_total_luck"}
+         "nba_total_luck",
+         # The NBA home team-total unders; market-fair P(under) + the walk-forward uplift.
+         "nba_team_total_luck"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 
