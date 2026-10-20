@@ -151,11 +151,13 @@ def rate_cols(stat: str) -> list[str]:
 def box_from_log(log: pd.DataFrame, games: pd.DataFrame, schedule: pd.DataFrame) -> pd.DataFrame:
     """nba_player_game_adv from the ESPN box log: whole minutes, played, starter; no usage or fouls.
 
-    Regular-season games only. A log row whose team is neither side of its game is dropped.
-    (scripts/nba_prop_model_verify.adv_from_log, unchanged.)
+    Regular-season games only, whether or not the stored schedule lists the game yet
+    (models.nba_props.regular_game_ids: an NBA Cup week game the schedule has not caught up with
+    still counts). A log row whose team is neither side of its game is dropped.
+    (scripts/nba_prop_model_verify.adv_from_log, unchanged but for the unlisted games.)
     """
     g = games.set_index("game_id")
-    reg = set(schedule[schedule.game_type == "regular"].game_id)
+    reg = nb.regular_game_ids(games, schedule)
     lg = log[log.game_id.isin(reg) & log.game_id.isin(g.index)].copy()
     home, away = lg.game_id.map(g.home_team), lg.game_id.map(g.away_team)
     ok = (lg.team == home) | (lg.team == away)

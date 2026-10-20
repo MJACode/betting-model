@@ -50,15 +50,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import models.nba_prop_market as mk  # noqa: E402
+import scripts.nba_total_luck_card as tlcard  # noqa: E402
 from data.anon_readable import API_ROLES, lock_down  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from data.ddl_guard import schema_is_current  # noqa: E402
@@ -67,7 +67,6 @@ from tracking.pick_integrity import pick_problems  # noqa: E402
 
 MODEL_ID = mk.MODEL_ID
 SPORT = mk.SPORT
-_ET = ZoneInfo("America/New_York")
 
 # ── the decisions ledger ──────────────────────────────────────────────────────
 # One row per game the card has decided (models/nba_prop_market, DECIDED ONCE).
@@ -114,41 +113,37 @@ def slate(conn, now: datetime, skipped: list | None = None,
           horizon_min: int | None = None) -> dict[str, dict]:
     """REGULAR-SEASON NBA games that have not tipped and tip within the
     decision window's far end (or `horizon_min`, for the window job's look
-    ahead).
+    ahead). Both NBA prop models read this slate (the projection card and the
+    five-minute window job call it too).
 
-    The tip is the earlier of nba_schedule's and games' start
-    (models.nba_prop_market.tip_of). The game_date bound only lets the query
-    use the date: a game tipping in the next 70 minutes cannot carry an ET
-    date before yesterday or after tomorrow.
+    The totals card's slate, read with this window
+    (scripts.nba_total_luck_card.slate): the tip is the earlier of
+    nba_schedule's and games' start (models.nba_prop_market.tip_of), and a
+    game counts as regular season by models.nba_total_luck.regular_season --
+    the schedule types it 'regular', or the schedule does not list it and it
+    falls on a regular-season day. The second half is the NBA Cup week: the
+    2026-27 schedule was loaded on 2026-10-15, before the league set it, so
+    24 regular-season games were not in it and the knockout games were only
+    placeholders, while the odds feed writes each into `games` as soon as it
+    quotes it. The daily schedule refresh lists them once ESPN does
+    (data/ingestors/nba_schedule_refresh.py); this keeps them priced on a day
+    that refresh has failed. They are in the graded population: the props
+    bought for 2023-24..2025-26 cover 1,230 regular-season games a season,
+    the Cup quarterfinals and semifinals included.
 
-    Regular season only, because that is the population the rule was graded
-    on (1,230 games a season, 2023-24..2025-26). A game nba_schedule does not
-    list as 'regular' -- the NBA Cup final, play-in, playoffs, or a game the
-    schedule does not know -- is skipped and named in `skipped`.
+    NOT the play-in, the playoffs or the NBA Cup final, on purpose. Neither
+    prop model has been graded on one: the stored prop history holds 0 of
+    those 272 games of 2023-24..2025-26 (18 play-in, 251 playoff, 3 Cup
+    finals) against 3,690 of 3,690 regular-season games (player_prop_odds
+    joined to nba_schedule by game type, production, 2026-10-20). Grading them
+    means buying those props first (data/ingestors/nba_odds_history.py
+    --props over the postseason dates). Each is skipped and named in
+    `skipped`, as is a game the schedule does not list on a day that is not
+    a regular-season day.
     """
-    today = now.astimezone(_ET).date()
-    dates = [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)]
-    rows = conn.execute("""
-        SELECT g.game_id, g.home_team, g.away_team, g.game_date, g.season,
-               g.commence_time, s.commence_time, s.game_type
-        FROM games g
-        LEFT JOIN nba_schedule s ON s.game_id = g.game_id
-        WHERE g.sport = 'NBA' AND g.game_date = ANY(%s)
-    """, (dates,)).fetchall()
-    out = {}
-    horizon = now + timedelta(minutes=horizon_min if horizon_min is not None
-                              else mk.DECISION_WINDOW_MIN[1])
-    for gid, home, away, gd, season, g_ct, s_ct, game_type in rows:
-        tip = mk.tip_of(s_ct, g_ct)
-        if tip is None or tip <= now or tip > horizon:
-            continue
-        if game_type != "regular":
-            if skipped is not None:
-                skipped.append(f"{gid} ({game_type or 'not in nba_schedule'})")
-            continue
-        out[gid] = {"home": home, "away": away, "game_date": str(gd)[:10],
-                    "season": int(season) if season is not None else None, "tip": tip}
-    return out
+    return tlcard.slate(conn, now, skipped,
+                        horizon_min=horizon_min if horizon_min is not None
+                        else mk.DECISION_WINDOW_MIN[1])
 
 
 def load_roster(conn, games: dict[str, dict]) -> mk.Roster:
