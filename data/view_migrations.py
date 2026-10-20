@@ -330,8 +330,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # one gzipped row per file (scripts/nfl_research_backup.py).
     "add_nfl_research_data_backup_2026_10_12.sql",
     # 2026-10-14: units and the W-L are the same graded picks, at the price
-    # the bet was taken at. Rewrites results_snapshots and drops the column
-    # that counted a pick in the record and left it out of the units.
+    # the bet was taken at. Rewrites results_snapshots only while the old
+    # column is still there, then drops it. A later pass must not restate
+    # units: published_picks_record owns the snapshot numbers after that,
+    # and an unguarded rewrite would commit all-bets units onto posted W-L.
     # The view patch removes the one-model units zeroing. It reads the live
     # view, so it runs after every migration that owns that view.
     "recompute_snapshot_units_2026_10_14.sql",
@@ -351,10 +353,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # record pass, which must stay last because it reads the live views.
     "live_row_index_bets_only_2026_10_14.sql",
     # 2026-10-14: the published record is the picks Discord still has.
-    # Rewrites results_snapshots (W-L and stake_for units) and adds the
-    # same lock to the two app views. Reads the live view text, so it
-    # runs after every migration that owns those views, including the
-    # duplicate-row pass above. Does not post.
+    # Rewrites results_snapshots once (until clv_rule = 'standard_v2'), and
+    # that pass skips a row that already matches. CLV uses standard_v2.
+    # Adds the same lock to the two app views. Reads the live view
+    # text, so it runs after every migration that owns those views,
+    # including the duplicate-row pass above. Does not post.
     "published_picks_record_2026_10_14.sql",
     # 2026-10-16: the 03:50Z evening pass was still unfinished after the
     # deploy (the only open pipeline_runs row). Same aborted stamp as

@@ -117,6 +117,7 @@ jobs:
             tests/test_settled_record_is_immutable.py \
             tests/test_live_money_no_record_only.py \
             tests/test_published_record.py \
+            tests/test_snapshot_pass_order.py \
             tests/test_record_units_agree.py \
             tests/test_record_hero.py \
             tests/test_app_crash_log.py \

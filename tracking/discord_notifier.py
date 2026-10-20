@@ -2042,6 +2042,7 @@ def notify_discord_free_pick(target_date: str | None = None,
 # CLV is the one figure in-play picks stay out of, and p.is_live is selected so
 # that exclusion is EXPLICIT rather than resting on clv_pct happening to be
 # NULL. An in-play price has no meaningful closing line to be measured against.
+# The selected clv_pct is already NULL unless clv_method is standard_v2.
 #
 # Retired models need no clause: the JOIN drops them, because a retirement
 # deletes the model_action_thresholds row.
@@ -2234,6 +2235,8 @@ def _tally(rows: list[tuple]) -> dict:
         # has no meaningful close to be measured against. _capture_clv already
         # skips them at source, so this is belt-and-braces rather than the only
         # guard -- but a figure this easy to misread deserves both.
+        # Column 6 is already NULL unless clv_method is standard_v2. Columns
+        # 8 and 9 are the posted-stake units and risked.
         if clv is not None and not is_live:
             t["clv_n"] += 1
             if float(clv) > 0:

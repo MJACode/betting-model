@@ -19,10 +19,13 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #943 merged origin/master `3a1891a9`; session logs keep both sides; live_row_index stays registered; snapshot rewrites stay one-shot; CLV marker is standard_v2 |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 merged origin/master `a82f517d`; session logs keep both sides; period-recap stub keeps master's allow_link assert |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #943 merged origin/master `a82f517d`; session logs keep both sides; snapshot rewrites stay one-shot; CLV marker is standard_v2 |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, migration guards use to_regclass so a missing table does not fail the file; a locked social_post_queue stays a no-op |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, NBA props: 36 opening-night props voided (mike); one bet a game and 4 a night across both NBA prop models, ranked by each model's own EV percentile (+9.7% graded, about 1,000 units a season below no limit) |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #943 merged origin/master `f94614aa`; snapshot rewrites stay one-shot; CLV marker is standard_v2; graded picks stay in the units |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 CI: narrowing migration stays ahead of the published-record pass; tail pin is published_record_units; period-recap double accepts allow_link |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #945 merged the updated #941 branch `32fe055f` (master `8e3d5262` already in it); session logs keep both sides |
@@ -143,6 +146,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Oct 13 line is its own post; the 07:24 ET restatement was ledgered after a truthy webhook response and the id was discarded (all 16 restate rows null); a recap with no id is now an error row and retries |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, one record-correction post: fixed words, Discord results then a pin attempt, X as a 265-character tweet plus a 200-character reply, ledgered before each send; the worker runs it |
 | 2026-10-14 | [2026-10](./2026-10.md) | superseded — 2026-10-14 OTA typecheck note; the 31-diagnostic count is not the current gate (see 2026-10-17) |
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, snapshot migrations stop mixing posted W-L with all-bets units: the units rewrite runs only while the old column exists; the published rewrite runs once and skips a matching row; CLV uses the record view's methods |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the app record matches the posted view: v_public_track_record already returns 8 for mlb_prop_batter_runs (the unfiltered settled count is 80); client tallies drop unpublished; detail list is the posted set; view rollup 808 / 431-375-2 |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, uq_picks_one_live_row also excludes VOID and result NO_ACTION (1 VOID live BET, pick 2476480, plus 8 NO_ACTION live BETs hold lanes today); guard matches signal_type = 'BET' and the exclusions; lock_timeout inside the DO; health check compares the full indexdef. Migration not applied |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, uq_picks_one_live_row narrowed to standing BETs so an AVOID no longer drops the later live BET; void notice skips a sideless lock that a posted sibling still holds; health check reads both index definitions. Migration not applied |
