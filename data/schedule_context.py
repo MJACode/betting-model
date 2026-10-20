@@ -137,6 +137,10 @@ RULES: dict[str, Rules] = {
 # days. Dormant until March.
 SCORER_GATED_SPORTS: tuple[str, ...] = ("NCAAF", "WNBA", "UFC")
 
+# The reason every gate writes when the schedule itself cannot be read: the
+# gates fail CLOSED (no decision this pass), and say so.
+SCHEDULE_UNREADABLE = "schedule check failed; not deciding this pass"
+
 # A team-day window this wide around a game's date is the game itself.
 _SAME_EVENT_DAYS = 1
 

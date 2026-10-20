@@ -83,7 +83,7 @@ from data.live_quote_guard import quote_predates_score
 from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
 from data.name_match import resolve_feed_name
-from data.schedule_context import SCORER_GATED_SPORTS, ScheduleBook
+from data.schedule_context import SCHEDULE_UNREADABLE, SCORER_GATED_SPORTS, ScheduleBook
 
 # Max minutes two books' opening snapshots may be apart and still count as
 # "simultaneous" for the NCAAF cross-book opener rule. A refresh pass is ~60
@@ -1516,9 +1516,6 @@ def _apply_schedule_hold(picks: list[dict], reason: str) -> list[dict]:
         else:
             p.update(_downgrade(p, reason))
     return picks
-
-
-SCHEDULE_UNREADABLE = "schedule check failed; not deciding this pass"
 
 
 def _schedule_hold(books: dict, sport: str, game_id: str, game_date: str,

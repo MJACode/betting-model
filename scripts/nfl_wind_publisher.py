@@ -736,9 +736,6 @@ def _fmt_spread(line: float) -> str:
 # the first tick after the games are scored decides it. Read from the
 # DATABASE schedule (nflverse, daily), never the frozen nfl/data/games.csv.
 
-SCHEDULE_UNREADABLE = "schedule check failed; not deciding this pass"
-
-
 def _schedule_holds(conn, games: dict[str, dict],
                     now: datetime | None = None) -> dict[str, str]:
     """{game_id: reason} for the games a pre-game NFL rule may not decide yet.
@@ -749,7 +746,7 @@ def _schedule_holds(conn, games: dict[str, dict],
     nothing)."""
     if not games:
         return {}
-    from data.schedule_context import ScheduleBook
+    from data.schedule_context import SCHEDULE_UNREADABLE, ScheduleBook
     now = now or datetime.now(timezone.utc)
     try:
         book = ScheduleBook.load(conn, "NFL", [(gid, g["game_date"])
