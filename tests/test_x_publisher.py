@@ -672,7 +672,7 @@ def test_x_posts_without_reading_discords_free_pick(monkeypatch):
 
     posted = []
 
-    def _deliver(text, dry_run=False, reply_to=None):
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
         posted.append(text)
         return "id1", False
 
@@ -796,7 +796,7 @@ def _wire_slate(monkeypatch, slate, already=None):
     monkeypatch.setattr(xp, "_ledger", _remember)
     posted = []
 
-    def _deliver(text, dry_run=False, reply_to=None):
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
         posted.append(text)
         return f"id{len(posted)}", False
 
@@ -966,7 +966,7 @@ def test_a_rate_limit_stops_the_slate_and_does_not_ledger_the_miss(monkeypatch):
     posted, ledgered = _wire_slate(monkeypatch, slate)
     calls = {"n": 0}
 
-    def _deliver(text, dry_run=False, reply_to=None):
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
         calls["n"] += 1
         posted.append(text)
         # The first pick posts. The second is the one X refuses. The third
