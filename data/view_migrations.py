@@ -419,6 +419,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Not the model record. Does not rewrite picks, snapshots, or the
     # published views. Returns before ALTER once the tables are locked down.
     "add_capper_picks_2026_10_20.sql",
+    # 2026-10-20 (mike: "We should absolutely always know the goalie matchup
+    # before making a bet as well."): who ESPN and DailyFaceoff say will start
+    # in goal, one row per change. The NHL goalie gate reads its latest rows;
+    # until this lands the gate fails closed and no NHL model bets. One new
+    # table, anon locked out. Does not rewrite the record views or picks.
+    "add_nhl_goalie_designations_2026_10_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
