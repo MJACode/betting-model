@@ -263,41 +263,6 @@ def score_game(conn: DBConnection,
                dry_run: bool = False,
                commence_time: str | None = None,
                write: bool = True) -> list[dict]:
-    """Score one game with one model (`_score_one_model`, below), and hold
-    every NHL model to the goalie rule.
-
-    NO NHL BET OF ANY KIND UNTIL BOTH STARTING GOALIES ARE CONFIRMED (mike,
-    2026-10-20: "We should absolutely always know the goalie matchup before
-    making a bet as well."). The two side models already decide only through
-    _nhl_game_day_reason, which reads the same gate; this is the sport-level
-    guard for every other NHL model scored here -- nhl_puckline, and any kind
-    added later -- so none can bypass it by having a different artifact kind.
-    An NHL model's rows are built unwritten, a BET on a game whose matchup is
-    not known becomes NONE with the reason (models/nhl_goalie_gate.py), and
-    only then are they written. Every other sport is called exactly as before.
-    """
-    sport = MODELS[model_id][0]
-    if sport != NHL_GOALIE_SPORT:
-        return _score_one_model(conn, game_id, model_id, features, bankroll,
-                                dry_run=dry_run, commence_time=commence_time,
-                                write=write)
-    picks = _score_one_model(conn, game_id, model_id, features, bankroll,
-                             dry_run=dry_run, commence_time=commence_time,
-                             write=False)
-    _apply_nhl_goalie_gate(conn, game_id, picks)
-    if picks and not dry_run and write:
-        _insert_picks(conn, picks)
-    return picks
-
-
-def _score_one_model(conn: DBConnection,
-                     game_id: str,
-                     model_id: str,
-                     features: dict,
-                     bankroll: float,
-                     dry_run: bool = False,
-                     commence_time: str | None = None,
-                     write: bool = True) -> list[dict]:
     """
     Score one game with one model. Generates 0, 1, or 2 pick rows
     (BET and/or AVOID signals).
@@ -308,6 +273,16 @@ def _score_one_model(conn: DBConnection,
     check them against the game's other picks first (_apply_side_conflicts).
     Only the stock path and the NHL 3-way path honour it, which covers every
     model in side_checked_models(); run_scorer passes it for those alone.
+
+    NO NHL BET OF ANY KIND UNTIL BOTH STARTING GOALIES ARE CONFIRMED (mike,
+    2026-10-20: "We should absolutely always know the goalie matchup before
+    making a bet as well."). Both NHL paths here end in the sport-level
+    goalie guard, _apply_nhl_goalie_gate, just before their rows are written:
+    the stock path, which every artifact kind falls through to (nhl_puckline,
+    the anchored moneyline, any kind added later), and the 3-way path. A BET
+    on a game whose matchup is not known becomes NONE with the reason
+    (models/nhl_goalie_gate.py). Anything that reached _insert_picks another
+    way meets the same gate there.
     """
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
@@ -657,6 +632,10 @@ def _score_one_model(conn: DBConnection,
 
     _apply_game_market_gate(conn, picks, market, odds, commence_time,
                             dry_run=dry_run)
+
+    # The goalie rule, for every NHL model by sport (docstring).
+    if sport == NHL_GOALIE_SPORT:
+        _apply_nhl_goalie_gate(conn, game_id, picks)
 
     # Write to DB
     if picks and not dry_run and write:
@@ -1203,6 +1182,9 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
         _apply_no_signal(picks, reason)
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
+    # The sport-level goalie guard (score_game's docstring). The reason above
+    # already holds this model to it; this keeps every NHL path the same.
+    _apply_nhl_goalie_gate(conn, game_id, picks)
     for p in picks:
         p.update(_get_public_betting(conn, game_id, "h2h_3way", p["pick_side"]))
         p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
