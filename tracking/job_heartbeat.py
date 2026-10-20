@@ -80,6 +80,9 @@ MAX_SILENCE: dict = {
     # Every 5 minutes, 24x7, and it beats on the idle ticks too (it returns
     # after one read when no NBA game is near), so silence means stopped.
     "nba_prop_window": 30,
+    # Every minute, 24x7, and it beats on the idle ticks too (one read, then
+    # return), so 20 minutes is 20 missed ticks: a stopped job, not a quiet one.
+    "nba_total_luck_window": 20,
 }
 
 

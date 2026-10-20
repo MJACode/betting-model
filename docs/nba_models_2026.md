@@ -623,3 +623,456 @@ stricter; it is still 0 of 422.
 **What comes next is 2026-27.** It is a season nobody has looked at, with every price move kept
 from opening night (#985). The grids above, and F4's overs in particular, can be re-graded on it
 with the same harness and no new choices.
+
+### 6.7 The house standard, applied to the same 422 cells (2026-10-17, after §6.6 was read)
+
+mike, 2026-10-17: *"Find it … edge like we have with other sports."* The bars in §1 and §6.4
+were stricter than any model shipped in this repo was held to. The newest shipped game-market
+model, `nhl_moneyline` (`docs/thresholds.md`, 2026-10-13/15), went live on this:
+
+- a walk-forward over its graded seasons pooled;
+- a 95% interval above zero;
+- seasons mostly positive (its newest season was −3.0%);
+- beating the blind bet on the same side;
+- a neighbourhood, not a peak;
+- closing-line value reported, not a bar.
+
+It had no separate one-season confirmation and no correction across the cells searched.
+
+**This section applies that standard to all 422 cells, once, as one fixed list. It is applied
+AFTER the §6.6 results were read, and it is stated before any number under it is computed.**
+The labs are re-run unchanged, except that each cell also reports its pooled numbers, and its
+bets are written out. A cell passes when all of these hold:
+
+1. **Pooled walk-forward:** every graded season (2021-22 → 2025-26, or the family's own
+   seasons per §6.3) together, ≥ 200 bets.
+2. **The pooled whole-day bootstrap 95% interval** of ROI is above zero (4,000 resamples, seed 7).
+3. **Seasons mostly positive:** of the graded seasons with ≥ 30 bets, all but at most one are
+   positive.
+4. **Beats the blind same real side**, pooled, over its own priced population (bar 9 as amended
+   in §6.4).
+5. **Neighbourhood:** every existing neighbour on the cut axis is positive, pooled.
+6. **Placebo:** above the 95th percentile of its shuffles (bar 10).
+
+**Reported beside each passing cell, not as bars:**
+
+- pooled closing-line value;
+- the blind same side's closing-line value at the same point (to tell a cell's own late drift
+  from the market's);
+- DraftKings alone;
+- the count of cells expected to clear bar 2 by chance (422 × 0.025 ≈ 10.5, before
+  correlation).
+
+A cell that passes is built LIVE (CLAUDE.md §2) and judged on its live record.
+
+**Results under the house standard (2026-10-17).** Every lab was re-run unchanged with pooled
+numbers and its bets written out (`NBA_GAME2_BETS`). `python -m scripts.nba_game2_verdict
+--house`: **4 of 422 cells pass, all one effect: F4's overs.**
+
+| Cell | Bets | Units | ROI | 95% interval | Seasons positive | Closing value (cell / blind over) |
+|---|---|---|---|---|---|---|
+| over, morning (A), gap ≥ 3 | 507 | +57.0 | +10.3% | +2.2 .. +18.5 | 5 of 5 | −2.35% / −2.80% |
+| over, morning (A), gap ≥ 4 | 210 | +29.9 | +13.1% | +0.3 .. +25.7 | 4 of 4 | −2.34% / −2.80% |
+| over, 60–180 min (C), gap ≥ 3 | 508 | +55.6 | +10.1% | +2.0 .. +18.3 | 5 of 5 | −2.23% / −2.41% |
+| over, 60–180 min (C), gap ≥ 4 | 210 | +31.2 | +13.6% | +1.3 .. +25.6 | 4 of 4 | −2.23% / −2.41% |
+
+- **How to read it.** Only 6 cells clear the 95% interval at all, against about 10.6 expected
+  by chance before correlation. Two of the 6 are one-bet artifacts and the other four are this
+  one effect. So the interval is not what makes it credible.
+- **What does make it credible is the shape:**
+  - The return rises with the luck gap at every decision time: +3.8 / +5.7 / +10.3 / +13.1% at
+    A, +3.7 / +5.9 / +10.1 / +13.6% at C.
+  - Every graded season is positive at gap ≥ 3.
+  - It works for overs only (unders are mixed).
+  - The mechanism is published: opponents' three-point shooting is mostly luck.
+  - The neighbours are positive, though not themselves significant: gap ≥ 2 spans zero. That is a
+    neighbourhood by the house definition and a ridge by a stricter one.
+- **Closing-line value is not a warning sign.** A line that never moves scores about −2 to −4.5%
+  by this measure (the bookmaker's margin). These bets fare slightly better than blind overs at
+  the same moment.
+- **The profit survives the market's own move.** The diagnostic at D (45–75 minutes, not
+  registered) at gap ≥ 3: 506 bets, +53.6 units, +9.7%, interval +1.6 .. +18.1, 5 of 5 seasons.
+- **Robustness of the cell that ships (C, gap ≥ 3):**
+  - Without single-book outlier prices: +46.8 units.
+  - Without BetRivers (+26.5 units on 78 bets): 430 bets, +29.1 units, +6.2%.
+  - DraftKings alone: +8.2% on 425 bets over the choosing seasons, +7.0% in 2025-26.
+  - Still offered at the next stored fetch: 27.8% of bets.
+  - Prices −115 to +100, median −110. 290-214-4.
+- **The other near misses fail the house standard:**
+  - F5 home spreads (3–6 h, gap ≥ 3): 512 bets, +8.1%, interval −0.4 .. +16.5.
+  - F6c against eliminated teams: 371 bets, +6.3%, interval −3.5 .. +16.2, 3 of 5 seasons.
+
+**Shipped LIVE (CLAUDE.md §2):** F4 overs at C, gap ≥ 3. It is judged on its live record.
+
+## 7. Third search: in-game spread, moneyline and total (pre-registered 2026-10-17, before any grid)
+
+mike, 2026-10-17: *"Find it."* Every pre-game idea the outside sweep found repeats a closed family
+or rests on weak evidence (ranking: build machine,
+`C:/Users/micha/AppData/Local/Temp/nba_game_edge/scout3_ranked.md`).
+
+The new information is in-game. The archive already holds **380,349 in-play quotes** on 7,213
+regular-season games, 2020-21 → 2025-26 (Pinnacle on 7,156 of them). They come from the hourly
+fetches that land after tip, about two per game, and no cell has ever used them. The in-play
+models elsewhere in this repo were judged on calibration and lost (`docs/live_betting.md`), so
+this search must first show **information beyond Pinnacle's own live price at the same moment**.
+Only then does it run a betting grid.
+
+### 7.1 Data rules
+
+- **Game state at a quote** (score, period, clock, fouls, shooting so far) comes from the ESPN
+  play-by-play wall clock (`nba_pbp`) at the quote's stamp, never from `games.commence_time`.
+  On 17 games in late October 2025 the first play came more than 60 minutes after the listed
+  tip.
+- **Step 0, the staleness gate (free).** Test whether points scored in the 60–120 seconds before
+  a quote's stamp predict that quote's result, against Pinnacle's live no-vig price.
+  - If they do, a quote is used only when no point was scored since the book's last update, and
+    only when Pinnacle quoted within 60 seconds of it. This is the NCAAF in-play rule,
+    `scripts/ncaaf_inplay_history_backtest.py`.
+  - The gate's result is recorded here before any information test runs.
+  - **How "predict" is scored (2026-10-17, fixed before the test ran;
+    `scripts/nba_ingame_staleness.py`).** Rows: in-play quotes by the play-by-play clock, all
+    six seasons, with a Pinnacle quote on the same game and market in the same purchase,
+    stamped within 60 seconds. The result is side A (home or over) at the quote's own number on
+    the full-game score; pushes are left out. The benchmark is Pinnacle's no-vig probability;
+    for spreads and totals only quotes at Pinnacle's own number are used. The predictor is the
+    points scored in the 60–120 seconds before the stamp, signed toward side A (home minus
+    away; both teams for a total). The statistic is the slope of (result − benchmark) on those
+    points, with a whole-day bootstrap 95% interval, per market and pooled. Four panels: every
+    book against Pinnacle (the test as written); Pinnacle alone; the 8 deciding books alone;
+    the 8 deciding books against their own no-vig price. The rule is imposed when any panel's
+    interval, in any market or pooled, lies wholly above zero. An interval wholly below zero is
+    over-reaction, not staleness, and imposes nothing. When imposed, the rule covers the
+    deciding quote and the Pinnacle quote it is measured against: no point scored between each
+    one's stamp and the moment the feed served it.
+  - **Result (2026-10-17): the gate fires, so the rule is imposed.**
+    `python -m scripts.nba_ingame_staleness` ran on 374,827 in-play quotes built by
+    `scripts/nba_ingame_data.py` (2020-21 → 2025-26). It left out 34 games whose play clock is
+    broken; in 13 of them, from late October 2025, ESPN stamped a whole half about 24 hours off.
+    - Points scored 60–120 seconds before a quote's stamp predict its result against Pinnacle's
+      live no-vig price, in every market and every season.
+    - Across every book the slope is +0.0159 per point (95% interval +0.0131 to +0.0189, 136,743
+      quotes): moneyline +0.0194, spread +0.0196, total +0.0110.
+    - On Pinnacle's own quotes it is +0.0154 (+0.0128 to +0.0179).
+    - So every in-game family uses a quote only under two conditions. No point was scored between
+      its stamp and the moment the feed served it, for the deciding quote and for its Pinnacle
+      quote. And Pinnacle quoted within 60 seconds.
+    - After the rule, the games per season with a usable deciding-book quote are: Q1–Q2 567–782;
+      halftime 114–299; Q3 262–483; Q4 with 6+ minutes left 170–359.
+  - **What the diagnostics add (2026-10-17; not part of the gate; `--extra`).**
+    - The rule does not remove the effect. On quotes that pass it, the same test gives +0.0170
+      (+0.0134 to +0.0205).
+    - The lag is in Pinnacle's stored live price. Points from 5–10 minutes before the stamp
+      still predict against it (moneyline +0.0106); points from earlier in the game barely do
+      (+0.0016).
+    - On the same moneyline quotes, Pinnacle's no-vig predicts worse than the deciding book's
+      own no-vig: log loss +0.029 (+0.025 to +0.033), worse in every season.
+    - The total shows the same split: +0.0134 against Pinnacle's own price, +0.0024 against the
+      deciding books' own. A total sits near even money, where the no-vig method cannot cause it.
+    - Against their own prices the deciding books show +0.0021 pooled (−0.0004 to +0.0047).
+      Their spreads and totals cover zero. Their moneylines do not: +0.0054 (+0.0015 to
+      +0.0096), and +0.0067 (+0.0018 to +0.0119) on quotes that pass the rule. So the deciding
+      books' own moneyline prices also carry a small lag that the rule does not remove.
+    - **What this means for 7.3:** an information test measured against Pinnacle's live price
+      alone would be passed by any model that knows the recent score. Measuring it against the
+      deciding books' own prices at the same stamp would change this pre-registration, so it is
+      not done here.
+- **Settlement:** full-game results. A live total is settled on the full-game score; the
+  remaining points are the live line minus the points already scored.
+- **Prices:** as §6.2, with the best of the 8 deciding books, the −200 floor, DraftKings alone
+  beside, and pushes out of the denominator.
+- **Seasons:** walk-forward. Choose on 2021-22 → 2024-25, confirm on 2025-26; 2020-21 is
+  reported only.
+
+### 7.2 Families (54 cells)
+
+| # | Family | Market × sides | Decision | Cut axis | Cells |
+|---|---|---|---|---|---|
+| IG-1 | **Totals after in-game shooting luck.** Luck points so far = (3PM − 3PA × expected 3P%) × 3 + (FTM − FTA × expected FT%), both teams, from each team's season-to-date rates before the date. Model remaining points = pace-scaled remainder of Pinnacle's pre-game close, with points so far luck-corrected. Bet under when shooting is hot, over when cold. The opposite direction ("hot halves keep scoring") is graded as a control. | live total × over, under | the first eligible quote in each of three windows: Q2, the halftime break, Q3 | luck gap ≥ 2 / 4 / 6 / 8 points | 24 |
+| IG-2 | **Game-state model against the live moneyline and spread.** A walk-forward win-probability and remaining-margin model. Inputs: margin, seconds left, Pinnacle's pre-game close spread as the prior (Stern 1994 variance), team fouls, foul counts of the top-minute players. | live moneyline (inside −200), live spread × the side the model favours | three phases: Q1–Q2, Q3, Q4 with ≥ 6 minutes left | EV ≥ 0.02 / 0.05 / 0.08 | 18 |
+| HT-1 | **Halftime.** Rest-of-game total and spread from first-half luck points, first-half pace against the pace the pre-game close implied, team fouls, and the halftime margin. Graded first on the held quotes stamped inside the break (103–271 games a season). | full-game live total and spread at halftime × 2 sides | one quote inside the break | model gap ≥ 1.5 / 3 / 4.5 points | 12 |
+
+#### IG-1: how the lab reads the row above (2026-10-17, written before any IG-1 number)
+
+The row leaves these open, so they are the lab's definitions, not registered ones
+(`scripts/nba_ingame_ig1.py`). Nothing below changes after a result is seen.
+
+- **Luck so far (L).** Both teams, from everything the play-by-play shows at or before the
+  quote's stamp: 3 × (3PM − 3PA × expected 3P%) + (FTM − FTA × expected FT%).
+  - "Expected" is the shooting team's own rate this season, from the box scores
+    (`nba_player_game_log`) of its games on earlier dates.
+  - Through 2024-25 the official three-point attempts count missed end-of-period heaves, so
+    the in-game count includes them too. From 2025-26 both leave them out.
+- **The luck gap is L itself, in points.** A cell bets the under when L ≥ g and the over when
+  L ≤ −g. The control, `control_ig1_persist`, bets the other way at the same cuts.
+- **Population.** Both teams have played at least 10 games this season (CLAUDE.md §3, as F4),
+  and Pinnacle has a pre-game closing total.
+- **The decision.** For each game and window, the first purchase in that window holding an
+  eligible quote. The offers are every eligible quote in that purchase and window, and the
+  cut is applied there and nowhere later.
+  - Eligible: one of the 8 deciding books, a coherent two-way price, a coherent Pinnacle
+    quote in the same purchase within 60 s, and no point scored between stamp and serving
+    for either quote (the 7.1 rule).
+  - The window is read from the quote's own stamp: Q2 in play; the halftime break; Q3 in
+    play, with the break after it.
+  - L is read at the earliest stamp among those offers and their Pinnacle quotes.
+- **The model (used by the information test only).** Remaining points =
+  C·f + w·(P − L − C·(1 − f))·f/(1 − f).
+  - C is Pinnacle's pre-game fair total (its close, no-vig, through the harness's empirical
+    distribution); f is the share of the 48 minutes still to play; P is the points so far.
+  - w is fit per window, by least squares on the seasons before the one predicted.
+  - The model's full-game total is M = P + remaining points.
+- **The information test (7.3).**
+  - Rows: Pinnacle's own coherent live totals that pass the 7.1 rule, the first per game and
+    window, read at Pinnacle's stamp.
+  - Pinnacle's fair total μ is solved from its no-vig over price at its number, through the
+    spread of (final total − Pinnacle's live number) on earlier seasons in the same window.
+    2020-21 has no earlier season and uses its own; it is reported, never chosen on.
+  - Without the model: μ + a0. With it: μ + a + b·(M − μ). a0, a and b are fit by least
+    squares on earlier seasons, per window.
+  - The statistic is the mean change in squared error of the final total, with the model
+    minus without (below zero = information), whole-day bootstrap 95%, 4,000 resamples,
+    seed 7. It is computed on the choosing seasons pooled (each predicted from the seasons
+    before it) and on 2025-26 alone.
+  - **Closed without a grid** unless the choosing seasons' interval lies wholly below zero.
+    2025-26 is reported beside; if its interval covers zero, that is said first.
+- **Diagnostics beside the test, never the gate.** 7.1 found that Pinnacle's stored live
+  price lags the score by minutes, so a model that only knows the score may pass. So:
+  (a) the model with no luck correction (L = 0, its own w) against Pinnacle; (b) the luck term
+  added on top of (a); (c) the full model against the deciding books' own fair total (the
+  median over books) at their first eligible quote.
+- **The grid, only if the test passes.** The harness's `run_cells`. Offers are priced at
+  Pinnacle's live fair total through the same distribution; best of the 8 deciding books,
+  −200 floor, DraftKings beside. The placebo shuffles L within date, 20 runs. Closing-line
+  value and "still offered at the next purchase" are not computed: the next purchase is
+  about an hour later, in a different game state.
+
+#### IG-1: the information test (2026-10-17)
+
+`python -m scripts.nba_ingame_ig1` (log: build machine,
+`C:/Users/micha/AppData/Local/Temp/nba_game_edge/ingame/ig1_full_log.txt`; numbers in
+`info_IG-1.json` beside it). Units are squared points of the final total; below zero means
+the model helped.
+
+- **The registered test passes, so the grid runs.** Choosing seasons: −10.5 (95% interval
+  −13.7 to −7.2) on 3,573 quotes, against Pinnacle's own error of 187.3. 2025-26 alone:
+  −10.1 (−16.4 to −4.1) on 1,141 quotes.
+- **But the gain is the score, not the luck.** The three diagnostics:
+  - (a) The same model with no luck correction gains the same: −10.2 (−13.5 to −6.8), and
+    −10.5 in 2025-26.
+  - (b) The luck term added on top of (a) gains nothing: +0.20 (−0.18 to +0.57); 2025-26
+    +0.06 (−0.80 to +0.92).
+  - (c) Against the deciding books' own prices the full model gains nothing: +0.06 (−0.54
+    to +0.65); 2025-26 −0.87 (−2.13 to +0.36).
+  - The halftime break, when no one scores and Pinnacle's price has time to catch up, shows
+    no gain at all: +0.35 (−2.58 to +3.15).
+- **So the registered test was passed by the lag 7.1 found in Pinnacle's stored live
+  price**, not by shooting luck. The fitted pace weight w is near zero in every season and
+  window (−0.05 to +0.09): luck-corrected scoring so far does not predict the rest of the
+  game beyond the pre-game total.
+- 2020-21 has no earlier season, so its live-total distribution is its own; it is reported
+  only. Games per season with a decision (both teams ≥ 10 games): Q2 410–524, halftime
+  89–253, Q3 224–408.
+
+#### IG-1: the grid (2026-10-17) — closed for 2026-27
+
+Same command; cells in `cells_IG-1.parquet`, the verdict in `verdict_house_IG-1.parquet`.
+
+- **0 of 24 cells pass the house standard (§6.7), and none clears its 95% interval**
+  (24 × 0.025 = 0.6 expected by chance). 0 of 24 pass the §6.4 bars either (multiple-testing
+  count 4,226). None of the 24 control cells ("hot halves keep scoring") clears its interval.
+- **The nearest cell is the under in Q3 when shooting has run 4 or more points hot:** 661
+  bets 2021-22 → 2025-26, +43.8 units, +5.8%, interval −1.6% to +12.7%.
+  - It fails the interval and the seasons bar: 2021-22 −7.6%, 2022-23 −1.9%, 2023-24
+    +11.6%, 2024-25 +21.8%, 2025-26 +5.5% (172 bets). 2020-21, reported only: +13.9% on 84.
+  - It beats the blind under in the same games (+2.9%), its neighbours are positive (+4.0%
+    at 2 points, +2.2% at 6), and it clears the placebo (+5.9% against a 95th percentile of
+    +5.3%).
+  - DraftKings alone: +1.4% on 409 bets in the choosing seasons, −1.1% in 2025-26.
+  - Prices −140 to +110, median −115; 372-289, no pushes.
+- **The same direction loses in the other windows:** the Q2 unders lose 1.8% to 4.1% at
+  every cut, the halftime unders 4.0% to 11.1%.
+- **Verdict:** IG-1 is closed for 2026-27. The information test was passed by Pinnacle's
+  lag, not by luck, and the betting grid finds no cell.
+
+### 7.3 Gates and bars
+
+1. **Information first.** For IG-1, IG-2 and HT-1, measure the change in log loss (moneyline)
+   or squared error (spread, total) when the family's model is added to Pinnacle's live no-vig
+   price at the same stamp. Walk-forward on 2021-22 → 2024-25, then 2025-26 alone. A family
+   whose 95% interval covers zero is **closed without a betting grid**.
+   - **How HT-1 is scored (2026-10-17, fixed before any HT-1 number was computed;
+     `scripts/nba_ingame_ht1.py`).**
+     - *Decision quote.* Per game, the first purchase holding a deciding book's spread or total
+       stamped inside the halftime break, coherent, with a coherent Pinnacle quote in the same
+       purchase stamped within 60 s, and no point scored between either quote's stamp and its
+       serving (7.1's rule). Every such deciding-book quote in that purchase is an offer. Both
+       teams must have played 10 games this season (CLAUDE.md §3, as F4 applied it).
+     - *Game state* at a decision is the plays logged at or before the quote's stamp (the shared
+       table). The model is fit on every regular-season game of earlier seasons with a Pinnacle
+       pre-game close, from its plays in periods 1–2, not only on games with a halftime quote.
+     - *The model* is least squares on the rest-of-game points (total) or rest-of-game home
+       margin (spread), fit on seasons before S; 2020-21 has none before it, so its model is fit
+       on itself and it is reported only.
+       - Total: Pinnacle's pre-game close total; pace, as first-half points minus half that
+         close; luck points of both teams; first-half personal fouls of both teams; the size of
+         the halftime margin.
+       - Spread: Pinnacle's pre-game expected home margin (minus its close spread); that times
+         pace, as (first-half points ÷ half the close total − 1); the halftime margin; luck
+         points home minus away; personal fouls home minus away.
+       - Luck points of a team = 3 × (3PM − 3PA × its 3P%) + (FTM − FTA × its FT%), with its
+         rates from its own earlier games this season. Rates and counts both come from the
+         play-by-play, with missed end-of-period heaves left out of both.
+     - *Pinnacle's live price as a number:* the centre of the final total (or home margin) at
+       which Pinnacle's no-vig probability holds at its number. It is solved through the
+       empirical spread of (final − Pinnacle's halftime number) on earlier seasons' decision
+       games (at least 150; 2020-21 on itself).
+     - *The test, per market.* For season S, the base is Pinnacle's centre plus a constant. With
+       the model it is Pinnacle's centre plus a constant plus β × (model − Pinnacle's centre).
+       The constant and β are fit by least squares on earlier seasons' decision games. The
+       statistic is the drop in mean squared error of the final number, in points squared,
+       with a whole-day bootstrap 95% interval (4,000 resamples, seed 7). It is computed on
+       2021-22 → 2024-25 pooled and on 2025-26 alone. **A market has information only when
+       both intervals lie wholly above zero;** otherwise its six cells close without a grid.
+     - *Reported beside, never the gate:* the same test for a score-only model (the pre-game
+       close and the halftime score, no luck and no fouls). If that model passes too, the gain
+       is Pinnacle's lag (7.1), not HT-1's inputs. Also: the same test against the deciding
+       books' own median centre; the test with Pinnacle's raw number as its centre; and the
+       slope of (result − Pinnacle's no-vig) on points scored in the last 5 minutes of Q2.
+     - *The grid, only for a market with information.* Strength = model − Pinnacle's centre,
+       in points, from the side's view, the same for every book. A side is bet when its
+       strength is at least 1.5 / 3 / 4.5, at its best deciding offer under Pinnacle's halftime
+       fair price (the harness's `run_cells`). The placebo shuffles the strength within date,
+       20 runs. The house standard (§6.7) judges. "Still offered at the next purchase" and
+       closing-line value cannot be measured at halftime and are reported as not measured.
+     - **HT-1's result (2026-10-17): closed. Totals show no information; spreads pass the gate
+       as written, but the gain is Pinnacle's lag, and none of the 6 spread cells passes the
+       house standard.** `python -m scripts.nba_ingame_ht1` (log `ht1/run_log.txt` beside the
+       shared table; cells `cells_HT-1.parquet`). Drop in mean squared error of the final
+       number when the model is added to Pinnacle's centre; positive means the model helps.
+       - Population after the 10-game rule: 573 spread and 574 total decisions in 2021-22 →
+         2024-25, 212 and 211 in 2025-26. The state at the stamp equals the game's first half
+         on 958 of 959 games.
+       - Totals: +0.65 points² (−1.35 to +2.60) on the choosing seasons; −2.17 (−7.70 to
+         +3.78) in 2025-26. **Closed without a grid.**
+       - Spreads: +3.11 points² (+0.75 to +5.68); +4.70 (+0.33 to +9.46) in 2025-26. The gate
+         opens.
+       - The score-only model clears the choosing seasons, +2.83 (+0.66 to +5.17), but not
+         2025-26, +4.19 (−0.47 to +9.29). So by the line above it does not strictly pass.
+       - Three other measurements say the gain is Pinnacle's lag:
+         - Against the deciding books' own median centre, the model adds nothing on the
+           choosing seasons: −0.005 (−0.18 to +0.17). 2025-26 alone shows +0.44 (+0.05 to
+           +0.86), one season, which the rule does not count.
+         - On 2021-22 → 2025-26 together, Pinnacle's halftime spread centre has a squared error
+           of 115.1 points². The books' own centre has 111.1.
+         - The late-Q2 slope below lies above zero.
+       - Points scored in Q2's last 5 minutes still predict against Pinnacle's halftime price:
+         spread +0.0068 per point (+0.0013 to +0.0124), total +0.0059 (+0.0002 to +0.0118).
+       - The spread grid (house standard, `house_verdict`): 0 of 6 pass. No cell reaches 200
+         pooled bets; the most is 147 (home, strength ≥ 1.5: −9.97 units, −6.0%, interval
+         −21.0% to +10.1%). Away at ≥ 3: 25 bets, +14.34 units, +52.4%, with no season holding
+         30 bets. The §6.4 bars, with the count at 4,226: 0 of 6.
+   - **How IG-2 is scored (2026-10-17, fixed before any IG-2 number was computed;
+     `scripts/nba_ingame_ig2.py`, whose docstring holds every definition).**
+     - *Decision.* Per game, market and phase (Q1–Q2, Q3, Q4 with 6:00 or more left; halftime
+       is not an IG-2 phase), the first purchase holding a deciding book's moneyline or spread
+       quote that passes 7.1's rule. Every such quote in that purchase is an offer. A later
+       purchase in the same phase is never used.
+     - *The model* (Stern 1994), fit on earlier seasons only: the final home margin is Normal,
+       centred on the current margin plus the time-scaled margin Pinnacle's pre-game close
+       implies, with adjustments for the current margin, team fouls in the period (and who is
+       in the penalty), and the fouls of each side's three top-minute starters. Its variance
+       grows with the time left. It is fit on every game's state every 30 s of game time, from
+       the play-by-play. 2020-21 has no earlier season, so it is fit on itself and reported only.
+     - *The test, per market.* Rows: Pinnacle's own quote at each decision, with the game state
+       at its stamp. For each season S, two fits on earlier seasons' rows: Pinnacle's live
+       no-vig alone, and Pinnacle plus the model. Moneyline: log loss of the home win. Spread:
+       squared error of the final home margin, Pinnacle's margin solved from its own number and
+       no-vig. The statistic is the change (with the model minus without), whole-day bootstrap
+       95% interval, 4,000 resamples, seed 7, on 2021-22 → 2024-25 pooled and on 2025-26 alone.
+       **A market has information only when both intervals lie wholly below zero;** otherwise
+       its nine cells close without a grid.
+     - *Reported beside, never the gate:* the same test against each deciding book's own
+       no-vig price (the prices that would be bet); the same test for the score-and-time model
+       alone, without fouls (if it passes too, the gain is Pinnacle's lag from 7.1, not IG-2's
+       inputs); and, for each cell that passes the house standard, its price range and its
+       units split by whether the bet's side had outscored its opponent in the 2 minutes before
+       the quote (the deciding books' own moneyline lag, which the rule does not remove).
+     - *The grid, only for a market with information.* The side the model favours (its best
+       offer's expected value is the higher), best of the 8 deciding books, −200 floor,
+       DraftKings alone beside, expected value ≥ 0.02 / 0.05 / 0.08 (the harness's
+       `run_cells`). The blind bets use Pinnacle's live no-vig as the fair price. The placebo
+       shuffles the model's disagreement with Pinnacle between games on the same date, 20 runs,
+       and adds it back to each game's own Pinnacle price. "Still offered at the next purchase"
+       and closing-line value are not measured in play.
+     - **IG-2's information test result (2026-10-17): both markets pass the gate as written, so
+       the grid runs. The gain is Pinnacle's stored-price lag, not the model's inputs.**
+       `python -m scripts.nba_ingame_ig2 --info` (log `ig2_info_log.txt`, numbers
+       `ig2_info.json`, both beside the shared table). Change per quote, with the model minus
+       without; negative means the model helps.
+       - Moneyline log loss: −0.0331 (−0.0403 to −0.0258) on 4,390 decisions in 2021-22 →
+         2024-25; −0.0281 (−0.0417 to −0.0144) on 1,304 in 2025-26. Every season is below zero.
+       - Spread squared error of the final margin: −11.75 points² (−13.79 to −9.63) on 5,117;
+         −13.74 (−17.79 to −10.01) on 1,528 in 2025-26.
+       - The model nearly replaces Pinnacle: its weight in the stack is 0.87–1.01. On its own,
+         its log loss is 0.522 against Pinnacle's 0.556, and its squared error 102.2 against
+         113.9.
+       - The score-and-time model without fouls does the same: −0.0330 (−0.0402 to −0.0258)
+         and −11.73 (−13.75 to −9.66). The foul inputs add nothing measurable. By the line
+         written above, this gain is Pinnacle's lag (7.1), not IG-2's inputs.
+       - Against the prices that would be bet (each deciding book's own no-vig), the moneyline
+         gain covers zero: −0.0013 (−0.0036 to +0.0009), and +0.0011 (−0.0032 to +0.0054) in
+         2025-26. The spread gain does not: −0.80 points² (−1.34 to −0.24), and −1.25 (−2.32 to
+         −0.15) in 2025-26.
+       - The model fit on 89,650–102,036 game states per season; 17 games whose play-by-play
+         final differs from the official score were left out of fitting.
+     - **IG-2's grid result (2026-10-17): 6 of 18 cells pass the house standard. Every warning
+       sign written down beforehand is present, so the profit may be stale soft-book quotes
+       rather than a price a bettor could take.** `python -m scripts.nba_ingame_ig2 --grid`
+       (log `ig2_grid_log.txt`; cells `cells_IG-2.parquet`; verdict
+       `verdict_house_IG-2.parquet`), and `--detail` for the beside-numbers
+       (`ig2_passing_detail.json`). Pooled 2021-22 → 2025-26; 2020-21 is in-sample and left out.
+
+       | Cell | Bets | Units | ROI | 95% interval | Seasons positive | 2025-26 | DraftKings alone, 2021-22 → 2024-25 / 2025-26 | Prices (min / median / max) |
+       |---|---|---|---|---|---|---|---|---|
+       | spread, Q1–Q2, EV ≥ 0.05 | 1,475 | +103.6 | +6.2% | +1.4 .. +11.1 | 4 of 5 | +6.0% on 334 | +3.9% / −1.3% | −160 / −114 / +114 |
+       | spread, Q1–Q2, EV ≥ 0.08 | 948 | +69.5 | +6.5% | +0.4 .. +12.7 | 5 of 5 | +0.2% on 210 | +1.0% / −1.4% | −152 / −114 / +114 |
+       | moneyline, Q3, EV ≥ 0.05 | 651 | +40.1 | +10.0% | +0.1 .. +19.9 | 5 of 5 | +6.7% on 159 | −1.5% / −1.1% | −200 / +210 / +3500 |
+       | moneyline, Q3, EV ≥ 0.08 | 545 | +49.6 | +15.8% | +3.8 .. +27.4 | 5 of 5 | +13.0% on 134 | +2.1% / −5.1% | −200 / +230 / +3500 |
+       | spread, Q3, EV ≥ 0.05 | 1,055 | +79.6 | +6.7% | +1.2 .. +12.6 | 5 of 5 | +5.5% on 286 | +7.2% / −3.6% | −144 / −114 / +125 |
+       | spread, Q3, EV ≥ 0.08 | 751 | +76.8 | +9.2% | +2.5 .. +16.2 | 5 of 5 | +2.3% on 227 | +10.6% / −11.9% | −144 / −113 / +125 |
+
+       - The other 12 fail. Every Q1–Q2 and Q4 moneyline cell fails the interval and the season
+         count. The Q1–Q2 spread, Q3 moneyline and Q3 spread cells at EV ≥ 0.02 fail the interval
+         alone. The Q4 spread cells fail the placebo, two of them the interval as well.
+       - 7 of the 18 cells clear the 95% interval, against about 0.5 expected by chance. So the
+         effect is systematic. What it is, these say:
+       - **Without outlier prices** (a price more than 20 cents better than the next book's, or a
+         number no other book hangs; about half of every passing cell's bets), the units fall to
+         +21.7 and +22.0 (Q1–Q2 spreads), −4.1 and +8.0 (Q3 moneylines), +42.7 and +41.0 (Q3
+         spreads).
+       - **Bets on the side that had just outscored its opponent** in the 2 minutes before the
+         quote earn more in every cell: Q1–Q2 spread at EV ≥ 0.05, +8.0% on 727 bets against
+         +4.5% on 748; Q3 moneyline at EV ≥ 0.05, +18.7% on 277 against +2.5% on 374; Q3 spread
+         at EV ≥ 0.05, +8.9% on 507 against +4.7% on 548. That is the deciding books' own lag
+         that the freshness rule does not remove (7.1).
+       - **DraftKings alone** loses in 2025-26 in all six (−1.1% to −11.9%). The best of 8 books,
+         quoted up to 60 s apart during play, picks the price that has moved least.
+       - **The Q3 moneyline cells are underdog bets** (516 of 651, and 446 of 545). The blind
+         Q3 underdog at the best price earns +6.5% pooled. FanDuel carries the most units in
+         every passing cell (+21.5 to +69.6).
+       - The information test above already showed that the foul inputs add nothing and that
+         against the deciding books' own moneyline prices the model adds nothing.
+       - Whether any of these prices could be bet cannot be measured from hourly purchases. A
+         book's stamp is its last update, not the moment it set the price, and books suspend
+         betting after a score. Section 7.3 item 3 says a passing cell is built LIVE. That needs
+         an NBA in-play loop, which does not exist; the decision is the owner's.
+2. **Bars for a grid that runs:** the house standard of §6.7. The §6.4 bars and the
+   multiple-testing count (now 4,226 with these 54) are reported beside.
+3. **A cell that passes is built LIVE.** That needs an NBA in-play loop; `ncaaf_live/` is the
+   template.
+
+### 7.4 Purchases, only if a free test shows information
+
+- HT-1's full set of halftime snapshots: 117,270 credits for 2021-22 → 2025-26 (measured grid).
+- The 5-minute in-play archive, to replay a rule that bets the first time a price crosses its
+  cut: 586,710 credits for moneyline only, 1,760,130 for all three markets.

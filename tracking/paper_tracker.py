@@ -2300,6 +2300,9 @@ _RULE_MODEL_MARKETS = {
     # NHL full-game totals (models/nhl_totals_market.py). scored_line is the
     # total; the stored final includes the shootout goal, as books settle it.
     "nhl_over_under": "totals",
+    # NBA full-game totals, overs (models/nba_total_luck.py). scored_line is
+    # the total; the stored final includes overtime, as books settle it.
+    "nba_total_luck": "totals",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

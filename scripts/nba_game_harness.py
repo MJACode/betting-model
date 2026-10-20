@@ -141,6 +141,36 @@ def attach_fetch(quotes: pd.DataFrame, ledger: pd.DataFrame) -> tuple[pd.DataFra
 
 MIN_PRICED_SHARE, MAX_PLACED_SHARE = 0.90, 0.05
 
+QUOTE_COLS = ["game_id", "season", "game_date", "tip", "market", "book", "snapshot_at",
+              "fetch_at", "line", "price_a", "price_b", "coherent"]
+
+
+def frame_quotes(o: pd.DataFrame, extra=()) -> pd.DataFrame:
+    """Stored odds rows -> the quote frame every cell reads (QUOTE_COLS).
+
+    `o` carries the odds columns (bookmaker, market, spread_home, total_line,
+    the four prices), the game's season / game_date / tip, a parsed
+    snapshot_at and the fetch instant `fetch_at`. Kept: rows from a fetch
+    before tip whose own stamp is before tip, with both prices. `line` is the
+    side-A number (spread_home or the total), price_a / price_b the side-A /
+    side-B prices, `coherent` the 1.00-1.15 implied-sum test.
+
+    ONE copy: load() runs it on the archive (fetch_at from the purchase
+    ledger), and models/nba_total_luck.py runs it on the live odds table
+    (fetch_at = created_at, the moment the refresh pass stored the fetch), so
+    the live model and the graded cells see the same quotes. `extra` names
+    further columns to keep (the live model's betslip links)."""
+    o = o[o["fetch_at"].notna() & (o["snapshot_at"] < o["tip"]) & (o["fetch_at"] < o["tip"])]
+    o = o.rename(columns={"bookmaker": "book"})
+    o["line"] = np.where(o["market"] == "spreads", o["spread_home"],
+                         np.where(o["market"] == "totals", o["total_line"], np.nan))
+    o["price_a"] = np.where(o["market"] == "totals", o["over_price"], o["home_price"])
+    o["price_b"] = np.where(o["market"] == "totals", o["under_price"], o["away_price"])
+    o = o[o["price_a"].notna() & o["price_b"].notna()]
+    s = imp(o["price_a"]) + imp(o["price_b"])
+    o["coherent"] = (s >= COHERENT[0]) & (s <= COHERENT[1])
+    return o[QUOTE_COLS + list(extra)].reset_index(drop=True)
+
 
 def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
     """Games, full-game quotes and the fetches that bought them.
@@ -159,18 +189,7 @@ def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
     o = o.merge(g[["game_id", "season", "game_date", "tip"]], on="game_id")
     led = pd.read_parquet(cache / "nba_fetch_ledger.parquet")
     o, notes = attach_fetch(o, led)
-    o = o[o["fetch_at"].notna() & (o["snapshot_at"] < o["tip"]) & (o["fetch_at"] < o["tip"])]
-    o = o.rename(columns={"bookmaker": "book"})
-    o["line"] = np.where(o["market"] == "spreads", o["spread_home"],
-                         np.where(o["market"] == "totals", o["total_line"], np.nan))
-    o["price_a"] = np.where(o["market"] == "totals", o["over_price"], o["home_price"])
-    o["price_b"] = np.where(o["market"] == "totals", o["under_price"], o["away_price"])
-    o = o[o["price_a"].notna() & o["price_b"].notna()]
-    s = imp(o["price_a"]) + imp(o["price_b"])
-    o["coherent"] = (s >= COHERENT[0]) & (s <= COHERENT[1])
-    keep = ["game_id", "season", "game_date", "tip", "market", "book", "snapshot_at",
-            "fetch_at", "line", "price_a", "price_b", "coherent"]
-    o = o[keep].reset_index(drop=True)
+    o = frame_quotes(o)
     f = o[["game_id", "tip", "fetch_at"]].drop_duplicates(["game_id", "fetch_at"]).copy()
     f["lead_min"] = (f["tip"] - f["fetch_at"]).dt.total_seconds() / 60.0
     notes["games"] = int(g["game_id"].nunique())
@@ -440,12 +459,17 @@ def side_mask(c: pd.DataFrame, sides) -> pd.Series:
     return keep
 
 
-def choose(cand: pd.DataFrame, cut: float, books=BETTABLE, sides=None) -> pd.DataFrame:
+def choose(cand: pd.DataFrame, cut: float, books=BETTABLE, sides=None,
+           floor: float | None = None) -> pd.DataFrame:
     """One bet per (game, market): the best-EV offer at an allowed book.
 
     `cand` holds offers with p_win, p_push (with_ev adds ev). Ties go to the
-    earlier book in BEST_LINE_BOOKMAKERS. `sides`: see side_mask."""
-    c = cand[cand["book"].isin(books) & (cand["price"] >= PRICE_FLOOR)]
+    earlier book in BEST_LINE_BOOKMAKERS. `sides`: see side_mask. `floor`:
+    the price floor, PRICE_FLOOR (config.DEFAULT_MIN_ODDS at import) unless
+    given; a live model passes its own config.min_odds_for, so an override of
+    the platform default cannot move it off the floor it was graded at."""
+    floor = PRICE_FLOOR if floor is None else float(floor)
+    c = cand[cand["book"].isin(books) & (cand["price"] >= floor)]
     if sides is not None:
         c = c[side_mask(c, sides)]
     if "ev" not in c:
@@ -498,6 +522,14 @@ def p_one_sided(b: pd.DataFrame) -> float:
     if p < P_REFINE_BELOW:
         p = float((boot(b, n=P_REFINE_N) <= 0).mean())
     return p
+
+
+def ci95(b: pd.DataFrame) -> tuple[float, float]:
+    """Whole-day bootstrap 95% interval of ROI (the house standard, §6.7)."""
+    if len(b) == 0 or b["risk"].sum() == 0:
+        return (np.nan, np.nan)
+    x = boot(b)
+    return float(np.percentile(x, 2.5)), float(np.percentile(x, 97.5))
 
 
 def ci90(b: pd.DataFrame) -> tuple[float, float]:
@@ -662,6 +694,18 @@ def cell_report(bets_all: pd.DataFrame, data: Data, cand: pd.DataFrame | None = 
             if (ch["season"] == s).sum() >= 30)
         sides = ch["side"].value_counts(normalize=True)
         r["top_side"], r["top_share"] = str(sides.index[0]), float(sides.iloc[0])
+    # §6.7: every graded season pooled (the choosing seasons and 2025-26).
+    pool_seasons = tuple(choose_seasons) + (CONFIRM,)
+    pl = bets_all[bets_all["season"].isin(pool_seasons)]
+    r["pool"] = summarise(pl)
+    r["pool"]["ci95"] = ci95(pl)
+    per = [(s, pl[pl["season"] == s]) for s in pool_seasons]
+    counted = [(s, x) for s, x in per if len(x) >= 30]
+    r["pool"]["seasons_counted"] = len(counted)
+    r["pool"]["seasons_positive"] = sum(1 for _, x in counted if roi(x) > 0)
+    if close is not None and sig is not None and len(pl):
+        ev = clv(pl, close, sig)
+        r["pool"]["clv_median"] = float(np.nanmedian(ev)) if ev.notna().any() else np.nan
     if len(bets_all):
         still = next_fetch_check(bets_all, data)
         r["units_still_offered"] = float(bets_all.loc[still, "units"].sum())
@@ -812,6 +856,41 @@ def blind_by_real_side(nm: pd.DataFrame, population: set, games: pd.DataFrame,
     return out
 
 
+def blind_pool(nm: pd.DataFrame, population: set, games: pd.DataFrame, seasons,
+               close=None, sig=None) -> dict:
+    """Pooled blind bets per real side (§6.7): ROI and, where a close exists,
+    the median closing-line value, so a cell's own late drift can be told from
+    the market's."""
+    pop = nm[nm["game_id"].isin(population)].drop(columns="side_pick", errors="ignore")
+    out = {}
+    if pop.empty:
+        return out
+    fv = fav_sides(pop)
+    for split, (a, b) in SPLITS.items():
+        for side in (a, b):
+            if split == "fav":
+                if fv.empty:
+                    continue
+                c = pop.merge(fv[["game_id", "market", side]].rename(columns={side: "side_pick"}),
+                              on=["game_id", "market"])
+                bets = choose(c, -np.inf, sides=[side])
+            else:
+                bets = choose(pop, -np.inf, sides=[side])
+            g = grade(bets, games)
+            g = g[g["season"].isin(seasons)] if len(g) else g
+            if not len(g):
+                continue
+            out[f"blind_pool_{side}"] = roi(g)
+            if close is not None and sig is not None:
+                ev = clv(g, close, sig)
+                out[f"blind_pool_clv_{side}"] = (float(np.nanmedian(ev))
+                                                 if ev.notna().any() else np.nan)
+    return out
+
+
+_BET_FILES = [0]
+
+
 def real_side_shares(bets: pd.DataFrame, neutral: pd.DataFrame) -> dict:
     """Shares of a cell's bets on the first side of each split, real sides."""
     out = {}
@@ -855,6 +934,9 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
         nm = neutral[neutral["market"] == market]
         population = set(cm["game_id"])
         blinds = blind_by_real_side(nm, population, data.games, choose_seasons)
+        bpool = blind_pool(nm, population, data.games, tuple(choose_seasons) + (CONFIRM,),
+                           close, sig)
+        dump = []
         for side in sides:
             blind = blind_side(nm, side, data.games)
             blind_ch = (roi(blind[blind["season"].isin(choose_seasons)])
@@ -873,6 +955,12 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                     pl.append(roi(gp[gp["season"].isin(choose_seasons)]) if len(gp) else np.nan)
                 ch, cf = rep["choose"], rep["confirm"]
                 shares = real_side_shares(g[g["season"].isin(choose_seasons)] if len(g) else g, nm)
+                pool_shares = real_side_shares(
+                    g[g["season"].isin(tuple(choose_seasons) + (CONFIRM,))] if len(g) else g, nm)
+                if os.environ.get("NBA_GAME2_BETS") and len(g):
+                    dump.append(g.assign(family=family, point=point, cell_side=side,
+                                         cut_index=k, cut=cut))
+                po = rep["pool"]
                 rows.append({
                     "family": family, "point": point, "market": market, "side": side,
                     "cut_index": k, "cut": cut,
@@ -908,7 +996,27 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                     "clv_median": rep.get("clv_median", np.nan),
                     "clv_share_positive": rep.get("clv_share_positive", np.nan),
                     "clv_n": rep.get("clv_n", 0),
+                    # §6.7, the house standard: every graded season pooled
+                    "pool_seasons": ",".join(str(x) for x in tuple(choose_seasons) + (CONFIRM,)),
+                    "pool_n": po["bets"], "pool_units": po["units"], "pool_roi": po["roi"],
+                    "pool_ci95_lo": po["ci95"][0], "pool_ci95_hi": po["ci95"][1],
+                    "pool_seasons_counted": po["seasons_counted"],
+                    "pool_seasons_positive": po["seasons_positive"],
+                    "pool_clv_median": po.get("clv_median", np.nan),
+                    **{f"pool_share_{k2}": pool_shares.get(k2, np.nan) for k2 in SPLITS},
+                    **{k2: bpool.get(k2, np.nan) for k2 in
+                       [f"blind_pool_{s2}" for pair in SPLITS.values() for s2 in pair]
+                       + [f"blind_pool_clv_{s2}" for pair in SPLITS.values() for s2 in pair]},
                 })
+        if dump:
+            d = Path(os.environ["NBA_GAME2_BETS"])
+            d.mkdir(parents=True, exist_ok=True)
+            _BET_FILES[0] += 1
+            keep = [c for c in ("game_id", "season", "game_date", "T", "market", "side", "book",
+                                "line", "price", "ev", "p_win", "result", "units", "risk",
+                                "family", "point", "cell_side", "cut_index", "cut") if c in dump[0]]
+            pd.concat([x[keep] for x in dump], ignore_index=True).to_parquet(
+                d / f"bets_{family}_{point}_{market}_{_BET_FILES[0]:04d}.parquet")
     return rows
 
 

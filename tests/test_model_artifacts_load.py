@@ -73,6 +73,16 @@ def test_artifact_deserialises(path: Path):
             f"{path.name}: a rate model is missing")
         assert artifact["alphas"] and artifact["calibration"], f"{path.name}: no widths or maps"
         return
+    if isinstance(artifact, dict) and artifact.get("kind") == "nba_total_luck":
+        # A rule's parameters, not an estimator (models/nba_total_luck.py): the
+        # residual sample the offer is priced with, per season, and the gap >= 3
+        # bucket's per-season counts its probability's uplift is fitted on.
+        assert artifact["model"] is None
+        seasons = {int(s) for s, _ in artifact["close_resid"]}
+        assert {2021, 2022, 2023, 2024, 2025, 2026} <= seasons, f"{path.name}: residual seasons {seasons}"
+        assert len(artifact["close_resid"]) > 5000, f"{path.name}: too few residuals"
+        assert all(v["n"] > 0 for v in artifact["bucket"].values()), f"{path.name}: an empty bucket season"
+        return
     if isinstance(artifact, dict):
         assert "model" in artifact, f"{path.name} has no 'model' key"
         # A NULL `model` is legitimate for a RULE. ncaaf_spread and

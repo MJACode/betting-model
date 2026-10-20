@@ -121,6 +121,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id = 'nfl_wind_totals'    THEN 'totals'
+            WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market' OR p.model_id = 'mlb_total_public_fade' THEN 'totals'
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
