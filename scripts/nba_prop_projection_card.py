@@ -11,11 +11,14 @@ wait for it.
       ESPN statuses it used in nba_injury_asof, so tonight's game is a past
       game with known injuries tomorrow.
 
-  --publish            (the window job, right after nba_prop_market's card)
+  --publish            (the window job, in the same step as nba_prop_market's card)
       Prices the stored projections against the game's newest prop fetch from
-      inside the decision window, and writes each decided game once -- its
+      inside the decision window. Both NBA prop cards then write through ONE
+      door (scripts/nba_props_card.publish_across_models): one bet a game
+      across both models and four a night, strongest first (each bet's EV
+      percentile within its own model); each decided game's
       ledger row (nba_prop_projection_decisions) and its bets in one
-      transaction, under the model's lock.
+      transaction, under both models' locks.
 
 FULL HISTORY, NOT RECENT SEASONS. The frame is built from every season since
 2018-19, as it was graded. Built from 2022-23 on instead, the projected mean
@@ -37,7 +40,7 @@ apart from a broken one.
 
     python -m scripts.nba_prop_projection_card                     # print the card, write nothing
     python -m scripts.nba_prop_projection_card --project G1 G2     # project these games and store it
-    python -m scripts.nba_prop_projection_card --publish           # write new decisions and bets
+    python -m scripts.nba_prop_projection_card --publish           # both NBA prop cards through the shared door
     python -m scripts.nba_prop_projection_card --backfill-official # the 2018-19..2025-26 injury history
 """
 from __future__ import annotations
@@ -566,6 +569,8 @@ def pick_rows(bets: list[pj.ProjectionBet], bankroll: float) -> list[dict]:
             "best_implied_prob": None if at_dk else round(dec_implied, 4),
             "best_edge": None if at_dk else decision_edge,
             "best_bet_link": None if at_dk else b.link,
+            # the shared door's ranking key (scripts/nba_props_card), not a column
+            "_ev": round(b.ev, 4), "_tip": b.tip,
         })
     return rows
 
@@ -576,44 +581,6 @@ _INSERT_DECISION = (
     f"INSERT INTO {DECISIONS_TABLE} (game_id, fetch_at, projected_at, n_quotes, n_bets, detail) "
     "VALUES (%(game_id)s, %(fetch_at)s, %(projected_at)s, %(n_quotes)s, %(n_bets)s, %(detail)s) "
     "ON CONFLICT (game_id) DO NOTHING RETURNING game_id")
-
-
-def publish(conn, rows: list[dict], decisions: list[dict]) -> tuple[int, int]:
-    """Each decided game once -- its ledger row and its bets in ONE transaction, under the model's
-    lock, the ledger and nba_prop_market's holdings re-read inside it. -> (bets, decisions)."""
-    if not decisions:
-        return 0, 0
-    from scripts.nfl_wind_publisher import _lock_model
-    # nba_prop_market's lock FIRST, then this model's own. The two cards each read the other's
-    # holdings before writing; holding the rule's lock serializes this write with the rule's, so
-    # the decide-alone path (DECIDE_ALONE_BY_MIN) and a late rule decision cannot both bet one
-    # proposition. The rule's card never takes this model's lock, so the order cannot deadlock.
-    _lock_model(conn, RULE_ID)
-    _lock_model(conn, MODEL_ID)
-    gids = sorted({d["game_id"] for d in decisions})
-    done = decided_games(conn, gids)
-    _, held = rule_state(conn, gids)
-    by_game: dict[str, list[dict]] = {}
-    for r in rows:
-        by_game.setdefault(r["game_id"], []).append(r)
-    n_bets = n_decided = n_held = 0
-    for d in sorted(decisions, key=lambda x: x["game_id"]):
-        if d["game_id"] in done:
-            continue
-        game_rows = [r for r in by_game.get(d["game_id"], [])
-                     if (r["game_id"], r["player_id"], r["prop_market"]) not in held]
-        n_held += len(by_game.get(d["game_id"], [])) - len(game_rows)
-        got = conn.execute(_INSERT_DECISION, {**d, "n_bets": len(game_rows)}).fetchone()
-        if not got:
-            continue
-        n_decided += 1
-        for r in game_rows:
-            if conn.execute(_INSERT, {c: r[c] for c in _COLS}).fetchone():
-                n_bets += 1
-    conn.commit()
-    logger.info(f"nba-prop-projection: {n_decided} game(s) decided, {n_bets} bet(s) written of "
-                f"{len(rows)} on the card; {n_held} skipped as nba_prop_market's; {len(done)} already decided")
-    return n_bets, n_decided
 
 
 def render(bets, diag: dict, written=None, decided=None) -> str:
@@ -629,62 +596,70 @@ def render(bets, diag: dict, written=None, decided=None) -> str:
     return "\n".join(lines)
 
 
-def run_card(do_publish: bool = False, now: datetime | None = None, art: dict | None = None) -> dict:
+def look(conn, now: datetime, art: dict | None = None,
+         rule_deciding: set[str] | frozenset = frozenset()) -> dict:
+    """One look, no write. `rule_deciding`: the games nba_prop_market decides in this same look
+    (scripts/nba_props_card.run_cards), so this model decides them in the same look too rather
+    than a tick later, and the two models' candidates meet in one choice.
+    -> {"games", "bets", "diag", "decisions", "names"}."""
     import config
+    empty = {"games": {}, "bets": [], "diag": dict.fromkeys(pj.DIAG_KEYS, 0), "decisions": [],
+             "names": {}}
+    games = rule_card.slate(conn, now)
+    if not games:
+        return empty
+    ensure_tables(conn)
+    gids = sorted(games)
+    decided = decided_games(conn, gids)
+    rule_decided, rule_keys = rule_state(conn, gids)
+    rule_decided = rule_decided | set(rule_deciding)
+    open_ = [g for g in gids if g not in decided]
+    books = tuple(config.BEST_LINE_BOOKMAKERS)
+    quotes = load_quotes(conn, {g: games[g] for g in open_}, books)
+    hist_log = _frame(conn, f"""
+        SELECT player_id, player_name, team, season, game_date FROM nba_player_game_log
+        WHERE team = ANY(%s) AND season = ANY(%s)
+    """, (sorted({t for g in open_ for t in (games[g]["home"], games[g]["away"])}),
+          sorted({s for g in open_ for s in (games[g]["season"], games[g]["season"] - 1)}))) \
+        if open_ else pd.DataFrame(columns=["player_id", "player_name", "team", "season", "game_date"])
+    hist_log["player_id"] = hist_log.player_id.astype(str)
+    gdf = pd.DataFrame([{"game_id": g, "season": games[g]["season"], "home_team": games[g]["home"],
+                         "away_team": games[g]["away"]} for g in open_])
+    how = resolve_players(quotes, roster_candidates(hist_log, gdf, open_)) if open_ else {}
+    proj = load_projections(conn, open_, now)
+    if art is None:
+        from models.trainer import load_model
+        art = load_model(MODEL_ID)
+    if art is None:
+        logger.error(f"nba-prop-projection: no active {MODEL_ID} artifact; nothing priced")
+        return {**empty, "games": games}
+    bets, diag, decisions = pj.find_bets(
+        quotes, proj, games, now, art, rule_keys, decided, rule_decided, books,
+        price_floor=float(config.min_odds_for(MODEL_ID)))
+    projected_at = dict(zip(proj.game_id, proj.projected_at)) if len(proj) else {}
+    for d in decisions:
+        d["projected_at"] = projected_at.get(d["game_id"])
+    for gid in open_:
+        lead = minutes_to_tip(games[gid]["tip"], now)
+        if lead < DECISION_WINDOW_MIN[0]:
+            logger.warning(f"nba-prop-projection: {gid} tips in {lead:.0f} min and was never decided")
+    return {"games": games, "bets": bets, "diag": diag, "decisions": decisions, "names": how}
+
+
+def run_card(do_publish: bool = False, now: datetime | None = None, art: dict | None = None) -> dict:
+    """Print this model's card. Publishing runs BOTH NBA prop cards through the shared door
+    (scripts/nba_props_card.run_cards): one model alone must never write, or the card that
+    happened to run first would win the game's one bet."""
     now = now or datetime.now(timezone.utc)
+    if do_publish:
+        from scripts.nba_props_card import run_cards
+        return run_cards(do_publish=True, now=now, art=art)
     conn = get_connection()
     try:
-        games = rule_card.slate(conn, now)
-        if not games:
-            diag = dict.fromkeys(pj.DIAG_KEYS, 0)
-            logger.info(render([], diag, 0 if do_publish else None) +
-                        f" (no NBA game tips in the next {DECISION_WINDOW_MIN[1]} minutes)")
-            return {"games": 0, "bets": 0, "published": 0, "decided": 0, "diag": diag}
-        ensure_tables(conn)
-        gids = sorted(games)
-        decided = decided_games(conn, gids)
-        rule_decided, rule_keys = rule_state(conn, gids)
-        open_ = [g for g in gids if g not in decided]
-        books = tuple(config.BEST_LINE_BOOKMAKERS)
-        quotes = load_quotes(conn, {g: games[g] for g in open_}, books)
-        hist_log = _frame(conn, f"""
-            SELECT player_id, player_name, team, season, game_date FROM nba_player_game_log
-            WHERE team = ANY(%s) AND season = ANY(%s)
-        """, (sorted({t for g in open_ for t in (games[g]["home"], games[g]["away"])}),
-              sorted({s for g in open_ for s in (games[g]["season"], games[g]["season"] - 1)}))) \
-            if open_ else pd.DataFrame(columns=["player_id", "player_name", "team", "season", "game_date"])
-        hist_log["player_id"] = hist_log.player_id.astype(str)
-        gdf = pd.DataFrame([{"game_id": g, "season": games[g]["season"], "home_team": games[g]["home"],
-                             "away_team": games[g]["away"]} for g in open_])
-        how = resolve_players(quotes, roster_candidates(hist_log, gdf, open_)) if open_ else {}
-        proj = load_projections(conn, open_, now)
-        if art is None:
-            from models.trainer import load_model
-            art = load_model(MODEL_ID)
-        if art is None:
-            logger.error(f"nba-prop-projection: no active {MODEL_ID} artifact; nothing priced")
-            return {"games": len(games), "bets": 0, "published": 0, "decided": 0, "diag": {}}
-        bets, diag, decisions = pj.find_bets(
-            quotes, proj, games, now, art, rule_keys, decided, rule_decided, books,
-            price_floor=float(config.min_odds_for(MODEL_ID)))
-        projected_at = dict(zip(proj.game_id, proj.projected_at)) if len(proj) else {}
-        for d in decisions:
-            d["projected_at"] = projected_at.get(d["game_id"])
-        for gid in open_:
-            lead = minutes_to_tip(games[gid]["tip"], now)
-            if lead < DECISION_WINDOW_MIN[0]:
-                logger.warning(f"nba-prop-projection: {gid} tips in {lead:.0f} min and was never decided")
-        published = n_decided = 0
-        if do_publish and decisions:
-            rows: list[dict] = []
-            if bets:
-                from models.scorer import _get_current_bankroll
-                rows = pick_rows(bets, _get_current_bankroll(conn))
-            published, n_decided = publish(conn, rows, decisions)
-        logger.info("\n" + render(bets, diag, published if do_publish else None,
-                                   n_decided if do_publish else None) + f" names={how}")
-        return {"games": len(games), "bets": len(bets), "published": published, "decided": n_decided,
-                "diag": diag}
+        got = look(conn, now, art)
+        logger.info("\n" + render(got["bets"], got["diag"]) + f" names={got['names']}")
+        return {"games": len(got["games"]), "bets": len(got["bets"]), "published": 0, "decided": 0,
+                "diag": got["diag"]}
     finally:
         conn.close()
 

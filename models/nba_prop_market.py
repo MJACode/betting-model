@@ -34,10 +34,13 @@ THE RULE, per game, ONCE (the first look that can price it; see DECIDED ONCE):
      counted, not refused (the convention of data/live_quote_guard.py).
   5. EV = fair under x decimal - 1, through models.honest_ev.gate (the
      model's own probability; floor config.MODEL_OWN_EV_FLOOR = 0.00).
-  6. One BET per (game, player, market): the best EV among the books, a tie
-     to the earlier book in SOFT_BOOKS (DraftKings first). Every qualifying
-     proposition is bet; there is no game or night cap (mike, 2026-10-16:
-     "maximize units won").
+  6. One candidate per (game, player, market): the best EV among the books,
+     a tie to the earlier book in SOFT_BOOKS (DraftKings first). Every
+     qualifying proposition is a CANDIDATE; what is written is one bet a game
+     across both NBA prop models and four a night, strongest first by each
+     bet's EV percentile within its own model
+     (scripts/nba_props_card.py; mike, 2026-10-20: "Only the strongest picks
+     need to be sent, like NHL", replacing 2026-10-16's no-cap rule).
 
 DECIDED ONCE. The backtest looked at every game exactly once, about 54
 minutes before tip. Live, a game is looked at on every refresh pass and every
@@ -148,9 +151,14 @@ DECISION_WINDOW_MIN = (45, 57)
 # same fetch is refused (mike's spec, 2026-10-15).
 STALE_SOFT_MAX_MIN = 10
 
-# NO GAME OR NIGHT CAP. mike, 2026-10-16: "maximize units won". Every
-# qualifying proposition is bet, one BET per (game, player, market) at the
-# best bettable price: the population the rule was graded on. Measured on the
+# THE CAP IS BACK, 2026-10-20 (mike, after opening night wrote 36 NBA prop
+# bets on one game: "Only the strongest picks need to be sent, like NHL"):
+# one bet a game across both NBA prop models and MAX_NBA_PROP_BETS_PER_NIGHT a
+# night, strongest first (each bet's EV percentile within its own model,
+# models/nba_prop_rank.py), in scripts/nba_props_card.py. What follows is the
+# 2026-10-16 no-cap rule it replaced ("maximize units won"), kept as the
+# measured record. Every qualifying proposition was bet, one BET per (game,
+# player, market) at the best bettable price: the population the rule was graded on. Measured on the
 # rule's own bet list (2023-24..2025-26, -200 floor, no double/triple-double;
 # C:/Users/micha/AppData/Local/Temp/nba_rebuild/uncapped_stats.py on the build
 # machine):
@@ -204,7 +212,8 @@ class NbaPropDecision:
     game_id: str
     fetch_at: str              # the deciding fetch's snapshot_at text
     n_quotes: int              # rows of this game in that fetch (the five markets)
-    n_bets: int                # propositions that qualified
+    n_bets: int                # propositions that qualified in this look; the ledger row stores
+                               # what the shared door WROTE (scripts/nba_props_card.py)
     detail: str                # this game's non-zero diagnostic counts
 
 

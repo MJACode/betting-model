@@ -394,6 +394,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # out, and the all-time ledger thread seeded as queued. The worker
     # drains it. Does not rewrite the record views, picks, or push_sent.
     "social_post_queue_2026_10_20.sql",
+    # 2026-10-20: images and an optional reply target on a manual post.
+    # Nullable columns only. Does not rewrite the ledger seed, picks, or
+    # push_sent. Returns before ALTER once the columns and checks exist.
+    "social_post_media_2026_10_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
