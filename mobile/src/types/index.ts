@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { DiscordPublish } from '@/lib/discordPublish';
 import type { PlayerLogSport } from '@/lib/playerLog';
 
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
@@ -193,10 +194,9 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
-  // Stamped by the record readers (#942) and read by teamDetail and the model
-  // detail screen; Pick carries it, this type did not, so master's type check
-  // failed and the over-the-air update stopped publishing (2026-10-14).
-  discordPublish?: 'published' | 'unpublished' | 'unknown';
+  // Client-only. attachDiscordPublish stamps it after the fetch. Not a
+  // column, so it stays out of SETTLED_PICK_COLUMNS and the cache key.
+  discordPublish?: DiscordPublish;
 };
 
 export interface LiveGameState {
@@ -941,9 +941,10 @@ export interface HitRatePlayer {
   player_name: string;
   team: string | null;
   player_type?: PlayerType;
-  /** The row's position, set only from the last-N read: nflverse `pos` on
-   *  NFL, null on NCAAF (player_recent_games_ncaaf has no position). Unset
-   *  (absent) on the Season and H2H reads, which carry no position at all. */
+  /** The row's position. Last-N reads it off the game log. NFL Season and
+   *  H2H read it off player_season_stat_values_nfl / player_h2h_stat_values_nfl
+   *  once that migration has landed; until then the field is absent and the
+   *  position chips stay off (matchesPosition lets a missing pos through). */
   pos?: string | null;
   games: RecentGameRow[]; // newest-first, length ≤ N ([] in Season/H2H mode)
   values: number[]; // per-game stat values, newest-first (dot strip source)
@@ -965,6 +966,8 @@ export interface SeasonStatValuesRow {
   player_id: string;
   player_name: string;
   team: string | null;
+  /** NFL only, from player_season_stat_values_nfl. Absent on the other sports. */
+  pos?: string | null;
   player_type?: PlayerType; // MLB only
   games: number;
   values: number[];
@@ -985,6 +988,22 @@ export interface SeasonStatValuesRow {
  * (data/migrations/add_position_vs_opponent_nfl.sql). The last four fields are
  * the defence's season standing, repeated on every row of that season.
  */
+/**
+ * One defense from position_defense_ranks_nfl. Rank 1 allows the most.
+ * `blended` is true while that defense has played fewer than 8 games
+ * this season and the rate still includes last season.
+ */
+export interface PositionDefenseRankRow {
+  defense: string;
+  avg_allowed: number | string | null;
+  player_games: number;
+  season_team_games: number;
+  window_team_games: number;
+  blended: boolean;
+  rank_most_allowed: number | null;
+  teams_ranked: number;
+}
+
 export interface PositionVsOpponentRow {
   season: number;
   player_id: string;
@@ -1006,6 +1025,8 @@ export interface H2HStatValuesRow {
   player_id: string;
   player_name: string;
   team: string | null;
+  /** NFL only, from player_h2h_stat_values_nfl. Absent on the other sports. */
+  pos?: string | null;
   player_type?: PlayerType; // MLB only
   /** The team these meetings were against — the player's NEXT opponent. */
   opponent: string;

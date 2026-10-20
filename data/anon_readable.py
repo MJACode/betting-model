@@ -49,6 +49,11 @@ ANON_READABLE: tuple[str, ...] = (
     # and the default grant since the Teams board shipped; declared now that
     # a `.from()` names it.
     "nfl_team_game_stats",
+    # Signals compact line: school name → abbreviation. The anon SELECT
+    # policy has been on this table since the Teams board
+    # (data/migrations/add_team_stats_board.sql, "anon read ncaaf_teams").
+    # Declared now that a `.from()` names it. A miss stays the school name.
+    "ncaaf_teams",
     "odds",
     "parlay_correlations",
     "parlay_track_record",
@@ -67,6 +72,12 @@ ANON_READABLE: tuple[str, ...] = (
     # NO policy -- deny-all -- so the grant alone read as an empty screen.
     # The policy is data/migrations/anon_read_public_betting_2026_09_20.sql.
     "public_betting",
+    # Build Your Own Model facts (2026-10-16). Granted before the screen
+    # exists: an undeclared table arrives with no SELECT and the first read
+    # is an empty error. Nothing in mobile/src names these yet, so they are
+    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
+    "byom_game_facts",
+    "byom_prop_facts",
     "tracked_bets",
     "ufc_fight_log",
     "umpires",
@@ -112,6 +123,15 @@ ANON_READABLE: tuple[str, ...] = (
     "v_public_track_record",
     "v_public_track_record_daily",
 )
+
+# In ANON_READABLE, and not yet named by a mobile `.from()`. The stale-entry
+# test subtracts this tuple and fails if anything else is granted unread.
+# Build Your Own Model facts: the NFL tables land before the screen.
+AHEAD_OF_THE_APP: tuple[str, ...] = (
+    "byom_game_facts",
+    "byom_prop_facts",
+)
+
 
 # Readable ONLY by a signed-in user. `anon` has never held SELECT on
 # subscriptions -- its grant was write-only until 2026-09-03, so revoking the
@@ -478,6 +498,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "position_vs_opponent_ncaaf",
     "position_vs_opponent_nfl",
     "position_vs_opponent_wnba",
+    # Anytime TD board: one rank per defense for a position group
+    # (data/migrations/position_defense_ranks_nfl_2026_10_18.sql).
+    "position_defense_ranks_nfl",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
@@ -498,6 +521,14 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "feedback_submit",
     "feedback_threads_for_device",
     "feedback_unread_count",
+    # the member's own sportsbooks -- SECURITY DEFINER, device/user-scoped
+    # (data/migrations/member_sportsbooks_2026_10_19.sql, which carries its own
+    # GRANT; apply_anon_grants skips them until the worker has applied it)
+    "member_books_get",
+    "member_books_set",
+    # crash logging -- SECURITY DEFINER, insert-only, returns nothing
+    # (data/migrations/add_app_errors.sql, mobile/src/lib/crashLogSetup.ts)
+    "log_app_error",
     # NOT called by the app, but REQUIRED by it: custom_model_picks and
     # custom_model_backtest are SECURITY INVOKER and both call this helper, so
     # the CALLER needs EXECUTE. Revoking it breaks the custom-model screen with

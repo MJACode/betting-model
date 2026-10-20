@@ -112,6 +112,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # tests/test_everything_in_supabase.py had failed on since 2026-09-12).
     # Written by data/ingestors/nfl_weather_cache_import.py.
     "add_nfl_stadium_weather_hourly.sql",
+    # 2026-10-11: the live wind card's kickoff-hour readings. The 11 mph check
+    # uses the minimum over a covered 12-hour window; without these rows the
+    # card fails closed and locks nothing. Not a pick.
+    "add_nfl_kickoff_wind_reads.sql",
     # 2026-09-20: per-game NHL team / goalie / skater logs from the NHL's free
     # stats API. The NHL models read one SEASON-FINAL row per goalie and
     # carried-forward team rates; an as-of-date feature needs the games it is
@@ -216,6 +220,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # written by data/ingestors/player_positions_ingestor.py. Guards on the
     # table existing.
     "add_player_positions.sql",
+    # 2026-10-06: ESPN athletes with no game-log row (mostly rookies). The
+    # position pass remembers them so it does not re-fetch them every morning.
+    # Guards on the table existing. Not applied in the session that added it;
+    # the worker's migration pass applies it after merge.
+    "add_player_position_unmatched.sql",
     # 2026-10-06 (Matt, phase 3): the card's NBA / WNBA / NCAAF functions,
     # joining player_positions. MUST run after add_player_positions.sql.
     "add_position_vs_opponent_bball_ncaaf.sql",
@@ -357,6 +366,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
     "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
+    # catalog return on the second pass. Win, loss, or push. The line
+    # basis is a label. Does not touch picks, the record views, or a
+    # live model. Unapplied until the worker's next pass.
+    "byom_facts_schema_2026_10_16.sql",
     # 2026-10-16: NHL Stats-tab reads (season totals, per-game value arrays,
     # team totals, latest pre-game prop quote). Display only. Does not
     # rewrite v_public_track_record and does not run before the CLV stamp.
@@ -364,6 +378,15 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-10-17: NHL Players board sums, same RPC shape as the other
     # sports. After the stats views. Does not rewrite the record.
     "add_nhl_skater_window_totals_2026_10_17.sql",
+    # 2026-10-18: Anytime TD matchup ranks, one row per defense, plus `pos`
+    # on the NFL season and H2H stat reads. Display only. Does not rewrite
+    # v_public_track_record. Sits with the other display reads, before the
+    # posted-stake pair. Guards each piece so the DDL fires once.
+    "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-10-19: the member's own sportsbooks (onboarding + Settings).
+    # Display only: one new table behind two device-scoped RPCs. No model,
+    # pick or record view reads it. Returns on a catalog read once applied.
+    "member_sportsbooks_2026_10_19.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

@@ -1,0 +1,58 @@
+# Known `npx tsc --noEmit` diagnostics for the PR CI gate.
+# Regenerate with: python scripts/check_tsc_baseline.py --write tsc.log tsc-baseline.txt
+# Do not hand-edit. Line and column are omitted.
+#
+# PR CI is stricter than the OTA Typecheck step on purpose.
+# mobile-ota.yml ignores src/lib/queries.ts and every scripts/ file: scripts
+# are not in the bundle, and the queries.ts casts are the tolerated baseline.
+# An error in a screen still blocks Publish. PR CI must catch that, and it
+# must also catch a new diagnostic inside queries.ts, which OTA would ignore.
+#
+# Keys:
+#   src/ and any other non-scripts file: file, TS code, and message.
+#     Another copy, or the same code with a different message, fails.
+#   scripts/: file and TS code only. The message names the type shape, so a
+#     new field on Pick, ParlayLeg, or TrackRecordSummary rewrites it and
+#     must not fail an unrelated PR. A new file, a new code, or another copy
+#     of the same code still fails.
+#
+# A baseline entry tsc no longer reports is a warning (::warning::), not a
+# failure. Delete it in the same PR. A fixed diagnostic can otherwise return
+# unseen.
+#
+# #846 (open) is a different mechanism: mobile/ci/tsc-baseline.txt and
+# scripts/mobile_ci_gate.py. That gate also runs the verify scripts, places
+# each error by source text, and fails when an entry disappears. This file
+# is not that baseline. This gate does not read mobile/ci/tsc-baseline.txt.
+scripts/verify_custom_model_filters.ts TS2322
+scripts/verify_line_shop.ts TS2741
+scripts/verify_parlay_correlation.ts TS2741
+scripts/verify_player_log.ts TS2352
+scripts/verify_share_record.ts TS2740
+scripts/verify_unpriced_pnl.ts TS2322
+scripts/verify_unpriced_pnl.ts TS2322
+scripts/verify_unpriced_pnl.ts TS2322
+scripts/verify_unpriced_pnl.ts TS2322
+scripts/verify_unpriced_pnl.ts TS2322
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError' to type 'Pick' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError' to type 'SavantStatsRow' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type '(ModelRegistryRow & { created_at: string; })[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'GameRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'GameRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'GameRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'GameRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'GameRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'GameWeather[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'GameWeather[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'LatestDkOddsRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'LatestDkOddsRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'LatestDkOddsRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'OpeningVsLiveRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'Pick[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'Pick[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'Pick[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'Pick[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'Pick[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'PlayerGameLogRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'PlayerGameLogRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/queries.ts TS2352 Conversion of type 'GenericStringError[]' to type 'TrackRecordRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.

@@ -129,6 +129,7 @@ const PAIRS: Pair[] = [
   T('betInk', 'bg', 'Parlay stat row on the grouped ground (H2)'),
   T('betInk', 'betSoft', 'BET badge, HIGH tier, sharp pill, W letter (H1/H2/M5/M6)'),
   T('tint', 'bgCard', 'Tracking / In slip ON: tint outline, checkmark and label (Designer ruling)'),
+  T('tint', 'tintSoft', 'Signals Slip/Track selected wash (Designer, #965)'),
   W('betInk', 'bet', 'parlay "Great" grade (H2)'),
   T('avoidInk', 'bgCard', 'loss text, error text, destructive labels (H2/H8/M1)'),
   T('avoidInk', 'bg', 'loss text on the grouped ground (H2)'),
@@ -160,6 +161,8 @@ const PAIRS: Pair[] = [
   // Red icons keep the bright hue where it already clears 3:1.
   T('avoid', 'avoidSoft', 'SignIn error-banner icon (non-text)', 3),
   T('avoid', 'bgCard', 'remove-leg / trash icons (non-text)', 3),
+  // Empty matchup bars sit on the white card. separatorOpaque is 1.7:1 there.
+  T('none', 'bgCard', 'Anytime TD empty matchup bar (non-text)', 3),
 ];
 console.log('\n  token          hex        ground              ratio  min');
 for (const p of PAIRS) {
