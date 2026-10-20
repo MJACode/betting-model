@@ -437,6 +437,31 @@ def run_calibration_watch() -> None:
         log.exception("ERROR calibration-watch crashed")
 
 
+def run_social_post_queue() -> None:
+    """Publish manual rows in social_post_queue. Does not post picks or recaps.
+
+    A raise must not kill the scheduler. The claim in tracking.social_posts is
+    what stops two services posting the same row; this job does not take the
+    session lock the worker_jobs queue uses.
+    """
+    try:
+        from data.db import get_connection
+        from tracking.social_posts import drain_social_posts
+        conn = get_connection()
+        try:
+            result = drain_social_posts(conn)
+        finally:
+            conn.close()
+        posted = result.get("posted") or 0
+        bad = [item for item in result.get("results", [])
+               if item.get("status") in ("failed", "uncertain")]
+        if posted or bad or result.get("status") not in ("ok", "skipped", "no_table"):
+            log.info("social post queue: status=%s posted=%s",
+                     result.get("status"), posted)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR social-post-queue crashed")
+
+
 def run_job_queue() -> None:
     # The worker's answer to "why on my machine?". Claims at most one queued job
     # per tick and runs it here, in-process, where DATABASE_URL, ODDS_API_KEY and
@@ -1694,6 +1719,16 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/5", timezone=TIMEZONE),
         id="job_queue",
         name="Worker job queue (every 5 min)",
+    )
+
+    # Manual posts to @SignalBasePicks. Separate from the pick slate and the
+    # recap jobs: it only reads social_post_queue. Five minutes matches the
+    # worker job queue. It does not move any other trigger.
+    sched.add_job(
+        run_social_post_queue,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="social_post_queue",
+        name="Manual X posts (every 5 min)",
     )
 
     # Pipeline watch — 7:15am ET daily, the slot the Sentinel agent used.

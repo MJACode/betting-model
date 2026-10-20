@@ -18,6 +18,10 @@ affected by this flag. The week and the previous calendar month are
 notify_x_period, the same renderer, Monday 7:30am ET. RUN_X_PUBLISHER=0
 still stops the slate and every recap.
 
+Manual marketing posts are not rendered here. They are rows in
+social_post_queue, drained by tracking.social_posts, and they call
+deliver_tweet below. Pick and recap posts do not.
+
 WHY NO LINKS, ENFORCED IN CODE. X moved to pay-per-use in February 2026 and
 charges $0.015 per post -- but $0.20 if the post contains a URL, added April
 2026. That is 13x, on a surcharge that is trivially easy to reintroduce by
@@ -641,41 +645,83 @@ def render_results(recap: dict, game_date: str, restate: bool = False,
 
 # ── Posting ───────────────────────────────────────────────────────────────────
 
+class TweetDelivery:
+    """One attempt to POST /2/tweets.
+
+    outcome is posted, posted_without_id, dry_run, skipped, refused,
+    rate_limited, rejected, or transport. rate_limited is True only for a
+    429, which is what the slate loop already stops on.
+    """
+
+    def __init__(self, tweet_id: str | None, rate_limited: bool, outcome: str,
+                 detail: str = ""):
+        self.tweet_id = tweet_id
+        self.rate_limited = rate_limited
+        self.outcome = outcome
+        self.detail = detail
+
+
 def post_tweet(text: str, dry_run: bool = False,
-               reply_to: str | None = None) -> str | None:
+               reply_to: str | None = None,
+               allow_link: bool = False) -> str | None:
     """POST one tweet. Returns its id, or None when it did not post.
 
     Never raises into a caller: a publishing surface must not be able to break
     the pass that produced the pick. A 429 is None here; callers that post a
     slate use _deliver_tweet so they can stop instead of hammering the limit.
+
+    allow_link defaults off. Pick and recap posts leave it off, so a URL is
+    still refused before the request. A manual row passes True only when that
+    row's allow_link column is set — X bills a URL at $0.20 instead of $0.015.
     """
-    tweet_id, _limited = _deliver_tweet(text, dry_run=dry_run, reply_to=reply_to)
+    tweet_id, _limited = _deliver_tweet(
+        text, dry_run=dry_run, reply_to=reply_to, allow_link=allow_link)
     return tweet_id
 
 
 def _deliver_tweet(text: str, dry_run: bool = False,
-                   reply_to: str | None = None) -> tuple[str | None, bool]:
+                   reply_to: str | None = None,
+                   allow_link: bool = False) -> tuple[str | None, bool]:
     """(tweet id or None, rate_limited).
 
     POST /2/tweets allows 100 posts per user per 15 minutes. A 429 is not a
     success and must not be ledgered; the second value tells a slate loop to
-    stop and leave the rest for the next pass.
+    stop and leave the rest for the next pass. A 2xx with no id still returns
+    the old "posted" sentinel so existing callers do not treat it as a miss.
+    """
+    delivered = deliver_tweet(
+        text, dry_run=dry_run, reply_to=reply_to, allow_link=allow_link)
+    if delivered.outcome == "posted_without_id":
+        return "posted", False
+    return delivered.tweet_id, delivered.rate_limited
+
+
+def deliver_tweet(text: str, dry_run: bool = False,
+                  reply_to: str | None = None,
+                  allow_link: bool = False) -> TweetDelivery:
+    """POST one tweet and say why it did or did not.
+
+    rejected is an HTTP 4xx other than 429: X refused, so the tweet was not
+    created. transport is a network error or a 5xx: the tweet may already
+    exist, and a retry can double-post. Callers that must not double-post
+    treat transport as uncertain rather than as a miss.
     """
     if not _enabled():
         logger.info("X publisher: RUN_X_PUBLISHER=0 — skipping")
-        return None, False
+        return TweetDelivery(None, False, "skipped", "RUN_X_PUBLISHER=0")
     creds = _creds()
     if not creds:
         logger.info("X publisher: credentials not configured — skipping")
-        return None, False
-    try:
-        _assert_no_link(text)
-    except ValueError as exc:
-        logger.error(f"X publisher: {exc}")
-        return None, False
+        return TweetDelivery(None, False, "skipped", "credentials not configured")
+    if not allow_link:
+        try:
+            _assert_no_link(text)
+        except ValueError as exc:
+            logger.error(f"X publisher: {exc}")
+            return TweetDelivery(None, False, "refused", str(exc))
     if dry_run:
         logger.info(f"[dry-run] would tweet:\n{text}")
-        return "dry-run", False
+        return TweetDelivery("dry-run", False, "dry_run", "")
     try:
         # A reply, when we are threading a result under the pick it grades.
         # Replies are the algorithm's heaviest signal -- weighted about 27x a
@@ -693,15 +739,22 @@ def _deliver_tweet(text: str, dry_run: bool = False,
             timeout=15,
         )
         if resp.status_code in (200, 201):
-            return str(resp.json().get("data", {}).get("id", "")) or "posted", False
+            tweet_id = str((resp.json().get("data") or {}).get("id") or "")
+            if tweet_id:
+                return TweetDelivery(tweet_id, False, "posted", "")
+            return TweetDelivery(None, False, "posted_without_id", "2xx with no id")
+        detail = f"HTTP {resp.status_code} {resp.text[:200]}"
         if resp.status_code == 429:
             logger.error(f"X publisher: rate limited (429) {resp.text[:200]}")
-            return None, True
-        logger.error(f"X publisher: HTTP {resp.status_code} {resp.text[:200]}")
-        return None, False
+            return TweetDelivery(None, True, "rate_limited", detail)
+        if 400 <= resp.status_code < 500:
+            logger.error(f"X publisher: {detail}")
+            return TweetDelivery(None, False, "rejected", detail)
+        logger.error(f"X publisher: {detail}")
+        return TweetDelivery(None, False, "transport", detail)
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"X publisher: post failed ({exc})")
-        return None, False
+        return TweetDelivery(None, False, "transport", str(exc)[:200])
 
 
 # ── Ledgered publishing ───────────────────────────────────────────────────────
