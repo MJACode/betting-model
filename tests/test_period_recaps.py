@@ -204,7 +204,9 @@ def test_x_period_uses_the_same_window_and_does_not_repost(monkeypatch):
     monkeypatch.setattr(xp, "_ledger", _remember)
     posted = []
 
-    def _deliver(text, dry_run=False, reply_to=None):
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
+        # post_tweet always forwards allow_link. Period recaps leave it off.
+        assert allow_link is False
         posted.append(text)
         return "id1", False
 
