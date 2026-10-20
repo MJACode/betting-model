@@ -33,6 +33,18 @@ DEFINITIONS (stated once, used everywhere):
              side-A number (spread_home, or the total), whatever the side.
   SEASONS    ending-year labels. Cuts chosen on 2022-2025, confirmed on 2026;
              2021 (2020-21) reported, never chosen on.
+  DERIVATIVE first half (h2h_h1, spreads_h1, totals_h1), first quarter (_q1)
+  MARKETS    and team totals (team_totals_home / _away), bought one game at a
+             time (load_per_event). Same rules as the full game, settled on
+             what the books settle them on (docs/nba_models_2026.md §4.2, §8;
+             scripts/nba_derivative_lab.py): first half = Q1 + Q2 points,
+             first quarter = Q1 points, both from nba_period_scores
+             (with_periods); a team total on that team's own final score,
+             overtime included. A level first half or first quarter VOIDS a
+             two-way moneyline at every book: graded "P", stake back, out of
+             the denominator, exactly like a push. Side A is home for h2h_* and
+             spreads_* (spread_home is the home number for the period), over
+             for totals_* and team totals.
 
     PYTHONPATH=. python -m scripts.nba_game_harness --check
 """
@@ -50,15 +62,33 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import config  # noqa: E402
+from scripts.nba_derivative_lab import build_outcomes  # noqa: E402
 from scripts.nba_game_market_lab import (  # noqa: E402
-    _assert_spread_sign, dec, imp, power_devig, probs_at, settle, solve_mu, threshold)
+    _assert_spread_sign, dec, imp, power_devig, probs_at, settle, solve_mu)
 
 # NBA_RESEARCH_CACHE points a lab in another worktree at the one shared cache
 # (scripts/nba_research_cache.py writes it; it is a cache of Supabase).
 CACHE = Path(os.environ.get("NBA_RESEARCH_CACHE", str(ROOT / "data" / "local" / "nba")))
-MARKETS = ("h2h", "spreads", "totals")
-SIDE_A = {"h2h": "home", "spreads": "home", "totals": "over"}
-SIDE_B = {"h2h": "away", "spreads": "away", "totals": "under"}
+MARKETS = ("h2h", "spreads", "totals")                 # the full game; load() keeps only these
+DERIVATIVE_MARKETS = ("h2h_h1", "spreads_h1", "totals_h1", "h2h_q1", "spreads_q1", "totals_q1",
+                      "team_totals_home", "team_totals_away")
+# market -> (kind, what settles it). kind: ml (two-way winner), spread (home
+# number), total (over / under). Settles on: the full game, the first half,
+# the first quarter, or one team's own final score.
+MARKET_SPEC = {
+    "h2h": ("ml", "game"), "spreads": ("spread", "game"), "totals": ("total", "game"),
+    "h2h_h1": ("ml", "h1"), "spreads_h1": ("spread", "h1"), "totals_h1": ("total", "h1"),
+    "h2h_q1": ("ml", "q1"), "spreads_q1": ("spread", "q1"), "totals_q1": ("total", "q1"),
+    "team_totals_home": ("total", "home_team"), "team_totals_away": ("total", "away_team"),
+}
+_KIND = {m: k for m, (k, _) in MARKET_SPEC.items()}
+_SCOPE = {m: s for m, (_, s) in MARKET_SPEC.items()}
+KIND_MARKET = {"ml": "h2h", "spread": "spreads", "total": "totals"}   # settled like this full-game market
+SIDE_A = {m: ("over" if k == "total" else "home") for m, k in _KIND.items()}
+SIDE_B = {m: ("under" if k == "total" else "away") for m, k in _KIND.items()}
+# per-team points that settle the first half and first quarter (with_periods)
+PERIOD_COLS = ("home_q1", "away_q1", "home_h1", "away_h1")
+_PERIOD_OF = {"h1": ("home_h1", "away_h1"), "q1": ("home_q1", "away_q1")}
 BETTABLE = tuple(config.BEST_LINE_BOOKMAKERS)
 BOOK_RANK = {b: i for i, b in enumerate(BETTABLE)}
 DK, SHARP = "draftkings", "pinnacle"
@@ -93,6 +123,62 @@ def risk_win(price):
     return r, r * (d - 1.0)
 
 
+# ── markets ─────────────────────────────────────────────────────────────────
+
+def _lookup(market, table: dict) -> np.ndarray:
+    m = pd.Series(np.asarray(market, dtype=object), dtype=object)
+    out = m.map(table)
+    if out.isna().any():
+        raise KeyError(f"unknown market(s) {sorted(set(m[out.isna()].astype(str)))}: "
+                       "name each in MARKET_SPEC before pricing or grading it")
+    return out.to_numpy(dtype=object)
+
+
+def kind(market) -> np.ndarray:
+    """ml / spread / total per row, for every market the harness grades."""
+    return _lookup(market, _KIND)
+
+
+def scope(market) -> np.ndarray:
+    """game / h1 / q1 / home_team / away_team: what settles each row."""
+    return _lookup(market, _SCOPE)
+
+
+def threshold(market, side_a_line):
+    """t for side A from the stored number, any market: side A wins when its
+    quantity (the home margin, or the total) is above t. A spread's stored
+    number is the HOME number, so t = -spread_home; a total's t is the number."""
+    line = np.asarray(side_a_line, float)
+    return np.where(kind(market) == "spread", -line, line)
+
+
+def settling_scores(market, frame: pd.DataFrame):
+    """(settled like, home, away) per row: the full-game market each row
+    settles like and the two numbers it settles on.
+
+    full game: the final scores (overtime counted). First half: each team's
+    Q1 + Q2 points; first quarter: its Q1 points (with_periods). Team total:
+    that team's own final score (overtime counted) as `home` and 0 as `away`,
+    so the "total" it settles on is that team's points alone."""
+    m = np.asarray(market, dtype=object)
+    sc = scope(m)
+    home = frame["home_score"].to_numpy(float).copy()
+    away = frame["away_score"].to_numpy(float).copy()
+    for part, (hc, ac) in _PERIOD_OF.items():
+        sel = sc == part
+        if not sel.any():
+            continue
+        if hc not in frame or ac not in frame:
+            raise KeyError(f"{part} markets settle on period scores and the games carry none: "
+                           "pass the games through H.with_periods first")
+        home[sel] = frame[hc].to_numpy(float)[sel]
+        away[sel] = frame[ac].to_numpy(float)[sel]
+    at = sc == "away_team"
+    home[at] = frame["away_score"].to_numpy(float)[at]
+    away[at | (sc == "home_team")] = 0.0
+    return _lookup(kind(m), KIND_MARKET), home, away
+
+
 # ── loading ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -110,6 +196,27 @@ def load_games(cache: Path = CACHE) -> pd.DataFrame:
     g["season"] = g["season"].astype(int)
     return g[["game_id", "season", "game_date", "tip", "home_team", "away_team",
               "home_score", "away_score"]].reset_index(drop=True)
+
+
+def with_periods(games: pd.DataFrame, cache: Path = CACHE,
+                 periods: pd.DataFrame | None = None) -> pd.DataFrame:
+    """`games` plus home_q1, away_q1, home_h1, away_h1: the points that settle
+    the first-quarter and first-half markets (nba_period_scores rows:
+    game_id, period, home_points, away_points).
+
+    The first search's rule for trusting a game's periods is kept, by calling
+    it (scripts/nba_derivative_lab.build_outcomes): the periods sum to the
+    stored final score, are numbered 1..n with n >= 4, and periods 1 and 2 are
+    both there. A game that fails it gets no period points (NaN), and grade()
+    refuses its first-half and first-quarter bets rather than guess."""
+    per = pd.read_parquet(cache / "nba_period_scores.parquet") if periods is None else periods
+    g = games.drop(columns=[c for c in PERIOD_COLS if c in games])
+    # went_to_ot only feeds build_outcomes' own report column, never its rule
+    o = build_outcomes(g[["game_id", "season", "home_score", "away_score"]].assign(went_to_ot=np.nan),
+                       per, {})
+    names = {"hq1": "home_q1", "aq1": "away_q1", "hh1": "home_h1", "ah1": "away_h1"}
+    o = o.loc[o["ok"].astype(bool), ["game_id", *names]].rename(columns=names)
+    return g.merge(o.astype({c: float for c in PERIOD_COLS}), on="game_id", how="left")
 
 
 def attach_fetch(quotes: pd.DataFrame, ledger: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -152,20 +259,24 @@ def frame_quotes(o: pd.DataFrame, extra=()) -> pd.DataFrame:
     the four prices), the game's season / game_date / tip, a parsed
     snapshot_at and the fetch instant `fetch_at`. Kept: rows from a fetch
     before tip whose own stamp is before tip, with both prices. `line` is the
-    side-A number (spread_home or the total), price_a / price_b the side-A /
-    side-B prices, `coherent` the 1.00-1.15 implied-sum test.
+    side-A number (spread_home for a spread, total_line for a total, none for
+    a moneyline: kind(), so a first-half or team total reads like the full
+    game's), price_a / price_b the side-A / side-B prices, `coherent` the
+    1.00-1.15 implied-sum test.
 
     ONE copy: load() runs it on the archive (fetch_at from the purchase
-    ledger), and models/nba_total_luck.py runs it on the live odds table
-    (fetch_at = created_at, the moment the refresh pass stored the fetch), so
-    the live model and the graded cells see the same quotes. `extra` names
+    ledger), and models/nba_total_luck.py and models/nba_team_total_luck.py
+    run it on the live odds table (fetch_at = created_at, the moment the fetch
+    was stored), so the live model and the graded cells see the same quotes;
+    on team-total rows it gives what load_per_event gives. `extra` names
     further columns to keep (the live model's betslip links)."""
     o = o[o["fetch_at"].notna() & (o["snapshot_at"] < o["tip"]) & (o["fetch_at"] < o["tip"])]
     o = o.rename(columns={"bookmaker": "book"})
-    o["line"] = np.where(o["market"] == "spreads", o["spread_home"],
-                         np.where(o["market"] == "totals", o["total_line"], np.nan))
-    o["price_a"] = np.where(o["market"] == "totals", o["over_price"], o["home_price"])
-    o["price_b"] = np.where(o["market"] == "totals", o["under_price"], o["away_price"])
+    k = kind(o["market"])
+    o["line"] = np.where(k == "spread", o["spread_home"],
+                         np.where(k == "total", o["total_line"], np.nan))
+    o["price_a"] = np.where(k == "total", o["over_price"], o["home_price"])
+    o["price_b"] = np.where(k == "total", o["under_price"], o["away_price"])
     o = o[o["price_a"].notna() & o["price_b"].notna()]
     s = imp(o["price_a"]) + imp(o["price_b"])
     o["coherent"] = (s >= COHERENT[0]) & (s <= COHERENT[1])
@@ -216,16 +327,22 @@ PER_EVENT_SOURCE = "odds_api_nba_derivative_history"
 
 
 def load_per_event(games: pd.DataFrame, cache: Path = CACHE,
-                   source: str = PER_EVENT_SOURCE) -> pd.DataFrame:
+                   source: str = PER_EVENT_SOURCE, require_seasons=None) -> pd.DataFrame:
     """Rows bought ONE GAME AT A TIME (first half, first quarter, team totals).
 
     These have no slate ledger: the per-game purchase asked for tip - 60 and
     stored the feed's own snapshot time as snapshot_at, so that stamp IS the
     moment the price was available and fetch_at = snapshot_at. Same columns as
     load().quotes; `market` keeps its stored name (team_totals_home, ...); the
-    over / under (or home / away) prices are price_a / price_b."""
+    over / under (or home / away) prices are price_a / price_b. Only the
+    markets in DERIVATIVE_MARKETS are kept.
+
+    `require_seasons`: as in load(), a graded run names the seasons it needs
+    and the load refuses when any of them has a derivative price on fewer than
+    90% of its games (a purchase still running, or a cache that predates it)."""
     o = pd.read_parquet(cache / "nba_odds.parquet")
-    o = o[(o["source"] == source) & (o["snapshot_type"] != "in_play")].copy()
+    o = o[(o["source"] == source) & (o["snapshot_type"] != "in_play")
+          & o["market"].isin(DERIVATIVE_MARKETS)].copy()
     o["snapshot_at"] = pd.to_datetime(o["snapshot_at"], utc=True)
     o = o.merge(games[["game_id", "season", "game_date", "tip"]], on="game_id")
     o = o[o["snapshot_at"] < o["tip"]].rename(columns={"bookmaker": "book"})
@@ -237,6 +354,13 @@ def load_per_event(games: pd.DataFrame, cache: Path = CACHE,
     o = o[o["price_a"].notna() & o["price_b"].notna()]
     sm = imp(o["price_a"]) + imp(o["price_b"])
     o["coherent"] = (sm >= COHERENT[0]) & (sm <= COHERENT[1])
+    if require_seasons is not None:
+        share = games["game_id"].isin(set(o["game_id"])).groupby(games["season"]).mean()
+        short = {int(s): round(float(share.get(int(s), 0.0)), 4) for s in require_seasons
+                 if share.get(int(s), 0.0) < MIN_PRICED_SHARE}
+        if short:
+            raise RuntimeError(f"derivative prices on too few games in {short} "
+                               f"(need {MIN_PRICED_SHARE:.0%}); refresh the cache after the purchase")
     return o[["game_id", "season", "game_date", "tip", "market", "book", "snapshot_at",
               "fetch_at", "line", "price_a", "price_b", "coherent"]].reset_index(drop=True)
 
@@ -278,8 +402,11 @@ def visible(quotes: pd.DataFrame, times: pd.DataFrame) -> pd.DataFrame:
 
 
 def offers(vis: pd.DataFrame) -> pd.DataFrame:
-    """Two rows per visible coherent quote, one per side: (side, line, price)."""
+    """Two rows per visible coherent quote, one per side: (side, line, price).
+    Sides per market: home / away for h2h_* and spreads_*, over / under for
+    totals_* and team totals (SIDE_A, SIDE_B)."""
     v = vis[vis["coherent"]]
+    kind(v["market"])                                   # an unnamed market stops here
     a = v.assign(side=v["market"].map(SIDE_A), price=v["price_a"])
     b = v.assign(side=v["market"].map(SIDE_B), price=v["price_b"])
     out = pd.concat([a, b], ignore_index=True).drop(columns=["price_a", "price_b"])
@@ -415,13 +542,17 @@ def dist_by_season(resid: pd.DataFrame, seasons, min_prior: int = 300) -> dict:
 def side_probs(market, side, line, mu=None, sigma=None, p_home=None):
     """(P win, P push) for a side at a stored side-A number.
 
-    spreads/totals: the side-A quantity (home margin, or the total) ~ Normal(mu,
-    sigma), integer-continuity as in the first search. h2h: p_home."""
+    spreads/totals (any period, team totals): the side-A quantity (home margin,
+    or the total) ~ Normal(mu, sigma) or the empirical distribution in sigma,
+    integer-continuity as in the first search. Moneylines (any period): p_home.
+    A first-half or first-quarter p_home is the home side's share of the
+    decided outcomes (a level period voids, as the two-way no-vig price
+    reads), so its EV is per unit risked given no void."""
     market, side = np.asarray(market), np.asarray(side)
     a_side = (side == "home") | (side == "over")
     pw = np.full(market.shape, np.nan)
     pp = np.zeros(market.shape)
-    ml = market == "h2h"
+    ml = kind(market) == "ml"
     if p_home is not None:
         ph = np.asarray(p_home, float)
         pw = np.where(ml, np.where(a_side, ph, 1.0 - ph), pw)
@@ -483,12 +614,35 @@ def choose(cand: pd.DataFrame, cut: float, books=BETTABLE, sides=None,
 # ── grading ─────────────────────────────────────────────────────────────────
 
 def grade(bets: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+    """W / L / P, units and risk per bet, by market (settling_scores).
+
+    Full game: the final scores, as the first search settled them. First half,
+    first quarter: the period points `games` carries (with_periods); a level
+    period voids a two-way moneyline (P: stake back, out of the denominator).
+    Team totals: that team's final score. A derivative bet whose numbers are
+    missing (no trustworthy period scores) stops the grade."""
     if len(bets) == 0:
         return bets.assign(result=[], units=[], risk=[], risk_kept=[])
-    b = bets.drop(columns=[c for c in ("home_score", "away_score") if c in bets]).merge(
-        games[["game_id", "home_score", "away_score"]], on="game_id")
-    res = settle(b["market"].to_numpy(), b["side"].to_numpy(), b["line"].to_numpy(),
-                 b["home_score"].to_numpy(), b["away_score"].to_numpy())
+    sc = scope(bets["market"])
+    periods = [c for c in PERIOD_COLS if c in games] if np.isin(sc, ("h1", "q1")).any() else []
+    b = bets.drop(columns=[c for c in ("home_score", "away_score", *periods) if c in bets]).merge(
+        games[["game_id", "home_score", "away_score", *periods]], on="game_id")
+    if periods or (sc != "game").any():
+        base, home, away = settling_scores(b["market"], b)
+        deriv = scope(b["market"]) != "game"
+        bad = deriv & ~(np.isfinite(home) & np.isfinite(away))
+        if bad.any():
+            raise ValueError(f"{int(bad.sum())} derivative bets have no settling score "
+                             f"(games {sorted(set(b.loc[bad, 'game_id']))[:5]}): their period "
+                             "scores fail with_periods' check or are missing")
+        res = settle(base, b["side"].to_numpy(), b["line"].to_numpy(), home, away)
+        # a level first half or first quarter voids the two-way moneyline
+        void = deriv & (kind(b["market"]) == "ml") & (home == away)
+        res[void] = "P"
+        b = b.drop(columns=periods)
+    else:
+        res = settle(b["market"].to_numpy(), b["side"].to_numpy(), b["line"].to_numpy(),
+                     b["home_score"].to_numpy(), b["away_score"].to_numpy())
     r, w = risk_win(b["price"])
     units = np.where(res == "W", w, np.where(res == "L", -r, 0.0))
     return b.assign(result=res, units=units, risk=np.where(res == "P", 0.0, r), risk_kept=r)
@@ -567,7 +721,7 @@ def next_fetch_check(bets: pd.DataFrame, data: Data) -> pd.Series:
     off = offers(vis)[["game_id", "market", "book", "side", "line", "price"]].rename(
         columns={"price": "price_next", "line": "line_next"})
     x = bets.reset_index().merge(off, on=["game_id", "market", "book", "side"], how="left")
-    same = np.where(x["market"] == "h2h", True,
+    same = np.where(kind(x["market"]) == "ml", True,
                     np.isclose(x["line"].fillna(0), x["line_next"].fillna(np.inf)))
     ok = same & (x["price_next"].fillna(-1e9) >= x["price"])
     return pd.Series(ok, index=x["index"]).groupby(level=0).any().reindex(bets.index, fill_value=False)
@@ -583,7 +737,8 @@ def outlier_flag(bets: pd.DataFrame, cand: pd.DataFrame) -> pd.Series:
     x = bets.reset_index()[["index", *key, "line", "book", "price"]].merge(
         c[[*key, "line", "book", "price"]].rename(columns={"book": "b2", "price": "p2", "line": "l2"}),
         on=key, how="left")
-    same = (x["market"] == "h2h") | np.isclose(x["line"].fillna(0), x["l2"].fillna(np.inf))
+    same = (pd.Series(kind(x["market"]) == "ml", index=x.index)
+            | np.isclose(x["line"].fillna(0), x["l2"].fillna(np.inf)))
     x = x[same & (x["b2"] != x["book"])]
     best_other = x.groupby("index")["p2"].max()
     gap = cents(bets["price"]) - cents(best_other.reindex(bets.index).fillna(-1e9))
@@ -602,14 +757,11 @@ def pinnacle_close(data: Data) -> pd.DataFrame:
 
 def close_sigma(close: pd.DataFrame, games: pd.DataFrame) -> dict:
     """SD of (result - Pinnacle close number) per market, fit on seasons before S."""
-    c = close[close["market"] != "h2h"].merge(games[["game_id", "home_score", "away_score"]],
-                                               on="game_id")
-    margin, total = c["home_score"] - c["away_score"], c["home_score"] + c["away_score"]
-    c = c.assign(resid=np.where(c["market"] == "spreads", margin + c["close_line"],
-                                total - c["close_line"]))
+    c = close_resid(close, games)
+    markets = ("spreads", "totals") + tuple(sorted(set(c["market"]) - {"spreads", "totals"}))
     sig = {}
     for s in sorted(games["season"].unique()):
-        for m in ("spreads", "totals"):
+        for m in markets:
             prior = c[(c["market"] == m) & (c["season"] < s)]
             if len(prior) < 300:
                 prior = c[(c["market"] == m) & (c["season"] == s)]
@@ -618,13 +770,21 @@ def close_sigma(close: pd.DataFrame, games: pd.DataFrame) -> dict:
 
 
 def close_resid(close: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
-    """(season, market, resid): result minus Pinnacle's closing number, side A."""
-    c = close[close["market"] != "h2h"].merge(games[["game_id", "home_score", "away_score"]],
-                                               on="game_id")
-    margin, total = c["home_score"] - c["away_score"], c["home_score"] + c["away_score"]
-    return pd.DataFrame({"season": c["season"].astype(int), "market": c["market"],
-                         "resid": np.where(c["market"] == "spreads", margin + c["close_line"],
-                                           total - c["close_line"])})
+    """(season, market, resid): result minus Pinnacle's closing number, side A
+    -- the home margin plus the home number for a spread, the total minus the
+    number for a total -- each settled on its own scores (settling_scores:
+    the first half's for spreads_h1, the team's own for a team total). A row
+    with no settling score (a game whose periods fail with_periods) is left out."""
+    c = close[kind(close["market"]) != "ml"]
+    sc = scope(c["market"])
+    periods = [p for p in PERIOD_COLS if p in games] if np.isin(sc, ("h1", "q1")).any() else []
+    c = c.merge(games[["game_id", "home_score", "away_score", *periods]], on="game_id")
+    base, home, away = settling_scores(c["market"], c)
+    x = np.where(base == "spreads", home - away, home + away)
+    resid = x - threshold(c["market"], c["close_line"])
+    ok = np.isfinite(resid)
+    return pd.DataFrame({"season": c["season"].astype(int).to_numpy()[ok],
+                         "market": c["market"].to_numpy()[ok], "resid": resid[ok]})
 
 
 def close_dist(close: pd.DataFrame, games: pd.DataFrame) -> dict:
@@ -645,7 +805,7 @@ def clv(bets: pd.DataFrame, close: pd.DataFrame, sig: dict) -> pd.Series:
     p_a = x["close_fa"].to_numpy()
     sigma = np.array([sig.get((int(s), m), 1.0) for s, m in zip(x["season"], x["market"])],
                      dtype=object)
-    ml = (x["market"] == "h2h").to_numpy()
+    ml = kind(x["market"]) == "ml"
     same = ml | np.isclose(x["line"].fillna(0), x["close_line"].fillna(np.inf))
     tc = threshold(x["market"], x["close_line"])
     mu = solve_any(tc, p_a, sigma)
@@ -730,16 +890,19 @@ def market_fair(vis: pd.DataFrame, sig: dict) -> pd.DataFrame:
     rule's offers (which number and price is best) and is the blind baseline's
     chooser; it is never a model's own probability.
 
-    spreads/totals: mu of the side-A quantity solved from each quote's no-vig
-    probability at its own number; h2h: p_home."""
+    spreads/totals (any period, team totals): mu of the side-A quantity solved
+    from each quote's no-vig probability at its own number, through sig[(season,
+    market)]; moneylines (any period): p_home."""
     v = vis[vis["coherent"] & vis["book"].isin((SHARP, *BETTABLE))].copy()
     if v.empty:
         return pd.DataFrame(columns=["game_id", "market", "mu", "sigma", "p_home", "ref"])
     ia, ib = imp(v["price_a"]), imp(v["price_b"])
     v["fa"] = ia / (ia + ib)
-    v["sigma"] = pd.Series([sig.get((int(se), m), np.nan) if m != "h2h" else np.nan
-                            for se, m in zip(v["season"], v["market"])], index=v.index, dtype=object)
-    sp = (v["market"] != "h2h").to_numpy()
+    k = kind(v["market"])
+    v["sigma"] = pd.Series([sig.get((int(se), m), np.nan) if kk != "ml" else np.nan
+                            for se, m, kk in zip(v["season"], v["market"], k)],
+                           index=v.index, dtype=object)
+    sp = k != "ml"
     mu = np.full(len(v), np.nan)
     if sp.any():
         x = v[sp]
@@ -753,7 +916,7 @@ def market_fair(vis: pd.DataFrame, sig: dict) -> pd.DataFrame:
     rest = rest[[k not in have for k in zip(rest["game_id"], rest["market"])]]
     out = pd.concat([sharp[["game_id", "market", "mu", "fa", "sigma"]].assign(ref="pinnacle"),
                      rest.assign(ref="consensus")], ignore_index=True)
-    out["p_home"] = np.where(out["market"] == "h2h", out["fa"], np.nan)
+    out["p_home"] = np.where(kind(out["market"]) == "ml", out["fa"], np.nan)
     return out.drop(columns="fa")
 
 
@@ -814,12 +977,14 @@ SPLITS = {"home": ("home", "away"), "fav": ("fav", "dog"), "over": ("over", "und
 
 def fav_sides(neutral: pd.DataFrame) -> pd.DataFrame:
     """(game_id, market, fav, dog): the favourite by the MARKET's fair line at T
-    (h2h: p_home > 0.5; spreads: the home margin's centre above 0). Totals have
-    none. Read from `neutral`, never from a result."""
+    (moneylines: p_home > 0.5; spreads: the home margin's centre above 0, any
+    period). Totals, of any period, and team totals have none. Read from
+    `neutral`, never from a result."""
     f = neutral.drop_duplicates(["game_id", "market"])[["game_id", "market", "mu", "p_home"]]
-    f = f[f["market"] != "totals"]
-    home_fav = np.where(f["market"] == "h2h", f["p_home"] > 0.5, f["mu"] > 0)
-    level = np.where(f["market"] == "h2h", np.isclose(f["p_home"], 0.5), np.isclose(f["mu"], 0.0))
+    f = f[kind(f["market"]) != "total"]
+    ml = kind(f["market"]) == "ml"
+    home_fav = np.where(ml, f["p_home"] > 0.5, f["mu"] > 0)
+    level = np.where(ml, np.isclose(f["p_home"], 0.5), np.isclose(f["mu"], 0.0))
     f = f.assign(fav=np.where(home_fav, "home", "away"), dog=np.where(home_fav, "away", "home"))
     return f[~level][["game_id", "market", "fav", "dog"]]
 
@@ -913,7 +1078,7 @@ def real_side_shares(bets: pd.DataFrame, neutral: pd.DataFrame) -> dict:
 def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: pd.DataFrame,
               cuts, sides_by_market: dict, close=None, sig=None, placebo=None,
               strength: str = "ev", choose_seasons=CHOOSE,
-              times: pd.DataFrame | None = None) -> list[dict]:
+              times: pd.DataFrame | None = None, market_groups: dict | None = None) -> list[dict]:
     """Grade one family at one decision point over its cut axis and sides.
 
     `cand`: offers with p_win / p_push / ev. A model family leaves strength="ev"
@@ -924,14 +1089,23 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
     `times`: the decision times the cells used (default: the slate fetches);
     at D any choosing season they reach on fewer than 95% of games is dropped
     from `choose_seasons` and named in the row (§6.5 amendment).
+    `market_groups`: {label: (market, ...)} pools several real markets into one
+    cell group (§8: team totals, both teams' markets, as one cell per side and
+    cut). A `sides_by_market` key that names a group takes every member's
+    offers; the row's `market` is the label, while every bet keeps its real
+    market, which pricing and settlement read. Keys not named run alone.
     One row per (market, side, cut) with every number section 6 reports."""
     rows = []
     cov = point_coverage(data, point, times)
     asked = tuple(choose_seasons)
     choose_seasons, dropped = gated_seasons(cov, asked, point)
+    groups = market_groups or {}
     for market, sides in sides_by_market.items():
-        cm = cand[cand["market"] == market]
-        nm = neutral[neutral["market"] == market]
+        members = tuple(groups.get(market, (market,)))
+        if market in groups:
+            kind(list(members))                         # a group's members must be real markets
+        cm = cand[cand["market"].isin(members)]
+        nm = neutral[neutral["market"].isin(members)]
         population = set(cm["game_id"])
         blinds = blind_by_real_side(nm, population, data.games, choose_seasons)
         bpool = blind_pool(nm, population, data.games, tuple(choose_seasons) + (CONFIRM,),
@@ -951,7 +1125,7 @@ def run_cells(data: Data, family: str, point: str, cand: pd.DataFrame, neutral: 
                 dk = grade(pick(cm, books=(DK,)), data.games)
                 pl = []
                 for pc in placebo or []:
-                    gp = grade(pick(pc[pc["market"] == market]), data.games)
+                    gp = grade(pick(pc[pc["market"].isin(members)]), data.games)
                     pl.append(roi(gp[gp["season"].isin(choose_seasons)]) if len(gp) else np.nan)
                 ch, cf = rep["choose"], rep["confirm"]
                 shares = real_side_shares(g[g["season"].isin(choose_seasons)] if len(g) else g, nm)
@@ -1032,6 +1206,16 @@ def check() -> None:
     assert np.allclose(cents([-110, 110, -105, 105, 150, -200]), [-10, 10, -5, 5, 50, -100])
     r, w = risk_win([-110, 150, -400])
     assert np.allclose(r, [1.1, 1 / 1.5, 3.0]) and np.allclose(w[:2], [1.0, 1.0])
+    # a period spread's stored number is the home number too
+    assert np.allclose(threshold(["spreads_h1", "spreads_q1", "totals_h1", "team_totals_away"],
+                                 [-3.5, 1.0, 110.5, 112.5]), [3.5, -1.0, 110.5, 112.5])
+    # first half 55-55 voids both moneyline sides; the home -0.5 first-quarter spread on 30-20 wins
+    g = pd.DataFrame({"game_id": ["G"], "home_score": [110.0], "away_score": [100.0],
+                      "home_q1": [30.0], "away_q1": [20.0], "home_h1": [55.0], "away_h1": [55.0]})
+    b = pd.DataFrame({"game_id": "G", "market": ["h2h_h1", "h2h_h1", "spreads_q1"],
+                      "side": ["home", "away", "home"], "line": [np.nan, np.nan, -0.5],
+                      "price": [-110.0, -110.0, -110.0]})
+    assert grade(b, g)["result"].tolist() == ["P", "P", "W"]
     print("checks pass")
 
 

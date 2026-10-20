@@ -82,6 +82,8 @@ MAX_SILENCE: dict = {
     "nba_prop_window": 30,
     # Every minute, 24x7, and it beats on the idle ticks too (one read, then
     # return), so 20 minutes is 20 missed ticks: a stopped job, not a quiet one.
+    # One job for both NBA totals models, nba_total_luck and
+    # nba_team_total_luck (scripts/nba_pregame_window.py), so one entry.
     "nba_total_luck_window": 20,
 }
 

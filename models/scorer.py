@@ -224,6 +224,16 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         direction = "Over" if pick_side == "over" else "Under"
         line_str = f" {line}" if line is not None else ""
         return f"{home_team} vs {away_team} {direction}{line_str}{f5_tag}"
+    elif market in ("team_totals_home", "team_totals_away"):
+        # One team's points: "BOS @ MIL — MIL Team Total Under 115.5". The
+        # matchup leads, as the NFL opener's "TB @ CAR — CAR -3", so the label
+        # cannot be read as the full-game total, and the app does not split
+        # it into a player-prop title. tracking/pick_integrity refuses a
+        # team-total label without "Team Total", or naming the other team.
+        team = home_team if market == "team_totals_home" else away_team
+        direction = "Over" if pick_side == "over" else "Under"
+        line_str = f" {line}" if line is not None else ""
+        return f"{away_team} @ {home_team} — {team} Team Total {direction}{line_str}"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -3166,6 +3176,8 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market'
                 OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
                 THEN 'totals'
+              -- The home team's own points, not the game total.
+              WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
                 THEN 'spreads'
@@ -3188,7 +3200,9 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
 
         warning = {"pick_label": label, "status": None, "detail": ""}
 
-        if market == "totals":
+        # Named markets, not a substring: "totals" in market would also start
+        # line-checking the MLB first-five totals, which this never covered.
+        if market in ("totals", "team_totals_home", "team_totals_away"):
             cur_line = current.get("total_line")
             if cur_line is not None and scored_line is not None:
                 delta = cur_line - scored_line

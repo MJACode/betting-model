@@ -94,7 +94,17 @@ scoring silently skips the model — the session-51 UFC failure.
 ```bash
 python -m data.ingestors.wnba_stats_ingestor --backfill 2019 2025   # was wnba_backfill.yml
 python -m scripts.nfl_odds_backfill <args>                          # was nfl_odds_backfill.yml
-python -m data.db_setup                                             # was db_migrate.yml
+python -m data.view_migrations                                      # after a merge: the view/function migrations (the worker also runs them each pass)
+python -m data.db_setup                                             # FIRST-TIME schema setup only (was db_migrate.yml)
+```
+
+`data.db_setup` is not the post-merge step. It replays the whole base schema and
+builds any index it declares that production lacks: on 2026-10-20 it tried to build
+`idx_prop_odds_game` on `player_prop_odds`, held that table's writes for the full
+two-minute statement timeout, and rolled back. A merged view or function change
+goes through `data.view_migrations`.
+
+```bash
 ```
 
 `nfl_props_setup.yml` existed only because the dev sandbox cannot reach Supabase
