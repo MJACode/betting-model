@@ -223,7 +223,17 @@ INDOOR_ROOFS = {"dome", "closed"}
 # blank here is NOT eligible until the state is known. That loses nothing: if
 # the roof is in fact open, the state lands before kickoff and the game
 # re-qualifies inside the firing window.
-RETRACTABLE_STADIUMS = {"ATL97", "DAL00", "HOU00", "IND00", "PHO00"}
+RETRACTABLE_IN_HISTORY = {"ATL97", "DAL00", "HOU00", "IND00", "PHO00"}
+
+# Retractable venues ABROAD, which nflverse's history cannot show: they host
+# one game, so no 'open' or 'closed' row exists before it is played. The
+# Bernabeu's renovation added a retractable roof; ESPN lists the 2026-11-08
+# game there as indoor (scoreboard, 2026-10-20) and nflverse leaves its roof
+# blank. Until the venue came from the games table (2026-10-20) the card saw
+# this game at ATL97 and held it back as retractable; this keeps it held back
+# now that it is placed in Madrid.
+RETRACTABLE_ABROAD = {"MAD00", "MAD01"}
+RETRACTABLE_STADIUMS = RETRACTABLE_IN_HISTORY | RETRACTABLE_ABROAD
 
 
 def open_air_mask(games) -> "pd.Series":
