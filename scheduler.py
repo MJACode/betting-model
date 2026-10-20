@@ -756,9 +756,10 @@ def run_nfl_wind_card(days: int, regions: str = "us",
                       timeout: float | None = None) -> list[str]:
     """Returns the labels of any steps killed at `timeout`."""
     # The Section-28 wind-totals bet card from the standalone nfl/ package. MUST run
-    # with cwd=nfl/ — the script reads data/games.csv and writes data/cards/ relative
-    # to its package root. It exits 0 before any odds call when no games are in the
-    # window, so off-season/off-day runs are free.
+    # with cwd=nfl/ — the script writes data/cards/ relative to its package root.
+    # Its schedule is the games table (nfl/data_ingest/schedule.py; not the frozen
+    # data/games.csv since 2026-10-20). It exits 0 before any odds call when no
+    # games are in the window, so off-season/off-day runs are free.
     #
     # The nfl/ package (developed externally) reads THE_ODDS_API_KEY — a different
     # env var NAME for the same Odds API service the platform already uses. No new
@@ -840,33 +841,73 @@ NFL_OPENER_POLL_MINUTES = max(1, int(os.environ.get("NFL_OPENER_POLL_MINUTES", "
 # real backstop, and RUN_NFL_WIND_CARD=0 stops the job without a deploy.
 
 
-def _nfl_lead_hours() -> float | None:
-    """Hours to the next NFL kickoff, or None if nothing is scheduled ahead."""
-    import csv as _csv
-    from datetime import datetime as _dt, timezone as _tz
+# How long the NFL kickoff list is reused before the games table is read again.
+# _nfl_lead_hours runs every MINUTE (the opener poll), year-round, and a
+# connection a minute is the cost this file already refused once against a
+# session pool of 15 (see the credit-cap note above). Kickoffs move a few times
+# a season, so a list up to 15 minutes old changes when a poll starts by at
+# most 15 minutes at its 10-day horizon; the lead itself is measured against
+# the clock on every call.
+NFL_SCHEDULE_CACHE_S = float(os.environ.get("NFL_SCHEDULE_CACHE_S", "900"))
+_nfl_kickoff_cache: dict = {"read_at": None, "kicks": None}
+
+
+def _read_nfl_kickoffs(now) -> list:
+    """Every NFL kickoff from yesterday (Eastern) on, from the games table.
+
+    The games table, not nfl/data/games.csv. That file was committed once
+    (2026-08-15) and never refreshed: it held no playoff game, so every NFL
+    pre-game job would have stood down after week 18, and it still carried a
+    CHI @ GB kickoff three and a half hours late. `games.commence_time` is
+    rewritten daily from nflverse (data/ingestors/nfl_props_data_ingestor.py).
+    Bounded on the indexed game_date; the cast is on a few hundred NFL rows.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     from zoneinfo import ZoneInfo as _ZI
-    path = ROOT / "nfl" / "data" / "games.csv"
-    if not path.exists():
-        return None
-    now = _dt.now(_tz.utc)
-    best = None
+    from data.db import get_connection
+    lo = (now.astimezone(_ZI(TIMEZONE)).date() - _td(days=1)).isoformat()
+    conn = get_connection()
     try:
-        with path.open(newline="", encoding="utf-8") as fh:
-            for row in _csv.DictReader(fh):
-                day, tod = row.get("gameday"), row.get("gametime")
-                if not day or not tod:
-                    continue
-                try:
-                    kick = _dt.fromisoformat(f"{day} {tod}").replace(
-                        tzinfo=_ZI("America/New_York")).astimezone(_tz.utc)
-                except ValueError:
-                    continue
-                lead = (kick - now).total_seconds() / 3600.0
-                if lead > 0 and (best is None or lead < best):
-                    best = lead
-    except OSError:
-        return None
-    return best
+        rows = conn.execute("""
+            SELECT commence_time FROM games
+            WHERE sport = 'NFL' AND game_date >= %s AND commence_time IS NOT NULL
+        """, (lo,)).fetchall()
+    finally:
+        conn.close()
+    kicks = []
+    for (raw,) in rows:
+        try:
+            k = _dt.fromisoformat(str(raw).replace("Z", "+00:00").replace(" ", "T"))
+        except ValueError:
+            continue
+        kicks.append(k if k.tzinfo else k.replace(tzinfo=_tz.utc))
+    return kicks
+
+
+def _nfl_lead_hours() -> float | None:
+    """Hours to the next NFL kickoff, or None if nothing is scheduled ahead.
+
+    Reads the games table at most every NFL_SCHEDULE_CACHE_S. A failed read
+    keeps the last list it had (loudly); with no list at all it answers None,
+    and every NFL pre-game job stands down rather than guess.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    now = _dt.now(_tz.utc)
+    cache = _nfl_kickoff_cache
+    age = (None if cache["read_at"] is None
+           else (now - cache["read_at"]).total_seconds())
+    if age is None or age >= NFL_SCHEDULE_CACHE_S:
+        try:
+            cache["kicks"] = _read_nfl_kickoffs(now)
+            cache["read_at"] = now
+        except Exception as exc:                               # noqa: BLE001
+            log.warning("NFL schedule read failed (%s: %s); %s", type(exc).__name__,
+                        exc, "keeping the last kickoff list" if cache["kicks"] is not None
+                        else "no kickoff list, NFL pre-game jobs stand down")
+    kicks = cache["kicks"] or []
+    leads = [(k - now).total_seconds() / 3600.0 for k in kicks]
+    ahead = [x for x in leads if x > 0]
+    return min(ahead) if ahead else None
 
 
 def run_nfl_poll(fast: bool = False) -> None:

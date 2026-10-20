@@ -119,7 +119,84 @@ STADIUM_COORDS = {
     "MEX00": (19.3029, -99.1505), "GER00": (48.2188, 11.6247),
     "FRA00": (50.0686, 8.6455), "SAO00": (-23.5453, -46.4742),
     "MAD00": (40.4531, -3.6883),
+    # The ids nflverse uses for the 2026 games abroad (live games.csv,
+    # 2026-10-20). Coordinates from Wikipedia's coordinates API the same day;
+    # MUN01 and MAD01 are the venues GER00 and MAD00 already name, so they
+    # carry the same pair. DUB00/BER00: Dublin and Berlin hosted in 2025 under
+    # the home team's US id, so nflverse has no id for them; these are ours.
+    "MEL00": (-37.8200, 144.9833), "RIO00": (-22.9122, -43.2303),
+    "PAR00": (48.9244, 2.3600), "MAD01": (40.4531, -3.6883),
+    "MUN01": (48.2188, 11.6247), "DUB00": (53.3608, -6.2511),
+    "BER00": (52.5147, 13.2394),
 }
+
+# Every venue outside the home teams' own stadiums, by NAME, as nflverse has
+# spelled it. Keys are `_venue_key(name)`.
+#
+# WHY BY NAME. For a game abroad nflverse's `stadium_id` is the weakest field
+# it carries. In the 2025 schedule all seven games abroad carry the home
+# team's US id AND its US stadium name (Dublin is "PIT00 Acrisure Stadium").
+# In the 2026 schedule the names are right and, on 2026-10-20, eight of nine
+# ids are too -- but PHI @ JAX at Tottenham still carries JAX00, and the
+# schedule file the cards read until that date carried the home team's id for
+# all nine. Reading the id put two London wind BETs on Jacksonville's
+# forecast (3465055, 3583736). The name, checked against ESPN's venue for all
+# nine 2026 games abroad, was right every time.
+#
+# NEVER ADD A US STADIUM HERE. The failure above is nflverse writing the HOME
+# team's own name on a game abroad; a US name in this table would turn that
+# into a confident forecast at the wrong stadium. A neutral US site (a Super
+# Bowl, a relocated game) therefore resolves to nothing and is not forecast.
+NEUTRAL_VENUE_NAMES = {
+    "wembleystadium": "LON00", "wembley": "LON00",
+    "twickenhamstadium": "LON01", "twickenham": "LON01",
+    "tottenhamhotspurstadium": "LON02", "tottenhamstadium": "LON02",
+    "estadioazteca": "MEX00", "aztecastadium": "MEX00", "estadiobanorte": "MEX00",
+    "fcbayernmunichstadium": "MUN01", "allianzarena": "MUN01",
+    "deutschebankpark": "FRA00", "frankfurtstadium": "FRA00",
+    "arenacorinthians": "SAO00", "neoquimicaarena": "SAO00",
+    "bernabeu": "MAD01", "santiagobernabeu": "MAD01",
+    "estadiosantiagobernabeu": "MAD01", "santiagobernabeustadium": "MAD01",
+    "melbournecricketground": "MEL00",
+    "maracanastadium": "RIO00", "maracana": "RIO00", "estadiodomaracana": "RIO00",
+    "stadedefrance": "PAR00",
+    "crokepark": "DUB00",
+    "olympiastadion": "BER00", "olympiastadionberlin": "BER00",
+}
+
+
+def _venue_key(name) -> str:
+    """'Maracanã Stadium' -> 'maracanastadium'. Accents, case and punctuation go."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode()
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def resolve_venue(stadium_id, stadium, location) -> tuple[str | None, str]:
+    """(STADIUM_COORDS key, note) for one schedule row, or (None, why not).
+
+    The three raw nflverse fields as the games table stores them. A game is
+    NEUTRAL when nflverse says so or when its stadium name is a known venue
+    abroad (the file this replaces had PHI @ JAX at Tottenham as 'Home'). A
+    neutral game is resolved by name only -- see NEUTRAL_VENUE_NAMES for why
+    its id is never trusted -- and a home game by its id, only when nflverse
+    says 'Home'. Anything else is None: the wind card does not forecast a
+    game whose venue it cannot establish, and never falls back to the home
+    team's stadium.
+    """
+    sid = (str(stadium_id).strip() if stadium_id is not None else "") or None
+    loc = (str(location).strip() if location is not None else "") or None
+    by_name = NEUTRAL_VENUE_NAMES.get(_venue_key(stadium))
+    if by_name is not None:
+        return by_name, f"{stadium} (by name; nflverse id {sid or '-'})"
+    if loc == "Neutral":
+        return None, (f"neutral site {stadium or '?'} (nflverse id {sid or '-'}) "
+                      "is not in the venue table")
+    if loc != "Home":
+        return None, "the schedule row carries no venue yet"
+    if sid in STADIUM_COORDS:
+        return sid, ""
+    return None, f"stadium {sid or '?'} ({stadium or '?'}) has no coordinates"
 
 # Roof values that mean weather cannot affect the game.
 INDOOR_ROOFS = {"dome", "closed"}
