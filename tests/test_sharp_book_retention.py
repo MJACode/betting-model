@@ -82,17 +82,34 @@ def test_a_shopping_book_is_still_prunable():
 # ── the path that actually deletes ───────────────────────────────────────────
 
 class _RecordingConn:
-    """Captures every (sql, params) prune_table issues, and answers counts."""
+    """Captures every (sql, params) prune_table issues. Answers by shape: one
+    game on every date, one value for every proposition column, 0 for counts,
+    so each date sends one proposition's statement."""
 
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
+        self._last = ""
 
     def execute(self, sql, params=None):
         self.calls.append((sql, dict(params or {})))
+        self._last = sql
         return self
 
     def fetchone(self):
         return (0,)
+
+    def fetchall(self):
+        if "FROM games" in self._last:
+            return [("G1",)]
+        if "WITH RECURSIVE" in self._last:
+            return [("v1",)]
+        return []
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
 
 
 def test_prune_table_binds_the_prop_tables_carve_out_into_the_DELETE():
@@ -107,8 +124,7 @@ def test_prune_table_binds_the_prop_tables_carve_out_into_the_DELETE():
     conn = _RecordingConn()
     prune_odds.prune_table(
         conn, "player_prop_odds", ("game_id", "market", "player_name"),
-        "game_date {op} %({param})s", keep_days=2, today="2026-08-31",
-        dry_run=True)
+        "game_date", keep_days=2, today="2026-08-31", dry_run=True)
 
     assert conn.calls, "prune_table issued no statements"
     protected = {tuple(p["protected"]) for _, p in conn.calls if "protected" in p}
@@ -122,13 +138,13 @@ def test_prune_table_binds_the_prop_tables_carve_out_into_the_DELETE():
 def test_prune_table_does_NOT_carve_out_sharp_books_for_the_odds_table():
     conn = _RecordingConn()
     prune_odds.prune_table(
-        conn, "odds", ("game_id", "market"),
-        "game_id IN (SELECT game_id FROM games WHERE game_date {op} %({param})s)",
+        conn, "odds", ("game_id", "market"), "%(game_day)s",
         keep_days=2, today="2026-08-31", dry_run=True)
 
-    for _, p in conn.calls:
-        if "protected" in p:
-            assert "pinnacle" not in tuple(p["protected"])
+    bound = [p for _, p in conn.calls if "protected" in p]
+    assert bound, "prune_table issued no statement with a protected set"
+    for p in bound:
+        assert "pinnacle" not in tuple(p["protected"])
 
 
 def test_every_prop_reference_book_is_protected():

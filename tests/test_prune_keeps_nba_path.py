@@ -123,3 +123,19 @@ def test_the_two_prune_tiers_never_select_a_path_kept_sport():
         lit = "(" + ", ".join(f"'{x}'" for x in v) + ")" if isinstance(v, tuple) else f"'{v}'"
         sql = sql.replace(f"%({k})s", lit)
     assert [r[0] for r in db.execute(f"SELECT sport FROM odds WHERE {sql}")] == ["MLB"]
+
+
+def test_protected_books_keep_every_repeated_row():
+    """RULE (the module docstring): draftkings and sbr_consensus are NEVER
+    deleted under any setting, and neither is a `cfbd…` archive book. The
+    thinning deleted their repeated rows until 2026-10-20: it filtered on
+    source alone. A line-shop book beside them is thinned, so the test proves
+    the thinning ran."""
+    c = _Conn()
+    c.game("G")
+    keep = set()
+    for book in ("draftkings", "sbr_consensus", "cfbd_bovada"):
+        keep |= {c.quote("G", _ts(i), -110, -110, book=book) for i in range(4)}
+    shop = [c.quote("G", _ts(i), -110, -110, book="fanduel") for i in range(4)]
+    po.thin_repeats(c, today="2026-10-22")
+    assert c.ids() == keep | {shop[0], shop[-1]}

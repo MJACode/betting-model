@@ -188,7 +188,14 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
 
     screen = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
     assert "[...allData, ...pausedData].filter((d) => d.pick.sport === sport)" in screen
-    assert "paused={view === 'today' && isPausedForDisplay(item.pick)}" in screen
+    # The PAUSED label no longer depends on the view (#994, the Signals card
+    # used on All, Signals and Live): a paused row is labelled wherever it
+    # appears. Which list may CARRY one is decided above and below, not here:
+    # only All merges `pausedData`; Signals runs passesActionFilter, which
+    # refuses a paused model; Live drops isModelPaused rows before `liveData`.
+    # tests/test_mobile_pick_cta.py pins the same line and refuses the old one.
+    assert "paused={isPausedForDisplay(item.pick)}" in screen
+    assert "!isModelPaused(d.pick.model_id) &&" in screen
     # Paused rows sort after active ones, and drop out once Signal narrows.
     assert "...all.filter((d) => !isPausedForDisplay(d.pick))," in screen
     assert "displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)" in screen
@@ -225,7 +232,11 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     assert "<ReasoningCard pick={pick} paused={paused} stale={hero?.stale === true} />" in detail
     assert "{paused ? null : <SharpScoreCard pick={pick} />}" in detail
     assert "{paused ? null : <PickTimingCard pick={pick} />}" in detail
-    assert "!preview && !retired && !paused && !voided ? (" in detail
+    # The BET badge's gate, pinned whole: #1006 (the member's own books)
+    # appended "&& myView?.status !== 'none'". A prefix pin alone would pass
+    # "... || paused ? (", which draws the badge on a paused pick.
+    assert ("pick.signal_type === 'BET' && !preview && !retired && !paused && !voided"
+            " && myView?.status !== 'none' ? (") in detail
     assert "openHere && !preview && !retired && !paused" in detail
     reasoning = _read(MOBILE / "src" / "components" / "ReasoningCard.tsx")
     assert "!isUnlockedPreview(pick) && !paused && !stale ? (" in reasoning
