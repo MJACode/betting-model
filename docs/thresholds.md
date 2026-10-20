@@ -544,10 +544,62 @@ every bar are in `docs/nba_models_2026.md` 4.3).
 | prob / edge cut | 0.0 / 0.0 — the cut is EV | `ACTION_THRESHOLDS`, both threshold dicts |
 | EV floor | 0.00, on Pinnacle's proportional no-vig under | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned | `MODEL_MIN_ODDS` |
-| caps | none: every qualifying proposition, one bet per (game, player, market) (mike, 2026-10-16: "maximize units won") | `models/nba_prop_market.py` |
-| decided once | the first look 45-57 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions`, never looked at again | `scripts/nba_prop_market_card.py` |
+| caps | one bet a game across both NBA prop models and at most 4 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
+| decided once | the first look 45-57 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions` (whether or not its bet survived the cap; `detail` names what the cap dropped), never looked at again | `scripts/nba_prop_market_card.py`, `scripts/nba_props_card.py` |
 | looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-62 min from tip | `scheduler.run_nba_prop_window` |
 | stale soft quote | refused when its clock is > 10 min behind Pinnacle's | same |
+
+**The caps, 2026-10-20 (mike: "Only the strongest picks need to be sent, like
+NHL").** Opening night wrote 36 NBA prop bets on one game (all VOIDed). The rule
+for BOTH NBA prop models, this one and `nba_prop_projection`:
+
+- one bet a game across the two models, and at most 4 a night;
+- the night fills in tip order, as the per-game decision windows produce it;
+  inside one look the strongest goes first;
+- "strongest" is the bet's EV percentile within its OWN model's graded EVs,
+  a tie to the larger raw EV. The two EVs are not on one scale (median 0.020
+  here, 0.083 for the projection model). On raw EV the projection model held
+  99.7% of the pooled top tenth and this model got 0.2% to 1.3% of the bets.
+  The percentile table is fixed breakpoints in `models/nba_prop_rank.py`,
+  rebuilt by `scripts/nba_prop_rank_table.py`;
+- the night's already-written bets count, a VOIDed one excepted.
+
+Graded on 2023-24..2025-26, both models' live-rule bet lists (this model 24,572
+bets; the projection model 66,588 at the five books the live feed returns), one
+a game, ranked from the stored percentile table, the night filled in tip order.
+Units are one unit to win; seasons are 2023-24 / 2024-25 / 2025-26:
+
+| Night rule | Bets | Units | Return | 90% range | Units by season | Return by season | Bets a night |
+|---|---|---|---|---|---|---|---|
+| no cap at all (reference) | 91,160 | +3,174.1 | +3.42% | +2.82 to +4.04 | +1,518.8 / +653.9 / +1,001.4 | +4.28 / +2.36 / +3.37 | 187.2 |
+| one a game, no night cap | 3,662 | +200.5 | +6.43% | +3.40 to +9.38 | +60.1 / +58.9 / +81.4 | +6.12 / +5.34 / +7.89 | 7.5 |
+| 1 a night | 487 | +3.0 | +0.74% | -7.44 to +8.74 | +9.3 / -9.9 / +3.6 | +7.56 / -6.80 / +2.67 | 1.0 |
+| 2 a night | 968 | +59.5 | +7.34% | +1.30 to +13.02 | +8.4 / +21.5 / +29.7 | +3.32 / +7.47 / +10.96 | 2.0 |
+| 3 a night | 1,428 | +101.9 | +8.47% | +3.73 to +13.10 | +43.6 / +25.7 / +32.6 | +11.79 / +6.04 / +8.00 | 2.9 |
+| **4 a night (live)** | **1,867** | **+153.8** | **+9.69%** | **+5.53 to +13.78** | +70.9 / +37.8 / +45.0 | +14.46 / +6.74 / +8.42 | 3.8 |
+| 5 a night | 2,277 | +164.5 | +8.49% | +4.78 to +12.29 | +58.9 / +55.6 / +50.0 | +9.81 / +8.07 / +7.72 | 4.7 |
+| 6 a night | 2,639 | +184.4 | +8.21% | +4.60 to +11.75 | +66.8 / +59.7 / +57.9 | +9.58 / +7.52 / +7.66 | 5.4 |
+| 7 a night | 2,939 | +173.0 | +6.92% | +3.55 to +10.22 | +56.8 / +53.3 / +62.9 | +7.32 / +6.05 / +7.45 | 6.0 |
+| 8 a night | 3,190 | +185.4 | +6.82% | +3.63 to +10.00 | +62.8 / +56.3 / +66.3 | +7.48 / +5.86 / +7.24 | 6.6 |
+
+- **Four is inside a range, not a peak.** 2 to 8 a night are positive in every
+  season; 3 to 6 return about 8 to 10%. One a night is not reliably positive.
+- **What the cap costs:** about 3,020 units over the three seasons against no
+  limit, about 1,000 units a season. In exchange: about 4 bets a night instead
+  of about 187.
+- **This model's share at 4 a night:** about 30% of the bets. On raw EV it was
+  0.9% (+134.0 units, +8.86%); the gap in units is inside the noise, so the
+  ranking decides which models bet, not how much is won.
+- **Prices laid at 4 a night:** -180 to +380, median +120, 78% plus money
+  (on raw EV: -200 to +380, median +130). Both models' floor is -200. The
+  one-book +3,000 threes-over tail appears only from 7 a night or with no night
+  cap.
+- Built by the 2026-10-20 cap grade (`grade_cap.py`, temp folder
+  `nba_game_edge/propcap/grade`); this table re-run from the stored breakpoints
+  matched the grade's exact-percentile result to +0.2 units (4 of 1,867 bets
+  differ).
+
+The figures below are each model's own uncapped population.
 
 Graded on 2023-24..2025-26 at the best bettable price: every proposition
 25,204 bets +2.85% (90% CI +1.75..+3.96); at -200 with no double/triple-double
@@ -586,10 +638,16 @@ search and every check are in `docs/nba_models_2026.md` §5).
 | the cells | steals over+under 0.02; rebounds under 0.01; blocks+steals over+under 0.05; blocks under 0.02; rebounds+assists under 0.04; threes over+under 0.04 | `models/nba_prop_projection.CARD` |
 | EV floor | 0.01 (the lowest cell's), each cell's own floor on top; on its own calibrated probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned | `MODEL_MIN_ODDS` |
-| caps | none: every qualifying proposition (mike, 2026-10-16: "maximize units won") | — |
-| decided once | the first look 45-57 min before tip, after `nba_prop_market` has decided the game (or alone from 50 min out); a row in `nba_prop_projection_decisions` | `scripts/nba_prop_projection_card.py` |
+| caps | one bet a game across both NBA prop models and at most 4 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
+| decided once | the first look 45-57 min before tip, in the same look as `nba_prop_market` (or alone from 50 min out); a row in `nba_prop_projection_decisions` (whether or not its bet survived the cap) | `scripts/nba_prop_projection_card.py`, `scripts/nba_props_card.py` |
 | stale quote | refused when its clock is > 10 min behind the freshest book's for the same market in the same fetch | `models/nba_prop_projection.py` |
 | not bet | assists overs (chosen by the search, failed on 2025-26), points and the scoring combos, turnovers, double-doubles | `docs/nba_models_2026.md` §5 |
+
+**The caps, 2026-10-20 (mike).** The same rule as `nba_prop_market`, shared with
+it: one bet a game across both NBA prop models, at most 4 a night in tip order,
+ranked by each bet's EV percentile within its own model. The grade, its cost and
+the prices it lays are in that section. The figures below are this model's own
+uncapped population.
 
 Graded 2023-24..2025-26, -200 floor, every qualifying proposition: at the five
 books the 2026-27 feed returns, 66,588 bets, +2,392.8 units, +3.60% (90% CI

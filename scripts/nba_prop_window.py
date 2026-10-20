@@ -16,8 +16,11 @@ WHAT A TICK DOES (scheduler.run_nba_prop_window, every five minutes, 24x7):
   3. Otherwise: fetch props for EXACTLY the games to decide
      (`python -m scripts.nba_prop_window --fetch <game ids>`, the same
      ingestor as the refresh pass's nba-prop-odds, restricted with
-     only_game_ids), then the card (step nba-prop-market), then the closing
-     snapshot (step nba-prop-close), then publish.
+     only_game_ids), then BOTH NBA prop cards in one step (step nba-props:
+     one bet a game across both models, four a night, strongest first by
+     each bet's EV percentile within its own model;
+     scripts/nba_props_card.py), then the closing snapshot (step
+     nba-prop-close), then publish.
 
 LOOK_AHEAD_MIN is a little wider than the decision window on both ends, so the
 fetch of a game is never the reason it misses its window: a tick whose fetch
