@@ -19,12 +19,25 @@ worth): form, shots, special teams, goalie, schedule (rest, back-to-back, road
 trip), rating, goalie workload, home ice, travel. NOT lineup: it was graded,
 but it reads who dressed, which nobody knows at noon on game day.
 
-THE DECISION. Once, on game day, in the first scoring runs at or after 16:00Z
-(DECISION_START_UTC_HOUR) -- the archive's first game-day quote is the 16:00Z
-snapshot, which is what the walk-forward decided against -- and only with the
-listed starting goalie of both teams (the game-day `nhl_goalie_stats` row). The
-grade assumed both. Outside that window the model's number is written as NONE
-with the reason, never as a BET.
+THE DECISION. At the first scoring run where both starting goalies are
+CONFIRMED (models/nhl_goalie_gate.py: ESPN confirmed, the game's
+`nhl_goalie_stats` row names him, DailyFaceoff does not disagree), last
+night's games are in the logs (`stale_teams`), and the game has not started.
+No clock (mike, 2026-10-20: "We should absolutely always know the goalie
+matchup before making a bet as well."). Any other run writes the model's
+number as NONE with the reason, never as a BET.
+
+WHAT THE GRADE ACTUALLY DID. The original walk-forward
+(docs/nhl_moneyline_rebuild.md) decided at each game's FIRST stored quote --
+95.8% of them dated the day before, median lead about 27 hours -- not at
+16:00Z on game day, which is what this docstring, the rebuild doc and
+config.py used to say; and it was graded with the goalie who actually started.
+The re-grade of 2026-10-20 (scratch goalie_work/ml_common.out: the as-built
+artifact, actual starters, EV >= 0.06, the -200 floor, the best price, the
+games all four timings share) put both ends of the new decision moment in
+profit: at the 16:00Z game-day quote +5.08% on 1,588 bets (bootstrap 95%
++0.3..+10.0), at the last pre-game quote +5.21% on 1,633 (+0.6..+10.0). A
+confirmed-goalie decision lands between the two.
 """
 from __future__ import annotations
 
@@ -44,11 +57,6 @@ LEAGUE_GOALS_PER_SHOT_FALLBACK = 0.09          # only the first date in the logs
 C_GRID = (0.003, 0.01, 0.03, 0.1, 0.3)
 FIRST_PRICED_SEASON = 2021                     # 2020-21: the bought archive's first season
 UPCOMING_NHL_GAME_ID = 9_999_999_999           # sorts after every real game on the same date
-
-# The decision window, UTC. 16:00Z is the archive snapshot the walk-forward
-# decided against; two hourly scoring runs fit inside it.
-DECISION_START_UTC_HOUR = 16
-DECISION_END_UTC_HOUR = 18
 
 # Arena latitude, longitude and UTC offset in standard time. A neutral-site
 # game is treated as the home team's arena.
@@ -422,18 +430,27 @@ def inputs_for_date(conn, game_date: str, now: datetime | None = None) -> tuple[
 
 def decision_window(game_date: str, commence_time: str | None,
                     now: datetime | None = None) -> str | None:
-    """None when this run may decide the game; otherwise the reason it may not."""
+    """None while the game has not started; otherwise why this run may not decide.
+
+    There is no clock any more (2026-10-20). Both side models decide at the
+    first scoring run where the goalie gate says KNOWN and last night's logs
+    are in (models/scorer._nhl_game_day_reason). The 16:00Z-18:00Z window this
+    replaced was justified as "what the walk-forward decided against", and the
+    walk-forward did not decide there (module docstring).
+
+    THE LOWER BOUND IS DATA, NOT A CLOCK. A game can be KNOWN only once its
+    game-day `nhl_goalie_stats` row exists, and that row is written at ~10:06Z
+    on game day after the morning's log top-up; the goalie poll rewrites such
+    a row and never creates one (data/ingestors/nhl_goalie_designations.py).
+    So no game is decided before its own game day, and `stale_teams` keeps the
+    second guard the walk-forward needed: no decision off logs that do not yet
+    hold a team's previous game.
+    """
     now = now or datetime.now(timezone.utc)
-    day = datetime.fromisoformat(str(game_date)[:10]).replace(tzinfo=timezone.utc)
-    start = day + timedelta(hours=DECISION_START_UTC_HOUR)
-    end = day + timedelta(hours=DECISION_END_UTC_HOUR)
     if commence_time:
         ct = datetime.fromisoformat(str(commence_time).replace("Z", "+00:00"))
         if ct.tzinfo is None:
             ct = ct.replace(tzinfo=timezone.utc)
-        end = min(end, ct)
-    if now < start:
-        return "decides on game day from 16:00Z, with both listed goalies"
-    if now >= end:
-        return "decision window closed (16:00Z-18:00Z on game day, before the start)"
+        if now >= ct:
+            return "game has started"
     return None

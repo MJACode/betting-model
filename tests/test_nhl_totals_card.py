@@ -230,8 +230,12 @@ class _LockConn:
         self.commits += 1
 
 
-def test_insert_once_under_the_model_lock():
+def test_insert_once_under_the_model_lock(monkeypatch):
+    import models.nhl_goalie_gate as gate
     from scripts.nfl_wind_publisher import _model_lock_key
+    # Both starting goalies confirmed: this test is the lock, not the gate
+    # (tests/test_nhl_goalie_gate.py is the gate).
+    monkeypatch.setattr(gate, "matchup_reasons", lambda conn, ids: {g: None for g in ids})
 
     rows = card.pick_rows([_bet()], GAMES, bankroll=10_000)
     conn = _LockConn()

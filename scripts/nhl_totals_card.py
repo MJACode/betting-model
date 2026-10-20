@@ -17,6 +17,17 @@ advisory lock, because the 6am run and a refresh pass can overlap and the
 picks unique index includes the side, so it would not stop an over plus an
 under.
 
+BOTH STARTING GOALIES CONFIRMED FIRST (mike, 2026-10-20: "We should
+absolutely always know the goalie matchup before making a bet as well."). A
+game is priced only once models/nhl_goalie_gate.py says its matchup is known;
+every other game is held back before its quotes are read, and the pass logs how
+many and why. The INSERT refuses an unknown game again (refuse_unknown, then
+the scorer's own insert guard). THIS MOVED THE MODEL'S DECISION MOMENT: until
+2026-10-20 a game's first qualifying fetch was often the day before (the
+prior-day quotes carry most of the evidence, above); now it is the first
+qualifying fetch after both goalies are confirmed on game day. That regime has
+not been graded on its own.
+
 BET ROWS ONLY. The scorer deletes every model's unsettled non-BET rows on each
 pass, so a "declined" row would not survive. The per-pass diagnostic line in
 the worker log is how an empty card is told apart from a broken one.
@@ -42,6 +53,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import models.nhl_goalie_gate as goalie_gate
 import models.nhl_totals_market as mk
 from data.db import get_connection
 from models.market_relative import implied
@@ -160,6 +172,8 @@ def publish(conn, rows: list[dict]) -> int:
         return 0
     from scripts.nfl_wind_publisher import _lock_model
     _lock_model(conn, MODEL_ID)
+    # The last line: no bet on a game whose goalie matchup is not known.
+    rows = goalie_gate.refuse_unknown(conn, rows, mode="drop", label=MODEL_ID)
     written = 0
     for r in rows:
         # Any BET on the game counts: the other side, a VOIDed or settled one.
@@ -194,7 +208,13 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         games = slate(conn, now)
         if not games:
             logger.info("NHL totals card: no unstarted NHL games")
-            return {"games": 0, "bets": 0, "published": 0}
+            return {"games": 0, "held": 0, "bets": 0, "published": 0}
+        # Only a game whose goalie matchup is known may produce a bet.
+        games, held = goalie_gate.split_known(
+            games, goalie_gate.matchup_reasons(conn, list(games)))
+        goalie_gate.log_held("NHL totals card", held)
+        if not games:
+            return {"games": len(held), "held": len(held), "bets": 0, "published": 0}
         quotes = mk.load_fetch_quotes(conn, games)
         # The card's clock goes to the rule, so a fetch older than
         # config.PREGAME_PRICE_MAX_AGE_MIN is refused (diag `stale_fetch`).
@@ -207,7 +227,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             published = publish(conn, rows)
             logger.info(f"NHL totals card: {published} new bet(s) written "
                         f"of {len(bets)} on the card")
-        return {"games": len(games), "bets": len(bets), "published": published}
+        return {"games": len(games) + len(held), "held": len(held), "bets": len(bets),
+                "published": published}
     finally:
         conn.close()
 

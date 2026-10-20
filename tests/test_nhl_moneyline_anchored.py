@@ -4,8 +4,9 @@ What these pin, each a way the live number could silently stop being the graded 
   - tonight's inputs are built exactly like the training rows (the as-of property
     the walk-forward's 9,316/9,316 check measured), and no later result leaks back;
   - the model, with nothing to say, returns the market's price;
-  - it decides only in the graded window, with both listed goalies, and its
-    other rows are NONE with the reason -- never AVOID;
+  - it decides only once both starting goalies are confirmed (no clock since
+    2026-10-20, mike), with last night's logs in, and its other rows are NONE
+    with the reason -- never AVOID;
   - the generic trainer cannot overwrite it with the retired design;
   - the committed artifact is the kind the scorer reads.
 """
@@ -117,20 +118,28 @@ def test_with_nothing_to_say_it_returns_the_market():
 
 
 @pytest.mark.parametrize("now, expected", [
-    (datetime(2026, 10, 16, 10, 0, tzinfo=timezone.utc), "decides on game day"),
+    # No clock (mike, 2026-10-20): the goalie gate and last night's logs
+    # decide when; this only refuses a game that has started. 10:00Z and
+    # 18:00Z-23:00Z were outside the old 16:00Z-18:00Z window.
+    (datetime(2026, 10, 16, 10, 0, tzinfo=timezone.utc), None),
     (datetime(2026, 10, 16, 16, 22, tzinfo=timezone.utc), None),
-    (datetime(2026, 10, 16, 17, 22, tzinfo=timezone.utc), None),
-    (datetime(2026, 10, 16, 18, 0, tzinfo=timezone.utc), "window closed"),
-    (datetime(2026, 10, 15, 16, 30, tzinfo=timezone.utc), "decides on game day"),
+    (datetime(2026, 10, 16, 18, 0, tzinfo=timezone.utc), None),
+    (datetime(2026, 10, 16, 22, 59, tzinfo=timezone.utc), None),
+    (datetime(2026, 10, 16, 23, 0, tzinfo=timezone.utc), "game has started"),
 ])
-def test_the_decision_window(now, expected):
+def test_the_decision_window_has_no_clock(now, expected):
     reason = anc.decision_window("2026-10-16", "2026-10-16T23:00:00Z", now=now)
     assert (reason is None) if expected is None else (expected in reason)
 
 
-def test_a_matinee_closes_the_window_at_puck_drop():
+def test_the_old_window_is_gone():
+    assert not hasattr(anc, "DECISION_START_UTC_HOUR")
+    assert not hasattr(anc, "DECISION_END_UTC_HOUR")
+
+
+def test_a_matinee_is_not_decided_once_it_has_started():
     now = datetime(2026, 10, 16, 17, 5, tzinfo=timezone.utc)
-    assert "window closed" in anc.decision_window("2026-10-16", "2026-10-16T17:00:00Z", now=now)
+    assert "game has started" in anc.decision_window("2026-10-16", "2026-10-16T17:00:00Z", now=now)
 
 
 class _Fixed:
@@ -140,8 +149,13 @@ class _Fixed:
         return np.array([[0.70, 0.30]])
 
 
-def _wire(monkeypatch, *, window=None, goalies=("OTT", "STL"), nan=False, stale=()):
+def _wire(monkeypatch, *, window=None, goalies=("OTT", "STL"), nan=False, stale=(),
+          matchup=None):
+    """`matchup` is the goalie gate's reason for the game: None means both
+    starting goalies are confirmed (models/nhl_goalie_gate.py)."""
+    import models.nhl_goalie_gate as gate
     import models.scorer as sc
+    monkeypatch.setattr(gate, "matchup_reasons", lambda conn, ids: {g: matchup for g in ids})
     artifact = {"kind": anc.KIND, "model": _Fixed(), "feature_cols": list(anc.FEATURES)}
     monkeypatch.setattr(sc, "load_model", lambda mid: artifact)
     # home OTT +150 (0.40), away STL -170 (0.63)
@@ -173,16 +187,19 @@ def test_in_the_window_it_bets_ev_and_never_writes_avoid(monkeypatch):
     assert {p["confidence_tier"] for p in picks.values()} == {"MED"}
 
 
-def test_outside_the_window_every_row_is_none_with_the_reason(monkeypatch):
-    picks = _wire(monkeypatch, window="decides on game day from 16:00Z, with both listed goalies")
+def test_a_started_game_every_row_is_none_with_the_reason(monkeypatch):
+    picks = _wire(monkeypatch, window="game has started")
     assert picks and all(p["signal_type"] == "NONE" for p in picks)
-    assert all("decides on game day" in (p.get("downgrade_reason") or "") for p in picks)
+    assert all("game has started" in (p.get("downgrade_reason") or "") for p in picks)
 
 
-def test_without_both_listed_goalies_it_does_not_decide(monkeypatch):
-    picks = _wire(monkeypatch, goalies=("OTT",))
+def test_without_both_goalies_confirmed_it_does_not_decide(monkeypatch):
+    """A listed goalie is not enough (2026-10-20): the 6am goalie did not start
+    in 65 of 251 team-games 2026-10-01..10-19."""
+    why = "waiting for both confirmed starting goalies (STL expected)"
+    picks = _wire(monkeypatch, matchup=why)
     assert picks and all(p["signal_type"] == "NONE" for p in picks)
-    assert all("listed goalies" in (p.get("downgrade_reason") or "") for p in picks)
+    assert all(p.get("downgrade_reason") == why for p in picks)
 
 
 def test_without_last_nights_logs_it_does_not_decide(monkeypatch):

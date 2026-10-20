@@ -125,7 +125,10 @@ class TestTheCard:
         rows = card.pick_rows(_scored(mu=0.9, over=float("nan")), GAMES, "2026-10-01", 1000.0)
         assert len(rows) == 1 and rows[0]["pick_side"] == "under"
 
-    def test_a_second_pass_does_not_touch_a_pick_that_exists(self):
+    def test_a_second_pass_does_not_touch_a_pick_that_exists(self, monkeypatch):
+        import models.nhl_goalie_gate as gate
+        monkeypatch.setattr(gate, "matchup_reasons", lambda conn, ids: {g: None for g in ids})
+
         class Conn:
             def __init__(self):
                 self.inserted, self.commits = [], 0
