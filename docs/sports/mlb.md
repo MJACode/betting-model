@@ -106,6 +106,17 @@ slate guard. Optional under-juice **band**
 `mlb_over_under` stays paused. Coverage caveat: only
 ~99–136 pre-commence public totals-over games in the DB.
 
+## 11b5. NOT YET SCHEDULE-GATED — why (2026-10-20)
+
+The other pre-game sports now wait for a team's earlier game to be played and
+logged before deciding (`data/schedule_context.py`). MLB is deliberately left
+out until its stored schedule is whole: 146 of the 2,385 odds-feed rows for 2026 have
+no result, 145 of them games already past (counted 2026-10-20), the 2026 table misses 218 games
+the free Stats API lists as final, and a doubleheader's two games share one
+`game_id`. Gated as it stands, every unscored row would hold both teams' next
+games for days. Dormant until March. Fix the results ingest first, then add MLB
+to `SCORER_GATED_SPORTS`.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 

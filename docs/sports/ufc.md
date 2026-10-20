@@ -34,6 +34,20 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 65%/8%, rounds 62%
 
 UFC events are ~weekly (Saturdays) — most days all UFC steps no-op cleanly.
 
+### The schedule gate (2026-10-20)
+
+`run_scorer` holds a fight while either fighter has an earlier fight on a card
+that is not in `ufc_fight_log` yet (`data/schedule_context.py`). The rows are
+written NONE with the reason. A fight counts as done once its CARD is in the
+log, whether or not this fighter is on it, because a cancelled bout never
+reaches the log; every past DraftKings-priced card date since 2026-06-13 is
+there (25 of 25, 2026-10-20). Only rows with a DraftKings moneyline count as
+fights (the scorer's own "this fight is real" rule), and rows within a day of
+each other for one fighter are one fight. Why: 8 of 22 UFC BETs were decided
+with a fighter's latest fight not yet in the log (all before the 2026-07-20
+bulk ingest; nothing enforced it). On today's priced board (19 fights) it holds
+none.
+
 ### Data source — CSV mirror, not live scraping (2026-06-11)
 
 ufcstats.com moved behind a **browser-level Cloudflare challenge** that plain

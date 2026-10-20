@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, pre-game models wait for each team's earlier game to be played and logged (NCAAF, WNBA, UFC in the scorer; NFL opener and wind at the publisher); rest read at kickoff from the stored schedule (no retrain); NCAAF night-game stubs take CFBD's week and venue; NHL check moved onto the shared reader unchanged; MLB not gated yet |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual posts to @SignalBasePicks: social_post_queue drained by the existing X client; ledger thread seeded queued; nothing posted |

@@ -243,6 +243,33 @@ the rest of the slate never reached the board.
 - **Coverage.** Wind evaluates outdoor games only, so indoor games carry an
   opener row and no wind row. The opener watches T-0..T-10 days.
 
+## The schedule gate (2026-10-20)
+
+The opener spread model fires from 10 days out and NFL games are 7 days apart,
+so a Thursday game can be decided before both teams' Sunday games: at
+2026-10-20 20:00Z it evaluated CAR @ GB (10-29) while both teams still had to
+play on 10-25. Neither rule reads a team log, but the rule stands for every
+pre-game model: no decision while either team has an earlier game not played,
+being played, or without its result in `games` (nflverse fills it).
+
+- **Where.** `scripts/nfl_wind_publisher` (`_schedule_holds`), where the BETs
+  are written: a held game's BET is not written by `publish` or
+  `publish_opener`, and `publish_scored` writes its NONE row with the reason
+  even when the model fired. Read from the database schedule
+  (`data/schedule_context.py`), never the frozen `nfl/data/games.csv`. Fails
+  closed: an unreadable schedule holds every game that pass.
+- **What it costs, measured on the 8 kept opener and 26 wind BETs.** Using the
+  first player-log row as the time a result landed (the audit's proxy; when the
+  score reached `games` itself is not stored): 1 opener BET (3502305, DAL @ GB,
+  written 10-11 23:59Z, before the previous games' rows landed at 10-12 10:02Z;
+  LOSS) and 1 wind BET (3503669, SEA @ DEN, WIN) would have waited about ten
+  hours. For a Thursday game the opener's window after the gate is from the
+  Sunday results (median 17.0h after kickoff, max 20.5h, 2026 weeks 1-6) to
+  T-2 on Tuesday night.
+- **Not gated here:** the player-prop models. Their 24-hour write ceiling
+  (`NFL_PROP_MAX_LEAD_HOURS`) already keeps every decision after the previous
+  game; that ceiling is set by price timing, not by the schedule.
+
 ## NFL player-prop injury veto
 
 Pre-game props (`nfl_prop_market`, and `run_nfl_prop_scorer` for any live
