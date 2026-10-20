@@ -77,6 +77,10 @@ MAX_SILENCE: dict = {
     "heartbeat_watchdog": 45,
     # Every 5 minutes, 24x7.
     "job_queue": 30,
+    # Manual X posts. Same cadence as the job queue. Silence means the drain
+    # stopped; queued copy would sit unpublished. Picks and recaps are not
+    # this job.
+    "social_post_queue": 30,
     # Every 5 minutes, 24x7, and it beats on the idle ticks too (it returns
     # after one read when no NBA game is near), so silence means stopped.
     "nba_prop_window": 30,
