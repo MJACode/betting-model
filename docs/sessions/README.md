@@ -19,6 +19,11 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 merged origin/master `a82f517d`; session logs keep both sides; period-recap stub keeps master's allow_link assert |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, migration guards use to_regclass so a missing table does not fail the file; a locked social_post_queue stays a no-op |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, NBA props: 36 opening-night props voided (mike); one bet a game and 4 a night across both NBA prop models, ranked by each model's own EV percentile (+9.7% graded, about 1,000 units a season below no limit) |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 CI: narrowing migration stays ahead of the published-record pass; tail pin is published_record_units; period-recap double accepts allow_link |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #945 merged the updated #941 branch `32fe055f` (master `8e3d5262` already in it); session logs keep both sides |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #945 merged origin/master `8e3d5262`; session logs keep both sides; no code, test, config, or migration conflict |

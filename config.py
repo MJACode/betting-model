@@ -607,8 +607,11 @@ ACTION_THRESHOLDS: dict = {
     # price (scripts/nba_prop_market_lab.py, docs/nba_models_2026.md 4.3):
     # 25,204 bets +2.85% (90% CI +1.75..+3.96); at -200 and no
     # double/triple-double 24,572 bets +2.96% (+1.85..+4.05), +781.3 units,
-    # every season positive -- every qualifying proposition, as the card
-    # writes it (mike, 2026-10-16: "maximize units won"; no game or night cap).
+    # every season positive -- every qualifying proposition, uncapped. From
+    # 2026-10-20 (mike: "Only the strongest picks need to be sent, like NHL")
+    # one bet a game across both NBA prop models and four a night, strongest
+    # first by each bet's EV percentile within its own model
+    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced.
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
@@ -616,6 +619,9 @@ ACTION_THRESHOLDS: dict = {
     # calibrated-EV floor (models/nba_prop_projection.CARD). Graded walk-forward
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
+    # Written through scripts/nba_props_card.py from 2026-10-20 (mike): one bet a
+    # game across both NBA prop models and four a night, strongest first by each
+    # bet's EV percentile within its own model (models/nba_prop_rank.py).
     "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
     # NBA full-game totals, OVER only (2026-10-17, mike: "Find it ... edge like
     # we have with other sports"): models/nba_total_luck.py, written by
@@ -2382,7 +2388,7 @@ SCORING_METHODS: dict = {
     "nhl_prop_shots_on_goal": SCORING_ARTIFACT,
     "nhl_prop_assists": SCORING_ARTIFACT,
     # Trained and registered (scripts/nba_prop_projection_train.py), scored by
-    # scripts/nba_prop_projection_card.py.
+    # scripts/nba_prop_projection_card.py, written by scripts/nba_props_card.py.
     "nba_prop_projection": SCORING_ARTIFACT,
     # A rule with a parameter artifact committed under models/saved/ (the
     # residual sample and the bucket counts, models/nba_total_luck.py), never

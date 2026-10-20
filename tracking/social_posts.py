@@ -25,17 +25,34 @@ Idempotency
     failed: X refused. A timeout or a 5xx becomes uncertain and is NOT retried,
     because the tweet may already exist. A posting row whose claim is older
     than the lease, with no tweet id, becomes uncertain for the same reason.
-    Requeue only by hand, after checking the account:
+    Requeue only by hand, after checking the account. Leave media_ids as they
+    are: those images are already on X and must not be uploaded again.
 
         UPDATE social_post_queue
            SET status = 'queued', error = NULL, claimed_at = NULL
          WHERE id = <id> AND status IN ('failed', 'uncertain')
            AND tweet_id IS NULL;
 
+Images
+    media_urls is a list of up to 4 https URLs (jpeg, png, or webp, 5MB).
+    After the claim, each missing image is fetched and uploaded with
+    POST /2/media/upload. The returned id is written to media_ids and
+    committed before the next image and before the tweet. A retry uploads
+    only indexes that do not already have an id. A failed upload marks the
+    row failed and does not tweet, so the post does not go out without the
+    image. A 429 on the upload or the image host requeues and stops the
+    pass, same as a 429 on the tweet. Dry run does not fetch or upload.
+
+Replies
+    reply_to_tweet_id, when set, is the tweet this row replies to. When it
+    is null, position 1 is a root and each later position replies to the
+    previous position's tweet_id, as before.
+
 Threads
-    Rows that share thread_key post in position order. Position 1 is the root.
-    Each later post is a reply to the previous position's tweet_id. A gap, a
-    failed row, or an uncertain row stops the thread. Nothing later is sent.
+    Rows that share thread_key post in position order. Position 1 is the root
+    unless reply_to_tweet_id is set. Each later post with a null
+    reply_to_tweet_id is a reply to the previous position's tweet_id. A gap,
+    a failed row, or an uncertain row stops the thread. Nothing later is sent.
 
 Links and pinning
     Pick posts still refuse URLs. A manual row whose text contains a URL is
@@ -52,7 +69,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -68,12 +87,14 @@ PIN_NOTE = (
 
 LOAD_SQL = (
     "SELECT id, thread_key, position, body, allow_link, pin, "
-    "scheduled_at, status, tweet_id, claimed_at "
+    "scheduled_at, status, tweet_id, claimed_at, "
+    "media_urls, media_ids, reply_to_tweet_id "
     "FROM social_post_queue ORDER BY thread_key, position"
 )
 RELOAD_SQL = (
     "SELECT id, thread_key, position, body, allow_link, pin, "
-    "scheduled_at, status, tweet_id, claimed_at "
+    "scheduled_at, status, tweet_id, claimed_at, "
+    "media_urls, media_ids, reply_to_tweet_id "
     "FROM social_post_queue WHERE id = %s"
 )
 CLAIM_SQL = (
@@ -94,17 +115,25 @@ HEAL_SQL = (
     "posted_at = %s, pin_status = %s, pin_note = %s "
     "WHERE id = %s AND tweet_id IS NOT NULL AND status <> 'posted' RETURNING id"
 )
+SAVE_MEDIA_SQL = (
+    "UPDATE social_post_queue SET media_ids = %s "
+    "WHERE id = %s AND status = 'posting' AND tweet_id IS NULL RETURNING id"
+)
 EXISTS_SQL = "SELECT 1 FROM social_post_queue WHERE thread_key = %s LIMIT 1"
 INSERT_SQL = (
     "INSERT INTO social_post_queue "
-    "(thread_key, position, body, allow_link, pin, scheduled_at) "
-    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"
+    "(thread_key, position, body, allow_link, pin, scheduled_at, "
+    "media_urls, reply_to_tweet_id) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
 )
 
 _COLUMNS = (
     "id", "thread_key", "position", "body", "allow_link", "pin",
     "scheduled_at", "status", "tweet_id", "claimed_at",
+    "media_urls", "media_ids", "reply_to_tweet_id",
 )
+MAX_IMAGES = 4
+_TWEET_ID = re.compile(r"^[0-9]{1,19}$")
 _OPEN = ("queued", "posting")
 
 
@@ -152,14 +181,63 @@ def _missing_table(exc: BaseException) -> bool:
     return "social_post_queue" in text and "does not exist" in text
 
 
+def _url_problem(url) -> str | None:
+    if not isinstance(url, str) or not url:
+        return "missing https URL"
+    if any(c in url for c in " \n\r\t"):
+        return "URL contains whitespace"
+    if len(url) > 2000:
+        return "URL is over 2000 characters"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return "URL must be https"
+    if parsed.username or parsed.password:
+        return "URL must not contain credentials"
+    return None
+
+
+def _checked_media_urls(media_urls: list[str] | None) -> list[str] | None:
+    if not media_urls:
+        return None
+    if len(media_urls) > MAX_IMAGES:
+        raise QueueRejected(
+            f"{len(media_urls)} images; the limit is {MAX_IMAGES}. Nothing was inserted."
+        )
+    for index, url in enumerate(media_urls, start=1):
+        reason = _url_problem(url)
+        if reason:
+            raise QueueRejected(f"image {index}: {reason}. Nothing was inserted.")
+    return list(media_urls)
+
+
+def _checked_reply(reply_to_tweet_id: str | None) -> str | None:
+    if reply_to_tweet_id is None or not str(reply_to_tweet_id).strip():
+        return None
+    reply = str(reply_to_tweet_id).strip()
+    if not _TWEET_ID.fullmatch(reply):
+        raise QueueRejected(
+            "reply_to_tweet_id must be a numeric tweet id. Nothing was inserted."
+        )
+    return reply
+
+
 def posts_to_rows(thread_key: str, bodies: list[str], *, pin_root: bool,
-                  allow_link: bool, scheduled_at: datetime) -> list[dict]:
+                  allow_link: bool, scheduled_at: datetime,
+                  media_urls: list[str] | None = None,
+                  reply_to_tweet_id: str | None = None) -> list[dict]:
     """The rows an enqueue would insert. Raises QueueRejected and writes nothing."""
     key = (thread_key or "").strip()
     if not key or len(key) > 80 or any(c in key for c in " \n\r\t"):
         raise QueueRejected("thread_key must be 1-80 characters with no whitespace")
     if not bodies:
         raise QueueRejected("a thread needs at least one post")
+    if media_urls and len(bodies) != 1:
+        raise QueueRejected(
+            "images attach to one post. Pass one body, or insert the thread in SQL. "
+            "Nothing was inserted."
+        )
+    urls = _checked_media_urls(media_urls)
+    reply = _checked_reply(reply_to_tweet_id)
     from tracking.x_publisher import MAX_TWEET
     rows = []
     for index, body in enumerate(bodies, start=1):
@@ -182,16 +260,21 @@ def posts_to_rows(thread_key: str, bodies: list[str], *, pin_root: bool,
             "allow_link": linked,
             "pin": bool(pin_root and index == 1),
             "scheduled_at": scheduled_at,
+            "media_urls": urls if index == 1 else None,
+            "reply_to_tweet_id": reply if index == 1 else None,
         })
     return rows
 
 
 def enqueue(conn, thread_key: str, bodies: list[str], *, pin_root: bool = False,
-            allow_link: bool = False, scheduled_at: datetime | None = None) -> list[int]:
+            allow_link: bool = False, scheduled_at: datetime | None = None,
+            media_urls: list[str] | None = None,
+            reply_to_tweet_id: str | None = None) -> list[int]:
     """Insert one thread. Does not post. Refuses a thread_key that already has a row."""
     when = _as_utc(scheduled_at) or datetime.now(timezone.utc)
     rows = posts_to_rows(
-        thread_key, bodies, pin_root=pin_root, allow_link=allow_link, scheduled_at=when)
+        thread_key, bodies, pin_root=pin_root, allow_link=allow_link, scheduled_at=when,
+        media_urls=media_urls, reply_to_tweet_id=reply_to_tweet_id)
     key = rows[0]["thread_key"]
     try:
         if conn.execute(EXISTS_SQL, (key,)).fetchone():
@@ -200,7 +283,8 @@ def enqueue(conn, thread_key: str, bodies: list[str], *, pin_root: bool = False,
         for row in rows:
             rec = conn.execute(INSERT_SQL, (
                 row["thread_key"], row["position"], row["body"], row["allow_link"],
-                row["pin"], row["scheduled_at"],
+                row["pin"], row["scheduled_at"], row["media_urls"],
+                row["reply_to_tweet_id"],
             )).fetchone()
             if not rec:
                 raise QueueRejected("insert returned no id")
@@ -287,11 +371,13 @@ def _actionable(group: list[dict]) -> bool:
 
 
 def drain_social_posts(conn, *, dry_run: bool = False, now: datetime | None = None,
-                       deliver=None) -> dict:
+                       deliver=None, fetch_image=None, upload_image=None) -> dict:
     """Post due queued rows. Posted rows are left alone. Never raises for a missing table.
 
     dry_run writes nothing and does not call the network. The default deliver
     is tracking.x_publisher.deliver_tweet, which uses the existing credentials.
+    Images are fetched and uploaded only after a claim, and only for indexes
+    that do not already have a media id.
     """
     clock = _as_utc(now) or datetime.now(timezone.utc)
     if not dry_run and not _can_post():
@@ -377,7 +463,8 @@ def drain_social_posts(conn, *, dry_run: bool = False, now: datetime | None = No
                 break
             if dry_run:
                 results.append(_result(
-                    row, "would_post", None, None, reply_to=parent_id))
+                    row, "would_post", None, None,
+                    reply_to=_reply_target(row, parent_id)))
                 parent_id = f"dry-run-{position}"
                 continue
 
@@ -388,7 +475,8 @@ def drain_social_posts(conn, *, dry_run: bool = False, now: datetime | None = No
                     continue
                 break
             outcome, parent_id, stop_pass = _send(
-                conn, row, parent_id, clock, deliver, results)
+                conn, row, parent_id, clock, deliver, results,
+                fetch_image, upload_image)
             posted += outcome
             if stop_pass or (parent_id is None and outcome == 0):
                 break
@@ -397,6 +485,30 @@ def drain_social_posts(conn, *, dry_run: bool = False, now: datetime | None = No
 
     status = "dry_run" if dry_run else "ok"
     return {"status": status, "posted": posted, "results": results}
+
+
+def _list_or_none(value, label: str) -> tuple[list | None, str | None]:
+    if value is None:
+        return [], None
+    if isinstance(value, (list, tuple)):
+        return list(value), None
+    return None, f"{label} is not a list; not posted"
+
+
+def _external_reply(row: dict) -> str | None:
+    raw = row.get("reply_to_tweet_id")
+    if raw is None or not str(raw).strip():
+        return None
+    return str(raw).strip()
+
+
+def _reply_target(row: dict, parent_id: str | None) -> str | None:
+    external = _external_reply(row)
+    if external:
+        return external
+    if int(row["position"]) > 1:
+        return parent_id
+    return None
 
 
 def _problem(row: dict, parent_id: str | None) -> str | None:
@@ -409,7 +521,29 @@ def _problem(row: dict, parent_id: str | None) -> str | None:
     if not row["allow_link"] and _has_link(body):
         return ("refusing to post: text contains a URL and allow_link is false "
                 "(X bills a URL at $0.20 instead of $0.015)")
-    if int(row["position"]) > 1 and not parent_id:
+    urls, url_error = _list_or_none(row.get("media_urls"), "media_urls")
+    if url_error:
+        return url_error
+    if len(urls) > MAX_IMAGES:
+        return f"{len(urls)} images; the limit is {MAX_IMAGES}; not posted"
+    for index, url in enumerate(urls, start=1):
+        reason = _url_problem(url)
+        if reason:
+            return f"image {index}: {reason}; not posted"
+    stored, id_error = _list_or_none(row.get("media_ids"), "media_ids")
+    if id_error:
+        return id_error
+    if len(stored) > len(urls):
+        return "media_ids is longer than media_urls; not posted"
+    for index, media_id in enumerate(stored, start=1):
+        if media_id is None or media_id == "":
+            continue
+        if not _TWEET_ID.fullmatch(str(media_id)):
+            return f"stored media id {index} is not numeric; not posted"
+    external = _external_reply(row)
+    if external and not _TWEET_ID.fullmatch(external):
+        return "reply_to_tweet_id is not a numeric tweet id; not posted"
+    if int(row["position"]) > 1 and not parent_id and not external:
         return "no parent tweet id to reply to"
     return None
 
@@ -422,13 +556,102 @@ def _stop_queued(conn, row, dry_run: bool, error: str, results: list) -> str:
     return "stop"
 
 
-def _send(conn, row, parent_id, clock, deliver, results) -> tuple[int, str | None, bool]:
-    reply_to = parent_id if int(row["position"]) > 1 else None
+def _not_posted(detail: str) -> str:
+    text = (detail or "image upload failed").strip()
+    if "not posted" not in text:
+        text = f"{text}; not posted"
+    return text[:500]
+
+
+def _save_media_ids(conn, row_id, media_ids: list) -> bool:
+    saved = conn.execute(SAVE_MEDIA_SQL, (list(media_ids), row_id)).fetchone()
+    conn.commit()
+    return saved is not None
+
+
+def _media_clients(fetch_image, upload_image):
+    if fetch_image is None or upload_image is None:
+        from tracking.x_publisher import fetch_https_image, upload_tweet_image
+        fetch_image = fetch_image or fetch_https_image
+        upload_image = upload_image or upload_tweet_image
+    return fetch_image, upload_image
+
+
+def _attach_media(conn, row, fetch_image, upload_image):
+    """(media_ids or None, error, kind). kind is ready, failed, or rate_limited.
+
+    None means the tweet body has no media key. A failure returns before a
+    tweet is created. Ids already stored are not uploaded again.
+    """
+    urls, _error = _list_or_none(row.get("media_urls"), "media_urls")
+    if not urls:
+        return None, None, "ready"
+    stored, _id_error = _list_or_none(row.get("media_ids"), "media_ids")
+    ids: list[str | None] = []
+    for item in stored:
+        ids.append(None if item in (None, "") else str(item))
+    fetch, upload = _media_clients(fetch_image, upload_image)
+    for index, url in enumerate(urls):
+        if index < len(ids) and ids[index]:
+            continue
+        try:
+            got = fetch(url)
+        except Exception as exc:  # noqa: BLE001
+            return None, _not_posted(f"image fetch raised: {exc}"), "failed"
+        outcome = getattr(got, "outcome", None)
+        if outcome == "rate_limited":
+            return None, getattr(got, "detail", "") or outcome, "rate_limited"
+        if outcome != "fetched" or not getattr(got, "content", None):
+            return None, _not_posted(getattr(got, "detail", "") or outcome or "image fetch failed"), "failed"
+        try:
+            uploaded = upload(got.content, got.media_type)
+        except Exception as exc:  # noqa: BLE001
+            return None, _not_posted(f"image upload raised: {exc}"), "failed"
+        up_outcome = getattr(uploaded, "outcome", None)
+        media_id = getattr(uploaded, "media_id", None)
+        if up_outcome == "rate_limited":
+            return None, getattr(uploaded, "detail", "") or up_outcome, "rate_limited"
+        if up_outcome != "uploaded" or not media_id or not _TWEET_ID.fullmatch(str(media_id)):
+            detail = getattr(uploaded, "detail", "") or up_outcome or "upload returned no media id"
+            return None, _not_posted(detail), "failed"
+        if index < len(ids):
+            ids[index] = str(media_id)
+        else:
+            ids.append(str(media_id))
+        # Keep later ids in place. A hole stays None so a retry uploads that
+        # index instead of shifting the ones after it.
+        if not _save_media_ids(conn, row["id"], list(ids)):
+            return None, _not_posted("could not store the media id before posting"), "failed"
+        row["media_ids"] = list(ids)
+    if len(ids) != len(urls) or any(not item for item in ids):
+        return None, _not_posted("image upload incomplete"), "failed"
+    return [str(item) for item in ids], None, "ready"
+
+
+def _send(conn, row, parent_id, clock, deliver, results,
+          fetch_image=None, upload_image=None) -> tuple[int, str | None, bool]:
+    reply_to = _reply_target(row, parent_id)
+    media_ids, media_error, media_kind = _attach_media(
+        conn, row, fetch_image, upload_image)
+    if media_kind == "rate_limited":
+        _finish(conn, row["id"], status="queued", error=media_error,
+                tweet_id=None, tweet_url=None, posted_at=None, pin_status=None,
+                pin_note=None, claimed_at=None)
+        results.append(_result(row, "queued", None, None, media_error))
+        return 0, None, True
+    if media_kind != "ready":
+        _finish(conn, row["id"], status="failed", error=media_error,
+                tweet_id=None, tweet_url=None, posted_at=None, pin_status=None,
+                pin_note=None, claimed_at=clock)
+        results.append(_result(row, "failed", None, None, media_error))
+        return 0, None, False
     try:
         if row["allow_link"]:
             logger.info(
                 "social post %s allows a URL; X bills the link rate", row["id"])
-        delivered = deliver(row["body"], reply_to=reply_to, allow_link=bool(row["allow_link"]))
+        delivered = deliver(
+            row["body"], reply_to=reply_to, allow_link=bool(row["allow_link"]),
+            media_ids=media_ids)
     except Exception as exc:  # noqa: BLE001 — the claim must not be retried blindly
         detail = f"deliver raised: {exc}"[:500]
         _finish(conn, row["id"], status="uncertain", error=detail, tweet_id=None,
@@ -513,6 +736,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="allow a URL in a post (X link rate, $0.20)")
     parser.add_argument("--scheduled-at", default=None,
                         help="ISO timestamp; default is now")
+    parser.add_argument("--media-url", action="append", default=[],
+                        help="https image URL, repeat up to 4; one --body-file only")
+    parser.add_argument("--reply-to", default=None,
+                        help="numeric tweet id this first post replies to")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -527,7 +754,9 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 ids = enqueue(
                     conn, args.thread_key, _read_bodies(args.body_file),
-                    pin_root=args.pin, allow_link=args.allow_link, scheduled_at=when)
+                    pin_root=args.pin, allow_link=args.allow_link, scheduled_at=when,
+                    media_urls=args.media_url or None,
+                    reply_to_tweet_id=args.reply_to)
             except QueueRejected as exc:
                 print(str(exc), file=sys.stderr)
                 return 1

@@ -1061,7 +1061,7 @@ def run_nfl_prop_card() -> None:
 # call per bet game owed a close. The PROJECTING steps run after them, on the
 # tick about an hour before tip, so a slow frame never delays a decision: the
 # ESPN injury pull, then the frame over every box line since 2018-19.
-NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "card": 60, "projection_card": 60, "close": 60,
+NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "cards": 120, "close": 60,
                              "injuries": 60, "project": 240}
 
 
@@ -1076,8 +1076,9 @@ def run_nba_prop_window() -> None:
     undecided, no bet game is owed its closing snapshot and no game is due its
     projection -- most ticks of most days.
 
-    Otherwise: fetch props for exactly the games to decide, run nba_prop_market's
-    card and then the projection card on that fetch, take any closing snapshot
+    Otherwise: fetch props for exactly the games to decide, run both NBA prop
+    cards on that fetch in one step (one bet a game across both models, at most
+    4 a night: scripts/nba_props_card.py), take any closing snapshot
     that is due, and publish what the cards wrote. THEN, for the games about 65
     minutes from tip, pull the ESPN injury list and store their projections (the
     projection card prices them two ticks later, inside the window). A step
@@ -1100,12 +1101,14 @@ def run_nba_prop_window() -> None:
         outcomes["nba-prop-window-fetch"] = _run(
             [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
             "nba-prop-window-fetch", timeout=t["fetch"])
-        outcomes["nba-prop-market"] = _run(
-            [sys.executable, "run_pipeline.py", "--step", "nba-prop-market"],
-            "nba-prop-market", timeout=t["card"])
-        outcomes["nba-prop-projection"] = _run(
-            [sys.executable, "run_pipeline.py", "--step", "nba-prop-projection"],
-            "nba-prop-projection", timeout=t["projection_card"])
+        # BOTH NBA prop cards in ONE step: their candidates meet in one choice
+        # (one bet a game across both models, four a night, strongest first by
+        # each bet's EV percentile within its own model;
+        # scripts/nba_props_card.py), so the order they run in cannot decide
+        # which model's bet a game gets.
+        outcomes["nba-props"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-props"],
+            "nba-props", timeout=t["cards"])
     if plan.close:
         outcomes["nba-prop-close"] = _run(
             [sys.executable, "run_pipeline.py", "--step", "nba-prop-close"],

@@ -561,3 +561,21 @@ def test_the_ev_floor_is_the_model_s_own_and_the_bet_is_priced_as_a_rule():
     from models.honest_ev import gate
     g = gate(tt.MODEL_ID, 0.60, -112)
     assert g.cal_prob == 0.60 and g.ev == pytest.approx(0.60 * (1 + 100 / 112) - 1)
+
+
+def test_opening_night_declines_every_game_without_crashing(art):
+    """RULE: on a season with no final game yet, every game is declined under
+    the 10-game rule. On 2026-10-20 the card failed every tick of its window:
+    the real ratings (never the stand-in _decide uses) raised on the empty,
+    object-dtype box. No stand-in here."""
+    t = _target()
+    fetch = TIP - timedelta(minutes=55)
+    games = t.assign(tip=pd.Timestamp(TIP))
+    q = tt.quote_frame(_rows(GID, fetch, [("pinnacle", 112.5, -110, -110),
+                                          ("draftkings", 112.5, -110, -110)]), games)
+    times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
+    empty = pd.DataFrame(columns=["game_id", "team", *tt.BOX_COLS])
+    final = pd.DataFrame(columns=["game_id", "season", "game_date", "home_team", "away_team",
+                                  "home_score", "away_score"])
+    bets, decisions, diag = tt.decide(t, q, empty, final, times, art, scheduled=final)
+    assert bets == [] and diag["early_season"] == 1, (decisions, diag)

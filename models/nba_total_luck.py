@@ -200,6 +200,17 @@ def as_of_ratings(tb: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
     and league averages over the same season's games before that date. Only
     the opponents' 3P% and FT% are replaced (section 6.3): the offence is
     left as played, so ortg_adj equals ortg_raw."""
+    if tb.empty:
+        # No final game yet this season (opening night). Every column of an
+        # empty box is object dtype, and the cumulative sums below raised
+        # "function is not implemented for this dtype: cumsum": both NBA game
+        # cards failed every tick of 2026-10-20 until the first game was final.
+        # No games means no ratings and n = 0, which the 10-game rule declines.
+        out = targets[["season", "team", "game_date"]].copy().reset_index(drop=True)
+        out["n"] = 0.0
+        for c in ("pace", "lg_rtg", "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"):
+            out[c] = np.nan
+        return out
     team = tb.groupby(["season", "team", "game_date"], as_index=False)[TEAM_SUMS].sum()
     team["n"] = 1.0
     team = team.sort_values(["season", "team", "game_date"])
