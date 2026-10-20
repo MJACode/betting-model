@@ -86,6 +86,26 @@ def test_the_board_and_the_card_agree_on_a_placed_game(wind):
     assert int(row["qualifies"]), row["reason"]
 
 
+def test_a_locked_pick_with_no_venue_reads_degraded_never_gone(wind):
+    """The locked-pick monitor turns this board row into the pick's flag.
+
+    GONE means the premise collapsed (the wind fell away). A venue the
+    schedule has not established yet is a data gap -- every open wind BET
+    reads this way between a deploy and the first nflverse ingest that fills
+    the venue columns -- so it must land as DEGRADED, like the "not stable
+    yet" reason, and never match a GONE marker.
+    """
+    from scripts.nfl_pick_monitor import _GONE_MARKERS, classify
+    for note in ("", "the schedule row carries no venue yet",
+                 "neutral site Somewhere Park (nflverse id YY00) is not in the venue table",
+                 "stadium NEW99 (Brand New Stadium) has no coordinates"):
+        row = wind.evaluate_board(_slate(None, note=note))[0]
+        still, status, reason = classify(row)
+        assert (still, status) == (False, "DEGRADED"), reason
+        assert reason.startswith("venue not established")
+        assert not any(m in reason.lower() for m in _GONE_MARKERS), reason
+
+
 def test_the_bernabeu_with_no_roof_state_is_held_back(wind):
     """Madrid has a retractable roof and nflverse leaves it blank. Before the
     venue came from the games table this game sat at ATL97, also retractable,
