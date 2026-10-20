@@ -3074,6 +3074,44 @@ def _reject_void_candidates(wanted: list[int], picks: list[dict]) -> None:
         raise DiscordVoidRejected(problems)
 
 
+def posted_sibling_sql() -> str:
+    """A pregame pick on this lock_key that a void notice would unpublish.
+
+    The pregame key is game_id:model_id plus player parts, and it has no
+    side. discord_void on that key releases every pick that shares it.
+    A sibling that is still a published BET blocks the notice. Live keys
+    include the side, so this query is not used for an in-play pick.
+    """
+    return f"""
+        SELECT sib.pick_id
+          FROM picks sib
+         WHERE sib.pick_id <> %s
+           AND sib.signal_type = 'BET'
+           AND sib.condition_status IS DISTINCT FROM 'VOID'
+           AND sib.condition_status IS DISTINCT FROM 'DUPLICATE'
+           AND sib.result IS DISTINCT FROM 'NO_ACTION'
+           AND COALESCE(sib.is_live, false) IS NOT TRUE
+           AND {lock_key_sql('sib')} = %s
+         LIMIT 1
+    """
+
+
+def _posted_sibling_id(conn, pick: dict):
+    """The pick_id still holding this pregame lock, or None.
+
+    Live locks carry the side. A notice on one does not release the other
+    side, so an in-play void is not checked here.
+    """
+    if pick.get("is_live"):
+        return None
+    row = conn.execute(
+        posted_sibling_sql(), (pick["pick_id"], pick["lock_key"])
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    return int(row[0])
+
+
 def _ledger_void(conn, picks: list[dict], sent_at: str, message_id: str) -> None:
     stored = None if message_id == _POST_OK_NO_ID else message_id
     for pick in picks:
@@ -3095,6 +3133,11 @@ def notify_discord_void(pick_ids, reason: str | None = None,
     fails the call and nothing is sent. Locks that already have discord_void
     are skipped; a rerun of a finished list is a no-op.
 
+    A pregame lock has no side. Posting discord_void on it releases every
+    pick on that key. When another pick on the key is still a published
+    BET, this logs the refusal and skips that pick: no post, no ledger
+    row. The void itself is already committed and is not undone.
+
     dry_run makes no HTTP call and no ledger write. It returns the exact
     POST bodies. A failed post writes nothing for that message. This never
     edits or deletes an existing Discord message.
@@ -3115,11 +3158,31 @@ def notify_discord_void(pick_ids, reason: str | None = None,
         ordered = [by_id[i] for i in ids]
         skipped = [p["lock_key"] for p in ordered if p["already_voided"]]
         pending = [p for p in ordered if not p["already_voided"]]
+        refused_siblings: list[str] = []
+        safe: list[dict] = []
+        for pick in pending:
+            sibling = _posted_sibling_id(conn, pick)
+            if sibling is None:
+                safe.append(pick)
+                continue
+            logger.warning(
+                f"Discord void: refusing pick {pick['pick_id']} on "
+                f"{pick['lock_key']}; posted sibling {sibling} still "
+                f"holds that lock")
+            refused_siblings.append(pick["lock_key"])
+        pending = safe
         if not pending:
-            logger.info(f"Discord void: nothing to post; {len(skipped)} lock(s) "
-                        f"already noticed")
+            if refused_siblings:
+                logger.info(
+                    f"Discord void: nothing to post; {len(refused_siblings)} "
+                    f"lock(s) kept, a posted sibling still holds them")
+            else:
+                logger.info(f"Discord void: nothing to post; {len(skipped)} lock(s) "
+                            f"already noticed")
             return {"dry_run": dry_run, "posted": 0,
-                    "skipped_lock_keys": skipped, "payloads": []}
+                    "skipped_lock_keys": skipped,
+                    "refused_sibling_lock_keys": refused_siblings,
+                    "payloads": []}
 
         by_sport: dict[str, list[dict]] = {}
         for pick in pending:
@@ -3146,7 +3209,9 @@ def notify_discord_void(pick_ids, reason: str | None = None,
                 logger.info(f"[dry-run] discord void {item['sport']} "
                             f"{json.dumps(item['payload'], default=str)}")
             return {"dry_run": True, "posted": 0,
-                    "skipped_lock_keys": skipped, "payloads": payloads}
+                    "skipped_lock_keys": skipped,
+                    "refused_sibling_lock_keys": refused_siblings,
+                    "payloads": payloads}
 
         missing = sorted({item["sport"] for item in payloads
                           if not item["webhook_configured"]})
@@ -3171,7 +3236,9 @@ def notify_discord_void(pick_ids, reason: str | None = None,
             message_ids.append(message_id)
         logger.success(f"✓ Discord void: posted {posted} pick(s)")
         return {"dry_run": False, "posted": posted,
-                "skipped_lock_keys": skipped, "message_ids": message_ids,
+                "skipped_lock_keys": skipped,
+                "refused_sibling_lock_keys": refused_siblings,
+                "message_ids": message_ids,
                 "payloads": payloads}
     finally:
         conn.close()

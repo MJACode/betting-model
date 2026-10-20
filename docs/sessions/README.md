@@ -19,10 +19,15 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 merged origin/master `a82f517d`; session logs keep both sides; period-recap stub keeps master's allow_link assert |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, migration guards use to_regclass so a missing table does not fail the file; a locked social_post_queue stays a no-op |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, NBA props: 36 opening-night props voided (mike); one bet a game and 4 a night across both NBA prop models, ranked by each model's own EV percentile (+9.7% graded, about 1,000 units a season below no limit) |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual X posts can attach up to 4 images and reply to an external tweet; pick and recap posting unchanged; nothing posted |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, period-recap X test stub accepts `allow_link`; recaps still post with links off |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 CI: narrowing migration stays ahead of the published-record pass; tail pin is published_record_units; period-recap double accepts allow_link |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #945 merged the updated #941 branch `32fe055f` (master `8e3d5262` already in it); session logs keep both sides |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #945 merged origin/master `8e3d5262`; session logs keep both sides; no code, test, config, or migration conflict |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 merged origin/master `8e3d5262`; session logs keep both sides; no code, test, config, or migration conflict |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, manual posts to @SignalBasePicks: social_post_queue drained by the existing X client; ledger thread seeded queued; nothing posted |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #1007 merged and its production steps; the daily odds cleanup (not finished since about 09-03) rebuilt as small bounded statements; two stale master tests; NBA Cup placeholder games skipped |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #963 merged origin/master `f3ed68bc`; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; draw_price stays off that list; the PR stays a draft |
@@ -139,6 +144,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, one record-correction post: fixed words, Discord results then a pin attempt, X as a 265-character tweet plus a 200-character reply, ledgered before each send; the worker runs it |
 | 2026-10-14 | [2026-10](./2026-10.md) | superseded — 2026-10-14 OTA typecheck note; the 31-diagnostic count is not the current gate (see 2026-10-17) |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the app record matches the posted view: v_public_track_record already returns 8 for mlb_prop_batter_runs (the unfiltered settled count is 80); client tallies drop unpublished; detail list is the posted set; view rollup 808 / 431-375-2 |
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, uq_picks_one_live_row also excludes VOID and result NO_ACTION (1 VOID live BET, pick 2476480, plus 8 NO_ACTION live BETs hold lanes today); guard matches signal_type = 'BET' and the exclusions; lock_timeout inside the DO; health check compares the full indexdef. Migration not applied |
+| 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, uq_picks_one_live_row narrowed to standing BETs so an AVOID no longer drops the later live BET; void notice skips a sideless lock that a posted sibling still holds; health check reads both index definitions. Migration not applied |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, Discord lock duplicates: 34 posts / 35 extra rows marked DUPLICATE (none graded); recap stores message_id; a posted void sends a notice; Oct 5 recap backfill is an explicit dry-run command |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, the published record is the picks Discord still has: 109 never-posted settled bets (41-68) leave the recap and the snapshots; all-time as of 2026-10-13 goes from 472-443-2, -15.5373u to 431-375-2, +16.9240u; stake_for unchanged from #938; migration not applied here |
 | 2026-10-14 | [2026-10](./2026-10.md) | 2026-10-14, graded picks are live money: the recap no longer leaves a pick out of the units; snapshots restate units at the taken price; all-time overall -38.4439 to -15.5373 as of 2026-10-13; NHL -8.4800 to +5.8762 |
