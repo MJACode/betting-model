@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: a quote with no line is dropped before the capture rank; Anytime TD 0.5 is still a line |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: master 9ac39a4d merged, then e9b081ed; two lines on the last pre-kickoff snapshot become one fact (later created_at, then prop_id); job stays off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, BYOM prop facts: a player who did not play is ungraded and out of the record; a row with no posted line is skipped; master merged, job stays off |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, #931 rework: `_insert_picks` refuses a pregame row at or past the pregame cutoff; live rows stay; card-level copies of the 2026-10-09 / #1027 / #1029 checks were dropped |
