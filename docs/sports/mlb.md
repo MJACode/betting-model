@@ -106,16 +106,49 @@ slate guard. Optional under-juice **band**
 `mlb_over_under` stays paused. Coverage caveat: only
 ~99–136 pre-commence public totals-over games in the DB.
 
-## 11b5. NOT YET SCHEDULE-GATED — why (2026-10-20)
+## 11b5. The schedule gate (2026-10-20)
 
-The other pre-game sports now wait for a team's earlier game to be played and
-logged before deciding (`data/schedule_context.py`). MLB is deliberately left
-out until its stored schedule is whole: 146 of the 2,385 odds-feed rows for 2026 have
-no result, 145 of them games already past (counted 2026-10-20), the 2026 table misses 218 games
-the free Stats API lists as final, and a doubleheader's two games share one
-`game_id`. Gated as it stands, every unscored row would hold both teams' next
-games for days. Dormant until March. Fix the results ingest first, then add MLB
-to `SCORER_GATED_SPORTS`.
+The MLB game models (`run_scorer`) do not decide a game while either team
+still has an earlier game not played, being played, or played but not yet in
+the morning run's logs (`data/schedule_context.py`, `RULES["MLB"]`). The rows
+are still written, NONE, with the reason ("waiting for TB's 2026-10-23 game and
+MIL's 2026-10-23 game to be played and logged"); NONE never locks, so the
+first pass after the logs land decides the game.
+
+- **Why now, not March.** MLB is live through the World Series (game 1
+  2026-10-23) and scores 7 days ahead. `mlb_f5_moneyline` wrote 14 of its 119
+  BETs since 07-05 before the morning run had logged a team's previous game:
+  -5.54 units on those 14, -1.42 on the other 91 (read-only SQL, 2026-10-20).
+- **"Logged" is the morning run's footprint:** a `mlb_team_stats` row dated
+  after the game. The `mlb_stats` step writes one per team every morning, in the
+  same run as the bullpen rows the game models read (`bullpen_ip_last1/3`, where
+  no row reads as an off day), and both run before the scoring step. Not the
+  bullpen rows themselves: a team whose starter went the distance has none.
+  Since 07-10, 1,955 of 1,996 team-games had bullpen rows, 1,996 of 1,996 had a
+  later team-stats row, and the two never landed more than an hour apart.
+- **Two horizons.** A game with a result waits for the log up to 2 days. A game
+  with NO result stops holding 12 hours after first pitch: that is a
+  postponement or a results gap, not a game to wait for. `MLB_2026-10-16_TB_CLE`
+  kept 3,328 odds rows and never got a score, 22.3h before the two teams' next
+  game; one 2-day horizon would have held that game to its first pitch.
+  October finals were scored within 3.9h of first pitch.
+- **A row no book priced is not a game.** `MLB_2026-10-16_MIL_LAD`, an
+  if-necessary game the series never needed, has 0 odds rows.
+- **What it costs.** A game decides from the 6am run after the teams' previous
+  game (the morning logs land 10:05-10:07Z, median 11.0h after first pitch).
+  When the log is late, the next game waits: 30 of the 1,955 team-games with
+  bullpen rows since 07-10 were logged after the team's next first pitch, and
+  gated, those next games
+  would not have been decided at all rather than decided on a stale bullpen.
+  A missing result costs at most 12 hours.
+- **Not covered.** A doubleheader's two games share one `game_id`, so the
+  second game is invisible to the gate (dormant until the regular season).
+  2026 has 146 odds-feed rows with no result, 145 of them past, and the table
+  misses 218 games the free Stats API lists as final; each costs at most 12
+  hours now. The pitcher prop models (`mlb_prop_pitcher_*`) are a separate path
+  and are not gated: they decide up to 47.8h ahead. Check in March whether
+  spring-training rows reach `games` without a team-stats row, which would
+  hold opening day.
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)

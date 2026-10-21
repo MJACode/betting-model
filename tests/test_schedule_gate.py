@@ -39,12 +39,13 @@ class _BoardConn:
     the stored schedule, the logs and the BET lock read."""
 
     def __init__(self, board, schedule, *, priced=(), ncaaf_log=(), ufc_cards=(),
-                 bets=(), fail_schedule=False):
+                 mlb_stats=(), bets=(), fail_schedule=False):
         self.board = board                    # run_scorer's game list (7-tuples)
         self.schedule = schedule              # games rows, 7 columns
         self.priced = set(priced)
         self.ncaaf_log = list(ncaaf_log)
         self.ufc_cards = list(ufc_cards)
+        self.mlb_stats = list(mlb_stats)      # (team, newest as_of_date)
         self.bets = list(bets)
         self.fail_schedule = fail_schedule
         self._sql = ""
@@ -62,12 +63,14 @@ class _BoardConn:
         s = self._sql
         if "commence_time, home_score, away_score FROM games" in s:
             return self.schedule
+        if s.startswith("SELECT s.game_id FROM games s"):
+            return [(g,) for g in self.priced]
         if "FROM ncaaf_team_game_log" in s:
             return self.ncaaf_log
         if "FROM ufc_fight_log" in s:
             return [(c,) for c in self.ufc_cards]
-        if s.startswith("SELECT DISTINCT game_id FROM odds"):
-            return [(g,) for g in self.priced]
+        if "FROM mlb_team_stats" in s:
+            return self.mlb_stats
         if "ORDER BY sport, game_date" in s:
             return self.board
         if "FROM games g" in s and "EXISTS" in s:
@@ -98,6 +101,7 @@ def _run(monkeypatch, conn, sport):
                       (wfe, "build_wnba_game_features")):
         monkeypatch.setattr(mod, name, lambda *a, **k: {"f": 1})
     monkeypatch.setattr(scorer, "build_nhl_game_features", lambda *a, **k: {"f": 1})
+    monkeypatch.setattr(scorer, "build_mlb_game_features", lambda *a, **k: {"f": 1})
     seen: dict = {}
 
     def _score(conn_, game_id, model_id, *a, **k):
@@ -225,6 +229,70 @@ def test_ufc_waits_for_a_fighters_card_to_reach_the_fight_log(monkeypatch):
     # The card lands: decided.
     holds = _run(monkeypatch, _BoardConn(board, schedule, priced={prev},
                                          ufc_cards=[_d(-30), _d(-2)]), "UFC")
+    assert holds and set(holds.values()) == {None}, holds
+
+
+# ── MLB: World Series game N+1 while game N is on, or not yet logged ─────────
+#
+# MLB is live through the World Series (game 1 2026-10-23) and scores 7 days
+# ahead. mlb_f5_moneyline wrote 14 of its 119 BETs since 07-05 before the
+# morning run had logged a team's previous game.
+
+G2 = f"MLB_{_d(1)}_TB_MIL"
+
+
+def _mlb(g1_start: float, g1_scored: bool, logged_through: str | None):
+    """Game 2 tomorrow; game 1 started `g1_start` hours from now. The team
+    stats' newest as_of_date is `logged_through` (the morning run's mark)."""
+    g1 = f"MLB_{_d(0) if g1_start > -10 else _d(-1)}_TB_MIL"
+    g1_day = g1.split("_")[1]
+    board = [(G2, "MLB", 2026, _d(1), "MIL", "TB", _t(26))]
+    schedule = [(G2, _d(1), "MIL", "TB", _t(26), None, None),
+                (g1, g1_day, "MIL", "TB", _t(g1_start),
+                 4.0 if g1_scored else None, 2.0 if g1_scored else None),
+                (f"MLB_{_d(-6)}_TB_CLE", _d(-6), "TB", "CLE", _t(-6 * 24), 7.0, 3.0),
+                (f"MLB_{_d(-6)}_MIL_LAD", _d(-6), "LAD", "MIL", _t(-6 * 24), 2.0, 6.0)]
+    stats = [(t, logged_through) for t in ("TB", "MIL")] if logged_through else []
+    return board, schedule, g1, g1_day, stats
+
+
+def test_mlb_game_two_waits_while_game_one_is_being_played(monkeypatch):
+    board, schedule, g1, g1_day, stats = _mlb(-1.5, False, _d(0))
+    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={g1, G2}, mlb_stats=stats),
+                 "MLB")
+    assert holds and set(holds.values()) == {
+        f"waiting for TB's {g1_day} game and MIL's {g1_day} game to be played and logged"}, holds
+
+
+def test_mlb_game_two_waits_for_the_morning_run_to_log_game_one(monkeypatch):
+    """Scored overnight, logged by the 6am run: until then the bullpen rows
+    the models read do not hold game 1, and no row reads as an off day."""
+    board, schedule, g1, g1_day, stats = _mlb(-14.0, True, _d(-1))
+    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={g1, G2}, mlb_stats=stats),
+                 "MLB")
+    assert holds and all(v and "TB's" in v and "MIL's" in v for v in holds.values()), holds
+    board, schedule, g1, g1_day, stats = _mlb(-14.0, True, _d(0))
+    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={g1, G2}, mlb_stats=stats),
+                 "MLB")
+    assert holds and set(holds.values()) == {None}, holds
+
+
+def test_a_postponed_mlb_game_stops_holding_twelve_hours_after_first_pitch(monkeypatch):
+    """MLB_2026-10-16_TB_CLE: 3,328 odds rows, never scored, 22.3h before the
+    two teams' next game. One 2-day horizon would have held that game to its
+    first pitch."""
+    board, schedule, g1, g1_day, stats = _mlb(-13.0, False, _d(0))
+    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={g1, G2}, mlb_stats=stats),
+                 "MLB")
+    assert holds and set(holds.values()) == {None}, holds
+
+
+def test_an_mlb_row_no_book_ever_priced_is_not_a_game(monkeypatch):
+    """MLB_2026-10-16_MIL_LAD: an if-necessary game the series never needed,
+    0 odds rows."""
+    board, schedule, g1, g1_day, stats = _mlb(-1.5, False, _d(0))
+    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={G2}, mlb_stats=stats),
+                 "MLB")
     assert holds and set(holds.values()) == {None}, holds
 
 

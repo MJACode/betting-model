@@ -263,9 +263,13 @@ being played, or without its result in `games` (nflverse fills it).
   score reached `games` itself is not stored): 1 opener BET (3502305, DAL @ GB,
   written 10-11 23:59Z, before the previous games' rows landed at 10-12 10:02Z;
   LOSS) and 1 wind BET (3503669, SEA @ DEN, WIN) would have waited about ten
-  hours. For a Thursday game the opener's window after the gate is from the
-  Sunday results (median 17.0h after kickoff, max 20.5h, 2026 weeks 1-6) to
-  T-2 on Tuesday night.
+  hours. The opener one would have been delayed, not lost: DraftKings held DAL
+  +1.5 (-120 to -122) every hour from 10-12 00:00Z to 13:00Z and Pinnacle held
+  DAL -1 to 12:59Z, so the 2.5-point deviation was still there at 10:02Z. A
+  number that lives minutes is lost to the hold instead (the 4-minute BetMGM
+  number on TEN @ NYG, `nfl/models/opener_spread.py`). For a Thursday game the
+  opener's window after the gate is from the Sunday results (median 17.0h after
+  kickoff, max 20.5h, 2026 weeks 1-6) to T-2 on Tuesday night.
 - **Not gated here:** the player-prop models. Their 24-hour write ceiling
   (`NFL_PROP_MAX_LEAD_HOURS`) already keeps every decision after the previous
   game; that ceiling is set by price timing, not by the schedule.

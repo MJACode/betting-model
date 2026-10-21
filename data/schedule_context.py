@@ -24,6 +24,10 @@ the sport docs):
     database).
   * The NFL opener spread model evaluated CAR @ GB (10-29) on 10-20, before both
     teams' week-7 games.
+  * mlb_f5_moneyline wrote 14 of its 119 BETs since 2026-07-05 before the
+    morning run had logged a team's previous game (-5.54 units on those 14,
+    -1.42 on the other 91). MLB is live through the World Series (game 1
+    2026-10-23) and scores 7 days ahead.
 
 THE RULE. A pre-game model never decides while either team still has an earlier
 game that is not played, being played, or played but not yet in the logs that
@@ -99,6 +103,12 @@ class Rules:
                      `games` is what they read.
     price_book       needs_price reads this book's h2h row only (None: any row).
     word             "game" or "fight", for the reason.
+    result_lookback_hours
+                     How long after its start a game with NO RESULT still
+                     holds, when that is shorter than lookback_days (MLB: a
+                     postponed game keeps its priced row and never gets a
+                     score). A game with a result still waits for the log for
+                     the full lookback_days. None: lookback_days for both.
     """
     sport: str
     lookback_days: int
@@ -107,6 +117,7 @@ class Rules:
     log: str | None = None
     price_book: str | None = None
     word: str = "game"
+    result_lookback_hours: int | None = None
 
 
 # lookback_days, each sport:
@@ -121,22 +132,34 @@ class Rules:
 #             (a cancelled bout never is), and every past DraftKings-priced
 #             card date since 2026-06-13 is in ufc_fight_log (25 of 25,
 #             measured 2026-10-20).
+#   MLB  2 days for the log, 12 hours for the result. Measured 2026-10-20:
+#             October finals were scored within 3.9h of first pitch, and the
+#             morning run logged them at 10:05-10:07Z the next day. The log
+#             can be late (30 of 1,955 team-games since 07-10 were logged
+#             after the team's next first pitch): that next game is held,
+#             not decided on a stale bullpen. A game with no result 12h on
+#             is a postponement or a results gap: MLB_2026-10-16_TB_CLE kept
+#             3,328 odds rows and no score, 22.3h before the two teams' next
+#             game, so one 2-day horizon would have held that game to its
+#             first pitch.
 RULES: dict[str, Rules] = {
     "NCAAF": Rules("NCAAF", lookback_days=10, log="ncaaf"),
     "NFL":   Rules("NFL", lookback_days=10),
     "WNBA":  Rules("WNBA", lookback_days=4, needs_price=True),
     "UFC":   Rules("UFC", lookback_days=400, needs_price=True, played_from_log=True,
                    log="ufc", price_book="draftkings", word="fight"),
+    "MLB":   Rules("MLB", lookback_days=2, needs_price=True, log="mlb",
+                   result_lookback_hours=12),
 }
 
 # The sports the generic pre-game scorer gates (models/scorer.run_scorer).
 # NFL's pre-game models are cards, gated where their BETs are written
-# (scripts/nfl_wind_publisher). NHL decides on game day behind its own check.
-# MLB is NOT gated yet, and that is deliberate: 146 of its 2,385 odds-feed
-# rows for 2026 have no result, 145 of them past games (an ingest gap,
-# docs/sports/mlb.md), and every one would hold both teams' next games for
-# days. Dormant until March.
-SCORER_GATED_SPORTS: tuple[str, ...] = ("NCAAF", "WNBA", "UFC")
+# (scripts/nfl_wind_publisher). NHL's side models decide on game day only,
+# 16:00Z-18:00Z, behind their own check (models/nhl_moneyline_anchored.
+# stale_teams). MLB's results gap (146 of 2,385 odds-feed rows for 2026 with
+# no result, docs/sports/mlb.md) costs at most 12 hours per missing result,
+# under result_lookback_hours, not days.
+SCORER_GATED_SPORTS: tuple[str, ...] = ("NCAAF", "WNBA", "UFC", "MLB")
 
 # The reason every gate writes when the schedule itself cannot be read: the
 # gates fail CLOSED (no decision this pass), and say so.
@@ -369,6 +392,8 @@ def team_view(rows: list[GameRow], rules: Rules, team: str, target: GameRow,
     events = collapse(mine, sport)
     here = next(ev for ev in events if target.game_id in ev.ids)
     horizon = now - timedelta(days=rules.lookback_days)
+    result_horizon = (now - timedelta(hours=rules.result_lookback_hours)
+                      if rules.result_lookback_hours is not None else horizon)
 
     earlier, later, pending, gaps = [], [], [], []
     for ev in events:
@@ -381,6 +406,7 @@ def team_view(rows: list[GameRow], rules: Rules, team: str, target: GameRow,
         on = _clock(ev)
         future = on is not None and on > now
         stale = on is not None and on < horizon
+        no_result_long = on is not None and on < result_horizon
         happened = logged(team, ev) if rules.played_from_log else ev.scored
         if happened:
             if rules.played_from_log or logged is None or logged(team, ev) or stale:
@@ -388,7 +414,7 @@ def team_view(rows: list[GameRow], rules: Rules, team: str, target: GameRow,
             pending.append((ev, UNLOGGED))
         elif future:
             pending.append((ev, UNPLAYED))
-        elif stale:
+        elif no_result_long:
             gaps.append(ev)                  # never got a result: not waited for
         else:
             pending.append((ev, UNLOGGED if rules.played_from_log else UNSCORED))
@@ -442,23 +468,24 @@ def _with_prices(conn, rows: list[GameRow], rules: Rules,
     if not ids:
         return rows
     # An IN list, not = ANY(...): the same statement runs on Postgres and on
-    # the sqlite the tests use. Indexed on odds (game_id, ...) either way.
+    # the sqlite the tests use. EXISTS, not DISTINCT over odds: it stops at
+    # each game's first odds row. Measured on production 2026-10-20 over 88
+    # MLB games (about 37,000 odds rows each): DISTINCT read 3.3 million index
+    # entries in 1,780 ms, EXISTS 88 in 17 ms.
     marks = ",".join("?" * len(ids))
-    if rules.price_book:
-        hit = {r[0] for r in conn.execute(
-            f"SELECT DISTINCT game_id FROM odds WHERE game_id IN ({marks}) "
-            f"AND market = 'h2h' AND bookmaker = ?", (*ids, rules.price_book)).fetchall()}
-    else:
-        hit = {r[0] for r in conn.execute(
-            f"SELECT DISTINCT game_id FROM odds WHERE game_id IN ({marks})",
-            tuple(ids)).fetchall()}
+    book = " AND o.market = 'h2h' AND o.bookmaker = ?" if rules.price_book else ""
+    hit = {r[0] for r in conn.execute(
+        f"SELECT s.game_id FROM games s WHERE s.game_id IN ({marks}) AND EXISTS "
+        f"(SELECT 1 FROM odds o WHERE o.game_id = s.game_id{book})",
+        (*ids, rules.price_book) if rules.price_book else tuple(ids)).fetchall()}
     return [r if r.scored else GameRow(r.game_id, r.game_date, r.home, r.away, r.start,
                                        r.home_score, r.away_score, r.game_id in hit)
             for r in rows]
 
 
-def _log_check(conn, rules: Rules, lo: str, hi: str):
-    """`logged(team, event)` for the sport's log, or None (the score is the log)."""
+def _log_check(conn, rules: Rules, lo: str, hi: str, teams=()):
+    """`logged(team, event)` for the sport's log, or None (the score is the log).
+    `teams`: whose log to read, where the read is per team (MLB)."""
     if rules.log == "ncaaf":
         seen: dict[str, set] = {}
         ids: set[tuple[str, str]] = set()
@@ -486,6 +513,29 @@ def _log_check(conn, rules: Rules, lo: str, hi: str):
             # with this fighter missing is a bout that did not happen.
             return any(abs((d - x).days) <= _SAME_EVENT_DAYS for d in ev.days for x in cards)
         return logged
+    if rules.log == "mlb":
+        # The morning run's footprint: a team-stats row dated AFTER the game.
+        # The mlb_stats step writes one per team every morning, in the same
+        # run as (and before the scoring step, like) the bullpen rows the game
+        # models read (bullpen_ip_last1/3, where no row reads as an off day).
+        # Not the bullpen rows themselves: a team whose starter went the
+        # distance has none. Since 07-10, 41 of 1,996 team-games had no
+        # bullpen row, 1,996 of 1,996 had a later team-stats row, and the two
+        # never landed more than an hour apart. In the postseason the team
+        # stats stay at 162 games; the bullpen rows are what the run changes.
+        teams = sorted({t for t in teams if t})
+        if not teams:
+            return lambda team, ev: False
+        marks = ",".join("?" * len(teams))
+        latest = {t: _day(d) for t, d in conn.execute(
+            f"SELECT team, MAX(as_of_date) FROM mlb_team_stats "
+            f"WHERE team IN ({marks}) AND as_of_date >= ? GROUP BY team",
+            (*teams, lo)).fetchall()}
+
+        def logged(team: str, ev: Event) -> bool:
+            last, d = latest.get(team), ev.last_day
+            return last is not None and d is not None and last > d
+        return logged
     return None
 
 
@@ -511,7 +561,8 @@ class ScheduleBook:
             f"SELECT {_ROW_COLS} FROM games WHERE sport = ? "
             f"AND game_date >= ? AND game_date <= ?", (sport, lo, hi)).fetchall())
         rows = _with_prices(conn, rows, rules)
-        return cls(rules, rows, _log_check(conn, rules, lo, hi))
+        teams = {t for r in rows for t in (r.home, r.away)}
+        return cls(rules, rows, _log_check(conn, rules, lo, hi, teams))
 
     def views(self, game_id: str, game_date: str, home: str, away: str,
               commence_time, now: datetime) -> list[tuple[str, TeamView]]:

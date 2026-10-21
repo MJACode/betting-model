@@ -147,8 +147,8 @@ Every one of these is a way a number can be wrong while looking right.
 - **A pre-game model never decides while a team still has an earlier game to
   play or log, and rest comes from the stored schedule.** `data/schedule_context`
   is the one reader (every `games` row, de-duplicated by the repo's rules).
-  `run_scorer` holds NCAAF/WNBA/UFC games and `scripts/nfl_wind_publisher` the
-  NFL cards, as NONE with the reason. A new pre-game writer goes through it;
+  `run_scorer` holds NCAAF/WNBA/UFC/MLB games and `scripts/nfl_wind_publisher`
+  the NFL cards, as NONE with the reason. A new pre-game writer goes through it;
   rest or a bye read from played games alone is the bug (2026-10-20: 9 of 77
   kept `ncaaf_over_under` BETs decided before a team's intermediate game).
 - **A stat that is always NULL deletes the training matrix.** One sparse column
