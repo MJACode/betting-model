@@ -156,3 +156,14 @@ sweep does not name them.
 `ACTIVE_MIGRATIONS`. The worker will not apply it. It stays unused
 until sign-in is turned on. That switch is Matt's. This change does
 not set it.
+
+## Mobile data layer
+
+`mobile/src/lib/byom.ts` types the backtest rows and the saved models,
+and calls `byom_backtest`, `byom_save_model`, `byom_list_models`, and
+`byom_delete_model`. `useByomBacktest` and `useByomModels` load those
+calls. A slower backtest response does not replace a newer one.
+`byomFilters` rejects a mixed-case or unknown key. No screen imports
+them. An empty filter is the whole season and must not be shown as a
+saved model record. There is no recommended stake. `package.json` is
+unchanged. Sign-in is unchanged.

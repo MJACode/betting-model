@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM mobile data: master 0aee0c5c merged; base is master; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; no migration file; unapplied |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM mobile data layer: types, fetchers, and hooks only; tsc message set matches origin/master d135a5ab; no screen, sign-in left off |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM saved models: master 992f079c merged; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; byom_saved_models_2026_10_16.sql is not registered; unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM saved models: auth.uid() tables, cap 25, snapshot of byom_backtest at save time, migration not registered, sign-in left off |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM refresh: master 06259b58 merged after cfe5dc1b; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; props_scanned_at unchanged; unapplied |

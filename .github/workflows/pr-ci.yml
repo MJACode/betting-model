@@ -189,6 +189,7 @@ jobs:
             tests/test_byom_backtest.py \
             tests/test_byom_refresh.py \
             tests/test_byom_saved_models.py \
+            tests/test_byom_mobile.py \
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
