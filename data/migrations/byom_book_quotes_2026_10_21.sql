@@ -17,8 +17,9 @@
 -- byom_game_book_quotes and byom_prop_book_quotes hold one row per book,
 -- market, and side. fact_id is the game canonical_key or the prop_key.
 -- market and side are on the row because one book posts a spread, a total,
--- and a moneyline, and each side has its own number. The index is
--- (fact_id, book).
+-- and a moneyline, and each side has its own number. The unique key is
+-- (fact_id, book, market, side). A key of (fact_id, book) collides a
+-- spread with a total, and an over with an under, on upsert.
 --
 -- byom_backtest(season, filters) is the DraftKings record: the same counts,
 -- and units, roi, and risked are NULL. byom_backtest(season, filters, books)
@@ -80,6 +81,10 @@ BEGIN
               AND p.prosrc LIKE '%byom_saved_models_v1%')
        )
      )
+     AND to_regclass('public.idx_byom_game_book_quotes_fact_book') IS NULL
+     AND to_regclass('public.idx_byom_prop_book_quotes_fact_book') IS NULL
+     AND to_regclass('public.idx_byom_game_book_quotes_fact_book_market_side') IS NOT NULL
+     AND to_regclass('public.idx_byom_prop_book_quotes_fact_book_market_side') IS NOT NULL
   THEN
     RAISE NOTICE 'byom book quotes already present - skipping';
     RETURN;
@@ -109,10 +114,14 @@ BEGIN
     PRIMARY KEY (fact_id, book, market, side)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_byom_game_book_quotes_fact_book
-    ON public.byom_game_book_quotes (fact_id, book);
-  CREATE INDEX IF NOT EXISTS idx_byom_prop_book_quotes_fact_book
-    ON public.byom_prop_book_quotes (fact_id, book);
+  -- A previous pass indexed (fact_id, book) only. That key collides
+  -- the spread and the total, and the two sides, from one book.
+  DROP INDEX IF EXISTS public.idx_byom_game_book_quotes_fact_book;
+  DROP INDEX IF EXISTS public.idx_byom_prop_book_quotes_fact_book;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_byom_game_book_quotes_fact_book_market_side
+    ON public.byom_game_book_quotes (fact_id, book, market, side);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_byom_prop_book_quotes_fact_book_market_side
+    ON public.byom_prop_book_quotes (fact_id, book, market, side);
 
   REVOKE ALL ON public.byom_game_book_quotes FROM PUBLIC, anon, authenticated;
   REVOKE ALL ON public.byom_prop_book_quotes FROM PUBLIC, anon, authenticated;

@@ -173,9 +173,10 @@ unchanged. Sign-in is unchanged.
 `byom_game_book_quotes` and `byom_prop_book_quotes` store one row per
 book, market, and side. `fact_id` is the game key or the prop key.
 Market and side are on the row because one book posts a spread, a
-total, and a moneyline. The index is `(fact_id, book)`. The quote is
-that book's last snapshot at or before kickoff, with the same per-book
-dedupe the prop facts use. The fact row stays the DraftKings line.
+total, and a moneyline. The unique key is `(fact_id, book, market, side)`.
+The quote is that book's last snapshot at or before kickoff, with the
+same per-book dedupe the prop facts use. The fact row stays the
+DraftKings line.
 
 `byom_backtest(season, filters)` is unchanged: the stored DraftKings
 counts, and `units`, `roi`, and `risked` are null. A third argument,

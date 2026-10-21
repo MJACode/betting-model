@@ -301,6 +301,8 @@ def _replace(conn, table: str, fact_ids: list[str], rows: list[dict]) -> int:
         )
     if not rows:
         return 0
+    # Unique key is (fact_id, book, market, side). (fact_id, book) alone
+    # would overwrite a spread with a total from the same book.
     conn.executemany(
         f"""
         INSERT INTO {table}

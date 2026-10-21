@@ -41,9 +41,16 @@ def test_the_migration_is_unregistered_and_leaves_the_old_files_alone():
     assert "anon 3s" in sql and "authenticated 8s" in sql
     assert "published_pick_unit_profit" in sql
     assert "published_pick_unit_risked" in sql
-    assert "idx_byom_game_book_quotes_fact_book" in sql
-    assert "idx_byom_prop_book_quotes_fact_book" in sql
-    assert "(fact_id, book)" in sql
+    assert "DROP INDEX IF EXISTS public.idx_byom_game_book_quotes_fact_book" in sql
+    assert "DROP INDEX IF EXISTS public.idx_byom_prop_book_quotes_fact_book" in sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_byom_game_book_quotes_fact_book_market_side" in sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_byom_prop_book_quotes_fact_book_market_side" in sql
+    assert "ON public.byom_game_book_quotes (fact_id, book, market, side)" in sql
+    assert "ON public.byom_prop_book_quotes (fact_id, book, market, side)" in sql
+    assert "CREATE INDEX IF NOT EXISTS idx_byom_game_book_quotes_fact_book\n" not in sql
+    writer = (ROOT / "byom" / "book_quotes.py").read_text(encoding="utf-8")
+    assert writer.count("ON CONFLICT (fact_id, book, market, side)") == 1
+    assert "ON CONFLICT (fact_id, book) DO" not in writer
     assert "CONCURRENTLY" not in code
     assert "insert into picks" not in sql.lower()
     assert code.index("RETURN;") < code.index("CREATE FUNCTION")
@@ -366,6 +373,45 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
         assert dk_props[:5] == (2, 1, 1, 0, 0)
         cur.execute("RESET ROLE")
 
+        cur.execute("""
+            INSERT INTO byom_game_book_quotes
+              (fact_id, book, market, side, line, price, captured_at)
+            VALUES
+              ('grain', 'draftkings', 'spreads', 'home', -3, -110, now()),
+              ('grain', 'draftkings', 'spreads', 'away', 3, -110, now()),
+              ('grain', 'draftkings', 'totals', 'over', 47, -105, now()),
+              ('grain', 'draftkings', 'totals', 'under', 47, -115, now())
+            ON CONFLICT (fact_id, book, market, side) DO UPDATE
+              SET line = EXCLUDED.line,
+                  price = EXCLUDED.price,
+                  captured_at = EXCLUDED.captured_at
+        """)
+        cur.execute("""
+            INSERT INTO byom_game_book_quotes
+              (fact_id, book, market, side, line, price, captured_at)
+            VALUES
+              ('grain', 'draftkings', 'spreads', 'home', -1, -120, now()),
+              ('grain', 'draftkings', 'spreads', 'away', 1, -110, now()),
+              ('grain', 'draftkings', 'totals', 'over', 44.5, -110, now()),
+              ('grain', 'draftkings', 'totals', 'under', 44.5, -110, now())
+            ON CONFLICT (fact_id, book, market, side) DO UPDATE
+              SET line = EXCLUDED.line,
+                  price = EXCLUDED.price,
+                  captured_at = EXCLUDED.captured_at
+        """)
+        cur.execute("""
+            SELECT market, side, line, price
+              FROM byom_game_book_quotes
+             WHERE fact_id = 'grain' AND book = 'draftkings'
+             ORDER BY market, side
+        """)
+        assert cur.fetchall() == [
+            ("spreads", "away", Decimal("1"), Decimal("-110")),
+            ("spreads", "home", Decimal("-1"), Decimal("-120")),
+            ("totals", "over", Decimal("44.5"), Decimal("-110")),
+            ("totals", "under", Decimal("44.5"), Decimal("-110")),
+        ]
+
         cur.execute("SELECT set_config('byom.uid', %s, false)", (USER_A,))
         cur.execute("""
             INSERT INTO byom_models (user_id, name, filters)
@@ -432,6 +478,14 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
 
         cur.execute("SELECT count(*) FROM byom_game_book_quotes")
         quote_count = cur.fetchone()[0]
+        cur.execute("""
+            CREATE INDEX idx_byom_game_book_quotes_fact_book
+              ON byom_game_book_quotes (fact_id, book)
+        """)
+        cur.execute("""
+            CREATE INDEX idx_byom_prop_book_quotes_fact_book
+              ON byom_prop_book_quotes (fact_id, book)
+        """)
         cur.execute(_sql(SQL_NAME))
         cur.execute(_sql("byom_backtest_rpc_2026_10_16.sql"))
         cur.execute(_sql("byom_saved_models_2026_10_16.sql"))
@@ -451,10 +505,29 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
         """)
         assert cur.fetchone()[0] is True
         cur.execute("""
-            SELECT indexdef FROM pg_indexes
-             WHERE indexname = 'idx_byom_game_book_quotes_fact_book'
+            SELECT c.relname
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'public'
+               AND c.relkind = 'i'
+               AND c.relname IN (
+                 'idx_byom_game_book_quotes_fact_book',
+                 'idx_byom_prop_book_quotes_fact_book',
+                 'idx_byom_game_book_quotes_fact_book_market_side',
+                 'idx_byom_prop_book_quotes_fact_book_market_side')
+             ORDER BY 1
         """)
-        assert "(fact_id, book)" in cur.fetchone()[0]
+        assert cur.fetchall() == [
+            ("idx_byom_game_book_quotes_fact_book_market_side",),
+            ("idx_byom_prop_book_quotes_fact_book_market_side",),
+        ]
+        cur.execute("""
+            SELECT indexdef FROM pg_indexes
+             WHERE indexname = 'idx_byom_game_book_quotes_fact_book_market_side'
+        """)
+        indexdef = cur.fetchone()[0]
+        assert indexdef.startswith("CREATE UNIQUE INDEX")
+        assert "(fact_id, book, market, side)" in indexdef
         cur.execute("SET ROLE anon")
         cur.execute("SELECT count(*) FROM byom_game_book_quotes")
         assert cur.fetchone()[0] == quote_count
