@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, X pick posts are one per call, at least 10 minutes apart, held from 1:00am to 8:00am ET, and dropped once the game has started; push_sent is still written only after a confirmed tweet |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, Eggz 60-minute ML is h2h_3way; slate headers and All 1U are context; stored needs_review messages are reparsed |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, profile URL seed is single-quoted so `?` is not rewritten to `%s`; X had refused the 101-character value with HTTP 403 code 120 |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, Eggz #eggz-picks is read with DISCORD_BOT_TOKEN, graded on capper_picks, and recapped only to DISCORD_WEBHOOK_EGGZ |
