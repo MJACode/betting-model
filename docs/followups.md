@@ -177,7 +177,8 @@ rows whose team plays in that game.
 
 mike, 2026-10-20: *"We should absolutely always know the goalie matchup
 before making a bet as well."* Built on branch `nhl-goalie-confirmed`, for
-all eight NHL models: one gate (`models/nhl_goalie_gate.py`) at the scorer,
+every NHL model but the shots-on-goal props (mike, same day: *"Ok on shots on
+goal"*; `config.NHL_GOALIE_GATE_EXEMPT`): one gate (`models/nhl_goalie_gate.py`) at the scorer,
 the totals card, both prop cards and every INSERT that can write an NHL pick;
 ESPN's and DailyFaceoff's designations stored as they change
 (`nhl_goalie_designations`); the game's goalie row rewritten when ESPN

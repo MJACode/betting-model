@@ -6,9 +6,31 @@
 
 > **2026-10-20 (mike): NO NHL BET OF ANY KIND UNTIL BOTH STARTING GOALIES ARE
 > CONFIRMED.** *"We should absolutely always know the goalie matchup before
-> making a bet as well."* All eight NHL models (`nhl_moneyline`,
-> `nhl_moneyline_regulation`, `nhl_over_under`, `nhl_puckline` and the four
-> prop models) and any added later. No exemptions.
+> making a bet as well."* Every NHL model (`nhl_moneyline`,
+> `nhl_moneyline_regulation`, `nhl_over_under`, `nhl_puckline`, and the
+> blocked-shots, saves and assists props) and any added later, **except the
+> shots-on-goal props** (below).
+>
+> **The one exemption: `nhl_prop_shots_on_goal`** (mike, same day: *"Ok on
+> shots on goal"*, answering a proposal that measured the cost of gating it).
+> The model never reads the goalie, and its record is its early price: bets
+> placed 6+ hours before puck drop were +11.66 units on 39 (average 8.75%
+> better than the closing price, over the 35 that carry a CLV), against
+> -1.12 on 33 placed later. Those units are 1u risked a bet
+> (`profit_flat / 100`), settled games through 2026-10-19; sized the
+> record's way (1u to win, risk capped at 3) the same bets are +9.27 and
+> -1.06. So it keeps deciding at its opening fetch, on the whole slate,
+> exactly as before the rule. `config.NHL_GOALIE_GATE_EXEMPT` names it, and
+> every check honours it per row, by `model_id`: the props card hands it the
+> whole slate (`slate_for`), the quote filter keeps its pre-confirmation
+> fetch, and the INSERT guards and the scorer's guard let its row through.
+> A model the constant does not name is gated, so a new NHL model waits by
+> default. `tests/test_nhl_goalie_gate.py` pins the set to this one model.
+> **What it means for the one-prop-a-game pool:** a shots-on-goal bet may
+> take a game's single prop slot before the goalies are confirmed, and then
+> the saves and assists models cannot bet that game. The pool drops a gated
+> model's row on an unknown game before it chooses, so such a row cannot
+> win the slot and leave the game with nothing.
 >
 > **Why.** `nhl_goalie_stats` held one row per team per game, written once at
 > ~10:06Z from ESPN's probable starter (`data/ingestors/nhl_stats_ingestor.py`).
@@ -33,8 +55,9 @@
 > **Where it holds.** The scorer: both side models decide through
 > `_nhl_game_day_reason`, which reads the gate, and `score_game` applies it to
 > every NHL model by sport (puckline, and any later kind). The totals card and
-> both prop cards drop unknown games before anything is pooled, so an unknown
-> game cannot take the one prop bet a game allows. And the last line, at every
+> both prop cards drop unknown games before anything is pooled (for every
+> model but shots on goal), so an unknown game cannot take the one prop bet a
+> game allows through a gated model. And the last line, at every
 > INSERT that can write an NHL pick: `_insert_picks` turns an unknown BET into
 > NONE with the reason, and the two prop cards' `publish` drop it.
 > `tests/test_nhl_goalie_guards.py` fails on any file that inserts into
@@ -93,7 +116,9 @@
 > **Props decide on a fetch taken after the confirmation.** A game whose
 > matchup became known after its newest prop fetch owes one more opening
 > snapshot (`nhl_prop_odds_ingestor.due`), and the cards will not decide it
-> on the older fetch. That is one extra snapshot per such game per night:
+> on the older fetch (shots on goal excepted: it still decides at its opening
+> fetch, and the extra snapshot is one more fetch it may see later, as the
+> 70-minute one is). That is one extra snapshot per such game per night:
 > two event calls (featured + alternates). The older "5 credits a game per
 > snapshot" below predates the alternates call; `api_call_log` measured the
 > pair at 10-11 credits on the quiet evening passes of 2026-10-19 (featured
