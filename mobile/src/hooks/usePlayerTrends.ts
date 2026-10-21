@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchPlayerGameLog } from '@/lib/queries';
 import {
   logStatValue,
@@ -115,13 +115,24 @@ export function usePlayerTrends({
   // because it cannot know which tabs a player fills until the rows land.
   const [loaded, setLoaded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  // Bumped by Retry on a failed load (usability audit M1: every error has one).
-  const [attempt, setAttempt] = useState(0);
-  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  const [nonce, setNonce] = useState(0);
+  // Loading flips true here, not only in the effect: pull-to-refresh
+  // batches the nonce with this so the spinner does not clear on the
+  // one frame before the effect runs (Reviewer Medium on #781). The same
+  // bump is what Retry uses on a failed load.
+  const reload = useCallback(() => {
+    setLoading(true);
+    setNonce((n) => n + 1);
+  }, []);
 
   const key = stat?.key ?? statKey ?? null;
   // Whether a stat is selected at all gates the fetch; WHICH stat does not.
   const hasStat = key != null;
+  // Identity without the refresh nonce: a pull must not flip `loaded` false
+  // or the screen swaps the filled chip row for a skeleton (UX review of
+  // the #781 follow-up). Player/sport change still does.
+  const identity = `${sport}|${playerId ?? ''}|${playerName ?? ''}|${playerType ?? ''}|${hasStat}|${beforeDate ?? ''}|${limit ?? ''}`;
+  const identityRef = useRef(identity);
 
   // The FETCH does not depend on the stat. `fetchPlayerGameLog` asks for a
   // sport's whole column list (LOG_COLUMNS), so every stat this screen can
@@ -132,14 +143,17 @@ export function usePlayerTrends({
   // after a load, so that window opened on its own). Deriving the values
   // below also makes a chip tap instant instead of a refetch.
   useEffect(() => {
+    const identityChanged = identityRef.current !== identity;
+    identityRef.current = identity;
     if (!beforeDate || !hasStat || !supportsPlayerDetail(sport) || (!playerId && !playerName)) {
       setGames([]);
       setLoaded(true);
+      setLoading(false);
       return;
     }
     let mounted = true;
     setLoading(true);
-    setLoaded(false);
+    if (identityChanged) setLoaded(false);
     setError(null);
 
     fetchPlayerGameLog(sport, { playerId, playerName }, beforeDate, limit)
@@ -160,7 +174,7 @@ export function usePlayerTrends({
     return () => {
       mounted = false;
     };
-  }, [playerId, playerName, beforeDate, hasStat, sport, playerType, limit, attempt]);
+  }, [playerId, playerName, beforeDate, hasStat, sport, playerType, limit, nonce]);
 
   // Newest-first, missing games dropped rather than counted as zero.
   const values = useMemo(() => {

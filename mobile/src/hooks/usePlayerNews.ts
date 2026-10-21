@@ -38,7 +38,12 @@ export function usePlayerNews({ sport, playerId, playerName, enabled = true, lim
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  // Loading flips true here so a pull-to-refresh spinner does not clear
+  // on the frame before the effect re-runs (Reviewer Medium on #781).
+  const reload = useCallback(() => {
+    setLoading(true);
+    setNonce((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     let mounted = true;

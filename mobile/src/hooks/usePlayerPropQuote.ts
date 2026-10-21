@@ -256,6 +256,12 @@ export function usePlayerPropQuote(opts: {
     hasGame: market != null && readIds.length > 0,
     loading: gamesLoading || loading,
     error,
-    reload: () => setNonce((n) => n + 1),
+    reload: () => {
+      // Loading flips true here so a pull-to-refresh spinner does not
+      // clear on the frame before the effects re-run (Reviewer Medium on #781).
+      setGamesLoading(true);
+      setLoading(true);
+      setNonce((n) => n + 1);
+    },
   };
 }

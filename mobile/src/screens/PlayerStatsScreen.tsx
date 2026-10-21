@@ -90,7 +90,6 @@ import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
 import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
-  bookLineFromThreshold,
   formatRecordLine,
   HIT_RATE_GOOD,
   HIT_RATE_WEAK,
@@ -272,8 +271,9 @@ export function PlayerStatsScreen() {
     selection,
   });
   // Has the reader stepped the line themselves? Until they do, the ruler
-  // follows the BOOK's posted line once it arrives — a hit rate at 5.5 when
-  // the book hangs 6.5 answers a question nobody is being asked.
+  // follows the MODEL'S PICK line when one exists, else the BOOK's posted
+  // line, else the median — a hit rate at 5.5 when the book hangs 6.5
+  // answers a question nobody is being asked.
   const [lineTouched, setLineTouched] = useState(false);
   // The line was handed over by the Stats board rather than stepped here —
   // held like a touched line (the book's line does not replace it) but NAMED
@@ -291,7 +291,7 @@ export function PlayerStatsScreen() {
   // not the chart's threshold: a parlay leg is a bet of record (§1c), and the
   // pick states its own line, so the card can never offer a bet at a number
   // nobody priced. No edge, no EV — the Stats surface stays out of the models.
-  const { data: todayPicks } = useTodayPicks();
+  const { data: todayPicks, loading: picksLoading, refresh: refreshPicks } = useTodayPicks();
   const slip = useParlaySlip();
   //
   // GATED ON THE LINE THE CHART IS SHOWING. The card sits directly under a
@@ -386,12 +386,28 @@ export function PlayerStatsScreen() {
   // because a Rush Yards book line of 62.5 rounded to a 65+ ruler while the
   // card beneath said 62.5 (UX review, 2026-09-20). The ± stepper still moves
   // in `step` increments from wherever the ruler sits.
-  const pickThreshold = useMemo(() => {
+  // The pick's own scored_line, kept raw: thresholdFromBookLine is for
+  // snapping the ruler, not for the label. bookLineFromThreshold(7) is 6.5,
+  // which mislabels an integer pick line as a half-point (Reviewer Medium
+  // on #781). The book label already prints tonight.line for the same reason.
+  // The SIDE rides with it: prop models write Unders as well as Overs, and
+  // "pick line 10.5" under an "11+ Reb" headline read an Under pick as an
+  // Over (UX review, 2026-10-21). The label says which, the way pick_label
+  // does (§00: quote a pick from its label).
+  const openPick = useMemo(() => {
     if (!pageId) return null;
     const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(pageId);
-    const sl = ep && ep.pick.result == null ? Number(ep.pick.scored_line) : NaN;
-    return Number.isFinite(sl) ? thresholdFromBookLine(sl) : null;
+    if (!ep || ep.pick.result != null) return null;
+    // Number(null) is 0, and 0 is finite. A pick with no scored_line is not
+    // "pick line 0".
+    const raw = ep.pick.scored_line;
+    if (raw == null) return null;
+    const sl = Number(raw);
+    return Number.isFinite(sl) ? { line: sl, side: ep.pick.pick_side } : null;
   }, [todayPicks, stat, pageId]);
+  const pickLine = openPick?.line ?? null;
+  const pickSideWord = openPick?.side === 'under' ? 'Under' : 'Over';
+  const pickThreshold = pickLine != null ? thresholdFromBookLine(pickLine) : null;
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
   const snapThreshold = pickThreshold ?? postedThreshold;
   useEffect(() => {
@@ -399,15 +415,16 @@ export function PlayerStatsScreen() {
     setLine((prev) => (prev === snapThreshold ? prev : snapThreshold));
   }, [snapThreshold, lineTouched]);
   // Named on the hit card, so nobody reads a 7+ hit rate without knowing the
-  // 7 came from a 6.5 posted line (UX review).
+  // 7 came from a 6.5 posted line (UX review). The number is the SOURCE
+  // line — scored_line or tonight.line — never the threshold inverse.
   const lineProvenance = lineTouched
     ? lineFromBoard
       ? pickScoredLine != null
         ? `pick ${mode === 'under' ? 'Under' : 'Over'} ${pickScoredLine}`
         : 'board line'
       : 'your line'
-    : pickThreshold != null && line === pickThreshold
-      ? `pick line ${bookLineFromThreshold(pickThreshold)}`
+    : pickThreshold != null && line === pickThreshold && pickLine != null
+      ? `pick ${pickSideWord} ${pickLine}`
       : postedThreshold != null && line === postedThreshold && detail.tonight
         ? `book line ${detail.tonight.line}`
         : null;
@@ -520,10 +537,14 @@ export function PlayerStatsScreen() {
   }, [activeChipKey]);
 
   // The pull spinner shows for a PULL only; each section has its own.
+  // Busy is every hook the pull reloads — detail alone left the chart,
+  // news and quote stale (Reviewer Medium on #781).
   const [pulled, setPulled] = useState(false);
+  const refreshBusy =
+    detail.loading || loading || news.loading || propQuote.loading || picksLoading;
   useEffect(() => {
-    if (!detail.loading) setPulled(false);
-  }, [detail.loading]);
+    if (!refreshBusy) setPulled(false);
+  }, [refreshBusy]);
 
   // H9 (lib/a11y reachFrame). The stat chips sit flush under the group tabs
   // and share an 8pt gap with the range chips (4 each), so under the tabs they
@@ -544,10 +565,14 @@ export function PlayerStatsScreen() {
         keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl
-            refreshing={pulled && detail.loading}
+            refreshing={pulled && refreshBusy}
             onRefresh={() => {
               setPulled(true);
+              reloadTrends();
+              news.reload();
+              propQuote.reload();
               detail.reload();
+              void refreshPicks();
             }}
           />
         }
@@ -1370,7 +1395,8 @@ function TonightLineCard({
           title: 'The posted number',
           body:
             'The line your sportsbooks have hung for this stat tonight, and the best over and under price ' +
-            'among them. The chart above follows this number until you move the ruler.\n\n' +
+            'among them. The chart above starts on our pick’s line when we have one for this stat, else on this ' +
+            'number, else the median — until you move the ruler.\n\n' +
             'SINCE OPEN is DraftKings’ opening number against its latest — a line that has climbed is ' +
             'money on the over. SHARP compares Pinnacle’s no-vig over with your book’s no-vig over at the ' +
             'same line; a positive gap means your book prices the over richer than Pinnacle does.',
