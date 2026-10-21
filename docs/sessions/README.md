@@ -20,7 +20,11 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, pre-game models wait for each team's earlier game to be played and logged (NCAAF, WNBA, UFC and MLB in the scorer; NFL opener and wind at the publisher); rest read at kickoff from the stored schedule (no retrain); NCAAF night-game stubs take CFBD's week and venue; NHL check moved onto the shared reader unchanged |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20 (follow-up 10-21), NFL pre-game models read the schedule from the games table, not the frozen games.csv (no playoffs, stale CHI @ GB kickoff, home stadium for games abroad); venues abroad placed by name; wind model skips a game with no venue and judges a game abroad by its venue's roof (both Updated-By: mike); schedule refreshed every 15 min and at boot; no production write |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, the six MLB bets written after first pitch voided (mike); void_picks.py --allow-graded keeps the grade in the note |
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, prune_odds failed the daily: one prop DELETE re-executed its window per row and hit statement_timeout; the DELETE now materializes the doomed ids and removes them by primary key |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, restatements stay in the 6:00am–noon window and wait on a live game; a missed daily carries over for 7 mornings and posts for that date |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, NBA fifth search: team first-quarter/first-half shares and an early-season start for the two NBA game models; 0 of 54 pass |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, recaps post from 6:00am or 7:30am through noon ET only, and wait while a game of that sport is in progress; a missed week or month rolls to the next morning |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, Eggz week of Oct 12-18 posted at 9:56pm ET (message 1562283386729406535); daily/week/month recaps wait for 6:00am or Monday 7:30am ET and for every slate-date game of that sport to be final |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, a final 60-minute line with no period row grades from went_to_ot and home_win_reg; nhl-results writes nhl_api_score rows the one-off on 2026-10-02 stopped at 2026-09-30 |

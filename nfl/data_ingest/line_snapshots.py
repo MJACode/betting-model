@@ -111,18 +111,20 @@ def dk_line_rows(records: list[dict], sched_records: list[dict],
     return rows
 
 
-def snapshot_schedule(hi_days: float = SNAPSHOT_HI_DAYS) -> list[dict]:
-    """Every game kicking off within hi_days, as plain dicts (nflverse ids)."""
-    import pandas as pd
-    from zoneinfo import ZoneInfo
+def snapshot_schedule(hi_days: float = SNAPSHOT_HI_DAYS, sched=None) -> list[dict]:
+    """Every game kicking off within hi_days, as plain dicts (nflverse ids).
 
-    g = pd.read_csv("data/games.csv")
-    dt = pd.to_datetime(g.gameday + " " + g.gametime, errors="coerce")
-    kick = (dt.dt.tz_localize(ZoneInfo("America/New_York"), ambiguous=True,
-                              nonexistent="shift_forward").dt.tz_convert("UTC"))
-    g = g.assign(kick_utc=kick)
-    now = pd.Timestamp.now(tz="UTC")
-    g = g[(g.kick_utc > now) & (g.kick_utc <= now + pd.Timedelta(days=hi_days))]
+    `sched` is a schedule frame the caller already holds (the opener card's
+    watch window); without one the games table is read
+    (data_ingest/schedule.py). Never data/games.csv, which was frozen on
+    2026-08-15.
+    """
+    import pandas as pd
+
+    if sched is None:
+        from data_ingest.schedule import load_schedule
+        sched = load_schedule(0.0, hi_days)
+    g = sched[pd.to_numeric(sched.lead_days, errors="coerce") <= hi_days]
     return [
         {"game_id": r.game_id, "home_team": r.home_team,
          "away_team": r.away_team, "kick_utc": str(r.kick_utc)}
@@ -146,12 +148,12 @@ def append_snapshot_csv(rows: list[dict], cards_dir: Path) -> Path:
 
 def dump_dk_lines(frame, market: str,
                   cards_dir: Path = Path("data/cards"),
-                  hi_days: float = SNAPSHOT_HI_DAYS) -> int:
+                  hi_days: float = SNAPSHOT_HI_DAYS, sched=None) -> int:
     """
     Called by the card scripts right after snapshot_to_frame. Returns the
     number of games snapshotted (0 when DK priced nothing in window).
     """
-    sched = snapshot_schedule(hi_days)
+    sched = snapshot_schedule(hi_days, sched=sched)
     if not sched:
         return 0
     snapshot_at = datetime.now(timezone.utc).isoformat()

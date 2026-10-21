@@ -236,18 +236,43 @@ def as_of_ratings(tb: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
               "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"]]
 
 
+RATING_COLS = ["n", "pace", "lg_rtg", "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"]
+
+
+def team_targets(games: pd.DataFrame) -> pd.DataFrame:
+    """(season, game_date, team) for both teams of every game, once each."""
+    g = games[["season", "game_date", "home_team", "away_team"]]
+    tg = pd.concat([g[["season", "game_date", "home_team"]].rename(columns={"home_team": "team"}),
+                    g[["season", "game_date", "away_team"]].rename(columns={"away_team": "team"})])
+    return tg.drop_duplicates()
+
+
+def pair_ratings(games: pd.DataFrame, r: pd.DataFrame) -> pd.DataFrame:
+    """Per game: the home team's ratings as h_*, the away team's as a_*, from a
+    (season, team, game_date) ratings frame shaped like as_of_ratings'."""
+    g = games[["game_id", "season", "game_date", "home_team", "away_team"]]
+    cols = RATING_COLS
+    h = r.rename(columns={"team": "home_team", **{c: f"h_{c}" for c in cols}})
+    a = r.rename(columns={"team": "away_team", **{c: f"a_{c}" for c in cols}}).drop(columns="a_lg_rtg")
+    return g.merge(h, on=["season", "game_date", "home_team"]).merge(a, on=["season", "game_date", "away_team"])
+
+
 def f4_projections(games: pd.DataFrame, tb: pd.DataFrame) -> pd.DataFrame:
     """Per game: raw and adjusted projected margin (no home court) and total,
     and the gaps. Games where either team has < MIN_GAMES are dropped."""
-    g = games[["game_id", "season", "game_date", "home_team", "away_team"]]
-    tg = pd.concat([g[["season", "game_date", "home_team"]].rename(columns={"home_team": "team"}),
-                    g[["season", "game_date", "away_team"]].rename(columns={"away_team": "team"})])
-    r = as_of_ratings(tb, tg.drop_duplicates())
-    cols = ["n", "pace", "lg_rtg", "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"]
-    h = r.rename(columns={"team": "home_team", **{c: f"h_{c}" for c in cols}})
-    a = r.rename(columns={"team": "away_team", **{c: f"a_{c}" for c in cols}}).drop(columns="a_lg_rtg")
-    x = g.merge(h, on=["season", "game_date", "home_team"]).merge(a, on=["season", "game_date", "away_team"])
+    r = as_of_ratings(tb, team_targets(games))
+    x = pair_ratings(games, r)
     x = x[(x["h_n"] >= MIN_GAMES) & (x["a_n"] >= MIN_GAMES)].copy()
+    return project_ratings(x)
+
+
+def project_ratings(x: pd.DataFrame) -> pd.DataFrame:
+    """Raw and adjusted projected margin and total, and the gaps, on a frame of
+    paired ratings (pair_ratings); a game with no gap is dropped. No games
+    filter: f4_projections applies the 10-game rule before calling this, and
+    the fifth search's early-season versions (scripts/nba_game5.py) call it on
+    blended ratings."""
+    x = x.copy()
     pace = 0.5 * (x["h_pace"] + x["a_pace"]) / 100.0
     for k in ("raw", "adj"):
         x[f"margin_{k}"] = pace * ((x[f"h_ortg_{k}"] - x[f"h_drtg_{k}"]) - (x[f"a_ortg_{k}"] - x[f"a_drtg_{k}"]))

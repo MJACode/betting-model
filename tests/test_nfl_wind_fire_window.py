@@ -240,10 +240,15 @@ def test_the_retractable_set_is_exactly_what_games_csv_says(wind):
     for r in rows:
         seen[r["stadium_id"]].add((r.get("roof") or "").strip())
     derived = {sid for sid, vals in seen.items() if {"open", "closed"} & vals}
-    from data_ingest.weather import RETRACTABLE_STADIUMS
-    assert derived == RETRACTABLE_STADIUMS, (
+    from data_ingest.weather import (RETRACTABLE_ABROAD, RETRACTABLE_IN_HISTORY,
+                                     RETRACTABLE_STADIUMS)
+    assert derived == RETRACTABLE_IN_HISTORY, (
         f"games.csv says {sorted(derived)}, the constant says "
-        f"{sorted(RETRACTABLE_STADIUMS)}")
+        f"{sorted(RETRACTABLE_IN_HISTORY)}")
+    # The only additions are the venues abroad that the history cannot show
+    # (one game each, never played before this season's).
+    assert RETRACTABLE_STADIUMS == derived | RETRACTABLE_ABROAD
+    assert not (RETRACTABLE_ABROAD & set(seen)), "an abroad id has history now"
 
 
 def test_every_blank_roof_row_is_a_retractable_venue(wind):
