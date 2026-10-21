@@ -567,6 +567,27 @@ def test_the_6am_run_runs_nothing_new(monkeypatch):
 
 def test_the_retry_counts_exactly_the_recaps_universe():
     """Built from _SETTLED_SQL, so a paused model's row can never wake it."""
-    sql = dn._missed_recap_state_sql()
-    assert dn._SETTLED_SQL.format(window="= %s") in sql
+    sql = dn._missed_recap_dates_sql(3)
+    assert dn._SETTLED_SQL.format(window="= day.game_date") in sql
+    assert "day.game_date" in sql
     assert config.paused_row_exclusion_sql("p") in sql
+
+
+def test_a_missed_day_posts_on_a_later_morning_for_that_date(monkeypatch):
+    """Oct 12 missed the morning of the 13th. The morning of the 14th
+    posts it, named for Oct 12. The evening of the 13th does not."""
+    w = World(monkeypatch)
+    w.daily("06:02:33")
+    for row in NHL_COUNTING:
+        _grade(w.db, row)
+    w.db.commit()
+    w.now = datetime(2026, 10, 13, 22, 0, tzinfo=ET)
+    assert dn.post_missed_recap() == 0
+    assert "discord_results:2026-10-12" not in w.ledger()
+    assert "x_results:2026-10-12" not in w.ledger()
+    w.now = datetime(2026, 10, 14, 8, 0, tzinfo=ET)
+    assert dn.post_missed_recap() == 2
+    assert "discord_results:2026-10-12" in w.ledger()
+    assert "x_results:2026-10-12" in w.ledger()
+    assert "Mon Oct 12" in w.discord[0]["title"]
+    assert "2026-10-14" not in w.discord[0]["title"]
