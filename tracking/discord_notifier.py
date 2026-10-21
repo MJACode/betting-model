@@ -1364,6 +1364,13 @@ def restate_published_recaps(through: str | None = None,
 # the 6am run and 07:17, so 7 costs nothing on a normal day and keeps any pass
 # from racing a 6am run that started late.
 RECAP_RETRY_FROM_HOUR_ET = 7
+# Daily posts from 6:00am ET. Weekly and monthly posts from 7:30am ET.
+# Both stop at noon. An evening pass does not catch up; the next morning does.
+RECAP_DAILY_HOUR_ET = 6
+RECAP_MORNING_END_HOUR_ET = 12
+# A started game with no final score is still in progress for this long.
+# Past it, a missing score is not a game that is being played.
+SPORT_LIVE_HOURS = 8
 
 
 def _results_webhook() -> str | None:
@@ -1394,11 +1401,11 @@ def post_missed_recap(now: datetime | None = None,
     the restatement scan in the same pass finds nothing late. A pick that
     settles after that is restated once, by the existing path.
 
-    Cost: before RECAP_RETRY_FROM_HOUR_ET, nothing. After it, one statement
-    (two lookups on the ledger's unique index and one game_date-indexed
-    EXISTS). When both surfaces are ledgered, or nothing counting has
-    settled, it returns there, silently -- a day with no counting bets must
-    not log on every pass.
+    Cost: before RECAP_RETRY_FROM_HOUR_ET, and from noon ET on, nothing.
+    Between them, one statement (two lookups on the ledger's unique index
+    and one game_date-indexed EXISTS). When both surfaces are ledgered, or
+    nothing counting has settled, it returns there, silently -- a day with
+    no counting bets must not log on every pass.
 
     A surface that is switched off here (no webhook, or X disabled or without
     credentials) does not count as missing, so it cannot keep the retry
@@ -1408,9 +1415,8 @@ def post_missed_recap(now: datetime | None = None,
     the tweet is restated once so the two surfaces end on the same numbers.
     Returns the number of posts made.
     """
-    now = (now or datetime.now(ET))
-    now = now.astimezone(ET) if now.tzinfo else now.replace(tzinfo=ET)
-    if now.hour < RECAP_RETRY_FROM_HOUR_ET:
+    now = _as_et(now)
+    if not in_daily_retry_window(now):
         return 0
     game_date = (now.date() - timedelta(days=1)).isoformat()
 
@@ -1438,12 +1444,13 @@ def post_missed_recap(now: datetime | None = None,
                 f"posting it now that a counting pick has settled")
     posted = discord_posted = 0
     try:
-        discord_posted = notify_discord_results(game_date, dry_run=dry_run)
+        discord_posted = notify_discord_results(
+            game_date, dry_run=dry_run, now=now)
         posted += discord_posted
     except Exception as exc:                              # noqa: BLE001
         logger.error(f"Discord recap retry {game_date} failed: {exc}")
     try:
-        posted += notify_x_results(game_date, dry_run=dry_run)
+        posted += notify_x_results(game_date, dry_run=dry_run, now=now)
     except Exception as exc:                              # noqa: BLE001
         logger.error(f"X recap retry {game_date} failed: {exc}")
 
@@ -2166,6 +2173,87 @@ def _execute_settled(conn, sql: str, params: tuple):
         return conn.execute(_sql_without_unit_functions(sql), params)
 
 
+def _as_et(now: datetime | None) -> datetime:
+    """America/New_York. A UTC instant is converted. A naive clock is labeled ET."""
+    now = now or datetime.now(ET)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=ET)
+    return now.astimezone(ET)
+
+
+def in_daily_recap_window(now: datetime | None = None) -> bool:
+    """6:00am inclusive through noon exclusive, America/New_York."""
+    now = _as_et(now)
+    return RECAP_DAILY_HOUR_ET <= now.hour < RECAP_MORNING_END_HOUR_ET
+
+
+def in_daily_retry_window(now: datetime | None = None) -> bool:
+    """7:00am inclusive through noon exclusive.
+
+    The 6:00am pipeline posts the day itself. The retry starts an hour
+    later so it does not race that run, and it stops at noon.
+    """
+    now = _as_et(now)
+    return RECAP_RETRY_FROM_HOUR_ET <= now.hour < RECAP_MORNING_END_HOUR_ET
+
+
+def in_period_recap_window(now: datetime | None = None) -> bool:
+    """7:30am inclusive through noon exclusive, America/New_York."""
+    now = _as_et(now)
+    if now.hour >= RECAP_MORNING_END_HOUR_ET:
+        return False
+    return (now.hour, now.minute) >= (PERIOD_RECAP_HOUR_ET, PERIOD_RECAP_MINUTE_ET)
+
+
+def _parse_commence(value) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=ET)
+    return parsed.astimezone(ET)
+
+
+def sport_in_progress(conn, sports: tuple[str, ...] | None = None,
+                      now: datetime | None = None) -> bool:
+    """A game of one of these sports has started and has no final score.
+
+    The start has to be inside SPORT_LIVE_HOURS. A postponed game from an
+    earlier day is not in progress. A connection with no execute is not live.
+    """
+    execute = getattr(conn, "execute", None)
+    if execute is None:
+        return False
+    sports = tuple(dict.fromkeys(s for s in (sports or ()) if s))
+    if not sports:
+        return False
+    now = _as_et(now)
+    opened = now - timedelta(hours=SPORT_LIVE_HOURS)
+    marks = ", ".join(["%s"] * len(sports))
+    sql = (
+        "SELECT g.commence_time FROM games g "
+        f"WHERE g.sport IN ({marks}) "
+        "AND g.game_date BETWEEN %s AND %s "
+        "AND (g.home_score IS NULL OR g.away_score IS NULL) "
+        "AND g.commence_time IS NOT NULL"
+    )
+    result = execute(
+        sql, (*sports, opened.date().isoformat(), now.date().isoformat()))
+    fetchall = getattr(result, "fetchall", None)
+    rows = fetchall() if fetchall else []
+    for row in rows or ():
+        started = _parse_commence(row[0] if row else None)
+        if started is not None and opened < started <= now:
+            return True
+    return False
+
+
 def window_still_live(conn, start: str, end: str, sports: tuple[str, ...] | None = None) -> bool:
     """A game on a slate date in the window has no final score.
 
@@ -2525,7 +2613,7 @@ def all_time_embed(conn, through: str) -> dict:
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
-                           restate=None) -> int:
+                           restate=None, now: datetime | None = None) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
     per-sport breakdown. Ledgered per date so re-running settle can't repost,
     and refuses any date that is not already over. Returns 1 if posted, else 0.
@@ -2585,6 +2673,10 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         if window_still_live(conn, game_date, game_date, sports):
             logger.info(f"Discord(results): {game_date} still has a game "
                         f"without a final score")
+            return 0
+        if sport_in_progress(conn, sports, now):
+            logger.info(f"Discord(results): {game_date} waits, a game of "
+                        f"that sport is in progress")
             return 0
 
         overall = _tally(rows)
@@ -2695,8 +2787,8 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
 # The daily recap above is yesterday, inside the 6:00am ET pipeline. These
 # two use that same settled query and the same results webhook. They open
 # Monday at 7:30am ET, after that daily post and after the 7:00am retry.
-# A missed Monday keeps trying until the next window opens. The ledger is
-# what makes the retry post once.
+# A missed morning posts on the next morning, 7:30am through noon ET, until
+# the next window opens. An evening pass does not post. The ledger posts once.
 
 PERIOD_RECAP_HOUR_ET = 7
 PERIOD_RECAP_MINUTE_ET = 30
@@ -2792,7 +2884,8 @@ def period_heading(span: str, start: date, end: date) -> str:
 
 
 def notify_discord_period(span: str, start: date, end: date,
-                          heading: str, dry_run: bool = False) -> int:
+                          heading: str, dry_run: bool = False,
+                          now: datetime | None = None) -> int:
     """One weekly or monthly recap, on the daily recap's webhook.
 
     Same settled picks as the daily recap (`_settled_rows_since` is that
@@ -2818,6 +2911,10 @@ def notify_discord_period(span: str, start: date, end: date,
         if window_still_live(conn, start.isoformat(), end.isoformat(), sports):
             logger.info(f"Discord({span}): {heading} still has a game "
                         f"without a final score")
+            return 0
+        if sport_in_progress(conn, sports, now):
+            logger.info(f"Discord({span}): {heading} waits, a game of "
+                        f"that sport is in progress")
             return 0
         overall = _tally(rows)
         if (overall["w"] + overall["l"] + overall["p"]) == 0:
@@ -2866,22 +2963,26 @@ def notify_discord_period(span: str, start: date, end: date,
 def post_period_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
     """Post each due week and month, Discord then X. A ledgered window is 0.
 
-    Called by the Monday 7:30am job and again from later settle passes, so
-    a failed post is retried and a successful one is not repeated.
+    Called by the Monday 7:30am job and again from later settle passes.
+    Only 7:30am through noon ET. A miss rolls to the next morning. A
+    successful post is not repeated.
     """
+    now = _as_et(now)
+    if not in_period_recap_window(now):
+        return 0
     posted = 0
     for window in recap_periods_due(now):
         try:
             posted += notify_discord_period(
                 window["span"], window["start"], window["end"],
-                window["heading"], dry_run=dry_run)
+                window["heading"], dry_run=dry_run, now=now)
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"Discord {window['span']} recap failed: {exc}")
         try:
             from tracking.x_publisher import notify_x_period
             posted += notify_x_period(
                 window["span"], window["start"], window["end"],
-                window["heading"], dry_run=dry_run)
+                window["heading"], dry_run=dry_run, now=now)
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"X {window['span']} recap failed: {exc}")
     return posted

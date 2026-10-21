@@ -41,6 +41,9 @@ from tracking.discord_notifier import (
     clv_line,
     period_heading,
     recap_periods_due,
+    in_daily_recap_window,
+    in_period_recap_window,
+    sport_in_progress,
 )
 from tracking.paper_tracker import (
     _closing_odds,
@@ -1215,7 +1218,7 @@ def eggz_embed(heading: str, rows: list[tuple], pending: int) -> dict | None:
 
 
 def _post_window(conn, span: str, start: str, end: str, heading: str,
-                 dry_run: bool = False) -> int:
+                 dry_run: bool = False, now: datetime | None = None) -> int:
     if not configured_to_post():
         return 0
     kind = f"discord_eggz_results_{span}"
@@ -1228,6 +1231,10 @@ def _post_window(conn, span: str, start: str, end: str, heading: str,
     if pending or _slate_unfinished(conn, start, end):
         return 0
     rows = _window_rows(conn, start, end)
+    sports = tuple({r[0] for r in rows if r[0]})
+    if sport_in_progress(conn, sports, now):
+        logger.info(f"Eggz {span} waits, a game of that sport is in progress")
+        return 0
     embed = eggz_embed(heading, rows, 0)
     if embed is None:
         return 0
@@ -1257,12 +1264,12 @@ def _as_et(now: datetime | None) -> datetime:
 
 
 def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
-    """Daily at or after 6:00am ET, plus the week and the month when due.
+    """Daily from 6:00am ET, week and month from 7:30am ET, all through noon.
 
     Skips when DISCORD_WEBHOOK_EGGZ is unset. Does not post to X or #results.
-    The day is yesterday in America/New_York, never the UTC date. A window
-    with a pending leg, or a game on one of its slate dates that is not
-    final, is left unledgered so a later pass can post the full set.
+    The day is yesterday in America/New_York. A pending leg, a slate date
+    that is not final, or a game of that sport in progress is left
+    unledgered. After noon the miss waits for the next morning.
     """
     if not configured_to_post():
         return 0
@@ -1279,13 +1286,15 @@ def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"Eggz grade before recap failed: {exc}")
         posted = 0
-        if (now.hour, now.minute) >= (6, 0):
+        if in_daily_recap_window(now):
             day = (now.date() - timedelta(days=1)).isoformat()
-            posted += _post_window(conn, "day", day, day, _day_heading(day), dry_run)
-        for window in recap_periods_due(now):
             posted += _post_window(
-                conn, window["span"], window["start"].isoformat(),
-                window["end"].isoformat(), window["heading"], dry_run)
+                conn, "day", day, day, _day_heading(day), dry_run, now)
+        if in_period_recap_window(now):
+            for window in recap_periods_due(now):
+                posted += _post_window(
+                    conn, window["span"], window["start"].isoformat(),
+                    window["end"].isoformat(), window["heading"], dry_run, now)
         return posted
     finally:
         conn.close()
