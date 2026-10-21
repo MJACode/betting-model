@@ -589,6 +589,7 @@ def parse_alternates(book_markets: list[dict], home_name: str, home: str, away: 
     hkey = _name_key(home_name)
     for m in book_markets:
         key, outs = m.get("key"), m.get("outcomes") or []
+        n0 = len(rows)
         if key == "alternate_spreads":
             home_at, away_at = {}, {}
             for o in outs:
@@ -625,6 +626,11 @@ def parse_alternates(book_markets: list[dict], home_name: str, home: str, away: 
             for (stored, pt), s in slots.items():
                 if s.get("over_price") is not None and s.get("under_price") is not None:
                     rows.append({"market": stored, "total_line": pt, **s})
+        if m.get("last_update"):
+            # the market's own update stamp, as the main-line archive keeps the book's
+            # (docs/nba_models_2026.md 10.3): a ladder older than the purchase is visible
+            for r in rows[n0:]:
+                r["snapshot_at"] = m["last_update"]
     return rows
 
 
@@ -721,10 +727,10 @@ def _buy_per_event(conn, meter: Meter, first_season: int, last_season: int, lead
                 for p in parse(book.get("markets", []), ev.get("home_team", ""),
                                g["home"], g["away"]):
                     row = dict.fromkeys(_ODDS_KEYS)
-                    row.update(p)
                     row.update({"game_id": g["game_id"], "sport": "NBA",
                                 "bookmaker": book.get("key"), "snapshot_type": "open",
                                 "snapshot_at": stamp, "source": source})
+                    row.update(p)                     # a parser's own snapshot_at wins
                     rows.append(row)
             if rows:
                 def _write(rows=rows):

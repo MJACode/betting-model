@@ -143,6 +143,14 @@ def test_alternate_ladders_store_each_rung_at_the_home_number():
     assert (tt["alternate_team_totals_away"]["total_line"], tt["alternate_team_totals_away"]["under_price"]) == (99.5, 230)
 
 
+def test_each_alternate_rung_carries_its_market_s_own_update_stamp():
+    book = [dict(ALT_BOOK[0], last_update="2025-01-15T22:51:00Z"), ALT_BOOK[1]]
+    rows = h.parse_alternates(book, "Detroit Pistons", "DET", "PHX")
+    assert {r["snapshot_at"] for r in rows if r["market"] == "alternate_spreads"} == {"2025-01-15T22:51:00Z"}
+    # a market with no stamp leaves the purchase's own stamp to the writer
+    assert all("snapshot_at" not in r for r in rows if r["market"] == "alternate_totals")
+
+
 def test_alternate_purchases_are_their_own_source_and_never_read_as_derivatives():
     assert h.ALT_SOURCE != h.DERIV_SOURCE
     assert not h.ALT_SOURCE.startswith(h.SOURCE_PREFIX)    # _deriv_done reads that prefix

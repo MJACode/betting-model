@@ -70,6 +70,8 @@ EDGES = (0.0,) + CUTS + (np.inf,)
 MIN_OFF_MAIN, MAX_LADDER_GAP = 1.5, 1.0
 PRICE_MIN, PRICE_MAX = -200.0, 400.0
 TT_MATCH_MIN = 10
+STALE_MAX_MIN = 15                 # 10.3 amendment: a ladder updated longer ago is not visible
+SPREAD_BUCKETS = (5.0, 10.0)       # 10.4.2 amendment: |line| <= 5, 5-10, > 10
 SEASONS = (2024, 2025, 2026)
 PLACEBO_RUNS = 200
 EXPECTED_CELLS = 30
@@ -106,14 +108,20 @@ def cache_alt(cache: Path = H.CACHE) -> pd.DataFrame:
 
 
 def frame_alt(o: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
-    """Stored alternate rows -> the harness's quote frame (H.QUOTE_COLS), one row per rung."""
+    """Stored alternate rows -> the harness's quote frame (H.QUOTE_COLS), one row per rung.
+
+    Each row's snapshot_at is its market's own update stamp (10.3 amendment). The decision
+    time T of a game is its newest stamp (the purchase); fetch_at = T for every row of the
+    game, and a ladder stamped more than STALE_MAX_MIN before T is dropped."""
     o = o[o["market"].isin(ALT_TO_MARKET)].copy()
     o["alt_market"] = o["market"]
     o["market"] = o["market"].map(ALT_TO_MARKET)
     o["snapshot_at"] = pd.to_datetime(o["snapshot_at"], utc=True)
     o = o.merge(games[["game_id", "season", "game_date", "tip"]], on="game_id")
     o = o[o["snapshot_at"] < o["tip"]].rename(columns={"bookmaker": "book"})
-    o["fetch_at"] = o["snapshot_at"]
+    o["fetch_at"] = o.groupby("game_id")["snapshot_at"].transform("max")
+    o["stale_min"] = (o["fetch_at"] - o["snapshot_at"]).dt.total_seconds() / 60.0
+    o = o[o["stale_min"] <= STALE_MAX_MIN + 1e-9]
     k = H.kind(o["market"])
     o["line"] = np.where(k == "spread", o["spread_home"], o["total_line"]).astype(float)
     o["price_a"] = np.where(k == "total", o["over_price"], o["home_price"]).astype(float)
@@ -121,7 +129,7 @@ def frame_alt(o: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
     o = o[o["price_a"].notna() & o["price_b"].notna() & o["line"].notna()]
     s = H.imp(o["price_a"]) + H.imp(o["price_b"])
     o["coherent"] = (s >= H.COHERENT[0]) & (s <= H.COHERENT[1])
-    return o[H.QUOTE_COLS + ["alt_market"]].reset_index(drop=True)
+    return o[H.QUOTE_COLS + ["alt_market", "stale_min"]].reset_index(drop=True)
 
 
 # ── fair line, eligibility, offers ──────────────────────────────────────────
@@ -136,7 +144,7 @@ def pinnacle_mains(q: pd.DataFrame, pe_tt: pd.DataFrame | None) -> pd.DataFrame:
     if pe_tt is not None and len(pe_tt):
         t = pe_tt[(pe_tt["book"] == H.SHARP) & pe_tt["coherent"] & pe_tt["market"].isin(TT_MARKETS)]
         t = main_rungs(t)
-        at = q[q["market"].isin(TT_MARKETS)].groupby("game_id")["fetch_at"].first().rename("alt_at")
+        at = q.groupby("game_id")["fetch_at"].first().rename("alt_at")
         t = t.merge(at, left_on="game_id", right_index=True)
         t = t[(t["fetch_at"] - t["alt_at"]).abs() <= pd.Timedelta(minutes=TT_MATCH_MIN)]
         parts.append(t.drop(columns="alt_at"))
@@ -146,11 +154,97 @@ def pinnacle_mains(q: pd.DataFrame, pe_tt: pd.DataFrame | None) -> pd.DataFrame:
     return m.drop_duplicates(["game_id", "market"])[["game_id", "market", "pin_line", "pin_fa", "pin_at"]]
 
 
-def fair_centres(pins: pd.DataFrame, games: pd.DataFrame, sig: dict) -> pd.DataFrame:
+def spread_bucket(line) -> np.ndarray:
+    a = np.abs(np.asarray(line, float))
+    return np.where(a <= SPREAD_BUCKETS[0], 0, np.where(a <= SPREAD_BUCKETS[1], 1, 2))
+
+
+def spread_shapes(close: pd.DataFrame, games: pd.DataFrame, seasons=SEASONS,
+                  min_prior: int = 300) -> dict:
+    """10.4.2 amendment: {(season, bucket, home_is_favourite): ResidDist} of the HOME margin
+    around Pinnacle's closing spread, from games whose closing line had the same size
+    (SPREAD_BUCKETS) on the seasons before `season`. Residuals are signed toward the
+    favourite first, so a game with the home team favoured reads the favourite's shape and
+    one with the away team favoured reads it mirrored. A level line has no favourite and is
+    not here (the pooled shape prices it)."""
+    c = close[close["market"] == "spreads"].merge(
+        games[["game_id", "home_score", "away_score"]], on="game_id")
+    c = c[c["close_line"].abs() > 1e-9]
+    r_home = (c["home_score"] - c["away_score"]) + c["close_line"]
+    fav_home = c["close_line"] < 0
+    r_fav = np.where(fav_home, r_home, -r_home)
+    df = pd.DataFrame({"season": c["season"].astype(int), "b": spread_bucket(c["close_line"]), "r": r_fav})
+    out = {}
+    for s in seasons:
+        for b in range(len(SPREAD_BUCKETS) + 1):
+            prior = df[(df["season"] < s) & (df["b"] == b)]["r"].to_numpy(float)
+            if len(prior) < min_prior:
+                continue
+            out[(s, b, True)] = H.ResidDist(prior, f"{s} spreads bucket {b} home favoured")
+            out[(s, b, False)] = H.ResidDist(-prior, f"{s} spreads bucket {b} away favoured")
+    return out
+
+
+def tt_shapes(close: pd.DataFrame, games: pd.DataFrame, seasons=SEASONS,
+              min_prior: int = 300) -> dict:
+    """10.7 amendment: {(season, bucket, is_favourite): ResidDist} of a team's score around the
+    team total Pinnacle's full-game close implies (home (total - spread)/2, away
+    (total + spread)/2), split by the size of the game's closing spread and whether the team
+    was the favourite, on the seasons before `season`. A level spread has no favourite."""
+    c = close[close["market"].isin(["spreads", "totals"])]
+    w = c.pivot_table(index=["game_id", "season"], columns="market", values="close_line",
+                      aggfunc="last")
+    if w.empty or not {"spreads", "totals"} <= set(w.columns):
+        return {}
+    w = w.dropna().reset_index().merge(games[["game_id", "home_score", "away_score"]], on="game_id")
+    w = w[w["spreads"].abs() > 1e-9]
+    parts = []
+    for team, sign, fav in (("home", -1.0, w["spreads"] < 0), ("away", 1.0, w["spreads"] > 0)):
+        tt = (w["totals"] + sign * w["spreads"]) / 2
+        parts.append(pd.DataFrame({"season": w["season"].astype(int), "r": w[f"{team}_score"] - tt,
+                                   "b": spread_bucket(w["spreads"]), "fav": fav.to_numpy()}))
+    d = pd.concat(parts, ignore_index=True)
+    out = {}
+    for s_ in seasons:
+        for b in range(len(SPREAD_BUCKETS) + 1):
+            for fav in (True, False):
+                prior = d[(d["season"] < s_) & (d["b"] == b) & (d["fav"] == fav)]["r"].to_numpy(float)
+                if len(prior) >= min_prior:
+                    out[(s_, b, fav)] = H.ResidDist(prior, f"{s_} team total bucket {b} "
+                                                           f"{'favourite' if fav else 'underdog'}")
+    return out
+
+
+def game_sigma(season, market, line, sig: dict, shapes: dict | None, spread_line=None):
+    """The pricing shape for one (season, market, Pinnacle number). Spreads: by the size of
+    the line and which team is favoured (10.4.2 amendment). Team totals: by the size of the
+    game's spread (`spread_line`, Pinnacle's main number in the same purchase) and whether
+    the team is the favourite (10.7). Anything else, or a level line: sig[(season, market)]."""
+    shapes = shapes or {}
+    if market == "spreads" and abs(float(line)) > 1e-9:
+        d = shapes.get("spreads", {}).get((int(season), int(spread_bucket([line])[0]), float(line) < 0))
+        if d is not None:
+            return d
+    if market in TT_MARKETS and spread_line is not None and np.isfinite(spread_line) \
+            and abs(float(spread_line)) > 1e-9:
+        fav = (float(spread_line) < 0) if market == "team_totals_home" else (float(spread_line) > 0)
+        d = shapes.get("tt", {}).get((int(season), int(spread_bucket([spread_line])[0]), fav))
+        if d is not None:
+            return d
+    return sig.get((int(season), market))
+
+
+def fair_centres(pins: pd.DataFrame, games: pd.DataFrame, sig: dict,
+                 shapes: dict | None = None) -> pd.DataFrame:
     """mu per (game, market): the side-A quantity's centre at which Pinnacle's main number
-    carries its no-vig price, through sig[(season, market)] (a ResidDist)."""
+    carries its no-vig price, through the game's shape (game_sigma: spreads by line size,
+    10.4.2 amendment; else sig[(season, market)])."""
     f = pins.merge(games[["game_id", "season", "game_date"]], on="game_id")
-    f["sigma"] = pd.Series([sig.get((int(s), m)) for s, m in zip(f["season"], f["market"])],
+    sp = f[f["market"] == "spreads"].set_index("game_id")["pin_line"]
+    f["spread_line"] = f["game_id"].map(sp).astype(float)
+    f["sigma"] = pd.Series([game_sigma(s, m, ln, sig, shapes, sl)
+                            for s, m, ln, sl in zip(f["season"], f["market"], f["pin_line"],
+                                                    f["spread_line"])],
                            index=f.index, dtype=object)
     f = f[f["sigma"].notna()]
     f["mu"] = H.solve_any(H.threshold(f["market"], f["pin_line"]), f["pin_fa"].to_numpy(),
@@ -266,6 +360,28 @@ def blinds(main_priced: pd.DataFrame, population: set, games: pd.DataFrame, fair
     return out
 
 
+def clv_shaped(bets: pd.DataFrame, close: pd.DataFrame, sig: dict, shapes: dict | None) -> pd.Series:
+    """H.clv with each bet priced at Pinnacle's no-vig CLOSE through the shape its closing
+    number selects (game_sigma). Team totals have no later price and read NaN."""
+    if len(bets) == 0:
+        return pd.Series([], dtype=float)
+    x = bets.reset_index().merge(close.drop(columns="season"), on=["game_id", "market"], how="left")
+    x = x[(x["close_at"] > x["T"]) & x["close_line"].notna()]
+    if x.empty:
+        return pd.Series(np.nan, index=bets.index)
+    a_side = x["side"].isin(["home", "over"]).to_numpy()
+    sigma = np.array([game_sigma(s, m, ln, sig, shapes) for s, m, ln in
+                      zip(x["season"], x["market"], x["close_line"])], dtype=object)
+    ok = np.array([v is not None for v in sigma])
+    x, sigma, a_side = x[ok], sigma[ok], a_side[ok]
+    p_a = x["close_fa"].to_numpy(float)
+    mu = H.solve_any(H.threshold(x["market"], x["close_line"]), p_a, sigma)
+    w, push, lose = H.probs_any(mu, sigma, H.threshold(x["market"], x["line"]))
+    pw = np.where(a_side, w, lose)
+    ev = pw * (H.dec(x["price"]) - 1.0) - (1.0 - pw - push)
+    return pd.Series(ev, index=x["index"].to_numpy()).reindex(bets.index)
+
+
 def shuffle_fair(fair: pd.DataFrame, run: int) -> pd.DataFrame:
     """Placebo: mu (with its sigma) swapped between games on the same date in the same market."""
     rng = np.random.default_rng(run)
@@ -275,6 +391,7 @@ def shuffle_fair(fair: pd.DataFrame, run: int) -> pd.DataFrame:
         if len(idx) > 1:
             perm = rng.permutation(idx)
             f.loc[idx, "mu"] = f.loc[perm, "mu"].to_numpy()
+            f.loc[idx, "sigma"] = f.loc[perm, "sigma"].to_numpy()
     return f
 
 
@@ -288,7 +405,8 @@ def without_best_book(cand, cut, side, g, games):
 
 def family_cells(fam: str, off: pd.DataFrame, fair: pd.DataFrame, main_priced: pd.DataFrame,
                  games: pd.DataFrame, close, sig, runs: int, label: str | None = None,
-                 band: tuple = (PRICE_MIN, PRICE_MAX)) -> tuple[list[dict], pd.DataFrame]:
+                 band: tuple = (PRICE_MIN, PRICE_MAX), shapes: dict | None = None
+                 ) -> tuple[list[dict], pd.DataFrame]:
     markets = FAMILIES[fam]
     o = in_band(off[off["market"].isin(markets)], *band)
     cand = priced(o, fair)
@@ -324,7 +442,7 @@ def family_cells(fam: str, off: pd.DataFrame, fair: pd.DataFrame, main_priced: p
                     row[f"{lab}_n"], row[f"{lab}_roi"] = int(len(gg)), (H.roi(gg) if len(gg) else np.nan)
             if len(g):
                 if close is not None and sig is not None:
-                    ev = H.clv(g.assign(T=g["T"]), close, sig)
+                    ev = clv_shaped(g, close, sig, shapes)
                     row["clv_n"] = int(ev.notna().sum())
                     row["clv_median"] = float(np.nanmedian(ev)) if ev.notna().any() else np.nan
                     row["clv_mean"] = float(np.nanmean(ev)) if ev.notna().any() else np.nan
@@ -335,8 +453,9 @@ def family_cells(fam: str, off: pd.DataFrame, fair: pd.DataFrame, main_priced: p
 
 # ── the run ─────────────────────────────────────────────────────────────────
 
-def pricing(data: H.Data, games_p: pd.DataFrame, pe: pd.DataFrame | None) -> dict:
-    """{(season, market): ResidDist} for spreads, totals and both team totals."""
+def pricing(data: H.Data, games_p: pd.DataFrame, pe: pd.DataFrame | None) -> tuple[dict, dict]:
+    """({(season, market): ResidDist} for spreads, totals and both team totals,
+    spread_shapes by line size)."""
     close = H.pinnacle_close(data)
     sig = dict(H.close_dist(close, data.games))
     if pe is not None and len(pe):
@@ -348,32 +467,34 @@ def pricing(data: H.Data, games_p: pd.DataFrame, pe: pd.DataFrame | None) -> dic
         dclose = H.pinnacle_close(dd)
         tt, _src = derivative_pricing(dclose, games_p, close, SEASONS)
         sig.update({k: v for k, v in tt.items() if k[1] in TT_MARKETS})
-    return sig
+    return sig, {"spreads": spread_shapes(close, data.games), "tt": tt_shapes(close, data.games)}
 
 
 def run(alt: pd.DataFrame, data: H.Data, pe: pd.DataFrame | None, runs: int = PLACEBO_RUNS,
-        sig: dict | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+        sig: dict | None = None, shapes: dict | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     games = data.games
     q = frame_alt(alt, games)
     q = q[q["season"].isin(SEASONS)]
-    sig = pricing(data, games, pe) if sig is None else sig
+    if sig is None:
+        sig, shapes = pricing(data, games, pe)
     close = H.pinnacle_close(data) if len(data.quotes) else None
     pins = pinnacle_mains(q, pe)
-    fair = fair_centres(pins, games, sig)
+    fair = fair_centres(pins, games, sig, shapes)
     off = eligible_offers(q, fair)
     main_priced = priced(main_offers(q, fair), fair)
     rows, bets = [], []
     for fam in FAMILIES:
-        r, b = family_cells(fam, off, fair, main_priced, games, close, sig, runs)
+        r, b = family_cells(fam, off, fair, main_priced, games, close, sig, runs, shapes=shapes)
         rows += r
         bets.append(b)
         # controls are reported, never judged (section 10.5), so they carry no placebo runs
         r, _ = family_cells(fam, off, fair, main_priced, games, close, sig, 0,
-                            label=f"control_{fam}_long", band=(PRICE_MAX + 1e-9, np.inf))
+                            label=f"control_{fam}_long", band=(PRICE_MAX + 1e-9, np.inf),
+                            shapes=shapes)
         rows += r
         mo = main_offers(q, fair)
         r, _ = family_cells(fam, mo, fair, main_priced, games, close, sig, 0,
-                            label=f"control_{fam}_main")
+                            label=f"control_{fam}_main", shapes=shapes)
         rows += r
         print(f"  {fam}: graded", flush=True)
     cells = pd.DataFrame(rows)
@@ -446,6 +567,14 @@ def synthetic_checks() -> None:
     off = eligible_offers(q, fair)
     cand = priced(off, fair)
     assert (cand["off_main"] >= MIN_OFF_MAIN).all()
+    # a book's ladder stamped 30 minutes before the purchase is not visible (10.3 amendment)
+    old = alt.copy()
+    one = old["bookmaker"].eq("fanduel") & old["game_id"].eq(old["game_id"].iloc[0])
+    old.loc[one, "snapshot_at"] = (pd.to_datetime(old.loc[one, "snapshot_at"], utc=True)
+                                   - pd.Timedelta(minutes=30)).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    q_old = frame_alt(old, games)
+    assert not (q_old["book"].eq("fanduel") & q_old["game_id"].eq(old["game_id"].iloc[0])).any(), \
+        "a stale ladder stayed visible"
     for side in ("home", "away"):
         soft = H.grade(_pick(cand, 0.04, side, books=("fanduel",)), games)
         fairbook = H.grade(_pick(cand, 0.04, side, books=("draftkings",)), games)
@@ -453,6 +582,26 @@ def synthetic_checks() -> None:
               f"true-curve book {len(fairbook)} bets")
         assert len(soft) > 200 and H.roi(soft) > 0.02, "a planted mispricing was not found"
         assert len(fairbook) < 0.05 * len(soft), "a correctly priced ladder produced EV >= 0.04"
+    # line-size shapes: a favourite's long tail is read on the favourite's side either way round
+    rng = np.random.default_rng(11)
+    n = 1200
+    lines = np.r_[np.full(n, -12.5), np.full(n, 12.5)]                 # home favoured, away favoured
+    r_fav = rng.gamma(2.0, 6.0, 2 * n) - 12.0                          # long tail toward the favourite
+    margin = np.where(lines < 0, r_fav, -r_fav) - lines
+    cg = pd.DataFrame({"game_id": [f"T{i}" for i in range(2 * n)], "season": 2023,
+                       "home_score": 120 + np.maximum(margin, 0), "away_score": 120 - np.minimum(margin, 0)})
+    cg["home_score"] = cg["home_score"].round()
+    cg["away_score"] = (cg["home_score"] - np.round(margin)).astype(float)
+    cl = pd.DataFrame({"game_id": cg["game_id"], "season": 2023, "market": "spreads", "close_line": lines,
+                       "close_fa": 0.5, "close_at": pd.Timestamp("2023-01-01", tz="UTC")})
+    shp = {"spreads": spread_shapes(cl, cg, seasons=(2024,))}
+    home_fav, away_fav = game_sigma(2024, "spreads", -12.5, {}, shp), game_sigma(2024, "spreads", 12.5, {}, shp)
+    w_hf, _, l_hf = home_fav.probs(np.array([0.0]), np.array([12.0]))   # home margin above centre + 12
+    w_af, _, l_af = away_fav.probs(np.array([0.0]), np.array([-12.0]))  # home margin below centre - 12
+    assert w_hf[0] > 0.04 and abs(w_hf[0] - (1 - w_af[0] - (1 - w_af[0] - l_af[0]))) < 0.02, \
+        "the favourite's tail is not mirrored for an away favourite"
+    lo_hf = home_fav.probs(np.array([0.0]), np.array([-12.0]))[2][0]
+    assert w_hf[0] > 2 * lo_hf, "home favoured: the long tail should sit on the home side"
     print("synthetic checks pass")
 
 

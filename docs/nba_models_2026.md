@@ -2096,3 +2096,49 @@ below the cut to the top positive; beats the 95th percentile of 200 placebo shuf
 - **Expected passes by chance:** 30 × 0.025 ≈ 0.75 cells clear bar 2 alone, before correlation.
 - **A pass is built live** (§2: every model is real money), with its own EV floor at the passing
   cut and the price range it lays stated before it ships.
+
+### 10.7 Two changes after two checks, before any rung was graded (2026-10-21)
+
+**1. Each ladder keeps its own update time, and a stale ladder is not bet (10.3, 10.4).**
+- Checked on the probe purchase (2025-01-15, NYK @ PHI): every book's alternate markets were
+  updated 0 to 35 seconds before the purchase, Pinnacle's 4.5 minutes before. Not stale here.
+- But the first version of the writer stored one time per purchase, so a stale ladder could not
+  be seen. The writer now stores each market's own update time as the rung's `snapshot_at`,
+  as the main-line archive stores each book's.
+- The lab's decision time for a game is its newest stamp (the purchase). A ladder stamped more
+  than 15 minutes before it is not eligible and does not give Pinnacle's main number.
+- The 11 pilot games were bought again under the new writer after their first rows
+  were deleted (331 credits), so every stored rung carries its market's time.
+
+**2. Spreads are priced through the shape of games with a line of the same size (10.4.2).**
+- Checked on results around Pinnacle's close, 2020-21 → 2025-26, before any alternate rung was
+  graded. With the residual signed toward the favourite:
+
+  | Closing line | Games before 2023-24 | Mean | Favourite by 12+ more | Underdog by 12+ more |
+  |---|---|---|---|---|
+  | 5 or less | 1,749 | −0.5 | 15.6% | 18.4% |
+  | 5 to 10 | 1,355 | −0.4 | 15.1% | 19.1% |
+  | more than 10 | 436 | +0.9 | 19.0% | 15.4% |
+
+  2023-24 on reads the same way (more than 10: 18.7% against 13.9%, 820 games).
+- One shape for every game makes a far underdog rung look too likely in a big-line game and too
+  unlikely in a close one. Books price alternate ladders off curves that move with the line, so a
+  "mispricing" found with a single shape could be the lab's own error.
+- So spreads are priced through the shape of results for games whose closing line was the same
+  size (5 or less, 5 to 10, more than 10 points), from the seasons before the graded one, signed
+  toward the favourite and mirrored when the away team is favoured. A level line uses the pooled
+  shape. Closing-line value is priced the same way.
+- Full-game totals keep one shape. Split by the size of the total, the spread of results moves
+  by at most 1.7 points (SD 17.0 to 18.7) and the 12-point tails by at most 2.6 points; split by
+  the size of the spread, the 15-point tails stay within 18.5% to 22.3%.
+- **Team totals are split the same way as spreads, by the game's line and by favourite or
+  underdog** (each team's score around the team total Pinnacle's full-game close implies,
+  2020-21 → 2025-26). A team favoured by more than 10 ran 15 or more under its number in 6.5% of
+  1,256 games and 15 or more over in 10.2%; a team in a game of 5 or less, 8.9% both ways. One
+  shape would make a big favourite's far under look too likely, which is where the pilot night's
+  best team-total rungs sat. So a team total is priced through the shape of teams in the same
+  role in games with a line of the same size, from the seasons before the graded one, centred on
+  Pinnacle's own team-total price. The game's line is Pinnacle's main spread in the same
+  alternate purchase; with none, or a level line, the pooled shape of 10.4.2 is used.
+- Both checks are synthetic-tested: the lab drops a ladder 30 minutes older than its purchase,
+  and it fails when the favourite's shape is mirrored the wrong way.
