@@ -857,7 +857,7 @@
   "855": "Close deploy-killed evening run migration",
   "856": "MLB public fade top-k backtest",
   "857": "MLB bet record audit",
-  "858": "NBA schedule refresh fake connection",
+  "858": "NBA schedule refresh run and fallback tests",
   "859": "Citadel alias migration",
   "860": "Team stats live season verify test",
   "861": "NFL DraftKings line snapshots",

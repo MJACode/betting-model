@@ -1,17 +1,17 @@
 # Graph Report - wt_nba-schedule-complete  (2026-10-21)
 
 ## Corpus Check
-- 1484 files · ~2,676,110 words
+- 1484 files · ~2,676,124 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 15 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
 ## Summary
-- 31991 nodes · 76486 edges · 993 communities (770 shown, 223 thin omitted)
+- 31991 nodes · 76487 edges · 993 communities (770 shown, 223 thin omitted)
 - Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 1978 edges (avg confidence: 0.87)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b03a5b2e`
+- Built from commit: `d35afff3`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -328,7 +328,7 @@
 - tests/test_recap_retries_a_skipped_day.py
 - Mixed pipeline and prop tests
 - MLB bet record audit
-- NBA schedule refresh fake connection
+- NBA schedule refresh run and fallback tests
 - NCAAF in-play score distribution
 - NFL DraftKings line snapshots
 - Live game poller no-op connection
@@ -2117,9 +2117,9 @@ Nodes (22): _LiteConn, World, _add_pick(), _grade(), _lite(), _schema(), test_a_
 Cohesion: 0.07
 Nodes (12): TestIngestEventsDoesNotShadowItsMarkets, _write(), test_the_halftime_distribution_refuses_a_choosing_season_without_enough_earlier_games(), rows(), test_live_prop_pull_asks_for_the_sharp_book(), fake_event_props(), fetchall(), fetchall() (+4 more)
 
-### Community 858 - "NBA schedule refresh fake connection"
-Cohesion: 0.17
-Nodes (3): _Conn, test_one_failed_month_is_left_as_stored_and_the_rest_are_written(), get()
+### Community 858 - "NBA schedule refresh run and fallback tests"
+Cohesion: 0.11
+Nodes (6): _Conn, fetch(), test_a_listing_of_more_than_one_page_fails_its_month(), test_a_month_the_fallback_host_breaks_on_is_failed_whole(), test_one_failed_month_is_left_as_stored_and_the_rest_are_written(), get()
 
 ### Community 86 - "NCAAF in-play score distribution"
 Cohesion: 0.08
@@ -3042,8 +3042,8 @@ Cohesion: 0.09
 Nodes (23): american_to_prob(), build_market_features(), _is_full_game_snap(), _latest_two_sided(), _s(), test_a_game_with_no_decision_book_still_gets_features(), test_a_line_that_genuinely_did_not_move_is_zero_not_none(), test_a_one_way_sharp_quote_yields_nothing() (+15 more)
 
 ### Community 525 - "NBA schedule writes on Postgres"
-Cohesion: 0.15
-Nodes (14): _core(), fetch(), _confirmed(), conn(), _game(), _row(), _sched(), test_a_month_read_from_the_fallback_host_keeps_a_stored_status_and_tv() (+6 more)
+Cohesion: 0.17
+Nodes (12): _core(), _no_network(), _confirmed(), conn(), _game(), _row(), _sched(), test_a_month_read_from_the_fallback_host_keeps_a_stored_status_and_tv() (+4 more)
 
 ### Community 529 - "tests/test_clear_unauthorized_auto_pauses_migration.py"
 Cohesion: 0.19
@@ -3450,8 +3450,8 @@ Cohesion: 0.67
 Nodes (3): closeOf(), openTag(), toggleUse()
 
 ### Community 732 - "NBA schedule refresh tests"
-Cohesion: 0.10
-Nodes (28): plan(), _board(), _by_gid(), _espn(), _flex(), _no_network(), _stored(), test_a_dry_run_reads_and_writes_nothing() (+20 more)
+Cohesion: 0.11
+Nodes (27): plan(), _board(), _by_gid(), _espn(), _flex(), _stored(), test_a_dry_run_reads_and_writes_nothing(), test_a_failed_write_rolls_back_and_is_reported() (+19 more)
 
 ### Community 74 - "Prop CLV and SQL escaping tests"
 Cohesion: 0.09
