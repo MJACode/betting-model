@@ -14,25 +14,34 @@
 -- at the link rate. Status stays 'queued' until the worker drains it.
 --
 -- One DO block. data/view_migrations.py runs each file as one statement.
+--
+-- The early return is a separate statement from the create path. A
+-- 'rel'::regclass cast is planned even when AND would not run it, and it
+-- errors when the table is absent, so a fresh database never reaches
+-- CREATE. to_regclass returns NULL instead. The privilege checks run only
+-- after that read says the table is there, because has_table_privilege
+-- errors on a missing relation too. A locked table still returns here and
+-- does not insert the seed again.
 
 DO $mig$
 BEGIN
-  IF to_regclass('public.social_post_queue') IS NOT NULL
-     AND EXISTS (
-       SELECT 1 FROM pg_class
-        WHERE oid = 'public.social_post_queue'::regclass
-          AND relrowsecurity
-     )
-     AND NOT has_table_privilege('anon', 'public.social_post_queue', 'SELECT')
-     AND NOT has_table_privilege('anon', 'public.social_post_queue', 'INSERT')
-     AND NOT has_table_privilege('anon', 'public.social_post_queue', 'UPDATE')
-     AND NOT has_table_privilege('anon', 'public.social_post_queue', 'DELETE')
-     AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'SELECT')
-     AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'INSERT')
-     AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'UPDATE')
-     AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'DELETE')
-  THEN
-    RETURN;
+  IF to_regclass('public.social_post_queue') IS NOT NULL THEN
+    IF EXISTS (
+         SELECT 1 FROM pg_class
+          WHERE oid = to_regclass('public.social_post_queue')
+            AND relrowsecurity
+       )
+       AND NOT has_table_privilege('anon', 'public.social_post_queue', 'SELECT')
+       AND NOT has_table_privilege('anon', 'public.social_post_queue', 'INSERT')
+       AND NOT has_table_privilege('anon', 'public.social_post_queue', 'UPDATE')
+       AND NOT has_table_privilege('anon', 'public.social_post_queue', 'DELETE')
+       AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'SELECT')
+       AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'INSERT')
+       AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'UPDATE')
+       AND NOT has_table_privilege('authenticated', 'public.social_post_queue', 'DELETE')
+    THEN
+      RETURN;
+    END IF;
   END IF;
 
   CREATE TABLE IF NOT EXISTS public.social_post_queue (

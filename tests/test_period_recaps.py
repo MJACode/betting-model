@@ -127,6 +127,76 @@ def test_settle_retries_the_period_recaps():
     assert src.index("notify_x_results") < src.index("post_period_recaps")
 
 
+def test_an_evening_with_a_live_game_waits_for_the_next_morning(monkeypatch):
+    """9:56pm ET posts nothing. 10:00am the next day still waits while the
+    sport is in progress. The morning after that posts the week, once."""
+    posted = []
+    tweets = []
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    monkeypatch.setattr(dn, "_post", lambda url, body: posted.append(body) or "99")
+    monkeypatch.setattr(xp, "_enabled", lambda: True)
+    monkeypatch.setattr(xp, "_creds", lambda: ("a", "b", "c", "d"))
+    monkeypatch.setattr(
+        xp, "post_tweet",
+        lambda text, dry_run=False, **k: tweets.append(text) or "tw1")
+
+    class _Conn:
+        def __init__(self):
+            self.sent = set()
+            self.sql = ""
+            self.params = ()
+            self.live = "2026-10-20T19:00:00-04:00"
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = tuple(params or ())
+            if "INSERT" in sql:
+                self.sent.add((self.params[0], self.params[1]))
+            return self
+
+        def fetchone(self):
+            if "push_sent" in self.sql and self.params[:2] in self.sent:
+                return (1,)
+            return None
+
+        def fetchall(self):
+            if "commence_time" in self.sql:
+                return [(self.live,)]
+            return []
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    conn = _Conn()
+    monkeypatch.setattr(dn, "get_connection", lambda: conn)
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+
+    def _rows(_conn, start, end):
+        if start == "2026-10-12" and end == "2026-10-18":
+            return [("NHL", "nhl_moneyline", "WIN", 0.02, -110, None, False,
+                     1.0, 1.1)]
+        return []
+
+    monkeypatch.setattr(dn, "_settled_rows_since", _rows)
+    assert dn.post_period_recaps(_at("2026-10-20T21:56:00")) == 0
+    assert posted == [] and tweets == []
+
+    conn.live = "2026-10-21T09:00:00-04:00"
+    assert dn.post_period_recaps(_at("2026-10-21T10:00:00")) == 0
+    assert posted == [] and tweets == []
+
+    assert dn.post_period_recaps(_at("2026-10-22T08:00:00")) == 2
+    assert len(posted) == 1 and len(tweets) == 1
+    assert "Week of Oct 12-18" in posted[0]["embeds"][0]["title"]
+    assert tweets[0].startswith("\U0001F4CA Week of Oct 12-18 results:")
+    assert dn.post_period_recaps(_at("2026-10-22T08:00:00")) == 0
+    assert len(posted) == 1 and len(tweets) == 1
+
+
 def test_discord_period_uses_the_results_webhook_and_ledgers_once(monkeypatch):
     posted = []
     monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
@@ -162,8 +232,11 @@ def test_discord_period_uses_the_results_webhook_and_ledgers_once(monkeypatch):
     monkeypatch.setattr(dn, "get_connection", lambda: conn)
     start = __import__("datetime").date(2026, 10, 12)
     end = __import__("datetime").date(2026, 10, 18)
-    assert dn.notify_discord_period("week", start, end, "Week of Oct 12-18") == 1
-    assert dn.notify_discord_period("week", start, end, "Week of Oct 12-18") == 0
+    morning = _at("2026-10-19T08:00:00")
+    assert dn.notify_discord_period(
+        "week", start, end, "Week of Oct 12-18", now=morning) == 1
+    assert dn.notify_discord_period(
+        "week", start, end, "Week of Oct 12-18", now=morning) == 0
     assert len(posted) == 1
     assert posted[0][0] == "https://discord.test/results"
     title = posted[0][1]["embeds"][0]["title"]
@@ -212,8 +285,9 @@ def test_x_period_uses_the_same_window_and_does_not_repost(monkeypatch):
 
     monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
     start, end = date(2026, 9, 1), date(2026, 9, 30)
-    assert xp.notify_x_period("month", start, end, "September") == 1
-    assert xp.notify_x_period("month", start, end, "September") == 0
+    morning = datetime(2026, 10, 5, 8, 0, tzinfo=ET)
+    assert xp.notify_x_period("month", start, end, "September", now=morning) == 1
+    assert xp.notify_x_period("month", start, end, "September", now=morning) == 0
     assert len(posted) == 1
     assert posted[0].startswith("\U0001F4CA September results:")
     assert "1-1" in posted[0] and "ROI" in posted[0]

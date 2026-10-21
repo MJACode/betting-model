@@ -400,16 +400,21 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   2026-10-12's only counting bets (two NHL props) were graded at 07:24 on
   10-13, after the 6am run had found nothing to recap, and nothing asked again
   -- the recap never posted on either surface; 2026-10-05 had the same shape.
-  Now every refresh pass from 7am ET (`RECAP_RETRY_FROM_HOUR_ET`) runs
-  `post_missed_recap`: one statement asks whether each surface is ledgered for
-  YESTERDAY and whether anything in the recap's universe has settled; if a
-  surface is missing and something has, the ordinary notifiers post, Discord
-  then X. A surface that already posted is not re-posted (its own ledger), so
-  a 6am post that failed on one surface is retried on that surface alone. A
-  day with nothing counting posts nothing and logs nothing. The hour gate
-  keeps the overnight passes (00:17-05:17 ET) from posting yesterday before
-  its late games and the 6am-only ingests are in. It runs before the
-  restatement scan, so picks graded after it restate it once.
+  Now every refresh pass from 7am through noon ET (`RECAP_RETRY_FROM_HOUR_ET`)
+  runs `post_missed_recap`: one statement asks, for each of the last
+  `DAILY_CATCHUP_DAYS` (7, the same span a week stays due), whether each
+  surface is ledgered and whether anything in the recap's universe has
+  settled. Oldest first. If a surface is missing and something has settled,
+  the ordinary notifiers post that date, Discord then X. A day still unposted
+  at noon stays eligible on later mornings until those 7 days pass. A surface
+  that already posted is not re-posted (its own ledger), so a 6am post that
+  failed on one surface is retried on that surface alone. A day with nothing
+  counting posts nothing and logs nothing. The hour gate keeps the overnight
+  passes (00:17-05:17 ET) from posting yesterday before its late games and
+  the 6am-only ingests are in. It runs before the restatement scan, so picks
+  graded after it restate it once. A restatement uses the same 6:00am–noon
+  window, and a game of that sport in progress holds it. After noon a
+  restatement is not ledgered. The next morning asks again.
   Because a missing ledger row now means "post again" on every pass, the
   recap commits its ledger row the moment the post is delivered, BEFORE the
   results snapshot is written. They used to share one transaction, and a
@@ -436,8 +441,42 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   graded picks as the daily recap, and ledger `discord_results_week` /
   `discord_results_month` on the window's start. A posted window is not
   posted again. X posts the same windows through `notify_x_period`. An
-  empty window is not ledgered. A window still unposted when the next one
-  opens is not caught up. Period recaps do not write `results_snapshots`.
+  empty window is not ledgered. Posts run from 7:30am through noon ET.
+  A miss rolls to the next morning. An evening pass does not post. A game
+  of a sport that has a bet on that date, with no final score, holds the
+  Discord post and the X post. A game of that sport that is in progress
+  holds it the same way. A later morning pass retries it. An unfinished
+  game of another sport does not. A window still unposted when the next
+  one opens is not caught up. Period recaps do not write `results_snapshots`.
+- **Eggz's recap is `#eggz-picks` only.** `DISCORD_WEBHOOK_EGGZ` has no
+  fallback to `#results` or X. The daily window is yesterday, from the
+  6:00am ET settle. The week and the month use the Monday 7:30am ET clock
+  and the same windows as the main recap. Ledger keys are
+  `discord_eggz_results_day`, `discord_eggz_results_week`, and
+  `discord_eggz_results_month`. The channel is read every 15 minutes
+  (`eggz_ingest`) with the existing `DISCORD_BOT_TOKEN`,
+  `DISCORD_EGGZ_CHANNEL_ID`, and `DISCORD_EGGZ_AUTHOR_ID`. A post that
+  cannot be parsed or matched is `needs_review` on `capper_picks` and is
+  logged. It is not graded and it is not dropped. One ops alert goes out
+  per message id when `DISCORD_WEBHOOK_OPS` is set. A window that still
+  has a pending leg is not ledgered. A `needs_review` leg does not hold
+  the window. A game of that sport on a slate date in the window that has
+  no final score holds the post, and so does a game of that sport that is
+  in progress. A later morning pass retries it.   The day is yesterday in
+  America/New_York, from 6:00am through noon ET. A day that missed that
+  window stays eligible for `DAILY_CATCHUP_DAYS` later mornings, oldest
+  first, and the post names that date. The week and the month
+  post from 7:30am through noon ET, and a miss rolls to the next morning.
+  His rows stay out of `picks`.
+  `60 Minute ML`, `60 min ML`, `Reg ML`, and `3-way` are market `h2h_3way`.
+  A sport/date header and `All 1U` are context. Regulation grades from
+  `nhl_period_scores` when a row exists (three periods; a tie is a loss
+  for the side). A final with no period row uses `went_to_ot` and
+  `home_win_reg` when both are present: `went_to_ot = 1` is a loss for
+  both sides, and `went_to_ot = 0` follows `home_win_reg`. A missing field
+  is `needs_review` (`no_regulation_score`) and is tried again. A message
+  whose parse_status is still `needs_review` is reparsed on the next grade
+  pass.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.
