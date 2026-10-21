@@ -4459,6 +4459,21 @@ NCAAF_ODDS_API_MAP: dict = {
     # would never see. ncaaf_citadel_alias_2026_10_16.sql consolidates them.
     "Citadel Bulldogs": "The Citadel",
     "Citadel": "The Citadel",
+    # 2026-09-22: ncaaf_game_identity STALE on the 2026-09-26 slate. Three
+    # FCS visitors, each a CFBD row from 2026-08-29 and a data_source=live
+    # row minted 05:49–05:59Z. alt_names is NULL on all three schools.
+    # "William and Mary" is also bridged by the fold (the word "and" vs "&")
+    # and "LIU Sharks" by abbreviation+mascot; both stay here so a map-only
+    # read still lands on the CFBD school. "Houston Baptist" is a rename —
+    # no fold, no abbreviation (HCU) and no prefix bridges it to
+    # "Houston Christian". Kickoff + one resolved side is the backstop for
+    # the next nickname that is in none of these.
+    "William and Mary Tribe": "William & Mary",
+    "William and Mary": "William & Mary",
+    "LIU Sharks": "Long Island University",
+    "LIU": "Long Island University",
+    "Houston Baptist Huskies": "Houston Christian",
+    "Houston Baptist": "Houston Christian",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.

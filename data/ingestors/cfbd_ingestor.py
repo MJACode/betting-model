@@ -1885,9 +1885,11 @@ def _load_schools(conn=None) -> list[dict]:
     try:
         _SCHOOL_CACHE = [
             {"school": r[0], "mascot": r[1],
-             "alt": [a for a in (r[2] or "").split("|") if a]}
+             "alt": [a for a in (r[2] or "").split("|") if a],
+             "abbreviation": r[3]}
             for r in conn.execute(
-                "SELECT school, mascot, alt_names FROM ncaaf_teams").fetchall()
+                "SELECT school, mascot, alt_names, abbreviation FROM ncaaf_teams"
+            ).fetchall()
         ]
     except Exception as exc:                            # noqa: BLE001
         logger.warning(f"ncaaf_teams unavailable ({exc}) — name resolution is identity-only")
@@ -1905,10 +1907,18 @@ def reset_school_cache() -> None:
 
 
 def _fold(v: str) -> str:
-    """Case-, accent- and punctuation-insensitive comparison key."""
+    """Case-, accent- and punctuation-insensitive comparison key.
+
+    "&" is punctuation, so "William & Mary" folds to "william mary" while
+    "William and Mary" keeps the word. Those are the same school (Odds API
+    wrote "William and Mary Tribe" on 2026-09-22). Drop "and" only when it
+    is its own token — "Anderson" stays. Measured on all 683 ncaaf_teams
+    schools that day: the new fold still collides with nothing.
+    """
     import unicodedata
     v = unicodedata.normalize("NFD", (v or "").strip().lower())
-    return "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
+    folded = "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
+    return " ".join(p for p in folded.split() if p != "and")
 
 
 def _rest_is_mascot(rest: str, mascot: str | None) -> bool:
@@ -1935,9 +1945,10 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     The Odds API team name → CFBD canonical school name.
 
     The Odds API lists NCAAF teams with the mascot appended ("Ohio State
-    Buckeyes"), so this strips it by matching against ncaaf_teams. Resolution
-    order: explicit config override → exact school → "school mascot" → longest
-    school that prefixes the input → alt name → the input unchanged (warned).
+    Buckeyes"), so this strips it by matching against ncaaf_teams.     Resolution
+    order: explicit config override → exact school → "school mascot" →
+    abbreviation (or abbreviation + mascot) → longest school that prefixes
+    the input → alt name → the input unchanged (warned).
 
     Identity fallback is deliberate: an unresolved name yields a game_id that
     simply won't match a stats row, so the scorer skips that game — far safer
@@ -1968,6 +1979,28 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     for s in schools:
         if s["mascot"] and _fold(f"{s['school']} {s['mascot']}") == lowered:
             return s["school"]
+    # Abbreviation, exact. "LIU Sharks" is Long Island University's
+    # abbreviation plus mascot; school+mascot looks for "Long Island
+    # University Sharks" and misses. Bare abbreviations shorter than three
+    # letters ("OU", "ME", "SC") are not matched on their own — too many
+    # of those are also ordinary syllables — but abbreviation+mascot is
+    # exact either way. Measured 2026-09-22: every abbreviation is unique,
+    # and no abbreviation+mascot equals a different school's name.
+    abbrev_hits: list[str] = []
+    for s in schools:
+        raw_abbrev = s.get("abbreviation") or ""
+        abbrev = _fold(raw_abbrev)
+        if not abbrev:
+            continue
+        mascot = s.get("mascot") or ""
+        if mascot and _fold(f"{raw_abbrev} {mascot}") == lowered:
+            abbrev_hits.append(s["school"])
+            continue
+        alnum = sum(ch.isalnum() for ch in abbrev)
+        if alnum >= 3 and abbrev == lowered:
+            abbrev_hits.append(s["school"])
+    if len(abbrev_hits) == 1:
+        return abbrev_hits[0]
     # A school that PREFIXES the input is a match only when what follows it is
     # that school's mascot. ncaaf_teams was /teams/fbs only until 2026-09-07,
     # so an FCS opponent whose name extends an FBS school's found no exact
@@ -2003,6 +2036,126 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     logger.warning(f"Unresolved NCAAF school from Odds API: '{name}' — "
                    f"add it to config.NCAAF_ODDS_API_MAP")
     return name
+
+
+def school_in_registry(name: str, conn=None) -> bool:
+    """True when `name` is a canonical ncaaf_teams.school, not a passthrough."""
+    if not name:
+        return False
+    return any(s.get("school") == name for s in _load_schools(conn))
+
+
+def commence_instant(value) -> str | None:
+    """UTC instant to the second, so `.000Z` and `+00:00` compare equal."""
+    from datetime import datetime, timezone
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value).strip().replace("Z", "+00:00")
+        if " " in raw and "T" not in raw:
+            raw = raw.replace(" ", "T", 1)
+        if raw.endswith("+00"):
+            raw = raw + ":00"
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def fetch_ncaaf_schedule(conn, start: str, end: str) -> list[dict]:
+    """NCAAF games rows in [start, end], for odds to attach to instead of minting."""
+    rows = conn.execute("""
+        SELECT game_id, game_date, home_team, away_team, commence_time, data_source
+        FROM games
+        WHERE sport = 'NCAAF' AND game_date BETWEEN %s AND %s
+    """, (start, end)).fetchall()
+    out = []
+    for row in rows:
+        if len(row) < 6:
+            continue
+        game_id, game_date, home, away, commence, source = row[:6]
+        gd = game_date.isoformat() if hasattr(game_date, "isoformat") else str(game_date)[:10]
+        out.append({
+            "game_id": game_id,
+            "game_date": gd,
+            "home_team": home,
+            "away_team": away,
+            "commence_time": commence,
+            "data_source": source,
+        })
+    return out
+
+
+def adopt_ncaaf_game_id(schedule: list[dict] | None, *,
+                        candidate_id: str,
+                        home: str,
+                        away: str,
+                        home_known: bool,
+                        away_known: bool,
+                        commence_time,
+                        game_date: str) -> str | None:
+    """Existing games.game_id for this Odds API event, or None.
+
+    Slug equality is not the only key. When one side resolved to a registry
+    school and the other is an unmapped nickname, the row with that side,
+    this ET date and the same kickoff is the game. That is the 2026-09-22
+    split: William & Mary, LIU and Houston Christian already had CFBD rows,
+    and the odds ingest minted a second id from the feed's name.
+
+    Two rows at that kickoff: the single data_source='cfbd' row, if there
+    is one. Otherwise the candidate, if it is already one of those rows —
+    never a third id. Both sides canonical: only the row whose teams are
+    exactly those schools.
+    """
+    schedule = schedule or []
+    by_id = {g.get("game_id"): g for g in schedule}
+    key = commence_instant(commence_time)
+
+    def _hits(require_both: bool) -> list[dict]:
+        if key is None:
+            return []
+        found = []
+        for g in schedule:
+            gd = str(g.get("game_date") or "")[:10]
+            if gd != game_date:
+                continue
+            if commence_instant(g.get("commence_time")) != key:
+                continue
+            home_hit = home_known and g.get("home_team") == home
+            away_hit = away_known and g.get("away_team") == away
+            if require_both:
+                if home_hit and away_hit:
+                    found.append(g)
+            elif home_hit or away_hit:
+                found.append(g)
+        return found
+
+    def _prefer(hits: list[dict]) -> str | None:
+        if len(hits) == 1:
+            return hits[0]["game_id"]
+        cfbd = [g for g in hits if g.get("data_source") == "cfbd"]
+        if len(cfbd) == 1:
+            return cfbd[0]["game_id"]
+        if any(g.get("game_id") == candidate_id for g in hits):
+            return candidate_id
+        return None
+
+    if home_known and away_known:
+        chosen = _prefer(_hits(require_both=True))
+        if chosen:
+            return chosen
+        return candidate_id if candidate_id in by_id else None
+    if home_known or away_known:
+        chosen = _prefer(_hits(require_both=False))
+        if chosen:
+            return chosen
+        return candidate_id if candidate_id in by_id else None
+    return candidate_id if candidate_id in by_id else None
 
 
 def ingest_ncaaf_season(season: int, conn=None, with_lines: bool = True) -> dict:

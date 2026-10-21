@@ -164,6 +164,46 @@ def test_the_per_pass_ceiling_is_hard(resolver):
     assert len(kept) == 2 and dropped["over_cap"] == 1
 
 
+def test_an_unmapped_nickname_attaches_to_the_cfbd_game_at_the_same_kickoff(monkeypatch):
+    """Props skip an id that is not already in games. The 2026-09-26 live
+    duplicate was that id. With the map emptied, kickoff + the resolved home
+    is what points the prop at the CFBD row instead of dropping it."""
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "North Texas", "mascot": "Mean Green", "abbreviation": "UNT", "alt": []},
+        {"school": "Houston Christian", "mascot": "Huskies", "abbreviation": "HCU", "alt": []},
+    ])
+    cfbd_id = "NCAAF_2026-09-26_houston-christian_north-texas"
+    live_id = "NCAAF_2026-09-26_houston-baptist-huskies_north-texas"
+    schedule = [
+        (cfbd_id, "2026-09-26", "North Texas", "Houston Christian",
+         "2026-09-26T23:30:00.000Z", "cfbd"),
+        (live_id, "2026-09-26", "North Texas", "Houston Baptist Huskies",
+         "2026-09-26T23:30:00+00:00", "live"),
+    ]
+
+    class _SchedConn:
+        def execute(self, sql, params=None):
+            if "o.bookmaker" in sql:
+                rows = [(cfbd_id,)]
+            elif "data_source" in sql:
+                rows = schedule
+            else:
+                rows = [(cfbd_id,), (live_id,)]
+            return type("R", (), {"fetchall": lambda _self: rows})()
+
+    event = {
+        "id": "hcu",
+        "home_team": "North Texas Mean Green",
+        "away_team": "Houston Baptist Huskies",
+        "commence_time": "2026-09-26T23:30:00Z",
+    }
+    kept, dropped = m.scope_events(_SchedConn(), [event], "2026-09-26")
+    assert [gid for _ev, gid in kept] == [cfbd_id]
+    assert dropped["unresolved"] == 0
+
+
 def test_the_dk_line_gate_can_be_turned_off_for_a_backfill(resolver):
     conn = _Conn(known=[KANSAS, USC, CARTHAGE], lined=[])
     kept, dropped = scope(conn, require_dk_line=False)

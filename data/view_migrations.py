@@ -425,6 +425,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # until this lands the gate fails closed and no NHL model bets. One new
     # table, anon locked out. Does not rewrite the record views or picks.
     "add_nhl_goalie_designations_2026_10_20.sql",
+    # 2026-09-22 measurement, slotted 2026-10-21: three empty
+    # data_source=live NCAAF rows on the 09-26 slate (William & Mary,
+    # LIU Sharks, Houston Baptist) beside the CFBD ids. Deletes the live
+    # row only while it still carries the measured nickname, is unscored,
+    # and has no odds or picks left on it. A pick is never deleted.
+    # Does not rewrite the record views. Sits before the posted-stake
+    # pair so those two files stay adjacent and the view patch stays last.
+    "ncaaf_fcs_opponent_alias_2026_10_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

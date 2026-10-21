@@ -359,6 +359,33 @@ def _nfl_resolver(conn, around_date: str):
     return resolve
 
 
+def _ncaaf_schedule_for_events(conn, events: list[dict]) -> list[dict] | None:
+    """CFBD/live games rows covering this batch, or None if the load failed.
+
+    None and [] both leave _process_events minting ids (the old behaviour).
+    None means the load itself failed and was logged; [] means the window
+    has no rows yet, which is when minting is correct.
+    """
+    from data.ingestors.cfbd_ingestor import eastern_game_date, fetch_ncaaf_schedule
+    dates: list[str] = []
+    for ev in events or []:
+        ts = ev.get("commence_time")
+        if not ts:
+            continue
+        try:
+            dates.append(eastern_game_date(ts))
+        except Exception:                              # noqa: BLE001
+            continue
+    if not dates or conn is None:
+        return []
+    try:
+        return fetch_ncaaf_schedule(conn, min(dates), max(dates))
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning(f"NCAAF schedule load failed ({exc}); "
+                       f"odds will mint ids from the feed names")
+        return None
+
+
 # ── Game ID Builder ───────────────────────────────────────────────────────────
 
 def _build_game_id(sport: str, game_date: str, away: str, home: str) -> str:
@@ -824,7 +851,8 @@ def _get_historical_odds(sport_key: str, markets: list[str],
 def _process_events(events: list[dict], sport: str,
                     snapshot_type: str, snapshot_at: str,
                     include_3way: bool = False,
-                    resolve_game_id=None) -> tuple[list[dict], list[dict]]:
+                    resolve_game_id=None,
+                    ncaaf_schedule: list[dict] | None = None) -> tuple[list[dict], list[dict]]:
     """
     Parse a list of Odds API event dicts.
     Returns (game_rows, odds_rows) ready for DB insert.
@@ -835,6 +863,13 @@ def _process_events(events: list[dict], sport: str,
     resolve is dropped. The NFL is the only caller today and must stay one
     (NFL_GAMES_ARE_NOT_OURS); everything else still mints its own id, which is
     correct because for those sports this ingestor IS the schedule.
+
+    NCAAF is the exception that still mints AND prefers an existing row.
+    `ncaaf_schedule` is the games rows already stored for these dates. When
+    one side resolved to a CFBD school, the unique row with that side and
+    the same kickoff is used instead of a second id built from the feed's
+    nickname (William and Mary Tribe, LIU Sharks, Houston Baptist Huskies,
+    2026-09-22). No schedule, or no unique row: mint, as before.
     """
     game_rows = []
     odds_rows = []
@@ -901,6 +936,29 @@ def _process_events(events: list[dict], sport: str,
             # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS.
         else:
             game_id = _build_game_id(sport, game_date, away_team, home_team)
+            if sport == "NCAAF" and ncaaf_schedule:
+                from data.ingestors.cfbd_ingestor import (
+                    adopt_ncaaf_game_id, school_in_registry,
+                )
+                adopted = adopt_ncaaf_game_id(
+                    ncaaf_schedule,
+                    candidate_id=game_id,
+                    home=home_team,
+                    away=away_team,
+                    home_known=school_in_registry(home_team),
+                    away_known=school_in_registry(away_team),
+                    commence_time=commence_ts,
+                    game_date=game_date,
+                )
+                if adopted and adopted != game_id:
+                    match = next((g for g in ncaaf_schedule
+                                  if g.get("game_id") == adopted), None)
+                    logger.info(f"NCAAF: {away_name!r} @ {home_name!r} "
+                                f"attached to {adopted} (feed id {game_id})")
+                    game_id = adopted
+                    if match:
+                        home_team = match["home_team"]
+                        away_team = match["away_team"]
 
             # Game row (upsert-safe — will not overwrite scores)
             game_rows.append({
@@ -1094,8 +1152,17 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
                 resolve = None
             if resolve is None:
                 continue        # never fall back to minting NFL game ids
+        ncaaf_schedule = None
+        if sp == "NCAAF":
+            try:
+                conn = conn or get_connection()
+                ncaaf_schedule = _ncaaf_schedule_for_events(conn, events)
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(f"pregame fetch: NCAAF schedule unavailable ({exc})")
+                ncaaf_schedule = None
         game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at,
-                                               resolve_game_id=resolve)
+                                               resolve_game_id=resolve,
+                                               ncaaf_schedule=ncaaf_schedule)
         if sp == "UFC":
             try:
                 conn = conn or get_connection()
@@ -1188,8 +1255,11 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 resolve = _nfl_resolver(conn, target_date)
                 if resolve is None:
                     continue    # never fall back to minting NFL game ids
+            ncaaf_schedule = (_ncaaf_schedule_for_events(conn, events)
+                              if sp == "NCAAF" else None)
             game_rows, odds_rows = _process_events(
-                events, sp, snapshot_type, snapshot_at, resolve_game_id=resolve
+                events, sp, snapshot_type, snapshot_at, resolve_game_id=resolve,
+                ncaaf_schedule=ncaaf_schedule,
             )
 
             # The MMA feed mixes every promotion; drop events where no fighter
@@ -1312,14 +1382,15 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     events = _get_historical_odds(sport_key, markets, snapshot_date)
     time.sleep(REQUEST_SLEEP)
 
-    game_rows, odds_rows = _process_events(
-        events, sport, "open", snapshot_at
-    )
-    for r in odds_rows:
-        r["source"] = HISTORICAL_ODDS_SOURCE
-
     conn = get_connection()
     try:
+        ncaaf_schedule = (_ncaaf_schedule_for_events(conn, events)
+                          if sport == "NCAAF" else None)
+        game_rows, odds_rows = _process_events(
+            events, sport, "open", snapshot_at, ncaaf_schedule=ncaaf_schedule,
+        )
+        for r in odds_rows:
+            r["source"] = HISTORICAL_ODDS_SOURCE
         n_games = _upsert_games(conn, game_rows)
         n_odds  = _insert_odds(conn, odds_rows)
         conn.commit()
@@ -1543,8 +1614,11 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     spent += per_call
                     stats["calls"] += 1
                     time.sleep(REQUEST_SLEEP)
+                    ncaaf_schedule = (_ncaaf_schedule_for_events(conn, events)
+                                      if sport == "NCAAF" else None)
                     game_rows, odds_rows = _process_events(
-                        events, sport, "open", snapshot_at)
+                        events, sport, "open", snapshot_at,
+                        ncaaf_schedule=ncaaf_schedule)
                     for r in odds_rows:
                         r["source"] = HISTORICAL_ODDS_SOURCE
                     flipped = _mark_in_play(game_rows, odds_rows)
