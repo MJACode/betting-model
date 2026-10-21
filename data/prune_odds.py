@@ -434,12 +434,30 @@ def doomed_sql(table: str, identity: tuple[str, ...], row_date: str,
 
 def delete_sql(table: str, identity: tuple[str, ...], row_date: str,
                prunable: str) -> str:
-    """DELETE one proposition's doomed rows. The outer statement carries the
-    proposition's own bound too, so the plan for the rows it deletes is an
-    index read of that proposition however the planner sizes the subquery."""
-    match = " AND ".join(f"{c} = %({c})s" for c in identity)
-    return (f"DELETE FROM {table} WHERE {match} AND {_pk(table)} IN "
-            f"({doomed_sql(table, identity, row_date, prunable)})")
+    """DELETE one proposition's doomed rows, by primary key.
+
+    The window runs once (`MATERIALIZED`). The DELETE then looks those ids up
+    on the primary key and does not repeat the proposition predicate.
+
+    Measured 2026-10-21 on `player_prop_odds`, game `NFL_2026_06_BAL_CLE`,
+    market `player_pass_yds_alternate`, player Deshaun Watson (8,284 rows,
+    4,819 of them doomed). The previous statement was
+    `DELETE ... WHERE game_id = ... AND prop_id IN (SELECT <window>)`.
+    Postgres estimated that proposition at 1 row (plan cost 6.22) and ran a
+    nested-loop semi join that re-executed the window once per row. The
+    server cancelled it at `statement_timeout` (SQLSTATE 57014, query id
+    2366139515779304512, 10:43:35 UTC). The window by itself, materialized,
+    took 44 ms; primary-key lookups of the doomed ids took 438 ms. Putting
+    the proposition predicate back on the DELETE made the planner rescan the
+    proposition index once per doomed id (24,484,201 rows rejected by the
+    join filter, 8.5 s) — the same quadratic shape, so the DELETE must not
+    carry it. The read inside the CTE still names the proposition, and the
+    ids it returns are the only rows deleted.
+    """
+    pk = _pk(table)
+    return (f"WITH doomed AS MATERIALIZED ("
+            f"{doomed_sql(table, identity, row_date, prunable)}) "
+            f"DELETE FROM {table} WHERE {pk} IN (SELECT {pk} FROM doomed)")
 
 
 def count_sql(table: str, identity: tuple[str, ...], row_date: str,
@@ -831,11 +849,13 @@ def thin_repeats(conn: DBConnection, today: str, sports: tuple[str, ...] = PATH_
         f"AND game_date >= %s AND game_date < %s ORDER BY 1 DESC",
         (*sports, start, today)).fetchall()]
     count = f"SELECT COUNT(*) FROM ({THIN_REPEATS_SQL}) s"
-    # The outer statement names the game and market too, so the rows it
-    # deletes are found through the index however the planner sizes the
-    # subquery (it estimates 4 repeats for a date that has thousands).
-    delete = (f"DELETE FROM odds WHERE game_id = %s AND market = %s "
-              f"AND odds_id IN ({THIN_REPEATS_SQL})")
+    # Same plan failure as delete_sql: `WHERE game_id = ... AND odds_id IN
+    # (SELECT <window>)` re-executes the window once per row when the
+    # planner estimates one row. The window is materialized once; the DELETE
+    # looks the ids up by primary key. The game and market stay on the read
+    # inside the CTE, which is what bounds it.
+    delete = (f"WITH doomed AS MATERIALIZED ({THIN_REPEATS_SQL}) "
+              f"DELETE FROM odds WHERE odds_id IN (SELECT odds_id FROM doomed)")
 
     def failed(d: str, gid: str, market: str | None, exc: Exception) -> None:
         out["failed"].append({"day": d, "game_id": gid, "market": market,
@@ -867,7 +887,7 @@ def thin_repeats(conn: DBConnection, today: str, sports: tuple[str, ...] = PATH_
                             n = conn.execute(
                                 count, (gid, market, *_THIN_BOOK_PARAMS)).fetchone()[0]
                         else:
-                            n = conn.execute(delete, (gid, market, gid, market,
+                            n = conn.execute(delete, (gid, market,
                                                       *_THIN_BOOK_PARAMS)).rowcount
                             conn.commit()
                     except Exception as exc:        # noqa: BLE001
