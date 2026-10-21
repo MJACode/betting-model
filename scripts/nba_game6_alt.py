@@ -341,6 +341,8 @@ def pricing(data: H.Data, games_p: pd.DataFrame, pe: pd.DataFrame | None) -> dic
     sig = dict(H.close_dist(close, data.games))
     if pe is not None and len(pe):
         from scripts.nba_game4_p2 import derivative_pricing
+        if not set(H.PERIOD_COLS) <= set(games_p.columns):
+            games_p = H.with_periods(games_p)        # the full-game proxy reads the halves' columns
         q_main = main_rungs(pe[pe["market"].isin(TT_MARKETS)])
         dd = H.Data(games=games_p, quotes=q_main, fetches=pd.DataFrame(columns=["game_id", "fetch_at"]))
         dclose = H.pinnacle_close(dd)
