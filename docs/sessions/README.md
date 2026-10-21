@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, #931 review: the scorer-insert cutoff read rolls back its savepoint, so a timed-out lookup does not drop the batch; the cutoff keeps its offset; scripts/*, the NFL live writer and first_signal_repair still bypass `_insert_picks` |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM backtest RPC: master 633be2b5 merged; master's ACTIVE_MIGRATIONS order, RPC row after it, units file still last; the in-function 3s timeout does not apply (anon 3s, authenticated 8s); unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: master 9ac39a4d merged, then e9b081ed; two lines on the last pre-kickoff snapshot become one fact (later created_at, then prop_id); job stays off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, BYOM prop facts: a player who did not play is ungraded and out of the record; a row with no posted line is skipped; master merged, job stays off |
