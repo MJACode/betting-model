@@ -387,7 +387,7 @@ export function PlayerStatsScreen() {
     // Number(null) is 0, and 0 is finite. A pick with no scored_line is not
     // "pick line 0".
     const raw = ep.pick.scored_line;
-    if (raw == null || raw === '') return null;
+    if (raw == null) return null;
     const sl = Number(raw);
     return Number.isFinite(sl) ? sl : null;
   }, [todayPicks, stat, pageId]);
