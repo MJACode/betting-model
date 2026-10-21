@@ -388,6 +388,7 @@ def test_no_app_root_component_reaches_a_focus_aware_hook():
     roots = [
         src_dir / "components" / "BetslipBar.tsx",
         src_dir / "hooks" / "usePushDeepLink.ts",
+        src_dir / "components" / "AppErrorBoundary.tsx",
     ]
     for root in roots:
         assert root.exists(), f"{root} moved -- re-point this test"

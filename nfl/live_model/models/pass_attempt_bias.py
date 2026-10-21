@@ -184,7 +184,7 @@ def blind_over_prob() -> float | None:
     """
     The rate at which finals cleared the line, with no gate at all.
 
-    Carried so the paper trade could run this arm alongside the priced one, on
+    Carried so a forward run could run this arm alongside the priced one, on
     the reasoning that the honest question was whether anything beats betting
     every over. That question now HAS an answer, measured on 4,071 real quotes
     at real prices: betting every over returns -8.23%, 90% CI (-12.1, -4.4).

@@ -16,7 +16,12 @@ may legitimately show a few pending feeds).
 
 Checks are CADENCE-AWARE: each sport's checks only apply when that sport had
 games in the relevant window (offseason/off-day → SKIPPED), so NBA in July or
-UFC midweek never false-alarm.
+UFC midweek never false-alarm. The three MLB feeds dated by the game
+(bullpen, player game log, umpires) use the newest final on or before the
+cadence ceiling, so a dark day inside the window is not itself a miss. A
+final more than MLB_GAME_FEED_LOOKBACK_DAYS before that ceiling is the
+offseason: the check skips instead of holding the last World Series date
+until spring.
 
 Severity:
   CRIT — a load-bearing feed is stale → the step returns False → the daily
@@ -32,6 +37,7 @@ Every result row is upserted into `system_health_checks`
     ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END, check_name;
 """
 
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -51,9 +57,9 @@ from tracking.postable import still_pre_game
 # (blocked on historical odds for their target, or a pending data subscription).
 # Update when one of these trains for real.
 KNOWN_UNTRAINED = {
-    "nhl_over_under", "nhl_puckline",            # need historical NHL lines
+    "nhl_puckline",                              # need historical NHL lines
+    # nhl_over_under is a rule since 2026-10-08, out of MODELS: never expected.
     "wnba_over_under", "wnba_spread",            # need historical DK WNBA lines
-    "nba_over_under", "nba_spread",              # need historical DK NBA lines
     # golf_* RETIRED 2026-09-08 -- gone from config.MODELS, so never expected.
 }
 
@@ -71,10 +77,19 @@ OK, STALE, EMPTY, SKIPPED, ERROR = "OK", "STALE", "EMPTY", "SKIPPED", "ERROR"
 # Budgets are each sport's real dark window, measured from `games` rather than
 # recalled, plus slack. Past the budget the check reports STALE and says to
 # suspect the gate.
+#
+# Newest MLB final this many days before the health-check ceiling is still a
+# date the ingestor should have written (a dark week, the All-Star break).
+# Further back is the offseason.
+MLB_GAME_FEED_LOOKBACK_DAYS = 7
+
 SKIP_BUDGET_DAYS: dict = {
     # NBA: last game mid-June, next scheduled row 2026-10-20 -> ~130 days of
     # legitimate offseason. 165 leaves room for a late schedule load.
     "nba_game_log":  165,
+    # The same offseason, read through a 45-day look ahead: dark from mid-June
+    # until next season's games reach `games`, well inside 165.
+    "nba_schedule_refresh": 165,
     # WNBA: mid-September to early May is ~230 days off. The 2026 season also
     # carries a FIBA World Cup break (Sept 4-13, resuming Sept 17), which is
     # well inside this budget and correctly stays quiet.
@@ -85,6 +100,16 @@ SKIP_BUDGET_DAYS: dict = {
     # accrue. 45 days covers that plus an off-week; longer than that means the
     # nightly fits have stopped, which is worth saying.
     "model_calibration": 45,
+    # Bullpen, the player game log and umpires skip once the newest final is
+    # more than MLB_GAME_FEED_LOOKBACK_DAYS before the ceiling. Consecutive
+    # MLB finals in `games` gap by at most 179 days (2010-10-03 to
+    # 2011-03-31, queried 2026-10-17). The skip starts 8 days after that
+    # final, so the streak is 171 days. 190 leaves room for a later opener
+    # than any gap this table has held. The 14-day default would turn that
+    # streak into STALE and fail the daily step for the rest of the winter.
+    "mlb_bullpen_workload": 190,
+    "mlb_player_game_log": 190,
+    "umpires": 190,
 }
 
 # Everything else: a fortnight. Long enough for a normal off-week in any sport
@@ -288,6 +313,53 @@ def _games_count(conn, sport, start, end, finals_only=False):
     return _scalar(conn, sql, (sport, start, end)) or 0
 
 
+def _last_mlb_finals_on_or_before(conn, ceiling: str) -> str | None:
+    """Newest MLB game_date with a final score on or before `ceiling`.
+
+    Bullpen rows exist only for completed game dates (`run_bullpen_ingestor`
+    selects `home_score IS NOT NULL`). The health-check ceiling is a calendar
+    day — yesterday, or the day before while the 6am run is still pending.
+    A ceiling that lands on a dark day (playoff off-day) can never grow a
+    row, so the floor is the last finals date the ingestor could have
+    written, not the empty calendar day and not "did yesterday have a final".
+    """
+    latest = _scalar(
+        conn,
+        """SELECT MAX(game_date) FROM games
+           WHERE sport = 'MLB' AND home_score IS NOT NULL
+             AND game_date <= ?""",
+        (ceiling,),
+    )
+    if latest is None:
+        return None
+    return str(latest)[:10]
+
+
+def _mlb_game_dated_feed(conn, ceiling: str) -> tuple[str | None, str]:
+    """(min_date, skip_note) for bullpen, the player game log and umpires.
+
+    min_date is the newest MLB final on or before `ceiling` when that final
+    is at most MLB_GAME_FEED_LOOKBACK_DAYS before the ceiling. A dark day
+    inside the window is not a miss. A final older than the window is the
+    offseason: these checks would otherwise keep demanding the last World
+    Series date until spring, and a row that never landed stays STALE and
+    fails the daily step.
+    """
+    latest = _last_mlb_finals_on_or_before(conn, ceiling)
+    if latest is None:
+        return None, f"no MLB finals on or before {ceiling}"
+    gap = (
+        datetime.strptime(ceiling[:10], "%Y-%m-%d")
+        - datetime.strptime(latest[:10], "%Y-%m-%d")
+    ).days
+    if gap > MLB_GAME_FEED_LOOKBACK_DAYS:
+        return None, (
+            f"newest MLB final {latest} is {gap} days before {ceiling}"
+            f" (lookback {MLB_GAME_FEED_LOOKBACK_DAYS} days)"
+        )
+    return latest, ""
+
+
 # ── Why a check is in the state it is, in one word ──────────────────────────
 # `detail` is a sentence and gets clamped in every table that renders it, so the
 # ANSWER to "why is this one skipped?" was three lines down inside a truncated
@@ -370,13 +442,21 @@ class HealthReport:
         })
 
     def date_check(self, conn, check, severity, table, date_col, min_date,
-                   gate_ok=True, gate_note="no games in window", where=""):
+                   gate_ok=True, gate_note="no games in window", where="",
+                   cadence=None):
         """Generic 'MAX(date_col) >= min_date' freshness check.
 
         `where`, if given, is spliced in raw after the table name and must
         include its own WHERE keyword (e.g. `where="WHERE season = 2026"`).
+
+        `cadence`, when passed, is the refresh label. The derived label
+        treats `min_date` as a fixed window ("every N days"). That wording
+        is wrong when min_date is the last game day and N is only how dark
+        the calendar is — a one-day gap reads "every 3 days", and the
+        offseason would read "every 120 days".
         """
-        cadence = _cadence_from_dates(min_date, self.run_date)
+        if cadence is None:
+            cadence = _cadence_from_dates(min_date, self.run_date)
         if not gate_ok:
             self.add(check, SKIPPED, severity, gate_note,
                      reason=REASON_GATE_SHUT, cadence=cadence)
@@ -437,6 +517,282 @@ class HealthReport:
                      reason=f"{age_h - max_age_hours:.0f} hours late"
                             if age_h - max_age_hours >= 1 else "Just late",
                      cadence=cadence)
+
+
+# ── Are the games about to be played still priced? ───────────────────────────
+# Since 2026-10-09 the scorer makes no pre-game pick on a game whose newest
+# DraftKings price is older than config.PREGAME_PRICE_MAX_AGE_MIN (180 min,
+# models.scorer._latest_book_game_odds). So an odds outage now EMPTIES THE
+# BOARD after 3 hours, while odds_dk_lines only fires when the newest odds row
+# of any kind is 12 hours old -- and from 09-27 to 10-01, with the odds fetch
+# failing on every pass ("Invalid ODDS_API_KEY"), in-play rows and a trickle of
+# DraftKings rows kept that one green. This check asks game by game instead.
+#
+# Sized from production, sampled every 6 hours (games kicking off in the next
+# 36 hours that DraftKings had priced at all):
+#   * 2026-10-03 to 10-09, 28 samples: the only stale games were UFC fights
+#     the feed had moved to their swapped id (up to 10 of 85 on 09-26 18:00Z)
+#     and the odd cancelled fight (1 of 15 UFC on 10-03 and 10-04);
+#   * the odds-key outage, 09-27 to 09-30 at 18:00Z: 11 of 11, 6 of 6, 9 of 9
+#     and 11 of 11 stale.
+# So the alarm is a SHARE, never "any stale game": at least half of the priced
+# games, overall or within one sport (a single sport's fetch can fail on its
+# own), and at least 2 of them.
+#
+# LEFTOVER IDS ARE NOT GAMES (second review, 2026-10-09). The feed re-keys a
+# game when it flips home and away (UFC), shifts its date, or renames a team,
+# and the old id keeps its last price forever. Counted as stale games, two of
+# them meet the 2-game minimum by themselves: 09-12 22:30Z read "UFC 3 of 6"
+# (all three were copies of the Jean Silva fight, priced under a third id) and
+# 09-02 11:30Z read "NCAAF 6 of 9" (UCF and Kennesaw State priced under renamed
+# ids, Rutgers and Delaware each under two stale ids). So a stale id is skipped
+# when a CURRENT id in the same sport shares a team or fighter name with it
+# and starts within PREGAME_SAME_GAME_HOURS (that id may start outside the 36
+# hours: Kennesaw's did), and stale ids linked the same way count once.
+# Replayed on production rows as of each sample (2026-10-09): 09-02 10:30Z
+# and 11:30Z, 09-12 22:30Z and 23:30Z went from CRIT to OK (NCAAF 1 of 1 and
+# 2 of 5, UFC 0 of 3 and 0 of 1); the outage samples 09-27 18:00Z, 09-28
+# 18:00Z, 09-29 21:00Z and 09-30 18:00Z read exactly as before (11 of 11,
+# 6 of 6, 8 of 8, 11 of 11). Nothing is compared with a reference timestamp,
+# so a trickle of fresh rows elsewhere (09-29 and 09-30: NHL alternate totals
+# from another writer) cannot make an outage look like pulled games. The
+# leftovers seen started at most 3 h 49 min from their live id; one team's
+# games on consecutive days are about 24 hours apart (PHI, 09-30 and 10-01:
+# 23 h 30 min).
+#
+# TOO FEW GAMES TO JUDGE ONE BY ONE. With 0 priced games the share reads
+# SKIPPED, which never alerts, and with 1 it reads OK (the minimum is 2), so a
+# dead fetch on a quiet slate stayed silent and STALE -> OK posted an
+# all-clear. Below PREGAME_STALE_MIN_GAMES the check also asks whether ANY
+# DraftKings pre-game row was stored inside the bound; none is CRIT. NFL and
+# golf rows are not counted: their own pollers could keep it green while the
+# main fetch is dead. idx_odds_date, 1-2 ms on production (2026-10-09, a live
+# and a dead-feed interval).
+PREGAME_CURRENT_WINDOW_HOURS: int = 36
+PREGAME_STALE_SHARE: float = 0.5
+PREGAME_STALE_MIN_GAMES: int = 2
+PREGAME_SAME_GAME_HOURS: int = 6
+# The newest of the three main markets: DraftKings pulls a lopsided game's
+# moneyline and keeps its spread and total (a moneyline-only read called one
+# 10-09 NCAAF game stale that was not). One LIMIT 1 read per market rides
+# idx_odds_book_snap backwards: 394 ms for 124 games on 2026-10-09, where a
+# MAX(snapshot_at) over every DraftKings row took 11 s.
+_PREGAME_CURRENT_MARKETS = ("h2h", "spreads", "totals")
+
+
+def _swapped_ufc_id(game_id: str) -> str | None:
+    """UFC_{date}_{away}_{home} -> UFC_{date}_{home}_{away}; None otherwise.
+    The same swap as models.scorer._sibling_ufc_game_id, kept here so the
+    health check does not import the scorer."""
+    parts = game_id.split("_")
+    if len(parts) != 4 or parts[0] != "UFC":
+        return None
+    return f"{parts[0]}_{parts[1]}_{parts[3]}_{parts[2]}"
+
+
+# ── Is the NBA schedule being kept current? ──────────────────────────────────
+# Until 2026-10-20 nba_schedule was one load by hand (every 2026-27 row stamped
+# 2026-10-15 22:17Z) that nothing refreshed, so the NBA Cup week, the knockout
+# games, play-in, playoffs and moved tips could never reach it, and both NBA
+# prop models priced and read rest only from what it listed. The daily
+# `nba-schedule` step (data/ingestors/nba_schedule_refresh.py) now stamps
+# updated_at on every row ESPN confirms, so the newest updated_at IS the last
+# refresh that reached ESPN. 36 hours: one day's 6am run and slack for a late
+# one; a whole missed day reads STALE. Nothing retries a failed schedule step
+# the same day: tracking/daily_retry.py re-runs a daily that never ran or died
+# mid-run, or whose MLB freshness steps failed, so a step that failed on its
+# own waits for the next 6am run. The gate is NBA games in `games` from
+# three days back to 45 ahead -- the odds feed writes those rows too, so a dead
+# refresh does not shut its own gate.
+NBA_SCHEDULE_MAX_AGE_HOURS = 36
+NBA_SCHEDULE_GATE_DAYS = (3, 45)
+
+
+def check_nba_schedule_refresh(conn, r: "HealthReport", run_date: str) -> None:
+    """Add the nba_schedule_refresh row (WARN): has the schedule been confirmed
+    by its daily refresh while NBA games are near?"""
+    d = datetime.strptime(run_date, "%Y-%m-%d")
+    lo = (d - timedelta(days=NBA_SCHEDULE_GATE_DAYS[0])).strftime("%Y-%m-%d")
+    hi = (d + timedelta(days=NBA_SCHEDULE_GATE_DAYS[1])).strftime("%Y-%m-%d")
+    soon = _games_count(conn, "NBA", lo, hi)
+    r.ts_check(conn, "nba_schedule_refresh", "WARN", "nba_schedule", "updated_at",
+               NBA_SCHEDULE_MAX_AGE_HOURS, gate_ok=soon > 0,
+               gate_note=f"no NBA games scheduled {lo}..{hi}")
+
+
+def check_pregame_prices_current(conn, r: "HealthReport",
+                                 now: datetime | None = None) -> None:
+    """Add the odds_dk_pregame_current row (CRIT): do the games about to be
+    played still have a DraftKings price the scorer will decide on?"""
+    check = "odds_dk_pregame_current"
+    limit = config.PREGAME_PRICE_MAX_AGE_MIN
+    cadence = (f"every {limit // 60} hours" if limit % 60 == 0
+               else f"every {limit} minutes")
+    now = now or datetime.now(timezone.utc)
+    floor = now - timedelta(minutes=limit)
+    horizon = now + timedelta(hours=PREGAME_CURRENT_WINDOW_HOURS)
+    # game_date is the Eastern date; a day either side of now's UTC date
+    # covers every game kicking off inside the window.
+    lo = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    hi = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+    newest_cols = ",\n".join(
+        f"""(SELECT o.snapshot_at FROM odds o
+              WHERE o.game_id = g.game_id AND o.market = '{m}'
+                AND o.bookmaker = ? AND o.snapshot_type <> 'in_play'
+              ORDER BY o.snapshot_at DESC LIMIT 1)"""
+        for m in _PREGAME_CURRENT_MARKETS)
+    try:
+        # NFL and golf are left out: the scorer runs no NFL game model and
+        # golf is retired, so this bound never refuses a price for either.
+        rows = conn.execute(f"""
+            SELECT g.game_id, g.sport, g.commence_time, g.home_team, g.away_team,
+                   {newest_cols}
+            FROM games g
+            WHERE g.game_date >= ? AND g.game_date <= ?
+              AND g.sport NOT IN ('GOLF', 'NFL')
+              AND g.commence_time IS NOT NULL
+        """, (config.ODDS_API_BOOKMAKER,) * len(_PREGAME_CURRENT_MARKETS)
+             + (lo, hi)).fetchall()
+    except Exception as exc:                                  # noqa: BLE001
+        # Same reason as ts_check: an aborted transaction would take every
+        # later check on this connection down with it.
+        getattr(conn, "rollback", lambda: None)()
+        r.add(check, ERROR, "CRIT", f"query failed: {exc}",
+              reason=REASON_QUERY_ERROR, cadence=cadence)
+        return
+
+    # Every fetched row, in the window or not: a leftover's live id can start
+    # just outside it.
+    info: dict = {}                      # game_id -> (sport, start, names, newest)
+    window: list = []
+    for row in rows:
+        game_id, sport, commence, home, away = row[:5]
+        stamps = [t for t in (_parse_ts(c) for c in row[5:]) if t is not None]
+        start = _parse_ts(commence)
+        names = frozenset(str(n).strip().lower() for n in (home, away)
+                          if n is not None and str(n).strip())
+        info[game_id] = (sport, start, names, max(stamps) if stamps else None)
+        if start is not None and now < start <= horizon:
+            window.append(game_id)
+
+    same_game_gap = timedelta(hours=PREGAME_SAME_GAME_HOURS)
+
+    def _same_game(a: str, b: str) -> bool:
+        sa, ta, na, _ = info[a]
+        sb, tb, nb, _ = info[b]
+        return (sa == sb and ta is not None and tb is not None
+                and abs(ta - tb) <= same_game_gap and bool(na & nb))
+
+    current_ids = {g for g, (_, _, _, ts) in info.items()
+                   if ts is not None and ts >= floor}
+
+    def _leftover(game_id: str) -> bool:
+        """A current id for the same game exists: the swapped UFC id, or one
+        sharing a name in the same sport within PREGAME_SAME_GAME_HOURS."""
+        twin = _swapped_ufc_id(game_id)
+        if twin in info and twin in current_ids:
+            return True
+        return any(c != game_id and _same_game(game_id, c) for c in current_ids)
+
+    priced: dict = {}
+    stale: dict = {}
+    stale_ids: list = []
+    leftovers = 0
+    for game_id in window:
+        sport, _, _, ts = info[game_id]
+        if ts is None:
+            continue                     # DraftKings never priced it
+        if ts >= floor:
+            priced[sport] = priced.get(sport, 0) + 1
+        elif _leftover(game_id):
+            leftovers += 1
+        else:
+            stale_ids.append(game_id)
+    # Stale ids of one game count once: link the pairs, count the groups.
+    group = {g: g for g in stale_ids}
+
+    def _root(g: str) -> str:
+        while group[g] != g:
+            group[g] = group[group[g]]
+            g = group[g]
+        return g
+
+    for i, a in enumerate(stale_ids):
+        for b in stale_ids[i + 1:]:
+            if _same_game(a, b):
+                group[_root(b)] = _root(a)
+    groups: dict = {}
+    for g in stale_ids:
+        groups.setdefault(_root(g), []).append(g)
+    for members in groups.values():
+        sport = info[members[0]][0]
+        priced[sport] = priced.get(sport, 0) + 1
+        stale.setdefault(sport, []).append(max(info[g][3] for g in members))
+    merged = len(stale_ids) - len(groups)
+
+    hours = PREGAME_CURRENT_WINDOW_HOURS
+    n_priced = sum(priced.values())
+    n_stale = sum(len(v) for v in stale.values())
+    if n_priced < PREGAME_STALE_MIN_GAMES:
+        # Too few games for the share to mean anything: is the feed alive?
+        try:
+            fresh = conn.execute("""
+                SELECT 1 FROM odds
+                WHERE snapshot_at >= ? AND bookmaker = ?
+                  AND snapshot_type <> 'in_play'
+                  AND sport NOT IN ('GOLF', 'NFL')
+                LIMIT 1
+            """, (floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                  config.ODDS_API_BOOKMAKER)).fetchone()
+        except Exception as exc:                              # noqa: BLE001
+            getattr(conn, "rollback", lambda: None)()
+            r.add(check, ERROR, "CRIT", f"query failed: {exc}",
+                  reason=REASON_QUERY_ERROR, cadence=cadence)
+            return
+        if fresh is None:
+            r.add(check, STALE, "CRIT",
+                  f"no DraftKings pre-game price stored in the last {limit} "
+                  f"minutes for any game; the odds fetch has stopped (too few "
+                  f"games in the next {hours} hours to judge game by game)",
+                  reason=REASON_STALE_DATA, cadence=cadence)
+            return
+    if n_priced == 0:
+        r.add(check, SKIPPED, "CRIT",
+              f"no game DraftKings prices kicks off in the next {hours} hours",
+              reason=REASON_GATE_SHUT, cadence=cadence)
+        return
+
+    def _alarm(n_s: int, n_p: int) -> bool:
+        return n_s >= PREGAME_STALE_MIN_GAMES and n_s >= PREGAME_STALE_SHARE * n_p
+
+    by_sport = ", ".join(f"{s} {len(stale.get(s, []))} of {priced[s]}"
+                         for s in sorted(priced))
+    if _alarm(n_stale, n_priced) or any(
+            _alarm(len(stale.get(s, [])), priced[s]) for s in priced):
+        last = max(t for v in stale.values() for t in v)
+        late_h = (now - last).total_seconds() / 3600 - limit / 60
+        r.add(check, STALE, "CRIT",
+              f"{n_stale} of {n_priced} games DraftKings prices in the next "
+              f"{hours} hours have no DraftKings price from the last {limit} "
+              f"minutes ({by_sport}). The scorer makes no pre-game pick on "
+              f"them, so the board is emptying: check the odds fetch. Raised "
+              f"when at least half the priced games (overall or in one sport) "
+              f"and at least {PREGAME_STALE_MIN_GAMES} are behind, because a "
+              f"cancelled fight or a pulled game is normal.",
+              last.isoformat(),
+              reason=(f"{late_h:.0f} hours late" if late_h >= 1 else "Just late"),
+              cadence=cadence)
+        return
+    detail = (f"{n_priced - n_stale} of {n_priced} games DraftKings prices in the "
+              f"next {hours} hours have a DraftKings price from the last "
+              f"{limit} minutes")
+    if n_stale:
+        detail += (f"; {n_stale} do not ({by_sport}), under the alarm level of "
+                   f"half the priced games and at least {PREGAME_STALE_MIN_GAMES}")
+    if leftovers or merged:
+        detail += (f"; {leftovers + merged} extra ids of a game counted under "
+                   f"another id were left out")
+    r.add(check, OK, "CRIT", detail, reason=REASON_FRESH, cadence=cadence)
 
 
 def _published_record_problems(rec: dict, daily: dict, live_start: str) -> list[str]:
@@ -516,6 +872,238 @@ def _calibration_eligibility_notes(conn, model_ids: list[str]) -> list[str]:
     return notes
 
 
+def _calibration_bet_only_models() -> list[str]:
+    """The models the calibration check reads from settled bets in `picks`.
+
+    `mv_scored_pick_outcomes` grades five MLB/WNBA game models and the
+    mlb_prop_/wnba_prop_ stat families, pre-game only. Everything else is
+    invisible to it: every NBA, NHL, NFL, NCAAF and UFC model, the in-play
+    models (the view drops is_live rows by construction), the MLB first-five
+    totals and run line, WNBA spread and total, and every market rule --
+    including `wnba_prop_market`, whose id matches the view's `wnba_prop_%`
+    filter but which has no grading branch there, so it lands as zero rows.
+    Until 2026-10-12 the check read the view alone, so none of these could
+    ever be measured, however far their probabilities drifted.
+
+    The split reuses the weekly fitter's two helpers (in-play test, view
+    membership) and adds the rule test the fitter lacks. The fitter itself
+    still reads `wnba_prop_market` from the view and fits it on n=0 (measured
+    2026-10-12: 27 settled bets) -- left alone here, because changing what the
+    fitter reads changes the maps that decide bets.
+    """
+    from models import probability_calibration as pc
+    methods = getattr(config, "SCORING_METHODS", {}) or {}
+    retired = set(getattr(config, "RETIRED_MODELS", ()) or ())
+    return sorted(
+        m for m in config.ACTION_THRESHOLDS
+        if m not in retired
+        and (pc._is_live_lane(m) or not pc._in_graded_matview(m)
+             or methods.get(m) == "rule"))
+
+
+def _calibration_bet_only_rows(conn, model_ids: list[str]) -> list:
+    """(model_id, n, claimed %, realised %, since, last graded) from settled bets.
+
+    The weekly fitter's third source (fetch_graded), restated for this check:
+    BET rows with a WIN/LOSS result and a real price, not VOID, not the second
+    copy of one event. Two deliberate differences, both because this grades the
+    number that DECIDED the bet rather than fitting a map to the raw one:
+
+      * it averages COALESCE(model_probability_cal, model_probability) -- the
+        same decision number the graded-view query grades;
+      * it applies NO probability floor. The view query's 0.60 floor picks
+        bet-shaped rows out of a BET+AVOID+NONE universe; here every row has
+        already passed the model's own cut. A floor would blind the check to
+        the very models it exists for: measured 2026-10-12, the settled bets of
+        nfl_prop_market, wnba_prop_market, mlb_spread_market, nfl_wind_totals
+        and nhl_moneyline_regulation all claim between 0.47 and 0.58.
+
+    The window is the view query's regime (the later of the active version and
+    the promoted map), extended to models with NO registry row -- the rules and
+    the NCAAF in-play engine -- whose regime is their promoted map, or every
+    pick since the fitter's paper start when nothing was ever promoted. Gated at
+    150 like the view query, so nothing new can alarm on a thin sample.
+
+    Cost: one aggregate over settled BETs, which `idx_picks_signal`
+    (signal_type, result) narrows to a few thousand rows.
+    """
+    if not model_ids:
+        return []
+    from models.probability_calibration import PAPER_START
+    before_start = (datetime.strptime(PAPER_START, "%Y-%m-%d")
+                    - timedelta(days=1)).strftime("%Y-%m-%d")
+    marks = ",".join("?" * len(model_ids))
+    return conn.execute(f"""
+        WITH regime AS (
+            SELECT r.model_id,
+                   CASE WHEN c.promoted IS TRUE
+                             AND SUBSTRING(c.promoted_at, 1, 10)
+                                 > SUBSTRING(r.created_at, 1, 10)
+                        THEN SUBSTRING(c.promoted_at, 1, 10)
+                        ELSE SUBSTRING(r.created_at, 1, 10) END AS since
+            FROM model_registry r
+            LEFT JOIN model_calibration c ON c.model_id = r.model_id
+            WHERE r.is_active = 1
+        ),
+        promoted AS (
+            SELECT model_id, SUBSTRING(promoted_at, 1, 10) AS since
+            FROM model_calibration
+            WHERE promoted IS TRUE
+        )
+        SELECT p.model_id,
+               COUNT(*) AS n,
+               AVG(COALESCE(p.model_probability_cal, p.model_probability))
+                   * 100 AS claimed,
+               100.0 * COUNT(*) FILTER (WHERE p.result = 'WIN') / COUNT(*) AS realised,
+               MIN(COALESCE(g.since, c.since, ?)) AS since,
+               MAX(p.game_date) AS last_graded
+        FROM picks p
+        LEFT JOIN regime g ON g.model_id = p.model_id
+        LEFT JOIN promoted c ON c.model_id = p.model_id
+        WHERE p.model_id IN ({marks})
+          AND p.signal_type = 'BET'
+          AND p.result IN ('WIN','LOSS')
+          AND COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL
+          AND COALESCE(p.condition_status, '') <> 'VOID'{config.duplicate_copy_exclusion_sql("p")}
+          AND p.game_date > COALESCE(g.since, c.since, ?)
+        GROUP BY p.model_id
+        HAVING COUNT(*) >= 150
+    """, (before_start, *model_ids, before_start)).fetchall()
+
+
+def _report_model_calibration(r, conn, rows, bet_only_rows) -> None:
+    """Turn the two readings into ONE model_calibration result.
+
+    Both inputs are (model_id, n, claimed %, realised %, since, last graded),
+    already gated at 150. Where a model somehow appears in both, the graded
+    view wins: it is the whole population, the settled bets only its top.
+
+    A PAUSED model is reported, not judged. Its gap, row count and last graded
+    date stay in the detail, but it never makes the check WARN: it bets
+    nothing, and a paused model's population can sit frozen for a whole
+    offseason (wnba_prop_player_threes, paused 2026-08-31, read +6.9pp/159 and
+    turned the check WARN every morning from then on). The set is read from
+    config.PAUSED_MODELS on every run, so unpausing re-arms it with no other
+    change. There is deliberately NO "nothing graded in N days, so it must be
+    frozen" rule: that would hide a real bug that deletes or stops grading
+    picks, which is the failure most worth seeing.
+    """
+    paused = set(getattr(config, "PAUSED_MODELS", ()) or ())
+    readings: dict = {}
+    bet_only: set = set()
+    for source_rows, is_bet_only in ((rows, False), (bet_only_rows, True)):
+        for m, n, c, rl, _since, last in source_rows:
+            m = str(m)
+            if m in readings:
+                continue
+            readings[m] = (float(c) - float(rl), int(n), str(last or "")[:10])
+            if is_bet_only:
+                bet_only.add(m)
+
+    def _tag(m: str) -> str:
+        return " bet-only" if m in bet_only else ""
+
+    held = sorted(((g, m, n, last) for m, (g, n, last) in readings.items()
+                   if m in paused), reverse=True)
+    paused_txt = ""
+    if held:
+        paused_txt = (
+            " Paused, so informational only (judged again automatically once "
+            "unpaused): " + "; ".join(
+                f"{m} {g:+.1f}pp/{n}{_tag(m)}, last graded {last or 'unknown'}"
+                for g, m, n, last in held) + ".")
+
+    gaps = sorted(((g, m, n) for m, (g, n, _last) in readings.items()
+                   if m not in paused), reverse=True)
+    crit = [g for g in gaps if g[0] >= 8.0]
+    warn = [g for g in gaps if 5.0 <= g[0] < 8.0]
+    measured_bet_only = sorted(m for _g, m, _n in gaps if m in bet_only)
+    bet_only_txt = ""
+    if measured_bet_only:
+        bet_only_txt = (
+            f" Bet-only ({', '.join(measured_bet_only)}): measured on settled "
+            f"bets alone, which are the model's own selections, so the gap "
+            f"leans high next to a reading over every scored pick.")
+    tail = bet_only_txt + paused_txt
+
+    if not gaps:
+        r.add("model_calibration", SKIPPED, "WARN",
+              "no unpaused model has 150+ graded picks yet under its current "
+              "version and promoted calibration map." + paused_txt,
+              reason="Nothing to check")
+        return
+
+    worst = ", ".join(f"{m} +{g:.1f}pp/{n}{_tag(m)}"
+                      for g, m, n in gaps[:4] if g >= 5.0)
+    flagged = [m for _, m, _ in crit + warn]
+    extra = _calibration_eligibility_notes(conn, flagged)
+    extra_txt = (" " + " ".join(extra) + ".") if extra else ""
+    if crit:
+        r.add("model_calibration", STALE, "WARN",
+              f"{len(crit)} model(s) 8pp+ overconfident at the probability "
+              f"actually bet: {worst}. A threshold cannot fix a "
+              f"calibration error.{extra_txt}{tail}",
+              reason=f"{crit[0][0]:.0f}pp overconfident")
+    elif warn:
+        r.add("model_calibration", STALE, "WARN",
+              f"{len(warn)} model(s) 5-8pp overconfident: {worst}.{extra_txt}{tail}",
+              reason=f"{warn[0][0]:.0f}pp overconfident")
+    else:
+        r.add("model_calibration", OK, "WARN",
+              f"{len(gaps)} model(s) measured, worst gap "
+              f"{gaps[0][0]:+.1f}pp ({gaps[0][1]}{_tag(gaps[0][1])}).{tail}")
+
+
+def _norm_indexdef(defn: str) -> str:
+    """Collapse whitespace. The catalog stores the publish-lock CASE on several lines."""
+    return re.sub(r"\s+", " ", (defn or "").strip())
+
+
+# Exact pg_indexes.indexdef text. Whitespace is collapsed; casts, parentheses
+# and column lists are not. A fragment match would accept a live index that
+# is BET-only and still holds a voided row.
+# Publish lock: read from production 2026-10-14 (vvprgnrmzeekokzkrkfu).
+# Live row: the btree list production prints for uq_picks_one_live_row, with
+# each WHERE term parenthesized and ::text-cast the way that catalog prints
+# the publish-lock predicate.
+_PICK_INDEX_DEFS = {
+    "uq_picks_one_bet_per_publish_lock": """CREATE UNIQUE INDEX uq_picks_one_bet_per_publish_lock ON public.picks USING btree ((
+CASE
+    WHEN COALESCE(is_live, false) THEN (((((((('live:'::text || game_id) || ':'::text) || model_id) || ':'::text) || COALESCE(pick_side, ''::text)) || COALESCE((':'::text || player_id), ''::text)) || COALESCE((':'::text || player_key), ''::text)) || COALESCE((':'::text || prop_market), ''::text))
+    ELSE (((((game_id || ':'::text) || model_id) || COALESCE((':'::text || player_id), ''::text)) || COALESCE((':'::text || player_key), ''::text)) || COALESCE((':'::text || prop_market), ''::text))
+END)) WHERE ((signal_type = 'BET'::text) AND (condition_status IS DISTINCT FROM 'DUPLICATE'::text) AND (condition_status IS DISTINCT FROM 'VOID'::text) AND (result IS DISTINCT FROM 'NO_ACTION'::text))""",
+    "uq_picks_one_live_row": (
+        "CREATE UNIQUE INDEX uq_picks_one_live_row ON public.picks USING btree "
+        "(game_date, model_id, game_id, COALESCE(player_id, ''::text), "
+        "COALESCE(player_key, ''::text), COALESCE(prop_market, ''::text), "
+        "pick_side) WHERE ((is_live IS TRUE) AND (signal_type = 'BET'::text) "
+        "AND (condition_status IS DISTINCT FROM 'DUPLICATE'::text) "
+        "AND (condition_status IS DISTINCT FROM 'VOID'::text) "
+        "AND (result IS DISTINCT FROM 'NO_ACTION'::text))"
+    ),
+}
+
+
+def pick_unique_index_problems(rows) -> list[str]:
+    """What's wrong with the two pick unique indexes, given (name, indexdef).
+
+    Empty when both exist and the catalog text equals the expected definition.
+    A missing index, the wide live predicate, or a BET-only live predicate
+    that still covers VOID and NO_ACTION, is a problem. This does not query;
+    the health check does.
+    """
+    found = {name: _norm_indexdef(defn) for name, defn in rows}
+    problems = []
+    for name, expected in _PICK_INDEX_DEFS.items():
+        defn = found.get(name) or ""
+        if not defn:
+            problems.append(f"{name} is missing")
+            continue
+        if defn != _norm_indexdef(expected):
+            problems.append(f"{name} definition does not match")
+    return problems
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -544,22 +1132,30 @@ def run_system_health(run_date: str | None = None) -> dict:
         mlb_yday_finals = _games_count(conn, "MLB", yday, yday, finals_only=True) > 0
         any_today = _scalar(conn, "SELECT COUNT(*) FROM games WHERE game_date = ? AND sport <> 'GOLF'", (run_date,)) or 0
 
-        # mlb_team_stats / mlb_bullpen_workload / mlb_player_game_log / umpires
-        # are written ONLY by the once-daily 6am ET run (Steps 0d/3/3b/5c) --
-        # refresh_pass.sh's hourly steps never touch them (odds/lineups/weather/
-        # public-betting do run hourly; these four do not). This health check
-        # itself runs on EVERY hourly pass too, so between midnight ET and the
-        # daily run's completion (~6:20am ET, measured 2026-09-08) "today" /
-        # "yesterday" genuinely has no row yet, and every one of these four
-        # CRIT/WARN checks fired STALE on all 6 overnight hourly passes --
-        # 2026-09-08's own report caught exactly this and all four self-healed
-        # within minutes of the 10:00 UTC run reaching their step. Not a feed
-        # problem; a cadence mismatch between when this check runs (hourly,
-        # around the clock) and when the data it reads is expected to exist
-        # (once daily, after ~6:20am ET). Relax the expectation by one day
-        # during that window, mirroring `in_pass_window` below -- a feed that
-        # is ALSO behind the relaxed date is still genuinely stale and still
-        # fires. Does not touch team_stats_asof_integrity (#714-#716).
+        # mlb_team_stats and mlb_bullpen_workload are written by the 6am ET
+        # daily (step_mlb_stats / step_bullpen). refresh_pass.sh does not run
+        # them. `umpires` and `game-log-today` do run on every refresh pass;
+        # the three date_checks below still share this pre-7am ceiling,
+        # because a row newer than the ceiling is fine and a missing dark
+        # day is not a miss. This health check itself runs on EVERY hourly
+        # pass too, so between midnight ET and the daily run's completion
+        # (~6:20am ET, measured 2026-09-08) "today" / "yesterday" genuinely
+        # has no row yet, and these checks fired STALE on all 6 overnight
+        # hourly passes -- 2026-09-08's own report caught exactly this and
+        # they self-healed within minutes of the 10:00 UTC run reaching
+        # their step. Not a feed problem; a cadence mismatch. Relax the
+        # ceiling by one day during that window. A feed that is ALSO behind
+        # the last finals date on or before that ceiling is still stale.
+        # Does not touch team_stats_asof_integrity (#714-#716).
+        #
+        # The ceiling is a calendar day. It is not a promise that MLB played.
+        # 2026-10-04 01:33 ET: pending, ceiling 2026-10-02, and 10-02 was a
+        # playoff off-day (finals on 10-01 and 10-03, bullpen max 10-01).
+        # The gate was "yesterday had finals" (10-03 did), so the check
+        # opened and demanded a 10-02 row the ingestor will never write.
+        # Floor is the newest final on or before the ceiling, and only
+        # while that final is within MLB_GAME_FEED_LOOKBACK_DAYS. Further
+        # back is the offseason, and the check skips.
         daily_pipeline_pending = datetime.now(ZoneInfo("America/New_York")).hour < 7
 
         # ── Odds feeds (The Odds API) ────────────────────────────────────────
@@ -589,6 +1185,10 @@ def run_system_health(run_date: str | None = None) -> dict:
                       f"no games rows for {run_date} AND last odds snapshot {age_note} "
                       f"(max 48h) — the odds feed itself is likely down (quota/key/API); "
                       f"games rows come from this feed, so 'no games today' cannot be trusted")
+        # The 3-hour question, game by game (see check_pregame_prices_current):
+        # odds_dk_lines above stays as it is, because its 48-hour off-day
+        # branch answers a different question (is the feed alive at all).
+        check_pregame_prices_current(conn, r)
         r.ts_check(conn, "player_prop_odds", "WARN", "player_prop_odds", "snapshot_at", 12,
                    gate_ok=mlb_today, gate_note="no MLB games today")
 
@@ -689,24 +1289,37 @@ def run_system_health(run_date: str | None = None) -> dict:
             getattr(conn, "rollback", lambda: None)()
             r.add("team_stats_asof_integrity", ERROR, "CRIT",
                   f"query failed: {exc}")
+        # Shared by mlb_bullpen_workload, mlb_player_game_log and umpires.
+        # Before 7am ET the ceiling is day2 (yesterday not ingested yet);
+        # after the daily has had its chance it is yesterday. The floor is
+        # the newest final on or before that ceiling, inside a 7-day
+        # lookback — a dark ceiling is not a date any of these tables can
+        # hold, and a final from last season is not one either. The cadence
+        # label is "each game day": the distance from today to that final
+        # is not a refresh interval.
+        mlb_feed_ceiling = day2 if daily_pipeline_pending else yday
+        mlb_feed_floor, mlb_feed_note = _mlb_game_dated_feed(conn, mlb_feed_ceiling)
         r.date_check(conn, "mlb_bullpen_workload", "CRIT", "mlb_bullpen_stats", "game_date",
-                     day2 if daily_pipeline_pending else yday,
-                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     mlb_feed_floor or mlb_feed_ceiling,
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note,
+                     cadence="each game day")
         r.date_check(conn, "mlb_pitcher_stats", "WARN", "mlb_pitcher_stats", "game_date",
                      d3, gate_ok=_games_count(conn, "MLB", d3, yday, finals_only=True) > 0,
                      gate_note="no MLB finals in last 3 days")
         r.date_check(conn, "mlb_weather", "CRIT", "game_weather", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
         r.date_check(conn, "mlb_player_game_log", "CRIT", "player_game_log", "game_date",
-                     day2 if daily_pipeline_pending else yday,
-                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     mlb_feed_floor or mlb_feed_ceiling,
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note,
+                     cadence="each game day")
         r.date_check(conn, "injuries", "WARN", "injuries", "report_date",
                      yday, gate_ok=any_today > 0, gate_note="no games today")
         r.date_check(conn, "lineups", "WARN", "lineup_slots", "game_date",
                      yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "umpires", "WARN", "umpires", "game_date",
-                     day2 if daily_pipeline_pending else yday,
-                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     mlb_feed_floor or mlb_feed_ceiling,
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note,
+                     cadence="each game day")
         r.date_check(conn, "public_betting", "WARN", "public_betting", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
 
@@ -816,6 +1429,9 @@ def run_system_health(run_date: str | None = None) -> dict:
                          gate_ok=played > 0,
                          gate_note=f"no {sport} games scheduled in last 3 days")
 
+        # ── NBA schedule: confirmed by its daily ESPN refresh ────────────────
+        check_nba_schedule_refresh(conn, r, run_date)
+
         # ── ESPN reachability probe (diagnostic, not an impact check) ────────
         # WNBA finals come from site.api.espn.com, which stopped serving the
         # Railway worker on 2026-08-05. The exception was only ever visible in
@@ -920,6 +1536,33 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("schema_drift", SKIPPED, "CRIT",
                   f"could not read information_schema: {type(exc).__name__}")
+
+        # ── The two pick unique indexes, after the migration ────────────────
+        # uq_picks_one_bet_per_publish_lock is one standing BET per publish
+        # lock. uq_picks_one_live_row is one standing live BET per side,
+        # with VOID and result NO_ACTION outside the index. This compares
+        # pg_indexes.indexdef to those two definitions. A name that exists
+        # with a wider predicate fails here the next morning.
+        try:
+            idx_rows = conn.execute("""
+                SELECT indexname, indexdef
+                  FROM pg_indexes
+                 WHERE schemaname = 'public'
+                   AND indexname IN ('uq_picks_one_bet_per_publish_lock',
+                                     'uq_picks_one_live_row')
+            """).fetchall()
+            problems = pick_unique_index_problems(idx_rows)
+            if problems:
+                r.add("pick_unique_indexes", STALE, "CRIT",
+                      "; ".join(problems))
+            else:
+                r.add("pick_unique_indexes", OK, "CRIT",
+                      "uq_picks_one_bet_per_publish_lock and "
+                      "uq_picks_one_live_row match their definitions")
+        except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
+            r.add("pick_unique_indexes", SKIPPED, "CRIT",
+                  f"could not read pg_indexes: {type(exc).__name__}")
 
         # ── Models + picks ───────────────────────────────────────────────────
         expected = (set(MODELS.keys()) | set(PROP_MODELS.keys())) - KNOWN_UNTRAINED
@@ -1118,6 +1761,10 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # A run that started long ago and never finished = hang / OOM / killed
         # worker. Absence of finished_at is the only way that becomes visible.
+        # Deploy-killed hourly/evening rows are stamped aborted at pipeline
+        # boot (run_ledger.abort_prior_refresh_orphans), so a row still open
+        # past 2h is a pass this process may still be inside. A daily is not
+        # closed by that sweep.
         stuck = 0
         if ledger_readable:
             stuck = _scalar(conn, """
@@ -1428,6 +2075,32 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("one_row_per_pick", ERROR, "CRIT", f"query failed: {exc}")
 
+        # ── One bet per real event ───────────────────────────────────────────
+        # The same bet written twice under two game ids for ONE event: UFC's
+        # swapped fighter order, an ET and a UTC date. Each copy settles, so
+        # the record counts the event twice (ufc_total_rounds, 2026-06-20 and
+        # 07-18/19). mike, 2026-10-09: "Count each fight once." The fix for a
+        # pair this finds is a guarded migration marking the extra copy
+        # (config.DUPLICATE_STATUS); nothing here writes. All-time, because the
+        # marker is the only thing that keeps a pair out of every surface.
+        # WARN: the miscount is one bet, and a person decides the marking.
+        try:
+            from tracking.record_duplicates import describe, find_duplicate_pairs
+            pairs = find_duplicate_pairs(conn)
+            if pairs:
+                r.add("one_pick_per_event", STALE, "WARN",
+                      f"{len(pairs)} bet(s) settled twice under two game ids "
+                      f"for one event, so the record counts them twice; mark "
+                      f"the extra copy with a guarded migration "
+                      f"(record_counts_each_event_once_2026_10_09.sql is the "
+                      f"pattern): {describe(pairs)}")
+            else:
+                r.add("one_pick_per_event", OK, "WARN",
+                      "no settled bet is counted twice under two game ids")
+        except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
+            r.add("one_pick_per_event", ERROR, "WARN", f"query failed: {exc}")
+
         # ── One games row per NCAAF matchup ──────────────────────────────────
         # NCAAF game_ids are built from RESOLVED school names, and two feeds
         # build them: CFBD writes its canonical school, the odds ingestor writes
@@ -1504,14 +2177,35 @@ def run_system_health(run_date: str | None = None) -> dict:
         # worker (job 82908, 683 rows — the whole table) and `_TEAM_UPSERT`
         # overwrites classification and conference unconditionally from CFBD.
         # Both came back `fbs`; the count stayed 138. CFBD asserts they are FBS
-        # programs, so what this check finds is a NEWLY PROMOTED school: SP+
-        # needs FBS history and lags a promotion by a season.
+        # programs, so what this check finds is a NEWLY PROMOTED school. Why it
+        # is unrated is a matter of WHICH season's SP+ we read (next paragraph).
         #
-        # WARN, not CRIT, and NOT ACTIONABLE BY A RE-PULL: nothing is mispriced
-        # — `features.ncaaf_feature_engine._is_fbs` requires the SP+ rating, so
-        # these decline at the gate with a name. It clears when SP+ rates the
-        # school. Worth a row anyway: it is the standing answer to "why is that
-        # game not on the board?".
+        # NOT ACTIONABLE BY A RE-PULL, AND IT DOES NOT CLEAR WHEN "SP+ RATES
+        # IT" (corrected 2026-10-12). A season's `sp_overall` is CFBD's PRIOR
+        # season's final SP+, held constant all year
+        # (cfbd_ingestor._prior_season_context; measured: one distinct value
+        # per team-season). Both schools were FCS in 2025, which SP+ does not
+        # rate, so they are blank for all of 2026 by design. A rating can first
+        # land when the season label rolls to 2027 on March 1 and the 2027
+        # preseason rows are built from the 2026 final SP+ — and only if CFBD
+        # rates them. Until then this check was STALE for 30 straight days
+        # (2026-09-13 → 10-12), and the failure alerter repeats a standing
+        # STALE warning to the ops channel every 12 hours
+        # (tracking/failure_alerter.RENOTIFY_WARN_MIN) — about something
+        # nobody could act on.
+        #
+        # So a school in config.NCAAF_PROMOTED_TO_FBS is EXPECTED to be unrated
+        # in its promotion season and is reported in the OK detail, with the
+        # reason and the earliest date it can change. The exemption ends with
+        # that season by itself: a listed school still unrated the season after
+        # is STALE again, and any other FBS school with no rating is STALE as
+        # before. Nothing about the games changes — `_is_fbs` still declines
+        # them at the gate, which is correct: an unrated school cannot be
+        # modelled because `sp_overall` is itself a feature.
+        #
+        # WARN, not CRIT: nothing is mispriced, the gate declines the game.
+        # Worth a row anyway: it is the standing answer to "why is that game
+        # not on the board?".
         # Season label = calendar year of the FALL (cfbd_ingestor.
         # ncaaf_season_for_date); never derived by hand — CLAUDE.md section 4.
         from data.ingestors.cfbd_ingestor import ncaaf_season_for_date
@@ -1528,15 +2222,49 @@ def run_system_health(run_date: str | None = None) -> dict:
                   )
                 ORDER BY t.school
             """, (season_now,)).fetchall()
-            if unrated:
-                named = "; ".join(f"{row[0]} [{row[1] or '?'}]" for row in unrated[:5])
-                more = f" (+{len(unrated) - 5} more)" if len(unrated) > 5 else ""
+            # Read at call time, not imported, so the list is whatever config
+            # holds now (and a test can substitute it).
+            promoted = getattr(config, "NCAAF_PROMOTED_TO_FBS", {}) or {}
+            expected = [row for row in unrated
+                        if promoted.get(row[0]) == season_now]
+            alarming = [row for row in unrated
+                        if promoted.get(row[0]) != season_now]
+            expected_note = ""
+            if expected:
+                names = "; ".join(f"{row[0]} [{row[1] or '?'}]" for row in expected)
+                expected_note = (
+                    f"{len(expected)} school(s) newly promoted to FBS in "
+                    f"{season_now} have no {season_now} SP+ by design and their "
+                    f"games are declined at the FBS gate: {names}. A season's "
+                    f"SP+ is the prior season's final rating and they were FCS "
+                    f"in {season_now - 1}, so this cannot change before the "
+                    f"first run on or after {season_now + 1}-03-01, and only if "
+                    f"CFBD rates them")
+            if alarming:
+                def _label(row):
+                    since = promoted.get(row[0])
+                    if since is None:
+                        tag = ""
+                    elif since < season_now:
+                        tag = f", promoted in {since}, no longer exempt"
+                    else:
+                        tag = f", listed as promoted in {since}, not exempt yet"
+                    return f"{row[0]} [{row[1] or '?'}{tag}]"
+                named = "; ".join(_label(row) for row in alarming[:5])
+                more = f" (+{len(alarming) - 5} more)" if len(alarming) > 5 else ""
                 r.add("ncaaf_fbs_registry", STALE, "WARN",
-                      f"{len(unrated)} FBS school(s) with no {season_now} SP+ "
+                      f"{len(alarming)} FBS school(s) with no {season_now} SP+ "
                       f"rating — their games are declined at the FBS gate and "
-                      f"never reach the board: {named}{more}. Usually a newly "
-                      f"promoted program; clears when SP+ rates it. A "
-                      f"ncaaf_teams_refresh does NOT fix this (tried 2026-09-13)")
+                      f"never reach the board: {named}{more}. Not a newly "
+                      f"promoted school in its first FBS season "
+                      f"(config.NCAAF_PROMOTED_TO_FBS), so this is not expected. "
+                      f"A ncaaf_teams_refresh does NOT fix a missing rating "
+                      f"(tried 2026-09-13)"
+                      + (f". Separately, {expected_note}" if expected_note else ""))
+            elif expected:
+                r.add("ncaaf_fbs_registry", OK, "WARN",
+                      f"every established FBS school carries a {season_now} SP+ "
+                      f"rating; {expected_note}")
             else:
                 r.add("ncaaf_fbs_registry", OK, "WARN",
                       f"every FBS school carries a {season_now} SP+ rating")
@@ -1582,6 +2310,21 @@ def run_system_health(run_date: str | None = None) -> dict:
         #
         # WARN at 5pp (the documented go-live criterion), CRIT at 8pp. Gated on
         # 150 graded picks so a new or thin model is SKIPPED rather than accused.
+        #
+        # TWO SOURCES, ONE VERDICT (2026-10-12). The graded view below grades
+        # MLB and WNBA pre-game models only, so every NBA, NHL, NFL, NCAAF and
+        # UFC model, every in-play model and every market rule was invisible
+        # here -- the same blind spot the weekly fitter closed on 2026-09-19
+        # (docs/probability_calibration.md, "A third graded source"). Those are
+        # now read from settled bets in `picks` (_calibration_bet_only_rows),
+        # labelled bet-only in the detail. And a PAUSED model is reported but
+        # never judged (_report_model_calibration says why).
+        #
+        # ONE RESULT PER RUN. A failed query used to add an ERROR and then fall
+        # through to add a SKIPPED as well; the persist below upserts on
+        # (run_date, check_name), so the SKIPPED overwrote the ERROR and the
+        # stored row hid the failure. A failure is now the only result.
+        source = "graded-pick view"
         try:
             rows = conn.execute("""
                 WITH regime AS (
@@ -1600,7 +2343,8 @@ def run_system_health(run_date: str | None = None) -> dict:
                        AVG(COALESCE(p.model_probability_cal, o.model_probability))
                            * 100 AS claimed,
                        100.0 * COUNT(*) FILTER (WHERE o.result = 'WIN') / COUNT(*) AS realised,
-                       MIN(g.since) AS since
+                       MIN(g.since) AS since,
+                       MAX(o.game_date) AS last_graded
                 FROM mv_scored_pick_outcomes o
                 JOIN regime g ON g.model_id = o.model_id
                 LEFT JOIN picks p ON p.pick_id = o.pick_id
@@ -1610,44 +2354,21 @@ def run_system_health(run_date: str | None = None) -> dict:
                 GROUP BY o.model_id
                 HAVING COUNT(*) >= 150
             """).fetchall()
+            source = "settled-bet"
+            bet_only_rows = _calibration_bet_only_rows(
+                conn, _calibration_bet_only_models())
         except Exception as exc:
             # Roll back before anything else touches this connection: a failed
             # statement aborts the Postgres transaction, and the persist below
             # now runs AFTER this block, so without the rollback one broken
             # calibration query would discard every result in the run.
             getattr(conn, "rollback", lambda: None)()
-            r.add("model_calibration", ERROR, "WARN", f"query failed: {exc}")
-            rows = []
-        if rows:
-            gaps = sorted(((float(c) - float(rl), m, int(n))
-                           for m, n, c, rl, _since in rows), reverse=True)
-            crit = [g for g in gaps if g[0] >= 8.0]
-            warn = [g for g in gaps if 5.0 <= g[0] < 8.0]
-            worst = ", ".join(f"{m} +{g:.1f}pp/{n}" for g, m, n in gaps[:4] if g >= 5.0)
-            flagged = [m for _, m, _ in crit + warn]
-            extra = _calibration_eligibility_notes(conn, flagged)
-            extra_txt = (" " + " ".join(extra) + ".") if extra else ""
-            if crit:
-                r.add("model_calibration", STALE, "WARN",
-                      f"{len(crit)} model(s) 8pp+ overconfident at the probability "
-                      f"actually bet: {worst}. A threshold cannot fix a "
-                      f"calibration error.{extra_txt}",
-                      reason=f"{crit[0][0]:.0f}pp overconfident")
-            elif warn:
-                r.add("model_calibration", STALE, "WARN",
-                      f"{len(warn)} model(s) 5-8pp overconfident: {worst}.{extra_txt}",
-                      reason=f"{warn[0][0]:.0f}pp overconfident")
-            else:
-                r.add("model_calibration", OK, "WARN",
-                      f"{len(gaps)} model(s) measured, worst gap "
-                      f"{gaps[0][0]:+.1f}pp ({gaps[0][1]})")
+            r.add("model_calibration", ERROR, "WARN",
+                  f"{source} query failed: {exc}")
         else:
-            # Honest, and it un-skips on its own as picks accrue under the
-            # current regime -- it does not mean "calibrated".
-            r.add("model_calibration", SKIPPED, "WARN",
-                  "no model has 150+ graded picks yet under its current "
-                  "version and promoted calibration map",
-                  reason="Nothing to check")
+            # SKIPPED (inside) is honest, and it un-skips on its own as picks
+            # accrue under the current regime -- it does not mean "calibrated".
+            _report_model_calibration(r, conn, rows, bet_only_rows)
 
         # ── Persist + summarize ──────────────────────────────────────────────
         # This runs AFTER every check, model_calibration included. It used to

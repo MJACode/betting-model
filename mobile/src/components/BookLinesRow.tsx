@@ -12,20 +12,31 @@
 // at that book, at that book's latest price. The record chip (DK, or the NFL
 // card's soft book) is the stored number the pick was given at and never
 // re-prices. The best payout says "best" in words, not just colour. No chip is
-// marked as the user's: the book picker sets the Stats lines and the betslip's
-// bet button, never how a pick is priced or how these chips are ordered
-// (Matt, 2026-09-04).
+// marked as the user's, but since 2026-10-19 (Matt) a chip at a book the
+// member has not chosen is not shown (`allowedBooks`): a price they cannot
+// bet in their state is not a line. The order is still best payout first.
 //
 // Live picks (is_live) get one DraftKings chip; the Live board's header and
 // the detail screen's provenance line say why (the in-play model prices and
-// places at DK only), so the row does not repeat it on every card.
+// places at DK only), so the row does not repeat it on every card. A live
+// model whose price we stop reading after the bet (hero.untracked,
+// markets.LIVE_PRICE_STOPS_AT_BET) gets that chip with no number on it, as
+// the card's "Open DK" does: the lock is not a price still on offer.
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { formatAmerican } from '@/lib/format';
-import { bookLabel, bookName, pickLineQuotes, selectLineChips, MODEL_BOOK } from '@/lib/markets';
+import {
+  bookLabel,
+  bookName,
+  currentLineQuotes,
+  selectLineChips,
+  MODEL_BOOK,
+  type HeroAmerican,
+  type PriceAgeContext,
+} from '@/lib/markets';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
@@ -39,10 +50,46 @@ interface Props {
   /** How many chips to show before "+N more". Three on the card: on a 375pt
    *  phone four plus "+N more" wrapped to three rows (UX review). */
   maxChips?: number;
+  /** The verdict on the deciding price (heroAmericanForPick) and the clock it
+   *  used. With both, no chip is offered at a book whose newest price is
+   *  older than the pre-game bound, the record chip included: the same list
+   *  as the card's hand-off (currentLineQuotes). Omitted: every chip, as
+   *  before. */
+  hero?: HeroAmerican | null;
+  priceAge?: PriceAgeContext;
+  /** The member's own books (usePreferredBooks). Chips at any other book are
+   *  not shown (Matt, 2026-10-19). Omitted: every bettable book. */
+  allowedBooks?: readonly string[];
 }
 
-export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3 }: Props) {
-  const quotes = pickLineQuotes(pick, bookRows ?? []);
+export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3, hero, priceAge, allowedBooks }: Props) {
+  if (hero?.untracked) {
+    const book = hero.book;
+    return (
+      <View style={styles.wrap}>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Live price</Text>
+        </View>
+        <View style={styles.chips}>
+          <Pressable
+            onPress={() => {
+              void openBookBetslip(book, hero.link);
+            }}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${bookName(book)} to check the live price`}
+            style={({ pressed }) => [styles.chip, styles.chipDk, pressed && styles.pressed]}
+          >
+            <Text style={[styles.chipBook, styles.chipTextDk]}>Open {bookLabel(book)}</Text>
+            {onMore != null ? null : (
+              <Ionicons name="open-outline" size={11} color={colors.textPrimary} />
+            )}
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+  const quotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   if (quotes.length === 0) return null;
   // Card (onMore set) vs detail: the card is scanned, so it drops the per-chip
   // icon and the hint — the a11y label and the header say the chip opens the

@@ -24,6 +24,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
 
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
+
 
 def _read(path: Path) -> str:
     # encoding is explicit: this repo runs on Windows, where read_text() with no
@@ -154,13 +156,12 @@ def test_the_pause_source_is_isModelPaused_not_a_hand_copied_set():
 
 
 @pytest.mark.skipif(
-    not (MOBILE / "node_modules" / ".bin").exists() or shutil.which("node") is None,
+    tsx_cmd(MOBILE) is None,
     reason="mobile node modules not installed",
 )
 def test_the_behavioural_checks_pass():
-    tsx = MOBILE / "node_modules" / ".bin" / "tsx"
     proc = subprocess.run(
-        [str(tsx), "scripts/verify_paused_catalog.ts"],
+        [*tsx_cmd(MOBILE), "scripts/verify_paused_catalog.ts"],
         cwd=MOBILE,
         capture_output=True,
         text=True,
@@ -187,7 +188,14 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
 
     screen = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
     assert "[...allData, ...pausedData].filter((d) => d.pick.sport === sport)" in screen
-    assert "paused={view === 'today' && isPausedForDisplay(item.pick)}" in screen
+    # The PAUSED label no longer depends on the view (#994, the Signals card
+    # used on All, Signals and Live): a paused row is labelled wherever it
+    # appears. Which list may CARRY one is decided above and below, not here:
+    # only All merges `pausedData`; Signals runs passesActionFilter, which
+    # refuses a paused model; Live drops isModelPaused rows before `liveData`.
+    # tests/test_mobile_pick_cta.py pins the same line and refuses the old one.
+    assert "paused={isPausedForDisplay(item.pick)}" in screen
+    assert "!isModelPaused(d.pick.model_id) &&" in screen
     # Paused rows sort after active ones, and drop out once Signal narrows.
     assert "...all.filter((d) => !isPausedForDisplay(d.pick))," in screen
     assert "displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)" in screen
@@ -221,10 +229,14 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     # stake, Sharp Score, post time, hand-off or betslip for a paused pick.
     detail = _read(MOBILE / "src" / "screens" / "PickDetailScreen.tsx")
     assert "const paused = !retired && isPausedForDisplay(pick);" in detail
-    assert "<ReasoningCard pick={pick} paused={paused} />" in detail
+    assert "<ReasoningCard pick={pick} paused={paused} stale={hero?.stale === true} />" in detail
     assert "{paused ? null : <SharpScoreCard pick={pick} />}" in detail
     assert "{paused ? null : <PickTimingCard pick={pick} />}" in detail
-    assert "!preview && !retired && !paused && !voided ? (" in detail
+    # The BET badge's gate, pinned whole: #1006 (the member's own books)
+    # appended "&& myView?.status !== 'none'". A prefix pin alone would pass
+    # "... || paused ? (", which draws the badge on a paused pick.
+    assert ("pick.signal_type === 'BET' && !preview && !retired && !paused && !voided"
+            " && myView?.status !== 'none' ? (") in detail
     assert "openHere && !preview && !retired && !paused" in detail
     reasoning = _read(MOBILE / "src" / "components" / "ReasoningCard.tsx")
-    assert "!isUnlockedPreview(pick) && !paused ? (" in reasoning
+    assert "!isUnlockedPreview(pick) && !paused && !stale ? (" in reasoning

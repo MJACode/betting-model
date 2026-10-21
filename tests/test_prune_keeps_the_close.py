@@ -13,34 +13,46 @@ statement per tier and the keep-set is the part that must not regress.
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from data import prune_odds as po  # noqa: E402
+from tests.test_prune_bounded import ODDS_COLS, StandIn  # noqa: E402
+
 SRC = (Path(__file__).parent.parent / "data" / "prune_odds.py").read_text(
     encoding="utf-8")
 
+# The statement prune_table sends, with the protected predicate left as a
+# marker so the tests can see where it lands.
+DOOMED = po.doomed_sql("odds", ("game_id", "market"), "%(game_day)s", "<<PRUNABLE>>")
 
-def _tier(name: str) -> str:
-    """The SQL text of one delete tier or of the keep-set."""
-    m = re.search(rf'{name} = f"""(.*?)"""', SRC, re.S)
-    assert m, f"{name} not found — prune_odds.py was restructured"
-    return m.group(1)
+
+def _quotes(conn: StandIn, game: str, day: str, rows) -> None:
+    """rows: (odds_id, snapshot_type, hour)."""
+    conn.db.execute("INSERT INTO games VALUES (?, 'MLB', ?)", (game, day))
+    for oid, stype, hour in rows:
+        conn.db.execute(
+            f"INSERT INTO odds ({', '.join(ODDS_COLS)}) VALUES "
+            f"(?, ?, 'MLB', 'h2h', 'fanduel', ?, ?, -110, 100, NULL, NULL, NULL, "
+            f"NULL, NULL, NULL)", (oid, game, stype, f"{day}T{hour:02d}:00:00Z"))
+
+
+def _prune(conn: StandIn, today: str = "2026-10-20") -> None:
+    po.prune_table(conn, "odds", ("game_id", "market"), "%(game_day)s", 2, today,
+                   budget=po.Budget(seconds=60, rows=10**9), floor="2026-10-01")
 
 
 def test_the_close_is_selected_by_the_newest_snapshot():
-    body = _tier("select_keepers")
-    assert "ORDER BY snapshot_at DESC" in body
-    assert "rn_last = 1" in body
+    assert "ORDER BY snapshot_at DESC" in DOOMED
+    assert "rn_last = 1" in DOOMED
 
 
 def test_the_opener_is_still_selected_by_the_oldest():
     """The 2026-08-25 rule this is layered on top of, not a replacement for."""
-    body = _tier("select_keepers")
-    assert "ORDER BY snapshot_at ASC" in body
-    assert "rn_first = 1" in body
+    assert "ORDER BY snapshot_at ASC" in DOOMED
+    assert "rn_first = 1" in DOOMED
 
 
 def test_the_close_is_never_an_in_play_price():
@@ -51,37 +63,54 @@ def test_the_close_is_never_an_in_play_price():
     is_pre is the newest PRE-GAME row — not the newest row that happens to be
     pre-game, which is what an unpartitioned ranking would give.
     """
-    body = _tier("select_keepers")
-    assert "{is_pre}" in body, "the close can be an in-play price"
-    assert "PARTITION BY {part_by}, {is_pre}" in body, (
+    assert f"PARTITION BY game_id, market, bookmaker, {po._IS_PRE}" in DOOMED, (
         "the DESC ranking is not scoped to pre-game rows, so a proposition "
         "whose newest row is in-play keeps nothing pre-game at all")
-    assert "is_pre AND rn_last = 1" in body
-    assert "snapshot_type IS NULL" in SRC, (
+    assert "is_pre AND rn_last = 1" in DOOMED
+    assert "snapshot_type IS NULL" in po._IS_PRE, (
         "NULL snapshot_type must count as pre-game — every reader treats it "
         "that way, and excluding it would keep nothing for older rows")
+    conn = StandIn()
+    _quotes(conn, "G", "2026-10-10", [(1, "open", 1), (2, "open", 2), (3, "open", 3),
+                                      (4, "in_play", 4), (5, "in_play", 5)])
+    _prune(conn)
+    assert conn.ids("odds") == {1, 3}, "the close must be the newest PRE-GAME row"
 
 
 def test_both_delete_tiers_spare_the_keep_set():
     """Tier 1 (settled games past the window) and tier 2 (superseded rows
-    inside it) both delete, so both must spare it. Sparing it in one tier only
-    means the other deletes it a day later."""
-    for tier in ("where_old", "select_superseded"):
-        assert "select_keepers" in _tier(tier), (
-            f"{tier} does not spare the opener and close")
+    inside it) both delete, so both must spare the opener and the close.
+    Sparing it in one tier only means the other deletes it a day later."""
+    assert "WHERE NOT (rn_first = 1 OR (is_pre AND rn_last = 1))" in DOOMED
+    conn = StandIn()
+    _quotes(conn, "OLD", "2026-10-10", [(1, "open", 1), (2, "open", 2), (3, "open", 3),
+                                        (4, "in_play", 4)])
+    _quotes(conn, "WIN", "2026-10-19", [(11, "open", 1), (12, "open", 2), (13, "open", 3),
+                                        (14, "in_play", 4)])
+    _prune(conn)
+    assert {1, 3} <= conn.ids("odds"), "tier 1 deleted the opener or the close"
+    assert {11, 13} <= conn.ids("odds"), "tier 2 deleted the opener or the close"
 
 
-def test_each_tier_uses_exactly_one_anti_join():
-    """PERFORMANCE IS CORRECTNESS HERE. The first version of this change added
-    a SECOND `NOT IN` beside the opener's, and the dry-run stopped completing:
-    `canceling statement due to statement timeout` on a job that finishes in
-    ~80s unchanged. A pruner that times out prunes nothing, and the growth it
-    exists to bound is silent. Both keep-rules therefore ride on ONE scan.
+def test_each_statement_reads_its_proposition_once_with_no_anti_join():
+    """PERFORMANCE IS CORRECTNESS HERE. A version that added a SECOND `NOT IN`
+    beside the opener's stopped completing (`canceling statement due to
+    statement timeout`), and the whole-table version later timed out every
+    day. A pruner that times out prunes nothing, and the growth it exists to
+    bound is silent. Every keep rule rides on ONE read of one proposition.
     """
-    for tier in ("where_old", "select_superseded"):
-        assert _tier(tier).count("NOT IN") == 1, (
-            f"{tier} does more than one anti-join — this timed out in "
-            f"production against 2.2M and 2.5M rows")
+    assert DOOMED.count("FROM odds") == 1
+    assert "NOT IN (" not in DOOMED
+    delete = po.delete_sql("odds", ("game_id", "market"), "%(game_day)s", "<<PRUNABLE>>")
+    assert delete.count("FROM odds") == 2          # the DELETE and its one read
+    # The window is computed once and the DELETE looks those ids up by primary
+    # key. A proposition predicate on the DELETE makes Postgres re-run the
+    # scan once per doomed id (2026-10-21: 4,819 ids, 8.5 s, and the form
+    # with the window inside that loop was cancelled at statement_timeout).
+    assert "AS MATERIALIZED" in delete
+    tail = delete.split("DELETE FROM", 1)[1]
+    assert "game_id" not in tail
+    assert tail.strip().startswith("odds WHERE odds_id IN (SELECT odds_id FROM doomed)")
 
 
 def test_the_protected_books_are_untouched_by_this_change():
@@ -89,9 +118,8 @@ def test_the_protected_books_are_untouched_by_this_change():
     the close is an addition to what SURVIVES, never a widening of what is
     deleted."""
     assert 'PROTECTED_BOOKMAKERS = (ODDS_API_BOOKMAKER, "sbr_consensus")' in SRC
-    for tier in ("where_old", "select_superseded", "select_keepers"):
-        assert "{prunable}" in _tier(tier), (
-            f"{tier} lost the protected-bookmaker predicate")
+    assert "AND <<PRUNABLE>>" in DOOMED, (
+        "the statement lost the protected-bookmaker predicate")
 
 
 def test_the_cost_is_recorded_as_a_measurement_not_a_guess():

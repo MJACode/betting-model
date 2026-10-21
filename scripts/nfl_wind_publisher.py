@@ -53,7 +53,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -417,6 +419,10 @@ def snapshot_row_params(r: dict) -> dict | None:
         return None
 
 
+BOARD_CHUNK = 5000            # rows per batch; each batch commits and moves the marker
+BOARD_FLUSH_BUDGET_S = 120    # no new batch starts after this; the poll runs every 10 min
+
+
 def publish_board(run_date: str | None = None) -> int:
     """
     Flush the tick's full board CSV into `nfl_odds_history`.
@@ -432,6 +438,20 @@ def publish_board(run_date: str | None = None) -> int:
 
     Idempotent: ON CONFLICT DO NOTHING on (snapshot_at, game_id, bookmaker,
     market). Never raises — an archive write must not sink a bet card.
+
+    INCREMENTAL AND BATCHED (2026-10-11). Since the opener went to a one-minute
+    poll (2026-09-22) it appends the whole board here every minute, ~560 rows a
+    minute on an NFL Sunday. This flush re-read the WHOLE day on every wind
+    tick, with two round trips per row inside one transaction, so each run took
+    longer than the last: 18, 27, 48, 71, 105, 151 and 232 minutes on
+    2026-10-11. The fast NFL poll allows one run at a time, so the run that
+    started at 12:20Z held it for ~5.7 hours and the wind model re-checked that
+    Sunday's games twice before kickoff. Now the marker beside the CSV holds how
+    many rows are already in, each matchup is looked up once, rows go in
+    batches that each commit and advance the marker, and no new batch starts
+    after BOARD_FLUSH_BUDGET_S, so the rest waits for the next tick instead of
+    holding the poll. A lost marker (redeploy) costs one re-flush, which the
+    ON CONFLICT makes harmless.
     """
     if run_date is None:
         run_date = datetime.now(timezone.utc).date().isoformat()
@@ -439,27 +459,68 @@ def publish_board(run_date: str | None = None) -> int:
     if not path.exists():
         return 0
     try:
-        rows = read_card(path)
-        if not rows:
+        marker = path.with_suffix(".flushed")
+        try:
+            done = int(marker.read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            done = 0
+        # The opener may be appending while this reads. Fix the end FIRST -- the
+        # last newline in the file as it stands now -- and read only up to it,
+        # so a half-written row waits for the next tick instead of going in
+        # past the marker, half-written for good.
+        with open(path, "rb") as fh:
+            data = fh.read()
+        data = data[:data.rfind(b"\n") + 1]
+        # Count past the rows already in rather than keeping the whole day
+        # (~800k rows by midnight on an NFL Sunday) as dicts.
+        total, pending = 0, []
+        for total, r in enumerate(
+                csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")), 1):
+            if total > done:
+                pending.append(r)
+        if done > total:                  # a rewritten file: start over
+            done = 0
+            pending = list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
+        if not pending:
             return 0
+
+        def matchup(r):
+            return ((r.get("home") or "").strip(), (r.get("away") or "").strip())
+
         from data.db import get_connection
         conn = get_connection()
-        written = 0
+        written, started = 0, time.monotonic()
         try:
-            for r in rows:
-                away, home = (r.get("away") or "").strip(), (r.get("home") or "").strip()
-                if not away or not home:
-                    continue
-                # Match the nflverse id the rest of the NFL tables use.
-                g = conn.execute("""
-                    SELECT game_id, season, week FROM games
-                    WHERE sport = 'NFL' AND home_team = %s AND away_team = %s
-                      AND commence_time IS NOT NULL
-                    ORDER BY commence_time DESC LIMIT 1
-                """, (home, away)).fetchone()
-                if not g:
-                    continue          # game not published yet; nothing to hang it on
-                conn.execute("""
+            # Match the nflverse id the rest of the NFL tables use, once per
+            # matchup rather than once per quote.
+            games: dict = {}
+            for key in {matchup(r) for r in pending}:
+                if all(key):
+                    games[key] = conn.execute("""
+                        SELECT game_id, season, week FROM games
+                        WHERE sport = 'NFL' AND home_team = %s AND away_team = %s
+                          AND commence_time IS NOT NULL
+                        ORDER BY commence_time DESC LIMIT 1
+                    """, key).fetchone()
+            for start in range(0, len(pending), BOARD_CHUNK):
+                if start and time.monotonic() - started > BOARD_FLUSH_BUDGET_S:
+                    break                 # the rest goes next tick, from the marker
+                chunk = pending[start:start + BOARD_CHUNK]
+                params = []
+                for r in chunk:
+                    g = games.get(matchup(r))
+                    if not g:
+                        continue          # game not published yet; nothing to hang it on
+                    params.append({
+                        "snapshot_at": r.get("snapshot_at"), "game_id": g[0],
+                        "season": g[1], "week": g[2],
+                        "commence_time": r.get("commence_time") or None,
+                        "bookmaker": r.get("bookmaker"), "market": r.get("market"),
+                        "point": _num(r.get("point")),
+                        "price_home": _num(r.get("price_home")),
+                        "price_away": _num(r.get("price_away")),
+                    })
+                conn.executemany("""
                     INSERT INTO nfl_odds_history
                         (snapshot_at, game_id, season, week, commence_time,
                          bookmaker, market, point, price_home, price_away)
@@ -467,20 +528,19 @@ def publish_board(run_date: str | None = None) -> int:
                             %(commence_time)s, %(bookmaker)s, %(market)s,
                             %(point)s, %(price_home)s, %(price_away)s)
                     ON CONFLICT (snapshot_at, game_id, bookmaker, market) DO NOTHING
-                """, {
-                    "snapshot_at": r.get("snapshot_at"), "game_id": g[0],
-                    "season": g[1], "week": g[2],
-                    "commence_time": r.get("commence_time") or None,
-                    "bookmaker": r.get("bookmaker"), "market": r.get("market"),
-                    "point": _num(r.get("point")),
-                    "price_home": _num(r.get("price_home")),
-                    "price_away": _num(r.get("price_away")),
-                })
-                written += 1
-            conn.commit()
+                """, params)
+                conn.commit()
+                written += len(params)
+                done += len(chunk)
+                try:
+                    marker.write_text(str(done), encoding="utf-8")
+                except OSError as exc:
+                    print(f"WARNING: could not write {marker}: {exc}", file=sys.stderr)
         finally:
             conn.close()
-        print(f"NFL board archive {run_date}: {written} quote(s) into nfl_odds_history")
+        left = total - done
+        print(f"NFL board archive {run_date}: {written} quote(s) into nfl_odds_history"
+              + (f", {left} row(s) left for the next tick" if left else ""))
         return written
     except Exception as exc:                                   # noqa: BLE001
         print(f"WARNING: board archive failed: {exc}", file=sys.stderr)
@@ -659,6 +719,63 @@ def _fmt_spread(line: float) -> str:
     return "PK" if float(line) == 0 else f"{line:+g}"
 
 
+# ── The schedule gate (mike, 2026-10-20) ─────────────────────────────────────
+#
+# "The repo/models should look ahead schedules for all markets and sports and
+# models." The opener fires from 10 days out and NFL games are 7 days apart, so
+# a Thursday game can be decided before both teams' Sunday games: at
+# 2026-10-20 20:00Z the opener evaluated CAR @ GB (10-29) while both teams
+# still had to play on 10-25. Neither rule reads a team log, but the rule
+# stands for every pre-game model: no decision while either team has an
+# earlier game not played, being played, or without its result in `games`
+# (data/schedule_context; nflverse fills the score, measured 4.2-20.5h after a
+# Sunday kickoff in 2026 weeks 1-6).
+#
+# A held game's BET is not written. Its number is written as NONE with the
+# reason, by publish_scored, so the board still shows it; NONE never locks, so
+# the first tick after the games are scored decides it. Read from the
+# DATABASE schedule (nflverse, daily), never the frozen nfl/data/games.csv.
+
+def _schedule_holds(conn, games: dict[str, dict],
+                    now: datetime | None = None) -> dict[str, str]:
+    """{game_id: reason} for the games a pre-game NFL rule may not decide yet.
+
+    `games` maps game_id -> {home_team, away_team, game_date, commence_time}.
+    Fails CLOSED: a schedule that cannot be read holds every game this pass
+    (the read runs before anything is written, so the rollback loses
+    nothing)."""
+    if not games:
+        return {}
+    from data.schedule_context import SCHEDULE_UNREADABLE, ScheduleBook
+    now = now or datetime.now(timezone.utc)
+    try:
+        book = ScheduleBook.load(conn, "NFL", [(gid, g["game_date"])
+                                                for gid, g in games.items()])
+        out = {}
+        for gid, g in games.items():
+            why = book.pending_reason(gid, g["game_date"], g["home_team"],
+                                      g["away_team"], g.get("commence_time"), now)
+            if why:
+                out[gid] = why
+        return out
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"WARNING: NFL schedule check failed ({exc!r}); holding "
+              f"{len(games)} game(s) this pass", file=sys.stderr)
+        try:
+            conn.rollback()
+        except Exception:                                      # noqa: BLE001
+            pass
+        return {gid: SCHEDULE_UNREADABLE for gid in games}
+
+
+def _held_out(pick_rows: list[dict], holds: dict[str, str], label: str) -> list[dict]:
+    """The pick rows still to write, after printing every held one."""
+    for p in pick_rows:
+        if p["game_id"] in holds:
+            print(f"  {label} {p['game_id']}: not decided -- {holds[p['game_id']]}")
+    return [p for p in pick_rows if p["game_id"] not in holds]
+
+
 def publish(run_date: str | None = None) -> int:
     """
     Mirror the day's card into games + picks. Returns picks written.
@@ -683,6 +800,8 @@ def publish(run_date: str | None = None) -> int:
     now_iso = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     try:
+        # Before any write: a failed read rolls back nothing (_schedule_holds).
+        holds = _schedule_holds(conn, {g["game_id"]: g for g in game_rows})
         for g in game_rows:
             conn.execute("""
                 INSERT INTO games (game_id, sport, season, game_date,
@@ -727,6 +846,8 @@ def publish(run_date: str | None = None) -> int:
         if skipped:
             print(f"  {len(skipped)} game(s) already locked — not re-priced: "
                   + ", ".join(sorted({p["game_id"] for p in skipped})))
+        # A team's earlier game still to be played or scored: no BET yet.
+        pick_rows = _held_out(pick_rows, holds, "wind")
 
         for p in pick_rows:
             _clear_scored_row(conn, p["game_id"], p["model_id"])
@@ -783,6 +904,8 @@ def publish_opener(run_date: str | None = None) -> int:
     conn = get_connection()
     written = 0
     try:
+        # Before any write: a failed read rolls back nothing (_schedule_holds).
+        holds = _schedule_holds(conn, {g["game_id"]: g for g in game_rows})
         for g in game_rows:
             conn.execute("""
                 INSERT INTO games (game_id, sport, season, game_date,
@@ -793,6 +916,10 @@ def publish_opener(run_date: str | None = None) -> int:
                 SET commence_time = EXCLUDED.commence_time,
                     game_date     = EXCLUDED.game_date
             """, g)
+
+        # A team's earlier game still to be played or scored: no BET yet. The
+        # first qualifying tick AFTER that is the one that locks.
+        pick_rows = _held_out(pick_rows, holds, "opener")
 
         # Serialise against publish_scored before the insert-once reads.
         _lock_model(conn, NFL_OPENER_MODEL_ID)
@@ -879,21 +1006,30 @@ def latest_eval_rows(rows: list[dict]) -> dict[tuple[str, str], dict]:
 
 
 def build_scored_rows(latest: dict[tuple[str, str], dict],
-                      games: dict[str, dict], bankroll: float) -> list[dict]:
+                      games: dict[str, dict], bankroll: float,
+                      holds: dict[str, str] | None = None) -> list[dict]:
     """
     Pure transform: newest eval row per (game, model) -> NONE pick rows.
 
     `games` maps game_id -> {home_team, away_team, game_date, commence_time}.
     A game the platform does not know (FK), or a row with no line or price,
     is skipped: a NONE row is only worth writing if it carries a real quote.
+
+    `holds` maps game_id -> the schedule gate's reason (_schedule_holds). A
+    held game's row carries that reason, and is written even when the model
+    fired: the BET writers write no BET for it, so this row is the board's
+    only view of the game until the earlier games are scored.
     """
+    holds = holds or {}
     out: list[dict] = []
     for (game_id, model_id), r in sorted(latest.items()):
+        held = holds.get(game_id)
         # The model FIRED on this tick. Its BET row is the publisher's to
         # write (publish / publish_opener); a "(no bet)" row carrying the
         # firing edge would be a bet dressed as a pass. Write nothing and
-        # let the BET land (Reviewer, #838 post-merge).
-        if str(r.get("qualifies") or "").strip() == "1":
+        # let the BET land (Reviewer, #838 post-merge) -- unless the game is
+        # held, in which case no BET will land this tick.
+        if str(r.get("qualifies") or "").strip() == "1" and not held:
             continue
         g = games.get(game_id)
         line, price = _num(r.get("current_line")), _num(r.get("current_price"))
@@ -901,7 +1037,7 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
             continue
         book = (r.get("current_book") or "").strip()
         # "(<words>, <BOOK>)" is the shape the app reads the quote's book from
-        # (mobile storedQuoteBook / clvLockBook): the BET rows' own form. A
+        # (mobile storedQuoteBook / clvBet.ts): the BET rows' own form. A
         # bare "(FD)" falls through to DraftKings there and mislabels the price.
         tag = BOOK_ABBREV.get(book, book or "?")
         home, away = g["home_team"], g["away_team"]
@@ -936,7 +1072,7 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
             "recommended_bet": 0.0,
             "bankroll_at_pick": bankroll,
             "signal_type": "NONE",
-            "downgrade_reason": (r.get("reason") or "")[:500] or None,
+            "downgrade_reason": (held or r.get("reason") or "")[:500] or None,
         })
     return out
 
@@ -1003,6 +1139,9 @@ def publish_scored(run_date: str | None = None) -> int:
                 continue            # frozen at its last pre-game view
             games[gid] = {"home_team": home, "away_team": away,
                           "game_date": gdate, "commence_time": kick}
+        # The same schedule answer the BET writers act on, read before any
+        # write (_schedule_holds).
+        holds = _schedule_holds(conn, games, now)
 
         # Same per-model lock the BET writers take, in a fixed order (no
         # deadlock), BEFORE the BET set is read: an opener/wind BET can no
@@ -1038,7 +1177,7 @@ def publish_scored(run_date: str | None = None) -> int:
             if key in existing and key[0] in games:
                 cleared += _clear_scored_row(conn, *key)
 
-        for p in build_scored_rows(latest, games, config.BANKROLL):
+        for p in build_scored_rows(latest, games, config.BANKROLL, holds):
             key = (p["game_id"], p["model_id"])
             if key in bet:
                 continue            # the pick of record stands; no NONE beside it

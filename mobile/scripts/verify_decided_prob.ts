@@ -5,7 +5,8 @@
  *   npx tsx scripts/verify_decided_prob.ts
  *
  * Pins: a BET whose raw probability is under its model's cut and whose
- * calibrated one is over it (pick 3094775, NYR (Regulation) +180) is a Signal;
+ * calibrated one is over it (mlb_moneyline, 0.72/0.11) is a Signal.
+ * nhl_moneyline_regulation now decides on its own number (mike, 2026-10-03).
  * a row with no calibrated number is cut raw, as before; a raw-deciding model
  * (DECIDES_ON_RAW_MODELS) is cut raw even when it carries a calibrated number.
  * And the two publish-time guards (config.publishable_cut_sql): a decided-only
@@ -34,6 +35,24 @@ function check(name: string, cond: boolean, detail = '') {
   else { failures++; console.log(`FAIL ${name} ${detail}`); }
 }
 
+const ml: ActionFilterable = {
+  model_id: 'mlb_moneyline',
+  model_probability: 0.60,
+  model_probability_cal: 0.75,
+  edge: 0.20,
+  decision_edge: 0.20,
+  decision_odds: 150,
+  decision_implied_prob: 0.40,
+  dk_implied_prob: 0.40,
+  dk_odds: 150,
+  signal_type: 'BET',
+  condition_status: null,
+  game_time: new Date(Date.now() + 3 * 3600_000).toISOString(),
+  game_date: null,
+  is_live: false,
+  created_at: new Date(Date.now() - 1 * 3600_000).toISOString(),
+};
+
 const nyr: ActionFilterable = {
   model_id: 'nhl_moneyline_regulation',
   model_probability: 0.3801,
@@ -54,22 +73,23 @@ const nyr: ActionFilterable = {
   created_at: new Date(Date.now() - 1 * 3600_000).toISOString(),
 };
 
-const d = decidedNumbers(nyr);
-check('decided prob is the calibrated one', Math.abs(d.prob - 0.443) < 1e-9, String(d.prob));
-check('decided edge is cal - deciding implied', Math.abs(d.edge - (0.443 - 0.3571)) < 1e-9, String(d.edge));
-check('raw-under / calibrated-over BET is a Signal', passesActionFilter(nyr));
+const d = decidedNumbers(ml);
+check('decided prob is the calibrated one', Math.abs(d.prob - 0.75) < 1e-9, String(d.prob));
+check('decided edge is cal - deciding implied', Math.abs(d.edge - (0.75 - 0.40)) < 1e-9, String(d.edge));
+check('raw-under / calibrated-over BET is a Signal', passesActionFilter(ml));
 
-const rawOnly = { ...nyr, model_probability_cal: null };
+const rawOnly = { ...ml, model_probability_cal: null };
 check('no calibrated number: raw cut, still fails', !passesActionFilter(rawOnly));
-check('no calibrated number: raw numbers', decidedNumbers(rawOnly).prob === 0.3801
-  && decidedNumbers(rawOnly).edge === 0.023);
-const rawPass = { ...rawOnly, model_probability: 0.4638, decision_edge: 0.0864 };
+check('no calibrated number: raw numbers', decidedNumbers(rawOnly).prob === 0.60
+  && decidedNumbers(rawOnly).edge === 0.20);
+const rawPass = { ...rawOnly, model_probability: 0.80, decision_edge: 0.15 };
 check('no calibrated number: a raw pass still passes', passesActionFilter(rawPass));
 
-const noPrice = { ...nyr, decision_implied_prob: null, dk_implied_prob: null as unknown as number };
-check('no price: edge falls back to the stored one', decidedNumbers(noPrice).edge === 0.023);
+const noPrice = { ...ml, decision_implied_prob: null, dk_implied_prob: null as unknown as number };
+check('no price: edge falls back to the stored one', decidedNumbers(noPrice).edge === 0.20);
 
-check('nhl moneyline decides calibrated', decidesOnCalibrated('nhl_moneyline'));
+check('nhl moneyline decides raw', !decidesOnCalibrated('nhl_moneyline'));
+check('mlb moneyline decides calibrated', decidesOnCalibrated('mlb_moneyline'));
 for (const m of DECIDES_ON_RAW_MODELS) {
   check(`${m} decides raw`, !decidesOnCalibrated(m));
 }
@@ -77,10 +97,10 @@ const rule = { ...nyr, model_id: 'nfl_wind_totals' };
 check('raw decider: calibrated number ignored', decidedNumbers(rule).prob === 0.3801);
 
 // ── the publish-time guards ─────────────────────────────────────────────────
-const far = { ...nyr, game_time: new Date(Date.now() + 72 * 3600_000).toISOString() };
+const far = { ...ml, game_time: new Date(Date.now() + 72 * 3600_000).toISOString() };
 check('decided-only pick 72h out waits', !passesActionFilter(far));
 check('a raw pass 72h out still shows', passesActionFilter({ ...far, model_probability_cal: null,
-  model_probability: 0.4638, decision_edge: 0.0864 }));
+  model_probability: 0.80, decision_edge: 0.15 }));
 const cut = { min_prob: 0.40, min_edge: 0.05, prob_only: false };
 const now = Date.parse('2026-10-02T20:05:00Z');
 const freshAt = '2026-10-02 20:00:00.000000+00';   // the pipeline's TEXT shape
@@ -130,8 +150,8 @@ const ncaaf = { ...nyr, model_id: 'ncaaf_live_win_prob', model_probability_cal: 
   decision_implied_prob: 0.33, dk_implied_prob: 0.40 };
 check('ncaaf_live edge is cal - DK implied', Math.abs(decidedNumbers(ncaaf).edge - 0.07) < 1e-9,
   String(decidedNumbers(ncaaf).edge));
-const zero = { ...nyr, decision_implied_prob: null, dk_implied_prob: 0 };
-check('implied 0.0 is a missing price', decidedNumbers(zero).edge === 0.023);
+const zero = { ...ml, decision_implied_prob: null, dk_implied_prob: 0 };
+check('implied 0.0 is a missing price', decidedNumbers(zero).edge === 0.20);
 
 if (failures) { console.log(`\n${failures} failure(s)`); process.exit(1); }
 console.log('\nall checks passed');

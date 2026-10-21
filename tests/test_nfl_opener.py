@@ -480,6 +480,20 @@ class TestBettableBooksOnly:
             assert bad not in books, bad
 
 
+def _db_row(gid, away, home, kick):
+    """One NFL games-table row as data_ingest/schedule.fetch_rows returns it."""
+    return {"game_id": f"NFL_{gid}", "season": 2026, "home_team": home,
+            "away_team": away, "commence_time": kick.isoformat(), "week": 1,
+            "season_type": "REG", "roof": "outdoors", "stadium_id": None,
+            "stadium": None, "location": None}
+
+
+def _feed_schedule(monkeypatch, rows):
+    """Serve `rows` as the games table, so no test reads a database."""
+    from data_ingest import schedule as sched_mod   # nfl/ is on sys.path via the card
+    monkeypatch.setattr(sched_mod, "fetch_rows", lambda lo, hi: rows)
+
+
 class TestFireWindow:
     """T-7 is gone; T-2 is not."""
 
@@ -492,24 +506,16 @@ class TestFireWindow:
         # On 2026-09-06 the Week-1 Sunday slate sat 172.5h out (7.19 days) with
         # Pinnacle posted and seven qualifying deviations, and the old bound
         # (LEAD_HI_DAYS = 7.0) watched them and fired nothing.
+        #
+        # The schedule is the games table since 2026-10-20 (it was a frozen
+        # data/games.csv), so the rows are fed where the card reads them.
         from datetime import datetime, timedelta, timezone
-        from zoneinfo import ZoneInfo
-        et = ZoneInfo("America/New_York")
         now = datetime.now(timezone.utc)
-
-        def _kick(delta_days):
-            k = (now + timedelta(days=delta_days)).astimezone(et)
-            return f"{k:%Y-%m-%d},{k:%H:%M}"
-
-        d = tmp_path / "data"
-        d.mkdir()
-        (d / "games.csv").write_text(
-            "season,week,gameday,gametime,away_team,home_team\n"
-            f"2026,1,{_kick(7.19)},BUF,HOU\n"    # was excluded by T-7
-            f"2026,1,{_kick(1.0)},NYJ,TEN\n"     # excluded by T-2, must STAY out
-            f"2026,1,{_kick(4.0)},SF,LA\n",      # inside either way
-            encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
+        _feed_schedule(monkeypatch, [
+            _db_row("2026_01_BUF_HOU", "BUF", "HOU", now + timedelta(days=7.19)),  # was excluded by T-7
+            _db_row("2026_01_NYJ_TEN", "NYJ", "TEN", now + timedelta(days=1.0)),   # excluded by T-2, must STAY out
+            _db_row("2026_01_SF_LA", "SF", "LA", now + timedelta(days=4.0)),       # inside either way
+        ])
 
         # No hi_days argument on purpose: the DEFAULT is the thing that
         # changed. Passing 10.0 explicitly would have driven the old code to
@@ -518,6 +524,70 @@ class TestFireWindow:
         assert "HOU" in teams, "the 7.19-day game must now be fireable"
         assert "LA" in teams
         assert "TEN" not in teams, "the T-2 late bound must still exclude it"
+
+    def test_main_never_bets_a_game_inside_T2(self, tmp_path, monkeypatch):
+        # The T-2 bound lives in ONE line of main() since 2026-10-20: the card
+        # reads the schedule once (lo_days=0, the watch window) and cuts the
+        # fire window out of it. select_opener_bets checks no lead time, and
+        # the test above checks load_window_schedule's DEFAULT, which main()
+        # no longer uses. So this runs main() end to end with the REAL
+        # selection: two games carrying the same qualifying deviation, one at
+        # T-1 and one at T-4. Only the T-4 game may be bet; both are watched.
+        from datetime import datetime, timedelta, timezone
+        import data_ingest.odds_api as odds_api
+        import data_ingest.parse as parse
+
+        now = datetime.now(timezone.utc)
+        _feed_schedule(monkeypatch, [
+            _db_row("2026_02_NYJ_MIA", "NYJ", "MIA", now + timedelta(days=1.0)),
+            _db_row("2026_02_DEN_KC", "DEN", "KC", now + timedelta(days=4.0)),
+        ])
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("THE_ODDS_API_KEY", "test")
+
+        class _Res:
+            payload = {"timestamp": None, "data": []}
+            cost = 0
+
+        class _FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+
+            def live_odds(self, **kw):
+                return _Res()
+
+        # Pinnacle -3.5, BetMGM -1.5 on both games: dev +2.0, the deployed floor.
+        board = _frame(
+            _both_sides("pinnacle", -3.5, -110, -110)
+            + _both_sides("betmgm", -1.5, -108, -112)
+            + _both_sides("pinnacle", -3.5, -110, -110, home="KC", away="DEN", event="ev2")
+            + _both_sides("betmgm", -1.5, -108, -112, home="KC", away="DEN", event="ev2"))
+        monkeypatch.setattr(odds_api, "OddsAPIClient", _FakeClient)
+        monkeypatch.setattr(odds_api, "ledger_status", lambda: {})
+        monkeypatch.setattr(parse, "snapshot_to_frame", lambda payload, label: board)
+        monkeypatch.setattr(card, "load_prior_observations",
+                            lambda sched, now=None, hours=None: pd.DataFrame(
+                                columns=card.PRIOR_COLS))
+
+        seen = {}
+        real_select = card.select_opener_bets
+
+        def _select(frame, sched, threshold, prior=None, now=None):
+            seen["bets"] = real_select(frame, sched, threshold=threshold,
+                                       prior=prior, now=now)
+            return seen["bets"]
+
+        def _evaluate(frame, sched, threshold, prior=None, now=None):
+            seen["watched"] = set(sched.game_id)
+            return []
+
+        monkeypatch.setattr(card, "select_opener_bets", _select)
+        monkeypatch.setattr(card.opener_spread, "evaluate_board", _evaluate)
+        monkeypatch.setattr(sys, "argv", ["daily_opener_card.py"])
+        assert card.main() == 0
+        assert seen["watched"] == {"2026_02_NYJ_MIA", "2026_02_DEN_KC"}
+        assert list(seen["bets"].game_id) == ["2026_02_DEN_KC"], (
+            "a game inside T-2 was bet")
 
     def test_early_bound_is_the_watch_horizon_and_late_bound_is_unchanged(self):
         # mike asked for the T-7 rule to go, not the T-2 one. Dropping both
@@ -766,16 +836,11 @@ class TestFreshNumberLabel:
         # A label the card does not feed is dead code. Run main() end to end
         # with the feed faked and record what reaches the model.
         from datetime import datetime, timedelta, timezone
-        from zoneinfo import ZoneInfo
         import data_ingest.odds_api as odds_api
 
-        k = (datetime.now(timezone.utc) + timedelta(days=4)).astimezone(
-            ZoneInfo("America/New_York"))
-        d = tmp_path / "data"
-        d.mkdir()
-        (d / "games.csv").write_text(
-            "season,week,gameday,gametime,away_team,home_team\n"
-            f"2026,3,{k:%Y-%m-%d},{k:%H:%M},TEN,NYG\n", encoding="utf-8")
+        _feed_schedule(monkeypatch, [_db_row(
+            "2026_03_TEN_NYG", "TEN", "NYG",
+            datetime.now(timezone.utc) + timedelta(days=4))])
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("THE_ODDS_API_KEY", "test")
 

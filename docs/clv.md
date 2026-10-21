@@ -1,122 +1,123 @@
 # Closing line value (CLV)
 
-The formula, the book, and the worked example. Capture lives in
+The formula, the book, and the worked examples. Capture lives in
 `tracking/paper_tracker.py` (`_capture_clv` / `_backfill_clv`); the arithmetic
-is `tracking/clv_math.py`. This is a grade of the *process*. It does not size
-bets and it does not recut models.
+is `tracking/clv_math.py`. The bulk rewrite is
+`data/migrations/clv_standard_v2_2026_10_14.sql`. This is a grade of the
+*process*. It does not size bets and it does not recut models.
 
-Industry write-up this matches:
-[OddsShopper, CLV explained (2026-06-05)](https://www.oddsshopper.com/articles/betting-101/closing-line-value-explained)
-and the companion
-[CLV vs variance (2026-08-18)](https://www.oddsshopper.com/articles/betting-101/clv-vs-variance).
+## Two numbers
 
-## Formula
-
-**Price CLV** (same line only), stored as `picks.clv_pct` in probability
-points:
+**Primary — same-book raw price CLV.** Did the book we actually bet
+(`decision_book`, stored as `clv_bet_book`) close worse than the price we
+took, on the same side and the same line?
 
 ```
-fair_close_p = no-vig probability of our side at the close
-fair_bet_p   = no-vig probability of our side at lock, when the locked
-               two-way is on the snapshot; otherwise raw bet implied
-clv_pct      = (fair_close_p − fair_bet_p) × 100
+taken  = raw implied probability of COALESCE(decision_odds, dk_odds)
+close  = raw implied probability of THAT book's last pre-start American
+clv_pp = (close − taken) × 100
+clv_pct = (taken_decimal / close_decimal − 1) × 100
 ```
 
-Positive = we bought cheaper than the market’s true close.
+Neither side is de-vigged. A beat is `clv_pct > 0`. Equal prices are 0 and
+are not a beat. `clv_beat_close` is that comparison, and it is NULL when
+`clv_pct` is NULL.
 
-No-vig (multiplicative / proportional de-vig): convert **both** sides of the
-two-way market to implied probability, divide each by the sum. A 3-way (NHL
-regulation) divides by the sum of all three. One-way quotes (anytime TD and
-other one-sided markets) have no second side: `clv_method = raw_one_way`,
-the raw implied is stored so pick-detail still has a number, and the
-published pedigree **excludes** it.
+If that book has no pre-start snapshot on the same line, both are NULL and
+the pick is left out of the average. No other book is filled in.
 
-OddsShopper’s worked Dodgers example only shows one bet price, so `fair_bet_p`
-is raw implied (−130 → 56.52%). Capture looks up the pick-book snapshot at
-`created_at` and de-vigs the bet too when that row’s price matches the lock.
+**Secondary — market edge.** Raw taken versus Pinnacle's fair close, only
+when Pinnacle has a pre-start snapshot on the same line.
 
-**Line CLV** (`picks.line_clv_pts`) is a different bet: points the number
-moved toward our side. When the line moved, `clv_pct` is NULL. The two are
-never mixed into one `clv_pct`. `clv_beat_close` is the one verdict: line CLV
-where the number moved, price CLV where it held.
+```
+fair        = power de-vig of Pinnacle's close (power_3way when a draw is quoted)
+market_clv_pp  = (fair − taken) × 100
+market_clv_pct = (taken_decimal × fair − 1) × 100
+```
 
-## Which book is the close?
+`market_clv_method` is `power`, `power_3way`, or `zero_vig` (Kalshi and
+Polymarket, which are not de-vigged again). No soft-book fallback. Missing
+Pinnacle close → NULL. This column is not the headline beat rate.
 
-1. **Pinnacle**, when a pre-game snapshot exists for that game + market
-   ( Circa is not in The Odds API feed we store).
-2. Else the book the pick was priced at (DraftKings for distributional
-   models; the label suffix for market-relative props).
+`clv_method = standard_v2` is the only stamp in the pedigree
+(`PEDIGREE_CLV_METHODS`). Older stamps (`no_vig`, `zero_vig`, `raw_one_way`,
+`raw_one_sided`, `graded_at_dk_legacy`) stay on the row until rewritten and
+are excluded from averages.
 
-`clv_close_book` names it. `closing_dk_odds` is the American on our side at
-that book (legacy column name).
+## Which price is the bet?
 
-Prediction-market prices (Kalshi, Polymarket) are already no-vig. If a close
-is ever read from those books, `clv_method = zero_vig` and the raw implied
-**is** the fair close — they are not de-vigged again. Measured 2026-09-14:
-zero `odds` rows and zero pick labels at Kalshi, so this is a guard, not a
-current path.
+The price is `COALESCE(decision_odds, dk_odds)`. The book, in order
+(`paper_tracker._bet_price_and_book`):
 
-## Worked example (OddsShopper’s Dodgers)
+1. `decision_book`, whenever the row carries one;
+2. the book the label names, for `nfl_prop_market`, `wnba_prop_market`,
+   `nfl_wind_totals` and `nfl_opener_spread`;
+3. DraftKings.
 
-Bet Dodgers −130. Close −150 / +135.
+`clv_bet_book` records it. The app prints the same price at the same book
+(`mobile/src/lib/clvBet.ts`).
 
-| Step | Number |
-|---|---|
-| Dodgers raw close | 150/250 = 60.0% |
-| Padres raw close | 100/235 ≈ 42.55% |
-| Sum (vig) | 102.55% |
-| Fair Dodgers | 60.0 / 102.55 ≈ **58.505%** ≈ **−141** |
-| Bet implied | 130/230 ≈ 56.522% |
-| `clv_pct` | (58.505 − 56.522) × 100 = **+1.98 pp** |
+## Same line, and the close bound
 
-Raw one-sided implied on −150 would have reported +3.48 pp. The extra 1.5 pp
-is hold, not edge. Pinned by `tests/test_clv_math.py::test_oddsshopper_dodgers_no_vig_close`.
+The price snapshot is filtered to the signed `scored_line` (`spread_home =
+scored_line`, not `ABS`). A later puck line at the opposite sign is a
+different bet. NHL puck-line rows in `odds` keep the sign the book sent;
+this capture does not rewrite them.
 
-Vig *widening* at close (−110/−110 → −115/−115) is +1.11 pp raw. Close-only
-de-vig vs raw bet is −2.38 pp (juice paid, not a beat). De-vigging **both**
-two-ways is **exactly 0**. That is the trap. Capture de-vigs both when the
-lock snapshot matches `dk_odds`.
+Line movement uses the book's latest main line. MLB and NHL spreads stay on
+`ABS(spread_home) = 1.5` for that read, so an alternate is not the close.
+When that number has left `scored_line`, `clv_pct` is NULL and `line_clv_pts`
+is kept. The headline beat does not treat the point move as a beat.
+
+The bound is the earlier of `games.commence_time` and `picks.game_time`.
+Game rows require `snapshot_type <> 'in_play'` and
+`snapshot_at <= bound`. There is no post-pitch fallback. Props do not filter
+`snapshot_type` (the feed's prop rows are not stamped that way); they are
+still bounded by the start. A pick with `created_at` after first pitch is
+not measured.
+
+## Worked examples
+
+Pinned by `tests/test_clv_standard_v2.py` and `tests/test_clv_math.py`.
+Power de-vig is bisection, 80 steps, k in [0.05, 12], then renormalised.
+It is not the multiplicative de-vig in the OddsShopper write-up, so the
+Dodgers fair price here is −143, not −141.
+
+| Pick | Taken | Same-book close | Primary | Pinnacle | Market edge |
+|---|---|---|---|---|---|
+| 3114189 Dach Under 1.5 SOG | DK −120 | DK −145 | **+8.50% / +4.64pp**, beat | −142 / +107 | +1.51% / +0.82pp, `power` |
+| 2387645 MIA +1.5 | Rebet −132 | Rebet −133 | **+0.33% / +0.18pp**, beat | −125 / +113 | **−4.47% / −2.54pp**, `power` |
+| 3114194 Dunn Under 0.5 assists | DK −160 | DK −160 | **0 / 0**, not a beat | −160 / +120 | −5.21% / −3.21pp, `power` |
+| Dodgers −130 (illustration) | −130 | — | — | −150 / +135 | +4.08% / +2.31pp, fair −143 |
+
+2387645 is the sign flip: the old no-vig column stored +1.10. The book we
+bet (Rebet) closed one cent worse, which is a small beat. Pinnacle's fair
+close was better than the price we took, which is the negative market edge.
 
 ## What this is not
 
-- **In-play.** Live picks are excluded (`is_live IS NOT TRUE`). The close is
-  the last snapshot with `snapshot_at <= commence_time`; there is no
-  unbounded “latest” fallback. Post-pitch rows labelled `open` (§106) are
-  not a close.
-- **A pick stamped after first pitch.** `created_at > commence_time` is
-  skipped. Measuring it fabricates a favourable move.
-- **Thin / one-sided / influencer markets.** Price CLV on a one-way quote is
-  stamped `raw_one_way` and kept out of `avg_clv_pct`. Be suspicious of CLV
-  in illiquid props even when two-way.
-- **P&L.** Short-sample results are variance. This audit does not change
-  unit sizes or recut models.
+- **In-play.** `is_live IS NOT TRUE`. No unbounded latest snapshot.
+- **A substitute book.** A missing bet-book close is NULL, not DraftKings
+  and not Pinnacle.
+- **P&L, a threshold, or a pause.** `results_snapshots` units and the
+  win–loss record are not rewritten. The cutoffs in the model-quality
+  monitor were not retuned when the unit became a percent.
 
-## Old vs new on existing rows
+## Where it shows
 
-Through 2026-09-14, `clv_pct` was raw one-sided implied on the pick’s book.
-Those rows are stamped `clv_method = raw_one_sided` by
-`data/migrations/add_clv_method_2026_09_14.sql`. `_backfill_clv` rewrites
-them on the worker (same 40-date bound as the uncaptured scan). Until a row
-is rewritten, **`v_public_track_record` averages only `no_vig` and
-`zero_vig`**, so the app pedigree (Sharp Score / `useModelClvPedigree`) never
-mixes the two definitions. During the catch-up the CLV sample on the Models
-tab shrinks, then grows back with the honest number.
+`v_public_track_record` averages `standard_v2` only. `clv_settled` /
+`clv_beat` / `avg_clv_pct` are the same-book headline. `clv_game_*` and
+`clv_prop_*` split game lines from props. `market_clv_*` is the Pinnacle
+column. The app's beat-the-close figure is the same-book rate. A row is
+shown as a percent only when `clv_method` is `standard_v2`.
 
-`opening_signals.clv_pct` uses the same no-vig formula from this change
-forward. It grades the *opening lock* vs close, not the live BET vs close,
-and it is a shadow track — not the public pedigree. Rows already settled
-there keep the old raw number; they are not rewritten.
+`opening_signals.clv_pct` stores the same-book raw **probability points**
+(DraftKings only) from this change forward. It is a shadow track. Rows
+already settled there are not rewritten.
 
-## Other CLV-shaped numbers in the repo
-
-| Surface | What it is |
-|---|---|
-| `picks.clv_pct` | This document. Production. |
-| `opening_signals.clv_pct` | Same formula, vs the opening lock. Shadow. |
-| `scripts/nfl_prop_clv.py` | Line-CLV research on the market-relative card (almost never same-line). |
-| `nfl/scripts/backtest_clv.py` | Spread *points* vs Pinnacle close, a different bet. |
-| NFL live `devig_power` | Power de-vig for *pricing*, not this capture. |
-
-Power de-vig (solve \(p_a^k + p_b^k = 1\)) is what the NFL moneyline arm uses
-to *price*. CLV capture is multiplicative, matching OddsShopper’s worked
-example. Do not swap one for the other without a new measurement.
+The migration recomputes every priced pre-game BET whose game has started
+and whose method is not yet `standard_v2`. A row with a measurable close or
+line move is stamped and captured. A row that cannot be measured, and whose
+game started more than six hours ago or that already carried an older
+stamp, is stamped `standard_v2` with NULLs so the old number leaves the
+average. A recent never-captured miss is left for the Python backfill.

@@ -20,7 +20,10 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+// Source is read with LF whatever the checkout: autocrlf gives CRLF on
+// Windows, and regexes below that end a match at a newline never matched.
+const readUtf8 = (p: string) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
+import { join, relative, sep } from 'node:path';
 
 import {
   formatCurrency,
@@ -33,7 +36,9 @@ import {
 import { badgeGlyphSize, pnlTone, roundedAt, roundsToZero, SIGNAL_BADGE } from '../src/lib/tone';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
+// Allowlists and labels use '/'; relative() yields '\\' on Windows.
+const relPosix = (f: string) => relative(ROOT, f).split(sep).join('/');
+const read = (p: string) => readUtf8(join(ROOT, p));
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -99,6 +104,10 @@ check(
   'textTertiary stays lighter than textSecondary (hierarchy)',
   lum(tok.textTertiary) > lum(tok.textSecondary),
 );
+check(
+  'pausedInk sits between tertiary and secondary',
+  lum(tok.textTertiary) > lum(tok.pausedInk) && lum(tok.pausedInk) > lum(tok.textSecondary),
+);
 
 // ── contrast on the real grounds ────────────────────────────────────────────
 type Pair = { fg: string; bg: string; bgName: string; min: number; where: string };
@@ -124,6 +133,7 @@ const PAIRS: Pair[] = [
   T('betInk', 'bg', 'Parlay stat row on the grouped ground (H2)'),
   T('betInk', 'betSoft', 'BET badge, HIGH tier, sharp pill, W letter (H1/H2/M5/M6)'),
   T('tint', 'bgCard', 'Tracking / In slip ON: tint outline, checkmark and label (Designer ruling)'),
+  T('tint', 'tintSoft', 'Signals Slip/Track selected wash (Designer, #965)'),
   W('betInk', 'bet', 'parlay "Great" grade (H2)'),
   T('avoidInk', 'bgCard', 'loss text, error text, destructive labels (H2/H8/M1)'),
   T('avoidInk', 'bg', 'loss text on the grouped ground (H2)'),
@@ -134,6 +144,7 @@ const PAIRS: Pair[] = [
   T('medInk', 'medSoft', 'MED tier, warn banners, reconnect, DOG tag (H8/M6/M24)'),
   W('medInk', 'med', 'parlay "Fair" grade (H2)'),
   T('textSecondary', 'noneSoft', 'NONE badge, LOW tier, P letter, Preview (H1)'),
+  T('pausedInk', 'noneSoft', 'Paused pick chip (designer, #963)'),
   W('textPrimary', 'info', 'parlay "Good" grade (H2)'),
   T('textPrimary', 'bet', 'SportToggle count on green (H6)'),
   T('textPrimary', 'med', 'player hit-rate badge on amber (H6 class)'),
@@ -155,6 +166,8 @@ const PAIRS: Pair[] = [
   // Red icons keep the bright hue where it already clears 3:1.
   T('avoid', 'avoidSoft', 'SignIn error-banner icon (non-text)', 3),
   T('avoid', 'bgCard', 'remove-leg / trash icons (non-text)', 3),
+  // Empty matchup bars sit on the white card. separatorOpaque is 1.7:1 there.
+  T('none', 'bgCard', 'Anytime TD empty matchup bar (non-text)', 3),
 ];
 console.log('\n  token          hex        ground              ratio  min');
 for (const p of PAIRS) {
@@ -174,9 +187,11 @@ check('the old failures really were failures', ratio(tok.bet, tok.bgCard) < 3 &&
 
 // ── signal badge (H1) ───────────────────────────────────────────────────────
 const GLYPH = { BET: 'checkmark', NONE: 'remove', AVOID: 'close' } as const;
+// NONE is stored as NONE and read as NEUTRAL (Matt, 2026-10-12).
+const WORD = { BET: 'BET', NONE: 'NEUTRAL', AVOID: 'AVOID' } as const;
 for (const s of ['BET', 'NONE', 'AVOID'] as const) {
   const spec = SIGNAL_BADGE[s];
-  check(`badge ${s}: word "${s}"`, spec.label === s);
+  check(`badge ${s}: word "${WORD[s]}"`, spec.label === WORD[s]);
   check(`badge ${s}: glyph ${GLYPH[s]}`, spec.glyph === GLYPH[s], spec.glyph);
   const r = ratio(tok[spec.ink], tok[spec.fill]);
   check(`badge ${s}: ${spec.ink} on ${spec.fill} ≥ 4.5:1`, r >= 4.5, r.toFixed(2));
@@ -305,8 +320,8 @@ const medIcons: string[] = [];
 // icon from `color` and the words through inkFor()).
 const HUE_TEXT = /(?<![A-Za-z])(color:|tint:|tint=\{)[^,;\n}]*\bcolors\.(bet|avoid|med|positive|negative|high|none|low)\b(?!Soft|Ink)/;
 for (const f of files) {
-  const rel = relative(ROOT, f);
-  code(readFileSync(f, 'utf-8'))
+  const rel = relPosix(f);
+  code(readUtf8(f))
     .split('\n')
     .forEach((line, i) => {
       // The short form is the one the scan could not see (L3); 6-digit brand
@@ -359,8 +374,8 @@ function ioniconColors(src: string): [number, string][] {
 const BRIGHT_ICON = /\bcolors\.(med|bet|positive|high)\b(?!Soft|Ink)/;
 const brightIcons: string[] = [];
 for (const f of files) {
-  const rel = relative(ROOT, f).split('\\').join('/');
-  for (const [line, expr] of ioniconColors(code(readFileSync(f, 'utf-8')))) {
+  const rel = relPosix(f).split('\\').join('/');
+  for (const [line, expr] of ioniconColors(code(readUtf8(f)))) {
     if (!BRIGHT_ICON.test(expr)) continue;
     brightIcons.push(`${rel}:${line} ${expr.replace(/\s+/g, ' ')}`);
   }
@@ -383,9 +398,9 @@ for (const rel of ['src/components/SportsbookPickerSheet.tsx', 'src/components/H
 }
 // Designer H2 / L9 misses: the equity-curve total and the share text.
 const eq = read('src/components/EquityCurve.tsx');
-check('EquityCurve total is pnlColor ink + formatSignedUnits (no bright text, no hyphen)', /<Text style=\{\[styles\.units, \{ color: pnlColor\(last, 1\) \}\]\}>\{formatSignedUnits\(last\)\}<\/Text>/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
+check('EquityCurve end pill is pnlColor ink + formatSigned, line is betInk (no bright green)', /formatSigned\(endUnits, 2, 'u'\)/.test(eq) && /pnlColor\(endUnits, 2\)/.test(eq) && /colors\.betInk/.test(eq) && !/colors\.positive/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
 const share = read('src/lib/shareRecord.ts');
-check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roiFlat\)/.test(share) && /formatSignedUnits\(opts\.endUnits\)/.test(share) && !/\? '\+' : ''/.test(share));
+check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roi\)/.test(share) && /formatSigned\(opts\.endUnits, 2, 'u'\)/.test(share) && !/\? '\+' : ''/.test(share));
 check('DailyResults "No picks" rows: no opacity, textTertiary', /sportCardEmpty: \{ paddingVertical: spacing\.sm \}/.test(read('src/components/DailyResultsModal.tsx')));
 // Every pnlColor() names the display's precision: `, 1, 100)` for a ratio
 // printed by formatPctSigned, `, 2)` for dollars, `, 1)` for pp (Reviewer
@@ -393,8 +408,8 @@ check('DailyResults "No picks" rows: no opacity, textTertiary', /sportCardEmpty:
 const toneCalls: string[] = [];
 const badToneCalls: string[] = [];
 for (const f of files) {
-  const rel = relative(ROOT, f);
-  for (const m of code(readFileSync(f, 'utf-8')).matchAll(/pnlColor\(((?:[^()]|\([^()]*\))*)\)/g)) {
+  const rel = relPosix(f);
+  for (const m of code(readUtf8(f)).matchAll(/pnlColor\(((?:[^()]|\([^()]*\))*)\)/g)) {
     if (/^value, digits/.test(m[1])) continue;
     toneCalls.push(rel);
     if (!/,\s*(1,\s*100|2|1)\s*$/.test(m[1])) badToneCalls.push(`${rel}: pnlColor(${m[1]})`);

@@ -28,6 +28,15 @@ Deliberate, and load-bearing:
   appears on a later pass, nothing happens to the pick that exists. The id,
   not the name, because two books spell one player two ways.
 
+  ONE NHL PROP BET A GAME, ACROSS ALL FOUR PROP MODELS (mike, 2026-10-02:
+  "1 max ... it needs to be the best of the best"). Blocked shots, saves,
+  shots on goal and assists are pooled; the single best-EV bet in a game is
+  written, and only if no NHL prop bet exists for that game already. A game
+  whose best bet does not clear its model's floor gets none. Graded on three
+  priced seasons (scripts/nhl_prop_combined_cap.py): with every floor at 0.18,
+  +16.2% on 1,659 bets, every season positive, against +6.7% on 9,082 under
+  the old per-model rules.
+
   THE DraftKings COLUMNS MEAN DraftKings. The row is written the way the
   scorer writes a pick decided away from DraftKings (CLAUDE.md 6):
   `decision_*` carry the book, price and edge the bet was DECIDED at;
@@ -42,8 +51,25 @@ Deliberate, and load-bearing:
   pass already wrote counts against it: a later pass adds only what is left
   and never replaces a pick that exists.
 
-  A GOALIE A BOOK PRICES IS TAKEN AS STARTING. That is the bet: the books void
-  saves when he does not start, and settlement does the same.
+  BOTH STARTING GOALIES CONFIRMED FIRST (mike, 2026-10-20: "We should
+  absolutely always know the goalie matchup before making a bet as well."),
+  FOR SAVES AND ASSISTS. Only games models/nhl_goalie_gate.py calls known are
+  scored -- filtered before the four models' rows are pooled, so an unknown
+  game never takes the one prop bet a game allows -- and only on a quote
+  fetched after the matchup became known (scripts/nhl_prop_card.
+  after_confirmation). The pool drops a gated row on an unknown game before it
+  chooses (publish_across_models), and publish() refuses one again.
+
+  SHOTS ON GOAL IS EXEMPT (mike, 2026-10-20: "Ok on shots on goal";
+  config.NHL_GOALIE_GATE_EXEMPT). It scores the whole slate at its opening
+  fetch exactly as before the rule, and its row may take a game's one prop
+  slot before the goalies are confirmed. The model never reads the goalie;
+  the evidence is beside the constant.
+
+  A SAVES BET IS ON THE CONFIRMED STARTER ONLY. A book that still prices the
+  other goalie is offering a bet that voids (the books void saves when he does
+  not start, and settlement does the same), and it would take the game's one
+  prop slot. Once the matchup is known that goalie is skipped and named.
 
   A PLAYER IT CANNOT IDENTIFY IS SKIPPED AND LOGGED, never guessed.
 
@@ -66,9 +92,15 @@ import config  # noqa: E402
 import models.nhl_props as np_  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from data.season_labels import nhl_season_label  # noqa: E402
-from scripts.nhl_prop_card import COHERENT_SUM, ET, _utc, slate  # noqa: E402
+import models.nhl_goalie_gate as goalie_gate  # noqa: E402
+from scripts.nhl_prop_card import (  # noqa: E402
+    COHERENT_SUM, ET, _utc, after_confirmation, known_slate, slate, slate_for,
+)
 
 QUOTE_COLS = ["game_id", "player", "book", "line", "over", "under", "snap", "over_link", "under_link"]
+# Which model prices each market, so the quote read honours the goalie rule's
+# exemption per model (shots on goal; models/nhl_goalie_gate.is_exempt).
+MODEL_BY_MARKET = {s.market: s.model_id for s in np_.LIVE}
 
 
 def latest_quotes(conn, games: dict[str, dict], market: str) -> pd.DataFrame:
@@ -90,6 +122,7 @@ def latest_quotes(conn, games: dict[str, dict], market: str) -> pd.DataFrame:
     if q.empty:
         return q.reset_index(drop=True)
     q = q[q.snap == q.groupby("game_id").snap.transform("max")]
+    q = after_confirmation(q, games, "nhl-props-card", MODEL_BY_MARKET.get(market))
     q = q.drop_duplicates(["game_id", "player", "book", "line"], keep="last")
     two = q.over.notna() & q.under.notna()
     total = q.over.map(np_.implied, na_action="ignore") + q.under.map(np_.implied, na_action="ignore")
@@ -152,6 +185,25 @@ def upcoming_rows(quotes: pd.DataFrame, games: dict[str, dict], who: pd.DataFram
     priced = (quotes.merge(pd.DataFrame(ids), on=["game_id", "player"]) if ids
               else quotes.iloc[0:0].assign(player_id=pd.Series(dtype="int64")))
     return pd.DataFrame(list(rows.values())), priced, skipped
+
+
+def starters_only(up: pd.DataFrame, priced: pd.DataFrame, starters: dict) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """The priced goalies who are their team's confirmed starter. `starters` is
+    {game_id: {team: (player_id, player_name)}} from the goalie gate. Pure."""
+    if up.empty:
+        return up, priced, []
+    keep, skipped = [], []
+    for r in up.itertuples():
+        st = (starters.get(r.game_id) or {}).get(r.team)
+        ok = st is not None and goalie_gate.same_goalie(st[0], st[1], r.player_id, r.player_name)
+        keep.append(ok)
+        if not ok:
+            skipped.append(f"{r.player_name} ({r.game_id}): not the confirmed starter "
+                           f"({st[1] if st else 'none confirmed'})")
+    up = up[keep].reset_index(drop=True)
+    ids = set(zip(up.game_id, up.player_id))
+    priced = priced[[(g, p) in ids for g, p in zip(priced.game_id, priced.player_id)]]
+    return up, priced, skipped
 
 
 def best_bet(spec: np_.Spec, mu: float, quotes: pd.DataFrame, dispersion: float) -> dict | None:
@@ -279,6 +331,119 @@ def limit_per_game(spec: np_.Spec, rows: list[dict], existing: dict[str, set[str
     return kept
 
 
+# Every NHL prop model. One bet a game is shared among all of them.
+PROP_MODEL_IDS = ("nhl_prop_blocked_shots", "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists")
+MAX_PROP_BETS_PER_GAME = 1
+# At most FOUR NHL prop bets a night (one game_date), best EV first, the picks
+# already written that night included (mike, 2026-10-08: "4 a night"; it was
+# two from 2026-10-03, mike: "Too many fucking unders nhl props.").
+#
+# WHY FOUR. The two-a-night figures (832 bets, +20.9%, +173.8 units) were
+# inflated by a backtest defect: a shared player name (two Elias Petterssons)
+# priced the forward's shots-on-goal under at the defenceman's count, +60.9 of
+# those units. With shared names refused as the card refuses them
+# (scripts/nhl_prop_backtest.namesakes, #895), the four models together at EV
+# >= 0.18, one a game, three priced seasons (worker job 444467,
+# scripts/nhl_prop_ev_lab.py), in units a season:
+#   2 a night +38.8 (+14.4%) | 3 +46.1 | 4 +54.6 (+12.9%) | 6 +56.8 | none +65.6
+# Every season is positive at every level. On the books that post these
+# markets live, four a night (+56.8) matches no limit (+56.5) against +35.5
+# for two: the gain with a hard ceiling. About 2.8 bets a night on average.
+# The backtest keeps each night's best; live, a pass writes what has cleared
+# by then, and a later better bet does not replace an earlier one.
+# docs/nhl_clv_ev_assessment.md.
+MAX_PROP_BETS_PER_NIGHT = 4
+
+
+def games_with_a_prop_bet(conn, game_ids: list[str]) -> set[str]:
+    """The games any NHL prop model has already written a pick for."""
+    if not game_ids:
+        return set()
+    return {r[0] for r in conn.execute(
+        "SELECT DISTINCT game_id FROM picks WHERE model_id = ANY(%s) AND game_id = ANY(%s)",
+        (list(PROP_MODEL_IDS), list(game_ids))).fetchall()}
+
+
+def prop_bets_by_night(conn, game_dates: list[str]) -> dict[str, int]:
+    """How many NHL prop picks are already written for each game_date."""
+    if not game_dates:
+        return {}
+    return {str(d): int(n) for d, n in conn.execute(
+        "SELECT game_date, count(*) FROM picks WHERE model_id = ANY(%s) AND game_date = ANY(%s) "
+        "GROUP BY game_date", (list(PROP_MODEL_IDS), list(game_dates))).fetchall()}
+
+
+def per_night(rows: list[dict], written: dict[str, int] | None = None) -> list[dict]:
+    """At most MAX_PROP_BETS_PER_NIGHT a game_date, best EV first, written picks counted. Pure."""
+    written = written or {}
+    left: dict[str, int] = {}
+    kept = []
+    for r in sorted(rows, key=lambda r: (-r["_ev"], r["model_id"], str(r["player_id"]))):
+        d = str(r["game_date"])
+        n = left.setdefault(d, MAX_PROP_BETS_PER_NIGHT - written.get(d, 0))
+        if n <= 0:
+            continue
+        left[d] = n - 1
+        kept.append(r)
+    return kept
+
+
+def one_per_game(rows: list[dict], taken: set[str] | None = None) -> list[dict]:
+    """The best-EV row in each game across every prop model, none for a game already bet. Pure."""
+    taken = taken or set()
+    left: dict[str, int] = {}
+    kept = []
+    for r in sorted(rows, key=lambda r: (-r["_ev"], r["model_id"], str(r["player_id"]))):
+        if r["game_id"] in taken:
+            continue
+        n = left.setdefault(r["game_id"], MAX_PROP_BETS_PER_GAME)
+        if n <= 0:
+            continue
+        left[r["game_id"]] = n - 1
+        kept.append(r)
+    return kept
+
+
+# The advisory lock the four prop models share for the read-then-write below,
+# so two writers (a refresh pass and the five-minute NHL goalie job) cannot
+# both see a game as unbet and each give it a prop. Same lock helper as the
+# totals card and the NBA cards (scripts/nfl_wind_publisher._lock_model).
+PROP_POOL_LOCK = "nhl_prop_pool"
+
+
+def publish_across_models(rows: list[dict]) -> int:
+    """Write the one bet a game the four prop models' rows allow. The only door a prop pick goes through."""
+    from scripts.nfl_wind_publisher import _lock_model
+    from scripts.nhl_prop_card import publish as publish_blocked
+    if not rows:
+        return 0
+    conn = get_connection()
+    try:
+        _lock_model(conn, PROP_POOL_LOCK)
+        # A gated model's row on a game whose goalies are not confirmed leaves
+        # the pool BEFORE the one slot a game is chosen: otherwise it could win
+        # the slot on EV, be refused at publish(), and leave the game with no
+        # bet when the exempt shots-on-goal row was there to take it.
+        rows = goalie_gate.refuse_unknown(conn, rows, mode="drop", label="nhl-prop-pool")
+        if not rows:
+            conn.commit()           # releases the pool lock
+            return 0
+        taken = games_with_a_prop_bet(conn, sorted({r["game_id"] for r in rows}))
+        written = prop_bets_by_night(conn, sorted({str(r["game_date"]) for r in rows}))
+        chosen = per_night(one_per_game(rows, taken), written)
+        logger.info(f"nhl-props: {len(chosen)} bet(s) kept of {len(rows)} that clear "
+                    f"(one a game, {MAX_PROP_BETS_PER_NIGHT} a night, across all four prop models; "
+                    f"{len(taken)} game(s) already bet; already written by night {written})")
+        written = 0
+        for r in chosen:
+            written += (publish_blocked if r["model_id"] == "nhl_prop_blocked_shots" else publish)(
+                conn, [r], commit=False)
+        conn.commit()               # releases the pool lock
+        return written
+    finally:
+        conn.close()
+
+
 _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", "pick_label",
          "model_probability", "model_probability_cal", "dk_implied_prob", "edge", "dk_odds", "scored_line",
          "kelly_fraction", "recommended_bet", "bankroll_at_pick", "signal_type", "confidence_tier",
@@ -289,8 +454,14 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"VALUES ({', '.join('%(' + c + ')s' for c in _COLS)})")
 
 
-def publish(conn, rows: list[dict]) -> int:
-    """Insert-once per (game, model, market, player id): a later pass never touches a pick that exists."""
+def publish(conn, rows: list[dict], commit: bool = True) -> int:
+    """Insert-once per (game, model, market, player id): a later pass never touches a pick that exists.
+
+    The last line first: a row whose game's goalie matchup is not known is
+    dropped (models/nhl_goalie_gate.refuse_unknown). `commit=False` leaves the
+    commit to the caller holding the prop pool's lock (publish_across_models).
+    """
+    rows = goalie_gate.refuse_unknown(conn, rows, mode="drop", label="nhl-props-card")
     written = 0
     for r in rows:
         if conn.execute("""
@@ -299,7 +470,7 @@ def publish(conn, rows: list[dict]) -> int:
             continue
         conn.execute(_INSERT, {c: r[c] for c in _COLS})
         written += 1
-    if written:
+    if written and commit:
         conn.commit()
     return written
 
@@ -316,8 +487,11 @@ def render(spec: np_.Spec, n_scored: int, rows: list[dict], skipped: list[str]) 
 
 
 def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
-                 artifact: dict | None = None) -> dict:
-    """One market's card: the model's mean for each priced player, the picks that clear, who was skipped."""
+                 artifact: dict | None = None, starters: dict | None = None) -> dict:
+    """One market's card: the model's mean for each priced player, the picks that clear, who was skipped.
+
+    `starters` ({game_id: {team: (player_id, name)}}, the goalie gate's
+    confirmed starters) limits a goalie market to the starting goalies."""
     out = {"priced": 0, "mus": pd.DataFrame(), "quotes": pd.DataFrame(), "rows": [], "skipped": []}
     quotes = latest_quotes(conn, games, spec.market)
     out["priced"] = int(quotes.groupby(["game_id", "player"]).ngroups) if len(quotes) else 0
@@ -343,6 +517,9 @@ def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
     # played, but a replay of a past slate would otherwise read it.
     pl = pl[pl.game_date.astype(str) < game_date]
     up, priced, skipped = upcoming_rows(quotes, games, identities(pl), game_date, season)
+    if spec.kind == "goalie" and starters is not None:
+        up, priced, off = starters_only(up, priced, starters)
+        skipped += off
     mus = pd.DataFrame()
     if len(up):
         tm = np_.load_teams(conn)
@@ -384,24 +561,32 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     out: dict = {"date": game_date}
     conn = get_connection()
     try:
-        games = slate(conn, game_date, now)
+        # Only games whose goalie matchup is known, before anything is
+        # pooled -- for every model but the exempt one (shots on goal), which
+        # is handed the whole slate as it was before the rule (slate_for).
+        everything = slate(conn, game_date, now)
+        gated = [s.model_id for s in np_.LIVE if not goalie_gate.is_exempt(s.model_id)]
+        known, states = known_slate(conn, everything, f"nhl-props-card ({', '.join(gated)})", now)
+        starters = {g: states[g].starters for g in known}
+        pooled: list[dict] = []
         for spec in np_.LIVE:
             if only and spec.model_id != only:
                 continue
+            games = slate_for(spec.model_id, everything, known)
             try:
-                r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id))
-                published = publish(conn, r["rows"]) if (do_publish and r["rows"]) else 0
-                if published:
-                    logger.info(f"nhl-props-card: {spec.model_id} published {published} new pick(s) "
-                                f"of {len(r['rows'])} that clear")
+                r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id),
+                                 starters=starters)
+                pooled += r["rows"]
                 out[spec.model_id] = {"priced": r["priced"], "scored": len(r["mus"]), "bets": len(r["rows"]),
-                                      "published": published, "skipped": len(r["skipped"])}
+                                      "skipped": len(r["skipped"])}
                 if keep is not None:
                     keep[spec.model_id] = r
             except Exception as exc:
                 conn.rollback()
                 logger.error(f"nhl-props-card: {spec.model_id} failed: {exc}")
                 out[spec.model_id] = {"error": str(exc)}
+        # Pooled, then one a game: the best bet across the markets, not the first market's.
+        out["published"] = publish_across_models(pooled) if (do_publish and pooled) else 0
         return out
     finally:
         conn.close()

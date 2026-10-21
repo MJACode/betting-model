@@ -117,15 +117,18 @@ class TestTheCard:
         assert card.pick_rows(_scored(mu=1.55, under=-110, over=-110), GAMES, "2026-10-01", 1000.0) == []
 
     def test_the_floor_is_the_models_own_and_is_the_swept_number(self):
-        assert config.MODEL_OWN_EV_FLOOR[bs.MODEL_ID] == 0.10
-        assert config.min_ev_for(bs.MODEL_ID) == 0.10          # not the global 0.20
+        assert config.MODEL_OWN_EV_FLOOR[bs.MODEL_ID] == 0.18   # mike, 2026-10-02: one a game, best of the best
+        assert config.min_ev_for(bs.MODEL_ID) == 0.18          # its own, mike 2026-10-02
         assert config.ACTION_THRESHOLDS[bs.MODEL_ID] == {"min_prob": 0.0, "min_edge": 0.0}
 
     def test_a_one_sided_quote_is_priced_on_the_side_it_has(self):
         rows = card.pick_rows(_scored(mu=0.9, over=float("nan")), GAMES, "2026-10-01", 1000.0)
         assert len(rows) == 1 and rows[0]["pick_side"] == "under"
 
-    def test_a_second_pass_does_not_touch_a_pick_that_exists(self):
+    def test_a_second_pass_does_not_touch_a_pick_that_exists(self, monkeypatch):
+        import models.nhl_goalie_gate as gate
+        monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
+
         class Conn:
             def __init__(self):
                 self.inserted, self.commits = [], 0

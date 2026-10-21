@@ -43,22 +43,22 @@ export function ExplainerScreen() {
             the first of those books that does, and the pick says so.
           </P>
           <P>
-            Every pick lists each book's line, <Strong>best price first</Strong>,
-            so you can place it wherever pays most. We compare every book we
-            price and put the best payout first. You can't change that ordering,
-            and the price a pick is measured at is always DraftKings.
+            Every pick lists each of your books' lines, <Strong>best price first</Strong>,
+            so you can place it wherever pays most. The model's own record is
+            always graded at the best price across every book we price.
           </P>
           <P>
             Book coverage is uneven — DraftKings posts far more prop markets than
             anyone else. Open a pick and check <Strong>All books</Strong> to
-            compare every book side by side. You choose the books you bet at in
-            Settings → Your sportsbooks, and you can pick as many as you like.
-            They set two things: the line the Stats leaderboard prints beside
-            each player — the <Strong>best of your books</Strong> on that number,
-            badged with the one offering it — and which book the betslip's bet
-            button opens. They never change what a pick is measured at, and they
-            never limit where you can place: the betslip lists every book we
-            price, whether you selected it or not.
+            compare your books side by side. You choose the books you can bet at
+            in Settings → Your sportsbooks, and you can pick as many as you like;
+            the more you use, the better the prices you get. Picks and the Stats
+            leaderboard show the <Strong>best of your books</Strong>. When a pick
+            was found at a book you don't use, the card shows your best price
+            with the edge worked out at that price, and says where the model
+            found it. When none of your books offers it, the card says so. Your
+            books never change what a pick is or how the model's record is
+            graded.
           </P>
         </Section>
 
@@ -90,19 +90,19 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="BET / AVOID / NONE">
+        <Section heading="BET / AVOID / NEUTRAL">
           <Bullet>
             <Strong>BET</Strong> — model probability AND edge both clear that
             model's threshold. Unit stake attached. These are the picks worth
             backing.
           </Bullet>
           <Bullet>
-            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge ≤
-            -3%). Informational; do NOT bet the other side blindly.
+            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge at or
+            below that model's AVOID cut). Informational; do NOT bet the other side blindly.
           </Bullet>
           <Bullet>
-            <Strong>NONE</Strong> — edge is in the dead zone (between -3% and
-            +3%). Model and DK essentially agree; no advantage either way.
+            <Strong>NEUTRAL</Strong> — edge sits between that model's AVOID and
+            BET cuts. Model and DK essentially agree; no advantage either way.
           </Bullet>
           <P>
             The Signals tab applies the per-model action filter (e.g. moneyline

@@ -23,8 +23,9 @@ scope unless asked.
 | Rule | Source | What to look for |
 |---|---|---|
 | A pick is a pick | CLAUDE.md §1c | A re-priced line shown where the locked line was. Movement belongs beside the pick (`LineMovementCard`, `PickTimingCard`), never in its place. |
-| Decided at the best bettable price at the DK line | CLAUDE.md §6 | Since 2026-09-09 `decision_*` is the deciding price (badge, edge, stake, P&L, the action filter); `dk_odds` / `edge` are the DraftKings reference. CLV grades the locked bet against the no-vig sharp close (`docs/clv.md`). Read both through `lib/decisionPrice.ts`, never the columns. Nothing shows `dk_odds` as the bet of record on a row another book decided; a chip labelled with one book must never carry another book's betslip link; parlays stay priced at DraftKings. |
-| LIVE, not paper trading | CLAUDE.md §2 | "paper", "simulated", "test mode" in copy. |
+| Decided at the best bettable price at the DK line | CLAUDE.md §6 | Since 2026-09-09 `decision_*` is the deciding price (badge, edge, stake, P&L, the action filter); `dk_odds` / `edge` are the DraftKings reference. CLV's headline is the bet book's own raw close; Pinnacle's no-vig close is a second line (`docs/clv.md`). Read both through `lib/decisionPrice.ts`, never the columns. Nothing shows `dk_odds` as the bet of record on a row another book decided; a chip labelled with one book must never carry another book's betslip link; parlays stay priced at DraftKings. |
+| The member's own books are a DISPLAY lens | Matt, 2026-10-19 | A pick card or Pick Detail may headline the member's best price at THEIR books (`lib/myBooks.ts`, status `mine`), with edge, return and stake worked out at that price, provided the row also names where the model found it ("Found at HRB +110"). The record, P&L, the action filter and every published surface still read `decision_*`. A pick none of their books offers stays on the board as "Not offered at your books", never hidden. |
+| Live real money | CLAUDE.md §2 | "paper", "simulated", "test mode", "not real money" in copy. |
 | Access is one gate | CLAUDE.md §6 | `useSubscription().entitled` deciding what renders. Must be `useEntitlement()`. |
 | Today is ET | CLAUDE.md §7 | `toISOString().slice(0,10)` or a bare `new Date()` day. Must be `todayET()` / the `*ET` formatters in `src/lib/format.ts`. |
 | Thresholds are mirrored, not authored | CLAUDE.md §6 | A component computing its own cut. `passesActionFilter` / `useActionThresholds` are the only sources. |
@@ -155,7 +156,7 @@ which is exactly when users open it.
 - Model ids never appear raw; `modelShort` / `modelMeta` label them.
 - Sentence case, no exclamation marks, no "Oops". Tooltips use `InfoTooltip`
   and explain the *number*, not the feature.
-- Nothing describes the platform as paper trading.
+- Nothing says the bets are not real money.
 
 ## 8. Reuse before invention
 

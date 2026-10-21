@@ -301,3 +301,64 @@ def test_totals_pick_label_quotes_the_line():
         r["pick_label"], r["pick_side"], r["scored_line"],
         r["model_id"], "NYY", "BOS")
     assert problems == [], problems
+
+
+# ── The started-game check (2026-10-09) ──────────────────────────────────────
+# On 2026-09-16 both MLB cards wrote BETs on games that had already started:
+# mlb_total_public_fade at 22:07Z (four unders, 180-297 min after first pitch)
+# and mlb_spread_market at 00:57Z (two run lines, 349-436 min after). slate()
+# selected by game_date alone, and load_latest_quotes bounds the quotes to
+# snapshot_at <= commence_time, so after first pitch the card still priced the
+# last pre-game quotes and wrote a bet nobody could take. The public-fade card
+# imports the same slate(), so both module names are driven here: un-sharing it
+# later must not drop the check from either card.
+
+class _SlateConn:
+    """Returns canned `games` rows for slate()'s one query."""
+
+    def __init__(self, rows):
+        self.rows, self.sql, self.params = list(rows), "", None
+
+    def execute(self, sql, params=None):
+        self.sql, self.params = sql, params
+        return self
+
+    def fetchall(self):
+        return self.rows
+
+
+def _game_rows(now):
+    from datetime import timedelta
+    started = (now - timedelta(hours=1)).isoformat()
+    later = (now + timedelta(hours=1)).isoformat()
+    return [
+        ("MLB_GONE", "CLE", "CWS", started, now.date().isoformat()),
+        ("MLB_OPEN", "NYY", "BOS", later, now.date().isoformat()),
+        ("MLB_NULL", "SEA", "OAK", None, now.date().isoformat()),
+    ]
+
+
+@pytest.mark.parametrize("module", [
+    "scripts.mlb_game_market_card",
+    "scripts.mlb_total_public_fade_card",
+])
+def test_slate_drops_a_game_that_has_already_started(module):
+    """On the real clock: a game that started an hour ago is not on the card."""
+    import importlib
+    from datetime import datetime, timezone
+
+    card = importlib.import_module(module)
+    now = datetime.now(timezone.utc)
+    games = card.slate(_SlateConn(_game_rows(now)), now.date().isoformat())
+    assert set(games) == {"MLB_OPEN"}, games
+
+
+def test_slate_treats_first_pitch_itself_as_started():
+    from datetime import datetime, timezone
+
+    from scripts.mlb_game_market_card import slate
+
+    now = datetime(2026, 9, 16, 17, 11, tzinfo=timezone.utc)
+    rows = [("MLB_AT_START", "CLE", "CWS", "2026-09-16T17:11:00+00:00", "2026-09-16"),
+            ("MLB_ONE_MIN", "TOR", "DET", "2026-09-16T17:12:00Z", "2026-09-16")]
+    assert set(slate(_SlateConn(rows), "2026-09-16", now=now)) == {"MLB_ONE_MIN"}

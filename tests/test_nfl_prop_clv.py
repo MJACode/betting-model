@@ -64,10 +64,14 @@ def test_the_market_relative_rules_take_their_market_from_the_row():
     src = _fn("_capture_clv")
     assert "p.prop_market" in src, "the SELECT must fetch the row's market"
     assert 'if prop_market == "FROM_PROP_MARKET":' in src
-    assert "bookmaker = _book_from_label(pick_label)" in src
+    # The book is read from the label by the one resolver every row goes
+    # through (CLV at the price taken, 2026-10-08).
+    assert "_bet_price_and_book(" in src
+    assert "_book_from_label(pick_label)" in _fn("_bet_price_and_book")
     assert "_first_prop_close(" in src
-    assert "pick_book=bookmaker" in src, (
-        "the close prefers Pinnacle then the pick's book, never a silent DK")
+    assert "pick_book=bookmaker" in src and "pick_book=sharp" in src, (
+        "the headline close is the bet book; Pinnacle is a second lookup")
+    assert "_SUFFIX_LABEL_PRICED_MODELS" in _fn("_bet_price_and_book")
 
 
 def _book_from_label_fn():

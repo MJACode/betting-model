@@ -1,6 +1,6 @@
 /**
  * Merged Picks tab — a single home for the daily board with a
- * `All | Signals | Live` segmented control. Replaces the old separate
+ * `All | Signals | Live | Lines` segmented control. Replaces the old separate
  * Picks and Signals tabs (which both showed BET picks and read as redundant):
  *   - All      = every scored pick today (the old Picks tab; labelled
  *                "Today" until 2026-09-26, Matt).
@@ -48,6 +48,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FlatList,
   type LayoutChangeEvent,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -91,6 +92,7 @@ import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
@@ -115,6 +117,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import {
   isModelPaused,
   isPausedForDisplay,
+  isPausedRow,
   isModelRetired,
   isUnlockedPreview,
   passesActionFilter,
@@ -139,6 +142,17 @@ import { decisionOdds } from '@/lib/decisionPrice';
 import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
 import { friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { LinesBoard } from '@/components/LinesBoard';
+import { FilterChip } from '@/components/filters/FilterChip';
+import { useLinesBoard } from '@/hooks/useLinesBoard';
+import {
+  LINES_SPORT_CHIPS,
+  filterLinesGames,
+  linesHaveOdds,
+  linesHeaderSubtitle,
+  type LinesPickRef,
+  type LinesSportFilter,
+} from '@/lib/linesBoard';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 export type { PicksView };
@@ -156,6 +170,11 @@ export function PicksHomeScreen() {
   const slip = useParlaySlip();
 
   const [view, setView] = useState<PicksView>('today');
+  const [linesSport, setLinesSport] = useState<LinesSportFilter>('all');
+  const lines = useLinesBoard(view === 'lines');
+  // School abbreviations for the Signals compact line. Other sports already
+  // store abbreviations on the game row.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
@@ -204,15 +223,19 @@ export function PicksHomeScreen() {
   // kept drawing a green BET badge and a stake here while Discord and push
   // had already stopped on `model_action_thresholds.paused`. The surfaces
   // show the same picks (CLAUDE.md §1b); this is the Live board's half.
-  // Deliberately NOT the full passesActionFilter: nfl_live_prop's cut is EV
-  // server-side, and its bundled row would hide BETs the lane legitimately
-  // wrote.
+  // Deliberately NOT the full passesActionFilter: an in-play model whose cut is
+  // applied server-side would have its bundled row hide BETs it legitimately
+  // wrote (nfl_live_prop was that case until it was retired 2026-10-04).
   const liveInProgress = useMemo(
     () =>
       allLiveData.filter(
         (d) =>
           !isModelPaused(d.pick.model_id) &&
           !isModelRetired(d.pick.model_id) &&
+          // The ROW's marker too (#850): a BET written while its lane was
+          // paused was never posted or staked, and stays not-a-signal after
+          // an unpause. isModelPaused alone only reads the present state.
+          !isPausedRow(d.pick) &&
           gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
       ),
     [allLiveData, liveStates],
@@ -270,6 +293,13 @@ export function PicksHomeScreen() {
   // labels scale with Dynamic Type, so no constant survives a text-size change.
   const segmentsRef = useRef<ScrollView | null>(null);
   const segmentX = useRef<Partial<Record<PicksView, number>>>({});
+  const segmentWidths = useRef({ view: 0, content: 0 });
+  const [segmentsOverflow, setSegmentsOverflow] = useState(false);
+  const noteSegmentWidth = (which: 'view' | 'content', w: number) => {
+    segmentWidths.current[which] = w;
+    const next = segmentWidths.current.content > segmentWidths.current.view + 1;
+    setSegmentsOverflow((prev) => (prev === next ? prev : next));
+  };
   const onSegmentLayout = (v: PicksView) => (e: LayoutChangeEvent) => {
     segmentX.current[v] = e.nativeEvent.layout.x;
   };
@@ -326,13 +356,20 @@ export function PicksHomeScreen() {
   );
 
   const activeItems: EnrichedPick[] =
-    view === 'today' ? todayData : view === 'live' ? liveData : live;
+    view === 'today' ? todayData : view === 'live' ? liveData : view === 'lines' ? [] : live;
 
   // Signals is the paid surface; Today (every scored pick, with
-  // model % and edge) stays free. `entitled` is true whenever billing is off,
-  // so this is inert until the flag flips.
+  // model % and edge) stays free. Lines is the board of prices, so it stays
+  // up when Signals is locked; the pick mark on a card is the signal, and
+  // that mark waits for entitlement. `entitled` is true whenever billing is
+  // off, so this is inert until the flag flips.
   const { entitled } = useEntitlement();
-  const signalsLocked = !entitled && view !== 'today';
+  const signalsLocked = !entitled && view !== 'today' && view !== 'lines';
+  const linesGames = filterLinesGames(lines.games, linesSport);
+  // Posted paused picks stay in allData and mark as a pick. The rest are a
+  // grey "Paused pick" chip, with no navy dot.
+  const linesPicks: LinesPickRef[] = allData.map((d) => d.pick);
+  const linesPaused: LinesPickRef[] = pausedData.map((d) => d.pick);
 
   // Restrict the filter's Market options to what is on screen — on EVERY view,
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
@@ -555,7 +592,16 @@ export function PicksHomeScreen() {
   // same reason. Local, because the hook cannot tell a poll from a pull.
   const [pulling, setPulling] = useState(false);
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
-  const subtitle = failed
+  const subtitle = view === 'lines'
+    ? linesHeaderSubtitle({
+        loaded: lines.loaded,
+        error: lines.error != null,
+        date: lines.date,
+        games: linesGames,
+        hasOdds: linesHaveOdds(linesGames.map((g) => g.game_id), lines.odds),
+        sport: linesSport,
+      })
+    : failed
     ? view === 'live'
       ? 'Live signals unavailable'
       : todayHeaderCounts({ date, known: false, ...todayStats })
@@ -595,15 +641,15 @@ export function PicksHomeScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Picks</Text>
           <InfoTooltip
-            title="The three boards"
+            title="These boards"
             body={
               // The live sports are INTERPOLATED, not typed out: this sentence
               // and the empty state are the two places a reader is told which
               // sports have an in-play model, and a hand-written list here would
               // be the one that goes stale when a lane ships (lib/liveSports.ts).
-              `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
+              `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nLines = today’s NHL and NBA games, with the best price a bettable book is offering on the puck line or spread, the moneyline and the total. Every game is listed, not only games with a pick. A pick is marked on its game; open a market to see every book.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
             }
-            accessibilityLabel="About the three boards"
+            accessibilityLabel="About these boards"
           />
           <View style={styles.headerRight}>
             <BetslipButton />
@@ -614,16 +660,30 @@ export function PicksHomeScreen() {
         {/* Neutral chips until today's board (and the live one) is known: built
             from empty data, every chip read muted and "no picks today" after a
             failure or before the first load (Designer #845). */}
-        <SportToggle
-          available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
-          signalCounts={sportSignalCounts}
-          liveSports={liveSports}
-          // H9, 45pt with no visual change: 6pt over the subtitle line above
-          // (text, not a control) and half of the 12pt gap to the sub-tab chips
-          // below — they take the other half (SUBTAB_REACH_ABOVE).
-          reachAbove={6}
-          reachBelow={4}
-        />
+        {view === 'lines' ? (
+          <View style={styles.linesSports}>
+            {LINES_SPORT_CHIPS.map((c) => (
+              <FilterChip
+                key={c.id}
+                label={c.label}
+                active={linesSport === c.id}
+                onPress={() => setLinesSport(c.id)}
+                accessibilityLabel={c.id === 'all' ? 'All sports' : c.label}
+              />
+            ))}
+          </View>
+        ) : (
+          <SportToggle
+            available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
+            signalCounts={sportSignalCounts}
+            liveSports={liveSports}
+            // H9, 45pt with no visual change: 6pt over the subtitle line above
+            // (text, not a control) and half of the 12pt gap to the sub-tab chips
+            // below — they take the other half (SUBTAB_REACH_ABOVE).
+            reachAbove={6}
+            reachBelow={4}
+          />
+        )}
         {/* Horizontal scroller, the same one SportToggle uses. Three segments
             with counts and a dot fit comfortably at default text size, but only
             the labels scale: the row ran off the right edge at roughly the first
@@ -636,6 +696,7 @@ export function PicksHomeScreen() {
             SCROLL-INTO-VIEW on the selected segment — a deep link from Settings
             or a push can select one that is off-screen, and a control showing
             three unselected segments reads as a rendering bug. */}
+        <View style={subTabsReach.frame}>
         <ScrollView
           ref={segmentsRef}
           horizontal
@@ -643,7 +704,8 @@ export function PicksHomeScreen() {
           keyboardShouldPersistTaps="handled"
           // Down into the header's own bottom padding (no sibling there), so
           // the sub-tabs' slop below is in bounds (H9).
-          style={subTabsReach.frame}
+          onLayout={(e) => noteSegmentWidth('view', e.nativeEvent.layout.width)}
+          onContentSizeChange={(w) => noteSegmentWidth('content', w)}
           contentContainerStyle={[styles.subTabsScroll, subTabsReach.content]}
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
@@ -664,9 +726,64 @@ export function PicksHomeScreen() {
               dot={liveData.length > 0}
               onLayout={onSegmentLayout('live')}
             />
+            <SubTabBtn
+              label="Lines"
+              count={lines.loaded ? linesGames.length : null}
+              active={view === 'lines'}
+              onPress={() => setView('lines')}
+              onLayout={onSegmentLayout('lines')}
+            />
           </View>
         </ScrollView>
+        {segmentsOverflow ? (
+          <View
+            pointerEvents="none"
+            style={styles.segmentFade}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <View style={[styles.segmentFadeStep, { opacity: 0.2 }]} />
+            <View style={[styles.segmentFadeStep, { opacity: 0.45 }]} />
+            <View style={[styles.segmentFadeStep, { opacity: 0.7 }]} />
+            <View style={[styles.segmentFadeStep, { opacity: 1 }]} />
+          </View>
+        ) : null}
+        </View>
       </View>
+
+      {view === 'lines' ? (
+        <LinesBoard
+          games={lines.games}
+          odds={lines.odds}
+          picks={linesPicks}
+          pausedPicks={linesPaused}
+          sport={linesSport}
+          loading={lines.loading && !lines.loaded}
+          loaded={lines.loaded}
+          error={lines.error}
+          retrying={lines.loading}
+          onRefresh={lines.refresh}
+          showMarks={entitled}
+          onOpenPick={(rows, kind) => {
+            if (rows.length === 1) {
+              navigation.navigate('PickDetail', { pickId: rows[0]!.pickId });
+              return;
+            }
+            Alert.alert(
+              kind === 'paused' ? 'Paused picks on this game' : 'Picks on this game',
+              undefined,
+              [
+                ...rows.map((row) => ({
+                  text: row.label,
+                  onPress: () => navigation.navigate('PickDetail', { pickId: row.pickId }),
+                })),
+                { text: 'Cancel', style: 'cancel' as const },
+              ],
+            );
+          }}
+        />
+      ) : (
+      <>
 
       {/* Live pricing caveats, and ONLY on the live segment. Both are
           load-bearing (CLAUDE.md §6): the feed serves one cached in-play
@@ -811,7 +928,9 @@ export function PicksHomeScreen() {
               onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
               liveState={liveStates.get(item.pick.game_id) ?? null}
               showSignalBadge={view === 'today'}
-              paused={view === 'today' && isPausedForDisplay(item.pick)}
+              paused={isPausedForDisplay(item.pick)}
+              layout="signals"
+              teamAbbrevs={ncaafAbbrevs}
             />
           );
         }}
@@ -858,6 +977,8 @@ export function PicksHomeScreen() {
         }
       />
       )}
+      </>
+      )}
     </SafeAreaView>
   );
 }
@@ -865,6 +986,7 @@ export function PicksHomeScreen() {
 function boardLabel(view: PicksView): string {
   if (view === 'today') return 'All';
   if (view === 'signals') return 'Signals';
+  if (view === 'lines') return 'Lines';
   return 'Live';
 }
 
@@ -978,9 +1100,12 @@ function EmptyForView({
       />
     );
   }
-  // Exhaustive over View2 — a third view added later has to say what it shows
-  // here rather than silently inheriting the Signals copy (UX review). The
-  // null is unreachable; the annotation is what fails the build.
+  // Lines has its own empty states (no games, no lines). It never reaches
+  // this copy.
+  if (view === 'lines') return null;
+  // Exhaustive over the pick views — a view added later has to say what it
+  // shows here rather than silently inheriting the Signals copy (UX review).
+  // The null is unreachable; the annotation is what fails the build.
   const exhaustive: never = view;
   void exhaustive;
   return null;
@@ -1012,7 +1137,7 @@ function SubTabBtn({
    */
   dot?: boolean;
 }) {
-  const noun = label === 'All' ? 'picks' : live ? 'picks in play' : 'signals';
+  const noun = label === 'All' ? 'picks' : label === 'Lines' ? 'games' : live ? 'picks in play' : 'signals';
   return (
     <Pressable
       onPress={onPress}
@@ -1077,7 +1202,21 @@ const styles = StyleSheet.create({
   // butt the bezel, which is the only hint a reader gets that the row scrolls
   // (SportToggle does the same).
   subTabsScroll: {
-    paddingRight: spacing.lg,
+    // Clears the right-edge fade when the row scrolls, so the last segment
+    // can sit fully in view.
+    paddingRight: spacing.xxl,
+  },
+  segmentFade: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 24,
+    flexDirection: 'row',
+  },
+  segmentFadeStep: {
+    flex: 1,
+    backgroundColor: colors.bg,
   },
   subTabs: {
     flexDirection: 'row',
@@ -1112,6 +1251,16 @@ const styles = StyleSheet.create({
   },
   subTabTextActive: {
     color: colors.tint,
+  },
+  linesSports: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    // 8pt, not 16. FilterChip's lower slop is 8pt and the segment scroller
+    // takes touches 6pt above itself. 8pt keeps that slop out of the scroller
+    // (the chip stays a 44pt target) and is half the gap that was trimmed.
+    marginBottom: spacing.sm,
   },
   firstDayHeader: { marginTop: 0 },
   list: {

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { retryAccessibilityLabel } from '@/lib/a11y';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorAnnouncement, friendlyError, isAbortError, type FriendlyError } from '@/lib/errors';
 import { repeatFailureAnnounce } from '@/lib/loadState';
@@ -31,6 +32,8 @@ interface Props {
   onRetry: () => void;
   /** Disable Retry while a reload is in flight. */
   retrying?: boolean;
+  /** Button word. "Retry" everywhere except a screen whose spec says otherwise. */
+  retryLabel?: string;
   /** Outer margins where the screen's own gutter differs. */
   style?: StyleProp<ViewStyle>;
   /**
@@ -39,6 +42,11 @@ interface Props {
    * (Designer, #845). Read out with the title and cause.
    */
   reassurance?: string;
+  /**
+   * Replaces the generated title and cause. Retry, the alert, and the icon
+   * stay. An abort in `error` still renders nothing.
+   */
+  copy?: FriendlyError;
 }
 
 /**
@@ -87,8 +95,12 @@ function useAnnounceAndLog(
   };
 }
 
-export function ErrorState({ what, error, onRetry, retrying, compact, style, reassurance }: Props & { compact?: boolean }) {
-  const copy = friendlyError(error, what);
+function shownCopy(what: string, error: unknown, override?: FriendlyError): FriendlyError {
+  return override ?? friendlyError(error, what);
+}
+
+export function ErrorState({ what, error, onRetry, retrying, retryLabel = 'Retry', compact, style, reassurance, copy: override }: Props & { compact?: boolean }) {
+  const copy = shownCopy(what, error, override);
   const silent = isAbortError(error);
   const markRetry = useAnnounceAndLog(copy, error, silent, retrying, reassurance);
   if (silent) return null;
@@ -116,19 +128,19 @@ export function ErrorState({ what, error, onRetry, retrying, compact, style, rea
         }}
         disabled={retrying}
         accessibilityRole="button"
-        accessibilityLabel={`Retry loading ${what}`}
+        accessibilityLabel={retryAccessibilityLabel(retryLabel, what)}
         accessibilityState={{ disabled: Boolean(retrying), busy: Boolean(retrying) }}
         style={({ pressed }) => [styles.retryBtn, (pressed || retrying) && styles.pressed]}
       >
         <Ionicons name="refresh" size={16} color={colors.tint} />
-        <Text style={styles.retryBtnText}>{retrying ? 'Retrying…' : 'Retry'}</Text>
+        <Text style={styles.retryBtnText}>{retrying ? 'Retrying…' : retryLabel}</Text>
       </Pressable>
     </View>
   );
 }
 
-export function ErrorBanner({ what, error, onRetry, retrying, style, reassurance }: Props) {
-  const copy = friendlyError(error, what);
+export function ErrorBanner({ what, error, onRetry, retrying, retryLabel = 'Retry', style, reassurance, copy: override }: Props) {
+  const copy = shownCopy(what, error, override);
   const silent = isAbortError(error);
   const markRetry = useAnnounceAndLog(copy, error, silent, retrying, reassurance);
   if (silent) return null;
@@ -155,11 +167,11 @@ export function ErrorBanner({ what, error, onRetry, retrying, style, reassurance
         disabled={retrying}
         hitSlop={{ left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel={`Retry loading ${what}`}
+        accessibilityLabel={retryAccessibilityLabel(retryLabel, what)}
         accessibilityState={{ disabled: Boolean(retrying), busy: Boolean(retrying) }}
         style={({ pressed }) => [styles.bannerRetry, (pressed || retrying) && styles.pressed]}
       >
-        <Text style={styles.bannerRetryText}>{retrying ? 'Retrying…' : 'Retry'}</Text>
+        <Text style={styles.bannerRetryText}>{retrying ? 'Retrying…' : retryLabel}</Text>
       </Pressable>
     </View>
   );

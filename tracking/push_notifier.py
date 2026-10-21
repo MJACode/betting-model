@@ -479,10 +479,21 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
         col = _SIDE_PRICE_COL.get(pick_side)
         if not col:
             continue
-        odds = _get_dk_odds(conn, game_id, _market_for_pick(model_id))
+        market = _market_for_pick(model_id)
+        odds = _get_dk_odds(conn, game_id, market)
         current = odds.get(col) if odds else None
         if current is None:
             continue
+        # A price at another number is another bet: Under 113.5 at +105 says
+        # nothing about the Under 115.5 at -112 that was tracked. A line market
+        # is compared only while DraftKings is at the tracked number
+        # (spread_home and locked_line are both the HOME number).
+        line_col = ("spread_home" if "spreads" in market
+                    else "total_line" if "totals" in market else None)
+        if line_col and locked_line is not None:
+            now_line = odds.get(line_col)
+            if now_line is None or abs(float(now_line) - float(locked_line)) > 1e-9:
+                continue
         shift = (american_to_implied_prob(float(current))
                  - american_to_implied_prob(float(locked_odds))) * 100
         if abs(shift) < LINE_CHANGE_NOTIFY_PP:

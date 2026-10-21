@@ -61,9 +61,11 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // Market-relative run line: de-vig Pinnacle, bet a bettable soft book
   // at the same ±1.5. Replaces the paused mlb_runline *publish path*;
   // mlb_runline itself stays paused. docs/mlb_runline_ou_edge_search.md.
+  // Named '(vs Pinnacle)' like the prop rules: the app explains Pinnacle, and
+  // never explained 'market-relative'.
   mlb_spread_market: {
     shortLabel: 'RL Mkt',
-    longLabel: 'Runline (market-relative)',
+    longLabel: 'Runline (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -73,7 +75,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // mlb_over_under itself stays paused. Paper until MLB_TOTAL_MARKET_PUBLISH=1.
   mlb_total_market: {
     shortLabel: 'O/U Mkt',
-    longLabel: 'Total Runs (market-relative)',
+    longLabel: 'Total Runs (vs Pinnacle)',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -264,9 +266,12 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'Ast',
   },
+  // '(vs Pinnacle)', one name for the three multi-market prop rules: each bets
+  // a retail price against Pinnacle's, and the app already explains Pinnacle.
+  // 'market-relative' was explained nowhere.
   wnba_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'WNBA Props (market-relative)',
+    longLabel: 'WNBA Props (vs Pinnacle)',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -370,6 +375,66 @@ export const MODEL_META: Record<string, ModelMeta> = {
     type: 'player_prop',
     statKey: null,
     statLabel: 'DD',
+  },
+  // The 2026-27 NBA prop rule (models/nba_prop_market.py): unders at the best
+  // bettable book on Pinnacle's own line, decided 45-57 minutes before tip.
+  // ONE id across five markets (points, rebounds, assists, threes, PRA); the
+  // market travels on picks.prop_market and the stat is in each pick's label,
+  // so statLabel is empty, as for nfl_prop_market and wnba_prop_market.
+  nba_prop_market: {
+    shortLabel: 'Prop Mkt',
+    longLabel: 'NBA Props (vs Pinnacle)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
+  // The NBA projection model (models/nba_prop_projection.py): projects each
+  // player's count from his minutes and per-minute rates and bets the books'
+  // main line, in the same 45-57 minute window as the rule above. ONE id across six markets (steals,
+  // rebounds, blocks+steals, blocks, rebounds+assists, threes), the market on
+  // picks.prop_market, like nba_prop_market. Unlike that rule it bets BOTH
+  // sides: steals, blocks+steals and threes can be over or under; rebounds,
+  // blocks and rebounds+assists are unders. Not '(vs Pinnacle)': its number is
+  // its own projection, not Pinnacle's price. Its shown probability is an
+  // upper bound (graded: claimed 0.533, won 0.501; docs/nba_models_2026.md).
+  nba_prop_projection: {
+    shortLabel: 'Projection',
+    longLabel: 'NBA Props (Projection)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
+  // NBA full-game totals, overs only (models/nba_total_luck.py, 2026-10-17).
+  // A team's points allowed include how well its opponents happened to shoot
+  // threes and free throws, which is mostly luck. When a total projected with
+  // that luck taken out is at least 3 points above the plain projection, it
+  // bets the over, once, about an hour before tip, at the best price. The
+  // label is the platform's "BOS vs NYK Over 225.5". A game line, not a
+  // picker slot: totals are not one (betSlotForModel).
+  nba_total_luck: {
+    // Market plus method, as 'O/U Mkt' and 'O/U Fade': the side is already in
+    // the label beside the chip.
+    shortLabel: 'O/U Luck',
+    longLabel: 'Total Points (Overs)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // NBA home team total points, unders only (models/nba_team_total_luck.py).
+  // The same luck read as nba_total_luck, on one team: when the away
+  // defence's opponents have shot luckily enough that its plain rating
+  // overstates the home team's score by at least 2 points, it bets the home
+  // team's own total under, once, about an hour before tip, at the best
+  // price. It settles on the home team's final score, overtime included,
+  // never the game total. The label is "BOS @ MIL — MIL Team Total Under
+  // 115.5". A game line, not a picker slot.
+  nba_team_total_luck: {
+    // Market plus method, as 'O/U Luck': TT is the team total.
+    shortLabel: 'TT Luck',
+    longLabel: 'Home Team Total (Unders)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
   },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
@@ -531,10 +596,22 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // outlier. ONE id across every market it trades — the validated number is
   // pooled, and the market itself is on picks.prop_market, so per-market
   // breakdowns are a query rather than eight entries here.
+  // Named '(vs Pinnacle)' like nba_prop_market and wnba_prop_market.
   nfl_prop_market: {
     shortLabel: 'Prop Mkt',
-    longLabel: 'NFL Props (market-relative)',
+    longLabel: 'NFL Props (vs Pinnacle)',
     type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
+  // The in-play NFL leader moneyline (nfl_live_leader/, LIVE 2026-10-13): late
+  // in the 4th quarter, the team up 4-16 on DraftKings' live moneyline when
+  // its win probability beats the price by 2 points. Same chip as the NCAAF
+  // live moneyline; its picks appear on the Live segment only.
+  nfl_live_leader_ml: {
+    shortLabel: 'LIVE ML',
+    longLabel: 'Live Leader Moneyline',
+    type: 'game',
     statKey: null,
     statLabel: '',
   },
@@ -701,6 +778,84 @@ export function modelLong(modelId: string): string {
 }
 
 /**
+ * The line under "Model probability" on a pick's "Why this bet?" card.
+ *
+ * The NBA projection model's probability is its own calibrated number, and it
+ * still runs high where it bets: graded walk-forward over 2023-24..2025-26 it
+ * claimed 0.533 and won 0.501, against 0.483 implied by the prices
+ * (docs/nba_models_2026.md; models/nba_prop_projection.py). So its card says
+ * to read the number as an upper bound, and gives the price comparison that
+ * shows the 50% still beat the price. Those are graded seasons, not a posted
+ * record: the model has none yet (UX review, 2026-10-16). Every other model
+ * keeps the plain sentence.
+ */
+const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
+  nba_prop_projection:
+    'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
+    'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
+  // The market's fair chance plus the walk-forward uplift (+0.1022 for
+  // 2026-27): on the 349 graded bets, 61.6% won where the market's fair
+  // chance averaged 51.4%. docs/thresholds.md plans on +7.7%, not +16.6%.
+  nba_team_total_luck:
+    'What our model says is the chance this side hits: the market’s fair chance plus about 10 percentage ' +
+    'points, the extra these bets won over the last three NBA seasons (62% won where the market’s fair ' +
+    'chance averaged 51%). Read it as an upper bound: plan on a return nearer 8% than the 17% those ' +
+    'seasons made.',
+};
+
+export function modelProbabilityNote(modelId: string): string {
+  return PROBABILITY_NOTE[modelId] ?? 'What our model says is the chance this side hits.';
+}
+
+// The NBA models that check each game once, about an hour before tip, and
+// post only the bets they find: the
+// full-game totals overs (scripts/nba_total_luck_card.py, 60-66 minutes out),
+// the home team-total unders (scripts/nba_team_total_luck_card.py, 45-66) and
+// the two prop models (scripts/nba_prop_market_card.py,
+// nba_prop_projection_card.py, 45-57). Their page is empty most of the day,
+// and the morning-run copy sent people back at the wrong time.
+const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
+  'nba_prop_market',
+  'nba_prop_projection',
+  'nba_team_total_luck',
+  'nba_total_luck',
+];
+
+export interface ModelPageTiming {
+  /** The tooltip beside "Today's potential picks". */
+  title: string;
+  body: string;
+  /** The empty state's subtitle: when the page will change. */
+  empty: string;
+  /** The line under today's picks when the model is not paused. */
+  note: string;
+}
+
+/** When a model's page fills, said on its own page. */
+export function modelPageTiming(modelId: string): ModelPageTiming {
+  if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {
+    return {
+      title: 'Checked once per game',
+      body:
+        'This model checks each game once, about an hour before tip-off, and posts a bet only when it ' +
+        'finds one. A posted bet is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model checks each game about an hour before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted about an hour before tip-off and never re-priced.',
+    };
+  }
+  return {
+    title: 'Picks lock for the day',
+    body:
+      "A pick locks the first time this model scores it today and never changes after that — it can't flip between BET and AVOID as lines move.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm, but only newly-priced games get scored on later refreshes.",
+    empty:
+      "This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab.",
+    note: "Locked for the day once scored — won't change again until the game ends.",
+  };
+}
+
+/**
  * The market category of a model — MODEL_META when it has an entry, and the
  * MODEL ID when it does not.
  *
@@ -746,6 +901,21 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('golf')) return 'GOLF';
   return 'MLB';
+}
+
+/**
+ * Does any prop model that is neither retired nor paused price this sport's
+ * players? Read from the model catalog, not the stat catalog: the
+ * multi-market models (nba_prop_market, nba_prop_projection, nfl_prop_market,
+ * wnba_prop_market) map to no single stat, so the stat-catalog test said NBA and the NFL had no
+ * prop model while both had a live one. NCAAF has only game models, so its
+ * player page still says no prop model prices it. Call it at render: the
+ * pause flag can come from the server.
+ */
+export function sportHasLivePropModel(sport: BetTypeSport): boolean {
+  return Object.keys(MODEL_META).some(
+    (id) => sportOfModel(id) === sport && isPropModel(id) && !isModelRetired(id) && !isModelPaused(id),
+  );
 }
 
 export interface BetTypeOption {

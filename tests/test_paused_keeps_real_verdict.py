@@ -313,16 +313,30 @@ def test_the_recap_excludes_a_settled_paused_bet_and_keeps_a_live_models_bet():
     if sqlite3.sqlite_version_info < (3, 39):
         pytest.skip("IS DISTINCT FROM needs SQLite >= 3.39")
     db = sqlite3.connect(":memory:")
+    from tracking.published_units import install_sqlite
+    install_sqlite(db)
+    # condition_status: the recap also skips the second copy of one bet
+    # (config.DUPLICATE_STATUS, 2026-10-09); NULL here, as on almost every row.
     db.execute("""CREATE TABLE picks (sport, model_id, result, kelly_fraction,
-                  dk_odds, clv_pct, is_live, game_date, signal_type,
-                  downgrade_reason)""")
+                  dk_odds, decision_odds, clv_pct, is_live, game_date, signal_type,
+                  downgrade_reason, condition_status, game_id, pick_side,
+                  player_id, player_key, prop_market, clv_method)""")
+    db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
-        ("MLB", "m_live", "WIN", 0.02, -110, None, 0, "2026-09-28", "BET", None),
-        ("MLB", "m_now_paused", "LOSS", 0.02, -110, None, 0, "2026-09-28", "BET", None),
-        ("MLB", "m_paused_row", "WIN", 0.02, 250, None, 0, "2026-09-28", "BET", NOTE),
-        ("MLB", "m_capped", "WIN", 0.0, -110, None, 0, "2026-09-28", "NONE", "daily cap"),
+        ("MLB", "m_live", "WIN", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None, "g1"),
+        ("MLB", "m_now_paused", "LOSS", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None, "g2"),
+        ("MLB", "m_paused_row", "WIN", 0.02, 250, None, None, 0, "2026-09-28", "BET", NOTE, None, "g3"),
+        ("MLB", "m_capped", "WIN", 0.0, -110, None, None, 0, "2026-09-28", "NONE", "daily cap", None, "g4"),
     ]
-    db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+    db.executemany(
+        "INSERT INTO picks (sport, model_id, result, kelly_fraction, dk_odds, "
+        "decision_odds, clv_pct, is_live, game_date, signal_type, "
+        "downgrade_reason, condition_status, game_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    # The two bets that count were posted. The paused-row bet was not.
+    db.executemany(
+        "INSERT INTO push_sent VALUES (?, 'discord_signal', '2026-09-28T12:00:00')",
+        [("g1:m_live",), ("g2:m_now_paused",)])
     sql = _SETTLED_SQL.format(window="= ?").replace("%%", "%")
     got = sorted(r[1] for r in db.execute(sql, ("2026-09-28",)).fetchall())
     assert got == ["m_live", "m_now_paused"]
@@ -376,7 +390,8 @@ def test_no_earlier_owner_guard_reverts_the_new_definition():
 def test_the_threshold_review_counts_only_published_signals():
     body = _src("tracking/threshold_review.py")
     assert "AND downgrade_reason IS DISTINCT FROM %s" in body
-    assert "(EPOCH, config.PAUSED_NOTE)" in body
+    # 2026-10-09: the second copy of one bet is skipped too (DUPLICATE_STATUS).
+    assert "(EPOCH, config.PAUSED_NOTE, config.DUPLICATE_STATUS)" in body
 
 
 # ── the app agrees (source pins; tsc keeps the types honest) ────────────────
@@ -392,4 +407,57 @@ def test_the_app_filters_the_paused_row_out_of_signals_and_the_record():
     for const in ("const PICK_COLUMNS =", "const SETTLED_PICK_COLUMNS ="):
         block = q.split(const)[1].split(";")[0]
         assert "downgrade_reason" in block, const
-    assert "const KEY = 'settledPicks.v7';" in _src("mobile/src/lib/settledPickCache.ts")
+    # v9 still carries downgrade_reason. It also carries clv_method.
+    assert "const KEY = 'settledPicks.v9';" in _src("mobile/src/lib/settledPickCache.ts")
+
+
+# ── post-#850 review: the leaks the first pass missed ────────────────────────
+
+def _fn(src: str, sig: str) -> str:
+    m = re.search(re.escape(sig) + r".*?\n\}\n", src, re.S)
+    assert m, f"{sig} is missing"
+    return m.group(0)
+
+
+def test_the_team_and_player_pick_records_drop_the_paused_row_on_the_server():
+    """Aaron Nola's page showed three paused 10/1 BETs, and ATL/PHI a paused
+    Over 7.5: both record reads pulled settled BETs with no paused clause."""
+    q = _src("mobile/src/lib/queries.ts")
+    assert (
+        "export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq.\"${PAUSED_NOTE}\"`;"
+        in q
+    ), "NULL must pass explicitly: neq alone drops every unmarked row"
+    for sig in (
+        "export async function fetchSettledGamePicksForGames(",
+        "export async function fetchSettledPropPicksForPlayer(",
+    ):
+        body = _fn(q, sig)
+        assert ".or(NOT_PAUSED_ROW)" in body, sig
+        assert "isPausedRow(p)" in body, f"{sig}: belt and braces, filter the rows too"
+
+
+def test_the_team_and_player_record_reductions_skip_the_paused_row():
+    team = _fn(_src("mobile/src/lib/teamDetail.ts"), "export function teamPickRecords(")
+    player = _fn(_src("mobile/src/lib/playerDetail.ts"), "export function playerPickRecord(")
+    for name, body in (("teamPickRecords", team), ("playerPickRecord", player)):
+        assert "if (isPausedRow(p)) continue;" in body, name
+
+
+def test_every_settled_bet_read_carries_the_paused_clause():
+    """Any server read pinned to settled BETs is a record read; it must say
+    which rows are not bets. Reads that feed passesRecordFilter (all-signal
+    reads) are not pinned to BET and are filtered on the client."""
+    q = _src("mobile/src/lib/queries.ts")
+    for m in re.finditer(r"export async function (\w+)\(.*?\n\}\n", q, re.S):
+        body = m.group(0)
+        if ".eq('signal_type', 'BET')" in body and ".in('result', ['WIN', 'LOSS', 'PUSH'])" in body:
+            assert ".or(NOT_PAUSED_ROW)" in body, m.group(1)
+
+
+def test_the_live_board_drops_the_paused_row():
+    """The #850 guard the Live board missed: a BET written while its lane was
+    paused stays not-a-signal after an unpause."""
+    src = _src("mobile/src/screens/PicksHomeScreen.tsx")
+    block = src.split("const liveInProgress = useMemo(")[1].split("[allLiveData, liveStates]")[0]
+    assert "!isModelPaused(d.pick.model_id)" in block
+    assert "!isPausedRow(d.pick)" in block

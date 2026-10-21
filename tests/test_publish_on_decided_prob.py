@@ -32,8 +32,11 @@ ROOT = Path(__file__).resolve().parents[1]
 THRESHOLDS_TS = (ROOT / "mobile" / "src" / "lib" / "thresholds.ts").read_text(encoding="utf-8")
 GENERATED_TS = (ROOT / "mobile" / "src" / "lib" / "thresholds.generated.ts").read_text(encoding="utf-8")
 
-# Pick 3094775, NYR (Regulation) at +180, as stored 2026-10-01.
-NYR = dict(model_id="nhl_moneyline_regulation", model_probability=0.3801,
+# Same shape as pick 3094775 (raw under the cut, calibrated over it). That
+# pick's model, nhl_moneyline_regulation, now decides on its own probability
+# (MODELS_ON_OWN_PROBABILITY, mike 2026-10-03), so the worked example is
+# mlb_moneyline, which still decides on the calibrated number.
+NYR = dict(model_id="mlb_moneyline", model_probability=0.3801,
            model_probability_cal=0.443, edge=-0.0045, decision_edge=0.023,
            decision_implied_prob=0.3571, dk_implied_prob=0.3846)
 NHL_REG_CUT = dict(min_prob=0.40, min_edge=0.05, prob_only=0)
@@ -85,15 +88,21 @@ def test_the_motivating_pick_fails_raw_and_passes_on_the_decided_numbers():
 
 
 def test_the_cut_agrees_with_the_scorers_own_decision(monkeypatch):
-    """_decide on the same inputs: BET. The publishers' cut has to say yes too."""
+    """_decide on the same inputs: BET. The publishers' cut has to say yes too.
+
+    mlb_moneyline's live cut is 0.72/0.11 and its EV floor is 0.11. Raw 0.60
+    at +150 fails the probability cut; calibrated 0.75 clears it and the floor.
+    """
     from models import scorer
     monkeypatch.setattr(scorer, "DECIDE_ON_CALIBRATED_PROB", True)
-    monkeypatch.setattr(scorer, "_calibrated", lambda m, p: 0.443)
+    monkeypatch.setattr(scorer, "_calibrated", lambda m, p: 0.75)
     monkeypatch.setattr(scorer, "_paused_signal", lambda m, s: (s, None))
-    sig = scorer._decide("nhl_moneyline_regulation", 0.3801, 0.3571,
-                         0.3801 - 0.3571, 180.0, is_prop=False)
+    sig = scorer._decide("mlb_moneyline", 0.60, 0.40, 0.20, 150.0, is_prop=False)
     assert sig == "BET"
-    assert _passes(NYR, NHL_REG_CUT)
+    row = dict(model_id="mlb_moneyline", model_probability=0.60,
+               model_probability_cal=0.75, edge=0.20, decision_edge=0.20,
+               decision_implied_prob=0.40, dk_implied_prob=0.40)
+    assert _passes(row, dict(min_prob=0.72, min_edge=0.11, prob_only=0))
 
 
 def test_a_row_with_no_calibrated_number_is_cut_exactly_as_before():
@@ -106,7 +115,7 @@ def test_a_row_with_no_calibrated_number_is_cut_exactly_as_before():
 def test_a_calibration_that_lowers_the_number_now_cuts_on_the_lower_one():
     """Symmetric: a favourite the map pulls under the cut was never a BET
     (the scorer decided on the lower number), so it does not publish."""
-    row = dict(model_id="nhl_moneyline", model_probability=0.60,
+    row = dict(model_id="mlb_moneyline", model_probability=0.60,
                model_probability_cal=0.535, edge=0.10, decision_edge=0.10,
                decision_implied_prob=0.50, dk_implied_prob=0.50)
     assert not _passes(row, dict(min_prob=0.55, min_edge=0.05, prob_only=0))
@@ -140,7 +149,10 @@ def test_the_raw_deciders_are_exactly_the_scorers():
                       or (config.scoring_method(m) != config.SCORING_ARTIFACT
                           and m not in config.NON_ARTIFACT_DECISION_SOURCE))
         assert (m in own) == expect_raw, m
-    assert "nhl_moneyline" not in own and "nhl_moneyline_regulation" not in own
+    # mike put both NHL moneylines on their own number (2026-10-03 regulation,
+    # 2026-10-13 moneyline). mlb_moneyline still decides calibrated.
+    assert "nhl_moneyline" in own and "nhl_moneyline_regulation" in own
+    assert "mlb_moneyline" not in own
 
 
 def test_flag_off_falls_back_to_raw(monkeypatch):
@@ -240,9 +252,9 @@ def test_the_free_pick_cuts_on_the_pick_of_records_decided_numbers():
 def test_the_prompt_sql_emitter_uses_the_decided_numbers():
     from scripts.emit_threshold_sql import emit
     out = emit(prefix="p.")
-    reg = [ln for ln in out.splitlines() if "'nhl_moneyline_regulation'" in ln][0]
-    assert "COALESCE(p.model_probability_cal, p.model_probability) >= 0.4" in reg
-    assert "NULLIF(p.decision_implied_prob, 0)" in reg
+    ml = [ln for ln in out.splitlines() if "'mlb_moneyline'" in ln][0]
+    assert "COALESCE(p.model_probability_cal, p.model_probability) >= 0.72" in ml
+    assert "NULLIF(p.decision_implied_prob, 0)" in ml
     wind = [ln for ln in out.splitlines() if "'nfl_wind_totals'" in ln][0]
     assert "model_probability_cal" not in wind
 
@@ -388,7 +400,7 @@ def test_a_pick_that_passes_raw_keeps_todays_behaviour():
 
 def test_the_price_gap_guard_refuses_a_stale_or_wrong_side_quote():
     """3101240 FLA ML: decided at BetMGM +154 against DK -125, 16.2pp apart."""
-    fla = dict(model_id="nhl_moneyline", model_probability=0.4998,
+    fla = dict(model_id="mlb_moneyline", model_probability=0.4998,
                model_probability_cal=0.5644, edge=-0.0558, decision_edge=0.1061,
                decision_implied_prob=0.3937, dk_implied_prob=0.5556)
     ml_cut = dict(min_prob=0.55, min_edge=0.05, prob_only=0)
@@ -549,32 +561,32 @@ def test_the_probability_cut_compares_the_scorers_own_rounding(monkeypatch):
     assert not _passes(dict(row, model_probability_cal=0.3999), NHL_REG_CUT)
 
 
-# ── record views and reports (reviewer MEDIUMs) ──────────────────────────────
+# ── the record is not re-cut (2026-10-21 rework) ─────────────────────────────
 
-def test_the_record_view_migration_is_generated_from_config_and_registered():
-    from scripts.emit_record_views_decided_cut import OUT, render
+def test_the_record_view_migration_is_gone():
+    """The 2026-10-02 migration CREATE OR REPLACE'd the record views from an
+    October snapshot. Registered after newer owners, the next worker pass
+    would put that snapshot back and a graded BET would leave the record.
+    It is not in the tree and not in ACTIVE_MIGRATIONS."""
     from data.view_migrations import ACTIVE_MIGRATIONS
-    assert OUT.read_text(encoding="utf-8") == render(), "regenerate the migration"
-    body = OUT.read_text(encoding="utf-8")
-    assert config.decided_prob_sql("p") + " AS prob" in body
-    assert config.decided_edge_sql("p") + " AS edge" in body
-    assert body.count(config.decided_cut_sql("pp", "m")) == 2
-    for v in ("v_model_full_record", "v_model_full_outcome_record",
-              "v_model_full_outcome_picks"):
-        assert f"CREATE OR REPLACE VIEW public.{v} WITH (security_invoker = on)" in body
-        assert f"pg_get_viewdef('public.{v}'::regclass, true)" in body
-    assert body.count("IF position('model_probability_cal' in d) > 0 THEN") == 3
-    assert ACTIVE_MIGRATIONS[-1] == "record_views_decided_cut_2026_10_02.sql"
-    assert ACTIVE_MIGRATIONS.index("record_views_decided_cut_2026_10_02.sql") > \
-        ACTIVE_MIGRATIONS.index("record_excludes_paused_rows_2026_09_28.sql")
+    name = "record_views_decided_cut_2026_10_02.sql"
+    assert name not in ACTIVE_MIGRATIONS
+    assert not (ROOT / "data" / "migrations" / name).exists()
+    assert not (ROOT / "scripts" / "emit_record_views_decided_cut.py").exists()
+    # The units migration stays last: it reads the live view text.
+    assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
 
 
-def test_the_reports_cut_on_the_decided_numbers():
+def test_reports_and_the_dashboard_do_not_re_cut_graded_bets():
+    """A graded BET is in the record because it was written as a BET. These
+    readers must not switch that population onto the decided cut."""
     import scripts.model_roi_report as roi
     import scripts.mlb_bet_record_audit as audit
-    assert config.decided_cut_sql("p", "m") in roi.SQL
-    assert config.decided_cut_sql("p", "t") in audit.PICKS_SQL
+    assert "decided_cut_sql" not in roi.SQL
+    assert "decided_cut_sql" not in audit.PICKS_SQL
+    assert "p.model_probability >= m.min_prob" in roi.SQL
+    assert "p.model_probability >= t.min_prob" in audit.PICKS_SQL
     dash = (ROOT / "dashboard" / "app.py").read_text(encoding="utf-8")
-    assert "_prob = decided_prob_col(_mid)" in dash
-    assert "{decided_edge_col(_mid)} >= {_t['min_edge']}" in dash
-    assert "AND model_probability >= {_t['min_prob']}" not in dash
+    assert "decided_prob_col" not in dash
+    assert "decided_edge_col" not in dash
+    assert "model_probability >= {_t['min_prob']}" in dash
