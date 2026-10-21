@@ -209,10 +209,13 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if not games:
             logger.info("NHL totals card: no unstarted NHL games")
             return {"games": 0, "held": 0, "bets": 0, "published": 0}
-        # Only a game whose goalie matchup is known may produce a bet.
-        games, held = goalie_gate.split_known(
-            games, goalie_gate.matchup_reasons(conn, list(games)))
-        goalie_gate.log_held("NHL totals card", held)
+        # Only a game whose goalie matchup is known may produce a bet
+        # (nhl_over_under is not exempt; models/nhl_goalie_gate.is_exempt).
+        held: dict = {}
+        if not goalie_gate.is_exempt(MODEL_ID):
+            games, held = goalie_gate.split_known(
+                games, goalie_gate.matchup_reasons(conn, list(games)))
+            goalie_gate.log_held("NHL totals card", held)
         if not games:
             return {"games": len(held), "held": len(held), "bets": 0, "published": 0}
         quotes = mk.load_fetch_quotes(conn, games)
