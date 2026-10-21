@@ -41,6 +41,7 @@ from tracking.discord_notifier import (
     clv_line,
     period_heading,
     recap_periods_due,
+    DAILY_CATCHUP_DAYS,
     in_daily_recap_window,
     in_period_recap_window,
     sport_in_progress,
@@ -1267,9 +1268,11 @@ def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
     """Daily from 6:00am ET, week and month from 7:30am ET, all through noon.
 
     Skips when DISCORD_WEBHOOK_EGGZ is unset. Does not post to X or #results.
-    The day is yesterday in America/New_York. A pending leg, a slate date
-    that is not final, or a game of that sport in progress is left
-    unledgered. After noon the miss waits for the next morning.
+    The day is yesterday in America/New_York. A day that missed its morning
+    stays eligible for DAILY_CATCHUP_DAYS mornings, oldest first, and the
+    post names that date. A pending leg, a slate date that is not final, or
+    a game of that sport in progress is left unledgered. After noon the miss
+    waits for the next morning.
     """
     if not configured_to_post():
         return 0
@@ -1287,9 +1290,10 @@ def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
             logger.error(f"Eggz grade before recap failed: {exc}")
         posted = 0
         if in_daily_recap_window(now):
-            day = (now.date() - timedelta(days=1)).isoformat()
-            posted += _post_window(
-                conn, "day", day, day, _day_heading(day), dry_run, now)
+            for back in range(DAILY_CATCHUP_DAYS, 0, -1):
+                day = (now.date() - timedelta(days=back)).isoformat()
+                posted += _post_window(
+                    conn, "day", day, day, _day_heading(day), dry_run, now)
         if in_period_recap_window(now):
             for window in recap_periods_due(now):
                 posted += _post_window(

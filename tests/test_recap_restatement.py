@@ -140,7 +140,79 @@ def test_the_discord_notifier_resolves_restate_true_and_no_ops_without_a_late_pi
     conn = _Conn([("2026-01-01", PUB, 7)], {"2026-01-01": 0})
     monkeypatch.setattr(dn, "get_connection", lambda *a, **k: conn)
     monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_RESULTS", "https://x", raising=False)
-    assert dn.notify_discord_results(game_date="2026-01-01", restate=True) == 0
+    morning = datetime(2026, 1, 2, 8, 0, tzinfo=dn.ET)
+    assert dn.notify_discord_results(
+        game_date="2026-01-01", restate=True, now=morning) == 0
+
+
+def test_a_restatement_after_noon_does_not_scan(monkeypatch):
+    opened = []
+    monkeypatch.setattr(dn, "get_connection", lambda *a, **k: opened.append(1))
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    evening = datetime(2026, 10, 21, 21, 56, tzinfo=dn.ET)
+    assert dn.restate_published_recaps(now=evening) == 0
+    assert dn.notify_discord_results(
+        game_date="2026-10-20", restate={
+            "published_at": "2026-10-21T06:02:00-04:00", "late": 1, "settled": 2,
+        }, now=evening) == 0
+    from datetime import date
+    assert dn.notify_discord_period(
+        "week", date(2026, 10, 12), date(2026, 10, 18),
+        "Week of Oct 12-18", now=evening) == 0
+    assert opened == []
+
+
+def test_a_restatement_waits_out_a_live_game_and_posts_the_next_morning(monkeypatch):
+    posted = []
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    monkeypatch.setattr(dn, "_post", lambda url, body: posted.append(body) or "44")
+    monkeypatch.setattr(
+        "tracking.x_publisher.notify_x_results", lambda *a, **k: 0)
+    item = {
+        "game_date": "2026-10-20",
+        "published_at": "2026-10-21T06:02:00-04:00",
+        "late": 1, "settled": 2,
+    }
+    monkeypatch.setattr(dn, "recaps_needing_restatement", lambda *a, **k: [item])
+
+    class Conn:
+        def __init__(self):
+            self.inserts = []
+            self.sql = ""
+            self.live = "2026-10-21T09:00:00-04:00"
+
+        def execute(self, sql, params=()):
+            self.sql = sql
+            if "INSERT INTO push_sent" in sql:
+                self.inserts.append(params)
+            return self
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            if "commence_time" in self.sql:
+                return [(self.live,)]
+            return [("NHL", "nhl_moneyline", "WIN", 0.02, -110.0,
+                     None, False, 1.0, 1.1)]
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    conn = Conn()
+    monkeypatch.setattr(dn, "get_connection", lambda *a, **k: conn)
+    held = datetime(2026, 10, 21, 10, 0, tzinfo=dn.ET)
+    assert dn.restate_published_recaps(now=held) == 0
+    assert posted == [] and conn.inserts == []
+    morning = datetime(2026, 10, 22, 8, 0, tzinfo=dn.ET)
+    assert dn.restate_published_recaps(now=morning) == 1
+    assert len(posted) == 1
+    assert "restated" in posted[0]["embeds"][0]["title"]
+    assert conn.inserts[0][1] == "discord_results_restate"
+    assert "2026-10-20" in conn.inserts[0][0]
 
 
 def test_the_tweet_header_says_restated():

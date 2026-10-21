@@ -232,8 +232,11 @@ def test_discord_period_uses_the_results_webhook_and_ledgers_once(monkeypatch):
     monkeypatch.setattr(dn, "get_connection", lambda: conn)
     start = __import__("datetime").date(2026, 10, 12)
     end = __import__("datetime").date(2026, 10, 18)
-    assert dn.notify_discord_period("week", start, end, "Week of Oct 12-18") == 1
-    assert dn.notify_discord_period("week", start, end, "Week of Oct 12-18") == 0
+    morning = _at("2026-10-19T08:00:00")
+    assert dn.notify_discord_period(
+        "week", start, end, "Week of Oct 12-18", now=morning) == 1
+    assert dn.notify_discord_period(
+        "week", start, end, "Week of Oct 12-18", now=morning) == 0
     assert len(posted) == 1
     assert posted[0][0] == "https://discord.test/results"
     title = posted[0][1]["embeds"][0]["title"]
@@ -282,8 +285,9 @@ def test_x_period_uses_the_same_window_and_does_not_repost(monkeypatch):
 
     monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
     start, end = date(2026, 9, 1), date(2026, 9, 30)
-    assert xp.notify_x_period("month", start, end, "September") == 1
-    assert xp.notify_x_period("month", start, end, "September") == 0
+    morning = datetime(2026, 10, 5, 8, 0, tzinfo=ET)
+    assert xp.notify_x_period("month", start, end, "September", now=morning) == 1
+    assert xp.notify_x_period("month", start, end, "September", now=morning) == 0
     assert len(posted) == 1
     assert posted[0].startswith("\U0001F4CA September results:")
     assert "1-1" in posted[0] and "ROI" in posted[0]

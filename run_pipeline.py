@@ -1772,9 +1772,9 @@ def step_settle(settle_date: str) -> bool:
         logger.error(f"✗ X results post failed (settlement + Discord "
                      f"unaffected): {exc}")
 
-    # Yesterday's recap, when the 6am run could not post it. Retries from
-    # 7:00am through noon ET. An evening pass does not post it; the next
-    # morning does, while the date is still yesterday.
+    # A day the morning window has not posted. Retries from 7:00am through
+    # noon ET for DAILY_CATCHUP_DAYS, oldest first. The post names that
+    # date. An evening pass does not post it.
     #
     # Only on a pass settling today. The 6am run settles yesterday and has
     # just made the ordinary attempt above, so it runs nothing new here.
