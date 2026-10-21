@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 
 import type { MatchupGrade } from './matchup';
 import { pnlTone } from './tone';
+import { FONT_SIZE_MICRO } from './typeScale';
 
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
@@ -25,6 +26,10 @@ export const colors = {
   // Opaque #6C6C70 is 5.23:1 on bgCard, 4.69:1 on bg and 4.56:1 on noneSoft —
   // still lighter than textSecondary, so the hierarchy holds (audit H7).
   textTertiary: '#6C6C70',
+  // The paused-pick chip is this grey on noneSoft. textTertiary is 4.56:1
+  // there, on the floor. #5C5C62 is 5.79:1 on noneSoft and still lighter
+  // than textSecondary (9.55:1), so the chip stays quieter than a Pick chip.
+  pausedInk: '#5C5C62',
   textInverse: '#FFFFFF',
 
   // Separators
@@ -47,6 +52,9 @@ export const colors = {
 
   // Tints
   tint: BRAND_INK, // primary actions, links, selection
+  // Selected Signals Slip / Track. A light wash of tint, so the ON state
+  // reads as selected and the label stays tint (measured on this wash).
+  tintSoft: '#E6E8EC',
   // A STATUS colour, never a control: the old system blue kept for the one
   // grade/pill/fill that means "good / in progress" and must not look like a
   // button now that tint is near-black (UX review 2026-09-03).
@@ -57,6 +65,9 @@ export const colors = {
   betSoft: '#E8F8EC',
   avoid: '#FF3B30', // red
   avoidSoft: '#FDECEB',
+  // Also the empty Anytime TD meter bar. #C6C6C8 on the white card is
+  // 1.7:1; this gray is 3.26:1 on bgCard, which clears the 3:1 non-text floor
+  // (Designer review of #995).
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
 
@@ -157,7 +168,7 @@ export const font = {
     // sub-caption line from inventing a third size nobody agreed to
     // (UX review, 2026-09-05).
     nano: 10,
-    micro: 11,
+    micro: FONT_SIZE_MICRO,
     caption: 12,
     footnote: 13,
     body: 15,

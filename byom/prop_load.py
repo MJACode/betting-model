@@ -83,6 +83,7 @@ def _as_quotes(rows) -> list[dict]:
             "player_name": row[0], "team": row[1], "market": row[2],
             "bookmaker": row[3], "snapshot_at": row[4],
             "commence_time": row[5], "point": row[6],
+            "prop_id": row[7], "captured_at": row[8],
         })
     return out
 
@@ -90,13 +91,15 @@ def _as_quotes(rows) -> list[dict]:
 def _quotes_for_game(conn, game_id: str) -> list[dict]:
     """DraftKings at or before kickoff. One game. The cast sits in a CASE.
 
-    Other books are not read. Prices are not read.
+    Other books are not read. Prices are not read. created_at is when
+    the row was written; the grader calls that captured_at. prop_id
+    breaks a tie between two lines on the same snapshot.
     """
     sql = f"""
         SELECT p.player_name, p.team, p.market, p.bookmaker,
                {_SNAP} AS snapshot_at,
                {_KICK} AS commence_time,
-               p.line
+               p.line, p.prop_id, p.created_at
           FROM player_prop_odds p
           JOIN games g ON g.game_id = p.game_id
          WHERE p.game_id = %s

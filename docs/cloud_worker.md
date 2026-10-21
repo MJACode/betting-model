@@ -20,15 +20,22 @@ crons had).
 | Job | When (ET) | Command |
 |---|---|---|
 | Daily full pipeline | 6:00am | `python run_pipeline.py` |
+| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered. The same call also posts Eggz's windows to `#eggz-picks` when `DISCORD_WEBHOOK_EGGZ` is set |
+| Eggz channel read | every 15 min | `run_eggz_ingest()` — `#eggz-picks`, author `DISCORD_EGGZ_AUTHOR_ID` only. No request when the token, channel id, or author id is unset |
 | Model quality monitor | 11:00am | `tracking.model_quality.run_model_quality()` — also Step 13 of the daily; report only, `model_quality_checks`. Kill switch: `RUN_MODEL_QUALITY=0` |
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
 | In-play live loop (supervisor) | every 10 min, 11am–midnight | `python -m data.ingestors.live_trigger_orchestrator --loop` |
 | NFL poll — hourly | every :00 | `run_nfl_poll(fast=False)` — both NFL models, 10-day horizon |
 | NFL poll — fast | every :10 | `run_nfl_poll(fast=True)` — only inside 3h of a kickoff |
+| NFL schedule refresh | :05, :20, :35, :50, 24x7, and once when the scheduler starts | `python -m data.ingestors.nfl_props_data_ingestor --schedule-only` — the next 14 days of the nflverse schedule into `games` and `nfl_team_game_stats` (kickoffs, venues, newly listed playoff games); free, no odds call. Kill switch: `RUN_NFL_SCHEDULE_REFRESH=0`; cadence: `NFL_SCHEDULE_REFRESH_MINUTES` (default 15) |
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
+
+Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
+a separate job. They do not move the pick slate or the recap jobs above.
+See `docs/social_posts.md`.
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
@@ -200,8 +207,10 @@ measured against the close and forecast skill improves as kickoff nears.
 
 Operational notes:
 
-- Runs with **cwd = `nfl/`** (the package reads `data/games.csv` and writes
-  `data/cards/` relative to its own root). Its Python deps for this path (pandas,
+- Runs with **cwd = `nfl/`** (the package writes `data/cards/` relative to its
+  own root). Its schedule is the `games` table (`nfl/data_ingest/schedule.py`),
+  not the frozen `data/games.csv`, since 2026-10-20 (`docs/sports/nfl.md`),
+  kept current by the NFL schedule refresh above. Its Python deps for this path (pandas,
   numpy, requests) are already in the root `requirements.txt` — the heavier
   `nfl/requirements.txt` extras (scipy, lightgbm, pyarrow) are only needed by the
   backtest/validation scripts, which are not scheduled.
@@ -366,7 +375,11 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
   public audience than the full feed, so leaving it unset posts nothing rather than leaking the
   free pick into the catch-all channel. |
-| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. |
+| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. An Eggz post that cannot be parsed is logged here once per message id when this is set. |
+| `DISCORD_WEBHOOK_EGGZ` | Eggz recaps in `#eggz-picks` only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
+| `DISCORD_EGGZ_CHANNEL_ID` | The `#eggz-picks` channel id the bot reads. Unset, the poll does not call Discord. |
+| `DISCORD_EGGZ_AUTHOR_ID` | Discord user id of the only author stored. That id is the user whose username is `jack_mehoff123` and whose display name is Dr. Eggz. The username is not the filter. |
+| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. |
 | `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
 | `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |
@@ -377,7 +390,10 @@ so adding that channel later still delivers the rest of the day's picks.
 |---|---|---|
 | **New BET signal** | The pick's first cross of the action thresholds — the same cut the app's Signals tab uses. Fires on the 6am run and each refresh pass as signals lock. | The sport's channel |
 | **Live (in-play) signal** | End of each MLB / NCAAF live pass; after every NFL live BET the in-play worker writes | `DISCORD_WEBHOOK_LIVE_{SPORT}`, else `DISCORD_WEBHOOK_LIVE`, else the sport's |
-| **Results recap** | After settlement, once per settled day | `DISCORD_WEBHOOK_RESULTS` |
+| **Results recap** | After settlement, once per settled day. The 6:00am ET daily settles yesterday. A miss retries from 7:00am ET on later settle passes. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
+| **Weekly results** | Monday 7:30am ET, the prior Monday–Sunday. Later settle passes retry until the next Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
+| **Monthly results** | The first Monday of the month, 7:30am ET, the previous calendar month. Later settle passes retry until the next month's first Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
+| **Eggz results** | Previous day from the 6:00am ET settle, and again on later settle passes. The week and the month use the Monday 7:30am clock. A window that still has a pending leg is not ledgered. | `DISCORD_WEBHOOK_EGGZ` (`#eggz-picks`) |
 | **Watchdog alert / recovery** | Database unreachable, or no completed pass in `WATCHDOG_STALE_MINUTES`. Checked every 15 minutes, around the clock. | `DISCORD_WEBHOOK_OPS` |
 | **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |
 
@@ -404,6 +420,24 @@ The recap fires from the **6am daily run**, which settles *yesterday*. It refuse
 any date that is not already over, so the `--step settle` that runs on every
 refresh pass (grading games as they finish) can never post a partial mid-slate
 record and then ledger it.
+
+The week and the month use that same settled query and the same `#results`
+webhook. `period_recaps` fires Monday at 7:30am ET, after the daily post and
+after the 7:00am retry. The week is the Monday–Sunday that just ended. The
+month is the previous calendar month, and only when that Monday is the first
+Monday of the month. A window that did not post stays due until the next one
+opens; the ledger (`discord_results_week`, `discord_results_month`, and the
+`x_results_*` pair, keyed on the window's start date) posts it once. X uses
+the daily recap's renderer with the window's heading.
+
+Eggz's recap uses that same clock and the same tally, on `DISCORD_WEBHOOK_EGGZ`
+only. Ledger keys are `discord_eggz_results_day`, `discord_eggz_results_week`,
+and `discord_eggz_results_month`, each with the window's start date. His bets
+are `capper_picks`, graded with the existing settler and the DraftKings
+pre-start close. They are not rows in `picks`, and they are not in `#results`
+or on X. A line that cannot be parsed or matched is `needs_review` and is
+logged; if `DISCORD_WEBHOOK_OPS` is set, one alert is posted for that message
+id. The read is `eggz_ingest`, every 15 minutes, with `DISCORD_BOT_TOKEN`.
 
 ### Guarantees
 

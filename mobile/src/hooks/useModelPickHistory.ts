@@ -2,14 +2,13 @@ import { useEffect, useState } from 'react';
 import { fetchModelFullOutcomePicks, type FullOutcomePickRow } from '@/lib/queries';
 
 /**
- * Per-pick history behind a built-in model's full-outcome record — every scored
- * pick (BET + dead-zone NONE + AVOID) that clears the CURRENT thresholds, graded
- * from final results. Row-for-row the same set v_model_full_outcome_picks, bounded to the published window,
- * aggregates, so the list always reconciles with the displayed record.
+ * Every scored pick (BET + dead-zone NONE + AVOID) that clears the CURRENT
+ * thresholds, graded from final results. That is the sweep population, not
+ * the published record. The model detail screen does not use this hook; it
+ * lists posted settled bets so its count matches the Record.
  *
- * Failure-tolerant: any fetch error leaves rows empty so the model detail
- * screen falls back to its settled-BET-pick history instead of blanking.
- * Models not covered by the view (UFC/NHL/NBA/golf) simply return zero rows.
+ * Failure-tolerant: any fetch error leaves rows empty. Models the view does
+ * not grade (UFC/NHL/NBA) return zero rows.
  */
 export function useModelPickHistory(modelId: string) {
   const [rows, setRows] = useState<FullOutcomePickRow[]>([]);

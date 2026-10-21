@@ -627,16 +627,8 @@ def _build_goalie_rows(season: int, as_of_date: str,
             espn = espn_probables.get(team_abbrev) or {}
             if espn.get("player_name"):
                 goalie_name = espn["player_name"]
-                goalie_id = ""
-                for g in goalie_stats:
-                    if _same_goalie_name(g.get("goalieFullName"), goalie_name):
-                        goalie_id = _goalie_id(g)
-                        break
-                # The summary only lists goalies who have played THIS season.
-                # A returning starter is in the log under the same name.
-                if not goalie_id and book:
-                    pid = book.player_named(goalie_name, season, as_of_date)
-                    goalie_id = str(pid) if pid else ""
+                goalie_id = resolve_goalie_id(goalie_name, goalie_stats, book,
+                                              season, as_of_date)
 
             # No probable named: the goalie the team has actually been using
             # (log, this season weighted double), then the summary's leader.
@@ -653,24 +645,6 @@ def _build_goalie_rows(season: int, as_of_date: str,
             if not goalie_name:
                 continue
 
-            # AN EMPTY ID MUST NEVER MATCH. The summary rows carry `playerId`
-            # and no `goalieId` key at all, so the old `str(g.get("goalieId",
-            # "")) == goalie_id` compared "" with "" and was TRUE for the first
-            # row of the list: every probable starter in the league was given
-            # that one goalie's line (all 28 rows written 2026-09-19/20 read
-            # .7143 / 8.8999). An unmatched goalie gets NO stats, never
-            # someone else's.
-            g_stats = {}
-            for g in goalie_stats:
-                if (goalie_id and _goalie_id(g) == goalie_id) or \
-                   _same_goalie_name(g.get("goalieFullName"), goalie_name):
-                    g_stats = g
-                    break
-            if not g_stats and goalie_stats:
-                # (An EMPTY summary is opening night, not a missing goalie.)
-                logger.warning(f"NHL goalie {goalie_name!r} ({team_abbrev}) is not in the "
-                               f"season summary — rated from the game log alone")
-
             # Match game_id from our DB
             game_db = conn.execute("""
                 SELECT game_id FROM games
@@ -680,39 +654,88 @@ def _build_goalie_rows(season: int, as_of_date: str,
                 LIMIT 1
             """, (as_of_date, team_abbrev, team_abbrev)).fetchone()
 
-            # THE NUMBERS COME FROM THE PER-GAME LOG, through the same function
-            # that built every training row (data/nhl_asof.py) — strictly before
-            # today, this season and last, regressed to the league. The season
-            # summary above is used to NAME the goalie, never to rate him: it
-            # was the source of the "GSAA = GAA" placeholder, and a training
-            # row and a live row must mean the same thing.
-            line = book.asof(int(goalie_id), season, as_of_date) if (
-                book and goalie_id) else {}
-            if not line and book:
-                # Named, but not in the log (a debut): league-average, not blank.
-                line = book.asof(None, season, as_of_date)
-            row = {
-                "player_name":    goalie_name,
-                "player_id":      goalie_id or None,
-                "team":           team_abbrev,
-                "season":         season,
-                "game_date":      as_of_date,
-                "game_id":        game_db[0] if game_db else None,
-                # Per-game (filled post-game)
-                "saves":          None,
-                "shots_faced":    None,
-                "goals_allowed":  None,
-                "save_pct":       line.get("save_pct"),
-                "gaa":            line.get("gaa"),
-                "gsaa":           line.get("gsaa"),
-                "xga":            None,
-                "save_pct_last5": line.get("save_pct_last5"),
-                "gaa_last5":      line.get("gaa_last5"),
-                "gsaa_last5":     line.get("gsaa_last5"),
-            }
-            rows.append(row)
+            rows.append(goalie_row(goalie_name, goalie_id, team_abbrev, season, as_of_date,
+                                   game_db[0] if game_db else None, goalie_stats, book))
 
     return rows
+
+
+def resolve_goalie_id(goalie_name: str, goalie_stats: list[dict], book,
+                      season: int, as_of_date: str) -> str:
+    """The NHL id of the goalie ESPN named, or "" when nothing can name him.
+
+    The season summary first; it lists only goalies who have played THIS
+    season, so a returning starter is then found in the log under the same
+    name (GoalieBook.player_named). Shared with the goalie-designation poll
+    (data/ingestors/nhl_goalie_designations.py), so a designation and the
+    goalie row it is compared with are resolved the same way.
+    """
+    for g in goalie_stats or []:
+        if _same_goalie_name(g.get("goalieFullName"), goalie_name):
+            return _goalie_id(g)
+    if book:
+        pid = book.player_named(goalie_name, season, as_of_date)
+        return str(pid) if pid else ""
+    return ""
+
+
+def goalie_row(goalie_name: str, goalie_id: str, team_abbrev: str, season: int,
+               as_of_date: str, game_id: str | None, goalie_stats: list[dict],
+               book) -> dict:
+    """One nhl_goalie_stats row for a named starter: his as-of line from the
+    per-game log. The 6am write and the confirmed-goalie swap
+    (data/ingestors/nhl_goalie_designations.py) both build rows here, so a
+    swapped row means exactly what the 6am row meant."""
+    goalie_stats = goalie_stats or []
+    # AN EMPTY ID MUST NEVER MATCH. The summary rows carry `playerId`
+    # and no `goalieId` key at all, so the old `str(g.get("goalieId",
+    # "")) == goalie_id` compared "" with "" and was TRUE for the first
+    # row of the list: every probable starter in the league was given
+    # that one goalie's line (all 28 rows written 2026-09-19/20 read
+    # .7143 / 8.8999). An unmatched goalie gets NO stats, never
+    # someone else's.
+    g_stats = {}
+    for g in goalie_stats:
+        if (goalie_id and _goalie_id(g) == goalie_id) or \
+           _same_goalie_name(g.get("goalieFullName"), goalie_name):
+            g_stats = g
+            break
+    if not g_stats and goalie_stats:
+        # (An EMPTY summary is opening night, not a missing goalie.)
+        logger.warning(f"NHL goalie {goalie_name!r} ({team_abbrev}) is not in the "
+                       f"season summary — rated from the game log alone")
+
+    # THE NUMBERS COME FROM THE PER-GAME LOG, through the same function
+    # that built every training row (data/nhl_asof.py) — strictly before
+    # today, this season and last, regressed to the league. The season
+    # summary above is used to NAME the goalie, never to rate him: it
+    # was the source of the "GSAA = GAA" placeholder, and a training
+    # row and a live row must mean the same thing.
+    line = book.asof(int(goalie_id), season, as_of_date) if (
+        book and goalie_id) else {}
+    if not line and book:
+        # Named, but not in the log (a debut): league-average, not blank.
+        line = book.asof(None, season, as_of_date)
+    row = {
+        "player_name":    goalie_name,
+        "player_id":      goalie_id or None,
+        "team":           team_abbrev,
+        "season":         season,
+        "game_date":      as_of_date,
+        "game_id":        game_id,
+        # Per-game (filled post-game)
+        "saves":          None,
+        "shots_faced":    None,
+        "goals_allowed":  None,
+        "save_pct":       line.get("save_pct"),
+        "gaa":            line.get("gaa"),
+        "gsaa":           line.get("gsaa"),
+        "xga":            None,
+        "save_pct_last5": line.get("save_pct_last5"),
+        "gaa_last5":      line.get("gaa_last5"),
+        "gsaa_last5":     line.get("gsaa_last5"),
+    }
+    return row
 
 
 # ── DB Writers ────────────────────────────────────────────────────────────────

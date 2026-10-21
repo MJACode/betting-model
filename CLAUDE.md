@@ -304,7 +304,8 @@ was available and is part of the pick's meaning.
   `condition_status='DUPLICATE'`, result kept (mike 10-09). The exits: **VOID** — a row the model should never
   have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
   sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
-  line, price and lock. REFUSES graded picks; posted ones (Matt 09-28) need
+  line, price and lock. Graded picks need `--allow-graded` (mike 10-20, grade
+  kept in the note); posted ones (Matt 09-28) need
   `--allow-posted` (mike 10-09) — and **`config.RECORD_EXCLUSIONS`**, naming who
   asked. Sweep views DO re-cut (§7). Test:
   `tests/test_settled_record_is_immutable.py`.
@@ -383,6 +384,11 @@ the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
 market (`docs/sports/nhl.md`).
+
+### NHL Goalies
+No NHL bet of any kind until both starting goalies are confirmed (mike,
+2026-10-20), except the shots-on-goal props (mike, 2026-10-20). One gate,
+every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
 
 ---
 
@@ -552,7 +558,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 64 models carry their
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 66 models carry their
   own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
@@ -592,6 +598,7 @@ to be known BEFORE deciding which file to open.
 | Test suite coverage | `docs/testing.md` |
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
+| **App crashes: `app_errors`, what each kind means, the queries** | `docs/app_errors.md` |
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |

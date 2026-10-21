@@ -43,6 +43,8 @@ models/saved/mlb_prop_pitcher_outs_20260903_233111.pkl
 models/saved/mlb_prop_pitcher_walks_20260620_164336.pkl
 models/saved/mlb_runline_20260823_105841.pkl
 models/saved/nba_prop_projection_20261016_091702.pkl
+models/saved/nba_team_total_luck_20261018_014024.pkl
+models/saved/nba_total_luck_20261017_090305.pkl
 models/saved/ncaaf_moneyline_20260821_113517.pkl
 models/saved/ncaaf_over_under_20260825_204305.pkl
 models/saved/ncaaf_spread_20260828_103438.pkl
@@ -98,6 +100,12 @@ models/saved/wnba_spread_20260719_113238.pkl
   (`models/nba_prop_projection.py`, fitted by `scripts/nba_prop_projection_train.py`
   through 2025-26), committed with the code that reads it and registered with
   `--register --from-file`. A new model id: no older file to drop.
+
+- `nba_team_total_luck_20261018_014024.pkl` — the NBA home team-total under
+  rule's pricing sample and per-season bet counts (`models/nba_team_total_luck.py`,
+  built by `scripts/nba_team_total_luck_build.py` from 2020-21 .. 2025-26). Read
+  by the model's own `load_artifact`, not `model_registry`; committed with the
+  code that reads it. A new model id: no older file to drop.
 
 ## Tracked artifacts that are not timestamped pkls
 

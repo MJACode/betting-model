@@ -1072,7 +1072,10 @@ def _job_void_picks(**kw):
     `"allow_posted": true` (mike, 2026-10-09: "Change the rule, void them").
     That opt-in is for a posted pick decided on a price nobody could bet; the
     module docstring of scripts/void_picks.py says when, and why the lock
-    exists. It never makes a graded pick voidable. The original message is
+    exists. It never makes a graded pick voidable; `"allow_graded": true`
+    does that (mike, 2026-10-20: "Void the 6 mlb picks"), for a pick that
+    should never have been produced, found after it settled. The grade it
+    overwrites is kept in the row's condition_note. The original message is
     not edited or deleted. After the void commits, a pick that was posted
     gets a void notice with this reason. An unposted void posts nothing, and
     a rejected notice does not undo the void.
@@ -1084,7 +1087,8 @@ def _job_void_picks(**kw):
     try:
         rows = _select(conn, kw["pick_ids"], None, None, None)
         to_void, refused = plan_voids(rows, kw["reason"],
-                                      allow_posted=bool(kw.get("allow_posted", False)))
+                                      allow_posted=bool(kw.get("allow_posted", False)),
+                                      allow_graded=bool(kw.get("allow_graded", False)))
         void(conn, to_void, kw["reason"])
         conn.commit()
         notice = announce_posted_voids(to_void, kw["reason"])
@@ -1119,7 +1123,13 @@ def _validate_void_picks(args: dict) -> dict:
     if not isinstance(allow_posted, bool):
         raise ValueError("allow_posted must be true or false (a JSON boolean); "
                          f"got {allow_posted!r}")
-    return {"pick_ids": ids, "reason": reason[:500], "allow_posted": allow_posted}
+    # The same for the settled-result lock (mike, 2026-10-20).
+    allow_graded = args.get("allow_graded", False)
+    if not isinstance(allow_graded, bool):
+        raise ValueError("allow_graded must be true or false (a JSON boolean); "
+                         f"got {allow_graded!r}")
+    return {"pick_ids": ids, "reason": reason[:500], "allow_posted": allow_posted,
+            "allow_graded": allow_graded}
 
 
 def _job_ncaaf_pbp_pull(**kw):
@@ -1980,8 +1990,9 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Not in
-    # jobs/declared_jobs.json, so a merge does not enqueue a writer.
+    # NFL Build Your Own Model game facts. apply defaults false. Not listed
+    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
     # NFL prop facts. apply defaults false. Listed in declared_jobs.json
     # with enabled false and apply false, so a merge does not enqueue a

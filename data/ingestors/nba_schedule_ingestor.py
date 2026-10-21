@@ -22,7 +22,11 @@ WHAT IT WRITES.
     a score already stored, or a game of any other type.
 
 stats.nba.com blocks datacenter IPs (docs/sports/nba.md), so this runs on a
-residential machine; the worker reads what it wrote.
+residential machine; the worker reads what it wrote. Between loads the worker
+keeps the schedule current from ESPN every day
+(data/ingestors/nba_schedule_refresh.py, the `nba-schedule` step): new games
+under an 'espn:' key, moved tips, postponements. A row this load writes
+replaces that game's 'espn:' row.
 
     python -m data.ingestors.nba_schedule_ingestor --seasons 2019 2027
 """
@@ -189,6 +193,12 @@ def write(conn, rows: list[dict]) -> dict:
             game_label = EXCLUDED.game_label, game_sublabel = EXCLUDED.game_sublabel,
             national_tv = EXCLUDED.national_tv, updated_at = NOW()
     """, rows)
+    # A game the worker's daily ESPN refresh listed before the league's own load
+    # (data/ingestors/nba_schedule_refresh.py) is keyed 'espn:<event id>'. The
+    # NBA.com row just written replaces it: one row a game.
+    if rows:
+        conn.execute("DELETE FROM nba_schedule WHERE nba_game_id LIKE %s AND game_id = ANY(%s)",
+                     ("espn:%", [r["game_id"] for r in rows]))
 
     reg = [r for r in rows if r["game_type"] == "regular"]
     ids = [r["game_id"] for r in reg]

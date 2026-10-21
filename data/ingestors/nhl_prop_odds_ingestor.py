@@ -31,6 +31,22 @@ series every other sport's prop history uses and every reader already bounds on
 `snapshot_at <= commence_time`; they are the first and last rows of that
 series, which is how scripts/nhl_prop_lab_priced.py reads them.
 
+ONE MORE OPEN WHEN THE GOALIES ARE CONFIRMED LATE (mike, 2026-10-20: "We
+should absolutely always know the goalie matchup before making a bet as
+well."). The prop cards decide a game only once both starting goalies are
+confirmed (models/nhl_goalie_gate.py), and only on a quote fetched after that
+moment (scripts/nhl_prop_card.after_confirmation). A game whose matchup became
+known after its newest 'open'-series snapshot therefore owes ONE more 'open'
+snapshot, bought by the next pass; once it is held, nothing more is owed
+until the moment the matchup became known moves past it again (a different
+goalie confirmed, or ESPN back to expected and confirming again). Cost: one
+extra snapshot each time that happens, usually once a game, and each is two
+event calls (featured + alternates). The code's older figure of 5 credits a
+snapshot predates the alternates call; api_call_log measured the pair at 10-11
+credits on the quiet evening passes of 2026-10-19 (featured 5-6, alternates 5;
+per-row credits there are the x-requests-used delta between consecutive calls
+in one process, so busier passes read noisier).
+
 THE FINAL IS FILED AS `snapshot_type = 'close'`, ON PURPOSE. Saves and blocked
 shots are posted only in the 70-minute close, so the cards decide on it, and
 CLV measured against that same quote is zero by construction (2026-10-08: all
@@ -105,7 +121,8 @@ def _utc(v) -> datetime:
 def due(start: datetime, now: datetime, stored: list[datetime],
         window_min: int = NHL_PROP_CLOSE_WINDOW_MIN, final_taken: bool = False,
         final_window: tuple[int, int] | None = (NHL_PROP_FINAL_OPENS_MIN,
-                                                NHL_PROP_FINAL_CLOSES_MIN)) -> str | None:
+                                                NHL_PROP_FINAL_CLOSES_MIN),
+        known_at: datetime | None = None) -> str | None:
     """Which snapshot, if any, this pass owes one game: 'open', 'close', 'final' or None.
 
     `stored` is every pre-game OPEN-series snapshot time already held for the
@@ -113,6 +130,13 @@ def due(start: datetime, now: datetime, stored: list[datetime],
     the puck has dropped, and a game first priced inside the closing window
     gets ONE decision snapshot, not two back to back. The close outranks the
     final: if both are owed on one pass, the quote a card decides on is bought.
+
+    `known_at` is when the game's goalie matchup became known
+    (models/nhl_goalie_gate.known_games), or None while it is not. A game
+    whose newest open-series snapshot is older than that owes one more 'open'
+    (the module docstring); the close, when it is owed on the same pass, is
+    that snapshot. Once a snapshot newer than `known_at` is held, it is owed
+    no more.
     """
     if now >= start:
         return None
@@ -129,6 +153,8 @@ def due(start: datetime, now: datetime, stored: list[datetime],
     window_opens = start - timedelta(minutes=window_min)
     if now >= window_opens and max(pre) < window_opens:
         return "close"
+    if known_at is not None and max(pre) < known_at <= now:
+        return "open"
     if final_window and not final_taken:
         f_opens = start - timedelta(minutes=final_window[0])
         f_closes = start - timedelta(minutes=final_window[1])
@@ -251,6 +277,10 @@ def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = Fals
                                            _normalize_team(ev["home"], "NHL"))
         known = _existing_game_ids(conn, [e["game_id"] for e in events])
         stored, finals = _stored_snapshots(conn, sorted(known))
+        # When each game's goalie matchup became known: a game confirmed
+        # after its newest open snapshot owes one more (due()).
+        from models.nhl_goalie_gate import known_games
+        confirmed_at = known_games(conn, sorted(known))
         snapshot_at = now.isoformat()
         for ev in events:
             gid = ev["game_id"]
@@ -259,7 +289,8 @@ def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = Fals
                 logger.warning(f"NHL prop odds: {gid} has no games row ({ev['away']} @ {ev['home']})")
                 out["unknown_games"] += 1
                 continue
-            which = due(ev["start"], now, stored.get(gid, []), final_taken=gid in finals)
+            which = due(ev["start"], now, stored.get(gid, []), final_taken=gid in finals,
+                        known_at=confirmed_at.get(gid))
             if which is None:
                 continue
             if dry_run:

@@ -17,11 +17,13 @@
 -- standard_v2. Worked picks 3114189, 2387645 and 3114194 are checked before
 -- any row is written; a mismatch raises and the transaction rolls back.
 -- Puck-line rows are not rewritten: the close matches the stored HOME sign.
+-- A team total's close is its 'close' snapshot only: its other rows are the
+-- decision fetch, the price taken (data/ingestors/nba_team_total_odds.py).
 -- results_snapshots is not touched.
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-nba-team-total-luck';
   work_left boolean;
   def text;
   new_def text;
@@ -202,6 +204,8 @@ BEGIN
         WHEN 'mlb_live_total_runs' THEN 'totals'
         WHEN 'ncaaf_live_win_prob' THEN 'h2h'
         WHEN 'ncaaf_live_total' THEN 'totals'
+        WHEN 'nba_total_luck' THEN 'totals'
+        WHEN 'nba_team_total_luck' THEN 'team_totals_home'
         ELSE 'h2h'
       END
     $body$;
@@ -353,7 +357,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12';
+      'clv-standard-v2-power-80-0.05-12-nba-team-total-luck';
   END IF;
 
   SELECT EXISTS (
@@ -471,7 +475,8 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND o.snapshot_type <> 'in_play'
+          AND ((s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close')
+            OR (s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)
@@ -491,7 +496,8 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND o.snapshot_type <> 'in_play'
+          AND ((s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close')
+            OR (s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             s.game_market <> 'spreads'
@@ -523,7 +529,8 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = 'pinnacle'
-          AND o.snapshot_type <> 'in_play'
+          AND ((s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close')
+            OR (s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)

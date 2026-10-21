@@ -24,8 +24,14 @@ reads and the inserts run under the model's transaction-scoped advisory lock
 pass and the window job can overlap; the ledger and the picks are re-read
 INSIDE the lock so two writers cannot both decide one game.
 
-EVERY QUALIFYING PROPOSITION. No game or night cap (mike, 2026-10-16:
-"maximize units won"; the measured basis is in models/nba_prop_market.py).
+ONE NBA PROP BET A GAME, ACROSS BOTH NBA PROP MODELS, AND A FEW A NIGHT
+(mike, 2026-10-20, after opening night wrote 36 bets on one game: "Only the
+strongest picks need to be sent, like NHL"). This card no longer writes
+anything itself: it finds every qualifying proposition (look()), and
+scripts/nba_props_card.publish_across_models -- the only door an NBA prop pick
+goes through -- pools them with nba_prop_projection's, keeps the best EV in
+each game and the best few of the night, and writes this card's decision rows
+with them. The 2026-10-16 "no game or night cap" rule is replaced.
 
 BET ROWS ONLY in picks. The scorer deletes every model's unsettled non-BET rows
 on each pass, so a "declined" row would not survive there. A decision with no
@@ -44,21 +50,21 @@ that name (tracking/paper_tracker._capture_clv). kelly_fraction is the NHL
 prop cards' flat 0.01.
 
     python -m scripts.nba_prop_market_card              # print the card, write no pick or decision
-    python -m scripts.nba_prop_market_card --publish    # write new decisions and bets
+    python -m scripts.nba_prop_market_card --publish    # both NBA prop cards through the shared door
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import models.nba_prop_market as mk  # noqa: E402
+import scripts.nba_total_luck_card as tlcard  # noqa: E402
 from data.anon_readable import API_ROLES, lock_down  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from data.ddl_guard import schema_is_current  # noqa: E402
@@ -67,7 +73,6 @@ from tracking.pick_integrity import pick_problems  # noqa: E402
 
 MODEL_ID = mk.MODEL_ID
 SPORT = mk.SPORT
-_ET = ZoneInfo("America/New_York")
 
 # ── the decisions ledger ──────────────────────────────────────────────────────
 # One row per game the card has decided (models/nba_prop_market, DECIDED ONCE).
@@ -114,41 +119,37 @@ def slate(conn, now: datetime, skipped: list | None = None,
           horizon_min: int | None = None) -> dict[str, dict]:
     """REGULAR-SEASON NBA games that have not tipped and tip within the
     decision window's far end (or `horizon_min`, for the window job's look
-    ahead).
+    ahead). Both NBA prop models read this slate (the projection card and the
+    five-minute window job call it too).
 
-    The tip is the earlier of nba_schedule's and games' start
-    (models.nba_prop_market.tip_of). The game_date bound only lets the query
-    use the date: a game tipping in the next 70 minutes cannot carry an ET
-    date before yesterday or after tomorrow.
+    The totals card's slate, read with this window
+    (scripts.nba_total_luck_card.slate): the tip is the earlier of
+    nba_schedule's and games' start (models.nba_prop_market.tip_of), and a
+    game counts as regular season by models.nba_total_luck.regular_season --
+    the schedule types it 'regular', or the schedule does not list it and it
+    falls on a regular-season day. The second half is the NBA Cup week: the
+    2026-27 schedule was loaded on 2026-10-15, before the league set it, so
+    24 regular-season games were not in it and the knockout games were only
+    placeholders, while the odds feed writes each into `games` as soon as it
+    quotes it. The daily schedule refresh lists them once ESPN does
+    (data/ingestors/nba_schedule_refresh.py); this keeps them priced on a day
+    that refresh has failed. They are in the graded population: the props
+    bought for 2023-24..2025-26 cover 1,230 regular-season games a season,
+    the Cup quarterfinals and semifinals included.
 
-    Regular season only, because that is the population the rule was graded
-    on (1,230 games a season, 2023-24..2025-26). A game nba_schedule does not
-    list as 'regular' -- the NBA Cup final, play-in, playoffs, or a game the
-    schedule does not know -- is skipped and named in `skipped`.
+    NOT the play-in, the playoffs or the NBA Cup final, on purpose. Neither
+    prop model has been graded on one: the stored prop history holds 0 of
+    those 272 games of 2023-24..2025-26 (18 play-in, 251 playoff, 3 Cup
+    finals) against 3,690 of 3,690 regular-season games (player_prop_odds
+    joined to nba_schedule by game type, production, 2026-10-20). Grading them
+    means buying those props first (data/ingestors/nba_odds_history.py
+    --props over the postseason dates). Each is skipped and named in
+    `skipped`, as is a game the schedule does not list on a day that is not
+    a regular-season day.
     """
-    today = now.astimezone(_ET).date()
-    dates = [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)]
-    rows = conn.execute("""
-        SELECT g.game_id, g.home_team, g.away_team, g.game_date, g.season,
-               g.commence_time, s.commence_time, s.game_type
-        FROM games g
-        LEFT JOIN nba_schedule s ON s.game_id = g.game_id
-        WHERE g.sport = 'NBA' AND g.game_date = ANY(%s)
-    """, (dates,)).fetchall()
-    out = {}
-    horizon = now + timedelta(minutes=horizon_min if horizon_min is not None
-                              else mk.DECISION_WINDOW_MIN[1])
-    for gid, home, away, gd, season, g_ct, s_ct, game_type in rows:
-        tip = mk.tip_of(s_ct, g_ct)
-        if tip is None or tip <= now or tip > horizon:
-            continue
-        if game_type != "regular":
-            if skipped is not None:
-                skipped.append(f"{gid} ({game_type or 'not in nba_schedule'})")
-            continue
-        out[gid] = {"home": home, "away": away, "game_date": str(gd)[:10],
-                    "season": int(season) if season is not None else None, "tip": tip}
-    return out
+    return tlcard.slate(conn, now, skipped,
+                        horizon_min=horizon_min if horizon_min is not None
+                        else mk.DECISION_WINDOW_MIN[1])
 
 
 def load_roster(conn, games: dict[str, dict]) -> mk.Roster:
@@ -183,19 +184,6 @@ def decided_games(conn, game_ids: list[str]) -> set[str]:
     return {r[0] for r in conn.execute(
         "SELECT game_id FROM nba_prop_market_decisions WHERE game_id = ANY(%s)",
         (list(game_ids),)).fetchall()}
-
-
-def projection_holdings(conn, game_ids: list[str]) -> set[tuple[str, str, str]]:
-    """(game, player, market) the projection model already holds a BET on. Normally empty: it
-    decides a game after this card. It decides alone only when this card has not decided the
-    game 50 minutes before tip (models.nba_prop_projection.DECIDE_ALONE_BY_MIN), and then a
-    later decision here must not bet the same proposition a second time."""
-    if not game_ids:
-        return set()
-    return {(g, str(p), m) for g, p, m in conn.execute("""
-        SELECT game_id, player_id, prop_market FROM picks
-        WHERE model_id = 'nba_prop_projection' AND signal_type = 'BET' AND game_id = ANY(%s)
-    """, (list(game_ids),)).fetchall()}
 
 
 # ── rows ──────────────────────────────────────────────────────────────────────
@@ -268,48 +256,6 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"ON CONFLICT DO NOTHING RETURNING pick_id")
 
 
-def publish(conn, rows: list[dict], decisions: list[mk.NbaPropDecision]) -> tuple[int, int]:
-    """Write each decided game once -- its decision row and its bets in ONE
-    transaction, under the model's lock, the ledger and the picks re-read
-    inside it. -> (bets written, decisions written).
-
-    A row whose game is not among `decisions`, or whose game another writer
-    has already decided or bet, is written nowhere.
-    """
-    if not decisions:
-        return 0, 0
-    from scripts.nfl_wind_publisher import _lock_model
-    _lock_model(conn, MODEL_ID)
-    gids = sorted({d.game_id for d in decisions})
-    taken = games_with_a_bet(conn, gids)
-    done = decided_games(conn, gids)
-    held = projection_holdings(conn, gids)
-    by_game: dict[str, list[dict]] = {}
-    for r in rows:
-        if (r["game_id"], r["player_id"], r["prop_market"]) in held:
-            continue                    # one bet per proposition across the NBA prop models
-        by_game.setdefault(r["game_id"], []).append(r)
-    n_bets = n_decided = 0
-    for d in sorted(decisions, key=lambda x: x.game_id):
-        if d.game_id in taken or d.game_id in done:
-            continue
-        game_rows = by_game.get(d.game_id, [])
-        got = conn.execute(_INSERT_DECISION, {
-            "game_id": d.game_id, "fetch_at": d.fetch_at, "n_quotes": d.n_quotes,
-            "n_bets": len(game_rows), "detail": d.detail}).fetchone()
-        if not got:
-            continue
-        n_decided += 1
-        for r in game_rows:
-            if conn.execute(_INSERT, {c: r[c] for c in _COLS}).fetchone():
-                n_bets += 1
-    conn.commit()
-    logger.info(f"nba-prop-market: {n_decided} game(s) decided, {n_bets} bet(s) written "
-                f"of {len(rows)} on the card; skipped {len(taken)} game(s) already bet "
-                f"and {len(done)} already decided")
-    return n_bets, n_decided
-
-
 # ── the pass ──────────────────────────────────────────────────────────────────
 
 def render(bets, diag: dict, written: int | None = None,
@@ -329,54 +275,53 @@ def render(bets, diag: dict, written: int | None = None,
     return "\n".join(lines)
 
 
+def look(conn, now: datetime) -> dict:
+    """One look, no write: the games in reach, every qualifying proposition and the games this
+    look decides. -> {"games", "bets", "diag", "decisions"}."""
+    skipped: list[str] = []
+    games = slate(conn, now, skipped)
+    if skipped:
+        logger.info(f"nba-prop-market: not a regular-season game, not priced: {skipped}")
+    if not games:
+        return {"games": {}, "bets": [], "diag": dict.fromkeys(mk.DIAG_KEYS, 0), "decisions": []}
+    ensure_decisions_table(conn)
+    taken = games_with_a_bet(conn, sorted(games))
+    decided = decided_games(conn, sorted(games))
+    quotes = mk.load_quotes(conn, games, now)
+    in_window = {g: v for g, v in games.items()
+                 if g not in taken and g not in decided and mk.in_window(v["tip"], now)}
+    roster = load_roster(conn, in_window) if in_window else mk.Roster([])
+    bets, diag, decisions = mk.find_bets(quotes, games, roster, now, taken=taken,
+                                         decided=decided)
+    for gid, g in sorted(games.items()):
+        lead = mk.minutes_to_tip(g["tip"], now)
+        if gid in taken or gid in decided or lead >= mk.DECISION_WINDOW_MIN[0]:
+            continue
+        rows = [q for q in quotes if q["game_id"] == gid]
+        if not mk.window_was_fetched(mk._pre_tip(rows, g["tip"], now), g["tip"]):
+            # Widen nothing (the window is the evidence). Say it, so a
+            # cadence that cannot reach a tip time is visible.
+            logger.warning(
+                f"nba-prop-market: {gid} tips at {g['tip'].isoformat()} ({lead:.0f} min) "
+                f"and no prop fetch landed {mk.DECISION_WINDOW_MIN[0]}-"
+                f"{mk.DECISION_WINDOW_MIN[1]} min before it: no pass could decide it")
+    return {"games": games, "bets": bets, "diag": diag, "decisions": decisions}
+
+
 def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
+    """Print this model's card. Publishing runs BOTH NBA prop cards through the shared door
+    (scripts/nba_props_card.run_cards): one model alone must never write, or the card that
+    happened to run first would win the game's one bet."""
     now = now or datetime.now(timezone.utc)
+    if do_publish:
+        from scripts.nba_props_card import run_cards
+        return run_cards(do_publish=True, now=now)
     conn = get_connection()
     try:
-        skipped: list[str] = []
-        games = slate(conn, now, skipped)
-        if skipped:
-            logger.info(f"nba-prop-market: not a regular-season game, not priced: {skipped}")
-        if not games:
-            diag = dict.fromkeys(mk.DIAG_KEYS, 0)
-            logger.info(render([], diag, 0 if do_publish else None)
-                        + " (no NBA game tips in the next "
-                        f"{mk.DECISION_WINDOW_MIN[1]} minutes)")
-            return {"games": 0, "bets": 0, "published": 0, "decided": 0, "diag": diag}
-        ensure_decisions_table(conn)
-        taken = games_with_a_bet(conn, sorted(games))
-        decided = decided_games(conn, sorted(games))
-        quotes = mk.load_quotes(conn, games, now)
-        in_window = {g: v for g, v in games.items()
-                     if g not in taken and g not in decided and mk.in_window(v["tip"], now)}
-        roster = load_roster(conn, in_window) if in_window else mk.Roster([])
-        bets, diag, decisions = mk.find_bets(quotes, games, roster, now, taken=taken,
-                                             decided=decided)
-        for gid, g in sorted(games.items()):
-            lead = mk.minutes_to_tip(g["tip"], now)
-            if gid in taken or gid in decided or lead >= mk.DECISION_WINDOW_MIN[0]:
-                continue
-            rows = [q for q in quotes if q["game_id"] == gid]
-            if not mk.window_was_fetched(mk._pre_tip(rows, g["tip"], now), g["tip"]):
-                # Widen nothing (the window is the evidence). Say it, so a
-                # cadence that cannot reach a tip time is visible.
-                logger.warning(
-                    f"nba-prop-market: {gid} tips at {g['tip'].isoformat()} ({lead:.0f} min) "
-                    f"and no prop fetch landed {mk.DECISION_WINDOW_MIN[0]}-"
-                    f"{mk.DECISION_WINDOW_MIN[1]} min before it: no pass could decide it")
-        published = n_decided = 0
-        if do_publish and decisions:
-            # A decision with no bet is still written: it is what stops the
-            # next look from re-deciding the game on a later price.
-            rows: list[dict] = []
-            if bets:
-                from models.scorer import _get_current_bankroll
-                rows = pick_rows(bets, _get_current_bankroll(conn))
-            published, n_decided = publish(conn, rows, decisions)
-        logger.info("\n" + render(bets, diag, published if do_publish else None,
-                                   n_decided if do_publish else None))
-        return {"games": len(games), "bets": len(bets), "published": published,
-                "decided": n_decided, "diag": diag}
+        got = look(conn, now)
+        logger.info("\n" + render(got["bets"], got["diag"]))
+        return {"games": len(got["games"]), "bets": len(got["bets"]), "published": 0,
+                "decided": 0, "diag": got["diag"]}
     finally:
         conn.close()
 

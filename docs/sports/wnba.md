@@ -33,6 +33,39 @@ Backtest note: `wnba_moneyline` OOS ROI (+42.7%) is vs. synthetic −110. Real D
 | WNBA team stats | **Local machine** (`wnba_stats`) | Daily 7am (Task Scheduler) | Season-to-date team ratings → game scorer features. Now redundant with the ESPN step's DB rebuild |
 | WNBA injuries | GitHub Actions (`step_injuries`) | 7am | ESPN hidden API → `injuries` table → `home/away_injury_adj` features |
 
+### The schedule gate and rest at tip (2026-10-20)
+
+Both read the stored schedule through `data/schedule_context.py`.
+
+- **No decision while a team's earlier game is pending.** In the postseason the
+  book lists game N+1 as game N ends, and `wnba_moneyline` bet the opening price
+  1.6 to 61.6 seconds after the row appeared, with game N still on (5 BETs). A
+  game is now held while either team has an earlier game not played, being
+  played, or without its score in `games` (the WNBA game inputs read the score
+  and the team stats the results step rebuilds from it). The rows are written
+  NONE with the reason; the first pass after the result lands decides it. A
+  past game with no result stops holding after 4 days. The cost: the results
+  step runs after scoring in a refresh pass and not at all in the 10-minute
+  evening passes, so game N+1 is decided from the first pass after game N's
+  result is stored (the 2026 postseason box scores landed 00:20-00:27 ET).
+- **Rest at tip.** `_rest_days_live` read scored games only. 11 of 40
+  `wnba_moneyline` BETs were written before a team's previous game was in the
+  database, and 8 of them read a different rest difference (3698318 read 10
+  days for both teams; the truth was 2). It now counts a game still being
+  played. Training reads the latest played game, the same thing for past
+  games, so **no retrain**. With the gate on, a game it lets through has no
+  pending earlier game, so its rest was already right; this corrects the
+  number on held rows and on any path that skips the gate (the backtester
+  calls the live builder).
+- **A row no book ever priced is not a game.** The four 2026 rows like
+  `WNBA_2026-10-03_NY_ATL` (unscored, 0 odds rows, 17 to 42 hours from the real
+  game) would otherwise hold their teams' next games and shorten rest.
+- **Not changed:** the prop models' own rest (`wnba_prop_feature_engine`
+  `_rest_days`, game-day only, counts every row including those four).
+- **Next season:** replaying 2026 with a decision at DraftKings' first price,
+  60 of 272 priced games (22%) had a team's game still to be played or in
+  progress. Those are the games this holds.
+
 ### stats.nba.com constraint
 
 `nba_api` calls `stats.nba.com`, which consistently times out from GitHub Actions datacenter IPs. `wnba_stats` and `wnba-game-log` must run on a residential IP. Windows Task Scheduler job `\BettingModel\WNBA Daily Ingest` handles this at 7am daily. Log: `logs/wnba_ingest.log`.

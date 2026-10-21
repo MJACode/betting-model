@@ -9,8 +9,14 @@ read it every hour on 2026-10-15), so every NBA pick of 2026-27 can settle
 without Matt's machine. It is the NBA analog of wnba_results_ingestor.
 
 WHAT IT WRITES, for ET dates [run_date - N .. run_date] (N = 3), plus a
-14-day self-heal reach for any started game still missing a score or a box
-(a worker outage longer than three days is caught up on the first pass back):
+self-heal reach back to the season's opening (at least 14 days) for any
+started game still missing a score or a box. A worker outage is caught up on
+the first pass back, and a box ESPN finishes late is still taken weeks later:
+the NBA totals model (models/nba_total_luck.py) declines every game while any
+earlier game of the season lacks its score or its box, so a box that stayed
+missing would stop that model for the rest of the season. The gate costs
+nothing when nothing is missing (one read of the season's games, 73 ms over
+2025-26 on production, measured 2026-10-17; no ESPN call):
   * games               -- home_score, away_score, home_win, went_to_ot (ESPN's
                            period count > 4) for every FINAL game that already
                            has a `games` row, or that `nba_schedule` lists as a
@@ -27,6 +33,12 @@ WHAT IT WRITES, for ET dates [run_date - N .. run_date] (N = 3), plus a
                            log rows yet. A game is never skipped because one
                            player's id could not be found (that is how rookies'
                            games went unlogged under the old fill_missing).
+  * nba_schedule        -- status_text = ESPN's 'Postponed' / 'Canceled' for a
+                           scheduled game ESPN lists that way on its date (ESPN
+                           keeps the event on the ORIGINAL date). The totals
+                           model then stops waiting for its score, and the date
+                           stops being fetched. A later stats.nba.com schedule
+                           load overwrites it with the league's own status.
   * nba_player_dnp      -- (created on demand) ESPN's did-not-play list for the
                            same game, with ESPN's reason ("COACH'S DECISION",
                            an injury note), plus players ESPN lists with '--'
@@ -85,13 +97,16 @@ from loguru import logger
 from data.db import call_in_savepoint, get_connection, statement_timeout
 from data.ingestors.nba_espn_box import (
     ESPN_NBA_SCOREBOARD_URL, ESPN_NBA_SUMMARY_URL, SEASON_TYPE_PRESEASON,
-    parse_nba_box, parse_nba_dnp, parse_nba_scoreboard,
+    parse_nba_box, parse_nba_dnp, parse_nba_postponed, parse_nba_scoreboard,
 )
 from data.ingestors.nba_stats_ingestor import _nba_season_for_date, _upsert_player_log
 from data.ingestors.wnba_results_ingestor import norm_player_name
 
 LOOKBACK_DAYS = 3
 HEAL_DAYS = 14               # a started game still unscored/unlogged this far back
+SEASON_OPENS = (10, 1)       # ... and back to Oct 1 of the season (season_open)
+_NOT_A_TEAM = {"", "NAN", "NONE", "NULL", "TBD"}
+POSTPONED_SQL = "(ppd|postpon|cancel)"
 NAME_HISTORY_DAYS = 400
 SUMMARY_SLEEP = 0.4          # between per-game summary calls
 FALLBACK_PREFIX = "espn:"
@@ -310,8 +325,25 @@ def _parse_ts(ts) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def season_open(anchor: date) -> date:
+    """Oct 1 of the NBA season `anchor` falls in. July to September give the
+    coming season's, so the reach is then the 14-day heal alone."""
+    year = anchor.year if anchor.month >= 7 else anchor.year - 1
+    return date(year, *SEASON_OPENS)
+
+
+def _is_team(code) -> bool:
+    return isinstance(code, str) and code.strip().upper() not in _NOT_A_TEAM
+
+
 def needs_work(game: dict, now: datetime) -> bool:
-    """Started, and still missing a score or a box."""
+    """Started, and still missing a score or a box. A placeholder with no teams
+    yet (an NBA Cup knockout slot) and a game recorded as postponed are not
+    work: neither will ever have a final on that date."""
+    if not (_is_team(game.get("home")) and _is_team(game.get("away"))):
+        return False
+    if game.get("postponed"):
+        return False
     start = _parse_ts(game.get("commence_time"))
     if start is not None:
         started = start <= now
@@ -365,20 +397,31 @@ class PgStore:
                    AND NOT EXISTS (SELECT 1 FROM games g WHERE g.game_id = s.game_id)
             """, (start, end)).fetchall()
 
+        def _postponed():
+            return self.conn.execute(f"""
+                SELECT game_id FROM nba_schedule
+                 WHERE game_date >= %s AND game_date <= %s
+                   AND status_text ~* '{POSTPONED_SQL}'
+            """, (start, end)).fetchall()
+
         try:
             sched = self._read("nba_results_sched", _schedule)
+            ppd = {r[0] for r in self._read("nba_results_ppd", _postponed)}
         except Exception as exc:                      # noqa: BLE001
             # nba_schedule is loaded by a local job; its absence only means a
             # game `games` lacks cannot be added here.
             logger.info(f"NBA results: nba_schedule not read ({str(exc)[:80]})")
-            sched = []
+            sched, ppd = [], set()
+        for gid in ppd & set(known):
+            known[gid]["postponed"] = True
         for gid, gdate, season, home, away, ct in sched:
             if gid in known:
                 continue
             known[gid] = {"game_id": gid, "game_date": str(gdate)[:10],
                           "season": int(season), "home": home, "away": away,
                           "home_score": None, "away_score": None, "went_to_ot": None,
-                          "commence_time": ct, "logged": False, "source": "schedule"}
+                          "commence_time": ct, "logged": False, "source": "schedule",
+                          "postponed": gid in ppd}
         return known
 
     def resolver(self, since: str) -> PlayerResolver:
@@ -438,6 +481,16 @@ class PgStore:
 
     def upsert_log(self, rows: list[dict]) -> int:
         return _upsert_player_log(self.conn, rows)
+
+    def mark_postponed(self, game_id: str, status: str) -> int:
+        """ESPN's postponed / cancelled status onto the scheduled game, never
+        onto a game with a final score."""
+        cur = self.conn.execute("""
+            UPDATE nba_schedule SET status_text = %s, updated_at = NOW()
+             WHERE game_id = %s AND home_score IS NULL
+               AND status_text IS DISTINCT FROM %s
+        """, (status, game_id, status))
+        return cur.rowcount or 0
 
     def ensure_dnp_table(self) -> None:
         """Create nba_player_dnp once. Gated on the catalog: CREATE TABLE IF NOT
@@ -506,8 +559,9 @@ def _new_totals() -> dict:
             "not_in_games": 0, "scores_filled": 0, "games_inserted": 0,
             "ot_fixed": 0, "score_conflicts": 0, "box_games": 0, "box_rows": 0,
             "dnp_rows": 0, "box_incomplete": 0, "fallback_players": [],
-            "resolved_by": {},
-            "errors": 0, "failed": [], "planned_scores": [], "planned_box": []}
+            "resolved_by": {}, "postponed": 0,
+            "errors": 0, "failed": [], "planned_scores": [], "planned_box": [],
+            "planned_postponed": []}
 
 
 def ingest_nba_results(run_date: str | None = None, lookback_days: int = LOOKBACK_DAYS,
@@ -515,14 +569,15 @@ def ingest_nba_results(run_date: str | None = None, lookback_days: int = LOOKBAC
                        recheck: bool = False, get_json=None, connect=None,
                        now: datetime | None = None, raise_on_error: bool = True,
                        sleep: float = SUMMARY_SLEEP, store=None,
-                       heal_days: int = HEAL_DAYS) -> dict:
+                       heal_days: int = HEAL_DAYS, heal_season: bool = True) -> dict:
     """Scores and box scores for the window (or `dates`). Returns counts.
 
     Default window: run_date and the `lookback_days` before it, plus a
-    self-heal reach of `heal_days` -- every date in it is gated the same way
-    (a started game still missing a score or a box), so a worker outage longer
-    than the lookback is caught up on the first pass back, at no cost when
-    nothing is missing.
+    self-heal reach of `heal_days` and, with heal_season, back to the season's
+    opening (season_open) -- every date in it is gated the same way (a started
+    game still missing a score or a box), so a worker outage longer than the
+    lookback is caught up on the first pass back, at no cost when nothing is
+    missing.
 
     dry_run  -- read everything, fetch everything, write nothing; the rows that
                 would be written are returned in planned_scores / planned_box.
@@ -537,7 +592,8 @@ def ingest_nba_results(run_date: str | None = None, lookback_days: int = LOOKBAC
     if dates is None:
         run_date = run_date or now.astimezone(_ET).strftime("%Y-%m-%d")
         anchor = date.fromisoformat(run_date)
-        reach = max(lookback_days, heal_days)
+        reach = max(lookback_days, heal_days,
+                    (anchor - season_open(anchor)).days if heal_season else 0)
         dates = [(anchor - timedelta(days=i)).isoformat()
                  for i in range(reach, -1, -1)]
     dates = sorted(set(dates))
@@ -575,6 +631,7 @@ def ingest_nba_results(run_date: str | None = None, lookback_days: int = LOOKBAC
                 totals["errors"] += 1
                 totals["failed"].append(d)
                 continue
+            _postponements(board, d, known, store, totals, dry_run)
             for ev in parse_nba_scoreboard(board, d):
                 if ev["game_date"] != d:
                     continue                          # the neighbouring date owns it
@@ -602,13 +659,49 @@ def ingest_nba_results(run_date: str | None = None, lookback_days: int = LOOKBAC
         logger.warning(f"NBA results: {len(fb)} player(s) took a fallback id: "
                        f"{[(f['name'], f['team'], f['player_id']) for f in fb[:10]]}")
     summary = {k: v for k, v in totals.items()
-               if k not in ("planned_scores", "planned_box", "fallback_players")}
+               if k not in ("planned_scores", "planned_box", "planned_postponed",
+                            "fallback_players")}
     summary["fallback_players"] = len(fb)
     logger.info(f"NBA results{' (DRY RUN)' if dry_run else ''}: {summary}")
     if totals["failed"] and raise_on_error:
         raise RuntimeError(f"NBA results: {len(totals['failed'])} failure(s) "
                            f"({', '.join(totals['failed'])}); committed so far: {summary}")
     return totals
+
+
+def _postponements(board, d: str, known: dict, store, totals: dict, dry_run: bool) -> None:
+    """Record ESPN's postponed / cancelled games of date `d`: the exact game
+    id only, and never a game with a final score."""
+    for ev in parse_nba_postponed(board, d):
+        game = known.get(ev["game_id"])
+        if ev["game_date"] != d or game is None or game.get("postponed") \
+                or game.get("home_score") is not None:
+            continue
+        if dry_run:
+            totals["planned_postponed"].append(ev["game_id"])
+            continue
+        try:
+            n = call_in_savepoint(store.conn, "nba_results_ppd_write",
+                                  lambda: store.mark_postponed(ev["game_id"], ev["status"]))
+            store.conn.commit()
+        except Exception as exc:                      # noqa: BLE001
+            logger.warning(f"NBA results: {ev['game_id']} postponement not recorded: {exc}")
+            try:
+                store.conn.rollback()
+            except Exception:                         # noqa: BLE001
+                pass
+            continue
+        game["postponed"] = True
+        if not n:
+            # A game only `games` has (added after the schedule was loaded):
+            # nothing to record it on. The totals model presumes it unplayed
+            # after two weeks (models/nba_total_luck.UNPLAYED_AFTER_DAYS).
+            logger.warning(f"NBA results: {ev['game_id']} {ev['status'].lower()} on {d} "
+                           f"(ESPN), but nba_schedule has no row for it to record")
+            continue
+        totals["postponed"] += 1
+        logger.info(f"NBA results: {ev['game_id']} {ev['status'].lower()} on {d} (ESPN); "
+                    f"recorded on nba_schedule")
 
 
 def _one_game(ev, game, store: PgStore, resolver, totals, *, get_json, dry_run,

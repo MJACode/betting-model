@@ -45,6 +45,8 @@ def test_the_function_is_invoker_and_has_no_price_or_line_filter():
         assert banned not in lowered, banned
     assert code.index("RETURN;") < code.index("CREATE OR REPLACE FUNCTION")
     assert "SET statement_timeout = '3s'" in code
+    assert "in-function 3s timeout does not apply" in SQL
+    assert "anon 3s" in SQL and "authenticated 8s" in SQL
     assert "v_month >= 9" in code
     assert "v_season := v_year - 1" in code
     assert "America/New_York" in code
