@@ -4,11 +4,9 @@ The model record stays in `picks`. These rows live in `capper_messages` and
 `capper_picks`. A line that cannot be parsed or matched is `needs_review`.
 It is stored and logged. It is not dropped, and it is not given a result.
 
-The channel was not readable from the machine that wrote the parser: no
-DISCORD_BOT_TOKEN on this host, and the Railway account here has no
-projects. The grammar below is what the tests pin. Anything else is
-needs_review, so a real post in a different shape is visible instead of
-being turned into a guessed bet.
+The Oct 18 and Oct 20 posts are the grammar the tests pin: a sport/date
+header, `All 1U` as the message stake, and `60 Minute ML` as `h2h_3way`.
+Anything else is needs_review.
 
 Env, all optional. Any one missing and that half no-ops:
     DISCORD_BOT_TOKEN          existing bot token (monitoring/discord_stats.py)
@@ -23,6 +21,7 @@ intent. Without that intent Discord returns an empty body.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import os
 import re
@@ -81,6 +80,24 @@ _PRICE_RE = re.compile(r"(?<![\d.])([+-]\d{3,})(?!\d)")
 _STAKE_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*u(?:nits?)?\b", re.I)
 _SPREAD_RE = re.compile(r"(?<![\d.])([+-]\d{1,2}(?:\.\d+)?)(?!\d)")
 _LINE_NUM_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?!\d)")
+_EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D✅❌✔✖]+")
+_ALL_STAKE_RE = re.compile(r"^all\s+(\d+(?:\.\d+)?)\s*u(?:nits?)?$", re.I)
+_REG_RE = re.compile(
+    r"\b(?:60\s*min(?:ute)?s?\s*ml|reg(?:ulation)?\s*ml|3\s*[- ]?way(?:\s*ml)?)\b",
+    re.I)
+_SLATE_RE = re.compile(
+    r"^(?P<sport>nhl|nfl|mlb|nba|wnba|ncaaf|ufc)\b"
+    r"(?:\s+(?P<weekday>[A-Za-z]+day))?"
+    r"(?:\s+(?P<mon>[A-Za-z]+)\.?\s+(?P<day>\d{1,2}))?"
+    r"\s*$",
+    re.I)
+_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+_FUZZY_CUTOFF = 0.88
 
 
 def _token() -> str:
@@ -142,6 +159,8 @@ def _aliases() -> dict[str, list[tuple[str, str]]]:
         add(abbr, "NHL", abbr)
         add(spaced, "NHL", abbr)
         add(nick, "NHL", abbr)
+    # His spelling of Canadiens, on the Oct 20 slate.
+    add("canadians", "NHL", "MTL")
     _aliases.cache = out
     return out
 
@@ -175,8 +194,13 @@ def _teams_in(text: str) -> list[tuple[str, str, str]]:
     return [(key, sport, abbr) for _i, key, sport, abbr in found]
 
 
-def _price_and_stake(text: str) -> tuple[str, float | None, float]:
-    stake = 1.0
+def _strip_emoji(text: str) -> str:
+    return _EMOJI_RE.sub("", text or "")
+
+
+def _price_and_stake(text: str, default_stake: float = 1.0
+                     ) -> tuple[str, float | None, float]:
+    stake = default_stake
     m = _STAKE_RE.search(text)
     if m:
         stake = float(m.group(1))
@@ -191,6 +215,69 @@ def _price_and_stake(text: str) -> tuple[str, float | None, float]:
     return text, price, stake
 
 
+def _slate_date(month: int, day: int, posted: datetime | None) -> str | None:
+    year = posted.year if posted else datetime.now(timezone.utc).year
+    try:
+        slate = datetime(year, month, day).date()
+    except ValueError:
+        return None
+    if posted:
+        delta = (slate - posted.date()).days
+        if delta > 180:
+            slate = slate.replace(year=year - 1)
+        elif delta < -180:
+            slate = slate.replace(year=year + 1)
+    return slate.isoformat()
+
+
+def _slate_header(text: str, posted: datetime | None) -> dict | None:
+    """'NHL Sunday Oct. 18' is the sport and the slate date, not a bet."""
+    m = _SLATE_RE.match(text.strip())
+    if not m:
+        return None
+    out = {"sport": m.group("sport").upper()}
+    if not m.group("mon"):
+        return out
+    month = _MONTHS.get(m.group("mon").lower())
+    if not month:
+        return None
+    slate = _slate_date(month, int(m.group("day")), posted)
+    if not slate:
+        return None
+    out["slate_date"] = slate
+    return out
+
+
+def _fuzzy_one(text: str, sport: str) -> str | None:
+    """One nickname in `sport` within one edit, or None when it is not unique."""
+    aliases = _aliases()
+    low = " ".join(text.lower().replace(".", " ").split())
+    phrases = {low}
+    phrases.update(w for w in low.split() if w.isalpha() and len(w) >= 4)
+    scored: list[tuple[float, str]] = []
+    for key, pairs in aliases.items():
+        if not any(s == sport for s, _abbr in pairs):
+            continue
+        if len(key) < 5:
+            continue
+        for phrase in phrases:
+            if abs(len(phrase) - len(key)) > 2:
+                continue
+            ratio = difflib.SequenceMatcher(None, phrase, key).ratio()
+            if ratio >= _FUZZY_CUTOFF:
+                for s, abbr in pairs:
+                    if s == sport:
+                        scored.append((ratio, abbr))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    top = scored[0][0]
+    close = {abbr for ratio, abbr in scored if top - ratio <= 0.05}
+    if len(close) != 1:
+        return None
+    return close.pop()
+
+
 def _spread_number(text: str) -> tuple[str, float | None]:
     m = _SPREAD_RE.search(text)
     if not m:
@@ -198,32 +285,48 @@ def _spread_number(text: str) -> tuple[str, float | None]:
     return (text[:m.start()] + " " + text[m.end():]).strip(), float(m.group(1))
 
 
-def parse_message(body: str) -> tuple[list[dict], list[dict]]:
+def parse_message(body: str, posted_at: datetime | None = None
+                  ) -> tuple[list[dict], list[dict]]:
     """(legs, reviews). A review is a line that was not turned into a bet.
 
-    A matchup line (`NYY @ BOS` or `NYY vs BOS`) sets the game for the
-    lines under it. Stake defaults to 1 unit to win. A missing price stays
-    missing.
+    A matchup line (`NYY @ BOS`) sets the game for the lines under it.
+    A sport/date line (`NHL Sunday Oct. 18`) sets the sport and the slate
+    date. `All 1U` sets the stake for the lines that do not name their own.
+    Neither of those is a bet. Stake defaults to 1 unit to win. A missing
+    price stays missing.
     """
     legs: list[dict] = []
     reviews: list[dict] = []
     context: dict | None = None
-    lines = [ln.strip() for ln in (body or "").splitlines()]
+    default_stake = 1.0
+    lines = [_strip_emoji(ln).strip() for ln in (body or "").splitlines()]
     lines = [ln for ln in lines if ln and not ln.startswith("#")]
     if not lines:
         reviews.append({"line_no": 1, "raw": body or "", "reason": "empty"})
         return legs, reviews
     for n, raw in enumerate(lines, start=1):
-        stripped, price, stake = _price_and_stake(raw)
+        slate = _slate_header(raw, posted_at)
+        if slate:
+            context = dict(context or {})
+            context.update(slate)
+            continue
+        all_stake = _ALL_STAKE_RE.match(raw.strip())
+        if all_stake:
+            default_stake = float(all_stake.group(1))
+            continue
+        stripped, price, stake = _price_and_stake(raw, default_stake)
         header = _matchup_header(stripped)
         if header and price is None and not _STAKE_RE.search(raw):
-            context = header
+            context = dict(context or {})
+            context.update(header)
             continue
         leg = _parse_line(stripped, price, stake, context, raw)
         if leg is None:
             reviews.append({"line_no": n, "raw": raw, "reason": "unparsed"})
             continue
         leg["line_no"] = n
+        leg["sport_hint"] = (context or {}).get("sport")
+        leg["slate_date"] = (context or {}).get("slate_date")
         legs.append(leg)
     return legs, reviews
 
@@ -269,6 +372,17 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
             "price": price, "stake_units": stake, "player_name": None,
             "prop_stat": None, "prop_kind": None, "prop_market": None,
             "team_text": None, "away_text": away, "home_text": home, "raw": raw,
+        }
+    reg = _REG_RE.search(text)
+    if reg:
+        team = (text[:reg.start()] + " " + text[reg.end():])
+        team = " ".join(team.split())
+        return {
+            "market": "h2h_3way", "side": None, "line": None, "price": price,
+            "stake_units": stake, "player_name": None, "prop_stat": None,
+            "prop_kind": None, "prop_market": None, "team_text": team,
+            "away_text": (context or {}).get("away_text"),
+            "home_text": (context or {}).get("home_text"), "raw": raw,
         }
     if re.search(r"\b(ml|moneyline)\b", text, re.I):
         team = re.sub(r"\b(ml|moneyline)\b", " ", text, flags=re.I)
@@ -537,10 +651,14 @@ def _flag_message(conn, mid, channel, author, body, posted, status, note) -> Non
 
 
 def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
+    prev = conn.execute(
+        "SELECT parse_note FROM capper_messages WHERE message_id = %s",
+        (message_id,)).fetchone()
+    old_note = prev[0] if prev else None
     conn.execute(
         "DELETE FROM capper_picks WHERE message_id = %s AND status <> 'graded'",
         (message_id,))
-    legs, reviews = parse_message(body)
+    legs, reviews = parse_message(body, posted)
     note_parts = []
     for leg in legs:
         game, reason = _match_leg(conn, leg, posted)
@@ -557,7 +675,7 @@ def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
     conn.execute(
         "UPDATE capper_messages SET parse_status = %s, parse_note = %s "
         "WHERE message_id = %s", (status, note, message_id))
-    if note_parts:
+    if note_parts and note != old_note:
         _surface_review(conn, message_id, note)
 
 
@@ -598,13 +716,15 @@ def _insert_pick(conn, message_id, leg, posted, status, reason, game) -> None:
 def _match_leg(conn, leg: dict, posted: datetime) -> tuple[dict | None, str | None]:
     away_text, home_text = leg.get("away_text"), leg.get("home_text")
     team_text = leg.get("team_text")
-    if leg["market"] in ("h2h", "spreads") and not (team_text or "").strip():
+    if leg["market"] in ("h2h", "h2h_3way", "spreads") and not (team_text or "").strip():
         return None, "no_team"
     if leg["market"] == "totals" and not (away_text and home_text):
         return None, "no_matchup"
     if leg["market"] == "prop" and not (away_text and home_text):
         return None, "no_matchup"
     candidates = _candidate_games(conn, leg, posted)
+    if candidates and candidates[0].get("ambiguous"):
+        return None, "ambiguous_team"
     chosen, reason = choose_game(candidates, posted)
     if reason or chosen is None:
         return None, reason or "no_game"
@@ -644,6 +764,8 @@ def _candidate_games(conn, leg, posted: datetime) -> list[dict]:
     away_text, home_text = leg.get("away_text"), leg.get("home_text")
     if away_text and home_text:
         pairs = _pair_teams(away_text, home_text)
+        if leg.get("sport_hint"):
+            pairs = [p for p in pairs if p[0] == leg["sport_hint"]]
         if not pairs:
             return []
         rows = []
@@ -657,18 +779,33 @@ def _candidate_games(conn, leg, posted: datetime) -> list[dict]:
                 (sport, home, away, start, end)).fetchall())
         return [_game_dict(r) for r in rows]
     hits = _teams_in(leg.get("team_text") or "")
+    sport_hint = leg.get("sport_hint")
+    if sport_hint:
+        hits = [h for h in hits if h[1] == sport_hint]
+        if not hits:
+            abbr = _fuzzy_one(leg.get("team_text") or "", sport_hint)
+            if abbr:
+                hits = [(leg.get("team_text") or "", sport_hint, abbr)]
+        if len({h[2] for h in hits}) > 1:
+            return [{"ambiguous": True}]
     if not hits:
         return []
+    slate = leg.get("slate_date")
     rows = []
     seen = set()
     for _tok, sport, abbr in hits:
-        found = conn.execute(
+        sql = (
             "SELECT game_id, sport, game_date, home_team, away_team, "
             "commence_time, home_score, away_score, home_win, home_win_reg, "
             "went_to_ot FROM games WHERE sport = %s AND (home_team = %s OR "
             "away_team = %s) AND commence_time::timestamptz BETWEEN %s::timestamptz "
-            "AND %s::timestamptz",
-            (sport, abbr, abbr, start, end)).fetchall()
+            "AND %s::timestamptz"
+        )
+        params: list = [sport, abbr, abbr, start, end]
+        if slate:
+            sql += " AND game_date = %s"
+            params.append(slate)
+        found = conn.execute(sql, tuple(params)).fetchall()
         for row in found:
             if row[0] not in seen:
                 seen.add(row[0])
@@ -732,18 +869,52 @@ def _surface_review(conn, message_id: str, note: str) -> None:
     )
 
 
+def reparse_stored(conn) -> int:
+    """Re-read stored messages whose parse was needs_review.
+
+    A graded leg is left as it was. A message that already parsed is left
+    as it was, so a later grade is not wiped on the next poll.
+    """
+    rows = conn.execute(
+        "SELECT message_id, body, posted_at, parse_status FROM capper_messages"
+    ).fetchall()
+    n = 0
+    for mid, body, posted, status in rows:
+        if status != "needs_review":
+            continue
+        graded = conn.execute(
+            "SELECT 1 FROM capper_picks WHERE message_id = %s AND status = 'graded' "
+            "LIMIT 1", (mid,)).fetchone()
+        if graded:
+            continue
+        ts = _parse_ts(posted)
+        if ts is None or body is None:
+            continue
+        _replace_legs(conn, mid, body, ts)
+        n += 1
+    if n:
+        conn.commit()
+    return n
+
+
 def grade_pending(conn) -> int:
     """Grade pending legs whose game is final. Returns how many settled.
+
+    Stored messages that are still needs_review are reparsed first, so a
+    parser fix reaches rows already in capper_messages.
 
     Game markets use `_compute_result` and the DraftKings pre-start close
     (`_closing_odds`, `same_book_clv`). MLB props use the same player_game_log
     columns the prop settler reads. A final with no grade becomes
     needs_review, so the recap is not held open by a leg that cannot settle.
     """
+    reparse_stored(conn)
     rows = conn.execute(
         "SELECT id, game_id, market, side, line, price, stake_units, "
         "player_name, prop_stat, prop_market, commence_time, sport "
-        "FROM capper_picks WHERE status = 'pending' AND game_id IS NOT NULL"
+        "FROM capper_picks WHERE game_id IS NOT NULL AND ("
+        "status = 'pending' OR (status = 'needs_review' AND "
+        "review_reason = 'no_regulation_score'))"
     ).fetchall()
     n = 0
     for row in rows:
@@ -771,6 +942,9 @@ def _grade_one(conn, row) -> bool:
         return _grade_prop(conn, pid, game_id, side, line, price, stake, player,
                            prop_stat, prop_kind, prop_market, commence or commence_db,
                            sport)
+    if market == "h2h_3way":
+        return _grade_regulation(conn, pid, game_id, side, price, stake,
+                                 commence or commence_db)
     if home_win is None and home_score is not None and away_score is not None:
         if float(home_score) > float(away_score):
             home_win = 1
@@ -788,6 +962,45 @@ def _grade_one(conn, row) -> bool:
     profit, risked = units_for_result(stake, price, result)
     clv, close_px, beat = _game_clv(
         conn, game_id, market, side, line, price, commence or commence_db)
+    _write_grade(conn, pid, result, profit, risked, clv, close_px, beat)
+    return True
+
+
+def _grade_regulation(conn, pid, game_id, side, price, stake, commence) -> bool:
+    """60-minute ML. A regulation tie, including OT/SO, is a loss for either side.
+
+    The score is the sum of the three period columns. No period row is
+    needs_review. The full-game moneyline result is not used.
+    """
+    rows = conn.execute(
+        "SELECT home_p1, home_p2, home_p3, away_p1, away_p2, away_p3 "
+        "FROM nhl_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return _mark_review(conn, pid, "no_regulation_score")
+    sums = []
+    for home_p1, home_p2, home_p3, away_p1, away_p2, away_p3 in rows:
+        try:
+            sums.append((
+                int(home_p1) + int(home_p2) + int(home_p3),
+                int(away_p1) + int(away_p2) + int(away_p3),
+            ))
+        except (TypeError, ValueError):
+            _mark_review(conn, pid, "no_regulation_score")
+            return True
+    if len(set(sums)) != 1:
+        _mark_review(conn, pid, "regulation_scores_disagree")
+        return True
+    reg_home, reg_away = sums[0]
+    if reg_home == reg_away:
+        result = "LOSS"
+    elif (reg_home > reg_away) == (side == "home"):
+        result = "WIN"
+    else:
+        result = "LOSS"
+    profit, risked = units_for_result(stake, price, result)
+    clv, close_px, beat = _game_clv(
+        conn, game_id, "h2h_3way", side, None, price, commence)
     _write_grade(conn, pid, result, profit, risked, clv, close_px, beat)
     return True
 
@@ -884,17 +1097,19 @@ def _write_grade(conn, pid, result, profit, risked, clv, close_px, beat) -> None
     conn.execute(
         "UPDATE capper_picks SET status = 'graded', result = %s, units = %s, "
         "risked = %s, clv_pct = %s, closing_price = %s, clv_beat_close = %s, "
-        "graded_at = %s WHERE id = %s AND status = 'pending'",
+        "graded_at = %s WHERE id = %s AND status IN ('pending', 'needs_review')",
         (result, profit, risked, clv, close_px, beat,
          datetime.now(timezone.utc).isoformat(), pid))
 
 
-def _mark_review(conn, pid, reason: str) -> None:
-    conn.execute(
+def _mark_review(conn, pid, reason: str) -> bool:
+    changed = conn.execute(
         "UPDATE capper_picks SET status = 'needs_review', review_reason = %s "
-        "WHERE id = %s AND status = 'pending'",
-        (reason, pid))
-    logger.error(f"Eggz pick {pid} needs review: {reason}")
+        "WHERE id = %s AND status = 'pending' RETURNING id",
+        (reason, pid)).fetchone()
+    if changed:
+        logger.error(f"Eggz pick {pid} needs review: {reason}")
+    return bool(changed)
 
 
 def _window_rows(conn, start: str, end: str) -> list[tuple]:

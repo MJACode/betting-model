@@ -450,6 +450,12 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   logged. It is not graded and it is not dropped. One ops alert goes out
   per message id when `DISCORD_WEBHOOK_OPS` is set. A window that still
   has a pending leg is not ledgered. His rows stay out of `picks`.
+  `60 Minute ML`, `60 min ML`, `Reg ML`, and `3-way` are market `h2h_3way`.
+  A sport/date header and `All 1U` are context. Regulation grades from
+  `nhl_period_scores` (three periods; a tie is a loss for the side). No
+  period row is `needs_review` (`no_regulation_score`) and is tried again
+  when the periods are stored. A message whose parse_status is still
+  `needs_review` is reparsed on the next grade pass.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.
