@@ -27,7 +27,7 @@ THE THREE THINGS THAT COULD GO WRONG, and all three are cheap to get wrong:
 from __future__ import annotations
 
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -632,9 +632,14 @@ def _fake_conn(discord_choice):
             return self
 
         def fetchone(self):
+            if "pg_try_advisory_lock" in self._sql:
+                return (True,)
             if "discord_free_pick" in self._sql:
                 return (discord_choice,)
             return None
+
+        def fetchall(self):
+            return []
 
         def commit(self):
             pass
@@ -677,7 +682,8 @@ def test_x_posts_without_reading_discords_free_pick(monkeypatch):
         return "id1", False
 
     monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
-    assert xp.notify_x_picks("2026-09-02") == 1
+    afternoon = datetime(2026, 9, 2, 16, 23, tzinfo=xp.ET)
+    assert xp.notify_x_picks("2026-09-02", now=afternoon) == 1
     assert len(posted) == 1
     assert "NYY ML" in posted[0]
     assert "Free pick" not in posted[0]
@@ -788,10 +794,20 @@ def _wire_slate(monkeypatch, slate, already=None):
 
     monkeypatch.setattr(xp, "_already_sent", _sent)
     ledgered = []
+    pace = {"last": None, "now": None}
+
+    def _last(conn):
+        if pace["last"] == "unreadable":
+            raise RuntimeError("ledger unreadable")
+        return pace["last"]
+
+    monkeypatch.setattr(xp, "_latest_x_pick_sent", _last)
 
     def _remember(conn, key, kind, tweet_id):
         ledgered.append((key, kind, tweet_id))
         sent.add((key, kind))
+        if kind == xp.X_PICK_KIND:
+            pace["last"] = pace["now"]
 
     monkeypatch.setattr(xp, "_ledger", _remember)
     posted = []
@@ -801,7 +817,12 @@ def _wire_slate(monkeypatch, slate, already=None):
         return f"id{len(posted)}", False
 
     monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
-    return posted, ledgered
+
+    def post_at(when, dry_run=False):
+        pace["now"] = when
+        return xp.notify_x_picks("2026-10-18", dry_run=dry_run, now=when)
+
+    return posted, ledgered, post_at, pace
 
 
 def test_team_hashtags_use_the_nickname():
@@ -927,10 +948,20 @@ def test_freepicks_in_the_pool_is_dropped(monkeypatch):
     assert "#FreePicks" not in text and "#CustomTag" in text
 
 
+def _afternoon():
+    return datetime(2026, 10, 18, 16, 23, tzinfo=xp.ET)
+
+
 def test_all_released_picks_are_posted_once_in_one_format(monkeypatch):
+    """The same three picks still post, one per call, 10 minutes apart."""
     slate = _slate()
-    posted, ledgered = _wire_slate(monkeypatch, slate)
-    assert xp.notify_x_picks("2026-10-18") == 3
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
+    start = _afternoon()
+    assert post_at(start) == 1
+    assert post_at(start + timedelta(minutes=9, seconds=59)) == 0
+    assert post_at(start + timedelta(minutes=10)) == 1
+    assert post_at(start + timedelta(minutes=20)) == 1
+    assert post_at(start + timedelta(minutes=30)) == 0
     assert len(posted) == 3, posted
     assert all("Free pick" not in t and "More in Discord" not in t
                and "#FreePicks" not in t for t in posted)
@@ -939,52 +970,161 @@ def test_all_released_picks_are_posted_once_in_one_format(monkeypatch):
     assert any("Over 8.5" in t and "#Yankees" in t and "#RedSox" in t for t in posted)
     assert any("SF -3.5" in t and "#49ers" in t and "#NFL" in t for t in posted)
     assert {row[0] for row in ledgered} == {"k-free", "k-total", "k-nfl"}
+    assert [row[0] for row in ledgered] == ["k-free", "k-total", "k-nfl"]
     assert all(kind == "x_pick" for _key, kind, _id in ledgered)
     assert not any(kind == "x_free_pick" for _key, kind, _id in ledgered)
 
 
 def test_the_flag_off_posts_no_pick_slate(monkeypatch):
     monkeypatch.setenv("X_POST_ALL_PICKS", "0")
-    posted, ledgered = _wire_slate(monkeypatch, _slate())
-    assert xp.notify_x_picks("2026-10-18") == 0
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    assert post_at(_afternoon()) == 0
+    assert posted == []
+    assert ledgered == []
+
+
+def test_the_kill_switch_posts_no_pick_slate(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    monkeypatch.setenv("RUN_X_PUBLISHER", "0")
+    assert post_at(_afternoon()) == 0
     assert posted == []
     assert ledgered == []
 
 
 def test_a_pick_already_tweeted_is_not_posted_again(monkeypatch):
-    posted, ledgered = _wire_slate(
+    posted, ledgered, post_at, _pace = _wire_slate(
         monkeypatch, _slate(), already={("k-total", "x_pick")})
-    assert xp.notify_x_picks("2026-10-18") == 2
+    start = _afternoon()
+    assert post_at(start) == 1
+    assert post_at(start + timedelta(minutes=10)) == 1
+    assert post_at(start + timedelta(minutes=20)) == 0
     assert not any("Over 8.5" in t for t in posted)
     assert any("SF -3.5" in t for t in posted)
     assert any("NYY ML" in t for t in posted)
     assert not any(key == "k-total" for key, _kind, _id in ledgered)
 
 
-def test_a_rate_limit_stops_the_slate_and_does_not_ledger_the_miss(monkeypatch):
+def test_a_rate_limit_does_not_ledger_and_the_same_pick_retries(monkeypatch):
     slate = _slate()
-    posted, ledgered = _wire_slate(monkeypatch, slate)
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
     calls = {"n": 0}
 
     def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
         calls["n"] += 1
-        posted.append(text)
-        # The first pick posts. The second is the one X refuses. The third
-        # must not be attempted.
-        if calls["n"] == 2:
-            posted.pop()
+        if calls["n"] == 1:
             return None, True
+        posted.append(text)
         return f"id{calls['n']}", False
 
     monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
-    posted.clear()
-    assert xp.notify_x_picks("2026-10-18") == 1
-    assert len(posted) == 1, posted
+    start = _afternoon()
+    assert post_at(start) == 0
+    assert posted == []
+    assert ledgered == []
+    assert calls["n"] == 1
+    # Nothing was confirmed, so the gap does not start. The next call retries
+    # the same pick.
+    assert post_at(start) == 1
+    assert len(posted) == 1
     assert "NYY ML" in posted[0]
     assert "Free pick" not in posted[0]
-    assert not any("SF -3.5" in t or "Over 8.5" in t for t in posted)
-    assert not any(key == "k-total" for key, _kind, _id in ledgered)
+    assert ledgered[0][0] == "k-free"
     assert calls["n"] == 2
+
+
+def test_quiet_hours_hold_the_pick_until_8am(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 0, 59, tzinfo=xp.ET)) is False
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 1, 0, tzinfo=xp.ET)) is True
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 7, 59, tzinfo=xp.ET)) is True
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 8, 0, tzinfo=xp.ET)) is False
+    assert post_at(datetime(2026, 10, 19, 1, 0, tzinfo=xp.ET)) == 0
+    assert post_at(datetime(2026, 10, 19, 7, 59, tzinfo=xp.ET)) == 0
+    assert posted == [] and ledgered == []
+    assert post_at(datetime(2026, 10, 19, 8, 0, tzinfo=xp.ET)) == 1
+    assert len(posted) == 1 and ledgered[0][0] == "k-free"
+
+
+def test_a_pick_whose_game_has_started_is_dropped_and_not_ledgered(monkeypatch):
+    slate = _slate()
+    slate[0]["commence"] = "2026-10-18T16:00:00-04:00"
+    slate[1]["commence"] = "2026-10-18T21:00:00-04:00"
+    slate[2]["commence"] = "2026-10-19T07:00:00-04:00"
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
+    eight = datetime(2026, 10, 19, 8, 0, tzinfo=xp.ET)
+    assert post_at(datetime(2026, 10, 18, 16, 23, tzinfo=xp.ET)) == 1
+    assert "Over 8.5" in posted[0]
+    assert not any(key == "k-free" for key, _kind, _id in ledgered)
+    assert post_at(eight) == 0
+    assert not any(key == "k-nfl" for key, _kind, _id in ledgered)
+    assert len(posted) == 1
+
+
+def test_a_missing_commence_is_still_posted(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    assert post_at(_afternoon()) == 1
+    assert ledgered[0][0] == "k-free"
+
+
+def test_an_unreadable_pick_clock_posts_nothing(monkeypatch):
+    posted, ledgered, post_at, pace = _wire_slate(monkeypatch, _slate())
+    pace["last"] = "unreadable"
+    assert post_at(_afternoon()) == 0
+    assert posted == [] and ledgered == []
+
+
+def test_a_held_lock_posts_nothing(monkeypatch):
+    from contextlib import contextmanager
+
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+
+    @contextmanager
+    def _held(*_a, **_k):
+        yield False
+
+    monkeypatch.setattr("tracking.publish_lock.publish_lock", _held)
+    assert post_at(_afternoon()) == 0
+    assert posted == [] and ledgered == []
+
+
+def test_the_pick_clock_uses_the_later_instant_across_the_dst_overlap():
+    class _Conn:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchall(self):
+            # 01:30 EDT is 05:30 UTC. 01:00 EST is 06:00 UTC and is later,
+            # even though the clock face looks earlier.
+            return [
+                ("2026-11-01T01:30:00-04:00",),
+                ("2026-11-01T01:00:00-05:00",),
+            ]
+
+    got = xp._latest_x_pick_sent(_Conn())
+    assert got == datetime.fromisoformat("2026-11-01T06:00:00+00:00")
+
+
+def test_recaps_are_not_on_the_pick_clock():
+    import inspect
+    for fn in (xp.notify_x_results, xp.notify_x_period):
+        src = inspect.getsource(fn)
+        assert "PICK_MIN_GAP" not in src
+        assert "_in_pick_quiet_hours" not in src
+        assert "X_PICKS_LOCK" not in src
+
+
+def test_pick_posts_use_a_session_connection_and_the_five_minute_job():
+    import inspect
+    src = inspect.getsource(xp.notify_x_picks)
+    assert "session_mode=True" in src
+    body = inspect.getsource(xp._post_released_picks)
+    assert "X_PICKS_LOCK" in body
+    assert "publish_lock(" in body
+    sched = (Path(__file__).parent.parent / "scheduler.py").read_text(encoding="utf-8")
+    job = sched[sched.index("def run_social_post_queue"):sched.index("def run_job_queue")]
+    assert "notify_x_picks" in job
+    assert "notify_x_results" not in job
+    assert "notify_x_period" not in job
 
 
 def test_a_tweet_without_media_omits_the_media_key(monkeypatch):
