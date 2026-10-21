@@ -27,6 +27,7 @@ crons had).
 | In-play live loop (supervisor) | every 10 min, 11am–midnight | `python -m data.ingestors.live_trigger_orchestrator --loop` |
 | NFL poll — hourly | every :00 | `run_nfl_poll(fast=False)` — both NFL models, 10-day horizon |
 | NFL poll — fast | every :10 | `run_nfl_poll(fast=True)` — only inside 3h of a kickoff |
+| NFL schedule refresh | :05, :20, :35, :50, 24x7, and once when the scheduler starts | `python -m data.ingestors.nfl_props_data_ingestor --schedule-only` — the next 14 days of the nflverse schedule into `games` and `nfl_team_game_stats` (kickoffs, venues, newly listed playoff games); free, no odds call. Kill switch: `RUN_NFL_SCHEDULE_REFRESH=0`; cadence: `NFL_SCHEDULE_REFRESH_MINUTES` (default 15) |
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
@@ -207,7 +208,8 @@ Operational notes:
 
 - Runs with **cwd = `nfl/`** (the package writes `data/cards/` relative to its
   own root). Its schedule is the `games` table (`nfl/data_ingest/schedule.py`),
-  not the frozen `data/games.csv`, since 2026-10-20 (`docs/sports/nfl.md`). Its Python deps for this path (pandas,
+  not the frozen `data/games.csv`, since 2026-10-20 (`docs/sports/nfl.md`),
+  kept current by the NFL schedule refresh above. Its Python deps for this path (pandas,
   numpy, requests) are already in the root `requirements.txt` — the heavier
   `nfl/requirements.txt` extras (scipy, lightgbm, pyarrow) are only needed by the
   backtest/validation scripts, which are not scheduled.

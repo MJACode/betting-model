@@ -230,7 +230,9 @@ refreshed. Measured on 2026-10-20:
 **Where the rows come from.** `data/ingestors/nfl_props_data_ingestor.py`
 (Step 0h of the 6am pipeline, and the settle pass's box-score gap fill)
 upserts every game in the nflverse schedule into `games` and
-`nfl_team_game_stats`, played or not, regular season or playoffs. The odds
+`nfl_team_game_stats`, played or not, regular season or playoffs. Between
+those runs the **schedule refresh** (2026-10-21, below) re-reads the next 14
+days every 15 minutes and as soon as the scheduler starts after a boot. The odds
 ingestor never writes NFL `games` rows (`NFL_GAMES_ARE_NOT_OURS`), so this
 ingest is what keeps `games.commence_time` current. It now also stores the
 nflverse venue (`stadium_id`, `stadium`, `location` on `nfl_team_game_stats`)
@@ -244,9 +246,33 @@ by 06:35Z, the sixth (LA @ CAR) by 16:30Z. The Monday 6am ET run (11:00Z)
 would have carried five games 5.6 to 7.6 days ahead of kickoff and the
 Tuesday run the sixth 4.4 days ahead: inside the 10-day poll horizon and
 before the wind model's 4-day and the opener's 2-day bounds. What the daily
-cadence can cost is the opener's first hours, because Pinnacle posts
-wild-card lines as soon as the matchups are set; a more frequent
-schedule-only refresh would close that gap, and is not built.
+cadence cost was the opener's first hours, because Pinnacle posts wild-card
+lines as soon as the matchups are set: the 6am run saw five of those games 6
+to 8 hours after nflverse listed them and LA @ CAR about 18.5 hours after.
+
+**The schedule refresh (2026-10-21).** `scheduler.run_nfl_schedule_refresh`
+runs `nfl_props_data_ingestor --schedule-only` at :05, :20, :35 and :50, and
+once as soon as the scheduler starts after a boot, which is after the boot
+column migrations (job `nfl_schedule_refresh`, pipeline
+service, watched for 90 minutes of silence; `RUN_NFL_SCHEDULE_REFRESH=0`
+stops it, `NFL_SCHEDULE_REFRESH_MINUTES` sets the cadence). One download of
+the nflverse schedule, no odds call, so it costs nothing. It writes only games
+that have not kicked off, in the next 14 days:
+
+- a game seen for the first time (a wild card the night its teams are known)
+  is written whole, `games` row first, exactly as the daily run would write it;
+- on a row that already exists it changes **only when and where the game is
+  played** (`game_date`, `week`, `season_type`, `commence_time`, and the
+  three venue fields). The spread, total, roof, temperature and wind on that
+  row are NFL prop model features (`features/nfl_prop_feature_engine.py`) and
+  stay on the daily run's timing, so the refresh never changes what a prop
+  model scores on;
+- a game with no kickoff time, or one that has started, is left alone.
+
+The worst case from nflverse listing a game to the NFL clock seeing it is
+about 35 minutes: GitHub serves the file with `Cache-Control: max-age=300`
+(response header, 2026-10-21), then up to 15 minutes to the next refresh and
+up to 15 more in the scheduler's kickoff cache.
 
 **The readers.** `nfl/data_ingest/schedule.py` (`load_schedule`) is the one
 loader the cards use: `games` joined to the home team's
@@ -277,16 +303,32 @@ clock runs every minute; a failed read keeps the last list.
   indoor, so CIN @ ATL in Madrid (11-08) stays held back, as it was when the
   file placed it at Atlanta's retractable stadium.
 
-**Not changed, flagged.** nflverse marks the Melbourne, Paris and Munich games
-`dome`; ESPN lists all three venues as not indoor. The wind model skips a
-`dome` game, so those games are never forecast. Correcting the roof would add
-bets the model has never placed, which is a separate call.
+**A game abroad is judged by its venue's roof (2026-10-21, Updated-By:
+mike).** nflverse fills an upcoming game's `roof` from the home team's US
+stadium, like its stadium id: in production on 2026-10-21 PIT @ NO in Paris
+(10-25) and NE @ DET in Munich (11-15) both read `dome`, so the wind model
+dropped them before forecasting. `weather.VENUE_ROOF_ABROAD` now gives each
+venue abroad its own roof, applied in `schedule.load_schedule` where the venue
+is resolved. The evidence is ESPN's scoreboard `venue.indoor` for all 22 games
+abroad from 2022 to 2026 (False everywhere except the Bernabeu) and nflverse's
+record of games already played there (Wembley `outdoors` 26 of 26, Tottenham
+10 of 10, Azteca 5, Allianz Arena 2, Frankfurt 2). The Bernabeu stays
+retractable: only an observed `open`/`closed` counts, so CIN @ ATL in Madrid
+is still held back. Home games keep their row's roof. Effect this season:
+Paris and Munich become games the wind model can bet if the wind clears its
+usual bar; no other game changes. **The stored roof is not changed**: the
+NFL prop models read `nfl_team_game_stats.roof` as a feature, and this is
+the wind card's reading of the venue, not a correction to their inputs.
+`tests/test_nfl_venue_roof_abroad.py` holds the ESPN table.
 
-**After a deploy, run the nflverse ingest once** (`python -m
-data.ingestors.nfl_props_data_ingestor`, or let the next 6am run do it). Until
-it runs, the new venue columns are empty and the wind model treats every game
-as "venue not established"; an open wind BET is flagged DEGRADED (not GONE) by
-the locked-pick monitor for that time. Kickoffs are unaffected.
+**After a deploy nothing needs running by hand.** The schedule refresh runs
+when the scheduler starts and fills the venue columns the boot migration adds
+(if the boot catch-ups hold the start past 10 minutes, the first 15-minute
+tick does it).
+Until it has run, every game reads "venue not established" (no wind bet, and
+an open wind BET is flagged DEGRADED, not GONE, by the locked-pick monitor).
+If the refresh fails, the 6am run fills them too. Kickoffs are unaffected
+either way.
 
 ## NONE rows: every game the wind and opener rules evaluated (2026-09-26)
 
