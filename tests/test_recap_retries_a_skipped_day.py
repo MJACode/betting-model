@@ -148,7 +148,7 @@ def _schema(db):
                "(game_date, scope, COALESCE(sport, ''))")
     db.execute("""CREATE TABLE games (
         game_id TEXT PRIMARY KEY, sport TEXT, game_date TEXT,
-        home_score INT, away_score INT)""")
+        home_score INT, away_score INT, commence_time TEXT)""")
     for sport in ("MLB", "NFL", "NHL"):
         db.execute(
             "INSERT INTO games (game_id, sport, game_date, home_score, away_score) "
@@ -503,12 +503,16 @@ def test_a_day_with_nothing_counting_posts_nothing_and_logs_nothing(monkeypatch)
     lines: list[str] = []
     sink = logger.add(lambda m: lines.append(str(m)), level="DEBUG")
     try:
-        for hhmmss in ("07:24:30", "08:24:30", "22:54:30"):
+        for hhmmss in ("07:24:30", "08:24:30"):
             w.now = datetime(2026, 10, 13, *map(int, hhmmss.split(":")),
                              tzinfo=ET)
             before = len(w.conn.statements)
             assert dn.post_missed_recap() == 0
             assert len(w.conn.statements) - before == 1, "one statement a pass"
+        w.now = datetime(2026, 10, 13, 22, 54, 30, tzinfo=ET)
+        before = len(w.conn.statements)
+        assert dn.post_missed_recap() == 0
+        assert len(w.conn.statements) - before == 0, "an evening pass does not query"
     finally:
         logger.remove(sink)
     assert w.discord == [] and w.tweets == []
