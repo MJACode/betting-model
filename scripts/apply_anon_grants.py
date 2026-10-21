@@ -121,6 +121,8 @@ def _function_signature(conn, name: str) -> str | None:
 MAY_BE_UNAPPLIED = (
     "byom_game_facts",
     "byom_prop_facts",
+    "byom_game_book_quotes",
+    "byom_prop_book_quotes",
 )
 
 

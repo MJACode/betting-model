@@ -184,6 +184,9 @@ def build_season(conn, season: int, apply: bool = False,
         }
     facts = facts_for_season(conn, season, game_ids=game_ids)
     written = _upsert(conn, facts) if apply else 0
+    if apply:
+        from byom.book_quotes import write_game_quotes
+        write_game_quotes(conn, facts)
     return {"season": season, "facts": len(facts), "written": written}
 
 

@@ -90,8 +90,14 @@ def test_both_tables_are_on_the_anon_read_list():
     for rel in ("byom_game_facts", "byom_prop_facts"):
         assert rel in ANON_READABLE
         assert rel in AHEAD_OF_THE_APP
-    # The app does not read them yet. The exemption is these two, nothing else.
-    assert AHEAD_OF_THE_APP == ("byom_game_facts", "byom_prop_facts")
+    # The app does not read them yet. The exemption is the facts and the
+    # per-book quotes, nothing else.
+    assert AHEAD_OF_THE_APP == (
+        "byom_game_facts",
+        "byom_prop_facts",
+        "byom_game_book_quotes",
+        "byom_prop_book_quotes",
+    )
 
 
 def test_schema_applies_twice_on_scratch_postgres_and_anon_can_only_read():

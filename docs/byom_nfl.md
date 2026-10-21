@@ -167,3 +167,31 @@ calls. A slower backtest response does not replace a newer one.
 them. An empty filter is the whole season and must not be shown as a
 saved model record. There is no recommended stake. `package.json` is
 unchanged. Sign-in is unchanged.
+
+## Best line
+
+`byom_game_book_quotes` and `byom_prop_book_quotes` store one row per
+book, market, and side. `fact_id` is the game key or the prop key.
+Market and side are on the row because one book posts a spread, a
+total, and a moneyline. The index is `(fact_id, book)`. The quote is
+that book's last snapshot at or before kickoff, with the same per-book
+dedupe the prop facts use. The fact row stays the DraftKings line.
+
+`byom_backtest(season, filters)` is unchanged: the stored DraftKings
+counts, and `units`, `roi`, and `risked` are null. A third argument,
+the member's books, grades the best line among those books and calls
+`published_pick_unit_profit` and `published_pick_unit_risked`. A push
+is 0. A leg with no selected line is excluded. A prop that is not
+logged stays out. Spreads take the higher line, overs the lower line,
+unders the higher line, and a moneyline the higher American price.
+Role on that path comes from the chosen spread. Rest, week, and
+primetime stay on the game fact.
+
+A saved snapshot's `result_version` is null when the column was not
+there, 1 for a DraftKings save, and 2 for a best-line save that stores
+`units`, `roi`, and the books. Overall ROI is the sum of units over
+the sum of risked.
+
+`data/migrations/byom_book_quotes_2026_10_21.sql` is not in
+`ACTIVE_MIGRATIONS` and was not applied. The facts schema file and the
+saved-models file were not edited.

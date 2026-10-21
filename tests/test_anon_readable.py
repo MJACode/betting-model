@@ -131,12 +131,17 @@ def test_the_plan_revokes_before_it_grants():
 
 
 def test_unapplied_facts_tables_are_not_granted_until_they_exist():
-    """GRANT and has_table_privilege raise on a missing relation. The two
-    facts tables are in the dry-run plan and out of the apply plan until
-    the migration has created them."""
+    """GRANT and has_table_privilege raise on a missing relation. The facts
+    tables and the per-book quote tables are in the dry-run plan and out of
+    the apply plan until the migration has created them."""
     from scripts.apply_anon_grants import MAY_BE_UNAPPLIED, _anon_can_read
 
-    assert MAY_BE_UNAPPLIED == ("byom_game_facts", "byom_prop_facts")
+    assert MAY_BE_UNAPPLIED == (
+        "byom_game_facts",
+        "byom_prop_facts",
+        "byom_game_book_quotes",
+        "byom_prop_book_quotes",
+    )
     dry = " | ".join(_plan())
     for rel in MAY_BE_UNAPPLIED:
         assert f'ON public."{rel}"' in dry

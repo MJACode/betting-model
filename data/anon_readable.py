@@ -78,6 +78,10 @@ ANON_READABLE: tuple[str, ...] = (
     # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
     "byom_game_facts",
     "byom_prop_facts",
+    # Per-book lines for those facts (2026-10-21). Same display grant, still
+    # ahead of the screen. The fact row stays the DraftKings line.
+    "byom_game_book_quotes",
+    "byom_prop_book_quotes",
     "tracked_bets",
     "ufc_fight_log",
     "umpires",
@@ -130,6 +134,8 @@ ANON_READABLE: tuple[str, ...] = (
 AHEAD_OF_THE_APP: tuple[str, ...] = (
     "byom_game_facts",
     "byom_prop_facts",
+    "byom_game_book_quotes",
+    "byom_prop_book_quotes",
 )
 
 
