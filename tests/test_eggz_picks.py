@@ -34,6 +34,187 @@ def test_a_side_a_spread_a_total_and_a_prop_parse():
     assert ml["team_text"].upper().startswith("NYY")
 
 
+OCT18 = "NHL Sunday Oct. 18\nMIN Wild 60 Minute ML (-110) 1U✅"
+OCT20 = (
+    "NHL Tuesday Oct. 20\n"
+    "All 1U\n"
+    "MTL Canadians 60 Minute ML (-130) \n"
+    "NY Islanders ML (-155) \n"
+    "NJ Devils ML (-120) \n"
+    "CBJ Blue Jackets ML (-162) \n"
+    "EDM Oilers ML (-135)"
+)
+_POSTED_OCT18 = datetime(2026, 10, 18, 3, 28, 45, tzinfo=timezone.utc)
+_POSTED_OCT20 = datetime(2026, 10, 20, 16, 6, 51, tzinfo=timezone.utc)
+
+
+def test_the_oct_18_wild_post_is_a_regulation_moneyline():
+    legs, reviews = eg.parse_message(OCT18, _POSTED_OCT18)
+    assert reviews == []
+    assert len(legs) == 1
+    leg = legs[0]
+    assert leg["market"] == "h2h_3way"
+    assert leg["price"] == -110
+    assert leg["stake_units"] == 1
+    assert leg["team_text"] == "MIN Wild"
+    assert leg["sport_hint"] == "NHL"
+    assert leg["slate_date"] == "2026-10-18"
+    assert "✅" not in leg["team_text"]
+
+
+def test_the_oct_20_slate_keeps_one_regulation_line_and_four_moneylines():
+    legs, reviews = eg.parse_message(OCT20, _POSTED_OCT20)
+    assert reviews == []
+    assert [leg["market"] for leg in legs] == [
+        "h2h_3way", "h2h", "h2h", "h2h", "h2h",
+    ]
+    assert [leg["price"] for leg in legs] == [-130, -155, -120, -162, -135]
+    assert [leg["stake_units"] for leg in legs] == [1, 1, 1, 1, 1]
+    assert legs[0]["team_text"] == "MTL Canadians"
+    assert [leg["sport_hint"] for leg in legs] == ["NHL"] * 5
+    assert [leg["slate_date"] for leg in legs] == ["2026-10-20"] * 5
+    assert {leg["team_text"] for leg in legs[1:]} == {
+        "NY Islanders", "NJ Devils", "CBJ Blue Jackets", "EDM Oilers",
+    }
+
+
+def test_regulation_wording_and_a_message_stake_do_not_become_reviews():
+    posted = _POSTED_OCT20
+    for line in ("BOS 60 min ML -150", "BOS Reg ML -150", "BOS 3-way -150",
+                 "BOS 3 way ML +120"):
+        legs, reviews = eg.parse_message(f"NHL Oct. 20\n{line}", posted)
+        assert reviews == [], line
+        assert legs[0]["market"] == "h2h_3way", line
+        assert legs[0]["team_text"] == "BOS"
+    legs, reviews = eg.parse_message(
+        "NHL Tuesday Oct. 20\nAll 2U\nEDM Oilers ML -135", posted)
+    assert reviews == []
+    assert legs[0]["market"] == "h2h"
+    assert legs[0]["stake_units"] == 2
+    assert legs[0]["price"] == -135
+
+
+def test_canadians_and_a_one_edit_nickname_resolve_to_montreal():
+    hits = eg._teams_in("Canadians")
+    assert ("canadians", "NHL", "MTL") in hits
+    assert eg._fuzzy_one("Canadien", "NHL") == "MTL"
+
+
+def test_min_wild_on_the_nhl_slate_is_not_the_nfl_team():
+    legs, reviews = eg.parse_message(OCT18, _POSTED_OCT18)
+    assert reviews == []
+    calls = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            calls.append(params)
+            self.params = params
+            return self
+
+        def fetchall(self):
+            sport = self.params[0]
+            if sport == "NHL" and "MIN" in self.params and "2026-10-18" in self.params:
+                return [(
+                    "NHL_2026-10-18_CBJ_MIN", "NHL", "2026-10-18", "MIN", "CBJ",
+                    "2026-10-18T22:00:00Z", 2, 1, 1, 1, 0,
+                )]
+            if sport == "NFL":
+                return [(
+                    "NFL_2026-10-18_MIN_GB", "NFL", "2026-10-18", "GB", "MIN",
+                    "2026-10-18T17:00:00Z", None, None, None, None, 0,
+                )]
+            return []
+
+        def fetchone(self):
+            return None
+
+    game, reason = eg._match_leg(Conn(), legs[0], _POSTED_OCT18)
+    assert reason is None
+    assert game["game_id"] == "NHL_2026-10-18_CBJ_MIN"
+    assert game["side"] == "home"
+    assert all(call[0] != "NFL" for call in calls)
+
+
+def test_a_regulation_tie_is_a_loss_and_a_missing_period_score_is_not_graded():
+    reviews = []
+    graded = []
+
+    class Conn:
+        def __init__(self, periods):
+            self.periods = periods
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params
+            if sql.startswith("UPDATE") and "needs_review" in sql:
+                reviews.append(params)
+            if sql.startswith("UPDATE capper_picks SET status = 'graded'"):
+                graded.append(params)
+            return self
+
+        def fetchall(self):
+            if "nhl_period_scores" in self.sql:
+                return self.periods
+            if "status = 'pending'" in self.sql:
+                return [(
+                    8, "NHL_2026-10-18_CBJ_MIN", "h2h_3way", "home", None, -110, 1,
+                    None, None, None, "2026-10-18T22:00:00Z", "NHL",
+                )]
+            return []
+
+        def fetchone(self):
+            if "RETURNING" in self.sql:
+                return (1,)
+            if "FROM games" in self.sql:
+                return (2, 1, 1, 1, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+            return None
+
+        def commit(self):
+            pass
+
+    assert eg.grade_pending(Conn([])) == 1
+    assert reviews[0][0] == "no_regulation_score"
+    assert graded == []
+
+    reviews.clear()
+    assert eg.grade_pending(Conn([(1, 1, 0, 0, 1, 0)])) == 1
+    assert graded[0][0] == "WIN"
+    assert abs(graded[0][1] - 1.0) < 1e-9
+
+    graded.clear()
+    assert eg.grade_pending(Conn([(1, 0, 0, 0, 1, 0)])) == 1
+    assert graded[0][0] == "LOSS"
+
+
+def test_a_stored_needs_review_message_is_reparsed_and_a_parsed_one_is_not(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        eg, "_replace_legs",
+        lambda conn, mid, body, posted: seen.append(mid))
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            if "FROM capper_messages" in self.sql:
+                return [
+                    ("old", OCT18, "2026-10-18T03:28:45+00:00", "needs_review"),
+                    ("done", "NYY ML -115", "2026-10-20T17:00:00+00:00", "parsed"),
+                ]
+            return []
+
+        def fetchone(self):
+            return None
+
+        def commit(self):
+            pass
+
+    assert eg.reparse_stored(Conn()) == 1
+    assert seen == ["old"]
+
+
 def test_a_missing_price_stays_missing_and_the_stake_defaults_to_one():
     legs, reviews = eg.parse_message("NYY ML")
     assert reviews == []
@@ -224,7 +405,7 @@ def _grade_conn(pending_row, log_rows):
         def execute(self, sql, params=None):
             self.sql = sql
             self.params = params
-            if "needs_review" in sql:
+            if sql.startswith("UPDATE") and "needs_review" in sql:
                 reviews.append(params)
             return self
 
@@ -236,6 +417,8 @@ def _grade_conn(pending_row, log_rows):
             return []
 
         def fetchone(self):
+            if "RETURNING" in self.sql:
+                return (1,)
             if "FROM games" in self.sql:
                 return (24, 17, 1, None, 0, "2026-10-19T20:00:00+00:00", "2026-10-19")
             return None
