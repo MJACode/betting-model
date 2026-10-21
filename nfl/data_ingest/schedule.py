@@ -80,7 +80,13 @@ def _utc(now) -> pd.Timestamp:
 
 def _empty() -> pd.DataFrame:
     return pd.DataFrame(columns=ROW_COLUMNS + ["kick_utc", "nflverse_stadium_id",
-                                               "venue_note", "matchup", "lead_days"])
+                                               "nflverse_roof", "venue_note",
+                                               "matchup", "lead_days"])
+
+
+def _text(v) -> str | None:
+    """A roof value as a comparable string, None for blank, NaN or None."""
+    return (v.strip() or None) if isinstance(v, str) else None
 
 
 def load_schedule(lo_days: float = 0.0, hi_days: float = 10.0, now=None,
@@ -95,12 +101,14 @@ def load_schedule(lo_days: float = 0.0, hi_days: float = 10.0, now=None,
 
     `stadium_id` is the RESOLVED venue (a `STADIUM_COORDS` key) or None when
     the venue cannot be established; `nflverse_stadium_id` is the raw id and
-    `venue_note` says how the venue was decided or why it was not.
+    `venue_note` says how the venue was decided or why it was not. `roof` is
+    the venue's own roof for a game abroad (weather.venue_roof), the row's
+    otherwise; `nflverse_roof` is the raw value either way.
 
     `rows` injects the database rows (tests). Otherwise the database is read;
     when it cannot be, the slate is empty and the reason goes to stderr.
     """
-    from data_ingest.weather import resolve_venue
+    from data_ingest.weather import resolve_venue, venue_roof
 
     now = _utc(now)
     if rows is None:
@@ -132,6 +140,15 @@ def load_schedule(lo_days: float = 0.0, hi_days: float = 10.0, now=None,
                 for sid, name, loc in zip(g.stadium_id, g.stadium, g.location)]
     g["stadium_id"] = [v for v, _ in resolved]
     g["venue_note"] = [n for _, n in resolved]
+    # A game abroad is judged by its venue's roof, not the home team's that
+    # nflverse copies onto the row (weather.VENUE_ROOF_ABROAD). The raw value
+    # rides along, and the note says when the two differ.
+    g["nflverse_roof"] = g.roof
+    g["roof"] = [venue_roof(sid, roof) for sid, roof in zip(g.stadium_id, g.roof)]
+    g["venue_note"] = [
+        note if _text(roof) == _text(raw)
+        else f"{note}; roof {_text(roof) or 'unknown'} (nflverse row: {_text(raw) or 'blank'})"
+        for note, roof, raw in zip(g.venue_note, g.roof, g.nflverse_roof)]
     g["matchup"] = g.away_team + " @ " + g.home_team
     g["lead_days"] = (g.kick_utc - now).dt.total_seconds() / 86400
     return g.sort_values("kick_utc").reset_index(drop=True)

@@ -235,6 +235,56 @@ RETRACTABLE_IN_HISTORY = {"ATL97", "DAL00", "HOU00", "IND00", "PHO00"}
 RETRACTABLE_ABROAD = {"MAD00", "MAD01"}
 RETRACTABLE_STADIUMS = RETRACTABLE_IN_HISTORY | RETRACTABLE_ABROAD
 
+# THE ROOF OF A GAME ABROAD IS THE VENUE'S, NEVER THE SCHEDULE ROW'S
+# (2026-10-21, mike's 2026-10-20 ask that the models read the real schedule).
+#
+# nflverse fills a FUTURE game's `roof` from the home team's US stadium -- the
+# same failure as its stadium id (NEUTRAL_VENUE_NAMES). In the 2026 schedule
+# Melbourne carries the Rams' 'dome', Paris the Saints' 'dome', Munich the
+# Lions' 'dome', and Rio and Madrid the blank of Dallas's and Atlanta's
+# retractable roofs. A 'dome' meant the wind model never forecast Paris or
+# Munich at all, placed or not.
+#
+# The venues' own record disagrees with every one of those copies. ESPN's
+# scoreboard `venue.indoor`, fetched 2026-10-21 for all 22 games abroad from
+# 2022 to 2026: False at every venue below except the Bernabeu (True, both
+# games). nflverse's record of games already PLAYED says the same: Wembley
+# 'outdoors' 26 of 26, Tottenham 10 of 10, Twickenham 3, Azteca 5, Allianz
+# Arena 2, Frankfurt 2, Sao Paulo 1.
+#
+# None marks a retractable roof: there the row counts only when it carries an
+# observed state ('open' / 'closed'); anything else is an unknown state, and
+# the game is held back (RETRACTABLE_ABROAD). Every venue the name table can
+# resolve to must be here -- a venue abroad with no entry would fall back to
+# the home team's roof, which is the bug.
+#
+# The STORED roof is left exactly as nflverse wrote it. The NFL prop models
+# read nfl_team_game_stats.roof as a feature, and this is the wind card's
+# reading of where the game is played, not a correction to their inputs.
+VENUE_ROOF_ABROAD = {
+    "LON00": "outdoors", "LON01": "outdoors", "LON02": "outdoors",
+    "MEX00": "outdoors", "GER00": "outdoors", "MUN01": "outdoors",
+    "FRA00": "outdoors", "SAO00": "outdoors", "RIO00": "outdoors",
+    "MEL00": "outdoors", "PAR00": "outdoors", "DUB00": "outdoors",
+    "BER00": "outdoors",
+    "MAD00": None, "MAD01": None,
+}
+
+
+def venue_roof(stadium_id, row_roof):
+    """The roof to judge a game by: the venue's abroad, the row's at home.
+
+    `stadium_id` is the RESOLVED venue (resolve_venue), `row_roof` the value
+    on the schedule row. A home game keeps its row's value untouched.
+    """
+    if stadium_id not in VENUE_ROOF_ABROAD:
+        return row_roof
+    fixed = VENUE_ROOF_ABROAD[stadium_id]
+    if fixed is not None:
+        return fixed
+    observed = str(row_roof).strip().lower() if isinstance(row_roof, str) else ""
+    return observed if observed in ("open", "closed") else None
+
 
 def open_air_mask(games) -> "pd.Series":
     """Boolean mask: games the weather can actually reach.
