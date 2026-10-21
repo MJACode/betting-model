@@ -520,9 +520,11 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_nhl",
     "fighter_window_totals_ufc",
     "team_stats_board",
-    # custom model builder
+    # custom model builder. The old builder stays. byom_backtest reads
+    # byom_game_facts and byom_prop_facts, not picks.
     "custom_model_backtest",
     "custom_model_picks",
+    "byom_backtest",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",
     "feedback_messages_for_thread",
