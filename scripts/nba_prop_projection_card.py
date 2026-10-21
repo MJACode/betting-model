@@ -177,7 +177,8 @@ def load_history(conn) -> dict:
         SELECT game_id, season, game_date, home_team, away_team, commence_time
         FROM games WHERE sport = 'NBA' AND season >= %s
     """, (nb.FIRST_TRAIN_SEASON,))
-    schedule = _frame(conn, "SELECT game_id, game_type, commence_time FROM nba_schedule")
+    # season and game_date: models.nba_props.regular_game_ids dates a game the schedule does not list
+    schedule = _frame(conn, "SELECT game_id, season, game_date, game_type, commence_time FROM nba_schedule")
     log = _frame(conn, f"SELECT {', '.join(LOG_COLS)} FROM nba_player_game_log WHERE season >= %s",
                  (nb.FIRST_TRAIN_SEASON,))
     for c in LOG_COLS[6:]:

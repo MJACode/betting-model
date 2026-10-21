@@ -123,6 +123,57 @@ Their feature engines (`features/nba_feature_engine.py`,
   and bet on every qualifying proposition they clear in steals, blocks, rebounds,
   rebounds+assists and threes — `nba_prop_projection`, live (§5).
 
+## The schedule the models read
+
+**Kept current on the worker every day** (`nba-schedule`,
+`data/ingestors/nba_schedule_refresh.py`, since 2026-10-20). Before that the
+2026-27 schedule was one load by hand (2026-10-15) that nothing refreshed: the
+24 NBA Cup week games the league had not yet set were missing, the knockout
+games were placeholders with no teams, and both prop models skipped every game
+the schedule did not type as regular season. Measured 2026-10-20: ESPN's
+2026-27 schedule holds the same 1,200 games as the stored one, month by month,
+at the same tips but one (CHI @ MIL 2026-10-23, where ESPN alone says 4pm ET
+and the league's load, the Bucks' release and ticket listings say 7pm CT, so
+ESPN never moves a tip on its own word). A tip moves when the odds feed's start
+for the game shows it too. The feed lists the books' start, not the league's
+tip: of the 46 2026-27 games it had written by 10-20, 8 sat on the tip, 35 ten
+minutes after it, 3 more 8 to 22 minutes after, none before. So the feed seconds
+ESPN when its start is from a minute before to 30 minutes after ESPN's new tip
+and does not fit the stored tip, or sits nearer ESPN's when it fits both. This
+matters for a game flexed later: all four NBA models take the earlier of the
+schedule's tip and the feed's start, so a 7pm game flexed to 9:30 that the
+schedule still held at 7pm would be decided three and a half hours early. A
+by-hand NBA.com load still works and replaces any `espn:` row of the games it
+writes. **If the scoreboard refuses this month or next, that month is read from
+ESPN's other host**, `sports.core.api.espn.com`. The scoreboard host answered
+the worker 403 on every day it was probed from 2026-08-08 to 2026-09-30, eight
+weeks, while the other host served the WNBA results step throughout. That host
+lists games as links: one call per game and one per team. December 2026 read
+that way took 209 calls and 170 seconds from the build machine and came back
+the same as the scoreboard (172 games, the same ids, the same fields but status
+and TV). All nine months would add about 18 minutes to the 6am run, so only the
+next two are read; a game further out is read again by the time it is near. It
+carries no status or TV inline, so a month read from it records no postponement
+and leaves a stored status as it is. A month neither host answers whole is left
+as stored, the step goes red, and the health check warns after 36 hours.
+
+**What the prop models price.** Every regular-season game, the Cup quarterfinals
+and semifinals included, whether or not the schedule lists it yet (a game the
+odds feed wrote on a regular-season day counts, the totals model's rule,
+`models.nba_total_luck.regular_season`). **Not the play-in, the playoffs or the
+Cup final:** neither prop model has been graded on one. The stored prop history
+holds 0 of those 272 games of 2023-24..2025-26 and all 3,690 regular-season
+games; grading them means buying those props first. The totals models are
+regular season only too (the Cup final never counts).
+
+**Rest.** The projection model's rest, back-to-back, games-in-four-days and
+road trip, and every player's history, read every regular-season game in
+`games`, listed or not, plus the Cup final once the schedule lists it
+(`models.nba_props.regular_game_ids`; ESPN carries the final's note before its
+teams are set, so the refresh types it the day they are).
+Removing the Cup week from 2023-24..2025-26 put the wrong rest on 30 team-games
+a season.
+
 ## Conventions (load-bearing)
 
 - **Season label = ENDING year** (2026 = 2025-26). Threaded explicitly, never
@@ -145,7 +196,7 @@ Their feature engines (`features/nba_feature_engine.py`,
 | `games` | scores, tip-off (`commence_time`), OT, neutral site | `nba_results_ingestor` (ESPN finals) / `nba_schedule_ingestor` | worker, every refresh pass before settle / this machine |
 | `nba_player_game_log` | every player's box line | `nba_results_ingestor` (ESPN) for 2026-27; nba_api for 2018-19 → 2025-26 | worker |
 | `nba_player_dnp` | ESPN did-not-play reasons | `nba_results_ingestor` | worker |
-| `nba_schedule` | NBA.com schedule: arenas, neutral sites, NBA Cup, national TV, OT | `nba_schedule_ingestor` | this machine (stats.nba.com blocks datacenter IPs) |
+| `nba_schedule` | NBA.com schedule: arenas, neutral sites, NBA Cup, national TV, OT; every game type | `nba_schedule_ingestor` (the season's load) / `nba_schedule_refresh` (ESPN, daily) | this machine (stats.nba.com blocks datacenter IPs) / worker, the 6am run |
 | `nba_player_game_adv` | starters, exact minutes, +/-, fouls, usage, possessions, DNP reasons | `nba_box_enrich` (sportsdataverse bulk files + stats.nba.com) | this machine, 2018-19 → 2025-26 |
 | `nba_game_inactives`, `nba_game_officials` | inactive lists, referee crews | `nba_box_enrich` | this machine |
 | `nba_injury_report` | the official league injury report, every PDF since 2018-12-17, stamped with its printed time | `nba_injury_report` | this machine; `--today` exists, not wired on the worker |
@@ -179,6 +230,7 @@ than 10 minutes behind Pinnacle's.
 | `nba-prop-close` | after the card; also in the window job | a `close` prop snapshot 12-25 minutes before tip for every game holding a bet (CLV; `NBA_PROP_CLOSE_*` in config) |
 | window job `nba_prop_window` | every 5 minutes, 24x7 (`scheduler.run_nba_prop_window`) | props for exactly the games 40-62 minutes from tip that either NBA prop model has not decided, then both cards, then any close that is due, then publish, then the projections due; no API call when nothing is near |
 | window job `nba_total_luck_window` | every minute, 24x7 (`scheduler.run_nba_total_luck_window`; one planning read for both totals models, `scripts/nba_pregame_window.py`) | `nba_total_luck` first, when an undecided game is 61-66 minutes from tip: the NBA board (the refresh pass's own NBA odds fetch, 90-second limit), then `nba-total-luck`. Then `nba_team_total_luck`, when an undecided game is 45-56 minutes from tip: one `team_totals` call per due game (`scripts/nba_team_total_luck_window.py --fetch`, 90-second limit), then `nba-team-total-luck`; and for each game holding its bet, the closing team totals 12-25 minutes before tip (`--close`, 90-second limit, filed `close`, for closing-line value). Then one publish. No API call when nothing is due. Six ticks fit the full-game window and twelve the team-total one, so one skipped tick loses nothing. One job for both, not two: every job opens a database connection each tick for its heartbeat. On the refresh pass a skipped tick lost the game: 27 of 504 evening ticks never started over 2026-10-03..16 |
+| `nba-schedule` | the 6am run, before `nba-results` | ESPN's schedule for this month and the next eight (one call a month) → `nba_schedule`: games it lacks under an `espn:` key (the NBA Cup week and knockout games once set, play-in, playoffs), postponements, and a moved tip only when the odds feed shows the same start. Fail-open: a month ESPN does not answer is left as stored; the step goes red and the health check `nba_schedule_refresh` goes STALE after 36 hours with no row confirmed |
 | `nba-results` | every pass, before settle | ESPN finals → `games`, every box line → `nba_player_game_log` |
 | box repair (by hand) | from a residential machine, when the totals card logs `box_missing` or `box_mismatch` | `python -m data.ingestors.nba_stats_ingestor --repair-boxes 2027` replaces each game of the season whose box is missing or does not add up to its final score with NBA.com's, one game per transaction, and writes a game only when NBA.com's box adds up. Not `--game-log-date`: it loads every game of the date and doubles any player ESPN stored under a fallback id |
 | `settle` | every pass | props via `_settle_prop_picks` (`FROM_PROP_MARKET`, `_NBA_MARKET_STAT`); the two totals models through `paper_tracker._RULE_MODEL_MARKETS`: `nba_total_luck` on the full-game total, `nba_team_total_luck` on the home team's own final score (overtime included; a push when equal) |

@@ -44,9 +44,10 @@ in fact played, its score and box are missing and every gap since is off;
 (3) the NBA Cup knockout games: nba_schedule lists them only as placeholders with
 no teams (production, read 2026-10-17: quarterfinals 12-04 and 12-05, semifinals
 12-08, the final 12-11). The model prices the quarterfinals and semifinals from
-their `games` rows and keeps the final out of the ratings by its date; reloading
-the schedule once the bracket is set (`python -m data.ingestors.nba_schedule_ingestor
---seasons 2027`, residential machine) gives them their real rows; (4) the
+their `games` rows and keeps the final out of the ratings by its date. Since
+2026-10-20 the worker's daily `nba-schedule` step gives them their real rows once
+ESPN lists the teams (`espn:` keys; the placeholders stay, the date rule reads
+them); no reload by hand is needed; (4) the
 artifact's copy in Supabase's `model_artifacts` — not written yet (the
 committed file is what the worker loads); `python -m scripts.nba_total_luck_build
 --store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the

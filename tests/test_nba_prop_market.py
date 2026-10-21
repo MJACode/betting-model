@@ -208,28 +208,72 @@ def test_the_tip_is_the_earlier_of_the_schedule_and_the_feed():
     assert mk.tip_of(None, feed) == mk.parse_ts(feed)
 
 
+class _SlateConn:
+    """The slate's two reads: tonight's games joined to the schedule, and the
+    season's schedule days (scripts.nba_total_luck_card.schedule_days)."""
+
+    def __init__(self, games, days):
+        self.games, self.days = games, days
+
+    def execute(self, sql, params):
+        self._rows = self.days if "SELECT DISTINCT season, game_date, game_type" in sql else self.games
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+
+# 2026-27 as stored: regular-season days 10-20..04-11, a Cup final placeholder.
+_DAYS = [(2027, "2026-10-20", "regular"), (2027, "2027-04-11", "regular"),
+         (2027, "2026-12-11", "cup_final")]
+
+
+def _t(m):
+    return (TIP + timedelta(minutes=m)).isoformat()
+
+
 def test_the_slate_is_regular_season_games_inside_the_horizon():
-    """The rule was graded on regular-season games only; the tip is the
-    schedule's when the feed's is later; a game past its tip is not priced."""
-    class _C:
-        def execute(self, sql, params):
-            self.params = params
-            return self
-
-        def fetchall(self):
-            t = lambda m: (TIP + timedelta(minutes=m)).isoformat()      # noqa: E731
-            return [
-                ("REG", "LAL", "GSW", "2026-10-21", 2027, t(10), t(0), "regular"),
-                ("CUP", "LAL", "GSW", "2026-10-21", 2027, t(0), t(0), "cup_final"),
-                ("NOSCHED", "LAL", "GSW", "2026-10-21", 2027, t(0), None, None),
-                ("LATER", "LAL", "GSW", "2026-10-21", 2027, t(30), t(30), "regular"),
-                ("STARTED", "LAL", "GSW", "2026-10-21", 2027, t(-60), t(-60), "regular"),
-            ]
-
+    """The tip is the schedule's when the feed's is later; a game past its tip
+    or beyond the window is not priced; the Cup final is not priced."""
+    rows = [
+        ("REG", "LAL", "GSW", "2026-10-21", 2027, _t(10), _t(0), "regular"),
+        ("CUP", "LAL", "GSW", "2026-10-21", 2027, _t(0), _t(0), "cup_final"),
+        ("LATER", "LAL", "GSW", "2026-10-21", 2027, _t(30), _t(30), "regular"),
+        ("STARTED", "LAL", "GSW", "2026-10-21", 2027, _t(-60), _t(-60), "regular"),
+    ]
     skipped = []
-    games = card.slate(_C(), NOW, skipped)
+    games = card.slate(_SlateConn(rows, _DAYS), NOW, skipped)
     assert sorted(games) == ["REG"] and games["REG"]["tip"] == TIP
-    assert sorted(s.split()[0] for s in skipped) == ["CUP", "NOSCHED"]
+    assert sorted(s.split()[0] for s in skipped) == ["CUP"]
+
+
+def test_an_nba_cup_week_game_the_schedule_does_not_list_is_still_priced():
+    """The 2026-27 schedule was loaded before the league set the Cup week, so
+    24 regular-season games were not in it, while the odds feed writes each into
+    `games`. Such a game on a regular-season day is in the graded population
+    (1,230 regular-season games a season) and is priced; one on a day the
+    schedule gives to another kind of game (the Cup final's) is not."""
+    rows = [
+        ("CUPWEEK", "LAL", "GSW", "2026-12-07", 2027, _t(0), None, None),
+        ("FINALDAY", "LAL", "GSW", "2026-12-11", 2027, _t(0), None, None),
+        ("NOSEASON", "LAL", "GSW", "2026-12-07", 2028, _t(0), None, None),
+    ]
+    skipped = []
+    games = card.slate(_SlateConn(rows, _DAYS), NOW, skipped)
+    assert sorted(games) == ["CUPWEEK"] and games["CUPWEEK"]["tip"] == TIP
+    assert sorted(s.split()[0] for s in skipped) == ["FINALDAY", "NOSEASON"]
+
+
+def test_the_postseason_is_never_priced():
+    """Neither NBA prop model was graded on a play-in, playoff or Cup final game:
+    the stored prop history holds none of the 272 of 2023-24..2025-26 (and all
+    3,690 regular-season games). Each is skipped and named, by its type."""
+    rows = [(gid, "LAL", "GSW", "2026-10-21", 2027, _t(0), _t(0), kind)
+            for gid, kind in (("PI", "playin"), ("PO", "playoff"), ("CF", "cup_final"),
+                              ("PRE", "preseason"))]
+    skipped = []
+    assert card.slate(_SlateConn(rows, _DAYS), NOW, skipped) == {}
+    assert sorted(skipped) == ["CF (cup_final)", "PI (playin)", "PO (playoff)", "PRE (preseason)"]
 
 
 def test_a_fetch_after_now_or_at_tip_and_a_close_row_never_decide():

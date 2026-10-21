@@ -87,6 +87,9 @@ SKIP_BUDGET_DAYS: dict = {
     # NBA: last game mid-June, next scheduled row 2026-10-20 -> ~130 days of
     # legitimate offseason. 165 leaves room for a late schedule load.
     "nba_game_log":  165,
+    # The same offseason, read through a 45-day look ahead: dark from mid-June
+    # until next season's games reach `games`, well inside 165.
+    "nba_schedule_refresh": 165,
     # WNBA: mid-September to early May is ~230 days off. The 2026 season also
     # carries a FIBA World Cup break (Sept 4-13, resuming Sept 17), which is
     # well inside this budget and correctly stays quiet.
@@ -585,6 +588,36 @@ def _swapped_ufc_id(game_id: str) -> str | None:
     if len(parts) != 4 or parts[0] != "UFC":
         return None
     return f"{parts[0]}_{parts[1]}_{parts[3]}_{parts[2]}"
+
+
+# ── Is the NBA schedule being kept current? ──────────────────────────────────
+# Until 2026-10-20 nba_schedule was one load by hand (every 2026-27 row stamped
+# 2026-10-15 22:17Z) that nothing refreshed, so the NBA Cup week, the knockout
+# games, play-in, playoffs and moved tips could never reach it, and both NBA
+# prop models priced and read rest only from what it listed. The daily
+# `nba-schedule` step (data/ingestors/nba_schedule_refresh.py) now stamps
+# updated_at on every row ESPN confirms, so the newest updated_at IS the last
+# refresh that reached ESPN. 36 hours: one day's 6am run and slack for a late
+# one; a whole missed day reads STALE. Nothing retries a failed schedule step
+# the same day: tracking/daily_retry.py re-runs a daily that never ran or died
+# mid-run, or whose MLB freshness steps failed, so a step that failed on its
+# own waits for the next 6am run. The gate is NBA games in `games` from
+# three days back to 45 ahead -- the odds feed writes those rows too, so a dead
+# refresh does not shut its own gate.
+NBA_SCHEDULE_MAX_AGE_HOURS = 36
+NBA_SCHEDULE_GATE_DAYS = (3, 45)
+
+
+def check_nba_schedule_refresh(conn, r: "HealthReport", run_date: str) -> None:
+    """Add the nba_schedule_refresh row (WARN): has the schedule been confirmed
+    by its daily refresh while NBA games are near?"""
+    d = datetime.strptime(run_date, "%Y-%m-%d")
+    lo = (d - timedelta(days=NBA_SCHEDULE_GATE_DAYS[0])).strftime("%Y-%m-%d")
+    hi = (d + timedelta(days=NBA_SCHEDULE_GATE_DAYS[1])).strftime("%Y-%m-%d")
+    soon = _games_count(conn, "NBA", lo, hi)
+    r.ts_check(conn, "nba_schedule_refresh", "WARN", "nba_schedule", "updated_at",
+               NBA_SCHEDULE_MAX_AGE_HOURS, gate_ok=soon > 0,
+               gate_note=f"no NBA games scheduled {lo}..{hi}")
 
 
 def check_pregame_prices_current(conn, r: "HealthReport",
@@ -1395,6 +1428,9 @@ def run_system_health(run_date: str | None = None) -> dict:
             r.date_check(conn, check, "WARN", table, "game_date", expect,
                          gate_ok=played > 0,
                          gate_note=f"no {sport} games scheduled in last 3 days")
+
+        # ── NBA schedule: confirmed by its daily ESPN refresh ────────────────
+        check_nba_schedule_refresh(conn, r, run_date)
 
         # ── ESPN reachability probe (diagnostic, not an impact check) ────────
         # WNBA finals come from site.api.espn.com, which stopped serving the

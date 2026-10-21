@@ -786,6 +786,32 @@ def step_nba_results(run_date: str) -> bool:
         return False
 
 
+def step_nba_schedule(run_date: str) -> bool:
+    """
+    The NBA schedule, refreshed from ESPN for this month and the next eight
+    (data/ingestors/nba_schedule_refresh.py): games the stored schedule lacks
+    (the NBA Cup week and knockout games once set, play-in, playoffs), moved
+    tips and postponements. Runs BEFORE nba_results, which inserts a
+    regular-season game only nba_schedule lists. A month ESPN's scoreboard
+    refuses is read from its core host (`via_core`). Fail-open: a month neither
+    host answers is left as stored and the models keep reading it; the step
+    returns False so pipeline_runs names it, and the health check
+    nba_schedule_refresh goes STALE after 36 hours without a confirmed row.
+    """
+    try:
+        from data.ingestors.nba_schedule_refresh import refresh
+        t = refresh(run_date)
+        summary = {k: v for k, v in t.items() if k not in ("plan", "months")}
+        if t["failed"] or t["error"] or not t["fetched"]:
+            logger.error(f"✗ NBA schedule (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NBA schedule (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA schedule failed: {exc}")
+        return False
+
+
 def step_ncaaf_results(run_date: str) -> bool:
     """
     Fill NCAAF final scores from CFBD. Must run BEFORE settlement — the
@@ -1946,6 +1972,15 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["wnba_results"] = step_wnba_results(run_date)
     time.sleep(1)
 
+    # ── Step 0e1: NBA schedule via ESPN (before the NBA results step) ───────
+    # The schedule was one by-hand load (2026-10-15) until this step: the Cup
+    # week, the knockout games, play-in and playoffs and any moved tip never
+    # reached it, and the NBA prop models price and read rest only from what
+    # it lists (data/ingestors/nba_schedule_refresh.py).
+    logger.info("Step 0e1: Refreshing the NBA schedule from ESPN...")
+    results["nba_schedule"] = step_nba_schedule(run_date)
+    time.sleep(1)
+
     # ── Step 0e2: NBA finals + box scores via ESPN (MUST precede settlement) ─
     # The worker's only NBA results source: nba_api is blocked here, and the
     # local job last ran 2026-08-30. No ESPN call unless a started game still
@@ -2409,7 +2444,7 @@ Examples:
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nba-results", "nfl-results",
+                                 "nhl-results", "wnba-results", "nba-results", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
@@ -2503,6 +2538,7 @@ Examples:
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
             "nba-results":  lambda: step_nba_results(run_date),
+            "nba-schedule": lambda: step_nba_schedule(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
             "ncaaf-results": lambda: step_ncaaf_results(run_date),
             "ncaaf-stats":  lambda: step_ncaaf_stats(run_date),
