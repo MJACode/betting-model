@@ -420,7 +420,11 @@ export function PlayerStatsScreen() {
   const lineProvenance = lineTouched
     ? lineFromBoard
       ? pickScoredLine != null
-        ? `pick ${mode === 'under' ? 'Under' : 'Over'} ${pickScoredLine}`
+        // The SIDE is the pick's, not the ruler's: the seeded mode is the
+        // pick's side on arrival, and it stays the caption's source after
+        // the reader toggles At Least / Over / Under, or an Over pick would
+        // read "pick Under" (§00: quote a pick from its label).
+        ? `pick ${requestedMode === 'under' ? 'Under' : 'Over'} ${pickScoredLine}`
         : 'board line'
       : 'your line'
     : pickThreshold != null && line === pickThreshold && pickLine != null
