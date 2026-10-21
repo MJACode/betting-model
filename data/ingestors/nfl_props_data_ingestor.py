@@ -607,8 +607,8 @@ def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = Non
 #     are the ones its edge lives in.
 #   * After the deploy that added the venue columns, nothing filled them until
 #     the next 6am run, and the wind model bets nothing on a game whose venue
-#     is not established. The scheduler now runs this 30 seconds after every
-#     boot as well as on its cadence (scheduler.run_nfl_schedule_refresh).
+#     is not established. The scheduler now runs this as soon as it starts
+#     after a boot, as well as on its cadence (scheduler.run_nfl_schedule_refresh).
 #
 # One GET of the nflverse schedule, no player or snap CSV, and it writes only
 # the LOOK-AHEAD: games that have not kicked off, inside SCHEDULE_REFRESH_DAYS.

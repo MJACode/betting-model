@@ -233,6 +233,8 @@ def _jobs(monkeypatch, role="all", on=True):
 
 
 def test_the_refresh_runs_every_15_minutes_and_once_at_boot(monkeypatch):
+    """next_run_time falls due before sched.start(), so the first run is the
+    moment the scheduler starts, after the boot column migrations."""
     jobs, _ = _jobs(monkeypatch)
     job = jobs["nfl_schedule_refresh"]
     assert "minute='5-59/15'" in str(job.trigger)

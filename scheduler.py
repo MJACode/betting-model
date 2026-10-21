@@ -917,7 +917,7 @@ def _nfl_lead_hours() -> float | None:
 # nflverse's commit history), and a deploy that adds a schedule column left it
 # empty until the next morning, which for the venue columns meant no wind bet
 # all day. So the look-ahead schedule is re-read every NFL_SCHEDULE_REFRESH_
-# MINUTES and once 30 seconds after every boot.
+# MINUTES and once as soon as the scheduler starts after a boot.
 #
 # Free: one GET of nflverse's games.csv on GitHub, no odds call. It writes the
 # next 14 days only, and on an existing row only when and where the game is
@@ -2073,8 +2073,12 @@ def build_scheduler() -> BlockingScheduler:
     # run_nfl_schedule_refresh). Not gated on RUN_NFL_WIND_CARD: the prop card
     # and the prop scorer read the same rows. Off the hour (:05, :20, ...) so
     # it never shares a minute with the hourly NFL poll or the 6am pipeline.
-    # next_run_time is the boot catch-up: a deploy that adds a schedule column
-    # gets it filled in 30 seconds, not at the next tick or the next morning.
+    # next_run_time is the boot catch-up. It falls due before sched.start(), so
+    # the run happens the moment the scheduler starts -- after the boot
+    # migrations in catch_up_weekly_jobs have added any new column -- and a
+    # deploy that adds one has it filled at boot, not the next morning. If the
+    # boot catch-ups hold the start past misfire_grace_time (10 minutes), the
+    # first 15-minute tick does it instead.
     if RUN_NFL_SCHEDULE_REFRESH:
         sched.add_job(
             run_nfl_schedule_refresh,
