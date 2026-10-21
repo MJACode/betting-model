@@ -562,6 +562,9 @@ export type RootStackParamList = {
      */
     line?: number;
     gameWindow?: number;
+    /** `line` came from a pick's own scored line (Pick Detail), not a board
+     *  row — the caption under the hit card names it "pick line". */
+    lineFromPick?: boolean;
   };
   /**
    * One team's page off the Stats tab's Teams board: next-game market read,

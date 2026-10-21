@@ -279,6 +279,9 @@ export function PlayerStatsScreen() {
   // held like a touched line (the book's line does not replace it) but NAMED
   // for where it came from, not "your line" (UX review, 2026-09-25).
   const [lineFromBoard, setLineFromBoard] = useState(false);
+  // Pick Detail hands the pick's line the same way; the caption names it as
+  // the pick's, not the board's, because no board was on screen.
+  const lineFromPick = route.params.lineFromPick === true;
 
   // ── The betslip leg ────────────────────────────────────────────────────────
   // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
@@ -298,14 +301,19 @@ export function PlayerStatsScreen() {
   // This screen's stepper is an "N+" threshold; the market line is the
   // half-point below it, which is how lineFor() converts on the Stats board.
   //
-  // OVER ONLY. A prop model's pick is an over at its scored line; offering it
-  // under an "Under 1.5" card would hand someone the opposite of the bet they
-  // are reading. The card's own bet bar covers the under — the model does not.
+  // THE PICK'S OWN SIDE. Prop models write Overs AND Unders (since 2026-08-01
+  // the split is roughly even), so the card shows the pick only when the bet
+  // under the ruler — line and side — is the bet the model wrote. Offering an
+  // Under pick beneath an "Over 1.5" headline, or hiding every Under pick
+  // because the mode is Under, each hands the reader the wrong bet (UX
+  // review, 2026-10-21: the Under bail emptied the card for every Under pick
+  // opened from Pick Detail once that screen seeded the side).
   const slipPick = useMemo(() => {
-    if (line == null || mode === 'under') return null;
+    if (line == null) return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
     const found = slipPickFor({ player_id: pageId }, idx, line - 0.5);
-    return found && found.pick.result == null ? found : null;
+    if (!found || found.pick.result != null) return null;
+    return selectionFor(line, mode).side === found.pick.pick_side ? found : null;
   }, [todayPicks, stat, pageId, line, mode]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
@@ -391,7 +399,9 @@ export function PlayerStatsScreen() {
   // Named on the hit card, so nobody reads a 7+ hit rate without knowing the
   // 7 came from a 6.5 posted line (UX review).
   const lineProvenance = lineTouched
-    ? lineFromBoard ? 'board line' : 'your line'
+    ? lineFromBoard
+      ? lineFromPick ? `pick line ${bookLineFromThreshold(line ?? 0)}` : 'board line'
+      : 'your line'
     : pickThreshold != null && line === pickThreshold
       ? `pick line ${bookLineFromThreshold(pickThreshold)}`
       : postedThreshold != null && line === postedThreshold && detail.tonight
