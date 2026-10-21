@@ -312,6 +312,19 @@ def test_an_empty_answer_for_a_month_the_schedule_fills_is_a_failure_not_a_wipe(
     assert t["not_on_espn"] == 0
 
 
+def test_a_run_stamps_every_row_espn_confirmed():
+    """updated_at on the rows ESPN listed is the one thing the health check
+    reads; without the stamp a working refresh reads as stopped after 36 hours.
+    (tests/test_nba_schedule_refresh_pg.py runs the same write on Postgres.)"""
+    conn = _Conn(stored=[_stored("NBA_2025-12-09_MIA_ORL", "0062500001", tip="2025-12-09T23:00:00+00:00")])
+    t = nsr.refresh("2025-12-01", get_json=lambda url, p: _board(p["dates"]),
+                    connect=lambda: conn, now=NOW)
+    assert t["confirm"] == 1
+    stamps = [p for s, p in conn.writes
+              if s.startswith("UPDATE nba_schedule SET updated_at = NOW() WHERE nba_game_id = ANY")]
+    assert stamps == [(["0062500001"],)]
+
+
 def test_a_failed_write_rolls_back_and_is_reported():
     class _Broken(_Conn):
         def executemany(self, sql, rows):

@@ -89,3 +89,33 @@ def test_a_cup_week_box_enters_the_players_history():
                          "is_starter": 1} for gid in (A, CUP)])
     box = pj.box_from_log(log, _games(A, CUP, B), _schedule())
     assert set(box.game_id) == {A, CUP}
+
+
+def test_the_projection_cards_own_reads_carry_what_the_rest_rule_reads(monkeypatch):
+    """The card's schedule read must carry season and game_date: regular_game_ids
+    dates a game the schedule does not list against them. Read with the card's
+    query before 2026-10-20 (game_id, game_type, commence_time) every test above
+    still passes, and the card raises KeyError on the first Cup week game `games`
+    holds and the schedule does not -- which stops the whole projection card.
+    Each read is answered with exactly the columns its own SQL names."""
+    import re
+
+    import scripts.nba_prop_projection_card as card
+    tables = {"games": _games(A, CUP, B), "nba_schedule": _schedule(),
+              "nba_player_game_log": pd.DataFrame(
+                  [{c: None for c in card.LOG_COLS} | {
+                      "game_id": gid, "player_id": "1628369", "player_name": "Jayson Tatum",
+                      "team": "BOS", "season": 2027, "game_date": gid.split("_")[1],
+                      "minutes": 36, "is_starter": 1} for gid in (A, CUP)]),
+              card.ASOF_TABLE: pd.DataFrame(columns=list(card.ASOF_COLS))}
+
+    def _frame(conn, sql, params=()):
+        cols, table = re.search(r"SELECT\s+(.*?)\s+FROM\s+(\w+)", sql, re.S).groups()
+        return tables[table][[c.strip() for c in cols.split(",")]].copy()
+
+    monkeypatch.setattr(card, "_frame", _frame)
+    hist = card.load_history(None)
+    box = pj.box_from_log(hist["log"], hist["games"], hist["schedule"])
+    assert set(box.game_id) == {A, CUP}
+    t = _bos(nb.team_games(_data(hist["games"], hist["schedule"], box)))
+    assert (t.loc[B, "rest"], t.loc[B, "b2b"]) == (1, 1.0)
