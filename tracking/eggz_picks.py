@@ -944,7 +944,7 @@ def _grade_one(conn, row) -> bool:
                            sport)
     if market == "h2h_3way":
         return _grade_regulation(conn, pid, game_id, side, price, stake,
-                                 commence or commence_db)
+                                 commence or commence_db, home_win_reg, went_to_ot)
     if home_win is None and home_score is not None and away_score is not None:
         if float(home_score) > float(away_score):
             home_win = 1
@@ -966,18 +966,51 @@ def _grade_one(conn, row) -> bool:
     return True
 
 
-def _grade_regulation(conn, pid, game_id, side, price, stake, commence) -> bool:
+def _regulation_from_game(side, home_win_reg, went_to_ot) -> str | None:
+    """60-minute result from a final's `went_to_ot` and `home_win_reg`.
+
+    `went_to_ot = 1` is a regulation tie, so both sides lose. `went_to_ot = 0`
+    follows `home_win_reg` (1 home won in regulation, 0 the away side did).
+    A missing field returns None and the caller leaves the leg needs_review.
+    """
+    if side not in ("home", "away") or home_win_reg is None or went_to_ot is None:
+        return None
+    try:
+        ot = int(went_to_ot)
+        reg = int(home_win_reg)
+    except (TypeError, ValueError):
+        return None
+    if ot == 1:
+        return "LOSS"
+    if ot != 0 or reg not in (0, 1):
+        return None
+    won = (reg == 1) if side == "home" else (reg == 0)
+    return "WIN" if won else "LOSS"
+
+
+def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
+                      home_win_reg, went_to_ot) -> bool:
     """60-minute ML. A regulation tie, including OT/SO, is a loss for either side.
 
-    The score is the sum of the three period columns. No period row is
-    needs_review. The full-game moneyline result is not used.
+    Period rows win when any exist: the score is the sum of the three period
+    columns, and a tie is a loss. A final with no period row uses `went_to_ot`
+    and `home_win_reg` when both are present. Otherwise the leg is
+    needs_review. The full-game moneyline result is not used. The caller has
+    already required a final (both scores present).
     """
     rows = conn.execute(
         "SELECT home_p1, home_p2, home_p3, away_p1, away_p2, away_p3 "
         "FROM nhl_period_scores WHERE game_id = %s",
         (game_id,)).fetchall()
     if not rows:
-        return _mark_review(conn, pid, "no_regulation_score")
+        result = _regulation_from_game(side, home_win_reg, went_to_ot)
+        if result is None:
+            return _mark_review(conn, pid, "no_regulation_score")
+        profit, risked = units_for_result(stake, price, result)
+        clv, close_px, beat = _game_clv(
+            conn, game_id, "h2h_3way", side, None, price, commence)
+        _write_grade(conn, pid, result, profit, risked, clv, close_px, beat)
+        return True
     sums = []
     for home_p1, home_p2, home_p3, away_p1, away_p2, away_p3 in rows:
         try:
@@ -1097,7 +1130,8 @@ def _write_grade(conn, pid, result, profit, risked, clv, close_px, beat) -> None
     conn.execute(
         "UPDATE capper_picks SET status = 'graded', result = %s, units = %s, "
         "risked = %s, clv_pct = %s, closing_price = %s, clv_beat_close = %s, "
-        "graded_at = %s WHERE id = %s AND status IN ('pending', 'needs_review')",
+        "graded_at = %s, review_reason = NULL "
+        "WHERE id = %s AND status IN ('pending', 'needs_review')",
         (result, profit, risked, clv, close_px, beat,
          datetime.now(timezone.utc).isoformat(), pid))
 

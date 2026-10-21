@@ -452,10 +452,13 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   has a pending leg is not ledgered. His rows stay out of `picks`.
   `60 Minute ML`, `60 min ML`, `Reg ML`, and `3-way` are market `h2h_3way`.
   A sport/date header and `All 1U` are context. Regulation grades from
-  `nhl_period_scores` (three periods; a tie is a loss for the side). No
-  period row is `needs_review` (`no_regulation_score`) and is tried again
-  when the periods are stored. A message whose parse_status is still
-  `needs_review` is reparsed on the next grade pass.
+  `nhl_period_scores` when a row exists (three periods; a tie is a loss
+  for the side). A final with no period row uses `went_to_ot` and
+  `home_win_reg` when both are present: `went_to_ot = 1` is a loss for
+  both sides, and `went_to_ot = 0` follows `home_win_reg`. A missing field
+  is `needs_review` (`no_regulation_score`) and is tried again. A message
+  whose parse_status is still `needs_review` is reparsed on the next grade
+  pass.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.
