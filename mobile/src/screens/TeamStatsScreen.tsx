@@ -325,6 +325,13 @@ export function TeamStatsScreen() {
               {d.pickRecords.settled} posted {d.pickRecords.settled === 1 ? 'bet' : 'bets'} in the last{' '}
               {Math.min(RECORD_GAMES, d.recent.data.length)} games, in-play bets included.
             </Text>
+            {d.pickRecords.teamTotals > 0 ? (
+              <Text style={styles.footnote}>
+                {d.pickRecords.teamTotals === 1
+                  ? '1 of them is a team-total bet (one team’s points), which the tiles above leave out.'
+                  : `${d.pickRecords.teamTotals} of them are team-total bets (one team’s points), which the tiles above leave out.`}
+              </Text>
+            ) : null}
             {d.pickRecords.ledgerUnread ? (
               <Text style={styles.footnote}>
                 The Discord check did not finish, so this record can include picks whose posting status is unknown.

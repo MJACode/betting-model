@@ -88,7 +88,7 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
               prop_id bigserial PRIMARY KEY, game_id text, game_date text,
               player_name text, team text, market text, bookmaker text,
               snapshot_type text, snapshot_at text, line numeric,
-              over_price numeric, under_price numeric);
+              over_price numeric, under_price numeric, created_at text);
             CREATE TABLE nfl_player_game_log (
               log_id bigserial PRIMARY KEY, player_id text, player_name text,
               team text, game_id text, game_date text, season int,

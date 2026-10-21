@@ -88,7 +88,8 @@ def test_token_values_and_fills_unchanged():
     assert t["bet"] == t["positive"] == "#34C759"
     assert t["avoid"] == t["negative"] == "#FF3B30"
     assert t["med"] == "#FF9500"
-    assert _lum(t["textTertiary"]) > _lum(t["textSecondary"])  # hierarchy holds
+    assert t["pausedInk"] == "#5C5C62"  # Paused pick chip, #963
+    assert _lum(t["textTertiary"]) > _lum(t["pausedInk"]) > _lum(t["textSecondary"])
 
 
 # (text token, ground, minimum). The app is light-only: no dark palette exists.
@@ -104,6 +105,7 @@ PAIRS = [
     ("medInk", "bg", 4.5),
     ("medInk", "medSoft", 4.5),
     ("textSecondary", "noneSoft", 4.5),
+    ("pausedInk", "noneSoft", 4.5),  # Paused pick chip, #963
     ("textPrimary", "bet", 4.5),  # SportToggle count (H6)
     ("textPrimary", "med", 4.5),  # player hit-rate badge
     ("textPrimary", "avoid", 4.5),
@@ -133,6 +135,7 @@ def test_the_audit_ratios():
     assert round(_ratio(t["avoidInk"], t["avoidSoft"]), 2) == 5.01
     assert round(_ratio(t["medInk"], t["medSoft"]), 2) == 4.99
     assert round(_ratio(t["textPrimary"], t["bet"]), 2) == 9.46
+    assert round(_ratio(t["pausedInk"], t["noneSoft"]), 2) == 5.79
 
 
 def test_signal_badge_ink_and_glyph_mapping():
@@ -307,10 +310,13 @@ def test_group_tabs_selection_is_tint_not_green():
 
 def test_equity_total_share_text_and_no_picks_rows():
     eq = _read(SRC / "components" / "EquityCurve.tsx")
-    assert "<Text style={[styles.units, { color: pnlColor(last, 1) }]}>{formatSignedUnits(last)}</Text>" in eq
+    assert "formatSigned(endUnits, 2, 'u')" in eq
+    assert "pnlColor(endUnits, 2)" in eq
+    assert "colors.betInk" in eq
+    assert "colors.positive" not in eq
     assert "toFixed(1)}u" not in eq
     share = _read(SRC / "lib" / "shareRecord.ts")
-    assert "formatPctSigned(s.roiFlat)" in share and "formatSignedUnits(opts.endUnits)" in share
+    assert "formatPctSigned(s.roi)" in share and "formatSigned(opts.endUnits, 2, 'u')" in share
     assert "? '+' : ''" not in share
     daily = _read(SRC / "components" / "DailyResultsModal.tsx")
     assert "sportCardEmpty: { paddingVertical: spacing.sm }," in daily

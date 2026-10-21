@@ -90,7 +90,7 @@ def test_both_tables_are_on_the_anon_read_list():
     for rel in ("byom_game_facts", "byom_prop_facts"):
         assert rel in ANON_READABLE
         assert rel in AHEAD_OF_THE_APP
-    # The app does not read them yet.
+    # The app does not read them yet. The exemption is these two, nothing else.
     assert AHEAD_OF_THE_APP == ("byom_game_facts", "byom_prop_facts")
 
 

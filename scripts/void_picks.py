@@ -7,6 +7,7 @@ Void picks that should never have been official, WITHOUT deleting them.
     python -m scripts.void_picks --pick-id 1634280 --pick-id 1655591 --reason "..."
     python -m scripts.void_picks ... --apply        # writes; omit for a dry run
     python -m scripts.void_picks --pick-id 2558703 --allow-posted --reason "..."
+    python -m scripts.void_picks --pick-id 2304600 --allow-graded --reason "..."
 
 WHY THIS EXISTS, AND WHY IT IS NOT A DELETE
 
@@ -38,8 +39,9 @@ WHAT IT PRESERVES
 
 WHAT IT REFUSES
 
-A pick already graded WIN / LOSS / PUSH. Voiding one of those is not correcting
-a bug, it is rewriting a settled result, and nothing in §1c permits it.
+A pick already graded WIN / LOSS / PUSH, BY DEFAULT. Voiding one of those
+rewrites a settled result, so it takes its own explicit opt-in (THE GRADED
+OPT-IN, below) and is never the default.
 
 A pick already POSTED as a signal, BY DEFAULT. (Matt, 2026-09-28: "if a bet is
 posted as a signal it should be locked".) Once the channel has it, members were
@@ -61,8 +63,20 @@ for a rule or threshold change after posting: that is a pick that existed at a
 real number, and Matt's reasoning above still applies to it in full.
 
 With the opt-in, a posted pick is voided like any other. Without it, it is
-refused and the refusal says how to opt in. A graded pick is refused either
-way. The original message stays where it is. After the void commits, a pick
+refused and the refusal says how to opt in. `--allow-posted` never makes a
+graded pick voidable.
+
+THE GRADED OPT-IN. mike, 2026-10-20: "Void the 6 mlb picks." Six MLB BETs
+(`mlb_total_public_fade` 2304600, 2304601, 2304605, 2304610; `mlb_spread_market`
+2321911, 2321912) were written 3 to 7 hours after first pitch on 2026-09-16,
+because the MLB market cards had no started-game check (fixed 2026-10-09,
+db5b1c5d). They had settled, -2.22 units, before anyone noticed, and neither
+exit fitted: this script refused graded picks and RECORD_EXCLUSIONS has no
+per-pick form (docs/followups.md, found 2026-10-08). `--allow-graded` (worker
+job: `"allow_graded": true`) exists for exactly that case: a pick that should
+never have been produced, found only after it settled. Not for a pick that lost
+at a number a bettor could have taken. The grade it overwrites is kept in
+`condition_note` ("[was LOSS, -1.00 units]"), so the void loses nothing. The original message stays where it is. After the void commits, a pick
 that was posted gets a void notice in that sport's channel, with this reason
 (tracking.discord_notifier.notify_discord_void). An unposted void posts
 nothing. A notice Discord rejects is logged and does not undo the void.
@@ -101,22 +115,35 @@ POSTED_SQL = _posted_sql()
 POSTED_REFUSAL = ("posted as a signal -- a posted signal is locked; to void it "
                   "anyway pass --allow-posted (worker job: \"allow_posted\": true)")
 
+GRADED_REFUSAL = ("already graded {result} -- a settled result is not rewritten; "
+                  "for a pick that should never have been produced, pass "
+                  "--allow-graded (worker job: \"allow_graded\": true)")
 
-def plan_voids(rows: list[dict], reason: str,
-               allow_posted: bool = False) -> tuple[list[dict], list[dict]]:
+
+def graded_note(reason: str, row: dict) -> str:
+    """The reason a graded pick was voided, with the grade it overwrites."""
+    result = (row.get("result") or "").strip().upper()
+    profit = row.get("profit_flat")
+    units = f", {float(profit) / 100:+.2f} units" if profit is not None else ""
+    return f"{reason} [was {result}{units}]"
+
+
+def plan_voids(rows: list[dict], reason: str, allow_posted: bool = False,
+               allow_graded: bool = False) -> tuple[list[dict], list[dict]]:
     """Split candidate rows into (to_void, refused). Pure; the tests drive this.
 
     Idempotent: a pick already carrying the void result is reported as a no-op
     rather than refused, so re-running the same command is safe.
 
-    `allow_posted` lifts ONLY the posted-signal lock (see the module docstring
-    for when it is meant to be used). A graded pick is refused with or without it.
+    `allow_posted` lifts ONLY the posted-signal lock and `allow_graded` ONLY
+    the settled-result one (see the module docstring for when each is meant to
+    be used). Neither lifts the other, and neither skips the reason check.
     """
     to_void, refused = [], []
     for r in rows:
         result = (r.get("result") or "").strip().upper()
-        if result in GRADED:
-            refused.append({**r, "why": f"already graded {result}"})
+        if result in GRADED and not allow_graded:
+            refused.append({**r, "why": GRADED_REFUSAL.format(result=result)})
         elif result == VOID_RESULT:
             refused.append({**r, "why": "already void (no-op)"})
         elif r.get("posted") and not allow_posted:
@@ -143,10 +170,10 @@ def _select(conn, pick_ids, model, before, game_ids):
         where.append("created_at < %s")
         params.append(before)
     sql = (f"SELECT pick_id, game_id, model_id, pick_label, signal_type, result, "
-           f"created_at, {POSTED_SQL} AS posted "
+           f"created_at, {POSTED_SQL} AS posted, profit_flat "
            f"FROM picks p WHERE {' AND '.join(where)} ORDER BY created_at")
     cols = ("pick_id", "game_id", "model_id", "pick_label", "signal_type",
-            "result", "created_at", "posted")
+            "result", "created_at", "posted", "profit_flat")
     return [dict(zip(cols, r)) for r in conn.execute(sql, params).fetchall()]
 
 
@@ -176,9 +203,13 @@ def announce_posted_voids(rows: list[dict], reason: str) -> dict | None:
 
 
 def void(conn, rows: list[dict], reason: str, now: str | None = None) -> int:
-    """Apply the void. Matches the shape paper_tracker's own NO_ACTION path uses."""
+    """Apply the void. Matches the shape paper_tracker's own NO_ACTION path uses.
+
+    A graded row's note also carries the grade it overwrites (graded_note)."""
     now = now or datetime.now(timezone.utc).isoformat()
     for r in rows:
+        note = (graded_note(reason, r)
+                if (r.get("result") or "").strip().upper() in GRADED else reason)
         conn.execute("""
             UPDATE picks
             SET result               = %s,
@@ -189,7 +220,7 @@ def void(conn, rows: list[dict], reason: str, now: str | None = None) -> int:
                 condition_note       = %s,
                 condition_checked_at = %s
             WHERE pick_id = %s
-        """, (VOID_RESULT, now, VOID_STATUS, reason[:500], now, r["pick_id"]))
+        """, (VOID_RESULT, now, VOID_STATUS, note[:500], now, r["pick_id"]))
     return len(rows)
 
 
@@ -207,6 +238,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="also void picks already posted as a signal (mike, "
                          "2026-10-09). Only for a posted pick decided on a "
                          "price nobody could bet. Graded picks stay refused.")
+    ap.add_argument("--allow-graded", action="store_true",
+                    help="also void picks already graded WIN/LOSS/PUSH (mike, "
+                         "2026-10-20). Only for a pick that should never have "
+                         "been produced, found after it settled. The grade is "
+                         "kept in condition_note.")
     return ap
 
 
@@ -220,7 +256,8 @@ def main() -> int:
     conn = get_connection()
     try:
         rows = _select(conn, a.pick_id, a.model, a.before, a.game_id)
-        to_void, refused = plan_voids(rows, a.reason, allow_posted=a.allow_posted)
+        to_void, refused = plan_voids(rows, a.reason, allow_posted=a.allow_posted,
+                                      allow_graded=a.allow_graded)
 
         for r in refused:
             print(f"  SKIP  {r['pick_id']}  {r['pick_label']}  -- {r['why']}")

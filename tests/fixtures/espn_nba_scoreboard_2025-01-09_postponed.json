@@ -1,0 +1,103 @@
+{
+ "_source": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20250109, fetched 2026-10-17, trimmed to two events",
+ "events": [
+  {
+   "id": "401705083",
+   "date": "2025-01-10T00:00Z",
+   "name": "Toronto Raptors at Cleveland Cavaliers",
+   "shortName": "TOR @ CLE",
+   "season": {
+    "year": 2025,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "period": 4,
+    "type": {
+     "id": "3",
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final",
+     "detail": "Final",
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401705083",
+     "date": "2025-01-10T00:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "132",
+       "team": {
+        "id": "5",
+        "abbreviation": "CLE",
+        "displayName": "Cleveland Cavaliers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "126",
+       "team": {
+        "id": "28",
+        "abbreviation": "TOR",
+        "displayName": "Toronto Raptors"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401705090",
+   "date": "2025-01-10T03:30Z",
+   "name": "Charlotte Hornets at Los Angeles Lakers",
+   "shortName": "CHA @ LAL",
+   "season": {
+    "year": 2025,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "period": 0,
+    "type": {
+     "id": "6",
+     "name": "STATUS_POSTPONED",
+     "state": "post",
+     "completed": false,
+     "description": "Postponed",
+     "detail": "Postponed",
+     "shortDetail": "Postponed"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401705090",
+     "date": "2025-01-10T03:30Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL",
+        "displayName": "Los Angeles Lakers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "Charlotte Hornets"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

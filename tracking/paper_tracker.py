@@ -1427,9 +1427,18 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
 
     `snapshot_at` is TEXT in mixed forms; the timestamptz cast is the same
     chronological bound `_closing_prop_odds` already uses.
+
+    A TEAM TOTAL'S CLOSE IS ITS CLOSING SNAPSHOT AND NOTHING ELSE. Its only
+    rows are nba_team_total_luck's own fetches (data/ingestors/
+    nba_team_total_odds.py): the decision fetch, filed 'open', and the close,
+    filed 'close'. The decision fetch is the price taken, so read as the close
+    it graded a pick whose close was never stored at exactly 0.0, for good.
+    With no 'close' row the pick is unmeasured.
     """
     if not commence_time:
         return None
+    snapshot_filter = ("snapshot_type = 'close'" if market.startswith("team_totals")
+                       else "snapshot_type != 'in_play'")
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
     line_filter = ""
@@ -1453,7 +1462,7 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
         WHERE game_id   = %s
           AND market    = %s
           AND bookmaker = %s
-          AND snapshot_type != 'in_play'
+          AND {snapshot_filter}
           AND snapshot_at::timestamptz <= %s::timestamptz
           {line_filter}
         ORDER BY snapshot_at::timestamptz DESC
@@ -1662,6 +1671,78 @@ def _bet_price_and_book(model_id: str, dk_odds, decision_odds, decision_book,
 # picked up by the following runs, which is why it converges rather than needing
 # a one-shot script (the umpire / UFC-results pattern).
 _CLV_BACKFILL_DATES_PER_RUN = 40
+# One statement covers this many game_dates. The unbounded
+# `ORDER BY game_date LIMIT 40` is an index scan of idx_picks_date with the
+# CLV predicates as a Filter, not an Index Cond. On 2026-10-03 that statement
+# was cancelled at the 120s statement_timeout (pipeline_log 119709, pid
+# 3837081, sqlstate 57014): 22 dates pass the commence_time join, so LIMIT 40
+# never stops the scan. A 7-day predicate is an Index Cond on idx_picks_date.
+_CLV_BACKFILL_WINDOW_DAYS = 7
+_CLV_SAVE_POINT = "clv_backfill_window"
+
+
+def _clv_attempt(conn, label: str, fn):
+    """Run fn in a savepoint. A statement timeout is rolled back and retried
+    once. Any other error, or a second timeout, is logged and returns None
+    with the transaction usable again.
+
+    call_in_savepoint is data.db's savepoint wrapper. It rolls the failed
+    statement back through rollback_savepoint. statement_timeout is the
+    same module's 57014 check. A second rollback here would find the
+    savepoint already released and fall through to a full ROLLBACK.
+    """
+    try:
+        return call_in_savepoint(conn, _CLV_SAVE_POINT, fn)
+    except Exception as exc:                                   # noqa: BLE001
+        if not statement_timeout(exc):
+            logger.warning(f"{label} failed (non-fatal): {exc}")
+            return None
+        logger.warning(f"{label} hit statement timeout; retrying once")
+        try:
+            return call_in_savepoint(conn, _CLV_SAVE_POINT, fn)
+        except Exception as exc2:                              # noqa: BLE001
+            logger.warning(f"{label} failed (non-fatal): {exc2}")
+            return None
+
+
+def _clv_backfill_dates(conn: DBConnection, sql: str,
+                        method: str = CLV_METHOD_STANDARD) -> list[str]:
+    """Oldest capturable dates, one game_date window per statement.
+
+    Stops at _CLV_BACKFILL_DATES_PER_RUN. A window that fails after its
+    retry ends the walk: later windows are not a substitute for an older
+    one that did not answer.
+    """
+    span = _clv_attempt(
+        conn,
+        "CLV backfill date bounds",
+        lambda: conn.execute(
+            "SELECT MIN(game_date), MAX(game_date) FROM picks"
+        ).fetchone(),
+    )
+    if not span or span[0] is None or span[1] is None:
+        return []
+    start = datetime.strptime(str(span[0])[:10], "%Y-%m-%d")
+    end = datetime.strptime(str(span[1])[:10], "%Y-%m-%d")
+    found: list[str] = []
+    cursor = start
+    while cursor <= end and len(found) < _CLV_BACKFILL_DATES_PER_RUN:
+        hi = cursor + timedelta(days=_CLV_BACKFILL_WINDOW_DAYS)
+        lo_s = cursor.strftime("%Y-%m-%d")
+        hi_s = hi.strftime("%Y-%m-%d")
+        remaining = _CLV_BACKFILL_DATES_PER_RUN - len(found)
+
+        def _window(lo_s=lo_s, hi_s=hi_s, remaining=remaining):
+            return conn.execute(
+                sql, (lo_s, hi_s, method, remaining)
+            ).fetchall()
+
+        rows = _clv_attempt(conn, f"CLV backfill {lo_s}", _window)
+        if rows is None:
+            break
+        found.extend(str(r[0])[:10] for r in rows)
+        cursor = hi
+    return found[:_CLV_BACKFILL_DATES_PER_RUN]
 
 
 def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
@@ -1703,11 +1784,15 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
     first pitch, and the guard above is what keeps them out.
 
     Returns picks filled."""
-    rows = conn.execute("""
+    # game_date bounds are the Index Cond. Without them this is the statement
+    # pipeline_log 119709 cancelled (see _CLV_BACKFILL_WINDOW_DAYS).
+    sql = """
         SELECT DISTINCT p.game_date
         FROM picks p
         JOIN games g ON g.game_id = p.game_id
-        WHERE p.signal_type = 'BET'
+        WHERE p.game_date >= %s
+          AND p.game_date < %s
+          AND p.signal_type = 'BET'
           AND COALESCE(p.dk_odds, p.decision_odds) IS NOT NULL
           AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
@@ -1716,17 +1801,22 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
           AND p.clv_method IS DISTINCT FROM %s
         ORDER BY p.game_date
         LIMIT %s
-    """, (CLV_METHOD_STANDARD, _CLV_BACKFILL_DATES_PER_RUN)).fetchall()
-    if not rows:
+    """
+    dates = _clv_backfill_dates(conn, sql, CLV_METHOD_STANDARD)
+    if not dates:
         return 0
     filled = 0
-    for (d,) in rows:
-        try:
-            filled += _capture_clv(conn, d, captured_at)
-        except Exception as exc:                     # noqa: BLE001
-            logger.warning(f"CLV backfill {d} failed (non-fatal): {exc}")
+    for d in dates:
+        n = _clv_attempt(
+            conn, f"CLV backfill {d}",
+            lambda d=d: _capture_clv(conn, d, captured_at),
+        )
+        if n is None:
+            logger.warning(f"CLV backfill {d} failed (non-fatal)")
+            continue
+        filled += n
     if filled:
-        logger.info(f"CLV backfill: {filled} pick(s) across {len(rows)} date(s)")
+        logger.info(f"CLV backfill: {filled} pick(s) across {len(dates)} date(s)")
     return filled
 
 
@@ -2051,7 +2141,10 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         # the number we bet. It is NULL when that snapshot is missing or when
         # the book's latest main line has left that number.
         same_line = closing
-        latest_line = _closing_line_for(prop_market, market, closing_for_line)
+        # The bet book can have no pre-start row while Pinnacle has one (a book
+        # that pulled the market before its close): no line of its own to read.
+        latest_line = (_closing_line_for(prop_market, market, closing_for_line)
+                       if closing_for_line else None)
         same_line_num = _closing_line_for(prop_market, market, same_line) if same_line else None
         line_moved = (latest_line is not None and scored_line is not None
                       and abs(float(latest_line) - float(scored_line)) > 1e-9)
@@ -2178,6 +2271,19 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "under":
             won = (total < total_line)
 
+    elif market in ("team_totals_home", "team_totals_away"):
+        # ONE team's points against its own line, never the sum. The stored
+        # final includes overtime, which is how DraftKings settles a team total.
+        if total_line is None:
+            return "NO_ACTION", 0.0, 0.0
+        team_pts = home_score if market == "team_totals_home" else away_score
+        if team_pts == total_line:
+            return "PUSH", 0.0, 0.0
+        if pick_side == "over":
+            won = (team_pts > total_line)
+        elif pick_side == "under":
+            won = (team_pts < total_line)
+
     elif market in ("spreads", "spreads_1st_5_innings"):
         if spread_home is None:
             return "NO_ACTION", 0.0, 0.0
@@ -2219,6 +2325,14 @@ _RULE_MODEL_MARKETS = {
     # NHL full-game totals (models/nhl_totals_market.py). scored_line is the
     # total; the stored final includes the shootout goal, as books settle it.
     "nhl_over_under": "totals",
+    # NBA full-game totals, overs (models/nba_total_luck.py). scored_line is
+    # the total; the stored final includes overtime, as books settle it.
+    "nba_total_luck": "totals",
+    # NBA home team's own points, unders (models/nba_team_total_luck.py).
+    # scored_line is the home team's points line; it settles on the home
+    # team's final score, overtime included, as DraftKings settles a team
+    # total. NEVER "totals": that sums both teams and grades every under a loss.
+    "nba_team_total_luck": "team_totals_home",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
@@ -2702,11 +2816,22 @@ def settle_picks(game_date: str = None) -> dict:
             logger.warning(f"NCAAF stored-final mirror failed: {_exc}")
             conn.rollback()
 
+        # The heal and the mirror are committed before CLV. rollback_savepoint
+        # falls back to a full ROLLBACK when the savepoint cannot be restored,
+        # and that must not discard the writes above.
+        conn.commit()
+
         # Record closing line value now that all pre-game odds snapshots have
         # accumulated. Independent of settlement — runs even for picks whose
         # game can't be settled yet (e.g. postponed) and is idempotent.
+        # The day's capture uses the same savepoint as the backfill. A timeout
+        # on this call used to raise out of settle_picks and fail dispatch:settle.
         clv_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-        _capture_clv(conn, game_date, clv_at)
+        if _clv_attempt(
+            conn, f"CLV {game_date}",
+            lambda: _capture_clv(conn, game_date, clv_at),
+        ) is None:
+            logger.warning(f"CLV {game_date} failed (non-fatal)")
         _backfill_clv(conn, clv_at)
         conn.commit()
 

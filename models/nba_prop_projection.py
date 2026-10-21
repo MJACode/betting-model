@@ -57,8 +57,11 @@ THE RULE, per game, ONCE:
      market's cell and EV >= the cell's floor. If both sides clear, the
      higher EV. A player listed Out is never bet.
 
-NO CAPS. Every qualifying proposition, no game or night cap (mike,
-2026-10-16: "maximize units won").
+CAPS (mike, 2026-10-20: "Only the strongest picks need to be sent, like
+NHL"; it replaced 2026-10-16's no-cap "maximize units won"). Every qualifying
+proposition is a CANDIDATE; scripts/nba_props_card.py writes one bet a game
+across both NBA prop models and four a night, strongest first by each bet's EV
+percentile within its own model (models/nba_prop_rank.py).
 
 WHAT THE WORKER CAN SEE, AND WHY THE MODEL USES ONLY THAT. The live worker
 has the ESPN box line (whole minutes, starter flag, counting stats), the
@@ -151,11 +154,13 @@ def rate_cols(stat: str) -> list[str]:
 def box_from_log(log: pd.DataFrame, games: pd.DataFrame, schedule: pd.DataFrame) -> pd.DataFrame:
     """nba_player_game_adv from the ESPN box log: whole minutes, played, starter; no usage or fouls.
 
-    Regular-season games only. A log row whose team is neither side of its game is dropped.
-    (scripts/nba_prop_model_verify.adv_from_log, unchanged.)
+    Regular-season games only, whether or not the stored schedule lists the game yet
+    (models.nba_props.regular_game_ids: an NBA Cup week game the schedule has not caught up with
+    still counts). A log row whose team is neither side of its game is dropped.
+    (scripts/nba_prop_model_verify.adv_from_log, unchanged but for the unlisted games.)
     """
     g = games.set_index("game_id")
-    reg = set(schedule[schedule.game_type == "regular"].game_id)
+    reg = nb.regular_game_ids(games, schedule)
     lg = log[log.game_id.isin(reg) & log.game_id.isin(g.index)].copy()
     home, away = lg.game_id.map(g.home_team), lg.game_id.map(g.away_team)
     ok = (lg.team == home) | (lg.team == away)

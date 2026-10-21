@@ -70,6 +70,7 @@ import {
   touchSetErrorLine,
   touchSetFromResponse,
   touchedPlayerIds,
+  fixtureForRow,
   slateGameFor,
   slateSubline,
   sublineSpoken,
@@ -611,6 +612,35 @@ check(
     slateGameFor({ team: 'SF' }, buildSlateGameIndex(nflSlate, { date: SUB_TODAY, keys: new Set(['SF']), isToday: true }, NOW))?.game ?? null,
     null,
   ) ?? '').endsWith('· @ SEA'),
+);
+
+// Thursday's slate must not blank a Sunday team. The slate index wins when
+// the team is on that date; otherwise the next game already loaded for H2H.
+const thuIdx = buildSlateGameIndex(
+  [subGame({ game_id: 'thu-kc', sport: 'NFL', home_team: 'KC', away_team: 'BAL' })],
+  { date: SUB_TODAY, keys: new Set(['KC', 'BAL']), isToday: true },
+  NOW,
+);
+const sunBuf = subGame({
+  game_id: 'sun-buf',
+  sport: 'NFL',
+  home_team: 'BUF',
+  away_team: 'MIA',
+  game_date: '2099-01-08',
+  commence_time: '2099-01-08T18:00:00Z',
+});
+const nextBuf = new Map([['BUF', { game: sunBuf, opponent: 'MIA', isHome: true }]]);
+check(
+  'a team on the slate date keeps that game over a later one',
+  fixtureForRow({ team: 'KC', player_name: 'P. Mahomes' }, thuIdx, nextBuf)?.game.game.game_id === 'thu-kc',
+);
+check(
+  'a team missing from the slate date uses its next loaded game',
+  fixtureForRow({ team: 'BUF', player_name: 'J. Allen' }, thuIdx, nextBuf)?.game.opponent === 'MIA',
+);
+check(
+  'a row with no team and no slate game stays blank',
+  fixtureForRow({ team: null, player_name: 'Nobody' }, thuIdx, nextBuf) === null,
 );
 
 // ── Next game in a multi-day window (team / player detail) ──
