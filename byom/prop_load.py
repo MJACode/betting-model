@@ -126,17 +126,23 @@ def _log_for_game(conn, game_id: str) -> list[dict]:
     return out
 
 
-def facts_for_season(conn, season: int) -> tuple[list[dict], list[str]]:
+def facts_for_season(conn, season: int,
+                     game_ids: list[str] | None = None) -> tuple[list[dict], list[str]]:
     """Facts, and the canonical keys of the games this read considered.
 
+    `game_ids` None reads every game. A list reads only those games.
     A game with no line is still in the key list so a rebuild can delete
     the rows a previous pass wrote.
     """
     if season < PROP_HISTORY_START_SEASON:
         return [], []
+    games = _games(conn, season)
+    if game_ids is not None:
+        wanted = set(game_ids)
+        games = [game for game in games if game["game_id"] in wanted]
     facts = []
     keys = []
-    for game in _games(conn, season):
+    for game in games:
         parsed = parse_game_id(game["game_id"])
         if parsed is None or parse_date(game.get("game_date")) is None:
             continue
@@ -174,15 +180,21 @@ def _upsert(conn, facts: list[dict], canonical_keys: list[str]) -> int:
     return len(values)
 
 
-def build_season(conn, season: int, apply: bool = False) -> dict:
+def build_season(conn, season: int, apply: bool = False,
+                 game_ids: list[str] | None = None) -> dict:
+    """One season. apply=False writes nothing. `game_ids` limits the read."""
     if season < PROP_HISTORY_START_SEASON:
         return {
             "season": season, "facts": 0, "written": 0,
+            "canonical_keys": [],
             "skipped": "before player_prop_odds history",
         }
-    facts, keys = facts_for_season(conn, season)
+    facts, keys = facts_for_season(conn, season, game_ids=game_ids)
     written = _upsert(conn, facts, keys) if apply else 0
-    return {"season": season, "facts": len(facts), "written": written}
+    return {
+        "season": season, "facts": len(facts), "written": written,
+        "canonical_keys": keys,
+    }
 
 
 def build_seasons(conn, seasons, apply: bool = False) -> dict:

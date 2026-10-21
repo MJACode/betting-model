@@ -1891,6 +1891,34 @@ def _job_byom_prop_facts(**kw):
         conn.close()
 
 
+def _validate_byom_refresh(args: dict) -> dict:
+    """Current-season refresh. apply defaults false, so a queued job
+    reports freshness and writes nothing until someone asks."""
+    sport = str(args.get("sport") or "NFL")
+    if sport != "NFL":
+        raise ValueError(f"byom_refresh builds NFL only, got {sport!r}")
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    return {"sport": sport, "apply": apply}
+
+
+def _job_byom_refresh(**kw):
+    """Freshness, and the due games when apply is true.
+
+    Does not touch picks or a live model. apply false does not read
+    odds and does not write.
+    """
+    from data.db import get_connection
+    from byom.refresh import refresh
+
+    conn = get_connection()
+    try:
+        return refresh(conn, apply=bool(kw.get("apply")))
+    finally:
+        conn.close()
+
+
 def _job_byom_game_facts(**kw):
     """Write byom_game_facts. Does not touch picks or a live model."""
     from data.db import get_connection
@@ -1998,6 +2026,12 @@ JOBS = {
     # with enabled false and apply false, so a merge does not enqueue a
     # writer.
     "byom_prop_facts": (_job_byom_prop_facts, _validate_byom_prop_facts),
+    # Current-season refresh. apply defaults false. Listed in
+    # declared_jobs.json with enabled false and apply false, so a merge
+    # does not enqueue a writer. Not a schedule: sync enqueues a declared
+    # job once. The owner turns it on. apply false is the freshness
+    # report and does not read odds.
+    "byom_refresh": (_job_byom_refresh, _validate_byom_refresh),
 }
 
 

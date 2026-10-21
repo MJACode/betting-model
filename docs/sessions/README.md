@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM refresh: master 06259b58 merged after cfe5dc1b; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; props_scanned_at unchanged; unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: a quote with no line is dropped before the capture rank; Anytime TD 0.5 is still a line; master cfe5dc1b merged, both session logs kept |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM backtest RPC: master 633be2b5 merged; master's ACTIVE_MIGRATIONS order, RPC row after it, units file still last; the in-function 3s timeout does not apply (anon 3s, authenticated 8s); unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: master 9ac39a4d merged, then e9b081ed; two lines on the last pre-kickoff snapshot become one fact (later created_at, then prop_id); job stays off |
@@ -143,6 +144,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, every skipped test runs here: `tests/_node.py` serves ten more files and runs tsx through node; `scripts/npm.py` installs mobile/node_modules with the pip npm; `tests/_pg.py` starts a throwaway Postgres from the `embedded-postgres` wheel (pg_ctl hangs on a captured pipe, refuses a held log); three verify scripts normalise CRLF and separators — 5,947 passed, 0 skipped |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, `requirements-test.txt` (pytest + `nodejs-wheel-binaries`) so the 13 TypeScript-backed tests run on any machine; testing.md, local_ops.md and CLAUDE.md §5 point at it; the worker still installs only requirements.txt |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, the 26 tests failing on master were all stale tests or Windows-only (recap fixture lacked `clv_method`; CLV capture literals; `node` absent; savepoint wrapper from #843; posix/backslash paths; `SOURCE` vs `SOURCE_PREFIX`); `tests/_node.py` finds node via the pip wheel so 10 more node-backed tests run here; `verify_a11y.ts` normalises separators and CRLF — 79/79, no app source touched |
+| 2026-10-17 | [2026-10](./2026-10.md) | 2026-10-17, BYOM refresh drains a past game after the prop pass reads it, including when that pass writes no prop row; a game the builder will not write is not scheduled as missing |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM refresh: freshness reads no odds; due set is yesterday through 7 days, a past game with no fact, a past fact with a null score, and a past game with facts but no prop facts; a null line is not unfinished; job enabled false and apply false |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM backtest RPC: SECURITY INVOKER, current season by default, both unit columns, no price or line filter, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM NFL prop facts: 24h UNCONFIRMED lock, no alt ladders, log_status for missing log vs non-participant, anytime TD is rush+rec, job disabled, unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM lock shop review: worker-only (no anon grant), h2h replaced when the DK snapshot moves, declared job enabled false and apply false, first apply before the 2026-10-17 prune |

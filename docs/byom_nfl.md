@@ -105,3 +105,31 @@ label is the previous year.
 `data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
 and was not applied. The function is in `RPC_ANON_CALLABLE`. It reads
 the facts tables, not `picks`.
+
+
+## Refresh
+
+`byom/refresh.py` reports freshness without reading odds. The due set
+is the current season only: games dated from yesterday through seven
+days ahead, plus a past game with no fact row, a past fact row that
+still has a null score, and a past game that has facts but no prop
+facts and has not been scanned for props yet. A null line is not
+unfinished. Scores and `built_at` come from one read. After `apply`,
+the prop pass stamps `props_scanned_at` on each game it read, including
+a game that produced no prop row, and that game leaves the due set.
+A game `assemble_game` will not build is not scheduled as missing.
+A game today or inside that forward window with no fact row counts as
+missing. A row in that window whose `built_at` is more than 24 hours
+before the report clock is stale.
+Those two day counts and the 24 hour age are the refresh's own bounds.
+
+`apply` false returns the report and writes nothing. `apply` true
+rebuilds only the due games, game facts and prop facts, and commits
+once. The line on that rebuild is the last DraftKings snapshot at or
+before kickoff. Rest days still use the whole season's schedule.
+Quotes for a game outside the due set are not fetched.
+
+`byom_refresh` defaults `apply` to false. `jobs/declared_jobs.json`
+lists `byom-nfl-refresh` with `enabled` false and `apply` false, so a
+merge does not enqueue it. A declared job is enqueued once. This file
+does not add a schedule. It does not write `picks`.
