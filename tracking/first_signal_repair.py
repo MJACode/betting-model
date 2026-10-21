@@ -244,6 +244,16 @@ def restore_first_signals(game_date: str | None = None,
                 if paused_lane:
                     cols.append("downgrade_reason")
                     vals["downgrade_reason"] = config.PAUSED_NOTE
+                # NOT HELD TO THE NHL GOALIE RULE, on purpose (mike,
+                # 2026-10-20; models/nhl_goalie_gate.py). This makes no bet:
+                # it puts back the first BET that already EXISTED, with its own
+                # created_at, after churn deleted it (CLAUDE.md 1c: a pick is
+                # a pick). The churned rows are already deleted above, so
+                # refusing this INSERT would not stop a bet, it would erase
+                # one. A BET first written after the rule shipped passed the
+                # gate at its own INSERT; one written before is the bet of
+                # record either way. Allow-listed in
+                # tests/test_nhl_goalie_guards.py.
                 conn.execute(
                     f"INSERT INTO picks ({', '.join(cols)}) "
                     f"VALUES ({', '.join('%(' + c + ')s' for c in cols)})", vals)

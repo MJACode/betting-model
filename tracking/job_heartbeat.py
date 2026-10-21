@@ -45,7 +45,8 @@ than no heartbeat at all.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -93,7 +94,36 @@ MAX_SILENCE: dict = {
     # One job for both NBA totals models, nba_total_luck and
     # nba_team_total_luck (scripts/nba_pregame_window.py), so one entry.
     "nba_total_luck_window": 20,
+    # Every five minutes, 11:00-23:55 ET, and it beats on the idle ticks too.
+    # Off overnight by design (23:55 to 11:00 is 665 minutes), so the bound has
+    # to clear that gap, as the NFL in-play worker's does. Inside its hours the
+    # tighter bound in ACTIVE_HOURS_ET applies.
+    "nhl_goalie_window": 700,
 }
+
+# Jobs that run only inside fixed Eastern hours: (first hour, last hour,
+# minutes). From `minutes` after the first hour through the end of the last
+# one, the job must have beaten within `minutes`, whatever MAX_SILENCE allows
+# overnight. Without it the NHL goalie window, if it stopped at noon, was
+# reported around 23:40 ET, after the slate it exists for.
+ACTIVE_HOURS_ET: dict = {
+    "nhl_goalie_window": (11, 23, 30),
+}
+_ET = ZoneInfo("America/New_York")
+
+
+def allowed_silence(job_id: str, now: datetime) -> float:
+    """Minutes `job_id` may go without a beat at `now`."""
+    allowed = MAX_SILENCE[job_id]
+    span = ACTIVE_HOURS_ET.get(job_id)
+    if span is None:
+        return allowed
+    first, last, minutes = span
+    et = now.astimezone(_ET)
+    started = et.replace(hour=first, minute=0, second=0, microsecond=0)
+    if et.hour <= last and et >= started + timedelta(minutes=minutes):
+        return min(allowed, minutes)
+    return allowed
 
 
 def ensure_schema(conn) -> None:
@@ -237,10 +267,11 @@ def stale_jobs(conn, now: datetime | None = None) -> list:
         seen[job_id] = parsed
 
     late = []
-    for job_id, allowed in sorted(MAX_SILENCE.items()):
+    for job_id in sorted(MAX_SILENCE):
         last = seen.get(job_id)
         if last is None:
             continue                      # not registered here — see above
+        allowed = allowed_silence(job_id, now)
         silent = (now - last).total_seconds() / 60.0
         if silent > allowed:
             late.append((job_id, silent, allowed))

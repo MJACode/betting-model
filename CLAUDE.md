@@ -385,6 +385,11 @@ the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
 market (`docs/sports/nhl.md`).
 
+### NHL Goalies
+No NHL bet of any kind until both starting goalies are confirmed (mike,
+2026-10-20), except the shots-on-goal props (mike, 2026-10-20). One gate,
+every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
+
 ---
 
 ## 4. Conventions
