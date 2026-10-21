@@ -277,8 +277,8 @@ def facts_for_game(game: dict, quotes: list[dict],
     Empty when the id does not parse or no DraftKings standard market has
     a snapshot at or before kickoff. The line is the latest such snapshot.
     Two points on that snapshot are one fact: the later captured_at, then
-    the higher prop_id, then the line text. An earlier number is not a
-    second fact.
+    the higher prop_id, then the line text. A quote with no line is
+    dropped before that rank. An earlier number is not a second fact.
     """
     parsed = parse_game_id(game.get("game_id") or "")
     if parsed is None:
@@ -297,11 +297,14 @@ def facts_for_game(game: dict, quotes: list[dict],
     out = []
     for (key, market), pool in grouped.items():
         latest = max(quote["snapshot_at"] for quote in pool)
-        at_line = [quote for quote in pool if quote["snapshot_at"] == latest]
-        quote = max(at_line, key=_capture_rank)
-        line = quote.get("point")
-        if line is None:
+        at_snap = [quote for quote in pool if quote["snapshot_at"] == latest]
+        # Rank only quotes that have a line. A later capture with no
+        # point must not win, and must not drop the line beside it.
+        at_line = [quote for quote in at_snap if quote.get("point") is not None]
+        if not at_line:
             continue
+        quote = max(at_line, key=_capture_rank)
+        line = quote["point"]
         matches = _rows_for_player(log_rows, key, quote.get("team"))
         status = log_status(played, game_rows, len(matches) if played else 0)
         out.append(_one(

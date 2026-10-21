@@ -350,6 +350,38 @@ def test_220_50_and_220_5_are_one_prop_key():
     assert first[0]["prop_key"].endswith("|220.5")
 
 
+def test_a_quote_with_no_line_is_dropped_before_the_rank():
+    """On the last snapshot, a later capture with no point does not win.
+    The line beside it stays. Anytime TD still fills 0.5 when the feed
+    omits the point, and that 0.5 is a line that can win the rank."""
+    log = [_log("Lamar Jackson", passing_yards=250, rushing_tds=1, receiving_tds=0)]
+    lined = _q("Lamar Jackson", "player_pass_yds", "draftkings", 1, 240.5, -110, -110)
+    blank = _q("Lamar Jackson", "player_pass_yds", "draftkings", 1, None, -110, -110)
+    lined["captured_at"] = KICK - timedelta(hours=3)
+    lined["prop_id"] = 1
+    blank["captured_at"] = KICK - timedelta(hours=1)
+    blank["prop_id"] = 99
+    facts = facts_for_game(_game(), [blank, lined], log)
+    assert len(facts) == 1
+    assert facts[0]["line"] == Decimal("240.5")
+    assert facts[0]["over_result"] == "win"
+
+    earlier = _q("Lamar Jackson", ANYTIME_TD_MARKET, "draftkings", 1, 1.5, -150, None)
+    omitted = _q("Lamar Jackson", ANYTIME_TD_MARKET, "draftkings", 1, None, -140, None)
+    earlier["captured_at"] = KICK - timedelta(hours=3)
+    earlier["prop_id"] = 2
+    omitted["captured_at"] = KICK - timedelta(hours=1)
+    omitted["prop_id"] = 3
+    td = facts_for_game(_game(), [earlier, omitted], log)
+    assert _one(td, ANYTIME_TD_MARKET)["line"] == Decimal("0.5")
+    assert _one(td, ANYTIME_TD_MARKET)["over_result"] == "win"
+
+    text = (ROOT / "byom" / "prop_facts.py").read_text(encoding="utf-8")
+    rank = text.index("quote = max(at_line, key=_capture_rank)")
+    before = text[text.rindex("def facts_for_game", 0, rank):rank]
+    assert 'quote.get("point") is not None' in before
+
+
 def test_two_lines_on_the_last_snapshot_keep_the_latest_capture():
     """One fact per player and market. The later captured_at wins.
     A tie breaks on prop_id, then the line text. Anytime TD's 0.5
