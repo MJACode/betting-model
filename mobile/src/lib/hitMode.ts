@@ -59,6 +59,23 @@ export function asHitMode(v: string | null | undefined): HitMode | null {
   return v === 'atLeast' || v === 'over' || v === 'under' ? v : null;
 }
 
+/**
+ * The board idiom a stored pick_side maps onto.
+ *
+ * A prop is written on Over or Under — those ARE HitModes, so they pass
+ * through. Anything else (home / away / draw) has no board side, so the
+ * screen's default At Least is the honest seed. Mapping those to Under
+ * would flip the chart onto a complementary bet nobody asked for.
+ *
+ * Used by Pick Detail's "View all stats": without this the screen opened
+ * on atLeast for every pick, so an Under prop landed on the complement
+ * of the bet it was read under — the same class of bug the Stats board
+ * already fixed for Hit Rate rows (#807 Medium).
+ */
+export function hitModeFromPickSide(side: string | null | undefined): HitMode {
+  return side === 'under' ? 'under' : side === 'over' ? 'over' : 'atLeast';
+}
+
 export function hitModeLabel(mode: HitMode): string {
   return HIT_MODES.find((m) => m.mode === mode)?.label ?? 'At Least';
 }
