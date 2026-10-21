@@ -468,6 +468,10 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   first, and the post names that date. The week and the month
   post from 7:30am through noon ET, and a miss rolls to the next morning.
   His rows stay out of `picks`.
+  The daily, the week, and the month each end with an all-time line:
+  every graded leg from the start of tracking through that period's end,
+  in the same W-L, units, and ROI shape as the period line. A leg dated
+  after the period stays out. `needs_review` and `pending` stay out.
   `60 Minute ML`, `60 min ML`, `Reg ML`, and `3-way` are market `h2h_3way`.
   A sport/date header and `All 1U` are context. Regulation grades from
   `nhl_period_scores` when a row exists (three periods; a tie is a loss
