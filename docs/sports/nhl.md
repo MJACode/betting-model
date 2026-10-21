@@ -434,6 +434,13 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 - **Franchise id:** Arizona Coyotes → Utah (Hockey Club → Mammoth) all map to the canonical **`UTA`** across every season — in `nhl_stats_ingestor.NHL_API_ABBREV_MAP`, `odds_ingestor.NHL_ODDS_API_MAP`, and `sbr_loader.NHL_NAME_MAP`. Historical ARI rows fold into UTA so the franchise has one identity.
 - **Goalie features:** save%/GAA/GSAA diffs, built as-of from the per-game log (see "Inputs as they are now"). The `_last5` columns are populated for every game since 2026-09-20 but are NOT in the model feature lists — `build_training_dataset` keeps only listed features, and adding them is a feature-list change that needs its own walk-forward.
 - **Starting-goalie confirm:** NHL `/v1/schedule` has no `probableGoalie` (measured 2026-09-14). ESPN core `probableStartingGoalie` overlays the game-day `nhl_goalie_stats` row (`data/ingestors/espn_probables.py`). The game-model gate then vetoes a BET when that named goalie is Out/Doubtful with `status_ts` ≤ the quote (`docs/game_injury_gate.md`). No ASOF fallback to the season snapshot for the gate — that is last year's #1.
+- **The last-night check reads the shared schedule reader** (2026-10-20):
+  `nhl_moneyline_anchored.stale_teams` now calls
+  `data/schedule_context.games_between` / `teams_missing_from_logs`, with its
+  behaviour pinned unchanged (every row in the two days, no de-duplication,
+  compared by game id with the team log; `tests/test_schedule_context.py`).
+  NHL is not in the generic scorer's schedule gate: both side models already
+  decide on game day behind this check.
 - **Season label:** ending year, rolling from SEPTEMBER (`data/season_labels.py`); the 2020 bubble playoffs are the one September that belongs to the season before.
 
 ### Pipeline

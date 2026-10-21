@@ -64,6 +64,10 @@ MAX_SILENCE: dict = {
     # RUNS and returns, so it still beats. 180 covers a slow tick plus slack.
     "nfl_poll_hourly": 180,
     "nfl_poll_fast": 180,
+    # Every 15 minutes, 24x7, and it runs whether or not a game is near, so
+    # 90 minutes is six missed ticks: every NFL card's slate has stopped
+    # moving. Clears a 60-minute NFL_SCHEDULE_REFRESH_MINUTES too.
+    "nfl_schedule_refresh": 90,
     # Every 10 minutes, 9am-midnight ET. Off overnight by design, so the bound
     # has to clear the gap: ~9h of silence is legitimate.
     "nfl_live_worker": 700,

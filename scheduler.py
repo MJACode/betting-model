@@ -704,7 +704,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # a dead name in a role map is a trap set for whoever
                   # inverts the sets later.
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_fast",
-                  "nfl_opener_poll",
+                  "nfl_opener_poll", "nfl_schedule_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
@@ -850,9 +850,10 @@ def run_nfl_wind_card(days: int, regions: str = "us",
                       timeout: float | None = None) -> list[str]:
     """Returns the labels of any steps killed at `timeout`."""
     # The Section-28 wind-totals bet card from the standalone nfl/ package. MUST run
-    # with cwd=nfl/ — the script reads data/games.csv and writes data/cards/ relative
-    # to its package root. It exits 0 before any odds call when no games are in the
-    # window, so off-season/off-day runs are free.
+    # with cwd=nfl/ — the script writes data/cards/ relative to its package root.
+    # Its schedule is the games table (nfl/data_ingest/schedule.py; not the frozen
+    # data/games.csv since 2026-10-20). It exits 0 before any odds call when no
+    # games are in the window, so off-season/off-day runs are free.
     #
     # The nfl/ package (developed externally) reads THE_ODDS_API_KEY — a different
     # env var NAME for the same Odds API service the platform already uses. No new
@@ -934,33 +935,100 @@ NFL_OPENER_POLL_MINUTES = max(1, int(os.environ.get("NFL_OPENER_POLL_MINUTES", "
 # real backstop, and RUN_NFL_WIND_CARD=0 stops the job without a deploy.
 
 
-def _nfl_lead_hours() -> float | None:
-    """Hours to the next NFL kickoff, or None if nothing is scheduled ahead."""
-    import csv as _csv
-    from datetime import datetime as _dt, timezone as _tz
+# How long the NFL kickoff list is reused before the games table is read again.
+# _nfl_lead_hours runs every MINUTE (the opener poll), year-round, and a
+# connection a minute is the cost this file already refused once against a
+# session pool of 15 (see the credit-cap note above). Kickoffs move a few times
+# a season, so a list up to 15 minutes old changes when a poll starts by at
+# most 15 minutes at its 10-day horizon; the lead itself is measured against
+# the clock on every call.
+NFL_SCHEDULE_CACHE_S = float(os.environ.get("NFL_SCHEDULE_CACHE_S", "900"))
+_nfl_kickoff_cache: dict = {"read_at": None, "kicks": None}
+
+
+def _read_nfl_kickoffs(now) -> list:
+    """Every NFL kickoff from yesterday (Eastern) on, from the games table.
+
+    The games table, not nfl/data/games.csv. That file was committed once
+    (2026-08-15) and never refreshed: it held no playoff game, so every NFL
+    pre-game job would have stood down after week 18, and it still carried a
+    CHI @ GB kickoff three and a half hours late. `games.commence_time` is
+    rewritten daily from nflverse (data/ingestors/nfl_props_data_ingestor.py).
+    Bounded on the indexed game_date; the cast is on a few hundred NFL rows.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     from zoneinfo import ZoneInfo as _ZI
-    path = ROOT / "nfl" / "data" / "games.csv"
-    if not path.exists():
-        return None
-    now = _dt.now(_tz.utc)
-    best = None
+    from data.db import get_connection
+    lo = (now.astimezone(_ZI(TIMEZONE)).date() - _td(days=1)).isoformat()
+    conn = get_connection()
     try:
-        with path.open(newline="", encoding="utf-8") as fh:
-            for row in _csv.DictReader(fh):
-                day, tod = row.get("gameday"), row.get("gametime")
-                if not day or not tod:
-                    continue
-                try:
-                    kick = _dt.fromisoformat(f"{day} {tod}").replace(
-                        tzinfo=_ZI("America/New_York")).astimezone(_tz.utc)
-                except ValueError:
-                    continue
-                lead = (kick - now).total_seconds() / 3600.0
-                if lead > 0 and (best is None or lead < best):
-                    best = lead
-    except OSError:
-        return None
-    return best
+        rows = conn.execute("""
+            SELECT commence_time FROM games
+            WHERE sport = 'NFL' AND game_date >= %s AND commence_time IS NOT NULL
+        """, (lo,)).fetchall()
+    finally:
+        conn.close()
+    kicks = []
+    for (raw,) in rows:
+        try:
+            k = _dt.fromisoformat(str(raw).replace("Z", "+00:00").replace(" ", "T"))
+        except ValueError:
+            continue
+        kicks.append(k if k.tzinfo else k.replace(tzinfo=_tz.utc))
+    return kicks
+
+
+def _nfl_lead_hours() -> float | None:
+    """Hours to the next NFL kickoff, or None if nothing is scheduled ahead.
+
+    Reads the games table at most every NFL_SCHEDULE_CACHE_S. A failed read
+    keeps the last list it had (loudly); with no list at all it answers None,
+    and every NFL pre-game job stands down rather than guess.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    now = _dt.now(_tz.utc)
+    cache = _nfl_kickoff_cache
+    age = (None if cache["read_at"] is None
+           else (now - cache["read_at"]).total_seconds())
+    if age is None or age >= NFL_SCHEDULE_CACHE_S:
+        try:
+            cache["kicks"] = _read_nfl_kickoffs(now)
+            cache["read_at"] = now
+        except Exception as exc:                               # noqa: BLE001
+            log.warning("NFL schedule read failed (%s: %s); %s", type(exc).__name__,
+                        exc, "keeping the last kickoff list" if cache["kicks"] is not None
+                        else "no kickoff list, NFL pre-game jobs stand down")
+    kicks = cache["kicks"] or []
+    leads = [(k - now).total_seconds() / 3600.0 for k in kicks]
+    ahead = [x for x in leads if x > 0]
+    return min(ahead) if ahead else None
+
+
+# NFL SCHEDULE REFRESH (2026-10-21). Every NFL pre-game job reads its slate
+# from the games table, and until this job only the 6am daily ingest wrote it.
+# That left two gaps: a playoff matchup nflverse lists overnight reached the
+# opener model 6 to 18 hours late (the 2025 wild card, measured from
+# nflverse's commit history), and a deploy that adds a schedule column left it
+# empty until the next morning, which for the venue columns meant no wind bet
+# all day. So the look-ahead schedule is re-read every NFL_SCHEDULE_REFRESH_
+# MINUTES and once as soon as the scheduler starts after a boot.
+#
+# Free: one GET of nflverse's games.csv on GitHub, no odds call. It writes the
+# next 14 days only, and on an existing row only when and where the game is
+# played, never a prop model's inputs (nfl_props_data_ingestor.
+# refresh_upcoming_schedule says why). RUN_NFL_SCHEDULE_REFRESH=0 stops it.
+RUN_NFL_SCHEDULE_REFRESH = os.environ.get("RUN_NFL_SCHEDULE_REFRESH", "1") != "0"
+NFL_SCHEDULE_REFRESH_MINUTES = min(60, max(1, int(
+    os.environ.get("NFL_SCHEDULE_REFRESH_MINUTES", "15"))))
+# A normal run is one download and two small upserts, a few seconds. The bound
+# exists so a hung download cannot hold the job (max_instances=1) for hours.
+NFL_SCHEDULE_REFRESH_TIMEOUT_S = 300.0
+
+
+def run_nfl_schedule_refresh() -> None:
+    _run([sys.executable, "-m", "data.ingestors.nfl_props_data_ingestor",
+          "--schedule-only"], "nfl-schedule-refresh",
+         timeout=NFL_SCHEDULE_REFRESH_TIMEOUT_S)
 
 
 def run_nfl_poll(fast: bool = False) -> None:
@@ -2204,6 +2272,29 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_WIND_CARD=0 — NFL polling NOT scheduled.")
+
+    # The NFL schedule of record, kept current between daily runs (see
+    # run_nfl_schedule_refresh). Not gated on RUN_NFL_WIND_CARD: the prop card
+    # and the prop scorer read the same rows. Off the hour (:05, :20, ...) so
+    # it never shares a minute with the hourly NFL poll or the 6am pipeline.
+    # next_run_time is the boot catch-up. It falls due before sched.start(), so
+    # the run happens the moment the scheduler starts -- after the boot
+    # migrations in catch_up_weekly_jobs have added any new column -- and a
+    # deploy that adds one has it filled at boot, not the next morning. If the
+    # boot catch-ups hold the start past misfire_grace_time (10 minutes), the
+    # first 15-minute tick does it instead.
+    if RUN_NFL_SCHEDULE_REFRESH:
+        sched.add_job(
+            run_nfl_schedule_refresh,
+            CronTrigger(minute=f"5-59/{NFL_SCHEDULE_REFRESH_MINUTES}", timezone=TIMEZONE),
+            id="nfl_schedule_refresh",
+            name=f"NFL schedule refresh (every {NFL_SCHEDULE_REFRESH_MINUTES} min "
+                 "and at boot, next 14 days)",
+            next_run_time=datetime.now(sched.timezone) + timedelta(seconds=30),
+            max_instances=1, coalesce=True, misfire_grace_time=600,
+        )
+    else:
+        log.info("RUN_NFL_SCHEDULE_REFRESH=0 — NFL schedule refresh NOT scheduled.")
 
     # NFL in-play worker. Sundays run 1pm to 1am ET, but Thursday, Saturday,
     # Monday and international kickoffs all fall outside a Sunday-only window,

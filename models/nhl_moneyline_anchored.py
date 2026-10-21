@@ -392,14 +392,16 @@ def stale_teams(conn, logs: dict, game_date: str) -> set:
     """Teams with a game in the two days before `game_date` that the team log
     does not hold yet. Last night's games land at ~10:05Z; if that ingest has
     not run, rest, back-to-back and form would be read off stale logs -- a
-    state the walk-forward never graded -- so the model does not decide."""
+    state the walk-forward never graded -- so the model does not decide.
+
+    Read through the shared schedule reader (data/schedule_context), with
+    this check's own behaviour kept exactly: every row in the two days, scored
+    or not, duplicates and all, compared by game_id with the team log."""
+    from data.schedule_context import games_between, teams_missing_from_logs
     d = datetime.fromisoformat(str(game_date)[:10])
     lo = (d - timedelta(days=2)).strftime("%Y-%m-%d")
-    recent = conn.execute(
-        "SELECT game_id, home_team, away_team FROM games WHERE sport = 'NHL' "
-        "AND game_date >= %s AND game_date < %s", (lo, d.strftime("%Y-%m-%d"))).fetchall()
-    logged = set(logs["team"].game_id)
-    return {t for gid, h, a in recent if gid not in logged for t in (h, a)}
+    recent = games_between(conn, "NHL", lo, d.strftime("%Y-%m-%d"))
+    return teams_missing_from_logs(recent, set(logs["team"].game_id))
 
 
 def inputs_for_date(conn, game_date: str, now: datetime | None = None) -> tuple[pd.DataFrame, dict, set]:
