@@ -22,6 +22,7 @@ import data.ingestors.nba_schedule_refresh as nsr  # noqa: E402
 from data.db import DBConnection  # noqa: E402
 from tests._pg import can_scratch, env_dsn, scratch_cluster  # noqa: E402
 from tests.test_nba_schedule_refresh import NOW, _board, _core, _espn, _refused  # noqa: E402
+from tests.test_nba_schedule_refresh import _no_network  # noqa: E402,F401 -- autouse: no test here reaches ESPN
 
 
 @pytest.fixture(scope="module")
