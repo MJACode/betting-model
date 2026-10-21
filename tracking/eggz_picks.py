@@ -1150,13 +1150,30 @@ def _mark_review(conn, pid, reason: str) -> bool:
     return bool(changed)
 
 
+_GRADED_LEGS = (
+    "SELECT sport, 'eggz', result, NULL, price, "
+    "CASE WHEN clv_pct IS NOT NULL THEN clv_pct END, FALSE, units, risked "
+    "FROM capper_picks WHERE status = 'graded' "
+    "AND result IN ('WIN','LOSS','PUSH') "
+)
+
+
 def _window_rows(conn, start: str, end: str) -> list[tuple]:
     return conn.execute(
-        "SELECT sport, 'eggz', result, NULL, price, "
-        "CASE WHEN clv_pct IS NOT NULL THEN clv_pct END, FALSE, units, risked "
-        "FROM capper_picks WHERE status = 'graded' AND result IN ('WIN','LOSS','PUSH') "
-        "AND game_date BETWEEN %s AND %s",
+        _GRADED_LEGS + "AND game_date BETWEEN %s AND %s",
         (start, end)).fetchall()
+
+
+def _all_time_rows(conn, through: str) -> list[tuple]:
+    """Every graded Eggz leg from the start of tracking through `through`.
+
+    needs_review and pending stay out. A leg whose game_date is after the
+    recap's period stays out, including one that is already graded. Every
+    graded leg inside the bound is in the units.
+    """
+    return conn.execute(
+        _GRADED_LEGS + "AND game_date <= %s",
+        (through,)).fetchall()
 
 
 def _pending_in(conn, start: str, end: str) -> int:
@@ -1189,8 +1206,14 @@ def _slate_unfinished(conn, start: str, end: str) -> bool:
     return row is not None
 
 
-def eggz_embed(heading: str, rows: list[tuple], pending: int) -> dict | None:
-    """The Discord embed, or None when the window is not ready to post."""
+def eggz_embed(heading: str, rows: list[tuple], pending: int,
+               all_time: list[tuple] | None = None) -> dict | None:
+    """The Discord embed, or None when the window is not ready to post.
+
+    `all_time` is every graded leg through the end of this period. The
+    footer is that record, in the same W-L, units, and ROI shape as the
+    period line. The sport fields stay the period.
+    """
     if pending:
         return None
     if not rows:
@@ -1207,7 +1230,7 @@ def eggz_embed(heading: str, rows: list[tuple], pending: int) -> dict | None:
         "inline": False,
     } for sport, group in sorted(by_sport.items())]
     color = 0x3BA55D if overall["units"] > 0 else 0xED4245 if overall["units"] < 0 else 0x4F545C
-    return {
+    embed = {
         "title": f"\U0001F4CA Eggz — {heading}",
         "description": (
             f"**{_tally_line(overall, with_clv=True)}**  ·  {len(rows)} settled"
@@ -1216,6 +1239,9 @@ def eggz_embed(heading: str, rows: list[tuple], pending: int) -> dict | None:
         "fields": fields,
         "clv": clv_line(overall),
     }
+    if all_time is not None:
+        embed["footer"] = {"text": f"All-time: {_tally_line(_tally(all_time))}"}
+    return embed
 
 
 def _post_window(conn, span: str, start: str, end: str, heading: str,
@@ -1236,7 +1262,8 @@ def _post_window(conn, span: str, start: str, end: str, heading: str,
     if sport_in_progress(conn, sports, now):
         logger.info(f"Eggz {span} waits, a game of that sport is in progress")
         return 0
-    embed = eggz_embed(heading, rows, 0)
+    all_time = _all_time_rows(conn, end) if rows else None
+    embed = eggz_embed(heading, rows, 0, all_time)
     if embed is None:
         return 0
     embed.pop("clv", None)
