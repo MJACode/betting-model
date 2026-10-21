@@ -613,7 +613,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # a dead name in a role map is a trap set for whoever
                   # inverts the sets later.
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_fast",
-                  "nfl_opener_poll",
+                  "nfl_opener_poll", "nfl_schedule_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
@@ -908,6 +908,33 @@ def _nfl_lead_hours() -> float | None:
     leads = [(k - now).total_seconds() / 3600.0 for k in kicks]
     ahead = [x for x in leads if x > 0]
     return min(ahead) if ahead else None
+
+
+# NFL SCHEDULE REFRESH (2026-10-21). Every NFL pre-game job reads its slate
+# from the games table, and until this job only the 6am daily ingest wrote it.
+# That left two gaps: a playoff matchup nflverse lists overnight reached the
+# opener model 6 to 18 hours late (the 2025 wild card, measured from
+# nflverse's commit history), and a deploy that adds a schedule column left it
+# empty until the next morning, which for the venue columns meant no wind bet
+# all day. So the look-ahead schedule is re-read every NFL_SCHEDULE_REFRESH_
+# MINUTES and once 30 seconds after every boot.
+#
+# Free: one GET of nflverse's games.csv on GitHub, no odds call. It writes the
+# next 14 days only, and on an existing row only when and where the game is
+# played, never a prop model's inputs (nfl_props_data_ingestor.
+# refresh_upcoming_schedule says why). RUN_NFL_SCHEDULE_REFRESH=0 stops it.
+RUN_NFL_SCHEDULE_REFRESH = os.environ.get("RUN_NFL_SCHEDULE_REFRESH", "1") != "0"
+NFL_SCHEDULE_REFRESH_MINUTES = min(60, max(1, int(
+    os.environ.get("NFL_SCHEDULE_REFRESH_MINUTES", "15"))))
+# A normal run is one download and two small upserts, a few seconds. The bound
+# exists so a hung download cannot hold the job (max_instances=1) for hours.
+NFL_SCHEDULE_REFRESH_TIMEOUT_S = 300.0
+
+
+def run_nfl_schedule_refresh() -> None:
+    _run([sys.executable, "-m", "data.ingestors.nfl_props_data_ingestor",
+          "--schedule-only"], "nfl-schedule-refresh",
+         timeout=NFL_SCHEDULE_REFRESH_TIMEOUT_S)
 
 
 def run_nfl_poll(fast: bool = False) -> None:
@@ -2041,6 +2068,25 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_WIND_CARD=0 — NFL polling NOT scheduled.")
+
+    # The NFL schedule of record, kept current between daily runs (see
+    # run_nfl_schedule_refresh). Not gated on RUN_NFL_WIND_CARD: the prop card
+    # and the prop scorer read the same rows. Off the hour (:05, :20, ...) so
+    # it never shares a minute with the hourly NFL poll or the 6am pipeline.
+    # next_run_time is the boot catch-up: a deploy that adds a schedule column
+    # gets it filled in 30 seconds, not at the next tick or the next morning.
+    if RUN_NFL_SCHEDULE_REFRESH:
+        sched.add_job(
+            run_nfl_schedule_refresh,
+            CronTrigger(minute=f"5-59/{NFL_SCHEDULE_REFRESH_MINUTES}", timezone=TIMEZONE),
+            id="nfl_schedule_refresh",
+            name=f"NFL schedule refresh (every {NFL_SCHEDULE_REFRESH_MINUTES} min "
+                 "and at boot, next 14 days)",
+            next_run_time=datetime.now(sched.timezone) + timedelta(seconds=30),
+            max_instances=1, coalesce=True, misfire_grace_time=600,
+        )
+    else:
+        log.info("RUN_NFL_SCHEDULE_REFRESH=0 — NFL schedule refresh NOT scheduled.")
 
     # NFL in-play worker. Sundays run 1pm to 1am ET, but Thursday, Saturday,
     # Monday and international kickoffs all fall outside a Sunday-only window,
