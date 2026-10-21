@@ -9,6 +9,12 @@ It is not a filter and it is not a reason to skip a game.
 # check constraint.
 LINE_BASIS = "DraftKings line at game start"
 
+# player_prop_odds NFL coverage used by this builder starts 2023-09-01.
+# Seasons before 2023 are refused. A 2023 game dated before that day is
+# not built.
+PROP_HISTORY_START_SEASON = 2023
+PROP_HISTORY_START_DATE = "2023-09-01"
+
 # Measured 2026-10-16: min(season) in nfl_odds_history for bookmaker
 # 'draftkings' is 2020. games holds 2015-2019. Those seasons are not built.
 DK_HISTORY_START_SEASON = 2020
