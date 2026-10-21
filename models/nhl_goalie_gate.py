@@ -32,7 +32,17 @@ KNOWN, for one game, means for BOTH teams:
   3. if DailyFaceoff has a latest designation for that team, it names the same
      goalie. Its status is not required to be "Confirmed": DailyFaceoff is a
      veto on a disagreement, not a second confirmation, because it is behind
-     Cloudflare and may never answer the worker (fail-open in the poll).
+     Cloudflare and may never answer the worker (fail-open in the poll);
+  4. a poll has READ that ESPN confirmation within
+     config.NHL_GOALIE_READ_MAX_AGE_MIN (`last_seen_at`). A poll that cannot
+     read ESPN stores nothing, so without this a confirmation stood all day
+     whoever ESPN named after it. A DailyFaceoff row that old is not a veto
+     any more: it fails open, as the poll does;
+  5. that goalie row carries his NHL id. The moneyline reads his form by id,
+     and a row without one was filled with the team's previous starter
+     (models/nhl_moneyline_anchored._goalie_frame), so a known game with an
+     id-less row would be bet on another goalie's form. NYI 2026-10-06
+     (Varlamov) was such a row.
 
 ESPN's 'confirmed' tracks the morning-skate signal and is looser than
 DailyFaceoff's "Confirmed" (2026-10-20: ESPN confirmed Kuemper for LAK while
@@ -65,7 +75,7 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
@@ -79,8 +89,15 @@ CONFIRMED = "confirmed"
 # Written when ESPN lists the game but no probable starter for a team, so a
 # withdrawn confirmation does not leave a stale 'confirmed' as the latest row.
 NO_STARTER = "none"
+# Written when ESPN names a starter whose athlete document could not be read,
+# so his name is unknown: a new name must close the gate, never leave the old
+# confirmation standing (data/ingestors/espn_probables).
+UNREAD = "unread"
 CHECK_FAILED = "goalie check failed; not deciding this pass"
 WAITING = "waiting for both confirmed starting goalies"
+# A known matchup priced off a fetch taken before it became known
+# (models/scorer._nhl_price_reason, scripts/nhl_totals_card).
+PRICE_WAIT = "waiting for a price fetched after both goalies were confirmed"
 
 # Equivalent first names. Small on purpose: a goalie is identified by his last
 # name plus this, and anything looser could match two people.
@@ -178,20 +195,46 @@ def _utc(v) -> datetime | None:
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
+def _seen_at(row: dict) -> datetime | None:
+    """When a poll last read this row as still standing (observed_at if never
+    re-read)."""
+    return _utc(row.get("seen_at")) or _utc(row.get("observed_at"))
+
+
+def _stale(row: dict, now: datetime | None) -> bool:
+    """True when no poll has read `row` within NHL_GOALIE_READ_MAX_AGE_MIN.
+    `now` None (the pure tests that pass no clock) checks nothing."""
+    if now is None:
+        return False
+    seen = _seen_at(row)
+    return seen is None or now - seen > timedelta(minutes=config.NHL_GOALIE_READ_MAX_AGE_MIN)
+
+
 def team_problem(team: str, espn: dict | None, stats: dict | None,
-                 dailyfaceoff: dict | None) -> str | None:
+                 dailyfaceoff: dict | None, now: datetime | None = None) -> str | None:
     """None when this team's starter is known; otherwise what is missing, in
-    words a reader of the pick row can act on."""
+    words a reader of the pick row can act on. `now` turns on the read-age
+    check (condition 4); matchup_states always passes it."""
+    if espn and espn.get("status") == UNREAD:
+        return f"{team} ESPN named a starter whose name could not be read"
     if not espn or not espn.get("player_name") or espn.get("status") == NO_STARTER:
         return f"{team} no starter listed"
     if espn.get("status") != CONFIRMED:
         return f"{team} {espn.get('status') or 'unconfirmed'}"
+    if _stale(espn, now):
+        seen = _seen_at(espn)
+        return (f"{team} ESPN not read since "
+                f"{seen.strftime('%H:%MZ') if seen else 'its confirmation'}")
     if not stats:
         return f"{team} no goalie row yet"
     if not same_goalie(stats.get("player_id"), stats.get("player_name"),
                        espn.get("player_id"), espn.get("player_name")):
         return (f"{team} goalie row names {stats.get('player_name')}, "
                 f"ESPN confirmed {espn.get('player_name')}")
+    if stats.get("player_id") in (None, ""):
+        return f"{team} goalie row for {stats.get('player_name')} has no NHL id"
+    if dailyfaceoff and _stale(dailyfaceoff, now):
+        dailyfaceoff = None                 # too old to veto: fails open, as the poll does
     if dailyfaceoff and dailyfaceoff.get("player_name") and not same_goalie_name(
             dailyfaceoff.get("player_name"), espn.get("player_name")):
         return (f"{team} DailyFaceoff names {dailyfaceoff.get('player_name')}, "
@@ -199,10 +242,12 @@ def team_problem(team: str, espn: dict | None, stats: dict | None,
     return None
 
 
-def assess(game_id: str, home: str, away: str, latest: dict, stats: dict) -> Matchup:
+def assess(game_id: str, home: str, away: str, latest: dict, stats: dict,
+           now: datetime | None = None) -> Matchup:
     """One game from the latest designations and the goalie rows. Pure.
 
     `latest`: {(game_id, team, source): row}; `stats`: {(game_id, team): row}.
+    `now`: the read-age check (team_problem); matchup_states passes it.
 
     known_at is the moment the matchup became known: the later of each team's
     ESPN confirmation and its goalie row. DailyFaceoff is left out of it on
@@ -213,7 +258,7 @@ def assess(game_id: str, home: str, away: str, latest: dict, stats: dict) -> Mat
     for team in (away, home):
         espn = latest.get((game_id, team, SOURCE_ESPN))
         row = stats.get((game_id, team))
-        why = team_problem(team, espn, row, latest.get((game_id, team, SOURCE_DAILYFACEOFF)))
+        why = team_problem(team, espn, row, latest.get((game_id, team, SOURCE_DAILYFACEOFF)), now)
         if why:
             problems.append(why)
             continue
@@ -230,7 +275,8 @@ _GAMES_SQL = "SELECT game_id, home_team, away_team FROM games WHERE game_id = AN
 # Latest row per (game, team, source): the table is append-only history.
 _LATEST_SQL = """
     SELECT DISTINCT ON (game_id, team, source)
-           game_id, team, source, player_id, player_name, status, observed_at
+           game_id, team, source, player_id, player_name, status, observed_at,
+           COALESCE(last_seen_at, observed_at) AS seen_at
     FROM nhl_goalie_designations
     WHERE game_id = ANY(%s)
     ORDER BY game_id, team, source, observed_at DESC
@@ -260,16 +306,19 @@ def _select(conn, sql: str, params) -> list:
     return rows
 
 
-def matchup_states(conn, game_ids) -> dict[str, Matchup]:
-    """{game_id: Matchup} for every id asked about. Fails closed."""
+def matchup_states(conn, game_ids, now: datetime | None = None) -> dict[str, Matchup]:
+    """{game_id: Matchup} for every id asked about. Fails closed. `now` is the
+    clock the read-age check uses (default: the wall clock)."""
     ids = sorted({str(g) for g in game_ids if g})
     if not ids:
         return {}
+    now = now or datetime.now(timezone.utc)
     from data.db import ConnectionLost
     try:
         teams = {r[0]: (r[1], r[2]) for r in _select(conn, _GAMES_SQL, (ids,))}
         latest = {(r[0], r[1], r[2]): {"player_id": r[3], "player_name": r[4],
-                                        "status": r[5], "observed_at": r[6]}
+                                        "status": r[5], "observed_at": r[6],
+                                        "seen_at": r[7] if len(r) > 7 else None}
                   for r in _select(conn, _LATEST_SQL, (ids,))}
         stats: dict = {}
         for gid, team, pid, name, created in _select(conn, _STATS_SQL, (ids,)):
@@ -287,7 +336,7 @@ def matchup_states(conn, game_ids) -> dict[str, Matchup]:
             out[g] = Matchup(g, f"{WAITING} (game not found)")
             continue
         home, away = teams[g]
-        out[g] = assess(g, home, away, latest, stats)
+        out[g] = assess(g, home, away, latest, stats, now)
     return out
 
 
@@ -319,8 +368,9 @@ def log_held(label: str, held: dict) -> None:
 # ── the last line, at every INSERT that writes NHL picks ─────────────────────
 
 def is_nhl_bet(row: dict) -> bool:
-    return (str(row.get("sport") or "").upper() == SPORT
-            and row.get("signal_type") == "BET" and bool(row.get("game_id")))
+    """An NHL BET. One with no game_id is one too: the guard refuses it (no
+    game, no known matchup) rather than letting it through unread."""
+    return str(row.get("sport") or "").upper() == SPORT and row.get("signal_type") == "BET"
 
 
 def is_exempt(model_id) -> bool:
@@ -354,7 +404,7 @@ def refuse_unknown(conn, rows: list[dict], *, mode: str, label: str,
     if not bets:
         return rows
     if reasons is None:
-        reasons = matchup_reasons(conn, {r["game_id"] for r in bets})
+        reasons = matchup_reasons(conn, {r.get("game_id") for r in bets})
     out = []
     for r in rows:
         why = reasons.get(r.get("game_id"), CHECK_FAILED) if is_gated_bet(r) else None

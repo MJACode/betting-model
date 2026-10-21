@@ -251,8 +251,13 @@ class FakeDB:
                 if r["game_id"] in ids:
                     latest[(r["game_id"], r["team"], r["source"])] = r
             return _Rows([(r["game_id"], r["team"], r["source"], r["player_id"], r["player_name"],
-                           r["status"], r["source_player_id"], r["observed_at"])
+                           r["status"], r["source_player_id"], r["observed_at"], r["designation_id"])
                           for r in latest.values()])
+        if q.startswith("UPDATE nhl_goalie_designations SET last_seen_at"):
+            for r in self.designations:
+                if r["designation_id"] in params[1]:
+                    r["last_seen_at"] = params[0]
+            return _Rows([])
         if q.startswith("SELECT game_id, team, player_id, player_name FROM nhl_goalie_stats"):
             ids = set(params[0])
             rows = sorted((r for r in self.stats if r["game_id"] in ids),
@@ -266,7 +271,8 @@ class FakeDB:
     def executemany(self, sql, rows):
         q = " ".join(sql.split())
         if q.startswith("INSERT INTO nhl_goalie_designations"):
-            self.designations += [dict(r) for r in rows]
+            for r in rows:
+                self.designations.append({**r, "designation_id": len(self.designations) + 1})
         elif q.startswith("DELETE FROM nhl_goalie_stats WHERE team"):
             for r in rows:
                 self.stats = [s for s in self.stats if not (s["team"] == r["team"] and
@@ -469,7 +475,10 @@ class _GateConn:
         if "FROM games" in q:
             return _Rows(self.games)
         if "FROM nhl_goalie_designations" in q:
-            return _Rows([(g, t, s, r["player_id"], r["player_name"], r["status"], r["observed_at"])
+            # seen_at: when a poll last read the row (default: just now, so a
+            # test about something else is not aged out by the wall clock).
+            return _Rows([(g, t, s, r["player_id"], r["player_name"], r["status"], r["observed_at"],
+                           r.get("seen_at") or datetime.now(timezone.utc))
                           for (g, t, s), r in self.latest.items()])
         if "FROM nhl_goalie_stats" in q:
             return _Rows([(g, t, r["player_id"], r["player_name"], r["created_at"])
@@ -546,3 +555,156 @@ def test_a_shots_on_goal_bet_passes_an_unknown_game_without_a_read():
     saves = _row("nhl_prop_saves")
     assert gate.refuse_unknown(conn, [saves, sog], mode="drop", label="t") == [sog]
     assert gate.is_exempt(SOG) and not gate.is_exempt("nhl_prop_saves") and not gate.is_exempt(None)
+
+
+# ── review fixes, 2026-10-21 ─────────────────────────────────────────────────
+#
+# Three ways a stored confirmation could stand when it should not: a goalie
+# row with no NHL id (the moneyline then reads the team's previous starter), a
+# confirmation no poll has re-read (ESPN blocking the worker stores nothing),
+# and a new ESPN starter whose name could not be read (the team was skipped,
+# so the old confirmation stayed the latest row).
+
+def test_a_goalie_row_with_no_nhl_id_is_not_known():
+    """NYI 2026-10-06 (Varlamov): the row's id was NULL. Names agree, so the
+    old check called the game known and the moneyline filled the id from the
+    team's last starter (models/nhl_moneyline_anchored._goalie_frame)."""
+    latest = _latest(SEA_espn={"player_id": None})
+    stats = {**STATS, (SEA_DET, "SEA"): {"player_id": None, "player_name": "Philipp Grubauer",
+                                         "created_at": "2026-10-20 16:00:00+00"}}
+    m = gate.assess(SEA_DET, "SEA", "DET", latest, stats)
+    assert m.reason == ("waiting for both confirmed starting goalies "
+                        "(SEA goalie row for Philipp Grubauer has no NHL id)")
+    empty = {**STATS, (SEA_DET, "SEA"): {**stats[(SEA_DET, "SEA")], "player_id": ""}}
+    assert "has no NHL id" in gate.assess(SEA_DET, "SEA", "DET", latest, empty).reason
+
+
+def test_a_confirmation_no_poll_has_read_lately_is_not_known():
+    import config
+    limit = timedelta(minutes=config.NHL_GOALIE_READ_MAX_AGE_MIN)
+    read_at = T0 + timedelta(hours=2)                       # DET's confirmation is the later one
+    fresh = _latest(SEA_espn={"seen_at": read_at}, DET_espn={"seen_at": read_at})
+    assert gate.assess(SEA_DET, "SEA", "DET", fresh, STATS, now=read_at + limit).reason is None
+    late = read_at + limit + timedelta(minutes=1)
+    m = gate.assess(SEA_DET, "SEA", "DET", fresh, STATS, now=late)
+    assert m.reason == ("waiting for both confirmed starting goalies "
+                        "(DET ESPN not read since 17:00Z; SEA ESPN not read since 17:00Z)")
+    # A row never re-read counts from when it was stored.
+    m = gate.assess(SEA_DET, "SEA", "DET", _latest(), STATS, now=T0 + limit + timedelta(minutes=1))
+    assert "SEA ESPN not read since 15:00Z" in m.reason
+
+
+def test_a_dailyfaceoff_name_too_old_to_be_read_no_longer_vetoes():
+    import config
+    limit = timedelta(minutes=config.NHL_GOALIE_READ_MAX_AGE_MIN)
+    now = T0 + timedelta(hours=3)
+    disagree = {"player_name": "Joey Daccord", "status": "likely"}
+    rows = _latest(SEA_espn={"seen_at": now}, DET_espn={"seen_at": now},
+                   SEA_dailyfaceoff={**disagree, "observed_at": T0, "seen_at": now})
+    assert "DailyFaceoff names Joey Daccord" in gate.assess(
+        SEA_DET, "SEA", "DET", rows, STATS, now=now).reason
+    old = _latest(SEA_espn={"seen_at": now}, DET_espn={"seen_at": now},
+                  SEA_dailyfaceoff={**disagree, "observed_at": T0, "seen_at": now - limit * 2})
+    assert gate.assess(SEA_DET, "SEA", "DET", old, STATS, now=now).reason is None
+
+
+def test_the_gate_reads_when_each_row_was_last_seen():
+    import config
+    seen = T0 + timedelta(hours=4)
+    latest = _latest(SEA_espn={"seen_at": seen}, DET_espn={"seen_at": seen})
+    conn = _GateConn([(SEA_DET, "SEA", "DET")], latest, STATS)
+    at = seen + timedelta(minutes=config.NHL_GOALIE_READ_MAX_AGE_MIN)
+    assert gate.matchup_states(conn, [SEA_DET], now=at)[SEA_DET].reason is None
+    later = at + timedelta(minutes=1)
+    assert "ESPN not read since" in gate.matchup_states(conn, [SEA_DET], now=later)[SEA_DET].reason
+
+
+def test_a_new_espn_starter_whose_name_cannot_be_read_closes_the_gate():
+    """ESPN switches SEA to a new athlete and his document times out. The team
+    used to be skipped, so the stored confirmation of the old goalie stayed the
+    latest row and the gate kept calling the game known."""
+    docs = _espn_docs()
+    docs["https://espn/event/1"]["competitions"][0]["competitors"][0]["probables"][0].update(
+        playerId=55, athlete={"$ref": "http://espn/athlete/55"})          # no document for 55
+    known = {"SEA": {"espn_athlete_id": "3149633", "designation": "confirmed",
+                     "player_name": "Philipp Grubauer"}}
+    rows = {r["team"]: r for r in fetch_espn_nhl_designations(
+        DAY, fetch=_Fetch(docs), known=known, teams_ok=lambda h, a: (h, a) in PAIRS)}
+    assert rows["SEA"]["designation"] == gate.UNREAD and rows["SEA"]["player_name"] is None
+    assert rows["SEA"]["espn_athlete_id"] == "55"
+    m = gate.assess(SEA_DET, "SEA", "DET", _latest(
+        SEA_espn={"player_id": None, "player_name": None, "status": gate.UNREAD}), STATS)
+    assert "SEA ESPN named a starter whose name could not be read" in m.reason
+
+
+def test_the_same_starter_keeps_his_name_when_only_his_status_changed():
+    """A status change re-reads the athlete document; if that read fails, the
+    same athlete id still names him."""
+    docs = _espn_docs()
+    del docs["https://espn/athlete/3149633"]
+    known = {"SEA": {"espn_athlete_id": "3149633", "designation": "expected",
+                     "player_name": "Philipp Grubauer"}}
+    rows = {r["team"]: r for r in fetch_espn_nhl_designations(
+        DAY, fetch=_Fetch(docs), known=known, teams_ok=lambda h, a: (h, a) in PAIRS)}
+    assert (rows["SEA"]["player_name"], rows["SEA"]["designation"]) == ("Philipp Grubauer", "confirmed")
+
+
+def test_a_poll_that_cannot_read_espn_fails_and_stores_what_dailyfaceoff_said(resolver):
+    db = _db()
+
+    def blocked(url):
+        raise RuntimeError("403 Forbidden")
+    with pytest.raises(RuntimeError, match="ESPN"):
+        des.run([DAY], now=NOW, conn=db, espn_fetch=blocked, df_fetch=lambda url: _df_html(DF_PROPS))
+    assert db.designations and {r["source"] for r in db.designations} == {"dailyfaceoff"}
+    assert db.commits == 1
+
+
+def test_an_espn_listing_with_none_of_our_games_fails_the_poll(resolver):
+    db = _db()
+    docs = _espn_docs()
+    docs[LISTING] = {"items": []}
+    with pytest.raises(RuntimeError, match="ESPN"):
+        _run(db, docs)
+
+
+def test_the_step_reports_a_failed_poll(monkeypatch):
+    import run_pipeline
+
+    def boom(**kw):
+        raise RuntimeError("ESPN not read for 2026-10-20")
+    monkeypatch.setattr(des, "run", boom)
+    assert run_pipeline.step_nhl_goalie_designations(today_only=True) is False
+
+
+def test_each_poll_marks_the_rows_it_read_as_still_standing(resolver):
+    db = _db()
+    _run(db, _espn_docs())
+    first = {(r["game_id"], r["team"], r["source"]): r for r in db.designations}
+    assert all(r["last_seen_at"] == NOW for r in first.values())
+    later = NOW + timedelta(minutes=5)
+    out = _run(db, _espn_docs(), now=later)
+    assert out["stored"] == 0
+    assert all(r["last_seen_at"] == later for r in db.designations)
+    assert all(r["observed_at"] == NOW for r in db.designations)     # history is not moved
+    # A game ESPN did not answer for keeps its old read time and ages out.
+    docs = _espn_docs()
+    del docs["https://espn/event/2"]
+    _run(db, docs, now=later + timedelta(minutes=5))
+    mtl = [r for r in db.designations if r["game_id"] == MTL_SJS and r["source"] == "espn"]
+    assert mtl and all(r["last_seen_at"] == later for r in mtl)
+
+
+def test_a_tomorrow_game_row_that_exists_is_never_rewritten(resolver):
+    """Rewrites are for today's games only, even when a tomorrow row exists
+    and ESPN has already confirmed someone else for it."""
+    db = _db()
+    db.games = [{**g, "date": "2026-10-21", "commence": "2026-10-21T23:00:00Z"} for g in db.games]
+    db.stats = [{**r, "game_date": "2026-10-21"} for r in db.stats]
+    before = [dict(r) for r in db.stats]
+    out = des.run(["2026-10-21"], now=NOW, conn=db,
+                  espn_fetch=_Fetch({**_espn_docs(), LISTING.replace("20261020", "20261021"):
+                                     _espn_docs()[LISTING]}),
+                  df_fetch=lambda url: _df_html(DF_PROPS))
+    assert out["stored"] > 0 and out["swapped"] == []
+    assert db.stats == before

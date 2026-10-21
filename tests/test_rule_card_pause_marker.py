@@ -31,7 +31,7 @@ def _goalies_confirmed(monkeypatch):
     goalie matchup is not known (models/nhl_goalie_gate.py, mike 2026-10-20).
     These tests are the paused marker: both starters confirmed."""
     import models.nhl_goalie_gate as gate
-    monkeypatch.setattr(gate, "matchup_reasons", lambda conn, ids: {g: None for g in ids})
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
 
 
 class _Conn:

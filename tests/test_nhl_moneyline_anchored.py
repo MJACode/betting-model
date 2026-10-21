@@ -155,7 +155,7 @@ def _wire(monkeypatch, *, window=None, goalies=("OTT", "STL"), nan=False, stale=
     starting goalies are confirmed (models/nhl_goalie_gate.py)."""
     import models.nhl_goalie_gate as gate
     import models.scorer as sc
-    monkeypatch.setattr(gate, "matchup_reasons", lambda conn, ids: {g: matchup for g in ids})
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, matchup) for g in ids})
     artifact = {"kind": anc.KIND, "model": _Fixed(), "feature_cols": list(anc.FEATURES)}
     monkeypatch.setattr(sc, "load_model", lambda mid: artifact)
     # home OTT +150 (0.40), away STL -170 (0.63)

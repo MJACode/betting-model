@@ -73,7 +73,8 @@ def slate(conn, game_date: str, now: datetime) -> dict[str, dict]:
             for r in rows if _utc(r[3]) > now}
 
 
-def known_slate(conn, games: dict[str, dict], label: str) -> tuple[dict[str, dict], dict]:
+def known_slate(conn, games: dict[str, dict], label: str,
+                now: datetime | None = None) -> tuple[dict[str, dict], dict]:
     """The games whose goalie matchup is known, each with `known_at`, and the
     gate's reading per game (models/nhl_goalie_gate.Matchup). Both NHL prop
     cards call this before anything is pooled, so an unknown game cannot take
@@ -82,7 +83,7 @@ def known_slate(conn, games: dict[str, dict], label: str) -> tuple[dict[str, dic
     For the gated models only: an exempt model (config.NHL_GOALIE_GATE_EXEMPT,
     shots on goal) is handed the slate as it is, with no `known_at`
     (`slate_for`)."""
-    states = goalie_gate.matchup_states(conn, list(games))
+    states = goalie_gate.matchup_states(conn, list(games), now=now)
     known, held = goalie_gate.split_known(games, {g: m.reason for g, m in states.items()})
     goalie_gate.log_held(label, held)
     return {g: {**v, "known_at": states[g].known_at} for g, v in known.items()}, states
@@ -296,7 +297,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     conn = get_connection()
     try:
         everything = slate(conn, game_date, now)
-        games = slate_for(MODEL_ID, everything, known_slate(conn, everything, "nhl-prop-card")[0])
+        games = slate_for(MODEL_ID, everything, known_slate(conn, everything, "nhl-prop-card", now)[0])
         quotes = latest_quotes(conn, games)
         out["priced"] = len(quotes)
         if quotes.empty:

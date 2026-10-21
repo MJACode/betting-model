@@ -127,7 +127,7 @@ class TestTheCard:
 
     def test_a_second_pass_does_not_touch_a_pick_that_exists(self, monkeypatch):
         import models.nhl_goalie_gate as gate
-        monkeypatch.setattr(gate, "matchup_reasons", lambda conn, ids: {g: None for g in ids})
+        monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
 
         class Conn:
             def __init__(self):

@@ -28,6 +28,7 @@ from loguru import logger
 
 from data.ingestors.injury_ingestor import ESPN_HEADERS
 from data.ingestors.odds_ingestor import NHL_ODDS_API_MAP
+from models.nhl_goalie_gate import UNREAD
 
 CORE_NHL_EVENTS_URL = (
     "https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl/events"
@@ -149,7 +150,7 @@ def _short_name_teams(event: dict) -> dict[str, str]:
 
 
 def fetch_espn_nhl_designations(game_date: str, fetch=None, known: dict | None = None,
-                                teams_ok=None, skip_game=None) -> list[dict]:
+                                teams_ok=None, skip_game=None, strict: bool = False) -> list[dict]:
     """Every team ESPN lists on `game_date` (ET; `?dates=` is keyed on the ET
     date, measured 2026-10-20: the 01:00Z-02:30Z games came back under the
     previous day), with its probable starter and ESPN's status.
@@ -172,7 +173,15 @@ def fetch_espn_nhl_designations(game_date: str, fetch=None, known: dict | None =
     Inline data first: the event document already carries each competitor's
     homeAway and probables (measured 2026-10-20); the competitor document is
     fetched only when they are missing. Fail open: a listing failure returns
-    [], a failed event or competitor is skipped.
+    [], a failed event or competitor is skipped. `strict` (the goalie poll,
+    data/ingestors/nhl_goalie_designations) raises on a listing failure
+    instead, so a poll that read nothing fails rather than reporting success.
+
+    A starter ESPN names whose athlete document cannot be read comes back with
+    player_name None and designation 'unread' (models/nhl_goalie_gate.UNREAD):
+    a new name must close the goalie gate, never leave the old confirmation
+    standing as the latest row. The same athlete id as the stored row keeps
+    the stored name.
     """
     fetch = fetch or _default_fetch
     known = known or {}
@@ -180,6 +189,8 @@ def fetch_espn_nhl_designations(game_date: str, fetch=None, known: dict | None =
     try:
         listing = fetch(CORE_NHL_EVENTS_URL.format(dates=yyyymmdd))
     except Exception as exc:  # noqa: BLE001
+        if strict:
+            raise RuntimeError(f"ESPN NHL listing for {game_date} not read: {exc!r}") from exc
         logger.warning(f"ESPN NHL events fetch failed ({exc}); no probable overlay")
         return []
 
@@ -257,7 +268,11 @@ def fetch_espn_nhl_designations(game_date: str, fetch=None, known: dict | None =
                         athlete = {}
                 name = athlete.get("displayName") or athlete.get("fullName")
                 ath_id = ath_id or str(athlete.get("id") or "")
+            if not name and ath_id and str(held.get("espn_athlete_id") or "") == ath_id:
+                name = held.get("player_name")      # the same athlete; only his status moved
             if not name:
+                rows.append({"team": abbrev, "home_away": side, "player_name": None,
+                             "espn_athlete_id": ath_id or None, "designation": UNREAD})
                 continue
             rows.append({"team": abbrev, "home_away": side, "player_name": name,
                          "espn_athlete_id": ath_id or None, "designation": status})

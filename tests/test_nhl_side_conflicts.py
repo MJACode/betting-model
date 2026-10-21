@@ -161,7 +161,7 @@ def _score_regulation(monkeypatch, *, window=None, goalies=("BOS", "LAK"),
                       stale=(), dry_run=True, write=True, inserted=None, matchup=None):
     import models.nhl_goalie_gate as gate
     # `matchup`: the goalie gate's reason; None = both starters confirmed.
-    monkeypatch.setattr(gate, "matchup_reasons", lambda conn, ids: {g: matchup for g in ids})
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, matchup) for g in ids})
     monkeypatch.setattr(sc, "load_model", lambda mid: {
         "model": _ThreeWay(), "feature_cols": ["x"]})
     # +195 on BOS in regulation: EV 0.42 x 2.95 - 1 = 0.239, over the 0.20 floor

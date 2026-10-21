@@ -21,12 +21,19 @@ WHAT A TICK DOES (scheduler.run_nhl_goalie_window, every five minutes from
      decided at that matchup yet. A restart forgets, and the next tick runs
      the deciders once more for every known game; each of them is insert-once,
      so the re-run writes nothing already written.
-  4. If any, and no refresh pass or daily run is in progress (each runs the
-     same deciders itself): the NHL prop odds step (it buys only what is owed,
-     including the one snapshot a game owes once its goalies are confirmed,
-     data/ingestors/nhl_prop_odds_ingestor.due), the two side models for
-     exactly those games (`--score`, below), the totals card, the prop cards,
-     then publish.
+  4. If any: the NHL game odds (run_pipeline step nhl-odds), so the side
+     models and the totals card price a fetch taken after the confirmation
+     (each refuses a game whose newest fetch predates it); the NHL prop odds
+     step (it buys only what is owed, including the snapshot a game owes once
+     its goalies are confirmed, data/ingestors/nhl_prop_odds_ingestor.due);
+     the two side models for exactly those games (`--score`, below), the
+     totals card, the prop cards, then publish. No game odds: the side models
+     and the totals card wait for the next tick.
+
+A tick does nothing at all, the poll included, while a refresh pass or the
+daily run is in progress (each polls and runs the same deciders itself), and
+it holds its lock from the poll to the publish, so a goalie row is never
+rewritten in the middle of a pass's scoring.
 
 `--score` is models.scorer.run_scorer with `only_games` and
 `game_models_only=True`: the pre-game line poller's own entry point, the one
@@ -76,7 +83,7 @@ def plan(conn, now: datetime, decided: dict | None = None) -> Plan:
     """
     decided = decided or {}
     games = today_slate(conn, now)
-    states = goalie_gate.matchup_states(conn, list(games))
+    states = goalie_gate.matchup_states(conn, list(games), now=now)
     known = {g: m.known_at for g, m in states.items() if m.reason is None}
     held = {g: m.reason for g, m in states.items() if m.reason is not None}
     due = {g: t for g, t in known.items() if g not in decided or decided[g] != t}

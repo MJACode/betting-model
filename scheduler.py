@@ -37,8 +37,9 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * NHL goalie window     every 5 min, 11:00-23:55 ET -> run_nhl_goalie_window
         (scripts/nhl_goalie_window.py: no NHL model bets until both starting
         goalies are confirmed, mike 2026-10-20; the goalie poll for today's
-        games, then the NHL deciders for any game whose matchup has just
-        become known. A day with no NHL game makes no call.)
+        games, then, for any game whose matchup has just become known, one
+        NHL odds fetch and the NHL deciders. Nothing while a refresh pass or
+        the daily run is in progress. A day with no NHL game makes no call.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -304,12 +305,8 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
                     retry_reason, source=retry_source or "catch-up")
             except Exception:  # noqa: BLE001 — the retry is the point
                 log.exception("daily-pipeline retry: ops note failed")
-        held_nhl = _wait_for_nhl_window("daily-pipeline")
-        try:
-            _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
-        finally:
-            if held_nhl:
-                _NHL_WINDOW_LOCK.release()
+        _wait_for_nhl_window("daily-pipeline")
+        _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
     finally:
         _DAILY_LOCK.release()
 
@@ -320,37 +317,43 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
 # that started at :10 would run the chain twice at once and buy odds twice.
 _REFRESH_LOCK = threading.Lock()
 
-# Held by the NHL goalie window while its deciders write picks
-# (run_nhl_goalie_window). A refresh pass or the daily run that starts in that
-# minute or two WAITS for it rather than skipping, then runs whole: every writer
-# to picks runs one at a time (the refresh chain's own rule), and skipping a pass
-# would cost every sport an hour on the hourly cadence. The window itself never
-# waits: it stands down when a pass or the daily run is in progress, since
-# those run the same NHL deciders.
+# Held by an NHL goalie window tick for its whole run: the goalie poll and the
+# deciders (run_nhl_goalie_window). A refresh pass or the daily run that starts
+# during a tick WAITS for it rather than skipping, then lets go of the lock and
+# runs whole: every writer to picks runs one at a time (the refresh chain's own
+# rule), and skipping a pass would cost every sport an hour on the hourly
+# cadence. Neither holds it while it runs. The tick stands down on their OWN
+# locks (_REFRESH_LOCK, _DAILY_LOCK), read again after it has taken this one,
+# so a pass that started in between still wins; and a pass that held this lock
+# for its whole run made every other pass that started meanwhile wait on it
+# (a 26-minute daily run, then a 15-minute wait blamed on the window).
 _NHL_WINDOW_LOCK = threading.Lock()
-# Slack over the deciding steps' own timeouts, for the publish that follows
-# them inside the lock (NHL_GOALIE_WINDOW_TIMEOUT_S, below).
+# Slack over the steps' own timeouts, for the plan read and the publish that
+# run inside the lock between them (NHL_GOALIE_WINDOW_TIMEOUT_S, below).
 NHL_WINDOW_WAIT_SLACK_S = 300
 
 
 def _nhl_window_wait_s() -> float:
-    """How long a pass waits for the window: every step the window runs while
-    holding the lock at its full timeout, plus the publish. Derived, so the
-    wait cannot fall short of what the window may legitimately take."""
+    """How long a pass waits for a tick: every step the tick runs while holding
+    the lock at its full timeout, plus the slack. Derived, so the wait cannot
+    fall short of what a tick may legitimately take."""
     t = NHL_GOALIE_WINDOW_TIMEOUT_S
     return sum(t[k] for k in NHL_GOALIE_WINDOW_LOCKED_STEPS) + NHL_WINDOW_WAIT_SLACK_S
 
 
 def _wait_for_nhl_window(label: str) -> bool:
-    """Block until the NHL goalie window's deciders are done (bounded). True
-    when this caller now holds the lock and must release it."""
+    """Block until an NHL goalie window tick in progress is done (bounded),
+    then let go of the lock: the caller already holds its own lock, which is
+    what keeps the next tick out. True when no tick was still running."""
     if _NHL_WINDOW_LOCK.acquire(blocking=False):
+        _NHL_WINDOW_LOCK.release()
         return True
     wait = _nhl_window_wait_s()
-    log.info("%s: the NHL goalie window is writing picks — waiting for it", label)
+    log.info("%s: an NHL goalie window tick is in progress — waiting for it", label)
     if _NHL_WINDOW_LOCK.acquire(timeout=wait):
+        _NHL_WINDOW_LOCK.release()
         return True
-    log.warning("%s: the NHL goalie window held its lock past %ss — running anyway",
+    log.warning("%s: an NHL goalie window tick held its lock past %ss — running anyway",
                 label, wait)
     return False
 
@@ -363,12 +366,8 @@ def run_refresh_pass(mode: str = "hourly") -> None:
                  mode)
         return
     try:
-        held_nhl = _wait_for_nhl_window(f"refresh-pass[{mode}]")
-        try:
-            _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
-        finally:
-            if held_nhl:
-                _NHL_WINDOW_LOCK.release()
+        _wait_for_nhl_window(f"refresh-pass[{mode}]")
+        _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
     finally:
         _REFRESH_LOCK.release()
 
@@ -1224,12 +1223,13 @@ def run_nba_prop_window() -> None:
 # Each step of an NHL goalie window tick is bounded, so one stuck step cannot
 # hold the job (max_instances=1) or a refresh pass waiting on its lock
 # (_wait_for_nhl_window) for long. The poll is ESPN plus one DailyFaceoff page;
-# the prop odds step buys only what is owed; the scoring is the NHL game models
-# for the named games; the cards are reads and a handful of writes.
-NHL_GOALIE_WINDOW_TIMEOUT_S = {"poll": 120, "prop_odds": 120, "score": 180,
+# the game odds step is one NHL fetch (the bulk call and the per-game 3-way
+# calls); the prop odds step buys only what is owed; the scoring is the NHL
+# game models for the named games; the cards are reads and a handful of writes.
+NHL_GOALIE_WINDOW_TIMEOUT_S = {"poll": 120, "odds": 120, "prop_odds": 120, "score": 180,
                                "totals": 120, "props": 180}
-# The steps run while _NHL_WINDOW_LOCK is held (the poll runs before it).
-NHL_GOALIE_WINDOW_LOCKED_STEPS = ("prop_odds", "score", "totals", "props")
+# Every step runs while _NHL_WINDOW_LOCK is held.
+NHL_GOALIE_WINDOW_LOCKED_STEPS = ("poll", "odds", "prop_odds", "score", "totals", "props")
 # {game_id: known_at} this process has run the deciders on. A restart empties
 # it and the next tick runs them once more for every known game; every NHL
 # decider is insert-once, so that re-run writes nothing already written.
@@ -1246,51 +1246,74 @@ def run_nhl_goalie_window() -> None:
     puck drop. The hourly passes (:17, 7am-5pm ET) would miss a matinee
     confirmed between them. Every five minutes, 11:00-23:55 ET.
 
-    A day with no unstarted NHL game: one read and return. Otherwise the goalie
-    poll for today's games runs (whatever else is running: it writes the
-    designations the gate reads, never a pick). Then, for the games whose
-    matchup is known and not yet decided by this process: if a refresh pass or
-    the daily run is in progress it stands down (those run the same deciders,
-    with this tick's poll already stored); else, holding _NHL_WINDOW_LOCK, the
-    NHL prop odds step (it buys only what is owed), the NHL side models for
-    exactly those games, the totals card and the prop cards, then publish. A
-    step that fails raises after publishing, so the heartbeat records "error"
-    and the game is tried again on the next tick.
+    A day with no unstarted NHL game: one read and return. A refresh pass or
+    the daily run in progress: return before anything, the poll included (the
+    pass polls first and decides after, and a poll rewriting a goalie row in
+    the middle of its scoring could put two models on different goalies).
+    Otherwise, holding _NHL_WINDOW_LOCK for the whole tick: the goalie poll for
+    today's games. If it failed, nothing is decided this tick. Then, for the
+    games whose matchup is known and not yet decided by this process: the NHL
+    game odds (so the side models and the totals card price a fetch taken
+    after the confirmation, not the last hourly pass's), the prop odds (it buys
+    only what is owed), the NHL side models for exactly those games, the totals
+    card and the prop cards, then publish. With no game odds, the side models
+    and the totals card do not run. A step that fails raises after
+    publishing, so the heartbeat records "error" and the game is tried again on
+    the next tick.
     """
     from scripts.nhl_goalie_window import has_games_today, plan_tick
     if not has_games_today():
         return
+    if _REFRESH_LOCK.locked() or _DAILY_LOCK.locked():
+        log.info("NHL goalie window: a refresh pass or the daily run is in progress; "
+                 "it polls the goalies and decides the NHL games itself")
+        return
+    if not _NHL_WINDOW_LOCK.acquire(blocking=False):
+        return
     t = NHL_GOALIE_WINDOW_TIMEOUT_S
     outcomes: dict[str, str] = {}
-    outcomes["nhl-goalie-poll"] = _run(
-        [sys.executable, "run_pipeline.py", "--step", "nhl-goalie-designations-today"],
-        "nhl-goalie-poll", timeout=t["poll"])
-    plan = plan_tick(_NHL_DECIDED)
-    if plan.decide:
+    try:
+        # Read again under the lock: a pass that took its own lock between the
+        # check above and this acquire is in progress now.
         if _REFRESH_LOCK.locked() or _DAILY_LOCK.locked():
-            log.info("NHL goalie window: %s known; a refresh pass or the daily run is in "
-                     "progress and decides them", sorted(plan.decide))
-        elif _NHL_WINDOW_LOCK.acquire(blocking=False):
-            try:
+            log.info("NHL goalie window: a pass started as this tick began; standing down")
+            return
+        outcomes["nhl-goalie-poll"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nhl-goalie-designations-today"],
+            "nhl-goalie-poll", timeout=t["poll"])
+        if outcomes["nhl-goalie-poll"] != "ok":
+            log.warning("NHL goalie window: the goalie poll did not finish; deciding nothing "
+                        "this tick")
+        else:
+            plan = plan_tick(_NHL_DECIDED)
+            if plan.decide:
                 ids = sorted(plan.decide)
                 log.info("NHL goalie window: both goalies confirmed, deciding %s", ids)
-                steps = [
-                    ("nhl-prop-odds", [sys.executable, "run_pipeline.py", "--step", "nhl-prop-odds"],
-                     t["prop_odds"]),
-                    ("nhl-goalie-window-score",
-                     [sys.executable, "-m", "scripts.nhl_goalie_window", "--score", *ids], t["score"]),
-                    ("nhl-over-under", [sys.executable, "run_pipeline.py", "--step", "nhl-over-under"],
-                     t["totals"]),
-                    ("nhl-prop-scoring", [sys.executable, "run_pipeline.py", "--step", "nhl-prop-scoring"],
-                     t["props"]),
-                ]
+                outcomes["nhl-odds"] = _run(
+                    [sys.executable, "run_pipeline.py", "--step", "nhl-odds"], "nhl-odds",
+                    timeout=t["odds"])
+                steps = [("nhl-prop-odds", [sys.executable, "run_pipeline.py", "--step",
+                                            "nhl-prop-odds"], t["prop_odds"])]
+                if outcomes["nhl-odds"] == "ok":
+                    steps += [
+                        ("nhl-goalie-window-score",
+                         [sys.executable, "-m", "scripts.nhl_goalie_window", "--score", *ids],
+                         t["score"]),
+                        ("nhl-over-under", [sys.executable, "run_pipeline.py", "--step",
+                                            "nhl-over-under"], t["totals"]),
+                    ]
+                else:
+                    log.warning("NHL goalie window: no NHL game odds this tick; the side "
+                                "models and the totals card wait for the next one")
+                steps.append(("nhl-prop-scoring", [sys.executable, "run_pipeline.py", "--step",
+                                                   "nhl-prop-scoring"], t["props"]))
                 for label, cmd, timeout in steps:
                     outcomes[label] = _run(cmd, label, timeout=timeout)
                 _publish_new_signals("nhl-goalie-window")
-                if all(outcomes.get(k) == "ok" for k, _, _ in steps):
+                if all(v == "ok" for v in outcomes.values()):
                     _NHL_DECIDED.update(plan.decide)
-            finally:
-                _NHL_WINDOW_LOCK.release()
+    finally:
+        _NHL_WINDOW_LOCK.release()
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
         raise RuntimeError(f"NHL goalie window step(s) did not finish: {bad}")

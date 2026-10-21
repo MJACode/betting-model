@@ -566,7 +566,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
         # is handed the whole slate as it was before the rule (slate_for).
         everything = slate(conn, game_date, now)
         gated = [s.model_id for s in np_.LIVE if not goalie_gate.is_exempt(s.model_id)]
-        known, states = known_slate(conn, everything, f"nhl-props-card ({', '.join(gated)})")
+        known, states = known_slate(conn, everything, f"nhl-props-card ({', '.join(gated)})", now)
         starters = {g: states[g].starters for g in known}
         pooled: list[dict] = []
         for spec in np_.LIVE:

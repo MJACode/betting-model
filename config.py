@@ -4048,6 +4048,17 @@ NHL_PROP_FINAL_CLOSES_MIN = int(os.environ.get("NHL_PROP_FINAL_CLOSES_MIN", "12"
 # fetch, before any goalie is confirmed. Pinned by
 # tests/test_nhl_goalie_gate.py: adding a model here takes his instruction.
 NHL_GOALIE_GATE_EXEMPT = frozenset({"nhl_prop_shots_on_goal"})
+# How long a stored ESPN confirmation counts without a poll re-reading it
+# (models/nhl_goalie_gate.team_problem, nhl_goalie_designations.last_seen_at).
+# A poll that cannot read ESPN (the worker has been IP-blocked twice) stores
+# nothing, so without this bound a confirmation from the afternoon stood all
+# evening, whoever ESPN named after it. Past the bound the game is not known,
+# and a DailyFaceoff name that old no longer vetoes. 30 minutes: the
+# five-minute window re-reads every tick from 11:00 ET, and a refresh pass
+# decides within its own run of its own poll (hourly passes 7.9 minutes
+# median, 13.1 longest; evening 7.4 median, 10.0 at the 95th percentile;
+# pipeline_runs since 2026-10-07).
+NHL_GOALIE_READ_MAX_AGE_MIN = int(os.environ.get("NHL_GOALIE_READ_MAX_AGE_MIN", "30"))
 # One run's ceiling. Measured 2026-10-01 on the live endpoint; see
 # data/ingestors/nhl_prop_odds_ingestor.py. A full 16-game slate fits; a gate
 # that broke and fetched every game on every pass would stop here, not at the

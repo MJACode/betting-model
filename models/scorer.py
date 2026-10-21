@@ -635,7 +635,7 @@ def score_game(conn: DBConnection,
 
     # The goalie rule, for every NHL model by sport (docstring).
     if sport == NHL_GOALIE_SPORT:
-        _apply_nhl_goalie_gate(conn, game_id, picks)
+        _apply_nhl_goalie_gate(conn, game_id, picks, market=market)
 
     # Write to DB
     if picks and not dry_run and write:
@@ -953,30 +953,76 @@ def _nhl_regulation_reason(conn, game_id: str, game_date: str, home_team: str,
 
 # ── No NHL bet until both starting goalies are confirmed (mike, 2026-10-20) ──
 #
-# models/nhl_goalie_gate.py decides; the four functions below apply it inside
-# the scorer. run_scorer reads the gate ONCE per NHL game per pass, before the
+# models/nhl_goalie_gate.py decides; the functions below apply it inside the
+# scorer. run_scorer reads the gate ONCE per NHL game per pass, before the
 # game's models are scored, into _NHL_GATE_MEMO: the moneyline and regulation
 # models (and the insert guard behind them) then see one answer, so a
-# designation the five-minute goalie poll stores in the middle of a game's
-# scoring cannot put the two side models on different sides of the rule.
-# Outside run_scorer (a single score_game call, a card writing through
-# _insert_picks) the gate is read directly. Fails closed either way.
+# designation stored in the middle of a game's scoring cannot put the two side
+# models on different sides of the rule. Outside run_scorer (a single
+# score_game call, a card writing through _insert_picks) the gate is read
+# directly. Fails closed either way.
+#
+# AND THE PRICE MUST POSTDATE THE CONFIRMATION (review, 2026-10-21). A known
+# matchup priced off a fetch taken before it became known bets a number the
+# market set without the goalie news: the five-minute window decided a game
+# confirmed at 16:40Z on the 16:17Z hourly fetch. Before a gated BET stands,
+# DraftKings' newest fetch for the game's market (odds.created_at, our fetch
+# time; snapshot_at is the book's own last-change time and can be hours older
+# in a fresh fetch) must be at or after the moment the matchup became known.
+# Otherwise NONE with PRICE_WAIT, and the next fetch decides. The window
+# fetches NHL odds right before it scores (run_pipeline step nhl-odds).
 NHL_GOALIE_SPORT = "NHL"
-_NHL_GATE_MEMO: dict[str, str | None] = {}
+_NHL_GATE_MEMO: dict = {}          # game_id -> models.nhl_goalie_gate.Matchup
+_NHL_NEWEST_FETCH_SQL = """
+    SELECT max(created_at::timestamptz) FROM odds
+    WHERE game_id = ? AND market = ? AND bookmaker = 'draftkings'
+      AND snapshot_type <> 'in_play'
+"""
+
+
+def _nhl_matchup(conn, game_id: str):
+    """The gate's reading of `game_id` (models.nhl_goalie_gate.Matchup): this
+    pass's memo when run_scorer took one, else a direct read."""
+    if game_id in _NHL_GATE_MEMO:
+        return _NHL_GATE_MEMO[game_id]
+    import models.nhl_goalie_gate as gate
+    return gate.matchup_states(conn, [game_id]).get(game_id) or gate.Matchup(game_id, gate.CHECK_FAILED)
 
 
 def _nhl_matchup_reason(conn, game_id: str) -> str | None:
     """None when both starting goalies of `game_id` are confirmed, else why not."""
-    if game_id in _NHL_GATE_MEMO:
-        return _NHL_GATE_MEMO[game_id]
+    return _nhl_matchup(conn, game_id).reason
+
+
+def _nhl_price_reason(conn, game_id: str, market: str, known_at) -> str | None:
+    """PRICE_WAIT when DraftKings' newest fetch of this game's `market` was
+    taken before the matchup became known (or cannot be read). None when it
+    was taken at or after, or when no moment is recorded (known_at None: a
+    stored designation always carries observed_at, so only a caller that did
+    not read the gate gets here). Fails closed on a failed read."""
+    if known_at is None:
+        return None
     import models.nhl_goalie_gate as gate
-    return gate.matchup_reasons(conn, [game_id]).get(game_id, gate.CHECK_FAILED)
+    from data.db import ConnectionLost
+    try:
+        rows = gate._select(conn, _NHL_NEWEST_FETCH_SQL, (game_id, market))
+    except ConnectionLost:
+        raise
+    except Exception as exc:                                # noqa: BLE001 - fail closed
+        logger.error(f"  {game_id}: newest NHL fetch read failed ({exc!r}); not deciding")
+        return gate.PRICE_WAIT
+    fetched = gate._utc(rows[0][0]) if rows and rows[0] else None
+    if fetched is None or fetched < known_at:
+        return gate.PRICE_WAIT
+    return None
 
 
-def _apply_nhl_goalie_gate(conn, game_id: str, picks: list[dict]) -> int:
+def _apply_nhl_goalie_gate(conn, game_id: str, picks: list[dict], market: str | None = None) -> int:
     """Every BET in `picks` turned NONE with the reason when the game's goalie
     matchup is not known, except an exempt model's (config.
-    NHL_GOALIE_GATE_EXEMPT, shots on goal; per row, by model_id). Mutates in
+    NHL_GOALIE_GATE_EXEMPT, shots on goal; per row, by model_id). With
+    `market` (the game models' paths), also when DraftKings' newest fetch of
+    that market predates the confirmation (_nhl_price_reason). Mutates in
     place; returns how many."""
     import models.nhl_goalie_gate as gate
 
@@ -984,7 +1030,10 @@ def _apply_nhl_goalie_gate(conn, game_id: str, picks: list[dict]) -> int:
         return p.get("signal_type") == "BET" and not gate.is_exempt(p.get("model_id"))
     if not any(held(p) for p in picks):
         return 0
-    reason = _nhl_matchup_reason(conn, game_id)
+    matchup = _nhl_matchup(conn, game_id)
+    reason = matchup.reason
+    if reason is None and market:
+        reason = _nhl_price_reason(conn, game_id, market, matchup.known_at)
     if reason is None:
         return 0
     n = 0
@@ -1006,8 +1055,9 @@ def _refuse_unknown_nhl_bets(conn, picks: list[dict]) -> None:
     bets = [p for p in picks if gate.is_gated_bet(p)]     # the exempt model's pass
     if not bets:
         return
-    ids = {p["game_id"] for p in bets}
-    memo = {g: _NHL_GATE_MEMO[g] for g in ids} if ids <= _NHL_GATE_MEMO.keys() else None
+    ids = {p.get("game_id") for p in bets}
+    memo = ({g: _NHL_GATE_MEMO[g].reason for g in ids}
+            if ids <= _NHL_GATE_MEMO.keys() else None)
     kept = gate.refuse_unknown(conn, picks, mode="none", label="scorer insert", reasons=memo)
     for p, q in zip(picks, kept):
         if q is not p:
@@ -1190,7 +1240,7 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                             home_team, away_team, odds)
     # The sport-level goalie guard (score_game's docstring). The reason above
     # already holds this model to it; this keeps every NHL path the same.
-    _apply_nhl_goalie_gate(conn, game_id, picks)
+    _apply_nhl_goalie_gate(conn, game_id, picks, market="h2h_3way")
     for p in picks:
         p.update(_get_public_betting(conn, game_id, "h2h_3way", p["pick_side"]))
         p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
@@ -4115,7 +4165,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         # The goalie gate, read once for this game's models
                         # (_NHL_GATE_MEMO). Fails closed inside.
                         _NHL_GATE_MEMO.pop(game_id, None)
-                        _NHL_GATE_MEMO[game_id] = _nhl_matchup_reason(conn, game_id)
+                        _NHL_GATE_MEMO[game_id] = _nhl_matchup(conn, game_id)
                     for model_id in relevant_models:
                         # Pick lock: this pair has already produced a BET, so it is
                         # frozen — the number given is the bet of record and nothing
