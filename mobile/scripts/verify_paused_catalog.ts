@@ -80,6 +80,12 @@ check('the NBA projection model\'s short name is a word, not its id',
 // 'O/U Mkt' and 'O/U Fade' do.
 check('the NBA totals overs model\'s chip names its market and method, not the side',
   MODEL_META.nba_total_luck?.shortLabel === 'O/U Luck', String(MODEL_META.nba_total_luck?.shortLabel));
+// The home team-total unders: market plus method too. Its long name says HOME
+// team total, so it is not read as the game's total.
+check('the NBA home team-total model\'s chip names its market and method',
+  MODEL_META.nba_team_total_luck?.shortLabel === 'TT Luck', String(MODEL_META.nba_team_total_luck?.shortLabel));
+check('the NBA home team-total model is named as the home team\'s total',
+  modelLong('nba_team_total_luck') === 'Home Team Total (Unders)', modelLong('nba_team_total_luck'));
 // "Why this bet?": the projection model's probability is an upper bound. The
 // figures are its graded seasons, not a posted record (it has none yet), and
 // the 48% the prices implied is what shows the 50% beat them (UX review,
@@ -158,6 +164,8 @@ check('an active batter prop is still a bet type you can build on',
     nbaProps?.modelIds.join(',') === 'nba_prop_market,nba_prop_projection', nbaProps?.modelIds.join(','));
   check('the NBA totals overs are a game line the picker does not offer as a slot',
     MODEL_META.nba_total_luck?.type === 'game' && betSlotForModel('nba_total_luck', 'game') === null);
+  check('the NBA home team-total unders are a game line the picker does not offer as a slot',
+    MODEL_META.nba_team_total_luck?.type === 'game' && betSlotForModel('nba_team_total_luck', 'game') === null);
   check('the NBA projection model is titled in picker language',
     betTypeLabel('nba_prop_projection') === 'NBA · Player props', betTypeLabel('nba_prop_projection'));
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',

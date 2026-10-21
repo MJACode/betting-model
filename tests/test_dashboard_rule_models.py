@@ -39,6 +39,9 @@ KNOWN_RULES = {
     # 2026-10-17 (mike): NBA totals overs on the shooting-luck gap
     # (models/nba_total_luck.py); its artifact holds parameters, not an estimator.
     "nba_total_luck",
+    # NBA home team-total unders on the home team's part of the same gap; its
+    # artifact holds parameters too.
+    "nba_team_total_luck",
 }
 
 

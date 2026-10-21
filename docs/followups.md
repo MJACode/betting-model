@@ -44,9 +44,10 @@ in fact played, its score and box are missing and every gap since is off;
 (3) the NBA Cup knockout games: nba_schedule lists them only as placeholders with
 no teams (production, read 2026-10-17: quarterfinals 12-04 and 12-05, semifinals
 12-08, the final 12-11). The model prices the quarterfinals and semifinals from
-their `games` rows and keeps the final out of the ratings by its date; reloading
-the schedule once the bracket is set (`python -m data.ingestors.nba_schedule_ingestor
---seasons 2027`, residential machine) gives them their real rows; (4) the
+their `games` rows and keeps the final out of the ratings by its date. Since
+2026-10-20 the worker's daily `nba-schedule` step gives them their real rows once
+ESPN lists the teams (`espn:` keys; the placeholders stay, the date rule reads
+them); no reload by hand is needed; (4) the
 artifact's copy in Supabase's `model_artifacts` — not written yet (the
 committed file is what the worker loads); `python -m scripts.nba_total_luck_build
 --store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the
@@ -173,7 +174,21 @@ card via `pagePlayerId`) can be the other player. Fix: pick detail passes the
 pick's game id or teams; when the by-name log holds more than one id, keep the
 rows whose team plays in that game.
 
-## [ ] [needs-decision] NHL game picks are decided before the night's goalie is known (found 2026-10-13)
+## [x] NHL game picks are decided before the night's goalie is known — DECIDED 2026-10-20 (mike): no NHL bet until both goalies are confirmed
+
+mike, 2026-10-20: *"We should absolutely always know the goalie matchup
+before making a bet as well."* Built on branch `nhl-goalie-confirmed`, for
+every NHL model but the shots-on-goal props (mike, same day: *"Ok on shots on
+goal"*; `config.NHL_GOALIE_GATE_EXEMPT`): one gate (`models/nhl_goalie_gate.py`) at the scorer,
+the totals card, both prop cards and every INSERT that can write an NHL pick;
+ESPN's and DailyFaceoff's designations stored as they change
+(`nhl_goalie_designations`); the game's goalie row rewritten when ESPN
+confirms someone else; the side models' 16:00Z-18:00Z clock removed; a
+five-minute NHL goalie window. Detail: `docs/sports/nhl.md` (2026-10-20). The
+existence-only guard proposed below would not have been enough: the 6am
+goalie did not start in 65 of 251 team-games 2026-10-01..10-19. Still open:
+`nhl_over_under` now decides on game day after the confirmations, a regime
+its prior-day evidence does not grade. The original item:
 
 "OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am
 ET, on Linus Ullmark's goalie row: he started for Ottawa the night before.
@@ -211,6 +226,57 @@ on all games or on the 350 back-to-back games, and move the Ottawa game by
 0.0001 (`docs/nhl_market_lab.md`, "Rest, back-to-back and road trip in the
 production models"; branch `nhl-rest-candidate`). The goalie is what moves
 a back-to-back game, which is why the timing above is the fix.
+
+## [ ] nhl_over_under now decides after the goalies are confirmed; that moment is ungraded (found 2026-10-20)
+
+The goalie rule (above) moved the totals card's decision from a game's first
+qualifying fetch, often the day before, to the first qualifying fetch after
+both goalies are confirmed on game day. Its six-season grade
+(`models/nhl_totals_market.py`, `docs/thresholds.md`) leans on the prior-day
+quotes. Next: grade the same rule at the game-day fetches on the stored
+seasons, with the goalies who actually started, and report it beside the
+current grid.
+
+## [ ] DailyFaceoff from the worker: answered or not? (found 2026-10-20)
+
+The goalie poll reads DailyFaceoff's starting-goalies page as a veto
+(`data/ingestors/nhl_goalie_designations.py`). It answered this machine. It
+sits behind Cloudflare and has never been called from Railway, so it fails
+open. After the first deploy: count `nhl_goalie_designations` rows with
+`source = 'dailyfaceoff'`, and read the worker log for "DailyFaceoff ... not
+read". None means the gate runs on ESPN alone.
+
+## [ ] NHL goalie rule: the checks to run after it merges (found 2026-10-21)
+
+Every NHL model but shots on goal refuses every bet until these hold, so run
+them on the first refresh pass after the deploy:
+
+1. The table exists: `SELECT to_regclass('public.nhl_goalie_designations')`
+   is not NULL. The first version of the migration could never create it
+   (fixed 2026-10-21; checked twice on a scratch Postgres 17.6).
+2. The poll is storing and re-reading: `SELECT source, count(*),
+   max(observed_at), max(last_seen_at) FROM nhl_goalie_designations GROUP BY
+   source`. ESPN rows within minutes of the pass; `last_seen_at` moving on
+   later passes.
+3. The window beats: `SELECT last_run_at, last_status FROM job_heartbeats
+   WHERE job_id = 'nhl_goalie_window'` after 11:00 ET.
+4. A known game is deciding: an NHL BET or a NONE row whose reason is not a
+   goalie one, on a game with both ESPN rows `confirmed`.
+
+No threshold sync is needed: the change touches no threshold.
+
+## [ ] The daily run and a refresh pass can still overlap on a long morning (found 2026-10-21)
+
+The five-minute window no longer polls while either is in progress, so its
+poll cannot rewrite a goalie row in the middle of their scoring. The two of
+them can still overlap each other, as before this branch: a refresh pass
+that starts while the daily run is scoring runs its own goalie poll first,
+which could rewrite a goalie row between the daily run's input read and its
+gate read. The daily runs measured 25.9 minutes median, 28.1 longest, since
+2026-10-07 (`pipeline_runs`), and the first hourly pass is at 11:17Z, so it
+needs a daily run over an hour late; 2026-10-01's ran 10:10Z to 12:39Z. Next,
+if it matters: have the refresh pass skip its goalie poll while the daily
+run holds its lock.
 
 ## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
 
@@ -645,7 +711,12 @@ The one-time re-grade (`clv-price-taken-recompute-2026-10-08`) must run before
 any pruner fix. The fix should keep, per game and book, the row at every
 pick's `created_at` and the last row at or before the start.
 
-## [ ] [needs-decision] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
+## [x] MLB market cards wrote 6 bets after the game started (found 2026-10-08; voided 2026-10-20)
+
+**2026-10-20, closed:** mike, *"Void the 6 mlb picks."* Voided with
+`scripts/void_picks.py --allow-graded` (added the same day; the grade each
+overwrote is kept in `condition_note`). The two late WNBA prop bets below
+(2371848, 2789745) are still in the record: they were not part of the ask.
 
 Read-only query, 2026-10-08: `mlb_total_public_fade` wrote 4 BETs at
 2026-09-16 22:07Z and `mlb_spread_market` 2 at 2026-09-17 00:57Z, each 3 to 7

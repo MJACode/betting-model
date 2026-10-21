@@ -1427,9 +1427,18 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
 
     `snapshot_at` is TEXT in mixed forms; the timestamptz cast is the same
     chronological bound `_closing_prop_odds` already uses.
+
+    A TEAM TOTAL'S CLOSE IS ITS CLOSING SNAPSHOT AND NOTHING ELSE. Its only
+    rows are nba_team_total_luck's own fetches (data/ingestors/
+    nba_team_total_odds.py): the decision fetch, filed 'open', and the close,
+    filed 'close'. The decision fetch is the price taken, so read as the close
+    it graded a pick whose close was never stored at exactly 0.0, for good.
+    With no 'close' row the pick is unmeasured.
     """
     if not commence_time:
         return None
+    snapshot_filter = ("snapshot_type = 'close'" if market.startswith("team_totals")
+                       else "snapshot_type != 'in_play'")
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
     line_filter = ""
@@ -1453,7 +1462,7 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
         WHERE game_id   = %s
           AND market    = %s
           AND bookmaker = %s
-          AND snapshot_type != 'in_play'
+          AND {snapshot_filter}
           AND snapshot_at::timestamptz <= %s::timestamptz
           {line_filter}
         ORDER BY snapshot_at::timestamptz DESC
@@ -2132,7 +2141,10 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         # the number we bet. It is NULL when that snapshot is missing or when
         # the book's latest main line has left that number.
         same_line = closing
-        latest_line = _closing_line_for(prop_market, market, closing_for_line)
+        # The bet book can have no pre-start row while Pinnacle has one (a book
+        # that pulled the market before its close): no line of its own to read.
+        latest_line = (_closing_line_for(prop_market, market, closing_for_line)
+                       if closing_for_line else None)
         same_line_num = _closing_line_for(prop_market, market, same_line) if same_line else None
         line_moved = (latest_line is not None and scored_line is not None
                       and abs(float(latest_line) - float(scored_line)) > 1e-9)
@@ -2259,6 +2271,19 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "under":
             won = (total < total_line)
 
+    elif market in ("team_totals_home", "team_totals_away"):
+        # ONE team's points against its own line, never the sum. The stored
+        # final includes overtime, which is how DraftKings settles a team total.
+        if total_line is None:
+            return "NO_ACTION", 0.0, 0.0
+        team_pts = home_score if market == "team_totals_home" else away_score
+        if team_pts == total_line:
+            return "PUSH", 0.0, 0.0
+        if pick_side == "over":
+            won = (team_pts > total_line)
+        elif pick_side == "under":
+            won = (team_pts < total_line)
+
     elif market in ("spreads", "spreads_1st_5_innings"):
         if spread_home is None:
             return "NO_ACTION", 0.0, 0.0
@@ -2303,6 +2328,11 @@ _RULE_MODEL_MARKETS = {
     # NBA full-game totals, overs (models/nba_total_luck.py). scored_line is
     # the total; the stored final includes overtime, as books settle it.
     "nba_total_luck": "totals",
+    # NBA home team's own points, unders (models/nba_team_total_luck.py).
+    # scored_line is the home team's points line; it settles on the home
+    # team's final score, overtime included, as DraftKings settles a team
+    # total. NEVER "totals": that sums both teams and grades every under a loss.
+    "nba_team_total_luck": "team_totals_home",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

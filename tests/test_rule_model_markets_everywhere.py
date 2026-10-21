@@ -124,9 +124,17 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
     stamped = re.search(r"COMMENT ON FUNCTION public\.clv_power_fair\(double precision\[\]\) IS\s*"
                         r"'([^']+)'", sql).group(1)
     assert declared == stamped
-    assert declared != "clv-standard-v2-power-80-0.05-12", (
-        "clv_game_market changed (nba_total_luck) after production stamped this comment; "
-        "without a new comment the guard never re-creates it")
+    # Every comment a version of clv_game_market has carried. Production held
+    # the first on 2026-10-18 and still on 2026-10-19 (read-only query of the
+    # function's comment); the second shipped with
+    # nba_total_luck, which may reach production before nba_team_total_luck.
+    stamped_before = {
+        "clv-standard-v2-power-80-0.05-12",
+        "clv-standard-v2-power-80-0.05-12-nba-total-luck",
+    }
+    assert declared not in stamped_before, (
+        "clv_game_market changed (nba_team_total_luck) after production may have "
+        "stamped this comment; without a new comment the guard never re-creates it")
 
 
 @pytest.mark.parametrize("model_id", RULE_IDS)

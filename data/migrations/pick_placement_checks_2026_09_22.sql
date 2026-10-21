@@ -21,26 +21,32 @@
 -- UPDATE/DELETE, this returns before any of that.
 -- Single DO block, because data/view_migrations.py runs each file as ONE
 -- statement.
+--
+-- The lockdown check is its own statement. 'rel'::regclass errors while the
+-- statement is planned when the table is absent, so a fresh database never
+-- reaches CREATE. to_regclass is NULL in that case. Privilege checks run
+-- only after the table is known to exist.
 
 DO $mig$
 BEGIN
-  IF to_regclass('public.pick_placement_checks') IS NOT NULL
-     AND EXISTS (
-       SELECT 1 FROM pg_class
-        WHERE oid = 'public.pick_placement_checks'::regclass
-          AND relrowsecurity
-     )
-     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'SELECT')
-     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'INSERT')
-     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'UPDATE')
-     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'DELETE')
-     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'SELECT')
-     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'INSERT')
-     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'UPDATE')
-     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'DELETE')
-  THEN
-    RAISE NOTICE 'pick_placement_checks already locked down - skipping';
-    RETURN;
+  IF to_regclass('public.pick_placement_checks') IS NOT NULL THEN
+    IF EXISTS (
+         SELECT 1 FROM pg_class
+          WHERE oid = to_regclass('public.pick_placement_checks')
+            AND relrowsecurity
+       )
+       AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'SELECT')
+       AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'INSERT')
+       AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'UPDATE')
+       AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'DELETE')
+       AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'SELECT')
+       AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'INSERT')
+       AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'UPDATE')
+       AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'DELETE')
+    THEN
+      RAISE NOTICE 'pick_placement_checks already locked down - skipping';
+      RETURN;
+    END IF;
   END IF;
 
   CREATE TABLE IF NOT EXISTS public.pick_placement_checks (

@@ -117,6 +117,7 @@ jobs:
             tests/test_settled_record_is_immutable.py \
             tests/test_live_money_no_record_only.py \
             tests/test_published_record.py \
+            tests/test_snapshot_pass_order.py \
             tests/test_record_units_agree.py \
             tests/test_record_hero.py \
             tests/test_app_crash_log.py \
@@ -189,6 +190,7 @@ jobs:
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
             tests/test_discord_post_one_pick_migration.py \
+            tests/test_live_bet_index.py \
             tests/test_results_recap_message_id.py \
             tests/test_backfill_results_recap.py \
             tests/test_job_queue.py \
@@ -199,10 +201,14 @@ jobs:
             tests/test_x_publisher.py \
             tests/test_free_pick_names_the_cheaper_book.py \
             tests/test_period_recaps.py \
+            tests/test_eggz_picks.py \
+            tests/test_nhl_period_scores_api.py \
             tests/test_mobile_stat_segments.py \
             tests/test_mobile_line_ruler.py \
             tests/test_mobile_nhl_skater_stats.py \
             tests/test_mobile_my_books.py \
             tests/test_member_sportsbooks_migration.py \
+            tests/test_social_post_queue_migration.py \
             tests/test_ddl_guard.py \
-            tests/test_nfl_wind_stability.py
+            tests/test_nfl_wind_stability.py \
+            tests/test_mobile_lines_board.py

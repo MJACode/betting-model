@@ -42,10 +42,16 @@ def _iso(dt):
 
 
 def test_started_games_are_not_on_the_slate():
+    import config
     rows = [
         ("NHL_A", "OTT", "PHI", _iso(NOW - timedelta(seconds=1)), "2026-10-08"),
-        ("NHL_B", "BOS", "UTA", _iso(NOW + timedelta(seconds=1)), "2026-10-08"),
+        ("NHL_B", "BOS", "UTA", _iso(NOW + timedelta(minutes=config.NHL_DECIDE_BEFORE_START_MIN + 1)),
+         "2026-10-08"),
         ("NHL_C", "VGK", "TOR", _iso(NOW + timedelta(hours=30)), "2026-10-09"),
+        # The feed's start time is about ten minutes after puck drop: a game
+        # this close may already be live.
+        ("NHL_D", "SEA", "DET", _iso(NOW + timedelta(minutes=config.NHL_DECIDE_BEFORE_START_MIN - 1)),
+         "2026-10-08"),
     ]
     conn = _SlateConn(rows)
     games = card.slate(conn, NOW)
@@ -230,8 +236,12 @@ class _LockConn:
         self.commits += 1
 
 
-def test_insert_once_under_the_model_lock():
+def test_insert_once_under_the_model_lock(monkeypatch):
+    import models.nhl_goalie_gate as gate
     from scripts.nfl_wind_publisher import _model_lock_key
+    # Both starting goalies confirmed: this test is the lock, not the gate
+    # (tests/test_nhl_goalie_gate.py is the gate).
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
 
     rows = card.pick_rows([_bet()], GAMES, bankroll=10_000)
     conn = _LockConn()

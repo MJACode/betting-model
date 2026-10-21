@@ -88,11 +88,40 @@ bounds it:
   event's only line-shop row, since those are priced up to 7 days ahead.
 - **NBA keeps its whole price path in `odds`** (2026-10-17, for the game-market search in
   `docs/nba_models_2026.md` §6.5). Neither tier touches an NBA row. Instead `thin_repeats`
-  runs first, in its own transactions, on settled games of the last 21 days: it deletes the
-  middle of every unchanged run per (game, market, book, pre-game or in-play), keeping the row
-  where each book moved and the last row it held. Every as-of read is unchanged. Paid history
-  (any non-NULL `source`) is never thinned. Measured dry run on the opening week's rows: 766,140
-  of 773,041 would go, 38.9 s for five game dates.
+  runs first, on settled games of the last 21 days: it deletes the middle of every unchanged
+  run per (game, market, book, pre-game or in-play), keeping the row where each book moved and
+  the last row it held. Every as-of read is unchanged. Paid history (any non-NULL `source`) is
+  never thinned, and since 2026-10-20 neither are `draftkings`, `sbr_consensus` or a `cfbd…`
+  archive book (before that it deleted their repeated rows). Measured dry run on the opening
+  week's rows: 766,140 of 773,041 would go, 38.9 s for five game dates. Since 2026-10-20 it
+  runs one (game, market) per statement, each committed on its own: it was one statement for
+  every game of a date, and one 10-20 game held 77,278 rows before tip-off, about 25.8k per
+  market. It has its own time budget, `PRUNE_THIN_SECONDS` (300), and goes newest date first.
+  A statement that times out is rolled back, logged and retried by the next run, and nothing
+  the thinning raises can stop the two table prunes.
+- **One proposition per statement** (2026-10-20). The whole-table version died on the 120 s
+  statement timeout every day, and from 2026-09-03 it thinned nothing in either table. Each
+  statement now covers one (game, market) in `odds` or one (game, market, player) in
+  `player_prop_odds`, read through the index that starts with those columns, and commits on
+  its own. The keep rules work per (proposition, book), so on the rows a run visits, the kept
+  and deleted rows are the same as before. Over time it keeps more, never less: a settled date
+  is not revisited, so a row written later onto one of its games, or a game whose date moves
+  onto a settled date, is kept. Per run and per table: first the dates an earlier run left
+  unfinished, then the newest date that has left the window (and any a missed run skipped),
+  then the window, then the backlog back to `BACKLOG_FLOOR` (2026-09-01), until
+  `PRUNE_RUN_SECONDS` (600) or `PRUNE_RUN_ROWS` (10,000,000) is spent. With the thinning's
+  300 s that is at most 25 minutes plus the statement in flight on each budget, which keeps
+  the daily run finishing by about 7:00am ET at the worst. The `odds` prune skips NBA games
+  entirely, since it never deletes their rows. Progress is a `job_heartbeats` row per table
+  (`prune_odds_frontier:<table>`), so finished dates are never re-read.
+- **A failed statement fails the step, and does not stall the prune.** A timeout is rolled
+  back and logged, and the rest of its date carries on. The date goes on a retry list in the
+  progress record and the walk moves past it; it leaves the list only when all of it
+  succeeds. Any failed statement, in either table or the thinning, and a progress record that
+  could not be read (that table is skipped for the run rather than restarted), make the run
+  raise after both tables have had their turn, so the pipeline step returns False.
+- Games older than the floor are not revisited: rows written later onto old games, such as
+  the paid NFL import tagged `nfl_odds_cache|…`, are kept.
 - **Pruned history is gone permanently.** Raise `PRUNE_NON_DK_KEEP_DAYS` before building
   anything that needs non-DK history (e.g. "did the best book beat DK at close?").
 

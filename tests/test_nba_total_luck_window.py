@@ -37,7 +37,8 @@ def test_the_plan_lists_exactly_the_undecided_games_61_to_66_minutes_out(monkeyp
     import scripts.nba_total_luck_card as card
     import scripts.nba_total_luck_window as win
     now = _et(2026, 11, 5, 18, 0)
-    games = {g: {"home": "H", "away": "A", "game_date": "2026-11-05", "season": 2027,
+    # Real teams: a game without two is never planned (the placeholder test below).
+    games = {g: {"home": "MIL", "away": "BOS", "game_date": "2026-11-05", "season": 2027,
                  "tip": now + timedelta(minutes=m)}
              for g, m in (("G60", 60), ("G61", 61), ("G66", 66), ("G67", 67), ("G_DONE", 64))}
     seen = {}
@@ -50,6 +51,64 @@ def test_the_plan_lists_exactly_the_undecided_games_61_to_66_minutes_out(monkeyp
     monkeypatch.setattr(card, "decided_games", lambda conn, ids: {"G_DONE"} & set(ids))
     assert win.plan(object(), now) == ["G61", "G66"]
     assert seen["horizon"] == win.LOOK_AHEAD_MIN[1]
+
+
+def _game(home, away, tip):
+    return {"home": home, "away": away, "game_date": tip.astimezone(ET).date().isoformat(),
+            "season": 2027, "tip": tip}
+
+
+def test_a_schedule_placeholder_with_no_teams_is_never_planned(monkeypatch):
+    """RULE: a game without two real teams is never planned. The schedule
+    holds NBA Cup knockout placeholders before their teams are known: three
+    games rows on 2026-12-04, 12-05 and 12-08, home and away the string 'NaN',
+    tipping at midnight Eastern, listed 'regular' (production, read
+    2026-10-20). No event in the feed is that game. Planned, each one fetched
+    the NBA board on every tick of its window and was never decided, so the
+    next tick fetched again."""
+    import scripts.nba_total_luck_card as card
+    import scripts.nba_total_luck_window as win
+    tip = _et(2026, 12, 4, 0, 0)                      # midnight Eastern, 05:00Z
+    now = tip - timedelta(minutes=64)
+    games = {
+        "NBA_2026-12-04_nan_nan": _game("NaN", "NaN", tip),
+        "G_AWAY_NONE": _game("MIL", None, tip),
+        "G_HOME_NAN": _game(float("nan"), "BOS", tip),
+        "G_REAL": _game("MIL", "BOS", tip),
+    }
+    asked = []
+    monkeypatch.setattr(card, "slate", lambda *a, **k: games)
+    monkeypatch.setattr(card, "decided_games",
+                        lambda conn, ids: asked.append(list(ids)) or set())
+    assert win.plan(object(), now) == ["G_REAL"]
+    assert asked == [["G_REAL"]], "a placeholder is not even looked up"
+    # A night holding only placeholders plans nothing and reads no ledger.
+    del games["G_REAL"]
+    asked.clear()
+    assert win.plan(object(), now) == [] and asked == []
+
+
+# Every team stored on the 2026-27 NBA games rows (production, read 2026-10-20:
+# the distinct home_team and away_team of games WHERE sport = 'NBA' AND
+# season = 2027, 1,203 rows): these 30 and the placeholder 'NaN'.
+STORED_TEAMS_2027 = ("ATL BKN BOS CHA CHI CLE DAL DEN DET GSW HOU IND LAC LAL MEM "
+                     "MIA MIL MIN NOP NYK OKC ORL PHI PHX POR SAC SAS TOR UTA WAS").split()
+
+
+def test_every_team_on_the_stored_schedule_is_planned(monkeypatch):
+    """The team rule must drop no real game. nba_total_luck bets real money: a
+    team stored under an abbreviation the rule does not know would never be
+    priced again, and nothing would say so."""
+    import scripts.nba_total_luck_card as card
+    import scripts.nba_total_luck_window as win
+    assert len(set(STORED_TEAMS_2027)) == 30
+    now = _et(2026, 11, 5, 18, 0)
+    tip = now + timedelta(minutes=63)
+    pairs = list(zip(STORED_TEAMS_2027[::2], STORED_TEAMS_2027[1::2]))
+    games = {f"G_{h}_{a}": _game(h, a, tip) for h, a in pairs + [(a, h) for h, a in pairs]}
+    monkeypatch.setattr(card, "slate", lambda *a, **k: games)
+    monkeypatch.setattr(card, "decided_games", lambda conn, ids: set())
+    assert win.plan(object(), now) == sorted(games)
 
 
 def test_the_plan_creates_no_table(monkeypatch):
@@ -66,9 +125,11 @@ def test_the_plan_creates_no_table(monkeypatch):
 
 def _tick(monkeypatch, due, result="ok"):
     import scheduler
-    import scripts.nba_total_luck_window as win
+    import scripts.nba_pregame_window as pw
     ran, published = [], []
-    monkeypatch.setattr(win, "plan_tick", lambda now=None: due)
+    # One planning read for both NBA totals models (scripts/nba_pregame_window);
+    # nba_team_total_luck has nothing due here.
+    monkeypatch.setattr(pw, "plan_tick", lambda now=None: pw.PregamePlan(total_luck=due))
     monkeypatch.setattr(scheduler, "_run",
                         lambda cmd, label, **kw: ran.append((label, cmd, kw)) or
                         (result if label == "nba-total-luck-fetch" else "ok"))
@@ -93,9 +154,9 @@ def test_a_tick_fetches_then_decides_then_publishes_each_step_bounded(monkeypatc
 
 def test_a_failed_step_is_recorded_as_an_error_after_publishing(monkeypatch):
     import scheduler
-    import scripts.nba_total_luck_window as win
+    import scripts.nba_pregame_window as pw
     published = []
-    monkeypatch.setattr(win, "plan_tick", lambda now=None: ["G1"])
+    monkeypatch.setattr(pw, "plan_tick", lambda now=None: pw.PregamePlan(total_luck=["G1"]))
     monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw:
                         "timeout" if label == "nba-total-luck-fetch" else "ok")
     monkeypatch.setattr(scheduler, "_publish_new_signals", published.append)

@@ -28,16 +28,16 @@ BEGIN
   IF to_regclass('public.byom_game_facts') IS NOT NULL
      AND to_regclass('public.byom_prop_facts') IS NOT NULL THEN
     IF (SELECT relrowsecurity FROM pg_class
-         WHERE oid = 'public.byom_game_facts'::regclass)
+         WHERE oid = to_regclass('public.byom_game_facts'))
        AND (SELECT relrowsecurity FROM pg_class
-             WHERE oid = 'public.byom_prop_facts'::regclass)
+             WHERE oid = to_regclass('public.byom_prop_facts'))
        AND EXISTS (
          SELECT 1 FROM pg_policy
-          WHERE polrelid = 'public.byom_game_facts'::regclass
+          WHERE polrelid = to_regclass('public.byom_game_facts')
             AND polname = 'anon read byom_game_facts')
        AND EXISTS (
          SELECT 1 FROM pg_policy
-          WHERE polrelid = 'public.byom_prop_facts'::regclass
+          WHERE polrelid = to_regclass('public.byom_prop_facts')
             AND polname = 'anon read byom_prop_facts')
        AND has_table_privilege('anon', 'public.byom_game_facts', 'SELECT')
        AND has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT')
@@ -160,7 +160,7 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_policy
-     WHERE polrelid = 'public.byom_game_facts'::regclass
+     WHERE polrelid = to_regclass('public.byom_game_facts')
        AND polname = 'anon read byom_game_facts') THEN
     CREATE POLICY "anon read byom_game_facts"
       ON public.byom_game_facts
@@ -169,7 +169,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_policy
-     WHERE polrelid = 'public.byom_prop_facts'::regclass
+     WHERE polrelid = to_regclass('public.byom_prop_facts')
        AND polname = 'anon read byom_prop_facts') THEN
     CREATE POLICY "anon read byom_prop_facts"
       ON public.byom_prop_facts

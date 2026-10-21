@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,6 +34,7 @@ from data_ingest.weather import (STADIUM_COORDS, INDOOR_ROOFS, DEPLOY_THRESHOLD,
                                  fetch_live_forecast, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
 from data_ingest.cards import clear_card
+from data_ingest.schedule import load_schedule as load_db_schedule
 from _nfl_models import load_nfl_model
 
 # NOT `from models.wind_totals import ...` -- the platform's top-level `models`
@@ -64,15 +64,13 @@ TEAM_MAP_REV = None  # filled from parse.TEAM_MAP
 
 
 def load_schedule(days: int) -> pd.DataFrame:
-    g = pd.read_csv("data/games.csv")
-    dt = pd.to_datetime(g.gameday + " " + g.gametime, errors="coerce")
-    g["kick_utc"] = (dt.dt.tz_localize(ZoneInfo("America/New_York"), ambiguous=True,
-                                       nonexistent="shift_forward").dt.tz_convert("UTC"))
-    now = pd.Timestamp.now(tz="UTC")
-    g = g[(g.kick_utc > now) & (g.kick_utc <= now + pd.Timedelta(days=days))].copy()
-    g["matchup"] = g.away_team + " @ " + g.home_team
-    g["lead_days"] = (g.kick_utc - now).dt.total_seconds() / 86400
-    return g
+    """The next `days` of games, from the games table (data_ingest/schedule.py).
+
+    Not data/games.csv: that copy was frozen on 2026-08-15 with a stale CHI @ GB
+    kickoff, the home team's US stadium for every game abroad, and no playoff
+    games. `stadium_id` here is the RESOLVED venue, None when it is not known.
+    """
+    return load_db_schedule(0.0, days)
 
 
 def attach_forecast(g: pd.DataFrame, days: int = 9) -> pd.DataFrame:
@@ -83,8 +81,21 @@ def attach_forecast(g: pd.DataFrame, days: int = 9) -> pd.DataFrame:
     outdoor = g[open_air_mask(g)].copy()
     if outdoor.empty:
         return outdoor
+    # A game whose venue the schedule cannot establish is kept on the board
+    # with no forecast, and says why; it is never forecast at the home team's
+    # stadium instead (data_ingest/weather.resolve_venue).
+    unplaced = outdoor[~outdoor.stadium_id.isin(STADIUM_COORDS)]
+    for r in unplaced.itertuples():
+        print(f"venue not established for {r.matchup}: "
+              f"{getattr(r, 'venue_note', '') or 'no stadium on the schedule row'}"
+              " -- not forecast", file=sys.stderr)
+    placed = outdoor[outdoor.stadium_id.isin(STADIUM_COORDS)]
+    for c in ("forecast_wind", "gust", "temp", "exp_true_wind"):
+        outdoor[c] = float("nan")
+    if placed.empty:
+        return outdoor
     frames = []
-    for sid in sorted(outdoor.stadium_id.unique()):
+    for sid in sorted(placed.stadium_id.unique()):
         frames.append(fetch_live_forecast(sid, days=days))
     hourly = pd.concat(frames, ignore_index=True)
     outdoor["forecast_wind"] = wind_at_kickoff(hourly, outdoor, "wind").reindex(outdoor.game_id).values

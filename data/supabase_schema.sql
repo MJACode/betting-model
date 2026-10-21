@@ -545,6 +545,13 @@ CREATE TABLE IF NOT EXISTS nfl_team_game_stats (
     commence_time   TIMESTAMPTZ,
     points_for      INTEGER,
     points_against  INTEGER,
+    -- venue, raw from nflverse (2026-10-20); resolved to coordinates at read
+    -- time by nfl/data_ingest/weather.resolve_venue. stadium_id is NOT
+    -- trustworthy alone for a game abroad (PHI @ JAX at Tottenham carries
+    -- JAX00), so the name and the Home/Neutral flag travel with it.
+    stadium_id      TEXT,
+    stadium         TEXT,
+    location        TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(game_id, team)
 );

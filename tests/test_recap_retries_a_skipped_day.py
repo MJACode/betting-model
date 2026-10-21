@@ -146,6 +146,22 @@ def _schema(db):
         published_at TEXT)""")
     db.execute("CREATE UNIQUE INDEX uq_snap ON results_snapshots "
                "(game_date, scope, COALESCE(sport, ''))")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT PRIMARY KEY, sport TEXT, game_date TEXT,
+        home_score INT, away_score INT, commence_time TEXT)""")
+    for sport in ("MLB", "NFL", "NHL"):
+        db.execute(
+            "INSERT INTO games (game_id, sport, game_date, home_score, away_score) "
+            "VALUES (?,?,?,1,0)",
+            (f"{sport}_{DAY}", sport, DAY))
+    # A game of a sport with no bet that night stays unfinished. It must not
+    # hold the recap.
+    db.execute(
+        "INSERT INTO games (game_id, sport, game_date, home_score, away_score) "
+        "VALUES (?,?,?,NULL,NULL)",
+        (f"UFC_{DAY}", "UFC", DAY))
+    from tracking.published_units import install_sqlite
+    install_sqlite(db)
 
 
 def _add_pick(db, row, *, graded: bool):
@@ -487,12 +503,16 @@ def test_a_day_with_nothing_counting_posts_nothing_and_logs_nothing(monkeypatch)
     lines: list[str] = []
     sink = logger.add(lambda m: lines.append(str(m)), level="DEBUG")
     try:
-        for hhmmss in ("07:24:30", "08:24:30", "22:54:30"):
+        for hhmmss in ("07:24:30", "08:24:30"):
             w.now = datetime(2026, 10, 13, *map(int, hhmmss.split(":")),
                              tzinfo=ET)
             before = len(w.conn.statements)
             assert dn.post_missed_recap() == 0
             assert len(w.conn.statements) - before == 1, "one statement a pass"
+        w.now = datetime(2026, 10, 13, 22, 54, 30, tzinfo=ET)
+        before = len(w.conn.statements)
+        assert dn.post_missed_recap() == 0
+        assert len(w.conn.statements) - before == 0, "an evening pass does not query"
     finally:
         logger.remove(sink)
     assert w.discord == [] and w.tweets == []
@@ -547,6 +567,27 @@ def test_the_6am_run_runs_nothing_new(monkeypatch):
 
 def test_the_retry_counts_exactly_the_recaps_universe():
     """Built from _SETTLED_SQL, so a paused model's row can never wake it."""
-    sql = dn._missed_recap_state_sql()
-    assert dn._SETTLED_SQL.format(window="= %s") in sql
+    sql = dn._missed_recap_dates_sql(3)
+    assert dn._SETTLED_SQL.format(window="= day.game_date") in sql
+    assert "day.game_date" in sql
     assert config.paused_row_exclusion_sql("p") in sql
+
+
+def test_a_missed_day_posts_on_a_later_morning_for_that_date(monkeypatch):
+    """Oct 12 missed the morning of the 13th. The morning of the 14th
+    posts it, named for Oct 12. The evening of the 13th does not."""
+    w = World(monkeypatch)
+    w.daily("06:02:33")
+    for row in NHL_COUNTING:
+        _grade(w.db, row)
+    w.db.commit()
+    w.now = datetime(2026, 10, 13, 22, 0, tzinfo=ET)
+    assert dn.post_missed_recap() == 0
+    assert "discord_results:2026-10-12" not in w.ledger()
+    assert "x_results:2026-10-12" not in w.ledger()
+    w.now = datetime(2026, 10, 14, 8, 0, tzinfo=ET)
+    assert dn.post_missed_recap() == 2
+    assert "discord_results:2026-10-12" in w.ledger()
+    assert "x_results:2026-10-12" in w.ledger()
+    assert "Mon Oct 12" in w.discord[0]["title"]
+    assert "2026-10-14" not in w.discord[0]["title"]
