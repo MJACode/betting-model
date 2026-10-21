@@ -124,8 +124,28 @@ the schedule did not type as regular season. Measured 2026-10-20: ESPN's
 2026-27 schedule holds the same 1,200 games as the stored one, month by month,
 at the same tips but one (CHI @ MIL 2026-10-23, where ESPN alone says 4pm ET
 and the league's load, the Bucks' release and ticket listings say 7pm CT, so
-ESPN never moves a tip on its own word). A by-hand NBA.com load still works and
-replaces any `espn:` row of the games it writes.
+ESPN never moves a tip on its own word). A tip moves when the odds feed's start
+for the game shows it too. The feed lists the books' start, not the league's
+tip: of the 46 2026-27 games it had written by 10-20, 8 sat on the tip, 35 ten
+minutes after it, 3 more 8 to 22 minutes after, none before. So the feed seconds
+ESPN when its start is from a minute before to 30 minutes after ESPN's new tip
+and does not fit the stored tip, or sits nearer ESPN's when it fits both. This
+matters for a game flexed later: all four NBA models take the earlier of the
+schedule's tip and the feed's start, so a 7pm game flexed to 9:30 that the
+schedule still held at 7pm would be decided three and a half hours early. A
+by-hand NBA.com load still works and replaces any `espn:` row of the games it
+writes. **If the scoreboard refuses this month or next, that month is read from
+ESPN's other host**, `sports.core.api.espn.com`. The scoreboard host answered
+the worker 403 on every day it was probed from 2026-08-08 to 2026-09-30, eight
+weeks, while the other host served the WNBA results step throughout. That host
+lists games as links: one call per game and one per team. December 2026 read
+that way took 209 calls and 170 seconds from the build machine and came back
+the same as the scoreboard (172 games, the same ids, the same fields but status
+and TV). All nine months would add about 18 minutes to the 6am run, so only the
+next two are read; a game further out is read again by the time it is near. It
+carries no status or TV inline, so a month read from it records no postponement
+and leaves a stored status as it is. A month neither host answers whole is left
+as stored, the step goes red, and the health check warns after 36 hours.
 
 **What the prop models price.** Every regular-season game, the Cup quarterfinals
 and semifinals included, whether or not the schedule lists it yet (a game the
@@ -138,7 +158,9 @@ regular season only too (the Cup final never counts).
 
 **Rest.** The projection model's rest, back-to-back, games-in-four-days and
 road trip, and every player's history, read every regular-season game in
-`games` plus the Cup final, listed or not (`models.nba_props.regular_game_ids`).
+`games`, listed or not, plus the Cup final once the schedule lists it
+(`models.nba_props.regular_game_ids`; ESPN carries the final's note before its
+teams are set, so the refresh types it the day they are).
 Removing the Cup week from 2023-24..2025-26 put the wrong rest on 30 team-games
 a season.
 

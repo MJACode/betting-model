@@ -593,11 +593,14 @@ def _swapped_ufc_id(game_id: str) -> str | None:
 # Until 2026-10-20 nba_schedule was one load by hand (every 2026-27 row stamped
 # 2026-10-15 22:17Z) that nothing refreshed, so the NBA Cup week, the knockout
 # games, play-in, playoffs and moved tips could never reach it, and both NBA
-# prop models price and read rest only from what it lists. The daily
+# prop models priced and read rest only from what it listed. The daily
 # `nba-schedule` step (data/ingestors/nba_schedule_refresh.py) now stamps
 # updated_at on every row ESPN confirms, so the newest updated_at IS the last
-# refresh that reached ESPN. 36 hours: the 6am run, a late same-day retry, and
-# slack; a whole missed day reads STALE. The gate is NBA games in `games` from
+# refresh that reached ESPN. 36 hours: one day's 6am run and slack for a late
+# one; a whole missed day reads STALE. Nothing retries a failed schedule step
+# the same day: tracking/daily_retry.py re-runs a daily that never ran or died
+# mid-run, or whose MLB freshness steps failed, so a step that failed on its
+# own waits for the next 6am run. The gate is NBA games in `games` from
 # three days back to 45 ahead -- the odds feed writes those rows too, so a dead
 # refresh does not shut its own gate.
 NBA_SCHEDULE_MAX_AGE_HOURS = 36
