@@ -272,6 +272,30 @@ def test_no_database_means_no_games_never_the_file(nfl_path, tmp_path, monkeypat
     assert "NFL schedule unavailable" in capsys.readouterr().err
 
 
+def test_a_game_that_has_kicked_off_never_reaches_the_wind_card(nfl_path, monkeypatch):
+    """The ONLY started-game guard on the wind model.
+
+    `wind_totals.select_bets` bounds the lead from above only, the live odds
+    pull carries in-play totals, and the publisher's BET insert does not ask
+    whether the game has started. So the schedule's `kick_utc > now` is what
+    keeps an in-play total off the card; a bound loosened by a day would put
+    every game of the last 24 hours back on it.
+    """
+    card = _load_script("weekly_wind_card")
+    now = pd.Timestamp.now(tz="UTC").floor("min")
+    _feed(monkeypatch, [
+        _row("2026_08_KC_DEN", "KC", "DEN", now - pd.Timedelta(hours=1),
+             stadium_id="DEN00", stadium="Empower Field at Mile High"),
+        _row("2026_08_CHI_SEA", "CHI", "SEA", now - pd.Timedelta(minutes=1),
+             stadium_id="SEA00", stadium="Lumen Field"),
+        _row("2026_08_BUF_NE", "BUF", "NE", now + pd.Timedelta(hours=1),
+             stadium_id="BOS00", stadium="Gillette Stadium"),
+    ])
+    g = card.load_schedule(7)
+    assert list(g.game_id) == ["2026_08_BUF_NE"]
+    assert (g.lead_days > 0).all()
+
+
 def test_a_playoff_game_reaches_the_cards(nfl_path):
     """The file had none. A wild-card row in the games table is just a game."""
     from data_ingest.schedule import load_schedule
