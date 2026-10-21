@@ -1,7 +1,9 @@
 # Graph Report - wt_schedule-pending-game-gate  (2026-10-21)
 
 ## Corpus Check
-- cluster-only mode — file stats not available
+- 1590 files · ~2,676,530 words
+- Verdict: corpus is large enough that graph structure adds value.
+- Unclassified: 15 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
 ## Summary
 - 32024 nodes · 76572 edges · 957 communities (752 shown, 205 thin omitted)
@@ -9,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f207f06b`
+- Built from commit: `358f9e10`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -892,16 +894,16 @@
 10. `radii` - 80 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `What is captured` --references--> `AppErrorBoundary`  [INFERRED]
-  docs/app_errors.md → mobile/src/components/AppErrorBoundary.tsx
 - `Forward capture (2026-27)` --references--> `run_forward()`  [INFERRED]
   docs/nba_public_splits.md → data/ingestors/nba_public_splits_ingestor.py
+- `Things a reader should know` --references--> `shot_value()`  [INFERRED]
+  docs/nba_pbp_stints.md → data/ingestors/nba_stints.py
+- `What is captured` --references--> `AppErrorBoundary`  [INFERRED]
+  docs/app_errors.md → mobile/src/components/AppErrorBoundary.tsx
 - `Where it lives` --references--> `startCrashLogging()`  [INFERRED]
   docs/app_errors.md → mobile/src/lib/crashLogSetup.ts
 - `8.1 P1, the market-anchored model: choices fixed before any P1 cell was graded (2026-10-18)` --references--> `choose_C()`  [INFERRED]
   docs/nba_models_2026.md → models/nhl_moneyline_anchored.py
-- `IG-1: how the lab reads the row above (2026-10-17, written before any IG-1 number)` --references--> `run_cells()`  [INFERRED]
-  docs/nba_models_2026.md → scripts/nba_game_harness.py
 
 ## Import Cycles
 - None detected.
@@ -3941,7 +3943,7 @@ Nodes (3): _announce(), _enabled(), run_agent()
   docs/privacy.html · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **105 isolated node(s):** `RFC-4122`, `expo/tsconfig.base`, `@babel/core`, `babel-plugin-module-resolver`, `babel-preset-expo` (+100 more)
+- **105 isolated node(s):** `expo-asset`, `expo-dev-client`, `expo-font`, `react-native-purchases`, `react-native-screens` (+100 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 12242 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **205 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -3949,17 +3951,17 @@ Nodes (3): _announce(), _enabled(), run_agent()
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Table` connect `NBA public splits pipeline step` to `Mobile contrast tones and range slider`, `Scratch Postgres migration test harness`?**
-  _High betweenness centrality (0.272) - this node is a cross-community bridge._
-- **What connects `RFC-4122`, `expo/tsconfig.base`, `@babel/core` to the rest of the system?**
+  _High betweenness centrality (0.211) - this node is a cross-community bridge._
+- **What connects `expo-asset`, `expo-dev-client`, `expo-font` to the rest of the system?**
   _105 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Mobile matchup helpers and verify scripts` be split into smaller, more focused modules?**
   _Cohesion score 0.031802911534154536 - nodes in this community are weakly interconnected._
 - **Why does `over()` connect `Mobile contrast tones and range slider` to `Mobile bankroll storage and settings card`, `NBA public splits pipeline step`?**
-  _High betweenness centrality (0.213) - this node is a cross-community bridge._
+  _High betweenness centrality (0.181) - this node is a cross-community bridge._
 - **Should `Mobile stats board` be split into smaller, more focused modules?**
   _Cohesion score 0.01110488065002034 - nodes in this community are weakly interconnected._
 - **Why does `inserted_minus_start_min()` connect `NBA public splits pipeline step` to `NBA public betting splits ingestor`, `NBA public splits percentage parsing`?**
-  _High betweenness centrality (0.162) - this node is a cross-community bridge._
+  _High betweenness centrality (0.120) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
