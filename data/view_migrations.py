@@ -425,6 +425,15 @@ ACTIVE_MIGRATIONS: list[str] = [
     # until this lands the gate fails closed and no NHL model bets. One new
     # table, anon locked out. Does not rewrite the record views or picks.
     "add_nhl_goalie_designations_2026_10_20.sql",
+    # 2026-10-14, slotted 2026-10-21: game spread/total market edge was
+    # Pinnacle's last quote still on our number, not the latest main line.
+    # Copies the affected picks, then nulls market_clv_pct, market_clv_pp,
+    # market_clv_method and pinnacle_close_odds. Does not rewrite clv_pct,
+    # the grade, the stake, or any view. clv_standard_v2 is already applied
+    # and is not edited. Once (clv_pinnacle_mainline_once_2026_10_14).
+    # Sits before the posted-stake pair. Those two files stay adjacent,
+    # and the view patch stays last.
+    "clv_pinnacle_mainline_2026_10_14.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

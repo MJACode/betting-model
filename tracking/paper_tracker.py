@@ -2113,10 +2113,20 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             moved_snap, _moved_book = _first_game_close(
                 conn, game_id, market, close_bound, pick_book=bookmaker,
                 match_line=None) if has_line else (closing, close_book)
-            pin_snap, _pin_book = (closing, sharp) if bookmaker == sharp else (
-                _first_game_close(
+            # Market edge uses Pinnacle's latest main line (match_line=None:
+            # MLB/NHL spreads stay on ±1.5). Filtering to scored_line first
+            # kept the last time Pinnacle still showed our number, which on
+            # 2026-10-14 was hours before the close for 78 of 301 game
+            # spread/total rows. pin_moved below turns that into NULL.
+            if has_line:
+                pin_snap, _pin_book = _first_game_close(
                     conn, game_id, market, close_bound, pick_book=sharp,
-                    match_line=scored_line if has_line else None))
+                    match_line=None)
+            else:
+                pin_snap, _pin_book = (closing, sharp) if bookmaker == sharp else (
+                    _first_game_close(
+                        conn, game_id, market, close_bound, pick_book=sharp,
+                        match_line=None))
             # The number that line-CLV measures is the book's latest main
             # line, which may have left the number we bet.
             if has_line and moved_snap:
@@ -2165,8 +2175,9 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         if closing_price is not None and not line_moved:
             clv_pct, clv_pp = same_book_clv(bet_price, closing_price)
 
-        # Market edge: Pinnacle only, and only while Pinnacle's line is the
-        # number we bet. Raw taken vs power-de-vigged close.
+        # Market edge: Pinnacle's latest main line only, and only while that
+        # close is still the number we bet. A main line that has moved off
+        # is NULL. Raw taken vs power-de-vigged close.
         market_pct = market_pp = market_method = pin_price = None
         pin_line = _closing_line_for(prop_market, market, pin_snap) if pin_snap else None
         pin_moved = (pin_line is not None and scored_line is not None

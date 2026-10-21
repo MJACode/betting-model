@@ -210,4 +210,5 @@ jobs:
             tests/test_social_post_queue_migration.py \
             tests/test_ddl_guard.py \
             tests/test_nfl_wind_stability.py \
-            tests/test_mobile_lines_board.py
+            tests/test_mobile_lines_board.py \
+            tests/test_clv_pinnacle_mainline.py
