@@ -1311,7 +1311,7 @@ def notify_x_results(game_date: str, dry_run: bool = False,
         return 0
     from data.db import get_connection
     from tracking.discord_notifier import (_settled_rows, _tally, clv_line,
-                                           restate_lock_key)
+                                           restate_lock_key, window_still_live)
 
     # A restatement (recaps_needing_restatement's dict) rides its own ledger
     # kind, keyed on the published_at of the recap it corrects -- the same
@@ -1325,6 +1325,11 @@ def notify_x_results(game_date: str, dry_run: bool = False,
             return 0
         rows = _settled_rows(conn, game_date)
         if not rows:
+            return 0
+        sports = tuple({r[0] for r in rows if r[0]})
+        if window_still_live(conn, game_date, game_date, sports):
+            logger.info(f"X results: {game_date} still has a game "
+                        f"without a final score")
             return 0
         t = _tally(rows)
         if (t["w"] + t["l"] + t["p"]) == 0:
@@ -1377,7 +1382,8 @@ def notify_x_period(span: str, start, end, heading: str,
     if not _enabled() or not _creds():
         return 0
     from data.db import get_connection
-    from tracking.discord_notifier import _settled_rows_since, _tally, clv_line
+    from tracking.discord_notifier import (_settled_rows_since, _tally, clv_line,
+                                           window_still_live)
 
     kind = f"x_results_{span}"
     lock = f"{kind}:{start.isoformat()}"
@@ -1387,6 +1393,11 @@ def notify_x_period(span: str, start, end, heading: str,
             return 0
         rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
         if not rows:
+            return 0
+        sports = tuple({r[0] for r in rows if r[0]})
+        if window_still_live(conn, start.isoformat(), end.isoformat(), sports):
+            logger.info(f"X {span}: {heading} still has a game "
+                        f"without a final score")
             return 0
         t = _tally(rows)
         if (t["w"] + t["l"] + t["p"]) == 0:

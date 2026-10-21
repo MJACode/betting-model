@@ -1163,6 +1163,28 @@ def _pending_in(conn, start: str, end: str) -> int:
     return int(row[0]) if row else 0
 
 
+def _slate_unfinished(conn, start: str, end: str) -> bool:
+    """A game on a slate date in this window has no final score.
+
+    The slate dates are the dates he has a pick. Every game of that sport
+    on that date has to be final, so a finished leg does not recap a night
+    that is still being played. A connection with no execute is not live.
+    """
+    execute = getattr(conn, "execute", None)
+    if execute is None:
+        return False
+    row = execute(
+        "SELECT 1 FROM games g "
+        "WHERE g.game_date BETWEEN %s AND %s "
+        "AND (g.home_score IS NULL OR g.away_score IS NULL) "
+        "AND EXISTS (SELECT 1 FROM capper_picks c "
+        "WHERE c.game_date = g.game_date AND c.sport = g.sport "
+        "AND c.game_date BETWEEN %s AND %s) "
+        "LIMIT 1",
+        (start, end, start, end)).fetchone()
+    return row is not None
+
+
 def eggz_embed(heading: str, rows: list[tuple], pending: int) -> dict | None:
     """The Discord embed, or None when the window is not ready to post."""
     if pending:
@@ -1203,8 +1225,10 @@ def _post_window(conn, span: str, start: str, end: str, heading: str,
         (lock, kind)).fetchone():
         return 0
     pending = _pending_in(conn, start, end)
+    if pending or _slate_unfinished(conn, start, end):
+        return 0
     rows = _window_rows(conn, start, end)
-    embed = eggz_embed(heading, rows, pending)
+    embed = eggz_embed(heading, rows, 0)
     if embed is None:
         return 0
     embed.pop("clv", None)
@@ -1224,18 +1248,26 @@ def _post_window(conn, span: str, start: str, end: str, heading: str,
     return 1
 
 
+def _as_et(now: datetime | None) -> datetime:
+    """The clock in America/New_York. A UTC instant is converted, not relabeled."""
+    now = now or datetime.now(ET)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=ET)
+    return now.astimezone(ET)
+
+
 def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
     """Daily at or after 6:00am ET, plus the week and the month when due.
 
     Skips when DISCORD_WEBHOOK_EGGZ is unset. Does not post to X or #results.
-    A window with a still-pending leg is left unledgered so the next pass
-    can post the full set.
+    The day is yesterday in America/New_York, never the UTC date. A window
+    with a pending leg, or a game on one of its slate dates that is not
+    final, is left unledgered so a later pass can post the full set.
     """
     if not configured_to_post():
         return 0
     from data.db import get_connection
-    now = now or datetime.now(ET)
-    now = now.astimezone(ET) if now.tzinfo else now.replace(tzinfo=ET)
+    now = _as_et(now)
     conn = get_connection()
     try:
         try:
