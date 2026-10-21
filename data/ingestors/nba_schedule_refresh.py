@@ -40,18 +40,25 @@ never writes, removes or renames one.
 WHAT IT WRITES, for the months it fetched (this ET month and the next
 MONTHS_AHEAD):
   * nba_schedule, a game it already lists (matched on our game_id): the tip,
-    when ESPN's differs AND the odds feed's own start for the game agrees with
-    ESPN to the minute (a time change two sources show), or the row has no
-    tip; status_text, when ESPN marks the game postponed or cancelled (the
-    results step's wording); and updated_at = NOW(), which is what the health
-    check reads as "confirmed today". Never its type, arena, label or score:
-    the NBA.com load and the results step own those. ESPN alone never moves
-    the league's tip: on 2026-10-20 it disagreed on 1 game of 1,200, CHI @ MIL
-    on 2026-10-23 (ESPN 4:00pm ET; the league's load, the Bucks' own schedule
-    release and ticket listings 7pm CT). Moved early on its word, the prop
-    models would decide five hours before the real tip; moved late, they
-    could decide after it. A disputed tip is left as stored, counted in
-    `tip_disputed` and named in a WARNING.
+    when ESPN's differs AND the odds feed's own start for the game shows the
+    new tip (a time change two sources show: the feed lists the books' start,
+    at or up to 30 minutes after the league's tip, so it seconds ESPN when it
+    sits that far after ESPN's tip and nearer it than the stored one --
+    feed_shows), or the row has no tip; status_text, when ESPN marks the game
+    postponed or cancelled (the results step's wording) and it has no score;
+    and updated_at = NOW(), which is what the health check reads as
+    "confirmed today". Never its type, arena, label or score: the NBA.com
+    load and the results step own those. All four NBA models take the
+    earlier of the schedule's tip and the feed's start (the totals card's
+    slate, models.nba_prop_market.tip_of), so a tip moved LATER (a 7pm game
+    flexed to 9:30) that the schedule still holds at 7pm has every one of
+    them decide hours before the real tip, even once the feed shows 9:40.
+    ESPN alone never moves the league's tip: on 2026-10-20 it disagreed on 1
+    game of 1,200, CHI @ MIL on 2026-10-23 (ESPN 4:00pm ET; the league's
+    load, the Bucks' own schedule release and ticket listings 7pm CT). Moved
+    early on its word, the prop models would decide five hours before the
+    real tip; moved late, they could decide after it. A disputed tip is left
+    as stored, counted in `tip_disputed` and named in a WARNING.
   * nba_schedule, a game it does not list: inserted, keyed 'espn:<event id>'.
     An NBA.com id is all digits, so the prefix never collides with one (the
     convention nba_results_ingestor uses for players). The next NBA.com load,
@@ -85,7 +92,7 @@ from __future__ import annotations
 
 import argparse
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -106,6 +113,17 @@ DATA_SOURCE = "espn_schedule"
 # `games` rows a schedule load wrote. Their start is a schedule's, not the odds
 # feed's, so it cannot second ESPN on a moved tip.
 SCHEDULE_SOURCES = ("nba_api_schedule", DATA_SOURCE)
+
+# How far after ESPN's new tip the odds feed's start may sit and still be the
+# feed showing the move. The feed lists the books' start, not the league's tip:
+# of the 46 2026-27 games whose games row it had written by 2026-10-20, 8 sat
+# on the league's tip, 35 ten minutes after it and 3 (opening night, rewritten
+# once the games began) 8, 18 and 22 minutes after; none before it (production).
+# A minute's slack before covers a feed stamped to the second. Requiring the
+# feed to sit nearer the new tip than the stored one is what keeps a feed that
+# has not moved yet (still ten minutes after the old tip) from seconding a
+# small move.
+FEED_LAG = (timedelta(minutes=-1), timedelta(minutes=30))
 
 ESPN_TYPES = {2: "regular", 3: "playoff", 5: "playin"}
 CUP_FINAL_NOTE = "cup championship"
@@ -142,6 +160,15 @@ def _ts(value) -> datetime | None:
 
 def _known_team(x) -> bool:
     return isinstance(x, str) and x.strip().upper() not in _NOT_A_TEAM
+
+
+def feed_shows(feed: datetime | None, new: datetime, old: datetime) -> bool:
+    """Does the odds feed's start for a game show ESPN's new tip, not the stored one?
+    At or up to FEED_LAG after the new tip, and nearer it than the old."""
+    if feed is None:
+        return False
+    lag = feed - new
+    return FEED_LAG[0] <= lag <= FEED_LAG[1] and abs(lag) < abs(feed - old)
 
 
 def months(today: date, ahead: int = MONTHS_AHEAD) -> list[str]:
@@ -251,7 +278,7 @@ def plan(espn: list[dict], stored: list[dict], games: dict[str, dict],
                 new, old = _ts(r["commence_time"]), _ts(x.get("commence_time"))
                 if new is None or new == old:
                     pass
-                elif old is None or (feed is not None and abs((feed - new).total_seconds()) < 60):
+                elif old is None or feed_shows(feed, new, old):
                     out["times"].append((x["nba_game_id"], r["commence_time"], x.get("commence_time")))
                 else:
                     out["tip_disputed"].append((r["game_id"], x.get("commence_time"), r["commence_time"],

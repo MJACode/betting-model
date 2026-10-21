@@ -145,6 +145,40 @@ def test_espn_alone_never_moves_the_leagues_tip():
         assert p["confirm"] == ["0022600400"]
 
 
+FLEX_OLD, FLEX_NEW = "2027-03-11T00:00:00+00:00", "2027-03-11T02:30:00+00:00"   # 7:00pm ET -> 9:30pm ET
+
+
+def _flex(feed, old=FLEX_OLD, new=FLEX_NEW):
+    g = "NBA_2027-03-10_LAL_BOS"
+    return nsr.plan([_espn(g, tip=new)], [_stored(g, "0022600900", tip=old)],
+                    {g: {"commence_time": feed, "data_source": "live"}}, ["202703"])
+
+
+def test_a_moved_tip_reaches_the_schedule_when_the_feed_lists_the_books_start():
+    """The odds feed lists the books' start, which on 35 of the 46 2026-27 games
+    it had written by 2026-10-20 sat ten minutes after the league's tip
+    (production). A flexed game whose feed start sits ten minutes after ESPN's
+    new tip has moved, and the schedule must say so: left at 7pm, every NBA
+    model would decide three and a half hours before the real tip."""
+    p = _flex("2027-03-11T02:40:00+00:00")
+    assert p["times"] == [("0022600900", FLEX_NEW, FLEX_OLD)] and p["tip_disputed"] == []
+    for lag in ("02:30:00", "02:38:00", "02:52:00"):        # 0, 8 and 22 minutes: all measured
+        assert _flex(f"2027-03-11T{lag}+00:00")["times"], lag
+
+
+def test_a_feed_that_has_not_moved_yet_never_moves_the_tip():
+    """The feed still on the old start (ten minutes after it), or before ESPN's
+    new tip (the feed never lists a start before the league's), or half an
+    hour or more past it, is not a second source for the move."""
+    assert _flex("2027-03-11T00:10:00+00:00")["tip_disputed"]                 # the flex, feed not moved
+    small = dict(old="2027-03-11T00:00:00+00:00", new="2027-03-11T00:15:00+00:00")
+    assert _flex("2027-03-11T00:10:00+00:00", **small)["times"] == []         # 5 minutes before ESPN's
+    assert _flex("2027-03-11T03:05:00+00:00")["times"] == []                  # 35 minutes after it
+    half = dict(old="2027-03-11T00:00:00+00:00", new="2027-03-11T00:30:00+00:00")
+    assert _flex("2027-03-11T00:40:00+00:00", **half)["times"]                # moved: 10 after ESPN's
+    assert _flex("2027-03-11T00:10:00+00:00", **half)["times"] == []          # not moved: nearer the old
+
+
 def test_a_tip_the_league_never_set_is_filled():
     p = nsr.plan([_espn(G1, tip=NEW)], [_stored(G1, "0042600101", kind="playoff", tip=None)], {}, ["202612"])
     assert p["times"] == [("0042600101", NEW, None)]
