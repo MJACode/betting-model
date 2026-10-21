@@ -380,7 +380,11 @@ export function PlayerStatsScreen() {
   // snapping the ruler, not for the label. bookLineFromThreshold(7) is 6.5,
   // which mislabels an integer pick line as a half-point (Reviewer Medium
   // on #781). The book label already prints tonight.line for the same reason.
-  const pickLine = useMemo(() => {
+  // The SIDE rides with it: prop models write Unders as well as Overs, and
+  // "pick line 10.5" under an "11+ Reb" headline read an Under pick as an
+  // Over (UX review, 2026-10-21). The label says which, the way pick_label
+  // does (§00: quote a pick from its label).
+  const openPick = useMemo(() => {
     if (!pageId) return null;
     const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(pageId);
     if (!ep || ep.pick.result != null) return null;
@@ -389,8 +393,10 @@ export function PlayerStatsScreen() {
     const raw = ep.pick.scored_line;
     if (raw == null) return null;
     const sl = Number(raw);
-    return Number.isFinite(sl) ? sl : null;
+    return Number.isFinite(sl) ? { line: sl, side: ep.pick.pick_side } : null;
   }, [todayPicks, stat, pageId]);
+  const pickLine = openPick?.line ?? null;
+  const pickSideWord = openPick?.side === 'under' ? 'Under' : 'Over';
   const pickThreshold = pickLine != null ? thresholdFromBookLine(pickLine) : null;
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
   const snapThreshold = pickThreshold ?? postedThreshold;
@@ -404,7 +410,7 @@ export function PlayerStatsScreen() {
   const lineProvenance = lineTouched
     ? lineFromBoard ? 'board line' : 'your line'
     : pickThreshold != null && line === pickThreshold && pickLine != null
-      ? `pick line ${pickLine}`
+      ? `pick ${pickSideWord} ${pickLine}`
       : postedThreshold != null && line === postedThreshold && detail.tonight
         ? `book line ${detail.tonight.line}`
         : null;
@@ -1375,7 +1381,7 @@ function TonightLineCard({
           title: 'The posted number',
           body:
             'The line your sportsbooks have hung for this stat tonight, and the best over and under price ' +
-            'among them. The chart above follows a pick on this player and stat when one exists, else this ' +
+            'among them. The chart above starts on our pick’s line when we have one for this stat, else on this ' +
             'number, else the median — until you move the ruler.\n\n' +
             'SINCE OPEN is DraftKings’ opening number against its latest — a line that has climbed is ' +
             'money on the over. SHARP compares Pinnacle’s no-vig over with your book’s no-vig over at the ' +

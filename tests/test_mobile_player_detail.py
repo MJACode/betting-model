@@ -55,9 +55,10 @@ def test_pick_provenance_labels_the_raw_scored_line():
     scored_line must be labelled from the source number, not the inverse."""
     screen = _read(SCREEN)
     assert "bookLineFromThreshold(pickThreshold)" not in screen
-    assert "pick line ${pickLine}" in screen
+    assert "pick ${pickSideWord} ${pickLine}" in screen, "the pick label must name the side"
     assert "book line ${detail.tonight.line}" in screen
-    assert "const pickLine = useMemo(" in screen
+    assert "const openPick = useMemo(" in screen
+    assert "const pickLine = openPick?.line ?? null;" in screen
     assert "thresholdFromBookLine(pickLine)" in screen
     # The inverse stays for half-point thresholds (6+ → 5.5); it is not the
     # label path.
@@ -85,7 +86,7 @@ def test_tonights_line_tooltip_names_the_snap_order():
     the ruler started preferring a pick (UX review of the #781 follow-up)."""
     screen = _read(SCREEN)
     assert "The chart above follows this number until you move the ruler." not in screen
-    assert "follows a pick on this player and stat when one exists" in screen
+    assert "starts on our pick’s line when we have one for this stat" in screen
 
 
 def test_pull_to_refresh_reloads_trends_news_and_quote():

@@ -366,7 +366,11 @@ export function usePlayerDetail(args: {
 
   return {
     reload,
-    loading: slate.loading || lines.loading || logGames.loading || picks.loading,
+    // Every section the pull reloads, or the spinner stops while five of
+    // them are still in flight (UX review, 2026-10-21).
+    loading:
+      slate.loading || lines.loading || logGames.loading || picks.loading
+      || h2hRow.loading || pvo.loading || savant.loading || lineup.loading || rosterPos.loading,
     books,
     booksReady,
     market,
