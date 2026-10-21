@@ -436,8 +436,13 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   graded picks as the daily recap, and ledger `discord_results_week` /
   `discord_results_month` on the window's start. A posted window is not
   posted again. X posts the same windows through `notify_x_period`. An
-  empty window is not ledgered. A window still unposted when the next one
-  opens is not caught up. Period recaps do not write `results_snapshots`.
+  empty window is not ledgered. Posts run from 7:30am through noon ET.
+  A miss rolls to the next morning. An evening pass does not post. A game
+  of a sport that has a bet on that date, with no final score, holds the
+  Discord post and the X post. A game of that sport that is in progress
+  holds it the same way. A later morning pass retries it. An unfinished
+  game of another sport does not. A window still unposted when the next
+  one opens is not caught up. Period recaps do not write `results_snapshots`.
 - **Eggz's recap is `#eggz-picks` only.** `DISCORD_WEBHOOK_EGGZ` has no
   fallback to `#results` or X. The daily window is yesterday, from the
   6:00am ET settle. The week and the month use the Monday 7:30am ET clock
@@ -449,7 +454,22 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   cannot be parsed or matched is `needs_review` on `capper_picks` and is
   logged. It is not graded and it is not dropped. One ops alert goes out
   per message id when `DISCORD_WEBHOOK_OPS` is set. A window that still
-  has a pending leg is not ledgered. His rows stay out of `picks`.
+  has a pending leg is not ledgered. A `needs_review` leg does not hold
+  the window. A game of that sport on a slate date in the window that has
+  no final score holds the post, and so does a game of that sport that is
+  in progress. A later morning pass retries it. The day is yesterday in
+  America/New_York, from 6:00am through noon ET. The week and the month
+  post from 7:30am through noon ET, and a miss rolls to the next morning.
+  His rows stay out of `picks`.
+  `60 Minute ML`, `60 min ML`, `Reg ML`, and `3-way` are market `h2h_3way`.
+  A sport/date header and `All 1U` are context. Regulation grades from
+  `nhl_period_scores` when a row exists (three periods; a tie is a loss
+  for the side). A final with no period row uses `went_to_ot` and
+  `home_win_reg` when both are present: `went_to_ot = 1` is a loss for
+  both sides, and `went_to_ot = 0` follows `home_win_reg`. A missing field
+  is `needs_review` (`no_regulation_score`) and is tried again. A message
+  whose parse_status is still `needs_review` is reparsed on the next grade
+  pass.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.

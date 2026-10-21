@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -32,6 +32,249 @@ def test_a_side_a_spread_a_total_and_a_prop_parse():
     assert prop["prop_market"] == "batter_hits" and prop["price"] == -120
     assert ml["stake_units"] == 2 and ml["price"] == -130
     assert ml["team_text"].upper().startswith("NYY")
+
+
+OCT18 = "NHL Sunday Oct. 18\nMIN Wild 60 Minute ML (-110) 1U✅"
+OCT20 = (
+    "NHL Tuesday Oct. 20\n"
+    "All 1U\n"
+    "MTL Canadians 60 Minute ML (-130) \n"
+    "NY Islanders ML (-155) \n"
+    "NJ Devils ML (-120) \n"
+    "CBJ Blue Jackets ML (-162) \n"
+    "EDM Oilers ML (-135)"
+)
+_POSTED_OCT18 = datetime(2026, 10, 18, 3, 28, 45, tzinfo=timezone.utc)
+_POSTED_OCT20 = datetime(2026, 10, 20, 16, 6, 51, tzinfo=timezone.utc)
+
+
+def test_the_oct_18_wild_post_is_a_regulation_moneyline():
+    legs, reviews = eg.parse_message(OCT18, _POSTED_OCT18)
+    assert reviews == []
+    assert len(legs) == 1
+    leg = legs[0]
+    assert leg["market"] == "h2h_3way"
+    assert leg["price"] == -110
+    assert leg["stake_units"] == 1
+    assert leg["team_text"] == "MIN Wild"
+    assert leg["sport_hint"] == "NHL"
+    assert leg["slate_date"] == "2026-10-18"
+    assert "✅" not in leg["team_text"]
+
+
+def test_the_oct_20_slate_keeps_one_regulation_line_and_four_moneylines():
+    legs, reviews = eg.parse_message(OCT20, _POSTED_OCT20)
+    assert reviews == []
+    assert [leg["market"] for leg in legs] == [
+        "h2h_3way", "h2h", "h2h", "h2h", "h2h",
+    ]
+    assert [leg["price"] for leg in legs] == [-130, -155, -120, -162, -135]
+    assert [leg["stake_units"] for leg in legs] == [1, 1, 1, 1, 1]
+    assert legs[0]["team_text"] == "MTL Canadians"
+    assert [leg["sport_hint"] for leg in legs] == ["NHL"] * 5
+    assert [leg["slate_date"] for leg in legs] == ["2026-10-20"] * 5
+    assert {leg["team_text"] for leg in legs[1:]} == {
+        "NY Islanders", "NJ Devils", "CBJ Blue Jackets", "EDM Oilers",
+    }
+
+
+def test_regulation_wording_and_a_message_stake_do_not_become_reviews():
+    posted = _POSTED_OCT20
+    for line in ("BOS 60 min ML -150", "BOS Reg ML -150", "BOS 3-way -150",
+                 "BOS 3 way ML +120"):
+        legs, reviews = eg.parse_message(f"NHL Oct. 20\n{line}", posted)
+        assert reviews == [], line
+        assert legs[0]["market"] == "h2h_3way", line
+        assert legs[0]["team_text"] == "BOS"
+    legs, reviews = eg.parse_message(
+        "NHL Tuesday Oct. 20\nAll 2U\nEDM Oilers ML -135", posted)
+    assert reviews == []
+    assert legs[0]["market"] == "h2h"
+    assert legs[0]["stake_units"] == 2
+    assert legs[0]["price"] == -135
+
+
+def test_canadians_and_a_one_edit_nickname_resolve_to_montreal():
+    hits = eg._teams_in("Canadians")
+    assert ("canadians", "NHL", "MTL") in hits
+    assert eg._fuzzy_one("Canadien", "NHL") == "MTL"
+
+
+def test_min_wild_on_the_nhl_slate_is_not_the_nfl_team():
+    legs, reviews = eg.parse_message(OCT18, _POSTED_OCT18)
+    assert reviews == []
+    calls = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            calls.append(params)
+            self.params = params
+            return self
+
+        def fetchall(self):
+            sport = self.params[0]
+            if sport == "NHL" and "MIN" in self.params and "2026-10-18" in self.params:
+                return [(
+                    "NHL_2026-10-18_CBJ_MIN", "NHL", "2026-10-18", "MIN", "CBJ",
+                    "2026-10-18T22:00:00Z", 2, 1, 1, 1, 0,
+                )]
+            if sport == "NFL":
+                return [(
+                    "NFL_2026-10-18_MIN_GB", "NFL", "2026-10-18", "GB", "MIN",
+                    "2026-10-18T17:00:00Z", None, None, None, None, 0,
+                )]
+            return []
+
+        def fetchone(self):
+            return None
+
+    game, reason = eg._match_leg(Conn(), legs[0], _POSTED_OCT18)
+    assert reason is None
+    assert game["game_id"] == "NHL_2026-10-18_CBJ_MIN"
+    assert game["side"] == "home"
+    assert all(call[0] != "NFL" for call in calls)
+
+
+def _reg_conn(periods, game, side="home"):
+    """Pending 60-minute leg. `game` is the games-table row the grader reads."""
+    reviews, graded = [], []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params
+            if "SET status = 'needs_review'" in sql:
+                reviews.append(params)
+            if sql.startswith("UPDATE capper_picks SET status = 'graded'"):
+                graded.append(params)
+            return self
+
+        def fetchall(self):
+            if "nhl_period_scores" in self.sql:
+                return periods
+            if "status = 'pending'" in self.sql:
+                return [(
+                    8, "NHL_2026-10-18_CBJ_MIN", "h2h_3way", side, None, -110, 1,
+                    None, None, None, "2026-10-18T22:00:00Z", "NHL",
+                )]
+            return []
+
+        def fetchone(self):
+            if "RETURNING" in self.sql:
+                return (1,)
+            if "FROM games" in self.sql:
+                return game
+            return None
+
+        def commit(self):
+            pass
+
+    return Conn(), reviews, graded
+
+
+def test_period_scores_grade_the_side_and_a_tie_is_a_loss():
+    # Periods still win when they exist, including over a regulation home win
+    # stored on the games row.
+    final = (2, 1, 1, 1, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([(1, 1, 0, 0, 1, 0)], final)
+    assert eg.grade_pending(conn) == 1
+    assert reviews == []
+    assert graded[0][0] == "WIN"
+    assert abs(graded[0][1] - 1.0) < 1e-9
+
+    conn, reviews, graded = _reg_conn([(1, 0, 0, 0, 1, 0)], final)
+    assert eg.grade_pending(conn) == 1
+    assert graded[0][0] == "LOSS"
+
+
+def test_an_overtime_game_is_a_loss_for_both_sides_when_period_scores_are_missing():
+    # went_to_ot = 1 is a regulation tie. home_win_reg is 0 on those games.
+    ot = (3, 2, 1, 0, 1, "2026-10-18T22:00:00Z", "2026-10-18")
+    for side in ("home", "away"):
+        conn, reviews, graded = _reg_conn([], ot, side)
+        assert eg.grade_pending(conn) == 1
+        assert reviews == []
+        assert graded[0][0] == "LOSS"
+        assert abs(graded[0][1] - -1.1) < 1e-9
+        assert abs(graded[0][2] - 1.1) < 1e-9
+
+
+def test_a_regulation_win_comes_from_home_win_reg_when_period_scores_are_missing():
+    reg = (2, 1, 1, 1, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([], reg, "home")
+    assert eg.grade_pending(conn) == 1
+    assert reviews == []
+    assert graded[0][0] == "WIN"
+    assert abs(graded[0][1] - 1.0) < 1e-9
+    assert abs(graded[0][2] - 1.1) < 1e-9
+
+    conn, reviews, graded = _reg_conn([], reg, "away")
+    assert eg.grade_pending(conn) == 1
+    assert graded[0][0] == "LOSS"
+
+    away_reg = (1, 2, 0, 0, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([], away_reg, "away")
+    assert eg.grade_pending(conn) == 1
+    assert graded[0][0] == "WIN"
+
+
+def test_missing_regulation_fields_stay_needs_review_and_a_live_game_stays_pending():
+    commence = "2026-10-18T22:00:00Z"
+    for game in (
+        (2, 1, 1, None, 0, commence, "2026-10-18"),
+        (2, 1, 1, 1, None, commence, "2026-10-18"),
+        (2, 1, 1, None, None, commence, "2026-10-18"),
+    ):
+        conn, reviews, graded = _reg_conn([], game)
+        eg.grade_pending(conn)
+        assert reviews[0][0] == "no_regulation_score"
+        assert graded == []
+
+    # Oct 20 rows stored went_to_ot = 0 before the game was final.
+    conn, reviews, graded = _reg_conn(
+        [], (None, None, None, None, 0, commence, "2026-10-20"))
+    assert eg.grade_pending(conn) == 0
+    assert reviews == []
+    assert graded == []
+
+
+def test_period_scores_outrank_an_overtime_flag():
+    # Periods say the home side won in regulation. went_to_ot = 1 would have
+    # been a loss for both sides. The period row is the grade.
+    ot = (3, 2, 1, 0, 1, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([(2, 0, 0, 0, 0, 0)], ot, "home")
+    assert eg.grade_pending(conn) == 1
+    assert reviews == []
+    assert graded[0][0] == "WIN"
+
+
+def test_a_stored_needs_review_message_is_reparsed_and_a_parsed_one_is_not(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        eg, "_replace_legs",
+        lambda conn, mid, body, posted: seen.append(mid))
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            if "FROM capper_messages" in self.sql:
+                return [
+                    ("old", OCT18, "2026-10-18T03:28:45+00:00", "needs_review"),
+                    ("done", "NYY ML -115", "2026-10-20T17:00:00+00:00", "parsed"),
+                ]
+            return []
+
+        def fetchone(self):
+            return None
+
+        def commit(self):
+            pass
+
+    assert eg.reparse_stored(Conn()) == 1
+    assert seen == ["old"]
 
 
 def test_a_missing_price_stays_missing_and_the_stake_defaults_to_one():
@@ -224,7 +467,7 @@ def _grade_conn(pending_row, log_rows):
         def execute(self, sql, params=None):
             self.sql = sql
             self.params = params
-            if "needs_review" in sql:
+            if sql.startswith("UPDATE") and "needs_review" in sql:
                 reviews.append(params)
             return self
 
@@ -236,6 +479,8 @@ def _grade_conn(pending_row, log_rows):
             return []
 
         def fetchone(self):
+            if "RETURNING" in self.sql:
+                return (1,)
             if "FROM games" in self.sql:
                 return (24, 17, 1, None, 0, "2026-10-19T20:00:00+00:00", "2026-10-19")
             return None
@@ -319,6 +564,198 @@ def test_the_recap_posts_only_to_his_webhook_and_only_once(monkeypatch):
 def test_an_unset_webhook_posts_nothing(monkeypatch):
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "")
     assert eg.post_eggz_recaps(datetime(2026, 10, 20, 12, 0, tzinfo=eg.ET)) == 0
+
+
+def test_a_live_game_on_the_slate_date_holds_the_recap(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "55")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params or ()
+            return self
+
+        def fetchone(self):
+            if "FROM games" in self.sql:
+                return (1,)
+            if "COUNT" in self.sql:
+                return (0,)
+            return None
+
+        def fetchall(self):
+            return [("NHL", "eggz", "WIN", None, -110, 1.0, False, 1.0, 1.1)]
+
+        def commit(self):
+            pass
+
+    assert eg._post_window(Conn(), "day", "2026-10-20", "2026-10-20", "Oct 20") == 0
+    assert posted == []
+
+
+def test_a_utc_instant_after_8pm_et_does_not_recap(monkeypatch):
+    """01:50 UTC on Oct 21 is 9:50pm ET on Oct 20. The morning window is closed."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    calls = []
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+    monkeypatch.setattr(
+        eg, "_post_window",
+        lambda conn, span, start, end, heading, dry_run=False, now=None: calls.append(
+            (span, start, end)) or 0)
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    now = datetime(2026, 10, 21, 1, 50, tzinfo=timezone.utc)
+    assert eg.post_eggz_recaps(now) == 0
+    assert calls == []
+
+
+def test_a_utc_morning_recaps_yesterday_in_new_york(monkeypatch):
+    """15:00 UTC on Oct 21 is 11:00am ET. Yesterday is Oct 20."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    calls = []
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+    monkeypatch.setattr(
+        eg, "_post_window",
+        lambda conn, span, start, end, heading, dry_run=False, now=None: calls.append(
+            (span, start, end)) or 0)
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    now = datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc)
+    assert eg.post_eggz_recaps(now) == 0
+    days = [call for call in calls if call[0] == "day"]
+    assert days == [("day", "2026-10-20", "2026-10-20")]
+    assert all(call[1] != "2026-10-21" for call in calls)
+
+
+def test_before_6am_et_the_daily_recap_does_not_run(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    calls = []
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+    monkeypatch.setattr(
+        eg, "_post_window",
+        lambda conn, span, start, end, heading, dry_run=False: calls.append(span) or 0)
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    assert eg.post_eggz_recaps(datetime(2026, 10, 21, 5, 59, tzinfo=eg.ET)) == 0
+    assert "day" not in calls
+
+
+def test_an_evening_live_game_holds_the_week_until_the_next_morning(monkeypatch):
+    """9:56pm ET with NHL in progress posts nothing. The next morning posts the week."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+
+    class Conn:
+        def __init__(self):
+            self.sent = set()
+            self.sql = ""
+            self.params = ()
+            self.live = "2026-10-20T19:00:00-04:00"
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params or ()
+            if "INSERT INTO push_sent" in sql:
+                self.sent.add((params[0], params[1]))
+            return self
+
+        def fetchone(self):
+            if "push_sent" in self.sql and "SELECT" in self.sql:
+                return (1,) if (self.params[0], self.params[1]) in self.sent else None
+            if "COUNT" in self.sql:
+                return (0,)
+            return None
+
+        def fetchall(self):
+            if "commence_time" in self.sql:
+                return [(self.live,)]
+            if self.params[:2] == ("2026-10-12", "2026-10-18"):
+                return [("NHL", "eggz", "WIN", None, -110, 1.0, False, 1.0, 1.1)]
+            return []
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    conn = Conn()
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+    evening = datetime(2026, 10, 20, 21, 56, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(evening) == 0
+    assert posted == [] and conn.sent == set()
+
+    # 10:00am, and the sport is still in progress. Still no ledger row.
+    conn.live = "2026-10-21T09:00:00-04:00"
+    held = datetime(2026, 10, 21, 10, 0, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(held) == 0
+    assert posted == [] and conn.sent == set()
+
+    # Next morning. That start is outside the live horizon. The week posts.
+    conn.live = "2026-10-21T09:00:00-04:00"
+    morning = datetime(2026, 10, 22, 8, 0, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(morning) == 1
+    assert len(posted) == 1
+    assert ("discord_eggz_results_week:2026-10-12",
+            "discord_eggz_results_week") in conn.sent
+    assert eg.post_eggz_recaps(morning) == 0
+    assert len(posted) == 1
+
+
+def test_the_main_recap_waits_while_a_game_on_that_date_is_unfinished(monkeypatch):
+    from tracking import discord_notifier as dn
+    posted = []
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    monkeypatch.setattr(dn, "_post", lambda url, body: posted.append(body) or "99")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+
+        def fetchone(self):
+            if "FROM games" in self.sql:
+                return (1,)
+            return None
+
+        def fetchall(self):
+            return [("NHL", "nhl_moneyline", "WIN", 0.02, -110, None, False, 1.0, 1.1)]
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(dn, "get_connection", lambda: Conn())
+    assert dn.notify_discord_results(game_date="2026-10-20") == 0
+    assert dn.notify_discord_period(
+        "week", date(2026, 10, 12), date(2026, 10, 18),
+        "Week of Oct 12-18") == 0
+    assert posted == []
 
 
 def test_the_job_is_on_the_pipeline_and_settle_posts_the_recap():

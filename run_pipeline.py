@@ -577,7 +577,11 @@ def step_nhl_results(run_date: str) -> bool:
         # today covers yesterday too, and only today's date can pick up a game
         # that finished this evening.
         n = ingest_nhl_scores_for_date(run_date)
-        logger.success(f"✓ NHL results: {n} final games upserted")
+        from data.ingestors.nhl_period_scores_api import top_up
+        # Same pass, after the finals are in `games`: the score feed's goals
+        # array is the period row. Dates already stored are not fetched.
+        periods = top_up(run_date)
+        logger.success(f"✓ NHL results: {n} final games upserted; {periods} period rows")
         return True
     except Exception as exc:
         logger.error(f"✗ NHL results failed: {exc}")
@@ -1630,10 +1634,12 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X posts every released pre-game pick, each in the same format.
-        # Discord's free pick is not an input. X_POST_ALL_PICKS=0 posts no
-        # pick slate. Ledgered independently of Discord, so one surface
-        # failing never suppresses the other.
+        # X posts the next released pre-game pick, one per call, in the same
+        # format. The 5-minute job is the other caller. notify_x_picks holds
+        # them 10 minutes apart and holds 1:00am–8:00am ET. Discord's free
+        # pick is not an input. X_POST_ALL_PICKS=0 posts no pick slate.
+        # Ledgered independently of Discord, so one surface failing never
+        # suppresses the other.
         try:
             from tracking.x_publisher import notify_x_picks
             notify_x_picks(target_date=run_date, dry_run=dry_run)
@@ -1766,13 +1772,9 @@ def step_settle(settle_date: str) -> bool:
         logger.error(f"✗ X results post failed (settlement + Discord "
                      f"unaffected): {exc}")
 
-    # Yesterday's recap, when the 6am run could not post it. 2026-10-13: the
-    # 6am run found nothing counting for 10-12 (its only counting bets, two
-    # NHL props, were graded at 07:24 by the next pass), and nothing asked
-    # again, so neither surface ever posted it. A refresh pass settles TODAY,
-    # so the two calls above refuse; this asks for yesterday instead, from
-    # 7am ET, both surfaces, Discord first, ledgered per date -- it posts once,
-    # on the first pass where something counting has settled.
+    # Yesterday's recap, when the 6am run could not post it. Retries from
+    # 7:00am through noon ET. An evening pass does not post it; the next
+    # morning does, while the date is still yesterday.
     #
     # Only on a pass settling today. The 6am run settles yesterday and has
     # just made the ordinary attempt above, so it runs nothing new here.
@@ -1801,8 +1803,8 @@ def step_settle(settle_date: str) -> bool:
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
 
     # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
-    # first Monday, the previous calendar month. Later passes retry a miss.
-    # Both are ledgered, so a posted window is not posted again.
+    # first Monday, the previous calendar month. Later morning passes, through
+    # noon ET, retry a miss. An evening pass does not. Both are ledgered.
     try:
         from tracking.discord_notifier import post_period_recaps
         n = post_period_recaps()
@@ -1812,8 +1814,9 @@ def step_settle(settle_date: str) -> bool:
         logger.error(f"✗ Period results recap failed (settlement "
                      f"unaffected): {exc}")
 
-    # Eggz's channel only. Yesterday at or after 6:00am ET, and the week
-    # and month on the same clock as the main recap. Ledgered separately.
+    # Eggz's channel only. Yesterday from 6:00am through noon ET, and the
+    # week and month from 7:30am through noon. A miss waits for the next
+    # morning. Ledgered separately.
     try:
         from tracking.eggz_picks import post_eggz_recaps
         n = post_eggz_recaps()
