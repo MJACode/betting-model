@@ -354,6 +354,52 @@ def test_a_paused_models_held_row_keeps_the_pause_note(monkeypatch):
     assert {p["downgrade_reason"] for p in picks} == {config.PAUSED_NOTE}
 
 
+class _Clf3:
+    def predict_proba(self, X):
+        return np.array([[0.80, 0.15, 0.05]])
+
+
+class _ClfOver:
+    def predict_proba(self, X):
+        return np.array([[0.10, 0.90]])
+
+
+UFC_HOLD = "waiting for Alex Pereira's 2026-10-18 fight to be played and logged"
+
+
+def _ufc_score(monkeypatch, model_id, clf, *, hold=None):
+    """score_game on a UFC fight with no DraftKings line, so the method model
+    and the round-totals model each take their own writing path. The price
+    rule is off (REQUIRE_DK_PRICE=0 is a supported setting) so both would BET."""
+    monkeypatch.setattr(scorer, "load_model", lambda mid: {"model": clf, "feature_cols": []})
+    monkeypatch.setattr(scorer, "_get_scoring_odds", lambda *a, **k: None)
+    monkeypatch.setattr(scorer, "_get_dk_odds", lambda *a, **k: None)
+    monkeypatch.setattr(scorer, "REQUIRE_DK_PRICE", False)
+    monkeypatch.setattr(scorer, "_is_paused", lambda mid: False)
+    return scorer.score_game(
+        None, "UFC_2026-10-25_jan-blachowicz_alex-pereira", model_id,
+        {"home_team": "Alex Pereira", "away_team": "Jan Blachowicz",
+         "game_date": "2026-10-25", "total_line": 2.5},
+        bankroll=1000.0, dry_run=True, commence_time="2026-10-26T03:00:00Z",
+        **({"schedule_hold": hold} if hold else {}))
+
+
+def test_the_ufc_method_model_writes_its_held_row_none_with_the_reason(monkeypatch):
+    assert {p["signal_type"] for p in _ufc_score(
+        monkeypatch, "ufc_method_of_victory", _Clf3())} == {"BET"}
+    (pick,) = _ufc_score(monkeypatch, "ufc_method_of_victory", _Clf3(), hold=UFC_HOLD)
+    assert pick["signal_type"] == "NONE" and pick["downgrade_reason"] == UFC_HOLD
+    assert pick["recommended_bet"] == 0.0
+
+
+def test_ufc_round_totals_with_no_book_line_write_their_held_row_none(monkeypatch):
+    assert {p["signal_type"] for p in _ufc_score(
+        monkeypatch, "ufc_total_rounds", _ClfOver())} == {"BET"}
+    picks = _ufc_score(monkeypatch, "ufc_total_rounds", _ClfOver(), hold=UFC_HOLD)
+    assert picks and {p["signal_type"] for p in picks} == {"NONE"}
+    assert {p["downgrade_reason"] for p in picks} == {UFC_HOLD}
+
+
 
 # ── NCAAF: the night-game stub takes CFBD's schedule row ─────────────────────
 
@@ -487,10 +533,13 @@ def test_wnba_rest_ignores_a_row_no_book_ever_priced():
 # ── NFL: the opener and wind cards, gated where their BETs are written ───────
 
 class _PublishConn:
-    """Records the publisher's statements; answers its schedule and lock reads."""
+    """Records the publisher's statements; answers its schedule and lock reads,
+    and publish_scored's read of the games it evaluated."""
 
-    def __init__(self, schedule):
+    def __init__(self, schedule, *, games_rows=(), fail_schedule=False):
         self.schedule = schedule
+        self.games_rows = list(games_rows)
+        self.fail_schedule = fail_schedule
         self.sql: list[tuple] = []
 
     def execute(self, sql, params=None):
@@ -498,7 +547,11 @@ class _PublishConn:
         self.sql.append((flat, params))
         rows = []
         if "commence_time, home_score, away_score FROM games" in flat:
+            if self.fail_schedule:
+                raise RuntimeError("statement timeout")
             rows = self.schedule
+        elif "FROM games WHERE sport = 'NFL' AND game_id = ANY" in flat:
+            rows = self.games_rows
 
         class R:
             rowcount = 0
@@ -522,6 +575,9 @@ class _PublishConn:
     def bets_written(self):
         return [p for s, p in self.sql
                 if s.startswith("INSERT INTO picks") and p.get("signal_type") == "BET"]
+
+    def rows_written(self):
+        return [p for s, p in self.sql if s.startswith("INSERT INTO picks")]
 
 
 CAR_GB = "NFL_2026_08_CAR_GB"
@@ -582,3 +638,59 @@ def test_a_held_nfl_game_still_shows_its_number_as_none_with_the_reason():
     (row,) = pub.build_scored_rows(latest, games, 1000.0, {CAR_GB: why})
     assert row["signal_type"] == "NONE" and row["downgrade_reason"] == why
     assert row["scored_line"] == -3.5                                # the HOME number
+
+
+def test_an_nfl_schedule_that_cannot_be_read_holds_the_opener(monkeypatch, tmp_path):
+    conn = _PublishConn(_nfl_schedule(week7_scored=True), fail_schedule=True)
+    assert _publish_opener(monkeypatch, tmp_path, conn) == 0
+    assert conn.bets_written() == []
+
+
+def _publish_wind(monkeypatch, tmp_path, conn):
+    import data.db as db
+    import scripts.nfl_wind_publisher as pub
+    (tmp_path / f"wind_card_{TODAY.isoformat()}.csv").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(pub, "CARDS_DIR", tmp_path)
+    monkeypatch.setattr(db, "get_connection", lambda: conn)
+    monkeypatch.setattr(pub, "_lock_model", lambda *a, **k: None)
+    monkeypatch.setattr(pub, "_flush_snapshots_safe", lambda *a, **k: None)
+    monkeypatch.setattr(pub, "_flush_board_safe", lambda *a, **k: None)
+    monkeypatch.setattr(pub, "read_card", lambda path: [])
+    game = {"game_id": CAR_GB, "sport": "NFL", "season": 2026, "game_date": _d(9),
+            "home_team": "GB", "away_team": "CAR", "commence_time": _t(9 * 24)}
+    pick = {"game_id": CAR_GB, "model_id": pub.NFL_WIND_MODEL_ID, "signal_type": "BET",
+            "pick_label": "CAR @ GB Under 41.5 (Wind 18 mph, DK)"}
+    monkeypatch.setattr(pub, "build_rows", lambda rows, bankroll: ([game], [pick]))
+    return pub.publish(TODAY.isoformat())
+
+
+def test_the_nfl_wind_card_does_not_lock_before_both_teams_previous_games(monkeypatch,
+                                                                          tmp_path):
+    conn = _PublishConn(_nfl_schedule(week7_scored=False))
+    assert _publish_wind(monkeypatch, tmp_path, conn) == 0
+    assert conn.bets_written() == []
+    conn = _PublishConn(_nfl_schedule(week7_scored=True))
+    assert _publish_wind(monkeypatch, tmp_path, conn) == 1
+    assert len(conn.bets_written()) == 1
+
+
+def test_publish_scored_writes_a_held_games_number_none_with_the_reason(monkeypatch,
+                                                                        tmp_path):
+    """The opener fired on CAR @ GB while both teams still had week 7 to play:
+    no BET (publish_opener), and this NONE row is the board's view of it."""
+    import data.db as db
+    import scripts.nfl_wind_publisher as pub
+    (tmp_path / f"pick_eval_{TODAY.isoformat()}.csv").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(pub, "CARDS_DIR", tmp_path)
+    monkeypatch.setattr(pub, "_lock_model", lambda *a, **k: None)
+    fired = {"game_id": CAR_GB, "model_id": "nfl_opener_spread", "qualifies": "1",
+             "current_line": "-3.5", "current_price": "-110", "current_book": "fanduel",
+             "reason": "deviation 1.5 vs Pinnacle", "observed_at": NOW.isoformat()}
+    monkeypatch.setattr(pub, "read_card", lambda path: [fired])
+    conn = _PublishConn(_nfl_schedule(week7_scored=False),
+                        games_rows=[(CAR_GB, "GB", "CAR", _d(9), _t(9 * 24))])
+    monkeypatch.setattr(db, "get_connection", lambda: conn)
+    assert pub.publish_scored(TODAY.isoformat()) == 1
+    (row,) = conn.rows_written()
+    why = f"waiting for CAR's {_d(5)} game and GB's {_d(5)} game to be played and logged"
+    assert row["signal_type"] == "NONE" and row["downgrade_reason"] == why
