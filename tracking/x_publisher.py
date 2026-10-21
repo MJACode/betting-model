@@ -18,6 +18,13 @@ affected by this flag. The week and the previous calendar month are
 notify_x_period, the same renderer, Monday 7:30am ET. RUN_X_PUBLISHER=0
 still stops the slate and every recap.
 
+Pick posts are one tweet per call, at least 10 minutes after the previous
+x_pick row, and never between 1:00am and 8:00am ET. A pick whose game has
+already started is not tweeted and is not ledgered. The 5-minute social
+job and the pipeline refresh both call notify_x_picks; the session lock
+plus the ledger timestamp keep those two from sending a pair. Recaps are
+not on this clock.
+
 Manual marketing posts are not rendered here. They are rows in
 social_post_queue, drained by tracking.social_posts, and they call
 deliver_tweet below. That drain can also upload a jpeg, png, or webp
@@ -126,7 +133,7 @@ import re
 import secrets
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -137,6 +144,9 @@ ET = ZoneInfo("America/New_York")
 
 X_POST_URL = "https://api.x.com/2/tweets"
 X_MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload"
+X_PROFILE_URL = "https://api.x.com/1.1/account/update_profile.json"
+PROFILE_NAME_MAX = 50
+PROFILE_DESCRIPTION_MAX = 160
 MAX_TWEET = 280
 # One-shot tweet_image on POST /2/media/upload. GIF and video use a different
 # category and are not accepted here.
@@ -202,7 +212,8 @@ def signature_base_string(method: str, url: str, params: dict) -> str:
 
 
 def _auth_header(method: str, url: str, creds: tuple,
-                 nonce: str | None = None, timestamp: str | None = None) -> str:
+                 nonce: str | None = None, timestamp: str | None = None,
+                 extra_params: dict | None = None) -> str:
     api_key, api_secret, token, token_secret = creds
     oauth = {
         "oauth_consumer_key": api_key,
@@ -212,9 +223,16 @@ def _auth_header(method: str, url: str, creds: tuple,
         "oauth_token": token,
         "oauth_version": "1.0",
     }
-    # The JSON body is NOT part of the signature for a JSON-bodied request --
-    # only oauth_* params are, since there is no form-encoded payload to fold in.
-    base = signature_base_string(method, url, oauth)
+    # A JSON body is not part of the signature. A form body is: RFC 5849 folds
+    # application/x-www-form-urlencoded fields into the same parameter list as
+    # the oauth_* fields. extra_params is that form. The Authorization header
+    # still lists only oauth_* fields. Tweet posts pass no extra_params.
+    signed = dict(oauth)
+    for key, value in (extra_params or {}).items():
+        if value is None:
+            continue
+        signed[str(key)] = str(value)
+    base = signature_base_string(method, url, signed)
     signing_key = f"{_quote(api_secret)}&{_quote(token_secret)}"
     digest = hmac.new(signing_key.encode(), base.encode(), hashlib.sha1).digest()
     oauth["oauth_signature"] = base64.b64encode(digest).decode()
@@ -915,6 +933,73 @@ def upload_tweet_image(content: bytes, media_type: str) -> MediaUpload:
     return MediaUpload(media_id, "uploaded", "")
 
 
+class ProfileUpdate:
+    """One POST /1.1/account/update_profile.json.
+
+    outcome is updated, skipped, rejected, or transport. rejected is an HTTP
+    4xx, including 429: the profile drain does not retry those. skipped means
+    the call was not made. Pick and recap posts never construct one.
+    """
+
+    def __init__(self, outcome: str, detail: str = "", body: str = ""):
+        self.outcome = outcome
+        self.detail = detail
+        self.body = body
+
+
+def update_profile(*, name: str | None = None, description: str | None = None,
+                   url: str | None = None) -> ProfileUpdate:
+    """Set the account name, description, and url. Does not create a tweet.
+
+    Omitted fields (None) are left off the form, so X leaves them as they are.
+    A name over 50 characters or a description over 160 is refused here, before
+    the request. RUN_X_PUBLISHER=0 returns skipped and does not call X.
+    """
+    if not _enabled():
+        return ProfileUpdate("skipped", "RUN_X_PUBLISHER=0")
+    creds = _creds()
+    if not creds:
+        return ProfileUpdate("skipped", "credentials not configured")
+    fields: dict[str, str] = {}
+    if name is not None:
+        fields["name"] = str(name)
+    if description is not None:
+        fields["description"] = str(description)
+    if url is not None:
+        fields["url"] = str(url)
+    if not fields:
+        return ProfileUpdate("rejected", "nothing to update")
+    if "name" in fields and len(fields["name"]) > PROFILE_NAME_MAX:
+        return ProfileUpdate(
+            "rejected",
+            f"name is {len(fields['name'])} characters; the limit is {PROFILE_NAME_MAX}")
+    if "description" in fields and len(fields["description"]) > PROFILE_DESCRIPTION_MAX:
+        return ProfileUpdate(
+            "rejected",
+            f"description is {len(fields['description'])} characters; "
+            f"the limit is {PROFILE_DESCRIPTION_MAX}")
+    try:
+        resp = requests.post(
+            X_PROFILE_URL,
+            data=fields,
+            headers={
+                "Authorization": _auth_header(
+                    "POST", X_PROFILE_URL, creds, extra_params=fields),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            timeout=20,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ProfileUpdate("transport", str(exc)[:500])
+    body = (resp.text or "")[:4000]
+    if resp.status_code in (200, 201):
+        return ProfileUpdate("updated", "", body)
+    detail = f"HTTP {resp.status_code} {body[:500]}"
+    if 400 <= resp.status_code < 500:
+        return ProfileUpdate("rejected", detail, body)
+    return ProfileUpdate("transport", detail, body)
+
+
 # ── Ledgered publishing ───────────────────────────────────────────────────────
 # Reuses push_sent, exactly as Discord does: UNIQUE(lock_key, kind), and a row
 # written ONLY after a confirmed post. Two consequences that matter here more
@@ -954,8 +1039,106 @@ def _ledger(conn, lock_key: str, kind: str, tweet_id: str | None) -> None:
 
 
 # One row per pick, on the pick's own lock key. A later pass sees the row
-# and does not tweet that pick again.
+# and does not tweet that pick again. The row is still written only after
+# a confirmed post. Pacing reads sent_at; it does not insert a claim row.
 X_PICK_KIND = "x_pick"
+# Minimum gap between two confirmed pick tweets. The 5-minute job is what
+# makes the gap about 10 minutes instead of the hourly refresh.
+PICK_MIN_GAP = timedelta(minutes=10)
+# 1:00am inclusive through 8:00am exclusive, America/New_York. 12:35am is
+# before this window. A held pick posts on the first eligible call at or
+# after 8:00am whose game has not started.
+_QUIET_START = dt_time(1, 0)
+_QUIET_END = dt_time(8, 0)
+
+
+def _as_et(now: datetime | None) -> datetime:
+    if now is None:
+        return datetime.now(ET)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=ET)
+    return now.astimezone(ET)
+
+
+def _in_pick_quiet_hours(now: datetime) -> bool:
+    local = _as_et(now)
+    return _QUIET_START <= local.time().replace(microsecond=0) < _QUIET_END
+
+
+def _parse_sent_at(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        ts = value
+    else:
+        try:
+            ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ET)
+    # UTC, not ET. Two ET stamps in the November overlap share a tzinfo, and
+    # Python then compares the clock face and ignores fold, so 1:30am EDT
+    # sorts after 1:00am EST even though EST is later.
+    return ts.astimezone(ZoneInfo("UTC"))
+
+
+def _latest_x_pick_sent(conn) -> datetime | None:
+    """Newest x_pick sent_at, or None when no pick has been confirmed.
+
+    Raises when the read fails or a returned stamp cannot be parsed. The
+    caller treats that as "do not post": an unreadable clock cannot prove
+    the gap. String order of the offset is wrong across the DST overlap,
+    so the newest of the last few rows is taken by parsed time.
+    """
+    rows = conn.execute(
+        "SELECT sent_at FROM push_sent WHERE kind = %s "
+        "ORDER BY sent_at DESC LIMIT 8",
+        (X_PICK_KIND,)).fetchall()
+    latest = None
+    saw = False
+    for row in rows:
+        saw = True
+        parsed = _parse_sent_at(row[0])
+        if parsed is not None and (latest is None or parsed > latest):
+            latest = parsed
+    if saw and latest is None:
+        raise ValueError("x_pick sent_at unreadable")
+    return latest
+
+
+def _x_pick_gap_open(conn, now: datetime) -> bool:
+    try:
+        last = _latest_x_pick_sent(conn)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"X publisher: pick clock unreadable ({exc}) — skipping")
+        return False
+    if last is None:
+        return True
+    return now - last >= PICK_MIN_GAP
+
+
+def _game_already_started(pick: dict, now: datetime) -> bool:
+    """True when this pick's commence is at or before now.
+
+    A missing or unparseable commence is not treated as started. That is
+    the same rule as the slate query: an unknown start must not drop a pick.
+    """
+    raw = pick.get("commence")
+    if raw is None or raw == "":
+        return False
+    if isinstance(raw, datetime):
+        ts = raw
+    else:
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    # Instants, not the ET clock face. The November overlap makes 1:30am EDT
+    # compare greater than 1:00am EST when both carry the same tzinfo.
+    return ts.astimezone(ZoneInfo("UTC")) <= _as_et(now).astimezone(ZoneInfo("UTC"))
 
 
 def _college_mascots(conn, picks: list[dict]) -> dict[str, str]:
@@ -984,64 +1167,96 @@ def _college_mascots(conn, picks: list[dict]) -> dict[str, str]:
     return {row[0]: row[1] for row in rows if row[0] and row[1]}
 
 
-def _post_released_picks(conn, target_date: str, dry_run: bool = False) -> int:
-    """Tweet every released pre-game pick that does not already have an X row.
+def _post_released_picks(conn, target_date: str, dry_run: bool = False,
+                         now: datetime | None = None) -> int:
+    """Tweet at most one released pre-game pick that has no X row yet.
 
     The set is _new_signals with the Discord ledger ignored: the same picks
     Discord's sport channels release, including a game dated ahead of today,
     excluding live and started games. Discord's free-pick choice is not
-    consulted. Each pick is ledgered as x_pick on its own lock_key after a
-    confirmed post. A 429 stops the batch; nothing unsent is ledgered, so
-    the next pass continues.
+    consulted. Order is that query's order. This posts the first one that
+    is not already ledgered and whose game has not started.
+
+    One confirmed tweet per call. The previous x_pick sent_at must be at
+    least PICK_MIN_GAP old. From 1:00am through 8:00am ET the call posts
+    nothing and writes nothing; the pick stays eligible. A game that has
+    started by send time is skipped and not ledgered, and the call moves
+    to the next pick. Each posted pick is ledgered as x_pick on its own
+    lock_key after a confirmed post. A 429 stops the call; nothing unsent
+    is ledgered, so the next eligible call retries that same pick.
+
+    The session advisory lock is held across the read, the send, and the
+    ledger so a pipeline pass and the 5-minute job cannot each send one.
     """
     if not post_all_picks():
         return 0
-    try:
-        from tracking.discord_notifier import _new_signals
-        picks = _new_signals(conn, target_date, include_already_posted=True)
-    except Exception as exc:                                  # noqa: BLE001
-        logger.error(f"X slate failed: {exc}")
+    clock = _as_et(now)
+    if _in_pick_quiet_hours(clock):
+        logger.info("X picks: quiet hours (1:00am–8:00am ET) — holding")
         return 0
-    try:
-        mascots = _college_mascots(conn, picks)
-    except Exception as exc:                                  # noqa: BLE001
-        logger.warning(f"X publisher: mascot load failed ({exc})")
-        mascots = {}
-    posted = 0
-    for pick in picks:
-        key = pick.get("lock_key")
-        if not key:
-            continue
-        if _already_sent(conn, key, X_PICK_KIND):
-            continue
+    from tracking.publish_lock import X_PICKS_LOCK, publish_lock
+    with publish_lock(conn, X_PICKS_LOCK, "X picks") as owned:
+        if not owned:
+            return 0
+        if not _x_pick_gap_open(conn, clock):
+            return 0
         try:
-            text = render_pick(pick, mascots=mascots)
-        except ValueError as exc:
-            logger.error(f"X publisher: {exc}")
-            continue
-        tweet_id, limited = _deliver_tweet(text, dry_run=dry_run)
-        if limited:
-            logger.warning(
-                "X publisher: rate limited — remaining picks wait for the next pass")
+            from tracking.discord_notifier import _new_signals
+            picks = _new_signals(conn, target_date, include_already_posted=True)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"X slate failed: {exc}")
+            return 0
+        try:
+            mascots = _college_mascots(conn, picks)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning(f"X publisher: mascot load failed ({exc})")
+            mascots = {}
+        posted = 0
+        for pick in picks:
+            key = pick.get("lock_key")
+            if not key:
+                continue
+            if _already_sent(conn, key, X_PICK_KIND):
+                continue
+            if _game_already_started(pick, clock):
+                logger.info(f"X picks: {key} game has started — not posting")
+                continue
+            try:
+                text = render_pick(pick, mascots=mascots)
+            except ValueError as exc:
+                logger.error(f"X publisher: {exc}")
+                continue
+            tweet_id, limited = _deliver_tweet(text, dry_run=dry_run)
+            if limited:
+                logger.warning(
+                    "X publisher: rate limited — this pick waits for the next pass")
+                break
+            if not tweet_id:
+                continue
+            if not dry_run:
+                _ledger(conn, key, X_PICK_KIND, tweet_id)
+            posted += 1
             break
-        if not tweet_id:
-            continue
-        if not dry_run:
-            _ledger(conn, key, X_PICK_KIND, tweet_id)
-        posted += 1
-    if posted:
-        logger.info(f"X: {posted} pick(s) tweeted")
-    return posted
+        if posted:
+            logger.info(f"X: {posted} pick(s) tweeted")
+        return posted
 
 
 def notify_x_picks(target_date: str | None = None,
-                   dry_run: bool = False) -> int:
-    """Tweet every released pre-game pick that is not already on X.
+                   dry_run: bool = False,
+                   now: datetime | None = None) -> int:
+    """Tweet the next released pre-game pick that is not already on X.
 
     One format for every pick. This does not read Discord's free-pick row,
     does not wait for that choice, and does not label one tweet differently.
     Each pick is ledgered on its own lock key, so a later pass posts only
-    picks that were not confirmed.
+    picks that were not confirmed. One call confirms at most one tweet, and
+    only when the last x_pick is at least 10 minutes old and the ET clock
+    is outside 1:00am–8:00am.
+
+    The connection is session mode so the advisory lock is held across the
+    HTTP call. The transaction pooler would release it after the lock
+    statement, and the pipeline pass and the 5-minute job would both send.
 
     X_POST_ALL_PICKS=0 returns 0 and posts nothing. Returns the number of
     tweets confirmed on this call.
@@ -1052,9 +1267,9 @@ def notify_x_picks(target_date: str | None = None,
         target_date = datetime.now(ET).date().isoformat()
     from data.db import get_connection
 
-    conn = get_connection()
+    conn = get_connection(session_mode=True)
     try:
-        return _post_released_picks(conn, target_date, dry_run=dry_run)
+        return _post_released_picks(conn, target_date, dry_run=dry_run, now=now)
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"X picks failed: {exc}")
         return 0
@@ -1063,7 +1278,8 @@ def notify_x_picks(target_date: str | None = None,
 
 
 def notify_x_results(game_date: str, dry_run: bool = False,
-                     restate: dict | None = None) -> int:
+                     restate: dict | None = None,
+                     now: datetime | None = None) -> int:
     """Tweet the settled day. Ledgered per date, and ONLY for a day that is over.
 
     THE DAY-IS-OVER GUARD IS THE WHOLE POINT OF THIS FUNCTION'S TIMING, and it
@@ -1092,11 +1308,18 @@ def notify_x_results(game_date: str, dry_run: bool = False,
     """
     if not _enabled() or not _creds():
         return 0
-    if game_date >= datetime.now(ET).date().isoformat():
+    from tracking.discord_notifier import (_as_et, _settled_rows, _tally,
+                                           clv_line, in_daily_recap_window,
+                                           restate_lock_key, sport_in_progress,
+                                           window_still_live)
+    clock = _as_et(now)
+    # Same clock as notify_discord_results: a day that is not over, and any
+    # hour from noon through 6:00am, returns before the database is opened.
+    if game_date >= clock.date().isoformat():
+        return 0
+    if not in_daily_recap_window(clock):
         return 0
     from data.db import get_connection
-    from tracking.discord_notifier import (_settled_rows, _tally, clv_line,
-                                           restate_lock_key)
 
     # A restatement (recaps_needing_restatement's dict) rides its own ledger
     # kind, keyed on the published_at of the recap it corrects -- the same
@@ -1110,6 +1333,15 @@ def notify_x_results(game_date: str, dry_run: bool = False,
             return 0
         rows = _settled_rows(conn, game_date)
         if not rows:
+            return 0
+        sports = tuple({r[0] for r in rows if r[0]})
+        if window_still_live(conn, game_date, game_date, sports):
+            logger.info(f"X results: {game_date} still has a game "
+                        f"without a final score")
+            return 0
+        if sport_in_progress(conn, sports, now):
+            logger.info(f"X results: {game_date} waits, a game of "
+                        f"that sport is in progress")
             return 0
         t = _tally(rows)
         if (t["w"] + t["l"] + t["p"]) == 0:
@@ -1152,7 +1384,8 @@ def notify_x_results(game_date: str, dry_run: bool = False,
 
 
 def notify_x_period(span: str, start, end, heading: str,
-                    dry_run: bool = False) -> int:
+                    dry_run: bool = False,
+                    now: datetime | None = None) -> int:
     """Tweet one week or one month. Same settled picks as the daily recap.
 
     The heading is the one Discord uses, plus 'results', so the two surfaces
@@ -1161,8 +1394,12 @@ def notify_x_period(span: str, start, end, heading: str,
     """
     if not _enabled() or not _creds():
         return 0
+    from tracking.discord_notifier import (_settled_rows_since, _tally, clv_line,
+                                           in_period_recap_window,
+                                           sport_in_progress, window_still_live)
+    if not in_period_recap_window(now):
+        return 0
     from data.db import get_connection
-    from tracking.discord_notifier import _settled_rows_since, _tally, clv_line
 
     kind = f"x_results_{span}"
     lock = f"{kind}:{start.isoformat()}"
@@ -1172,6 +1409,15 @@ def notify_x_period(span: str, start, end, heading: str,
             return 0
         rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
         if not rows:
+            return 0
+        sports = tuple({r[0] for r in rows if r[0]})
+        if window_still_live(conn, start.isoformat(), end.isoformat(), sports):
+            logger.info(f"X {span}: {heading} still has a game "
+                        f"without a final score")
+            return 0
+        if sport_in_progress(conn, sports, now):
+            logger.info(f"X {span}: {heading} waits, a game of "
+                        f"that sport is in progress")
             return 0
         t = _tally(rows)
         if (t["w"] + t["l"] + t["p"]) == 0:

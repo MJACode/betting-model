@@ -43,17 +43,18 @@ def test_the_recap_query_drops_an_unposted_bet_and_a_voided_lock():
         clv_method)""")
     db.execute("CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)")
     rows = [
-        ("MLB", "m_posted", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g1", None, None, None, None),
-        ("MLB", "m_silent", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g2", None, None, None, None),
-        ("MLB", "m_voided", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g3", None, None, None, None),
-        ("NFL", "nfl_live_prop", "WIN", 0.02, -110, None, None, 1, "2026-10-01", "BET", None, None, "g4", "over", "p", "p", "player_pass_attempts"),
-        ("MLB", "m_void_result", "NO_ACTION", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, "VOID", "g5", None, None, None, None),
+        ("MLB", "m_posted", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g1", None, None, None, None, None),
+        ("MLB", "m_silent", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g2", None, None, None, None, None),
+        ("MLB", "m_voided", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g3", None, None, None, None, None),
+        ("NFL", "nfl_live_prop", "WIN", 0.02, -110, None, None, 1, "2026-10-01", "BET", None, None, "g4", "over", "p", "p", "player_pass_attempts", None),
+        ("MLB", "m_void_result", "NO_ACTION", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, "VOID", "g5", None, None, None, None, None),
     ]
     db.executemany(
         "INSERT INTO picks (sport, model_id, result, kelly_fraction, dk_odds, "
         "decision_odds, clv_pct, is_live, game_date, signal_type, downgrade_reason, "
-        "condition_status, game_id, pick_side, player_id, player_key, prop_market) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        "condition_status, game_id, pick_side, player_id, player_key, prop_market, "
+        "clv_method) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     db.executemany(
         "INSERT INTO push_sent VALUES (?, ?, ?)",
         [
@@ -193,6 +194,7 @@ def test_the_app_record_leaves_an_unpublished_graded_bet_out():
     assert "both keep picks whose posting status is unknown" in screen
     assert "useModelPickHistory" not in screen
     assert "v_model_full_outcome_picks" not in screen
+    assert "clears today's thresholds" not in screen
     for rel in ("mobile/src/lib/teamDetail.ts", "mobile/src/lib/playerDetail.ts"):
         assert "publishedRecordKeeps(p)" in (ROOT / rel).read_text(encoding="utf-8")
     hook = (ROOT / "mobile/src/hooks/useCustomModelStats.ts").read_text(encoding="utf-8")
@@ -200,7 +202,9 @@ def test_the_app_record_leaves_an_unpublished_graded_bet_out():
     assert load.index("writeSettledCache(merged)") < load.index("attachDiscordPublish(merged)")
     queries = (ROOT / "mobile/src/lib/queries.ts").read_text(encoding="utf-8")
     cols = queries.split("const SETTLED_PICK_COLUMNS =")[1].split(";")[0]
-    assert "player_key" in cols and "prop_market" in cols
+    assert "player_key" in cols and "prop_market" in cols and "clv_method" in cols
     assert queries.count("return attachDiscordPublish(") == 2
     cache = (ROOT / "mobile/src/lib/settledPickCache.ts").read_text(encoding="utf-8")
     assert "const KEY = 'settledPicks.v9';" in cache
+    assert "p.clv_method === 'standard_v2'" in screen
+    assert "countsTowardViewClv" not in screen

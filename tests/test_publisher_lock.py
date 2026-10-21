@@ -126,7 +126,8 @@ def test_an_exception_mid_publish_does_not_wedge_every_later_pass():
 
 def test_the_producers_do_not_share_one_key():
     """A slow Discord webhook must not hold up the push path, or vice versa."""
-    keys = [pl.DISCORD_SIGNALS_LOCK, pl.DISCORD_LIVE_LOCK, pl.PUSH_SIGNALS_LOCK]
+    keys = [pl.DISCORD_SIGNALS_LOCK, pl.DISCORD_LIVE_LOCK, pl.PUSH_SIGNALS_LOCK,
+            pl.X_PICKS_LOCK]
     assert len(set(keys)) == len(keys)
 
 

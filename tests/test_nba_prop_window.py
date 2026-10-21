@@ -217,13 +217,13 @@ def test_a_tick_with_nothing_near_spends_nothing(monkeypatch):
 def test_a_tick_fetches_exactly_the_window_games_then_decides_closes_and_publishes(monkeypatch):
     import scripts.nba_prop_window as win
     ran, published = _tick(monkeypatch, win.Plan(decide=["G1", "G2"], close=["G0"]))
-    assert [label for label, _, _ in ran] == ["nba-prop-window-fetch", "nba-prop-market",
-                                              "nba-prop-projection", "nba-prop-close"]
+    # ONE step for both NBA prop cards: their candidates meet in one choice
+    # (scripts/nba_props_card.py), so the order they run in cannot pick the winner.
+    assert [label for label, _, _ in ran] == ["nba-prop-window-fetch", "nba-props", "nba-prop-close"]
     fetch_cmd = ran[0][1]
     assert fetch_cmd[-3:] == ["--fetch", "G1", "G2"]
-    assert ran[1][1][-2:] == ["--step", "nba-prop-market"]
-    assert ran[2][1][-2:] == ["--step", "nba-prop-projection"]
-    assert ran[3][1][-2:] == ["--step", "nba-prop-close"]
+    assert ran[1][1][-2:] == ["--step", "nba-props"]
+    assert ran[2][1][-2:] == ["--step", "nba-prop-close"]
     assert all(kw.get("timeout") for _, _, kw in ran), "every step is bounded (see _run)"
     assert sum(kw["timeout"] for _, _, kw in ran) <= 300, "the deciding steps fit inside one tick"
     assert published == ["nba-prop-window"]
@@ -239,7 +239,7 @@ def test_projecting_runs_after_the_decisions_are_published(monkeypatch):
     monkeypatch.setattr(scheduler, "_publish_new_signals", lambda src: order.append(("publish", None)))
     scheduler.run_nba_prop_window()
     labels = [x[0] for x in order]
-    assert labels == ["nba-prop-window-fetch", "nba-prop-market", "nba-prop-projection", "publish",
+    assert labels == ["nba-prop-window-fetch", "nba-props", "publish",
                       "nba-injuries", "nba-prop-project"]
     assert order[-2][1][-2:] == ["--sport", "NBA"]
     assert order[-1][1][-2:] == ["--project", "G9"]

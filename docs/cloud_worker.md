@@ -20,7 +20,8 @@ crons had).
 | Job | When (ET) | Command |
 |---|---|---|
 | Daily full pipeline | 6:00am | `python run_pipeline.py` |
-| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered |
+| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered. The same call also posts Eggz's windows to `#eggz-picks` when `DISCORD_WEBHOOK_EGGZ` is set |
+| Eggz channel read | every 15 min | `run_eggz_ingest()` — `#eggz-picks`, author `DISCORD_EGGZ_AUTHOR_ID` only. No request when the token, channel id, or author id is unset |
 | Model quality monitor | 11:00am | `tracking.model_quality.run_model_quality()` — also Step 13 of the daily; report only, `model_quality_checks`. Kill switch: `RUN_MODEL_QUALITY=0` |
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
@@ -374,7 +375,11 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
   public audience than the full feed, so leaving it unset posts nothing rather than leaking the
   free pick into the catch-all channel. |
-| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. |
+| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. An Eggz post that cannot be parsed is logged here once per message id when this is set. |
+| `DISCORD_WEBHOOK_EGGZ` | Eggz recaps in `#eggz-picks` only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
+| `DISCORD_EGGZ_CHANNEL_ID` | The `#eggz-picks` channel id the bot reads. Unset, the poll does not call Discord. |
+| `DISCORD_EGGZ_AUTHOR_ID` | Discord user id of the only author stored. That id is the user whose username is `jack_mehoff123` and whose display name is Dr. Eggz. The username is not the filter. |
+| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. |
 | `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
 | `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |
@@ -388,6 +393,7 @@ so adding that channel later still delivers the rest of the day's picks.
 | **Results recap** | After settlement, once per settled day. The 6:00am ET daily settles yesterday. A miss retries from 7:00am ET on later settle passes. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Weekly results** | Monday 7:30am ET, the prior Monday–Sunday. Later settle passes retry until the next Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Monthly results** | The first Monday of the month, 7:30am ET, the previous calendar month. Later settle passes retry until the next month's first Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
+| **Eggz results** | Previous day from the 6:00am ET settle, and again on later settle passes. The week and the month use the Monday 7:30am clock. A window that still has a pending leg is not ledgered. | `DISCORD_WEBHOOK_EGGZ` (`#eggz-picks`) |
 | **Watchdog alert / recovery** | Database unreachable, or no completed pass in `WATCHDOG_STALE_MINUTES`. Checked every 15 minutes, around the clock. | `DISCORD_WEBHOOK_OPS` |
 | **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |
 
@@ -423,6 +429,15 @@ Monday of the month. A window that did not post stays due until the next one
 opens; the ledger (`discord_results_week`, `discord_results_month`, and the
 `x_results_*` pair, keyed on the window's start date) posts it once. X uses
 the daily recap's renderer with the window's heading.
+
+Eggz's recap uses that same clock and the same tally, on `DISCORD_WEBHOOK_EGGZ`
+only. Ledger keys are `discord_eggz_results_day`, `discord_eggz_results_week`,
+and `discord_eggz_results_month`, each with the window's start date. His bets
+are `capper_picks`, graded with the existing settler and the DraftKings
+pre-start close. They are not rows in `picks`, and they are not in `#results`
+or on X. A line that cannot be parsed or matched is `needs_review` and is
+logged; if `DISCORD_WEBHOOK_OPS` is set, one alert is posted for that message
+id. The read is `eggz_ingest`, every 15 minutes, with `DISCORD_BOT_TOKEN`.
 
 ### Guarantees
 

@@ -577,7 +577,11 @@ def step_nhl_results(run_date: str) -> bool:
         # today covers yesterday too, and only today's date can pick up a game
         # that finished this evening.
         n = ingest_nhl_scores_for_date(run_date)
-        logger.success(f"✓ NHL results: {n} final games upserted")
+        from data.ingestors.nhl_period_scores_api import top_up
+        # Same pass, after the finals are in `games`: the score feed's goals
+        # array is the period row. Dates already stored are not fetched.
+        periods = top_up(run_date)
+        logger.success(f"✓ NHL results: {n} final games upserted; {periods} period rows")
         return True
     except Exception as exc:
         logger.error(f"✗ NHL results failed: {exc}")
@@ -1345,45 +1349,45 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
-def step_nba_prop_market(dry_run: bool = False) -> bool:
-    """NBA player props (`nba_prop_market`): same-line unders against Pinnacle.
+def step_nba_props(dry_run: bool = False) -> bool:
+    """NBA player props, BOTH models (`nba_prop_market`, `nba_prop_projection`), in one look.
 
-    Decides each game once, at the first look 45-57 minutes before its tip
-    whose newest prop fetch holds Pinnacle, and writes every qualifying
-    proposition with the game's decision row, under the model's lock
-    (scripts/nba_prop_market_card.py; no game or night cap, mike 2026-10-16).
-    Run by the refresh pass, the 6am run and the five-minute window job. LIVE,
-    no write switch (mike, 2026-10-15). A look with no game in its window
-    writes nothing and logs why.
+    Each card decides a game once, 45-57 minutes before its tip; their
+    candidates are pooled and ONE door writes at most one NBA prop bet a game
+    across both models and scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT a
+    night, ranked by each bet's EV percentile within its own model
+    (models/nba_prop_rank.py), the bets already written counted (mike, 2026-10-20:
+    "Only the strongest picks need to be sent, like NHL"; it replaced the
+    2026-10-16 no-cap rule). Run by the refresh pass, the 6am run and the
+    five-minute window job. LIVE, no write switch. A look with no game in its
+    window writes nothing and logs why. One model's look failing returns False
+    (the step exits 1) after the other model has still decided and written.
     """
     try:
-        from scripts.nba_prop_market_card import run_card
-        result = run_card(do_publish=not dry_run)
-        logger.success(f"✓ NBA prop market card: "
-                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
+        from scripts.nba_props_card import run_cards
+        result = run_cards(do_publish=not dry_run)
+        if result.get("errors"):
+            # one model's look failed; the other still decided and wrote (scripts/nba_props_card.py)
+            logger.error(f"✗ NBA prop cards: a look failed {result['errors']}: {result}")
+            return False
+        logger.success(f"✓ NBA prop cards: {result}")
         return True
     except Exception as exc:
-        logger.error(f"✗ NBA prop market card failed: {exc}")
+        logger.error(f"✗ NBA prop cards failed: {exc}")
         return False
+
+
+def step_nba_prop_market(dry_run: bool = False) -> bool:
+    """The old name for step_nba_props, kept so existing callers keep working. One model's card
+    alone never writes (the card that ran first would win the game's one bet)."""
+    return step_nba_props(dry_run=dry_run)
 
 
 def step_nba_prop_projection(dry_run: bool = False) -> bool:
-    """The NBA projection model (`nba_prop_projection`): price the stored projections.
-
-    Decides each game once, in the same window as nba_prop_market and after it
-    (scripts/nba_prop_projection_card.py), on the projections the window job
-    stored about 65 minutes before tip. Never a proposition nba_prop_market holds.
-    LIVE, no write switch. A look with no game in its window writes nothing.
-    """
-    try:
-        from scripts.nba_prop_projection_card import run_card
-        result = run_card(do_publish=not dry_run)
-        logger.success(f"✓ NBA projection card: "
-                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
-        return True
-    except Exception as exc:
-        logger.error(f"✗ NBA projection card failed: {exc}")
-        return False
+    """The old name for step_nba_props, kept so existing callers keep working: both NBA prop
+    cards in one look (scripts/nba_props_card.py). A second run in the same pass decides nothing
+    new: every game the first decided is in both ledgers."""
+    return step_nba_props(dry_run=dry_run)
 
 
 def step_nba_total_luck(dry_run: bool = False) -> bool:
@@ -1630,10 +1634,12 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X posts every released pre-game pick, each in the same format.
-        # Discord's free pick is not an input. X_POST_ALL_PICKS=0 posts no
-        # pick slate. Ledgered independently of Discord, so one surface
-        # failing never suppresses the other.
+        # X posts the next released pre-game pick, one per call, in the same
+        # format. The 5-minute job is the other caller. notify_x_picks holds
+        # them 10 minutes apart and holds 1:00am–8:00am ET. Discord's free
+        # pick is not an input. X_POST_ALL_PICKS=0 posts no pick slate.
+        # Ledgered independently of Discord, so one surface failing never
+        # suppresses the other.
         try:
             from tracking.x_publisher import notify_x_picks
             notify_x_picks(target_date=run_date, dry_run=dry_run)
@@ -1766,13 +1772,9 @@ def step_settle(settle_date: str) -> bool:
         logger.error(f"✗ X results post failed (settlement + Discord "
                      f"unaffected): {exc}")
 
-    # Yesterday's recap, when the 6am run could not post it. 2026-10-13: the
-    # 6am run found nothing counting for 10-12 (its only counting bets, two
-    # NHL props, were graded at 07:24 by the next pass), and nothing asked
-    # again, so neither surface ever posted it. A refresh pass settles TODAY,
-    # so the two calls above refuse; this asks for yesterday instead, from
-    # 7am ET, both surfaces, Discord first, ledgered per date -- it posts once,
-    # on the first pass where something counting has settled.
+    # A day the morning window has not posted. Retries from 7:00am through
+    # noon ET for DAILY_CATCHUP_DAYS, oldest first. The post names that
+    # date. An evening pass does not post it.
     #
     # Only on a pass settling today. The 6am run settles yesterday and has
     # just made the ordinary attempt above, so it runs nothing new here.
@@ -1801,8 +1803,8 @@ def step_settle(settle_date: str) -> bool:
         logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
 
     # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
-    # first Monday, the previous calendar month. Later passes retry a miss.
-    # Both are ledgered, so a posted window is not posted again.
+    # first Monday, the previous calendar month. Later morning passes, through
+    # noon ET, retry a miss. An evening pass does not. Both are ledgered.
     try:
         from tracking.discord_notifier import post_period_recaps
         n = post_period_recaps()
@@ -1810,6 +1812,18 @@ def step_settle(settle_date: str) -> bool:
             logger.info(f"Period results recap posted: {n} post(s)")
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Period results recap failed (settlement "
+                     f"unaffected): {exc}")
+
+    # Eggz's channel only. Yesterday from 6:00am through noon ET, and the
+    # week and month from 7:30am through noon. A miss waits for the next
+    # morning. Ledgered separately.
+    try:
+        from tracking.eggz_picks import post_eggz_recaps
+        n = post_eggz_recaps()
+        if n:
+            logger.info(f"Eggz results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Eggz results recap failed (settlement "
                      f"unaffected): {exc}")
     return True
 
@@ -1986,9 +2000,8 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # The NBA prop card reads the fetch just stored (it decides only games
     # 45-57 minutes from tip, so at 6am it normally writes nothing), then the
     # closing snapshot for any bet game whose close is due.
-    logger.info("Step 2c3: NBA prop card (same-line unders vs Pinnacle)...")
-    results["nba_prop_market"] = step_nba_prop_market(dry_run=dry_run)
-    results["nba_prop_projection"] = step_nba_prop_projection(dry_run=dry_run)
+    logger.info("Step 2c3: NBA prop cards (both NBA prop models, one door)...")
+    results["nba_props"] = step_nba_props(dry_run=dry_run)
     if not dry_run:
         results["nba_prop_close"] = step_nba_prop_close()
     time.sleep(2)
@@ -2337,7 +2350,7 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
-                                 "nba-prop-market", "nba-prop-close",
+                                 "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck",
                                  "nhl-over-under",
@@ -2421,6 +2434,7 @@ Examples:
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
+            "nba-props": lambda: step_nba_props(dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
             "nba-prop-close": lambda: step_nba_prop_close(),
             "nba-prop-projection": lambda: step_nba_prop_projection(dry_run=args.dry_run),
