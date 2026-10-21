@@ -44,9 +44,14 @@ export function gameMarketForModel(modelId: string): string | null {
   // so without this it fell through to 'h2h' and its totals price could never
   // resolve. Live rows come from v_latest_inplay_odds_all_books, not the
   // pre-game views (which exclude snapshot_type='in_play' by design).
-  // Same trap: `mlb_total_market` / `mlb_total_public_fade` have neither
-  // 'over_under' nor 'spread'. Without this they fall through to 'h2h'.
+  // Same trap: `mlb_total_market` / `mlb_total_public_fade` / `nba_total_luck`
+  // have neither 'over_under' nor 'spread'. Without this they fall through to
+  // 'h2h', and every price, movement and line-shop lookup reads moneyline rows.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
+  if (modelId === 'nba_total_luck') return 'totals';
+  // The NBA home team total (unders): the home team's own points, stored
+  // under its own market, never the game's 'totals' rows.
+  if (modelId === 'nba_team_total_luck') return 'team_totals_home';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';
@@ -91,17 +96,20 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
  * is not the proposition the book sells.
  *
  * Almost always they are the same thing: an "Over 5.5 Receptions" board row
- * buys Over 5.5 receptions. `player_anytime_td` is the exception — the board
- * asked it as "Rush+Rec TDs" with a 0.5 line (the chip has been named
+ * buys Over 5.5 receptions. Two markets are not. `player_anytime_td` — the
+ * board asked it as "Rush+Rec TDs" with a 0.5 line (the chip has been named
  * "Anytime TD" since 2026-09-25), but no book sells that; they
  * sell "Anytime Touchdown Scorer", which also pays on a return touchdown the
- * board's rush+rec history never counted. A betslip leg reading "Over 0.5
- * Rush+Rec TDs" is a proposition the user cannot find at their sportsbook,
- * so the LEG and the sheet use this name while the column header keeps its
- * own (UX review, 2026-09-05).
+ * board's rush+rec history never counted. `player_goal_scorer_anytime` is the
+ * same split: the chip stays "Goals" because that is the average, and the
+ * book lists the bet as Anytime Goal Scorer, Yes. A leg reading "Over 0.5
+ * Goals" is a proposition the user cannot find at their sportsbook, so the
+ * LEG and the sheet use this name while the column header keeps its own
+ * (UX review, 2026-09-05 and 2026-10-16).
  */
 export function propDisplayLabel(market: string | null, statLabel: string): string {
   if (market === 'player_anytime_td') return 'Anytime TD';
+  if (market === 'player_goal_scorer_anytime') return 'Anytime Goal';
   return statLabel;
 }
 
@@ -113,6 +121,9 @@ export function propDisplayLabel(market: string | null, statLabel: string): stri
  * dashes and a column of dashes with a reason.
  */
 export function oneWayMarket(market: string | null, side: 'over' | 'under'): boolean {
+  // Anytime goal scorer is the same Yes/No shape: the book posts Yes (over
+  // 0.5) and no No, stored as player_goal_scorer_anytime.
+  if (market === 'player_goal_scorer_anytime') return side === 'under';
   return market === 'player_anytime_td' && side === 'under';
 }
 
@@ -148,7 +159,8 @@ export function playerNameFromPickLabel(label: string): string | null {
 
 /**
  * PickCard title parts. Props show the bet on the primary (bold) line and
- * the player name on a caption line; game markets stay a single `pick_label`.
+ * the player name on a caption line; game markets stay a single `pick_label`,
+ * except a team total, which shows the part of the label after its dash.
  *
  * Secondary is set only when `playerNameFromPickLabel` returns a name that
  * is not a game-total matchup. `_build_pick_label` writes totals as
@@ -159,11 +171,40 @@ export function playerNameFromPickLabel(label: string): string | null {
  * any suffix the scorer already wrote). The label is quoted, never rebuilt
  * (CLAUDE.md §00 / §1c).
  */
+/**
+ * A team total's bet, quoted from its label after the dash:
+ * "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total Under 115.5".
+ * Null for any other label. The whole label is wider than a phone's one-line
+ * title, so it clipped the side and the number, the part the row is for.
+ */
+export function teamTotalBet(label: string): string | null {
+  const dash = label.indexOf(' — ');
+  if (dash > 0 && label.slice(dash + 3).includes(' Team Total ')) {
+    return label.slice(dash + 3).trim();
+  }
+  return null;
+}
+
+/**
+ * The text of a one-line pick row (a model's page, the tracked list): a team
+ * total's bet without the matchup (the row's date already places the game, the
+ * home team plays once a night), every other label as stored. A prop keeps its
+ * player name. The row's accessibility label keeps the whole stored label.
+ */
+export function pickRowTitle(pick: { pick_label: string }): string {
+  const label = pick.pick_label ?? '';
+  return teamTotalBet(label) ?? label;
+}
+
 export function splitPickTitle(pick: { pick_label: string }): {
   primary: string;
   secondary: string | null;
 } {
   const label = pick.pick_label ?? '';
+  // A team total: the bold line is the bet (the card's header already shows
+  // the matchup).
+  const bet = teamTotalBet(label);
+  if (bet) return { primary: bet, secondary: null };
   const player = playerNameFromPickLabel(label);
   if (!player || /\s(?:vs|@)\s/.test(player)) {
     return { primary: label, secondary: null };
@@ -195,8 +236,12 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId.startsWith('mlb_prop_pitcher_')) return 'pitching_prop';
   if (modelId.includes('prop')) return 'off_prop'; // batter / player scoring props
   if (modelId.includes('over_under') || modelId.includes('total_runs')) return 'game_total';
-  // Same trap as gameMarketForModel: mlb_total_* has neither substring.
+  // Same trap as gameMarketForModel: mlb_total_* and nba_total_luck have
+  // neither substring.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
+  if (modelId === 'nba_total_luck') return 'game_total';
+  // One team's points move with the game total, so the nearest class.
+  if (modelId === 'nba_team_total_luck') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1000,6 +1045,13 @@ export interface HeroAmerican {
   link: string | null;
   lockedPrice: number;
   showLockedCaption: boolean;
+  /**
+   * The deciding book's line right now, home-relative, when it is not
+   * `scored_line`. Set even when the price has not moved. On that path
+   * `kind` stays `decision` and `line` stays the lock, so the board's price
+   * pill does not change. The Signals card prints it.
+   */
+  movedLine?: number;
   /** The deciding book has not updated this price within PREGAME_PRICE_MAX_AGE_MIN. */
   stale?: boolean;
   /**
@@ -1102,6 +1154,7 @@ export function heroAmericanForPick(
       ...(untracked ? { untracked: true } : {}),
     };
   }
+  const moved = movedLineField(current?.line, lockedLine);
   if (current != null && current.price !== locked) {
     return {
       kind: 'now',
@@ -1111,6 +1164,7 @@ export function heroAmericanForPick(
       link: current.link,
       lockedPrice: locked,
       showLockedCaption: true,
+      ...moved,
     };
   }
   if (live && current != null) {
@@ -1124,8 +1178,12 @@ export function heroAmericanForPick(
       // Live always restates the lock as a caption (designer contract), even
       // when Now equals it — the timing footer is not the price.
       showLockedCaption: true,
+      ...moved,
     };
   }
+  // kind stays decision and line stays the lock, so the board pill is the
+  // scored line. movedLine is the book's line now. The hand-off does not
+  // use this record link for that line: the link was stamped with the lock.
   return {
     kind: 'decision',
     price: locked,
@@ -1134,7 +1192,17 @@ export function heroAmericanForPick(
     link: recordLink(pick, storedQuoteBook(pick)),
     lockedPrice: locked,
     showLockedCaption: false,
+    ...moved,
   };
+}
+
+/** Home-relative current line, only when it is not the lock. */
+function movedLineField(
+  currentLine: number | null | undefined,
+  lockedLine: number | null,
+): { movedLine: number } | Record<string, never> {
+  if (currentLine == null || lockedLine == null || currentLine === lockedLine) return {};
+  return { movedLine: currentLine };
 }
 
 /**
@@ -1171,7 +1239,18 @@ export function currentLineQuotes(
   bookRows: BookPricedRow[] | undefined,
   hero?: HeroAmerican | null,
   priceAge?: PriceAgeContext,
+  /** The member's own books (usePreferredBooks). A quote at any other book
+   *  is dropped and the rest re-ranked (Matt, 2026-10-19). Omitted: every
+   *  bettable book, as before. */
+  allowedBooks?: readonly string[],
 ): LineQuote[] {
+  if (allowedBooks) {
+    const allowed = new Set(allowedBooks);
+    const all = currentLineQuotes(pick, bookRows, hero, priceAge);
+    const kept = all.filter((q) => allowed.has(q.bookmaker));
+    if (kept.length === all.length) return all;
+    return kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
+  }
   const quotes = pickLineQuotes(pick, freshBookRows(pick, bookRows, priceAge));
   if (!priceAgeApplies(pick, priceAge)) return quotes;
   // A book is stale when we hold rows for it and none is current.
@@ -1191,15 +1270,26 @@ export function currentLineQuotes(
   return kept.length === 0 ? [] : rankQuotes(kept.map(({ isBest: _isBest, ...q }) => q));
 }
 
+/**
+ * Side link on the book's current row. Not `dk_bet_link`: that link was
+ * stamped with the lock, so it still opens the old line after the number moves.
+ */
+function snapshotSideLink(pick: Pick, rows: BookPricedRow[] | undefined, book: string): string | null {
+  const row = (rows ?? []).find((r) => r.bookmaker === book);
+  return row ? linkForSide(row, pick.pick_side) : null;
+}
+
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
 export interface BoardHandoff {
   bookmaker: string;
-  /** Null only with verb "Open": a live pick whose price we stop reading after the bet. */
+  /** Null with verb "Open": there is no price to put on the button. */
   price: number | null;
   link: string | null;
   /**
    * "Best" when another book beats the record; "Bet" otherwise (and on live);
-   * "Open" when there is no number to quote (LIVE_PRICE_STOPS_AT_BET).
+   * "Open" when there is no number to quote (LIVE_PRICE_STOPS_AT_BET), or
+   * when the record book's line has moved and the only slip link on hand is
+   * the one stamped at the lock.
    */
   verb: 'Best' | 'Bet' | 'Open';
 }
@@ -1209,8 +1299,13 @@ export function bestHandoffForPick(
   bookRows: BookPricedRow[] | undefined,
   hero?: HeroAmerican | null,
   priceAge?: PriceAgeContext,
+  /** The member's own books (usePreferredBooks). A book outside them is
+   *  never handed off to (Matt, 2026-10-19), the record book included.
+   *  Omitted: every book, as before. */
+  allowedBooks?: readonly string[],
 ): BoardHandoff | null {
   if (pick.is_live === true) {
+    if (allowedBooks && !allowedBooks.includes(MODEL_BOOK)) return null;
     // No live number to quote after the bet: open the book without one,
     // rather than print the lock as if it were still on offer.
     if (hero?.untracked) {
@@ -1227,24 +1322,27 @@ export function bestHandoffForPick(
   }
   // No hand-off to a book whose newest price is older than the bound
   // (currentLineQuotes; Pick Detail's chips read the same list).
-  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge);
+  let quotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   if (quotes.length === 0) return null;
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet
-  // placed NOW. When the record chip wins and hero Now is at that same book,
-  // re-rank with that book at its current price: record DK −110, now DK −130,
-  // FD −115 must hand off to FD −115, not "Bet DK −130" (Reviewer #847).
-  // The same re-rank when that book has moved IN the bettor's favour and the
-  // record chip ranked behind another book: locked DK −110, now DK −102, MGM
-  // −105 must hand off to DK −102, not "Best MGM −105" (third review,
-  // 2026-10-09). That case only at the pick's line: DK's price at a moved
-  // line is a different bet, not ranked against books still at the line.
+  // placed NOW. Re-rank that book at its current price only while the
+  // current line is still the scored line: record DK −110, now DK −130,
+  // FD −115 hands off to FD −115 (Reviewer #847); locked DK −110, now
+  // DK −102, MGM −105 hands off to DK −102 (2026-10-09). A price at a
+  // moved line is a different bet: DK −8.5 −105 does not outrank MGM
+  // still at −7.5 −112.
   const scored = numOrNull(pick.scored_line);
+  // hero.line on a line-only move is the lock (kind stays decision, so the
+  // board pill does not change). movedLine is the current line. That is a
+  // different bet, so it does not enter the same-line re-rank.
+  const lineMoved = hero != null && hero.movedLine != null;
+  const sameLine =
+    !lineMoved &&
+    (hero == null || hero.line == null || scored == null || hero.line === scored);
   if (
-    hero?.kind === 'now' && hero.price != null &&
-    ((best.isRecord && best.bookmaker === hero.book) ||
-      ((hero.line == null || scored == null || hero.line === scored) &&
-        quotes.some((q) => q.isRecord && q.bookmaker === hero.book)))
+    hero?.kind === 'now' && hero.price != null && sameLine &&
+    quotes.some((q) => q.isRecord && q.bookmaker === hero.book)
   ) {
     const nowPrice = hero.price;
     quotes = rankQuotes(
@@ -1253,6 +1351,25 @@ export function bestHandoffForPick(
       ),
     );
     best = quotes.find((q) => q.isBest) ?? quotes[0];
+  }
+  // movedLine is a Now handoff whether or not kind is 'now'. A book still
+  // quoting the scored line wins. Otherwise a side link on the current row
+  // is that quote. Signals names the line on its button. Today does not:
+  // todayBoardHandoff turns this Bet into Open, so the button does not
+  // read "Bet DK −110" and open the new line. With no current link the
+  // button opens the book and does not use the lock's slip.
+  if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book) {
+    const stillThere = quotes.filter((q) => !(q.isRecord && q.bookmaker === hero.book));
+    if (stillThere.length > 0) {
+      const ranked = rankQuotes(stillThere.map(({ isBest: _isBest, ...q }) => q));
+      best = ranked.find((q) => q.isBest) ?? ranked[0];
+    } else {
+      const currentLink = snapshotSideLink(pick, bookRows, hero.book);
+      if (currentLink && hero.price != null) {
+        return { bookmaker: hero.book, price: hero.price, link: currentLink, verb: 'Bet' };
+      }
+      return { bookmaker: hero.book, price: null, link: null, verb: 'Open' };
+    }
   }
   const verb: 'Best' | 'Bet' =
     best.isBest && quotes.length > 1 && !best.isRecord ? 'Best' : 'Bet';
@@ -1276,6 +1393,36 @@ export function bestHandoffForPick(
     link: best.link,
     verb,
   };
+}
+
+/**
+ * The Today button. It prints the lock and does not name a line.
+ *
+ * When the deciding book has moved its line but not its price, and no
+ * other book is still at the scored line, `bestHandoffForPick` returns
+ * a Bet whose link is the current row — the new line, at the old price.
+ * Putting that on Today reads "Bet DK −110" and opens a different bet.
+ * This case is the existing Open hand-off: no price, and no slip link.
+ * A book still at the scored line is unchanged, including "Best now".
+ * Signals names the line and does not call this.
+ */
+export function todayBoardHandoff(
+  handoff: BoardHandoff | null,
+  hero: HeroAmerican | null | undefined,
+): BoardHandoff | null {
+  if (
+    handoff != null &&
+    hero != null &&
+    hero.movedLine != null &&
+    hero.kind !== 'now' &&
+    handoff.verb === 'Bet' &&
+    handoff.bookmaker === hero.book &&
+    handoff.price != null &&
+    handoff.price === hero.price
+  ) {
+    return { bookmaker: handoff.bookmaker, price: null, link: null, verb: 'Open' };
+  }
+  return handoff;
 }
 
 /**
@@ -1318,7 +1465,10 @@ export function formatSideLine(
 /** Line value (total or spread) from a snapshot, if the market carries one. */
 export function lineFromSnapshot(snap: PricedSnapshot, market: string | null): number | null {
   if (market == null) return null;
-  if (market.startsWith('totals')) return numOrNull(snap.total_line);
+  // A team total's number is stored in total_line too (team_totals_home/_away).
+  if (market.startsWith('totals') || market.startsWith('team_totals')) {
+    return numOrNull(snap.total_line);
+  }
   if (market.startsWith('spreads')) return numOrNull(snap.spread_home);
   return numOrNull(snap.line); // prop markets
 }
@@ -1454,10 +1604,19 @@ export function computeMovement(
  * (scripts/nba_prop_projection_card.py pick_rows): decision_book always set,
  * scored_line the main line that book quotes. So it is here too, on either
  * side, since it bets overs as well as unders.
+ *
+ * The two NBA totals cards (scripts/nba_total_luck_card.py, the full-game
+ * overs; scripts/nba_team_total_luck_card.py, the home team-total unders)
+ * store the deciding book's own number too, and leave line_book empty
+ * whenever DraftKings hung the same number. Read as DraftKings' line, a move
+ * at the deciding book showed as a price move in the bettor's favour
+ * (designer review, 2026-10-20).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_prop_market',
   'nba_prop_projection',
+  'nba_team_total_luck',
+  'nba_total_luck',
   'nfl_prop_market',
   'wnba_prop_market',
 ];
@@ -1720,10 +1879,15 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // NO_ACTION for an nba_player with no box-score row in a logged game).
   // The NBA projection model (scripts/nba_prop_projection_card.py) posts in
   // the same window, the same way, and voids the same way, over or under.
+  // The NBA totals overs card (scripts/nba_total_luck_card.py) posts each game
+  // once, about an hour before tip, and is a game line: nothing to void. The
+  // NBA home team-total unders post the same way, in the same hour.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
+    pick.model_id === 'nba_total_luck' ||
+    pick.model_id === 'nba_team_total_luck' ||
     nbaPosted
   ) {
     return {

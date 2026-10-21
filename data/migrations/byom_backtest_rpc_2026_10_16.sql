@@ -60,6 +60,10 @@ BEGIN
     STABLE
     SECURITY INVOKER
     SET search_path = public, pg_temp
+    -- The in-function 3s timeout does not apply. Postgres arms
+    -- statement_timeout when the top-level statement starts, so this
+    -- SET does not bound the running call. The role timeouts govern:
+    -- anon 3s, authenticated 8s.
     SET statement_timeout = '3s'
     AS $body$
     DECLARE
@@ -114,8 +118,8 @@ BEGIN
       END IF;
 
       -- Output names are also plpgsql variables. The leg columns use
-      -- other names so `market` is not ambiguous. statement_timeout is
-      -- set on the function (STABLE cannot SET LOCAL).
+      -- other names so `market` is not ambiguous. The function-level
+      -- statement_timeout above does not apply; the role timeouts govern.
       RETURN QUERY
       WITH legs AS (
         SELECT 'spreads'::text AS mkt,

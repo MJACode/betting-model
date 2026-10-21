@@ -126,7 +126,7 @@ def test_the_live_projection_gives_the_graded_means_for_one_night():
             if t == tip and str(games.set_index("game_id").game_date[gid])[:10] == day]
     assert len(gids) == 2
     now = dec.set_index("game_id").decision_ts.reindex(gids).max().to_pydatetime()
-    hist = {"games": games, "schedule": raw["nba_schedule"][["game_id", "game_type", "commence_time"]],
+    hist = {"games": games, "schedule": raw["nba_schedule"][["game_id", "season", "game_date", "game_type", "commence_time"]],
             "log": log[pd.to_datetime(log.game_date) < pd.Timestamp(day)],
             "asof": report[~report.game_id.isin(gids)].assign(source="official")}
     priced = props[props.game_id.isin(gids) & props.market.isin(pj.MARKETS)][["game_id", "player_name"]]

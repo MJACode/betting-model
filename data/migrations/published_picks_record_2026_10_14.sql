@@ -15,9 +15,15 @@
 -- A voided pick is also result NO_ACTION and fails the WIN/LOSS/PUSH filter.
 --
 -- Idempotent. Before totals are inserted once, from the latest all-time rows.
--- Later runs recompute and refresh the after columns. The view patch skips
--- once v_discord_published is already in the live text. published_at is left
--- as the original post. This statement does not write push_sent.
+-- The snapshot UPDATE runs once, until results_snapshot_published_backfill
+-- records clv_rule = 'standard_v2' (the same CLV predicate as
+-- v_public_track_record: clv_pct IS NOT NULL AND clv_method = 'standard_v2').
+-- A later pass
+-- does not recompute history. The one pass that does run also skips a row
+-- whose wins, losses, pushes, settled, units, risked, roi and CLV already
+-- match. The view patch skips once v_discord_published is already in the live
+-- text. published_at is left as the original post. This statement does not
+-- write push_sent.
 --
 -- ONE statement, so data/view_migrations.py can execute it.
 
@@ -27,6 +33,7 @@ DECLARE
   d text;
   as_of text;
   pred text;
+  rewrite boolean;
 BEGIN
   -- CREATE and the lock run once. ENABLE ROW LEVEL SECURITY takes ACCESS
   -- EXCLUSIVE and reloads the API schema cache on every call (data/ddl_guard.py).
@@ -45,10 +52,21 @@ BEGIN
       after_pushes integer,
       after_settled integer,
       after_units numeric,
-      after_risked numeric
+      after_risked numeric,
+      clv_rule text
     );
     ALTER TABLE public.results_snapshot_published_backfill ENABLE ROW LEVEL SECURITY;
     REVOKE ALL ON public.results_snapshot_published_backfill FROM anon, authenticated;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'results_snapshot_published_backfill'
+      AND column_name = 'clv_rule'
+  ) THEN
+    ALTER TABLE public.results_snapshot_published_backfill ADD COLUMN clv_rule text;
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM public.results_snapshot_published_backfill) THEN
@@ -67,14 +85,22 @@ BEGIN
     END IF;
   END IF;
 
+  SELECT NOT EXISTS (
+    SELECT 1
+    FROM public.results_snapshot_published_backfill
+    WHERE clv_rule = 'standard_v2'
+  ) INTO rewrite;
+
+  IF rewrite THEN
   -- STAKE_EXPR_RISK
   -- CASE WHEN price IS NULL OR price = 0 THEN 1.0 ELSE LEAST(1.0 / (CASE WHEN price > 0 THEN price / 100.0 ELSE 100.0 / abs(price) END), 3.0) END
   -- END_STAKE_EXPR_RISK
   -- STAKE_EXPR_WIN
   -- CASE WHEN price IS NULL OR price = 0 THEN 1.0 WHEN (1.0 / (CASE WHEN price > 0 THEN price / 100.0 ELSE 100.0 / abs(price) END)) > 3.0 THEN 3.0 * (CASE WHEN price > 0 THEN price / 100.0 ELSE 100.0 / abs(price) END) ELSE 1.0 END
   -- END_STAKE_EXPR_WIN
+  -- SNAPSHOT_REWRITE_BEGIN
   CREATE TEMP TABLE _published_record_picks ON COMMIT DROP AS
-  SELECT sport, game_date, result, is_live, clv_pct, price,
+  SELECT sport, game_date, result, clv_pct, clv_method, price,
          CASE
            WHEN price IS NULL OR price = 0 THEN 1.0
            ELSE LEAST(
@@ -91,7 +117,7 @@ BEGIN
            ELSE 1.0
          END AS win_u
   FROM (
-    SELECT p.sport, p.game_date, p.result, p.is_live, p.clv_pct,
+    SELECT p.sport, p.game_date, p.result, p.clv_pct, p.clv_method,
            COALESCE(p.decision_odds, p.dk_odds) AS price
     FROM public.picks p
     WHERE p.signal_type = 'BET'
@@ -160,19 +186,19 @@ BEGIN
         ELSE NULL
       END AS roi_pct,
       COALESCE(COUNT(*) FILTER (
-        WHERE g.clv_pct IS NOT NULL AND g.is_live IS NOT TRUE), 0)::integer AS clv_graded,
+        WHERE g.clv_pct IS NOT NULL AND g.clv_method = 'standard_v2'), 0)::integer AS clv_graded,
       COALESCE(COUNT(*) FILTER (
         WHERE g.clv_pct IS NOT NULL AND g.clv_pct > 0
-          AND g.is_live IS NOT TRUE), 0)::integer AS clv_beat,
+          AND g.clv_method = 'standard_v2'), 0)::integer AS clv_beat,
       CASE
         WHEN COUNT(*) FILTER (
-          WHERE g.clv_pct IS NOT NULL AND g.is_live IS NOT TRUE) > 0
+          WHERE g.clv_pct IS NOT NULL AND g.clv_method = 'standard_v2') > 0
         THEN round(
           COUNT(*) FILTER (
             WHERE g.clv_pct IS NOT NULL AND g.clv_pct > 0
-              AND g.is_live IS NOT TRUE)::numeric
+              AND g.clv_method = 'standard_v2')::numeric
           / COUNT(*) FILTER (
-            WHERE g.clv_pct IS NOT NULL AND g.is_live IS NOT TRUE)
+            WHERE g.clv_pct IS NOT NULL AND g.clv_method = 'standard_v2')
           * 100, 4)
         ELSE NULL
       END AS clv_pct
@@ -187,7 +213,19 @@ BEGIN
      AND (s2.sport IS NULL OR g.sport = s2.sport)
     GROUP BY s2.snapshot_id
   ) c
-  WHERE s.snapshot_id = c.snapshot_id;
+  WHERE s.snapshot_id = c.snapshot_id
+    AND (
+      s.wins IS DISTINCT FROM c.wins
+      OR s.losses IS DISTINCT FROM c.losses
+      OR s.pushes IS DISTINCT FROM c.pushes
+      OR s.settled IS DISTINCT FROM c.settled
+      OR s.units IS DISTINCT FROM c.units
+      OR s.risked IS DISTINCT FROM c.risked
+      OR s.roi_pct IS DISTINCT FROM c.roi_pct
+      OR s.clv_graded IS DISTINCT FROM c.clv_graded
+      OR s.clv_beat IS DISTINCT FROM c.clv_beat
+      OR s.clv_pct IS DISTINCT FROM c.clv_pct
+    );
 
   UPDATE public.results_snapshot_published_backfill b
   SET after_wins = s.wins,
@@ -200,6 +238,16 @@ BEGIN
   WHERE s.scope = 'all_time'
     AND s.game_date = b.as_of_date
     AND COALESCE(s.sport, '') = b.sport;
+
+  UPDATE public.results_snapshot_published_backfill
+  SET clv_rule = 'standard_v2';
+  IF NOT EXISTS (SELECT 1 FROM public.results_snapshot_published_backfill) THEN
+    INSERT INTO public.results_snapshot_published_backfill
+      (sport, as_of_date, clv_rule)
+    VALUES ('', '1970-01-01', 'standard_v2');
+  END IF;
+  -- SNAPSHOT_REWRITE_END
+  END IF;
 
   pred := $pred$
     AND EXISTS (

@@ -99,6 +99,85 @@ def test_a_producer_that_does_not_supply_side_and_line_is_refused():
     assert refuse_mismatched([{"lock_key": "k", "label": "BOS ML"}], "t") == []
 
 
+# A team total is one team's points (nba_team_total_luck: the HOME team's).
+# Side and number alone pass "MIL vs BOS Under 115.5", which reads as the full
+# game, and "BOS Team Total Under 115.5", which names the wrong team: measured
+# 2026-10-18 on the guard as it stood (buildmap/pick_row.md 2b).
+TT = "nba_team_total_luck"
+TT_LABEL = "BOS @ MIL — MIL Team Total Under 115.5"
+
+
+@pytest.mark.parametrize("label,ok", [
+    (TT_LABEL, True),                                     # what the card writes
+    ("MIL Team Total Under 115.5", True),
+    ("BOS @ MIL — MIL team total under 115.5", True),     # case is not a market
+    ("BOS @ MIL — BOS Team Total Under 115.5", False),    # the away team's points
+    ("BOS Team Total Under 115.5", False),
+    ("MIL vs BOS Under 115.5", False),                    # reads as the game total
+    ("BOS @ MIL — MIL Under 115.5", False),               # no "Team Total"
+    ("BOS @ MIL — MIL Team Total Under 116.5", False),    # wrong number
+    ("BOS @ MIL — MIL Team Total Over 115.5", False),     # wrong side
+])
+def test_a_team_total_says_team_total_and_names_its_own_team(label, ok):
+    got = pick_problems(label, "under", 115.5, TT, "MIL", "BOS")
+    assert (got == []) is ok, got
+
+
+def test_the_team_total_wording_is_checked_without_the_teams():
+    """A producer that does not pass home and away still cannot send a
+    team-total pick worded as a full-game total."""
+    got = pick_problems("MIL vs BOS Under 115.5", "under", 115.5, TT)
+    assert any("Team Total" in p for p in got), got
+    assert pick_problems(TT_LABEL, "under", 115.5, TT) == []
+
+
+def test_an_away_team_total_names_the_away_team(monkeypatch):
+    """Keyed on the market, not the id: a model mapped to team_totals_away must
+    name the AWAY team. (No model bets one today.)"""
+    from tracking import paper_tracker
+    monkeypatch.setitem(paper_tracker._RULE_MODEL_MARKETS, "x_away_tt", "team_totals_away")
+    assert pick_problems("BOS @ MIL — BOS Team Total Under 104.5", "under", 104.5,
+                         "x_away_tt", "MIL", "BOS") == []
+    assert pick_problems("BOS @ MIL — MIL Team Total Under 104.5", "under", 104.5,
+                         "x_away_tt", "MIL", "BOS")
+
+
+@pytest.mark.parametrize("label,side,line,model_id,home,away", [
+    # Real BET labels of other models (picks, read-only). On 2026-10-19, 320
+    # such labels across 54 models (up to four per model and side, games from
+    # 2026-07-01) got the same verdict from the guard before and after the
+    # team-total check, and none was refused.
+    ("LAK vs EDM Under 6.0", "under", 6.0, "nhl_over_under", "LAK", "EDM"),
+    ("CAR @ PHI Under 39 (Wind 12 mph, MGM) · 0.77u", "under", 39.0,
+     "nfl_wind_totals", "PHI", "CAR"),
+    ("STL vs WSH Under 8.5 (MGM)", "under", 8.5, "mlb_total_public_fade", "STL", "WSH"),
+    ("SD vs MIA Under 11.5 (live)", "under", 11.5, "mlb_live_total_runs", "SD", "MIA"),
+    # nba_total_luck has written no pick yet; this is its card's label shape.
+    ("BOS vs NYK Over 225.5", "over", 225.5, "nba_total_luck", "BOS", "NYK"),
+])
+def test_other_models_totals_are_not_asked_for_a_team_total(label, side, line,
+                                                            model_id, home, away):
+    assert pick_problems(label, side, line, model_id, home, away) == []
+
+
+def test_a_team_whose_name_starts_with_the_other_team_s_is_not_the_wrong_team(monkeypatch):
+    """College names nest ("Ohio" and "Ohio State"), so "Ohio State Team
+    Total" also starts with "Ohio ". As in the side check, a label naming its
+    own team is not refused for also matching the other's name."""
+    from tracking import paper_tracker
+    monkeypatch.setitem(paper_tracker._RULE_MODEL_MARKETS, "x_home_tt", "team_totals_home")
+    assert pick_problems("Ohio @ Ohio State — Ohio State Team Total Under 30.5", "under",
+                         30.5, "x_home_tt", "Ohio State", "Ohio") == []
+
+
+def test_refuse_mismatched_drops_a_team_total_naming_the_wrong_team():
+    good = {"lock_key": "g1", "label": TT_LABEL, "side": "under", "line": 115.5,
+            "model_id": TT, "home": "MIL", "away": "BOS"}
+    bad = dict(good, lock_key="g2",
+               label="BOS @ MIL — BOS Team Total Under 115.5")
+    assert refuse_mismatched([good, bad], "t") == [good]
+
+
 # ── 2. every publisher refuses it ────────────────────────────────────────────
 
 class _Conn:

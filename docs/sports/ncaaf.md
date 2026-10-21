@@ -183,6 +183,57 @@ its opening number, which is rarely true by kickoff.
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
   ~52 DK-priced — so the board is tens of games, not hundreds.
 
+### The schedule gate, rest at kickoff and the night-game stub (2026-10-20)
+
+mike: *"The repo/models should look ahead schedules for all markets and sports
+and models."* Three changes, all reading the stored schedule through one module
+(`data/schedule_context.py`).
+
+- **No decision while a team has an earlier game to play or log.** A game is
+  held when either team has an earlier game that is not played, being played,
+  or played but not yet in `ncaaf_team_game_log` (the log the team stats are
+  built from). Every model's row is still written, as NONE, with the reason
+  ("waiting for Wisconsin's 2026-10-17 game to be played and logged"). NONE
+  never locks, so the first pass after the game is logged decides it
+  (`models/scorer.run_scorer`, `_schedule_hold`). Why: `ncaaf_over_under`
+  decided 9 of its 77 kept BETs before a team's intermediate game, all 9 more
+  than 7 days ahead; its stats and early-season flag were one game stale. The 8
+  graded went 3-5, -2.31 units, against 36-25, +7.48 units on the other 61 (too
+  few to show a cost; the reason is input correctness). The open one, 3688041
+  (Wisconsin vs USC Under 52.5, 10-24), is a locked BET and is not touched.
+- **Rest at kickoff.** `_rest_days_live` read played games only, so the game in
+  between looked like a bye (pick 3094504 read 14/14 where it was 7/7). It now
+  counts a game still to be played. Training reads the latest played game,
+  which for a past game is the same thing, so **no retrain**: the training
+  value does not change. With the gate on, a game it lets through has no
+  pending earlier game, so its rest was already right; this corrects the
+  number on held rows and on any path that skips the gate. Only the paused
+  `ncaaf_moneyline` has a rest input; the totals model does not.
+- **The night-game stub takes CFBD's schedule row.** The odds feed's ET-dated
+  row carries the prices and no week, venue, neutral-site or conference flag;
+  the scorer used to read those as 0 (week 0 never occurs in training). It now
+  takes them from CFBD's row for the same two teams within a day, or from the
+  one CFBD game either team has within a day; none or two, and the game is not
+  scored, with the reason logged (`_schedule_row_live`). Measured 2026-10-20:
+  all 9 future stubs (Miami @ Notre Dame 11-07, Texas @ Texas A&M 11-27,
+  Army-Navy 12-12 among them) have that row.
+- **What counts as one game.** A team never plays twice inside two days, so
+  every row for a team within a day of another is the same game. That is what
+  catches the stub and an opponent spelled two ways ('LIU Sharks' beside 'Long
+  Island University', 'Bryant Bulldogs' beside 'Bryant'). A past game that
+  never gets a result stops holding after 10 days (the results step's own
+  self-heal window).
+- **On today's board (2026-10-20, read-only SQL):** 0 of the 56 priced games
+  would be held. Every team's previous game is scored and logged, and no team
+  has a game before this week's. The gate bites when DraftKings prices a game
+  more than a week out.
+- **What it costs.** A Saturday game reaches the team log in the next morning's
+  6am ET run: 439 of 446 Saturday games since 2026-09-01 were logged on the
+  Sunday, 6 on the Monday (log `created_at`, which an upsert never rewrites;
+  median 14.2 hours after kickoff). So the next Saturday's game can be decided
+  from Sunday morning, about 6.5 days before kickoff, against a median BET lead
+  of 5.2 days.
+
 ### Data / conventions (load-bearing)
 
 - **New CFBD games are dated by Eastern kickoff** (Matt, 2026-09-13, the

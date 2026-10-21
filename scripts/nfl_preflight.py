@@ -320,6 +320,12 @@ def check_data() -> None:
         # CI mode: calendar/committed-data misses warn (see module docstring).
         check(s, name, PASS if ok else (WARN if CI_MODE else FAIL), detail)
 
+    # The committed copy is replay and backtest HISTORY. Since 2026-10-20 the
+    # live cards and the scheduler's NFL clock read the games table instead
+    # (nfl/data_ingest/schedule.py); the file was frozen on 2026-08-15 with no
+    # playoff games. Checking it below says nothing about production.
+    check(s, "live schedule source", INFO,
+          "games table (sport='NFL'), refreshed daily from nflverse; needs the DB")
     g = NFL / "data" / "games.csv"
     data_check("games.csv present", g.exists())
     if g.exists():

@@ -495,6 +495,13 @@ def _result(c, pick_id: int):
 
 
 class TestInsertOnce:
+    @pytest.fixture(autouse=True)
+    def _goalies_confirmed(self, monkeypatch):
+        """These tests are insert-once, not the goalie gate
+        (tests/test_nhl_goalie_gate.py): both starters confirmed."""
+        import models.nhl_goalie_gate as gate
+        monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
+
     def _row(self, **over) -> dict:
         q = _quotes([(1, "betmgm", 2.5, -150, 120)])
         r = card.pick_rows(P.SHOTS, _mus([(1, 1.6)]), q, GAMES, "2026-10-01", 1000.0, 0.0)[0]

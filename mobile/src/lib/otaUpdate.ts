@@ -18,12 +18,28 @@
  * older bundle.
  *
  * So the app checks for itself: at cold start, and on every real return from
- * the background. A fetched update is applied immediately with reloadAsync()
- * rather than being left for a relaunch that may never come.
+ * the background, and DOWNLOADS what it finds. It never applies a bundle to a
+ * running app. expo-updates launches the newest downloaded bundle at the next
+ * cold start, so the 2026-08-31 gap is now "one fresh start", not "two". A
+ * return keeps checking after a download, so a second bundle published in
+ * the same session replaces the first rather than waiting a launch.
+ *
+ * WHY IT NEVER RELOADS (Matt, 2026-10-19, option A). Applying a bundle meant
+ * Updates.reloadAsync(), which starts a new JS runtime inside the running
+ * process. Matt's TestFlight crash report of 10:41 ET that day shows the
+ * process launched at 09:04 and aborted at 10:41 in expo-updates'
+ * ErrorRecovery.crash(): a fatal JS error within its 10 s window after first
+ * render (docs.expo.dev/eas-update/error-recovery), i.e. right after an
+ * in-process reload on return from the background, the first return after
+ * #1003 published at 10:18. The same bundle opened cleanly from cold. A
+ * reload at launch had already been removed (it was the first theory); this
+ * removes the other one. There is no reloadAsync in UpdatesApi, so no caller
+ * can bring it back without tests/test_mobile_ota_self_update.py failing.
  *
  * Split out of the hook so the decision logic is testable off-device:
- * `shouldCheck` is pure, and `applyPendingUpdate` takes the expo-updates
- * surface as an argument. `scripts/verify_ota_update.ts` drives both.
+ * `shouldCheck` and `nextAction` are pure, and `downloadUpdate` takes the
+ * expo-updates surface as an argument. `scripts/verify_ota_update.ts` drives
+ * all three.
  */
 
 /** A foreground return only counts if the app was actually away this long —
@@ -60,39 +76,45 @@ export function shouldCheck(s: CheckState): boolean {
   return true;
 }
 
+/**
+ * What to do for one trigger. Pure.
+ *
+ *   download  launch, or a real return with the throttle clear: check and
+ *             fetch (a newer bundle replaces one already downloaded)
+ *   skip      not a real return, or inside the throttle window
+ */
+export type UpdateAction = 'download' | 'skip';
+
+export function nextAction(s: CheckState): UpdateAction {
+  if (s.trigger === 'launch') return 'download';
+  return shouldCheck(s) ? 'download' : 'skip';
+}
+
 /** The slice of expo-updates this module uses. Injectable so the behaviour can
- *  be verified without a device. */
+ *  be verified without a device. Deliberately no reloadAsync (see header). */
 export interface UpdatesApi {
   /** False in Expo Go and in a dev client — there is no update to fetch. */
   isEnabled: boolean;
   checkForUpdateAsync(): Promise<{ isAvailable: boolean }>;
   fetchUpdateAsync(): Promise<{ isNew: boolean }>;
-  reloadAsync(): Promise<void>;
 }
 
-export type UpdateOutcome = 'disabled' | 'none' | 'reloaded' | 'error';
+export type UpdateOutcome = 'disabled' | 'none' | 'downloaded' | 'error';
 
 /**
- * Check, fetch and APPLY. Returns what happened rather than throwing: an
- * update check failing is not an app error, and there is nothing a user could
- * do about it. Offline, a mid-publish manifest, or an unreachable EAS all land
- * on 'error' and are retried at the next launch or foreground return.
- *
- * `reloadAsync()` does not resolve — it tears the JS context down — so
- * 'reloaded' is returned optimistically after the call is issued, and any
- * throw from it is still caught.
+ * Check and fetch. Never applies: expo-updates launches a downloaded bundle at
+ * the next cold start. Returns what happened rather than throwing: offline, a
+ * mid-publish manifest or an unreachable EAS all land on 'error' and are
+ * retried at the next launch or real return.
  */
-export async function applyPendingUpdate(api: UpdatesApi): Promise<UpdateOutcome> {
+export async function downloadUpdate(api: UpdatesApi): Promise<UpdateOutcome> {
   if (!api.isEnabled) return 'disabled';
   try {
     const check = await api.checkForUpdateAsync();
     if (!check.isAvailable) return 'none';
     const fetched = await api.fetchUpdateAsync();
-    // isNew false means the fetch resolved to the bundle already running —
-    // reloading would be a pointless flash.
-    if (!fetched.isNew) return 'none';
-    await api.reloadAsync();
-    return 'reloaded';
+    // isNew false means the fetch resolved to the bundle already running.
+    return fetched.isNew ? 'downloaded' : 'none';
   } catch {
     return 'error';
   }

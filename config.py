@@ -321,6 +321,14 @@ DISCORD_WEBHOOK_FREE: str = os.environ.get("DISCORD_WEBHOOK_FREE", "").strip()
 # its own return value and logs at CRITICAL rather than failing silently.
 DISCORD_WEBHOOK_OPS: str = os.environ.get("DISCORD_WEBHOOK_OPS", "").strip()
 
+# Eggz's own results, in #eggz-picks. No fallback: an unset variable posts
+# nothing, and these recaps never go to #results or to X. The bot token is
+# the existing DISCORD_BOT_TOKEN. The channel and the author are ids, not
+# display names.
+DISCORD_WEBHOOK_EGGZ: str = os.environ.get("DISCORD_WEBHOOK_EGGZ", "").strip()
+DISCORD_EGGZ_CHANNEL_ID: str = os.environ.get("DISCORD_EGGZ_CHANNEL_ID", "").strip()
+DISCORD_EGGZ_AUTHOR_ID: str = os.environ.get("DISCORD_EGGZ_AUTHOR_ID", "").strip()
+
 # How stale the newest pipeline_runs row may get before the watchdog calls it a
 # stall, in minutes. The tightest real cadence is the evening refresh at every
 # 10 minutes; the loosest gap a HEALTHY system produces is the quiet stretch
@@ -607,8 +615,11 @@ ACTION_THRESHOLDS: dict = {
     # price (scripts/nba_prop_market_lab.py, docs/nba_models_2026.md 4.3):
     # 25,204 bets +2.85% (90% CI +1.75..+3.96); at -200 and no
     # double/triple-double 24,572 bets +2.96% (+1.85..+4.05), +781.3 units,
-    # every season positive -- every qualifying proposition, as the card
-    # writes it (mike, 2026-10-16: "maximize units won"; no game or night cap).
+    # every season positive -- every qualifying proposition, uncapped. From
+    # 2026-10-20 (mike: "Only the strongest picks need to be sent, like NHL")
+    # one bet a game across both NBA prop models and four a night, strongest
+    # first by each bet's EV percentile within its own model
+    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced.
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
@@ -616,7 +627,30 @@ ACTION_THRESHOLDS: dict = {
     # calibrated-EV floor (models/nba_prop_projection.CARD). Graded walk-forward
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
+    # Written through scripts/nba_props_card.py from 2026-10-20 (mike): one bet a
+    # game across both NBA prop models and four a night, strongest first by each
+    # bet's EV percentile within its own model (models/nba_prop_rank.py).
     "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA full-game totals, OVER only (2026-10-17, mike: "Find it ... edge like
+    # we have with other sports"): models/nba_total_luck.py, written by
+    # scripts/nba_total_luck_card.py. THE CUT IS THE GAP (luck-adjusted minus raw
+    # projected total >= 3 points), applied in the card; the offer is the
+    # best expected value under the market's fair line. Graded walk-forward at
+    # bought prices, 2021-22..2025-26 pooled: 508 bets, +55.6 units, +10.1%,
+    # 95% interval +2.0..+18.3, 5 of 5 seasons positive (docs/nba_models_2026.md
+    # 6.7). prob / edge are 0.0 so every publisher shows exactly what the card
+    # wrote: a decision edge is the EV divided by the decimal price, so it is
+    # >= 0 exactly when the bet clears its 0.00 EV floor.
+    "nba_total_luck":           {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA HOME team total points, UNDER only (the fourth NBA search): written
+    # by the nba_team_total_luck card. THE CUT IS THE HOME TEAM'S PART OF THE
+    # SHOOTING-LUCK GAP (>= 2.0 points, applied in the card), the offer the best
+    # expected value under the market's fair line, decided about an hour before
+    # tip. Settles on the home team's final score, overtime included. Graded
+    # walk-forward at bought prices, 2023-24..2025-26 pooled: 349 bets, 215-134,
+    # +64.72 units on 390.37 risked, +16.6%, every season positive. prob / edge
+    # are 0.0 for the same reason as nba_total_luck's.
+    "nba_team_total_luck":      {"min_prob": 0.0, "min_edge": 0.0},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1862,6 +1896,14 @@ MODEL_MIN_ODDS: dict = {
     # The projection model was graded at the same -200 floor; it lays -200 to
     # +3000 (median +110; the long tail is threes overs at 0.5 from one book).
     "nba_prop_projection":       -200,
+    # NBA totals overs (2026-10-17, mike): graded at the same -200 floor; it laid
+    # -115 to +100 on its 611 graded bets (median -110). Pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it off its evidence.
+    "nba_total_luck":            -200,
+    # NBA home team-total unders: it laid -122 to +110 on its 349 graded bets
+    # (median -112), so -200 admits prices it was never graded at. Pinned so a
+    # Railway DEFAULT_MIN_ODDS override cannot move it.
+    "nba_team_total_luck":       -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2058,8 +2100,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # nhl_moneyline was REBUILT 2026-10-13 (mike; shipped on his "Yes",
     # 2026-10-15) and swept on its own walk-forward: a plateau from EV 0.02 to
     # 0.08 at the best price with the -200 floor (see ACTION_THRESHOLDS);
-    # 0.06 sits inside it (+6.3% on 1,326, interval +1.1..+11.4). Re-sweep on
-    # its own record at ~250 settled bets.
+    # 0.06 sits inside it (+6.3% on 1,326, interval +1.1..+11.4). That
+    # walk-forward decided at each game's FIRST stored quote (95.8% the day
+    # before, median lead ~27h), not at 16:00Z on game day. Re-graded
+    # 2026-10-20 with the goalies who actually started, at 0.06 and the best
+    # price: +5.08% on 1,588 at the 16:00Z game-day quote (+0.3..+10.0),
+    # +5.21% on 1,633 at the last pre-game quote (+0.6..+10.0). Live, it
+    # decides once both starting goalies are confirmed (docs/sports/nhl.md).
+    # Re-sweep on its own record at ~250 settled bets.
     "nhl_moneyline":             0.06,
     "nhl_moneyline_regulation":  0.20,   # n=0, no written bet
     "nhl_puckline":              0.20,   # n=0, no written bet
@@ -2096,6 +2144,20 @@ MODEL_OWN_EV_FLOOR: dict = {
     # The lowest of its six cells' floors (rebounds unders). Each market's own
     # floor (0.01-0.05) is applied on top, in models/nba_prop_projection.CARD.
     "nba_prop_projection":       0.01,
+    # NBA totals overs (2026-10-17, mike). The cut is the gap, not EV, so this
+    # floor must not become a second cut. The card applies it to p x decimal - 1
+    # (a push scored as a loss), the same quantity the publishers filter on, so
+    # nothing it writes is dropped downstream. On its 508 graded bets, at the
+    # 2026-27 uplift (+0.0659), it removes one: NBA_2023-01-24_DEN_NOP, FanDuel
+    # over 232.0, -0.012. The next smallest is +0.030, the median +0.090.
+    "nba_total_luck":           0.00,
+    # NBA home team-total unders. Same reasoning: the cut is the home team's
+    # part of the gap, and this floor is applied in the card to p_model x
+    # decimal - 1 (a push scored as a loss), p_model being the fair probability
+    # plus the walk-forward uplift. On its 349 graded bets, at the 2026-27
+    # uplift (+0.1022), it removes one: NBA_2025-01-24_POR_CHA, FanDuel under
+    # 109.5 at -118, -0.113. The next smallest is +0.053, the median +0.169.
+    "nba_team_total_luck":      0.00,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2222,6 +2284,15 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # artifact (a Platt map fitted on the graded seasons' main-line pairs); a
     # second, pooled map would move every number it was graded on.
     "nba_prop_projection",
+    # 2026-10-17 (mike). The NBA totals overs: its probability is the market's
+    # fair P(over) plus the gap >= 3 bucket's walk-forward uplift, which is
+    # what its floor was set on. It has no record, so its promoted map would
+    # be the offset borrowed from other models.
+    "nba_total_luck",
+    # The NBA home team-total unders: the market's fair P(under) plus the
+    # walk-forward uplift of the earlier graded seasons, which is what its
+    # floor was set on. No record either, so the same reasoning.
+    "nba_team_total_luck",
 })
 
 
@@ -2331,8 +2402,15 @@ SCORING_METHODS: dict = {
     "nhl_prop_shots_on_goal": SCORING_ARTIFACT,
     "nhl_prop_assists": SCORING_ARTIFACT,
     # Trained and registered (scripts/nba_prop_projection_train.py), scored by
-    # scripts/nba_prop_projection_card.py.
+    # scripts/nba_prop_projection_card.py, written by scripts/nba_props_card.py.
     "nba_prop_projection": SCORING_ARTIFACT,
+    # A rule with a parameter artifact committed under models/saved/ (the
+    # residual sample and the bucket counts, models/nba_total_luck.py), never
+    # registered: the card loads it by its pinned path.
+    "nba_total_luck":      "rule",
+    # The same shape: a rule whose parameter artifact holds the residual sample
+    # and the per-season uplift buckets, loaded by the card, never registered.
+    "nba_team_total_luck": "rule",
 }
 
 
@@ -2360,6 +2438,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
+    "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
+    "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2448,6 +2528,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
+    "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
+    "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -3948,9 +4030,46 @@ NHL_PROP_CLOSE_WINDOW_MIN = int(os.environ.get("NHL_PROP_CLOSE_WINDOW_MIN", "70"
 # feed's time: the feed lists NHL starts at :10, ten minutes after the
 # scheduled puck drop, so a later fetch could hold in-play prices. Thirteen
 # minutes wide, so the ten-minute evening passes always land one inside it.
-# Measured cost: 5 credits a game, about 6,600 credits a season.
+# Measured cost: 5 credits a game, about 6,600 credits a season (measured
+# before the alternate-lines call was added; a snapshot is now two calls,
+# 10-11 credits a game on 2026-10-19 in api_call_log).
 NHL_PROP_FINAL_OPENS_MIN = int(os.environ.get("NHL_PROP_FINAL_OPENS_MIN", "25"))
 NHL_PROP_FINAL_CLOSES_MIN = int(os.environ.get("NHL_PROP_FINAL_CLOSES_MIN", "12"))
+# The NHL models that do NOT wait for both starting goalies to be confirmed
+# (models/nhl_goalie_gate.py). Every other NHL model, present and future, does.
+# mike, 2026-10-20: "Ok on shots on goal", answering: "The shots-on-goal props
+# lose their early price under this rule. Measured: +11.66 units on 39 bets
+# placed 6+ hours out (average 8.75% better than the closing price) vs -1.12
+# on 33 later. The model never reads the goalie. I'd exempt it; one config
+# line." Those units are 1u risked a bet (picks.profit_flat / 100), settled
+# games through 2026-10-19; the CLV average is over the 35 of the 39 that
+# carry one. Sized the record's way (1u to win, risk capped at 3) the same
+# bets are +9.27 and -1.06. So shots on goal keeps deciding at its opening
+# fetch, before any goalie is confirmed. Pinned by
+# tests/test_nhl_goalie_gate.py: adding a model here takes his instruction.
+NHL_GOALIE_GATE_EXEMPT = frozenset({"nhl_prop_shots_on_goal"})
+# How long a stored ESPN confirmation counts without a poll re-reading it
+# (models/nhl_goalie_gate.team_problem, nhl_goalie_designations.last_seen_at).
+# A poll that cannot read ESPN (the worker has been IP-blocked twice) stores
+# nothing, so without this bound a confirmation from the afternoon stood all
+# evening, whoever ESPN named after it. Past the bound the game is not known,
+# and a DailyFaceoff name that old no longer vetoes. 30 minutes: the
+# five-minute window re-reads every tick from 11:00 ET, and a refresh pass
+# decides within its own run of its own poll (hourly passes 7.9 minutes
+# median, 13.1 longest; evening 7.4 median, 10.0 at the 95th percentile;
+# pipeline_runs since 2026-10-07).
+NHL_GOALIE_READ_MAX_AGE_MIN = int(os.environ.get("NHL_GOALIE_READ_MAX_AGE_MIN", "30"))
+# The NHL side models and the totals card decide nothing this many minutes
+# before a game's stored start. That start is the odds feed's, and the feed
+# lists NHL games about ten minutes after the scheduled puck drop (2026-10-21:
+# 23:40 in `games` for two games the NHL schedules at 23:30; settlement later
+# moves it back to the scheduled time, tests/test_mobile_line_movement.py).
+# Before the goalie rule the side models decided by 18:00Z and
+# the totals card usually the day before; now both can decide minutes after a
+# warmup confirmation, so a decision just before the stored start could price
+# a game already under way. The prop close snapshot stops 12 minutes before
+# the same time for the same reason (NHL_PROP_FINAL_CLOSES_MIN).
+NHL_DECIDE_BEFORE_START_MIN = int(os.environ.get("NHL_DECIDE_BEFORE_START_MIN", "10"))
 # One run's ceiling. Measured 2026-10-01 on the live endpoint; see
 # data/ingestors/nhl_prop_odds_ingestor.py. A full 16-game slate fits; a gate
 # that broke and fetched every game on every pass would stop here, not at the

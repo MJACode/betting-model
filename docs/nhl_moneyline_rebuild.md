@@ -41,9 +41,17 @@ most useful group here — the model design decides whether an input can be used
   (`docs/followups.md`). The lineup input uses who dressed, which production
   cannot know at noon — so it is also graded without it.
 - Prices: the bought archive (`odds.source = 'odds_api_historical'`), read by
-  game id. Decision at DraftKings' first game-day quote (the 16:00Z snapshot);
-  "best" = the best price among `config.BEST_LINE_BOOKMAKERS` **in that same
-  snapshot**. Closing-line value = Pinnacle's last pre-game no-vig minus its
+  game id. **Corrected 2026-10-20:** this line used to say the decision was
+  at DraftKings' first game-day quote (the 16:00Z snapshot). The grade
+  actually decided at each game's FIRST stored quote, and 95.8% of those are
+  dated the day before (median lead about 27 hours). Re-graded with the
+  goalies who actually started (scratch `goalie_work/ml_common.out`: as-built
+  artifact, EV ≥ 0.06, −200 floor, best price, the games all four timings
+  share): the 16:00Z game-day quote +5.08% on 1,588 bets (bootstrap 95%
+  +0.3..+10.0), the last pre-game quote +5.21% on 1,633 (+0.6..+10.0). Live,
+  the model now decides once both starting goalies are confirmed
+  (`docs/sports/nhl.md`, 2026-10-20). "Best" = the best price among
+  `config.BEST_LINE_BOOKMAKERS` **in that same snapshot**. Closing-line value = Pinnacle's last pre-game no-vig minus its
   first, on the side taken.
 - Walk-forward: each test season is fit only on earlier seasons. The penalty is
   chosen on the training seasons (mean log loss over the last three, each fit

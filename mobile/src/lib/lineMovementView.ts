@@ -149,7 +149,11 @@ export function lineMovementView(
   const lockedPrice = decisionOdds(pick);
   const book = bookName(historyBookForPick(pick) ?? storedQuoteBook(pick));
   const line = (v: number | null) => formatSideLine(v, side, market);
-  const showLineCol = market.startsWith('totals') || market.startsWith('spreads') || isProp;
+  const showLineCol =
+    market.startsWith('totals') ||
+    market.startsWith('team_totals') ||
+    market.startsWith('spreads') ||
+    isProp;
   /** Home-relative on spreads, like scored_line. */
   const lineOf = (s: Snap) => lineFromSnapshot(s, market);
   const priceOf = (s: Snap) => priceForSide(s, side);
