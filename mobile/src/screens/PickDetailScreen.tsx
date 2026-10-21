@@ -70,6 +70,8 @@ import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
 import { detailPresentation } from '@/lib/loadState';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
+import { hitModeFromPickSide } from '@/lib/hitMode';
+import { thresholdFromBookLine } from '@/lib/playerDetail';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
@@ -604,6 +606,19 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                   // the same one — it was the model's most-filled stat instead.
                   statKey: propStat ? String(propStat.key) : undefined,
                   statGroup: propStat?.group,
+                  // ...and the SIDE, or an Under prop opens on atLeast —
+                  // complementary hits on the same games. The board already
+                  // sends this from a Hit Rate row (#807); this is the same
+                  // handover off the pick that was read.
+                  hitMode: hitModeFromPickSide(pick.pick_side),
+                  // ...and the LINE, the last third of the question. The
+                  // sparkline above draws pick.scored_line; the screen only
+                  // recovers it on its own for an unsettled pick in today's
+                  // set, so a settled "Under 1.5 Hits" opened at the median
+                  // (UX review, 2026-10-21). Carried as the ruler stop, the
+                  // way the Stats board carries its own.
+                  line: pick.scored_line != null ? thresholdFromBookLine(Number(pick.scored_line)) : undefined,
+                  pickScoredLine: pick.scored_line != null ? Number(pick.scored_line) : undefined,
                 })
               }
               style={({ pressed }) => [styles.viewStatsBtn, pressed && styles.viewStatsBtnPressed]}
