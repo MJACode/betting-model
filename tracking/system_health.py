@@ -37,6 +37,7 @@ Every result row is upserted into `system_health_checks`
     ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END, check_name;
 """
 
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -1053,6 +1054,56 @@ def _report_model_calibration(r, conn, rows, bet_only_rows) -> None:
               f"{gaps[0][0]:+.1f}pp ({gaps[0][1]}{_tag(gaps[0][1])}).{tail}")
 
 
+def _norm_indexdef(defn: str) -> str:
+    """Collapse whitespace. The catalog stores the publish-lock CASE on several lines."""
+    return re.sub(r"\s+", " ", (defn or "").strip())
+
+
+# Exact pg_indexes.indexdef text. Whitespace is collapsed; casts, parentheses
+# and column lists are not. A fragment match would accept a live index that
+# is BET-only and still holds a voided row.
+# Publish lock: read from production 2026-10-14 (vvprgnrmzeekokzkrkfu).
+# Live row: the btree list production prints for uq_picks_one_live_row, with
+# each WHERE term parenthesized and ::text-cast the way that catalog prints
+# the publish-lock predicate.
+_PICK_INDEX_DEFS = {
+    "uq_picks_one_bet_per_publish_lock": """CREATE UNIQUE INDEX uq_picks_one_bet_per_publish_lock ON public.picks USING btree ((
+CASE
+    WHEN COALESCE(is_live, false) THEN (((((((('live:'::text || game_id) || ':'::text) || model_id) || ':'::text) || COALESCE(pick_side, ''::text)) || COALESCE((':'::text || player_id), ''::text)) || COALESCE((':'::text || player_key), ''::text)) || COALESCE((':'::text || prop_market), ''::text))
+    ELSE (((((game_id || ':'::text) || model_id) || COALESCE((':'::text || player_id), ''::text)) || COALESCE((':'::text || player_key), ''::text)) || COALESCE((':'::text || prop_market), ''::text))
+END)) WHERE ((signal_type = 'BET'::text) AND (condition_status IS DISTINCT FROM 'DUPLICATE'::text) AND (condition_status IS DISTINCT FROM 'VOID'::text) AND (result IS DISTINCT FROM 'NO_ACTION'::text))""",
+    "uq_picks_one_live_row": (
+        "CREATE UNIQUE INDEX uq_picks_one_live_row ON public.picks USING btree "
+        "(game_date, model_id, game_id, COALESCE(player_id, ''::text), "
+        "COALESCE(player_key, ''::text), COALESCE(prop_market, ''::text), "
+        "pick_side) WHERE ((is_live IS TRUE) AND (signal_type = 'BET'::text) "
+        "AND (condition_status IS DISTINCT FROM 'DUPLICATE'::text) "
+        "AND (condition_status IS DISTINCT FROM 'VOID'::text) "
+        "AND (result IS DISTINCT FROM 'NO_ACTION'::text))"
+    ),
+}
+
+
+def pick_unique_index_problems(rows) -> list[str]:
+    """What's wrong with the two pick unique indexes, given (name, indexdef).
+
+    Empty when both exist and the catalog text equals the expected definition.
+    A missing index, the wide live predicate, or a BET-only live predicate
+    that still covers VOID and NO_ACTION, is a problem. This does not query;
+    the health check does.
+    """
+    found = {name: _norm_indexdef(defn) for name, defn in rows}
+    problems = []
+    for name, expected in _PICK_INDEX_DEFS.items():
+        defn = found.get(name) or ""
+        if not defn:
+            problems.append(f"{name} is missing")
+            continue
+        if defn != _norm_indexdef(expected):
+            problems.append(f"{name} definition does not match")
+    return problems
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -1485,6 +1536,33 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("schema_drift", SKIPPED, "CRIT",
                   f"could not read information_schema: {type(exc).__name__}")
+
+        # ── The two pick unique indexes, after the migration ────────────────
+        # uq_picks_one_bet_per_publish_lock is one standing BET per publish
+        # lock. uq_picks_one_live_row is one standing live BET per side,
+        # with VOID and result NO_ACTION outside the index. This compares
+        # pg_indexes.indexdef to those two definitions. A name that exists
+        # with a wider predicate fails here the next morning.
+        try:
+            idx_rows = conn.execute("""
+                SELECT indexname, indexdef
+                  FROM pg_indexes
+                 WHERE schemaname = 'public'
+                   AND indexname IN ('uq_picks_one_bet_per_publish_lock',
+                                     'uq_picks_one_live_row')
+            """).fetchall()
+            problems = pick_unique_index_problems(idx_rows)
+            if problems:
+                r.add("pick_unique_indexes", STALE, "CRIT",
+                      "; ".join(problems))
+            else:
+                r.add("pick_unique_indexes", OK, "CRIT",
+                      "uq_picks_one_bet_per_publish_lock and "
+                      "uq_picks_one_live_row match their definitions")
+        except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
+            r.add("pick_unique_indexes", SKIPPED, "CRIT",
+                  f"could not read pg_indexes: {type(exc).__name__}")
 
         # ── Models + picks ───────────────────────────────────────────────────
         expected = (set(MODELS.keys()) | set(PROP_MODELS.keys())) - KNOWN_UNTRAINED

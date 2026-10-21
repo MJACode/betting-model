@@ -12,18 +12,28 @@
 
 | Model | What it bets | Status |
 |---|---|---|
-| `nba_prop_projection` | Steals (over or under), rebounds (under), blocks+steals (over or under), blocks (under), rebounds+assists (under), threes (over or under): each player's projected count — minutes × per-minute rate, a negative-binomial width, a per-market calibration map — priced at the consensus main line, every proposition whose calibrated EV at the best bettable price clears its market's floor. Decided once, in the same 45-57 minute window, after `nba_prop_market`; never a proposition it holds. | **LIVE** (artifact — `models/nba_prop_projection.py`, card `scripts/nba_prop_projection_card.py`, steps `nba-prop-project` / `nba-prop-projection`) |
+| `nba_prop_projection` | Steals (over or under), rebounds (under), blocks+steals (over or under), blocks (under), rebounds+assists (under), threes (over or under): each player's projected count — minutes × per-minute rate, a negative-binomial width, a per-market calibration map — priced at the consensus main line, every proposition whose calibrated EV at the best bettable price clears its market's floor. Decided once, in the same 45-57 minute window and the same look as `nba_prop_market`. One bet a game across both NBA prop models, at most four a night, each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20). | **LIVE** (artifact — `models/nba_prop_projection.py`, card `scripts/nba_prop_projection_card.py`, steps `nba-prop-project` / `nba-props`) |
 | `nba_total_luck` | The full-game OVER, when the projected total with the opponents' three-point and free-throw shooting luck taken out is at least 3 points above the plain projected total. At the best bettable price under the market's fair line; each game decided once, on a fetch 60-66 minutes before tip made by its own one-minute job; regular-season games only (the NBA Cup final never counts); both teams need 10 games, so the first bets come in mid-November. | **LIVE** (rule with a parameter artifact — `models/nba_total_luck.py`, card `scripts/nba_total_luck_card.py`, step `nba-total-luck`, job `nba_total_luck_window`) |
 | `nba_team_total_luck` | The HOME team total UNDER, when the home team's own part of that shooting-luck gap is at least 2 points toward the under (the away defence's luck, in the home team's points). At the best bettable price under the market's fair line; each game decided once, on this model's own team-total fetch 45-66 minutes before tip, made by the same one-minute job; settled on the home team's final score, overtime included; regular-season games only; both teams need 10 games. | **LIVE** (rule with a parameter artifact — `models/nba_team_total_luck.py`, card `scripts/nba_team_total_luck_card.py`, step `nba-team-total-luck`, job `nba_total_luck_window`) |
-| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip; every qualifying proposition, no game or night cap. | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-prop-market`) |
+| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip. One bet a game across both NBA prop models, at most four a night, each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20). | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-props`) |
 
 Graded on 2023-24 → 2025-26, the population it bets (every qualifying
 proposition, −200 floor, no double/triple-double): 24,572 bets, +781.3 units,
 +2.96%, 90% CI +1.85..+4.05, positive every season (+393.6 / +220.5 / +167.1
-units) — about +260 units a season and about 50 bets a night. mike, 2026-10-16:
-*"maximize units won"*, so the one-a-game, four-a-night caps it shipped with on
-10-15 (+94.9 units over the same seasons) are gone. Expect about +2% per bet
-live. It only ever bets unders because that is where the books' margin sits in
+units) — about +260 units a season and about 50 bets a night, uncapped. That
+was the 2026-10-16 rule (*"maximize units won"*). It is replaced: on 2026-10-20,
+after opening night wrote 36 NBA prop bets on one game, mike asked for *"only the
+strongest picks ... like NHL"*.
+
+Both NBA prop models now write one bet a game between them and at most four a
+night, filled in tip order. A bet is ranked by where its EV sits among its own
+model's graded EVs, because the two models' EVs are not on one scale
+(`scripts/nba_props_card.py`, `models/nba_prop_rank.py`). Graded on the same
+three seasons, that gave +153.8 units, +9.69%, about 4 bets a night, this model
+on about 30% of them (the grade is in `docs/thresholds.md`). This model alone at
+one a game and four a night had made +94.9 units. Expect about +2% per bet live.
+
+It only ever bets unders because that is where the books' margin sits in
 every sport this repo has measured: blind NBA overs lose 7.3%, blind unders 2.2%
 (505,932 propositions).
 
@@ -213,8 +223,7 @@ than 10 minutes behind Pinnacle's.
 | Step | When | What |
 |---|---|---|
 | `nba-prop-odds` | every refresh pass (`par`) | live props, 11 markets + 8 alternates, 7 days ahead (blocks+steals and rebounds+assists added 2026-10-16) |
-| `nba-prop-market` | right after `nba-prop-odds`; also in the window job | the card: games tipping in 45-57 minutes and not yet decided; every qualifying proposition; a decision row per game decided; a diagnostic line every look |
-| `nba-prop-projection` | right after `nba-prop-market` (refresh pass, 6am run, window job) | the projection card: prices the stored projections for games in their window that `nba_prop_market` has decided (or alone from 50 minutes out); a decision row per game |
+| `nba-props` | right after `nba-prop-odds`; also in the window job (the old names `nba-prop-market` and `nba-prop-projection` run the same step) | BOTH NBA prop cards in one look: games tipping in 45-57 minutes and not yet decided; every qualifying proposition of both pooled, then one bet a game across both models and `MAX_NBA_PROP_BETS_PER_NIGHT` (4) a night, ranked by each bet's EV percentile within its own model, the night's written bets counted (`scripts/nba_props_card.py`); a decision row per game per model; a diagnostic line every look |
 | `nba-prop-project` | the window job, about 65 minutes before tip | an ESPN injury pull, then the frame over every box line since 2018-19, stored in `nba_prop_projections`; a game 45-62 minutes out with none is projected at once |
 | `nba-total-luck` | only in the totals window job, right after its fetch, under a 180-second limit (NOT in the refresh pass) | the totals card: decides a regular-season game on a fetch that landed 60-66 minutes before tip and is at most 5 minutes old; a decision row per game; the over when the gap is 3+ |
 | `nba-team-total-luck` | only in the totals window job, right after its team-total fetch, under a 180-second limit | the home team-total card: decides a regular-season game on its own team-total fetch that landed 45-66 minutes before tip and is at most 5 minutes old; a decision row per game; the home team total under when the home team's part of the gap is 2+ toward the under |

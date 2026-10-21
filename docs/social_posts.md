@@ -1,16 +1,53 @@
-# Manual posts to @SignalBasePicks
+# Posts to @SignalBasePicks
 
-Picks and results recaps are unchanged. They still go out through
-`tracking/x_publisher.py` (`notify_x_picks`, `notify_x_results`,
-`notify_x_period`) on the schedules they already have, and they still
-ledger in `push_sent`.
-
-A marketing post is a row in `social_post_queue`. The worker job
-`social_post_queue` drains due rows every 5 minutes. It uses the same
+Manual posts are rows in `social_post_queue`. The worker job
+`social_post_queue` drains due rows every 5 minutes, then one queued
+profile update, then at most one automated pick. It uses the same
 OAuth 1.0a client and the same four Railway variables on the `worker`
 service: `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`,
 `X_ACCESS_TOKEN_SECRET`. There is no new secret. `RUN_X_PUBLISHER=0`
-stops this drain as well as the slate and the recaps.
+stops this drain, the pick slate, and the recaps.
+
+Results recaps (`notify_x_results`, `notify_x_period`) are not paced by
+the pick clock below. They still ledger in `push_sent` on their own kinds.
+
+## Pick timing
+
+`notify_x_picks` posts the same released pre-game picks as before
+(`_new_signals` with Discord's ledger ignored, same order, same text).
+One call confirms at most one tweet. The pipeline refresh still calls
+it, and this 5-minute job calls it too. The call opens a session-mode
+connection and takes `X_PICKS_LOCK` for the read, the send, and the
+ledger, so those two callers cannot each send one.
+
+A call posts only when all of these hold:
+
+- `RUN_X_PUBLISHER` is not `0`, the four keys are set, and
+  `X_POST_ALL_PICKS` is not `0` / `false` / `no` / `off`.
+- The America/New_York clock is outside 1:00am inclusive through 8:00am
+  exclusive. 12:35am is before this window, so a pick can still post
+  then. A call inside the window posts nothing and writes nothing. The
+  next call at or after 8:00am posts the next unsent pick whose game
+  has not started.
+- The newest `push_sent.sent_at` with `kind = 'x_pick'` is at least 10
+  minutes old, or there is no such row. The newest of the last eight
+  stamps is taken by parsed time. A read failure or an unreadable stamp
+  posts nothing.
+- The pick has no `x_pick` row yet. A pick whose `commence` is at or
+  before the send time is not tweeted and is not ledgered. The call
+  moves on to the next pick. A missing commence is still postable.
+
+`push_sent` is inserted only after X confirms the tweet,
+`UNIQUE(lock_key, kind)`, kind `x_pick`, `sent_at` the ET timestamp,
+`message_id` the tweet id. That insert is unchanged. Discord and the
+published record do not read this kind. A pick that is held or dropped
+stays out of the ledger, so a later pass can still post it until the
+game starts. A 429 does not ledger; the next call retries that same
+pick, and the 10-minute gap does not start until a tweet is confirmed.
+
+The set of picks is the set that clears the existing slate query. The
+one pick that does not go out is one whose game has started before its
+send slot.
 
 ## What is already queued
 
@@ -178,6 +215,53 @@ UPDATE social_post_queue
 Leave `media_ids` alone. Those ids are already uploaded. Clearing them
 uploads the same images again; it does not change the "one tweet" rule,
 but it is wasted work and the row does not need it.
+
+## Profile
+
+The same 5-minute job applies queued rows in `social_profile_update` after
+it drains posts. It does not tweet. The call is
+`POST https://api.x.com/1.1/account/update_profile.json` with form fields
+`name`, `description`, and `url`, signed with the same OAuth 1.0a header
+and the same four `X_*` variables. Form fields are part of the signature.
+`RUN_X_PUBLISHER=0` leaves the row `queued`.
+
+A row is claimed with `UPDATE ... WHERE status = 'queued'` before the
+request. A second drain does not send it. An HTTP 4xx, including 429, is
+`failed` and is not retried. A timeout or a 5xx is `failed` and is not
+retried either. `response` stores X's body. `error` stores the failure.
+`applied_at` is set only when X accepted the update.
+
+The migration seeds one row, and only when the table has no row yet. A
+later pass returns before that insert, so a deleted row is not put back.
+The seeded name is 30 characters and the description is 156, so neither
+was trimmed. X's limits are 50 and 160. The URL is the sheet, 100
+characters, and it is a single-quoted literal. The worker rewrites a `?`
+outside single quotes to `%s`. The first seed was in a dollar quote, so
+production stored 101 characters and X answered HTTP 403, code 120:
+`Account update failed: Url is too long (maximum is 100 characters).`
+That row stays `failed`. The next migration queues the 100-character URL
+once.
+
+```text
+name: SignalBase | Model Picks + CLV
+description: Model-driven picks: NHL, NFL, CFB, NBA & more. Every posted pick graded, every closing line tracked. Full record below. Discord: discord.gg/Sge4Djj2xT · 21+
+url: https://docs.google.com/spreadsheets/d/1FaUkZnjirMrh0G3Je3RpNoO6d9wq6CcKGZr9bbSovXo/edit?usp=sharing
+```
+
+Another update, after this one has left `queued`, is a new row. The SQL
+editor (the table owner) can insert it. `anon` cannot.
+
+```sql
+INSERT INTO social_profile_update (name, description, url)
+VALUES (
+  'SignalBase | Model Picks + CLV',
+  'Model-driven picks: NHL, NFL, CFB, NBA & more. Every posted pick graded, every closing line tracked. Full record below. Discord: discord.gg/Sge4Djj2xT · 21+',
+  'https://docs.google.com/spreadsheets/d/1FaUkZnjirMrh0G3Je3RpNoO6d9wq6CcKGZr9bbSovXo/edit?usp=sharing'
+);
+```
+
+A name over 50 characters or a description over 160 is refused before the
+request and the row is `failed`.
 
 ## Pinning
 

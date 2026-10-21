@@ -57,8 +57,11 @@ THE RULE, per game, ONCE:
      market's cell and EV >= the cell's floor. If both sides clear, the
      higher EV. A player listed Out is never bet.
 
-NO CAPS. Every qualifying proposition, no game or night cap (mike,
-2026-10-16: "maximize units won").
+CAPS (mike, 2026-10-20: "Only the strongest picks need to be sent, like
+NHL"; it replaced 2026-10-16's no-cap "maximize units won"). Every qualifying
+proposition is a CANDIDATE; scripts/nba_props_card.py writes one bet a game
+across both NBA prop models and four a night, strongest first by each bet's EV
+percentile within its own model (models/nba_prop_rank.py).
 
 WHAT THE WORKER CAN SEE, AND WHY THE MODEL USES ONLY THAT. The live worker
 has the ESPN box line (whole minutes, starter flag, counting stats), the
