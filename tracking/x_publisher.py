@@ -1308,12 +1308,18 @@ def notify_x_results(game_date: str, dry_run: bool = False,
     """
     if not _enabled() or not _creds():
         return 0
-    if game_date >= datetime.now(ET).date().isoformat():
-        return 0
-    from data.db import get_connection
-    from tracking.discord_notifier import (_settled_rows, _tally, clv_line,
+    from tracking.discord_notifier import (_as_et, _settled_rows, _tally,
+                                           clv_line, in_daily_recap_window,
                                            restate_lock_key, sport_in_progress,
                                            window_still_live)
+    clock = _as_et(now)
+    # Same clock as notify_discord_results: a day that is not over, and any
+    # hour from noon through 6:00am, returns before the database is opened.
+    if game_date >= clock.date().isoformat():
+        return 0
+    if not in_daily_recap_window(clock):
+        return 0
+    from data.db import get_connection
 
     # A restatement (recaps_needing_restatement's dict) rides its own ledger
     # kind, keyed on the published_at of the recap it corrects -- the same
@@ -1388,9 +1394,12 @@ def notify_x_period(span: str, start, end, heading: str,
     """
     if not _enabled() or not _creds():
         return 0
-    from data.db import get_connection
     from tracking.discord_notifier import (_settled_rows_since, _tally, clv_line,
+                                           in_period_recap_window,
                                            sport_in_progress, window_still_live)
+    if not in_period_recap_window(now):
+        return 0
+    from data.db import get_connection
 
     kind = f"x_results_{span}"
     lock = f"{kind}:{start.isoformat()}"
