@@ -234,7 +234,9 @@ step push-notifications
 # Every-pass steps are the ones that cost nothing when there is nothing to do:
 #   game-log-today   skips per game; no boxscore call for games already stored
 #   nfl-results      returns without fetching unless a started NFL game is unscored
-#   nhl-results      3 calls to a free API; no-ops out of season
+#   nhl-results      trailing 3 score calls, plus one call per date that still
+#                    has a final and no nhl_api_score row (20 dates on
+#                    2026-10-21; none once those are stored). No-ops out of season
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.

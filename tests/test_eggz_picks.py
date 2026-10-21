@@ -135,18 +135,15 @@ def test_min_wild_on_the_nhl_slate_is_not_the_nfl_team():
     assert all(call[0] != "NFL" for call in calls)
 
 
-def test_a_regulation_tie_is_a_loss_and_a_missing_period_score_is_not_graded():
-    reviews = []
-    graded = []
+def _reg_conn(periods, game, side="home"):
+    """Pending 60-minute leg. `game` is the games-table row the grader reads."""
+    reviews, graded = [], []
 
     class Conn:
-        def __init__(self, periods):
-            self.periods = periods
-
         def execute(self, sql, params=None):
             self.sql = sql
             self.params = params
-            if sql.startswith("UPDATE") and "needs_review" in sql:
+            if "SET status = 'needs_review'" in sql:
                 reviews.append(params)
             if sql.startswith("UPDATE capper_picks SET status = 'graded'"):
                 graded.append(params)
@@ -154,10 +151,10 @@ def test_a_regulation_tie_is_a_loss_and_a_missing_period_score_is_not_graded():
 
         def fetchall(self):
             if "nhl_period_scores" in self.sql:
-                return self.periods
+                return periods
             if "status = 'pending'" in self.sql:
                 return [(
-                    8, "NHL_2026-10-18_CBJ_MIN", "h2h_3way", "home", None, -110, 1,
+                    8, "NHL_2026-10-18_CBJ_MIN", "h2h_3way", side, None, -110, 1,
                     None, None, None, "2026-10-18T22:00:00Z", "NHL",
                 )]
             return []
@@ -166,24 +163,89 @@ def test_a_regulation_tie_is_a_loss_and_a_missing_period_score_is_not_graded():
             if "RETURNING" in self.sql:
                 return (1,)
             if "FROM games" in self.sql:
-                return (2, 1, 1, 1, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+                return game
             return None
 
         def commit(self):
             pass
 
-    assert eg.grade_pending(Conn([])) == 1
-    assert reviews[0][0] == "no_regulation_score"
-    assert graded == []
+    return Conn(), reviews, graded
 
-    reviews.clear()
-    assert eg.grade_pending(Conn([(1, 1, 0, 0, 1, 0)])) == 1
+
+def test_period_scores_grade_the_side_and_a_tie_is_a_loss():
+    # Periods still win when they exist, including over a regulation home win
+    # stored on the games row.
+    final = (2, 1, 1, 1, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([(1, 1, 0, 0, 1, 0)], final)
+    assert eg.grade_pending(conn) == 1
+    assert reviews == []
     assert graded[0][0] == "WIN"
     assert abs(graded[0][1] - 1.0) < 1e-9
 
-    graded.clear()
-    assert eg.grade_pending(Conn([(1, 0, 0, 0, 1, 0)])) == 1
+    conn, reviews, graded = _reg_conn([(1, 0, 0, 0, 1, 0)], final)
+    assert eg.grade_pending(conn) == 1
     assert graded[0][0] == "LOSS"
+
+
+def test_an_overtime_game_is_a_loss_for_both_sides_when_period_scores_are_missing():
+    # went_to_ot = 1 is a regulation tie. home_win_reg is 0 on those games.
+    ot = (3, 2, 1, 0, 1, "2026-10-18T22:00:00Z", "2026-10-18")
+    for side in ("home", "away"):
+        conn, reviews, graded = _reg_conn([], ot, side)
+        assert eg.grade_pending(conn) == 1
+        assert reviews == []
+        assert graded[0][0] == "LOSS"
+        assert abs(graded[0][1] - -1.1) < 1e-9
+        assert abs(graded[0][2] - 1.1) < 1e-9
+
+
+def test_a_regulation_win_comes_from_home_win_reg_when_period_scores_are_missing():
+    reg = (2, 1, 1, 1, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([], reg, "home")
+    assert eg.grade_pending(conn) == 1
+    assert reviews == []
+    assert graded[0][0] == "WIN"
+    assert abs(graded[0][1] - 1.0) < 1e-9
+    assert abs(graded[0][2] - 1.1) < 1e-9
+
+    conn, reviews, graded = _reg_conn([], reg, "away")
+    assert eg.grade_pending(conn) == 1
+    assert graded[0][0] == "LOSS"
+
+    away_reg = (1, 2, 0, 0, 0, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([], away_reg, "away")
+    assert eg.grade_pending(conn) == 1
+    assert graded[0][0] == "WIN"
+
+
+def test_missing_regulation_fields_stay_needs_review_and_a_live_game_stays_pending():
+    commence = "2026-10-18T22:00:00Z"
+    for game in (
+        (2, 1, 1, None, 0, commence, "2026-10-18"),
+        (2, 1, 1, 1, None, commence, "2026-10-18"),
+        (2, 1, 1, None, None, commence, "2026-10-18"),
+    ):
+        conn, reviews, graded = _reg_conn([], game)
+        eg.grade_pending(conn)
+        assert reviews[0][0] == "no_regulation_score"
+        assert graded == []
+
+    # Oct 20 rows stored went_to_ot = 0 before the game was final.
+    conn, reviews, graded = _reg_conn(
+        [], (None, None, None, None, 0, commence, "2026-10-20"))
+    assert eg.grade_pending(conn) == 0
+    assert reviews == []
+    assert graded == []
+
+
+def test_period_scores_outrank_an_overtime_flag():
+    # Periods say the home side won in regulation. went_to_ot = 1 would have
+    # been a loss for both sides. The period row is the grade.
+    ot = (3, 2, 1, 0, 1, "2026-10-18T22:00:00Z", "2026-10-18")
+    conn, reviews, graded = _reg_conn([(2, 0, 0, 0, 0, 0)], ot, "home")
+    assert eg.grade_pending(conn) == 1
+    assert reviews == []
+    assert graded[0][0] == "WIN"
 
 
 def test_a_stored_needs_review_message_is_reparsed_and_a_parsed_one_is_not(monkeypatch):

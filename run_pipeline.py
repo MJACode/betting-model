@@ -577,7 +577,11 @@ def step_nhl_results(run_date: str) -> bool:
         # today covers yesterday too, and only today's date can pick up a game
         # that finished this evening.
         n = ingest_nhl_scores_for_date(run_date)
-        logger.success(f"✓ NHL results: {n} final games upserted")
+        from data.ingestors.nhl_period_scores_api import top_up
+        # Same pass, after the finals are in `games`: the score feed's goals
+        # array is the period row. Dates already stored are not fetched.
+        periods = top_up(run_date)
+        logger.success(f"✓ NHL results: {n} final games upserted; {periods} period rows")
         return True
     except Exception as exc:
         logger.error(f"✗ NHL results failed: {exc}")

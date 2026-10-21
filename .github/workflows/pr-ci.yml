@@ -201,6 +201,7 @@ jobs:
             tests/test_free_pick_names_the_cheaper_book.py \
             tests/test_period_recaps.py \
             tests/test_eggz_picks.py \
+            tests/test_nhl_period_scores_api.py \
             tests/test_mobile_stat_segments.py \
             tests/test_mobile_line_ruler.py \
             tests/test_mobile_nhl_skater_stats.py \
