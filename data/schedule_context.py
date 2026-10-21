@@ -576,11 +576,13 @@ class ScheduleBook:
     def pending_reason(self, game_id: str, game_date: str, home: str, away: str,
                        commence_time, now: datetime) -> str | None:
         views = self.views(game_id, game_date, home, away, commence_time, now)
+        hours = self.rules.result_lookback_hours
+        after = f"{hours}+ hours" if hours is not None else f"{self.rules.lookback_days}+ days"
         for name, v in views:
             for ev in v.gaps:
                 logger.info(f"  {game_id}: {name}'s {ev.first_day} {self.rules.word} "
                             f"({', '.join(sorted(ev.ids))}) has no result "
-                            f"{self.rules.lookback_days}+ days on -- not waited for")
+                            f"{after} on -- not waited for")
         return pending_reason(views, self.rules.word)
 
 
