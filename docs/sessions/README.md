@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM saved models: master 992f079c merged; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; byom_saved_models_2026_10_16.sql is not registered; unapplied |
+| 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM saved models: auth.uid() tables, cap 25, snapshot of byom_backtest at save time, migration not registered, sign-in left off |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM refresh: master 06259b58 merged after cfe5dc1b; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; props_scanned_at unchanged; unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: a quote with no line is dropped before the capture rank; Anytime TD 0.5 is still a line; master cfe5dc1b merged, both session logs kept |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM backtest RPC: master 633be2b5 merged; master's ACTIVE_MIGRATIONS order, RPC row after it, units file still last; the in-function 3s timeout does not apply (anon 3s, authenticated 8s); unapplied |
