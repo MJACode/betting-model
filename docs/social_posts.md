@@ -197,7 +197,13 @@ retried either. `response` stores X's body. `error` stores the failure.
 The migration seeds one row, and only when the table has no row yet. A
 later pass returns before that insert, so a deleted row is not put back.
 The seeded name is 30 characters and the description is 156, so neither
-was trimmed. X's limits are 50 and 160. The URL is the sheet.
+was trimmed. X's limits are 50 and 160. The URL is the sheet, 100
+characters, and it is a single-quoted literal. The worker rewrites a `?`
+outside single quotes to `%s`. The first seed was in a dollar quote, so
+production stored 101 characters and X answered HTTP 403, code 120:
+`Account update failed: Url is too long (maximum is 100 characters).`
+That row stays `failed`. The next migration queues the 100-character URL
+once.
 
 ```text
 name: SignalBase | Model Picks + CLV

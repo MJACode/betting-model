@@ -345,6 +345,20 @@ def test_the_seed_fits_and_the_guard_uses_to_regclass():
     assert code.index("RETURN;") < code.index("CREATE TABLE")
     assert code.index("RETURN;") < code.index("INSERT INTO public.social_profile_update")
     assert "WHERE NOT EXISTS (SELECT 1 FROM public.social_profile_update)" in code
+    from data.db import _adapt_sql
+    adapted = _adapt_sql(sql)
+    assert "edit?usp=sharing" in adapted
+    assert "edit%susp" not in adapted
+    fix = (ROOT / "data" / "migrations" / "social_profile_url_2026_10_21.sql").read_text(encoding="utf-8")
+    fix_code = _code(fix)
+    assert "::regclass" not in fix_code
+    assert "to_regclass('public.social_profile_update') IS NULL" in fix_code
+    fixed = _adapt_sql(fix)
+    assert "edit?usp=sharing" in fixed
+    assert "edit%susp" not in fixed
+    assert "social_profile_url_2026_10_21.sql" in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index("social_profile_update_2026_10_20.sql") < ACTIVE_MIGRATIONS.index(
+        "social_profile_url_2026_10_21.sql")
     assert code.count("$mig$") == 2
     name = "social_profile_update_2026_10_20.sql"
     assert name in ACTIVE_MIGRATIONS
@@ -367,7 +381,9 @@ def test_profile_migration_applies_on_an_empty_database_and_does_not_reseed():
         pytest.skip(f"scratch cluster did not start: {exc}")
     conn = psycopg2.connect(dsn)
     conn.autocommit = True
-    sql = MIG.read_text(encoding="utf-8")
+    from data.db import _adapt_sql
+    sql = _adapt_sql(MIG.read_text(encoding="utf-8"))
+    fix = _adapt_sql((ROOT / "data" / "migrations" / "social_profile_url_2026_10_21.sql").read_text(encoding="utf-8"))
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -382,12 +398,27 @@ def test_profile_migration_applies_on_an_empty_database_and_does_not_reseed():
         """)
         cur.execute(sql)
         cur.execute(sql)
-        cur.execute("SELECT name, description, url, status FROM public.social_profile_update ORDER BY id")
-        assert cur.fetchall() == [(NAME, DESC, URL, "queued")]
+        cur.execute("SELECT name, description, url, status, char_length(url) FROM public.social_profile_update ORDER BY id")
+        assert cur.fetchall() == [(NAME, DESC, URL, "queued", 100)]
+        cur.execute(fix)
+        cur.execute("SELECT count(*) FROM public.social_profile_update")
+        assert cur.fetchone()[0] == 1
         cur.execute("DELETE FROM public.social_profile_update")
         cur.execute(sql)
         cur.execute("SELECT count(*) FROM public.social_profile_update")
         assert cur.fetchone()[0] == 0
+        cur.execute(
+            "INSERT INTO public.social_profile_update (name, description, url, status, error) "
+            "VALUES (%s, %s, %s, 'failed', 'HTTP 403')",
+            (NAME, DESC, URL.replace("?usp", "%susp")))
+        cur.execute(fix)
+        cur.execute(fix)
+        cur.execute(
+            "SELECT url, status, char_length(url) FROM public.social_profile_update ORDER BY id")
+        rows = cur.fetchall()
+        assert rows[0][1] == "failed"
+        assert rows[0][2] == 101
+        assert rows[1] == (URL, "queued", 100)
     finally:
         conn.close()
         cluster.stop()

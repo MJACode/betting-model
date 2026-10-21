@@ -14,6 +14,8 @@
 --
 -- The seed is one row, status queued. Name is 30 characters. Description
 -- is 156. Neither needed trimming. The URL is the sheet, 100 characters.
+-- It is a single-quoted literal: data.db rewrites a ? outside single
+-- quotes to %s, which turned this URL into 101 characters.
 --
 -- One DO block. data/view_migrations.py runs each file as one statement.
 
@@ -62,7 +64,7 @@ BEGIN
   INSERT INTO public.social_profile_update (name, description, url)
   SELECT $pname$SignalBase | Model Picks + CLV$pname$,
          $pdesc$Model-driven picks: NHL, NFL, CFB, NBA & more. Every posted pick graded, every closing line tracked. Full record below. Discord: discord.gg/Sge4Djj2xT · 21+$pdesc$,
-         $purl$https://docs.google.com/spreadsheets/d/1FaUkZnjirMrh0G3Je3RpNoO6d9wq6CcKGZr9bbSovXo/edit?usp=sharing$purl$
+         'https://docs.google.com/spreadsheets/d/1FaUkZnjirMrh0G3Je3RpNoO6d9wq6CcKGZr9bbSovXo/edit?usp=sharing'
    WHERE NOT EXISTS (SELECT 1 FROM public.social_profile_update);
 
   REVOKE ALL ON public.social_profile_update FROM anon, authenticated;
