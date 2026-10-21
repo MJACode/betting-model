@@ -1055,5 +1055,16 @@
     "requested_by": "owner",
     "note": "Owner, 2026-10-14 18:27 ET: delete the custom-format full record, Discord message 1560045816352079957, via the results webhook. Standard post 1560049598565715999 and X untouched.",
     "args": {}
+  },
+  {
+    "key": "byom-nfl-prop-facts",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. Turning it on is the owner's call, and apply has to be set true in the same change or the run writes nothing. Builds byom_prop_facts from player_prop_odds (from 2023-09-01) and nfl_player_game_log. The line is the last DraftKings snapshot at or before kickoff. No alt ladders. A posted line on a player who logged the game is a win, a loss, or a push. A player who did not play, and a row with no line, are not graded and are not in the record. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": false
+    }
   }
 ]
