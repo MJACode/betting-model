@@ -406,6 +406,15 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Nullable columns only. Does not rewrite the ledger seed, picks, or
     # push_sent. Returns before ALTER once the columns and checks exist.
     "social_post_media_2026_10_20.sql",
+    # 2026-10-20: one queued X profile update for @SignalBasePicks.
+    # A new table. Does not rewrite the post queue, picks, or push_sent.
+    # Returns before CREATE once the table is locked down, so a second
+    # pass does not insert the seed again.
+    "social_profile_update_2026_10_20.sql",
+    # 2026-10-21: the sheet URL again, single-quoted, so the ? survives
+    # data.db's rewrite. Inserts only when that URL is not already queued
+    # or done. Does not rewrite the failed row, picks, or push_sent.
+    "social_profile_url_2026_10_21.sql",
     # 2026-10-20: Eggz's Discord posts. Three tables, anon locked out.
     # Not the model record. Does not rewrite picks, snapshots, or the
     # published views. Returns before ALTER once the tables are locked down.
