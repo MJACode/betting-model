@@ -4059,6 +4059,17 @@ NHL_GOALIE_GATE_EXEMPT = frozenset({"nhl_prop_shots_on_goal"})
 # median, 13.1 longest; evening 7.4 median, 10.0 at the 95th percentile;
 # pipeline_runs since 2026-10-07).
 NHL_GOALIE_READ_MAX_AGE_MIN = int(os.environ.get("NHL_GOALIE_READ_MAX_AGE_MIN", "30"))
+# The NHL side models and the totals card decide nothing this many minutes
+# before a game's stored start. That start is the odds feed's, and the feed
+# lists NHL games about ten minutes after the scheduled puck drop (2026-10-21:
+# 23:40 in `games` for two games the NHL schedules at 23:30; settlement later
+# moves it back to the scheduled time, tests/test_mobile_line_movement.py).
+# Before the goalie rule the side models decided by 18:00Z and
+# the totals card usually the day before; now both can decide minutes after a
+# warmup confirmation, so a decision just before the stored start could price
+# a game already under way. The prop close snapshot stops 12 minutes before
+# the same time for the same reason (NHL_PROP_FINAL_CLOSES_MIN).
+NHL_DECIDE_BEFORE_START_MIN = int(os.environ.get("NHL_DECIDE_BEFORE_START_MIN", "10"))
 # One run's ceiling. Measured 2026-10-01 on the live endpoint; see
 # data/ingestors/nhl_prop_odds_ingestor.py. A full 16-game slate fits; a gate
 # that broke and fetched every game on every pass would stop here, not at the

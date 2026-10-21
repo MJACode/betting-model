@@ -42,10 +42,16 @@ def _iso(dt):
 
 
 def test_started_games_are_not_on_the_slate():
+    import config
     rows = [
         ("NHL_A", "OTT", "PHI", _iso(NOW - timedelta(seconds=1)), "2026-10-08"),
-        ("NHL_B", "BOS", "UTA", _iso(NOW + timedelta(seconds=1)), "2026-10-08"),
+        ("NHL_B", "BOS", "UTA", _iso(NOW + timedelta(minutes=config.NHL_DECIDE_BEFORE_START_MIN + 1)),
+         "2026-10-08"),
         ("NHL_C", "VGK", "TOR", _iso(NOW + timedelta(hours=30)), "2026-10-09"),
+        # The feed's start time is about ten minutes after puck drop: a game
+        # this close may already be live.
+        ("NHL_D", "SEA", "DET", _iso(NOW + timedelta(minutes=config.NHL_DECIDE_BEFORE_START_MIN - 1)),
+         "2026-10-08"),
     ]
     conn = _SlateConn(rows)
     games = card.slate(conn, NOW)

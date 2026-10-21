@@ -124,7 +124,11 @@ def test_with_nothing_to_say_it_returns_the_market():
     (datetime(2026, 10, 16, 10, 0, tzinfo=timezone.utc), None),
     (datetime(2026, 10, 16, 16, 22, tzinfo=timezone.utc), None),
     (datetime(2026, 10, 16, 18, 0, tzinfo=timezone.utc), None),
-    (datetime(2026, 10, 16, 22, 59, tzinfo=timezone.utc), None),
+    (datetime(2026, 10, 16, 22, 49, tzinfo=timezone.utc), None),
+    # The stored start is the feed's, about ten minutes after the scheduled
+    # puck drop (2026-10-21: 23:40 against the NHL's 23:30), so nothing
+    # decides in the last config.NHL_DECIDE_BEFORE_START_MIN.
+    (datetime(2026, 10, 16, 22, 51, tzinfo=timezone.utc), "starts within"),
     (datetime(2026, 10, 16, 23, 0, tzinfo=timezone.utc), "game has started"),
 ])
 def test_the_decision_window_has_no_clock(now, expected):

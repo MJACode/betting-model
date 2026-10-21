@@ -708,3 +708,11 @@ def test_a_tomorrow_game_row_that_exists_is_never_rewritten(resolver):
                   df_fetch=lambda url: _df_html(DF_PROPS))
     assert out["stored"] > 0 and out["swapped"] == []
     assert db.stats == before
+
+
+def test_the_poll_asks_espn_to_raise_when_its_listing_cannot_be_read():
+    def blocked(url):
+        raise RuntimeError("403 Forbidden")
+    with pytest.raises(RuntimeError, match="ESPN NHL listing for 2026-10-20 not read"):
+        fetch_espn_nhl_designations(DAY, fetch=blocked, strict=True)
+    assert fetch_espn_nhl_designations(DAY, fetch=blocked) == []        # the 6am overlay still fails open

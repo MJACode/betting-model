@@ -55,6 +55,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config
 import models.nhl_goalie_gate as goalie_gate
 import models.nhl_totals_market as mk
 from data.db import get_connection
@@ -91,9 +92,13 @@ def slate(conn, now: datetime) -> dict[str, dict]:
           AND game_date >= %s
     """, (since,)).fetchall()
     out = {}
+    # The stored start is the odds feed's, about ten minutes after the
+    # scheduled puck drop: nothing is decided that close to it
+    # (config.NHL_DECIDE_BEFORE_START_MIN).
+    margin = timedelta(minutes=config.NHL_DECIDE_BEFORE_START_MIN)
     for gid, home, away, commence, gd in rows:
         start = _parse_iso_ts(commence)
-        if start is None or start <= now:
+        if start is None or start - margin <= now:
             continue
         out[gid] = {"home": home, "away": away,
                     "commence_time": commence, "game_date": str(gd)[:10]}

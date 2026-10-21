@@ -47,6 +47,8 @@ from math import asin, cos, radians, sin, sqrt
 import numpy as np
 import pandas as pd
 
+import config
+
 MODEL_ID = "nhl_moneyline"
 KIND = "anchored_logit"
 MARKET = "h2h"
@@ -430,7 +432,8 @@ def inputs_for_date(conn, game_date: str, now: datetime | None = None) -> tuple[
 
 def decision_window(game_date: str, commence_time: str | None,
                     now: datetime | None = None) -> str | None:
-    """None while the game has not started; otherwise why this run may not decide.
+    """None until NHL_DECIDE_BEFORE_START_MIN before the game's stored start;
+    otherwise why this run may not decide.
 
     There is no clock any more (2026-10-20). Both side models decide at the
     first scoring run where the goalie gate says KNOWN and last night's logs
@@ -453,4 +456,9 @@ def decision_window(game_date: str, commence_time: str | None,
             ct = ct.replace(tzinfo=timezone.utc)
         if now >= ct:
             return "game has started"
+        # The stored start is the odds feed's, about ten minutes after the
+        # scheduled puck drop (config.NHL_DECIDE_BEFORE_START_MIN).
+        margin = config.NHL_DECIDE_BEFORE_START_MIN
+        if now >= ct - timedelta(minutes=margin):
+            return f"game starts within {margin} minutes"
     return None

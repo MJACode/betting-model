@@ -1264,19 +1264,17 @@ def run_nhl_goalie_window() -> None:
     from scripts.nhl_goalie_window import has_games_today, plan_tick
     if not has_games_today():
         return
-    if _REFRESH_LOCK.locked() or _DAILY_LOCK.locked():
-        log.info("NHL goalie window: a refresh pass or the daily run is in progress; "
-                 "it polls the goalies and decides the NHL games itself")
-        return
     if not _NHL_WINDOW_LOCK.acquire(blocking=False):
         return
     t = NHL_GOALIE_WINDOW_TIMEOUT_S
     outcomes: dict[str, str] = {}
     try:
-        # Read again under the lock: a pass that took its own lock between the
-        # check above and this acquire is in progress now.
+        # Read under this lock, never before taking it: a pass that took its
+        # own lock a moment earlier is in progress now, and one that starts
+        # after this read waits for the tick (_wait_for_nhl_window).
         if _REFRESH_LOCK.locked() or _DAILY_LOCK.locked():
-            log.info("NHL goalie window: a pass started as this tick began; standing down")
+            log.info("NHL goalie window: a refresh pass or the daily run is in progress; "
+                     "it polls the goalies and decides the NHL games itself")
             return
         outcomes["nhl-goalie-poll"] = _run(
             [sys.executable, "run_pipeline.py", "--step", "nhl-goalie-designations-today"],

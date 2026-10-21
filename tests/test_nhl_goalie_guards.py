@@ -1122,3 +1122,13 @@ def test_no_writer_names_the_picks_table_through_a_variable():
                     and str(node.value.value).lower() in ("picks", "public.picks"):
                 bad.append(f"{rel.as_posix()}:{node.value.lineno}")
     assert not bad, f"picks named through a variable next to a templated INSERT: {bad}"
+
+
+def test_an_nhl_odds_fetch_that_stored_nothing_is_a_failed_step(monkeypatch):
+    """run_odds_ingestor logs a failed sport and carries on, so the step reads
+    the row count: the window must not score believing it has new prices."""
+    import run_pipeline
+    monkeypatch.setattr(run_pipeline, "_import_step", lambda name: lambda **kw: {"odds_rows": 0, "games": 0})
+    assert run_pipeline.step_nhl_odds("2026-10-20") is False
+    monkeypatch.setattr(run_pipeline, "_import_step", lambda name: lambda **kw: {"odds_rows": 40, "games": 2})
+    assert run_pipeline.step_nhl_odds("2026-10-20") is True
