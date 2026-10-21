@@ -355,6 +355,34 @@
   capped at 10,000 rows a call, so they are pulled a week at a time and a
   capped page is refused. `totalShotAttempts` is NULL before 2022-23; the 5v5
   counts (`sat_for_5v5`) go back the whole way and are what Corsi uses.
+- **Every shot attempt since 2018-19** (2026-10-13), from the free play-by-play
+  feed (`api-web.nhle.com/v1/gamecenter/<id>/play-by-play`): `nhl_shot_events`,
+  one row per shot on goal, miss, block and goal — 1,238,808 rows over all
+  10,604 games in `nhl_team_game_log`. Location (raw, and rotated so the
+  attacked net is at +89), shot type, decoded strength, score, the event just
+  before. Importer `data/ingestors/nhl_shot_events.py` (resumes on the key);
+  checks `scripts/nhl_shot_events_verify.py` — shots on goal + goals equal
+  `shots_for` in 99.24% of team-games (never off by more than 2), goals equal
+  `goals_for` in all of them. Traps found and handled: 2018-19 has no
+  `homeTeamDefendingSide` and a sortOrder that is not chronological; a blocked
+  shot's coordinates and zone are the BLOCKER's; the recording changes under
+  the training window: from 2022-23 more attempts sit within 10 ft (10.0% of
+  unblocked attempts in 2021-22, 12.4-15.0% after), and from 2023-24 the feed
+  logs more misses and fewer shots on goal (misses 24.7 a game in 2022-23,
+  29.9 in 2025-26) with new "teammate-blocked" / "short" /
+  "failed-bank-attempt" reasons.
+- **Expected goals** (`data/nhl_xg.py`): LightGBM on unblocked attempts, fit
+  2018-19 → 2021-22, stored on each attempt as `nhl_shot_events.xg` with
+  `xg_model_version`. Out of sample it OVERSHOOTS goals and the gap grows
+  (xG/goals 1.066 in 2022-23 → 1.144 in 2025-26). The overshoot lines up with
+  the recording shifts above and sits where they are (attempts within 10 ft,
+  tip-ins, deflections, backhands) -- inferred from that breakdown, not
+  proven. So an absolute xG level is not comparable across 2021-22 / 2022-23,
+  and league goals saved above expected, which should sum to about zero, reads
+  +567 to +1,162 a season from 2022-23. Shares (xGF%) hold: 0.991 / 0.983
+  correlation with MoneyPuck's team xGF% in 2023-24 / 2024-25. Per team-game
+  and per goalie-game sums: `nhl_team_game_xg`, `nhl_goalie_game_xg`
+  (`data/nhl_xg_aggregates.py`).
 - **One function rates goalies and teams for training and for scoring**:
   `data/nhl_asof.py`. Strictly before the date asked about. A goalie's save%
   and GAA are taken over this season and last and regressed to the league
