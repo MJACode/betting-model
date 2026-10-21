@@ -2100,8 +2100,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # nhl_moneyline was REBUILT 2026-10-13 (mike; shipped on his "Yes",
     # 2026-10-15) and swept on its own walk-forward: a plateau from EV 0.02 to
     # 0.08 at the best price with the -200 floor (see ACTION_THRESHOLDS);
-    # 0.06 sits inside it (+6.3% on 1,326, interval +1.1..+11.4). Re-sweep on
-    # its own record at ~250 settled bets.
+    # 0.06 sits inside it (+6.3% on 1,326, interval +1.1..+11.4). That
+    # walk-forward decided at each game's FIRST stored quote (95.8% the day
+    # before, median lead ~27h), not at 16:00Z on game day. Re-graded
+    # 2026-10-20 with the goalies who actually started, at 0.06 and the best
+    # price: +5.08% on 1,588 at the 16:00Z game-day quote (+0.3..+10.0),
+    # +5.21% on 1,633 at the last pre-game quote (+0.6..+10.0). Live, it
+    # decides once both starting goalies are confirmed (docs/sports/nhl.md).
+    # Re-sweep on its own record at ~250 settled bets.
     "nhl_moneyline":             0.06,
     "nhl_moneyline_regulation":  0.20,   # n=0, no written bet
     "nhl_puckline":              0.20,   # n=0, no written bet
@@ -4024,9 +4030,46 @@ NHL_PROP_CLOSE_WINDOW_MIN = int(os.environ.get("NHL_PROP_CLOSE_WINDOW_MIN", "70"
 # feed's time: the feed lists NHL starts at :10, ten minutes after the
 # scheduled puck drop, so a later fetch could hold in-play prices. Thirteen
 # minutes wide, so the ten-minute evening passes always land one inside it.
-# Measured cost: 5 credits a game, about 6,600 credits a season.
+# Measured cost: 5 credits a game, about 6,600 credits a season (measured
+# before the alternate-lines call was added; a snapshot is now two calls,
+# 10-11 credits a game on 2026-10-19 in api_call_log).
 NHL_PROP_FINAL_OPENS_MIN = int(os.environ.get("NHL_PROP_FINAL_OPENS_MIN", "25"))
 NHL_PROP_FINAL_CLOSES_MIN = int(os.environ.get("NHL_PROP_FINAL_CLOSES_MIN", "12"))
+# The NHL models that do NOT wait for both starting goalies to be confirmed
+# (models/nhl_goalie_gate.py). Every other NHL model, present and future, does.
+# mike, 2026-10-20: "Ok on shots on goal", answering: "The shots-on-goal props
+# lose their early price under this rule. Measured: +11.66 units on 39 bets
+# placed 6+ hours out (average 8.75% better than the closing price) vs -1.12
+# on 33 later. The model never reads the goalie. I'd exempt it; one config
+# line." Those units are 1u risked a bet (picks.profit_flat / 100), settled
+# games through 2026-10-19; the CLV average is over the 35 of the 39 that
+# carry one. Sized the record's way (1u to win, risk capped at 3) the same
+# bets are +9.27 and -1.06. So shots on goal keeps deciding at its opening
+# fetch, before any goalie is confirmed. Pinned by
+# tests/test_nhl_goalie_gate.py: adding a model here takes his instruction.
+NHL_GOALIE_GATE_EXEMPT = frozenset({"nhl_prop_shots_on_goal"})
+# How long a stored ESPN confirmation counts without a poll re-reading it
+# (models/nhl_goalie_gate.team_problem, nhl_goalie_designations.last_seen_at).
+# A poll that cannot read ESPN (the worker has been IP-blocked twice) stores
+# nothing, so without this bound a confirmation from the afternoon stood all
+# evening, whoever ESPN named after it. Past the bound the game is not known,
+# and a DailyFaceoff name that old no longer vetoes. 30 minutes: the
+# five-minute window re-reads every tick from 11:00 ET, and a refresh pass
+# decides within its own run of its own poll (hourly passes 7.9 minutes
+# median, 13.1 longest; evening 7.4 median, 10.0 at the 95th percentile;
+# pipeline_runs since 2026-10-07).
+NHL_GOALIE_READ_MAX_AGE_MIN = int(os.environ.get("NHL_GOALIE_READ_MAX_AGE_MIN", "30"))
+# The NHL side models and the totals card decide nothing this many minutes
+# before a game's stored start. That start is the odds feed's, and the feed
+# lists NHL games about ten minutes after the scheduled puck drop (2026-10-21:
+# 23:40 in `games` for two games the NHL schedules at 23:30; settlement later
+# moves it back to the scheduled time, tests/test_mobile_line_movement.py).
+# Before the goalie rule the side models decided by 18:00Z and
+# the totals card usually the day before; now both can decide minutes after a
+# warmup confirmation, so a decision just before the stored start could price
+# a game already under way. The prop close snapshot stops 12 minutes before
+# the same time for the same reason (NHL_PROP_FINAL_CLOSES_MIN).
+NHL_DECIDE_BEFORE_START_MIN = int(os.environ.get("NHL_DECIDE_BEFORE_START_MIN", "10"))
 # One run's ceiling. Measured 2026-10-01 on the live endpoint; see
 # data/ingestors/nhl_prop_odds_ingestor.py. A full 16-game slate fits; a gate
 # that broke and fetched every game on every pass would stop here, not at the

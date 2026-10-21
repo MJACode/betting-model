@@ -37,6 +37,7 @@ Usage:
     python -m data.ingestors.nfl_props_data_ingestor                 # self-healing daily
     python -m data.ingestors.nfl_props_data_ingestor --season 2025
     python -m data.ingestors.nfl_props_data_ingestor --backfill 2015 2025
+    python -m data.ingestors.nfl_props_data_ingestor --schedule-only   # next 14 days
 """
 
 from __future__ import annotations
@@ -203,7 +204,31 @@ def parse_player_rows(csv_text: str, schedule: dict[str, dict]) -> list[dict]:
 TEAM_COLUMNS = ["game_id", "team", "opponent", "game_date", "season", "week", "season_type",
                 "is_home", "pass_attempts", "carries", "plays", "pass_yards", "rush_yards",
                 "completions", "targets", "spread_line", "total_line", "roof", "surface",
-                "temp", "wind", "div_game", "commence_time", "points_for", "points_against"]
+                "temp", "wind", "div_game", "commence_time", "points_for", "points_against",
+                "stadium_id", "stadium", "location"]
+
+# WHERE the game is played, as nflverse publishes it (2026-10-20). Stored raw
+# and resolved to coordinates at read time (nfl/data_ingest/weather.py
+# resolve_venue), because the raw fields are not trustworthy on their own for
+# a game abroad: in the 2026 schedule nflverse marks PHI @ JAX at Tottenham as
+# `location=Neutral` but `stadium_id=JAX00`, Jacksonville's stadium. Until this
+# date the wind card read the venue from a schedule file frozen on 2026-08-15,
+# and two London BETs were forecast at Jacksonville's coordinates.
+VENUE_COLUMNS = ["stadium_id", "stadium", "location"]
+
+
+def _venue_fields(game: dict) -> dict:
+    """The nflverse venue columns for one schedule row, blanks as None."""
+    return {c: (game.get(c) or "").strip() or None for c in VENUE_COLUMNS}
+
+
+def _neutral_site(location: str | None) -> int | None:
+    """games.neutral_site from nflverse `location`: 'Neutral' -> 1, 'Home' -> 0."""
+    if location == "Neutral":
+        return 1
+    if location == "Home":
+        return 0
+    return None
 
 
 def _kickoff_utc(gameday: str, gametime: str | None) -> str | None:
@@ -274,6 +299,7 @@ def parse_team_rows(player_rows: list[dict], schedule: dict[str, dict]) -> list[
             "commence_time": _kickoff_utc(a["game_date"], game.get("gametime")),
             "points_for": (hs if is_home == 1 else as_) if is_home is not None else None,
             "points_against": (as_ if is_home == 1 else hs) if is_home is not None else None,
+            **_venue_fields(game),
         })
         out.append(a)
     return out
@@ -323,6 +349,7 @@ def parse_upcoming_team_rows(schedule: dict[str, dict], season: int,
                 "div_game": _int_or_none(game.get("div_game")),
                 "commence_time": _kickoff_utc(gameday, game.get("gametime")),
                 "points_for": None, "points_against": None,
+                **_venue_fields(game),
             })
     return rows
 
@@ -393,6 +420,50 @@ def _upsert_sql(table: str, columns: list[str], conflict: list[str]) -> str:
 
 _PLAYER_UPSERT = _upsert_sql("nfl_player_game_log", PLAYER_COLUMNS, ["player_id", "game_id"])
 _TEAM_UPSERT = _upsert_sql("nfl_team_game_stats", TEAM_COLUMNS, ["game_id", "team"])
+_TEAM_UPSERT_NO_VENUE = _upsert_sql(
+    "nfl_team_game_stats", [c for c in TEAM_COLUMNS if c not in VENUE_COLUMNS],
+    ["game_id", "team"])
+
+
+def _has_venue_columns(conn) -> bool:
+    """True when nfl_team_game_stats carries the three venue columns.
+
+    The columns arrive by `data/db_setup._MIGRATIONS`, which runs at worker
+    boot and at Step 0c, AFTER this ingest (Step 0h). A boot whose migration
+    failed must not take this step down with it: the same upsert writes the
+    scheduled-game rows the NFL prop scorer reads its slate from. Without the
+    columns the rows still land and only the venue is missing, which the wind
+    card treats as "venue not established". One catalog read per season.
+
+    Scoped to the public schema and counted by distinct name: the catalog
+    lists every schema the role can see, so a same-named table elsewhere (a
+    backup copy) would double an unscoped count, fail the equality, and stop
+    the venue being written for good -- logged as "no venue columns yet".
+    """
+    try:
+        row = conn.execute("""
+            SELECT COUNT(DISTINCT column_name) FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'nfl_team_game_stats'
+              AND column_name = ANY(%s)
+        """, (VENUE_COLUMNS,)).fetchone()
+        if row and int(row[0]) == len(VENUE_COLUMNS):
+            return True
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"NFL props data: venue-column probe failed ({exc})")
+        try:
+            conn.rollback()
+        except Exception:                                      # noqa: BLE001
+            pass
+    logger.warning("NFL props data: nfl_team_game_stats has no venue columns yet "
+                   f"({', '.join(VENUE_COLUMNS)}); writing team rows without them")
+    return False
+
+
+def _team_upsert_for(conn) -> str:
+    """The team-row upsert, without the venue columns if the table lacks them."""
+    return _TEAM_UPSERT if _has_venue_columns(conn) else _TEAM_UPSERT_NO_VENUE
+
+
 _SNAP_UPSERT = _upsert_sql("nfl_snap_counts", SNAP_COLUMNS, ["game_id", "team", "norm_name"])
 
 
@@ -423,18 +494,28 @@ def _upsert_chunked(conn, sql: str, rows: list[dict], chunk: int = _UPSERT_CHUNK
 #
 # Safe on the health check: NFL is not in system_health.CRIT_FINALS_SPORTS, so
 # an unplayed game with no score is a WARN, never a red daily run.
+#
+# THIS IS THE NFL SCHEDULE OF RECORD (2026-10-20). Every NFL pre-game job reads
+# its kickoffs from these rows (nfl/data_ingest/schedule.py, scheduler.py
+# _nfl_lead_hours), so a flexed or re-timed game moves the day nflverse moves
+# it. The odds ingestor never writes NFL games rows (NFL_GAMES_ARE_NOT_OURS),
+# so nothing else keeps commence_time current. week and neutral_site were
+# NULL on all 272 NFL 2026 rows before this; both come from the same row.
 _GAMES_UPSERT = """
     INSERT INTO games (game_id, sport, season, game_date, home_team, away_team,
-                       commence_time, home_score, away_score, home_win, data_source)
+                       commence_time, home_score, away_score, home_win, week,
+                       neutral_site, data_source)
     VALUES (%(game_id)s, 'NFL', %(season)s, %(game_date)s, %(home_team)s,
             %(away_team)s, %(commence_time)s, %(home_score)s, %(away_score)s,
-            %(home_win)s, 'nflverse')
+            %(home_win)s, %(week)s, %(neutral_site)s, 'nflverse')
     ON CONFLICT (game_id) DO UPDATE SET
         game_date     = EXCLUDED.game_date,
         commence_time = COALESCE(EXCLUDED.commence_time, games.commence_time),
         home_score    = COALESCE(EXCLUDED.home_score, games.home_score),
         away_score    = COALESCE(EXCLUDED.away_score, games.away_score),
-        home_win      = COALESCE(EXCLUDED.home_win,   games.home_win)
+        home_win      = COALESCE(EXCLUDED.home_win,   games.home_win),
+        week          = COALESCE(EXCLUDED.week,       games.week),
+        neutral_site  = COALESCE(EXCLUDED.neutral_site, games.neutral_site)
 """
 
 
@@ -466,6 +547,8 @@ def games_rows(team_rows: list[dict]) -> list[dict]:
             "home_score": hs, "away_score": as_,
             "home_win": (1 if hs > as_ else 0) if (hs is not None and as_ is not None
                                                    and hs != as_) else None,
+            "week": r.get("week"),
+            "neutral_site": _neutral_site(r.get("location")),
             "_from_home": is_home == 1,
         }
     for v in best.values():
@@ -499,7 +582,7 @@ def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = Non
         # games first — player_prop_odds and picks both FK to it
         _upsert_chunked(conn, _GAMES_UPSERT, games_rows(team_rows))
         _upsert_chunked(conn, _PLAYER_UPSERT, player_rows)
-        _upsert_chunked(conn, _TEAM_UPSERT, team_rows)
+        _upsert_chunked(conn, _team_upsert_for(conn), team_rows)
         _upsert_chunked(conn, _SNAP_UPSERT, snap_rows)
     finally:
         if own:
@@ -509,6 +592,106 @@ def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = Non
                 f"{len(team_rows)} team, {len(snap_rows)} snap, "
                 f"{len(games_rows(team_rows))} games row(s)")
     return {"players": len(player_rows), "teams": len(team_rows), "snaps": len(snap_rows)}
+
+
+# ── Schedule-only refresh (2026-10-21) ────────────────────────────────────────
+#
+# The daily ingest above is the only writer of the NFL schedule of record, and
+# it runs once, in the 6am ET pipeline. Two gaps followed from that:
+#
+#   * A matchup nflverse lists overnight reached the cards up to a day late.
+#     For the 2025 wild card, nflverse's commit history has five games listed by
+#     2026-01-05 04:39Z and the sixth (LA @ CAR) at 16:30Z; the 6am ET run
+#     (~11:00Z) saw the five 6-8 hours late and the sixth ~18.5 hours late. The
+#     opener model is racing Pinnacle's first posted number, so those hours
+#     are the ones its edge lives in.
+#   * After the deploy that added the venue columns, nothing filled them until
+#     the next 6am run, and the wind model bets nothing on a game whose venue
+#     is not established. The scheduler now runs this as soon as it starts
+#     after a boot, as well as on its cadence (scheduler.run_nfl_schedule_refresh).
+#
+# One GET of the nflverse schedule, no player or snap CSV, and it writes only
+# the LOOK-AHEAD: games that have not kicked off, inside SCHEDULE_REFRESH_DAYS.
+#
+# IT MOVES THE SCHEDULE, NEVER A MODEL INPUT. On a row that already exists it
+# updates when and where the game is played and nothing else. The spread,
+# total, roof, temperature and wind on these rows are NFL prop model features
+# (features/nfl_prop_feature_engine.py), and they stay on the daily ingest's
+# cadence: refreshing them four times an hour would change what the prop
+# models score on, which is a model decision and not this one. A game seen for
+# the FIRST time is inserted whole, exactly as the daily run would insert it.
+SCHEDULE_REFRESH_DAYS = 14.0
+
+# The team-row columns the refresh may change on an existing row.
+SCHEDULE_COLUMNS = ["game_date", "week", "season_type", "commence_time"] + VENUE_COLUMNS
+
+
+def _schedule_upsert_sql(columns: list[str], movable: list[str]) -> str:
+    cols = ", ".join(columns)
+    vals = ", ".join(f"%({c})s" for c in columns)
+    sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in movable)
+    return (f"INSERT INTO nfl_team_game_stats ({cols}) VALUES ({vals}) "
+            f"ON CONFLICT (game_id, team) DO UPDATE SET {sets}")
+
+
+_SCHEDULE_UPSERT = _schedule_upsert_sql(TEAM_COLUMNS, SCHEDULE_COLUMNS)
+_SCHEDULE_UPSERT_NO_VENUE = _schedule_upsert_sql(
+    [c for c in TEAM_COLUMNS if c not in VENUE_COLUMNS],
+    [c for c in SCHEDULE_COLUMNS if c not in VENUE_COLUMNS])
+
+
+def upcoming_schedule_rows(schedule: dict[str, dict], now=None,
+                           days: float = SCHEDULE_REFRESH_DAYS) -> list[dict]:
+    """Context team rows for every game kicking off in (now, now + days].
+
+    A row with no kickoff time is left to the daily run: without one there is
+    no way to know the game has not started, and the refresh never touches a
+    game that may have.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    hi = now + timedelta(days=days)
+    # Every season with a game dated from yesterday on: a wild card in January
+    # carries the previous year's season label.
+    cutoff = (now - timedelta(days=1)).date().isoformat()
+    seasons = sorted({_int_or_none(g.get("season")) for g in schedule.values()
+                      if (g.get("gameday") or "").strip() >= cutoff} - {None})
+    out: list[dict] = []
+    for season in seasons:
+        for r in parse_upcoming_team_rows(schedule, season, set()):
+            if r["commence_time"] is None:
+                continue
+            kick = datetime.fromisoformat(r["commence_time"])
+            if now < kick <= hi:
+                out.append(r)
+    return out
+
+
+def refresh_upcoming_schedule(conn=None, schedule: dict[str, dict] | None = None,
+                              now=None, days: float = SCHEDULE_REFRESH_DAYS) -> dict:
+    """Write the look-ahead NFL schedule: `games` rows, then the team rows."""
+    if schedule is None:
+        schedule = fetch_schedule()
+    team_rows = upcoming_schedule_rows(schedule, now=now, days=days)
+    games = games_rows(team_rows)
+    own = conn is None
+    if own:
+        conn = get_connection()
+    try:
+        # games first: player_prop_odds and picks both FK to it
+        _upsert_chunked(conn, _GAMES_UPSERT, games)
+        sql = (_SCHEDULE_UPSERT if _has_venue_columns(conn)
+               else _SCHEDULE_UPSERT_NO_VENUE)
+        _upsert_chunked(conn, sql, team_rows)
+    finally:
+        if own:
+            conn.close()
+    logger.info(f"NFL schedule refresh: {len(games)} game(s), {len(team_rows)} team "
+                f"row(s) kicking off in the next {days:g} days")
+    return {"games": len(games), "teams": len(team_rows)}
 
 
 def run_nfl_props_data_ingestor() -> dict:
@@ -565,8 +748,13 @@ if __name__ == "__main__":
     ap.add_argument("--season", type=int, help="ingest one season")
     ap.add_argument("--backfill", nargs=2, type=int, metavar=("START", "END"),
                     help="ingest a season range, e.g. --backfill 2015 2025")
+    ap.add_argument("--schedule-only", action="store_true",
+                    help="write only the next 14 days of the schedule (kickoffs, "
+                         "venues, new games); no player or snap data")
     args = ap.parse_args()
-    if args.backfill:
+    if args.schedule_only:
+        refresh_upcoming_schedule()
+    elif args.backfill:
         backfill(args.backfill[0], args.backfill[1])
     elif args.season:
         ingest_season(args.season)

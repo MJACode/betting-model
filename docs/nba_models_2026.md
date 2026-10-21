@@ -1542,3 +1542,427 @@ averages out, so in this window most of its over result may be hot shooting rath
 number set too low. It gets the full assessment a live model gets. C2's version of the same
 test was favourable (above).
 
+
+## 9. Fifth search: team first-quarter and first-half tendencies, and the early season (pre-registered 2026-10-20, before any grid)
+
+mike's standing instruction: find pre-game moneyline, spread, total, first-half and
+first-quarter edge, and build every strategy that passes LIVE as real money. This search tests
+two ideas no earlier search tested:
+
+- **F7, team period tendencies.** Some teams may score, allow or win a larger or smaller share
+  of a game in the first quarter or first half than the league does: scripted openings,
+  rotation patterns, starters' minutes. If the books set period lines from the full-game line
+  with one league-wide ratio, those teams' period lines are mispriced.
+- **F8, the early season.** Both live shooting-luck models wait until each team has played 10
+  games. F8 asks whether that wait costs bets that would have won, by carrying last season's
+  luck ratings in and blending toward this season's as games are played.
+
+Already closed, not re-tested: schedule spots, availability, referee crews, sharp versus soft
+books, fading line moves, ratings projections, shooting luck on the full-game spread, the spread
+against the moneyline, the market-anchored model, and period lines as one league-wide share of
+the full game (§8.3's ratings projection used a + b × the full-game number for every team).
+A control (below) re-grades that last idea beside F7, so F7 is credited only with what the team
+shares add.
+
+**Corrected in 9.8, before any cell was graded:** the first search did test a version of F7, and
+the closed league-wide idea is the first search's, not §8.3's. Neither was ever judged under the
+house standard.
+
+**Written before any F7 or F8 cell was graded. Nothing below changes after a result is seen; a
+later change gets its own dated line and reason.** Lab: `scripts/nba_game5.py`. Pass/fail:
+`scripts/nba_game2_verdict.py --house5` (`house_verdict_bands`). No data is bought: every price
+is already in the cache.
+
+### 9.1 The bars
+
+The house standard of §6.7, applied once to every cell, with the two fixes §8.4 named:
+
+1. Pooled over the graded seasons, ≥ 200 bets.
+2. The pooled whole-day bootstrap 95% interval of the return is above zero (4,000 resamples,
+   seed 7).
+3. At least two graded seasons have ≥ 30 bets, and of those all but at most one are positive.
+4. Beats the blind bet on its dominant real side, pooled (§6.4's bar 9).
+5. **Bands, not nested cuts (fixed now).** The band just below the cell's cut, and every band
+   from its cut to the top, each has a positive pooled return. A band with fewer than 30 pooled
+   bets is reported and not judged (the floor bar 3 uses for a season). The cell's own pooled
+   return must be above zero too.
+   - F7's bands lie between its four cuts; the lowest cut's lower band starts at 0, and the top
+     band is open.
+   - F8's bands are gap 1-2, 2-3, 3-4 and 4+.
+   - A band's bets are the cell's own choice at the band's lower edge, less the games still
+     chosen at its upper edge.
+   - Why: the nested neighbour (cut ≥ 1 holds every cut ≥ 2 bet) never tested the band below the
+     cut. That band lost for both fourth-search passes. **By this bar the live home team-total
+     model's own cell (§8.4's C2) would have failed**: its 1-to-2 band lost 6.3% on 540 bets.
+     That is stated here so the bar is not read as tuned to keep it.
+6. **Placebo: 200 shuffles, seeds 1 to 200** (was 20). The cell's return on its choosing seasons
+   beats the 95th percentile of its shuffles. The verdict refuses a cell carrying any other
+   count.
+
+Closing-line value is reported, never a bar. DraftKings alone is reported beside every cell.
+
+**Expected passes by chance:** about 54 × 0.025 ≈ 1.35 cells clear bar 2 alone, before
+correlation. Bars 3 to 6 make a chance pass rarer still. With the control judged (9.8), 102 ×
+0.025 ≈ 2.55.
+
+### 9.2 The cells (54)
+
+| Family | Markets × sides | Decision | Cut axis | Cells |
+|---|---|---|---|---|
+| F7 | first quarter and first half: spread, total, moneyline × 2 sides | each game's per-game purchase, 45-75 minutes before tip (D) | spread and total, first half: gap ≥ 0.5 / 1 / 1.5 / 2 points; first quarter: ≥ 0.25 / 0.5 / 0.75 / 1 point. Moneyline: EV ≥ 0.02 / 0.04 / 0.06 / 0.08 | 6 × 2 × 4 = 48 |
+| F8 | full-game total, over; home team total, under | full game at C (the newest fetch 60-180 minutes before tip, where the live model decides); team total at the per-game purchase (D) | one cut each, the live model's: gap ≥ 3; home part ≤ -2. Blend: k = 5 / 10 / 20 | 2 × 3 = 6 |
+| **Total** | | | | **54** |
+
+- The point cuts are the full game's 1 to 4 points (§6.3) scaled by each period's share of the
+  game: one half for the first half, one quarter for the first quarter. They were fixed by
+  that rule, not by looking at the gaps.
+- The F8 blend setting is a parameter, not a cut. Each F8 cell has no neighbouring cell; its
+  bar 5 reads its bands.
+- **Control, never judged and not counted:** `control_F7_league`, F7's 48 cells with every
+  team's share set to the league's. That is the closed "fixed share of the full game" idea. An
+  F7 cell that passes while its control does as well is credited to the closed idea, not to
+  team tendencies. **Changed in 9.8, before grading:** the control is judged under the same six
+  bars with its own placebo, and the credit rule is stated so it can be applied.
+
+### 9.3 F7: what the shares are and how the period number is projected
+
+**Shares**, per team, venue (home or away) and period (first quarter, first half):
+
+- **Scoring share:** the team's own points in the period over its own final points.
+- **Allowed share:** its opponents' points in the period over their final points.
+- **Margin share:** scoring share minus allowed share: how much more of its own scoring than of
+  its opponents' it puts into the period. A ratio of the period margin to the final margin
+  cannot be used: it explodes for a team whose games average near a level margin.
+- Each is a ratio of sums over the team's games at that venue in the **previous regular season
+  plus this season, dated before the game**. Only games whose period scores pass the first
+  search's check are used (`H.with_periods`). Final points include overtime, as the full-game
+  total does.
+- **Shrunk toward the league** by games played: (n × team share + k × league share) / (n + k).
+  n is the games in the window; the league share is every team's over the same window and venue.
+- **k per period, fixed on 2019-20 to 2022-23 only.** It is the value in the grid 0, 5, 10, 20,
+  40, 80, 160, 320, 640 and infinity (league only) with the smallest squared error predicting
+  each team's period points as its final points × its share in that game. The fit reads no game
+  from 2023-24 on.
+  - Result (period scores only, no price): **first quarter k = 160; first half k = 40**, over
+    4,595 games.
+  - The team shares cut the squared error against the league-only share by 0.6% (first
+    quarter) and 2.5% (first half).
+
+**The projected period number at T**, T being the game's per-game purchase:
+
+- The market's full-game numbers at T: the home margin M and the total Tot. Each is the
+  harness's fair centre (`H.market_fair`): Pinnacle's no-vig where it quotes coherently, else
+  the deciding books' median. They are priced through the spread of results around Pinnacle's
+  close on earlier seasons (`H.close_dist`). The full-game quotes are each book's main number
+  (`models/nba_book_numbers`).
+- Home points H = (Tot + M) / 2; away points A = (Tot - M) / 2.
+- The home team's share in this game = its scoring share at home + the away team's allowed
+  share on the road - the league's home scoring share. The away team's share is the same with
+  the roles swapped. Each team's difference from the league is added once.
+- Period home points = H × home share; period away points = A × away share. Their difference is
+  the projected period margin; their sum is the projected period total.
+
+**One line added 2026-10-20 after the first smoke counts, still before any cell was graded.** The
+full-game number at T counts when its FETCH is at most 60 minutes before T, the rule the live
+team-total model uses. The harness's own rule reads the book's last update, which sits minutes
+before the fetch. Under it, 209 decisions had no full-game number: 101 in 2023-24, 46 in 2024-25
+and 62 in 2025-26. Every one was a purchase 64 minutes before tip whose newest slate fetch was 56
+minutes old. Nothing later than T is read either way.
+
+**What the gap is measured against.** Read literally, "the gap between the projection and the
+book's period number" would measure each book's own number. §6.5's third amendment measures every
+gap against the market's number, never each book's, because a soft book's off-market number is
+the refuted outlier mechanism. So:
+
+- The gap is the projected centre minus the **period market's fair centre at T**: Pinnacle's
+  no-vig first-half or first-quarter number, else the deciding books' median. It is priced
+  through §8.3's market pricing for the period (`scripts/nba_game4_p3.market_pricing`).
+- Every book's offer on a side carries the same gap. The side's best deciding offer under the
+  market's fair line is bet (a rule, like F4).
+- A centre is compared with a centre: the full-game numbers are no-vig centres too.
+
+**Moneyline.** The chance the period's home margin is above zero, out of above or below. A level
+period voids the bet, so its mass is removed. It is priced through the period spread market's own
+distribution of results (§8.3's market pricing), centred on the projected margin. The projection
+is anchored to the market's own numbers, so it carries the market's error, not a separate model's
+(§8.1 priced the same way). Bet the best offer at EV ≥ the cut.
+
+**Placebo, 200 runs, seeds 1-200.** Each game's team shares (all eight, with the league values
+read beside them) are moved together to another game on the same date, by the harness's own
+within-date shuffle. Each game keeps its own full-game numbers and its own prices, and the
+projection is recomputed. The league-wide part of the projection stays in every placebo, so a
+cell earning only from the closed fixed-share idea fails this bar. For the same reason the whole
+probability is never shuffled: that would hand each game another game's market price, which any
+model beats (§8.1).
+
+**Seasons:** 2023-24, 2024-25 and 2025-26 graded and pooled. The choosing seasons (which the
+placebo reads) are 2023-24 and 2024-25.
+
+**Settlement:** first-half and first-quarter markets settle on the period scores
+(`nba_period_scores`). A level period voids the moneyline (stake back, out of the denominator).
+
+**Not measurable here, reported as such:** closing-line value and "still offered at the next
+purchase". There is one purchase per game, so there is no later price.
+
+### 9.4 F8: the early season
+
+**The signals**, unchanged from the live models (`models/nba_total_luck.py`,
+`models/nba_team_total_luck.py`). Their arithmetic is imported, not copied: the existing
+`as_of_ratings` is called as before, and the rest of the projection was split into `team_targets`,
+`pair_ratings` and `project_ratings`. The live model's output was checked identical on all 8,274
+games of 2018-19 to 2025-26. (Wording corrected 2026-10-20, see 9.8.)
+
+- Full-game total, OVER, when the luck gap is ≥ 3 points.
+- Home team total, UNDER, when the home team's part of the gap is ≤ -2 points.
+
+**The population:** games where **either** team has fewer than 10 games this season before the
+date. These are the games the live models skip.
+
+**The blend.** Every rating of each team (pace, the league rate, raw and luck-adjusted offence
+and defence) is
+
+  (n × this season's rating so far + k × last season's final rating) / (n + k)
+
+- n is the team's games this season before the date. At n = 0 it is last season's alone.
+- k = 5, 10 or 20 (three cells per signal): last season counts as k games of evidence.
+- Last season's final rating is every one of its regular-season games, at the league's rates
+  for that season.
+- A team with no previous regular season has no number (none in 2020-21 to 2025-26).
+- Both teams in a game are blended, each by its own n.
+
+**Decision and seasons:**
+
+- Full-game totals at decision point C, graded 2021-22 to 2025-26 pooled. The choosing seasons
+  are 2021-22 to 2024-25; 2020-21 is reported, never chosen on. Priced as the live model is
+  (`H.close_dist`).
+- Home team totals at the per-game purchase (D), graded 2023-24 to 2025-26. Priced as §8.3
+  (F6d's team-total distribution).
+
+**Placebo: 200 runs, seeds 1-200,** the gap shuffled between games on the same date in the same
+market.
+
+**Settlement:** the full-game final score including overtime; the home team's own final score
+including overtime.
+
+**The 200-bet bar applies unchanged.** The bets each cell would place per season are counted
+below, before grading. If the pooled count is under 200, the cell fails bar 1 and that is the
+answer: the early-season window is too small to show an edge under the house standard.
+
+### 9.5 Do team period shares persist? (measured 2026-10-20, period scores only, no price)
+
+Each team's full-season share (home and away pooled), against the same team's next season. Seven
+season pairs, 2018-19 → 2019-20 through 2024-25 → 2025-26, about 210 team pairs. Each season is
+centred on its own mean before pooling. "Within a season" correlates each team's odd- and
+even-numbered games; the full-season reliability follows from it.
+
+| Period | Share | Next season, pooled r | Range over the 7 pairs | Within a season, half v half | Full-season reliability | Spread across teams, in points |
+|---|---|---|---|---|---|---|
+| First quarter | scoring | 0.25 | 0.01 to 0.47 | 0.23 | 0.37 | 0.73 |
+| First quarter | allowed | 0.21 | -0.21 to 0.46 | 0.15 | 0.26 | 0.66 |
+| First quarter | margin | 0.26 | 0.12 to 0.50 | 0.15 | 0.27 | 0.97 |
+| First half | scoring | 0.33 | 0.17 to 0.63 | 0.33 | 0.50 | 1.04 |
+| First half | allowed | 0.29 | -0.24 to 0.66 | 0.33 | 0.49 | 0.94 |
+| First half | margin | 0.22 | -0.08 to 0.56 | 0.09 | 0.17 | 1.05 |
+
+"Spread across teams, in points" is the standard deviation of a team's share, times 112 points.
+Most of it is noise: a share measured over a full season is only 17% to 50% signal.
+
+- **They persist, weakly.** With about 210 pairs, a correlation of zero would read within about
+  ±0.14 nineteen times in twenty. Every pooled figure is above that.
+- **Single season pairs swing widely.** Three of the six shares had a negative pair.
+- The first half's scoring and allowed shares persist more than the first quarter's. Its margin
+  share does not (0.22 against 0.26).
+- **The signal is small.** Taking out the noise (the spread times the square root of the
+  reliability), a team's true tendency is worth about 0.3 to 0.4 points of its first-quarter
+  points and about 0.7 points of its first-half points, before shrinkage. Two teams add to a
+  game's line. The F7 cuts, fixed by the scaling rule in 9.2, are of the same size.
+
+F7 is graded as registered.
+
+### 9.6 Counts before grading
+
+Counted 2026-10-20 by `python -m scripts.nba_game5 --smoke` (second run, after the line added to
+9.3), before any cell was graded. Prices and timestamps only; no result was read.
+
+**F7: games per season**
+
+| Season | Games | A purchase 45-75 minutes before tip | With the full-game numbers at T | With team shares | With a projection |
+|---|---|---|---|---|---|
+| 2023-24 | 1,230 | 1,225 | 1,225 | 1,230 | 1,225 |
+| 2024-25 | 1,230 | 1,224 | 1,224 | 1,230 | 1,224 |
+| 2025-26 | 1,230 | 1,218 | 1,218 | 1,230 | 1,218 |
+
+**F7: how far the projection sits from the period market**, over all 3,667 decisions, in points:
+the standard deviation of the gap, with the team shares and with the league's alone (the control).
+
+| Market | Gap, team shares | Gap, league share only | The team shares' own part |
+|---|---|---|---|
+| First-quarter spread | 0.60 | 0.55 | 0.41 |
+| First-quarter total | 1.27 | 1.43 | 0.50 |
+| First-half spread | 1.14 | 0.70 | 1.02 |
+| First-half total | 2.35 | 2.92 | 1.78 |
+
+- **In three of the four markets most of the gap is not the team shares.** The league-wide share
+  alone misses the books' number by 0.55 points (first-quarter spread), 1.43 and 2.92 (the two
+  totals); the team shares' own part is 0.41, 0.50 and 1.78. The first-half spread is the
+  exception: its team part (1.02) is larger than the league-only gap (0.70). The league-wide part
+  was closed in the fourth search, so the placebo and the control (9.2, 9.3) are what separate
+  the team tendencies from it.
+- **The books' period totals already lean the teams' way.** With team shares the total gaps
+  shrink: 1.43 to 1.27 points in the first quarter, 2.92 to 2.35 in the first half. The first-half
+  spread is the reverse: 0.70 to 1.14.
+
+**F7: games per band of the gap, each side** (a game counts on the side its gap favours; these
+are games, not bets).
+
+| Market | Side | Below the lowest cut | Band 1 | Band 2 | Band 3 | Top band |
+|---|---|---|---|---|---|---|
+| First-quarter spread (0.25 / 0.5 / 0.75 / 1) | home | 621 | 532 | 364 | 207 | 206 |
+| | away | 564 | 481 | 346 | 182 | 164 |
+| First-quarter total (same cuts) | over | 142 | 131 | 185 | 248 | 954 |
+| | under | 138 | 218 | 223 | 303 | 1,125 |
+| First-quarter moneyline (EV 0.02 / 0.04 / 0.06 / 0.08) | home | 386 | 277 | 170 | 121 | 364 |
+| | away | 316 | 241 | 145 | 123 | 511 |
+| First-half spread (0.5 / 1 / 1.5 / 2) | home | 628 | 488 | 335 | 176 | 120 |
+| | away | 620 | 537 | 390 | 203 | 170 |
+| First-half total (same cuts) | over | 247 | 276 | 234 | 198 | 718 |
+| | under | 298 | 312 | 306 | 288 | 790 |
+| First-half moneyline (EV, as above) | home | 227 | 193 | 157 | 120 | 452 |
+| | away | 232 | 207 | 167 | 161 | 761 |
+
+For the moneylines the number is the best deciding offer's EV on that side (at -200 or
+better), and a game counts on each side where it is 0 or more. Every band holds at least 120
+games. Bar 5 judges a band once it has 30 bets.
+
+**F8: the bets each cell would place, per season** (an offer at a deciding book at -200 or
+better; counted, never graded). Every season has 155 to 157 early-season games, and every one
+has a blended number: no team lacked a previous season.
+
+| Signal | k | 2020-21 (reported) | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 | Graded, pooled |
+|---|---|---|---|---|---|---|---|---|
+| Full-game total over, gap ≥ 3 | 5 | 19 | 25 | 25 | 24 | 22 | 16 | 112 |
+| | 10 | 12 | 16 | 16 | 18 | 12 | 3 | 65 |
+| | 20 | 5 | 9 | 12 | 11 | 9 | 2 | 43 |
+| Home team total under, home part ≤ -2 | 5 | | | | 1 | 17 | 19 | 37 |
+| | 10 | | | | 1 | 9 | 8 | 18 |
+| | 20 | | | | 1 | 14 | 2 | 17 |
+
+- **No F8 cell can reach 200 bets.** The largest is 112. All six fail bar 1 by construction, and
+  none has two seasons of 30 bets, so all six fail bar 3 too. That is the pre-registered answer
+  to the hold question under the house standard: the first 10 games of a season are too few to
+  show an edge either way. They are graded anyway, as registered, and reported.
+- **2023-24's early team totals are missing from the cache.** No October 2023 game has a
+  team-total price, and 83% of November's do; 2024-25 and 2025-26 are complete from opening night.
+  So 2023-24 adds about one bet to each team-total cell. Whether the feed served no October 2023
+  team totals or the purchase missed them is not checked here; it is reported, not repaired.
+
+### 9.7 What the lab writes
+
+`--full` refuses unless `NBA_GAME2_GO=1`, a named `NBA_GAME2_RESULTS` and `NBA_GAME2_BETS`
+are set and the fetch ledger is in the cache. It refuses a cache that prices fewer than 90% of
+any graded season, or whose derivative purchases are not exactly 2023-24 to 2025-26. It writes
+`cells_F7`, `cells_F8` and `cells_control_F7_league` only after all three are built, with their
+population tables and the shrinkage fit (`shares.json`).
+
+### 9.8 Changes after the check, before any cell was graded (2026-10-20)
+
+An independent check of this section and its code ran before grading. It found the faults below.
+Each is fixed here, before `--full` ran and before any return was read.
+
+**1. The control is judged, with its own placebo.**
+
+- As registered, the control could never pass: it carried no placebo runs, and the verdict
+  dropped it before judging. So the rule "an F7 cell that passes while its control does as well
+  is credited to the closed idea" could not be applied.
+- The control's 48 cells are now judged under the same six bars (9.1). A control cell that
+  passes is a strategy like any other, and section 8's rule applies: it is built LIVE.
+- **Its placebo, 200 runs, seeds 1-200,** moves its gap from the period market, never its
+  probability or its projected centre (9.3 says why):
+  - Spread and total: the gap is shuffled between games on the same date in the same market.
+    This is F8's placebo, and the fourth search's for shooting luck.
+  - Moneyline: the gap between the projected period margin and the period spread market's fair
+    centre is shuffled the same way. It is added back to each game's own fair centre and priced
+    as the cell is (§8.1's shape). Counted before grading: every one of the 3,667 games with a
+    period moneyline offer has a period spread centre, in both periods.
+  - F7's own placebo, shuffling team shares, would do nothing here: every game on a date carries
+    the same league share.
+- **Credit.** An F7 cell is credited to team tendencies only when it passes and its pooled return
+  beats its control's at the same market, side and cut. A control with no bet counts as 0. An F7
+  cell that passes without beating its control is reported as the league-wide idea's.
+- **Expected passes by chance:** 54 × 0.025 ≈ 1.35 for the registered cells; 102 × 0.025 ≈ 2.55
+  with the control.
+
+**2. What the control re-grades, and what F7 repeats (corrected).**
+
+- Section 9's opening says F7 is an idea no earlier search tested, and cites §8.3 for the closed
+  league-wide idea. Both are wrong. §8.3 scaled the ratings projection, not the market's number.
+- The first search (§4.2, `scripts/nba_derivative_lab.py`) graded two "derived" families on
+  2024-25 and 2025-26:
+  - `derived`: the market's full-game spread and total mapped to the first half and first
+    quarter by one league-wide line (a + b × the number, fit on 2020-21 to 2023-24). This is the
+    idea the control re-grades.
+  - `derived_team`: the same, with each team's share of its games' points in the period over its
+    previous 82 games (shrunk toward a half or a quarter with 30 games' weight, the two teams
+    averaged), and each team's tendency to win the first half by more than half its final
+    margin (the first quarter by more than a quarter). That is F7's idea.
+- Both were judged only under §1's original bars, and closed there. Neither was ever judged under
+  the house standard: the fourth search re-graded only sharp-versus-soft and the off-market
+  number (§8.2).
+- F7 builds the shares differently: by venue, with scoring and allowed shares kept apart, from
+  last season plus this one, shrunk toward the league by a k fitted on 2019-20 to 2022-23, and
+  graded on a third season (2023-24).
+
+**3. A placebo run with no bet counts as a return of 0.**
+
+- The verdict counted every run toward the 200, but took the 95th percentile only over runs that
+  placed a bet. A run that bets nothing made nothing, so it now counts as 0. The 200-run check
+  still counts runs.
+
+**4. The fitted and live constants are pinned.**
+
+- `--full` refuses unless the shrinkage refit returns exactly first quarter k = 160 and first half
+  k = 40, the values registered in 9.3.
+- F8's two signals (market, side and cut) are imported from the live models
+  (`models/nba_total_luck.py`, `models/nba_team_total_luck.py`), not typed into the lab. They are
+  equal today: the over at gap 3, the home team-total under at a home part of 2.
+
+**5. Wording.** 9.4 named `as_of_ratings` as one of the split pieces. It already existed; the new
+pieces are `team_targets`, `pair_ratings` and `project_ratings`. Fixed in place.
+
+**6. Found while `--full` ran, before any result was read; it changes no cell.** The lab's synthetic
+checks run first, inside `--full`, with the bets folder already named. So they wrote 18 files of
+synthetic bets (made-up games) beside the real ones. They were moved out of the bets folder after
+the run, and the synthetic checks now unset the folder while they run. The fourth search's lab has
+the same fault: its P3 bets folder holds 9 files of synthetic bets. No bets table exists in
+Supabase, so none was stored.
+
+### 9.9 Results (graded 2026-10-20)
+
+Run `2026-10-20-fifth`: 54 registered cells plus 48 judged controls, stored in Supabase
+(`nba_game2_cells`, `nba_game2_population`; 102 cells, 171 population rows). Pass/fail:
+`python -m scripts.nba_game2_verdict --house5` (the bands bar and 200 placebo runs of 9.1).
+
+**0 of the 54 registered cells pass, and none clears the 95% interval on its own** (about
+1.35 would by chance). The 48 controls also pass 0 and clear 0. 45 of the 54 have 200 or more
+bets.
+
+| Nearest cells (200+ bets, all first-half moneyline) | Bets | Units | Return | 95% interval | By season | Fails |
+|---|---|---|---|---|---|---|
+| away, EV >= 0.08 | 761 | +20.8 | +5.8% | -5.1% to +16.6% | +9.4% / +5.8% / +0.4% | interval, placebo |
+| away, EV >= 0.06 | 922 | +28.0 | +5.8% | -3.3% to +15.3% | +9.7% / +7.5% / -1.4% | interval, bands, placebo |
+| away, EV >= 0.04 | 1,089 | +27.5 | +4.4% | -3.9% to +12.4% | +8.0% / +6.3% / -1.7% | interval, bands |
+| home, EV >= 0.08 | 452 | +9.9 | +3.6% | -8.7% to +16.2% | -6.5% / +25.8% / -14.7% | interval, seasons, bands |
+
+- The away cells are nested cuts of one bet, 93% on the first-half underdog. Blind first-half
+  underdogs returned +0.2%, so the cut does beat the blind bet, but DraftKings alone lost (-5.0%
+  over 2023-24 and 2024-25) and the league-share control at the same cut returned -1.2%.
+- What the team shares added: F7 cells with 200+ bets had a median return of -2.9% (11 of 45
+  positive), the controls -3.1% (5 of 42 positive). F7 beat its control in 28 of 48 cells, the
+  gap only in the first-half moneyline; the other five markets are level with their controls.
+- **F8, the early season: too few games to tell.** The six cells place 112, 65, 43, 37, 18 and
+  17 bets over all priced seasons. Full-game overs with last season weighted as 5, 10 or 20
+  games: -0.9%, +0.1%, +11.4%; home team-total unders: -2.4%, -15.1%, -21.5%. The 10-game wait
+  stays.
+
+**Closed for 2026-27: team first-quarter and first-half shares, and an early-season start for
+the two live models.** Nothing here is built.

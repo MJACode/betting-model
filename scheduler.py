@@ -34,6 +34,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         Returns without an API call when no game is in either range. mike,
         2026-10-16: "we're not leaving our games" -- the hourly passes put no
         look 45-57 minutes before any tip at or before 6pm ET.)
+  * NHL goalie window     every 5 min, 11:00-23:55 ET -> run_nhl_goalie_window
+        (scripts/nhl_goalie_window.py: no NHL model bets until both starting
+        goalies are confirmed, mike 2026-10-20; the goalie poll for today's
+        games, then, for any game whose matchup has just become known, one
+        NHL odds fetch and the NHL deciders. Nothing while a refresh pass or
+        the daily run is in progress. A day with no NHL game makes no call.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -299,6 +305,7 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
                     retry_reason, source=retry_source or "catch-up")
             except Exception:  # noqa: BLE001 — the retry is the point
                 log.exception("daily-pipeline retry: ops note failed")
+        _wait_for_nhl_window("daily-pipeline")
         _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
     finally:
         _DAILY_LOCK.release()
@@ -310,6 +317,46 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
 # that started at :10 would run the chain twice at once and buy odds twice.
 _REFRESH_LOCK = threading.Lock()
 
+# Held by an NHL goalie window tick for its whole run: the goalie poll and the
+# deciders (run_nhl_goalie_window). A refresh pass or the daily run that starts
+# during a tick WAITS for it rather than skipping, then lets go of the lock and
+# runs whole: every writer to picks runs one at a time (the refresh chain's own
+# rule), and skipping a pass would cost every sport an hour on the hourly
+# cadence. Neither holds it while it runs. The tick stands down on their OWN
+# locks (_REFRESH_LOCK, _DAILY_LOCK), read again after it has taken this one,
+# so a pass that started in between still wins; and a pass that held this lock
+# for its whole run made every other pass that started meanwhile wait on it
+# (a 26-minute daily run, then a 15-minute wait blamed on the window).
+_NHL_WINDOW_LOCK = threading.Lock()
+# Slack over the steps' own timeouts, for the plan read and the publish that
+# run inside the lock between them (NHL_GOALIE_WINDOW_TIMEOUT_S, below).
+NHL_WINDOW_WAIT_SLACK_S = 300
+
+
+def _nhl_window_wait_s() -> float:
+    """How long a pass waits for a tick: every step the tick runs while holding
+    the lock at its full timeout, plus the slack. Derived, so the wait cannot
+    fall short of what a tick may legitimately take."""
+    t = NHL_GOALIE_WINDOW_TIMEOUT_S
+    return sum(t[k] for k in NHL_GOALIE_WINDOW_LOCKED_STEPS) + NHL_WINDOW_WAIT_SLACK_S
+
+
+def _wait_for_nhl_window(label: str) -> bool:
+    """Block until an NHL goalie window tick in progress is done (bounded),
+    then let go of the lock: the caller already holds its own lock, which is
+    what keeps the next tick out. True when no tick was still running."""
+    if _NHL_WINDOW_LOCK.acquire(blocking=False):
+        _NHL_WINDOW_LOCK.release()
+        return True
+    wait = _nhl_window_wait_s()
+    log.info("%s: an NHL goalie window tick is in progress — waiting for it", label)
+    if _NHL_WINDOW_LOCK.acquire(timeout=wait):
+        _NHL_WINDOW_LOCK.release()
+        return True
+    log.warning("%s: an NHL goalie window tick held its lock past %ss — running anyway",
+                label, wait)
+    return False
+
 
 def run_refresh_pass(mode: str = "hourly") -> None:
     # The single-source-of-truth refresh chain (odds + prop odds + lineups + scoring
@@ -319,6 +366,7 @@ def run_refresh_pass(mode: str = "hourly") -> None:
                  mode)
         return
     try:
+        _wait_for_nhl_window(f"refresh-pass[{mode}]")
         _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
     finally:
         _REFRESH_LOCK.release()
@@ -656,7 +704,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # a dead name in a role map is a trap set for whoever
                   # inverts the sets later.
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_fast",
-                  "nfl_opener_poll",
+                  "nfl_opener_poll", "nfl_schedule_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
@@ -668,7 +716,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "nba_prop_window",
                   # Writes picks through its own cards (nba_total_luck and
                   # nba_team_total_luck), with their own fetches.
-                  "nba_total_luck_window"}
+                  "nba_total_luck_window",
+                  # Writes NHL picks through the scorer and the NHL cards, and
+                  # takes turns with the refresh passes in this process.
+                  "nhl_goalie_window"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -799,9 +850,10 @@ def run_nfl_wind_card(days: int, regions: str = "us",
                       timeout: float | None = None) -> list[str]:
     """Returns the labels of any steps killed at `timeout`."""
     # The Section-28 wind-totals bet card from the standalone nfl/ package. MUST run
-    # with cwd=nfl/ — the script reads data/games.csv and writes data/cards/ relative
-    # to its package root. It exits 0 before any odds call when no games are in the
-    # window, so off-season/off-day runs are free.
+    # with cwd=nfl/ — the script writes data/cards/ relative to its package root.
+    # Its schedule is the games table (nfl/data_ingest/schedule.py; not the frozen
+    # data/games.csv since 2026-10-20). It exits 0 before any odds call when no
+    # games are in the window, so off-season/off-day runs are free.
     #
     # The nfl/ package (developed externally) reads THE_ODDS_API_KEY — a different
     # env var NAME for the same Odds API service the platform already uses. No new
@@ -883,33 +935,100 @@ NFL_OPENER_POLL_MINUTES = max(1, int(os.environ.get("NFL_OPENER_POLL_MINUTES", "
 # real backstop, and RUN_NFL_WIND_CARD=0 stops the job without a deploy.
 
 
-def _nfl_lead_hours() -> float | None:
-    """Hours to the next NFL kickoff, or None if nothing is scheduled ahead."""
-    import csv as _csv
-    from datetime import datetime as _dt, timezone as _tz
+# How long the NFL kickoff list is reused before the games table is read again.
+# _nfl_lead_hours runs every MINUTE (the opener poll), year-round, and a
+# connection a minute is the cost this file already refused once against a
+# session pool of 15 (see the credit-cap note above). Kickoffs move a few times
+# a season, so a list up to 15 minutes old changes when a poll starts by at
+# most 15 minutes at its 10-day horizon; the lead itself is measured against
+# the clock on every call.
+NFL_SCHEDULE_CACHE_S = float(os.environ.get("NFL_SCHEDULE_CACHE_S", "900"))
+_nfl_kickoff_cache: dict = {"read_at": None, "kicks": None}
+
+
+def _read_nfl_kickoffs(now) -> list:
+    """Every NFL kickoff from yesterday (Eastern) on, from the games table.
+
+    The games table, not nfl/data/games.csv. That file was committed once
+    (2026-08-15) and never refreshed: it held no playoff game, so every NFL
+    pre-game job would have stood down after week 18, and it still carried a
+    CHI @ GB kickoff three and a half hours late. `games.commence_time` is
+    rewritten daily from nflverse (data/ingestors/nfl_props_data_ingestor.py).
+    Bounded on the indexed game_date; the cast is on a few hundred NFL rows.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     from zoneinfo import ZoneInfo as _ZI
-    path = ROOT / "nfl" / "data" / "games.csv"
-    if not path.exists():
-        return None
-    now = _dt.now(_tz.utc)
-    best = None
+    from data.db import get_connection
+    lo = (now.astimezone(_ZI(TIMEZONE)).date() - _td(days=1)).isoformat()
+    conn = get_connection()
     try:
-        with path.open(newline="", encoding="utf-8") as fh:
-            for row in _csv.DictReader(fh):
-                day, tod = row.get("gameday"), row.get("gametime")
-                if not day or not tod:
-                    continue
-                try:
-                    kick = _dt.fromisoformat(f"{day} {tod}").replace(
-                        tzinfo=_ZI("America/New_York")).astimezone(_tz.utc)
-                except ValueError:
-                    continue
-                lead = (kick - now).total_seconds() / 3600.0
-                if lead > 0 and (best is None or lead < best):
-                    best = lead
-    except OSError:
-        return None
-    return best
+        rows = conn.execute("""
+            SELECT commence_time FROM games
+            WHERE sport = 'NFL' AND game_date >= %s AND commence_time IS NOT NULL
+        """, (lo,)).fetchall()
+    finally:
+        conn.close()
+    kicks = []
+    for (raw,) in rows:
+        try:
+            k = _dt.fromisoformat(str(raw).replace("Z", "+00:00").replace(" ", "T"))
+        except ValueError:
+            continue
+        kicks.append(k if k.tzinfo else k.replace(tzinfo=_tz.utc))
+    return kicks
+
+
+def _nfl_lead_hours() -> float | None:
+    """Hours to the next NFL kickoff, or None if nothing is scheduled ahead.
+
+    Reads the games table at most every NFL_SCHEDULE_CACHE_S. A failed read
+    keeps the last list it had (loudly); with no list at all it answers None,
+    and every NFL pre-game job stands down rather than guess.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    now = _dt.now(_tz.utc)
+    cache = _nfl_kickoff_cache
+    age = (None if cache["read_at"] is None
+           else (now - cache["read_at"]).total_seconds())
+    if age is None or age >= NFL_SCHEDULE_CACHE_S:
+        try:
+            cache["kicks"] = _read_nfl_kickoffs(now)
+            cache["read_at"] = now
+        except Exception as exc:                               # noqa: BLE001
+            log.warning("NFL schedule read failed (%s: %s); %s", type(exc).__name__,
+                        exc, "keeping the last kickoff list" if cache["kicks"] is not None
+                        else "no kickoff list, NFL pre-game jobs stand down")
+    kicks = cache["kicks"] or []
+    leads = [(k - now).total_seconds() / 3600.0 for k in kicks]
+    ahead = [x for x in leads if x > 0]
+    return min(ahead) if ahead else None
+
+
+# NFL SCHEDULE REFRESH (2026-10-21). Every NFL pre-game job reads its slate
+# from the games table, and until this job only the 6am daily ingest wrote it.
+# That left two gaps: a playoff matchup nflverse lists overnight reached the
+# opener model 6 to 18 hours late (the 2025 wild card, measured from
+# nflverse's commit history), and a deploy that adds a schedule column left it
+# empty until the next morning, which for the venue columns meant no wind bet
+# all day. So the look-ahead schedule is re-read every NFL_SCHEDULE_REFRESH_
+# MINUTES and once as soon as the scheduler starts after a boot.
+#
+# Free: one GET of nflverse's games.csv on GitHub, no odds call. It writes the
+# next 14 days only, and on an existing row only when and where the game is
+# played, never a prop model's inputs (nfl_props_data_ingestor.
+# refresh_upcoming_schedule says why). RUN_NFL_SCHEDULE_REFRESH=0 stops it.
+RUN_NFL_SCHEDULE_REFRESH = os.environ.get("RUN_NFL_SCHEDULE_REFRESH", "1") != "0"
+NFL_SCHEDULE_REFRESH_MINUTES = min(60, max(1, int(
+    os.environ.get("NFL_SCHEDULE_REFRESH_MINUTES", "15"))))
+# A normal run is one download and two small upserts, a few seconds. The bound
+# exists so a hung download cannot hold the job (max_instances=1) for hours.
+NFL_SCHEDULE_REFRESH_TIMEOUT_S = 300.0
+
+
+def run_nfl_schedule_refresh() -> None:
+    _run([sys.executable, "-m", "data.ingestors.nfl_props_data_ingestor",
+          "--schedule-only"], "nfl-schedule-refresh",
+         timeout=NFL_SCHEDULE_REFRESH_TIMEOUT_S)
 
 
 def run_nfl_poll(fast: bool = False) -> None:
@@ -1167,6 +1286,103 @@ def run_nba_prop_window() -> None:
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
         raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")
+
+
+# Each step of an NHL goalie window tick is bounded, so one stuck step cannot
+# hold the job (max_instances=1) or a refresh pass waiting on its lock
+# (_wait_for_nhl_window) for long. The poll is ESPN plus one DailyFaceoff page;
+# the game odds step is one NHL fetch (the bulk call and the per-game 3-way
+# calls); the prop odds step buys only what is owed; the scoring is the NHL
+# game models for the named games; the cards are reads and a handful of writes.
+NHL_GOALIE_WINDOW_TIMEOUT_S = {"poll": 120, "odds": 120, "prop_odds": 120, "score": 180,
+                               "totals": 120, "props": 180}
+# Every step runs while _NHL_WINDOW_LOCK is held.
+NHL_GOALIE_WINDOW_LOCKED_STEPS = ("poll", "odds", "prop_odds", "score", "totals", "props")
+# {game_id: known_at} this process has run the deciders on. A restart empties
+# it and the next tick runs them once more for every known game; every NHL
+# decider is insert-once, so that re-run writes nothing already written.
+_NHL_DECIDED: dict = {}
+
+
+def run_nhl_goalie_window() -> None:
+    """One NHL goalie window tick (scripts/nhl_goalie_window.py).
+
+    mike, 2026-10-20: "We should absolutely always know the goalie matchup
+    before making a bet as well." No NHL model bets until both starting goalies
+    are confirmed (models/nhl_goalie_gate.py), so a game is decided when its
+    goalies are confirmed, which can be at warmups, about 25 minutes before
+    puck drop. The hourly passes (:17, 7am-5pm ET) would miss a matinee
+    confirmed between them. Every five minutes, 11:00-23:55 ET.
+
+    A day with no unstarted NHL game: one read and return. A refresh pass or
+    the daily run in progress: return before anything, the poll included (the
+    pass polls first and decides after, and a poll rewriting a goalie row in
+    the middle of its scoring could put two models on different goalies).
+    Otherwise, holding _NHL_WINDOW_LOCK for the whole tick: the goalie poll for
+    today's games. If it failed, nothing is decided this tick. Then, for the
+    games whose matchup is known and not yet decided by this process: the NHL
+    game odds (so the side models and the totals card price a fetch taken
+    after the confirmation, not the last hourly pass's), the prop odds (it buys
+    only what is owed), the NHL side models for exactly those games, the totals
+    card and the prop cards, then publish. With no game odds, the side models
+    and the totals card do not run. A step that fails raises after
+    publishing, so the heartbeat records "error" and the game is tried again on
+    the next tick.
+    """
+    from scripts.nhl_goalie_window import has_games_today, plan_tick
+    if not has_games_today():
+        return
+    if not _NHL_WINDOW_LOCK.acquire(blocking=False):
+        return
+    t = NHL_GOALIE_WINDOW_TIMEOUT_S
+    outcomes: dict[str, str] = {}
+    try:
+        # Read under this lock, never before taking it: a pass that took its
+        # own lock a moment earlier is in progress now, and one that starts
+        # after this read waits for the tick (_wait_for_nhl_window).
+        if _REFRESH_LOCK.locked() or _DAILY_LOCK.locked():
+            log.info("NHL goalie window: a refresh pass or the daily run is in progress; "
+                     "it polls the goalies and decides the NHL games itself")
+            return
+        outcomes["nhl-goalie-poll"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nhl-goalie-designations-today"],
+            "nhl-goalie-poll", timeout=t["poll"])
+        if outcomes["nhl-goalie-poll"] != "ok":
+            log.warning("NHL goalie window: the goalie poll did not finish; deciding nothing "
+                        "this tick")
+        else:
+            plan = plan_tick(_NHL_DECIDED)
+            if plan.decide:
+                ids = sorted(plan.decide)
+                log.info("NHL goalie window: both goalies confirmed, deciding %s", ids)
+                outcomes["nhl-odds"] = _run(
+                    [sys.executable, "run_pipeline.py", "--step", "nhl-odds"], "nhl-odds",
+                    timeout=t["odds"])
+                steps = [("nhl-prop-odds", [sys.executable, "run_pipeline.py", "--step",
+                                            "nhl-prop-odds"], t["prop_odds"])]
+                if outcomes["nhl-odds"] == "ok":
+                    steps += [
+                        ("nhl-goalie-window-score",
+                         [sys.executable, "-m", "scripts.nhl_goalie_window", "--score", *ids],
+                         t["score"]),
+                        ("nhl-over-under", [sys.executable, "run_pipeline.py", "--step",
+                                            "nhl-over-under"], t["totals"]),
+                    ]
+                else:
+                    log.warning("NHL goalie window: no NHL game odds this tick; the side "
+                                "models and the totals card wait for the next one")
+                steps.append(("nhl-prop-scoring", [sys.executable, "run_pipeline.py", "--step",
+                                                   "nhl-prop-scoring"], t["props"]))
+                for label, cmd, timeout in steps:
+                    outcomes[label] = _run(cmd, label, timeout=timeout)
+                _publish_new_signals("nhl-goalie-window")
+                if all(v == "ok" for v in outcomes.values()):
+                    _NHL_DECIDED.update(plan.decide)
+    finally:
+        _NHL_WINDOW_LOCK.release()
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    if bad:
+        raise RuntimeError(f"NHL goalie window step(s) did not finish: {bad}")
 
 
 # The NBA totals window's steps are bounded, so a stuck step cannot hold the
@@ -2057,6 +2273,29 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_NFL_WIND_CARD=0 — NFL polling NOT scheduled.")
 
+    # The NFL schedule of record, kept current between daily runs (see
+    # run_nfl_schedule_refresh). Not gated on RUN_NFL_WIND_CARD: the prop card
+    # and the prop scorer read the same rows. Off the hour (:05, :20, ...) so
+    # it never shares a minute with the hourly NFL poll or the 6am pipeline.
+    # next_run_time is the boot catch-up. It falls due before sched.start(), so
+    # the run happens the moment the scheduler starts -- after the boot
+    # migrations in catch_up_weekly_jobs have added any new column -- and a
+    # deploy that adds one has it filled at boot, not the next morning. If the
+    # boot catch-ups hold the start past misfire_grace_time (10 minutes), the
+    # first 15-minute tick does it instead.
+    if RUN_NFL_SCHEDULE_REFRESH:
+        sched.add_job(
+            run_nfl_schedule_refresh,
+            CronTrigger(minute=f"5-59/{NFL_SCHEDULE_REFRESH_MINUTES}", timezone=TIMEZONE),
+            id="nfl_schedule_refresh",
+            name=f"NFL schedule refresh (every {NFL_SCHEDULE_REFRESH_MINUTES} min "
+                 "and at boot, next 14 days)",
+            next_run_time=datetime.now(sched.timezone) + timedelta(seconds=30),
+            max_instances=1, coalesce=True, misfire_grace_time=600,
+        )
+    else:
+        log.info("RUN_NFL_SCHEDULE_REFRESH=0 — NFL schedule refresh NOT scheduled.")
+
     # NFL in-play worker. Sundays run 1pm to 1am ET, but Thursday, Saturday,
     # Monday and international kickoffs all fall outside a Sunday-only window,
     # so the supervisor ticks every day. An idle tick reaches no hunt state and
@@ -2124,6 +2363,19 @@ def build_scheduler() -> BlockingScheduler:
         name="NBA totals window (every minute, 24x7: full-game totals 61-66 min, "
              "home team totals 45-56 min from tip)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
+    )
+
+    # NHL goalie window -- every five minutes, 11:00-23:55 ET
+    # (run_nhl_goalie_window). No NHL model bets until both starting goalies
+    # are confirmed (mike, 2026-10-20), and confirmations come from the morning
+    # skate (late morning) to warmups (about 25 minutes before the last puck
+    # drop, around 10:30pm ET). Unconditional, like the cards it runs.
+    sched.add_job(
+        run_nhl_goalie_window,
+        CronTrigger(hour="11-23", minute="*/5", timezone=TIMEZONE),
+        id="nhl_goalie_window",
+        name="NHL goalie window (every 5 min, 11:00-23:55 ET: decide games once both goalies are confirmed)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 
     # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow

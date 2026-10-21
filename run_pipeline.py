@@ -399,6 +399,36 @@ def step_odds(run_date: str, snapshot_type: str = "open") -> bool:
         return False
 
 
+def step_nhl_odds(run_date: str) -> bool:
+    """NHL game odds only: the moneyline, puck line and total for every listed
+    game, plus the per-game 3-way regulation market. The NHL goalie window
+    (scheduler.run_nhl_goalie_window) runs it right before the side models and
+    the totals card decide a game whose goalies were just confirmed, so they
+    price a fetch taken after the confirmation rather than the last hourly
+    pass's, which can be an hour old (mike, 2026-10-20: "We should absolutely
+    always know the goalie matchup before making a bet as well."). Measured
+    cost of one NHL fetch, 2026-10-19 14:00Z to 10-21 04:00Z in api_call_log:
+    median 35 credits (3 for the bulk call, 32 for 13 per-game 3-way calls),
+    55 at the 90th percentile. The window fetches only on a tick that has a
+    newly confirmed game to decide.
+
+    A fetch that stored no row is a failure here: run_odds_ingestor logs a
+    failed sport and carries on, and the window must not decide on the old
+    prices believing it has new ones.
+    """
+    fn = _import_step("odds")
+    try:
+        result = fn(sport="NHL", snapshot_type="open", target_date=run_date)
+        if not result.get("odds_rows"):
+            logger.error(f"✗ NHL odds stored nothing: {result}")
+            return False
+        logger.success(f"✓ NHL odds: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL odds failed: {exc}")
+        return False
+
+
 def step_mlb_stats(run_date: str) -> bool:
     fn = _import_step("mlb_stats")
     try:
@@ -561,6 +591,25 @@ def step_nhl_stats(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ NHL stats failed: {exc}")
+        return False
+
+
+def step_nhl_goalie_designations(today_only: bool = False) -> bool:
+    """Who ESPN and DailyFaceoff say will start in goal, stored as it changes,
+    and the game's goalie row rewritten when ESPN confirms someone else
+    (data/ingestors/nhl_goalie_designations.py). No NHL model bets until both
+    starting goalies are confirmed (mike, 2026-10-20; models/nhl_goalie_gate.py),
+    and the gate reads what this stores. Free endpoints. `today_only` is the
+    five-minute NHL job's poll; the refresh pass and the 6am run add tomorrow.
+    """
+    try:
+        from data.ingestors.nhl_goalie_designations import run
+        result = run(today_only=today_only)
+        logger.success(f"✓ NHL goalie designations: stored {result['stored']}, "
+                       f"rewrote {len(result['swapped'])}, DailyFaceoff {result['dailyfaceoff']}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL goalie designations failed: {exc}")
         return False
 
 
@@ -2063,6 +2112,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
 
     logger.info("Step 4/7: NHL team + goalie stats...")
     results["nhl_stats"] = step_nhl_stats(run_date)
+    # Who each source says will start in goal, right after the 6am goalie
+    # rows: the history starts the morning, and a row ESPN has already
+    # contradicted with a confirmation is rewritten before anything scores.
+    results["nhl_goalie_designations"] = step_nhl_goalie_designations()
     time.sleep(1)
 
     # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
@@ -2388,7 +2441,8 @@ Examples:
                                  "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck",
-                                 "nhl-over-under",
+                                 "nhl-over-under", "nhl-odds",
+                                 "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
@@ -2468,6 +2522,9 @@ Examples:
             "mlb-game-market": lambda: step_mlb_game_market(run_date, dry_run=args.dry_run),
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
+            "nhl-odds":     lambda: step_nhl_odds(run_date),
+            "nhl-goalie-designations": lambda: step_nhl_goalie_designations(),
+            "nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "nba-props": lambda: step_nba_props(dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),

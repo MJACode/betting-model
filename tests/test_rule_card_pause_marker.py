@@ -25,6 +25,15 @@ import config  # noqa: E402
 from models import scorer  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _goalies_confirmed(monkeypatch):
+    """The rows here are NHL BETs, and the shared insert refuses one whose
+    goalie matchup is not known (models/nhl_goalie_gate.py, mike 2026-10-20).
+    These tests are the paused marker: both starters confirmed."""
+    import models.nhl_goalie_gate as gate
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
+
+
 class _Conn:
     def __init__(self):
         self.rows = []
