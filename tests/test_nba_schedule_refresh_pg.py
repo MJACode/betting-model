@@ -21,7 +21,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 import data.ingestors.nba_schedule_refresh as nsr  # noqa: E402
 from data.db import DBConnection  # noqa: E402
 from tests._pg import can_scratch, env_dsn, scratch_cluster  # noqa: E402
-from tests.test_nba_schedule_refresh import NOW, _board, _espn  # noqa: E402
+from tests.test_nba_schedule_refresh import NOW, _board, _core, _espn, _refused  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -147,3 +147,20 @@ def test_the_plan_lands_as_written_and_a_played_game_keeps_its_status(conn):
     assert _row(conn, "nba_schedule", "espn:9", ("game_id",)) == {"game_id": CUP}
     assert _row(conn, "games", CUP, ("data_source", "commence_time")) == {
         "data_source": "live", "commence_time": "2026-12-09T00:10:00+00:00"}
+
+
+def test_a_month_read_from_the_fallback_host_keeps_a_stored_status_and_tv(conn):
+    """The core host's documents carry no status and no broadcasts inline; a
+    month read from it must not blank what the scoreboard stored."""
+    _sched(conn, "espn:401809837", SF, "regular", "2025-12-13T22:30:00+00:00", status="Final")
+    conn.execute("UPDATE nba_schedule SET national_tv = 'ABC' WHERE nba_game_id = 'espn:401809837'")
+    conn.commit()
+
+    t = nsr.refresh("2025-12-01", get_json=_refused, core_json=_core(), connect=lambda: conn, now=NOW)
+
+    assert t["error"] is None and "202512" in t["via_core"]
+    assert _row(conn, "nba_schedule", "espn:401809837", ("status_text", "national_tv", "arena_city")) == {
+        "status_text": "Final", "national_tv": "ABC", "arena_city": "Las Vegas"}
+    assert _confirmed(conn, "espn:401809837")
+    assert _row(conn, "nba_schedule", "espn:401809833", ("game_type", "status_text")) == {
+        "game_type": "regular", "status_text": None}

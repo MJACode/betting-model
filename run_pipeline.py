@@ -739,8 +739,9 @@ def step_nba_schedule(run_date: str) -> bool:
     (data/ingestors/nba_schedule_refresh.py): games the stored schedule lacks
     (the NBA Cup week and knockout games once set, play-in, playoffs), moved
     tips and postponements. Runs BEFORE nba_results, which inserts a
-    regular-season game only nba_schedule lists. Fail-open: a month ESPN does
-    not answer is left as stored and the models keep reading it; the step
+    regular-season game only nba_schedule lists. A month ESPN's scoreboard
+    refuses is read from its core host (`via_core`). Fail-open: a month neither
+    host answers is left as stored and the models keep reading it; the step
     returns False so pipeline_runs names it, and the health check
     nba_schedule_refresh goes STALE after 36 hours without a confirmed row.
     """

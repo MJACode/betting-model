@@ -30,6 +30,13 @@ POSTPONED = json.loads((FIX / "espn_nba_scoreboard_2025-01-09_postponed.json").r
 PIPE = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    def refuse(url):
+        raise AssertionError(f"a test reached the network: {url}")
+    monkeypatch.setattr(nsr, "fetch_core", refuse, raising=False)
+
+
 def _by_gid(rows):
     return {r["game_id"]: r for r in rows}
 
@@ -285,8 +292,13 @@ def test_espn_unreachable_writes_nothing_and_never_raises():
     def boom(url, params):
         raise ConnectionError("403 from site.api.espn.com")
 
-    t = nsr.refresh("2025-12-01", get_json=boom, connect=lambda: calls.append(1), now=NOW)
+    def core_boom(url):
+        raise ConnectionError("timed out from sports.core.api.espn.com")
+
+    t = nsr.refresh("2025-12-01", get_json=boom, core_json=core_boom,
+                    connect=lambda: calls.append(1), now=NOW)
     assert t["failed"] == t["months"] and t["fetched"] == [] and calls == []
+    assert t["via_core"] == []
 
 
 def test_one_failed_month_is_left_as_stored_and_the_rest_are_written():
@@ -298,7 +310,10 @@ def test_one_failed_month_is_left_as_stored_and_the_rest_are_written():
         assert params["limit"] == nsr.EVENT_LIMIT
         return _board(params["dates"])
 
-    t = nsr.refresh("2025-12-01", get_json=get, connect=lambda: conn, now=NOW)
+    def core(url):
+        raise TimeoutError("read timed out")       # the fallback host is down too
+
+    t = nsr.refresh("2025-12-01", get_json=get, core_json=core, connect=lambda: conn, now=NOW)
     assert t["failed"] == ["202601"] and "202512" in t["fetched"]
     assert t["upsert"] == 3 and t["games_insert"] == 2          # QF and SF are regular; the final is not
     assert conn.committed == 1 and any("INSERT INTO nba_schedule" in w[0] for w in conn.writes)
@@ -341,6 +356,104 @@ def test_a_dry_run_reads_and_writes_nothing():
     t = nsr.refresh("2025-12-01", get_json=lambda url, p: _board(p["dates"]),
                     connect=lambda: conn, now=NOW, dry_run=True)
     assert t["upsert"] == 3 and conn.writes == [] and conn.committed == 0
+
+
+# ── the fallback host: sports.core.api.espn.com ──────────────────────────────
+# site.api.espn.com answered the worker 403 on every day it was probed from
+# 2026-08-08 to 2026-09-30 (system_health_checks, espn_wnba_api) while the core
+# host kept serving it. A month the scoreboard refuses is read from the core
+# host. Shapes: a trimmed copy of core documents fetched 2026-10-21
+# (tests/fixtures/espn_nba_core_sample.json).
+
+CORE = json.loads((FIX / "espn_nba_core_sample.json").read_text(encoding="utf-8"))
+
+
+def _core(calls=None):
+    def fetch(url):
+        assert url.startswith("https://"), url             # ESPN's links say http://
+        if calls is not None:
+            calls.append(url)
+        month = re.search(r"/events\?dates=(\d{6})&limit=1000$", url)
+        if month:
+            return CORE["listings"].get(month.group(1), {"count": 0, "pageCount": 1, "items": []})
+        return CORE["docs"][url.split("?")[0]]               # KeyError: a document ESPN would 404
+    return fetch
+
+
+def _refused(url, params):
+    raise ConnectionError("403 Client Error: Forbidden for url: https://site.api.espn.com/...")
+
+
+def test_the_fallback_host_reads_the_same_games_as_the_scoreboard():
+    """December 2025 from both hosts: the same games, ids, dates, types, tips,
+    arenas and labels. The core host carries no status or broadcasts inline
+    (each is one more link per game), so those stay empty."""
+    core = _by_gid(nsr.event_rows(nsr.core_month("202512", _core(), {})))
+    site = _by_gid(nsr.event_rows(_board("202512")))
+    assert sorted(core) == sorted(site) == ["NBA_2025-12-09_MIA_ORL", "NBA_2025-12-13_NYK_ORL",
+                                            "NBA_2025-12-16_SAS_NYK"]
+    for gid in site:
+        drop = ("status_text", "postponed", "national_tv")
+        same = {k: v for k, v in core[gid].items() if k not in drop}
+        assert same == {k: v for k, v in site[gid].items() if k not in drop}, gid
+        assert core[gid]["status_text"] is None and core[gid]["postponed"] is False
+    assert core["NBA_2025-12-16_SAS_NYK"]["game_type"] == "cup_final"
+
+
+def test_the_fallback_types_a_play_in_and_skips_a_slot_with_no_teams():
+    calls, counts = [], {}
+    rows = nsr.event_rows(nsr.core_month("202604", _core(calls), {}))
+    assert [(r["game_id"], r["game_type"], r["season"]) for r in rows] == [
+        ("NBA_2026-04-14_MIA_CHA", "playin", 2026)]
+    assert nsr.event_rows(nsr.core_month("202612", _core(calls), {}), counts) == []
+    assert counts == {"no_teams": 1}
+    assert not any("/teams/-" in u for u in calls)          # ESPN's -1 and -2 are not teams
+
+
+def test_each_team_is_fetched_once_a_run():
+    calls, teams = [], {}
+    nsr.core_month("202512", _core(calls), teams)
+    nsr.core_month("202512", _core(calls), teams)
+    team_calls = [u for u in calls if "/teams/" in u]
+    assert len(team_calls) == len(set(team_calls)) == 4     # ORL, MIA, NYK, SAS
+
+
+def test_a_month_the_scoreboard_refuses_is_read_from_the_fallback_host():
+    """This month and next only: read from this machine on 2026-10-21 a core
+    month cost 209 calls and 170 seconds, so all nine months would add about
+    18 minutes to the 6am run. A game more than a month out is not priced,
+    and its month is read again by the time it is near. The months past the
+    fallback's reach stay failed, so the step still goes red during a block."""
+    conn = _Conn()
+    t = nsr.refresh("2025-12-01", get_json=_refused, core_json=_core(), connect=lambda: conn, now=NOW)
+    assert t["via_core"] == ["202512", "202601"] == t["months"][:nsr.CORE_MONTHS]
+    assert t["failed"] == t["months"][nsr.CORE_MONTHS:] and "202604" in t["failed"]
+    assert t["upsert"] == 3 and t["games_insert"] == 2      # QF, SF and final; QF and SF are regular
+    assert conn.committed == 1
+
+
+def test_a_month_the_fallback_host_breaks_on_is_failed_whole():
+    """One document the core host does not answer fails its month: a month
+    read in part would name every game it missed as no longer listed."""
+    docs = dict(CORE["docs"])
+    docs.pop(next(k for k in docs if k.endswith("/events/401809837")))
+
+    def fetch(url):
+        month = re.search(r"/events\?dates=(\d{6})", url)
+        if month:
+            return CORE["listings"].get(month.group(1), {"count": 0, "pageCount": 1, "items": []})
+        return docs[url.replace("http://", "https://").split("?")[0]]
+
+    t = nsr.refresh("2025-12-01", get_json=_refused, core_json=fetch, connect=lambda: _Conn(), now=NOW)
+    assert "202512" in t["failed"] and "202512" not in t["via_core"] and "202601" in t["via_core"]
+
+
+def test_a_listing_of_more_than_one_page_fails_its_month():
+    def fetch(url):
+        return {"count": 1200, "pageCount": 2, "items": []}
+
+    with pytest.raises(ValueError):
+        nsr.core_month("202512", fetch, {})
 
 
 # ── the NBA.com load replaces an 'espn:' row ─────────────────────────────────

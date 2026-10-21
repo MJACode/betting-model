@@ -28,6 +28,24 @@ build machine on 2026-10-20. Measured 2026-10-20 against production:
     Cup final 1 of 1, play-in 6 of 6, playoffs 80 of 80, a regular-season
     sample 25 of 25 -- with the same tips.
 
+THE FALLBACK HOST. site.api.espn.com has refused the worker before: its daily
+probe read HTTP 403 on every day it ran from 2026-08-08 to 2026-09-30
+(system_health_checks, espn_wnba_api), eight weeks, while
+sports.core.api.espn.com served the WNBA results step's fallback the whole
+time; site answered again from 2026-10-01. A month the scoreboard does not
+answer is read from the core host (core_month), for this month and the next
+only (CORE_MONTHS): one listing call a month, then one document per game and
+one per team (cached for the run), since the core host lists events and teams
+as links. A month further out that the scoreboard refuses stays failed. Measured 2026-10-21: its December
+2025 and December 2026 listings hold the same event ids as the scoreboard's
+(198 and 178), and its documents carry the date, timeValid, venue, neutral
+site and notes inline, the season type and year in the link paths. Status and
+broadcasts are one more link per game each and are not followed: a month read
+this way records no postponement (the results step records those) and leaves
+a stored status and national TV as they are. Read against the scoreboard on
+2026-10-21, December 2026 came back the same: 172 games, the same game ids,
+no field different but status and TV.
+
 TYPES. season.type 2 is the regular season, the Cup quarterfinals and
 semifinals included (they count in the standings, NBA.com types them 002);
 a type-2 game whose note reads "NBA Cup Championship" is the Cup final
@@ -77,9 +95,10 @@ fetched month, that ESPN no longer lists under that game_id is counted in
 date is in it), and a game removed on one day's read is safer named than
 dropped.
 
-FAIL-OPEN. A month that cannot be fetched, or that comes back with no NBA
-game while the schedule lists games in it, is logged as an ERROR naming the
-month and left exactly as stored. Nothing else depends on this run: the models
+FAIL-OPEN. A month that neither host answers whole, or that comes back with no
+NBA game while the schedule lists games in it, is logged as an ERROR naming
+the month and left exactly as stored; a month read from the core host is
+named in `via_core` and a WARNING. Nothing else depends on this run: the models
 keep reading the stored schedule. The pipeline step returns False when any
 month failed (so pipeline_runs names it), and the health check
 `nba_schedule_refresh` turns STALE when no schedule row has been confirmed for
@@ -93,6 +112,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -125,6 +145,20 @@ SCHEDULE_SOURCES = ("nba_api_schedule", DATA_SOURCE)
 # shows the one it sits nearer, so a feed that has not moved yet (still ten
 # minutes after the stored tip) never seconds a small move.
 FEED_LAG = (timedelta(minutes=-1), timedelta(minutes=30))
+
+# The fallback host (THE FALLBACK HOST above). Its links say http://; they are
+# followed as https://, as the WNBA results step's (wnba_results_ingestor).
+CORE_NBA_EVENTS_URL = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events"
+CORE_REQUEST_SLEEP = 0.1      # the WNBA results step's pause between core calls
+# This month and next: far enough ahead for every game a model could price soon
+# (a flex is announced days ahead, the Cup bracket the week before), and a
+# month further out is read again by the time it is near. All nine would cost
+# the 6am run about 18 minutes: December 2026 read this way took 209 calls
+# and 170 seconds from the build machine on 2026-10-21.
+CORE_MONTHS = 2
+_REF_TYPE = re.compile(r"/seasons/(\d{4})/types/(\d+)")
+_REF_SEASON = re.compile(r"/seasons/(\d{4})")
+_REF_TEAM = re.compile(r"/seasons/\d{4}/teams/(-?\d+)")
 
 ESPN_TYPES = {2: "regular", 3: "playoff", 5: "playin"}
 CUP_FINAL_NOTE = "cup championship"
@@ -246,6 +280,78 @@ def event_rows(data: dict, counts: dict | None = None) -> list[dict]:
     return out
 
 
+# ── the fallback host (sports.core.api.espn.com) ─────────────────────────────
+
+def _https(url: str) -> str:
+    """The core host's links say http://; every one is followed over https."""
+    return "https://" + url[len("http://"):] if url.startswith("http://") else url
+
+
+def fetch_core(url: str) -> dict:
+    """GET one core-API document, with nba_results_ingestor's one retry on a
+    timeout or a 5xx."""
+    out = _http_get_json(_https(url), {})
+    time.sleep(CORE_REQUEST_SLEEP)
+    return out
+
+
+def _core_team(team: dict, fetch, teams: dict) -> dict:
+    """A core competitor's team as the scoreboard carries it ({abbreviation,
+    displayName}), fetched once a run per season and team. {} for a knockout
+    slot with no teams yet: ESPN gives those team ids -1 and -2."""
+    ref = str((team or {}).get("$ref") or "")
+    m = _REF_TEAM.search(ref)
+    if not m or int(m.group(1)) <= 0:
+        return {}
+    key = m.group(0)
+    if key not in teams:
+        doc = fetch(_https(ref)) or {}
+        teams[key] = {"abbreviation": doc.get("abbreviation"), "displayName": doc.get("displayName")}
+    return teams[key]
+
+
+def core_event(ev: dict, fetch, teams: dict) -> dict:
+    """One core-API event document in the scoreboard's event shape, for
+    event_rows: the season type and year from the link paths, the teams
+    followed, no status and no broadcasts (THE FALLBACK HOST)."""
+    ev = ev or {}
+    comp = (ev.get("competitions") or [{}])[0]
+    kind = _REF_TYPE.search(str((ev.get("seasonType") or {}).get("$ref") or ""))
+    year = _REF_SEASON.search(str((ev.get("season") or {}).get("$ref") or ""))
+    return {
+        "id": ev.get("id"),
+        "date": ev.get("date") or comp.get("date"),
+        "season": {"type": int(kind.group(2)) if kind else None,
+                   "year": int(year.group(1)) if year else None},
+        "competitions": [{
+            "date": comp.get("date"),
+            "timeValid": comp.get("timeValid", ev.get("timeValid")),
+            "neutralSite": comp.get("neutralSite"),
+            "notes": comp.get("notes") or [],
+            "venue": comp.get("venue") or {},
+            "competitors": [{"homeAway": c.get("homeAway"),
+                             "team": _core_team(c.get("team"), fetch, teams)}
+                            for c in comp.get("competitors") or []],
+        }],
+    }
+
+
+def core_month(month: str, fetch=None, teams: dict | None = None) -> dict:
+    """A month (YYYYMM) from the core host, as a scoreboard ({"events": [...]}).
+    Raises on any document it cannot read, or a listing of more than one
+    page: a month read in part would name every game it missed as no longer
+    listed, so the caller fails the month whole."""
+    fetch = fetch or fetch_core
+    teams = {} if teams is None else teams
+    listing = fetch(f"{CORE_NBA_EVENTS_URL}?dates={month}&limit={EVENT_LIMIT}") or {}
+    if int(listing.get("pageCount") or 1) > 1:
+        raise ValueError(f"core listing for {month} runs to {listing.get('pageCount')} pages")
+    refs = [i.get("$ref") for i in listing.get("items") or [] if isinstance(i, dict)]
+    if any(not r for r in refs):
+        raise ValueError(f"core listing for {month} has an item with no link")
+    return {"events": [core_event(fetch(_https(r)), fetch, teams) for r in refs]}
+
+
 # ── the plan (pure) ──────────────────────────────────────────────────────────
 
 def plan(espn: list[dict], stored: list[dict], games: dict[str, dict],
@@ -352,10 +458,11 @@ _UPSERT = f"""
         game_type = EXCLUDED.game_type, game_date = EXCLUDED.game_date,
         commence_time = COALESCE(EXCLUDED.commence_time, nba_schedule.commence_time),
         home_team = EXCLUDED.home_team, away_team = EXCLUDED.away_team,
-        status_text = EXCLUDED.status_text, arena_name = EXCLUDED.arena_name,
+        status_text = COALESCE(EXCLUDED.status_text, nba_schedule.status_text),
+        arena_name = EXCLUDED.arena_name,
         arena_city = EXCLUDED.arena_city, arena_state = EXCLUDED.arena_state,
         is_neutral = EXCLUDED.is_neutral, game_label = EXCLUDED.game_label,
-        national_tv = EXCLUDED.national_tv, updated_at = NOW()
+        national_tv = COALESCE(EXCLUDED.national_tv, nba_schedule.national_tv), updated_at = NOW()
 """
 
 
@@ -400,24 +507,41 @@ def _counts(p: dict) -> dict:
     return {k: len(v) for k, v in p.items()}
 
 
-def refresh(run_date: str | None = None, *, get_json=None, connect=None,
+def refresh(run_date: str | None = None, *, get_json=None, core_json=None, connect=None,
             dry_run: bool = False, now: datetime | None = None) -> dict:
     """Fetch this month and the next MONTHS_AHEAD from ESPN and write the plan.
-    Never raises: a failure is logged and returned in `failed` / `error`."""
+    A month the scoreboard does not answer is read from the core host
+    (`core_json`, default fetch_core). Never raises: a failure is logged and
+    returned in `failed` / `error`."""
     now = now or datetime.now(timezone.utc)
     today = date.fromisoformat(run_date) if run_date else now.astimezone(_ET).date()
     get_json = get_json or _http_get_json
-    totals: dict = {"months": months(today), "fetched": [], "failed": [], "events": 0,
-                    "skipped": {}, "error": None}
+    core_json = core_json or fetch_core
+    totals: dict = {"months": months(today), "fetched": [], "failed": [], "via_core": [],
+                    "events": 0, "skipped": {}, "error": None}
     espn: dict[str, list[dict]] = {}
-    for m in totals["months"]:
+    teams: dict = {}
+    for i, m in enumerate(totals["months"]):
         try:
             board = get_json(ESPN_NBA_SCOREBOARD_URL, {"dates": m, "limit": EVENT_LIMIT})
         except Exception as exc:                      # noqa: BLE001 -- fail-open, by month
-            logger.error(f"NBA schedule refresh: ESPN month {m} failed ({type(exc).__name__}: "
-                         f"{str(exc)[:160]}); its stored schedule is left as it is")
-            totals["failed"].append(m)
-            continue
+            site = f"{type(exc).__name__}: {str(exc)[:160]}"
+            if i >= CORE_MONTHS:
+                logger.error(f"NBA schedule refresh: ESPN month {m} failed ({site}), past the fallback "
+                             f"host's {CORE_MONTHS} months; its stored schedule is left as it is")
+                totals["failed"].append(m)
+                continue
+            try:
+                board = core_month(m, core_json, teams)
+            except Exception as core_exc:             # noqa: BLE001 -- fail-open, by month
+                logger.error(f"NBA schedule refresh: ESPN month {m} failed on both hosts (site: {site}; "
+                             f"core: {type(core_exc).__name__}: {str(core_exc)[:160]}); its stored "
+                             f"schedule is left as it is")
+                totals["failed"].append(m)
+                continue
+            logger.warning(f"NBA schedule refresh: ESPN's scoreboard refused month {m} ({site}); "
+                           f"read from sports.core.api.espn.com instead (no status, no broadcasts)")
+            totals["via_core"].append(m)
         espn[m] = event_rows(board, totals["skipped"])
         totals["events"] += len(espn[m])
     if not espn:
