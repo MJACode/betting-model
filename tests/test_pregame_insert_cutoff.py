@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import psycopg2
 import pytest
 from loguru import logger
 
@@ -90,7 +91,7 @@ def test_a_row_before_the_cutoff_is_inserted(clock, warnings):
     _insert_picks(conn, [_row()])
     assert len(conn.inserted) == 1
     assert conn.inserted[0]["game_id"] == "G1"
-    assert "first_pitch_at" in conn.lookups[0]
+    assert any("first_pitch_at" in sql for sql in conn.lookups)
     assert _rejected(warnings) == []
 
 
@@ -168,4 +169,190 @@ def test_the_insert_calls_the_gate_before_it_writes():
     gate = inspect.getsource(scorer._drop_pregame_after_cutoff)
     assert src.index("_drop_pregame_after_cutoff") < src.index("executemany")
     assert "is_live" in gate
-    assert "pregame_cutoff_sql" in inspect.getsource(scorer._cutoff_by_game)
+    lookup = inspect.getsource(scorer._cutoff_by_game)
+    assert "pregame_cutoff_sql" in lookup
+    assert "_fail_open" in lookup
+
+
+_ABORTED = "current transaction is aborted, commands ignored until end of transaction block"
+_TIMEOUT = "canceling statement due to statement timeout"
+
+
+class _AbortConn:
+    """Postgres-shaped: a failed statement aborts the transaction until
+    ROLLBACK TO SAVEPOINT. The cutoff SELECT is what times out."""
+
+    def __init__(self, *, lose=False):
+        self.lose = lose
+        self.aborted = False
+        self.inserted = []
+        self.events: list[tuple] = []
+
+    def execute(self, sql, params=None):
+        text = " ".join(sql.split())
+        upper = text.upper()
+        if self.aborted:
+            if upper.startswith("ROLLBACK TO SAVEPOINT"):
+                self.aborted = False
+                self.events.append(("savepoint_rollback", text))
+                return self
+            self.events.append(("poisoned", text[:80]))
+            raise psycopg2.errors.InFailedSqlTransaction(_ABORTED)
+        self.events.append(("exec", text[:120]))
+        if upper.startswith(("SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK")):
+            return self
+        if "first_pitch_at" in text:
+            if self.lose:
+                from data.db import ConnectionLost
+                raise ConnectionLost("server closed the connection")
+            self.aborted = True
+            raise psycopg2.errors.QueryCanceled(_TIMEOUT)
+        return self
+
+    def fetchall(self):
+        return []
+
+    def executemany(self, sql, batch):
+        if self.aborted:
+            self.events.append(("poisoned", "executemany"))
+            raise psycopg2.errors.InFailedSqlTransaction(_ABORTED)
+        self.inserted.extend(list(batch))
+        self.events.append(("insert", len(self.inserted)))
+
+
+def test_a_timed_out_cutoff_read_still_inserts_the_batch(clock, warnings):
+    """The fake that only raises RuntimeError never aborts a transaction.
+    This one does: QueryCanceled leaves the connection in the failed state,
+    and the next statement raises InFailedSqlTransaction unless the lookup
+    rolled back to its savepoint."""
+    conn = _AbortConn()
+    _insert_picks(conn, [_row(), _row(model_id="unit_model_b")])
+    assert [r["model_id"] for r in conn.inserted] == ["unit_model", "unit_model_b"]
+    assert not conn.aborted
+    assert any(ev[0] == "savepoint_rollback" for ev in conn.events)
+    assert not any(ev[0] == "poisoned" for ev in conn.events)
+    assert _rejected(warnings) == []
+
+
+def test_a_lost_connection_on_the_cutoff_read_is_not_swallowed(clock):
+    from data.db import ConnectionLost
+    conn = _AbortConn(lose=True)
+    with pytest.raises(ConnectionLost):
+        _insert_picks(conn, [_row()])
+    assert conn.inserted == []
+
+
+def test_the_scorer_loop_skips_a_passed_cutoff_and_scores_the_rest(monkeypatch):
+    """The skip re-reads the cutoff. The games row's commence_time is still
+    in the future on every game, so a once-per-pass snapshot of that column
+    would score them all.
+
+    NHL_OFFSET's cutoff is 19:30-04:00 (23:30 UTC). The clock is 21:00 UTC.
+    Truncating the offset would read 19:30 as UTC and skip the game about
+    four hours early. NHL_PAST's re-read cutoff is already past, so it is
+    skipped. An unknown cutoff is scored. A timed-out read is scored, and
+    the game after it is scored on the same connection."""
+    from types import SimpleNamespace
+
+    import models.scorer as scorer
+
+    future = "2099-01-01T00:00:00+00:00"
+    when = datetime(2026, 9, 17, 21, 0, tzinfo=timezone.utc)
+    games = [
+        ("NHL_OFFSET", "NHL", 2026, "2026-09-17", "EDM", "VAN", future),
+        ("NHL_PAST", "NHL", 2026, "2026-09-17", "BOS", "NYR", future),
+        ("NHL_UNKNOWN", "NHL", 2026, "2026-09-17", "TOR", "MTL", future),
+        ("NHL_FAIL", "NHL", 2026, "2026-09-17", "CGY", "EDM", future),
+        ("NHL_AFTER", "NHL", 2026, "2026-09-17", "SEA", "VGK", future),
+    ]
+    cutoffs = {
+        "NHL_OFFSET": "2026-09-17T19:30:00-04:00",
+        "NHL_PAST": "2020-01-01T00:00:00+00:00",
+        "NHL_AFTER": future,
+    }
+
+    class LoopConn:
+        def __init__(self):
+            self.aborted = False
+            self.last = ""
+            self.params = ()
+            self.events: list[tuple] = []
+            self.closed = False
+
+        def execute(self, sql, params=None):
+            text = " ".join(sql.split())
+            upper = text.upper()
+            if self.aborted:
+                if upper.startswith("ROLLBACK TO SAVEPOINT"):
+                    self.aborted = False
+                    self.events.append(("savepoint_rollback", text))
+                    self.last = text
+                    self.params = params or ()
+                    return self
+                self.events.append(("poisoned", text[:80]))
+                raise psycopg2.errors.InFailedSqlTransaction(_ABORTED)
+            self.last = text
+            self.params = params or ()
+            self.events.append(("exec", text[:100], self.params))
+            if upper.startswith(("SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK", "SET LOCAL")):
+                return self
+            gid = self.params[0] if self.params else None
+            if "first_pitch_at" in text and gid == "NHL_FAIL":
+                self.aborted = True
+                raise psycopg2.errors.QueryCanceled(_TIMEOUT)
+            return self
+
+        def fetchone(self):
+            if "first_pitch_at" not in self.last:
+                return None
+            gid = self.params[0] if self.params else None
+            if gid not in cutoffs:
+                return None
+            return (cutoffs[gid],)
+
+        def fetchall(self):
+            if "home_team" in self.last and "FROM games" in self.last:
+                return games
+            return []
+
+        def rollback(self):
+            self.aborted = False
+            self.events.append(("rollback",))
+
+        def commit(self):
+            if self.aborted:
+                raise psycopg2.errors.InFailedSqlTransaction(_ABORTED)
+            self.events.append(("commit",))
+
+        def close(self):
+            self.closed = True
+
+    conn = LoopConn()
+    built: list[str] = []
+    monkeypatch.setattr(scorer, "get_connection", lambda: conn)
+    monkeypatch.setattr(scorer, "_get_postponed_games", lambda _date: set())
+    monkeypatch.setattr(scorer, "_utcnow", lambda: when)
+    monkeypatch.setattr(scorer, "_get_dk_odds", lambda *a, **k: {"home_price": -110})
+    monkeypatch.setattr(
+        scorer, "_nhl_matchup",
+        lambda c, gid: SimpleNamespace(reason=None, game_id=gid))
+    def _build(conn, game_id, *a, **k):
+        conn.events.append(("built", game_id))
+        built.append(game_id)
+        return {"x": 1}
+
+    monkeypatch.setattr(scorer, "build_nhl_game_features", _build)
+    monkeypatch.setattr(scorer, "score_game", lambda *a, **k: [])
+
+    result = scorer.run_scorer("2026-09-17", dry_run=False)
+
+    assert built == ["NHL_OFFSET", "NHL_UNKNOWN", "NHL_FAIL", "NHL_AFTER"]
+    assert "NHL_PAST" not in built
+    assert result["games"] == 5
+    assert not conn.aborted
+    assert any(ev[0] == "savepoint_rollback" for ev in conn.events)
+    assert not any(ev[0] == "poisoned" for ev in conn.events)
+    reset = next(i for i, ev in enumerate(conn.events) if ev[0] == "savepoint_rollback")
+    after = next(i for i, ev in enumerate(conn.events)
+                 if ev[0] == "built" and ev[1] == "NHL_AFTER")
+    assert reset < after

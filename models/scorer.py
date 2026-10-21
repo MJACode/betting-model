@@ -2300,8 +2300,7 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     Only quotes at the SAME line count (totals/spreads), and only pre-game
     snapshots — an in-play price is a different proposition entirely.
 
-    BOUNDED AT THE PRE-GAME CUTOFF when `cutoff` (the 19-char UTC prefix
-    _pregame_cutoff returns) is given, exactly as _get_dk_odds bounds the
+    BOUNDED AT THE PRE-GAME CUTOFF when `cutoff` is given, exactly as _get_dk_odds bounds the
     DraftKings read: since 2026-09-09 this price DECIDES the pick, and the
     evening refresh keeps writing `open` rows after first pitch, so an
     unbounded "newest per book" would hand a pre-game model an in-play price
@@ -2333,6 +2332,24 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     return _best_game_price_one(conn, sibling, market, side, scored_line, cutoff)
 
 
+def _odds_snapshot_prefix(cutoff: str | None) -> str | None:
+    """19-char UTC prefix for `substr(snapshot_at, 1, 19)`.
+
+    `odds.snapshot_at` is ISO with a `T` and UTC (`Z` or `+00:00`); the
+    prefix drops that offset so the two shapes compare (`_get_dk_odds`).
+    The cutoff may carry a different offset. Truncating the string would
+    compare the local clock to UTC rows, so this parses first and formats
+    the UTC instant. A value that will not parse is prefixed as text.
+    """
+    if not cutoff:
+        return None
+    dt = _parse_cutoff(cutoff)
+    if dt is None:
+        text = str(cutoff).strip()
+        return text[:19] or None
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
                          pick_side: str, scored_line: float | None,
                          cutoff: str | None = None) -> dict | None:
@@ -2346,9 +2363,11 @@ def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
 
     placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
     # The same 19-character-prefix bound _get_dk_odds uses (its docstring
-    # carries the measurement that makes the prefix compare safe).
-    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
-    params = (game_id, market, *BEST_LINE_BOOKMAKERS) + ((cutoff,) if cutoff else ())
+    # carries the measurement that makes the prefix compare safe). The
+    # prefix is the UTC instant: a `-04:00` cutoff must not be sliced raw.
+    bound = _odds_snapshot_prefix(cutoff)
+    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if bound else ""
+    params = (game_id, market, *BEST_LINE_BOOKMAKERS) + ((bound,) if bound else ())
     rows = conn.execute(f"""
         SELECT bookmaker, {price_col}, {link_col}, total_line, spread_home, snapshot_at
         FROM odds
@@ -2660,11 +2679,18 @@ def _tag_prop(pick: dict, ctx: tuple, conn: DBConnection | None = None) -> dict:
 
 
 def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
-    """The 19-char UTC prefix of this game's first pitch, or None.
+    """This game's pregame cutoff, offset included, or None.
 
     None means "do not bound" — a game with no commence_time keeps the old
     behaviour rather than losing every price, which is the fail-open direction
     the WNBA leak taught us (.claude/rules/data-integrity.md).
+
+    The return is the cutoff as stored, including its offset. A 19-character
+    prefix drops `-04:00`, and `_parse_cutoff` then reads that clock as UTC,
+    so the started-game skip treats the game as started about four hours
+    early. The odds text comparison still wants a 19-character UTC prefix
+    (`_odds_snapshot_prefix`); that slice is taken from the UTC instant at
+    the comparison, not here.
 
     ACTUAL first pitch, not the scheduled start. This shipped in #606 reading
     `commence_time` alone, which is the permissive direction and therefore the
@@ -2685,7 +2711,14 @@ def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
         (game_id,),
     ).fetchone()
     ct = row[0] if row else None
-    return str(ct)[:19] if ct else None
+    if ct is None or ct == "":
+        return None
+    if isinstance(ct, datetime):
+        if ct.tzinfo is None:
+            ct = ct.replace(tzinfo=timezone.utc)
+        return ct.isoformat()
+    text = str(ct).strip()
+    return text or None
 
 
 # F5 totals/spreads DraftKings' Odds API feed does not list. Other books do
@@ -2756,7 +2789,8 @@ def _newest_book_game_row(conn: DBConnection, game_id: str, market: str,
     are all older than the bound: no price, never the other id's).
     """
     spread_filter = _game_spread_filter_sql(game_id, market)
-    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
+    bound = _odds_snapshot_prefix(cutoff)
+    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if bound else ""
     row = conn.execute(f"""
             SELECT home_price, away_price, draw_price,
                    spread_home, total_line, over_price, under_price,
@@ -2771,7 +2805,7 @@ def _newest_book_game_row(conn: DBConnection, game_id: str, market: str,
               {pregame_filter}
             ORDER BY snapshot_at DESC
             LIMIT 1
-        """, (game_id, market, bookmaker) + ((cutoff,) if cutoff else ())
+        """, (game_id, market, bookmaker) + ((bound,) if bound else ())
         ).fetchone()
     if not row:
         return None
@@ -3228,19 +3262,28 @@ def _cutoff_by_game(conn: DBConnection, game_ids: list[str]) -> dict | None:
     The value is `pregame_cutoff_sql` — actual first pitch, clamped — not
     the scheduled start. A game with no row, or a NULL cutoff, is unknown.
     None means the read failed; the caller keeps the rows.
+
+    The read is in a savepoint. A statement_timeout aborts the Postgres
+    transaction, and catching it without rolling back makes the following
+    INSERT raise InFailedSqlTransaction and drops the whole batch (the
+    VAN@EDM best-price failure, daily run
+    51e965f8023c4b0e86e03fe075af1f9c). ConnectionLost is re-raised: that
+    transaction is gone.
     """
     if not game_ids:
         return {}
-    try:
-        rows = conn.execute(
+
+    def _read():
+        return conn.execute(
             f"SELECT game_id, {pregame_cutoff_sql('games')} "
             "FROM games WHERE game_id = ANY(?)",
             (list(game_ids),),
         ).fetchall()
-    except Exception as exc:  # noqa: BLE001 — unknown start is kept
-        logger.warning(
-            f"pregame cutoff lookup failed ({exc!r}); keeping the rows"
-        )
+
+    rows = _fail_open(
+        conn, "sp_insert_cutoff", _read, None, "pregame cutoff lookup",
+    )
+    if rows is None:
         return None
     return {r[0]: r[1] for r in rows}
 

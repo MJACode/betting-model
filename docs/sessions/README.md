@@ -19,8 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, #931 review: the scorer-insert cutoff read rolls back its savepoint, so a timed-out lookup does not drop the batch; the cutoff keeps its offset; scripts/*, the NFL live writer and first_signal_repair still bypass `_insert_picks` |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, #931 rework: `_insert_picks` refuses a pregame row at or past the pregame cutoff; live rows stay; card-level copies of the 2026-10-09 / #1027 / #1029 checks were dropped |
-
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, Eggz daily, week, and month recaps end with the all-time record through that period; Signalbase daily already has one, week and month and X do not |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, the NBA schedule refreshed daily on the worker from ESPN (`nba-schedule`, health check `nba_schedule_refresh`); ESPN never moves the league's tip alone, a flexed tip moves when the odds feed shows it, a month the scoreboard refuses is read from ESPN's core host; both NBA prop models price every regular-season game, listed or not, and the projection's rest reads them; play-in, playoffs and the Cup final stay out (no graded props) |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, the NHL goalie rule after review: the migration creates its table; an id-less goalie row, a confirmation unread for 30 minutes and an unreadable new starter are not known; prices must be fetched after the confirmation; nothing decides in the last 10 minutes; the window never polls during a pass |
