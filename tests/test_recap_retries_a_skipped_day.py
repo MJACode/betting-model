@@ -146,6 +146,22 @@ def _schema(db):
         published_at TEXT)""")
     db.execute("CREATE UNIQUE INDEX uq_snap ON results_snapshots "
                "(game_date, scope, COALESCE(sport, ''))")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT PRIMARY KEY, sport TEXT, game_date TEXT,
+        home_score INT, away_score INT)""")
+    for sport in ("MLB", "NFL", "NHL"):
+        db.execute(
+            "INSERT INTO games (game_id, sport, game_date, home_score, away_score) "
+            "VALUES (?,?,?,1,0)",
+            (f"{sport}_{DAY}", sport, DAY))
+    # A game of a sport with no bet that night stays unfinished. It must not
+    # hold the recap.
+    db.execute(
+        "INSERT INTO games (game_id, sport, game_date, home_score, away_score) "
+        "VALUES (?,?,?,NULL,NULL)",
+        (f"UFC_{DAY}", "UFC", DAY))
+    from tracking.published_units import install_sqlite
+    install_sqlite(db)
 
 
 def _add_pick(db, row, *, graded: bool):

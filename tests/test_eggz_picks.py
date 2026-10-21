@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -564,6 +564,110 @@ def test_the_recap_posts_only_to_his_webhook_and_only_once(monkeypatch):
 def test_an_unset_webhook_posts_nothing(monkeypatch):
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "")
     assert eg.post_eggz_recaps(datetime(2026, 10, 20, 12, 0, tzinfo=eg.ET)) == 0
+
+
+def test_a_live_game_on_the_slate_date_holds_the_recap(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "55")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params or ()
+            return self
+
+        def fetchone(self):
+            if "FROM games" in self.sql:
+                return (1,)
+            if "COUNT" in self.sql:
+                return (0,)
+            return None
+
+        def fetchall(self):
+            return [("NHL", "eggz", "WIN", None, -110, 1.0, False, 1.0, 1.1)]
+
+        def commit(self):
+            pass
+
+    assert eg._post_window(Conn(), "day", "2026-10-20", "2026-10-20", "Oct 20") == 0
+    assert posted == []
+
+
+def test_a_utc_instant_after_8pm_et_recaps_yesterday_in_new_york(monkeypatch):
+    """01:50 UTC on Oct 21 is 9:50pm ET on Oct 20. Yesterday is Oct 19."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    calls = []
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+    monkeypatch.setattr(
+        eg, "_post_window",
+        lambda conn, span, start, end, heading, dry_run=False: calls.append(
+            (span, start, end)) or 0)
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    now = datetime(2026, 10, 21, 1, 50, tzinfo=timezone.utc)
+    assert eg.post_eggz_recaps(now) == 0
+    days = [call for call in calls if call[0] == "day"]
+    assert days == [("day", "2026-10-19", "2026-10-19")]
+    assert all(call[1] != "2026-10-20" for call in calls)
+
+
+def test_before_6am_et_the_daily_recap_does_not_run(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    calls = []
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+    monkeypatch.setattr(
+        eg, "_post_window",
+        lambda conn, span, start, end, heading, dry_run=False: calls.append(span) or 0)
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    assert eg.post_eggz_recaps(datetime(2026, 10, 21, 5, 59, tzinfo=eg.ET)) == 0
+    assert "day" not in calls
+
+
+def test_the_main_recap_waits_while_a_game_on_that_date_is_unfinished(monkeypatch):
+    from tracking import discord_notifier as dn
+    posted = []
+    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
+    monkeypatch.setattr(dn, "_post", lambda url, body: posted.append(body) or "99")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+
+        def fetchone(self):
+            if "FROM games" in self.sql:
+                return (1,)
+            return None
+
+        def fetchall(self):
+            return [("NHL", "nhl_moneyline", "WIN", 0.02, -110, None, False, 1.0, 1.1)]
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(dn, "get_connection", lambda: Conn())
+    assert dn.notify_discord_results(game_date="2026-10-20") == 0
+    assert dn.notify_discord_period(
+        "week", date(2026, 10, 12), date(2026, 10, 18),
+        "Week of Oct 12-18") == 0
+    assert posted == []
 
 
 def test_the_job_is_on_the_pipeline_and_settle_posts_the_recap():

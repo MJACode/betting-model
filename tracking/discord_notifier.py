@@ -2166,6 +2166,35 @@ def _execute_settled(conn, sql: str, params: tuple):
         return conn.execute(_sql_without_unit_functions(sql), params)
 
 
+def window_still_live(conn, start: str, end: str, sports: tuple[str, ...] | None = None) -> bool:
+    """A game on a slate date in the window has no final score.
+
+    Slate dates are dates that have a BET in the window. Every game of that
+    sport on that date has to be final. An unfinished game in another sport
+    does not hold the recap. A connection with no execute is not live, so a
+    test double that only ledgers still posts.
+    """
+    execute = getattr(conn, "execute", None)
+    if execute is None:
+        return False
+    sports = tuple(s for s in (sports or ()) if s)
+    if not sports:
+        return False
+    marks = ", ".join(["%s"] * len(sports))
+    sql = (
+        "SELECT 1 FROM games g "
+        f"WHERE g.game_date BETWEEN %s AND %s AND g.sport IN ({marks}) "
+        "AND (g.home_score IS NULL OR g.away_score IS NULL) "
+        "AND EXISTS (SELECT 1 FROM picks p "
+        "WHERE p.game_date = g.game_date AND p.sport = g.sport "
+        "AND p.signal_type = 'BET' "
+        "AND p.game_date BETWEEN %s AND %s) "
+        "LIMIT 1"
+    )
+    row = execute(sql, (start, end, *sports, start, end)).fetchone()
+    return row is not None
+
+
 def _settled_rows(conn, game_date: str) -> list[tuple]:
     """One settled day."""
     return _execute_settled(conn, _SETTLED_SQL.format(window="= %s"),
@@ -2552,6 +2581,11 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         if not rows:
             logger.info(f"Discord(results): nothing settled for {game_date}")
             return 0
+        sports = tuple({r[0] for r in rows if r[0]})
+        if window_still_live(conn, game_date, game_date, sports):
+            logger.info(f"Discord(results): {game_date} still has a game "
+                        f"without a final score")
+            return 0
 
         overall = _tally(rows)
         by_sport: dict[str, list[tuple]] = {}
@@ -2779,6 +2813,11 @@ def notify_discord_period(span: str, start: date, end: date,
             return 0
         rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
         if not rows:
+            return 0
+        sports = tuple({r[0] for r in rows if r[0]})
+        if window_still_live(conn, start.isoformat(), end.isoformat(), sports):
+            logger.info(f"Discord({span}): {heading} still has a game "
+                        f"without a final score")
             return 0
         overall = _tally(rows)
         if (overall["w"] + overall["l"] + overall["p"]) == 0:
