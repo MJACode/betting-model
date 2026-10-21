@@ -275,7 +275,10 @@ def step_prune_odds(run_date: str) -> bool:
     that unread history would grow ~2.7 GB/month, so this prunes it to a flat
     working set. draftkings + sbr_consensus are never touched, and today's rows
     are left alone so this can't race with an ingest. Non-fatal: a failed prune
-    costs disk, never picks.
+    costs disk, never picks, so the run goes on. But it returns False, so the
+    run's ledger names it as a failed step. Its backlog shows it last finished
+    around 2026-09-03, and it timed out every day the logs reach (10-14 to
+    10-20) while this returned True, so nothing said so.
     """
     try:
         from data.prune_odds import run_prune_odds
@@ -284,8 +287,8 @@ def step_prune_odds(run_date: str) -> bool:
         logger.success(f"✓ Odds prune: {total:,} line-shop rows removed")
         return True
     except Exception as exc:
-        logger.warning(f"⚠ Odds prune failed (non-fatal): {exc}")
-        return True
+        logger.warning(f"⚠ Odds prune failed (non-fatal, step marked failed): {exc}")
+        return False
 
 
 
@@ -1342,45 +1345,45 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
-def step_nba_prop_market(dry_run: bool = False) -> bool:
-    """NBA player props (`nba_prop_market`): same-line unders against Pinnacle.
+def step_nba_props(dry_run: bool = False) -> bool:
+    """NBA player props, BOTH models (`nba_prop_market`, `nba_prop_projection`), in one look.
 
-    Decides each game once, at the first look 45-57 minutes before its tip
-    whose newest prop fetch holds Pinnacle, and writes every qualifying
-    proposition with the game's decision row, under the model's lock
-    (scripts/nba_prop_market_card.py; no game or night cap, mike 2026-10-16).
-    Run by the refresh pass, the 6am run and the five-minute window job. LIVE,
-    no write switch (mike, 2026-10-15). A look with no game in its window
-    writes nothing and logs why.
+    Each card decides a game once, 45-57 minutes before its tip; their
+    candidates are pooled and ONE door writes at most one NBA prop bet a game
+    across both models and scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT a
+    night, ranked by each bet's EV percentile within its own model
+    (models/nba_prop_rank.py), the bets already written counted (mike, 2026-10-20:
+    "Only the strongest picks need to be sent, like NHL"; it replaced the
+    2026-10-16 no-cap rule). Run by the refresh pass, the 6am run and the
+    five-minute window job. LIVE, no write switch. A look with no game in its
+    window writes nothing and logs why. One model's look failing returns False
+    (the step exits 1) after the other model has still decided and written.
     """
     try:
-        from scripts.nba_prop_market_card import run_card
-        result = run_card(do_publish=not dry_run)
-        logger.success(f"✓ NBA prop market card: "
-                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
+        from scripts.nba_props_card import run_cards
+        result = run_cards(do_publish=not dry_run)
+        if result.get("errors"):
+            # one model's look failed; the other still decided and wrote (scripts/nba_props_card.py)
+            logger.error(f"✗ NBA prop cards: a look failed {result['errors']}: {result}")
+            return False
+        logger.success(f"✓ NBA prop cards: {result}")
         return True
     except Exception as exc:
-        logger.error(f"✗ NBA prop market card failed: {exc}")
+        logger.error(f"✗ NBA prop cards failed: {exc}")
         return False
+
+
+def step_nba_prop_market(dry_run: bool = False) -> bool:
+    """The old name for step_nba_props, kept so existing callers keep working. One model's card
+    alone never writes (the card that ran first would win the game's one bet)."""
+    return step_nba_props(dry_run=dry_run)
 
 
 def step_nba_prop_projection(dry_run: bool = False) -> bool:
-    """The NBA projection model (`nba_prop_projection`): price the stored projections.
-
-    Decides each game once, in the same window as nba_prop_market and after it
-    (scripts/nba_prop_projection_card.py), on the projections the window job
-    stored about 65 minutes before tip. Never a proposition nba_prop_market holds.
-    LIVE, no write switch. A look with no game in its window writes nothing.
-    """
-    try:
-        from scripts.nba_prop_projection_card import run_card
-        result = run_card(do_publish=not dry_run)
-        logger.success(f"✓ NBA projection card: "
-                       f"{ {k: v for k, v in result.items() if k != 'diag'} }")
-        return True
-    except Exception as exc:
-        logger.error(f"✗ NBA projection card failed: {exc}")
-        return False
+    """The old name for step_nba_props, kept so existing callers keep working: both NBA prop
+    cards in one look (scripts/nba_props_card.py). A second run in the same pass decides nothing
+    new: every game the first decided is in both ledgers."""
+    return step_nba_props(dry_run=dry_run)
 
 
 def step_nba_total_luck(dry_run: bool = False) -> bool:
@@ -1808,6 +1811,17 @@ def step_settle(settle_date: str) -> bool:
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Period results recap failed (settlement "
                      f"unaffected): {exc}")
+
+    # Eggz's channel only. Yesterday at or after 6:00am ET, and the week
+    # and month on the same clock as the main recap. Ledgered separately.
+    try:
+        from tracking.eggz_picks import post_eggz_recaps
+        n = post_eggz_recaps()
+        if n:
+            logger.info(f"Eggz results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Eggz results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 
@@ -1983,9 +1997,8 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # The NBA prop card reads the fetch just stored (it decides only games
     # 45-57 minutes from tip, so at 6am it normally writes nothing), then the
     # closing snapshot for any bet game whose close is due.
-    logger.info("Step 2c3: NBA prop card (same-line unders vs Pinnacle)...")
-    results["nba_prop_market"] = step_nba_prop_market(dry_run=dry_run)
-    results["nba_prop_projection"] = step_nba_prop_projection(dry_run=dry_run)
+    logger.info("Step 2c3: NBA prop cards (both NBA prop models, one door)...")
+    results["nba_props"] = step_nba_props(dry_run=dry_run)
     if not dry_run:
         results["nba_prop_close"] = step_nba_prop_close()
     time.sleep(2)
@@ -2334,7 +2347,7 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
-                                 "nba-prop-market", "nba-prop-close",
+                                 "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck",
                                  "nhl-over-under",
@@ -2418,6 +2431,7 @@ Examples:
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
+            "nba-props": lambda: step_nba_props(dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
             "nba-prop-close": lambda: step_nba_prop_close(),
             "nba-prop-projection": lambda: step_nba_prop_projection(dry_run=args.dry_run),

@@ -893,3 +893,22 @@ def test_the_refresh_pass_does_not_run_it():
     import re
     sh = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
     assert not re.search(r"^\s*step nba-total-luck\s*$", sh, re.M)
+
+
+def test_opening_night_declines_every_game_without_crashing(art):
+    """RULE: on a season with no final game yet, every game is declined under
+    the 10-game rule. On 2026-10-20 the card failed every tick of its window:
+    the ratings raised on the empty, object-dtype box the card loads before
+    any game is final (scripts/nba_total_luck_card.load_season)."""
+    t = _target("2026-10-21")
+    tip = _et(2026, 10, 21, 19, 30)
+    fetch = tip - timedelta(minutes=65)
+    q = tl.quote_frame(_rows(t.game_id[0], fetch, [("pinnacle", 224.5, -105, -115),
+                                                   ("draftkings", 224.5, -110, -110)]),
+                       t.assign(tip=pd.Timestamp(tip)))
+    times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
+    box = pd.DataFrame(columns=["game_id", "team", *tl.BOX_COLS])
+    games = pd.DataFrame(columns=["game_id", "season", "game_date", "home_team", "away_team",
+                                  "home_score", "away_score"])
+    bets, decisions, diag = tl.decide(t, q, box, games, times, art, scheduled=games)
+    assert bets == [] and diag["early_season"] == 1, (decisions, diag)

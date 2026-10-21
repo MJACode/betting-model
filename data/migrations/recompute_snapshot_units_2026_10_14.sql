@@ -8,9 +8,14 @@
 -- left as published.
 --
 -- Idempotent. The before totals are inserted once, from the latest all-time
--- rows, before the first rewrite. Later runs recompute units again (same
--- formula, same result) and refresh the after column. The column drop is
--- IF EXISTS in spirit: it runs only while the column is still there.
+-- rows, before the first rewrite. The units rewrite and the column drop run
+-- only while results_snapshots.record_only still exists. The worker has no
+-- applied-filename ledger: every ACTIVE_MIGRATIONS file runs on every pass,
+-- and a file skips by looking at the database. Once this column is gone the
+-- rewrite must not run again. published_picks_record_2026_10_14.sql owns the
+-- snapshot numbers after that, and an unguarded rewrite here would commit
+-- all-bets units onto rows whose W-L that later file already narrowed to
+-- the picks Discord still has.
 --
 -- ONE statement, so data/view_migrations.py can execute it.
 
@@ -60,6 +65,10 @@ BEGIN
     END IF;
   END IF;
 
+  -- SNAPSHOT_REWRITE_BEGIN
+  -- Only while the column this file exists to drop is still there. A later
+  -- pass finds it gone and does not touch results_snapshots.
+  IF has_col THEN
   CREATE TEMP TABLE _snapshot_unit_picks ON COMMIT DROP AS
   SELECT
     p.sport,
@@ -139,7 +148,7 @@ BEGIN
     AND s.game_date = b.as_of_date
     AND COALESCE(s.sport, '') = b.sport;
 
-  IF has_col THEN
     ALTER TABLE public.results_snapshots DROP COLUMN record_only;
   END IF;
+  -- SNAPSHOT_REWRITE_END
 END $mig$;

@@ -366,6 +366,7 @@ def run_period_recaps() -> None:
 
     The function itself decides whether a window is due, and the ledger
     decides whether it already went out. A raise must not kill the scheduler.
+    Eggz's own channel gets the same windows, and only that channel.
     """
     try:
         from tracking.discord_notifier import post_period_recaps
@@ -373,6 +374,21 @@ def run_period_recaps() -> None:
         log.info("period recaps: %s post(s)", n)
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR period recaps crashed")
+    try:
+        from tracking.eggz_picks import post_eggz_recaps
+        n = post_eggz_recaps()
+        log.info("eggz recaps: %s post(s)", n)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR eggz recaps crashed")
+
+
+def run_eggz_ingest() -> None:
+    """Read #eggz-picks and grade what is final. No-op when the token is unset."""
+    try:
+        from tracking.eggz_picks import run_eggz_ingest as _run
+        _run()
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR eggz ingest crashed")
 
 
 def run_failure_alerter() -> None:
@@ -435,6 +451,49 @@ def run_calibration_watch() -> None:
         log.info("CalibrationWatch: %s", result.get("status"))
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR calibration-watch crashed")
+
+
+def run_social_post_queue() -> None:
+    """Publish manual rows in social_post_queue, then one profile update.
+
+    Does not post picks or recaps. A raise must not kill the scheduler.
+    The claim in each drain is what stops two services sending the same
+    row; this job does not take the session lock the worker_jobs queue uses.
+    The profile pass is its own try, so a post-queue failure does not skip
+    it and a profile failure does not change the post pass.
+    """
+    try:
+        from data.db import get_connection
+        from tracking.social_posts import drain_social_posts
+        conn = get_connection()
+        try:
+            result = drain_social_posts(conn)
+        finally:
+            conn.close()
+        posted = result.get("posted") or 0
+        bad = [item for item in result.get("results", [])
+               if item.get("status") in ("failed", "uncertain")]
+        if posted or bad or result.get("status") not in ("ok", "skipped", "no_table"):
+            log.info("social post queue: status=%s posted=%s",
+                     result.get("status"), posted)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR social-post-queue crashed")
+    try:
+        from data.db import get_connection
+        from tracking.social_profile import drain_social_profile
+        conn = get_connection()
+        try:
+            result = drain_social_profile(conn)
+        finally:
+            conn.close()
+        applied = result.get("applied") or 0
+        bad = [item for item in result.get("results", [])
+               if item.get("status") == "failed"]
+        if applied or bad or result.get("status") not in ("ok", "skipped", "no_table"):
+            log.info("social profile: status=%s applied=%s",
+                     result.get("status"), applied)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR social-profile crashed")
 
 
 def run_job_queue() -> None:
@@ -580,7 +639,7 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
-                  "period_recaps",
+                  "period_recaps", "eggz_ingest",
                   # "nfl_poll_fast", not "nfl_poll_10min": the id was renamed
                   # when the fast tier moved to T-24h and this entry was not,
                   # so it named a job that does not exist. Inert today because
@@ -1036,7 +1095,7 @@ def run_nfl_prop_card() -> None:
 # call per bet game owed a close. The PROJECTING steps run after them, on the
 # tick about an hour before tip, so a slow frame never delays a decision: the
 # ESPN injury pull, then the frame over every box line since 2018-19.
-NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "card": 60, "projection_card": 60, "close": 60,
+NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "cards": 120, "close": 60,
                              "injuries": 60, "project": 240}
 
 
@@ -1051,8 +1110,9 @@ def run_nba_prop_window() -> None:
     undecided, no bet game is owed its closing snapshot and no game is due its
     projection -- most ticks of most days.
 
-    Otherwise: fetch props for exactly the games to decide, run nba_prop_market's
-    card and then the projection card on that fetch, take any closing snapshot
+    Otherwise: fetch props for exactly the games to decide, run both NBA prop
+    cards on that fetch in one step (one bet a game across both models, at most
+    4 a night: scripts/nba_props_card.py), take any closing snapshot
     that is due, and publish what the cards wrote. THEN, for the games about 65
     minutes from tip, pull the ESPN injury list and store their projections (the
     projection card prices them two ticks later, inside the window). A step
@@ -1075,12 +1135,14 @@ def run_nba_prop_window() -> None:
         outcomes["nba-prop-window-fetch"] = _run(
             [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
             "nba-prop-window-fetch", timeout=t["fetch"])
-        outcomes["nba-prop-market"] = _run(
-            [sys.executable, "run_pipeline.py", "--step", "nba-prop-market"],
-            "nba-prop-market", timeout=t["card"])
-        outcomes["nba-prop-projection"] = _run(
-            [sys.executable, "run_pipeline.py", "--step", "nba-prop-projection"],
-            "nba-prop-projection", timeout=t["projection_card"])
+        # BOTH NBA prop cards in ONE step: their candidates meet in one choice
+        # (one bet a game across both models, four a night, strongest first by
+        # each bet's EV percentile within its own model;
+        # scripts/nba_props_card.py), so the order they run in cannot decide
+        # which model's bet a game gets.
+        outcomes["nba-props"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-props"],
+            "nba-props", timeout=t["cards"])
     if plan.close:
         outcomes["nba-prop-close"] = _run(
             [sys.executable, "run_pipeline.py", "--step", "nba-prop-close"],
@@ -1696,6 +1758,16 @@ def build_scheduler() -> BlockingScheduler:
         name="Worker job queue (every 5 min)",
     )
 
+    # Manual posts to @SignalBasePicks, and one queued profile update.
+    # Separate from the pick slate and the recap jobs. Five minutes matches
+    # the worker job queue. It does not move any other trigger.
+    sched.add_job(
+        run_social_post_queue,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="social_post_queue",
+        name="Manual X posts (every 5 min)",
+    )
+
     # Pipeline watch — 7:15am ET daily, the slot the Sentinel agent used.
     #
     # After the 6am pipeline and before the 8am backlog run, so the morning
@@ -1722,6 +1794,17 @@ def build_scheduler() -> BlockingScheduler:
         id="period_recaps",
         name="Weekly and monthly results (Mon 7:30am ET)",
         max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
+
+    # Eggz's channel. The poll is the read. Recaps are the 6:00am settle and
+    # the Monday 7:30 job above. Unset token or channel: the poll returns
+    # without a request.
+    sched.add_job(
+        run_eggz_ingest,
+        CronTrigger(minute="*/15", timezone=TIMEZONE),
+        id="eggz_ingest",
+        name="Eggz picks (every 15 min)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has
