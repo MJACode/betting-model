@@ -430,8 +430,12 @@ def _rows(raw) -> list[GameRow]:
 def _with_prices(conn, rows: list[GameRow], rules: Rules,
                  skip: frozenset = frozenset()) -> list[GameRow]:
     """Fill `priced` on the unscored rows: one indexed read, for those only.
-    `skip`: ids that need no answer (the game being scored is priced, or the
-    scorer would not be scoring it)."""
+    `skip`: ids that need no answer -- only ever the one game being asked
+    about, which team_view puts back in whatever its row says. NOT the games a
+    scoring pass is about to score: run_scorer builds that list before its
+    price pre-filters drop the games no book has priced, so an unpriced row
+    dated inside the window would be taken for a game and hold the real one
+    behind it (WNBA_2026-10-22_GSV_ATL, 0 odds rows, in the Finals)."""
     if not rules.needs_price:
         return rows
     ids = sorted({r.game_id for r in rows if not r.scored and r.game_id not in skip})
@@ -506,7 +510,7 @@ class ScheduleBook:
         rows = _rows(conn.execute(
             f"SELECT {_ROW_COLS} FROM games WHERE sport = ? "
             f"AND game_date >= ? AND game_date <= ?", (sport, lo, hi)).fetchall())
-        rows = _with_prices(conn, rows, rules, skip=frozenset(str(t[0]) for t in targets))
+        rows = _with_prices(conn, rows, rules)
         return cls(rules, rows, _log_check(conn, rules, lo, hi))
 
     def views(self, game_id: str, game_date: str, home: str, away: str,

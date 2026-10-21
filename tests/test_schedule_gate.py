@@ -191,6 +191,24 @@ def test_a_wnba_row_no_book_ever_priced_is_not_a_game(monkeypatch):
     assert holds and set(holds.values()) == {None}, holds
 
 
+def test_a_row_no_book_priced_inside_the_scoring_window_is_not_a_game(monkeypatch):
+    """The same phantom seen from two days before it: dated INSIDE the
+    look-ahead window, so it is on run_scorer's game list too (the price
+    pre-filter drops it later, in the loop). Being on that list must not make
+    it a game. Production 2026-10-20: WNBA_2026-10-22_GSV_ATL has 0 odds rows
+    and sits in the Finals."""
+    real = f"WNBA_{_d(3)}_NY_ATL"
+    phantom = f"WNBA_{_d(2)}_NY_ATL"
+    board = [(phantom, "WNBA", 2026, _d(2), "ATL", "NY", _t(48)),
+             (real, "WNBA", 2026, _d(3), "ATL", "NY", _t(72))]
+    schedule = [(real, _d(3), "ATL", "NY", _t(72), None, None),
+                (phantom, _d(2), "ATL", "NY", _t(48), None, None),      # 0 odds rows
+                (f"WNBA_{_d(-1)}_ATL_NY", _d(-1), "NY", "ATL", _t(-22), 80.0, 77.0)]
+    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={real}), "WNBA")
+    real_holds = {k: v for k, v in holds.items() if k[0] == real}
+    assert real_holds and set(real_holds.values()) == {None}, real_holds
+
+
 # ── UFC: a card not in the fight log yet ─────────────────────────────────────
 
 def test_ufc_waits_for_a_fighters_card_to_reach_the_fight_log(monkeypatch):
