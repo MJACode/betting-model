@@ -165,6 +165,5 @@ and calls `byom_backtest`, `byom_save_model`, `byom_list_models`, and
 calls. A slower backtest response does not replace a newer one.
 `byomFilters` rejects a mixed-case or unknown key. No screen imports
 them. An empty filter is the whole season and must not be shown as a
-saved model record. `units_uncapped` and `units_capped`
-are results of DraftKings' own lock price. There is no recommended
-stake. `package.json` is unchanged. Sign-in is unchanged.
+saved model record. There is no recommended stake. `package.json` is
+unchanged. Sign-in is unchanged.
