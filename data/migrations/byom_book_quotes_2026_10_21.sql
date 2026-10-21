@@ -24,8 +24,22 @@
 -- byom_backtest(season, filters) is the DraftKings record: the same counts,
 -- and units, roi, and risked are NULL. byom_backtest(season, filters, books)
 -- grades the best line among those books. No selected line excludes the
--- leg. A prop that is not logged stays out. Units call
--- published_pick_unit_profit and published_pick_unit_risked. A push is 0.
+-- leg. A quote with a line and no price is not eligible, so the record
+-- and the units describe the same bets. A prop that is not logged stays
+-- out. Units call published_pick_unit_profit and
+-- published_pick_unit_risked. A push is 0.
+--
+-- A book's quote counts only when captured_at is at or before kickoff
+-- and no older than v_max_age hours. The default is 6. That number is
+-- also QUOTE_MAX_AGE_HOURS in byom/book_quotes.py. Change both together.
+--
+-- Ranking is the number first. Spreads take the higher line, overs the
+-- lower line, unders the higher line. Price only breaks a tie, then the
+-- book name. A moneyline has no line, so the higher American price wins.
+-- Price does not outrank a better number.
+--
+-- canonical_key is the game key. Prop deletes use that column. The
+-- one-time backfill below is for rows written before the column existed.
 --
 -- The in-function 3s timeout does not apply. Postgres arms
 -- statement_timeout when the top-level statement starts, so the SET below
@@ -51,6 +65,7 @@ BEGIN
         WHERE n.nspname = 'public' AND p.proname = 'byom_backtest'
           AND p.prosrc LIKE '%byom_best_line_v1%'
           AND p.prosrc LIKE '%byom_backtest_v1%'
+          AND p.prosrc LIKE '%byom_quote_window_v1%'
           AND pg_get_function_identity_arguments(p.oid)
               = 'p_season integer, p_filters jsonb, p_books text[]')
      AND NOT EXISTS (
@@ -72,7 +87,8 @@ BEGIN
              JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = 'public' AND p.proname = 'byom_save_model'
               AND p.prosrc LIKE '%byom_best_line_v1%'
-              AND p.prosrc LIKE '%byom_saved_models_v1%')
+              AND p.prosrc LIKE '%byom_saved_models_v1%'
+              AND p.prosrc LIKE '%byom_books_in_filters_v1%')
          AND EXISTS (
            SELECT 1 FROM pg_proc p
              JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -85,6 +101,12 @@ BEGIN
      AND to_regclass('public.idx_byom_prop_book_quotes_fact_book') IS NULL
      AND to_regclass('public.idx_byom_game_book_quotes_fact_book_market_side') IS NOT NULL
      AND to_regclass('public.idx_byom_prop_book_quotes_fact_book_market_side') IS NOT NULL
+     AND to_regclass('public.idx_byom_prop_book_quotes_canonical') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'byom_prop_book_quotes'
+          AND column_name = 'canonical_key')
   THEN
     RAISE NOTICE 'byom book quotes already present - skipping';
     RETURN;
@@ -122,6 +144,23 @@ BEGIN
     ON public.byom_game_book_quotes (fact_id, book, market, side);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_byom_prop_book_quotes_fact_book_market_side
     ON public.byom_prop_book_quotes (fact_id, book, market, side);
+
+  -- CREATE TABLE IF NOT EXISTS does not add a column to a table that
+  -- already exists. canonical_key is the game key the writer already
+  -- knows. Prop deletes use the index, not a parse of fact_id.
+  ALTER TABLE public.byom_game_book_quotes
+    ADD COLUMN IF NOT EXISTS canonical_key text;
+  ALTER TABLE public.byom_prop_book_quotes
+    ADD COLUMN IF NOT EXISTS canonical_key text;
+  CREATE INDEX IF NOT EXISTS idx_byom_prop_book_quotes_canonical
+    ON public.byom_prop_book_quotes (canonical_key);
+  UPDATE public.byom_prop_book_quotes
+     SET canonical_key = split_part(fact_id, '|', 1)
+   WHERE canonical_key IS NULL
+     AND position('|' IN fact_id) > 0;
+  UPDATE public.byom_game_book_quotes
+     SET canonical_key = fact_id
+   WHERE canonical_key IS NULL;
 
   REVOKE ALL ON public.byom_game_book_quotes FROM PUBLIC, anon, authenticated;
   REVOKE ALL ON public.byom_prop_book_quotes FROM PUBLIC, anon, authenticated;
@@ -182,6 +221,9 @@ BEGIN
     DECLARE
       -- byom_backtest_v1
       -- byom_best_line_v1
+      -- byom_quote_window_v1
+      -- Change this with QUOTE_MAX_AGE_HOURS in byom/book_quotes.py.
+      v_max_age integer := 6;
       v_season integer;
       v_side text;
       v_role text;
@@ -339,9 +381,12 @@ BEGIN
         RETURN;
       END IF;
 
-      -- Best line among the selected books. Spreads: higher line. Over:
-      -- lower line. Under: higher line. Moneyline: higher American price.
-      -- Grade that line. A push is 0 via published_pick_unit_profit.
+      -- Best line among the selected books. A quote with no price is
+      -- out. captured_at must be at or before kickoff and no older than
+      -- v_max_age hours. Spreads: higher line. Over: lower line. Under:
+      -- higher line. Moneyline: higher American price. Price does not
+      -- outrank a better number. Grade that line. A push is 0 via
+      -- published_pick_unit_profit.
       RETURN QUERY
       WITH game_best AS (
         SELECT DISTINCT ON (q.fact_id, q.market, q.side)
@@ -350,10 +395,15 @@ BEGIN
           JOIN byom_game_facts g ON g.canonical_key = q.fact_id
          WHERE g.sport = 'NFL' AND g.season = v_season
            AND q.book = ANY (v_books)
+           AND q.price IS NOT NULL
            AND (
-             (q.market = 'h2h' AND q.price IS NOT NULL)
+             q.market = 'h2h'
              OR (q.market IN ('spreads', 'totals') AND q.line IS NOT NULL)
            )
+           AND g.commence_time IS NOT NULL
+           AND q.captured_at <= g.commence_time
+           AND q.captured_at >= g.commence_time
+                 - (v_max_age * interval '1 hour')
          ORDER BY q.fact_id, q.market, q.side,
            CASE
              WHEN q.market = 'spreads' THEN q.line
@@ -381,11 +431,17 @@ BEGIN
                q.fact_id, q.side, q.line, q.price
           FROM byom_prop_book_quotes q
           JOIN byom_prop_facts p ON p.prop_key = q.fact_id
+          JOIN byom_game_facts g ON g.canonical_key = p.canonical_key
          WHERE p.sport = 'NFL' AND p.season = v_season
            AND p.log_status = 'logged'
            AND p.actual IS NOT NULL
            AND q.book = ANY (v_books)
            AND q.line IS NOT NULL
+           AND q.price IS NOT NULL
+           AND g.commence_time IS NOT NULL
+           AND q.captured_at <= g.commence_time
+           AND q.captured_at >= g.commence_time
+                 - (v_max_age * interval '1 hour')
          ORDER BY q.fact_id, q.side,
            CASE WHEN q.side = 'under' THEN q.line ELSE NULL END DESC NULLS LAST,
            CASE WHEN q.side = 'over' THEN q.line ELSE NULL END ASC NULLS LAST,
@@ -571,6 +627,7 @@ BEGIN
     DECLARE
       -- byom_saved_models_v1
       -- byom_best_line_v1
+      -- byom_books_in_filters_v1
       v_uid uuid;
       v_name text;
       v_filters jsonb;
@@ -644,6 +701,8 @@ BEGIN
           SELECT DISTINCT lower(btrim(e.val #>> '{}'))
             FROM jsonb_array_elements(v_filters->'books') AS e(val));
         v_version := 2;
+        v_filters := jsonb_set(
+          v_filters, '{books}', to_jsonb(v_books), true);
       END IF;
 
       SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
@@ -651,7 +710,7 @@ BEGIN
         FROM jsonb_each(v_filters) AS e
        WHERE e.key IN (
          'side', 'role', 'weeks', 'min_rest_days', 'max_rest_days',
-         'primetime', 'markets');
+         'primetime', 'markets', 'books');
 
       IF p_season IS NULL THEN
         v_month := EXTRACT(MONTH FROM (now() AT TIME ZONE 'America/New_York'))::integer;

@@ -48,9 +48,22 @@ def test_the_migration_is_unregistered_and_leaves_the_old_files_alone():
     assert "ON public.byom_game_book_quotes (fact_id, book, market, side)" in sql
     assert "ON public.byom_prop_book_quotes (fact_id, book, market, side)" in sql
     assert "CREATE INDEX IF NOT EXISTS idx_byom_game_book_quotes_fact_book\n" not in sql
+    from byom.book_quotes import QUOTE_MAX_AGE_HOURS
+
     writer = (ROOT / "byom" / "book_quotes.py").read_text(encoding="utf-8")
+    assert QUOTE_MAX_AGE_HOURS == 6
+    assert f"v_max_age integer := {QUOTE_MAX_AGE_HOURS}" in code
+    assert "byom_quote_window_v1" in sql
+    assert "byom_books_in_filters_v1" in sql
+    assert "idx_byom_prop_book_quotes_canonical" in sql
+    assert "ADD COLUMN IF NOT EXISTS canonical_key" in sql
+    assert "WHEN q.market = 'spreads' THEN q.line" in code
+    assert "WHEN q.market = 'h2h' THEN q.price" in code
+    assert "WHEN q.market = 'totals' AND q.side = 'over' THEN q.line" in code
+    assert "q.price DESC NULLS LAST" in code
     assert writer.count("ON CONFLICT (fact_id, book, market, side)") == 1
     assert "ON CONFLICT (fact_id, book) DO" not in writer
+    assert "split_part" not in writer
     assert "CONCURRENTLY" not in code
     assert "insert into picks" not in sql.lower()
     assert code.index("RETURN;") < code.index("CREATE FUNCTION")
@@ -170,6 +183,86 @@ def test_each_book_keeps_its_own_last_pre_kickoff_line():
     assert write_game_quotes(Missing(), [{"canonical_key": "2026_01_BAL_KC"}]) == 0
 
 
+def test_a_missing_side_price_is_filled_from_the_same_line():
+    from byom.book_quotes import game_quote_rows
+
+    snap = KICK - timedelta(hours=1)
+    rows = game_quote_rows("2026_01_BAL_KC", [
+        {
+            "bookmaker": "fanduel", "market": "spreads",
+            "snapshot_at": snap, "commence_time": KICK,
+            "point": Decimal("-3"), "price_home": -110, "price_away": None,
+        },
+        {
+            "bookmaker": "fanduel", "market": "spreads",
+            "snapshot_at": snap, "commence_time": KICK,
+            "point": Decimal("-3"), "price_home": None, "price_away": -105,
+        },
+    ])
+    by_side = {row["side"]: row for row in rows}
+    assert by_side["home"]["line"] == Decimal("-3")
+    assert by_side["home"]["price"] == Decimal("-110")
+    assert by_side["away"]["line"] == Decimal("3")
+    assert by_side["away"]["price"] == Decimal("-105")
+    assert by_side["home"]["canonical_key"] == "2026_01_BAL_KC"
+
+
+def test_a_side_with_no_price_is_not_a_row():
+    from byom.book_quotes import game_quote_rows, prop_quote_rows
+    from byom.prop_facts import player_key
+
+    rows = game_quote_rows("2026_01_BAL_KC", [
+        {
+            "bookmaker": "draftkings", "market": "spreads",
+            "snapshot_at": KICK - timedelta(hours=1), "commence_time": KICK,
+            "point": Decimal("-3"), "price_home": -110, "price_away": None,
+        },
+    ])
+    assert [row["side"] for row in rows] == ["home"]
+
+    key = player_key("Lamar Jackson")
+    props = prop_quote_rows(
+        [{
+            "player_key": key,
+            "market": "player_pass_yds",
+            "canonical_key": "2026_01_BAL_KC",
+            "prop_key": "2026_01_BAL_KC|player_pass_yds|lamar jackson|240.5",
+        }],
+        [_quote("draftkings", 1, 240.5, under=None)],
+    )
+    assert [row["side"] for row in props] == ["over"]
+    assert props[0]["canonical_key"] == "2026_01_BAL_KC"
+
+
+def test_a_stale_book_is_dropped_and_six_hours_still_counts():
+    from byom.book_quotes import game_quote_rows
+
+    rows = game_quote_rows("2026_01_BAL_KC", [
+        {
+            "bookmaker": "fanduel", "market": "spreads",
+            "snapshot_at": KICK - timedelta(hours=10), "commence_time": KICK,
+            "point": Decimal("-1"), "price_home": -110, "price_away": -110,
+        },
+        {
+            "bookmaker": "draftkings", "market": "spreads",
+            "snapshot_at": KICK - timedelta(hours=2), "commence_time": KICK,
+            "point": Decimal("-3"), "price_home": -110, "price_away": -110,
+        },
+        {
+            "bookmaker": "betmgm", "market": "spreads",
+            "snapshot_at": KICK - timedelta(hours=6), "commence_time": KICK,
+            "point": Decimal("-2"), "price_home": -110, "price_away": -110,
+        },
+    ])
+    books = {row["book"] for row in rows}
+    assert "fanduel" not in books
+    assert "draftkings" in books
+    assert "betmgm" in books
+    lines = {(row["book"], row["side"]): row["line"] for row in rows}
+    assert lines[("draftkings", "home")] == Decimal("-3")
+    assert lines[("betmgm", "home")] == Decimal("-2")
+
+
 def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
     psycopg2 = pytest.importorskip("psycopg2")
     from tests.byom_scratch import ScratchPostgres, pg_bin
@@ -223,16 +316,38 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
               ml_home_result, ml_away_result,
               ou_over_result, ou_under_result,
               home_rest_days, away_rest_days, is_primetime,
-              home_role, away_role)
+              home_role, away_role, commence_time)
             VALUES
               ('2026_01_BAL_KC', 'NFL', 2026, 1, 'BAL', 'KC',
                'DraftKings line at game start', 24, 22, -3, 47,
                'loss', 'win', 'win', 'loss', 'loss', 'win',
-               7, 7, false, 'favorite', 'underdog'),
+               7, 7, false, 'favorite', 'underdog',
+               now() + interval '1 hour'),
               ('2026_02_BUF_NYJ', 'NFL', 2026, 2, 'BUF', 'NYJ',
                'DraftKings line at game start', 20, 20, 0, 40,
                'push', 'push', 'tie', 'tie', 'push', 'push',
-               10, 10, false, 'pickem', 'pickem')
+               10, 10, false, 'pickem', 'pickem',
+               now() + interval '1 hour'),
+              ('2026_03_DAL_PHI', 'NFL', 2026, 3, 'DAL', 'PHI',
+               'DraftKings line at game start', 24, 22, -3, 47,
+               'loss', 'win', 'win', 'loss', 'loss', 'win',
+               7, 7, false, 'favorite', 'underdog',
+               timestamptz '2026-09-27 17:00:00+00'),
+              ('2026_04_MIA_BUF', 'NFL', 2026, 4, 'MIA', 'BUF',
+               'DraftKings line at game start', 24, 22, -3, 47,
+               'loss', 'win', 'win', 'loss', 'loss', 'win',
+               7, 7, false, 'favorite', 'underdog',
+               timestamptz '2026-10-04 17:00:00+00'),
+              ('2026_05_DET_GB', 'NFL', 2026, 5, 'DET', 'GB',
+               'DraftKings line at game start', 24, 22, -3, 47,
+               'loss', 'win', 'win', 'loss', 'loss', 'win',
+               7, 7, false, 'favorite', 'underdog',
+               timestamptz '2026-10-11 17:00:00+00'),
+              ('2026_06_SEA_SF', 'NFL', 2026, 6, 'SEA', 'SF',
+               'DraftKings line at game start', 24, 22, -3, 47,
+               'loss', 'win', 'win', 'loss', 'loss', 'win',
+               7, 7, false, 'favorite', 'underdog',
+               timestamptz '2026-10-18 17:00:00+00')
         """)
         cur.execute("""
             INSERT INTO byom_prop_facts (
@@ -271,7 +386,23 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
               ('2026_02_BUF_NYJ', 'draftkings', 'h2h', 'home', NULL, -110, now()),
               ('2026_02_BUF_NYJ', 'draftkings', 'h2h', 'away', NULL, -110, now()),
               ('2026_02_BUF_NYJ', 'draftkings', 'totals', 'over', 40, -110, now()),
-              ('2026_02_BUF_NYJ', 'draftkings', 'totals', 'under', 40, -110, now())
+              ('2026_02_BUF_NYJ', 'draftkings', 'totals', 'under', 40, -110, now()),
+              ('2026_03_DAL_PHI', 'fanduel', 'spreads', 'home', -1, -110,
+               timestamptz '2026-09-27 07:00:00+00'),
+              ('2026_03_DAL_PHI', 'draftkings', 'spreads', 'home', -3, -110,
+               timestamptz '2026-09-27 16:00:00+00'),
+              ('2026_04_MIA_BUF', 'fanduel', 'spreads', 'home', -1, NULL,
+               timestamptz '2026-10-04 16:00:00+00'),
+              ('2026_04_MIA_BUF', 'draftkings', 'spreads', 'home', -3, -110,
+               timestamptz '2026-10-04 16:00:00+00'),
+              ('2026_05_DET_GB', 'draftkings', 'spreads', 'home', -1, NULL,
+               timestamptz '2026-10-11 16:00:00+00'),
+              ('2026_06_SEA_SF', 'fanduel', 'spreads', 'home', -1, -110,
+               timestamptz '2026-10-18 07:00:00+00'),
+              ('2026_06_SEA_SF', 'betmgm', 'spreads', 'home', -1, -110,
+               timestamptz '2026-10-18 11:00:00+00'),
+              ('2026_06_SEA_SF', 'draftkings', 'spreads', 'home', -3, -110,
+               timestamptz '2026-10-18 16:00:00+00')
         """)
         cur.execute("""
             INSERT INTO byom_prop_book_quotes
@@ -371,6 +502,31 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
             {"markets": ["player_pass_yds"]}, ["draftkings"],
         )["player_pass_yds"]
         assert dk_props[:5] == (2, 1, 1, 0, 0)
+
+        stale = fetch(
+            {"weeks": [3], "side": "home", "markets": ["spreads"]},
+            ["fanduel", "draftkings"],
+        )["spreads"]
+        assert stale[:5] == (1, 0, 1, 0, 0)
+        assert float(stale[5]) == pytest.approx(unit_profit(-110, "LOSS"), abs=1e-9)
+        assert float(stale[7]) == pytest.approx(unit_risked(-110, "LOSS"), abs=1e-9)
+        priced = fetch(
+            {"weeks": [4], "side": "home", "markets": ["spreads"]},
+            ["fanduel", "draftkings"],
+        )["spreads"]
+        assert priced[:5] == (1, 0, 1, 0, 0)
+        assert float(priced[5]) == pytest.approx(unit_profit(-110, "LOSS"), abs=1e-9)
+        assert float(priced[7]) == pytest.approx(unit_risked(-110, "LOSS"), abs=1e-9)
+        assert "spreads" not in fetch(
+            {"weeks": [5], "side": "home", "markets": ["spreads"]},
+            ["draftkings"],
+        )
+        bounded = fetch(
+            {"weeks": [6], "side": "home", "markets": ["spreads"]},
+            ["fanduel", "betmgm", "draftkings"],
+        )["spreads"]
+        assert bounded[:5] == (1, 1, 0, 0, 0)
+        assert float(bounded[5]) == pytest.approx(unit_profit(-110, "WIN"), abs=1e-9)
         cur.execute("RESET ROLE")
 
         cur.execute("""
@@ -463,10 +619,27 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
         version, units, roi, books, filters = cur.fetchone()
         assert version == 2
         assert sorted(books) == ["draftkings", "fanduel"]
-        assert "books" not in filters
+        stored = filters if isinstance(filters, dict) else json.loads(filters)
+        assert sorted(stored["books"]) == ["draftkings", "fanduel"]
         assert float(units) == pytest.approx(unit_profit(-110, "WIN"), abs=1e-9)
         assert float(roi) == pytest.approx(
             unit_profit(-110, "WIN") / unit_risked(-110, "WIN"), abs=1e-9)
+        cur.execute("""
+            SELECT bets, wins FROM byom_save_model(
+              'best home',
+              (SELECT filters FROM byom_models WHERE name = 'best home'),
+              2026)
+        """)
+        assert cur.fetchone() == (1, 1)
+        cur.execute("""
+            SELECT result_version
+              FROM byom_model_snapshots s
+              JOIN byom_models m ON m.model_id = s.model_id
+             WHERE m.name = 'best home'
+             ORDER BY s.saved_at DESC
+             LIMIT 1
+        """)
+        assert cur.fetchone()[0] == 2
         with pytest.raises(psycopg2.errors.RaiseException, match="lowercase"):
             cur.execute("""
                 SELECT byom_save_model('nope', '{"Books":["draftkings"]}'::jsonb, 2026)
@@ -528,6 +701,28 @@ def test_scratch_best_line_grades_units_and_keeps_the_draftkings_record():
         indexdef = cur.fetchone()[0]
         assert indexdef.startswith("CREATE UNIQUE INDEX")
         assert "(fact_id, book, market, side)" in indexdef
+        cur.execute("""
+            SELECT prosrc LIKE '%byom_quote_window_v1%'
+              FROM pg_proc WHERE proname = 'byom_backtest'
+        """)
+        assert cur.fetchone()[0] is True
+        cur.execute("""
+            SELECT prosrc LIKE '%byom_books_in_filters_v1%'
+              FROM pg_proc WHERE proname = 'byom_save_model'
+        """)
+        assert cur.fetchone()[0] is True
+        cur.execute("""
+            SELECT DISTINCT canonical_key
+              FROM byom_prop_book_quotes
+             WHERE fact_id LIKE '2026_01_BAL_KC|%%'
+             ORDER BY 1
+        """)
+        assert cur.fetchall() == [("2026_01_BAL_KC",)]
+        cur.execute("""
+            SELECT 1 FROM pg_indexes
+             WHERE indexname = 'idx_byom_prop_book_quotes_canonical'
+        """)
+        assert cur.fetchone() is not None
         cur.execute("SET ROLE anon")
         cur.execute("SELECT count(*) FROM byom_game_book_quotes")
         assert cur.fetchone()[0] == quote_count

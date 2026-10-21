@@ -3,13 +3,20 @@
 The fact row stays the DraftKings line at game start. These rows are
 the other books, and DraftKings itself, from that same last snapshot
 at or before kickoff. A quote with no line is dropped before the rank,
-the same way prop facts drop one. The tables are created by
+the same way prop facts drop one. A quote with no price is not a row.
+A quote older than QUOTE_MAX_AGE_HOURS before kickoff is not a row.
+The tables are created by
 data/migrations/byom_book_quotes_2026_10_21.sql, which is not applied
 here. apply=false, and a database without the tables, writes nothing.
 """
 from __future__ import annotations
 
 from decimal import Decimal
+
+# Change this number here and the matching `v_max_age integer := N` in
+# data/migrations/byom_book_quotes_2026_10_21.sql. A book's quote counts
+# only when captured_at is at or before kickoff and no older than this.
+QUOTE_MAX_AGE_HOURS = 6
 
 from byom.game_facts import lead_hours, parse_game_id, parse_ts
 from byom.prop_facts import (
@@ -35,6 +42,14 @@ def _ready(conn, table: str) -> bool:
     return row is not None and row[0] is not None
 
 
+def _within_window(captured, commence) -> bool:
+    """True when captured_at is at or before kickoff and inside the max age."""
+    lead = lead_hours(captured, commence)
+    if lead is None or lead < 0:
+        return False
+    return lead <= QUOTE_MAX_AGE_HOURS
+
+
 def _prop_row(quote: dict) -> dict | None:
     market = quote.get("market")
     book = (quote.get("bookmaker") or "").strip().lower()
@@ -43,11 +58,13 @@ def _prop_row(quote: dict) -> dict | None:
     key = player_key(quote.get("player_name"))
     if not key:
         return None
-    lead = lead_hours(quote.get("snapshot_at"), quote.get("commence_time"))
-    if lead is None or lead < 0:
-        return None
     snap = parse_ts(quote.get("snapshot_at"))
     if snap is None:
+        return None
+    captured = parse_ts(quote.get("captured_at")) or snap
+    if not _within_window(snap, quote.get("commence_time")):
+        return None
+    if not _within_window(captured, quote.get("commence_time")):
         return None
     row = dict(quote)
     row["player_key"] = key
@@ -70,6 +87,11 @@ def prop_quote_rows(facts: list[dict], quotes: list[dict]) -> list[dict]:
         for fact in facts
         if fact.get("player_key") and fact.get("market") and fact.get("prop_key")
     }
+    canon = {
+        (fact["player_key"], fact["market"]): fact.get("canonical_key")
+        for fact in facts
+        if fact.get("player_key") and fact.get("market")
+    }
     grouped: dict[tuple, list[dict]] = {}
     for quote in quotes:
         row = _prop_row(quote)
@@ -91,13 +113,20 @@ def prop_quote_rows(facts: list[dict], quotes: list[dict]) -> list[dict]:
         captured = parse_ts(quote.get("captured_at")) or quote["snapshot_at"]
         base = {
             "fact_id": fact_id[(key, market)],
+            "canonical_key": canon.get((key, market)),
             "book": book,
             "market": market,
             "line": quote["point"],
             "captured_at": captured,
         }
-        out.append({**base, "side": "over", "price": _num(quote.get("over_price"))})
-        out.append({**base, "side": "under", "price": _num(quote.get("under_price"))})
+        for side, raw_price in (
+            ("over", quote.get("over_price")),
+            ("under", quote.get("under_price")),
+        ):
+            price = _num(raw_price)
+            if price is None:
+                continue
+            out.append({**base, "side": side, "price": price})
     return out
 
 
@@ -106,12 +135,10 @@ def _game_row(quote: dict) -> dict | None:
     book = (quote.get("bookmaker") or "").strip().lower()
     if market not in GAME_MARKETS or not book:
         return None
-    lead = lead_hours(quote.get("snapshot_at"), quote.get("commence_time"))
-    if lead is None or lead < 0:
-        return None
     snap = parse_ts(quote.get("snapshot_at"))
-    if snap is None:
+    if snap is None or not _within_window(snap, quote.get("commence_time")):
         return None
+    lead = lead_hours(snap, quote.get("commence_time"))
     row = dict(quote)
     row["book"] = book
     row["market"] = market
@@ -144,7 +171,18 @@ def _pick_game(pool: list[dict], require_line: bool) -> dict | None:
         point = quote.get("point")
         return (price, "" if point is None else format(point, "f"))
 
-    return max(at_snap, key=rank)
+    # Keep this rank. A second row at the same snapshot can carry the
+    # other side's price. Copy it only when the line is the same.
+    chosen = dict(max(at_snap, key=rank))
+    point = chosen.get("point")
+    for other in at_snap:
+        if require_line and other.get("point") != point:
+            continue
+        if chosen.get("price_home") is None and other.get("price_home") is not None:
+            chosen["price_home"] = other["price_home"]
+        if chosen.get("price_away") is None and other.get("price_away") is not None:
+            chosen["price_away"] = other["price_away"]
+    return chosen
 
 
 def game_quote_rows(canonical_key: str, quotes: list[dict]) -> list[dict]:
@@ -152,7 +190,7 @@ def game_quote_rows(canonical_key: str, quotes: list[dict]) -> list[dict]:
 
     Home spread is the home handicap. Away spread is its opposite. A
     moneyline has a price and no line. A spread or total with no line
-    is not a row.
+    is not a row. A side with no price is not a row.
     """
     grouped: dict[tuple, list[dict]] = {}
     for quote in quotes:
@@ -184,10 +222,11 @@ def game_quote_rows(canonical_key: str, quotes: list[dict]) -> list[dict]:
                 ("away", None, chosen.get("price_away")),
             )
         for side, line, price in sides:
-            if market == "h2h" and price is None:
+            if price is None:
                 continue
             out.append({
                 "fact_id": canonical_key,
+                "canonical_key": canonical_key,
                 "book": book,
                 "market": market,
                 "side": side,
@@ -204,6 +243,11 @@ CASE WHEN o.snapshot_at ~ '^[0-9]{4}-'
      ELSE NULL END
 """
 
+# nfl_odds_history stores both sides on one row. price_home is the home
+# price, the over, or the home moneyline. price_away is the away price
+# or the under. That is the column comment in data/supabase_schema.sql
+# and the pair _two_sided writes in nfl/scripts/screen_books.py. Totals
+# are not remapped: price_home is the over and price_away is the under.
 _GAME_HISTORY = """
 SELECT bookmaker, market, snapshot_at, commence_time, point,
        price_home, price_away
@@ -306,16 +350,18 @@ def _replace(conn, table: str, fact_ids: list[str], rows: list[dict]) -> int:
     conn.executemany(
         f"""
         INSERT INTO {table}
-          (fact_id, book, market, side, line, price, captured_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+          (fact_id, canonical_key, book, market, side, line, price, captured_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (fact_id, book, market, side) DO UPDATE
-          SET line = EXCLUDED.line,
+          SET canonical_key = EXCLUDED.canonical_key,
+              line = EXCLUDED.line,
               price = EXCLUDED.price,
               captured_at = EXCLUDED.captured_at
         """,
         [
-            (row["fact_id"], row["book"], row["market"], row["side"],
-             row["line"], row["price"], row["captured_at"])
+            (row["fact_id"], row.get("canonical_key"), row["book"],
+             row["market"], row["side"], row["line"], row["price"],
+             row["captured_at"])
             for row in rows
         ],
     )
@@ -344,14 +390,12 @@ def write_prop_quotes(conn, facts: list[dict], canonical_keys: list[str]) -> int
     from byom.prop_facts import MARKET_COLUMNS
 
     keys = list(dict.fromkeys(canonical_keys))
-    fact_ids = []
     if keys:
-        cur = conn.execute(
-            "SELECT fact_id FROM byom_prop_book_quotes "
-            "WHERE split_part(fact_id, '|', 1) = ANY(%s)",
+        conn.execute(
+            "DELETE FROM byom_prop_book_quotes WHERE canonical_key = ANY(%s)",
             (keys,),
         )
-        fact_ids = [row[0] for row in cur.fetchall()]
+    fact_ids = []
     rows = []
     by_game: dict[str, list[dict]] = {}
     for fact in facts:

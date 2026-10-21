@@ -176,22 +176,37 @@ Market and side are on the row because one book posts a spread, a
 total, and a moneyline. The unique key is `(fact_id, book, market, side)`.
 The quote is that book's last snapshot at or before kickoff, with the
 same per-book dedupe the prop facts use. The fact row stays the
-DraftKings line.
+DraftKings line. A line with no price is not a row, and `byom_backtest`
+also skips a stored quote whose price is null, so the record and the
+units describe the same bets.
+
+A book's quote counts only when `captured_at` is at or before kickoff
+and no older than `QUOTE_MAX_AGE_HOURS`. The default is 6. That number
+is in `byom/book_quotes.py` and as `v_max_age` in
+`data/migrations/byom_book_quotes_2026_10_21.sql`. Change both together.
+`nfl_odds_history.price_home` is the home price, the over, or the home
+moneyline. `price_away` is the away price or the under. The history
+query keeps that mapping.
 
 `byom_backtest(season, filters)` is unchanged: the stored DraftKings
 counts, and `units`, `roi`, and `risked` are null. A third argument,
 the member's books, grades the best line among those books and calls
 `published_pick_unit_profit` and `published_pick_unit_risked`. A push
 is 0. A leg with no selected line is excluded. A prop that is not
-logged stays out. Spreads take the higher line, overs the lower line,
-unders the higher line, and a moneyline the higher American price.
-Role on that path comes from the chosen spread. Rest, week, and
-primetime stay on the game fact.
+logged stays out. Ranking is the number first: spreads take the higher
+line, overs the lower line, unders the higher line. Price only breaks
+a tie on that number, then the book name. A moneyline has no line, so
+the higher American price wins. Price does not outrank a better number.
+Role on that path comes from the chosen spread, so a near-pick'em game
+can flip favorite and underdog and the same role filter can count
+different bets than the DraftKings path. Rest, week, and primetime
+stay on the game fact.
 
 A saved snapshot's `result_version` is null when the column was not
 there, 1 for a DraftKings save, and 2 for a best-line save that stores
-`units`, `roi`, and the books. Overall ROI is the sum of units over
-the sum of risked.
+`units`, `roi`, and the books. The cleaned books stay on the model
+filters, so saving those filters again stays a best-line save. Overall
+ROI is the sum of units over the sum of risked.
 
 `data/migrations/byom_book_quotes_2026_10_21.sql` is not in
 `ACTIVE_MIGRATIONS` and was not applied. The facts schema file and the

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM best line: a quote with no price is not eligible; quotes older than QUOTE_MAX_AGE_HOURS (6) before kickoff are not eligible; ranking is unchanged; books stay on the saved filters; unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM best line unique key: (fact_id, book, market, side); the (fact_id, book) index is dropped when present; unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM best line: per-book quotes, best selected line graded with published_pick_unit_profit, push is 0, result_version on snapshots; byom_book_quotes_2026_10_21.sql is not registered; unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM mobile data: master 0aee0c5c merged; base is master; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; no migration file; unapplied |
