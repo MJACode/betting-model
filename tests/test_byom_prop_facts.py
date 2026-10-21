@@ -350,6 +350,42 @@ def test_220_50_and_220_5_are_one_prop_key():
     assert first[0]["prop_key"].endswith("|220.5")
 
 
+def test_two_lines_on_the_last_snapshot_keep_the_latest_capture():
+    """One fact per player and market. The later captured_at wins.
+    A tie breaks on prop_id, then the line text. Anytime TD's 0.5
+    fill is unchanged."""
+    log = [_log("Lamar Jackson", passing_yards=250)]
+    older = _q("Lamar Jackson", "player_pass_yds", "draftkings", 1, 220.5, -110, -110)
+    newer = _q("Lamar Jackson", "player_pass_yds", "draftkings", 1, 240.5, -115, -105)
+    older["captured_at"] = KICK - timedelta(hours=4)
+    older["prop_id"] = 30
+    newer["captured_at"] = KICK - timedelta(hours=2)
+    newer["prop_id"] = 4
+    facts = facts_for_game(_game(), [older, newer], log)
+    assert len(facts) == 1
+    assert facts[0]["line"] == Decimal("240.5")
+    assert facts[0]["over_result"] == "win"
+
+    older["captured_at"] = newer["captured_at"]
+    older["prop_id"] = 40
+    newer["prop_id"] = 4
+    tied_time = facts_for_game(_game(), [newer, older], log)
+    assert len(tied_time) == 1
+    assert tied_time[0]["line"] == Decimal("220.5")
+
+    older["prop_id"] = 7
+    newer["prop_id"] = 7
+    tied_id = facts_for_game(_game(), [older, newer], log)
+    assert len(tied_id) == 1
+    assert tied_id[0]["line"] == Decimal("240.5")
+
+    td = facts_for_game(_game(), [
+        _q("Lamar Jackson", ANYTIME_TD_MARKET, "draftkings", 10, None, -150, None),
+    ], [_log("Lamar Jackson", rushing_tds=1, receiving_tds=0)])
+    assert _one(td, ANYTIME_TD_MARKET)["line"] == Decimal("0.5")
+    assert _one(td, ANYTIME_TD_MARKET)["over_result"] == "win"
+
+
 def test_a_later_number_replaces_the_earlier_line():
     """One line. The last pre-start snapshot is the fact."""
     facts = facts_for_game(_game(), [
@@ -366,6 +402,8 @@ def test_a_later_number_replaces_the_earlier_line():
 def test_the_builder_reads_one_game_and_casts_inside_a_case():
     text = (ROOT / "byom" / "prop_load.py").read_text(encoding="utf-8")
     assert "p.game_id = %s" in text
+    assert "p.prop_id" in text
+    assert "p.created_at" in text
     assert "bookmaker = 'draftkings'" in text
     assert "BEST_LINE_BOOKMAKERS" not in text
     assert "ELSE NULL END" in text
@@ -435,7 +473,7 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
               prop_id bigserial PRIMARY KEY, game_id text, game_date text,
               player_name text, team text, market text, bookmaker text,
               snapshot_type text, snapshot_at text, line numeric,
-              over_price numeric, under_price numeric);
+              over_price numeric, under_price numeric, created_at text);
             CREATE TABLE nfl_player_game_log (
               log_id bigserial PRIMARY KEY, player_id text, player_name text,
               team text, game_id text, game_date text, season int,

@@ -42,7 +42,9 @@ Other books are not read. A season is not loaded in one fetch.
 ## Prop facts
 
 `byom_prop_facts` is one standard prop at the DraftKings line at game
-start: the last DraftKings snapshot at or before kickoff.
+start: the last DraftKings snapshot at or before kickoff. Two points
+on that snapshot are one fact. The later `created_at` (captured_at)
+wins, then the higher `prop_id`, then the line text.
 `player_prop_odds` is the source, from `2023-09-01`
 (`PROP_HISTORY_START_DATE`). Seasons before 2023 are refused. The same
 `line_basis` label is stored on the row. The line is not a filter. A

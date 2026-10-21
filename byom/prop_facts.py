@@ -37,6 +37,7 @@ and stays ungraded.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from data.name_match import normalize_player_name
@@ -225,6 +226,25 @@ def _rows_for_player(log_rows: list[dict], key: str, team: str | None = None) ->
     return matches
 
 
+_NO_CAPTURE = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _capture_rank(quote: dict) -> tuple:
+    """Later capture wins. A tie breaks on prop_id, then the line text.
+
+    The line text is last so two different points cannot depend on the
+    order the quotes arrived in. A missing captured_at loses to one
+    that parsed. A missing prop_id loses to a real id.
+    """
+    captured = parse_ts(quote.get("captured_at")) or _NO_CAPTURE
+    raw_id = quote.get("prop_id")
+    try:
+        prop_id = int(raw_id) if raw_id is not None and raw_id != "" else -1
+    except (TypeError, ValueError):
+        prop_id = -1
+    return (captured, prop_id, line_key(quote.get("point")))
+
+
 def _pre_start(quote: dict) -> dict | None:
     """One DraftKings quote at or before kickoff, or None."""
     market = quote.get("market")
@@ -256,7 +276,9 @@ def facts_for_game(game: dict, quotes: list[dict],
 
     Empty when the id does not parse or no DraftKings standard market has
     a snapshot at or before kickoff. The line is the latest such snapshot.
-    An earlier number is not a second fact.
+    Two points on that snapshot are one fact: the later captured_at, then
+    the higher prop_id, then the line text. An earlier number is not a
+    second fact.
     """
     parsed = parse_game_id(game.get("game_id") or "")
     if parsed is None:
@@ -276,21 +298,16 @@ def facts_for_game(game: dict, quotes: list[dict],
     for (key, market), pool in grouped.items():
         latest = max(quote["snapshot_at"] for quote in pool)
         at_line = [quote for quote in pool if quote["snapshot_at"] == latest]
-        seen: list = []
-        lines = []
-        for quote in at_line:
-            line = quote.get("point")
-            if line is None or any(same_line(line, prev) for prev in seen):
-                continue
-            seen.append(line)
-            lines.append((line, quote))
-        for line, quote in lines:
-            matches = _rows_for_player(log_rows, key, quote.get("team"))
-            status = log_status(played, game_rows, len(matches) if played else 0)
-            out.append(_one(
-                canonical, season, week, key, market, line, quote,
-                status, matches,
-            ))
+        quote = max(at_line, key=_capture_rank)
+        line = quote.get("point")
+        if line is None:
+            continue
+        matches = _rows_for_player(log_rows, key, quote.get("team"))
+        status = log_status(played, game_rows, len(matches) if played else 0)
+        out.append(_one(
+            canonical, season, week, key, market, line, quote,
+            status, matches,
+        ))
     return out
 
 
