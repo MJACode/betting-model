@@ -92,6 +92,21 @@ step apply-view-migrations
 # that afternoon never posted. Must follow apply-view-migrations (a
 # migration can change the auto-pause set this sync then mirrors).
 step sync-thresholds
+# Who ESPN and DailyFaceoff say will start in goal for each NHL game, and the
+# goalie row rewritten when ESPN confirms someone else. No NHL model bets until
+# both starting goalies are confirmed (mike, 2026-10-20; models/
+# nhl_goalie_gate.py), so this runs before every NHL decider below:
+# nhl-over-under, nhl-prop-odds (a game confirmed after its newest prop fetch
+# owes one more), nhl-prop-scoring and scoring. SEQUENTIAL and BEFORE group 1:
+# it opens its own connection (the pool note on probables-refresh below), and
+# here it delays no priced fetch. Tomorrow's games on the hourly passes only:
+# ESPN has IP-blocked this worker twice, and a tomorrow game cannot be decided
+# today anyway (its goalie row does not exist yet).
+if [ "$MODE" = "hourly" ]; then
+step nhl-goalie-designations
+else
+step nhl-goalie-designations-today
+fi
 
 # GROUP 1 — market + model inputs. Every one of these is an independent
 # producer writing its own table (odds, player_prop_odds, lineups, injuries,
@@ -117,6 +132,9 @@ par weather-refresh
 # both are no-ops that never open a socket.
 par player-news-refresh
 par public-betting
+# NBA splits: a pre-tip snapshot per pass into nba_public_splits (never
+# public_betting, which the scorer reads), plus yesterday's archive once.
+par nba-public-splits
 par_wait
 
 # NHL total goals (nhl_over_under): Pinnacle's no-vig price against the
@@ -127,6 +145,27 @@ par_wait
 # writer to picks runs one at a time. Insert-once under the model's own lock,
 # so every later pass on a game already bet is a no-op.
 step nhl-over-under
+# NBA full-game totals, overs (nba_total_luck) is NOT run here. It decides on a
+# fetch 60-66 minutes before tip in its own one-minute job with its own fetch
+# (scheduler.run_nba_total_luck_window), because a pass that overruns its ten
+# minutes makes the scheduler skip the next one, and a skipped deciding tick
+# lost the game.
+# NBA player props, BOTH models (nba_prop_market: same-line unders against
+# Pinnacle; nba_prop_projection: the projections the window job stored about
+# 65 minutes before tip) IN THE PROP FETCH `par nba-prop-odds` JUST STORED. They
+# decide only games whose tip is 45-57 minutes away, so they run here, minutes
+# after the fetch, rather than in the scoring group. ONE step: the two cards'
+# candidates meet in one choice, one bet a game across both models and at most 4
+# a night, ranked by each model's own EV percentile (scripts/nba_props_card.py;
+# mike, 2026-10-20). SEQUENTIAL,
+# like every writer to picks; each game decided once per model under both
+# models' locks. The five-minute window job (scheduler.run_nba_prop_window)
+# runs this same step for the tip times these passes cannot reach.
+step nba-props
+# Its closing snapshot, for closing-line value only: one event call per bet
+# game, 12-25 minutes before tip, filed 'close' so no card decides on it. A
+# pass with no bet game in that window spends nothing.
+step nba-prop-close
 
 # MLB probable starters for today AND the look-ahead window. The scorer can
 # now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB game
@@ -171,7 +210,6 @@ step mlb-game-market
 step prop-scoring
 step wnba-prop-scoring
 step wnba-prop-market
-step nba-prop-scoring
 # Golf data + scoring run last so a DataGolf hiccup can never abort the
 # chain before game/prop picks are scored above.
 step golf-field
@@ -211,7 +249,9 @@ step push-notifications
 # Every-pass steps are the ones that cost nothing when there is nothing to do:
 #   game-log-today   skips per game; no boxscore call for games already stored
 #   nfl-results      returns without fetching unless a started NFL game is unscored
-#   nhl-results      3 calls to a free API; no-ops out of season
+#   nhl-results      trailing 3 score calls, plus one call per date that still
+#                    has a final and no nhl_api_score row (20 dates on
+#                    2026-10-21; none once those are stored). No-ops out of season
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.
@@ -219,6 +259,7 @@ par game-log-today
 par nfl-results
 par nhl-results
 par ufc-results-poll
+par nba-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute

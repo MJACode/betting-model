@@ -7,7 +7,13 @@ could be tracked forward. mike, 2026-10-01: collect them, an opening and a
 closing price.
 
 WHAT IT BUYS. For every NHL game dated today (ET), the six markets the
-history purchase bought (config.PROP_MARKETS_NHL), at the ten fetched books:
+history purchase bought (config.PROP_MARKETS_NHL), at the ten fetched books,
+plus the five alternate keys (`NHL_LIVE_ALT_MARKETS`) on a second call.
+Alternates are stored under their own market key, one row per line. They are
+not in `PROP_MARKETS_NHL` — that list is the history series and the only
+markets the cards read — so a second line cannot decide a bet. The second
+call is what keeps a number after the featured line moves off it. A non-200
+on the alternate call keeps the featured rows.
 
   * the OPEN  -- the first refresh pass that finds the game priced;
   * the CLOSE -- the first pass inside the last NHL_PROP_CLOSE_WINDOW_MIN
@@ -24,6 +30,22 @@ The open and the close are filed as `snapshot_type = 'open'`, the pre-game
 series every other sport's prop history uses and every reader already bounds on
 `snapshot_at <= commence_time`; they are the first and last rows of that
 series, which is how scripts/nhl_prop_lab_priced.py reads them.
+
+ONE MORE OPEN WHEN THE GOALIES ARE CONFIRMED LATE (mike, 2026-10-20: "We
+should absolutely always know the goalie matchup before making a bet as
+well."). The prop cards decide a game only once both starting goalies are
+confirmed (models/nhl_goalie_gate.py), and only on a quote fetched after that
+moment (scripts/nhl_prop_card.after_confirmation). A game whose matchup became
+known after its newest 'open'-series snapshot therefore owes ONE more 'open'
+snapshot, bought by the next pass; once it is held, nothing more is owed
+until the moment the matchup became known moves past it again (a different
+goalie confirmed, or ESPN back to expected and confirming again). Cost: one
+extra snapshot each time that happens, usually once a game, and each is two
+event calls (featured + alternates). The code's older figure of 5 credits a
+snapshot predates the alternates call; api_call_log measured the pair at 10-11
+credits on the quiet evening passes of 2026-10-19 (featured 5-6, alternates 5;
+per-row credits there are the x-requests-used delta between consecutive calls
+in one process, so busier passes read noisier).
 
 THE FINAL IS FILED AS `snapshot_type = 'close'`, ON PURPOSE. Saves and blocked
 shots are posted only in the 70-minute close, so the cards decide on it, and
@@ -79,6 +101,17 @@ SPORT_KEY = SPORT_KEYS["NHL"]
 SNAPSHOT_TYPE = "open"
 FINAL_SNAPSHOT_TYPE = "close"      # read by the CLV capture, never by a card
 YESNO_MARKET = "player_goal_scorer_anytime"
+# Live fetch only. Not part of PROP_MARKETS_NHL: the priced-history list and
+# the cards both key on those six featured markets, one line per player.
+# The Odds API serves the other numbers on these keys. A 422 here must not
+# drop the featured call (that call is made first, on its own).
+NHL_LIVE_ALT_MARKETS = (
+    "player_shots_on_goal_alternate",
+    "player_points_alternate",
+    "player_assists_alternate",
+    "player_blocked_shots_alternate",
+    "player_total_saves_alternate",
+)
 
 
 def _utc(v) -> datetime:
@@ -88,7 +121,8 @@ def _utc(v) -> datetime:
 def due(start: datetime, now: datetime, stored: list[datetime],
         window_min: int = NHL_PROP_CLOSE_WINDOW_MIN, final_taken: bool = False,
         final_window: tuple[int, int] | None = (NHL_PROP_FINAL_OPENS_MIN,
-                                                NHL_PROP_FINAL_CLOSES_MIN)) -> str | None:
+                                                NHL_PROP_FINAL_CLOSES_MIN),
+        known_at: datetime | None = None) -> str | None:
     """Which snapshot, if any, this pass owes one game: 'open', 'close', 'final' or None.
 
     `stored` is every pre-game OPEN-series snapshot time already held for the
@@ -96,6 +130,13 @@ def due(start: datetime, now: datetime, stored: list[datetime],
     the puck has dropped, and a game first priced inside the closing window
     gets ONE decision snapshot, not two back to back. The close outranks the
     final: if both are owed on one pass, the quote a card decides on is bought.
+
+    `known_at` is when the game's goalie matchup became known
+    (models/nhl_goalie_gate.known_games), or None while it is not. A game
+    whose newest open-series snapshot is older than that owes one more 'open'
+    (the module docstring); the close, when it is owed on the same pass, is
+    that snapshot. Once a snapshot newer than `known_at` is held, it is owed
+    no more.
     """
     if now >= start:
         return None
@@ -112,6 +153,8 @@ def due(start: datetime, now: datetime, stored: list[datetime],
     window_opens = start - timedelta(minutes=window_min)
     if now >= window_opens and max(pre) < window_opens:
         return "close"
+    if known_at is not None and max(pre) < known_at <= now:
+        return "open"
     if final_window and not final_taken:
         f_opens = start - timedelta(minutes=final_window[0])
         f_closes = start - timedelta(minutes=final_window[1])
@@ -165,23 +208,53 @@ def _stored_snapshots(conn: DBConnection, game_ids: list[str]) -> tuple[dict[str
     return out, finals
 
 
-def _event_props(event_id: str) -> tuple[list[tuple[str, list[dict]]], int]:
-    """One paid call: every requested market at every fetched book. Returns the
-    (book, markets) pairs and the credits the feed billed for it."""
+def _fetch_event_markets(event_id: str, markets: list[str]) -> tuple[list[tuple[str, list[dict]]], int, int]:
+    """One paid call for `markets`. (books, credits, HTTP status)."""
     resp = requests.get(
         f"{ODDS_API_BASE}/sports/{SPORT_KEY}/events/{event_id}/odds",
         params={"apiKey": ODDS_API_KEY, "regions": ODDS_API_REGIONS,
-                "markets": ",".join(PROP_MARKETS_NHL), "bookmakers": ODDS_API_BOOKMAKERS_PARAM,
+                "markets": ",".join(markets), "bookmakers": ODDS_API_BOOKMAKERS_PARAM,
                 "oddsFormat": "american", "includeLinks": "true", "includeSids": "true"},
         timeout=20)
     record_quota_headers(resp)
     cost = int(float(resp.headers.get("x-requests-last") or 0))
     if resp.status_code != 200:
-        logger.warning(f"NHL prop odds: event {event_id} HTTP {resp.status_code}: {resp.text[:160]}")
-        return [], cost
+        return [], cost, resp.status_code
     books = [(b.get("key"), b.get("markets", [])) for b in resp.json().get("bookmakers", [])
              if b.get("key") in LINE_SHOP_BOOKMAKERS]
-    return books, cost
+    return books, cost, resp.status_code
+
+
+def _event_props(event_id: str) -> tuple[list[tuple[str, list[dict]]], int]:
+    """Featured markets, then the alternate lines, as two calls.
+
+    The featured call is the one the cards score. The alternate call is stored
+    beside it so a number the featured line has left still has a row. A
+    non-200 on the alternate call — a 422 for a key this sport does not
+    serve — does not throw away the featured rows. Neither does a timeout
+    or a body that is not JSON: those credits are already spent, and the
+    featured rows are what the cards lock.
+    """
+    books, cost, status = _fetch_event_markets(event_id, list(PROP_MARKETS_NHL))
+    if status != 200:
+        logger.warning(f"NHL prop odds: event {event_id} HTTP {status}")
+        return [], cost
+    time.sleep(REQUEST_SLEEP)
+    try:
+        alt_books, alt_cost, alt_status = _fetch_event_markets(event_id, list(NHL_LIVE_ALT_MARKETS))
+    except Exception as exc:
+        logger.warning(f"NHL prop odds: event {event_id} alternates failed ({exc}); "
+                       "featured lines kept")
+        return books, cost
+    cost += alt_cost
+    if alt_status != 200:
+        logger.warning(f"NHL prop odds: event {event_id} alternates HTTP {alt_status}; "
+                       "featured lines kept")
+        return books, cost
+    merged: dict[str, list[dict]] = {key: list(markets) for key, markets in books}
+    for key, markets in alt_books:
+        merged.setdefault(key, []).extend(markets)
+    return list(merged.items()), cost
 
 
 def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = False) -> dict:
@@ -204,6 +277,10 @@ def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = Fals
                                            _normalize_team(ev["home"], "NHL"))
         known = _existing_game_ids(conn, [e["game_id"] for e in events])
         stored, finals = _stored_snapshots(conn, sorted(known))
+        # When each game's goalie matchup became known: a game confirmed
+        # after its newest open snapshot owes one more (due()).
+        from models.nhl_goalie_gate import known_games
+        confirmed_at = known_games(conn, sorted(known))
         snapshot_at = now.isoformat()
         for ev in events:
             gid = ev["game_id"]
@@ -212,7 +289,8 @@ def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = Fals
                 logger.warning(f"NHL prop odds: {gid} has no games row ({ev['away']} @ {ev['home']})")
                 out["unknown_games"] += 1
                 continue
-            which = due(ev["start"], now, stored.get(gid, []), final_taken=gid in finals)
+            which = due(ev["start"], now, stored.get(gid, []), final_taken=gid in finals,
+                        known_at=confirmed_at.get(gid))
             if which is None:
                 continue
             if dry_run:
@@ -233,8 +311,10 @@ def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = Fals
                         for o in m.get("outcomes", []):
                             o.setdefault("point", 0.5)
                 kind = FINAL_SNAPSHOT_TYPE if which == "final" else SNAPSHOT_TYPE
-                rows += _parse_prop_markets(markets, gid, today_et, kind, snapshot_at,
-                                            allowed_markets=set(PROP_MARKETS_NHL), bookmaker=book)
+                rows += _parse_prop_markets(
+                    markets, gid, today_et, kind, snapshot_at,
+                    allowed_markets=set(PROP_MARKETS_NHL) | set(NHL_LIVE_ALT_MARKETS),
+                    bookmaker=book)
             if not rows:
                 out["not_priced"] += 1
                 logger.info(f"  {gid}: no prop rows returned ({cost} credits) — not priced yet")

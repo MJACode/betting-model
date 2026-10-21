@@ -359,6 +359,7 @@ CREATE TABLE IF NOT EXISTS nfl_team_game_stats (
     roof            TEXT, surface TEXT, temp REAL, wind REAL, div_game INTEGER,
     commence_time   TEXT,
     points_for      INTEGER, points_against INTEGER,
+    stadium_id      TEXT, stadium TEXT, location TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(game_id, team)
 );
@@ -892,7 +893,8 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     under_link      TEXT,
     over_sid        TEXT,
     under_sid       TEXT,
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (datetime('now')),
+    book_last_update TEXT
 );
 
 -- 2026-08-30 Disk-IO fix: MAX(snapshot_at) freshness probes full-scanned the
@@ -1440,6 +1442,12 @@ _MIGRATIONS = [
     ("nfl_player_game_log", "pat_made", "INTEGER"),
     ("nfl_player_game_log", "pat_att", "INTEGER"),
     ("nfl_player_game_log", "norm_name", "TEXT"),
+    # NFL venue, raw from nflverse (2026-10-20). The wind card resolves it to
+    # coordinates at read time (nfl/data_ingest/weather.resolve_venue) instead
+    # of trusting a schedule file frozen on 2026-08-15.
+    ("nfl_team_game_stats", "stadium_id", "TEXT"),
+    ("nfl_team_game_stats", "stadium", "TEXT"),
+    ("nfl_team_game_stats", "location", "TEXT"),
     ("player_savant_stats", "gb_pct", "NUMERIC"),
     ("player_savant_stats", "chase_pct", "NUMERIC"),
     ("player_savant_stats", "batter_whiff_pct", "NUMERIC"),

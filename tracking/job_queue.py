@@ -713,6 +713,44 @@ def _job_publish_oct13_nhl_line(**kw):
         conn.close()
 
 
+def _job_publish_full_record_standard(**kw):
+    """Full record in the standard recap embed, once, Discord only."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record_standard
+
+    conn = get_connection()
+    try:
+        return publish_full_record_standard(conn)
+    finally:
+        conn.close()
+
+
+def _job_delete_custom_record_post(**kw):
+    """Delete Discord message 1560045816352079957 once (owner, 2026-10-14)."""
+    from scripts.post_record_correction import delete_custom_record_post
+    return delete_custom_record_post()
+
+
+def _validate_publish_full_record(args: dict) -> dict:
+    """No arguments. The text is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_full_record accepts no arguments; the text is fixed")
+    return {}
+
+
+def _job_publish_full_record(**kw):
+    """Post the 2026-10-14 full record once to Discord results. Not X."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record
+
+    conn = get_connection()
+    try:
+        return publish_full_record(conn)
+    finally:
+        conn.close()
+
+
 def _validate_publish_record_correction(args: dict) -> dict:
     """No arguments. The correction text is fixed in the script."""
     if args:
@@ -1034,7 +1072,10 @@ def _job_void_picks(**kw):
     `"allow_posted": true` (mike, 2026-10-09: "Change the rule, void them").
     That opt-in is for a posted pick decided on a price nobody could bet; the
     module docstring of scripts/void_picks.py says when, and why the lock
-    exists. It never makes a graded pick voidable. The original message is
+    exists. It never makes a graded pick voidable; `"allow_graded": true`
+    does that (mike, 2026-10-20: "Void the 6 mlb picks"), for a pick that
+    should never have been produced, found after it settled. The grade it
+    overwrites is kept in the row's condition_note. The original message is
     not edited or deleted. After the void commits, a pick that was posted
     gets a void notice with this reason. An unposted void posts nothing, and
     a rejected notice does not undo the void.
@@ -1046,7 +1087,8 @@ def _job_void_picks(**kw):
     try:
         rows = _select(conn, kw["pick_ids"], None, None, None)
         to_void, refused = plan_voids(rows, kw["reason"],
-                                      allow_posted=bool(kw.get("allow_posted", False)))
+                                      allow_posted=bool(kw.get("allow_posted", False)),
+                                      allow_graded=bool(kw.get("allow_graded", False)))
         void(conn, to_void, kw["reason"])
         conn.commit()
         notice = announce_posted_voids(to_void, kw["reason"])
@@ -1081,7 +1123,13 @@ def _validate_void_picks(args: dict) -> dict:
     if not isinstance(allow_posted, bool):
         raise ValueError("allow_posted must be true or false (a JSON boolean); "
                          f"got {allow_posted!r}")
-    return {"pick_ids": ids, "reason": reason[:500], "allow_posted": allow_posted}
+    # The same for the settled-result lock (mike, 2026-10-20).
+    allow_graded = args.get("allow_graded", False)
+    if not isinstance(allow_graded, bool):
+        raise ValueError("allow_graded must be true or false (a JSON boolean); "
+                         f"got {allow_graded!r}")
+    return {"pick_ids": ids, "reason": reason[:500], "allow_posted": allow_posted,
+            "allow_graded": allow_graded}
 
 
 def _job_ncaaf_pbp_pull(**kw):
@@ -1784,6 +1832,42 @@ def _job_mlb_over_under_retrain_sweep(**kw):
     }
 
 
+def _validate_byom_game_facts(args: dict) -> dict:
+    """NFL game facts. apply defaults false so a queued job writes nothing
+    until someone asks. Seasons before DraftKings history are refused.
+    """
+    from byom.constants import DK_HISTORY_START_SEASON
+
+    sport = str(args.get("sport") or "NFL")
+    if sport != "NFL":
+        raise ValueError(f"byom_game_facts builds NFL only, got {sport!r}")
+    season = args.get("season")
+    if season in (None, ""):
+        season = None
+    else:
+        season = int(season)
+        if season < DK_HISTORY_START_SEASON:
+            raise ValueError(
+                f"season {season} is before DraftKings history "
+                f"({DK_HISTORY_START_SEASON})")
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    return {"sport": sport, "season": season, "apply": apply}
+
+
+def _job_byom_game_facts(**kw):
+    """Write byom_game_facts. Does not touch picks or a live model."""
+    from data.db import get_connection
+    from byom.load import build_seasons
+
+    conn = get_connection()
+    try:
+        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+    finally:
+        conn.close()
+
+
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
@@ -1830,6 +1914,13 @@ JOBS = {
     # scripts/post_record_correction.py. See _job_publish_record_correction.
     "publish_record_correction": (_job_publish_record_correction,
                                   _validate_publish_record_correction),
+    # Owner-approved full record, Discord only. See _job_publish_full_record.
+    "publish_full_record": (_job_publish_full_record,
+                            _validate_publish_full_record),
+    "delete_custom_record_post": (_job_delete_custom_record_post,
+                                  _validate_publish_full_record),
+    "publish_full_record_standard": (_job_publish_full_record_standard,
+                                     _validate_publish_full_record),
     # One line, after the 2026-10-14 correction. See _job_publish_oct13_nhl_line.
     "publish_oct13_nhl_line": (_job_publish_oct13_nhl_line,
                                _validate_publish_oct13_nhl_line),
@@ -1864,6 +1955,10 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
+    # NFL Build Your Own Model game facts. apply defaults false. Not listed
+    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
+    "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
 }
 
 

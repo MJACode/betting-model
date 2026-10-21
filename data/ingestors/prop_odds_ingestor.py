@@ -303,12 +303,22 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
                         game_date: str, snapshot_type: str,
                         snapshot_at: str,
                         allowed_markets=PROP_MARKETS_ALL,
-                        bookmaker: str = ODDS_API_BOOKMAKER) -> list[dict]:
+                        bookmaker: str = ODDS_API_BOOKMAKER,
+                        book_last_update: str | None = None) -> list[dict]:
     """
     Parse one bookmaker's markets list into DB rows.
 
     `bookmaker` is stamped onto every row. Call once per book — rows for the same
     player/market at different books are independent and must not be merged.
+
+    `book_last_update` on every row is the BOOK'S OWN clock for that market:
+    the market's `last_update` from the feed, else the bookmaker-level
+    `last_update` the caller passes, else None (2026-10-16). `snapshot_at` is
+    OUR fetch time and is the same for every book in a fetch, so it cannot
+    tell a book that re-priced a minute ago from one that has not moved in
+    an hour. The NBA prop rule (scripts/nba_prop_market_card.py) refuses a
+    soft quote whose clock is more than 10 minutes behind Pinnacle's in the
+    same fetch; the 2023-26 archive it was graded on stored no such clock.
 
     The Odds API serves two outcome shapes for player props:
 
@@ -344,6 +354,7 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
         "under_link":   None,
         "over_sid":     None,
         "under_sid":    None,
+        "book_last_update": book_last_update,
     })
 
     OU_DIRS  = {"over", "under"}
@@ -361,6 +372,7 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
         # ever holds two lines for one player (config.PROP_ALT_MARKETS).
         is_alt  = _is_alt_line_market(market_key)
         keep_pt = ALT_KEEP_POINT.get(market_key)
+        market_lu = mkt.get("last_update") or book_last_update
 
         for outcome in mkt.get("outcomes", []):
             name_field = (outcome.get("name") or "").strip()
@@ -407,6 +419,8 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
             row = player_rows[key]
             row["player_name"] = player_name
             row["market"]      = out_market
+            if market_lu:
+                row["book_last_update"] = market_lu
             if point is not None:
                 row["line"] = point
             if direction == "Over":
@@ -729,24 +743,66 @@ def _warn_unknown_prop_game(game_id: str, away: str, home: str, game_date: str,
     )
 
 
+BOOK_LAST_UPDATE_COLUMN = "book_last_update"
+BOOK_LAST_UPDATE_DDL = ("ALTER TABLE player_prop_odds "
+                        "ADD COLUMN IF NOT EXISTS book_last_update TEXT")
+_book_last_update_ready = False
+
+
+def ensure_book_last_update_column(conn) -> bool:
+    """Make sure player_prop_odds carries `book_last_update` (2026-10-16).
+
+    Nullable, no default, so in Postgres the ADD COLUMN is a catalog change
+    and rewrites nothing. It still takes an ACCESS EXCLUSIVE lock, and even an
+    `IF NOT EXISTS` that finds the column is real DDL that fires PostgREST's
+    schema reload (data/ddl_guard.py), so it runs only when the catalog says
+    the column is missing, and the answer is remembered for the process. The
+    lock wait is bounded at 5 seconds so a busy table cannot queue every
+    reader behind it; a timeout raises, and the next pass tries again.
+
+    The DDL joins the caller's transaction and commits with its rows. It was
+    applied to production from the build machine on 2026-10-16, so on the
+    worker this is one catalog read per process and nothing more.
+    """
+    global _book_last_update_ready
+    if _book_last_update_ready:
+        return True
+    from data.ddl_guard import schema_is_current
+    if not schema_is_current(conn, "player_prop_odds",
+                             columns=(BOOK_LAST_UPDATE_COLUMN,)):
+        logger.warning("player_prop_odds has no book_last_update column; adding it")
+        conn.execute("SET LOCAL lock_timeout = '5s'")
+        conn.execute(BOOK_LAST_UPDATE_DDL)
+    _book_last_update_ready = True
+    return True
+
+
 def _insert_prop_odds(conn: DBConnection, rows: list[dict]) -> int:
-    """Insert prop odds rows. No dedup — always append snapshots."""
+    """Insert prop odds rows. No dedup — always append snapshots.
+
+    `book_last_update` is read with .get(): a caller that builds rows without
+    it (none today) writes NULL, which every reader treats as "unknown".
+    """
     if not rows:
         return 0
+    ensure_book_last_update_column(conn)
     sql = """
         INSERT INTO player_prop_odds (
             game_id, game_date, player_name, team, market,
             bookmaker, snapshot_type, snapshot_at,
             line, over_price, under_price,
-            over_link, under_link, over_sid, under_sid
+            over_link, under_link, over_sid, under_sid,
+            book_last_update
         ) VALUES (
             %(game_id)s, %(game_date)s, %(player_name)s, %(team)s, %(market)s,
             %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
             %(line)s, %(over_price)s, %(under_price)s,
-            %(over_link)s, %(under_link)s, %(over_sid)s, %(under_sid)s
+            %(over_link)s, %(under_link)s, %(over_sid)s, %(under_sid)s,
+            %(book_last_update)s
         )
     """
-    conn.executemany(sql, rows)
+    conn.executemany(sql, [{**r, "book_last_update": r.get("book_last_update")}
+                           for r in rows])
     return len(rows)
 
 
@@ -764,7 +820,8 @@ def _log_pipeline(conn: DBConnection, run_date: str, status: str,
 def run_prop_odds_ingestor(target_date: str = None,
                            snapshot_type: str = "open",
                            sport: str = "MLB",
-                           days_ahead: int = None) -> dict:
+                           days_ahead: int = None,
+                           only_game_ids=None) -> dict:
     """
     Pull DK player prop lines for all of a sport's games on target_date.
 
@@ -772,6 +829,11 @@ def run_prop_odds_ingestor(target_date: str = None,
         target_date:   ISO date YYYY-MM-DD (default: today ET)
         snapshot_type: 'open' | 'live'
         sport:         'MLB', 'WNBA', or 'NBA'
+        only_game_ids: when given, fetch ONLY these game ids (applied before
+                       the paid per-event call). The NBA window job
+                       (scheduler.run_nba_prop_window) uses it to fetch the
+                       games about to enter their decision window; None, the
+                       default, fetches every game as before.
 
     Returns:
         Summary dict.
@@ -836,6 +898,11 @@ def run_prop_odds_ingestor(target_date: str = None,
             identities.append(
                 (event, game_id, away_team, home_team, away_name, home_name)
             )
+        if only_game_ids is not None:
+            wanted = set(only_game_ids)
+            identities = [i for i in identities if i[1] in wanted]
+            logger.info(f"  {len(identities)} of {len(events)} {sport} event(s) asked for: "
+                        f"{sorted(wanted)}")
         known = _existing_game_ids(conn, [gid for _ev, gid, *_ in identities])
         skipped_unknown = 0
 

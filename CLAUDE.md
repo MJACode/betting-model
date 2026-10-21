@@ -304,7 +304,8 @@ was available and is part of the pick's meaning.
   `condition_status='DUPLICATE'`, result kept (mike 10-09). The exits: **VOID** — a row the model should never
   have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
   sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
-  line, price and lock. REFUSES graded picks; posted ones (Matt 09-28) need
+  line, price and lock. Graded picks need `--allow-graded` (mike 10-20, grade
+  kept in the note); posted ones (Matt 09-28) need
   `--allow-posted` (mike 10-09) — and **`config.RECORD_EXCLUSIONS`**, naming who
   asked. Sweep views DO re-cut (§7). Test:
   `tests/test_settled_record_is_immutable.py`.
@@ -384,6 +385,11 @@ the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
 market (`docs/sports/nhl.md`).
 
+### NHL Goalies
+No NHL bet of any kind until both starting goalies are confirmed (mike,
+2026-10-20), except the shots-on-goal props (mike, 2026-10-20). One gate,
+every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
+
 ---
 
 ## 4. Conventions
@@ -434,6 +440,7 @@ python -m data.threshold_sync               # config.py -> model_action_threshol
 python -m scripts.emit_threshold_sql        # the action-filter SQL, generated
 python -m models.trainer --model <id>       # retrain (then COMMIT the .pkl)
 python -m pytest -q tests/                  # the only quality gate
+pip install -r requirements-test.txt        # pytest + node for the TS tests, not on the worker
 pip install -r requirements-dashboard.txt   # dashboard deps, not on the worker
 streamlit run dashboard/app.py
 ```
@@ -551,7 +558,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 74 models carry their
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 66 models carry their
   own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
@@ -591,6 +598,7 @@ to be known BEFORE deciding which file to open.
 | Test suite coverage | `docs/testing.md` |
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
+| **App crashes: `app_errors`, what each kind means, the queries** | `docs/app_errors.md` |
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |
@@ -619,6 +627,7 @@ to be known BEFORE deciding which file to open.
 | **MLB market-handicap features (public/RLM/steam; RL+OU matrix; retrain next)** | `docs/mlb_market_handicap_features.md` |
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
+| **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —
@@ -673,3 +682,14 @@ does: a cap on this file, a cap on this file PLUS the session-start hook (so
 moving prose between them cannot game it), a per-file cap on each rules file, and
 a check that every rules file is pointed at from here. It fails once, at merge
 time, for whoever grew it — which is why no session needs to spend a reply on it.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.

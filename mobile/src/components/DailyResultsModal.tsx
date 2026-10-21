@@ -13,17 +13,21 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
-import { addDays, formatAmerican, formatPctSigned, formatSignedUnits } from '@/lib/format';
+import { unitsSpeech } from '@/lib/a11y';
+import { addDays, formatAmerican } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
-import { flatPnl } from '@/lib/thresholds';
+import { postedPickUnits } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
-import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import {
   ALL_SPORTS,
+  dayRoiText,
+  dayUnitsText,
+  dayWinRateText,
   EMPTY_DAILY,
   scopeDailyResults,
   type DailyResults,
   type DayGameSummary,
+  type DayStakeStats,
   type ModelDayStats,
   type SportDayBreakdown,
 } from '@/lib/dailyResults';
@@ -63,14 +67,29 @@ export function DailyResultsModal({
 }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [sportFilter, setSportFilter] = useState<string>('ALL');
+  // Sport cards open collapsed — the header carries the sport's record; a tap
+  // shows its models.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   // Snap the sport filter back to All every time the modal opens — a sticky
   // per-sport filter from a previous open would read as missing data.
   const wasVisible = useRef(false);
   useEffect(() => {
-    if (visible && !wasVisible.current) setSportFilter('ALL');
+    if (visible && !wasVisible.current) {
+      setSportFilter('ALL');
+      setExpanded(new Set());
+    }
     wasVisible.current = visible;
   }, [visible]);
+  // A new day starts collapsed too.
+  useEffect(() => setExpanded(new Set()), [date]);
+  const toggleSport = (sport: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(sport)) next.delete(sport);
+      else next.add(sport);
+      return next;
+    });
 
   const scoped = useMemo(() => scopeDailyResults(results, sportFilter), [results, sportFilter]);
 
@@ -94,6 +113,16 @@ export function DailyResultsModal({
   ];
   const visibleSections =
     sportFilter === 'ALL' ? sportSections : sportSections.filter((s) => s.sport === sportFilter);
+  // Sports that had picks come first (canonical order kept); the quiet ones are
+  // still listed — never dropped — but as one line underneath, so they don't
+  // split up the sports that did play.
+  const activeSections = visibleSections.filter(sportHasActivity);
+  const quietSections = visibleSections.filter((s) => !sportHasActivity(s));
+  // One sport filtered, or only one sport played: its card opens — collapsing
+  // the only card would add a tap and hide nothing.
+  const single = sportFilter !== 'ALL' || activeSections.length === 1;
+  const noPickSports = quietSections.filter((s) => s.unpublished === 0).map((s) => s.sport);
+  const notPostedSports = quietSections.filter((s) => s.unpublished > 0).map((s) => s.sport);
 
   // The displayed results can lag the selected date by one render while a new
   // day loads — treat that as loading so we never show day A under day B's header.
@@ -259,13 +288,13 @@ export function DailyResultsModal({
             {scoped.record.picks > 0 ? (
               <View style={styles.hero}>
                 <Text style={styles.heroLabel}>
-                  {sportFilter === 'ALL' ? 'All models' : sportFilter} — flat-bet ROI
+                  {sportFilter === 'ALL' ? 'All models' : sportFilter} — return on bets
                 </Text>
                 <Text
-                  style={[styles.heroRoi, { color: hasPricedStake(scoped.record) ? roiColor(scoped.record.roiFlat) : colors.textSecondary }]}
-                  accessibilityLabel={hasPricedStake(scoped.record) ? undefined : 'ROI unavailable, no priced picks'}
+                  style={[styles.heroRoi, { color: scoped.record.risked > 0 ? roiColor(scoped.record.roi) : colors.textSecondary }]}
+                  accessibilityLabel={scoped.record.risked > 0 ? undefined : 'Return on bets unavailable'}
                 >
-                  {hasPricedStake(scoped.record) ? formatPctSigned(scoped.record.roiFlat) : '—'}
+                  {dayRoiText(scoped.record.risked, scoped.record.roi)}
                 </Text>
                 <Text style={styles.heroRecord}>{recordLine(scoped.record)}</Text>
                 {/* How the day splits. Both halves count identically — a live
@@ -278,21 +307,17 @@ export function DailyResultsModal({
                     {scoped.record.picks - scoped.live} pre-game · {scoped.live} in-play
                   </Text>
                 ) : null}
-                {unpricedOf(scoped.record) > 0 ? (
-                  <Text style={styles.splitNote}>
-                    {unpricedOf(scoped.record)} unpriced · not in the money
-                  </Text>
-                ) : null}
                 <View style={styles.heroStats}>
                   <HeroStat label="Picks" value={String(scoped.record.picks)} />
                   <HeroStat
                     label="Units"
-                    value={hasPricedStake(scoped.record) ? formatSignedUnits(scoped.record.profitFlat / 100) : '—'}
-                    color={hasPricedStake(scoped.record) ? unitsColor(scoped.record.profitFlat / 100) : colors.textSecondary}
+                    value={dayUnitsText(scoped.record.units)}
+                    color={unitsColor(scoped.record.units)}
                   />
                   <HeroStat
                     label="Win rate"
-                    value={formatPctSigned(scoped.record.winRate).replace('+', '')}
+                    value={dayWinRateText(scoped.record.wins, scoped.record.losses, scoped.record.winRate)}
+                    color={scoped.record.wins + scoped.record.losses > 0 ? undefined : colors.textSecondary}
                   />
                 </View>
                 {scoped.pending > 0 ? (
@@ -330,53 +355,35 @@ export function DailyResultsModal({
               </View>
             )}
 
-            {/* Per-sport breakdown — every sport always listed (filtered by chip) */}
-            {visibleSections.map((s) =>
-              s.total.picks > 0 || s.pending > 0 || s.models.length > 0 ? (
-                <View key={s.sport} style={styles.sportCard}>
-                  <View style={styles.sportHeader}>
-                    <Text style={styles.sportName}>{s.sport}</Text>
-                    {s.total.picks > 0 ? (
-                      <Text style={[styles.sportRoi, { color: hasPricedStake(s.total) ? roiColor(s.total.roiFlat) : colors.textSecondary }]}>
-                        {hasPricedStake(s.total) ? formatPctSigned(s.total.roiFlat) : '—'}
-                      </Text>
-                    ) : s.pending > 0 ? (
-                      <Text style={styles.sportEmptyNote}>
-                        {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
-                      </Text>
-                    ) : (
-                      <Text style={styles.sportEmptyNote}>
-                        {formatSignedUnits(s.total.profitFlat / 100)}
-                      </Text>
-                    )}
-                  </View>
-                  {s.total.picks > 0 ? (
-                    <Text style={styles.sportSub}>
-                      {recordLine(s.total)} · {stakeLine(s.total)}
-                      {s.pending > 0 ? ` · ${s.pending} pending` : ''}
-                    </Text>
-                  ) : s.pending > 0 ? (
-                    <Text style={styles.sportSub}>Signals fired — results not graded yet</Text>
-                  ) : (
-                    <Text style={styles.sportSub}>
-                      {recordLine(s.total)} · {formatSignedUnits(s.total.profitFlat / 100)}
-                    </Text>
-                  )}
-                  {s.models.map((m) => (
-                    <ModelRow key={m.modelId} model={m} />
-                  ))}
-                </View>
-              ) : (
-                <View key={s.sport} style={[styles.sportCard, styles.sportCardEmpty]}>
-                  <View style={styles.sportHeader}>
-                    <Text style={styles.sportNameEmpty}>{s.sport}</Text>
-                    <Text style={styles.sportEmptyNote}>
-                      {s.unpublished > 0 ? 'Not posted' : 'No picks'}
-                    </Text>
-                  </View>
-                </View>
-              ),
-            )}
+            {/* Per-sport breakdown — sports with picks first, each collapsible.
+                A single-sport filter shows its one card already open. */}
+            {activeSections.map((s) => (
+              <SportCard
+                key={s.sport}
+                section={s}
+                open={single || expanded.has(s.sport)}
+                collapsible={!single}
+                onToggle={() => toggleSport(s.sport)}
+              />
+            ))}
+
+            {/* Every sport is still accounted for: the quiet ones share one line. */}
+            {quietSections.length > 0 ? (
+              <View style={[styles.sportCard, styles.sportCardEmpty]}>
+                {noPickSports.length > 0 ? (
+                  <Text style={styles.quietLine}>
+                    <Text style={styles.quietLabel}>No picks  </Text>
+                    {noPickSports.join(' · ')}
+                  </Text>
+                ) : null}
+                {notPostedSports.length > 0 ? (
+                  <Text style={styles.quietLine}>
+                    <Text style={styles.quietLabel}>Not posted  </Text>
+                    {notPostedSports.join(' · ')}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
 
             {/* Every pick behind the record — graded first, then still-open */}
             {scoped.gradedPicks.length > 0 || scoped.pendingPicks.length > 0 ? (
@@ -405,14 +412,101 @@ export function DailyResultsModal({
             ) : null}
 
             <Text style={styles.footer}>
-              Settled BET picks, as posted. Results are in units — one
-              unit is one flat bet per pick. Open picks settle after their games go final.
+              Settled picks that Discord posted. Each pick risks the amount
+              needed to win 1 unit. At −110 that’s 1.1 units to win 1. Risk is
+              capped at 3 units, and a pick with no price counts as 1 unit. The
+              percentage is units won or lost divided by units risked. The Models
+              tab uses a flat $100 bet, so its percentages won’t match. Open
+              picks settle after their games go final.
             </Text>
           </ScrollView>
         )}
       </SafeAreaView>
       </SafeAreaProvider>
     </Modal>
+  );
+}
+
+function sportHasActivity(s: SportDayBreakdown): boolean {
+  return s.total.picks > 0 || s.pending > 0 || s.models.length > 0;
+}
+
+/** One sport's day: the header is its record; opening it lists the models. */
+function SportCard({
+  section: s,
+  open,
+  collapsible,
+  onToggle,
+}: {
+  section: SportDayBreakdown;
+  open: boolean;
+  collapsible: boolean;
+  onToggle: () => void;
+}) {
+  const roiText = s.total.picks > 0 ? dayRoiText(s.total.risked, s.total.roi) : null;
+  const sub =
+    s.total.picks > 0
+      ? `${recordLine(s.total)} · ${stakeLine(s.total)}${s.pending > 0 ? ` · ${s.pending} pending` : ''}`
+      : s.pending > 0
+        ? 'Signals fired — results not graded yet'
+        : `${recordLine(s.total)} · ${dayUnitsText(s.total.units)}`;
+  const header = (
+    <>
+      <View style={styles.sportHeader}>
+        <Text style={styles.sportName}>{s.sport}</Text>
+        <View style={styles.sportHeaderRight}>
+          {roiText != null ? (
+            <Text
+              style={[styles.sportRoi, { color: s.total.risked > 0 ? roiColor(s.total.roi) : colors.textSecondary }]}
+              accessibilityLabel={s.total.risked > 0 ? undefined : 'Return on bets unavailable'}
+            >
+              {roiText}
+            </Text>
+          ) : s.pending > 0 ? (
+            <Text style={styles.sportEmptyNote}>
+              {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
+            </Text>
+          ) : (
+            <Text style={styles.sportEmptyNote}>{dayUnitsText(s.total.units)}</Text>
+          )}
+          {collapsible && s.models.length > 0 ? (
+            <Ionicons
+              name={open ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.textTertiary}
+            />
+          ) : null}
+        </View>
+      </View>
+      <Text style={[styles.sportSub, !open && styles.sportSubCollapsed]}>{sub}</Text>
+    </>
+  );
+  return (
+    <View style={styles.sportCard}>
+      {collapsible && s.models.length > 0 ? (
+        <Pressable
+          onPress={onToggle}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={`${s.sport}, ${sub}${
+            s.total.picks === 0
+              ? s.pending > 0
+                ? `, ${s.pending} pending`
+                : ''
+              : s.total.risked > 0
+                ? `, ${roiText} return`
+                : ', return unavailable'
+          }`}
+          accessibilityHint={open ? 'Hides the models' : 'Shows the models'}
+          style={({ pressed }) => [styles.sportToggle, pressed && { opacity: 0.6 }]}
+        >
+          {header}
+        </Pressable>
+      ) : (
+        header
+      )}
+      {open ? s.models.map((m) => <ModelRow key={m.modelId} model={m} />) : null}
+    </View>
   );
 }
 
@@ -426,7 +520,7 @@ function HeroStat({ label, value, color }: { label: string; value: string; color
 }
 
 function ModelRow({ model }: { model: ModelDayStats }) {
-  const priced = hasPricedStake(model);
+  const priced = model.risked > 0;
   return (
     <View style={styles.modelRow}>
       <View style={styles.modelLeft}>
@@ -443,8 +537,11 @@ function ModelRow({ model }: { model: ModelDayStats }) {
           </Text>
         </View>
       </View>
-      <Text style={[styles.modelRoi, { color: priced ? roiColor(model.roiFlat) : colors.textSecondary }]}>
-        {priced ? formatPctSigned(model.roiFlat) : '—'}
+      <Text
+        style={[styles.modelRoi, { color: priced ? roiColor(model.roi) : colors.textSecondary }]}
+        accessibilityLabel={priced ? undefined : 'Return on bets unavailable'}
+      >
+        {dayRoiText(model.risked, model.roi)}
       </Text>
     </View>
   );
@@ -460,11 +557,11 @@ const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }>
 
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
-  // The row shows the same money the day's total added: flatPnl(pick).profit
-  // at the taken price. A stake of 0 means both prices were null, so the
-  // stored profit was filled in and is not shown.
-  const profit = flatPnl(pick).profit;
-  const unpriced = flatPnl(pick).staked === 0;
+  // The row shows the same money the day's total added: postedPickUnits.
+  const profit = postedPickUnits(pick).units;
+  const price = decisionOdds(pick);
+  const missingPrice = price == null;
+  const unitsLabel = unitsSpeech(dayUnitsText(profit));
   return (
     <View style={styles.modelRow}>
       <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>
@@ -476,18 +573,16 @@ function PickRow({ pick }: { pick: Pick }) {
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
-          {unpriced
-            ? ' · unpriced'
-            : decisionOdds(pick) != null
-              ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`
-              : ''}
+          {missingPrice
+            ? ' · no price'
+            : ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(price)}`}
         </Text>
       </View>
       <Text
-        style={[styles.modelRoi, { color: unpriced ? colors.textSecondary : unitsColor(profit / 100) }]}
-        accessibilityLabel={unpriced ? 'unpriced' : undefined}
+        style={[styles.modelRoi, { color: unitsColor(profit) }]}
+        accessibilityLabel={missingPrice ? `no price, ${unitsLabel}` : unitsLabel}
       >
-        {unpriced ? '—' : formatSignedUnits(profit / 100)}
+        {dayUnitsText(profit)}
       </Text>
     </View>
   );
@@ -537,25 +632,14 @@ function GameScoreRow({ game, showSport }: { game: DayGameSummary; showSport: bo
   );
 }
 
-function recordLine(s: CustomModelStats): string {
+function recordLine(s: DayStakeStats): string {
   const base = `${s.wins}–${s.losses}`;
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
 }
 
-function unpricedOf(s: { picks: number; stakedFlat: number }): number {
-  return s.picks - Math.round(s.stakedFlat / 100);
-}
-
-function hasPricedStake(s: { stakedFlat: number }): boolean {
-  return s.stakedFlat > 0;
-}
-
-/** Units for a total that has graded picks. An all-unpriced total is an em
- *  dash, the same as the Models row; a priced push stays 0.0u. */
-function stakeLine(s: CustomModelStats): string {
-  const units = hasPricedStake(s) ? formatSignedUnits(s.profitFlat / 100) : '—';
-  const n = unpricedOf(s);
-  return n > 0 ? `${units} · ${n} unpriced` : units;
+/** Units beside a record line. A push-only total is 0.00u, not a dash. */
+function stakeLine(s: DayStakeStats): string {
+  return dayUnitsText(s.units);
 }
 
 // Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
@@ -566,13 +650,10 @@ function roiColor(roi: number): string {
   return pnlColor(roi, 1, 100);
 }
 
-/** Colour a units figure by what formatSignedUnits prints, so a day that
- *  rounds to "0.0u" never reads as a win or a loss. */
+/** Colour a units figure by what dayUnitsText prints (2 dp), so a day that
+ *  rounds to "0.00u" never reads as a win or a loss. */
 function unitsColor(units: number): string {
-  // The value formatSignedUnits prints (magnitude rounded half-up to 1 dp,
-  // then the sign), toned in ink, not the bright heat-map fills (audit H2).
-  const shown = Math.sign(units) * (Math.round(Math.abs(units) * 10) / 10);
-  return pnlColor(shown, 1);
+  return pnlColor(units, 2);
 }
 
 function prettyDate(date: string): string {
@@ -775,13 +856,14 @@ const styles = StyleSheet.create({
   // No opacity: 0.75 over textTertiary was 3.15:1. The muted look comes from
   // the tertiary ink itself (5.23:1 on bgCard).
   sportCardEmpty: { paddingVertical: spacing.sm },
-  sportNameEmpty: {
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-  },
   sportEmptyNote: { fontSize: font.size.footnote, color: colors.textTertiary },
   sportSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.sm },
+  sportSubCollapsed: { marginBottom: 0 },
+  // The whole header is the tap target: name + record line, never under 44pt.
+  sportToggle: { minHeight: 44, justifyContent: 'center' },
+  sportHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  quietLine: { fontSize: font.size.footnote, color: colors.textTertiary, lineHeight: 20 },
+  quietLabel: { fontWeight: font.weight.semibold },
   picksTitle: {
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,

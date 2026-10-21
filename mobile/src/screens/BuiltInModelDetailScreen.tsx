@@ -23,14 +23,14 @@ import {
   formatSigned,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
-import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
+import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickRowTitle, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -131,8 +131,10 @@ export function BuiltInModelDetailScreen() {
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
+  // The long name: three prop rules share the short label "Prop Mkt", so a
+  // short title made their screens indistinguishable. The chip keeps it.
   useEffect(() => {
-    navigation.setOptions({ title: modelShort(modelId) });
+    navigation.setOptions({ title: modelLong(modelId) });
   }, [navigation, modelId]);
 
   // Prop models are Poisson count projections, so the model card labels their
@@ -187,17 +189,15 @@ export function BuiltInModelDetailScreen() {
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeader}>Today's potential picks</Text>
               <InfoTooltip
-                title="Picks lock for the day"
-                body={
-                  "A pick locks the first time this model scores it today and never changes after that — it can't flip between BET and AVOID as lines move.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm, but only newly-priced games get scored on later refreshes."
-                }
+                title={modelPageTiming(modelId).title}
+                body={modelPageTiming(modelId).body}
                 accessibilityLabel="About today's potential picks"
               />
             </View>
             <Text style={styles.sectionNote}>
               {paused
                 ? 'Paused, so there are no picks today.'
-                : "Locked for the day once scored — won't change again until the game ends."}
+                : modelPageTiming(modelId).note}
             </Text>
           </>
         }
@@ -215,7 +215,7 @@ export function BuiltInModelDetailScreen() {
           ) : (
             <EmptyState
               title="No live BET picks right now"
-              subtitle="This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab."
+              subtitle={modelPageTiming(modelId).empty}
             />
           )
         }
@@ -433,7 +433,7 @@ function TodayPickRow({
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
-            {pick.pick_label}
+            {pickRowTitle(pick)}
           </Text>
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
@@ -478,7 +478,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
-            {pick.pick_label}
+            {pickRowTitle(pick)}
           </Text>
           <View style={styles.pickMeta}>
             <Text style={styles.pickMetaText}>{dayLabelET(pick.game_date)}</Text>

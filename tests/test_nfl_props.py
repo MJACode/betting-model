@@ -146,6 +146,118 @@ class TestKickoff:
         assert _kickoff_utc("2026-09-13", "") is None
 
 
+class TestVenueAndScheduleOfRecord:
+    """The wind card reads WHERE a game is played from these rows (2026-10-20).
+
+    Until then it read a schedule file frozen on 2026-08-15, and nflverse's
+    venue columns were fetched every day and thrown away. The row below is
+    PHI @ JAX at Tottenham exactly as nflverse publishes it today: Neutral,
+    but carrying Jacksonville's stadium id. All three fields must survive the
+    ingest, because the id alone points at Jacksonville.
+    """
+
+    LONDON = {
+        "2026_05_PHI_JAX": {
+            "game_id": "2026_05_PHI_JAX", "season": "2026", "week": "5",
+            "gameday": "2026-10-11", "gametime": "09:30", "game_type": "REG",
+            "home_team": "JAX", "away_team": "PHI", "home_score": "", "away_score": "",
+            "location": "Neutral", "stadium_id": "JAX00",
+            "stadium": "Tottenham Hotspur Stadium", "roof": "outdoors",
+        },
+    }
+
+    def test_upcoming_rows_carry_the_raw_venue(self):
+        rows = parse_upcoming_team_rows(self.LONDON, 2026, set())
+        assert {r["team"] for r in rows} == {"JAX", "PHI"}
+        for r in rows:
+            assert (r["stadium_id"], r["stadium"], r["location"]) == (
+                "JAX00", "Tottenham Hotspur Stadium", "Neutral")
+
+    def test_played_rows_carry_the_raw_venue(self):
+        kc = next(r for r in parse_team_rows(
+            parse_player_rows(PLAYER_CSV, SCHEDULE), SCHEDULE) if r["team"] == "KC")
+        # the fixture has no venue columns: absent is None, never ""
+        assert kc["stadium_id"] is None and kc["location"] is None
+
+    def test_games_row_carries_week_and_neutral_site(self):
+        g = games_rows(parse_upcoming_team_rows(self.LONDON, 2026, set()))[0]
+        assert g["week"] == 5
+        assert g["neutral_site"] == 1
+        home = games_rows(parse_upcoming_team_rows(SCHEDULE, 2025, set()))[0]
+        assert home["neutral_site"] is None     # no location column in that fixture
+
+    def test_every_team_column_is_written_by_both_parsers(self):
+        from data.ingestors.nfl_props_data_ingestor import TEAM_COLUMNS
+        up = parse_upcoming_team_rows(self.LONDON, 2026, set())[0]
+        played = parse_team_rows(parse_player_rows(PLAYER_CSV, SCHEDULE), SCHEDULE)[0]
+        assert set(TEAM_COLUMNS) <= set(up) and set(TEAM_COLUMNS) <= set(played)
+
+    def test_playoff_rows_are_kept(self):
+        """POST games reach the schedule of record the same way REG games do.
+
+        A regression pin, not a fail-first test: parse_upcoming_team_rows has
+        filtered on season only since it was written, and 13 POST games per
+        season already sit in nfl_team_game_stats for 2024 and 2025.
+        """
+        wc = {"2026_19_GB_CHI": {
+            "game_id": "2026_19_GB_CHI", "season": "2026", "week": "19",
+            "gameday": "2027-01-16", "gametime": "16:30", "game_type": "WC",
+            "home_team": "CHI", "away_team": "GB", "home_score": "", "away_score": "",
+            "location": "Home", "stadium_id": "CHI98", "stadium": "Soldier Field"}}
+        rows = parse_upcoming_team_rows(wc, 2026, set())
+        assert len(rows) == 2 and rows[0]["season_type"] == "WC"
+        assert games_rows(rows)[0]["commence_time"].startswith("2027-01-16T21:30")
+
+    def test_team_upsert_drops_the_venue_columns_when_the_table_lacks_them(self):
+        from data.ingestors import nfl_props_data_ingestor as ing
+
+        class _Conn:
+            def __init__(self, n):
+                self.n = n
+
+            def execute(self, sql, params=None):
+                n = self.n
+
+                class _R:
+                    def fetchone(self):
+                        return (n,)
+                return _R()
+
+        assert ing._team_upsert_for(_Conn(3)) == ing._TEAM_UPSERT
+        no_venue = ing._team_upsert_for(_Conn(0))
+        assert no_venue == ing._TEAM_UPSERT_NO_VENUE
+        assert "stadium_id" not in no_venue and "commence_time" in no_venue
+
+    def test_a_same_named_table_in_another_schema_does_not_drop_the_venue(self):
+        """The catalog probe counts columns, and information_schema lists every
+        schema the role can see. A second nfl_team_game_stats (a backup copy,
+        a staging schema) doubled the count to 6, the `== 3` test failed, and
+        the venue was never written again -- silently, as "no venue columns
+        yet". This catalog answers each probe the way Postgres would."""
+        from data.ingestors import nfl_props_data_ingestor as ing
+
+        catalog = [(schema, col) for schema in ("public", "archive")
+                   for col in ing.VENUE_COLUMNS]
+
+        class _Catalog:
+            def execute(self, sql, params=None):
+                flat = " ".join(sql.split())
+                seen = [(s, c) for s, c in catalog
+                        if "table_schema = 'public'" not in flat or s == "public"]
+                n = (len({c for _, c in seen}) if "DISTINCT column_name" in flat
+                     else len(seen))
+
+                class _R:
+                    def fetchone(self):
+                        return (n,)
+                return _R()
+
+            def rollback(self):
+                pass
+
+        assert ing._team_upsert_for(_Catalog()) == ing._TEAM_UPSERT
+
+
 # ── Response distributions ────────────────────────────────────────────────────
 # These are the tests that matter. Everything above is plumbing; this is where a
 # wrong answer costs money silently.

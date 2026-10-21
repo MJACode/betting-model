@@ -50,10 +50,16 @@ def _row(pick_id, *, status="VOID", signal=True, voided=False,
 
 
 class Ledger:
-    """Serves the void SELECT and records inserts. close() keeps the rows."""
+    """Serves the void SELECT and records inserts. close() keeps the rows.
 
-    def __init__(self, rows):
+    `siblings` maps a pregame lock_key to the pick_id of a posted sibling.
+    The sibling query is the only fetchone. Default is no sibling, so a
+    void that used to post still posts.
+    """
+
+    def __init__(self, rows, siblings=None):
         self.rows = [list(r) for r in rows]
+        self.siblings = dict(siblings or {})
         self.statements: list[tuple] = []
         self.commits = 0
 
@@ -68,12 +74,15 @@ class Ledger:
 
         class Result:
             def fetchall(self):
-                if "FROM picks" in sql:
+                if "FROM picks p" in sql:
                     return [tuple(r) for r in outer.rows]
                 return []
 
             def fetchone(self):
-                return (True,)
+                if "sib.pick_id" in sql:
+                    sib = outer.siblings.get(params[1])
+                    return None if sib is None else (sib,)
+                return None
 
         return Result()
 
@@ -91,8 +100,8 @@ class Ledger:
         return [s for s in self.statements if "INSERT INTO push_sent" in s[0]]
 
 
-def _bind(monkeypatch, rows, post=None):
-    ledger = Ledger(rows)
+def _bind(monkeypatch, rows, post=None, siblings=None):
+    ledger = Ledger(rows, siblings=siblings)
     monkeypatch.setattr(dn, "get_connection", lambda: ledger)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: WEBHOOK)
     calls = []
@@ -274,12 +283,8 @@ def test_release_is_strictly_newer_and_a_null_void_stamp_does_not_stick():
 
 
 def _pg_bin(name):
-    import shutil
-    found = shutil.which(name)
-    if found:
-        return found
-    path = Path(f"/usr/lib/postgresql/16/bin/{name}")
-    return str(path) if path.is_file() else None
+    from tests._pg import pg_bin
+    return pg_bin(name)
 
 
 def _swap_dbname(dsn, name):
@@ -324,19 +329,13 @@ def test_anon_reads_both_discord_views():
             pytest.skip(
                 "LATEST_LINE_TEST_DSN not set and initdb is missing -- "
                 "needs a scratch Postgres")
-        owned = tempfile.mkdtemp(prefix="discord-void-pg-")
-        subprocess.run(
-            [initdb, "-D", owned, "-A", "trust", "--username", "postgres"],
-            check=True, capture_output=True, text=True)
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        subprocess.run(
-            [pg_ctl, "-D", owned, "-o", f"-p {port} -k {owned}",
-             "-l", str(Path(owned) / "log"), "-w", "start"],
-            check=True, capture_output=True, text=True)
-        dsn = f"host={owned} port={port} dbname=postgres user=postgres"
+        # tests/_pg.py: UTF-8, trusted, TCP on a free port, output to the
+        # cluster log (a captured pipe hangs pg_ctl on Windows). `owned`
+        # is the ExitStack that stops and deletes it.
+        import contextlib
+        from tests._pg import scratch_cluster
+        owned = contextlib.ExitStack()
+        dsn = owned.enter_context(scratch_cluster("discord-void-pg-"))
 
     conn = None
     try:
@@ -351,6 +350,7 @@ def test_anon_reads_both_discord_views():
             admin.close()
             dsn = _swap_dbname(dsn, "discord_void_anon")
         conn = psycopg2.connect(dsn)
+        conn.set_client_encoding("UTF8")
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute("""
@@ -437,10 +437,7 @@ def test_anon_reads_both_discord_views():
         if conn is not None:
             conn.close()
         if owned is not None:
-            subprocess.run(
-                [_pg_bin("pg_ctl"), "-D", owned, "-w", "-m", "immediate", "stop"],
-                check=False, capture_output=True, text=True)
-            shutil.rmtree(owned, ignore_errors=True)
+            owned.close()
 
 
 def test_the_migration_grants_sent_at_and_not_message_id():
@@ -702,6 +699,82 @@ def test_the_worker_job_is_registered_and_defaults_to_dry_run(monkeypatch):
     out = q._job_publish_discord_void(pick_ids=[2992290], dry_run=False)
     assert calls == [([2992290], None, False)]
     assert out["dry_run"] is False
+
+
+def test_a_posted_sibling_on_the_sideless_lock_is_not_released(monkeypatch):
+    """The pregame key has no side. A void notice on it would release a
+    sibling that is still published. Refuse the post and the ledger write."""
+    lock = "NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under"
+    other = "NCAAF_2026-10-17_kansas_kansas-state:ncaaf_over_under"
+    rows = [
+        _row(2992290, lock=lock),
+        _row(2992283, lock=other, label="Kansas State vs Kansas Under 54.5"),
+    ]
+    ledger, calls = _bind(monkeypatch, rows, siblings={lock: 3000001})
+    warnings = []
+    monkeypatch.setattr(dn.logger, "warning",
+                        lambda msg: warnings.append(str(msg)))
+    out = dn.notify_discord_void([2992290, 2992283], dry_run=False)
+    assert out["posted"] == 1
+    assert out["refused_sibling_lock_keys"] == [lock]
+    posted_locks = [c[1]["embeds"][0]["fields"][0]["name"] for c in calls]
+    assert posted_locks == ["Kansas State vs Kansas Under 54.5"]
+    assert ledger.inserts and all(ins[1][0] != lock for ins in ledger.inserts)
+    assert any("2992290" in msg and "3000001" in msg and lock in msg
+               for msg in warnings)
+    assert ledger.commits == 1
+
+
+def test_a_live_void_still_posts_when_a_pregame_sibling_would_block(monkeypatch):
+    """Live keys carry the side. The sideless-lock refusal does not apply."""
+    lock = "live:NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under:under"
+    ledger, calls = _bind(
+        monkeypatch,
+        [_row(2992290, live=True, lock=lock)],
+        siblings={lock: 3000001},
+    )
+    out = dn.notify_discord_void([2992290], dry_run=False)
+    assert out["posted"] == 1
+    assert out["refused_sibling_lock_keys"] == []
+    assert len(calls) == 1
+    assert len(ledger.inserts) == 1
+
+
+def test_refusing_the_only_pick_posts_nothing_and_releases_nothing(monkeypatch):
+    lock = "NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under"
+    ledger, calls = _bind(monkeypatch, [_row(2992290, lock=lock)],
+                          siblings={lock: 3000001})
+    out = dn.notify_discord_void([2992290], dry_run=False)
+    assert out["posted"] == 0
+    assert out["payloads"] == []
+    assert out["refused_sibling_lock_keys"] == [lock]
+    assert calls == []
+    assert ledger.inserts == []
+    assert ledger.commits == 0
+
+    dry, dry_calls = _bind(monkeypatch, [_row(2992290, lock=lock)],
+                           siblings={lock: 3000001})
+    dry_out = dn.notify_discord_void([2992290], dry_run=True)
+    assert dry_out["payloads"] == []
+    assert dry_calls == []
+    assert dry.inserts == []
+
+
+def test_the_auto_void_notice_skips_a_posted_sibling(monkeypatch):
+    """scripts/void_picks.announce_posted_voids is the path after a void commits."""
+    lock = "NCAAF_2026-10-17_auburn_georgia:ncaaf_over_under"
+    ledger, calls = _bind(monkeypatch, [_row(2992290, lock=lock)],
+                          siblings={lock: 3000001})
+    from scripts.void_picks import announce_posted_voids
+    out = announce_posted_voids(
+        [{"pick_id": 2992290, "posted": True}],
+        "decided on a price nobody could bet, notice must not release the sibling",
+    )
+    assert out["posted"] == 0
+    assert out["refused_sibling_lock_keys"] == [lock]
+    assert calls == []
+    assert ledger.inserts == []
+    assert ledger.commits == 0
 
 
 def test_the_migration_is_one_statement():

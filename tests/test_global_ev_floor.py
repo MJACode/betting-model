@@ -371,7 +371,22 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-10-08 (mike): the NHL totals rule; its number IS Pinnacle's.
          "nhl_over_under",
          # 2026-10-12 (mike): the NFL prop rule; its number IS the sharp book's.
-         "nfl_prop_market"}
+         "nfl_prop_market",
+         # 2026-10-13 (mike): the NFL in-play leader moneyline; its cut was
+         # measured on its own per-lead win probability.
+         "nfl_live_leader_ml",
+         # 2026-10-15 (mike, "Yes"): the rebuilt moneyline, anchored on
+         # DraftKings' price and graded on its own number.
+         "nhl_moneyline",
+         # 2026-10-15 (mike: "use what you've learned in this repo"): the NBA
+         # prop rule; its number IS Pinnacle's no-vig under.
+         "nba_prop_market",
+         # 2026-10-16 (mike): the NBA projection model; calibrated inside its own artifact.
+         "nba_prop_projection",
+         # 2026-10-17 (mike): the NBA totals overs; market-fair P(over) + its bucket's uplift.
+         "nba_total_luck",
+         # The NBA home team-total unders; market-fair P(under) + the walk-forward uplift.
+         "nba_team_total_luck"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

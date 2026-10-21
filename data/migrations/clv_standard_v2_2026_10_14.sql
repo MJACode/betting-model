@@ -13,18 +13,17 @@
 --   fair_close from power de-vig (3-way when the close has a draw).
 --
 -- One statement. DDL is behind a catalog guard so a later pass fires no
--- pgrst_ddl_watch event. The recompute runs once: public.clv_standard_v2_once
--- is the marker, and a later pass does not write picks again. It also does
--- not write when any row is already standard_v2 (the historical pass has
--- landed; a later unstamped pick is the Python capture's job). Worked picks
--- 3114189, 2387645 and 3114194 are checked before any row is written; a
--- mismatch raises and the transaction rolls back.
+-- pgrst_ddl_watch event. The recompute runs only while a row is still not
+-- standard_v2. Worked picks 3114189, 2387645 and 3114194 are checked before
+-- any row is written; a mismatch raises and the transaction rolls back.
 -- Puck-line rows are not rewritten: the close matches the stored HOME sign.
+-- A team total's close is its 'close' snapshot only: its other rows are the
+-- decision fetch, the price taken (data/ingestors/nba_team_total_odds.py).
 -- results_snapshots is not touched.
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-nba-team-total-luck';
   work_left boolean;
   def text;
   new_def text;
@@ -205,6 +204,8 @@ BEGIN
         WHEN 'mlb_live_total_runs' THEN 'totals'
         WHEN 'ncaaf_live_win_prob' THEN 'h2h'
         WHEN 'ncaaf_live_total' THEN 'totals'
+        WHEN 'nba_total_luck' THEN 'totals'
+        WHEN 'nba_team_total_luck' THEN 'team_totals_home'
         ELSE 'h2h'
       END
     $body$;
@@ -356,22 +357,9 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12';
+      'clv-standard-v2-power-80-0.05-12-nba-team-total-luck';
   END IF;
 
-  IF to_regclass('public.clv_standard_v2_once') IS NULL THEN
-    CREATE TABLE public.clv_standard_v2_once (
-      applied_at timestamptz NOT NULL DEFAULT now()
-    );
-    ALTER TABLE public.clv_standard_v2_once ENABLE ROW LEVEL SECURITY;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon')
-       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-      REVOKE ALL ON public.clv_standard_v2_once FROM anon, authenticated;
-    END IF;
-
-    IF NOT EXISTS (
-      SELECT 1 FROM public.picks WHERE clv_method = 'standard_v2' LIMIT 1
-    ) THEN
   SELECT EXISTS (
     SELECT 1
     FROM public.picks p
@@ -420,12 +408,17 @@ BEGIN
           ELSE 'draftkings'
         END AS bet_book,
         CASE
-          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market') THEN 'from_row'
+          -- Multi-market prop models: the market is on the row. The two NBA ones
+          -- (2026-10-16) fell to 'game' here, so a late recompute stamped their
+          -- CLV empty and the Python capture never revisited it.
+          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market',
+                              'nba_prop_market', 'nba_prop_projection') THEN 'from_row'
           WHEN public.clv_prop_key(p.model_id) IS NOT NULL THEN 'prop'
           ELSE 'game'
         END AS kind,
         CASE
-          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market') THEN p.prop_market
+          WHEN p.model_id IN ('nfl_prop_market', 'wnba_prop_market',
+                              'nba_prop_market', 'nba_prop_projection') THEN p.prop_market
           ELSE public.clv_prop_key(p.model_id)
         END AS prop_market,
         public.clv_game_market(p.model_id) AS game_market,
@@ -482,7 +475,8 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND o.snapshot_type <> 'in_play'
+          AND ((s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close')
+            OR (s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)
@@ -502,7 +496,8 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND o.snapshot_type <> 'in_play'
+          AND ((s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close')
+            OR (s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             s.game_market <> 'spreads'
@@ -534,7 +529,8 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = 'pinnacle'
-          AND o.snapshot_type <> 'in_play'
+          AND ((s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close')
+            OR (s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)
@@ -849,10 +845,6 @@ BEGIN
     GET DIAGNOSTICS n_empty = ROW_COUNT;
 
     RAISE NOTICE 'clv standard_v2 wrote % rows, cleared %', n_full, n_empty;
-  END IF;
-    END IF;
-
-    INSERT INTO public.clv_standard_v2_once DEFAULT VALUES;
   END IF;
 
   def := pg_get_viewdef('public.v_public_track_record'::regclass, true);

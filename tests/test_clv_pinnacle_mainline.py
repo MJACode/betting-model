@@ -11,7 +11,6 @@ those rows and nulls the moved ones, once.
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -20,10 +19,6 @@ import pytest
 from tracking import paper_tracker as pt
 
 ROOT = Path(__file__).parent.parent
-DSN = os.environ.get(
-    "CLV_MIGRATION_TEST_URL",
-    "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
-)
 V2 = ROOT / "data" / "migrations" / "clv_standard_v2_2026_10_14.sql"
 MAIN = ROOT / "data" / "migrations" / "clv_pinnacle_mainline_2026_10_14.sql"
 
@@ -221,24 +216,34 @@ def test_an_mlb_main_line_that_flipped_sign_is_null():
 
 # ── the migration, against a local Postgres ──────────────────────────────────
 
-def _connect():
+def _scratch():
     psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        if __import__("os").environ.get("GITHUB_ACTIONS"):
+            pytest.fail("initdb is missing in CI — the migration test would skip")
+        pytest.skip("initdb is not installed")
+    cluster = ScratchPostgres()
     try:
-        conn = psycopg2.connect(DSN)
-    except Exception as exc:  # noqa: BLE001 — the fixture reports the real cause
-        pytest.fail(f"migration tests need Postgres at {DSN}: {exc}")
+        dsn = cluster.start()
+    except Exception as exc:  # noqa: BLE001
+        cluster.stop()
+        pytest.skip(f"scratch cluster did not start: {exc}")
+    conn = psycopg2.connect(dsn)
     conn.autocommit = False
-    return conn
+    return cluster, conn
 
 
 @pytest.fixture
 def pg():
-    conn = _connect()
+    cluster, conn = _scratch()
     try:
         yield conn
     finally:
         conn.rollback()
         conn.close()
+        cluster.stop()
 
 
 def _exec(conn, sql, params=None):
@@ -519,69 +524,30 @@ def test_a_second_pass_does_not_write(pg):
     """)[0] == 1
 
 
-def test_the_standard_v2_rewrite_runs_once(pg):
-    """No standard_v2 row yet: the first pass rewrites. The second does not,
-    even when a new unstamped pick shows up."""
-    _base_schema(pg)
-    _game(pg, "MLB_2026-09-01_NYY_BOS", "2026-09-01T23:00:00Z")
-    _exec(pg, """
-        INSERT INTO public.picks (
-          pick_id, game_id, model_id, pick_side, signal_type, is_live,
-          dk_odds, created_at, game_time, clv_method, clv_pct
-        ) VALUES (
-          11, 'MLB_2026-09-01_NYY_BOS', 'mlb_moneyline', 'home', 'BET', false,
-          -120, '2026-09-01T12:00:00Z', '2026-09-01T23:00:00Z', NULL, 4.50
-        )
-    """)
-    _run_file(pg, V2)
-    assert _one_sql(pg, "SELECT clv_method FROM public.picks WHERE pick_id = 11") == (
-        "standard_v2",)
-    assert _one_sql(pg, "SELECT count(*) FROM public.clv_standard_v2_once")[0] == 1
-    _exec(pg, """
-        INSERT INTO public.picks (
-          pick_id, game_id, model_id, pick_side, signal_type, is_live,
-          dk_odds, created_at, game_time, clv_method, clv_pct
-        ) VALUES (
-          12, 'MLB_2026-09-01_NYY_BOS', 'mlb_moneyline', 'away', 'BET', false,
-          -110, '2026-09-01T12:00:00Z', '2026-09-01T23:00:00Z', NULL, 7.77
-        )
-    """)
-    _run_file(pg, V2)
-    assert _one_sql(pg, "SELECT clv_method, clv_pct FROM public.picks WHERE pick_id = 12") == (
-        None, 7.77)
-
-
-def test_a_standard_v2_row_means_the_rewrite_does_not_run_again(pg):
-    """Production shape: the historical pass already stamped standard_v2.
-    The patched file records the marker and leaves an unstamped sibling alone."""
-    _base_schema(pg)
-    _game(pg, "MLB_2026-09-01_NYY_BOS", "2026-09-01T23:00:00Z")
-    _exec(pg, """
-        INSERT INTO public.picks (
-          pick_id, game_id, model_id, pick_side, signal_type, is_live,
-          dk_odds, created_at, game_time, clv_method, clv_pct
-        ) VALUES
-          (21, 'MLB_2026-09-01_NYY_BOS', 'mlb_moneyline', 'home', 'BET', false,
-           -120, '2026-09-01T12:00:00Z', '2026-09-01T23:00:00Z', 'standard_v2', 9.99),
-          (22, 'MLB_2026-09-01_NYY_BOS', 'mlb_moneyline', 'away', 'BET', false,
-           -110, '2026-09-01T12:00:00Z', '2026-09-01T23:00:00Z', NULL, 3.33)
-    """)
-    _run_file(pg, V2)
-    assert _one_sql(pg, "SELECT clv_pct FROM public.picks WHERE pick_id = 21") == (9.99,)
-    assert _one_sql(pg, "SELECT clv_method, clv_pct FROM public.picks WHERE pick_id = 22") == (
-        None, 3.33)
-    _run_file(pg, V2)
-    assert _one_sql(pg, "SELECT clv_method, clv_pct FROM public.picks WHERE pick_id = 22") == (
-        None, 3.33)
+def test_the_applied_standard_v2_file_is_not_edited():
+    """clv_standard_v2 has already run in production. The data fix is the
+    new file, not a second edit of that migration."""
+    text = V2.read_text(encoding="utf-8")
+    assert "clv_standard_v2_once" not in text
+    assert "clv_pinnacle_mainline" not in text
 
 
 def test_both_migrations_are_on_the_worker_list_in_order():
     from data.view_migrations import ACTIVE_MIGRATIONS
+    pick_units = "published_pick_units_2026_10_17.sql"
+    units = "published_record_units_2026_10_16.sql"
     assert V2.name in ACTIVE_MIGRATIONS
     assert MAIN.name in ACTIVE_MIGRATIONS
     assert ACTIVE_MIGRATIONS.index(V2.name) < ACTIVE_MIGRATIONS.index(MAIN.name)
-    assert "clv_standard_v2_once" in V2.read_text(encoding="utf-8")
+    assert ACTIVE_MIGRATIONS[-1] == units
+    # The posted-stake functions and the view that reads them stay adjacent,
+    # with the view last. This file is the entry immediately before that pair.
+    assert ACTIVE_MIGRATIONS.index(pick_units) == ACTIVE_MIGRATIONS.index(units) - 1
+    assert ACTIVE_MIGRATIONS.index(MAIN.name) == ACTIVE_MIGRATIONS.index(pick_units) - 1
     body = MAIN.read_text(encoding="utf-8")
+    assert "v_public_track_record" not in body
+    assert "profit_flat" not in body
+    assert "SET result" not in body
     assert body.index("INSERT INTO public.clv_pinnacle_mainline_backup_2026_10_14") < body.index(
         "UPDATE public.picks")
     assert "2899429" in body and "2911172" in body

@@ -25,6 +25,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
+
+from tests._node import NODE, node_strips_types, tsx_cmd  # noqa: E402
 SRC = MOBILE / "src"
 LIB = SRC / "lib"
 
@@ -34,11 +36,7 @@ def _read(path: Path) -> str:
 
 
 def _node_strips_types() -> bool:
-    if shutil.which("node") is None:
-        return False
-    out = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    m = re.match(r"v(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (22, 6)
+    return node_strips_types()
 
 
 def _run(tmp_path: Path, files: list[str], script: str) -> subprocess.CompletedProcess:
@@ -48,7 +46,7 @@ def _run(tmp_path: Path, files: list[str], script: str) -> subprocess.CompletedP
         src = re.sub(r"from '\./(\w+)';", r"from './\1.ts';", src)
         (tmp_path / name).write_text(src, encoding="utf-8")
     return subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
 
@@ -207,7 +205,7 @@ const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, latest({ ov
 eq([h2?.bookmaker, h2?.price, h2?.verb], [MODEL_BOOK, -112, 'Bet'], 'DK now -112 beats FD -115');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -297,7 +295,7 @@ eq(priceCheckForItem({ pick, latestOdds: latest(FRESH), bookRows: freshRows, gam
 eq(priceCheckForItem({ pick, latestOdds: null, bookRows: [], game }, null, NOW).flagged, false, 'missing');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -369,7 +367,7 @@ ok(cap.startsWith('Locked -112 · DK last priced ') && cap.includes('9/5') && ca
 eq(lockedCaptionText(moved), 'Locked -110', 'a moved price keeps the plain caption');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -384,7 +382,7 @@ def test_a_stale_card_offers_no_bet():
     slip = re.search(r"const canSlip =[^;]*;", card).group(0)
     assert "(!heroPrice?.stale || Boolean(inSlip))" in slip and slip.endswith("&& cta.slip;")
     assert re.search(r"const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview"
-                     r" \|\| paused \|\| heroPrice\?\.stale\s*\?\s*null", card)
+                     r" \|\| paused \|\| heroPrice\?\.stale \|\| signalsMuted( \|\| notAtMyBooks \|\| noEdgeAtMine)?\s*\?\s*null", card)
     # The words come from the reasons (lib/heroPriceText.ts).
     assert "{priceCheckChipText(check)}" in card and ">Price check<" not in card
     assert "flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`" in card
@@ -444,7 +442,7 @@ eq(stalePriceNote(fh), null, 'fresh: no note');
 eq(currentLineQuotes(pick, rows).map((q) => q.bookmaker), ['draftkings'], 'no clock: unchanged');
 """
     proc = subprocess.run(
-        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -456,15 +454,18 @@ def test_pick_detail_applies_the_price_age_rule():
     detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
     assert "const priceAge = priceAgeFor(pick, game, liveState);" in detail
     assert "heroAmericanForPick(pick, enriched.latestOdds ?? null, bookRows, priceAge)" in detail
-    assert "<BookLinesRow pick={pick} bookRows={bookRows} hero={hero} priceAge={priceAge} />" in detail
-    assert "<AllBooksCard pick={pick} bookRows={freshBookRows(pick, bookRows, priceAge)} />" in detail
+    # allowedBooks: the member's own books (2026-10-19, test_mobile_my_books.py).
+    assert re.search(r"<BookLinesRow\s+pick=\{pick\}\s+bookRows=\{bookRows\}\s+hero=\{hero\}\s+priceAge=\{priceAge\}"
+                     r"(\s+allowedBooks=\{allowedBooks\})?\s*/>", detail)
+    assert re.search(r"<AllBooksCard pick=\{pick\} bookRows=\{freshBookRows\(pick, bookRows, priceAge\)\}"
+                     r"( allowedBooks=\{allowedBooks\})? />", detail)
     assert "&& (!hero?.stale || inSlip) && !voided && cta.slip ?" in detail
     assert "stalePriceNote(hero)" in detail
     # No chip left: no empty "Betting lines" card either.
-    assert "const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge);" in detail
-    assert re.search(r"cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>", detail)
+    assert re.search(r"const lineQuotes = currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\);", detail)
+    assert re.search(r"cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>", detail)
     row = _read(SRC / "components" / "BookLinesRow.tsx")
-    assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in row
+    assert re.search(r"currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\)", row)
     assert "pickLineQuotes(" not in row
 
 
@@ -497,7 +498,7 @@ def test_the_card_applies_the_price_age_rule():
     assert "priceAge?: PriceAgeContext" in hero
     assert "priceAgeApplies(pick, priceAge)" in hero and "stale: true" in hero
     handoff = markets[markets.index("export function bestHandoffForPick("):]
-    assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in handoff[:1500]
+    assert re.search(r"currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\)", handoff[:1800])
     # One list for the card's hand-off and Pick Detail's chips.
     shop = markets[markets.index("export function currentLineQuotes("):]
     shop = shop[:shop.index("\nexport function ")]
@@ -522,7 +523,7 @@ def test_best_handoff_rerank_is_wired():
     assert re.search(r"export function bestHandoffForPick\(", markets)
     assert "hero" in markets[markets.index("export function bestHandoffForPick("):][:3000]
     card = _read(SRC / "components" / "PickCard.tsx")
-    assert re.search(r"bestHandoffForPick\(pick, item\.bookRows, heroPrice, priceAge\)", card)
+    assert re.search(r"bestHandoffForPick\(pick, item\.bookRows, heroPrice, priceAge(, myBooksReady \? myBooks : undefined)?\)", card)
 
 
 def test_pick_card_wiring():
@@ -544,14 +545,17 @@ def test_pick_card_wiring():
     assert re.search(r"startedText: \{[^}]*color: colors\.textSecondary", card)
     assert card.count("cta.priceTag") >= 2 and "kind === 'now' ? 'Now'" not in card
     assert "{priceCheckChipText(check)}" in card and re.search(r"priceCheckChip: \{[^}]*colors\.medSoft", card)
-    assert "flagged ? '—' : formatPctSigned(decisionEdge(pick))" in card and "flagged ? 'EV —'" in card
+    # shownEdge is decisionEdge(pick) unless the member's own book re-prices it
+    # (lib/myBooks.ts); a flagged row still shows "—" either way.
+    assert "flagged ? '—' : formatPctSigned(shownEdge)" in card and "flagged ? 'EV —'" in card
+    assert ": decisionEdge(pick);" in card
     assert "const demoteEdge = pick.signal_type !== 'BET';" in card
     assert "kind === 'pre' && !flagged" in card
 
 
 def test_pick_detail_board_and_copy_wiring():
     detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
-    assert re.search(r"cta\.handoff && lineQuotes\.length > 0 \? \(\s*<View style=\{styles\.linesCard\}>", detail)
+    assert re.search(r"cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>", detail)
     assert "cta.startedLine && openHere" in detail
     assert "gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))" in detail
     assert "&& !voided && cta.slip ?" in detail and "const canTrack = openHere;" in detail
@@ -579,18 +583,241 @@ def test_price_check_is_display_only():
         assert not re.search(r"PRICE_CHECK_MAX_(EDGE|CENTS)\s*=", _read(SRC / rel)), rel
 
 
+def test_signals_card_quotes_the_bet_and_names_the_best_book():
+    """Signals (Designer Option 1). The headline is the bet from structured
+    fields, the matchup wraps above it beside the score, the stake sentence is
+    its own row, and the model name is the footer. All, Signals and Live use
+    this card."""
+    card = _read(SRC / "components" / "PickCard.tsx")
+    home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    assert 'layout="signals"' in home
+    assert "layout={view === 'signals' ? 'signals' : 'board'}" not in home
+    assert "paused={isPausedForDisplay(item.pick)}" in home
+    assert "paused={view === 'today' && isPausedForDisplay" not in home
+    assert "signalsBetHeadline({" in card
+    assert "signalsBetHeadline(pick.pick_label)" not in card
+    assert "label: pick.pick_label" in card
+    assert "verdict: signalsVerdict" in card
+    assert "const signalsVerdict = preview" in card
+    assert "quietHeadline && styles.betMuted" in card
+    assert "pick.model_id === 'ufc_total_rounds' ? 'Rounds'" in card
+    assert "timing?.kind === 'live' ? null" in card
+    queries = _read(LIB / "queries.ts")
+    nfl = queries.split("export async function fetchUpcomingNflPicks", 1)[1].split(
+        "export async function ", 1
+    )[0]
+    assert ".from('game_weather')" not in nfl
+    assert "weather: null" in nfl
+    assert "signalsReasonLine(" in card and "signalsModelCaption(" in card
+    assert "signalsCardSpeech(" in card
+    assert "Model chance" in card and "Expected return" in card
+    navy = re.search(r"handoffNavy: \{([^}]*)\}", card)
+    assert navy and "backgroundColor: colors.tint" in navy.group(1)
+    assert "DK_GREEN" not in navy.group(1) and "colors.info" not in navy.group(1)
+    assert re.search(r"handoffNavyText: \{[^}]*color: colors\.textInverse", card)
+    assert "signalsStakeLine(signalsRiskUnits, signalsWinUnits)" in card
+    assert "formatUnits(stake.risk)" in card and "formatUnits(stake.win)" in card
+    assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
+    assert "signalsNowLine(" in card and "now: signalsNowSpoken" in card
+    cta_block = re.search(r"const ctaAtMovedLine = Boolean\((.*?)\);", card, re.S)
+    assert cta_block and "kind === 'now'" not in cta_block.group(1)
+    markets = _read(LIB / "markets.ts")
+    assert "if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book)" in markets
+    assert "else if (hero.kind !== 'now')" not in markets
+    assert "heroPrice.stale || heroPrice.untracked" in card
+    assert "Stake unavailable" in card and ">Stake<" not in card
+    assert "styles.stakeRow" in card and "{signalsStakeShown ?? '—'}" in card
+    assert "To win unavailable" not in card and ">To win<" not in card
+    assert "flexBasis: '30%'" in card and "maxWidth: '32%'" in card
+    assert "flexBasis: '46%'" not in card
+    assert "flexBasis: '100%'" not in card
+    assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine" not in card
+    assert "bestNow: boardHandoff.verb === 'Best'" in card
+    assert "const boardHandoff = todayBoardHandoff(handoff, heroPrice)" in card
+    assert "openBookBetslip(boardHandoff.bookmaker, boardHandoff.link)" in card
+    assert "export function todayBoardHandoff" in markets
+    stake = _read(LIB / "signalsCard.ts")
+    assert "export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win'" in stake
+    assert "SIGNALS_STAKE_FORM === 'single'" not in stake
+    assert "SIGNALS_STAKE_FORM === 'risk-win'" in stake
+    differs = re.search(r"const buttonDiffers = Boolean\((.*?)\);", card, re.S)
+    assert differs and "ctaAtMovedLine" in differs.group(1)
+    assert "buttonNowSpoken" not in card
+    assert "signalsMuted" in card and "tintSoft:" in _read(SRC / "lib" / "theme.ts")
+    assert "colors.tintSoft" in _read(SRC / "components" / "TrackButton.tsx")
+    assert "colors.tintSoft" in _read(SRC / "components" / "AddToPlayButton.tsx")
+    assert "marginLeft: 'auto'" in card
+    # The arrow form stays on the Today caption. The Signals cell does not use it.
+    assert "formatUnits(stake.risk)} → ${formatUnits(stake.win)}" in card
+    assert "minHeight: 44" in _read(SRC / "components" / "AddToPlayButton.tsx")
+    assert "minHeight: 44" in _read(SRC / "components" / "TrackButton.tsx")
+    for name in ("AddToPlayButton.tsx", "TrackButton.tsx"):
+        src = _read(SRC / "components" / name)
+        assert "colors.info" not in src
+        assert "? 'checkmark'" in src
+
+
+@pytest.mark.skipif(
+    not _node_strips_types(),
+    reason="node copy test skips on node older than 22.6",
+)
+def test_signals_card_copy(tmp_path):
+    """Behaviour of the Signals copy helpers, including a moved line.
+
+    Skips when node is older than 22.6 (no type stripping). The source pins
+    in test_signals_card_quotes_the_bet_and_names_the_best_book still run.
+    """
+    for name in ("format.ts", "signalsCard.ts"):
+        src = _read(LIB / name)
+        src = re.sub(r"from '(?:\./|@/lib/)([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = r"""
+import { signalsBetHeadline, signalsCardSpeech, signalsContextLine, signalsContextTime, signalsCtaLabel, signalsCtaSpeech, signalsHeroSpeech, signalsLabelHeadline, signalsModelCaption, signalsNowLine, signalsPriceText, signalsReasonLine, signalsStakeLine, signalsStakeSpeech } from './signalsCard.ts';
+const MINUS = '\u2212';
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const abbrevs = new Map([['Western Kentucky', 'WKU'], ['Sam Houston', 'SHSU']]);
+ok(signalsContextLine({ sport: 'NCAAF', away: 'Western Kentucky', home: 'Sam Houston', timeLabel: '8:00 PM ET', abbrevs }) === 'WKU @ SHSU · NCAAF · 8:00 PM ET', 'abbrev line');
+ok(signalsContextLine({ sport: 'NCAAF', away: 'Western Kentucky', home: 'Sam Houston', timeLabel: '8:00 PM ET', abbrevs: null }) === 'Western Kentucky @ Sam Houston · NCAAF · 8:00 PM ET', 'no invented code');
+ok(signalsContextLine({ sport: 'MLB', away: 'NYY', home: 'BOS', timeLabel: '7:05 PM ET' }) === 'NYY @ BOS · MLB · 7:05 PM ET', 'mlb abbrevs pass through');
+ok(signalsContextLine({ sport: 'UFC', away: 'A', home: 'B', timeLabel: '10:00 PM ET' }) === 'A vs B · UFC · 10:00 PM ET', 'ufc vs');
+const spread = signalsBetHeadline({ side: 'home', line: -7.5, market: 'spreads', homeTeam: 'Sam Houston', awayTeam: 'WKU' });
+ok(spread === `Sam Houston ${MINUS}7.5`, 'spread minus');
+ok(!spread.includes('-'), 'no ascii hyphen on the spread');
+ok(signalsBetHeadline({ side: 'home', line: -7, market: 'spreads', homeTeam: 'BUF', awayTeam: 'KC' }) === `BUF ${MINUS}7`, 'whole spread has no tenth');
+ok(signalsBetHeadline({ side: 'home', line: 3, market: 'spreads', homeTeam: 'BUF', awayTeam: 'KC' }) === 'BUF +3', 'plus spread stays whole');
+ok(signalsBetHeadline({ side: 'home', line: -2.5, market: 'spreads', homeTeam: 'Louisiana-Monroe', awayTeam: 'WKU' }) === `Louisiana-Monroe ${MINUS}2.5`, 'name hyphen stays');
+ok(signalsBetHeadline({ side: 'home', line: null, market: 'h2h', homeTeam: 'Sam Houston', awayTeam: 'WKU' }) === 'Sam Houston ML', 'moneyline');
+ok(signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'BOS', awayTeam: 'NYY' }) === 'Over 8.5', 'total');
+ok(signalsBetHeadline({ side: 'over', line: 4.5, market: 'totals_1st_5_innings', homeTeam: 'BOS', awayTeam: 'NYY' }) === 'Over 4.5 F5', 'F5 total keeps the qualifier');
+ok(signalsBetHeadline({ side: 'home', line: -1.5, market: 'spreads_1st_5_innings', homeTeam: 'NYY', awayTeam: 'BOS' }) === `NYY ${MINUS}1.5 F5`, 'F5 spread keeps the qualifier');
+ok(signalsBetHeadline({ side: 'home', line: null, market: 'h2h_1st_5_innings', homeTeam: 'NYY', awayTeam: 'BOS' }) === 'NYY ML F5', 'F5 moneyline keeps the qualifier');
+ok(signalsBetHeadline({ side: 'under', line: 6, market: 'totals', homeTeam: 'EDM', awayTeam: 'LAK' }) === 'Under 6', 'whole-number total drops .0');
+ok(signalsBetHeadline({ side: 'under', line: 56, market: 'totals', homeTeam: 'BUF', awayTeam: 'KC' }) === 'Under 56', 'wind total is the bet only');
+ok(!signalsBetHeadline({ side: 'under', line: 56, market: 'totals' }).includes('0.77u'), 'no stake suffix');
+ok(signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Team Total Over 3.5', 'team total names the club');
+ok(signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Team Total Under 2.5', 'away team total');
+ok(signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'Los Angeles', awayTeam: 'New York' }) === 'Over 8.5', 'two-word teams are not a qualifier');
+ok(signalsBetHeadline({ side: 'under', line: 9.5, market: 'player_tackles_assists', player: 'Roquan Smith' }) === 'Roquan Smith Under 9.5 Tackles + Assists', 'prop');
+ok(signalsBetHeadline({ side: 'over', line: 2.5, market: 'player_threes', player: 'Karl-Anthony Towns' }) === 'Karl-Anthony Towns Over 2.5 Three-pointers', 'three pointers');
+ok(signalsBetHeadline({ side: 'over', line: 32.5, market: 'player_points_rebounds_assists', player: 'Jalen Brunson' }) === 'Jalen Brunson Over 32.5 Points + Rebounds + Assists', 'pra');
+ok(signalsBetHeadline({ side: 'yes', line: null, market: null, homeTeam: 'The Masters', awayTeam: 'FIELD', label: 'Scottie Scheffler to Win' }) === 'Scottie Scheffler to Win', 'golf outright');
+ok(signalsBetHeadline({ side: '1845', line: null, market: null, homeTeam: 'The Masters', label: 'Scottie Scheffler over Rory McIlroy (matchup)' }) === 'Scottie Scheffler over Rory McIlroy (matchup)', 'golf matchup keeps (matchup)');
+ok(signalsBetHeadline({ side: 'ko_tko', line: null, market: null, homeTeam: 'Islam Makhachev', awayTeam: 'Alex Pereira', label: 'Alex Pereira vs Islam Makhachev — KO/TKO' }) === 'Alex Pereira vs Islam Makhachev — KO/TKO', 'ufc method');
+ok(!signalsBetHeadline({ side: 'decision', line: null, market: null, homeTeam: 'Islam Makhachev', label: 'Alex Pereira vs Islam Makhachev — Decision' }).includes('ML'), 'ufc method is not a moneyline');
+ok(signalsBetHeadline({ side: 'home', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins', awayTeam: 'Toronto Maple Leafs' }) === 'Boston Bruins (Regulation)', 'regulation moneyline');
+ok(signalsBetHeadline({ side: 'draw', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins', awayTeam: 'Toronto Maple Leafs' }) === 'Draw (Regulation)', 'regulation draw');
+ok(!signalsBetHeadline({ side: 'home', line: null, market: 'h2h_3way', homeTeam: 'Boston Bruins' }).includes('ML'), 'regulation is not ML');
+ok(signalsBetHeadline({ side: 'under', line: 2.5, market: 'totals', stat: 'Rounds' }) === 'Under 2.5 Rounds', 'rounds');
+ok(signalsBetHeadline({ side: 'over', line: 0.5, market: 'player_anytime_td', player: "Ja'Marr Chase" }) === "Ja'Marr Chase Anytime TD", 'anytime td');
+ok(signalsBetHeadline({ side: 'under', line: 9.5, market: 'player_tackles_assists', player: null, label: 'Roquan Smith Under 9.5 Tackles (FD) · 0.50u' }) === 'Roquan Smith Under 9.5 Tackles', 'prop falls back to the label');
+ok(signalsBetHeadline({ side: 'under', line: 56, market: 'totals', label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Under 56', 'structured total ignores the label');
+ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 14 }) === 'Wind 14 mph at kickoff', 'wind reason');
+ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: null, label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Wind 14 mph at kickoff', 'wind from the label');
+ok(signalsReasonLine({ modelId: 'nfl_wind_totals', windMph: 21, label: 'KC @ BUF Under 56 (Wind 14 mph, FD) · 0.77u' }) === 'Wind 14 mph at kickoff', 'label wind beats a later number');
+ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: null, label: 'KC @ BUF — KC -3 (Wind 14 mph, FD)' }) === null, 'other models do not grow a wind line');
+ok(signalsBetHeadline({ side: 'over', line: 1.5, market: 'player_custom', player: null, label: 'Someone Over 1.5 Custom (betonlineag) · 1.00u' }) === 'Someone Over 1.5 Custom', 'an unknown book code stays off the headline');
+ok(signalsBetHeadline({ side: 'over', line: 1.5, market: 'player_custom', player: null, label: 'Someone Over 1.5 Custom (FanDuel)' }) === 'Someone Over 1.5 Custom', 'a full book name stays off the headline');
+ok(signalsBetHeadline({ side: 'yes', line: null, market: null, homeTeam: 'The Masters', label: 'Scottie Scheffler to Win (MB (exch.))' }) === 'Scottie Scheffler to Win', 'a nested book tag stays off the headline');
+const openerChi = 'CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, fanatics) · 0.98u · NEW 0m';
+const openerNyg = 'TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u · NEW 0m';
+const openerTen = 'HOU @ TEN — TEN +9.5 (Opener +2 vs Pinnacle, BR) · 1.67u · NEW 0m';
+const windSf = 'WAS @ SF Under 51.5 (Wind 11 mph, MGM) · 1.01u';
+const windBuf = 'NE @ BUF Under 49 (Wind 11 mph, fanatics) · 1.01u';
+ok(signalsLabelHeadline(openerChi) === 'CHI @ ATL — CHI +0.5', 'opener drops the note, the stake and NEW');
+ok(signalsLabelHeadline(openerNyg) === `TEN @ NYG — NYG ${MINUS}1`, 'opener minus is a true minus');
+ok(signalsLabelHeadline(openerTen) === 'HOU @ TEN — TEN +9.5', 'opener plus stays');
+ok(signalsLabelHeadline('BUF @ HOU — BUF +1 (Opener -2 vs Pinnacle, fanatics) · 0.98u') === 'BUF @ HOU — BUF +1', 'opener stake with no age tag');
+ok(!signalsLabelHeadline(openerChi).includes('Opener') && !signalsLabelHeadline(openerChi).includes('NEW') && !signalsLabelHeadline(openerChi).includes('0.98u'), 'opener noise is gone');
+ok(signalsLabelHeadline(windSf) === 'WAS @ SF Under 51.5', 'wind drops the forecast and the stake');
+ok(signalsLabelHeadline(windBuf) === 'NE @ BUF Under 49', 'wind fanatics label');
+ok(!signalsLabelHeadline(windSf).includes('Wind') && !signalsLabelHeadline(windSf).includes('1.01u'), 'wind noise is gone');
+ok(signalsLabelHeadline('Charlie McAvoy Under 1.5 Blocked Shots (DK)') === 'Charlie McAvoy Under 1.5 Blocked Shots', 'blocked shots drops DK');
+ok(signalsLabelHeadline('Paige Bueckers Under 3.5 Reb (DK)') === 'Paige Bueckers Under 3.5 Reb', 'reb drops DK');
+ok(signalsLabelHeadline('Jadarian Price Over 1.5 Rec (FD)') === 'Jadarian Price Over 1.5 Rec', 'rec drops FD');
+ok(signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · 0.98u · up 5h') === 'CHI @ ATL — CHI +0.5', 'up hours comes off');
+ok(signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · age unknown') === 'CHI @ ATL — CHI +0.5', 'age unknown comes off');
+ok(signalsLabelHeadline('Boston Bruins (Regulation) · 1.10u · NEW 0m') === 'Boston Bruins (Regulation)', 'regulation stays');
+ok(signalsLabelHeadline('Scottie Scheffler over Rory McIlroy (matchup) · 0.50u · NEW 0m') === 'Scottie Scheffler over Rory McIlroy (matchup)', 'matchup stays');
+ok(signalsBetHeadline({ side: 'away', line: -0.5, market: 'spreads', homeTeam: 'ATL', awayTeam: 'CHI', label: openerChi }) === 'CHI +0.5', 'opener hero is the pick');
+ok(signalsBetHeadline({ side: 'home', line: -1, market: 'spreads', homeTeam: 'NYG', awayTeam: 'TEN', label: openerNyg }) === `NYG ${MINUS}1`, 'opener hero uses the fields');
+ok(signalsBetHeadline({ side: 'under', line: 51.5, market: 'totals', homeTeam: 'SF', awayTeam: 'WAS', label: windSf }) === 'Under 51.5', 'wind hero is the total');
+ok(signalsBetHeadline({ side: 'under', line: 1.5, market: 'player_blocked_shots', player: null, label: 'Charlie McAvoy Under 1.5 Blocked Shots (DK)' }) === 'Charlie McAvoy Under 1.5 Blocked Shots', 'blocked shots fallback');
+ok(signalsBetHeadline({ side: 'under', line: 3.5, market: 'player_rebounds', player: null, label: 'Paige Bueckers Under 3.5 Reb (DK)' }) === 'Paige Bueckers Under 3.5 Reb', 'reb fallback');
+ok(!signalsBetHeadline({ side: 'under', line: 51.5, market: 'totals', label: windSf }).includes('Wind'), 'wind hero has no forecast');
+ok(!signalsBetHeadline({ side: 'away', line: -0.5, market: 'spreads', homeTeam: 'ATL', awayTeam: 'CHI', label: openerChi }).includes('NEW'), 'opener hero has no age tag');
+ok(signalsReasonLine({ modelId: 'nfl_opener_spread', windMph: 14 }) === null, 'other models stay quiet');
+ok(signalsModelCaption('Wind Totals (Under)', 'Posted 11:07 AM ET') === 'Wind Totals (Under) model · Posted 11:07 AM ET', 'caption');
+ok(signalsCardSpeech({
+  bet: 'Under 56', price: `${MINUS}110 DraftKings`, reason: 'Wind 14 mph at kickoff',
+  teams: 'Kansas City at Buffalo', time: '8:00 PM ET', edge: 'Edge +6.0%',
+  modelChance: 'Model chance 58%', expectedReturn: 'Expected return +4.0%',
+  stake: 'Stake, Bet 1.1 units, win 1 unit', modelName: 'Wind Totals (Under) model',
+  posted: 'Posted 11:07 AM ET', paused: null, gameStatus: null, sharp: null, started: null,
+}) === `Under 56. ${MINUS}110 DraftKings. Kansas City at Buffalo. 8:00 PM ET. Wind 14 mph at kickoff. Edge +6.0%. Model chance 58%. Expected return +4.0%. Stake, Bet 1.1 units, win 1 unit. Wind Totals (Under) model. Posted 11:07 AM ET`, 'voiceover order');
+ok(signalsCardSpeech({
+  verdict: 'NEUTRAL', bet: 'Under 43.5', price: null, reason: null, teams: null, time: null,
+  edge: null, modelChance: null, expectedReturn: null, stake: null, modelName: null,
+  posted: null, paused: null, gameStatus: null, sharp: null, started: null,
+}) === 'NEUTRAL. Under 43.5', 'verdict is spoken first');
+ok(!signalsCardSpeech({
+  bet: 'Under 56', price: null, reason: null, teams: null, time: null, edge: null,
+  modelChance: null, expectedReturn: null, stake: null, modelName: null, posted: null,
+  paused: null, gameStatus: null, sharp: null, started: null,
+}).includes('models agree'), 'agreement count is not on the card');
+ok(signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`, 'price book');
+ok(signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`, 'cta');
+ok(signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`, 'cta names a moved line');
+ok(signalsCtaLabel('DK', null) === 'Open DK', 'no invented price');
+ok(signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`, 'best now');
+ok(signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105`, 'best now names the line');
+ok(signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105`, 'spoken best now');
+ok(signalsCtaSpeech('DraftKings', '-105', '-8.5', { bestNow: true }) === `Best now, DraftKings, ${MINUS}8.5, ${MINUS}105`, 'spoken best now names the line');
+ok(signalsCtaSpeech('DraftKings', null) === 'Open DraftKings', 'spoken open');
+ok(!signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'), 'spoken label has no middle dot');
+const moved = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DK' });
+const priced = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DK' });
+ok(moved === `DK line now ${MINUS}8.5 (${MINUS}110)`, 'moved line');
+ok(priced === `DK now (${MINUS}105)`, 'moved price');
+ok(signalsNowLine({ line: '-4.5', price: '-110', priceDiffers: false, book: 'MGM' }) === `MGM line now ${MINUS}4.5 (${MINUS}110)`, 'book names the line');
+ok(signalsNowLine({ line: '-8.5', price: '-105', priceDiffers: true, book: 'DK' }) === `DK line now ${MINUS}8.5 (${MINUS}105)`, 'line and price');
+ok(signalsNowLine({ line: null, price: '-110', priceDiffers: false, book: 'DK' }) === null, 'unchanged is quiet');
+ok(signalsNowLine({ line: '-8.5', price: null, priceDiffers: true, book: 'DK' }) === null, 'no price, no Now line');
+ok(signalsStakeLine('1.5u', '0.4u') === 'Bet 1.5u · Win 0.4u', 'capped favorite shows risk and win');
+ok(signalsStakeLine('1.1u', '1u') === 'Bet 1.1u · Win 1u', 'both amounts, no arrow');
+ok(!signalsStakeLine('1.1u', '1u').includes('\u2192'), 'arrow form is not the cell');
+ok(signalsStakeSpeech('1.5u', '0.4u') === 'Bet 1.5 units, win 0.4 units', 'speech says both');
+ok(signalsStakeSpeech('1u', '1u') === 'Bet 1 unit, win 1 unit', 'one unit is singular');
+ok(signalsStakeSpeech('10u', '1.5u') === 'Bet 10 units, win 1.5 units', 'ten stays plural');
+ok(signalsContextTime(null, '8:00 PM ET') === '8:00 PM ET', 'today is the clock');
+ok(signalsContextTime('Sat 10/17', '8:00 PM ET') === 'Sat 10/17 · 8:00 PM ET', 'later day joins the clock');
+const locked = signalsPriceText('-110', 'BetMGM');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }) === locked, 'decision speech is the headline price');
+ok(!signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM' }).includes('Now'), 'no Now when the screen has none');
+const spoken = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'BetMGM' });
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }) === `${locked}. ${spoken}`, 'speech repeats the Now line');
+ok(signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }).includes(' now '), 'now is in the label when the button differs');
+ok(!signalsHeroSpeech({ decisionPrice: '-110', book: 'BetMGM', now: spoken }).includes('Picked at'), 'the lock is spoken once');
+"""
+    proc = subprocess.run(
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_pick_cta_pins_are_on_the_pr_ci_subset():
     assert "tests/test_mobile_pick_cta.py" in _read(ROOT / ".github" / "workflows" / "pr-ci.yml")
 
 
 @pytest.mark.skipif(
-    not (MOBILE / "node_modules" / ".bin").exists() or shutil.which("node") is None,
+    tsx_cmd(MOBILE) is None,
     reason="mobile node modules not installed",
 )
 def test_the_behavioural_checks_pass():
-    tsx = MOBILE / "node_modules" / ".bin" / "tsx"
-    proc = subprocess.run(
-        [str(tsx), "scripts/verify_pick_cta.ts"],
-        cwd=MOBILE, capture_output=True, text=True, timeout=300,
-    )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    cmd = tsx_cmd(MOBILE)
+    for script in ("scripts/verify_pick_cta.ts", "scripts/verify_pick_card.ts"):
+        proc = subprocess.run(
+            [*cmd, script],
+            cwd=MOBILE, capture_output=True, text=True, timeout=300,
+        )
+        assert proc.returncode == 0, script + "\n" + proc.stdout + proc.stderr

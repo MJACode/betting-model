@@ -306,10 +306,15 @@ def test_the_nhl_totals_card_will_not_bet_a_fetch_hours_old():
 
 
 def test_the_card_passes_its_clock_to_the_rule(monkeypatch):
+    import models.nhl_goalie_gate as gate
+
     class _C:
         def close(self):
             pass
     monkeypatch.setattr(card, "get_connection", lambda: _C())
+    # Both starting goalies confirmed (tests/test_nhl_goalie_guards.py is the
+    # gate); this test is the card's clock.
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
     monkeypatch.setattr(card, "slate", lambda conn, now: {
         "NHL_2026-10-08_PHI_OTT": {"home": "OTT", "away": "PHI",
                                    "game_date": "2026-10-08",
