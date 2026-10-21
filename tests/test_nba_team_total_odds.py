@@ -559,7 +559,8 @@ def test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name():
     purchases are protected, named exactly as their writers stamp them."""
     from data import prune_odds
     from data.ingestors import nba_odds_history, nhl_derivative_odds_history
-    for src in (feed.SOURCE, nba_odds_history.DERIV_SOURCE, nhl_derivative_odds_history.SOURCE):
+    for src in (feed.SOURCE, nba_odds_history.DERIV_SOURCE, nba_odds_history.ALT_SOURCE,
+                nhl_derivative_odds_history.SOURCE):
         assert src in prune_odds.PROTECTED_SOURCES, src
         params: dict = {}
         prune_odds._unprotected(params, table="odds")
