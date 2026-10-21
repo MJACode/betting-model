@@ -205,8 +205,9 @@ measured against the close and forecast skill improves as kickoff nears.
 
 Operational notes:
 
-- Runs with **cwd = `nfl/`** (the package reads `data/games.csv` and writes
-  `data/cards/` relative to its own root). Its Python deps for this path (pandas,
+- Runs with **cwd = `nfl/`** (the package writes `data/cards/` relative to its
+  own root). Its schedule is the `games` table (`nfl/data_ingest/schedule.py`),
+  not the frozen `data/games.csv`, since 2026-10-20 (`docs/sports/nfl.md`). Its Python deps for this path (pandas,
   numpy, requests) are already in the root `requirements.txt` — the heavier
   `nfl/requirements.txt` extras (scipy, lightgbm, pyarrow) are only needed by the
   backtest/validation scripts, which are not scheduled.
