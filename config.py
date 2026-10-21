@@ -4035,6 +4035,19 @@ NHL_PROP_CLOSE_WINDOW_MIN = int(os.environ.get("NHL_PROP_CLOSE_WINDOW_MIN", "70"
 # 10-11 credits a game on 2026-10-19 in api_call_log).
 NHL_PROP_FINAL_OPENS_MIN = int(os.environ.get("NHL_PROP_FINAL_OPENS_MIN", "25"))
 NHL_PROP_FINAL_CLOSES_MIN = int(os.environ.get("NHL_PROP_FINAL_CLOSES_MIN", "12"))
+# The NHL models that do NOT wait for both starting goalies to be confirmed
+# (models/nhl_goalie_gate.py). Every other NHL model, present and future, does.
+# mike, 2026-10-20: "Ok on shots on goal", answering: "The shots-on-goal props
+# lose their early price under this rule. Measured: +11.66 units on 39 bets
+# placed 6+ hours out (average 8.75% better than the closing price) vs -1.12
+# on 33 later. The model never reads the goalie. I'd exempt it; one config
+# line." Those units are 1u risked a bet (picks.profit_flat / 100), settled
+# games through 2026-10-19; the CLV average is over the 35 of the 39 that
+# carry one. Sized the record's way (1u to win, risk capped at 3) the same
+# bets are +9.27 and -1.06. So shots on goal keeps deciding at its opening
+# fetch, before any goalie is confirmed. Pinned by
+# tests/test_nhl_goalie_gate.py: adding a model here takes his instruction.
+NHL_GOALIE_GATE_EXEMPT = frozenset({"nhl_prop_shots_on_goal"})
 # One run's ceiling. Measured 2026-10-01 on the live endpoint; see
 # data/ingestors/nhl_prop_odds_ingestor.py. A full 16-game slate fits; a gate
 # that broke and fetched every game on every pass would stop here, not at the

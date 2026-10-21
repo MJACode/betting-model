@@ -52,12 +52,19 @@ Deliberate, and load-bearing:
   and never replaces a pick that exists.
 
   BOTH STARTING GOALIES CONFIRMED FIRST (mike, 2026-10-20: "We should
-  absolutely always know the goalie matchup before making a bet as well.").
-  Only games models/nhl_goalie_gate.py calls known are scored -- filtered
-  before the four models' rows are pooled, so an unknown game never takes the
-  one prop bet a game allows -- and only on a quote fetched after the matchup
-  became known (scripts/nhl_prop_card.after_confirmation). publish() refuses
-  an unknown game again.
+  absolutely always know the goalie matchup before making a bet as well."),
+  FOR SAVES AND ASSISTS. Only games models/nhl_goalie_gate.py calls known are
+  scored -- filtered before the four models' rows are pooled, so an unknown
+  game never takes the one prop bet a game allows -- and only on a quote
+  fetched after the matchup became known (scripts/nhl_prop_card.
+  after_confirmation). The pool drops a gated row on an unknown game before it
+  chooses (publish_across_models), and publish() refuses one again.
+
+  SHOTS ON GOAL IS EXEMPT (mike, 2026-10-20: "Ok on shots on goal";
+  config.NHL_GOALIE_GATE_EXEMPT). It scores the whole slate at its opening
+  fetch exactly as before the rule, and its row may take a game's one prop
+  slot before the goalies are confirmed. The model never reads the goalie;
+  the evidence is beside the constant.
 
   A SAVES BET IS ON THE CONFIRMED STARTER ONLY. A book that still prices the
   other goalie is offering a bet that voids (the books void saves when he does
@@ -87,10 +94,13 @@ from data.db import get_connection  # noqa: E402
 from data.season_labels import nhl_season_label  # noqa: E402
 import models.nhl_goalie_gate as goalie_gate  # noqa: E402
 from scripts.nhl_prop_card import (  # noqa: E402
-    COHERENT_SUM, ET, _utc, after_confirmation, known_slate, slate,
+    COHERENT_SUM, ET, _utc, after_confirmation, known_slate, slate, slate_for,
 )
 
 QUOTE_COLS = ["game_id", "player", "book", "line", "over", "under", "snap", "over_link", "under_link"]
+# Which model prices each market, so the quote read honours the goalie rule's
+# exemption per model (shots on goal; models/nhl_goalie_gate.is_exempt).
+MODEL_BY_MARKET = {s.market: s.model_id for s in np_.LIVE}
 
 
 def latest_quotes(conn, games: dict[str, dict], market: str) -> pd.DataFrame:
@@ -112,7 +122,7 @@ def latest_quotes(conn, games: dict[str, dict], market: str) -> pd.DataFrame:
     if q.empty:
         return q.reset_index(drop=True)
     q = q[q.snap == q.groupby("game_id").snap.transform("max")]
-    q = after_confirmation(q, games, "nhl-props-card")
+    q = after_confirmation(q, games, "nhl-props-card", MODEL_BY_MARKET.get(market))
     q = q.drop_duplicates(["game_id", "player", "book", "line"], keep="last")
     two = q.over.notna() & q.under.notna()
     total = q.over.map(np_.implied, na_action="ignore") + q.under.map(np_.implied, na_action="ignore")
@@ -410,6 +420,14 @@ def publish_across_models(rows: list[dict]) -> int:
     conn = get_connection()
     try:
         _lock_model(conn, PROP_POOL_LOCK)
+        # A gated model's row on a game whose goalies are not confirmed leaves
+        # the pool BEFORE the one slot a game is chosen: otherwise it could win
+        # the slot on EV, be refused at publish(), and leave the game with no
+        # bet when the exempt shots-on-goal row was there to take it.
+        rows = goalie_gate.refuse_unknown(conn, rows, mode="drop", label="nhl-prop-pool")
+        if not rows:
+            conn.commit()           # releases the pool lock
+            return 0
         taken = games_with_a_prop_bet(conn, sorted({r["game_id"] for r in rows}))
         written = prop_bets_by_night(conn, sorted({str(r["game_date"]) for r in rows}))
         chosen = per_night(one_per_game(rows, taken), written)
@@ -543,13 +561,18 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     out: dict = {"date": game_date}
     conn = get_connection()
     try:
-        # Only games whose goalie matchup is known, before anything is pooled.
-        games, states = known_slate(conn, slate(conn, game_date, now), "nhl-props-card")
-        starters = {g: states[g].starters for g in games}
+        # Only games whose goalie matchup is known, before anything is
+        # pooled -- for every model but the exempt one (shots on goal), which
+        # is handed the whole slate as it was before the rule (slate_for).
+        everything = slate(conn, game_date, now)
+        gated = [s.model_id for s in np_.LIVE if not goalie_gate.is_exempt(s.model_id)]
+        known, states = known_slate(conn, everything, f"nhl-props-card ({', '.join(gated)})")
+        starters = {g: states[g].starters for g in known}
         pooled: list[dict] = []
         for spec in np_.LIVE:
             if only and spec.model_id != only:
                 continue
+            games = slate_for(spec.model_id, everything, known)
             try:
                 r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id),
                                  starters=starters)

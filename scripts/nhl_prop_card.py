@@ -77,18 +77,31 @@ def known_slate(conn, games: dict[str, dict], label: str) -> tuple[dict[str, dic
     """The games whose goalie matchup is known, each with `known_at`, and the
     gate's reading per game (models/nhl_goalie_gate.Matchup). Both NHL prop
     cards call this before anything is pooled, so an unknown game cannot take
-    the one prop bet a game allows. The rest are logged with the reason."""
+    the one prop bet a game allows. The rest are logged with the reason.
+
+    For the gated models only: an exempt model (config.NHL_GOALIE_GATE_EXEMPT,
+    shots on goal) is handed the slate as it is, with no `known_at`
+    (`slate_for`)."""
     states = goalie_gate.matchup_states(conn, list(games))
     known, held = goalie_gate.split_known(games, {g: m.reason for g, m in states.items()})
     goalie_gate.log_held(label, held)
     return {g: {**v, "known_at": states[g].known_at} for g, v in known.items()}, states
 
 
-def after_confirmation(q: pd.DataFrame, games: dict[str, dict], label: str) -> pd.DataFrame:
+def slate_for(model_id: str, games: dict[str, dict], known: dict[str, dict]) -> dict[str, dict]:
+    """The games `model_id` may decide: the known ones, or for an exempt model
+    (shots on goal, mike 2026-10-20) the whole slate exactly as before the rule."""
+    return games if goalie_gate.is_exempt(model_id) else known
+
+
+def after_confirmation(q: pd.DataFrame, games: dict[str, dict], label: str,
+                       model_id: str) -> pd.DataFrame:
     """Only quotes fetched after the game's matchup became known. A newest
     fetch taken before the confirmation priced a market that did not know the
-    goalies yet; the next pass's fetch decides instead."""
-    if q.empty:
+    goalies yet; the next pass's fetch decides instead. An exempt model's
+    quotes (config.NHL_GOALIE_GATE_EXEMPT, shots on goal) are all kept: it
+    decides at its opening fetch, before any goalie is confirmed."""
+    if q.empty or goalie_gate.is_exempt(model_id):
         return q
     stale = [s < games[g]["known_at"] if games[g].get("known_at") else False
              for g, s in zip(q.game_id, q.snap)]
@@ -116,7 +129,7 @@ def latest_quotes(conn, games: dict[str, dict]) -> pd.DataFrame:
         q[c] = pd.to_numeric(q[c], errors="coerce")
     q = q[[s <= _utc(games[g]["commence_time"]) for g, s in zip(q.game_id, q.snap)]]
     q = q.sort_values("snap").drop_duplicates(["game_id", "player"], keep="last")
-    q = after_confirmation(q, games, "nhl-prop-card")
+    q = after_confirmation(q, games, "nhl-prop-card", MODEL_ID)
     two = q.over.notna() & q.under.notna()
     total = q.over.map(bs_implied, na_action="ignore") + q.under.map(bs_implied, na_action="ignore")
     bad = two & ~total.between(*COHERENT_SUM)
@@ -282,7 +295,8 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     out = {"date": game_date, "priced": 0, "scored": 0, "bets": 0, "published": 0, "skipped": 0}
     conn = get_connection()
     try:
-        games, _ = known_slate(conn, slate(conn, game_date, now), "nhl-prop-card")
+        everything = slate(conn, game_date, now)
+        games = slate_for(MODEL_ID, everything, known_slate(conn, everything, "nhl-prop-card")[0])
         quotes = latest_quotes(conn, games)
         out["priced"] = len(quotes)
         if quotes.empty:

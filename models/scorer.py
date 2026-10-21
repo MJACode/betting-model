@@ -975,15 +975,21 @@ def _nhl_matchup_reason(conn, game_id: str) -> str | None:
 
 def _apply_nhl_goalie_gate(conn, game_id: str, picks: list[dict]) -> int:
     """Every BET in `picks` turned NONE with the reason when the game's goalie
-    matchup is not known. Mutates in place; returns how many."""
-    if not any(p.get("signal_type") == "BET" for p in picks):
+    matchup is not known, except an exempt model's (config.
+    NHL_GOALIE_GATE_EXEMPT, shots on goal; per row, by model_id). Mutates in
+    place; returns how many."""
+    import models.nhl_goalie_gate as gate
+
+    def held(p):
+        return p.get("signal_type") == "BET" and not gate.is_exempt(p.get("model_id"))
+    if not any(held(p) for p in picks):
         return 0
     reason = _nhl_matchup_reason(conn, game_id)
     if reason is None:
         return 0
     n = 0
     for p in picks:
-        if p.get("signal_type") == "BET":
+        if held(p):
             logger.info(f"  {game_id}: {p.get('pick_label')} not bet -- {reason}")
             p.update(_downgrade(p, reason))
             n += 1
@@ -997,7 +1003,7 @@ def _refuse_unknown_nhl_bets(conn, picks: list[dict]) -> None:
     it logs at WARNING. Mutates in place, so the caller's rows say what was
     written."""
     import models.nhl_goalie_gate as gate
-    bets = [p for p in picks if gate.is_nhl_bet(p)]
+    bets = [p for p in picks if gate.is_gated_bet(p)]     # the exempt model's pass
     if not bets:
         return
     ids = {p["game_id"] for p in bets}

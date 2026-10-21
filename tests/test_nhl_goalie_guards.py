@@ -1,7 +1,10 @@
 """Every NHL writer refuses a bet whose goalie matchup is not known.
 
 mike, 2026-10-20: "We should absolutely always know the goalie matchup before
-making a bet as well." All eight NHL models, and any added later. These tests
+making a bet as well." Every NHL model, and any added later, except the
+shots-on-goal props (mike, same day: "Ok on shots on goal";
+config.NHL_GOALIE_GATE_EXEMPT), which keep deciding at their opening fetch,
+before any goalie is confirmed. These tests
 drive the real writers -- the scorer, the totals card, both prop cards -- over a
 fake database that answers the goalie gate's own reads, so each one shows the
 rule holding at the place a pick is written, not in a helper.
@@ -160,14 +163,18 @@ PROP_GAME = "NHL_2026-10-01_BOS_NYR"
 PROP_GAMES = {PROP_GAME: {"home": "NYR", "away": "BOS", "commence_time": "2026-10-01T23:00:00Z"}}
 
 
-def _props_row():
+def _props_row(market="player_shots_on_goal", game=PROP_GAME, games=None, player_id=1):
+    """One BET row from the props card's own pick_rows, for the model that
+    prices `market` (shots on goal, saves or assists)."""
     import models.nhl_props as P
-    q = pd.DataFrame([{"game_id": PROP_GAME, "player": "Skater 1", "player_id": 1, "book": "betmgm",
-                       "line": 2.5, "over": -150.0, "under": 120.0,
+    spec = next(sp for sp in P.LIVE if sp.market == market)
+    games = games or PROP_GAMES
+    q = pd.DataFrame([{"game_id": game, "player": f"Player {player_id}", "player_id": player_id,
+                       "book": "betmgm", "line": 2.5, "over": -150.0, "under": 120.0,
                        "over_link": "betmgm/o", "under_link": "betmgm/u"}])
-    mus = pd.DataFrame([{"player_id": 1, "game_id": PROP_GAME, "mu": 1.6}])
-    rows = props.pick_rows(P.SHOTS, mus, q, PROP_GAMES, "2026-10-01", 1000.0, 0.0)
-    assert rows and rows[0]["signal_type"] == "BET"
+    mus = pd.DataFrame([{"player_id": player_id, "game_id": game, "mu": 1.6}])
+    rows = props.pick_rows(spec, mus, q, games, "2026-10-01", 1000.0, 0.05 if spec.overdispersed else 0.0)
+    assert rows and rows[0]["signal_type"] == "BET" and rows[0]["model_id"] == spec.model_id
     return rows
 
 
@@ -180,10 +187,19 @@ def _blocked_rows():
     return rows
 
 
-def test_the_props_card_insert_refuses_an_unknown_game():
+@pytest.mark.parametrize("market", ["player_total_saves", "player_assists"])
+def test_the_props_card_insert_refuses_an_unknown_game(market):
     db = GoalieDB({PROP_GAME: ("NYR", "BOS")}, _both(PROP_GAME, "NYR", "BOS", status_home="expected"))
-    assert props.publish(db, _props_row()) == 0
+    assert props.publish(db, _props_row(market)) == 0
     assert db.inserted == []
+
+
+def test_the_props_card_insert_writes_a_shots_on_goal_bet_on_an_unknown_game():
+    """The exemption (mike, 2026-10-20: "Ok on shots on goal"): the model never
+    reads the goalie, and its early price is its edge."""
+    db = GoalieDB({PROP_GAME: ("NYR", "BOS")}, _both(PROP_GAME, "NYR", "BOS", status_home="expected"))
+    assert props.publish(db, _props_row("player_shots_on_goal")) == 1
+    assert [(r["model_id"], r["signal_type"]) for r in db.inserted] == [("nhl_prop_shots_on_goal", "BET")]
 
 
 def test_the_blocked_shots_card_insert_refuses_an_unknown_game():
@@ -194,7 +210,8 @@ def test_the_blocked_shots_card_insert_refuses_an_unknown_game():
 
 def test_both_prop_cards_insert_a_known_game():
     db = GoalieDB({PROP_GAME: ("NYR", "BOS")}, _both(PROP_GAME, "NYR", "BOS"))
-    assert props.publish(db, _props_row()) == 1
+    for market in ("player_shots_on_goal", "player_total_saves", "player_assists"):
+        assert props.publish(db, _props_row(market)) == 1, market
     assert blocked.publish(db, _blocked_rows()) == 1
 
 
@@ -219,18 +236,24 @@ def test_the_totals_card_reads_quotes_only_for_known_games(monkeypatch):
     assert seen["games"] == {KNOWN}
 
 
-def test_the_props_card_scores_only_known_games(monkeypatch):
+def test_the_props_card_scores_only_known_games_except_for_shots_on_goal(monkeypatch):
+    """Saves and assists see the known game only. Shots on goal sees the whole
+    slate, as it did before the rule, with no confirmation time attached (so
+    no quote of its is held back for being older than one)."""
     db = GoalieDB(TWO, TWO_ESPN)
-    seen = []
+    seen = {}
     monkeypatch.setattr(props, "get_connection", lambda: db)
-    monkeypatch.setattr(props, "slate", lambda conn, d, now: dict(SLATE))
+    monkeypatch.setattr(props, "slate", lambda conn, d, now: {g: dict(v) for g, v in SLATE.items()})
 
     def score_market(conn, spec, games, game_date, artifact=None, **kw):
-        seen.append(set(games))
+        seen[spec.model_id] = games
         return {"priced": 0, "mus": pd.DataFrame(), "quotes": pd.DataFrame(), "rows": [], "skipped": []}
     monkeypatch.setattr(props, "score_market", score_market)
     props.run_card("2026-10-20", do_publish=False, now=datetime(2026, 10, 20, 20, 0, tzinfo=timezone.utc))
-    assert seen and all(g == {KNOWN} for g in seen)
+    assert set(seen["nhl_prop_saves"]) == {KNOWN}
+    assert set(seen["nhl_prop_assists"]) == {KNOWN}
+    assert set(seen["nhl_prop_shots_on_goal"]) == {KNOWN, UNKNOWN}
+    assert all("known_at" not in g for g in seen["nhl_prop_shots_on_goal"].values())
 
 
 def test_the_blocked_shots_card_reads_quotes_only_for_known_games(monkeypatch):
@@ -261,11 +284,21 @@ def test_a_prop_fetch_older_than_the_confirmation_does_not_decide():
     games = {KNOWN: {"home": "TOR", "away": "BOS", "commence_time": "2026-10-20T23:00:00Z",
                      "known_at": datetime(2026, 10, 20, 18, 30, tzinfo=timezone.utc)}}
     rows = [(KNOWN, "Skater 1", "betmgm", 2.5, -150, 120, "2026-10-20T18:00:00Z", "o", "u")]
-    assert props.latest_quotes(_QuoteConn(rows), games, "player_shots_on_goal").empty
+    for market in ("player_assists", "player_total_saves"):
+        assert props.latest_quotes(_QuoteConn(rows), games, market).empty, market
     later = [(KNOWN, "Skater 1", "betmgm", 2.5, -150, 120, "2026-10-20T18:40:00Z", "o", "u")]
-    assert len(props.latest_quotes(_QuoteConn(later), games, "player_shots_on_goal")) == 1
+    assert len(props.latest_quotes(_QuoteConn(later), games, "player_assists")) == 1
     dk = [(KNOWN, "Skater 1", 1.5, -135, 105, "2026-10-20T18:00:00Z", "o", "u")]
     assert blocked.latest_quotes(_QuoteConn(dk), games).empty
+
+
+def test_a_shots_on_goal_fetch_older_than_the_confirmation_still_decides():
+    """The exemption reaches the quote filter too: even handed a game that
+    carries a confirmation time, shots on goal keeps the fetch taken before it."""
+    games = {KNOWN: {"home": "TOR", "away": "BOS", "commence_time": "2026-10-20T23:00:00Z",
+                     "known_at": datetime(2026, 10, 20, 18, 30, tzinfo=timezone.utc)}}
+    rows = [(KNOWN, "Skater 1", "betmgm", 2.5, -150, 120, "2026-10-20T12:00:00Z", "o", "u")]
+    assert len(props.latest_quotes(_QuoteConn(rows), games, "player_shots_on_goal")) == 1
 
 
 def test_a_saves_bet_is_only_on_the_confirmed_starter():
@@ -280,6 +313,103 @@ def test_a_saves_bet_is_only_on_the_confirmed_starter():
     assert list(up2.player_name) == ["Philipp Grubauer"]
     assert list(priced2.player_id) == [8475831]
     assert "Joey Daccord" in skipped[0] and "not the confirmed starter" in skipped[0]
+
+
+# ── shots on goal: exempt, end to end, and in the one-a-game pool ───────────
+
+OPEN_FETCH = "2026-10-20T12:00:00Z"     # 13h40m before puck drop, before any confirmation
+
+
+class _CardDB(GoalieDB):
+    """GoalieDB plus the props card's quote read: one opening fetch, one
+    player in every game asked about, for whichever market is asked."""
+
+    def execute(self, sql, params=None):
+        q = " ".join(sql.split())
+        if "FROM player_prop_odds" in q:
+            return _Rows([(g, f"{g[-3:]} Player", "betmgm", 2.5, -150, 120, OPEN_FETCH, "o", "u")
+                          for g in params[0]])
+        return super().execute(sql, params)
+
+
+def test_shots_on_goal_writes_a_bet_on_an_unknown_game_at_its_opening_fetch(monkeypatch):
+    """The real card from the slate to the INSERT: the goalie split, the quote
+    read and its confirmation filter, pick_rows, the pool, publish. Only the
+    model's mean is faked. Shots on goal bets both games off the 12:00Z fetch.
+    Saves and assists bet neither: one game is unknown, and the other was
+    confirmed at 15:00Z, after that fetch."""
+    db = _CardDB(TWO, TWO_ESPN)
+    monkeypatch.setattr(props, "get_connection", lambda: db)
+    monkeypatch.setattr(props, "slate", lambda conn, d, now: {g: dict(v) for g, v in SLATE.items()})
+    seen = {}
+
+    def score_market(conn, spec, games, game_date, artifact=None, **kw):
+        quotes = props.latest_quotes(conn, games, spec.market)
+        seen[spec.model_id] = sorted(set(quotes.game_id))
+        quotes["player_id"] = [1 + sorted(TWO).index(g) for g in quotes.game_id]
+        mus = quotes[["player_id", "game_id"]].assign(mu=1.6)
+        rows = props.pick_rows(spec, mus, quotes, games, game_date, 1000.0,
+                               0.05 if spec.overdispersed else 0.0)
+        return {"priced": len(quotes), "mus": mus, "quotes": quotes, "rows": rows, "skipped": []}
+    monkeypatch.setattr(props, "score_market", score_market)
+    out = props.run_card("2026-10-20", do_publish=True, now=datetime(2026, 10, 20, 19, 0, tzinfo=timezone.utc))
+    assert seen == {"nhl_prop_saves": [], "nhl_prop_shots_on_goal": sorted([KNOWN, UNKNOWN]),
+                    "nhl_prop_assists": []}
+    assert out["published"] == 2
+    assert sorted((r["game_id"], r["model_id"], r["signal_type"]) for r in db.inserted) == sorted([
+        (KNOWN, "nhl_prop_shots_on_goal", "BET"), (UNKNOWN, "nhl_prop_shots_on_goal", "BET")])
+
+
+def _pool(monkeypatch, db, rows):
+    monkeypatch.setattr(props, "get_connection", lambda: db)
+    return props.publish_across_models(rows)
+
+
+def test_the_pool_gives_an_unknown_game_to_shots_on_goal_not_to_a_gated_model(monkeypatch):
+    """An assists row for an unknown game with the better EV must not win the
+    game's one prop slot and then be refused, leaving the game with nothing:
+    the gated row is out of the pool before the slot is chosen."""
+    db = GoalieDB({PROP_GAME: ("NYR", "BOS")}, _both(PROP_GAME, "NYR", "BOS", status_away="expected"))
+    sog = _props_row("player_shots_on_goal", player_id=1)[0]
+    assists = {**_props_row("player_assists", player_id=2)[0], "_ev": sog["_ev"] + 0.5}
+    assert _pool(monkeypatch, db, [assists, sog]) == 1
+    assert [(r["model_id"], r["player_id"]) for r in db.inserted] == [("nhl_prop_shots_on_goal", "1")]
+
+
+@pytest.mark.parametrize("market", ["player_total_saves", "player_assists"])
+def test_the_pool_writes_no_gated_prop_on_an_unknown_game(monkeypatch, market):
+    db = GoalieDB({PROP_GAME: ("NYR", "BOS")}, _both(PROP_GAME, "NYR", "BOS", status_away="expected"))
+    assert _pool(monkeypatch, db, _props_row(market) + _blocked_rows()) == 0
+    assert db.inserted == []
+
+
+def test_the_pool_still_allows_one_prop_a_game_once_the_game_is_known(monkeypatch):
+    db = GoalieDB({PROP_GAME: ("NYR", "BOS")}, _both(PROP_GAME, "NYR", "BOS"))
+    sog = _props_row("player_shots_on_goal", player_id=1)[0]
+    assists = {**_props_row("player_assists", player_id=2)[0], "_ev": sog["_ev"] + 0.5}
+    assert _pool(monkeypatch, db, [assists, sog]) == 1
+    assert [r["model_id"] for r in db.inserted] == ["nhl_prop_assists"]
+
+
+def test_the_scorer_guards_pass_a_shots_on_goal_bet_and_refuse_the_rest():
+    """Per row, by model: the sport-level guard and the INSERT guard."""
+    db = GoalieDB({PROP_GAME: ("NYR", "BOS")}, _both(PROP_GAME, "NYR", "BOS", status_home="expected"))
+    picks = [_props_row("player_shots_on_goal")[0], _props_row("player_total_saves")[0]]
+    assert sc._apply_nhl_goalie_gate(db, PROP_GAME, picks) == 1
+    assert [(p["model_id"], p["signal_type"]) for p in picks] == [
+        ("nhl_prop_shots_on_goal", "BET"), ("nhl_prop_saves", "NONE")]
+    picks = [_props_row("player_shots_on_goal")[0], _props_row("player_assists")[0]]
+    sc._refuse_unknown_nhl_bets(db, picks)
+    assert [(p["model_id"], p["signal_type"]) for p in picks] == [
+        ("nhl_prop_shots_on_goal", "BET"), ("nhl_prop_assists", "NONE")]
+
+
+def test_an_unknown_game_with_no_prop_fetch_still_owes_its_opening_snapshot():
+    """Shots on goal decides at the opening fetch, so the confirmation logic
+    must never hold that fetch back. Unchanged from before the rule; pinned."""
+    now = START - timedelta(hours=8)
+    assert prop_odds.due(START, now, [], known_at=None) == "open"
+    assert prop_odds.due(START, now, [], known_at=now - timedelta(minutes=5)) == "open"
 
 
 # ── the scorer: every NHL model, by sport, not by artifact kind ──────────────
@@ -476,9 +606,12 @@ def test_the_three_nhl_insert_sites_call_the_guard_in_their_own_body():
 
 
 def test_every_nhl_model_is_behind_a_goalie_guard():
+    """Every NHL model is reached by a guard; the guards let through only the
+    models config exempts (pinned to shots on goal in test_nhl_goalie_gate)."""
     from models.trainer import MODELS
     nhl = ({m for m in config.ACTION_THRESHOLDS if m.startswith("nhl_")}
            | {m for m, (sp, _, _) in MODELS.items() if sp == "NHL"})
+    assert config.NHL_GOALIE_GATE_EXEMPT <= nhl
     assert nhl >= {"nhl_moneyline", "nhl_moneyline_regulation", "nhl_over_under", "nhl_puckline",
                    "nhl_prop_blocked_shots", "nhl_prop_saves", "nhl_prop_shots_on_goal",
                    "nhl_prop_assists"}

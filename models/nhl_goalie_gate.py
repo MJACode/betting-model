@@ -1,9 +1,16 @@
 """No NHL bet of any kind until both starting goalies are confirmed.
 
 THE RULE (mike, 2026-10-20): "We should absolutely always know the goalie
-matchup before making a bet as well." Every NHL model, present and future:
-nhl_moneyline, nhl_moneyline_regulation, nhl_over_under, nhl_puckline and the
-four prop models. No exemptions.
+matchup before making a bet as well." Every NHL model, present and future: nhl_moneyline,
+nhl_moneyline_regulation, nhl_over_under, nhl_puckline, and the blocked-shots,
+saves and assists props.
+
+ONE EXEMPTION: THE SHOTS-ON-GOAL PROPS (mike, 2026-10-20: "Ok on shots on
+goal"). config.NHL_GOALIE_GATE_EXEMPT names it. That model never reads the
+goalie, and its record is its early price, so it keeps deciding at its
+opening fetch. Every check here is per row, by model_id (`is_exempt`,
+`is_gated_bet`): an exempt row passes untouched and costs no read, and a
+model that is not named is gated, so a new NHL model waits by default.
 
 WHY IT WAS NEEDED. `nhl_goalie_stats` holds one row per team per game, written
 once at ~10:06Z from ESPN's probable starter (data/ingestors/
@@ -61,6 +68,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from loguru import logger
+
+import config
 
 SPORT = "NHL"
 SOURCE_ESPN = "espn"
@@ -314,6 +323,17 @@ def is_nhl_bet(row: dict) -> bool:
             and row.get("signal_type") == "BET" and bool(row.get("game_id")))
 
 
+def is_exempt(model_id) -> bool:
+    """True for a model that does not wait for the goalies
+    (config.NHL_GOALIE_GATE_EXEMPT: shots on goal, mike 2026-10-20)."""
+    return bool(model_id) and model_id in config.NHL_GOALIE_GATE_EXEMPT
+
+
+def is_gated_bet(row: dict) -> bool:
+    """An NHL BET this rule holds back while its game's matchup is not known."""
+    return is_nhl_bet(row) and not is_exempt(row.get("model_id"))
+
+
 def refuse_unknown(conn, rows: list[dict], *, mode: str, label: str,
                    reasons: dict | None = None) -> list[dict]:
     """Every NHL BET whose game's goalie matchup is not known is refused.
@@ -322,21 +342,22 @@ def refuse_unknown(conn, rows: list[dict], *, mode: str, label: str,
     refused row has nothing to become). mode "none": the row is turned NONE
     with the reason in `downgrade_reason`, unsized, the way the scorer turns
     any other declined BET (models/scorer._downgrade). Rows that are not NHL
-    BETs pass through untouched and cost no read. Logged at WARNING: reaching
+    BETs, and the exempt model's BETs (`is_exempt`), pass through untouched
+    and cost no read. Logged at WARNING: reaching
     this line means a gate upstream of it did not hold. `reasons`, when given,
     is the caller's reading of the gate for these games (the scorer's
     once-a-game memo) and saves the read.
     """
     if mode not in ("drop", "none"):
         raise ValueError(f"refuse_unknown: unknown mode {mode!r}")
-    bets = [r for r in rows if is_nhl_bet(r)]
+    bets = [r for r in rows if is_gated_bet(r)]
     if not bets:
         return rows
     if reasons is None:
         reasons = matchup_reasons(conn, {r["game_id"] for r in bets})
     out = []
     for r in rows:
-        why = reasons.get(r.get("game_id"), CHECK_FAILED) if is_nhl_bet(r) else None
+        why = reasons.get(r.get("game_id"), CHECK_FAILED) if is_gated_bet(r) else None
         if not why:
             out.append(r)
             continue

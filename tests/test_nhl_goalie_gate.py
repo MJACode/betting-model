@@ -11,7 +11,9 @@ What these pin:
   - a goalie row ESPN's confirmation contradicts is rewritten A -> B, a second
     run is a no-op, and A -> B -> A puts A back without a key clash;
   - the gate's reasons: expected, missing, no goalie row, a mismatched row,
-    DailyFaceoff disagreeing, and the first-name alias step.
+    DailyFaceoff disagreeing, and the first-name alias step;
+  - the one exemption, shots on goal (mike, 2026-10-20: "Ok on shots on
+    goal"), is exactly that model, and every other NHL model is refused.
 
 No network, no database: fixtures are cut from the samples in the 2026-10-20
 investigation (goalie_work/df_today.html.json, the ESPN core event documents).
@@ -22,6 +24,7 @@ from __future__ import annotations
 import copy
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -494,3 +497,52 @@ def test_refuse_unknown_drops_or_downgrades_and_leaves_other_sports_unread():
     assert none["downgrade_reason"] == "waiting for both confirmed starting goalies (SEA expected)"
     quiet = _GateConn([], {}, {})
     assert gate.refuse_unknown(quiet, [mlb], mode="drop", label="t") == [mlb] and quiet.reads == 0
+
+
+# ── the one exemption: shots on goal (mike, 2026-10-20) ──────────────────────
+
+ROOT = Path(__file__).resolve().parent.parent
+SOG = "nhl_prop_shots_on_goal"
+
+
+def test_the_exemption_is_exactly_shots_on_goal_and_says_who_asked():
+    """Adding a model here takes a new instruction, and the comment above the
+    constant has to say whose. mike, 2026-10-20: "Ok on shots on goal"."""
+    import config
+    assert config.NHL_GOALIE_GATE_EXEMPT == frozenset({SOG})
+    lines = (ROOT / "config.py").read_text(encoding="utf-8").splitlines()
+    at = [i for i, line in enumerate(lines) if line.startswith("NHL_GOALIE_GATE_EXEMPT")]
+    assert len(at) == 1, "one definition of NHL_GOALIE_GATE_EXEMPT"
+    comment = []
+    for line in reversed(lines[:at[0]]):
+        if not line.startswith("#"):
+            break
+        comment.append(line)
+    text = " ".join(comment)
+    assert "mike" in text and "2026-10-20" in text and "Ok on shots on goal" in text, text
+
+
+def _row(model_id, game_id=SEA_DET):
+    return {"game_id": game_id, "sport": "NHL", "signal_type": "BET", "model_id": model_id,
+            "pick_label": f"{model_id} pick", "kelly_fraction": 0.02, "recommended_bet": 20.0}
+
+
+@pytest.mark.parametrize("model_id", [
+    "nhl_moneyline", "nhl_moneyline_regulation", "nhl_over_under", "nhl_puckline",
+    "nhl_prop_blocked_shots", "nhl_prop_saves", "nhl_prop_assists",
+    "nhl_prop_points",          # no such model yet: a new NHL model is gated by default
+])
+def test_every_nhl_model_but_shots_on_goal_is_refused_on_an_unknown_game(model_id):
+    conn = _GateConn([(SEA_DET, "SEA", "DET")], _latest(SEA_espn={"status": "expected"}), STATS)
+    assert gate.refuse_unknown(conn, [_row(model_id)], mode="drop", label="t") == []
+    none = gate.refuse_unknown(conn, [_row(model_id)], mode="none", label="t")[0]
+    assert none["signal_type"] == "NONE" and none["recommended_bet"] == 0.0
+
+
+def test_a_shots_on_goal_bet_passes_an_unknown_game_without_a_read():
+    conn = _GateConn([(SEA_DET, "SEA", "DET")], _latest(SEA_espn={"status": "expected"}), STATS)
+    sog = _row(SOG)
+    assert gate.refuse_unknown(conn, [sog], mode="drop", label="t") == [sog] and conn.reads == 0
+    saves = _row("nhl_prop_saves")
+    assert gate.refuse_unknown(conn, [saves, sog], mode="drop", label="t") == [sog]
+    assert gate.is_exempt(SOG) and not gate.is_exempt("nhl_prop_saves") and not gate.is_exempt(None)
