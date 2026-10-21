@@ -258,9 +258,9 @@
     "semantic_hash": "9eda03dfb72337a55eebf51a35b73bac"
   },
   "data/ingestors/nfl_props_data_ingestor.py": {
-    "mtime": 1792532032.963174,
-    "seen": 1792538460.755651,
-    "ast_hash": "5a2c460bbe9065ed9b9df150233d2b5c",
+    "mtime": 1792559480.2697897,
+    "seen": 1792559840.9963157,
+    "ast_hash": "fd775415d6218a79f6ed42bee3684588",
     "semantic_hash": ""
   },
   "data/ingestors/nfl_results_ingestor.py": {
@@ -3390,9 +3390,9 @@
     "semantic_hash": "b7b2784b5737680c80514c10ce732cbc"
   },
   "nfl/data_ingest/weather.py": {
-    "mtime": 1792532877.1190743,
-    "seen": 1792538460.7584093,
-    "ast_hash": "1661f2a2ef10c8686399df366d2ed70a",
+    "mtime": 1792559272.3926115,
+    "seen": 1792559840.99941,
+    "ast_hash": "315224cb0bbea705bd15866ad7c60a8f",
     "semantic_hash": ""
   },
   "nfl/features/build.py": {
@@ -3762,8 +3762,8 @@
     "semantic_hash": "92e1288201d0fa3223cfc078cf9087a4"
   },
   "nfl/models/wind_totals.py": {
-    "mtime": 1792532861.5985842,
-    "seen": 1792538460.7586987,
+    "mtime": 1792539553.5038407,
+    "seen": 1792559840.9997218,
     "ast_hash": "eebe4e195fa2f38ccdbe9fa3128411ad",
     "semantic_hash": ""
   },
@@ -3834,8 +3834,8 @@
     "semantic_hash": "7a69eb004f7927c4038816c1cf65d4d8"
   },
   "nfl/scripts/daily_opener_card.py": {
-    "mtime": 1792532552.7173586,
-    "seen": 1792538460.758754,
+    "mtime": 1792557987.5122242,
+    "seen": 1792559840.9997833,
     "ast_hash": "09d5065a2c3e3d81e5984b10c1e466fe",
     "semantic_hash": ""
   },
@@ -3954,9 +3954,9 @@
     "semantic_hash": ""
   },
   "scheduler.py": {
-    "mtime": 1792532552.5820577,
-    "seen": 1792538460.758846,
-    "ast_hash": "467d0ac9b6c0aa562e4e9ac5253e5b59",
+    "mtime": 1792559480.2697897,
+    "seen": 1792559840.999885,
+    "ast_hash": "fcb61bb0d9009df7fb515802f4b42c4c",
     "semantic_hash": ""
   },
   "scripts/_envfile.py": {
@@ -6396,9 +6396,9 @@
     "semantic_hash": "a9a765eb897cfc7ae1dd1166b961f175"
   },
   "tests/test_nfl_opener.py": {
-    "mtime": 1792532376.5067549,
-    "seen": 1792538460.761345,
-    "ast_hash": "839aa060f1dd7c512f0da28c418cb4aa",
+    "mtime": 1792557970.3568501,
+    "seen": 1792559841.0025663,
+    "ast_hash": "72b8899d4f5f27820f7586b5ebfdd58a",
     "semantic_hash": ""
   },
   "tests/test_nfl_pick_monitor.py": {
@@ -6522,9 +6522,9 @@
     "semantic_hash": "cfe3b3d43dd37174d5e2059749680829"
   },
   "tests/test_nfl_props.py": {
-    "mtime": 1792532012.4951553,
-    "seen": 1792538460.7614455,
-    "ast_hash": "dfc37256f30a67f77f10c0f82213ebde",
+    "mtime": 1792557839.04136,
+    "seen": 1792559841.0026774,
+    "ast_hash": "5acbd9228519b7f9692bb9e3d9f9cd11",
     "semantic_hash": ""
   },
   "tests/test_nfl_results_ingestor.py": {
@@ -7458,9 +7458,9 @@
     "semantic_hash": "a436c6dceeca33610a0286dca55abab4"
   },
   "tracking/job_heartbeat.py": {
-    "mtime": 1792530376.8117154,
-    "seen": 1792538460.7622907,
-    "ast_hash": "a19018ab07ef26ec900dbc6b97ecd240",
+    "mtime": 1792558372.4046729,
+    "seen": 1792559841.0036325,
+    "ast_hash": "3561f55d4850ec333c2a61b36ada6953",
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
@@ -7758,9 +7758,9 @@
     "semantic_hash": "ff56b1af52f5ac8d5a7a06fc50628149"
   },
   "docs/cloud_worker.md": {
-    "mtime": 1792533058.343175,
-    "seen": 1792538460.7625396,
-    "ast_hash": "2c34a1ca8a13391596cb4ae8c5962e0c",
+    "mtime": 1792559480.2851348,
+    "seen": 1792559841.0039086,
+    "ast_hash": "45f056586d9e6f5f0b6d5ddc86a266be",
     "semantic_hash": ""
   },
   "docs/clv.md": {
@@ -8154,9 +8154,9 @@
     "semantic_hash": ""
   },
   "docs/sports/nfl.md": {
-    "mtime": 1792533095.0796642,
-    "seen": 1792538460.7628717,
-    "ast_hash": "5172572c81884612e34e6c9141108b25",
+    "mtime": 1792559480.2697897,
+    "seen": 1792559841.0042815,
+    "ast_hash": "e4ab58d0786937d2fb459c47887c76a9",
     "semantic_hash": ""
   },
   "docs/sports/nhl.md": {
@@ -9654,21 +9654,33 @@
     "semantic_hash": ""
   },
   "nfl/data_ingest/schedule.py": {
-    "mtime": 1792532130.3994076,
-    "seen": 1792538460.758404,
-    "ast_hash": "4220427e891eb700749cb617abb299b8",
+    "mtime": 1792559255.1720364,
+    "seen": 1792559840.9994037,
+    "ast_hash": "0f85a203045d29ab593f706e87db28ae",
     "semantic_hash": ""
   },
   "tests/test_nfl_schedule_from_db.py": {
-    "mtime": 1792532483.8773632,
-    "seen": 1792538460.761462,
-    "ast_hash": "93d6df3953fe4cd5fdc939512639ae83",
+    "mtime": 1792557906.1629648,
+    "seen": 1792559841.0026948,
+    "ast_hash": "1c24e903e272b4b431b63e3e2edb0ed6",
     "semantic_hash": ""
   },
   "tests/test_nfl_wind_venue_gate.py": {
-    "mtime": 1792532821.9765308,
-    "seen": 1792538460.7615108,
-    "ast_hash": "bf2ba6535fba2bb8da4765491b40ea54",
+    "mtime": 1792539445.818936,
+    "seen": 1792559841.002755,
+    "ast_hash": "0d4124f9183f0506684b8813fc7d533b",
+    "semantic_hash": ""
+  },
+  "tests/test_nfl_schedule_refresh.py": {
+    "mtime": 1792559480.3020027,
+    "seen": 1792559841.0027008,
+    "ast_hash": "16f12826ef9e6a3b24b878f892584a0e",
+    "semantic_hash": ""
+  },
+  "tests/test_nfl_venue_roof_abroad.py": {
+    "mtime": 1792559177.5601447,
+    "seen": 1792559841.0027206,
+    "ast_hash": "4b992b79b515c25cd87f6fb1b15c5a48",
     "semantic_hash": ""
   }
 }
