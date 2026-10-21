@@ -511,6 +511,78 @@ def test_an_mlb_prop_waits_when_the_log_is_not_in_yet():
     assert reviews == []
 
 
+def test_the_all_time_line_stops_at_the_period_and_posts_on_every_span(monkeypatch):
+    """A graded leg after the period is not in the all-time line. A graded
+    leg inside it is, including one whose grade landed after the period.
+    Day, week, and month each carry the line. pending and needs_review do not."""
+    import sqlite3
+
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "91")
+
+    db = sqlite3.connect(":memory:")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
+        sport TEXT, price REAL, clv_pct REAL, units REAL, risked REAL,
+        graded_at TEXT)""")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT,
+        home_score INT, away_score INT, commence_time TEXT)""")
+    db.execute("""CREATE TABLE push_sent (
+        lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
+        UNIQUE (lock_key, kind))""")
+    legs = [
+        (1, "graded", "LOSS", "2026-10-12", "NHL", -130, -1.3, 1.3,
+         "2026-10-13T11:00:00+00:00"),
+        (2, "graded", "WIN", "2026-10-18", "NHL", -110, 1.0, 1.1,
+         "2026-10-21T01:56:24+00:00"),
+        (3, "graded", "WIN", "2026-10-20", "NHL", -135, 1.0, 1.35,
+         "2026-10-21T04:23:21+00:00"),
+        (4, "pending", None, "2026-10-21", "NHL", -110, None, None, None),
+        (5, "needs_review", "WIN", "2026-10-12", "NHL", -110, 5.0, 1.1, None),
+    ]
+    db.executemany(
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, "
+        "price, units, risked, graded_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        legs)
+
+    class Conn:
+        def execute(self, sql, params=None):
+            return db.execute(sql.replace("%s", "?"), tuple(params or ()))
+
+        def commit(self):
+            db.commit()
+
+    conn = Conn()
+    assert "downgrade_reason" not in eg._GRADED_LEGS
+    assert "paused" not in eg._GRADED_LEGS
+    assert eg._post_window(
+        conn, "day", "2026-10-18", "2026-10-18", "Oct 18") == 1
+    assert eg._post_window(
+        conn, "week", "2026-10-12", "2026-10-18", "Week of Oct 12-18") == 1
+    assert eg._post_window(
+        conn, "month", "2026-10-01", "2026-10-18", "October") == 1
+    assert eg._post_window(
+        conn, "day", "2026-10-12", "2026-10-12", "Oct 12") == 1
+
+    def footer(body):
+        return body["embeds"][0]["footer"]["text"]
+
+    # Oct 18 day, the week, and the month stop before the Oct 20 win.
+    for body in posted[:3]:
+        text = footer(body)
+        assert text.startswith("All-time: 1-1")
+        assert "-0.30u" in text and "ROI" in text
+        assert "2-1" not in text
+    # The Oct 12 day does not include the Oct 18 win graded on Oct 21.
+    assert footer(posted[3]).startswith("All-time: 0-1")
+    assert "+5.00u" not in footer(posted[3])
+    oct18 = posted[0]["embeds"][0]
+    assert "1-0" in oct18["description"]
+    assert oct18["footer"]["text"].startswith("All-time: 1-1")
+
+
 def test_the_embed_names_eggz_and_states_units_and_roi():
     rows = [("MLB", "eggz", "WIN", None, -110, 4.0, False, 1.0, 1.1),
             ("MLB", "eggz", "LOSS", None, -110, None, False, -1.1, 1.1)]
