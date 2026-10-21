@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, no NHL bet until both starting goalies are confirmed: one gate at every NHL writer and INSERT; nhl_goalie_designations; the goalie row rewritten on an ESPN confirmation; the side models' 16:00Z clock removed; a five-minute NHL goalie window; one more prop fetch after a late confirmation |
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, no NHL bet until both starting goalies are confirmed: one gate at every NHL writer and INSERT; nhl_goalie_designations; the goalie row rewritten on an ESPN confirmation; the side models' 16:00Z clock removed; a five-minute NHL goalie window; one more prop fetch after a late confirmation; shots on goal exempt (mike) |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, restatements stay in the 6:00am–noon window and wait on a live game; a missed daily carries over for 7 mornings and posts for that date |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, recaps post from 6:00am or 7:30am through noon ET only, and wait while a game of that sport is in progress; a missed week or month rolls to the next morning |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, Eggz week of Oct 12-18 posted at 9:56pm ET (message 1562283386729406535); daily/week/month recaps wait for 6:00am or Monday 7:30am ET and for every slate-date game of that sport to be final |
