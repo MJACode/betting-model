@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, the six MLB bets written after first pitch voided (mike); void_picks.py --allow-graded keeps the grade in the note |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, prune_odds failed the daily: one prop DELETE re-executed its window per row and hit statement_timeout; the DELETE now materializes the doomed ids and removes them by primary key |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, restatements stay in the 6:00am–noon window and wait on a live game; a missed daily carries over for 7 mornings and posts for that date |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, NBA fifth search: team first-quarter/first-half shares and an early-season start for the two NBA game models; 0 of 54 pass |
