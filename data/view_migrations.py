@@ -415,6 +415,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # data.db's rewrite. Inserts only when that URL is not already queued
     # or done. Does not rewrite the failed row, picks, or push_sent.
     "social_profile_url_2026_10_21.sql",
+    # 2026-10-20: Eggz's Discord posts. Three tables, anon locked out.
+    # Not the model record. Does not rewrite picks, snapshots, or the
+    # published views. Returns before ALTER once the tables are locked down.
+    "add_capper_picks_2026_10_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

@@ -366,6 +366,7 @@ def run_period_recaps() -> None:
 
     The function itself decides whether a window is due, and the ledger
     decides whether it already went out. A raise must not kill the scheduler.
+    Eggz's own channel gets the same windows, and only that channel.
     """
     try:
         from tracking.discord_notifier import post_period_recaps
@@ -373,6 +374,21 @@ def run_period_recaps() -> None:
         log.info("period recaps: %s post(s)", n)
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR period recaps crashed")
+    try:
+        from tracking.eggz_picks import post_eggz_recaps
+        n = post_eggz_recaps()
+        log.info("eggz recaps: %s post(s)", n)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR eggz recaps crashed")
+
+
+def run_eggz_ingest() -> None:
+    """Read #eggz-picks and grade what is final. No-op when the token is unset."""
+    try:
+        from tracking.eggz_picks import run_eggz_ingest as _run
+        _run()
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR eggz ingest crashed")
 
 
 def run_failure_alerter() -> None:
@@ -623,7 +639,7 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
-                  "period_recaps",
+                  "period_recaps", "eggz_ingest",
                   # "nfl_poll_fast", not "nfl_poll_10min": the id was renamed
                   # when the fast tier moved to T-24h and this entry was not,
                   # so it named a job that does not exist. Inert today because
@@ -1778,6 +1794,17 @@ def build_scheduler() -> BlockingScheduler:
         id="period_recaps",
         name="Weekly and monthly results (Mon 7:30am ET)",
         max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
+
+    # Eggz's channel. The poll is the read. Recaps are the 6:00am settle and
+    # the Monday 7:30 job above. Unset token or channel: the poll returns
+    # without a request.
+    sched.add_job(
+        run_eggz_ingest,
+        CronTrigger(minute="*/15", timezone=TIMEZONE),
+        id="eggz_ingest",
+        name="Eggz picks (every 15 min)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has

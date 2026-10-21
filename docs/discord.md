@@ -438,6 +438,18 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   posted again. X posts the same windows through `notify_x_period`. An
   empty window is not ledgered. A window still unposted when the next one
   opens is not caught up. Period recaps do not write `results_snapshots`.
+- **Eggz's recap is `#eggz-picks` only.** `DISCORD_WEBHOOK_EGGZ` has no
+  fallback to `#results` or X. The daily window is yesterday, from the
+  6:00am ET settle. The week and the month use the Monday 7:30am ET clock
+  and the same windows as the main recap. Ledger keys are
+  `discord_eggz_results_day`, `discord_eggz_results_week`, and
+  `discord_eggz_results_month`. The channel is read every 15 minutes
+  (`eggz_ingest`) with the existing `DISCORD_BOT_TOKEN`,
+  `DISCORD_EGGZ_CHANNEL_ID`, and `DISCORD_EGGZ_AUTHOR_ID`. A post that
+  cannot be parsed or matched is `needs_review` on `capper_picks` and is
+  logged. It is not graded and it is not dropped. One ops alert goes out
+  per message id when `DISCORD_WEBHOOK_OPS` is set. A window that still
+  has a pending leg is not ledgered. His rows stay out of `picks`.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.

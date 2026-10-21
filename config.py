@@ -321,6 +321,14 @@ DISCORD_WEBHOOK_FREE: str = os.environ.get("DISCORD_WEBHOOK_FREE", "").strip()
 # its own return value and logs at CRITICAL rather than failing silently.
 DISCORD_WEBHOOK_OPS: str = os.environ.get("DISCORD_WEBHOOK_OPS", "").strip()
 
+# Eggz's own results, in #eggz-picks. No fallback: an unset variable posts
+# nothing, and these recaps never go to #results or to X. The bot token is
+# the existing DISCORD_BOT_TOKEN. The channel and the author are ids, not
+# display names.
+DISCORD_WEBHOOK_EGGZ: str = os.environ.get("DISCORD_WEBHOOK_EGGZ", "").strip()
+DISCORD_EGGZ_CHANNEL_ID: str = os.environ.get("DISCORD_EGGZ_CHANNEL_ID", "").strip()
+DISCORD_EGGZ_AUTHOR_ID: str = os.environ.get("DISCORD_EGGZ_AUTHOR_ID", "").strip()
+
 # How stale the newest pipeline_runs row may get before the watchdog calls it a
 # stall, in minutes. The tightest real cadence is the evening refresh at every
 # 10 minutes; the loosest gap a HEALTHY system produces is the quiet stretch
