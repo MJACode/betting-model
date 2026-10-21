@@ -235,12 +235,14 @@ def _jobs(monkeypatch, role="all", on=True):
 def test_the_refresh_runs_every_15_minutes_and_once_at_boot(monkeypatch):
     """next_run_time falls due before sched.start(), so the first run is the
     moment the scheduler starts, after the boot column migrations."""
+    before = datetime.now(timezone.utc)
     jobs, _ = _jobs(monkeypatch)
     job = jobs["nfl_schedule_refresh"]
     assert "minute='5-59/15'" in str(job.trigger)
-    first = job.next_run_time
-    now = datetime.now(first.tzinfo)
-    assert timedelta(0) < first - now <= timedelta(seconds=31), first
+    # 30 s after the build, however long the build itself took
+    lag = job.next_run_time - before
+    assert timedelta(seconds=30) <= lag <= timedelta(seconds=30) + (
+        datetime.now(timezone.utc) - before), job.next_run_time
 
 
 def test_the_refresh_belongs_to_the_pipeline_service(monkeypatch):
