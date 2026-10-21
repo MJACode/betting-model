@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20 (follow-up 10-21), NFL pre-game models read the schedule from the games table, not the frozen games.csv (no playoffs, stale CHI @ GB kickoff, home stadium for games abroad); venues abroad placed by name; wind model skips a game with no venue and judges a game abroad by its venue's roof (both Updated-By: mike); schedule refreshed every 15 min and at boot; no production write |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, the six MLB bets written after first pitch voided (mike); void_picks.py --allow-graded keeps the grade in the note |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, prune_odds failed the daily: one prop DELETE re-executed its window per row and hit statement_timeout; the DELETE now materializes the doomed ids and removes them by primary key |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, restatements stay in the 6:00am–noon window and wait on a live game; a missed daily carries over for 7 mornings and posts for that date |

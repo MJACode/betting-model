@@ -99,7 +99,9 @@ in-week during the season.
   migration `drop_voided_nfl_wind_opening_signals_2026_09_14.sql` in
   `ACTIVE_MIGRATIONS` applies on the next Railway pipeline/refresh pass
   after merge. No Discord re-announce.
-- 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
+- **The live schedule is the `games` table, not `nfl/data/games.csv`** (since
+  2026-10-20; see *The schedule of record* below). The committed file is
+  replay and backtest history only.
 - First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
   shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.
 - **Cadence: AUTOMATED on the Railway worker (2026-08-15).** `scheduler.py` runs the
@@ -206,6 +208,127 @@ in-week during the season.
   screen) so a day-of user knows the number is from earlier in the week —
   for the opener the note says outright that the model only endorsed the
   locked number.
+
+## The schedule of record: the games table (2026-10-20)
+
+**Every NFL pre-game job reads kickoffs and venues from the database.** The
+wind card, the opener card, their DraftKings line dump and the scheduler's
+NFL clock (`scheduler._nfl_lead_hours`, which decides whether the wind poll,
+the opener poll and the prop card run at all) used to read
+`nfl/data/games.csv`, committed once (4ffdada1, 2026-08-15) and never
+refreshed. Measured on 2026-10-20:
+
+- it held the 272 regular-season games and **no playoff game**, so after
+  week 18 (2027-01-10) every NFL pre-game job would have found nothing ahead
+  and stood down for the postseason;
+- CHI @ GB sat at 16:25 ET; the game kicked off at 13:00 ET. Wind BET
+  3365283 carries the stale 20:25Z kickoff;
+- all nine 2026 games abroad carried the home team's US stadium, so wind
+  BETs 3465055 (PHI @ JAX, Tottenham) and 3583736 (HOU @ JAX, Wembley) were
+  forecast at Jacksonville's coordinates.
+
+**Where the rows come from.** `data/ingestors/nfl_props_data_ingestor.py`
+(Step 0h of the 6am pipeline, and the settle pass's box-score gap fill)
+upserts every game in the nflverse schedule into `games` and
+`nfl_team_game_stats`, played or not, regular season or playoffs. Between
+those runs the **schedule refresh** (2026-10-21, below) re-reads the next 14
+days every 15 minutes and as soon as the scheduler starts after a boot. The odds
+ingestor never writes NFL `games` rows (`NFL_GAMES_ARE_NOT_OURS`), so this
+ingest is what keeps `games.commence_time` current. It now also stores the
+nflverse venue (`stadium_id`, `stadium`, `location` on `nfl_team_game_stats`)
+and fills `games.week` and `games.neutral_site`, which were empty on all 272
+2026 rows.
+
+**Playoffs.** nflverse lists a playoff game once its teams are known. For the
+2025 wild-card round (GitHub commit history of `nflverse/nfldata`,
+`data/games.csv`): the first game appeared at 2026-01-05 03:10Z, five of six
+by 06:35Z, the sixth (LA @ CAR) by 16:30Z. The Monday 6am ET run (11:00Z)
+would have carried five games 5.6 to 7.6 days ahead of kickoff and the
+Tuesday run the sixth 4.4 days ahead: inside the 10-day poll horizon and
+before the wind model's 4-day and the opener's 2-day bounds. What the daily
+cadence cost was the opener's first hours, because Pinnacle posts wild-card
+lines as soon as the matchups are set: the 6am run saw five of those games 6
+to 8 hours after nflverse listed them and LA @ CAR about 18.5 hours after.
+
+**The schedule refresh (2026-10-21).** `scheduler.run_nfl_schedule_refresh`
+runs `nfl_props_data_ingestor --schedule-only` at :05, :20, :35 and :50, and
+once as soon as the scheduler starts after a boot, which is after the boot
+column migrations (job `nfl_schedule_refresh`, pipeline
+service, watched for 90 minutes of silence; `RUN_NFL_SCHEDULE_REFRESH=0`
+stops it, `NFL_SCHEDULE_REFRESH_MINUTES` sets the cadence). One download of
+the nflverse schedule, no odds call, so it costs nothing. It writes only games
+that have not kicked off, in the next 14 days:
+
+- a game seen for the first time (a wild card the night its teams are known)
+  is written whole, `games` row first, exactly as the daily run would write it;
+- on a row that already exists it changes **only when and where the game is
+  played** (`game_date`, `week`, `season_type`, `commence_time`, and the
+  three venue fields). The spread, total, roof, temperature and wind on that
+  row are NFL prop model features (`features/nfl_prop_feature_engine.py`) and
+  stay on the daily run's timing, so the refresh never changes what a prop
+  model scores on;
+- a game with no kickoff time, or one that has started, is left alone.
+
+The worst case from nflverse listing a game to the NFL clock seeing it is
+about 35 minutes: GitHub serves the file with `Cache-Control: max-age=300`
+(response header, 2026-10-21), then up to 15 minutes to the next refresh and
+up to 15 more in the scheduler's kickoff cache.
+
+**The readers.** `nfl/data_ingest/schedule.py` (`load_schedule`) is the one
+loader the cards use: `games` joined to the home team's
+`nfl_team_game_stats` row, bounded on `game_date`, in the shape the cards
+always consumed. **There is no fallback to the file**: if the database
+cannot be read the card prints why and sees no games. The scheduler reads
+the kickoff list at most every `NFL_SCHEDULE_CACHE_S` (900 s) because its
+clock runs every minute; a failed read keeps the last list.
+
+**Venues.** `weather.resolve_venue` turns the three raw fields into a
+`STADIUM_COORDS` key:
+
+- a game is **neutral** if nflverse says `Neutral` or its stadium name is a
+  known venue abroad (`NEUTRAL_VENUE_NAMES`). A neutral game is placed **by
+  name only**. nflverse's `stadium_id` is not trusted for it: in the 2025
+  schedule all seven games abroad carry the home team's id AND name (Dublin
+  is "PIT00 Acrisure Stadium"), and on 2026-10-20 PHI @ JAX at Tottenham
+  still carries JAX00. All nine 2026 games abroad resolve to the venue ESPN
+  lists (`tests/test_nfl_schedule_from_db.py`);
+- a home game is placed by its `stadium_id`;
+- anything else is **not established**, and the wind model does not bet it
+  (`wind_totals.select_bets`, Updated-By: mike) and its board row says
+  "venue not established: ...". A neutral US site (a Super Bowl, a relocated
+  game) is in this group on purpose: a US name in the venue table would turn
+  nflverse's 2025 habit into a confident forecast at the wrong stadium.
+- the **Bernabeu** (MAD00/MAD01) joins the retractable set
+  (`RETRACTABLE_ABROAD`): nflverse leaves its roof blank and ESPN lists it as
+  indoor, so CIN @ ATL in Madrid (11-08) stays held back, as it was when the
+  file placed it at Atlanta's retractable stadium.
+
+**A game abroad is judged by its venue's roof (2026-10-21, Updated-By:
+mike).** nflverse fills an upcoming game's `roof` from the home team's US
+stadium, like its stadium id: in production on 2026-10-21 PIT @ NO in Paris
+(10-25) and NE @ DET in Munich (11-15) both read `dome`, so the wind model
+dropped them before forecasting. `weather.VENUE_ROOF_ABROAD` now gives each
+venue abroad its own roof, applied in `schedule.load_schedule` where the venue
+is resolved. The evidence is ESPN's scoreboard `venue.indoor` for all 22 games
+abroad from 2022 to 2026 (False everywhere except the Bernabeu) and nflverse's
+record of games already played there (Wembley `outdoors` 26 of 26, Tottenham
+10 of 10, Azteca 5, Allianz Arena 2, Frankfurt 2). The Bernabeu stays
+retractable: only an observed `open`/`closed` counts, so CIN @ ATL in Madrid
+is still held back. Home games keep their row's roof. Effect this season:
+Paris and Munich become games the wind model can bet if the wind clears its
+usual bar; no other game changes. **The stored roof is not changed**: the
+NFL prop models read `nfl_team_game_stats.roof` as a feature, and this is
+the wind card's reading of the venue, not a correction to their inputs.
+`tests/test_nfl_venue_roof_abroad.py` holds the ESPN table.
+
+**After a deploy nothing needs running by hand.** The schedule refresh runs
+when the scheduler starts and fills the venue columns the boot migration adds
+(if the boot catch-ups hold the start past 10 minutes, the first 15-minute
+tick does it).
+Until it has run, every game reads "venue not established" (no wind bet, and
+an open wind BET is flagged DEGRADED, not GONE, by the locked-pick monitor).
+If the refresh fails, the 6am run fills them too. Kickoffs are unaffected
+either way.
 
 ## NONE rows: every game the wind and opener rules evaluated (2026-09-26)
 
