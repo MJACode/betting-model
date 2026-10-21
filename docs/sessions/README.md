@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, Eggz #eggz-picks is read with DISCORD_BOT_TOKEN, graded on capper_picks, and recapped only to DISCORD_WEBHOOK_EGGZ |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #943 merged origin/master `3a1891a9`; session logs keep both sides; live_row_index stays registered; snapshot rewrites stay one-shot; CLV marker is standard_v2 |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #941 merged origin/master `a82f517d`; session logs keep both sides; period-recap stub keeps master's allow_link assert |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, #943 merged origin/master `a82f517d`; session logs keep both sides; snapshot rewrites stay one-shot; CLV marker is standard_v2 |

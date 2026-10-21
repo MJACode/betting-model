@@ -1811,6 +1811,17 @@ def step_settle(settle_date: str) -> bool:
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Period results recap failed (settlement "
                      f"unaffected): {exc}")
+
+    # Eggz's channel only. Yesterday at or after 6:00am ET, and the week
+    # and month on the same clock as the main recap. Ledgered separately.
+    try:
+        from tracking.eggz_picks import post_eggz_recaps
+        n = post_eggz_recaps()
+        if n:
+            logger.info(f"Eggz results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Eggz results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 

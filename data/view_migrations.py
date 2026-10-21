@@ -406,6 +406,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Nullable columns only. Does not rewrite the ledger seed, picks, or
     # push_sent. Returns before ALTER once the columns and checks exist.
     "social_post_media_2026_10_20.sql",
+    # 2026-10-20: Eggz's Discord posts. Three tables, anon locked out.
+    # Not the model record. Does not rewrite picks, snapshots, or the
+    # published views. Returns before ALTER once the tables are locked down.
+    "add_capper_picks_2026_10_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
