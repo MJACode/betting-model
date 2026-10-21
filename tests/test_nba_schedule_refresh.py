@@ -177,6 +177,9 @@ def test_a_feed_that_has_not_moved_yet_never_moves_the_tip():
     half = dict(old="2027-03-11T00:00:00+00:00", new="2027-03-11T00:30:00+00:00")
     assert _flex("2027-03-11T00:40:00+00:00", **half)["times"]                # moved: 10 after ESPN's
     assert _flex("2027-03-11T00:10:00+00:00", **half)["times"] == []          # not moved: nearer the old
+    early = dict(old="2027-03-11T00:00:00+00:00", new="2027-03-10T23:45:00+00:00")
+    assert _flex("2027-03-11T00:10:00+00:00", **early)["times"] == []         # 25 after ESPN's, 10 after the old
+    assert _flex("2027-03-10T23:55:00+00:00", **early)["times"]               # moved: before the old
 
 
 def test_a_tip_the_league_never_set_is_filled():

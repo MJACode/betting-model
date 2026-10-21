@@ -43,16 +43,17 @@ MONTHS_AHEAD):
     when ESPN's differs AND the odds feed's own start for the game shows the
     new tip (a time change two sources show: the feed lists the books' start,
     at or up to 30 minutes after the league's tip, so it seconds ESPN when it
-    sits that far after ESPN's tip and nearer it than the stored one --
-    feed_shows), or the row has no tip; status_text, when ESPN marks the game
-    postponed or cancelled (the results step's wording) and it has no score;
-    and updated_at = NOW(), which is what the health check reads as
-    "confirmed today". Never its type, arena, label or score: the NBA.com
-    load and the results step own those. All four NBA models take the
-    earlier of the schedule's tip and the feed's start (the totals card's
-    slate, models.nba_prop_market.tip_of), so a tip moved LATER (a 7pm game
-    flexed to 9:30) that the schedule still holds at 7pm has every one of
-    them decide hours before the real tip, even once the feed shows 9:40.
+    sits that far after ESPN's tip and not the stored one, or nearer ESPN's
+    when it fits both -- feed_shows), or the row has no tip; status_text,
+    when ESPN marks the game postponed or cancelled (the results step's
+    wording) and it has no score; and updated_at = NOW(), which is what the
+    health check reads as "confirmed today". Never its type, arena, label or
+    score: the NBA.com load and the results step own those. All four NBA
+    models take the earlier of the schedule's tip and the feed's start (the
+    totals card's slate, models.nba_prop_market.tip_of), so a tip moved LATER
+    (a 7pm game flexed to 9:30) that the schedule still holds at 7pm has
+    every one of them decide hours before the real tip, even once the feed
+    shows 9:40.
     ESPN alone never moves the league's tip: on 2026-10-20 it disagreed on 1
     game of 1,200, CHI @ MIL on 2026-10-23 (ESPN 4:00pm ET; the league's
     load, the Bucks' own schedule release and ticket listings 7pm CT). Moved
@@ -119,10 +120,10 @@ SCHEDULE_SOURCES = ("nba_api_schedule", DATA_SOURCE)
 # of the 46 2026-27 games whose games row it had written by 2026-10-20, 8 sat
 # on the league's tip, 35 ten minutes after it and 3 (opening night, rewritten
 # once the games began) 8, 18 and 22 minutes after; none before it (production).
-# A minute's slack before covers a feed stamped to the second. Requiring the
-# feed to sit nearer the new tip than the stored one is what keeps a feed that
-# has not moved yet (still ten minutes after the old tip) from seconding a
-# small move.
+# A minute's slack before covers a feed stamped to the second. A feed start
+# that fits both the stored tip and ESPN's (a move of under half an hour)
+# shows the one it sits nearer, so a feed that has not moved yet (still ten
+# minutes after the stored tip) never seconds a small move.
 FEED_LAG = (timedelta(minutes=-1), timedelta(minutes=30))
 
 ESPN_TYPES = {2: "regular", 3: "playoff", 5: "playin"}
@@ -162,13 +163,16 @@ def _known_team(x) -> bool:
     return isinstance(x, str) and x.strip().upper() not in _NOT_A_TEAM
 
 
+def _fits(feed: datetime, tip: datetime) -> bool:
+    return FEED_LAG[0] <= feed - tip <= FEED_LAG[1]
+
+
 def feed_shows(feed: datetime | None, new: datetime, old: datetime) -> bool:
     """Does the odds feed's start for a game show ESPN's new tip, not the stored one?
-    At or up to FEED_LAG after the new tip, and nearer it than the old."""
-    if feed is None:
+    It fits the new tip (FEED_LAG), and either does not fit the old or sits nearer the new."""
+    if feed is None or not _fits(feed, new):
         return False
-    lag = feed - new
-    return FEED_LAG[0] <= lag <= FEED_LAG[1] and abs(lag) < abs(feed - old)
+    return not _fits(feed, old) or abs(feed - new) < abs(feed - old)
 
 
 def months(today: date, ahead: int = MONTHS_AHEAD) -> list[str]:
