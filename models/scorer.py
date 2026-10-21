@@ -83,6 +83,7 @@ from data.live_quote_guard import quote_predates_score
 from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
 from data.name_match import resolve_feed_name
+from data.schedule_context import SCHEDULE_UNREADABLE, SCORER_GATED_SPORTS, ScheduleBook
 
 # Max minutes two books' opening snapshots may be apart and still count as
 # "simultaneous" for the NCAAF cross-book opener rule. A refresh pass is ~60
@@ -262,7 +263,8 @@ def score_game(conn: DBConnection,
                bankroll: float,
                dry_run: bool = False,
                commence_time: str | None = None,
-               write: bool = True) -> list[dict]:
+               write: bool = True,
+               schedule_hold: str | None = None) -> list[dict]:
     """
     Score one game with one model. Generates 0, 1, or 2 pick rows
     (BET and/or AVOID signals).
@@ -273,6 +275,11 @@ def score_game(conn: DBConnection,
     check them against the game's other picks first (_apply_side_conflicts).
     Only the stock path and the NHL 3-way path honour it, which covers every
     model in side_checked_models(); run_scorer passes it for those alone.
+
+    `schedule_hold` is the reason this pass may not decide the game at all: a
+    team still has an earlier game to play or to log (data/schedule_context,
+    run_scorer). Every row is still written, as NONE, with that reason
+    (_apply_schedule_hold), on every path below that writes.
     """
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
@@ -351,7 +358,8 @@ def score_game(conn: DBConnection,
     if market == "method":
         return _score_ufc_method(conn, game_id, model_id, sport, game_date,
                                  home_team, away_team, clf, x, features,
-                                 bankroll, dry_run, commence_time)
+                                 bankroll, dry_run, commence_time,
+                                 schedule_hold=schedule_hold)
 
     # NHL regulation 3-way — 3-class (away reg win / draw / home reg win),
     # priced against DK's h2h_3way market. Also handled before the binary
@@ -359,7 +367,8 @@ def score_game(conn: DBConnection,
     if market == "h2h_3way":
         return _score_nhl_3way(conn, game_id, model_id, sport, game_date,
                                home_team, away_team, clf, x, features,
-                               bankroll, dry_run, commence_time, write=write)
+                               bankroll, dry_run, commence_time, write=write,
+                               schedule_hold=schedule_hold)
 
     # A model can decline to BET a game and still have something worth
     # showing. When a rule's gate/preconditions fail we set a reason here and
@@ -492,7 +501,8 @@ def score_game(conn: DBConnection,
     if not odds and sport == "UFC" and market == "totals":
         return _score_ufc_totals_prob_only(
             conn, game_id, model_id, sport, game_date, home_team, away_team,
-            home_prob, away_prob, feat, features, bankroll, dry_run, commence_time)
+            home_prob, away_prob, feat, features, bankroll, dry_run, commence_time,
+            schedule_hold=schedule_hold)
 
     if not odds:
         logger.debug(f"  No DK odds for {game_id}/{model_id}")
@@ -603,6 +613,10 @@ def score_game(conn: DBConnection,
     # otherwise fire a BET the walk-forward never validated.
     if no_signal:
         _apply_no_signal(picks, no_signal)
+    # After the rule's own reason: a game the model may not decide yet beats
+    # anything it said about this number.
+    if schedule_hold:
+        _apply_schedule_hold(picks, schedule_hold)
 
     if artifact.get("kind") == "anchored_logit":
         # Its rule is EV at the price and nothing else; AVOID is not part of
@@ -1034,7 +1048,8 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                     game_date: str, home_team: str, away_team: str,
                     clf, x, features: dict, bankroll: float,
                     dry_run: bool, commence_time: str | None,
-                    write: bool = True) -> list[dict]:
+                    write: bool = True,
+                    schedule_hold: str | None = None) -> list[dict]:
     """
     NHL regulation-result scoring — 3-class (away reg win / draw / home reg
     win) priced against DraftKings' 3-way regulation market. Each side with a
@@ -1102,6 +1117,8 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                                     away_team, commence_time)
     if reason:
         _apply_no_signal(picks, reason)
+    if schedule_hold:
+        _apply_schedule_hold(picks, schedule_hold)
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
     for p in picks:
@@ -1122,7 +1139,8 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
 def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
                       game_date: str, home_team: str, away_team: str,
                       clf, x, features: dict, bankroll: float,
-                      dry_run: bool, commence_time: str | None) -> list[dict]:
+                      dry_run: bool, commence_time: str | None,
+                      schedule_hold: str | None = None) -> list[dict]:
     """
     UFC method-of-victory scoring — 3-class (decision / ko_tko / submission),
     prob-only (model_id is in PROB_ONLY_MODELS; The Odds API carries no method
@@ -1198,8 +1216,10 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
         "game_time":         commence_time,
         "downgrade_reason":  _pause_note(model_id),
     }
+    if schedule_hold:
+        _apply_schedule_hold([pick], schedule_hold)
 
-    if signal_type == "BET":
+    if pick["signal_type"] == "BET":
         logger.info(
             f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
             f"model={model_prob:.3f} | edge={edge*100:+.1f}% (vs fair 1/3) | "
@@ -1214,7 +1234,8 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
                                 game_date: str, home_team: str, away_team: str,
                                 over_prob: float, under_prob: float,
                                 feat: dict, features: dict, bankroll: float,
-                                dry_run: bool, commence_time: str | None) -> list[dict]:
+                                dry_run: bool, commence_time: str | None,
+                                schedule_hold: str | None = None) -> list[dict]:
     """
     UFC round totals without DK lines: prob-only against the synthetic line
     carried by the feature row (2.5 for 3-round bouts, 4.5 for 5-round).
@@ -1275,6 +1296,8 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
             f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
         )
 
+    if schedule_hold:
+        _apply_schedule_hold(picks, schedule_hold)
     if picks and not dry_run:
         _insert_picks(conn, picks)
     return picks
@@ -1477,6 +1500,44 @@ def _apply_no_signal(picks: list[dict], reason: str) -> list[dict]:
     for p in picks:
         p.update(_downgrade(p, reason))
     return picks
+
+
+def _apply_schedule_hold(picks: list[dict], reason: str) -> list[dict]:
+    """A game the model may not decide yet (data/schedule_context): every row
+    NONE and unsized, with the reason persisted -- except that a paused
+    model's row keeps config.PAUSED_NOTE. Every paused-row exclusion keys on
+    that exact string (config.paused_row_exclusion_sql), so the pause note
+    wins here as it does over the EV floor's (_requalify_keeping_pause).
+    Mutates in place, like _apply_no_signal."""
+    for p in picks:
+        if _is_paused_row(p):
+            p.update({"signal_type": "NONE", "kelly_fraction": 0.0,
+                      "recommended_bet": 0.0})
+        else:
+            p.update(_downgrade(p, reason))
+    return picks
+
+
+def _schedule_hold(books: dict, sport: str, game_id: str, game_date: str,
+                   home_team: str, away_team: str, commence_time,
+                   now: datetime) -> str | None:
+    """Why run_scorer may not decide this game yet, or None.
+
+    None for a sport the gate does not cover (data.schedule_context.
+    SCORER_GATED_SPORTS). A gated sport whose schedule could not be read, or a
+    game the check itself fails on, is held: fails CLOSED."""
+    if sport not in SCORER_GATED_SPORTS:
+        return None
+    book = books.get(sport)
+    if book is None:
+        return SCHEDULE_UNREADABLE
+    try:
+        return book.pending_reason(game_id, game_date, home_team, away_team,
+                                   commence_time, now)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"  {game_id}: schedule check failed ({exc!r})\n"
+                     + traceback.format_exc())
+        return SCHEDULE_UNREADABLE
 
 
 def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
@@ -3848,6 +3909,41 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             AND (commence_time IS NULL OR commence_time > %s)
                       )""" + _sc, (target_date, ufc_horizon, now_utc) + _sp)
 
+        # THE SCHEDULE GATE (mike, 2026-10-20: "The repo/models should look
+        # ahead schedules for all markets and sports and models"). A model
+        # never decides a game while either team still has an earlier game not
+        # played, being played, or not yet in the logs its inputs read
+        # (data/schedule_context has the rule and the evidence). ncaaf_over_under
+        # decided 9 of its 77 kept BETs that way, reading stats one game stale;
+        # wnba_moneyline bet game N+1 seconds after the book listed it, with
+        # game N still on.
+        #
+        # One read of each gated sport's stored schedule per pass, then one
+        # answer per game. The rows are still written, NONE, with the reason;
+        # NONE never locks, so the first pass after the game is logged decides
+        # it. A BET already standing is in locked_pairs and never re-scored.
+        #
+        # Fails CLOSED, like the NHL game-day check and the side check: a
+        # schedule that cannot be read means nobody in that sport decides this
+        # pass (loud), not that everybody does.
+        schedule_books: dict = {}
+        now_dt = datetime.fromisoformat(now_utc)
+        for _sp_name in SCORER_GATED_SPORTS:
+            _targets = [(g[0], g[3]) for g in games if g[1] == _sp_name]
+            if not _targets:
+                continue
+            try:
+                schedule_books[_sp_name] = _call_in_savepoint(
+                    conn, "sp_schedule_book",
+                    lambda s=_sp_name, t=_targets: ScheduleBook.load(conn, s, t))
+            except ConnectionLost:
+                raise
+            except Exception as exc:                          # noqa: BLE001
+                logger.error(f"{_sp_name} schedule read failed ({exc!r}); no "
+                             f"{_sp_name} model decides this pass\n"
+                             + traceback.format_exc())
+                schedule_books[_sp_name] = None
+
         all_picks = []
         rescored: set[str] = set()
         model_failures: list[str] = []
@@ -3962,6 +4058,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             relevant_models = [mid for mid, (sp, _, _) in MODELS.items()
                                if sp == sport]
 
+            schedule_hold = _schedule_hold(schedule_books, sport, game_id,
+                                           game_date, home_team, away_team,
+                                           commence_time, now_dt)
+            if schedule_hold:
+                logger.info(f"  [HOLD] {away_team} @ {home_team} — {schedule_hold}")
+
             # -- ONE GAME = ONE TRANSACTION (2026-09-08) ------------------
             # Clear this game's non-BET rows, score every model, commit. A
             # connection lost mid-game costs that game once (the wrapper has
@@ -4054,7 +4156,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             # the last one.
                             # A side model's rows come back unwritten
                             # (write=False) for the check below; every other
-                            # model is called exactly as before.
+                            # model is called exactly as before. A schedule
+                            # hold is passed only when there is one, so an
+                            # ungated game's call is unchanged too.
                             hold = model_id in side_models
                             picks = _call_in_savepoint(
                                 conn, "sp_model_game",
@@ -4062,7 +4166,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                     conn, game_id, model_id, features,
                                     bankroll, dry_run=dry_run,
                                     commence_time=commence_time,
-                                    **({"write": False} if model_id in side_models else {})))
+                                    **({"write": False} if model_id in side_models else {}),
+                                    **({"schedule_hold": schedule_hold}
+                                       if schedule_hold else {})))
                         except ConnectionLost:
                             raise                      # the game's unit, not the model's
                         except Exception as exc:
