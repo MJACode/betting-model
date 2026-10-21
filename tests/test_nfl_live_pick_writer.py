@@ -24,9 +24,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "nfl"))
 
+from live_model.models import rush_attempt_pace as _rap  # noqa: E402
+from live_model.models import pass_attempt_bias as _pab  # noqa: E402
 from live_model.pick_writer import (  # noqa: E402
-    LANE_MARKET, MODEL_ID, PicksRecorder, TeeRecorder, _INSERT_SQL,
-    _norm_player, build_pick, resolve_game_id,
+    LANE_MARKET, LANE_SIDE, MODEL_ID, PicksRecorder, TeeRecorder, _INSERT_SQL,
+    _norm_player, build_pick, refuse_publish_reason, resolve_game_id,
 )
 
 
@@ -38,15 +40,18 @@ class _Decision:
         self.ts = over.get("ts", datetime(2026, 9, 13, 18, 30, tzinfo=timezone.utc))
         self.game_id = over.get("game_id", "espn-401547json")
         self.model_id = over.get("model_id", MODEL_ID)
-        self.market = over.get("market", "player_pass_attempts")
-        self.side = over.get("side", "over")
-        self.line = over.get("line", 32.5)
+        # Defaults match the DEPLOYED lane (rush under). Pass-attempt overs are
+        # the retired constant-prob path and must be constructed explicitly in
+        # the refuse-publish tests below.
+        self.market = over.get("market", _rap.MARKET)
+        self.side = over.get("side", _rap.SIDE)
+        self.line = over.get("line", 11.5)
         self.price = over.get("price", -115.0)
         self.model_prob = over.get("model_prob", 0.58)
         self.market_prob = over.get("market_prob", 0.5349)
         self.ev = over.get("ev", 0.0787)
         self.stake_fraction = over.get("stake_fraction", 0.011)
-        self.player = over.get("player", "C.J. Stroud")
+        self.player = over.get("player", "Blake Corum")
         self.context = over.get("context", {"home_team": "Houston Texans",
                                             "away_team": "Buffalo Bills"})
 
@@ -99,11 +104,53 @@ def test_the_settlement_columns_are_populated():
     # `player_pass_attempts` until 2026-09-21 and now trades
     # `player_rush_attempts`; a switch that updated one and not the other would
     # settle a rushing bet against passing attempts and look normal doing it.
-    from live_model.models import rush_attempt_pace as _rap
     assert row["prop_market"] == LANE_MARKET == _rap.MARKET
-    assert row["player_key"] == "CJ STROUD"
+    assert row["player_key"] == "BLAKE CORUM"
     assert row["is_live"] is True
     assert row["signal_type"] == "BET"
+
+
+def test_refuse_publish_blocks_pass_attempt_overs():
+    """THE BUG THIS EXISTS FOR, 2026-09-20 ledger.
+
+    Every priced nfl_live_prop BET through 2026-09-20 was player_pass_attempts
+    OVER at one of two raw probabilities (0.600344, 0.642). The worker no
+    longer scores that market; this gate is the publish backstop so a wiring
+    regression cannot put those rows on the board again while the model stays
+    live (no PAUSED_MODELS entry).
+    """
+    assert LANE_MARKET == "player_rush_attempts"
+    assert LANE_SIDE == "under"
+    for p in _pab.CONSTANT_OVER_PROBS:
+        d = _Decision(market="player_pass_attempts", side="over",
+                      model_prob=p, player="Dak Prescott", line=35.5)
+        reason = refuse_publish_reason(d)
+        assert reason is not None, p
+        assert "wrong_market" in reason or "retired_constant_prob" in reason
+
+
+def test_refuse_publish_blocks_the_constant_prob_fingerprint_even_on_rush():
+    """A rush-market quote stamped with the retired constant is still refuse."""
+    for p in _pab.CONSTANT_OVER_PROBS:
+        d = _Decision(model_prob=p)
+        assert refuse_publish_reason(d) == f"retired_constant_prob:{p}"
+
+
+def test_refuse_publish_allows_a_real_rush_under():
+    assert refuse_publish_reason(_Decision()) is None
+
+
+def test_picks_recorder_drops_a_pass_attempt_over_before_sql():
+    """End to end: PicksRecorder must not INSERT a retired-market BET."""
+    conn = _Conn()
+
+    rec = PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn,
+                        announce=lambda *_: None)
+    d = _Decision(market="player_pass_attempts", side="over",
+                  model_prob=_pab.CONSTANT_OVER_PROBS[0])
+    rec(d)
+    assert conn.commits == 0
+    assert not any("INSERT INTO picks" in (sql or "") for sql, _ in conn.executed)
 
 
 def test_the_label_names_the_stat_the_model_actually_trades():
@@ -377,59 +424,27 @@ def test_an_unlocked_lane_does_write():
 
 # ── registration: thresholds and settlement ──────────────────────────────────
 
-def test_the_lane_carries_its_own_thresholds():
-    """A model reaching production without its own entry is scored against the
-    module-level fallback, which is a number nobody chose (tests/test_config)."""
+def test_the_retired_model_carries_no_threshold_row():
+    """RETIRED 2026-10-04 (mike: "Remove this model"). Its threshold rows, its
+    price floor and its live flag went with it; settlement stays (below), so
+    the picks already written keep grading (CLAUDE.md 1c)."""
     import config
+    assert MODEL_ID in config.RETIRED_MODELS
     for m in (config.MODEL_EDGE_THRESHOLDS, config.MODEL_PROB_THRESHOLDS,
-              config.ACTION_THRESHOLDS):
-        assert MODEL_ID in m, f"{MODEL_ID} missing from a threshold map"
+              config.ACTION_THRESHOLDS, config.MODEL_MIN_ODDS):
+        assert MODEL_ID not in m
 
 
-def test_the_thresholds_do_not_re_cut_what_the_lane_already_decided():
-    """The cut is EV, applied in the executor BEFORE a decision is recorded as a
-    bet. A second, different cut in the action filter would write picks and then
-    hide them -- the exact app/Discord divergence this release removes.
-
-    ALL THREE gates, not just the two that are written inline. The first version
-    of this test asserted min_prob and min_edge only, and shipped a lane whose
-    PRICE floor fell through to the -200 house default: a live prop bet at -250
-    would have been written to `picks` and then hidden by the app's
-    passesActionFilter. The gap was invisible because the floor is not in
-    ACTION_THRESHOLDS at all -- it comes from config.min_odds_for, which is what
-    data.threshold_sync actually mirrors into model_action_thresholds.
-    """
+def test_its_settled_record_is_struck_on_mikes_instruction():
     import config
-    assert config.ACTION_THRESHOLDS[MODEL_ID] == {"min_prob": 0.0, "min_edge": 0.0}
-    # The price floor is allowed to bind ONLY where the executor already refuses
-    # (see test_the_display_floor_matches_the_executors_ceiling). Tighter than
-    # the executor and a taken bet gets hidden, which is the #491 bug.
-    assert config.min_odds_for(MODEL_ID) <= _executor_min_price(), (
-        f"display floor {config.min_odds_for(MODEL_ID)} is TIGHTER than the "
-        f"executor's ceiling {_executor_min_price()} -- a bet the lane took "
-        f"would be written to picks and hidden in the app")
+    ex = [e for e in config.RECORD_EXCLUSIONS if e["model_id"] == MODEL_ID]
+    assert ex and not ex[0].get("before"), "the whole model, not a date window"
+    assert "mike" in ex[0]["asked_by"]
 
 
-def test_the_synced_row_is_what_the_app_will_actually_read():
-    """threshold_sync mirrors config into model_action_thresholds, and the app,
-    Discord and push all gate on THAT row -- so the row, not the inline dict, is
-    the thing that has to be non-cutting. Built here the same way the sync builds
-    it, so a change to how the floor is derived cannot pass this test."""
-    import config
-    from config import ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS
-
-    assert MODEL_ID in ACTION_THRESHOLDS, "the sync only writes ACTION_THRESHOLDS keys"
-    t = ACTION_THRESHOLDS[MODEL_ID]
-    row = {
-        "min_prob": t["min_prob"],
-        "min_edge": t["min_edge"],
-        "min_odds": config.min_odds_for(MODEL_ID),
-        "prob_only": MODEL_ID in PROB_ONLY_MODELS,
-        "paused": MODEL_ID in PAUSED_MODELS,
-    }
-    assert row["paused"] is False, "the lane is LIVE (CLAUDE.md section 2)"
-    assert row["min_prob"] == 0.0 and row["min_edge"] == 0.0
-    assert row["min_odds"] <= _executor_min_price()
+def test_the_worker_loop_is_off_unless_explicitly_enabled():
+    src = (Path(__file__).parent.parent / "scheduler.py").read_text(encoding="utf-8")
+    assert 'RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"' in src
 
 
 def test_the_lane_can_actually_settle():
@@ -483,19 +498,6 @@ def test_the_lane_refuses_a_quote_past_the_ceiling():
     a -140 ceiling and +120 is not.
     """
     assert _executor_min_price() == -140.0
-
-
-def test_the_display_floor_matches_the_executors_ceiling():
-    """The two numbers that drifted apart in #491, pinned together.
-
-    A display floor TIGHTER than the executor's ceiling hides a bet the lane
-    took -- that was the bug. One LOOSER is dead config that still reads as a
-    rule. They must be the same number.
-    """
-    import config
-    assert config.min_odds_for(MODEL_ID) == _executor_min_price(), (
-        f"MODEL_MIN_ODDS says {config.min_odds_for(MODEL_ID)}, the executor "
-        f"says {_executor_min_price()} -- keep them in step")
 
 
 def test_the_ceiling_is_a_refusal_not_a_filter():

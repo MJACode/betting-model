@@ -22,9 +22,11 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
+import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
+import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
-import { statForPropModel, type StatDef } from '@/lib/statCatalog';
-import { modelShort } from '@/lib/modelMeta';
+import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
+import { modelLong, modelShort, sportOfModel } from '@/lib/modelMeta';
 import type { GameRow, PropOddsByBookRow, PropOddsSnapshotRow, SettledPick } from '@/types';
 
 // ── Line conversions ─────────────────────────────────────────────────────────
@@ -173,9 +175,11 @@ export interface PropLineMove {
 
 /**
  * DraftKings' opening snapshot against its latest, for one player market.
- * `history` is oldest-first (fetchPropOddsHistory); `now` is the same book's
- * latest row from the all-books view, which may be newer than the history's
- * last element because that read is capped.
+ * `history` is the whole series oldest-first by the instant each row was taken
+ * (fetchPropOddsHistory sorts on the phone: Eastern-time stamps make text
+ * order wrong); `now` is the same book's latest row from the all-books view.
+ * Without it the last history row is the latest. That fallback used to be the
+ * 50th-oldest row, because the read was the oldest 50 (fixed 2026-10-09).
  */
 export function propLineMove(
   history: PropOddsSnapshotRow[],
@@ -216,7 +220,7 @@ export interface SplitBucket {
   label: string;
   games: number;
   avg: number | null;
-  /** Share of games at or above the page's threshold; null with no games. */
+  /** Share of games that WON the page's bet; null with no games. */
   hitRate: number | null;
   hits: number;
 }
@@ -224,21 +228,100 @@ export interface SplitBucket {
 export interface StatSplits {
   home: SplitBucket;
   away: SplitBucket;
-  /** Against tonight's opponent, within the loaded log; null with no opponent. */
-  vsOpponent: SplitBucket | null;
   /** Basketball only — the log carries is_starter. */
   starting: SplitBucket | null;
   bench: SplitBucket | null;
 }
 
-function bucket(label: string, entries: PlayerLogEntry[], stat: StatDef | null, threshold: number): SplitBucket {
+// ── Head-to-head with the next opponent ─────────────────────────────
+
+/** One previous meeting: when it was, and what the player did in it. */
+export interface H2HMeeting {
+  date: string;
+  value: number;
+}
+
+export interface PlayerHeadToHead {
+  opponent: string;
+  /** Newest first. */
+  meetings: H2HMeeting[];
+  /** The same numbers as a split, so it reads beside Home / Away unchanged. */
+  bucket: SplitBucket;
+}
+
+/**
+ * The H2H card's numbers, off one player_h2h_stat_values_* row.
+ *
+ * THIS REPLACED A `vsOpponent` SPLIT COMPUTED OVER THE LOADED LOG, and the
+ * reason is span, not shape. That log is 25 rows in football and 50 elsewhere
+ * (playerLog.logFetchLimit) — about a third of an MLB season — so "vs BAL"
+ * silently meant "vs BAL inside the last fifty games", which in September is a
+ * different question from the one the label asked. Two seasons is the span
+ * Matt asked for (2026-09-20), and the RPC is bounded to it server-side.
+ *
+ * `values` and `dates` arrive index-aligned from the RPC (it filters both on
+ * the same non-null condition); a length mismatch would pair a number with
+ * another game's date, so the pairing stops at the shorter of the two rather
+ * than trusting either length.
+ */
+export function playerHeadToHead(
+  opponent: string,
+  values: readonly number[],
+  dates: readonly string[],
+  line: number,
+  side: HitDirection,
+): PlayerHeadToHead {
+  const n = Math.min(values.length, dates.length);
+  const meetings: H2HMeeting[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = Number(values[i]);
+    if (!Number.isFinite(v)) continue;
+    meetings.push({ date: dates[i]!, value: v });
+  }
+  const nums = meetings.map((m) => m.value);
+  // `computeHitRate`, not `>=`: the board's H2H branch uses it, and two
+  // surfaces of one feature disagreeing about which side won is worse than
+  // either being wrong alone.
+  const { hits, total, pct } = computeHitRate(nums, line, side);
+  return {
+    opponent,
+    meetings,
+    bucket: {
+      label: `vs ${opponent}`,
+      games: total,
+      avg: total ? nums.reduce((a, b) => a + b, 0) / total : null,
+      hitRate: total ? pct : null,
+      hits,
+    },
+  };
+}
+
+/**
+ * A split's numbers for the page's ACTUAL bet \u2014 `(line, side)`, never the
+ * "n+" threshold.
+ *
+ * It counted `v >= threshold` until 2026-09-20, which is the OVER rate, and in
+ * Under mode the page asks the opposite question: `selectionFor(n, 'under')`
+ * is `{line: n - 0.5, side: 'under'}`. A player who had gone under in all
+ * three meetings rendered 0%, on a screen whose game-log dots \u2014 which have
+ * always read `(line, side)` \u2014 were painting those same three games green a
+ * few rows above. `lib/hitMode` states the rule this now follows: everything
+ * downstream reads the resolved line and side and never the mode.
+ */
+function bucket(
+  label: string,
+  entries: PlayerLogEntry[],
+  stat: StatDef | null,
+  line: number,
+  side: HitDirection,
+): SplitBucket {
   const values = entries.map((e) => logStatValue(e, stat)).filter((v): v is number => v != null);
-  const hits = values.filter((v) => v >= threshold).length;
+  const { hits, total, pct } = computeHitRate(values, line, side);
   return {
     label,
-    games: values.length,
-    avg: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
-    hitRate: values.length ? hits / values.length : null,
+    games: total,
+    avg: total ? values.reduce((a, b) => a + b, 0) / total : null,
+    hitRate: total ? pct : null,
     hits,
   };
 }
@@ -259,20 +342,18 @@ export function statSplits(
   entries: PlayerLogEntry[],
   gamesById: ReadonlyMap<string, GameRow>,
   stat: StatDef | null,
-  threshold: number,
-  opponent: string | null,
+  line: number,
+  side: HitDirection,
   hasStarterFlag: boolean,
 ): StatSplits {
   const home: PlayerLogEntry[] = [];
   const away: PlayerLogEntry[] = [];
-  const vsOpp: PlayerLogEntry[] = [];
   const starting: PlayerLogEntry[] = [];
   const bench: PlayerLogEntry[] = [];
   for (const e of entries) {
-    const { isHome, opponent: opp } = sideOf(e, gamesById.get(e.game_id));
+    const { isHome } = sideOf(e, gamesById.get(e.game_id));
     if (isHome === true) home.push(e);
     else if (isHome === false) away.push(e);
-    if (opponent && opp === opponent) vsOpp.push(e);
     if (hasStarterFlag) {
       // Stored as an integer column (measured: nba/wnba_player_game_log.is_starter
       // is `integer`); a NUMERIC-as-string arrives as '1' / '0'.
@@ -282,17 +363,18 @@ export function statSplits(
     }
   }
   return {
-    home: bucket('Home', home, stat, threshold),
-    away: bucket('Away', away, stat, threshold),
-    vsOpponent: opponent ? bucket(`vs ${opponent}`, vsOpp, stat, threshold) : null,
-    starting: hasStarterFlag ? bucket('Starting', starting, stat, threshold) : null,
-    bench: hasStarterFlag ? bucket('Off bench', bench, stat, threshold) : null,
+    home: bucket('Home', home, stat, line, side),
+    away: bucket('Away', away, stat, line, side),
+    starting: hasStarterFlag ? bucket('Starting', starting, stat, line, side) : null,
+    bench: hasStarterFlag ? bucket('Off bench', bench, stat, line, side) : null,
   };
 }
 
 // ── Our record on this player ────────────────────────────────────────────────
 
 export interface PlayerPickLine {
+  /** Unique per line: the model id, plus the market for a multi-market rule. */
+  key: string;
   modelId: string;
   /** The stat the model prices ("Hits", "Points"), or the model's short label. */
   label: string;
@@ -314,6 +396,19 @@ export interface PlayerPickRecord {
   pushes: number;
   units: number | null;
   unpriced: number;
+  /** A ledger read failed. Unknown stamps stayed in the counts. */
+  ledgerUnread: boolean;
+}
+
+/**
+ * What a multi-market model's line on the player page is called after its
+ * stat: the parenthetical of the model's own name, so "Points (vs Pinnacle)"
+ * for the three rules priced against Pinnacle and "Steals (Projection)" for
+ * the NBA projection model, which is not priced against Pinnacle. The short
+ * name when the long one carries no parenthetical.
+ */
+function multiMarketModelName(modelId: string): string {
+  return /\(([^()]+)\)\s*$/.exec(modelLong(modelId))?.[1] ?? modelShort(modelId);
 }
 
 /**
@@ -323,19 +418,45 @@ export interface PlayerPickRecord {
  */
 export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   const by = new Map<string, PlayerPickLine>();
-  const total: PlayerPickRecord = { lines: [], settled: 0, wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0 };
+  const total: PlayerPickRecord = {
+    lines: [], settled: 0, wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, ledgerUnread: false,
+  };
   for (const p of picks) {
     if (p.signal_type !== 'BET') continue;
+    // Paused-model BETs were never bet (#850); same rule as passesRecordFilter.
+    if (isPausedRow(p)) continue;
+    // Struck from the record (config.RECORD_EXCLUSIONS); same rule as passesRecordFilter.
+    if (RECORD_EXCLUDED_MODELS.has(p.model_id)) continue;
+    // The second copy of one bet under another game id counts once (2026-10-09).
+    if (isDuplicateCopy(p)) continue;
+    // The published record is the picks Discord still has. Omitted and
+    // unknown stay; only an explicit unpublished stamp leaves.
+    if (!publishedRecordKeeps(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
-    let line = by.get(p.model_id);
+    // A multi-market model (nba/wnba/nfl_prop_market, nba_prop_projection) is
+    // one model id across several markets, so its picks are split by the
+    // row's prop_market and each line is named for that market's stat.
+    // Without this every one of its bets was one line labelled "Prop Mkt".
+    const modelStat = statForPropModel(p.model_id);
+    const market = modelStat ? null : (p.prop_market ?? null);
+    const key = market ? `${p.model_id}|${market}` : p.model_id;
+    let line = by.get(key);
     if (!line) {
-      const stat = statForPropModel(p.model_id);
+      const stat = modelStat ?? statForPropMarket(sportOfModel(p.model_id), market);
+      // A rule's line names the rule too: named for the stat alone, it read
+      // as a second per-stat line ("Assists 1-0" over "Assists 0-1").
+      const label = !stat
+        ? modelShort(p.model_id)
+        : market
+          ? `${stat.label} (${multiMarketModelName(p.model_id)})`
+          : stat.label;
       line = {
+        key,
         modelId: p.model_id,
-        label: stat?.label ?? modelShort(p.model_id),
+        label,
         wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, overs: 0, unders: 0,
       };
-      by.set(p.model_id, line);
+      by.set(key, line);
     }
     if (p.result === 'WIN') { line.wins += 1; total.wins += 1; }
     else if (p.result === 'LOSS') { line.losses += 1; total.losses += 1; }
@@ -353,6 +474,7 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
       line.unpriced += 1;
       total.unpriced += 1;
     }
+    if (p.discordPublish === 'unknown') total.ledgerUnread = true;
     total.settled += 1;
   }
   total.lines = [...by.values()].sort((a, b) => (b.wins + b.losses + b.pushes) - (a.wins + a.losses + a.pushes));

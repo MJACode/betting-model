@@ -41,8 +41,8 @@ violates one is a **Blocker** regardless of how it looks.
   reference and the CLV basis. A row must name the book that decided it, a
   chip labelled with one book must never carry another book's betslip link,
   and parlays stay priced at DraftKings.
-- **The platform is LIVE, not paper trading** (§2). The words "paper",
-  "paper trading", "simulated" must not appear in user-facing copy.
+- **Every model is live real money** (§2). The words "paper",
+  "simulated", and "not real money" must not appear in user-facing copy.
 - **Access is `useEntitlement()`**, never `useSubscription().entitled` (§6).
   A Discord (Whop) member is entitled in the app.
 - **"Today" is ET** (`todayET()` in `src/lib/format.ts`), never
@@ -64,7 +64,7 @@ violates one is a **Blocker** regardless of how it looks.
    ```
    (or `node mobile/scripts/ux_scan.mts <files…>`). It catches hard-coded hex,
    font-size literals, pressables with no accessibility label, UTC "today",
-   paper-trading copy and the entitlement trap. It is deliberately not part of
+   copy that says the bets are not real, and the entitlement trap. It is deliberately not part of
    you: its findings are comparable run to run, yours are judgement on top.
 3. **Read the whole component, and the screen that mounts it.** A card that
    looks right in isolation can be the fourth card of the same shape on a

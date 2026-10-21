@@ -64,7 +64,10 @@ def test_the_shipped_floor_is_020_and_the_ncaaf_moneyline_keeps_the_030_it_was_s
     src = (Path(config.__file__)).read_text(encoding="utf-8")
     assert 'os.environ.get("GLOBAL_MIN_EV", "0.20")' in src
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
-    assert config.min_ev_for("nfl_prop_market") == 0.20
+    # a model with no floor of its own sits at the shipped global number
+    assert "nba_spread" not in config.MODEL_OWN_EV_FLOOR
+    assert "nba_spread" not in config.MODEL_MIN_EV
+    assert config.min_ev_for("nba_spread") == 0.20
     # its 0.50/0.16 cut was swept with a 0.30 floor in force (2026-09-19)
     assert config.min_ev_for("ncaaf_live_win_prob") == 0.30
     assert config.min_ev_for("mlb_live_total_runs") == 0.32
@@ -317,6 +320,26 @@ def test_nfl_wind_and_opener_rows_drop_a_bet_under_the_floor(floor_030, identity
     assert picks == []
 
 
+def test_nhl_totals_card_drops_a_bet_under_the_floor(floor_030, identity_maps):
+    from models.nhl_totals_market import NhlTotalBet
+    from scripts.nhl_totals_card import pick_rows
+    games = {"NHL_2026-10-08_PHI_OTT": {"home": "OTT", "away": "PHI",
+                                       "game_date": "2026-10-08",
+                                       "commence_time": "2026-10-08T23:00:00Z"}}
+
+    def bet(fair):
+        return NhlTotalBet(game_id="NHL_2026-10-08_PHI_OTT", side="over",
+                           book="fanduel", line=6.5, price=MINUS_110, fair=fair,
+                           ev=fair * (1 + 100 / 110) - 1, sharp_over=-125.0,
+                           sharp_under=108.0, created_at="2026-10-08 01:00:07+00",
+                           soft_snapshot_at=None, sharp_snapshot_at=None,
+                           link=None, dk_price=None, dk_link=None)
+    # 0.60 at -110 is EV 0.145: it clears this model's own cut (EV 0.01, price
+    # -200 or better) and only the 0.30 floor refuses it. 0.72 is EV 0.375.
+    rows = pick_rows([bet(0.60), bet(0.72)], games, 1000.0)
+    assert [r["model_probability"] for r in rows] == [0.72]
+
+
 # ── the two NFL rules on their own floor and their own probability ───────────
 
 # The 2026-09-20 MIN @ CHI row, as the 15:40 UTC card wrote it.
@@ -332,17 +355,38 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
     assert config.min_ev_for("nfl_wind_totals") == 0.05
     assert config.min_ev_for("nfl_opener_spread") == 0.01
-    # nfl_prop_market's own entry is the global number ON PURPOSE: #794 left it
-    # under the floor on its record (19-20, -2.49u over 39) and 2026-09-20 wrote
-    # that choice out rather than leaving it implicit.
-    assert config.min_ev_for("nfl_prop_market") == 0.20
+    # nfl_prop_market sat at the global number until 2026-10-12, when its own
+    # 2023-25 record was swept (mike: "yes"; docs/nfl_edge_search.md §5).
+    assert config.min_ev_for("nfl_prop_market") == 0.07
     # The dict is no longer these two alone (mike, 2026-09-20: "each model will
     # need its own floor"), but DECIDING ON ITS OWN PROBABILITY still is. The
     # two were one expression until today; widening the floors must not take
     # every model off the calibration map.
     assert {"nfl_wind_totals", "nfl_opener_spread"} <= set(config.MODEL_OWN_EV_FLOOR)
     assert config.MODELS_ON_OWN_PROBABILITY == frozenset(
-        {"nfl_wind_totals", "nfl_opener_spread"}
+        {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
+         "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
+         # 2026-10-03 (mike): the two-way correction on a three-way market.
+         "nhl_moneyline_regulation",
+         # 2026-10-08 (mike): the NHL totals rule; its number IS Pinnacle's.
+         "nhl_over_under",
+         # 2026-10-12 (mike): the NFL prop rule; its number IS the sharp book's.
+         "nfl_prop_market",
+         # 2026-10-13 (mike): the NFL in-play leader moneyline; its cut was
+         # measured on its own per-lead win probability.
+         "nfl_live_leader_ml",
+         # 2026-10-15 (mike, "Yes"): the rebuilt moneyline, anchored on
+         # DraftKings' price and graded on its own number.
+         "nhl_moneyline",
+         # 2026-10-15 (mike: "use what you've learned in this repo"): the NBA
+         # prop rule; its number IS Pinnacle's no-vig under.
+         "nba_prop_market",
+         # 2026-10-16 (mike): the NBA projection model; calibrated inside its own artifact.
+         "nba_prop_projection",
+         # 2026-10-17 (mike): the NBA totals overs; market-fair P(over) + its bucket's uplift.
+         "nba_total_luck",
+         # The NBA home team-total unders; market-fair P(under) + the walk-forward uplift.
+         "nba_team_total_luck"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 
@@ -352,13 +396,34 @@ def test_the_two_rules_decide_on_their_own_probability(monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
     monkeypatch.setattr(sc, "_CAL_CACHE", {"nfl_wind_totals": SHRINK,
                                            "nfl_opener_spread": SHRINK,
-                                           "nfl_prop_market": SHRINK})
+                                           "nfl_prop_market": SHRINK,
+                                           "mlb_moneyline": SHRINK})
     g = honest_ev.gate("nfl_wind_totals", 0.5735, -114)
     assert g.cal_prob == pytest.approx(0.5735) and g.clears
     assert honest_ev.gate("nfl_opener_spread", 0.5557, -110).clears
     # a model not on the list is still marked down, and still under the floor
-    other = honest_ev.gate("nfl_prop_market", 0.5735, -114)
+    other = honest_ev.gate("mlb_moneyline", 0.5735, -114)
     assert other.cal_prob < 0.5735 and not other.clears
+
+
+def test_nfl_prop_market_bets_the_rows_the_worker_dropped_on_2026_10_11(monkeypatch):
+    """The worker card log of 2026-10-11 printed, for every candidate,
+    "ev_below_floor:0.037<0.20 (p 0.573->0.506 at +105)": the 0.20 floor AND a
+    borrowed calibration offset. On its own probability and its own 0.07
+    floor, the +105 and +115 rows clear and the -110 rows do not."""
+    import models.scorer as sc
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
+    # the promoted map as stored on 2026-10-11 (model_calibration)
+    monkeypatch.setattr(sc, "_CAL_CACHE",
+                        {"nfl_prop_market": {"method": "platt", "a": 1.0, "b": -0.279827}})
+    for prob, price, bets in ((0.573, 105, True),    # carnelltate receptions u4.5
+                              (0.523, 115, True),    # dandreswift receptions o2.5
+                              (0.551, -110, False),  # orondegadsden receptions u3.5
+                              (0.541, -110, False)): # jaydendaniels rush yds u30.5
+        g = honest_ev.gate("nfl_prop_market", prob, price)
+        assert g.cal_prob == pytest.approx(prob)
+        assert g.floor == 0.07
+        assert g.clears is bets, (prob, price, g.ev)
 
 
 def test_the_min_chi_wind_row_is_written_as_a_bet(monkeypatch):

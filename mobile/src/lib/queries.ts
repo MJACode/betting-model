@@ -1,6 +1,12 @@
+import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
+import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
+import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
+import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
+import { isNotFoundError } from './errors';
+import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
   LOG_COLUMNS,
   LOG_TABLE,
@@ -9,17 +15,25 @@ import {
   type PlayerLogEntry,
   type PlayerLogSport,
 } from './playerLog';
+import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
 import {
   gameMarketForModel,
   lineShopForPick,
   numOrNull,
   playerNameFromPickLabel,
-  propMarketForModel,
+  propMarketForPick,
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
-import type { ServerThreshold } from './thresholds';
+import {
+  DUPLICATE_STATUS,
+  isDuplicateCopy,
+  isPausedRow,
+  PAUSED_NOTE,
+  type ServerThreshold,
+} from './thresholds';
 import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
+import type { SettledPickMarker } from './settledPickMarkers';
 import { sanitizeFilters } from './customModelFilters';
 
 /** Raw row shape of the model_action_thresholds table. */
@@ -59,6 +73,9 @@ import type {
   PropOddsSnapshotRow,
   RecentGameRow,
   SavantStatsRow,
+  H2HStatValuesRow,
+  PositionVsOpponentRow,
+  PositionDefenseRankRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
@@ -110,6 +127,42 @@ const UFC_TOTALS_COLUMNS =
   'sig_strikes, takedowns, knockdowns, sub_attempts';
 
 /**
+ * Season or last-N skater totals from player_window_totals_nhl.
+ *
+ * The same shape as the other sports: one row per player, summed in SQL,
+ * p_window null for the season. The function reads nhl_skater_game_log
+ * (`shots`, regular season, season = the ending year). The first label
+ * with rows wins.
+ *
+ * The function is SECURITY INVOKER. Before this migration is applied the
+ * call is PGRST202 or 42883 (the function is not in the schema). Before
+ * #962 grants the log it is 42501 (permission denied). Those two are an
+ * empty average, so posted lines still render. Every other error is thrown.
+ */
+async function fetchNhlSkaterBoard(
+  calendarYear: number,
+  window: number | null,
+  teams?: SlateTeams,
+): Promise<SeasonTotalsRow[]> {
+  const fn = 'player_window_totals_nhl';
+  try {
+    for (const s of nhlSeasonCandidates(calendarYear, monthET())) {
+      const rows = await pageRpc<SeasonTotalsRow>(
+        fn,
+        { p_season: s, p_window: window },
+        teams,
+        totalsRowKey,
+      );
+      if (rows.length) return rows;
+    }
+    return [];
+  } catch (e) {
+    if (nhlSkaterReadMissing(e)) return [];
+    throw e;
+  }
+}
+
+/**
  * The Stats board's slate narrowing — the teams whose players the board is
  * about, or null/[] for "the whole league".
  *
@@ -144,6 +197,7 @@ export async function fetchSeasonTotals(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
     for (const s of footballSeasonCandidates(season)) {
@@ -230,10 +284,7 @@ export async function fetchWindowTotals(
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  if (sport === 'NHL') {
-    // No per-player skater leaderboard for NHL (team + goalie stats only).
-    return [];
-  }
+  if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
   if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
@@ -374,7 +425,9 @@ export async function fetchRecentGames(
     }
     return [];
   }
-  return []; // UFC / NHL / GOLF: no per-game player logs
+  // UFC / GOLF have no log. NHL hit rate stays off. The averages board
+  // reads player_window_totals_nhl in fetchWindowTotals.
+  return [];
 }
 
 /** (player, game) is the row's identity; `rn` orders a player's games. */
@@ -430,17 +483,255 @@ export async function fetchSeasonStatValues(
   return []; // UFC / NHL / GOLF: no per-game player logs
 }
 
+/**
+ * A PAIR OF TEAMS, one per slate fixture, as the H2H RPCs take them.
+ *
+ * Two parallel arrays rather than 'TEAM|OPP' strings because an NCAAF team id
+ * is a school NAME (CLAUDE.md §4), so every separator is a character that can
+ * occur inside a key; the RPC pairs them with `unnest(...) WITH ORDINALITY`.
+ */
+export interface H2HMatchups {
+  teams: string[];
+  opponents: string[];
+}
+
+/**
+ * How many seasons back H2H looks: this one and the one before it.
+ *
+ * Matt, 2026-09-20 — "they should be able to see the last 2 years". FIXED, not
+ * a control: one definition of the window is one number on the row that always
+ * means the same thing. Widening it is a one-line change here.
+ */
+export const H2H_SEASONS = 2;
+
+/** [2026, 2025] for a season of 2026 — newest first, H2H_SEASONS long. */
+export function h2hSeasons(season: number): number[] {
+  return Array.from({ length: H2H_SEASONS }, (_, i) => season - i);
+}
+
+/**
+ * The newest season LABEL to try first for a sport, then the fallbacks.
+ *
+ * Because a season label is not a calendar year, and it is not the same kind of
+ * thing in every sport (CLAUDE.md §4). Measured on production 2026-09-20, by
+ * the dates each label actually spans:
+ *
+ *   MLB 2026   2026-04-05 → 2026-09-20   year of play
+ *   WNBA 2026  2026-05-08 → 2026-09-19   year of play
+ *   NBA 2026   2025-10-21 → 2026-04-12   ENDING year
+ *   NFL 2026   2026-09-09 → 2026-09-17   starting year
+ *   NCAAF 2026 2026-08-27 → 2026-09-20   starting year
+ *
+ * So for the NBA, from October to December the season in progress is labelled
+ * NEXT year, and a bare calendar year asks for the two seasons BEFORE the one
+ * it claims — for three months, silently, under a card that says "last 2
+ * seasons". Football has always had this fallback because its label is a year
+ * ahead of its January games; the NBA needs it in the other direction.
+ *
+ * The sports whose label IS the year of play get one candidate, because for
+ * them a fallback could only ever hide a genuinely empty read.
+ */
+function h2hSeasonCandidates(sport: string, season: number): number[] {
+  if (sport === 'NFL' || sport === 'NCAAF') return footballSeasonCandidates(season);
+  // Try the season the autumn belongs to first; fall back to the one that has
+  // just finished, which is the right answer all through the spring and summer.
+  if (sport === 'NBA') return [season + 1, season, season - 1];
+  return [season];
+}
+
+/**
+ * Per-player per-game values for ONE stat, IN THE MEETINGS with the team that
+ * player is about to play, over the last two seasons. Backs the Stats tab's
+ * H2H window.
+ *
+ * Deliberately the same row shape as fetchSeasonStatValues above (a `values`
+ * array per player), so the board computes the H2H hit rate for any line
+ * through the same client-side path the Season window already uses — plus
+ * `opponent` and `dates`, which are the two things only H2H can say.
+ *
+ * NARROWED BY THE FIXTURES, NOT BY THE TEAMS. `matchups` pairs each slate team
+ * with the one opponent it is about to face, so the read returns one row per
+ * player rather than every slate player against every slate opponent. Measured
+ * on the 30-game NFL slate of 2026-09-20: 1,406 rows for 1,157 players, out of
+ * 3,724 players on the slate — i.e. ~31% of them have met that opponent inside
+ * two seasons at all.
+ *
+ * Empty matchups return [] WITHOUT a request: no slate means no opponent to
+ * ask about, and an unnarrowed H2H read is the cross product.
+ */
+export async function fetchH2HStatValues(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  season: number,
+  statKey: string,
+  matchups: H2HMatchups,
+  playerType?: 'batter' | 'pitcher',
+): Promise<H2HStatValuesRow[]> {
+  if (matchups.teams.length === 0) return [];
+  // (player, opponent) is the row's identity: a player whose team appears in
+  // the slate twice (an MLB doubleheader) still resolves to one opponent, but
+  // the key must not collapse two different ones if that ever changes.
+  const key = (r: H2HStatValuesRow) => `${r.player_id}:${r.opponent}:${r.player_type ?? ''}`;
+  const fn =
+    sport === 'WNBA' ? 'player_h2h_stat_values_wnba'
+    : sport === 'NBA' ? 'player_h2h_stat_values_nba'
+    : sport === 'MLB' ? 'player_h2h_stat_values_mlb'
+    : sport === 'NFL' ? 'player_h2h_stat_values_nfl'
+    : sport === 'NCAAF' ? 'player_h2h_stat_values_ncaaf'
+    : null;
+  if (!fn) return []; // UFC / NHL / GOLF: no per-game player logs
+  const base: Record<string, unknown> = {
+    p_stat: statKey,
+    p_teams: matchups.teams,
+    p_opponents: matchups.opponents,
+  };
+  if (sport === 'MLB') base.p_player_type = playerType ?? 'batter';
+  // Candidates, newest label first: an empty read on the first one means that
+  // label has no games yet, not that the player has never met the opponent.
+  for (const s of h2hSeasonCandidates(sport, season)) {
+    const rows = await pageRpc<H2HStatValuesRow>(fn, { ...base, p_seasons: h2hSeasons(s) }, null, key);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+/**
+ * Whether `season` has started for `sport`: at least one FINAL game.
+ *
+ * A row in `games` is not enough. Measured 2026-10-06: NBA season 2027
+ * already had 46 games on the schedule and 0 with `home_win` set (first
+ * date 2026-10-20). Counting rows would open this season before opening
+ * night. The read is `limit(1)` — 0 or 1 row, under the 1,000-row cap.
+ * `games` is already on the anon read surface.
+ */
+export async function fetchSeasonStarted(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF',
+  season: number,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('game_id')
+    .eq('sport', sport)
+    .eq('season', season)
+    .not('home_win', 'is', null)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
+/**
+ * Every qualifying player-game at one NFL position group against one defence,
+ * this season and last, with the defence's league rank on each row. Backs the
+ * player page's "WRs vs ATL" card (Matt, 2026-10-05).
+ *
+ * ROW COUNT, from each function's query run read-only against production
+ * data: NFL WR receiving_yards vs ATL, seasons 2025-2026, 55 rows
+ * (2026-10-05); MLB 1-3 hitters' hits vs NYY, 883 rows (2026-10-06, before
+ * position_vs_opponent_mlb was deployed) — the largest, and why it is paged. A full 17-game season of
+ * a defensive group is a few hundred at most, so one page — but paged anyway,
+ * because the 1,000-row cap is a property of every read
+ * (.claude/rules/frontend.md), on an order the REQUEST names.
+ *
+ * NFL, MLB, NBA, WNBA and NCAAF; other sports return [] without a request.
+ */
+export async function fetchPositionVsOpponent(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  seasons: number[],
+  statKey: string,
+  posGroup: string,
+  opponent: string,
+): Promise<PositionVsOpponentRow[]> {
+  const args = { p_seasons: seasons, p_stat: statKey, p_pos_group: posGroup, p_opponent: opponent };
+  const key = (r: PositionVsOpponentRow) => `${r.game_id}:${r.player_id}`;
+  // Two literal .rpc() names, never one picked by a variable: the read-surface
+  // tripwire parses the name out of the literal (tests/test_anon_readable.py).
+  if (sport === 'NFL') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_nfl', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'MLB') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_mlb', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'NBA') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_nba', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'WNBA') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_wnba', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'NCAAF') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_ncaaf', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  return [];
+}
+
+/**
+ * Every defense's rank for one NFL position group and stat. 32 rows, so it
+ * is not paged. Rank 1 allows the most. The Anytime TD board calls it once
+ * per group (position_defense_ranks_nfl).
+ */
+export async function fetchPositionDefenseRanks(
+  seasons: number[],
+  statKey: string,
+  posGroup: string,
+): Promise<PositionDefenseRankRow[]> {
+  const { data, error } = await supabase.rpc('position_defense_ranks_nfl', {
+    p_seasons: seasons,
+    p_stat: statKey,
+    p_pos_group: posGroup,
+  });
+  if (error) throw error;
+  return (data ?? []) as PositionDefenseRankRow[];
+}
+
+/**
+ * One player's position, for the sports whose game log carries none
+ * (NBA, WNBA, NCAAF — data/migrations/add_player_positions.sql). One row by
+ * primary key, or null when the roster pull has not placed him.
+ */
+export async function fetchPlayerPositionGroup(
+  sport: 'NBA' | 'WNBA' | 'NCAAF',
+  playerId: string,
+): Promise<{ position: string; pos_group: string | null } | null> {
+  const { data, error } = await supabase
+    .from('player_positions')
+    .select('position, pos_group')
+    .eq('sport', sport)
+    .eq('player_id', playerId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { position: string; pos_group: string | null } | null) ?? null;
+}
+
 const PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
   'model_probability, model_probability_cal, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, condition_status, result, profit_flat, ' +
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
-  'is_live, inning_at_pick, score_diff_at_pick, ' +
+  'is_live, inning_at_pick, score_diff_at_pick, player_key, prop_market, ' +
   'public_bet_pct, public_money_pct, ' +
-  'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
-  'clv_captured_at, clv_method, clv_close_book, dk_bet_link, ' +
-  'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, ' +
+  'closing_dk_odds, closing_line, clv_pct, clv_pp, line_clv_pts, clv_beat_close, ' +
+  'clv_captured_at, clv_method, clv_close_book, clv_bet_book, ' +
+  'market_clv_pct, market_clv_pp, market_clv_method, pinnacle_close_odds, dk_bet_link, ' +
+  'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, downgrade_reason, ' +
   'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
@@ -450,8 +741,8 @@ const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
-  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
-  'is_live';
+  'public_bet_pct, injury_flag, clv_pct, clv_method, decision_book, decision_odds, decision_edge, ' +
+  'is_live, downgrade_reason, player_key, prop_market';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -669,6 +960,78 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
 }
 
 /**
+ * Today's NHL and NBA games for the Lines board — every game, not the ones
+ * a model picked. Measured 2026-10-16: 11 NHL games on 2026-10-15, 2 on
+ * 2026-10-16, 3 NBA games on 2026-10-20. Well under the 1,000-row cap.
+ */
+export async function fetchGamesForLinesBoard(date: string): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .in('sport', [...LINES_SPORTS])
+    .eq('game_date', date)
+    .order('commence_time')
+    .order('game_id');
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
+/**
+ * Every book's latest line for those games.
+ *
+ * Measured 2026-10-16 on v_latest_odds_all_books: NHL 2026-10-13 was 592
+ * rows, the largest NHL day from 2026-10-01 through that read; NBA
+ * 2026-10-21 was 363. A day with both full slates can pass the 1,000-row
+ * cap, so this is paged and narrowed to the board's game ids and to
+ * LINES_ODDS_MARKETS (h2h, h2h_3way, spreads, totals) — not the whole slate.
+ */
+function drawPriceNotOnView(e: unknown): boolean {
+  const msg = e instanceof Error
+    ? e.message
+    : e && typeof e === 'object' && 'message' in e
+      ? String((e as { message: unknown }).message)
+      : '';
+  return /draw_price/i.test(msg);
+}
+
+/**
+ * Set after one select learns the view has no draw_price column. Later loads
+ * in this process skip that failing select. A new app session tries again,
+ * which is how the tie appears after the hand-applied view lands.
+ */
+let linesDrawPriceMissing = false;
+
+export async function fetchLinesBoardOdds(gameIds: readonly string[]): Promise<OddsByBookRow[]> {
+  if (gameIds.length === 0) return [];
+  // draw_price is on latest_odds and missing from the view until Matt applies
+  // add_draw_price_to_latest_odds_view_2026_10_16.sql. The first miss retries
+  // without the column. linesDrawPriceMissing keeps every later load off that
+  // failing select.
+  const read = (columns: string) =>
+    fetchAllPages<OddsByBookRow>(
+      (from, to) =>
+        supabase
+          .from('v_latest_odds_all_books')
+          .select(columns)
+          .in('game_id', [...gameIds])
+          .in('market', [...LINES_ODDS_MARKETS])
+          .order('game_id')
+          .order('market')
+          .order('bookmaker')
+          .range(from, to),
+      (row) => `${row.game_id}|${row.market}|${row.bookmaker}`,
+    );
+  if (linesDrawPriceMissing) return read(ODDS_BY_BOOK_COLUMNS);
+  try {
+    return await read(`${ODDS_BY_BOOK_COLUMNS}, draw_price`);
+  } catch (e: unknown) {
+    if (!drawPriceNotOnView(e)) throw e;
+    linesDrawPriceMissing = true;
+    return read(ODDS_BY_BOOK_COLUMNS);
+  }
+}
+
+/**
  * Every book's latest line for ONE player and market — what a Stats LINE leg
  * re-prices from each time the betslip resolves (lib/lineLegs.ts). A few
  * dozen rows, bounded by game_id; no paging needed.
@@ -776,7 +1139,8 @@ export async function fetchPicksForDate(
       lineGames.add(p.game_id);
       continue;
     }
-    const propMarket = propMarketForModel(p.model_id);
+    // propMarketForPick: a multi-market rule's market is on the row, not the model.
+    const propMarket = propMarketForPick(p);
     const player = propMarket ? playerNameFromPickLabel(p.pick_label) : null;
     if (propMarket && player) {
       propGames.add(p.game_id);
@@ -860,7 +1224,8 @@ export async function fetchPicksForDate(
       ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
       : [];
     if (bookRows.length === 0) {
-      const propMarket = propMarketForModel(pick.model_id);
+      // The row's prop_market for a multi-market rule (propMarketForPick).
+      const propMarket = propMarketForPick(pick);
       const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
       if (propMarket && player) {
         bookRows = propBooksByKey.get(`${pick.game_id}|${propMarket}|${player}`) ?? [];
@@ -1109,6 +1474,9 @@ export async function fetchUpcomingNflPicks(
     return {
       pick,
       game: gameById.get(pick.game_id) ?? null,
+      // game_weather has no NFL rows. nfl_kickoff_wind_reads is a later
+      // observation and its mph does not match the bet. The kickoff-hour
+      // forecast is the "Wind N mph" parenthetical on the label.
       weather: null,
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
       ...bookEnrichment(pick, booksByGameMarket),
@@ -1220,6 +1588,98 @@ export async function fetchUpcomingNcaafPicks(
   });
 }
 
+/**
+ * Upcoming NHL picks AFTER `afterDate` through `throughDate`.
+ *
+ * The scorer prices NHL up to config.GAME_SCORE_AHEAD_DAYS (7) — the same
+ * outer bound as MLB, NBA and WNBA — so a slate whose line has opened inside
+ * that window exists before game day. The Today board was same-day for NHL,
+ * which left the sport chip muted and those picks invisible until
+ * `game_date`. Same enrichment shape as fetchUpcomingNflPicks.
+ *
+ * Signals are ordered first: NONE rows must not be able to push a BET off
+ * the cap. Odds reads are scoped by the `NHL_{date}_{away}_{home}` game_id
+ * prefix because neither odds view carries a sport column.
+ */
+export async function fetchUpcomingNhlPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes, latestOddsRes, allBooksRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'NHL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('signal_type', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'NHL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    supabase
+      .from('v_latest_dk_odds')
+      .select(LATEST_ODDS_COLUMNS)
+      .like('game_id', 'NHL_%')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): a week of NHL across every book is over the
+    // 1,000-row response cap once the slate is full; wrapped so a failure
+    // stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'NHL_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  // Enrichment only — a failure shouldn't take down the NHL board.
+  const latestOdds = (
+    latestOddsRes.error ? [] : (latestOddsRes.data ?? [])
+  ) as unknown as LatestDkOddsRow[];
+  const booksByGameMarket = groupBooksByGameMarket(
+    (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as unknown as OddsByBookRow[],
+  );
+
+  const picks = (picksRes.data ?? []) as unknown as Pick[];
+  const games = (gamesRes.data ?? []) as unknown as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      ...bookEnrichment(pick, booksByGameMarket),
+    };
+  });
+}
+
 // Live (in-play) picks: is_live=true rows for games that are still in progress
 // (commence_time has passed, no final score yet).
 //
@@ -1243,7 +1703,10 @@ export async function fetchUpcomingNcaafPicks(
 // while the board strip says the feed is ~45s old — so we re-read the in-play
 // view, DK rows only, for the slate dates. All-books shopping stays off
 // (pickLineQuotes still returns the record chip on live; detail is unchanged).
-export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
+export async function fetchLivePicks(
+  dates: string[],
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
   const nowIso = new Date().toISOString();
   const [picksRes, gamesRes, weatherRes, inplayRes] = await Promise.all([
     supabase
@@ -1254,11 +1717,9 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
       // Live tab shows only actionable, recommended bets — AVOID (fade) picks
       // are still written + settled for model tracking, just not surfaced here.
       .eq('signal_type', 'BET')
-      // A VOIDED pick is not displayable (§1c), on this board like every other.
-      // The publishers' exclusion is unconditional across sports and
-      // scripts/void_picks.py takes any --model, so a voided live pick would
-      // otherwise vanish from Discord and stay on the Live tab.
-      .or('condition_status.is.null,condition_status.neq.VOID')
+      // VOID is NOT dropped in SQL. A post Discord already made stays on this
+      // board; a lock the channel does not have is dropped after the ledger
+      // join (discordLedVisible). Publishers still refuse to announce a VOID.
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase
@@ -1279,7 +1740,11 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
   // In-play odds are enrichment: a miss leaves Now empty and the card labels
-  // the lock Locked. Do not fail the board for it.
+  // the lock Locked. Do not fail the board for it -- but REPORT it, so the
+  // board can say "Live prices unavailable" instead of silently dropping every
+  // Now price (v_latest_inplay_odds_all_books 500'd repeatedly on 2026-09-25;
+  // usability audit M2). Same contract as fetchPicksForDate.
+  if (inplayRes.error) onEnrichmentError?.('live prices', inplayRes.error);
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
@@ -1296,8 +1761,11 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
 
-  return picks
-    .filter((p) => liveGameIds.has(p.game_id))
+  const onBoard = await attachDiscordPublish(
+    picks.filter((p) => liveGameIds.has(p.game_id)),
+  );
+  return onBoard
+    .filter((pick) => discordLedVisible(pick.condition_status, pick.discordPublish))
     .map((pick) => {
       const market = gameMarketForModel(pick.model_id);
       const rows = market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
@@ -1365,12 +1833,17 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
     .from('picks')
     .select(PICK_COLUMNS)
     .eq('pick_id', pickId)
-    .single();
-  if (error) throw error;
+    // maybeSingle: a pick_id with no row is "not found" (null), which
+    // PickDetail answers with "Open Picks". The exactly-one-row read turned it
+    // into a 406 PGRST116 and a Retry that could never succeed (L11, Designer
+    // #845).
+    .maybeSingle();
+  if (error && !isNotFoundError(error)) throw error;
   if (!data) return null;
-  const pick = data as Pick;
+  const [pick] = await attachDiscordPublish([data as Pick]);
   const market = gameMarketForModel(pick.model_id);
-  const propMarket = market ? null : propMarketForModel(pick.model_id);
+  // The row's prop_market for a multi-market rule (propMarketForPick).
+  const propMarket = market ? null : propMarketForPick(pick);
   const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
 
   const [gameRes, weatherRes, bookRes] = await Promise.all([
@@ -1521,6 +1994,28 @@ export async function fetchSettledPicks(
 }
 
 /**
+ * The condition_status of every pick dated `since` or later that has one: the
+ * markers the settled-pick cache must copy onto rows it fetched before the
+ * marker was set (lib/settledPickMarkers). Settled or not, so the list is
+ * complete for the range. 118 rows on 2026-10-09 (VOID, GONE, OK); drained by
+ * pages all the same, because the server caps a response at 1,000 rows
+ * without saying so (lib/paging).
+ */
+export async function fetchSettledPickMarkers(since: string): Promise<SettledPickMarker[]> {
+  return fetchAllPages<SettledPickMarker>(
+    (fromRow, toRow) =>
+      supabase
+        .from('picks')
+        .select('pick_id, condition_status')
+        .gte('game_date', since)
+        .not('condition_status', 'is', null)
+        .order('pick_id', { ascending: true })
+        .range(fromRow, toRow),
+    (m) => String(m.pick_id),
+  );
+}
+
+/**
  * Server-side custom-model backtest over the graded every-pick universe
  * (mv_scored_pick_outcomes, refreshed daily after settle). rules/filters are
  * passed verbatim — the RPC implements the same semantics as pickMatchesModel,
@@ -1645,8 +2140,7 @@ export async function fetchPublishedModelRecord(): Promise<Record<string, FullOu
       pushes: Number(r.pushes ?? 0),
       priced_bets: staked / 100,
       units: profit / 100,
-      // Null rather than 0 when nothing was priced: 0.0% reads as break-even,
-      // and a record-only model has no ROI to report.
+      // Null rather than 0 when nothing was priced: 0.0% reads as break-even.
       roi_pct: staked > 0 ? (profit / staked) * 100 : null,
     };
   }
@@ -1698,19 +2192,6 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
     .limit(1000);
   if (error) throw error;
   return (data ?? []) as unknown as FullOutcomePickRow[];
-}
-
-export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
-  const { data, error } = await supabase
-    .from('games')
-    .select(GAME_COLUMNS)
-    .or(`home_team.eq.${team},away_team.eq.${team}`)
-    .lt('game_date', beforeDate)
-    .not('home_score', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []) as GameRow[];
 }
 
 export async function fetchPlayerRecentGames(
@@ -1849,15 +2330,47 @@ export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<stri
  * Backed by v_public_track_record, which applies the same prob/edge cuts as
  * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
  */
+const TRACK_RECORD_SELECT =
+  'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked, ' +
+  'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
+  'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
+  'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
+  'market_clv_settled, market_clv_beat, avg_market_clv_pct';
+
+/** The select from before units and risked existed. An OTA can ship first. */
+const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, risked', '');
+
+/**
+ * The units columns are not on the view until the migration runs.
+ *
+ * PostgREST puts `42703` on `error.code` for an undefined column, and
+ * `PGRST204` when the schema cache has no such column. The message names
+ * the column. Any other error still throws.
+ */
+export function postedStakeColumnsMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (!message.includes('units') && !message.includes('risked')) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === '42703' || code === 'PGRST204'
+    || message.includes('does not exist')
+    || message.includes('schema cache');
+}
+
 export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
-  const { data, error } = await supabase
-    .from('v_public_track_record')
-    .select(
-      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
-        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date',
-    );
-  if (error) throw error;
-  return (data ?? []) as TrackRecordRow[];
+  const first = await supabase.from('v_public_track_record').select(TRACK_RECORD_SELECT);
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record')
+      .select(TRACK_RECORD_SELECT_WITHOUT_UNITS);
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordRow[];
 }
 
 /**
@@ -1884,13 +2397,27 @@ export async function fetchActionThresholds(): Promise<Record<string, ServerThre
 }
 
 /** Daily settled totals for the equity curve (v_public_track_record_daily). */
+const TRACK_RECORD_DAILY_SELECT =
+  'game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked';
+
+const TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS =
+  TRACK_RECORD_DAILY_SELECT.replace(', units, risked', '');
+
 export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
-  const { data, error } = await supabase
+  const first = await supabase
     .from('v_public_track_record_daily')
-    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat')
+    .select(TRACK_RECORD_DAILY_SELECT)
     .order('game_date', { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as TrackRecordDailyRow[];
+  if (postedStakeColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_public_track_record_daily')
+      .select(TRACK_RECORD_DAILY_SELECT_WITHOUT_UNITS)
+      .order('game_date', { ascending: true });
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as TrackRecordDailyRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as TrackRecordDailyRow[];
 }
 
 /** The daily canonical cross-game parlays (public parlay track record). */
@@ -1936,25 +2463,62 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
 
 // ── Line movement ───────────────────────────────────────────────────────────
 
-/** Snapshots for one game+market at one book, oldest first (line movement history). */
+/**
+ * One game market at one book from a pick to the game's start (line movement
+ * history), oldest first: the last pre-game snapshot before the pick's second,
+ * then the newest HISTORY_ROWS from that second up to the start. Two reads,
+ * split at the same bound, so they never overlap; lib/lineHistory.sincePick
+ * places the pick inside its second.
+ *
+ * It used to be the OLDEST 50 snapshots with the last called "now": days
+ * before the pick on a busy NFL market (2026-10-09). The server can filter and
+ * order this table by snapshot_at because every row is UTC (utcSecond). In-play
+ * rows are excluded by type and by the start: "open" rows keep coming after it.
+ */
 export async function fetchOddsHistory(
   gameId: string,
   market: string,
   bookmaker: string,
+  pickAt: string,
+  startAt: string | null,
 ): Promise<OddsSnapshotRow[]> {
-  const { data, error } = await supabase
-    .from('odds')
-    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
-    .eq('game_id', gameId)
-    .eq('market', market)
-    .eq('bookmaker', bookmaker)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
-  if (error) throw error;
-  return (data ?? []) as OddsSnapshotRow[];
+  const from = utcSecond(pickAt);
+  if (from == null) return [];
+  const until = utcSecond(startAt);
+  const series = () =>
+    supabase
+      .from('odds')
+      .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
+      .eq('game_id', gameId)
+      .eq('market', market)
+      .eq('bookmaker', bookmaker)
+      .neq('snapshot_type', 'in_play');
+  let since = series().gte('snapshot_at', from);
+  if (until != null) since = since.lt('snapshot_at', until);
+  const [atPick, after] = await Promise.all([
+    series().lt('snapshot_at', from).order('snapshot_at', { ascending: false }).limit(1),
+    since.order('snapshot_at', { ascending: false }).limit(HISTORY_ROWS),
+  ]);
+  if (atPick.error) throw atPick.error;
+  if (after.error) throw after.error;
+  return byTime([...(atPick.data ?? []), ...(after.data ?? [])] as OddsSnapshotRow[]);
 }
 
-/** Prop-line snapshots for one player+market in a game at one book, oldest first. */
+/** Rows per prop series: about three times the longest the card's markets hold. */
+const PROP_HISTORY_CAP = 500;
+
+/**
+ * Every prop-line snapshot for one player+market in a game at one book,
+ * oldest first by the instant it was taken.
+ *
+ * Never ordered or filtered by snapshot_at on the server: the MLB, WNBA, NBA
+ * and NCAAF writers stamp Eastern time ("…-04:00"), the NFL and NHL writers
+ * UTC, so text order is hours off time order wherever the two meet. The whole
+ * series comes back (the longest for the card's markets was 174 rows,
+ * measured 2026-10-09) and is sorted on the phone; the cap keeps the most
+ * recently written rows. Callers window it themselves: the card from the pick
+ * to the start (sincePick); the player page reads the first and the last.
+ */
 export async function fetchPropOddsHistory(
   gameId: string,
   market: string,
@@ -1968,10 +2532,10 @@ export async function fetchPropOddsHistory(
     .eq('market', market)
     .eq('bookmaker', bookmaker)
     .eq('player_name', playerName)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
+    .order('prop_id', { ascending: false })
+    .limit(PROP_HISTORY_CAP);
   if (error) throw error;
-  return (data ?? []) as PropOddsSnapshotRow[];
+  return byTime((data ?? []) as PropOddsSnapshotRow[]);
 }
 
 // ── Prop matchup context ────────────────────────────────────────────────────
@@ -2175,8 +2739,9 @@ export async function fetchTeamStats(
 
 /**
  * A team's most recent finished games IN ONE SPORT, newest first. Scoped by
- * sport, unlike fetchTeamRecentGames: 'BUF' is Buffalo in the NFL and the
- * NHL, and a form strip that mixes the two is wrong on both.
+ * sport: 'BUF' is Buffalo in the NFL and the NHL, and a form strip that mixes
+ * the two is wrong on both. The only team-form read: the unscoped one it
+ * replaced put Red Sox and Bruins games on a Celtics pick (2026-10-17).
  */
 export async function fetchTeamRecentGamesForSport(
   sport: string,
@@ -2279,6 +2844,24 @@ export async function fetchNflTeamGameStats(team: string, season: number): Promi
 }
 
 /**
+ * The record's paused-row exclusion as a PostgREST or= filter (#850): a BET a
+ * paused model wrote carries downgrade_reason = PAUSED_NOTE and was never a
+ * bet. NULL must pass explicitly — `neq` alone drops it (SQL three-valued
+ * logic), and almost every row is NULL. Same clause as the server's
+ * paused_row_exclusion_sql.
+ */
+export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq."${PAUSED_NOTE}"`;
+
+/**
+ * The second copy of one bet, as a PostgREST or= filter (2026-10-09, mike:
+ * "Count each fight once"): a model that bet one real event under two game
+ * ids has its extra copy marked condition_status = DUPLICATE_STATUS, and the
+ * record counts the event once. NULL must pass explicitly, as above. Same
+ * clause as the server's duplicate_copy_exclusion_sql.
+ */
+export const NOT_DUPLICATE_COPY = `condition_status.is.null,condition_status.neq."${DUPLICATE_STATUS}"`;
+
+/**
  * Settled game-level BET rows in a set of games — the team page's "our
  * record on this team". The RECORD filter, on the server: `signal_type =
  * 'BET'` and a real result, which is what the pick WAS (CLAUDE.md §1c — never
@@ -2304,11 +2887,16 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       .in('result', ['WIN', 'LOSS', 'PUSH'])
       .is('player_id', null)
       .in('pick_side', ['home', 'away', 'over', 'under'])
-      .not('model_id', 'ilike', '%prop%');
+      .not('model_id', 'ilike', '%prop%')
+      .or(NOT_PAUSED_ROW)
+      // A second or= is ANDed with the first by PostgREST.
+      .or(NOT_DUPLICATE_COPY);
     if (error) throw error;
-    out.push(...((data ?? []) as unknown as SettledPick[]));
+    out.push(
+      ...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p) && !isDuplicateCopy(p)),
+    );
   }
-  return out;
+  return attachDiscordPublish(out);
 }
 
 /**
@@ -2339,14 +2927,19 @@ export async function fetchSettledPropPicksForPlayer(args: {
     .eq('signal_type', 'BET')
     .in('result', ['WIN', 'LOSS', 'PUSH'])
     .or(clauses.join(','))
+    // A second or= is ANDed with the first by PostgREST.
+    .or(NOT_PAUSED_ROW)
+    .or(NOT_DUPLICATE_COPY)
     .order('game_date', { ascending: false })
     .limit(200);
   if (error) throw error;
   // A game-level pick can never match a player_id; the label match could in
   // theory catch a team whose name starts a label, so keep prop rows only.
-  return ((data ?? []) as unknown as SettledPick[]).filter(
-    (p) => p.player_id != null || p.model_id.includes('prop'),
+  const rows = ((data ?? []) as unknown as SettledPick[]).filter(
+    (p) =>
+      (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p) && !isDuplicateCopy(p),
   );
+  return attachDiscordPublish(rows);
 }
 
 /**

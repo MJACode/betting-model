@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-17",
+  "picks": [
+    {"id": "priced-win", "sport": "MLB", "model_id": "mlb_moneyline", "result": "WIN", "price": -110, "counts": true},
+    {"id": "capped-loss", "sport": "MLB", "model_id": "mlb_moneyline", "result": "LOSS", "price": -400, "counts": true},
+    {"id": "capped-win", "sport": "MLB", "model_id": "mlb_f5_moneyline", "result": "WIN", "price": -400, "counts": true},
+    {"id": "unpriced-win", "sport": "NHL", "model_id": "nhl_moneyline", "result": "WIN", "price": null, "counts": true},
+    {"id": "push", "sport": "NHL", "model_id": "nhl_moneyline", "result": "PUSH", "price": -110, "counts": true},
+    {"id": "unpriced-loss", "sport": "NHL", "model_id": "nhl_moneyline", "result": "LOSS", "price": null, "counts": true},
+    {"id": "dog-loss", "sport": "WNBA", "model_id": "wnba_moneyline", "result": "LOSS", "price": 150, "counts": true},
+    {"id": "void", "sport": "WNBA", "model_id": "wnba_moneyline", "result": "NO_ACTION", "price": -400, "condition_status": "VOID", "counts": false},
+    {"id": "unpublished", "sport": "MLB", "model_id": "mlb_moneyline", "result": "WIN", "price": -110, "discordPublish": "unpublished", "counts": false}
+  ]
+}

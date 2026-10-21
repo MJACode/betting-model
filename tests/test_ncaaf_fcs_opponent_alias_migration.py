@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 MIG = (Path(__file__).parent.parent
-       / "data/migrations/ncaaf_fcs_opponent_alias_2026_09_22.sql")
+       / "data/migrations/ncaaf_fcs_opponent_alias_2026_10_21.sql")
 CODE = MIG.read_text(encoding="utf-8")
 
 PAIRS = (
@@ -30,6 +30,14 @@ PAIRS = (
 def test_migration_is_registered_with_the_worker_runner():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name in ACTIVE_MIGRATIONS
+    assert "ncaaf_fcs_opponent_alias_2026_09_22.sql" not in ACTIVE_MIGRATIONS
+    pick_units = "published_pick_units_2026_10_17.sql"
+    units = "published_record_units_2026_10_16.sql"
+    assert ACTIVE_MIGRATIONS[-1] == units
+    # The posted-stake functions and the view that reads them stay adjacent,
+    # with the view last. This file is the entry immediately before that pair.
+    assert ACTIVE_MIGRATIONS.index(pick_units) == ACTIVE_MIGRATIONS.index(units) - 1
+    assert ACTIVE_MIGRATIONS.index(MIG.name) == ACTIVE_MIGRATIONS.index(pick_units) - 1
 
 
 def test_migration_is_one_statement():

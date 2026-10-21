@@ -3,27 +3,30 @@
  *
  *   npx tsx scripts/verify_ota_update.ts
  *
- * Pins the behaviour that closes a real, measured delivery gap: a published
- * bundle must be APPLIED without the user force-quitting the app. The daily
- * recap counted in-play picks from 2026-08-30 and the OTA published at 10:41
- * ET that morning, yet on 2026-08-31 the app still rendered the pre-change
- * number while the server-side Discord recap had the corrected one.
- *
- * Two halves, both checked here:
- *   * shouldCheck  — WHEN a check runs (launch always; a foreground return
- *                    only after a real absence, and outside the throttle).
- *   * applyPendingUpdate — that a fetched new bundle is RELOADED, that nothing
- *                    is fetched when nothing is available, and that a throw
- *                    anywhere is swallowed rather than surfaced.
+ * Two jobs, both checked here:
+ *   * the app finds and DOWNLOADS a published bundle by itself (launch and
+ *     every real return), so the next cold start runs it — the 2026-08-31
+ *     delivery gap;
+ *   * it NEVER applies one to a running app (2026-10-19: the TestFlight
+ *     crash was expo-updates aborting on a fatal JS error right after an
+ *     in-process reload). UpdatesApi has no reloadAsync at all.
  */
 
 import {
-  applyPendingUpdate,
+  downloadUpdate,
+  nextAction,
   shouldCheck,
   MIN_BACKGROUND_MS,
   MIN_CHECK_INTERVAL_MS,
   type UpdatesApi,
 } from '../src/lib/otaUpdate';
+import {
+  isUpdateReady,
+  markUpdateReady,
+  resetUpdateReadyForTests,
+  subscribeUpdateReady,
+  UPDATE_READY_MESSAGE,
+} from '../src/lib/updateReady';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -100,16 +103,45 @@ check(
   `${MIN_BACKGROUND_MS}ms`,
 );
 
-// ── applyPendingUpdate ───────────────────────────────────────────────────────
+// ── nextAction: download only ─────────────────────────
 
-interface Calls { checked: number; fetched: number; reloaded: number }
+const away = NOW - MIN_BACKGROUND_MS;
+check('launch downloads',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: null, trigger: 'launch' }) === 'download');
+check('a real return checks again, even after a download (a newer bundle replaces it)',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: 'foreground' }) === 'download');
+check('a brief absence does nothing',
+  nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: NOW - (MIN_BACKGROUND_MS - 1), trigger: 'foreground' }) === 'skip');
+check('a real return inside the throttle does nothing',
+  nextAction({ now: NOW, lastCheckAt: NOW - 1_000, backgroundedAt: away, trigger: 'foreground' }) === 'skip');
+check('no trigger can ask for anything but download or skip',
+  ['launch', 'foreground'].every((trigger) =>
+    ['download', 'skip'].includes(nextAction({ now: NOW, lastCheckAt: null, backgroundedAt: away, trigger: trigger as 'launch' }))));
 
-function fakeApi(
-  over: Partial<UpdatesApi> & { available?: boolean; isNew?: boolean },
-): { api: UpdatesApi; calls: Calls } {
-  const calls: Calls = { checked: 0, fetched: 0, reloaded: 0 };
+// ── updateReady: the quiet note shows once per session ──────────────────────
+
+resetUpdateReadyForTests();
+{
+  let heard = 0;
+  const off = subscribeUpdateReady(() => { heard++; });
+  check('nothing downloaded: not ready', !isUpdateReady());
+  check('the first download is the one that shows the note', markUpdateReady() === true && isUpdateReady());
+  check('a second download in the same session does not show it again', markUpdateReady() === false);
+  check('Settings is told once', heard === 1, String(heard));
+  off();
+  check('the note says when it loads and offers no action',
+    /next time the app starts/i.test(UPDATE_READY_MESSAGE) && !/\bopen\b/i.test(UPDATE_READY_MESSAGE) && !/tap|restart|refresh/i.test(UPDATE_READY_MESSAGE));
+}
+resetUpdateReadyForTests();
+
+// ── downloadUpdate ──────────────────────────────────────────────────────────
+
+interface Calls { checked: number; fetched: number }
+
+function fakeApi(over: { available?: boolean; isNew?: boolean; isEnabled?: boolean }): { api: UpdatesApi; calls: Calls } {
+  const calls: Calls = { checked: 0, fetched: 0 };
   const api: UpdatesApi = {
-    isEnabled: true,
+    isEnabled: over.isEnabled ?? true,
     checkForUpdateAsync: async () => {
       calls.checked++;
       return { isAvailable: over.available ?? false };
@@ -118,73 +150,49 @@ function fakeApi(
       calls.fetched++;
       return { isNew: over.isNew ?? true };
     },
-    reloadAsync: async () => {
-      calls.reloaded++;
-    },
-    ...(over.isEnabled !== undefined ? { isEnabled: over.isEnabled } : {}),
   };
   return { api, calls };
 }
 
 async function main(): Promise<void> {
   {
-    // Expo Go / dev client: there is nothing to fetch and reloadAsync would
-    // throw. Must be a clean no-op, not an error.
+    // Expo Go / dev client: nothing to fetch. A clean no-op, not an error.
     const { api, calls } = fakeApi({ isEnabled: false, available: true });
-    const out = await applyPendingUpdate(api);
+    const out = await downloadUpdate(api);
     check('disabled updates are a no-op', out === 'disabled' && calls.checked === 0, out);
   }
-
   {
     const { api, calls } = fakeApi({ available: false });
-    const out = await applyPendingUpdate(api);
-    check(
-      'nothing available: no fetch, no reload',
-      out === 'none' && calls.checked === 1 && calls.fetched === 0 && calls.reloaded === 0,
-      out,
-    );
+    const out = await downloadUpdate(api);
+    check('nothing available: no fetch', out === 'none' && calls.checked === 1 && calls.fetched === 0, out);
   }
-
   {
-    // The bundle already running. Reloading would be a flash for nothing.
     const { api, calls } = fakeApi({ available: true, isNew: false });
-    const out = await applyPendingUpdate(api);
-    check(
-      'an already-running bundle is not reloaded',
-      out === 'none' && calls.fetched === 1 && calls.reloaded === 0,
-      out,
-    );
+    const out = await downloadUpdate(api);
+    check('the bundle already running is not counted as downloaded', out === 'none' && calls.fetched === 1, out);
   }
-
   {
-    // THE LOAD-BEARING CASE. A new bundle is fetched and APPLIED in the same
-    // session — not left for a relaunch that may never happen.
+    // The load-bearing case: a new bundle is fetched, so the next cold
+    // start runs it, and nothing is applied to this running app.
     const { api, calls } = fakeApi({ available: true, isNew: true });
-    const out = await applyPendingUpdate(api);
-    check(
-      'a new bundle is fetched AND reloaded',
-      out === 'reloaded' && calls.checked === 1 && calls.fetched === 1 && calls.reloaded === 1,
-      `${out} checked=${calls.checked} fetched=${calls.fetched} reloaded=${calls.reloaded}`,
-    );
+    const out = await downloadUpdate(api);
+    check('a new bundle is fetched and reported downloaded',
+      out === 'downloaded' && calls.checked === 1 && calls.fetched === 1, `${out} fetched=${calls.fetched}`);
   }
-
   {
     // Offline is the common case, not an exception. It must never surface.
     const { api } = fakeApi({ available: true });
     api.checkForUpdateAsync = async () => {
       throw new Error('network');
     };
-    const out = await applyPendingUpdate(api);
-    check('a failed check is swallowed', out === 'error', out);
+    check('a failed check is swallowed', (await downloadUpdate(api)) === 'error');
   }
-
   {
-    const { api, calls } = fakeApi({ available: true, isNew: true });
-    api.reloadAsync = async () => {
-      throw new Error('reload refused');
+    const { api } = fakeApi({ available: true });
+    api.fetchUpdateAsync = async () => {
+      throw new Error('download cut');
     };
-    const out = await applyPendingUpdate(api);
-    check('a failed reload is swallowed', out === 'error' && calls.fetched === 1, out);
+    check('a failed download is swallowed', (await downloadUpdate(api)) === 'error');
   }
 
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

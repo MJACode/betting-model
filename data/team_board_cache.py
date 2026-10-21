@@ -11,9 +11,15 @@ here and read many times by the app. `data/migrations/cache_team_stats_board.sql
 has the measurements and the schema.
 
 Per (sport, season) pair, deliberately: each refresh is one transaction that
-swaps that pair's rows, so the app never reads a half-built board, and each
-pair fits inside any statement window on its own. The whole set is a few
-minutes on the worker, which has no timeout.
+swaps that pair's rows, so the app never reads a half-built board. The
+database statement_timeout is 2min on the postgres role. The compute
+function's closing-line read is an index probe per game
+(`team_board_line_probe`), and that probe's pre-game cutoff is an index
+condition on `idx_odds_book_snap` (`team_board_commence_bound`). Without the
+bound the scan starts at the newest in-play row: daily runs
+873cb1fe2e1e487d975ae3367f219a3f and fd57b13575f04d63b219134d62f434dc
+cancelled MLB 2026 there. The bounded probe over every finished MLB 2026
+game, both markets and the five named books, measured 11,626.902 ms.
 """
 
 from __future__ import annotations

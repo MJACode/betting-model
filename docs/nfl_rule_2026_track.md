@@ -1,4 +1,4 @@
-# NFL 2026 paper-track — opener and wind, no unit bump
+# NFL 2026 live track — opener and wind, no unit bump
 
 > Policy encoded 2026-09-14. Not a threshold change and not a unit increase.
 > Re-score: `python -m scripts.nfl_rule_2026_track` (add `--settle` to run the
@@ -6,7 +6,7 @@
 
 ## The policy
 
-1. **`nfl_opener_spread`** — paper-track through 2026 with **no unit bump**.
+1. **`nfl_opener_spread`** — live track through 2026 with **no unit bump**.
    Retire if 2026 finishes **≤ flat** on standing settled BETs (`signal_type='BET'`,
    result in WIN/LOSS/PUSH; VOID is not the record). The six-season restatement
    already spans zero: 2024 carried, 2020–22 lost (`nfl/models/opener_spread.py`).

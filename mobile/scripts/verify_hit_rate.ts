@@ -276,12 +276,13 @@ check(
     screen.includes('modeLineLabel(l, sd, hitMode),')
       && read('src/lib/lineLegs.ts').includes('numberLabel(quote.line, quote.side)'));
   check('the off-line caption is the short form, on one line, in that idiom',
-    screen.includes('offLineCaption(quote.line, quote.side, hitMode)')
+    screen.includes('offLineCaption(quote.line, quote.side, hitMode, sport)')
+      && screen.includes('const plain = nhlOffLineCount(line, side);')
+      && screen.includes('if (plain != null) return plain;')
       && screen.includes('return modeLineLabel(line, side, mode, true);')
-      // Repointed 2026-09-19: the caption took a second style (`oddsCaptionDay`)
-      // and moved onto its own line. Still ONE line of text, which is the claim
-      // — "Under 224.5" wrapping made one row of a 25-row board taller.
-      && /style=\{\[styles\.oddsCaption[\s\S]{0,120}?numberOfLines=\{1\}/.test(screen));
+      // Two lines (was one). "3 or fewer" was clipped at large text inside the
+      // 62-93pt column. Other sports still print the short form ("3+", "O 2.5").
+      && /style=\{\[styles\.oddsCaption[\s\S]{0,180}?numberOfLines=\{sport === 'NHL' \? 2 : 1\}/.test(screen));
 
   // Two idioms, two homes, and neither is spoken in the other's sentence.
   // The betslip explainer quotes the board headline and the book's number in
@@ -300,7 +301,7 @@ check(
   // comparison, and the preview is the reason the row exists.
   check('the selected row reserves its border rather than adding one',
     /borderWidth: 1\.5,\s*\n\s*borderColor: 'transparent',/.test(sheet)
-      && sheet.includes('rowActive: { borderColor: colors.bet }'));
+      && sheet.includes('rowActive: { borderColor: colors.tint }'));
   check('the preview cannot be the thing that truncates',
     /styles\.rowPreview[^\n]*\]\}>\s*\n\s*\{priced \? preview/.test(sheet)
       && !/rowPreview[^\n]*numberOfLines/.test(sheet));
@@ -327,7 +328,9 @@ check(
   // and in Under mode its number deliberately differs from the headline's.
   check('the ruler is adjustable by VoiceOver',
     screen.includes('accessibilityRole="adjustable"')
-      && screen.includes("accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}"));
+      && screen.includes("{ name: 'increment' }")
+      && screen.includes("{ name: 'decrement' }")
+      && screen.includes("label: 'Type a line'"));
   check('its ticks are decoration', /accessibilityElementsHidden[\s\S]{0,120}styles\.tickCol/.test(screen));
 
   // Every mode resolves a stop to the same line, so a mode change leaves the

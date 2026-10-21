@@ -93,9 +93,13 @@ def test_the_job_does_not_read_rowcount_off_the_cursor():
         "a job reads .rowcount off _CursorResult, which raises AttributeError")
 
 
-def test_the_cursor_wrapper_really_lacks_rowcount():
-    """Pins the premise of the test above against the wrapper itself, so this
-    does not silently become a rule about nothing if data.db grows the
-    attribute later."""
+def test_the_cursor_wrapper_rowcount_is_the_cursors():
+    """data.db._CursorResult grew a real `rowcount` (#844 review: callers
+    reading getattr(cur, "rowcount", 0) always got 0). The COUNT-then-DELETE
+    above stays; it is still correct. This pins that the attribute, where it
+    is read, is the cursor's own number and not a default."""
     from data.db import _CursorResult
-    assert not hasattr(_CursorResult, "rowcount")
+
+    class Raw:
+        rowcount = 3
+    assert _CursorResult(Raw()).rowcount == 3

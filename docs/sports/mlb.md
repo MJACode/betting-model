@@ -106,6 +106,50 @@ slate guard. Optional under-juice **band**
 `mlb_over_under` stays paused. Coverage caveat: only
 ~99–136 pre-commence public totals-over games in the DB.
 
+## 11b5. The schedule gate (2026-10-20)
+
+The MLB game models (`run_scorer`) do not decide a game while either team
+still has an earlier game not played, being played, or played but not yet in
+the morning run's logs (`data/schedule_context.py`, `RULES["MLB"]`). The rows
+are still written, NONE, with the reason ("waiting for TB's 2026-10-23 game and
+MIL's 2026-10-23 game to be played and logged"); NONE never locks, so the
+first pass after the logs land decides the game.
+
+- **Why now, not March.** MLB is live through the World Series (game 1
+  2026-10-23) and scores 7 days ahead. `mlb_f5_moneyline` wrote 14 of its 119
+  BETs since 07-05 before the morning run had logged a team's previous game:
+  -5.54 units on those 14, -1.42 on the other 91 (read-only SQL, 2026-10-20).
+- **"Logged" is the morning run's footprint:** a `mlb_team_stats` row dated
+  after the game. The `mlb_stats` step writes one per team every morning, in the
+  same run as the bullpen rows the game models read (`bullpen_ip_last1/3`, where
+  no row reads as an off day), and both run before the scoring step. Not the
+  bullpen rows themselves: a team whose starter went the distance has none.
+  Since 07-10, 1,955 of 1,996 team-games had bullpen rows, 1,996 of 1,996 had a
+  later team-stats row, and the two never landed more than an hour apart.
+- **Two horizons.** A game with a result waits for the log up to 2 days. A game
+  with NO result stops holding 12 hours after first pitch: that is a
+  postponement or a results gap, not a game to wait for. `MLB_2026-10-16_TB_CLE`
+  kept 3,328 odds rows and never got a score, 22.3h before the two teams' next
+  game; one 2-day horizon would have held that game to its first pitch.
+  October finals were scored within 3.9h of first pitch.
+- **A row no book priced is not a game.** `MLB_2026-10-16_MIL_LAD`, an
+  if-necessary game the series never needed, has 0 odds rows.
+- **What it costs.** A game decides from the 6am run after the teams' previous
+  game (the morning logs land 10:05-10:07Z, median 11.0h after first pitch).
+  When the log is late, the next game waits: 30 of the 1,955 team-games with
+  bullpen rows since 07-10 were logged after the team's next first pitch, and
+  gated, those next games
+  would not have been decided at all rather than decided on a stale bullpen.
+  A missing result costs at most 12 hours.
+- **Not covered.** A doubleheader's two games share one `game_id`, so the
+  second game is invisible to the gate (dormant until the regular season).
+  2026 has 146 odds-feed rows with no result, 145 of them past, and the table
+  misses 218 games the free Stats API lists as final; each costs at most 12
+  hours now. The pitcher prop models (`mlb_prop_pitcher_*`) are a separate path
+  and are not gated: they decide up to 47.8h ahead. Check in March whether
+  spring-training rows reach `games` without a team-stats row, which would
+  hold opening day.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 
@@ -342,10 +386,11 @@ and XGBoost cannot split on a constant. The Phase 1 rebuild revived them and the
 model immediately leant on them. The ERA pair that carried the old model has
 fallen out of the top five.
 
-**PAPER ONLY until it clears the go-live gate.** CLAUDE.md §2: ≥50 settled
-picks, positive flat-bet ROI, calibration ≤5% — per model, and **a retrain
-resets it**. CalError already passes at 2.4%; the other two need live settled
-picks. Until then f5 is surfaced but not backed.
+**The gate is a report, and the bets are live money.** CLAUDE.md §2: ≥50
+settled picks, positive flat-bet ROI, calibration ≤5% — per model, and **a
+retrain resets the count**. CalError already passes at 2.4%; the other two
+need more settled picks. The picks f5 writes are in the record and in the
+units either way.
 
 #### The threshold sweep, and why it does not produce a threshold
 
@@ -370,7 +415,7 @@ p >= 0.74      0 sides      <- the live cut
 This is `mlb_runline`'s failure mode exactly: a model that cannot reach its own
 floor publishes nothing while looking live in `config.py`,
 `model_action_thresholds` and the mobile fallback. **The status quo is not
-neutral** — a paper-only model that fires zero picks can never accumulate the
+neutral** — a live model that fires zero picks can never accumulate the
 ≥50 settled picks §2's gate requires, so 0.74 does not park f5, it strands it.
 
 **2. There is no cut to move it to.** Of 104 grid cells, 50 carry ≥30 bets and
@@ -390,16 +435,15 @@ Average DK implied probability across the sides is 53.2%, so that is the bar.
 
 #### What was shipped, and on whose call
 
-**0.58/0.02, as a PAPER cut (mike, 2026-09-03). These picks are NOT LIVE**, and
-that is the premise the whole decision rests on: the retrain reset §2's gate, so
-f5 is paper-only and nothing is backed at this cut.
+**0.58/0.02 (mike, 2026-09-03).** The retrain reset the settled-pick count
+the gate reports. The picks this cut writes are live money.
 
 The grid does not support a cut — one positive cell in fifty, failing the
-plateau test 0 of 8 — and that is a strong argument against ever making this
-**live**. It is not an argument against measuring it. Pausing and shipping a
-paper cut differ in exactly one respect: whether the model produces a record to
-judge. Pausing produces none, and a paused model cannot clear the gate that
-would unpause it. 0.74 had the same effect as pausing without saying so.
+plateau test 0 of 8 — and that is why the kill criterion pauses the model at
+50 settled picks if flat-bet ROI is negative. It is not a reason to leave
+the picks out of the units. Pausing produces no record, and a paused model
+cannot clear the review that would unpause it. 0.74 had the same effect as
+pausing without saying so.
 
 The numbers on the record are the FLOORED ones, with `config.MODEL_MIN_ODDS`
 applied inside the sweep, because a cell measured on bets below the floor is
@@ -505,7 +549,7 @@ machine / GitHub Actions (where the API is reachable). Same hand-off pattern as 
 |---|---|---|---|
 | `nhl_moneyline` | h2h | real DK moneyline | home wins incl. OT/SO |
 | `nhl_moneyline_regulation` | h2h_3way | real DK 3-way regulation | **3-class** XGBoost (away reg / draw / home reg) — the spec's "regulation market often has better value" play |
-| `nhl_over_under` | totals | real DK totals | total goals O/U |
+| `nhl_over_under` | totals | Pinnacle's no-vig price vs the bettable books | a rule since 2026-10-08, not trained (`docs/sports/nhl.md`) |
 | `nhl_puckline` | spreads | real DK puck line | home covers ±1.5 |
 
 First-time setup (Matt's machine — see Section 24):
@@ -514,7 +558,6 @@ python -m data.ingestors.nhl_stats_ingestor --backfill-games 2019 2025   # games
 python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2025         # team + goalie season snapshots
 python -m models.trainer --model nhl_moneyline
 python -m models.trainer --model nhl_moneyline_regulation
-python -m models.trainer --model nhl_over_under
 python -m models.trainer --model nhl_puckline
 python -m models.backtester --model nhl_moneyline --season 2025
 ```
@@ -575,7 +618,7 @@ Collect real DK prop lines via The Odds API daily (prop_odds_ingestor.py is live
 
 ### Bet Sizing
 
-Tenth-Kelly, capped at 5% of bankroll — same as game-level models. Tune thresholds after 50+ live paper trading picks per model.
+Tenth-Kelly, capped at 5% of bankroll — same as game-level models. Tune thresholds after 50+ settled picks per model.
 
 ### Umpire Data
 

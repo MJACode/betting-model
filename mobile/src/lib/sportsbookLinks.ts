@@ -123,8 +123,8 @@ export const DK_GREEN = colors.bookDraftKings;
 
 export function bookButtonColors(book: string): { bg: string; fg: string } {
   return book === 'draftkings'
-    ? { bg: DK_GREEN, fg: '#000' }
-    : { bg: colors.tint, fg: '#fff' };
+    ? { bg: DK_GREEN, fg: colors.textPrimary }
+    : { bg: colors.tint, fg: colors.textInverse };
 }
 
 // The button's label ("Bet on FanDuel") lives in markets.ts alongside the book
@@ -204,7 +204,14 @@ export async function isBookAppInstalled(book: string): Promise<boolean | null> 
 export async function openBookBetslip(
   book: string,
   link: string | null | undefined,
+  opts?: { sameBookOnly?: boolean },
 ): Promise<boolean> {
+  // A control labelled for this book must not open another. Fliff is bettable
+  // and has no entry here; the fallback below is DraftKings, which is the
+  // right hand-off for an unnamed NFL quote and the wrong one for a Fliff row.
+  if (opts?.sameBookOnly && !BOOK_APPS[book]) {
+    return openThisBooksLinkOnly(book, link);
+  }
   const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
   const installed = await isBookAppInstalled(book);
 
@@ -255,6 +262,31 @@ function couldNotOpen(book: string): false {
     `We couldn’t open the ${bookName(book)} app or website on this device.`,
   );
   return false;
+}
+
+/**
+ * This book's own betslip link, and nothing else. Used when the row names a
+ * book we have no app entry for: opening DraftKings from a Fliff button is a
+ * different bet. No link, or a link that will not open, is the same alert as
+ * every other book.
+ */
+async function openThisBooksLinkOnly(
+  book: string,
+  link: string | null | undefined,
+): Promise<boolean> {
+  if (link && link.trim()) {
+    const filled = fillBetslipLink(link, getBettingState());
+    if (filled) {
+      if (await tryOpen(filled)) return true;
+    } else if (linkNeedsState(link)) {
+      Alert.alert(
+        `Which state do you bet in?`,
+        `${bookName(book)} links need your state to open the app with the bet on your slip. Set it under Settings → Your state.`,
+      );
+      return false;
+    }
+  }
+  return couldNotOpen(book);
 }
 
 /**

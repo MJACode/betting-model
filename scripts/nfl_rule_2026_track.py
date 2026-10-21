@@ -1,4 +1,4 @@
-"""2026 paper-track for nfl_opener_spread and nfl_wind_totals.
+"""2026 live track for nfl_opener_spread and nfl_wind_totals.
 
     python -m scripts.nfl_rule_2026_track
     python -m scripts.nfl_rule_2026_track --season 2026
@@ -14,7 +14,7 @@ POLICY (encoded, not a unit increase)
 -------------------------------------
 * Do not bump units. opener UNIT_PCT and wind UNIT_PCT stay 0.01; wind
   MAX_UNITS stays 2; opener MAX_UNITS stays 4.
-* nfl_opener_spread: paper-track through 2026. Retire if the 2026 settled
+* nfl_opener_spread: live track through 2026. Retire if the 2026 settled
   BET record (WIN/LOSS/PUSH, VOID excluded) finishes at or below flat.
   Six-season restatement already spans zero (2024 carried; 2020-22 lost).
   Do not unpause the paused XGB / distributional NFL props as a response.
@@ -25,7 +25,7 @@ POLICY (encoded, not a unit increase)
 
 WHAT IT GRADES
 --------------
-The production `picks` table is the paper track. Settlement is
+The production `picks` table is the live track. Settlement is
 `tracking.paper_tracker.settle_picks` (already the daily grader). This script
 reads that record. `--settle` runs the existing grader on any still-unsettled
 dates for these two models, then reports. It does not re-price, does not
@@ -103,7 +103,7 @@ def classify(row: dict) -> str:
 
 
 def grade_rows(rows: list[dict]) -> dict:
-    """Split one model's rows into the paper-track buckets. Pure; no DB."""
+    """Split one model's rows into the live track buckets. Pure; no DB."""
     settled, void, unsettled, other = [], [], [], []
     for row in rows:
         bucket = classify(row)
@@ -278,7 +278,7 @@ def report(season: int, rows: list[dict], *, settled_dates: list[str] | None = N
     opener_v = opener_verdict(grades["nfl_opener_spread"], season, season_over)
     wind_v = wind_verdict(grades["nfl_wind_totals"], past_window)
 
-    print(f"NFL rule 2026 paper-track  season={season}  window {lo} .. {hi}")
+    print(f"NFL rule 2026 live track  season={season}  window {lo} .. {hi}")
     print("Policy: no unit bump; opener retire-if-flat-2026; "
           "wind MAX_FIRE_LEAD stays 4; do not unpause paused XGB props.")
     if settled_dates:

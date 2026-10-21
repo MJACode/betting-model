@@ -35,7 +35,7 @@ import { showToast } from '@/components/Toast';
 import { useNow } from '@/hooks/useNow';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
-import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
+import { addDays, etDate, formatAmerican, weekdayET, gameStatus } from '@/lib/format';
 import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
@@ -43,7 +43,15 @@ import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/qu
 import {
   buildSlateGameIndex,
   buildTonightSlate,
+  slateChipDisabled,
   slateGameFor,
+  slateLabelFor,
+  slateReadKey,
+  SLATE_CHECKING_HINT,
+  TEAMS_SLATE_FAILED_HINT,
+  TEAMS_SLATE_OFF_HINT,
+  TEAMS_SLATE_ON_HINT,
+  teamsNoGamesHint,
   slateSubline,
   sublineSpoken,
 } from '@/lib/statsBoard';
@@ -72,8 +80,10 @@ import {
   type TeamStatGroup,
 } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 
 /**
@@ -116,6 +126,12 @@ export function TeamsBoard({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState<string>('');
+  // "Playing today" — narrows the board to the teams on the slate (today, or
+  // the next game day for a sport that does not play daily). Matt, 2026-10-09:
+  // "I cannot filter on today's games". The Players board has had this switch
+  // since 2026-09-05; the Teams board never got it. Off by default, like
+  // Players (StatsScreen SLATE_ONLY_DEFAULT), and reset with the sport.
+  const [slateOnly, setSlateOnly] = useState<boolean>(false);
 
   // ── The LINE column: the user's sportsbook's number for each team's next
   // game, from that team's side. Matt, 2026-09-03: "see a current line for a
@@ -139,11 +155,46 @@ export function TeamsBoard({
     games: [],
   });
   const [gameLines, setGameLines] = useState<OddsByBookRow[]>([]);
+  // Which sport the slate read has SETTLED for (answered or failed). Until it
+  // has, "no games" is not something we know, and the chip must not say it
+  // (§00; the Players board's `slateFor`).
+  const [slateFor, setSlateFor] = useState<Sport | null>(null);
+  const [slateFailed, setSlateFailed] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Bumped by pull-to-refresh. The effect also re-runs when the ET date
+  // changes (useNow, including a resume), so yesterday's teams do not stay
+  // under "Playing today".
+  const [slateReload, setSlateReload] = useState(0);
+  // During render, not in an effect: the effect runs after paint, and that
+  // paint would still filter the new sport by the previous sport's teams.
+  const [slateSport, setSlateSport] = useState(sport);
+  if (slateSport !== sport) {
+    setSlateSport(sport);
+    setSlate({ date: '', isToday: false, games: [] });
+    setGameLines([]);
+    setSlateFailed(false);
+    setSlateFor(null);
+    setSlateOnly(false);
+  }
+  // One clock for every time-derived cell on the board — see hooks/useNow.
+  // Also the ET date the slate read is keyed on.
+  const now = useNow();
+  const etDay = etDate(new Date(now));
+  const slateKey = slateReadKey(sport, etDay);
+  // Same gap as a sport change: until this read returns, yesterday's teams
+  // would stay under an enabled chip. `slateFor` null is "checking".
+  const [slateDay, setSlateDay] = useState(etDay);
+  if (slateDay !== etDay) {
+    setSlateDay(etDay);
+    setSlate({ date: '', isToday: false, games: [] });
+    setGameLines([]);
+    setSlateFailed(false);
+    setSlateFor(null);
+  }
 
   useEffect(() => {
     let cancelled = false;
-    const from = todayET();
+    const from = etDay;
     // Today's games, or the next scheduled day for a sport that does not play
     // daily — the same rule the Players board's "Playing today" toggle uses.
     fetchSlateGames(sport, from, addDays(from, 7))
@@ -152,6 +203,8 @@ export function TeamsBoard({
         const onDate = games.filter((g) => g.sport === sport && g.game_date === t.date);
         if (cancelled) return;
         setSlate({ date: t.date, isToday: t.isToday, games: onDate });
+        setSlateFailed(false);
+        setSlateFor(sport);
         if (!t.date) {
           setGameLines([]);
           return;
@@ -163,21 +216,32 @@ export function TeamsBoard({
       // unreachable. But say so: an unreachable view and "no games" both look
       // like an empty column.
       .catch((e: unknown) => {
-        if (cancelled) return;
+        // An abort is a cancel like `cancelled`: no toast, no state change.
+        if (cancelled || isAbortError(e)) return;
         setSlate({ date: '', isToday: false, games: [] });
         setGameLines([]);
-        showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
+        setSlateFailed(true);
+        setSlateFor(sport);
+        showToast(`Couldn’t load today’s lines. ${friendlyCause(e)}`);
       });
     return () => {
       cancelled = true;
     };
-  }, [sport]);
+  }, [slateKey, etDay, sport, slateReload]);
 
   // Reset to the sport's default stat whenever the sport changes — the stat
   // sets do not overlap across sports, so keeping the old one would be invalid.
   useEffect(() => {
     setStat(defaultTeamStatFor(sport));
     setQuery('');
+    setSlateOnly(false); // a different sport is a different slate
+    // Drop the previous sport's games in the same commit. Until the new read
+    // lands, `hasSlate` would still be true and the chip would filter by the
+    // outgoing teams while VoiceOver says it is checking the schedule.
+    setSlate({ date: '', isToday: false, games: [] });
+    setGameLines([]);
+    setSlateFailed(false);
+    setSlateFor(null);
   }, [sport]);
 
   const load = useCallback(async () => {
@@ -193,7 +257,7 @@ export function TeamsBoard({
       setRows(data);
       setSeason(used);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
       setRows([]);
     } finally {
       setLoading(false);
@@ -204,6 +268,11 @@ export function TeamsBoard({
     void load();
   }, [load]);
 
+  const refresh = useCallback(() => {
+    setSlateReload((n) => n + 1);
+    void load();
+  }, [load]);
+
   const activeGroup = stat?.group ?? groups[0];
   const pickGroup = (g: TeamStatGroup) => {
     if (g === activeGroup) return;
@@ -211,26 +280,52 @@ export function TeamsBoard({
     if (first) setStat(first);
   };
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.team.toLowerCase().includes(q) ||
-        (r.conference ?? '').toLowerCase().includes(q),
-    );
-  }, [rows, query]);
+  // The teams on the slate. Keys are `games.home_team` / `away_team`, the same
+  // ids the team-stats rows carry (the subline under each name already joins
+  // on them).
+  const slateTeams = useMemo(() => {
+    const out = new Set<string>();
+    for (const g of slate.games) {
+      if (g.home_team) out.add(g.home_team);
+      if (g.away_team) out.add(g.away_team);
+    }
+    return out;
+  }, [slate.games]);
+  const hasSlate = slateTeams.size > 0;
+  // Only cut when there IS a slate — a stale toggle on an off day must not
+  // empty the board.
+  const slateActive = slateOnly && hasSlate;
+  const slateChecking = slateFor !== sport;
+  const slateLabel = slateLabelFor(slate);
 
-  const { rows: ranked, cuts } = useMemo(
-    () => (stat ? rankTeams(filtered, stat) : { rows: [], cuts: null }),
-    [filtered, stat],
+  // Ranked over the WHOLE league, then narrowed. A filtered board keeps each
+  // team's league rank and league tertile colour: "#33 in ATS%" is the fact,
+  // and re-ranking the dozen teams playing today would print #1 on a team
+  // that is middle of the pack.
+  const { rows: rankedAll, cuts } = useMemo(
+    () => (stat ? rankTeams(rows, stat) : { rows: [], cuts: null }),
+    [rows, stat],
   );
+  const ranked = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const out: { row: TeamStatsRow; rank: number }[] = [];
+    rankedAll.forEach((r, i) => {
+      if (slateActive && !slateTeams.has(r.team)) return;
+      if (
+        q &&
+        !r.team.toLowerCase().includes(q) &&
+        !(r.conference ?? '').toLowerCase().includes(q)
+      ) {
+        return;
+      }
+      out.push({ row: r, rank: i + 1 });
+    });
+    return out;
+  }, [rankedAll, query, slateActive, slateTeams]);
 
   const lineMarket = stat ? teamLineMarketFor(String(stat.key)) : 'h2h';
   // Only games that have NOT started: a game in progress has no line a user
   // can still take, and its "latest" pre-game row is a live number.
-  // One clock for every time-derived cell on the board — see hooks/useNow.
-  const now = useNow();
   const unstarted = useMemo(
     () => unstartedGameIds(slate.games, new Date(now).toISOString()),
     [slate.games, now],
@@ -345,32 +440,55 @@ export function TeamsBoard({
         </View>
       ) : null}
 
-      <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color={colors.textTertiary} />
-        <TextInput
-          style={styles.searchInput}
-          value={query}
-          onChangeText={setQuery}
-          placeholder={sport === 'NCAAF' ? 'Search team or conference…' : 'Search teams…'}
-          placeholderTextColor={colors.textTertiary}
-          autoCorrect={false}
-          returnKeyType="search"
+      <View style={styles.searchRow}>
+        <View style={styles.searchWrap}>
+          <Ionicons name="search" size={16} color={colors.textTertiary} />
+          <TextInput
+            accessibilityLabel="Search teams"
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={sport === 'NCAAF' ? 'Search team or conference…' : 'Search teams…'}
+            placeholderTextColor={colors.textTertiary}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {query.length > 0 ? (
+            <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+            </Pressable>
+          ) : null}
+        </View>
+        {/* Rendered even when it cannot act, disabled, so the control is
+            findable on an off day too (the Players board's lesson). */}
+        <FilterChip
+          label={hasSlate ? slateLabel : 'Playing today'}
+          icon="calendar-outline"
+          active={slateActive}
+          disabled={slateChipDisabled(slateChecking, hasSlate)}
+          onPress={() => setSlateOnly((v) => !v)}
+          accessibilityLabel={hasSlate ? slateLabel : 'Playing today'}
+          accessibilityHint={
+            slateChecking
+              ? SLATE_CHECKING_HINT
+              : slateFailed
+                ? TEAMS_SLATE_FAILED_HINT
+                : !hasSlate
+                  ? teamsNoGamesHint(sport)
+                  : slateActive
+                    ? TEAMS_SLATE_ON_HINT
+                    : TEAMS_SLATE_OFF_HINT
+          }
         />
-        {query.length > 0 ? (
-          <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
-            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-          </Pressable>
-        ) : null}
       </View>
 
       {error ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>Connection error: {error}</Text>
-        </View>
+        <ErrorBanner what={`the ${sport} teams`} error={error} onRetry={() => void load()} retrying={loading} />
       ) : null}
 
       {noLinesNote ? (
         <Pressable
+          hitSlop={{ top: 5, bottom: 5, left: 0, right: 0 }}
           onPress={() => setPickerOpen(true)}
           accessibilityRole="button"
           accessibilityLabel={`${noLinesNote} Switch sportsbook`}
@@ -401,13 +519,14 @@ export function TeamsBoard({
       ) : null}
 
       <FlatList
+        ListFooterComponent={<BetslipBarSpacer />}
         data={ranked}
-        keyExtractor={(item) => item.team}
-        renderItem={({ item, index }) => {
+        keyExtractor={(item) => item.row.team}
+        renderItem={({ item: { row: item, rank } }) => {
           const quote = lineByTeam.get(item.team) ?? null;
           return (
             <TeamRow
-              rank={index + 1}
+              rank={rank}
               row={item}
               def={stat}
               cuts={cuts}
@@ -432,9 +551,13 @@ export function TeamsBoard({
           ) : (
             <EmptyState
               title="No teams"
+              actionLabel={slateActive ? 'Show every team' : undefined}
+              onAction={slateActive ? () => setSlateOnly(false) : undefined}
               subtitle={
                 query.trim()
-                  ? `Nothing matched "${query.trim()}".`
+                  ? `Nothing matched "${query.trim()}"${slateActive ? ` among teams on this slate (${slateLabel.toLowerCase()})` : ''}.`
+                  : slateActive && rows.length > 0
+                    ? `None of the teams on this slate have ${sport} team stats yet.`
                   : `No ${sport} team stats yet. Records fill in as games are played and lines are stored.`
               }
             />
@@ -446,7 +569,7 @@ export function TeamsBoard({
         initialNumToRender={20}
         // The board prints a clock on every row now, and this was one of the
         // two lists in the app whose pull gesture did nothing (UX review).
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
       />
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
@@ -641,12 +764,22 @@ const styles = StyleSheet.create({
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
   hintRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: 2 },
   hintText: { fontSize: font.size.micro, color: colors.textTertiary, lineHeight: 15 },
-  searchWrap: {
+  searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: spacing.lg,
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
+    gap: spacing.sm,
+    // The chip drops to its own line before it can squeeze the search field
+    // to an icon at large Dynamic Type (UX review, 2026-10-09).
+    flexWrap: 'wrap',
+  },
+  searchWrap: {
+    flex: 1,
+    minWidth: '55%',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radii.md,
@@ -776,13 +909,4 @@ const styles = StyleSheet.create({
   thinLabel: { fontSize: font.size.nano, color: colors.textTertiary, fontStyle: 'italic' },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
 });

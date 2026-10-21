@@ -79,6 +79,13 @@ answer is "nothing".
   BookMoveClock` and keeps its state key to what changes on an EVENT (score,
   period, possession). A new loop that prices without it is that bet again.
   Evidence: `docs/rules_evidence.md`; tests: `tests/test_live_book_move_guard.py`.
+- **ONE GAME NEVER CARRIES TWO BETS THAT CANNOT BOTH WIN.** (mike,
+  2026-10-17: *"It can't be both"*, after "BOS (Regulation)" and "LAK ML"
+  posted on one game.) The scorer holds a side model's rows back and checks
+  them against the game's other BETs (`models/scorer._apply_side_conflicts`,
+  endings in `_SIDE_ENDINGS`). The standing BET keeps the game, and two from
+  one pass both go NONE. A market that can conflict joins the table; a new
+  model on a listed market is checked without doing anything.
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
@@ -132,9 +139,14 @@ A surface with an extra GATE can only lose rows, and does it silently —
   publish key is a data migration, not a code change: re-ledger the
   already-published picks (`scripts/backfill_publish_keys.py`) BEFORE the
   code ships, or every one of them republishes.
-- **A VOIDED pick is not publishable and not displayable** (§1c). Excluded in
-  the publishers' SQL and in the app's `passesActionFilter`. Only `'VOID'` —
-  NCAAF's `'OK'` / `'GONE'` are live states on real picks.
+- **A VOIDED pick is not newly publishable.** The publishers' SQL still
+  excludes `'VOID'`, and VOID does not delete a Discord message. **Display
+  follows the Discord ledger** (`push_sent` kind `discord_signal` /
+  `discord_live`, read by the app through `v_discord_published`): a lock the
+  channel still has stays on Today / Signals, and a lock the channel does
+  not have is not an active Discord-led bet. The settled record still
+  excludes VOID (`passesRecordFilter`). Only `'VOID'` — NCAAF's `'OK'` /
+  `'GONE'` are live states on real picks.
 - **NOTHING IS SENT WHOSE LABEL DISAGREES WITH ITS SIDE AND LINE.** Every
   producer passes its rows through `tracking/pick_integrity.refuse_mismatched`
   and supplies `side` and `line`, or the pick is refused. A new surface adds

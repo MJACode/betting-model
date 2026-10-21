@@ -1,11 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  InputAccessoryView,
+  Keyboard,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,6 +24,7 @@ import { HitModeSheet } from '@/components/HitModeSheet';
 import { HitRateChart } from '@/components/HitRateChart';
 import { PlayerBetBar } from '@/components/PlayerBetBar';
 import { PlayerNewsButton } from '@/components/PlayerNewsButton';
+import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/PositionVsOpponentCard';
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
@@ -29,19 +35,24 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   chipKey,
+  chipRowScrollX,
   chipsForLoadedPlayer,
   chipsForPlayer,
   chipsWithRequested,
   defaultChipForPlayer,
   filledChipCounts,
+  commitTypedLineOnce,
   gameContextLine,
   groupsOfChips,
   lineStepFor,
   logStatValue,
   openingChip,
+  pagePlayerId,
   playerSubtitle,
   requestedChip,
   roundLineToStep,
+  stepLineFrom,
+  stepperRowLayout,
   windowOptionsFor,
   type GameWindow,
   type PlayerLogEntry,
@@ -65,6 +76,9 @@ import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import { reachFrame } from '@/lib/a11y';
+import { ErrorBanner } from '@/components/ErrorState';
+import { friendlyCause } from '@/lib/errors';
 import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
@@ -74,7 +88,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
-import { STAT_CATALOG } from '@/lib/statCatalog';
+import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
   bookLineFromThreshold,
   formatRecordLine,
@@ -84,16 +98,28 @@ import {
   type PlayerPickRecord,
   type PropLineMove,
   type SplitBucket,
+  type PlayerHeadToHead,
   type StatSplits,
   type TonightLine,
 } from '@/lib/playerDetail';
 import type { LineupSlotRow, PlayerType, SavantStatsRow } from '@/types';
 import { ordinal } from '@/lib/teamDetail';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
+/** The keyboard bar under the typed line field. */
+const LINE_ACCESSORY_ID = 'player-line-input';
+
 export function PlayerStatsScreen() {
   const route = useRoute<Route>();
+  // Above fontScale 1 the Avg | Median | stepper row is wider than a 375pt
+  // card (measureStepperRow). The stepper's flex basis is 0, so it will not
+  // wrap on its own and the + button leaves the screen. On its own line it
+  // still fits through Accessibility Large (2.143). From Accessibility Extra
+  // Large (2.643) the mode control takes the line above − / field / +.
+  const { fontScale } = useWindowDimensions();
+  const stepperLayout = stepperRowLayout(fontScale);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
   const fromParlay = route.params.fromParlay === true;
@@ -149,11 +175,19 @@ export function PlayerStatsScreen() {
   useEffect(() => {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setMode(requestedMode);
-    setGameWindow(windows.some((w) => w.value === 10) ? 10 : windows[0]!.value);
-  }, [sport, playerType, playerId, windows, requested, requestedMode]);
+    // The board's window when this screen offers that span (Stats L3 → L3
+    // here); else this screen's own default. 'Season' and H2H have no
+    // equivalent span here, so they fall back rather than guess one.
+    const asked = route.params.gameWindow;
+    setGameWindow(
+      asked != null && windows.some((w) => w.value === asked)
+        ? (asked as GameWindow)
+        : windows.some((w) => w.value === 10) ? 10 : windows[0]!.value,
+    );
+  }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
   const beforeDate = todayET();
-  const { games, loading, loaded, error } = usePlayerTrends({
+  const { games, loading, loaded, error, reload: reloadTrends } = usePlayerTrends({
     playerId: playerId || null,
     playerName: playerId ? null : playerName,
     beforeDate,
@@ -207,19 +241,44 @@ export function PlayerStatsScreen() {
   // sharp read, splits at the same threshold, our record on the player, and
   // the MLB context (Matt, 2026-09-20: "do the same for player props, there
   // should be more helpful information there"). Each section fails alone.
+  const effLine = line ?? 0;
+
+  // ── The sportsbook line behind the number on screen ────────────────────────
+  // The card's threshold and the book's line are the same bet in two idioms:
+  // "2+ Hits" is Over 1.5. `selectionFor` is the one translation, shared with
+  // the board, so the price can never be fetched for a different bet than the
+  // chart is drawing. It holds at every step size — a 250-yard threshold is
+  // Over 249.5 exactly as a 2-hit one is Over 1.5.
+  //
+  // DECLARED HERE, above usePlayerDetail, because the splits and the
+  // head-to-head card read the resolved SIDE and not the "n+" threshold: with
+  // the threshold alone they counted the over in Under mode, on a screen whose
+  // game-log dots were painting those same games the other colour.
+  const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
+
+  // The route's id, else the loaded log's: a page opened by name (an
+  // nfl_prop_market pick has no player_id) still keys its id reads on the
+  // player (pagePlayerId).
+  const pageId = pagePlayerId(playerId, games);
+
   const detail = usePlayerDetail({
     sport,
-    playerId: playerId || null,
+    playerId: pageId,
     playerName,
     playerType,
     games,
     stat,
     threshold: line,
+    selection,
   });
   // Has the reader stepped the line themselves? Until they do, the ruler
   // follows the BOOK's posted line once it arrives — a hit rate at 5.5 when
   // the book hangs 6.5 answers a question nobody is being asked.
   const [lineTouched, setLineTouched] = useState(false);
+  // The line was handed over by the Stats board rather than stepped here —
+  // held like a touched line (the book's line does not replace it) but NAMED
+  // for where it came from, not "your line" (UX review, 2026-09-25).
+  const [lineFromBoard, setLineFromBoard] = useState(false);
 
   // ── The betslip leg ────────────────────────────────────────────────────────
   // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
@@ -245,9 +304,9 @@ export function PlayerStatsScreen() {
   const slipPick = useMemo(() => {
     if (line == null || mode === 'under') return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
-    const found = slipPickFor({ player_id: playerId }, idx, line - 0.5);
+    const found = slipPickFor({ player_id: pageId }, idx, line - 0.5);
     return found && found.pick.result == null ? found : null;
-  }, [todayPicks, stat, playerId, line, mode]);
+  }, [todayPicks, stat, pageId, line, mode]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
   const toggleSlip = () => {
@@ -262,9 +321,35 @@ export function PlayerStatsScreen() {
 
   // Reset the line to auto whenever the stat changes — a points line makes no
   // sense for rebounds.
+  //
+  // EXCEPT the first time the screen lands on the stat it was asked for with a
+  // line: that line is the question the reader tapped ("45+ Rush Yards"), so
+  // it is held as their own and the book's posted line does not replace it
+  // (Matt, 2026-09-25). Once per player — stepping away and back to the stat
+  // resets as before.
+  const seededLineFor = useRef<string | null>(null);
+  const requestedLine = route.params.line;
   useEffect(() => {
+    const seedKey = `${sport}:${playerId}`;
+    if (
+      requestedLine != null &&
+      Number.isFinite(requestedLine) &&
+      seededLineFor.current !== seedKey &&
+      requested != null &&
+      stat != null &&
+      stat.key === requested.key &&
+      stat.group === requested.group
+    ) {
+      seededLineFor.current = seedKey;
+      setLine(requestedLine);
+      setLineTouched(true);
+      setLineFromBoard(true);
+      return;
+    }
     setLine(null);
     setLineTouched(false);
+    setLineFromBoard(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
   // Values come most-recent-first. Window slices the most recent N.
@@ -292,11 +377,11 @@ export function PlayerStatsScreen() {
   // card beneath said 62.5 (UX review, 2026-09-20). The ± stepper still moves
   // in `step` increments from wherever the ruler sits.
   const pickThreshold = useMemo(() => {
-    if (!playerId) return null;
-    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(playerId);
+    if (!pageId) return null;
+    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(pageId);
     const sl = ep && ep.pick.result == null ? Number(ep.pick.scored_line) : NaN;
     return Number.isFinite(sl) ? thresholdFromBookLine(sl) : null;
-  }, [todayPicks, stat, playerId]);
+  }, [todayPicks, stat, pageId]);
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
   const snapThreshold = pickThreshold ?? postedThreshold;
   useEffect(() => {
@@ -306,22 +391,13 @@ export function PlayerStatsScreen() {
   // Named on the hit card, so nobody reads a 7+ hit rate without knowing the
   // 7 came from a 6.5 posted line (UX review).
   const lineProvenance = lineTouched
-    ? 'your line'
+    ? lineFromBoard ? 'board line' : 'your line'
     : pickThreshold != null && line === pickThreshold
       ? `pick line ${bookLineFromThreshold(pickThreshold)}`
       : postedThreshold != null && line === postedThreshold && detail.tonight
         ? `book line ${detail.tonight.line}`
         : null;
 
-  const effLine = line ?? 0;
-
-  // ── The sportsbook line behind the number on screen ────────────────────────
-  // The card's threshold and the book's line are the same bet in two idioms:
-  // "2+ Hits" is Over 1.5. `selectionFor` is the one translation, shared with
-  // the board, so the price can never be fetched for a different bet than the
-  // chart is drawing. It holds at every step size — a 250-yard threshold is
-  // Over 249.5 exactly as a 2-hit one is Over 1.5.
-  const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
   const market = useMemo(() => propMarketForStat(stat), [stat]);
   const { books } = usePreferredBooks();
   // Threaded into the quote so "which games have not started" re-derives on
@@ -388,15 +464,46 @@ export function PlayerStatsScreen() {
 
   const stepLine = (deltaSteps: number) => {
     setLineTouched(true);
+    setLineFromBoard(false);
     setLine((prev) => {
       const base = prev ?? roundLineToStep(median ?? step, step);
-      return Math.min(Math.max(0, base + deltaSteps * step), Math.ceil(maxValue) + step * 5);
+      return stepLineFrom(base, deltaSteps, step, Math.ceil(maxValue) + step * 5);
     });
+  };
+
+  // The number between − and + is also a field: tap it and type any line
+  // (Matt, 2026-10-08: "allow a user to manually enter in the line"). The
+  // stepper's ceiling does not apply — a typed line is a deliberate question.
+  const [lineDraft, setLineDraft] = useState<string | null>(null);
+  // Android fires onSubmitEditing and then onEndEditing for one Done press.
+  // The ref latches in the first call so the second does not apply the line again.
+  const lineCommitTaken = useRef(false);
+  const commitLineDraft = () => {
+    const result = commitTypedLineOnce(lineDraft, lineCommitTaken.current, mode, line);
+    lineCommitTaken.current = result.taken;
+    if (result.taken) setLineDraft(null);
+    if (result.line == null) return;
+    setLineTouched(true);
+    setLineFromBoard(false);
+    setLine(result.line);
   };
 
   const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
+
+  // The selected stat chip, scrolled into view once it lays out, the way
+  // SportToggle does it. A pick on Blocks+Steals or Reb+Ast opens on the 10th
+  // or 11th NBA chip, past the right edge on every iPhone (UX review,
+  // 2026-10-16). Layout only, never on a tap: a tapped chip is already on
+  // screen, and a load, a new player or a group tab remounts the chips.
+  const statRowRef = useRef<ScrollView>(null);
+  const statChipX = useRef<Record<string, number>>({});
+  const activeChipKey = stat ? chipKey(stat) : null;
+  const scrollToActiveChip = useCallback(() => {
+    const x = activeChipKey != null ? chipRowScrollX(statChipX.current[activeChipKey]) : null;
+    if (x != null) statRowRef.current?.scrollTo({ x, animated: false });
+  }, [activeChipKey]);
 
   // The pull spinner shows for a PULL only; each section has its own.
   const [pulled, setPulled] = useState(false);
@@ -404,10 +511,23 @@ export function PlayerStatsScreen() {
     if (!detail.loading) setPulled(false);
   }, [detail.loading]);
 
+  // H9 (lib/a11y reachFrame). The stat chips sit flush under the group tabs
+  // and share an 8pt gap with the range chips (4 each), so under the tabs they
+  // stop at 4 + ~32 + 4 — there is no whitespace left to take. With the group
+  // header TEXT above instead, the frame reaches 6pt into its bottom padding.
+  const statReachAbove = groups.length === 1 && groupsOfChips(allChips).length > 1 ? 6 : 0;
+  const statReach = reachFrame(statReachAbove);
+  // The range chips reach 6pt down over the next sibling, raised so it is
+  // hit-tested first: the hit card's 8pt top margin, the empty card's 16pt
+  // padding or the spinner's margin — never the ErrorBanner, whose Retry
+  // starts at its top edge.
+  const rangeReachBelow = error ? 0 : 6;
+  const rangeReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.list}
+        keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl
             refreshing={pulled && detail.loading}
@@ -492,17 +612,27 @@ export function PlayerStatsScreen() {
               }}
             />
 
-            {/* Stat selector */}
+            {/* Stat selector. H9: with the group header text above (no
+                group tabs) the frame reaches 6pt into its bottom padding;
+                under the group tabs it can't — see statReach. */}
             <ScrollView
+              ref={statRowRef}
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.windowRow}
+              style={statReach.frame}
+              contentContainerStyle={[styles.windowRow, statReach.content]}
             >
               {groupChips.map((c) => {
                 const active = c.key === stat?.key && c.group === stat?.group;
                 return (
                   <Pressable
+                    // In-bounds only: the row's 4pt padding (+ statReach above).
+                    hitSlop={{ top: 4 + statReachAbove, bottom: 4, left: 2, right: 2 }}
                     key={chipKey(c)}
+                    onLayout={(e) => {
+                      statChipX.current[chipKey(c)] = e.nativeEvent.layout.x;
+                      if (active) scrollToActiveChip();
+                    }}
                     onPress={() => setPicked(c)}
                     // Pre-existing (ux_scan a11y-pressable, byte-identical to
                     // master): a chip whose only child is a Text announces as
@@ -526,16 +656,22 @@ export function PlayerStatsScreen() {
           </>
         )}
 
-        {/* Game-range selector */}
+        {/* Game-range selector. H9: raised 6pt over the next sibling's top
+            margin / padding (whitespace, or the non-interactive empty card) —
+            not over the ErrorBanner, whose Retry starts at its top edge. */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.windowRow}
+          style={rangeReach.frame}
+          contentContainerStyle={[styles.windowRow, rangeReach.content]}
         >
           {windows.map((w) => {
             const active = w.value === gameWindow;
             return (
               <Pressable
+                // In-bounds only: the row's 4pt padding (4 above is its half of
+                // the 8pt gap to the stat chips) + rangeReach below.
+                hitSlop={{ top: 4, bottom: 4 + rangeReachBelow, left: 2, right: 2 }}
                 key={String(w.value)}
                 onPress={() => setGameWindow(w.value)}
                 accessibilityRole="button"
@@ -554,9 +690,13 @@ export function PlayerStatsScreen() {
         </ScrollView>
 
         {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {error}</Text>
-          </View>
+          <ErrorBanner
+            what="recent games"
+            error={error}
+            onRetry={reloadTrends}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
         ) : null}
 
         {loading && games.length === 0 ? (
@@ -601,7 +741,7 @@ export function PlayerStatsScreen() {
                 </View>
               </View>
 
-              <View style={styles.statsRow}>
+              <View style={[styles.statsRow, stepperLayout !== 'inline' && styles.statsRowStacked]}>
                 <View style={styles.statCell}>
                   <Text style={styles.statCellValue}>{avg != null ? avg.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Avg</Text>
@@ -610,7 +750,12 @@ export function PlayerStatsScreen() {
                   <Text style={styles.statCellValue}>{median != null ? median.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Median</Text>
                 </View>
-                <View style={styles.stepper}>
+                <View
+                  style={[
+                    stepperLayout === 'inline' ? styles.stepper : styles.stepperStacked,
+                    stepperLayout === 'split' && styles.stepperSplit,
+                  ]}
+                >
                   {/* The board's own mode control, not a second one. It opens
                       HitModeSheet, which is the one place the three idioms are
                       shown side by side — "2+ Hits", "Over 1.5 Hits", "Under
@@ -621,34 +766,62 @@ export function PlayerStatsScreen() {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Direction: ${hitModeLabel(mode)}. Change`}
-                    style={({ pressed }) => [styles.modeBtn, pressed && { opacity: 0.7 }]}
+                    style={({ pressed }) => [
+                      styles.modeBtn,
+                      stepperLayout === 'split' && styles.modeBtnSplit,
+                      pressed && { opacity: 0.7 },
+                    ]}
                   >
                     <Text style={styles.stepperLabel}>{hitModeLabel(mode)}</Text>
                     <Ionicons name="chevron-down" size={12} color={colors.textSecondary} />
                   </Pressable>
-                  {/* Icon-only, so the label is the only thing VoiceOver has
-                      — an unlabelled glyph button is announced as "button" and
-                      nothing else. Pre-existing; cleared here because this
-                      change brought the file into the reviewed set. */}
-                  <Pressable
-                    onPress={() => stepLine(-1)}
-                    hitSlop={8}
-                    style={styles.stepBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Lower the line"
-                  >
-                    <Ionicons name="remove" size={18} color={colors.tint} />
-                  </Pressable>
-                  <Text style={styles.stepValue}>{rulerValueLabel(effLine, mode)}</Text>
-                  <Pressable
-                    onPress={() => stepLine(1)}
-                    hitSlop={8}
-                    style={styles.stepBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Raise the line"
-                  >
-                    <Ionicons name="add" size={18} color={colors.tint} />
-                  </Pressable>
+                  {/* The three stay one group so a wrap can move them together
+                      without a second copy of the field. At the default size
+                      the group is only as wide as its contents. */}
+                  <View style={[styles.stepperControls, stepperLayout === 'split' && styles.stepperControlsSplit]}>
+                    {/* Icon-only, so the label is the only thing VoiceOver has
+                        — an unlabelled glyph button is announced as "button" and
+                        nothing else. Pre-existing; cleared here because this
+                        change brought the file into the reviewed set. */}
+                    <Pressable
+                      onPress={() => stepLine(-1)}
+                      hitSlop={8}
+                      style={styles.stepBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Lower the line"
+                    >
+                      <Ionicons name="remove" size={18} color={colors.tint} />
+                    </Pressable>
+                    <TextInput
+                      value={lineDraft ?? rulerValueLabel(effLine, mode)}
+                      onFocus={() => {
+                        lineCommitTaken.current = false;
+                        setLineDraft('');
+                      }}
+                      onChangeText={setLineDraft}
+                      onEndEditing={commitLineDraft}
+                      onSubmitEditing={commitLineDraft}
+                      placeholder={rulerValueLabel(effLine, mode)}
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      maxLength={6}
+                      inputAccessoryViewID={Platform.OS === 'ios' ? LINE_ACCESSORY_ID : undefined}
+                      style={[styles.stepValue, styles.stepInput]}
+                      accessibilityLabel={`Line, ${headline}`}
+                      accessibilityHint="Type a line"
+                    />
+                    <Pressable
+                      onPress={() => stepLine(1)}
+                      hitSlop={8}
+                      style={styles.stepBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Raise the line"
+                    >
+                      <Ionicons name="add" size={18} color={colors.tint} />
+                    </Pressable>
+                  </View>
                 </View>
               </View>
 
@@ -725,6 +898,7 @@ export function PlayerStatsScreen() {
                   onPress={toggleSlip}
                   hitSlop={8}
                   accessibilityRole="button"
+                  accessibilityState={{ selected: inSlip }}
                   accessibilityLabel={inSlip ? 'Remove from betslip' : 'Add to betslip'}
                   style={({ pressed }) => [
                     styles.slipBtn,
@@ -735,7 +909,7 @@ export function PlayerStatsScreen() {
                   <Ionicons
                     name={inSlip ? 'checkmark' : 'add'}
                     size={16}
-                    color={inSlip ? colors.bet : colors.textInverse}
+                    color={inSlip ? colors.tint : colors.textInverse}
                   />
                   <Text style={[styles.slipBtnText, inSlip && styles.slipBtnTextIn]}>
                     {inSlip ? 'In slip' : 'Add'}
@@ -761,7 +935,64 @@ export function PlayerStatsScreen() {
 
             {/* ── The same threshold, split ─────────────────────────────── */}
             {detail.splits ? (
-              <SplitsCard splits={detail.splits} statLabel={statLabel} threshold={effLine} loading={detail.splitsLoading} />
+              <SplitsCard
+                splits={detail.splits}
+                statLabel={statLabel}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                loading={detail.splitsLoading}
+              />
+            ) : null}
+
+            {/* ── Head-to-head with the next opponent, last two seasons ─────── */}
+            {detail.h2h ? (
+              <HeadToHeadCard
+                h2h={detail.h2h}
+                statLabel={statLabel}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                selection={selection}
+                loading={detail.h2hLoading}
+              />
+            ) : null}
+
+            {/* ── Same position vs the next opponent (NFL for now) ──────── */}
+            {detail.positionVsOpponent ? (
+              <PositionVsOpponentCard
+                opponent={detail.positionVsOpponent.opponent}
+                group={detail.positionVsOpponent.group}
+                seasonThis={detail.positionVsOpponent.seasonThis}
+                rows={detail.positionVsOpponent.rows}
+                loading={detail.positionVsOpponent.loading}
+                error={detail.positionVsOpponent.error}
+                seasonStarted={detail.positionVsOpponent.seasonStarted}
+                playerId={pageId}
+                statLabel={statLabel}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                selection={selection}
+                groupBasis={detail.positionVsOpponent.groupBasis}
+                sport={detail.positionVsOpponent.sport}
+              />
+            ) : detail.positionVsOpponentPending ? (
+              <PositionVsOpponentPending
+                opponent={detail.positionVsOpponentPending.opponent}
+                loading={detail.positionVsOpponentPending.loading}
+                error={detail.positionVsOpponentPending.error}
+              />
+            ) : null}
+
+            {/* Blocks+Steals and Reb+Ast are summed from this page's log; the
+                server has no head-to-head or same-position read for either
+                yet (statCatalog.LOG_DERIVED_STATS), so the two cards above are
+                absent. Said where they were, rather than vanishing (UX
+                review, 2026-10-16). */}
+            {detail.serverReadsSkipped && detail.nextGame ? (
+              <>
+                <SectionTitle title={`vs ${detail.nextGame.entry.opponent}`} />
+                <View style={styles.card}>
+                  <Text style={styles.muted}>
+                    No head-to-head or same-position numbers for combined stats yet. Pick a single stat to see them.
+                  </Text>
+                </View>
+              </>
             ) : null}
 
             {/* ── MLB context the prop models train on ─────────────────── */}
@@ -775,7 +1006,10 @@ export function PlayerStatsScreen() {
               record={detail.record}
               loading={detail.picksLoading}
               error={detail.picksError}
-              sportHasPropModel={STAT_CATALOG.some((d) => d.sport === sport && propModelForStat(d) != null)}
+              // From the model catalog: NBA's and the NFL's live prop models are
+              // multi-market rules with no single stat, so a stat-catalog test
+              // said "No prop model prices NBA players yet" while one did.
+              sportHasPropModel={sportHasLivePropModel(sport)}
               sport={sport}
             />
 
@@ -799,6 +1033,7 @@ export function PlayerStatsScreen() {
             ))}
           </>
         )}
+        <BetslipBarSpacer />
       </ScrollView>
 
       <HitModeSheet
@@ -837,6 +1072,23 @@ export function PlayerStatsScreen() {
         onClose={() => setLineSheet(null)}
         onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
       />
+      {/* decimal-pad has no return key on iOS; this is how the typed line is
+          committed (same bar as Settings' bankroll field). */}
+      {Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={LINE_ACCESSORY_ID}>
+          <View style={styles.doneBar}>
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              hitSlop={8}
+              style={({ pressed }) => [styles.doneBtn, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -891,6 +1143,146 @@ function GameRow({
     </View>
   );
 }
+
+/**
+ * HEAD-TO-HEAD: every meeting with the next opponent, over the last two seasons.
+ *
+ * Matt, 2026-09-20 — "show how a player or team has done against an opponent
+ * ... the last 2 years". Two seasons is FIXED and said on the card rather than
+ * being a control, so the number always means the same thing.
+ *
+ * WHY THE SAMPLE IS SAID OUT LOUD, TWICE. In the weekly sports a two-season
+ * head-to-head is usually ONE game: measured on the NFL logs for seasons 2025
+ * and 2026, 13,373 of 15,664 player-opponent pairs (85%) have exactly one
+ * meeting, 2,052 have two and 239 have three or more. So "100%" here is very
+ * often "1 for 1", which is a fact about the schedule and not about the
+ * player. Matt's call (2026-09-20) is to show it plainly rather than hide or
+ * hedge it — so the rate is printed as it is, the game count sits under it,
+ * and every meeting is listed below, which is the honest version of the same
+ * number: a reader who can see the one game cannot mistake it for a trend.
+ *
+ * An opponent with NO stored meeting still renders. "They have not met in two
+ * seasons" is an answer to the question the card asks, and a card that
+ * vanishes instead reads as a page that failed to load.
+ */
+function HeadToHeadCard({
+  h2h,
+  statLabel,
+  betLabel,
+  selection,
+  loading,
+}: {
+  h2h: PlayerHeadToHead;
+  statLabel: string;
+  /** The page's bet in its own idiom — "3+" or "Under 2.5". */
+  betLabel: string;
+  /** The RESOLVED bet. The dots below read this, exactly as the game log does,
+   *  so one meeting cannot be green in one list and red in the other. */
+  selection: { line: number; side: HitDirection };
+  loading: boolean;
+}) {
+  const b = h2h.bucket;
+  const [showAll, setShowAll] = useState(false);
+  // Two MLB seasons against a division rival is 13-22 meetings at ~56pt — a
+  // whole screen of scroll for a section whose headline numbers are the two
+  // tiles above it. Football's one to three rows never hit this.
+  const MEETINGS_SHOWN = 5;
+  const shown = showAll ? h2h.meetings : h2h.meetings.slice(0, MEETINGS_SHOWN);
+  return (
+    <>
+      <SectionTitle
+        title={`vs ${h2h.opponent} · last 2 seasons`}
+        tooltip={{
+          title: 'Every meeting, not a recent-form window',
+          body:
+            `Each game ${h2h.opponent} have been the opponent in, over the last two seasons on file, and ` +
+            `how often ${betLabel} ${statLabel} won in them. In the weekly sports this is ` +
+            'usually one or two games: the count under the rate, and the list of meetings below it, are ' +
+            'there so a 100% that rests on a single game reads as a single game.',
+        }}
+      />
+      {loading && b.games === 0 ? (
+        <View style={styles.card}>
+          <ActivityIndicator style={styles.loadingInline} />
+        </View>
+      ) : b.games === 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.muted}>No meetings with {h2h.opponent} in the last 2 seasons.</Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.tileRow}>
+            <StatTile
+              label={`${betLabel} ${statLabel}`}
+              value={b.hitRate == null ? '—' : formatPct(b.hitRate, 0)}
+              caption={`${b.hits} of ${b.games}`}
+              tint={
+                b.hitRate == null || b.games < 3
+                  ? undefined
+                  : b.hitRate >= HIT_RATE_GOOD
+                    ? colors.gradeGood
+                    : b.hitRate < HIT_RATE_WEAK
+                      ? colors.gradeBad
+                      : undefined
+              }
+            />
+            <StatTile
+              label={`Avg ${statLabel}`}
+              value={b.avg == null ? '—' : String(Math.round(b.avg * 10) / 10)}
+              caption={b.games === 1 ? '1 meeting' : `${b.games} meetings`}
+            />
+            <View style={styles.tilePad} />
+          </View>
+          {shown.map((m, i) => (
+            // `${date}:${i}` and not the date alone: an MLB doubleheader is two
+            // meetings on one date against one opponent, and the RPC returns no
+            // game id to tell them apart — a duplicate key drops a row from a
+            // list whose whole claim is that it shows every meeting.
+            <View key={`${m.date}:${i}`} style={styles.gameRow}>
+              <View style={styles.gameDot}>
+                <View
+                  style={[
+                    styles.dot,
+                    {
+                      backgroundColor: isHit(m.value, selection.line, selection.side)
+                        ? colors.bet
+                        : colors.avoid,
+                    },
+                  ]}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.gameDate}>{m.date}</Text>
+              </View>
+              <View style={styles.gameStat}>
+                <Text style={styles.gameStatValue}>{String(Math.round(m.value * 10) / 10)}</Text>
+                <Text style={styles.gameStatLabel}>{statLabel}</Text>
+              </View>
+            </View>
+          ))}
+          {h2h.meetings.length > MEETINGS_SHOWN ? (
+            <Pressable
+              hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
+              onPress={() => setShowAll((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                showAll
+                  ? 'Show fewer meetings'
+                  : `Show all ${h2h.meetings.length} meetings with ${h2h.opponent}`
+              }
+              style={({ pressed }) => [styles.gameRow, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.h2hMore}>
+                {showAll ? 'Show fewer' : `Show all ${h2h.meetings.length} meetings`}
+              </Text>
+            </Pressable>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
 
 // ── Added sections (2026-09-20) ─────────────────────────────────────────────
 
@@ -986,7 +1378,7 @@ function TonightLineCard({
         ) : !tonight ? (
           <Text style={[styles.muted, styles.gapTop]}>
             {error
-              ? `Couldn’t load lines — ${error}`
+              ? `Couldn’t load lines. ${friendlyCause(error)} Pull down to retry.`
               : `No book has posted ${statLabel} for this game yet.`}
           </Text>
         ) : (
@@ -1074,20 +1466,23 @@ function TonightLineCard({
   );
 }
 
-/** The chart's threshold, split by venue, opponent and (basketball) role. */
+/** The chart's threshold, split by venue and (basketball) role.
+ *  The opponent split moved to HeadToHeadCard below, which reads two SEASONS
+ *  rather than the loaded log — see playerDetail.playerHeadToHead. */
 function SplitsCard({
   splits,
   statLabel,
-  threshold,
+  betLabel,
   loading,
 }: {
   splits: StatSplits;
   statLabel: string;
-  threshold: number;
+  /** The page's bet in its own idiom — "3+" or "Under 2.5". NOT a bare
+   *  threshold: in Under mode the two name opposite bets. */
+  betLabel: string;
   loading: boolean;
 }) {
   const buckets: SplitBucket[] = [splits.home, splits.away];
-  if (splits.vsOpponent) buckets.push(splits.vsOpponent);
   if (splits.starting && splits.starting.games > 0) buckets.push(splits.starting);
   if (splits.bench && splits.bench.games > 0) buckets.push(splits.bench);
   const rows: SplitBucket[][] = [];
@@ -1095,13 +1490,14 @@ function SplitsCard({
   return (
     <>
       <SectionTitle
-        title={`${statLabel} ${threshold}+ by situation`}
+        title={`${statLabel} ${betLabel} by situation`}
         tooltip={{
           title: 'Same line, different spots',
           body:
-            'How often the player has cleared the line above at home, on the road and against tonight’s ' +
-            'opponent, over the games loaded on this page. Small samples swing hard — the game count is ' +
-            'under every number for that reason. Home and away come from the game itself, not from the box score.',
+            'How often the player has cleared the line above at home and on the road, over the games ' +
+            'loaded on this page. Small samples swing hard — the game count is under every number for ' +
+            'that reason. Home and away come from the game itself, not from the box score. The opponent ' +
+            'has its own card below, because that one reads two whole seasons rather than this page’s log.',
         }}
       />
       {loading && buckets.every((b) => b.games === 0) ? (
@@ -1199,9 +1595,9 @@ function PickRecordCard({
       <SectionTitle
         title={`Our picks on ${playerName}`}
         tooltip={{
-          title: 'Settled bets only',
+          title: 'Posted bets only',
           body:
-            `Every settled BET our prop models made on ${playerName}, by market. Results are in units: one unit is one ` +
+            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units: one unit is one ` +
             'flat bet. A pick that carried no price counts in the record and not the units.',
         }}
       />
@@ -1213,9 +1609,9 @@ function PickRecordCard({
         <View style={styles.card}>
           <Text style={styles.muted}>
             {error
-              ? `Couldn’t load our picks — ${error}`
+              ? `Couldn’t load our picks. ${friendlyCause(error)} Pull down to retry.`
               : sportHasPropModel
-                ? `No settled picks on ${playerName}.`
+                ? `No posted picks on ${playerName}.`
                 : `No prop model prices ${sport} players yet.`}
           </Text>
         </View>
@@ -1224,13 +1620,18 @@ function PickRecordCard({
           <View style={styles.recordTop}>
             <Text style={styles.recordTotal}>{formatRecordLine(record)}</Text>
             <Text style={styles.recordCount}>
-              {record.settled} settled {record.settled === 1 ? 'bet' : 'bets'}
+              {record.settled} posted {record.settled === 1 ? 'bet' : 'bets'}
               {record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}
             </Text>
+            {record.ledgerUnread ? (
+              <Text style={styles.muted}>
+                The Discord check did not finish, so this record can include picks whose posting status is unknown.
+              </Text>
+            ) : null}
           </View>
           {record.lines.map((l) => (
             <ReadRow
-              key={l.modelId}
+              key={l.key}
               label={l.label}
               value={formatRecordLine(l)}
               note={
@@ -1309,17 +1710,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  // ON: outlined in tint with a checkmark (same as AddToPlayButton), not green.
   slipBtnIn: {
-    backgroundColor: colors.betSoft,
+    backgroundColor: colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.bet,
+    borderColor: colors.tint,
   },
   slipBtnText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textInverse,
   },
-  slipBtnTextIn: { color: colors.bet },
+  slipBtnTextIn: { color: colors.tint },
   container: { flex: 1, backgroundColor: colors.bg },
   // Clears BetslipBar, which is mounted at the app ROOT and sits over the
   // bottom of this screen whenever the slip has a leg — at 24pt the tail of
@@ -1424,10 +1826,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     alignItems: 'center',
   },
+  // Dark on every fill (5.9–9.6:1). White was 2.22:1 on the green and
+  // 2.20:1 on the amber — the same fault as audit H6.
   hitBadgeText: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.textPrimary,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1455,6 +1859,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.sm,
+  },
+  // Own line, full width of the card. Not an override of `flex: 1` — that
+  // shorthand's basis of 0 wins over a later flexBasis and the row never wraps.
+  stepperStacked: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  // Mode on one line, − / field / + on the next. Only when the stepper's own
+  // line is wider than the card (Accessibility Extra Large and up).
+  stepperSplit: {
+    flexWrap: 'wrap',
+  },
+  stepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  stepperControlsSplit: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
+  modeBtnSplit: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
+  statsRowStacked: {
+    flexWrap: 'wrap',
   },
   stepperLabel: {
     fontSize: font.size.footnote,
@@ -1484,6 +1918,34 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  // Filled like the − and + beside it, so the three read as one control and
+  // the number reads as something to tap; the 44pt height is the target.
+  stepInput: {
+    minWidth: 48,
+    minHeight: 44,
+    paddingVertical: 0,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+  },
+  doneBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    backgroundColor: colors.bgGrouped,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  doneBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  doneText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   legendRow: {
     flexDirection: 'row',
@@ -1552,6 +2014,13 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
+  h2hMore: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
   gameStatLabel: {
     fontSize: font.size.nano,
     color: colors.textTertiary,
@@ -1582,13 +2051,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });

@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { showToast } from '@/components/Toast';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { formatAmerican } from '@/lib/format';
+import { formatAmerican, MINUS } from '@/lib/format';
 import { isGameSpec, lineLegKey, lineLegLabel, type LineSheetInput } from '@/lib/lineLegs';
 import { bookLabelShort, bookName, MODEL_BOOK } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
@@ -71,7 +71,7 @@ export function AddLineSheet({
 
   // The title IS the proposition — the exact string the betslip's leg card
   // will show, so the slip entry is recognisable from here.
-  const title = spec ? lineLegLabel(spec) : '';
+  const title = input?.title ?? (spec ? lineLegLabel(spec) : '');
   const matchup = matchupForLeg(game);
 
   const act = () => {
@@ -90,12 +90,17 @@ export function AddLineSheet({
 
   return (
     <Modal visible={input != null} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Close"
-      >
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close add line"
+        />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the price rows and the
             buttons unreachable. Same fix as SportsbookPickerSheet. */}
@@ -108,7 +113,7 @@ export function AddLineSheet({
               </Text>
               {matchup ? <Text style={styles.matchup}>{matchup}</Text> : null}
             </View>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close add line">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -132,12 +137,13 @@ export function AddLineSheet({
                 const isModel = p.book === MODEL_BOOK;
                 const isBest = best != null && p.price === best;
                 const mine = (myBooks as readonly string[]).includes(p.book);
+                const priceText = formatAmerican(p.price).replace(/-/g, MINUS);
                 return (
                   <View
                     key={p.book}
                     style={[styles.row, i > 0 && styles.rowDivider]}
                     accessible
-                    accessibilityLabel={`${bookName(p.book)}${mine ? ', yours' : ''}, ${formatAmerican(p.price)}${isBest ? ', best odds' : ''}`}
+                    accessibilityLabel={`${bookName(p.book)}${mine ? ', yours' : ''}, ${priceText}${isBest ? ', best odds' : ''}`}
                   >
                     <View style={[styles.badge, isModel && styles.badgeDk]}>
                       <Text style={[styles.badgeText, isModel && styles.badgeTextDk]}>{bookLabelShort(p.book)}</Text>
@@ -146,7 +152,7 @@ export function AddLineSheet({
                       {bookName(p.book)}
                     </Text>
                     {mine ? <Text style={styles.yours}>Yours</Text> : null}
-                    <Text style={styles.rowPrice}>{formatAmerican(p.price)}</Text>
+                    <Text style={styles.rowPrice}>{priceText}</Text>
                     {isBest ? (
                       <Ionicons name="star" size={14} color={colors.best} accessibilityElementsHidden />
                     ) : (
@@ -186,7 +192,7 @@ export function AddLineSheet({
             <Text style={styles.secondaryText}>Not now</Text>
           </Pressable>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

@@ -382,8 +382,7 @@ export function toggleChip(
 // ---------------------------------------------------------------------------
 
 /**
- * The values the line and public-backing pickers scroll through, so those
- * filters are a choice rather than a free-text box.
+ * The stops the line and public-backing sliders snap to.
  *
  * Line value spans every market we price: spreads are stored home-relative and
  * go negative (an NBA -12.5), prop lines sit at 0.5-12.5, baseball and hockey
@@ -416,6 +415,116 @@ export function nearestOption(options: number[], value: number | null | undefine
     if (Math.abs(o - value) < Math.abs(best - value)) best = o;
   }
   return best;
+}
+
+/**
+ * American prices the price slider can land on. Monotonic in payout, so the
+ * track reads left to right from the juiciest favourite to the longest dog.
+ * The open interval (−100, +100) is not a price and is not a stop. The
+ * slider's outer stops are sentinels (see boundIndex), not these values, so
+ * sitting on an end means Any rather than "at least −1000".
+ */
+function buildOddsStops(): number[] {
+  const out: number[] = [];
+  for (let v = -1000; v <= -500; v += 50) out.push(v);
+  for (let v = -450; v <= -200; v += 25) out.push(v);
+  for (let v = -190; v <= -100; v += 10) out.push(v);
+  for (let v = 100; v <= 190; v += 10) out.push(v);
+  for (let v = 200; v <= 450; v += 25) out.push(v);
+  for (let v = 500; v <= 1000; v += 50) out.push(v);
+  return out;
+}
+
+export const ODDS_STOPS: number[] = buildOddsStops();
+
+/** Index of the unbound low end on a slider whose stops are `stops`. */
+export const SLIDER_LOW_SENTINEL = -1;
+
+/** Index of the unbound high end. One past the last real stop. */
+export function sliderHighSentinel(stops: readonly number[]): number {
+  return stops.length;
+}
+
+/**
+ * Where a stored bound sits on the slider. Null (no constraint) is the
+ * sentinel for that end. A legacy free-text value that is not itself a stop
+ * lands on the nearest stop for the thumb only — the stored number is left
+ * alone until the user drags.
+ */
+export function boundIndex(
+  stops: readonly number[],
+  value: number | null | undefined,
+  which: 'low' | 'high',
+): number {
+  if (value == null || stops.length === 0) {
+    return which === 'low' ? SLIDER_LOW_SENTINEL : stops.length;
+  }
+  const nearest = nearestOption(stops as number[], value);
+  const idx = nearest == null ? -1 : (stops as number[]).indexOf(nearest);
+  if (idx < 0) return which === 'low' ? SLIDER_LOW_SENTINEL : stops.length;
+  return idx;
+}
+
+/** Slider index → the filter value. Sentinels and anything off the list are null (Any). */
+export function indexToBound(stops: readonly number[], index: number): number | null {
+  if (!Number.isInteger(index) || index < 0 || index >= stops.length) return null;
+  return stops[index] ?? null;
+}
+
+/**
+ * Slider indices → the stored min/max pair.
+ *
+ * An end whose index did not move keeps its stored number. A legacy off-list
+ * value sits on the nearest stop for the thumb only; moving the other thumb
+ * must not snap it. An end that did move is rewritten to the stop under its
+ * new index. A sentinel rewrites to null (Any).
+ */
+export function commitSliderBounds(
+  stops: readonly number[],
+  prevLow: number,
+  prevHigh: number,
+  nextLow: number,
+  nextHigh: number,
+  storedMin: number | null | undefined,
+  storedMax: number | null | undefined,
+): { min: number | null; max: number | null } {
+  return {
+    min: nextLow === prevLow ? (storedMin ?? null) : indexToBound(stops, nextLow),
+    max: nextHigh === prevHigh ? (storedMax ?? null) : indexToBound(stops, nextHigh),
+  };
+}
+
+/**
+ * American price for a caption. Same glyph as `formatAmerican` in format.ts
+ * (ASCII hyphen, plus on the dog) so the editor and the model-detail chips
+ * cannot drift into two minuses.
+ */
+export function formatAmericanLabel(v: number): string {
+  const n = Math.round(v);
+  return n > 0 ? `+${n}` : String(n);
+}
+
+export function formatLineLabel(v: number): string {
+  return String(v);
+}
+
+export function formatPublicLabel(v: number): string {
+  return `${v}%`;
+}
+
+/**
+ * The one line above a range slider. Both ends open is "Any"; one end open
+ * reads as a single inequality (`≤ 40%`); both closed reads `-150 / +200`.
+ */
+export function formatRangeCaption(
+  min: number | null | undefined,
+  max: number | null | undefined,
+  format: (v: number) => string,
+): string {
+  if (min == null && max == null) return 'Any';
+  if (min != null && max != null) return `${format(min)} / ${format(max)}`;
+  if (max != null) return `≤ ${format(max)}`;
+  return `≥ ${format(min as number)}`;
 }
 
 /** Set (or clear, when value is null) one of the numeric filters. */
@@ -451,18 +560,14 @@ export function describeFilters(filters: CustomModelFilters | undefined): string
     if (sel.length === 0 || sel.length === group.options.length) continue;
     out.push(sel.map((v) => LABEL_OF[`${group.key}:${v}`] ?? v).join(' / '));
   }
-  if (filters.minOdds != null) out.push(`Price ≥ ${fmtAmerican(filters.minOdds)}`);
-  if (filters.maxOdds != null) out.push(`Price ≤ ${fmtAmerican(filters.maxOdds)}`);
+  if (filters.minOdds != null) out.push(`Price ≥ ${formatAmericanLabel(filters.minOdds)}`);
+  if (filters.maxOdds != null) out.push(`Price ≤ ${formatAmericanLabel(filters.maxOdds)}`);
   if (filters.minLine != null) out.push(`Line ≥ ${filters.minLine}`);
   if (filters.maxLine != null) out.push(`Line ≤ ${filters.maxLine}`);
   if (filters.maxPublicBetPct != null) out.push(`Public ≤ ${filters.maxPublicBetPct}%`);
   if (filters.minPublicBetPct != null) out.push(`Public ≥ ${filters.minPublicBetPct}%`);
   if (filters.excludeInjuries) out.push('No injury flags');
   return out;
-}
-
-function fmtAmerican(v: number): string {
-  return v > 0 ? `+${v}` : String(v);
 }
 
 /**

@@ -139,3 +139,120 @@ def live_lock_key(game_id: str, model_id: str, pick_side: str,
              "prop_market": prop_market}
     tail = "".join(f":{parts[c]}" for c in KEY_PARTS if parts[c])
     return f"{LIVE_KEY_PREFIX}{game_id}:{model_id}:{pick_side}{tail}"
+
+
+# The Discord channel kinds in push_sent. A lock_key in either means the pick
+# was POSTED as a signal -- the same join mobile's v_discord_published makes.
+DISCORD_KINDS = ("discord_signal", "discord_live")
+
+# A later push_sent row of this kind is the void notice. The original
+# discord_signal / discord_live row stays (the message is not deleted). The
+# published join treats the notice as the publish state and drops the lock.
+VOID_NOTICE_KIND = "discord_void"
+
+
+def void_notice_is_newer_sql(signal_alias: str = "s") -> str:
+    """The stamp rule inside `void_notice_releases_sql`.
+
+    Strictly newer (`v.sent_at > signal.sent_at`). Equal stamps do not
+    release. A null void `sent_at` releases only a signal that also has no
+    `sent_at`; it does not release a stamped signal, and once a rehold
+    stamps that signal the notice stops matching so the new post holds.
+    A stamped notice releases a signal with no `sent_at`.
+    """
+    return (
+        f"((v.sent_at IS NOT NULL AND ({signal_alias}.sent_at IS NULL "
+        f"OR v.sent_at > {signal_alias}.sent_at)) "
+        f"OR (v.sent_at IS NULL AND {signal_alias}.sent_at IS NULL))"
+    )
+
+
+def void_notice_releases_sql(signal_alias: str = "s") -> str:
+    """True when a discord_void notice is strictly newer than this signal.
+
+    The pre-game key is game_id:model_id, with no side and no pick id, so
+    the voided pick and a later bet on that game share one lock. The notice
+    releases it only while `void_notice_is_newer_sql` is true. A signal
+    stamped after the notice is a later pick taking the lock back.
+
+    `signal_alias` is the channel-post row.
+    """
+    return (
+        "EXISTS (SELECT 1 FROM push_sent v "
+        f"WHERE v.lock_key = {signal_alias}.lock_key "
+        f"AND v.kind = '{VOID_NOTICE_KIND}' "
+        f"AND {void_notice_is_newer_sql(signal_alias)})"
+    )
+
+
+def void_notice_exclusion_sql(alias: str = "s") -> str:
+    """The notice does not release this channel row.
+
+    Same predicate v_discord_published applies. A published VOID with no
+    notice stays visible. A later pick's signal, stamped after the notice,
+    holds the lock again. `alias` is the channel-post row.
+    """
+    return f"NOT ({void_notice_releases_sql(alias)})"
+
+
+def channel_lock_held_sql(lock_expr: str, kind: str) -> str:
+    """True when a channel row still blocks a new post of this lock.
+
+    No notice: the discord_signal / discord_live row blocks, as it always
+    has. A notice releases that block. A signal written after the notice
+    blocks again. `kind` is one of DISCORD_KINDS, never a caller string.
+    """
+    if kind not in DISCORD_KINDS:
+        raise ValueError(kind)
+    return (
+        "EXISTS (SELECT 1 FROM push_sent s "
+        f"WHERE s.lock_key = {lock_expr} AND s.kind = '{kind}' "
+        f"AND {void_notice_exclusion_sql('s')})"
+    )
+
+
+# A new post on a lock the notice released updates the channel row in place.
+# ON CONFLICT DO NOTHING would leave the old message holding the key, and the
+# next pass would post again. The WHERE keeps a lock with no notice from
+# being overwritten: a conflict there changes nothing.
+SIGNAL_LEDGER_SQL = (
+    "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+    "VALUES (%s, %s, %s, %s) "
+    "ON CONFLICT (lock_key, kind) DO UPDATE "
+    "SET sent_at = EXCLUDED.sent_at, message_id = EXCLUDED.message_id "
+    "WHERE EXISTS (SELECT 1 FROM push_sent v "
+    "WHERE v.lock_key = EXCLUDED.lock_key "
+    f"AND v.kind = '{VOID_NOTICE_KIND}' "
+    f"AND {void_notice_is_newer_sql('push_sent')})"
+)
+
+
+def posted_sql(alias: str = "p") -> str:
+    """EXISTS: the Discord ledger holds this pick's lock_key (pre-game or live).
+
+    Matt, 2026-09-28: "if a bet is posted as a signal it should be locked".
+    scripts/void_picks.py refuses any pick this is true for, unless the caller
+    opts in with --allow-posted (mike, 2026-10-09: for a posted pick decided on
+    a price nobody could bet; a graded pick stays refused). Built from the two
+    key expressions above so there is one definition of the key, not two.
+
+    A discord_void notice releases the lock here only while it is strictly
+    newer than the channel row, the same way v_discord_published does. A
+    null void sent_at does not release a stamped signal. A signal stamped
+    after the notice holds the lock again. The signal row is not deleted.
+
+    This exclusion also reaches the two other callers of posted_sql.
+    scripts/void_picks.py uses it as the posted-signal lock, and
+    tracking/record_duplicates.py uses it as the "which copy was posted"
+    flag. Harmless today: a notice is written only for a pick that is
+    already VOID (result NO_ACTION), void_picks treats that result as a
+    no-op before it looks at the posted flag, and record_duplicates only
+    pairs WIN/LOSS/PUSH copies, which the void path refuses to grade.
+    """
+    kinds = ", ".join(f"'{k}'" for k in DISCORD_KINDS)
+    return ("EXISTS (SELECT 1 FROM push_sent s "
+            f"WHERE s.kind IN ({kinds}) "
+            f"AND s.lock_key = CASE WHEN {alias}.is_live "
+            f"THEN {live_lock_key_sql(alias)} "
+            f"ELSE {lock_key_sql(alias)} END "
+            f"AND {void_notice_exclusion_sql('s')})")

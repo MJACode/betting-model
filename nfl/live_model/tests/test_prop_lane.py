@@ -69,19 +69,43 @@ def test_the_gates_are_checked_before_the_no_bias_decline():
     assert pab.over_prob(32.5, 30.0, 60).reason != "no_measured_bias"
 
 
-def test_the_constants_are_read_at_call_time_not_import_time():
+def test_the_constants_are_read_at_call_time_not_import_time(monkeypatch):
     """The old signature bound `bias=DEPLOY_BIAS` as a DEFAULT VALUE, so
     rebinding the constant changed nothing and the function kept using the
     number captured at import. A hotfix or a replay that set it would have
-    silently done nothing."""
+    silently done nothing.
+
+    With the kill switch default-off, rebinding DEPLOY_BIAS alone must still
+    refuse -- restoring the constant-prob path needs both a non-zero bias AND
+    NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS=1.
+    """
     import live_model.models.pass_attempt_bias as m
     before = m.DEPLOY_BIAS
     try:
         m.DEPLOY_BIAS = 1.50
+        monkeypatch.delenv(m._ALLOW_ENV, raising=False)
+        assert m.over_prob(32.5, 17.0, 1800).over_prob is None
+        assert m.over_prob(32.5, 17.0, 1800).reason == "pass_attempt_overs_disabled"
+        monkeypatch.setenv(m._ALLOW_ENV, "1")
         assert m.over_prob(32.5, 17.0, 1800).over_prob is not None
     finally:
         m.DEPLOY_BIAS = before
+    monkeypatch.delenv(m._ALLOW_ENV, raising=False)
     assert m.over_prob(32.5, 17.0, 1800).over_prob is None
+
+
+def test_editing_deploy_bias_alone_cannot_rearm_live_overs(monkeypatch):
+    """Kill switch: DEPLOY_BIAS != 0 without the env flag is a no-op for live."""
+    import live_model.models.pass_attempt_bias as m
+    before = m.DEPLOY_BIAS
+    monkeypatch.delenv(m._ALLOW_ENV, raising=False)
+    try:
+        m.DEPLOY_BIAS = 1.50
+        r = m.over_prob(32.5, 17.0, 1800)
+        assert r.over_prob is None
+        assert r.reason == "pass_attempt_overs_disabled"
+    finally:
+        m.DEPLOY_BIAS = before
 
 
 def test_restoring_a_bias_is_one_constant():
@@ -94,11 +118,18 @@ def test_restoring_a_bias_is_one_constant():
 
 def test_the_old_rule_was_a_constant_not_a_model():
     """Why the card was identical in every game: the output never depended on
-    the line, the accrued total or the clock. Pinned so nobody rebuilds it."""
+    the line, the accrued total or the clock. Pinned so nobody rebuilds it.
+
+    Production confirmed the fingerprint: every pass-attempt OVER BET carried
+    one of CONSTANT_OVER_PROBS and nothing else.
+    """
     probs = {pab.over_prob(line, acc, secs, bias=1.50).over_prob
              for line, acc, secs in ((25.5, 5.0, 2700), (32.5, 17.0, 1800),
                                      (44.5, 30.0, 600), (19.5, 1.0, 3500))}
     assert len(probs) == 1, "the shipped construction had no discrimination"
+    only = next(iter(probs))
+    assert abs(only - pab.CONSTANT_OVER_PROBS[0]) < 5e-3
+    assert abs(0.642 - pab.CONSTANT_OVER_PROBS[1]) < 1e-9
 
 
 def test_blind_arm_no_longer_asserts_a_rate():

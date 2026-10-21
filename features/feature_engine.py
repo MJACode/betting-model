@@ -165,6 +165,43 @@ NHL_TOTALS_FEATURES = [
     "is_early_season",
 ]
 
+# THE BLENDED LIST -- BUILT, BACKTESTED, NOT ADOPTED (2026-10-01). mike: no
+# 10-game hold, the early weeks are to be handled by the inputs. This is that
+# input design. It does what it was built for (a team's first home or road game
+# of a season is a row like any other, where the list above drops it from
+# training) and it is not better: both models retrained on it graded WORSE at
+# real 2025-26 prices than the live ones, five walk-forward seasons say the
+# same, and on the very games it was built for the old list scored the way
+# production scores them is the more accurate of the two
+# (docs/nhl_market_lab.md, scripts/nhl_early_season_blend.py). So FEATURE_MAP
+# names the list above, production reads exactly what it read before, and the
+# blended columns are computed on the TRAINING path only, for the backtest.
+# Switching is a retrain on this list, the scoring path taught to compute it,
+# and the registry row -- a model update, mike's call.
+#
+# Every team number comes from ONE function,
+# data.nhl_asof.TeamBook.inputs, blended toward the team's last season by games
+# played, for training rows and for tonight's alike. NEW NAMES, on purpose: an
+# artifact trained on NHL_H2H_FEATURES keeps reading the columns it was trained
+# on, so swapping the registry row is the whole switch and the whole rollback.
+# What changed against the list above: goals for / against per game and the
+# home / road scoring splits are blended instead of raw; the win columns are a
+# blended share of games not lost in regulation; the running goal-difference
+# total is gone (a total cannot be blended, and per game it is the first two
+# columns again); shot share, power play and penalty kill are the same numbers
+# read through the same function.
+NHL_H2H_FEATURES_BLENDED = [
+    "d_gf_pg_bl", "d_ga_pg_bl", "d_goals_last_5", "d_goals_last_10",
+    "d_corsi_bl", "d_pp_bl", "d_pk_bl",
+    "d_goalie_save_pct", "d_goalie_gaa", "d_goalie_gsaa",
+    "home_gf_home_bl", "away_gf_away_bl",
+    "home_pts_rate_bl", "away_pts_rate_bl",
+    "home_injury_adj", "away_injury_adj",
+    "home_goalie_out", "away_goalie_out",
+    "home_has_returnee", "away_has_returnee",
+    "is_early_season",
+]
+
 NHL_REG_FEATURES = NHL_H2H_FEATURES  # regulation moneyline uses same inputs
 
 NHL_PUCKLINE_FEATURES = NHL_H2H_FEATURES + ["spread_home"]
@@ -209,12 +246,6 @@ WNBA_TOTALS_FEATURES = [
 
 WNBA_SPREAD_FEATURES = WNBA_H2H_FEATURES + ["spread_home"]
 
-# ── NBA Feature Groups ────────────────────────────────────────────────────────
-# Identical basketball metric set to WNBA (same nba_team_stats columns + rolling
-# points from the games table). Aliased to the WNBA lists so the two never drift.
-NBA_H2H_FEATURES    = WNBA_H2H_FEATURES
-NBA_TOTALS_FEATURES = WNBA_TOTALS_FEATURES
-NBA_SPREAD_FEATURES = WNBA_SPREAD_FEATURES
 
 
 # ── NCAAF (FBS) ───────────────────────────────────────────────────────────────
@@ -351,14 +382,12 @@ FEATURE_MAP = {
     "mlb_f5_runline":           MLB_F5_SPREADS_FEATURES,
     "nhl_moneyline":            NHL_H2H_FEATURES,
     "nhl_moneyline_regulation": NHL_REG_FEATURES,
-    "nhl_over_under":           NHL_TOTALS_FEATURES,
+    # nhl_over_under is a rule since 2026-10-08 (models/nhl_totals_market.py):
+    # no artifact, so no feature list. NHL_TOTALS_FEATURES stays for the labs.
     "nhl_puckline":             NHL_PUCKLINE_FEATURES,
     "wnba_moneyline":           WNBA_H2H_FEATURES,
     "wnba_over_under":          WNBA_TOTALS_FEATURES,
     "wnba_spread":              WNBA_SPREAD_FEATURES,
-    "nba_moneyline":            NBA_H2H_FEATURES,
-    "nba_over_under":           NBA_TOTALS_FEATURES,
-    "nba_spread":               NBA_SPREAD_FEATURES,
     "ncaaf_moneyline":          NCAAF_H2H_FEATURES,
     "ncaaf_over_under":         NCAAF_TOTALS_FEATURES,
     "ncaaf_spread":             NCAAF_SPREAD_FEATURES,
@@ -955,6 +984,34 @@ def build_mlb_game_features(conn: DBConnection,
 
 # ── NHL Feature Builder ───────────────────────────────────────────────────────
 
+def _nhl_blended_features(book, home_team: str, away_team: str,
+                          season: int, game_date: str) -> dict:
+    """The blended team columns for one game (data.nhl_asof.TeamBook.inputs),
+    strictly before the date. TRAINING-SIDE ONLY: the list that reads them was
+    not adopted, so the scoring path does not compute them. Adopting it means
+    calling this from build_nhl_game_features too, with the same book."""
+    names = ("d_gf_pg_bl", "d_ga_pg_bl", "d_corsi_bl", "d_pp_bl", "d_pk_bl",
+             "home_gf_home_bl", "away_gf_away_bl", "home_pts_rate_bl", "away_pts_rate_bl")
+    if book is None:
+        return {n: None for n in names} | {"home_games_played_bl": None, "away_games_played_bl": None}
+    h = book.inputs(home_team, season, str(game_date)[:10])
+    a = book.inputs(away_team, season, str(game_date)[:10])
+
+    def d(key: str):
+        if h.get(key) is None or a.get(key) is None:
+            return None
+        return round(h[key] - a[key], 4)
+
+    return {
+        "d_gf_pg_bl": d("gf_pg"), "d_ga_pg_bl": d("ga_pg"),
+        "d_corsi_bl": d("corsi_for_pct"), "d_pp_bl": d("power_play_pct"),
+        "d_pk_bl": d("penalty_kill_pct"),
+        "home_gf_home_bl": h.get("gf_home"), "away_gf_away_bl": a.get("gf_away"),
+        "home_pts_rate_bl": h.get("pts_rate"), "away_pts_rate_bl": a.get("pts_rate"),
+        "home_games_played_bl": h.get("games_played"),
+        "away_games_played_bl": a.get("games_played"),
+    }
+
 def _get_nhl_team_stats(conn: DBConnection,
                          team: str, season: int, as_of_date: str) -> dict:
     row = conn.execute("""
@@ -1249,19 +1306,36 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     o_cols = ["game_id", "market", "bookmaker", "home_price", "away_price", "draw_price",
               "spread_home", "total_line", "over_price", "under_price",
               "snapshot_type", "snapshot_at", "commence_time", "first_pitch_at"]
-    o_rows = conn.execute("""
-        SELECT o.game_id, o.market, o.bookmaker, o.home_price, o.away_price, o.draw_price,
-               o.spread_home, o.total_line, o.over_price, o.under_price,
-               o.snapshot_type, o.snapshot_at, g.commence_time, g.first_pitch_at
-        FROM odds o
-        JOIN games g ON g.game_id = o.game_id
-        WHERE o.sport = 'NHL'
-          AND o.bookmaker IN ('draftkings', 'sbr_consensus')
-          AND o.snapshot_type != 'in_play'
-        ORDER BY o.game_id, o.market,
-                 CASE o.bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
-                 o.snapshot_at DESC
-    """).fetchall()
+    # BY GAME ID, FOR THE SEASONS ASKED FOR. This used to read every NHL
+    # DraftKings row ever stored and sort it in the database -- a read that
+    # grows with the log: the live season is polled every few minutes (98,933
+    # rows per market for the first 35 games of 2026-27). On 2026-10-01 it was
+    # cancelled by the statement timeout twice in a row, which fails the
+    # trainer and every NHL backtest. The database was busy at the time (a
+    # by-game read timed out minutes later too), so load was part of it; the
+    # unbounded read is the part that only gets worse. `odds` is indexed on
+    # game_id, so this is bounded by the games asked for, not by the log.
+    sp_req = ",".join(["%s"] * len(all_seasons))
+    g_meta = {r[0]: (r[1], r[2]) for r in conn.execute(
+        f"SELECT game_id, commence_time, first_pitch_at FROM games "
+        f"WHERE sport = 'NHL' AND season IN ({sp_req})", all_seasons).fetchall()}
+    ids = sorted(g_meta)
+    o_rows = []
+    for i in range(0, len(ids), 300):
+        for r in conn.execute("""
+            SELECT game_id, market, bookmaker, home_price, away_price, draw_price,
+                   spread_home, total_line, over_price, under_price,
+                   snapshot_type, snapshot_at
+            FROM odds
+            WHERE game_id = ANY(%s)
+              AND bookmaker IN ('draftkings', 'sbr_consensus')
+              AND snapshot_type != 'in_play'
+        """, (ids[i:i + 300],)).fetchall():
+            o_rows.append(tuple(r) + g_meta[r[0]])
+    # The order the database used to impose: DraftKings before the archive
+    # consensus, newest snapshot first within a book.
+    o_rows.sort(key=lambda r: str(r[11] or ""), reverse=True)
+    o_rows.sort(key=lambda r: (r[0], r[1], 0 if r[2] == "draftkings" else 1))
     # Latest genuinely pre-game snapshot per (game_id, market) — see _is_pregame_snapshot.
     odds_lookup: dict = {}
     for r in o_rows:
@@ -1278,9 +1352,14 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         f"{len(hist_rows)} hist games, {len(inj_rows)} injury rows, {len(o_rows)} odds rows"
     )
 
+    # The per-game team log, read through the function scoring uses.
+    from data.nhl_asof import team_book as _nhl_book
+    book = _nhl_book(conn, all_seasons)
+
     return dict(team_stats=team_stats, goalies=goalies,
                 goals=goals, home_goals=home_goals, away_goals=away_goals,
-                injuries=injuries, inj_dates=inj_dates, odds=odds_lookup)
+                injuries=injuries, inj_dates=inj_dates, odds=odds_lookup,
+                team_book=book)
 
 
 def _blk_nhl_asof(store: dict, team: str, season: int, game_date: str) -> dict:
@@ -1426,6 +1505,8 @@ def _build_nhl_features_from_bulk(bulk: dict,
         "home_has_returnee": _has_returnee(home_inj),
         "away_has_returnee": _has_returnee(away_inj),
     }
+    features.update(_nhl_blended_features(bulk.get("team_book"), home_team, away_team,
+                                          season, game_date))
 
     if odds_row:
         features["total_line"]  = odds_row.get("total_line")
@@ -1467,10 +1548,6 @@ def build_features_for_game(conn: DBConnection,
         from features.wnba_feature_engine import build_wnba_game_features
         return build_wnba_game_features(conn, game_id, game_date,
                                          home_team, away_team, season, odds_row)
-    elif sport == "NBA":
-        from features.nba_feature_engine import build_nba_game_features
-        return build_nba_game_features(conn, game_id, game_date,
-                                        home_team, away_team, season, odds_row)
     elif sport == "NCAAF":
         from features.ncaaf_feature_engine import build_ncaaf_game_features
         return build_ncaaf_game_features(conn, game_id, game_date,
@@ -1871,14 +1948,15 @@ def _build_mlb_features_from_bulk(bulk: dict,
 
 def build_training_dataset(model_id: str,
                              seasons: list[int],
-                             db_path: str = None) -> pd.DataFrame:
+                             db_path: str = None,
+                             feature_cols: list[str] | None = None) -> pd.DataFrame:
     """
     Build the full historical feature matrix for training.
     Pulls all completed games for the given seasons, builds features,
     and attaches the appropriate target variable.
 
     Args:
-        model_id: e.g. 'mlb_moneyline', 'nhl_over_under'
+        model_id: e.g. 'mlb_moneyline', 'nhl_moneyline'
         seasons:  list of seasons to include
         db_path:  ignored (kept for backwards compat); uses DATABASE_URL
 
@@ -1891,7 +1969,10 @@ def build_training_dataset(model_id: str,
         raise ValueError(f"Unknown model_id: {model_id}")
 
     sport, market, _ = MODELS[model_id]
-    feature_cols = FEATURE_MAP[model_id]
+    # `feature_cols` overrides the map for ONE purpose: rebuilding the frame an
+    # artifact was trained on after the map has moved on (grading the old NHL
+    # artifacts beside the blended ones). Training itself never passes it.
+    feature_cols = list(feature_cols) if feature_cols else FEATURE_MAP[model_id]
 
     # GOLF rows are per-player (or per-pair) — not per-game — so golf has its own
     # builder (the prop-model precedent). Delegate and return early.
@@ -1923,7 +2004,6 @@ def build_training_dataset(model_id: str,
     # Bulk-load all lookup tables upfront to avoid per-game DB round trips.
     bulk = None
     wnba_bulk = None
-    nba_bulk = None
     ufc_bulk = None
     nhl_bulk = None
     ncaaf_bulk = None
@@ -1938,11 +2018,6 @@ def build_training_dataset(model_id: str,
             build_bulk_wnba_lookups, build_wnba_features_from_bulk,
         )
         wnba_bulk = build_bulk_wnba_lookups(conn, seasons)
-    elif sport == "NBA":
-        from features.nba_feature_engine import (
-            build_bulk_nba_lookups, build_nba_features_from_bulk,
-        )
-        nba_bulk = build_bulk_nba_lookups(conn, seasons)
     elif sport == "UFC":
         from features.ufc_feature_engine import (
             build_bulk_ufc_lookups, build_ufc_features_from_bulk,
@@ -1982,10 +2057,6 @@ def build_training_dataset(model_id: str,
             odds = wnba_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = build_wnba_features_from_bulk(wnba_bulk, game_id, game_date,
                                                  home_team, away_team, season, odds)
-        elif sp == "NBA":
-            odds = nba_bulk['odds'].get((game_id, _market_for_odds(market)))
-            feat = build_nba_features_from_bulk(nba_bulk, game_id, game_date,
-                                                home_team, away_team, season, odds)
         elif sp == "UFC":
             odds = ufc_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = build_ufc_features_from_bulk(ufc_bulk, game_id, game_date,

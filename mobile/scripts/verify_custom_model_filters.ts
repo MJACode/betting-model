@@ -31,7 +31,15 @@ import {
   CHIP_GROUPS,
   DEFAULT_FILTERS,
   LINE_VALUE_OPTIONS,
+  ODDS_STOPS,
   PUBLIC_PCT_OPTIONS,
+  SLIDER_LOW_SENTINEL,
+  boundIndex,
+  commitSliderBounds,
+  formatAmericanLabel,
+  formatPublicLabel,
+  formatRangeCaption,
+  indexToBound,
   nearestOption,
   type FilterablePick,
 } from '../src/lib/customModelFilters';
@@ -42,6 +50,8 @@ import {
   refreshFrom,
   REFRESH_WINDOW_DAYS,
 } from '../src/lib/settledPickCache';
+import { applySettledMarkers } from '../src/lib/settledPickMarkers';
+import { passesRecordFilter } from '../src/lib/thresholds';
 import {
   EMPTY_STATS,
   mergeStats,
@@ -521,6 +531,27 @@ check(
     'an empty refresh keeps out-of-window history intact',
     mergeSettled(cached, [], '2026-07-17').length === 1,
   );
+
+  // A marker set after a row was cached, on a row older than the window: the
+  // second copy of one bet, marked DUPLICATE once both copies settle
+  // (2026-10-09). The per-load marker read reaches it; the record skips it.
+  const bet = (id: number): SettledPick =>
+    ({
+      pick_id: id, game_date: '2026-09-05', result: 'WIN', model_id: 'ufc_total_rounds',
+      signal_type: 'BET', is_live: false, downgrade_reason: null, condition_status: null,
+    }) as unknown as SettledPick;
+  const marked = applySettledMarkers(
+    [bet(1), bet(2)],
+    [{ pick_id: 2, condition_status: 'DUPLICATE' }],
+    '2026-09-01',
+  );
+  check('a late marker reaches a cached row', marked[1].condition_status === 'DUPLICATE');
+  check('the marked copy leaves the record', !passesRecordFilter(marked[1]));
+  check('its twin stays in the record', passesRecordFilter(marked[0]));
+  check(
+    'a failed marker read leaves the cache as it was',
+    applySettledMarkers(marked, null, '2026-09-01')[1].condition_status === 'DUPLICATE',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -629,6 +660,72 @@ check(
   check(
     'the price filter no longer names a single book',
     describeFilters({ minOdds: -140 })[0] === 'Price ≥ -140',
+  );
+  check(
+    'odds stops are the labelled prices and skip the dead zone',
+    ODDS_STOPS.includes(-150) &&
+      ODDS_STOPS.includes(200) &&
+      ODDS_STOPS.includes(-140) &&
+      ODDS_STOPS.every((v, i) => (i === 0 || v > ODDS_STOPS[i - 1]!) && (v <= -100 || v >= 100)),
+  );
+  for (const stops of [ODDS_STOPS, LINE_VALUE_OPTIONS, PUBLIC_PCT_OPTIONS]) {
+    const mid = stops[Math.floor(stops.length / 2)]!;
+    check(
+      'a stop round-trips and the ends are Any',
+      boundIndex(stops, null, 'low') === SLIDER_LOW_SENTINEL &&
+        boundIndex(stops, null, 'high') === stops.length &&
+        indexToBound(stops, SLIDER_LOW_SENTINEL) === null &&
+        indexToBound(stops, stops.length) === null &&
+        indexToBound(stops, boundIndex(stops, mid, 'low')) === mid,
+    );
+  }
+  check(
+    'an off-list legacy price sits on a real stop, not on Any',
+    indexToBound(ODDS_STOPS, boundIndex(ODDS_STOPS, -165, 'low')) != null,
+  );
+  {
+    const legacyMin = -165;
+    const storedMax = 200;
+    const prevLow = boundIndex(ODDS_STOPS, legacyMin, 'low');
+    const prevHigh = boundIndex(ODDS_STOPS, storedMax, 'high');
+    const movedHigh = commitSliderBounds(
+      ODDS_STOPS, prevLow, prevHigh, prevLow, prevHigh + 1, legacyMin, storedMax,
+    );
+    const snappedMin = indexToBound(ODDS_STOPS, prevLow);
+    check(
+      'off-list min + move high → min unchanged',
+      snappedMin != null &&
+        snappedMin !== legacyMin &&
+        movedHigh.min === legacyMin &&
+        movedHigh.max === indexToBound(ODDS_STOPS, prevHigh + 1),
+    );
+    const legacyMax = 163;
+    const storedMin = -150;
+    const lowIdx = boundIndex(ODDS_STOPS, storedMin, 'low');
+    const highIdx = boundIndex(ODDS_STOPS, legacyMax, 'high');
+    const movedLow = commitSliderBounds(
+      ODDS_STOPS, lowIdx, highIdx, lowIdx + 1, highIdx, storedMin, legacyMax,
+    );
+    const snappedMax = indexToBound(ODDS_STOPS, highIdx);
+    check(
+      'off-list max + move low → max unchanged',
+      snappedMax != null &&
+        snappedMax !== legacyMax &&
+        movedLow.max === legacyMax &&
+        movedLow.min === indexToBound(ODDS_STOPS, lowIdx + 1),
+    );
+  }
+  check(
+    '0% public is a real floor, distinct from the unbound end',
+    boundIndex(PUBLIC_PCT_OPTIONS, 0, 'low') === 0 &&
+      indexToBound(PUBLIC_PCT_OPTIONS, 0) === 0 &&
+      boundIndex(PUBLIC_PCT_OPTIONS, null, 'low') === SLIDER_LOW_SENTINEL,
+  );
+  check(
+    'unbound ends read Any, a price band reads −150 / +200, a public ceiling reads ≤ 40%',
+    formatRangeCaption(null, null, formatAmericanLabel) === 'Any' &&
+      formatRangeCaption(-150, 200, formatAmericanLabel) === '-150 / +200' &&
+      formatRangeCaption(null, 40, formatPublicLabel) === '≤ 40%',
   );
 }
 

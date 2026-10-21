@@ -72,12 +72,28 @@ def test_the_path_cleared_is_the_path_the_publisher_reads(nfl_path):
 
 
 def _windless_run(monkeypatch, tmp_path, argv):
-    """Run the wind card's main() with a slate that qualifies nothing."""
+    """Run the wind card's main() with a slate that qualifies nothing.
+
+    The slate carries a game_id, as load_schedule's does: the card keys the
+    recent wind readings on it (#919).
+
+    The recent readings are never read or written here. The real
+    attach_live_wind_reads inserts this poll's reading into production
+    (nfl_kickoff_wind_reads) whenever DATABASE_URL is set, and it is set in a
+    full-suite run (other test modules default it) and in any checkout that
+    holds a .env. It is replaced by a recorder that returns no readings, so
+    nothing locks, which is the card's own answer when the database misses.
+    """
     card = _load_script("weekly_wind_card")
+    import data_ingest.kickoff_wind_reads as wind_reads
     slate = pd.DataFrame([{
+        "game_id": "2026_02_MIN_CHI",
         "matchup": "MIN @ CHI", "stadium_id": "CHI98", "lead_days": 0.0,
         "forecast_wind": 10.0, "exp_true_wind": 8.9, "gust": 17.9, "temp": 65.9,
     }])
+    asked: list[list[str]] = []
+    monkeypatch.setattr(wind_reads, "attach_live_wind_reads",
+                        lambda games, now=None: asked.append(list(games.game_id)) or {})
     monkeypatch.setattr(card, "load_schedule", lambda days: slate)
     monkeypatch.setattr(card, "attach_forecast", lambda sched: slate)
     monkeypatch.setattr(card, "attach_odds", lambda g, regions, dry: g)
@@ -91,6 +107,8 @@ def _windless_run(monkeypatch, tmp_path, argv):
     stale.parent.mkdir(parents=True)
     stale.write_text("game_id\n2026_02_MIN_CHI\n", encoding="utf-8")
     assert card.main() == 0
+    # The card asked for the readings once, through the stand-in: no database.
+    assert asked == [["2026_02_MIN_CHI"]]
     return stale
 
 

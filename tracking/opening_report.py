@@ -27,6 +27,7 @@ _EXCLUDE = """
   AND model_id NOT LIKE 'mlb_prop_%%'
   AND model_id NOT LIKE 'wnba_prop_%%'
   AND model_id NOT LIKE 'nba_prop_%%'
+  AND model_id NOT LIKE 'nhl_prop_%%'
   AND model_id NOT LIKE 'ufc_%%'
   AND model_id NOT LIKE 'golf_%%'
   AND model_id NOT LIKE 'mlb_live_%%'
