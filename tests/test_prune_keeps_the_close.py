@@ -103,6 +103,14 @@ def test_each_statement_reads_its_proposition_once_with_no_anti_join():
     assert "NOT IN (" not in DOOMED
     delete = po.delete_sql("odds", ("game_id", "market"), "%(game_day)s", "<<PRUNABLE>>")
     assert delete.count("FROM odds") == 2          # the DELETE and its one read
+    # The window is computed once and the DELETE looks those ids up by primary
+    # key. A proposition predicate on the DELETE makes Postgres re-run the
+    # scan once per doomed id (2026-10-21: 4,819 ids, 8.5 s, and the form
+    # with the window inside that loop was cancelled at statement_timeout).
+    assert "AS MATERIALIZED" in delete
+    tail = delete.split("DELETE FROM", 1)[1]
+    assert "game_id" not in tail
+    assert tail.strip().startswith("odds WHERE odds_id IN (SELECT odds_id FROM doomed)")
 
 
 def test_the_protected_books_are_untouched_by_this_change():

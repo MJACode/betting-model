@@ -58,6 +58,29 @@ class Timeout(Exception):
     pgcode = "57014"
 
 
+def _is_delete_sql(sql: str) -> bool:
+    """A prune DELETE. The window is a leading CTE, so the text starts with
+    WITH; the whole-table statements this file freezes still start with DELETE."""
+    head = sql.lstrip().upper()
+    return head.startswith("DELETE") or (
+        head.startswith("WITH") and "DELETE FROM" in head)
+
+
+class _Counted:
+    """sqlite reports rowcount -1 for `WITH ... DELETE`. The prune charges
+    `cursor.rowcount`."""
+
+    def __init__(self, cur, rowcount: int):
+        self._cur = cur
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+
 class StandIn:
     """sqlite3 behind the DBConnection surface the prune uses, recording every
     statement and every commit in order."""
@@ -78,9 +101,12 @@ class StandIn:
             raise Timeout("canceling statement due to statement timeout")
         text = render(sql, params)
         self.log.append(("sql", text))
+        before = self.db.total_changes
         cur = self.db.execute(text)
-        if text.lstrip().upper().startswith("DELETE"):
-            self.deleted.append(cur.rowcount)
+        if _is_delete_sql(text):
+            n = self.db.total_changes - before
+            self.deleted.append(n)
+            return _Counted(cur, n)
         return cur
 
     def commit(self):
@@ -327,9 +353,21 @@ def unbounded(sql: str) -> list[str]:
         rest = sql[m.end():]
         nxt = _TABLE_READ.search(rest)
         clause = rest[: nxt.start()] if nxt else rest
-        if not re.search(r"\bWHERE\b.*?\bgame_id\s*(=\s*'[^']*'|IN\s*\('[^)]*'\))",
-                         clause, re.S | re.I):
-            bad.append(" ".join(sql[m.start():m.start() + 120].split()))
+        if re.search(r"\bWHERE\b.*?\bgame_id\s*(=\s*'[^']*'|IN\s*\('[^)]*'\))",
+                     clause, re.S | re.I):
+            continue
+        # The DELETE looks doomed ids up by primary key. Repeating game_id
+        # on it makes Postgres rescan the proposition once per id (measured
+        # 2026-10-21, 8.5 s on 4,819 ids). The CTE read above is what pins
+        # the game; this DELETE only accepts that.
+        is_delete = m.group(0).upper().startswith("DELETE")
+        pk_from_cte = re.search(
+            r"\bIN\s*\(\s*SELECT\s+\w+\s+FROM\s+doomed\s*\)", clause, re.I)
+        if (is_delete and pk_from_cte
+                and re.search(r"\bAS\s+MATERIALIZED\b", sql, re.I)
+                and re.search(r"\bgame_id\s*=\s*'[^']*'", sql)):
+            continue
+        bad.append(" ".join(sql[m.start():m.start() + 120].split()))
     return bad
 
 
@@ -349,7 +387,7 @@ def test_every_statement_the_prune_sends_names_its_game(monkeypatch):
     po.run_prune_odds(run_date=TODAY, keep_days=KEEP, seconds=3600, rows=10**9)
     sent = [t for k, t in conn.log if k == "sql"]
     assert any(_TABLE_READ.search(s) for s in sent)
-    assert any("NBA_K" in s and s.lstrip().upper().startswith("DELETE") for s in sent), (
+    assert any("NBA_K" in s and _is_delete_sql(s) for s in sent), (
         "the path thinning never ran, so its statements were never checked")
     offenders = [b for s in sent for b in unbounded(s)]
     assert not offenders, offenders
@@ -410,7 +448,7 @@ def _expire_after_deletes(conn: StandIn, n: int) -> po.Budget:
 
     def execute(sql, params=None):
         cur = run(sql, params)
-        if sql.lstrip().upper().startswith("DELETE"):
+        if _is_delete_sql(sql):
             seen["deletes"] += 1
         return cur
     conn.execute = execute
@@ -420,7 +458,7 @@ def _expire_after_deletes(conn: StandIn, n: int) -> po.Budget:
 
 def _after_nth_delete(conn: StandIn, n: int) -> list[str]:
     sent = [t for k, t in conn.log if k == "sql"]
-    at = [i for i, t in enumerate(sent) if t.lstrip().upper().startswith("DELETE")][n - 1]
+    at = [i for i, t in enumerate(sent) if _is_delete_sql(t)][n - 1]
     return sent[at + 1:]
 
 
@@ -437,8 +475,8 @@ def test_a_spent_budget_starts_no_statement_not_even_a_listing(table):
     _run(probe, table)
     sent = [t for k, t in probe.log if k == "sql"]
     k = next(i for i in range(len(sent) - 1)
-             if sent[i].lstrip().startswith("DELETE") and "WITH RECURSIVE" in sent[i + 1])
-    n = sum(1 for t in sent[:k + 1] if t.lstrip().startswith("DELETE"))
+             if _is_delete_sql(sent[i]) and "WITH RECURSIVE" in sent[i + 1])
+    n = sum(1 for t in sent[:k + 1] if _is_delete_sql(t))
     conn = StandIn()
     build(conn)
     _, identity, row_date = next(t for t in po._TABLES if t[0] == table)
@@ -486,9 +524,9 @@ def test_every_delete_is_committed_on_its_own():
     drain(conn, "odds", rows=10**9)
     log = conn.log
     for i, (kind, text) in enumerate(log):
-        if kind == "sql" and text.lstrip().startswith("DELETE"):
+        if kind == "sql" and _is_delete_sql(text):
             nxt = next(k for k, _ in log[i + 1:] if k in ("commit", "rollback")
-                       or (k == "sql" and _.lstrip().startswith("DELETE")))
+                       or (k == "sql" and _is_delete_sql(_)))
             assert nxt == "commit", "two DELETEs shared a transaction"
 
 
@@ -540,7 +578,7 @@ def test_a_missed_day_is_caught_up():
 def _fails_on(game_id: str):
     """A stand-in failure: every DELETE of one game times out."""
     return lambda sql, p: (isinstance(p, dict) and p.get("game_id") == game_id
-                           and sql.lstrip().startswith("DELETE"))
+                           and _is_delete_sql(sql))
 
 
 def test_a_date_with_a_failed_statement_goes_on_the_retry_list():
@@ -668,7 +706,7 @@ def test_failed_statements_fail_the_step(monkeypatch):
 def test_a_failed_thinning_statement_fails_the_step(monkeypatch):
     conn = StandIn()
     nba_paths(conn)
-    conn.fail = lambda sql, p: (sql.lstrip().upper().startswith("DELETE")
+    conn.fail = lambda sql, p: (_is_delete_sql(sql)
                                 and not isinstance(p, dict)
                                 and tuple(p[:2]) == ("NBA_Q", "totals"))
     monkeypatch.setattr(po, "get_connection", lambda: _Ctx(conn))
@@ -692,12 +730,12 @@ def test_the_frontier_is_written_after_its_dates_last_commit():
         writes += 1
         rng = json.loads(re.search(r"'(\{[^']*\})'", text).group(1))
         for kind2, later in log[i + 1:]:
-            if kind2 == "sql" and later.lstrip().startswith("DELETE"):
+            if kind2 == "sql" and _is_delete_sql(later):
                 gid = re.search(r"game_id = '([^']+)'", later).group(1)
                 assert not (rng["lo"] <= day_of[gid] < rng["hi"]), (
                     f"{gid} ({day_of[gid]}) was pruned after its date was recorded settled")
         before = [k for k, t in log[:i] if k in ("commit", "rollback")
-                  or (k == "sql" and t.lstrip().startswith("DELETE"))]
+                  or (k == "sql" and _is_delete_sql(t))]
         assert not before or before[-1] == "commit"
     assert writes > 3
 
@@ -805,7 +843,14 @@ def test_thinning_a_market_at_a_time_keeps_what_the_date_wide_statement_kept(see
     assert new.ids("odds") == old.ids("odds")
 
 
-_ONE_UNIT = re.compile(r"^DELETE FROM odds WHERE game_id = '[^']+' AND market = '[^']+' AND ")
+def _one_market(sql: str) -> bool:
+    """One thinning DELETE: the CTE names one game and one market, and the
+    DELETE itself is the primary-key lookup."""
+    games = re.findall(r"game_id = '([^']+)'", sql)
+    markets = re.findall(r"market = '([^']+)'", sql)
+    return (_is_delete_sql(sql) and "AS MATERIALIZED" in sql.upper()
+            and len(games) == 1 and len(markets) == 1
+            and not re.search(r"game_id\s+IN\s*\(", sql, re.I))
 
 
 def test_every_thinning_statement_covers_one_game_and_one_market():
@@ -817,10 +862,10 @@ def test_every_thinning_statement_covers_one_game_and_one_market():
     nba_paths(conn)
     out = po.thin_repeats(conn, today=TODAY)
     sent = [t for k, t in conn.log if k == "sql"]
-    deletes = [" ".join(s.split()) for s in sent if s.lstrip().upper().startswith("DELETE")]
+    deletes = [" ".join(s.split()) for s in sent if _is_delete_sql(s)]
     settled = [g for g, d in NBA_DAYS.items() if d < TODAY]
     assert len(deletes) == len(settled) * len(NBA_MARKETS) == out["statements"]
-    assert all(_ONE_UNIT.match(d) for d in deletes), deletes[:2]
+    assert all(_one_market(d) for d in deletes), deletes[:2]
     assert not [s for s in sent if re.search(r"game_id\s+IN\s*\(", s, re.I)]
 
 
@@ -833,7 +878,7 @@ def test_a_thinning_timeout_spares_the_other_markets_and_is_retried():
     nba_paths(ref)
     old_thin(ref)
     stuck = _rows_of(conn, "NBA_Q", "totals")
-    conn.fail = lambda sql, p: (sql.lstrip().upper().startswith("DELETE")
+    conn.fail = lambda sql, p: (_is_delete_sql(sql)
                                 and tuple(p[:2]) == ("NBA_Q", "totals"))
     out = po.thin_repeats(conn, today=TODAY)
     assert [(f["game_id"], f["market"]) for f in out["failed"]] == [("NBA_Q", "totals")]
@@ -886,7 +931,7 @@ def test_the_thinning_starts_with_the_newest_date():
     nba_paths(conn)
     po.thin_repeats(conn, today=TODAY, budget=_expire_after_deletes(conn, 1))
     first = next(t for k, t in conn.log
-                 if k == "sql" and t.lstrip().upper().startswith("DELETE"))
+                 if k == "sql" and _is_delete_sql(t))
     newest = max(d for d in NBA_DAYS.values() if d < TODAY)
     assert f"'{next(g for g, d in NBA_DAYS.items() if d == newest)}'" in first
 
@@ -917,7 +962,7 @@ def test_a_thinning_error_that_is_not_a_timeout_is_raised():
     nba_paths(conn)
 
     def broken(sql, p):
-        if sql.lstrip().upper().startswith("DELETE"):
+        if _is_delete_sql(sql):
             raise ValueError("column q does not exist")
         return False
     conn.fail = broken

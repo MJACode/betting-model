@@ -1794,10 +1794,8 @@ def build_scheduler() -> BlockingScheduler:
     )
 
     # Weekly results, and the monthly results on the first Monday. 7:30am ET
-    # is after the 6:00am daily recap and after the 7:00am retry of a missed
-    # day. Later Monday settle passes call the same function; the ledger
-    # posts each window once. The pipeline service owns it (X credentials
-    # live there).
+    # is after the 6:00am daily recap. A miss retries on later mornings
+    # through noon. The ledger posts each window once.
     sched.add_job(
         run_period_recaps,
         CronTrigger(day_of_week="mon", hour=7, minute=30, timezone=TIMEZONE),

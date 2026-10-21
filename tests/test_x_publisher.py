@@ -531,9 +531,29 @@ def test_x_does_price_a_day_that_is_over(monkeypatch):
 
     monkeypatch.setattr(data.db, "get_connection", _open)
     from datetime import datetime as _dt
-    yesterday = (_dt.now(xp.ET).date() - timedelta(days=1)).isoformat()
-    xp.notify_x_results(yesterday)
+    clock = _dt.now(xp.ET)
+    morning = clock.replace(hour=8, minute=0, second=0, microsecond=0)
+    yesterday = (clock.date() - timedelta(days=1)).isoformat()
+    xp.notify_x_results(yesterday, now=morning)
     assert opened, "a settled, finished day must still be published"
+
+
+def test_x_refuses_a_finished_day_after_noon(monkeypatch):
+    """Noon through 6:00am returns before the database, same as a day that
+    is not over. A restatement uses this function too."""
+    _creds_on(monkeypatch)
+    import data.db
+    opened = []
+    monkeypatch.setattr(data.db, "get_connection",
+                        lambda *a, **k: opened.append(1))
+    from datetime import datetime as _dt
+    clock = _dt.now(xp.ET)
+    evening = clock.replace(hour=21, minute=56, second=0, microsecond=0)
+    yesterday = (clock.date() - timedelta(days=1)).isoformat()
+    assert xp.notify_x_results(yesterday, now=evening) == 0
+    assert xp.notify_x_period(
+        "week", clock.date(), clock.date(), "Week", now=evening) == 0
+    assert not opened
 
 
 def test_the_tweeted_record_carries_pushes():

@@ -1278,7 +1278,8 @@ def notify_x_picks(target_date: str | None = None,
 
 
 def notify_x_results(game_date: str, dry_run: bool = False,
-                     restate: dict | None = None) -> int:
+                     restate: dict | None = None,
+                     now: datetime | None = None) -> int:
     """Tweet the settled day. Ledgered per date, and ONLY for a day that is over.
 
     THE DAY-IS-OVER GUARD IS THE WHOLE POINT OF THIS FUNCTION'S TIMING, and it
@@ -1307,11 +1308,18 @@ def notify_x_results(game_date: str, dry_run: bool = False,
     """
     if not _enabled() or not _creds():
         return 0
-    if game_date >= datetime.now(ET).date().isoformat():
+    from tracking.discord_notifier import (_as_et, _settled_rows, _tally,
+                                           clv_line, in_daily_recap_window,
+                                           restate_lock_key, sport_in_progress,
+                                           window_still_live)
+    clock = _as_et(now)
+    # Same clock as notify_discord_results: a day that is not over, and any
+    # hour from noon through 6:00am, returns before the database is opened.
+    if game_date >= clock.date().isoformat():
+        return 0
+    if not in_daily_recap_window(clock):
         return 0
     from data.db import get_connection
-    from tracking.discord_notifier import (_settled_rows, _tally, clv_line,
-                                           restate_lock_key, window_still_live)
 
     # A restatement (recaps_needing_restatement's dict) rides its own ledger
     # kind, keyed on the published_at of the recap it corrects -- the same
@@ -1330,6 +1338,10 @@ def notify_x_results(game_date: str, dry_run: bool = False,
         if window_still_live(conn, game_date, game_date, sports):
             logger.info(f"X results: {game_date} still has a game "
                         f"without a final score")
+            return 0
+        if sport_in_progress(conn, sports, now):
+            logger.info(f"X results: {game_date} waits, a game of "
+                        f"that sport is in progress")
             return 0
         t = _tally(rows)
         if (t["w"] + t["l"] + t["p"]) == 0:
@@ -1372,7 +1384,8 @@ def notify_x_results(game_date: str, dry_run: bool = False,
 
 
 def notify_x_period(span: str, start, end, heading: str,
-                    dry_run: bool = False) -> int:
+                    dry_run: bool = False,
+                    now: datetime | None = None) -> int:
     """Tweet one week or one month. Same settled picks as the daily recap.
 
     The heading is the one Discord uses, plus 'results', so the two surfaces
@@ -1381,9 +1394,12 @@ def notify_x_period(span: str, start, end, heading: str,
     """
     if not _enabled() or not _creds():
         return 0
-    from data.db import get_connection
     from tracking.discord_notifier import (_settled_rows_since, _tally, clv_line,
-                                           window_still_live)
+                                           in_period_recap_window,
+                                           sport_in_progress, window_still_live)
+    if not in_period_recap_window(now):
+        return 0
+    from data.db import get_connection
 
     kind = f"x_results_{span}"
     lock = f"{kind}:{start.isoformat()}"
@@ -1398,6 +1414,10 @@ def notify_x_period(span: str, start, end, heading: str,
         if window_still_live(conn, start.isoformat(), end.isoformat(), sports):
             logger.info(f"X {span}: {heading} still has a game "
                         f"without a final score")
+            return 0
+        if sport_in_progress(conn, sports, now):
+            logger.info(f"X {span}: {heading} waits, a game of "
+                        f"that sport is in progress")
             return 0
         t = _tally(rows)
         if (t["w"] + t["l"] + t["p"]) == 0:

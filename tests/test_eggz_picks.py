@@ -594,15 +594,15 @@ def test_a_live_game_on_the_slate_date_holds_the_recap(monkeypatch):
     assert posted == []
 
 
-def test_a_utc_instant_after_8pm_et_recaps_yesterday_in_new_york(monkeypatch):
-    """01:50 UTC on Oct 21 is 9:50pm ET on Oct 20. Yesterday is Oct 19."""
+def test_a_utc_instant_after_8pm_et_does_not_recap(monkeypatch):
+    """01:50 UTC on Oct 21 is 9:50pm ET on Oct 20. The morning window is closed."""
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
     calls = []
     monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
     monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
     monkeypatch.setattr(
         eg, "_post_window",
-        lambda conn, span, start, end, heading, dry_run=False: calls.append(
+        lambda conn, span, start, end, heading, dry_run=False, now=None: calls.append(
             (span, start, end)) or 0)
 
     class Conn:
@@ -613,9 +613,86 @@ def test_a_utc_instant_after_8pm_et_recaps_yesterday_in_new_york(monkeypatch):
     monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
     now = datetime(2026, 10, 21, 1, 50, tzinfo=timezone.utc)
     assert eg.post_eggz_recaps(now) == 0
+    assert calls == []
+
+
+def test_a_utc_morning_recaps_yesterday_in_new_york(monkeypatch):
+    """15:00 UTC on Oct 21 is 11:00am ET. Yesterday is Oct 20."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    calls = []
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+    monkeypatch.setattr(
+        eg, "_post_window",
+        lambda conn, span, start, end, heading, dry_run=False, now=None: calls.append(
+            (span, start, end)) or 0)
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    now = datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc)
+    assert eg.post_eggz_recaps(now) == 0
     days = [call for call in calls if call[0] == "day"]
-    assert days == [("day", "2026-10-19", "2026-10-19")]
-    assert all(call[1] != "2026-10-20" for call in calls)
+    assert days[0] == ("day", "2026-10-14", "2026-10-14")
+    assert days[-1] == ("day", "2026-10-20", "2026-10-20")
+    assert len(days) == 7
+    assert all(call[1] != "2026-10-21" for call in calls)
+
+
+def test_a_missed_eggz_day_posts_the_next_morning_for_that_date(monkeypatch):
+    """Oct 18 missed its morning. The morning of Oct 21 posts that date.
+    The evening does not."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "88")
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+
+    class Conn:
+        def __init__(self):
+            self.sent = set()
+            self.sql = ""
+            self.params = ()
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params or ()
+            if "INSERT INTO push_sent" in sql:
+                self.sent.add((params[0], params[1]))
+            return self
+
+        def fetchone(self):
+            if "push_sent" in self.sql and "SELECT" in self.sql:
+                return (1,) if (self.params[0], self.params[1]) in self.sent else None
+            if "COUNT" in self.sql:
+                return (0,)
+            return None
+
+        def fetchall(self):
+            if self.params[:2] == ("2026-10-18", "2026-10-18"):
+                return [("NHL", "eggz", "WIN", None, -110, 1.0, False, 1.0, 1.1)]
+            return []
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    conn = Conn()
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+    evening = datetime(2026, 10, 20, 21, 56, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(evening) == 0
+    assert posted == [] and conn.sent == set()
+    morning = datetime(2026, 10, 21, 8, 0, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(morning) == 1
+    assert ("discord_eggz_results_day:2026-10-18",
+            "discord_eggz_results_day") in conn.sent
+    assert "Oct 18" in posted[0]["embeds"][0]["title"]
 
 
 def test_before_6am_et_the_daily_recap_does_not_run(monkeypatch):
@@ -625,7 +702,8 @@ def test_before_6am_et_the_daily_recap_does_not_run(monkeypatch):
     monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
     monkeypatch.setattr(
         eg, "_post_window",
-        lambda conn, span, start, end, heading, dry_run=False: calls.append(span) or 0)
+        lambda conn, span, start, end, heading, dry_run=False, now=None: (
+            calls.append(span) or 0))
 
     class Conn:
         def close(self):
@@ -635,6 +713,72 @@ def test_before_6am_et_the_daily_recap_does_not_run(monkeypatch):
     monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
     assert eg.post_eggz_recaps(datetime(2026, 10, 21, 5, 59, tzinfo=eg.ET)) == 0
     assert "day" not in calls
+
+
+def test_an_evening_live_game_holds_the_week_until_the_next_morning(monkeypatch):
+    """9:56pm ET with NHL in progress posts nothing. The next morning posts the week."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")
+    monkeypatch.setattr(eg, "ingest_messages", lambda conn: None)
+    monkeypatch.setattr(eg, "grade_pending", lambda conn: 0)
+
+    class Conn:
+        def __init__(self):
+            self.sent = set()
+            self.sql = ""
+            self.params = ()
+            self.live = "2026-10-20T19:00:00-04:00"
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params or ()
+            if "INSERT INTO push_sent" in sql:
+                self.sent.add((params[0], params[1]))
+            return self
+
+        def fetchone(self):
+            if "push_sent" in self.sql and "SELECT" in self.sql:
+                return (1,) if (self.params[0], self.params[1]) in self.sent else None
+            if "COUNT" in self.sql:
+                return (0,)
+            return None
+
+        def fetchall(self):
+            if "commence_time" in self.sql:
+                return [(self.live,)]
+            if self.params[:2] == ("2026-10-12", "2026-10-18"):
+                return [("NHL", "eggz", "WIN", None, -110, 1.0, False, 1.0, 1.1)]
+            return []
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    conn = Conn()
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+    evening = datetime(2026, 10, 20, 21, 56, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(evening) == 0
+    assert posted == [] and conn.sent == set()
+
+    # 10:00am, and the sport is still in progress. Still no ledger row.
+    conn.live = "2026-10-21T09:00:00-04:00"
+    held = datetime(2026, 10, 21, 10, 0, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(held) == 0
+    assert posted == [] and conn.sent == set()
+
+    # Next morning. That start is outside the live horizon. The week posts.
+    conn.live = "2026-10-21T09:00:00-04:00"
+    morning = datetime(2026, 10, 22, 8, 0, tzinfo=eg.ET)
+    assert eg.post_eggz_recaps(morning) == 1
+    assert len(posted) == 1
+    assert ("discord_eggz_results_week:2026-10-12",
+            "discord_eggz_results_week") in conn.sent
+    assert eg.post_eggz_recaps(morning) == 0
+    assert len(posted) == 1
 
 
 def test_the_main_recap_waits_while_a_game_on_that_date_is_unfinished(monkeypatch):
@@ -663,10 +807,11 @@ def test_the_main_recap_waits_while_a_game_on_that_date_is_unfinished(monkeypatc
             pass
 
     monkeypatch.setattr(dn, "get_connection", lambda: Conn())
-    assert dn.notify_discord_results(game_date="2026-10-20") == 0
+    morning = datetime(2026, 10, 21, 8, 0, tzinfo=dn.ET)
+    assert dn.notify_discord_results(game_date="2026-10-20", now=morning) == 0
     assert dn.notify_discord_period(
         "week", date(2026, 10, 12), date(2026, 10, 18),
-        "Week of Oct 12-18") == 0
+        "Week of Oct 12-18", now=morning) == 0
     assert posted == []
 
 
