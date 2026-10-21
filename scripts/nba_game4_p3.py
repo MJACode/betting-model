@@ -505,9 +505,17 @@ def run_world(world: dict, n_placebo: int = 2, min_prior: int = MIN_PRIOR_GAMES)
 
 def synthetic_checks() -> dict:
     """Run before any real data is read, by --smoke and --full: the harness's
-    sign checks, and all 72 cells through run_cells on synthetic games."""
+    sign checks, and all 72 cells through run_cells on synthetic games.
+    NBA_GAME2_BETS is unset while they run: run_cells writes every cell's bets
+    wherever it points, and the 2026-10-18 graded run left 9 files of synthetic
+    bets beside the real ones (the fifth search found them)."""
     H.check()
-    out = run_world(synthetic_world())
+    saved = os.environ.pop("NBA_GAME2_BETS", None)
+    try:
+        out = run_world(synthetic_world())
+    finally:
+        if saved is not None:
+            os.environ["NBA_GAME2_BETS"] = saved
     n = {f: len(r) for f, r in out["rows"].items()}
     assert n == EXPECTED_CELLS, n
     for fam, rows in out["rows"].items():
