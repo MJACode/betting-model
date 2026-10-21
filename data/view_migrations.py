@@ -22,10 +22,20 @@ Deliberate constraints:
     second run would red the pipeline forever.
   * Every migration must be a SINGLE statement -- in practice a DO $$...$$
     block. See the comment at the execute() call for why.
-  * Failures are logged and swallowed. A view refinement must never take down
-    settlement or scoring — the same rule run_ledger follows.
+  * Failures are logged and swallowed here (this function does not raise).
+    The step reports them and returns False; later steps still run. A view
+    refinement must never take down settlement or scoring — the same rule
+    run_ledger follows.
+  * An already-applied file must not take AccessExclusiveLock. PostgreSQL
+    locks first and checks IF NOT EXISTS second, so the SQL itself returns
+    on a catalog read. A lock that is still required (a real change, under
+    contention) uses a short lock_timeout and a few retries, then fails
+    the step with the filename in the error.
 """
 from __future__ import annotations
+
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from loguru import logger
@@ -33,6 +43,27 @@ from loguru import logger
 from data.db import get_connection
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+
+# How long one attempt will sit in the lock queue. statement_timeout on the
+# worker role is 2min and lock_timeout is 0, so an AccessExclusive waiter
+# used to block new readers for the whole two minutes (lock-queue fairness)
+# and pin every later lock request behind it. Five seconds is long enough
+# for a short transaction to finish and short enough that a miss releases
+# the queue. The work AFTER the lock is acquired still has the server
+# statement_timeout; this does not cancel a real index build.
+# Retries are only lock_timeout (55P03) and deadlock (40P01). A statement
+# timeout (57014) means the file already held its lock for the full 2min,
+# so it is not run again.
+MIGRATION_LOCK_TIMEOUT = "5s"
+# Same value. The helper and the lock-noop tests use this name.
+LOCK_TIMEOUT = MIGRATION_LOCK_TIMEOUT
+LOCK_ATTEMPTS = 3
+# Sleep after attempt 1 and attempt 2. The third failure does not sleep.
+LOCK_BACKOFF_S = (0.5, 1.5)
+
+# 55P03 lock_not_available (lock_timeout), 40P01 deadlock_detected.
+_TRANSIENT_PGCODES = frozenset({"55P03", "40P01"})
+_STATEMENT_TIMEOUT_PGCODE = "57014"
 
 # Idempotent view migrations to keep applied. Order matters only if one
 # depends on another.
@@ -81,11 +112,20 @@ ACTIVE_MIGRATIONS: list[str] = [
     # tests/test_everything_in_supabase.py had failed on since 2026-09-12).
     # Written by data/ingestors/nfl_weather_cache_import.py.
     "add_nfl_stadium_weather_hourly.sql",
+    # 2026-10-11: the live wind card's kickoff-hour readings. The 11 mph check
+    # uses the minimum over a covered 12-hour window; without these rows the
+    # card fails closed and locks nothing. Not a pick.
+    "add_nfl_kickoff_wind_reads.sql",
     # 2026-09-20: per-game NHL team / goalie / skater logs from the NHL's free
     # stats API. The NHL models read one SEASON-FINAL row per goalie and
     # carried-forward team rates; an as-of-date feature needs the games it is
     # summed from. Written by data/ingestors/nhl_game_logs.py.
     "add_nhl_game_logs.sql",
+    # 2026-09-21: goals by period, one row per game, from the same archive the
+    # NHL opening/closing lines came from. The ingestor validated its parse on
+    # them and discarded them; they settle the first-period and regulation
+    # markets. Written by data/ingestors/nhl_sbr_archive.py.
+    "add_nhl_period_scores.sql",
     # 2026-09-09 (mike: "remove DK only - we want best lines for us
     # regardless"): picks carry the price each pick was DECIDED at
     # (decision_*); the graded matview, the record views and the custom-model
@@ -136,6 +176,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # same PR. Guards on both names still being the measured split; no-ops
     # after once. Never deletes a pick.
     "ncaaf_se_louisiana_ul_monroe_alias_2026_09_14.sql",
+    # 2026-10-16: five Citadel matchups (2023-09-02 to 2026-10-17) each have a
+    # CFBD "The Citadel" row and a live "Citadel Bulldogs" alias the resolver
+    # minted because The Odds API drops the article. Moves odds, latest_odds
+    # and weather onto the CFBD id and deletes the unscored alias. Map entry
+    # in config.py in the same PR. Guards on the measured names; no-ops after
+    # once. Never deletes a pick.
+    "ncaaf_citadel_alias_2026_10_16.sql",
     # 2026-09-07: three MLB games rows that are the previous night's game filed
     # again under its UTC date. Relabelled data_source='duplicate_utc', never
     # deleted or scored (five voided picks point at them). No-ops after once.
@@ -151,6 +198,36 @@ ACTIVE_MIGRATIONS: list[str] = [
     # player's window. Applied to production the same evening; this is the
     # recoverable copy, and it guards on its own property so it runs once.
     "player_recent_games_slate_teams.sql",
+    # 2026-09-20 (Matt): the Stats tab's H2H window and the player page's
+    # "vs OPP · last 2 seasons" card — five player_h2h_stat_values_* RPCs, one
+    # row per slate player carrying that player's values against the team he is
+    # about to play. MLB/NBA/WNBA derive the opponent by joining `games` (their
+    # logs have no opponent column); NFL/NCAAF read it off the log row. Guards
+    # on all five existing, so the DDL fires once and skips forever after —
+    # this file runs on every refresh pass and each DDL statement forces a
+    # PostgREST schema reload.
+    "add_player_h2h_stat_values_rpcs.sql",
+    # 2026-10-05 (Matt): the player page's "WRs vs ATL" card — how other
+    # players at the same position have done against tonight's opponent, with
+    # the defence's league rank. NFL first (the only log with pos + opponent);
+    # MLB and the basketball/NCAAF position ingest follow. Guards on the
+    # function existing, so the DDL fires once.
+    "add_position_vs_opponent_nfl.sql",
+    # 2026-10-05 (Matt): phase 2 — MLB batters by lineup spot (1-3/4-6/7-9)
+    # and starting pitchers, same row shape as the NFL function.
+    "add_position_vs_opponent_mlb.sql",
+    # 2026-10-06 (Matt, phase 3): NBA/WNBA/NCAAF positions for the same card,
+    # written by data/ingestors/player_positions_ingestor.py. Guards on the
+    # table existing.
+    "add_player_positions.sql",
+    # 2026-10-06: ESPN athletes with no game-log row (mostly rookies). The
+    # position pass remembers them so it does not re-fetch them every morning.
+    # Guards on the table existing. Not applied in the session that added it;
+    # the worker's migration pass applies it after merge.
+    "add_player_position_unmatched.sql",
+    # 2026-10-06 (Matt, phase 3): the card's NBA / WNBA / NCAAF functions,
+    # joining player_positions. MUST run after add_player_positions.sql.
+    "add_position_vs_opponent_bball_ncaaf.sql",
     # 2026-09-14 (mike): leftover nfl_wind_totals opening_signals rows whose
     # picks were VOIDED 09-07 / DELETED 09-11 after MAX_FIRE_LEAD. Capture
     # stayed (ON CONFLICT DO NOTHING). Deletes captures with no standing
@@ -168,6 +245,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Out/Doubtful veto compares this to the quote's snapshot_at; NULL
     # fails open. ADD COLUMN IF NOT EXISTS.
     "add_injuries_status_ts_2026_09_14.sql",
+    # 2026-09-22 (mike): was a pick actually placeable at the book? One row
+    # per pick, written by scripts/mark_placeable.py, for the opener's fresh
+    # numbers ("NEW 0m"): a book error is the model's best case if it can be
+    # placed, a feed ghost if not, and only a person at the book can say.
+    # CREATE TABLE IF NOT EXISTS + REVOKE anon/authenticated + RLS.
+    "pick_placement_checks_2026_09_22.sql",
     # 2026-09-14 (mike): NOTHING AUTOPAUSES. The 250-bet review wrote
     # mlb_prop_batter_runs and mlb_prop_pitcher_k into model_auto_pauses
     # on 2026-09-11 with no approval. Measured: those two were the only
@@ -178,59 +261,334 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-14: CLV is no-vig two-way close, sharp book when present.
     # Columns first so the view filter cannot run against a missing clv_method.
     "add_clv_method_2026_09_14.sql",
+    # 2026-10-08 (mike): grade CLV at the price taken. picks.clv_bet_book, and
+    # the graded_at_dk_legacy stamp on rows graded at DraftKings although taken
+    # elsewhere, which _backfill_clv re-measures once. MUST run after
+    # add_clv_method (it reads clv_method). Guarded: the no-op pass is DML only.
+    "clv_price_taken_2026_10_08.sql",
     "track_record_clv_no_vig_2026_09_14.sql",
+    # 2026-09-28 (Matt via CoS; Michael-gated): a paused model keeps its real
+    # verdict (scorer._paused_signal), so a paused BET can exist; it is not a
+    # signal and stays out of both published views, keyed on the row's
+    # 'model paused' marker. MUST run after track_record_clv_no_vig.
+    "record_excludes_paused_rows_2026_09_28.sql",
     # 2026-09-15 (mike): MLB game-market gate log. Live default (despite
     # no §7 cut) — does not ALTER picks; the scorer writes NONE itself.
     "add_game_market_gate_2026_09_15.sql",
     # 2026-09-19: daily model-quality findings (one-sided slates, fade
     # concentration, CLV/ROI, volume). Report only; never pauses.
     "add_model_quality_checks_2026_09_19.sql",
+    # 2026-09-23 (Matt): Discord is the board. The app joins this view to
+    # decide which bets are still in the channel. VOID does not delete the
+    # post. push_sent stays closed except lock_key + kind on the two
+    # channel kinds. No Discord mutation.
+    "discord_publish_state_2026_09_23.sql",
+    # 2026-10-09: a void notice (push_sent kind discord_void) drops that lock
+    # from v_discord_published while the notice is strictly newer, and widens
+    # anon_read_discord_publish so the security_invoker subquery can see the
+    # notice. Anon SELECT on push_sent is lock_key, kind, and sent_at (the
+    # WHERE reads the stamp). message_id stays ungranted. The original
+    # message is not deleted. Must run after discord_publish_state, which
+    # returns early once the view text contains discord_void (its keyword
+    # check) so the narrower definition is not put back on the next pass.
+    "discord_void_notice_2026_10_09.sql",
+    # 2026-09-26 (mike / Michael Alksninis): demote the ncaaf_over_under
+    # Platt map promoted 2026-09-19 17:45 ET (a=1, b=-0.281555). The
+    # decision goes back to the raw probability, which is ~0.650 at the
+    # validated +8 gate. Pinned to that promotion so a later map is left
+    # alone. Does not pause, does not move the 0.65 floor or the ±8 gate.
+    "demote_ncaaf_over_under_platt_2026_09_26.sql",
+    # 2026-09-28: NCAAF 2026 team board refresh cancelled at statement_timeout
+    # (daily run 51e965f8023c4b0e86e03fe075af1f9c, 10:15:00Z). The closing-line
+    # CTE seq-scanned odds because `bookmaker = 'draftkings' OR LIKE 'cfbd\_%'`.
+    # Replaces team_stats_board_compute with per-game index probes. Guards on
+    # the probe marker so the DDL runs once.
+    "team_stats_board_line_probe_2026_09_28.sql",
+    # 2026-09-30: MLB 2026 team board refresh cancelled at statement_timeout
+    # (daily runs 873cb1fe2e1e487d975ae3367f219a3f and
+    # fd57b13575f04d63b219134d62f434dc). The 09-28 probe still starts at the
+    # newest in-play row because the commence cutoff is a timestamptz cast
+    # on a text snapshot_at. Bounds the same index at commence. Must run
+    # after team_stats_board_line_probe_2026_09_28, which owns the function
+    # and would otherwise restore the unbounded scan on the next pass.
+    "team_stats_board_commence_bound_2026_09_30.sql",
+    # 2026-10-04 (mike): nfl_live_prop retired and its settled record struck
+    # (config.RECORD_EXCLUSIONS). Patches the LIVE view text with one clause,
+    # so it must run after every migration that owns the two record views.
+    "record_strikes_nfl_live_prop_2026_10_04.sql",
+    # 2026-10-09 (mike, "Count each fight once"): two UFC fights were bet
+    # twice by ufc_total_rounds under two game ids each. The extra copies are
+    # marked condition_status='DUPLICATE' (result untouched; no-ops after
+    # once), and the two record views stop counting a marked copy. The view
+    # patch reads the LIVE view text, so it runs after every owner above.
+    "record_counts_each_event_once_2026_10_09.sql",
+    "record_views_count_each_event_once_2026_10_09.sql",
+    # 2026-10-12 (mike: buy the NFL in-game history): a source column on
+    # nfl_odds_history and a ledger of paid calls, so the purchase resumes.
+    "add_nfl_odds_history_source_and_pulls_2026_10_12.sql",
+    # 2026-10-12 (mike: "5) yes"): the free data the NFL edge search fetched,
+    # one gzipped row per file (scripts/nfl_research_backup.py).
+    "add_nfl_research_data_backup_2026_10_12.sql",
+    # 2026-10-14: units and the W-L are the same graded picks, at the price
+    # the bet was taken at. Rewrites results_snapshots only while the old
+    # column is still there, then drops it. A later pass must not restate
+    # units: published_picks_record owns the snapshot numbers after that,
+    # and an unguarded rewrite would commit all-bets units onto posted W-L.
+    # The view patch removes the one-model units zeroing. It reads the live
+    # view, so it runs after every migration that owns that view.
+    "recompute_snapshot_units_2026_10_14.sql",
+    "home_run_units_follow_graded_profit_2026_10_14.sql",
+    # 2026-10-14: 35 extra picks rows behind one Discord lock are marked
+    # DUPLICATE (kept row untouched; none of the extras is a graded
+    # WIN/LOSS/PUSH). Two unique indexes stop a second standing BET on a
+    # publish lock and a second live BET on the same side. Skips the
+    # create, and does not raise, when a duplicate of that identity remains.
+    "discord_post_one_pick_2026_10_14.sql",
+    # 2026-10-14: uq_picks_one_live_row, if already created, covers every
+    # non-DUPLICATE live row. The NFL writer inserts AVOID then BET with
+    # ON CONFLICT DO NOTHING, so the BET is dropped. This narrows the
+    # index to signal_type BET. Property-guarded (the file above skips
+    # once the name exists). Not CONCURRENTLY; the worker applies it.
+    # Does not post. Does not change a pick row. Before the published
+    # record pass, which must stay last because it reads the live views.
+    "live_row_index_bets_only_2026_10_14.sql",
+    # 2026-10-14: the published record is the picks Discord still has.
+    # Rewrites results_snapshots once (until clv_rule = 'standard_v2'), and
+    # that pass skips a row that already matches. CLV uses standard_v2.
+    # Adds the same lock to the two app views. Reads the live view
+    # text, so it runs after every migration that owns those views,
+    # including the duplicate-row pass above. Does not post.
+    "published_picks_record_2026_10_14.sql",
+    # 2026-10-16: the 03:50Z evening pass was still unfinished after the
+    # deploy (the only open pipeline_runs row). Same aborted stamp as
+    # run_ledger._abort_orphans, this run_id only, and only while it is
+    # still unfinished. Boot closes the next one; this closes the one
+    # already open. Does not touch picks, thresholds, or pauses.
+    # Sits immediately before clv_standard_v2: that file reads the live view.
+    # published_record_units also reads the live view and is last, so it
+    # keeps the CLV columns. Every other file after the CLV stamp must not
+    # rewrite v_public_track_record (tests/test_published_record.py,
+    # tests/test_record_units_agree.py). The NHL stats views are display-only
+    # and stay after CLV. The skater window totals follow those views.
+    # Both stay before the posted-stake pair.
+    "abort_deploy_killed_evening_2026_10_16.sql",
+    # 2026-10-14: same-book raw CLV is the headline; Pinnacle power de-vig
+    # is the market-edge column. Recomputes rows not yet standard_v2 and
+    # patches v_public_track_record. Reads the live view, so it runs after
+    # every migration that owns that view. Does not touch units or pauses.
+    "clv_standard_v2_2026_10_14.sql",
+    # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
+    # catalog return on the second pass. Win, loss, or push. The line
+    # basis is a label. Does not touch picks, the record views, or a
+    # live model. Unapplied until the worker's next pass.
+    "byom_facts_schema_2026_10_16.sql",
+    # 2026-10-16: NHL Stats-tab reads (season totals, per-game value arrays,
+    # team totals, latest pre-game prop quote). Display only. Does not
+    # rewrite v_public_track_record and does not run before the CLV stamp.
+    "add_nhl_stats_views_2026_10_16.sql",
+    # 2026-10-17: NHL Players board sums, same RPC shape as the other
+    # sports. After the stats views. Does not rewrite the record.
+    "add_nhl_skater_window_totals_2026_10_17.sql",
+    # 2026-10-18: Anytime TD matchup ranks, one row per defense, plus `pos`
+    # on the NFL season and H2H stat reads. Display only. Does not rewrite
+    # v_public_track_record. Sits with the other display reads, before the
+    # posted-stake pair. Guards each piece so the DDL fires once.
+    "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-10-19: the member's own sportsbooks (onboarding + Settings).
+    # Display only: one new table behind two device-scoped RPCs. No model,
+    # pick or record view reads it. Returns on a catalog read once applied.
+    "member_sportsbooks_2026_10_19.sql",
+    # 2026-10-20: manual posts to @SignalBasePicks. One table, anon locked
+    # out, and the all-time ledger thread seeded as queued. The worker
+    # drains it. Does not rewrite the record views, picks, or push_sent.
+    "social_post_queue_2026_10_20.sql",
+    # 2026-10-20: images and an optional reply target on a manual post.
+    # Nullable columns only. Does not rewrite the ledger seed, picks, or
+    # push_sent. Returns before ALTER once the columns and checks exist.
+    "social_post_media_2026_10_20.sql",
+    # 2026-10-20: one queued X profile update for @SignalBasePicks.
+    # A new table. Does not rewrite the post queue, picks, or push_sent.
+    # Returns before CREATE once the table is locked down, so a second
+    # pass does not insert the seed again.
+    "social_profile_update_2026_10_20.sql",
+    # 2026-10-21: the sheet URL again, single-quoted, so the ? survives
+    # data.db's rewrite. Inserts only when that URL is not already queued
+    # or done. Does not rewrite the failed row, picks, or push_sent.
+    "social_profile_url_2026_10_21.sql",
+    # 2026-10-20: Eggz's Discord posts. Three tables, anon locked out.
+    # Not the model record. Does not rewrite picks, snapshots, or the
+    # published views. Returns before ALTER once the tables are locked down.
+    "add_capper_picks_2026_10_20.sql",
+    # 2026-10-20 (mike: "We should absolutely always know the goalie matchup
+    # before making a bet as well."): who ESPN and DailyFaceoff say will start
+    # in goal, one row per change. The NHL goalie gate reads its latest rows;
+    # until this lands the gate fails closed and no NHL model bets. One new
+    # table, anon locked out. Does not rewrite the record views or picks.
+    "add_nhl_goalie_designations_2026_10_20.sql",
+    # 2026-10-17: the posted-stake functions, committed on their own.
+    # The view patch is the next file. A failure there must not roll
+    # these back, or settlement's query names a function that does not
+    # exist. Does not rewrite snapshots, picks, or push_sent.
+    "published_pick_units_2026_10_17.sql",
+    # 2026-10-16: Discord #results and the Record tab share one stake.
+    # The two record views gain units and risked from the functions
+    # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
+    # Reads the live view, so it runs after every owner above, including
+    # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
+    # and does not post. This file stays last.
+    "published_record_units_2026_10_16.sql",
 ]
 
 
-def apply_view_migrations(conn=None) -> int:
-    """Run each ACTIVE_MIGRATIONS file. Returns how many applied cleanly.
-    Never raises — observability and schema polish must not break the pass."""
+@dataclass(frozen=True)
+class ViewMigrationResult:
+    """applied is how many files committed. failed is (filename, error)."""
+
+    applied: int
+    failed: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def failed_names(self) -> tuple[str, ...]:
+        return tuple(name for name, _err in self.failed)
+
+
+def _is_transient_lock_error(exc: BaseException) -> bool:
+    """True for a lock timeout (55P03) or a deadlock (40P01) only.
+
+    A statement timeout (57014, "canceling statement due to statement
+    timeout") is NOT retried: the statement got its lock and ran for the
+    whole server statement_timeout, and running it twice more would hold
+    that lock for three times as long. Anything else (missing column,
+    syntax, a guard that raised) fails the file on the first attempt too.
+    Retrying those would hide a real migration bug behind three identical
+    errors.
+    """
+    code = getattr(exc, "pgcode", None)
+    if code in _TRANSIENT_PGCODES:
+        return True
+    if code == _STATEMENT_TIMEOUT_PGCODE:
+        return False
+    # No SQLSTATE (a wrapped error): only the lock_timeout wording retries.
+    # "statement timeout" also contains the words "timeout" but not
+    # "lock timeout", so it does not match.
+    return "lock timeout" in str(exc).lower()
+
+
+def format_view_migration_failure(
+    applied: int,
+    total: int,
+    failed: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+) -> str:
+    """The line step_apply_view_migrations logs. pipeline_log keeps the last
+    ERROR, truncated at 360 characters, so the filenames lead."""
+    if not failed:
+        return (
+            f"✗ View migrations: {applied}/{total} applied — "
+            f"FAILED: {total - applied} file(s) did not apply"
+        )
+    names = ", ".join(name for name, _err in failed)
+    head = f"✗ View migrations: {applied}/{total} applied — FAILED: {names}"
+    reason = " ".join(str(failed[0][1]).split())
+    if reason:
+        extra = f" — {reason[:120]}"
+        if len(head) + len(extra) <= 320:
+            head += extra
+    return head
+
+
+def _with_lock_timeout(sql: str) -> str:
+    """The migration with its SET LOCAL lock_timeout in the SAME execute.
+
+    data/db counts any statement that is not plainly a read as a write, so
+    a SET LOCAL sent on its own marked the clean transaction dirty. A pooler
+    drop during the migration then raised ConnectionLost (the file failed)
+    instead of reconnecting and re-running it. Sent together, the
+    connection is still clean when the statement starts, so a drop
+    reconnects and replays BOTH: the replayed migration keeps its 5s
+    lock_timeout instead of waiting behind the 2min statement_timeout on
+    the new backend. SET LOCAL dies with the transaction, so a passed-in
+    connection (the CLV backfill job) does not keep the short timeout
+    after we return.
+    """
+    return f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}';\n{sql}"
+
+
+def _apply_one(conn, name: str, sql: str) -> str | None:
+    """Run one file. None means it committed. A string is the error that
+    survived the retries. Never raises.
+
+    `time.sleep` is looked up on each retry so a test can patch it. A
+    default argument would bind the real sleep at import and ignore the patch.
+    """
+    last = ""
+    for attempt in range(1, LOCK_ATTEMPTS + 1):
+        try:
+            # conn.execute, NOT conn.executescript: executescript splits on
+            # ";" and would shred a dollar-quoted DO $$...$$ block into
+            # fragments at every semicolon in its body. Each migration here
+            # must therefore be a SINGLE statement (a DO block), which is
+            # also what makes the idempotency check atomic. The only other
+            # statement in this execute is the SET LOCAL in front of it.
+            conn.execute(_with_lock_timeout(sql))
+            conn.commit()
+            return None
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            last = str(exc)
+            if attempt < LOCK_ATTEMPTS and _is_transient_lock_error(exc):
+                delay = LOCK_BACKOFF_S[min(attempt - 1, len(LOCK_BACKOFF_S) - 1)]
+                logger.warning(
+                    f"View migration lock wait ({name}), "
+                    f"attempt {attempt}/{LOCK_ATTEMPTS}: {exc}"
+                )
+                time.sleep(delay)
+                continue
+            logger.error(f"View migration FAILED ({name}): {exc}")
+            return last
+    return last
+
+
+def apply_view_migrations(conn=None) -> ViewMigrationResult:
+    """Run each ACTIVE_MIGRATIONS file. Never raises — observability and
+    schema polish must not break the pass. The caller turns `failed` into
+    the step's error line."""
     owns = conn is None
     applied = 0
+    failed: list[tuple[str, str]] = []
     try:
         conn = conn or get_connection()
     except Exception as exc:                      # no DB — nothing to do
         logger.warning(f"View migrations skipped (no connection): {exc}")
-        return 0
+        return ViewMigrationResult(0, (("(connection)", str(exc)),))
 
     try:
         for name in ACTIVE_MIGRATIONS:
             path = MIGRATIONS_DIR / name
             if not path.exists():
                 logger.warning(f"View migration missing on disk: {name}")
+                failed.append((name, "missing on disk"))
                 continue
-            try:
-                # conn.execute, NOT conn.executescript: executescript splits on
-                # ";" and would shred a dollar-quoted DO $$...$$ block into
-                # fragments at every semicolon in its body. Each migration here
-                # must therefore be a SINGLE statement (a DO block), which is
-                # also what makes the idempotency check atomic.
-                conn.execute(path.read_text(encoding="utf-8"))
-                conn.commit()
+            err = _apply_one(conn, name, path.read_text(encoding="utf-8"))
+            if err is None:
                 applied += 1
                 logger.info(f"View migration OK: {name}")
-            except Exception as exc:
-                # Roll back so one bad migration cannot poison the next.
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                logger.error(f"View migration FAILED ({name}): {exc}")
+            else:
+                failed.append((name, err))
     finally:
         if owns:
             try:
                 conn.close()
             except Exception:
                 pass
-    return applied
+    return ViewMigrationResult(applied, tuple(failed))
 
 
 if __name__ == "__main__":
-    n = apply_view_migrations()
-    print(f"{n}/{len(ACTIVE_MIGRATIONS)} view migration(s) applied")
+    result = apply_view_migrations()
+    print(f"{result.applied}/{len(ACTIVE_MIGRATIONS)} view migration(s) applied")
+    if result.failed:
+        print(format_view_migration_failure(
+            result.applied, len(ACTIVE_MIGRATIONS), result.failed))

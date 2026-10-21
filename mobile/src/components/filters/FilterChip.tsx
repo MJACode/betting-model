@@ -34,6 +34,8 @@ export interface FilterChipProps {
    */
   busy?: boolean;
   accessibilityLabel?: string;
+  /** Spoken after the label. Omitted on a chip that has nothing further to say. */
+  accessibilityHint?: string;
 }
 
 export function FilterChip({
@@ -46,6 +48,7 @@ export function FilterChip({
   disabled = false,
   busy = false,
   accessibilityLabel,
+  accessibilityHint,
 }: FilterChipProps) {
   const fg = disabled ? colors.textTertiary : active ? colors.textInverse : colors.textSecondary;
   return (
@@ -55,10 +58,13 @@ export function FilterChip({
       // 34pt tall at 'md', 28 at 'sm' — both under the 44pt HIG floor, and on
       // the Stats board height is the one thing that cannot be spent (UX
       // review, 2026-09-12). The target is made up out of the gap instead.
-      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+      // 8pt (was 6): md 31 → 47, sm 28 → 44 where the parent has the room
+      // (audit M26). In a horizontal ScrollView only the in-bounds part counts.
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
       accessibilityRole="button"
       accessibilityState={{ selected: active, disabled, busy }}
       accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityHint={accessibilityHint}
       style={({ pressed }) => [
         styles.chip,
         size === 'sm' && styles.chipSm,

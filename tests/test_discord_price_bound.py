@@ -83,10 +83,13 @@ def test_a_model_with_no_own_ev_floor_is_bound_by_the_global_one(monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.30)
     # Also skip MODEL_OWN_EV_FLOOR: since 2026-09-20 a model with an own floor
     # is bound by THAT, not the global one, so it cannot exercise this path.
-    model = next(m for m in ("mlb_moneyline", "nhl_moneyline", "ufc_moneyline")
+    # Any registered model will do; the named tuple this used to search ran
+    # out on 2026-09-21 when the NHL models got their own floor entries.
+    model = next(m for m in config.ACTION_THRESHOLDS
                  if m not in config.MODEL_MIN_EV
                  and m not in config.MODEL_MIN_ODDS
-                 and m not in config.MODEL_OWN_EV_FLOOR)
+                 and m not in config.MODEL_OWN_EV_FLOOR
+                 and m not in config.RETIRED_MODELS)
     prob, edge_floor = 0.62, 0.08
     got = price_bound(prob, model, edge_floor, None, 200)
     from_ev = 1.30 / prob

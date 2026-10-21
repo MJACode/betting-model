@@ -127,6 +127,38 @@ Forward half: the `model_calibration` health check measures the LIVE graded
 record per model (WARN at 5pp, CRIT at 8pp, n≥150), because a training-time
 metric cannot see drift after shipping.
 
+**Since 2026-10-12 it sees every model, and judges only unpaused ones**
+(`tracking/system_health.py`, `_report_model_calibration`):
+
+- **Two sources, the same split the weekly fitter uses.** MLB and WNBA pre-game
+  models are read from `mv_scored_pick_outcomes` as before (every scored pick,
+  decision probability ≥ 0.60). Everything that view cannot grade — every NBA,
+  NHL, NFL, NCAAF and UFC model, the in-play models, every market rule
+  including `wnba_prop_market` — is read from settled BETs in `picks` (a real
+  price, not VOID, not a duplicate copy), including models with no registry
+  row. Those readings are labelled **bet-only** in the detail: settled bets
+  are the model's own selections, so the gap leans high next to a reading over
+  every scored pick. The bet-only source applies **no probability floor**,
+  because every row already passed the model's own cut, and a 0.60 floor would
+  have hidden every rule and the NHL three-way model (their bets claim
+  0.47–0.58). Same 150 gate, so nothing new can alarm on a thin sample.
+- **A paused model is informational.** Its gap, count and last graded date stay
+  in the detail; it never turns the check WARN. `wnba_prop_player_threes`
+  (paused 2026-08-31) had made the check WARN every morning at +6.9pp/159. The
+  set is `config.PAUSED_MODELS`, read each run, so unpausing re-arms it. There
+  is deliberately no "nothing graded in N days" rule — that would hide a real
+  deletion or grading bug.
+- On 2026-10-12 it reads: 3 models measured, worst gap +0.7pp
+  (`mlb_prop_batter_walks`); paused `wnba_prop_player_threes` +6.9pp/159 and
+  `mlb_prop_batter_hits` +0.2pp/2504 shown as informational; no bet-only model
+  has 150 settled bets in its current window yet (largest: `ncaaf_over_under`
+  53, claiming 68.9% and hitting 52.8%).
+- **Not fixed, flagged:** the weekly fitter still reads `wnba_prop_market` from
+  the view (its id matches the view's `wnba_prop_%` filter but no grading
+  branch exists), so it fits that model on n=0 against 27 settled bets.
+  Changing what the fitter reads changes maps that decide bets, so it is not a
+  monitoring fix.
+
 ### 2026-09-14 — two CRITs, two different problems (mike)
 
 Health check predicates (decision probability ≥ 0.60, later of version/promotion
@@ -161,6 +193,26 @@ tighten `ACTION_THRESHOLDS`. Re-check when a nightly fit reports
 The health check now appends an eligibility clause for every flagged model
 (re-promote / not eligible / candidate not yet promoted) so these two stop
 reading as the same failure.
+
+### 2026-09-26 — `ncaaf_over_under` map demoted (mike)
+
+Michael Alksninis, explicit approval: "Demote ncaaf_over_under Platt map."
+Updated-By: mike.
+
+The map promoted 2026-09-19 17:45 ET (`promoted_a=1.0`, `promoted_b=-0.281555`)
+was in the decision path. On the residual ECDF a +8 over is raw 0.6503 and
+calibrates to 0.5838, so it fails the 0.65 floor. A −8.09 under is raw
+0.7111 and calibrates to 0.6501, so it clears. After the promotion the book
+was 18 under BETs and 0 over BETs.
+
+`data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql` is `demote()`
+for that one row, pinned to that `promoted_at` and that `promoted_b`. The
+worker ACTIVE_MIGRATIONS pass applies it. `load_calibrations` then returns
+no map, and `apply_calibration` returns the raw probability. Both arms are
+decided at the ±8 gate again (raw P(over) at +8 is 0.6503). The 0.65 floor,
+the point gate, and `PAUSED_MODELS` are unchanged. The nightly fit still
+writes a candidate and does not promote. A later promotion is a new model
+update; this migration will not clear it.
 
 ---
 
@@ -358,6 +410,51 @@ reads so the gate AND the Discord bound use the rule's own number. Neither
 number is swept: each sits just under the smallest bet that rule has written
 (`docs/nfl_rule_2026_track.md`). `scripts/ev_floor_replay.py` still shows the
 marked-down view for them, because it applies the fitted map directly.
+
+### The per-model floors (#796), measured on the number the gate uses (2026-09-21)
+
+#796 set each model's floor "just under its smallest written bet", reading EV
+from `picks.model_probability_cal`. **On 3,765 of the 3,945 priced BETs those
+models have written, that column equals `model_probability` or is empty** (written before
+the phase-3 maps, or by a model with no promoted map), so for every mapped
+model the floor was set on the RAW number while the gate judges the CALIBRATED
+one. Replayed through `models.honest_ev.gate` on production's maps (the local
+gate reproduced the worker's logged fade number, −0.129, exactly):
+
+- **1,008 of 3,945 written bets (26%) sit under their own model's floor.** The
+  models with no promoted map are untouched (0% blocked): `mlb_f5_moneyline`,
+  `mlb_moneyline`, `mlb_prop_batter_hits`, `mlb_prop_batter_walks`,
+  `wnba_moneyline`, `wnba_prop_player_threes`, and the two NFL rules, which
+  decide on their own probability.
+- **Where a map applies, the floor is far tighter than #796 says.** Share of
+  each model's written bets the gate now blocks: `wnba_prop_player_points` 99%,
+  `wnba_prop_player_pra` 94%, `nfl_prop_market` 93% (0.20 by choice, #794),
+  `mlb_total_public_fade` 88%, `mlb_prop_pitcher_walks` 84%, `wnba_prop_market`
+  75%, `mlb_runline` 64%, `mlb_spread_market` 62%, `mlb_prop_pitcher_er` 47%,
+  `mlb_prop_batter_tb` 46%, `wnba_prop_player_rebounds` 41%, `nfl_live_prop`
+  38%, `mlb_over_under` 35%; `ufc_total_rounds` 8 of 8, `ncaaf_spread` 1 of 1.
+- **What the blocked bets did** (settled, priced, not VOID; units, IN-SAMPLE —
+  the maps were fit on these same records): across the models with any blocked
+  bet, **blocked 915 bets −85.1u (−9.3%)**; **kept 1,557 bets −111.2u
+  (−7.1%)**. The floor is refusing losing bets and keeping losing bets.
+- **One model runs the other way and it is not a thin sample:**
+  `wnba_prop_player_rebounds` — the 93 bets its floor blocks went +6.8u while
+  the 136 it keeps went −19.9u. One floor value, unswept, in-sample; it is a
+  reason to run that model's own sweep, not a reason to move the number. The
+  other two positive blocked cells ARE thin: `wnba_prop_player_assists`
+  (+6.8u / 11) and `ncaaf_over_under` (+2.5u / 5).
+
+**So there is nothing here to restore.** "Each behaves as it did before the
+global floor landed" (config.py) is false for every mapped model, but the
+behaviour it no longer has was −85 units. A floor is a model update and its
+owner's call (CLAUDE.md §1b); no floor was moved. The two that matter in
+practice are `mlb_total_public_fade` and `mlb_spread_market`: their
+probabilities are the market's own (fade) or a Pinnacle no-vig fair (spread),
+the pooled offset takes ~6 points off both, and every pick comes out at EV
+−0.11 to −0.15 — they cannot bet under ANY non-negative floor while they are
+judged on the pooled map. If they are wanted back, that is the question to
+decide (the two NFL rules were moved to `MODELS_ON_OWN_PROBABILITY` for the
+same reason), not the floor.
 
 ### Operating it
 

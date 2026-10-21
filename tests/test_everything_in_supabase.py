@@ -56,6 +56,14 @@ ALLOWED = {
     # is now in `nfl_stadium_weather_hourly` (tests/test_nfl_weather_cache_import.py
     # pins the importer); what remains on disk is a cache of Supabase.
     "nfl/data/weather_cache": "imported to Supabase by nfl_weather_cache_import.py",
+    # 5,333 archived DraftKings/FanDuel in-play prop snapshots, 2023-25. Every
+    # file is in `nfl_live_prop_snapshots` keyed on its own sha256, and
+    # nfl/live_model/backtest/backup_snaps.py both backs them up and restores
+    # them (--restore refuses on a checksum mismatch, so a restore proves it
+    # reproduced the original file rather than merely a file). What sits on
+    # disk after `scripts/nfl_live_prop_assessment --restore` is therefore a
+    # cache of Supabase, the sanctioned shape, and is deleteable at any time.
+    "nfl/data/live_model/prop_snaps": "backed up to Supabase by backup_snaps.py",
     "tests": "test fixtures",
     "tests/fixtures": "test fixtures",
     "data/migrations": "schema",
@@ -65,8 +73,13 @@ ALLOWED = {
     ".github": "workflows",
 }
 
+# Derived build artifacts, not acquired data: every file here is re-derived
+# from the repo itself. graphify-out/ is the code knowledge graph and its
+# extraction cache (graph committed, cache gitignored; `graphify update .`), the same kind of
+# thing as .pytest_cache, not a dataset that was bought or fetched.
 SKIP_PARTS = {".git", "node_modules", "__pycache__", ".venv", "venv",
-              ".pytest_cache", ".expo", "build", "dist", ".claude"}
+              ".pytest_cache", ".expo", "build", "dist", ".claude",
+              "graphify-out"}
 
 
 def _data_dirs() -> dict[str, int]:
@@ -138,8 +151,13 @@ def test_every_buying_ingestor_keys_its_resume_on_a_source_marker(shape):
         src = p.read_text(encoding="utf-8")
         if "requests.get" not in src and "_insert_odds" not in src:
             continue
-        assert "SOURCE_PREFIX" in src, f"{p.name}: no source marker to resume on"
-        assert "source LIKE" in src or "source like" in src, (
+        # Either shape keys the resume on a `source` value the ingestor owns:
+        # a prefix matched with LIKE, or one exact marker matched with =.
+        assert "SOURCE_PREFIX" in src or "SOURCE = " in src, (
+            f"{p.name}: no source marker to resume on")
+        reads_back = any(k in src for k in (
+            "source LIKE", "source like", "source = %s", "source=%s"))
+        assert reads_back, (
             f"{p.name}: nothing reads the marker back, so a re-run re-buys")
 
 

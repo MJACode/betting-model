@@ -371,6 +371,42 @@ def _validate_player_news(args: dict) -> dict:
     return {"sports": sports, "run_date": run_date}
 
 
+def _job_player_positions(**kw):
+    """Fetch NBA / WNBA / NCAAF positions into `player_positions`, on the worker.
+
+    WHY HERE. The position-vs-opponent card's phase 3 (Matt, 2026-10-05) needs
+    a position per player, and both sources -- ESPN core rosters for
+    basketball, CFBD /roster for NCAAF -- 403 from the dev sandbox's egress
+    proxy (requests and WebFetch, 2026-10-06), while CFBD_API_KEY is set on
+    the worker only. So the response shapes are unverified until this runs:
+    `dry_run: true` writes nothing and returns counts, the name-match rate, the
+    positions seen and a sample, and is read back from worker_jobs.result
+    before any real run is queued.
+    """
+    from data.ingestors.player_positions_ingestor import ingest_player_positions
+    return ingest_player_positions(
+        sports=kw["sports"], season=kw["season"], dry_run=kw["dry_run"])
+
+
+def _validate_player_positions(args: dict) -> dict:
+    from data.ingestors.player_positions_ingestor import SPORTS
+    sports = args.get("sports") or list(SPORTS)
+    if not isinstance(sports, list) or not sports:
+        raise ValueError("sports must be a non-empty list")
+    sports = [str(s).upper() for s in sports]
+    bad = sorted(set(sports) - set(SPORTS))
+    if bad:
+        raise ValueError(f"unknown sport {bad}; known {list(SPORTS)}")
+    season = args.get("season")
+    season = int(season) if season not in (None, "") else None
+    if season is not None and not (2014 <= season <= datetime.now().year + 1):
+        raise ValueError(f"season out of range: {season}")
+    dry = args.get("dry_run", True)
+    if not isinstance(dry, bool):
+        raise ValueError("dry_run must be true or false")
+    return {"sports": sports, "season": season, "dry_run": dry}
+
+
 def _validate_ncaaf_prop_odds(args: dict) -> dict:
     """College props, measured before they are scheduled.
 
@@ -443,6 +479,172 @@ def _validate_nhl_odds_history(args: dict) -> dict:
     return {"max_credits": cap}
 
 
+# Keys this job will read. Anything else — including max_credits, credit_cap,
+# reserve_days — is a malformed request and fails in the validator, before the
+# module is imported and before any Odds API call. Michael, 2026-10-03: there
+# is no credit cap on this purchase, so the job must not grow one.
+_NHL_DERIVATIVE_ODDS_ARGS = frozenset({"apply", "probe", "seasons"})
+
+
+def _job_nhl_derivative_odds_history(**kw):
+    """Historical NHL team totals, alternate totals, and first-period totals.
+
+    Runs data.ingestors.nhl_derivative_odds_history. That module skips a game
+    already stored under odds_api_nhl_totals_history (or in its pull ledger)
+    and, on --apply, buys every remaining scored game. It does not stop for
+    credits. Dry run is argv with no --apply: the plan, plus a three-game
+    measured probe when the key is set.
+    """
+    argv: list[str] = []
+    seasons = kw.get("seasons")
+    if seasons:
+        argv.extend(["--seasons", str(seasons[0]), str(seasons[1])])
+    if kw.get("probe"):
+        argv.extend(["--probe", str(kw["probe"])])
+    elif kw.get("apply"):
+        argv.append("--apply")
+    return _run_script_main(
+        "data.ingestors.nhl_derivative_odds_history", argv)[-4000:]
+
+
+def _validate_nhl_derivative_odds_history(args: dict) -> dict:
+    """Dry run unless apply is true. No credit-ceiling argument is accepted."""
+    extra = sorted(set(args) - _NHL_DERIVATIVE_ODDS_ARGS)
+    if extra:
+        raise ValueError(
+            f"unknown args {extra}; this job takes apply, probe, and seasons, "
+            "and it has no credit ceiling")
+    if "apply" in args and not isinstance(args["apply"], bool):
+        raise ValueError("apply must be true or false")
+    apply = bool(args.get("apply", False))
+    probe = args.get("probe")
+    if probe is not None:
+        probe = str(probe)
+        datetime.strptime(probe, "%Y-%m-%d")  # ValueError if it is not a date
+    if apply and probe:
+        raise ValueError("pass apply or probe, not both")
+    seasons = args.get("seasons")
+    if seasons is None:
+        cleaned: tuple[int, int] | None = None
+    else:
+        if not isinstance(seasons, (list, tuple)) or len(seasons) != 2:
+            raise ValueError("seasons must be two ending years")
+        try:
+            start, end = int(seasons[0]), int(seasons[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"seasons must be two ending years, got {seasons!r}") from exc
+        if start > end:
+            raise ValueError(f"seasons out of order: {start}-{end}")
+        # A year that is not an NHL ending year is a typo. Omitting seasons
+        # leaves the module's own window, which is the full purchase.
+        if not (2020 <= start <= end <= datetime.now().year + 2):
+            raise ValueError(f"seasons out of range: {start}-{end}")
+        cleaned = (start, end)
+    return {"apply": apply, "probe": probe, "seasons": cleaned}
+
+
+# ── NHL research scripts, run where the database is ─────────────────────────
+#
+# 2026-10-08. The NHL backtests and labs read production through
+# get_connection(), and a dev session's machine may hold no DATABASE_URL (the
+# one that asked for this did not: "DATABASE_URL is not set"). Asked how to
+# run them, the person directing chose the worker. The worker already holds the
+# connection string, so a re-grade is a declared job, not a handover.
+#
+# READ-ONLY BY CONSTRUCTION. Every module below prints tables and writes
+# nothing: tests/test_nhl_research_job.py reads each one's source on every run
+# and fails on an INSERT, UPDATE, DELETE, TRUNCATE or commit(). A script's
+# file-writing flags (--dump, --cache) are not arguments here, so the job
+# cannot write outside its own worker_jobs row.
+#
+# An allowlist of modules and typed arguments, never an argv string -- the
+# queue is not a shell (test_there_is_no_shell_or_command_column).
+_NHL_RESEARCH_SEASONS = (2024, 2025, 2026)
+
+
+def _nhl_prop_spec(value) -> str:
+    import models.nhl_props as np_
+    v = str(value)
+    if v not in np_.SPECS:
+        raise ValueError(f"model must be one of {sorted(np_.SPECS)}, got {v!r}")
+    return v
+
+
+def _nhl_priced_season(value) -> str:
+    try:
+        v = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"season must be an ending year, got {value!r}") from exc
+    if v not in _NHL_RESEARCH_SEASONS:
+        raise ValueError(f"season must be one of {_NHL_RESEARCH_SEASONS}, got {v}")
+    return str(v)
+
+
+# script -> (module, {argument: (cli flag, validator)})
+NHL_RESEARCH_SCRIPTS: dict[str, tuple[str, dict]] = {
+    "nhl_prop_backtest": ("scripts.nhl_prop_backtest", {"model": ("--model", _nhl_prop_spec)}),
+    "nhl_prop_combined_cap": ("scripts.nhl_prop_combined_cap", {}),
+    "nhl_prop_blocked_shots_backtest": ("scripts.nhl_prop_blocked_shots_backtest", {}),
+    "nhl_prop_lab_priced": ("scripts.nhl_prop_lab_priced", {"season": ("--season", _nhl_priced_season)}),
+    "nhl_threeway_lab": ("scripts.nhl_threeway_lab", {"season": ("--season", _nhl_priced_season)}),
+    "nhl_totals_lab": ("scripts.nhl_totals_lab", {}),
+    "nhl_moneyline_market_lab": ("scripts.nhl_moneyline_market_lab", {}),
+    "nhl_live_artifact_grade": ("scripts.nhl_live_artifact_grade", {}),
+    "nhl_derivative_totals_backtest": ("scripts.nhl_derivative_totals_backtest", {}),
+    "nhl_prop_ev_lab": ("scripts.nhl_prop_ev_lab", {}),
+}
+# The full printout is kept on the row; a job card shows the last 800 chars.
+_NHL_RESEARCH_STDOUT_CAP = 400_000
+
+
+def _job_nhl_research(**kw):
+    """Run one allowlisted NHL backtest or lab and keep everything it printed.
+
+    The statement timeout is raised for this job's connections only and put
+    back afterwards, as the retrain does: a three-season prop load runs past
+    the database's 120s default.
+    """
+    module, flags = NHL_RESEARCH_SCRIPTS[kw["script"]]
+    argv: list[str] = []
+    for name, value in kw["args"].items():
+        argv += [flags[name][0], value]
+    prev_timeout = os.environ.get("DB_STATEMENT_TIMEOUT_MS")
+    os.environ["DB_STATEMENT_TIMEOUT_MS"] = str(kw["statement_timeout_ms"])
+    try:
+        stdout = _run_script_main(module, argv)
+    finally:
+        if prev_timeout is None:
+            os.environ.pop("DB_STATEMENT_TIMEOUT_MS", None)
+        else:
+            os.environ["DB_STATEMENT_TIMEOUT_MS"] = prev_timeout
+    text = stdout.strip()
+    return {"script": kw["script"], "argv": argv,
+            "summary": text[-800:] if text else "(no output)",
+            "chars": len(text), "truncated": len(text) > _NHL_RESEARCH_STDOUT_CAP,
+            "stdout": text[-_NHL_RESEARCH_STDOUT_CAP:]}
+
+
+def _validate_nhl_research(args: dict) -> dict:
+    extra = sorted(set(args) - {"script", "args", "statement_timeout_ms"})
+    if extra:
+        raise ValueError(f"unknown keys {extra}; this job takes script, args, statement_timeout_ms")
+    script = str(args.get("script") or "")
+    if script not in NHL_RESEARCH_SCRIPTS:
+        raise ValueError(f"script must be one of {sorted(NHL_RESEARCH_SCRIPTS)}, got {script!r}")
+    _, flags = NHL_RESEARCH_SCRIPTS[script]
+    given = args.get("args") or {}
+    if not isinstance(given, dict):
+        raise ValueError("args must be an object of named arguments")
+    unknown = sorted(set(given) - set(flags))
+    if unknown:
+        raise ValueError(f"{script} takes {sorted(flags) or 'no arguments'}, not {unknown}")
+    cleaned = {name: flags[name][1](value) for name, value in sorted(given.items())}
+    timeout_ms = int(args.get("statement_timeout_ms") or 1_800_000)   # 30 min
+    if not (60_000 <= timeout_ms <= 7_200_000):
+        raise ValueError(f"statement_timeout_ms out of range: {timeout_ms}")
+    return {"script": script, "args": cleaned, "statement_timeout_ms": timeout_ms}
+
+
 def _job_relabel_in_play(**kw):
     from data.ingestors.odds_ingestor import relabel_in_play
     return relabel_in_play(sport=kw["sport"], since=kw["since"])
@@ -466,6 +668,109 @@ def _job_derive_first_pitch(**kw):
     conn = get_connection()
     try:
         return derive_first_pitch(conn)
+    finally:
+        conn.close()
+
+
+def _validate_publish_oct13_nhl_reply(args: dict) -> dict:
+    """No arguments. The line and the tweet it replies to are fixed."""
+    if args:
+        raise ValueError(
+            "publish_oct13_nhl_reply accepts no arguments; the line and reply target are fixed")
+    return {}
+
+
+def _job_publish_oct13_nhl_reply(**kw):
+    """Reply the Oct 13 line under the correction tweet. Discord is skipped
+    when that follow-up is already in push_sent."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_oct13_reply
+
+    conn = get_connection()
+    try:
+        return publish_oct13_reply(conn)
+    finally:
+        conn.close()
+
+
+def _validate_publish_oct13_nhl_line(args: dict) -> dict:
+    """No arguments. The line is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_oct13_nhl_line accepts no arguments; the line is fixed")
+    return {}
+
+
+def _job_publish_oct13_nhl_line(**kw):
+    """Post the Oct 13 NHL line once. The longer correction has already gone."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_oct13_line
+
+    conn = get_connection()
+    try:
+        return publish_oct13_line(conn)
+    finally:
+        conn.close()
+
+
+def _job_publish_full_record_standard(**kw):
+    """Full record in the standard recap embed, once, Discord only."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record_standard
+
+    conn = get_connection()
+    try:
+        return publish_full_record_standard(conn)
+    finally:
+        conn.close()
+
+
+def _job_delete_custom_record_post(**kw):
+    """Delete Discord message 1560045816352079957 once (owner, 2026-10-14)."""
+    from scripts.post_record_correction import delete_custom_record_post
+    return delete_custom_record_post()
+
+
+def _validate_publish_full_record(args: dict) -> dict:
+    """No arguments. The text is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_full_record accepts no arguments; the text is fixed")
+    return {}
+
+
+def _job_publish_full_record(**kw):
+    """Post the 2026-10-14 full record once to Discord results. Not X."""
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_full_record
+
+    conn = get_connection()
+    try:
+        return publish_full_record(conn)
+    finally:
+        conn.close()
+
+
+def _validate_publish_record_correction(args: dict) -> dict:
+    """No arguments. The correction text is fixed in the script."""
+    if args:
+        raise ValueError(
+            "publish_record_correction accepts no arguments; the correction text is fixed")
+    return {}
+
+
+def _job_publish_record_correction(**kw):
+    """Post the 2026-10-14 record correction once to Discord results and to X.
+
+    The words live in scripts/post_record_correction.py. This job does not
+    take a text argument, and a retry skips any surface already in push_sent.
+    """
+    from data.db import get_connection
+    from scripts.post_record_correction import publish_record_correction
+
+    conn = get_connection()
+    try:
+        return publish_record_correction(conn)
     finally:
         conn.close()
 
@@ -608,6 +913,66 @@ def _validate_publish_discord_signals(args: dict) -> dict:
     return {"target_date": raw}
 
 
+def _job_publish_discord_void(**kw):
+    """Post a one-off void notice for picks that are already VOID and posted.
+
+    Calls notify_discord_void. dry_run defaults to true, so a job that omits
+    the flag returns the payload and does not post. The real post is
+    dry_run false, run by a person after they have read the payload.
+
+    Does not edit or delete the original Discord messages. Does not update
+    pick rows. A lock already carrying discord_void is skipped.
+    """
+    from tracking.discord_notifier import notify_discord_void
+
+    return notify_discord_void(
+        pick_ids=kw["pick_ids"],
+        reason=kw.get("reason"),
+        dry_run=kw.get("dry_run", True),
+    )
+
+
+def _validate_publish_discord_void(args: dict) -> dict:
+    raw = args.get("pick_ids")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("pick_ids must be a non-empty list of pick ids")
+    try:
+        ids: list[int] = []
+        seen: set[int] = set()
+        for p in raw:
+            # bool is an int. A float or a numeric string must not be
+            # truncated or coerced: int(2.7) is 2 and int("8") is 8.
+            if isinstance(p, bool) or not isinstance(p, int):
+                raise ValueError("pick_ids must be integers")
+            if p <= 0:
+                raise ValueError(f"pick id {p} is not a pick")
+            if p not in seen:
+                seen.add(p)
+                ids.append(p)
+    except ValueError as exc:
+        if str(exc).startswith("pick id") or str(exc).startswith("pick_ids"):
+            raise
+        raise ValueError("pick_ids must be integers") from exc
+    if len(ids) > 100:
+        raise ValueError(f"{len(ids)} picks in one void notice; split it")
+    reason = args.get("reason")
+    if reason is not None:
+        reason = str(reason).strip()
+        if not reason:
+            reason = None
+        elif len(reason) > 4000:
+            raise ValueError("reason is longer than Discord's description cap")
+    dry_run = args.get("dry_run", True)
+    if not isinstance(dry_run, bool):
+        raise ValueError(
+            "dry_run must be true or false (a JSON boolean); "
+            f"got {dry_run!r}")
+    out: dict = {"pick_ids": ids, "dry_run": dry_run}
+    if reason:
+        out["reason"] = reason
+    return out
+
+
 def _job_discord_probe(**kw):
     """Ask Discord WHICH CHANNEL each configured webhook actually points at.
 
@@ -702,20 +1067,38 @@ def _job_void_picks(**kw):
     Same rules as the script: a graded WIN/LOSS/PUSH is refused, an
     already-void pick is a no-op, and every row keeps its created_at, its line
     and its price. The reason is written to the row.
+
+    A pick already posted as a signal is refused unless the job says
+    `"allow_posted": true` (mike, 2026-10-09: "Change the rule, void them").
+    That opt-in is for a posted pick decided on a price nobody could bet; the
+    module docstring of scripts/void_picks.py says when, and why the lock
+    exists. It never makes a graded pick voidable; `"allow_graded": true`
+    does that (mike, 2026-10-20: "Void the 6 mlb picks"), for a pick that
+    should never have been produced, found after it settled. The grade it
+    overwrites is kept in the row's condition_note. The original message is
+    not edited or deleted. After the void commits, a pick that was posted
+    gets a void notice with this reason. An unposted void posts nothing, and
+    a rejected notice does not undo the void.
     """
     from data.db import get_connection
-    from scripts.void_picks import _select, plan_voids, void
+    from scripts.void_picks import _select, announce_posted_voids, plan_voids, void
 
     conn = get_connection()
     try:
         rows = _select(conn, kw["pick_ids"], None, None, None)
-        to_void, refused = plan_voids(rows, kw["reason"])
+        to_void, refused = plan_voids(rows, kw["reason"],
+                                      allow_posted=bool(kw.get("allow_posted", False)),
+                                      allow_graded=bool(kw.get("allow_graded", False)))
         void(conn, to_void, kw["reason"])
         conn.commit()
+        notice = announce_posted_voids(to_void, kw["reason"])
         found = {r["pick_id"] for r in rows}
-        return {"voided":  [r["pick_id"] for r in to_void],
-                "refused": [[r["pick_id"], r["why"]] for r in refused],
-                "missing": [p for p in kw["pick_ids"] if p not in found]}
+        out = {"voided":  [r["pick_id"] for r in to_void],
+               "refused": [[r["pick_id"], r["why"]] for r in refused],
+               "missing": [p for p in kw["pick_ids"] if p not in found]}
+        if notice is not None:
+            out["void_notice"] = notice
+        return out
     finally:
         conn.close()
 
@@ -734,7 +1117,19 @@ def _validate_void_picks(args: dict) -> dict:
     if len(reason) < 20:
         raise ValueError("reason must say what was wrong with the pick "
                          "(20+ characters); it is written to the row")
-    return {"pick_ids": ids, "reason": reason[:500]}
+    # A real JSON boolean only. "true", 1 or null is a typo, and a typo must
+    # not be what lifts the posted-signal lock.
+    allow_posted = args.get("allow_posted", False)
+    if not isinstance(allow_posted, bool):
+        raise ValueError("allow_posted must be true or false (a JSON boolean); "
+                         f"got {allow_posted!r}")
+    # The same for the settled-result lock (mike, 2026-10-20).
+    allow_graded = args.get("allow_graded", False)
+    if not isinstance(allow_graded, bool):
+        raise ValueError("allow_graded must be true or false (a JSON boolean); "
+                         f"got {allow_graded!r}")
+    return {"pick_ids": ids, "reason": reason[:500], "allow_posted": allow_posted,
+            "allow_graded": allow_graded}
 
 
 def _job_ncaaf_pbp_pull(**kw):
@@ -984,9 +1379,12 @@ def _job_team_stats_asof_verify(**kw):
     queue's ❌ card carries the detail. The rebuild itself already ran
     2026-09-03; this job is the ongoing gate after the marker lifts the freeze.
 
-    verify() skips the current max (live) season for impossible-games and
-    tolerates a 1-game date-boundary mismatch — see that function. This wrapper
-    only reports what verify returns; it never rebuilds or DELETE.
+    verify() skips the current max (live) season for impossible-games,
+    tolerates a 1-game date-boundary mismatch, and excuses a thin snapshot
+    count on that live season only while its finals span fewer than
+    MIN_SNAPSHOTS_PER_SEASON days — see that function. Historical seasons
+    are not excused. This wrapper only reports what verify returns; it
+    never rebuilds or DELETE.
     """
     from data.db import get_connection
     from data.team_stats_rebuild import SPORTS, verify
@@ -1013,6 +1411,7 @@ def _job_team_stats_asof_verify(**kw):
                 "impossible": len(v["impossible"]),
                 "thin_seasons": v["thin_seasons"],
                 "skipped_live_season": v.get("skipped_live_season"),
+                "live_snapshot_grace": v.get("live_snapshot_grace"),
             })
             if v["impossible"]:
                 eg = v["impossible"][0]
@@ -1065,6 +1464,7 @@ def _job_clv_backfill(**kw):
     from zoneinfo import ZoneInfo
 
     from data.db import get_connection
+    from data.view_migrations import apply_view_migrations
     from tracking.paper_tracker import _backfill_clv
 
     max_passes = int(kw.get("max_passes") or _CLV_BACKFILL_MAX_PASSES)
@@ -1072,6 +1472,11 @@ def _job_clv_backfill(**kw):
     conn = get_connection()
     filled_per_pass: list[int] = []
     try:
+        # A declared job is claimed on the worker's next tick, which can come
+        # before the first pass after a deploy has applied that deploy's
+        # migrations -- and the capture SELECT names columns a migration adds
+        # (clv_bet_book, 2026-10-08). Every file is idempotent and never raises.
+        apply_view_migrations(conn)
         for n in range(1, max_passes + 1):
             filled = int(_backfill_clv(conn, now_iso) or 0)
             conn.commit()
@@ -1427,6 +1832,42 @@ def _job_mlb_over_under_retrain_sweep(**kw):
     }
 
 
+def _validate_byom_game_facts(args: dict) -> dict:
+    """NFL game facts. apply defaults false so a queued job writes nothing
+    until someone asks. Seasons before DraftKings history are refused.
+    """
+    from byom.constants import DK_HISTORY_START_SEASON
+
+    sport = str(args.get("sport") or "NFL")
+    if sport != "NFL":
+        raise ValueError(f"byom_game_facts builds NFL only, got {sport!r}")
+    season = args.get("season")
+    if season in (None, ""):
+        season = None
+    else:
+        season = int(season)
+        if season < DK_HISTORY_START_SEASON:
+            raise ValueError(
+                f"season {season} is before DraftKings history "
+                f"({DK_HISTORY_START_SEASON})")
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    return {"sport": sport, "season": season, "apply": apply}
+
+
+def _job_byom_game_facts(**kw):
+    """Write byom_game_facts. Does not touch picks or a live model."""
+    from data.db import get_connection
+    from byom.load import build_seasons
+
+    conn = get_connection()
+    try:
+        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+    finally:
+        conn.close()
+
+
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
@@ -1465,6 +1906,28 @@ JOBS = {
     "publish_results": (_job_publish_results, _validate_publish_x_results),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
+    # One-off void notice. dry_run defaults true. Does not edit or delete
+    # the original messages. See _job_publish_discord_void.
+    "publish_discord_void": (_job_publish_discord_void,
+                             _validate_publish_discord_void),
+    # One post of the 2026-10-14 record correction. Text is fixed in
+    # scripts/post_record_correction.py. See _job_publish_record_correction.
+    "publish_record_correction": (_job_publish_record_correction,
+                                  _validate_publish_record_correction),
+    # Owner-approved full record, Discord only. See _job_publish_full_record.
+    "publish_full_record": (_job_publish_full_record,
+                            _validate_publish_full_record),
+    "delete_custom_record_post": (_job_delete_custom_record_post,
+                                  _validate_publish_full_record),
+    "publish_full_record_standard": (_job_publish_full_record_standard,
+                                     _validate_publish_full_record),
+    # One line, after the 2026-10-14 correction. See _job_publish_oct13_nhl_line.
+    "publish_oct13_nhl_line": (_job_publish_oct13_nhl_line,
+                               _validate_publish_oct13_nhl_line),
+    # Reply under the correction's per-sport tweet. See
+    # _job_publish_oct13_nhl_reply.
+    "publish_oct13_nhl_reply": (_job_publish_oct13_nhl_reply,
+                                _validate_publish_oct13_nhl_reply),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
@@ -1473,6 +1936,14 @@ JOBS = {
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
     "nhl_odds_history": (_job_nhl_odds_history, _validate_nhl_odds_history),
+    # Derivative totals (team, alternate, first period). No credit ceiling:
+    # Michael, 2026-10-03. Dry run is apply=false. See
+    # _job_nhl_derivative_odds_history.
+    "nhl_derivative_odds_history": (_job_nhl_derivative_odds_history,
+                                    _validate_nhl_derivative_odds_history),
+    # Measure-only: one allowlisted NHL backtest or lab, its printout on the
+    # row. Writes nothing else. See _job_nhl_research.
+    "nhl_research": (_job_nhl_research, _validate_nhl_research),
     "game_log_backfill": (_job_game_log_backfill, _validate_game_log_backfill),
     "ncaaf_player_backfill": (_job_ncaaf_player_backfill,
                               _validate_ncaaf_player_backfill),
@@ -1481,6 +1952,13 @@ JOBS = {
     # Read-mostly: writes only player_news. Forces a real ESPN fetch (no
     # max-age skip) and returns per-sport diagnostics. See _job_player_news.
     "player_news": (_job_player_news, _validate_player_news),
+    # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
+    # unreachable from the dev sandbox. See _job_player_positions.
+    "player_positions": (_job_player_positions, _validate_player_positions),
+    # NFL Build Your Own Model game facts. apply defaults false. Not listed
+    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
+    "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
 }
 
 

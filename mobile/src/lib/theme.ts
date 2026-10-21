@@ -6,6 +6,8 @@
 import { Platform } from 'react-native';
 
 import type { MatchupGrade } from './matchup';
+import { pnlTone } from './tone';
+import { FONT_SIZE_MICRO } from './typeScale';
 
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
@@ -19,7 +21,15 @@ export const colors = {
   // Text
   textPrimary: '#000000',
   textSecondary: '#3C3C43',
-  textTertiary: '#3C3C4399',
+  // Was the iOS label-tertiary '#3C3C4399' (3.44:1 on bgCard, 3.29:1 on bg),
+  // under AA at the 11–13pt it is used at for times, provenance and footnotes.
+  // Opaque #6C6C70 is 5.23:1 on bgCard, 4.69:1 on bg and 4.56:1 on noneSoft —
+  // still lighter than textSecondary, so the hierarchy holds (audit H7).
+  textTertiary: '#6C6C70',
+  // The paused-pick chip is this grey on noneSoft. textTertiary is 4.56:1
+  // there, on the floor. #5C5C62 is 5.79:1 on noneSoft and still lighter
+  // than textSecondary (9.55:1), so the chip stays quieter than a Pick chip.
+  pausedInk: '#5C5C62',
   textInverse: '#FFFFFF',
 
   // Separators
@@ -42,6 +52,9 @@ export const colors = {
 
   // Tints
   tint: BRAND_INK, // primary actions, links, selection
+  // Selected Signals Slip / Track. A light wash of tint, so the ON state
+  // reads as selected and the label stays tint (measured on this wash).
+  tintSoft: '#E6E8EC',
   // A STATUS colour, never a control: the old system blue kept for the one
   // grade/pill/fill that means "good / in progress" and must not look like a
   // button now that tint is near-black (UX review 2026-09-03).
@@ -52,8 +65,26 @@ export const colors = {
   betSoft: '#E8F8EC',
   avoid: '#FF3B30', // red
   avoidSoft: '#FDECEB',
+  // Also the empty Anytime TD meter bar. #C6C6C8 on the white card is
+  // 1.7:1; this gray is 3.26:1 on bgCard, which clears the 3:1 non-text floor
+  // (Designer review of #995).
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
+
+  // ── Text-safe inks (usability audit H1 / H2 / H8, 2026-09-25) ────────────
+  // `bet` / `avoid` / `med` are FILLS, dots and icons. As text they measure
+  // 2.22 / 3.55 / 1.97:1 on bgCard — under the 4.5:1 AA floor on exactly the
+  // numbers people come to read (P&L, ROI, EV, CLV, warnings, BET/AVOID).
+  // Wherever green, red or amber is TEXT, use the ink; keep the bright hue for
+  // the fill or icon beside it. Every value also carries a sign or a word, so
+  // colour is never the only carrier (WCAG 1.4.1). Measured on their real
+  // grounds by scripts/verify_contrast_tokens.ts:
+  //   betInk   5.08 bgCard · 4.55 bg · 4.61 betSoft   (NOT on noneSoft/avoidSoft: 4.4)
+  //   avoidInk 5.73 bgCard · 5.13 bg · 5.01 avoidSoft
+  //   medInk   5.43 bgCard · 4.86 bg · 4.99 medSoft
+  betInk: '#1A7F37',
+  avoidInk: '#C4281C',
+  medInk: '#9A5B00',
 
   // ── The board's good / average / bad ramp ────────────────────────────────
   // Used by BOTH traffic lights on the Stats board: the matchup grade and the
@@ -137,7 +168,7 @@ export const font = {
     // sub-caption line from inventing a third size nobody agreed to
     // (UX review, 2026-09-05).
     nano: 10,
-    micro: 11,
+    micro: FONT_SIZE_MICRO,
     caption: 12,
     footnote: 13,
     body: 15,
@@ -155,6 +186,37 @@ export const font = {
     bold: '700' as const,
   },
 };
+
+/**
+ * The text colour for a signed result — P&L, ROI, EV, CLV, a line move. Gain
+ * reads `betInk`, loss `avoidInk`, and zero / a push / a missing value a
+ * neutral `textSecondary` (never a green "+0.00" or a red "−0.00").
+ *
+ * The tone is taken from the value ROUNDED the way the screen shows it —
+ * `digits` decimals of `value × scale` — so a ratio printed as "0.0%" is grey
+ * and one printed as "+0.1%" is green. Match the formatter beside it:
+ * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatCurrencySigned(v)` →
+ * `pnlColor(v, 2)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
+ *
+ * The rule itself lives in `lib/tone.ts` so the verify scripts, which cannot
+ * import react-native, can pin it.
+ */
+export function pnlColor(value: number | null | undefined, digits: number, scale = 1): string {
+  return colors[pnlTone(value, digits, scale)];
+}
+
+/**
+ * The text-safe ink for a bright semantic hue: bet/positive/high → betInk,
+ * avoid/negative → avoidInk, med → medInk; anything else passes through.
+ * For rows where one colour drives an icon AND its words — the icon keeps
+ * the bright hue, the words take the ink (usability audit H8).
+ */
+export function inkFor(hue: string): string {
+  if (hue === colors.bet || hue === colors.positive || hue === colors.high) return colors.betInk;
+  if (hue === colors.avoid || hue === colors.negative) return colors.avoidInk;
+  if (hue === colors.med) return colors.medInk;
+  return hue;
+}
 
 /** Intensity 0..1 for heat-map cells. Returns hex with alpha. */
 export function heatColor(profit: number, max: number): string {

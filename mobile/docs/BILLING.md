@@ -233,8 +233,9 @@ means first moving the website + Claude-mobile onto a service-role key, then
 revoking anon SELECT on `picks`, then serving signals through a gated RPC. Do
 it in that order or the daily workflow breaks.
 
-**2. Selling picks raises the bar on claims.** CLAUDE.md §2 still frames this
-as paper-only for a model that has not cleared its go-live gate. Once money
+**2. Selling picks raises the bar on claims.** CLAUDE.md §2 reports gate
+standing (≥50 settled picks, positive ROI, calibration ≤5%). The bets are
+live money either way. Once money
 changes hands, ROI and
 win-rate claims become advertising, and income claims in gambling-adjacent
 products attract FTC attention. The paywall copy promises access to signals,

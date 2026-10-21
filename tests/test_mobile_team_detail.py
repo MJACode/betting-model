@@ -173,7 +173,7 @@ def test_results_are_units_never_dollars():
 def test_no_paper_trading_copy():
     """CLAUDE.md §2 / .claude/rules/frontend.md: the platform is live."""
     for p in (SCREEN, HOOK, LIB):
-        assert "paper" not in _read(p).lower(), f"{p.name} mentions paper trading"
+        assert "paper" not in _read(p).lower(), f"{p.name} mentions paper"
 
 
 def test_the_nfl_spread_sign_is_normalised_the_way_the_board_does_it():

@@ -70,8 +70,10 @@ class _Conn:
         if self._standing is None:
             return None
         s = self._standing
+        # downgrade_reason: _standing reads it so a restore keeps a paused
+        # model's marker (tests/test_paused_keeps_real_verdict.py).
         return (s["pick_id"], s["scored_line"], s["dk_odds"],
-                s["pick_label"], s["created_at"])
+                s["pick_label"], s["created_at"], s.get("downgrade_reason"))
 
     def commit(self):
         self.committed = True

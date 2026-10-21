@@ -2,7 +2,8 @@
 Two row-level defects found on the NCAAF board, 2026-09-10 (session 280), both
 in shared scorer code and therefore every sport's:
 
-  1. A PAUSED model still wrote AVOID rows. `_is_paused` only downgraded a BET,
+  1. A PAUSED model still wrote AVOID rows. (Superseded 2026-09-28: a paused
+     model now keeps its real verdict, marked 'model paused'; see section 1.) `_is_paused` only downgraded a BET,
      so `ncaaf_moneyline` -- paused because every edge cell lost at real
      prices -- had 80 AVOID rows on the Today/Signals board, which does not
      check `paused` (useTodayPicks drops game-over, retired and VOID only).
@@ -64,7 +65,14 @@ def _prop_pick(monkeypatch, *, prob):
         line=5.5, bankroll=10000.0, stat_label="Ks", player_id="P1")
 
 
-# ── 1. a paused model emits no signal on EITHER side ─────────────────────────
+# ── 1. a paused model keeps its REAL verdict and says it is paused ──────────
+#
+# Until 2026-09-28 these pinned "a paused model's BET and AVOID both become
+# NONE". Matt (via CoS, Michael-gated) changed the rule: the row keeps the
+# model's real verdict and stake, and being paused only means the pick is not
+# a signal. The 2026-09-10 defect (paused AVOIDs drawn as fade signals) is now
+# held by the ROW's 'model paused' marker, which every publisher and the app's
+# Signals board exclude on -- see tests/test_paused_keeps_real_verdict.py.
 
 def test_unpaused_model_still_writes_avoid(monkeypatch):
     """Control: the AVOID side is untouched for a live model."""
@@ -73,25 +81,25 @@ def test_unpaused_model_still_writes_avoid(monkeypatch):
     assert p.get("downgrade_reason") is None
 
 
-def test_paused_game_model_avoid_becomes_none_with_reason(monkeypatch):
+def test_paused_game_model_avoid_stays_avoid_with_reason(monkeypatch):
     monkeypatch.setattr(scorer, "PAUSED_MODELS", {MODEL})
     p = _game_pick(monkeypatch, prob=0.40)
-    assert p["signal_type"] == "NONE"
+    assert p["signal_type"] == "AVOID"
     assert p["downgrade_reason"] == "model paused"
 
 
-def test_paused_game_model_bet_becomes_none_with_reason(monkeypatch):
+def test_paused_game_model_bet_stays_bet_with_reason_and_stake(monkeypatch):
     monkeypatch.setattr(scorer, "PAUSED_MODELS", {MODEL})
     p = _game_pick(monkeypatch, prob=0.70)
-    assert p["signal_type"] == "NONE"
+    assert p["signal_type"] == "BET"
     assert p["downgrade_reason"] == "model paused"
-    assert p["recommended_bet"] == 0.0
+    assert p["recommended_bet"] > 0.0      # the stake the model would publish
 
 
-def test_paused_prop_model_avoid_becomes_none_with_reason(monkeypatch):
+def test_paused_prop_model_avoid_stays_avoid_with_reason(monkeypatch):
     monkeypatch.setattr(scorer, "PAUSED_MODELS", {PROP_MODEL})
     p = _prop_pick(monkeypatch, prob=0.40)
-    assert p["signal_type"] == "NONE"
+    assert p["signal_type"] == "AVOID"
     assert p["downgrade_reason"] == "model paused"
 
 
@@ -99,7 +107,7 @@ def test_auto_paused_counts_as_paused(monkeypatch):
     """The threshold review's pause list goes through the same branch."""
     monkeypatch.setattr(scorer, "_auto_paused_models", lambda: {MODEL})
     p = _game_pick(monkeypatch, prob=0.40)
-    assert p["signal_type"] == "NONE"
+    assert p["signal_type"] == "AVOID"
     assert p["downgrade_reason"] == "model paused"
 
 

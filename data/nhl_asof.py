@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import unicodedata
 from collections import defaultdict
 
 from loguru import logger
@@ -47,9 +48,27 @@ TEAM_PRIOR_GAMES = 25
 
 TEAM_RATE_COLUMNS = ("corsi_for_pct", "power_play_pct", "penalty_kill_pct",
                      "shots_per_game", "shots_against_pg")
+# The whole team side of a feature row, blended (TeamBook.inputs). Goals and
+# results joined the five rates above on 2026-10-01: until then they reached
+# the model raw (one game in, a team was its one game) or, before a team's
+# first game, as LAST season's running totals.
+TEAM_INPUT_COLUMNS = ("gf_pg", "ga_pg", "pts_rate", "corsi_for_pct",
+                      "power_play_pct", "penalty_kill_pct")
+# How many games of last season the goals and results columns carry. Swept on
+# five walk-forward seasons (scripts/nhl_early_season_blend.py); the shot and
+# special-teams rates keep TEAM_PRIOR_GAMES, which predates this.
+TEAM_PRIOR_GOAL_GAMES = 25
+TEAM_PRIOR_LOC_GAMES = 12       # the home / road scoring splits see half the games
+GOAL_INPUT_COLUMNS = ("gf_pg", "ga_pg", "pts_rate")
 
 
 # ── goalies ──────────────────────────────────────────────────────────────────
+
+def name_key(name: str | None) -> str:
+    """Accent- and case-insensitive: ESPN and the NHL disagree on diacritics."""
+    flat = unicodedata.normalize("NFKD", name or "")
+    return "".join(c for c in flat.lower() if c.isalnum() and not unicodedata.combining(c))
+
 
 class GoalieBook:
     """Every goalie game, indexed so 'strictly before d' is a bisect, not a scan."""
@@ -109,6 +128,28 @@ class GoalieBook:
                     toi[pid] += (r.get("toi_seconds") or 0) * (2 if r["season"] == season else 1)
         return max(toi, key=toi.get) if toi else None
 
+    def player_named(self, name: str | None, season: int, as_of: str) -> int | None:
+        """The id of the goalie with this name, from the log itself.
+
+        The probable starter arrives as a NAME (ESPN). The season summary can
+        put an id to it only once he has played THIS season, so in week one a
+        returning starter matched nothing and was rated as a debutant: 28 of
+        the 32 rows written 2026-09-29 -> 10-01 carried the league-average
+        line. The log holds his last season under the same name. Two goalies
+        sharing a name resolve to the one who played most recently.
+        """
+        want = name_key(name)
+        if not want:
+            return None
+        best: tuple[str, int] | None = None
+        for pid, rows in self.by_player.items():
+            for r in reversed(rows):
+                if r["game_date"] < as_of and r["season"] in (season, season - 1):
+                    if name_key(r.get("player_name")) == want and (best is None or r["game_date"] > best[0]):
+                        best = (r["game_date"], pid)
+                    break                    # only his latest game in the window names him
+        return best[1] if best else None
+
     def asof(self, player_id: int | None, season: int, as_of: str) -> dict:
         """The six goalie columns for `player_id` strictly before `as_of`.
         Empty when the league baseline itself is missing (no data loaded)."""
@@ -167,12 +208,27 @@ class TeamBook:
             return {}
         saf, saa = s("sat_for_5v5"), s("sat_against_5v5")      # 5v5: every season
         ppo, tsh = s("pp_opportunities"), s("times_shorthanded")
+        # The log's goals stop at the end of overtime: a shootout is a tie here
+        # (the standings' extra goal is not a goal anyone scored). A regulation
+        # loss is the one result worth no point; `went_to_ot` comes from `games`
+        # and a game with no row there is read as decided in regulation.
+        reg_losses = sum(1 for r in rows
+                         if (r.get("goals_for") or 0) < (r.get("goals_against") or 0)
+                         and not r.get("went_to_ot"))
+        home = [r for r in rows if r.get("is_home")]
+        road = [r for r in rows if not r.get("is_home")]
         return {
             "corsi_for_pct": 100.0 * saf / (saf + saa) if saf + saa else None,
             "power_play_pct": s("pp_goals") / ppo if ppo else None,
             "penalty_kill_pct": 1 - s("pp_goals_against") / tsh if tsh else None,
             "shots_per_game": s("shots_for") / n,
             "shots_against_pg": s("shots_against") / n,
+            "gf_pg": s("goals_for") / n,
+            "ga_pg": s("goals_against") / n,
+            "pts_rate": 1 - reg_losses / n,
+            "gf_home": sum(r.get("goals_for") or 0 for r in home) / len(home) if home else None,
+            "gf_away": sum(r.get("goals_for") or 0 for r in road) / len(road) if road else None,
+            "n_home": len(home), "n_away": len(road),
         }
 
     def final(self, team: str, season: int) -> dict:
@@ -207,6 +263,41 @@ class TeamBook:
                 out[col] = round((n * c + TEAM_PRIOR_GAMES * p) / (n + TEAM_PRIOR_GAMES), 4)
         return out
 
+    def inputs(self, team: str, season: int, as_of: str) -> dict:
+        """Every team number a feature row uses, strictly before `as_of`, each
+        blended toward the team's own last season by games played.
+
+        There is always an answer: before a team's first game the blend IS last
+        season (the league's, for an expansion team), so opening night is a row
+        like any other rather than last season's running totals standing in for
+        this one's (2026-09-29: goal-difference gaps of +97 to +133 against a
+        training range of -23..+23 for the first fortnight).
+        """
+        k = (team, season)
+        n = bisect.bisect_left(self._dates.get(k, []), as_of)
+        cur = self._rates(self.by_team.get(k, [])[:n])
+        prior = self.final(team, season - 1) or self.league_final(season - 1)
+        league = self.league_final(season - 1)
+
+        def blend(col: str, games: int, weight: int):
+            c = cur.get(col)
+            p = prior.get(col) if prior.get(col) is not None else league.get(col)
+            if c is None and p is None:
+                return None
+            if p is None:
+                return round(c, 4)
+            if c is None:
+                return round(p, 4)
+            return round((games * c + weight * p) / (games + weight), 4)
+
+        out = {"games_played": n}
+        for col in TEAM_INPUT_COLUMNS:
+            out[col] = blend(col, n, TEAM_PRIOR_GOAL_GAMES if col in GOAL_INPUT_COLUMNS
+                             else TEAM_PRIOR_GAMES)
+        out["gf_home"] = blend("gf_home", cur.get("n_home") or 0, TEAM_PRIOR_LOC_GAMES)
+        out["gf_away"] = blend("gf_away", cur.get("n_away") or 0, TEAM_PRIOR_LOC_GAMES)
+        return out
+
 
 # ── loading ──────────────────────────────────────────────────────────────────
 
@@ -224,6 +315,7 @@ _GOALIE_COLS = ("nhl_game_id", "player_id", "player_name", "game_id", "season",
 _TEAM_COLS = ("nhl_game_id", "team", "season", "game_date", "shots_for",
               "shots_against", "sat_for_5v5", "sat_against_5v5",
               "pp_opportunities", "pp_goals", "times_shorthanded", "pp_goals_against")
+_TEAM_RESULT_COLS = ("goals_for", "goals_against", "is_home")
 
 
 def goalie_book(conn: DBConnection, seasons: list[int]) -> GoalieBook:
@@ -233,7 +325,13 @@ def goalie_book(conn: DBConnection, seasons: list[int]) -> GoalieBook:
 
 def team_book(conn: DBConnection, seasons: list[int]) -> TeamBook:
     want = sorted({s for x in seasons for s in (x - 1, x)})
-    return TeamBook(_load(conn, "nhl_team_game_log", _TEAM_COLS, want))
+    marks = ",".join("?" for _ in want)
+    cols = _TEAM_COLS + _TEAM_RESULT_COLS
+    rows = conn.execute(
+        f"SELECT {', '.join('l.' + c for c in cols)}, g.went_to_ot "
+        f"FROM nhl_team_game_log l LEFT JOIN games g ON g.game_id = l.game_id "
+        f"WHERE l.season IN ({marks})", tuple(want)).fetchall()
+    return TeamBook([dict(zip(cols + ("went_to_ot",), r)) for r in rows])
 
 
 # ── the historical rebuild ───────────────────────────────────────────────────

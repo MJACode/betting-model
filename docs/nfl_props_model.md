@@ -210,7 +210,7 @@ decile realises 47.9% against a 46.9% prediction. Kicking points: R² 0.029.
 | **longest rush / longest reception** | an extreme-value problem: the distribution of a per-game maximum is dominated by the tail of a per-play distribution we cannot forecast. Nothing in the usage features moves the max conditional on the mean. |
 | **first TD** | anytime TD already sits at R² 0.03 on the count; first TD adds a sequencing lottery on top and carries the worst hold on the board. |
 | **defensive interceptions** | same failure mode as passing INTs, at a lower base rate. |
-| **defensive sacks** | *borderline.* 7.6% lift is real, but 88% of player-games are zero and the market is thin with low limits. Modelled (Poisson head) but **paper-only** pending real prices. |
+| **defensive sacks** | *borderline.* 7.6% lift is real, but 88% of player-games are zero and the market is thin with low limits. Modelled (Poisson head). The lane is paused (`nfl_prop_sacks`). |
 
 **"We can price it" vs "we can beat it".** Nothing above is a claim of the
 second. What §2 establishes is which markets have *forecastable* signal and

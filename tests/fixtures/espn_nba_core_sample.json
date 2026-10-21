@@ -1,0 +1,357 @@
+{
+ "_note": "Trimmed copy of sports.core.api.espn.com NBA documents fetched 2026-10-21: the December 2025 Cup quarterfinal, semifinal and final, a 2026 play-in game and the 2026-27 Cup final slot with no teams yet (ESPN team ids -1, -2). Only the fields nba_schedule_refresh reads, plus the links it does not follow.",
+ "listings": {
+  "202512": {
+   "count": 3,
+   "pageIndex": 1,
+   "pageSize": 1000,
+   "pageCount": 1,
+   "items": [
+    {
+     "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809833?lang=en&region=us"
+    },
+    {
+     "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809837?lang=en&region=us"
+    },
+    {
+     "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809839?lang=en&region=us"
+    }
+   ]
+  },
+  "202604": {
+   "count": 1,
+   "pageIndex": 1,
+   "pageSize": 1000,
+   "pageCount": 1,
+   "items": [
+    {
+     "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401866755?lang=en&region=us"
+    }
+   ]
+  },
+  "202612": {
+   "count": 1,
+   "pageIndex": 1,
+   "pageSize": 1000,
+   "pageCount": 1,
+   "items": [
+    {
+     "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401909456?lang=en&region=us"
+    }
+   ]
+  }
+ },
+ "docs": {
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809833": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809833?lang=en&region=us",
+   "id": "401809833",
+   "date": "2025-12-09T23:00Z",
+   "timeValid": true,
+   "season": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026?lang=en&region=us"
+   },
+   "seasonType": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/types/2?lang=en&region=us"
+   },
+   "competitions": [
+    {
+     "id": "401809833",
+     "date": "2025-12-09T23:00Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup - Quarterfinals"
+      }
+     ],
+     "venue": {
+      "fullName": "Kia Center",
+      "address": {
+       "city": "Orlando",
+       "state": "FL"
+      }
+     },
+     "status": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809833/competitions/401809833/status?lang=en&region=us"
+     },
+     "broadcasts": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809833/competitions/401809833/broadcasts?lang=en&region=us"
+     },
+     "competitors": [
+      {
+       "id": "19",
+       "homeAway": "home",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/19?lang=en&region=us"
+       }
+      },
+      {
+       "id": "14",
+       "homeAway": "away",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/14?lang=en&region=us"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809837": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809837?lang=en&region=us",
+   "id": "401809837",
+   "date": "2025-12-13T22:30Z",
+   "timeValid": true,
+   "season": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026?lang=en&region=us"
+   },
+   "seasonType": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/types/2?lang=en&region=us"
+   },
+   "competitions": [
+    {
+     "id": "401809837",
+     "date": "2025-12-13T22:30Z",
+     "timeValid": true,
+     "neutralSite": true,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup - Semifinals"
+      }
+     ],
+     "venue": {
+      "fullName": "T-Mobile Arena",
+      "address": {
+       "city": "Las Vegas",
+       "state": "NV"
+      }
+     },
+     "status": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809837/competitions/401809837/status?lang=en&region=us"
+     },
+     "broadcasts": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809837/competitions/401809837/broadcasts?lang=en&region=us"
+     },
+     "competitors": [
+      {
+       "id": "19",
+       "homeAway": "home",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/19?lang=en&region=us"
+       }
+      },
+      {
+       "id": "18",
+       "homeAway": "away",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/18?lang=en&region=us"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809839": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809839?lang=en&region=us",
+   "id": "401809839",
+   "date": "2025-12-17T01:30Z",
+   "timeValid": true,
+   "season": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026?lang=en&region=us"
+   },
+   "seasonType": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/types/2?lang=en&region=us"
+   },
+   "competitions": [
+    {
+     "id": "401809839",
+     "date": "2025-12-17T01:30Z",
+     "timeValid": true,
+     "neutralSite": true,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup Championship"
+      }
+     ],
+     "venue": {
+      "fullName": "T-Mobile Arena",
+      "address": {
+       "city": "Las Vegas",
+       "state": "NV"
+      }
+     },
+     "status": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809839/competitions/401809839/status?lang=en&region=us"
+     },
+     "broadcasts": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401809839/competitions/401809839/broadcasts?lang=en&region=us"
+     },
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "home",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/18?lang=en&region=us"
+       }
+      },
+      {
+       "id": "24",
+       "homeAway": "away",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/24?lang=en&region=us"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401866755": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401866755?lang=en&region=us",
+   "id": "401866755",
+   "date": "2026-04-14T23:30Z",
+   "timeValid": true,
+   "season": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026?lang=en&region=us"
+   },
+   "seasonType": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/types/5?lang=en&region=us"
+   },
+   "competitions": [
+    {
+     "id": "401866755",
+     "date": "2026-04-14T23:30Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Play-In - East - 9th Place vs 10th Place"
+      }
+     ],
+     "venue": {
+      "fullName": "Spectrum Center",
+      "address": {
+       "city": "Charlotte",
+       "state": "NC"
+      }
+     },
+     "status": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401866755/competitions/401866755/status?lang=en&region=us"
+     },
+     "broadcasts": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401866755/competitions/401866755/broadcasts?lang=en&region=us"
+     },
+     "competitors": [
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/30?lang=en&region=us"
+       }
+      },
+      {
+       "id": "14",
+       "homeAway": "away",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/14?lang=en&region=us"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401909456": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401909456?lang=en&region=us",
+   "id": "401909456",
+   "date": "2026-12-11T05:00Z",
+   "timeValid": false,
+   "season": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027?lang=en&region=us"
+   },
+   "seasonType": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/types/2?lang=en&region=us"
+   },
+   "competitions": [
+    {
+     "id": "401909456",
+     "date": "2026-12-11T05:00Z",
+     "timeValid": false,
+     "neutralSite": true,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup Championship"
+      }
+     ],
+     "venue": {
+      "fullName": "Hinkle Fieldhouse",
+      "address": {
+       "city": "Indianapolis",
+       "state": "IN"
+      }
+     },
+     "status": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401909456/competitions/401909456/status?lang=en&region=us"
+     },
+     "broadcasts": {
+      "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/401909456/competitions/401909456/broadcasts?lang=en&region=us"
+     },
+     "competitors": [
+      {
+       "id": "-1",
+       "homeAway": "home",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/-1?lang=en&region=us"
+       }
+      },
+      {
+       "id": "-2",
+       "homeAway": "away",
+       "team": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/-2?lang=en&region=us"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/14": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/14?lang=en&region=us",
+   "id": "14",
+   "abbreviation": "MIA",
+   "displayName": "Miami Heat"
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/18": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/18?lang=en&region=us",
+   "id": "18",
+   "abbreviation": "NY",
+   "displayName": "New York Knicks"
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/19": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/19?lang=en&region=us",
+   "id": "19",
+   "abbreviation": "ORL",
+   "displayName": "Orlando Magic"
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/24": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/24?lang=en&region=us",
+   "id": "24",
+   "abbreviation": "SA",
+   "displayName": "San Antonio Spurs"
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/30": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/30?lang=en&region=us",
+   "id": "30",
+   "abbreviation": "CHA",
+   "displayName": "Charlotte Hornets"
+  },
+  "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/11": {
+   "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/11?lang=en&region=us",
+   "id": "11",
+   "abbreviation": "IND",
+   "displayName": "Indiana Pacers"
+  }
+ }
+}

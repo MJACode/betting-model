@@ -1,0 +1,91 @@
+"""The NBA totals window's plan: ONE database read a tick for both NBA totals
+models.
+
+scheduler.run_nba_total_luck_window runs every minute, 24x7, for
+nba_total_luck (the full-game total, decided 61-66 minutes before tip:
+scripts/nba_total_luck_window.py) and nba_team_total_luck (the home team
+total, fetched and decided 45-56 minutes out, its close 12-25 minutes out:
+scripts/nba_team_total_luck_window.py). One connection plans both: the slate is
+read once and handed to each model's plan.
+
+WHY ONE JOB. Every scheduled job beats its heartbeat on every tick, on a
+connection of its own (scheduler._with_heartbeat -> tracking/job_heartbeat
+.beat), so a second every-minute job would cost 1,440 more connection opens a
+day before its plan read anything; and every-minute connections are what
+strained a Supabase session pool of 15 (scheduler.py, the note above
+_nfl_lead_hours). A tick with nothing near any tip costs exactly what
+nba_total_luck's tick cost alone: one connection, one slate read.
+
+ONE MODEL'S PLAN CANNOT STOP THE OTHER'S. Each model's plan is read on its
+own: one that raises is logged and recorded in `errors`, and the tick still
+runs the other model's steps, then fails (the scheduler raises after
+publishing, so the heartbeat records an error).
+"""
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+from loguru import logger
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import scripts.nba_team_total_luck_window as ttw  # noqa: E402
+import scripts.nba_total_luck_card as tlcard  # noqa: E402
+import scripts.nba_total_luck_window as tlw  # noqa: E402
+from data.db import get_connection  # noqa: E402
+
+# The slate's horizon: the far end of either model's window.
+HORIZON_MIN = max(tlw.LOOK_AHEAD_MIN[1], ttw.PLAN_HORIZON_MIN)
+
+
+@dataclass
+class PregamePlan:
+    # nba_total_luck: the games to fetch the board for and decide.
+    total_luck: list[str] = field(default_factory=list)
+    # nba_team_total_luck: the games to fetch and decide, and the bet games
+    # owed their closing snapshot.
+    team_total: ttw.Plan = field(default_factory=ttw.Plan)
+    # {model id: the error} for a model whose plan raised this tick.
+    errors: dict[str, str] = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        return bool(self.total_luck or self.team_total.decide or self.team_total.close
+                    or self.errors)
+
+
+def plan(conn, now: datetime) -> PregamePlan:
+    """Both models' plans from one slate read. Reads only."""
+    games = tlcard.slate(conn, now, horizon_min=HORIZON_MIN)
+    out = PregamePlan()
+    for model, read in (("nba_total_luck", lambda: tlw.plan(conn, now, games=games)),
+                        ("nba_team_total_luck", lambda: ttw.plan(conn, now, games=games))):
+        try:
+            got = read()
+        except Exception as exc:  # noqa: BLE001 - the other model still runs this tick
+            logger.exception(f"NBA totals window: the {model} plan failed")
+            out.errors[model] = repr(exc)
+            try:
+                conn.rollback()  # a failed read leaves the transaction unusable
+            except Exception:  # noqa: BLE001
+                pass
+            continue
+        if model == "nba_total_luck":
+            out.total_luck = got
+        else:
+            out.team_total = got
+    return out
+
+
+def plan_tick(now: datetime | None = None) -> PregamePlan:
+    conn = get_connection()
+    try:
+        return plan(conn, now or datetime.now(timezone.utc))
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    print(plan_tick())

@@ -38,7 +38,7 @@ model validates.
 
 import bisect
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 
@@ -132,11 +132,22 @@ def _is_fbs(stats: dict) -> bool:
     That leaves the gate correct for a different reason than first claimed: a
     school SP+ has not rated cannot be MODELLED, whatever division it plays in,
     because `sp_overall` is itself a feature (`d_sp_overall`) and a missing
-    feature is not 0.0. SP+ lags a promotion — it needs FBS history — so a
-    newly promoted program is unpriceable until it has one. The same shape
-    appears in every season the registry covers, always on a school moving
-    between the divisions: 2025 Delaware, Idaho, Missouri State; 2024 those
-    three plus Kennesaw State.
+    feature is not 0.0.
+
+    WHY A PROMOTED SCHOOL HAS NO RATING ALL SEASON (corrected 2026-10-12; this
+    said "SP+ lags a promotion — it needs FBS history", which names the wrong
+    cause). A season's `sp_overall` is CFBD's PRIOR season's final SP+, held
+    constant all year (cfbd_ingestor._prior_season_context — current-season
+    SP+ is built from the games being predicted, so it is never read). A school
+    that was FCS last season has no SP+ from last season, so it has none for
+    the whole of its first FBS season, and no re-pull changes that. The rating
+    can first appear when the season label rolls over on March 1 and next
+    season's preseason rows are built from this season's final SP+ — and only
+    if CFBD rates it. Measured in `ncaaf_team_stats` (2026-10-12): Delaware and
+    Missouri State, FBS from 2025, are unrated in 2025 and rated in 2026;
+    Kennesaw State, FBS from 2024, unrated in 2024 and rated in 2025. The
+    schools are listed in `config.NCAAF_PROMOTED_TO_FBS`, which only the health
+    check and the refusal log read — this gate still refuses them.
 
     So the order is inverted: SP+ is NECESSARY, and `classification` may only
     ever VETO. Nothing that could be priced is lost — the game was already
@@ -163,9 +174,17 @@ def unrated_fbs_claim(stats: dict) -> str | None:
     nothing) and no one expects a pick. This is a team we are SUPPOSED to be
     able to price and cannot, which is how a DK-priced game goes missing from
     the board with nobody able to say why. In practice it means a NEWLY
-    PROMOTED program: SP+ needs FBS history, so it lags a promotion by a
-    season (2026-09-13 — confirmed against CFBD, which lists both of the 2026
-    cases as FBS). Returns None when there is nothing surprising to report.
+    PROMOTED program in its first FBS season: the season's SP+ is last
+    season's, when it was FCS and unrated (see `_is_fbs`; CFBD lists both of
+    the 2026 cases as FBS, confirmed 2026-09-13). Returns None when there is
+    nothing surprising to report.
+
+    `stats` must carry `classification` for this to say anything. The live
+    snapshot read (`_get_ncaaf_team_stats`) does not select it — `_STAT_COLS`
+    must never gain it, because `_is_fbs` would then apply its classification
+    veto in training and backtests too, which is a model update — so the live
+    refusal log passes the registry's classification in separately
+    (`build_ncaaf_game_features(fbs_registry=...)`).
     """
     if not stats or stats.get("sp_overall") is not None:
         return None
@@ -474,20 +493,121 @@ def _rolling_points_live(conn: DBConnection, team: str, as_of_date: str,
     return round(float(np.mean(pts)), 2) if pts else None
 
 
-def _rest_days_live(conn: DBConnection, team: str, as_of_date: str) -> int | None:
+def _rest_days_live(conn: DBConnection, team: str, as_of_date: str,
+                    game_id: str) -> int | None:
+    """Rest at KICKOFF, from the stored schedule (data/schedule_context).
+
+    This read only PLAYED games until 2026-10-20, so a game the team had still
+    to play before this one was invisible and looked like a bye: on the paused
+    moneyline model's pick 3094504 (Missouri ML, decided 9 days out) rest read
+    14/14 where it was 7/7. Training reads every completed game, which for a
+    game in the past is every game the team played -- the same thing this now
+    returns. No retrain: the training value does not change."""
+    from data.schedule_context import rest_days_as_of_kickoff
+    return rest_days_as_of_kickoff(conn, SPORT, team, game_id, as_of_date)
+
+
+_SCHED_COLS = ("week", "neutral_site", "conference_game", "venue_id")
+
+
+def _schedule_row_live(conn: DBConnection, game_id: str, game_date: str,
+                       home_team: str, away_team: str) -> dict | None:
+    """The scored row's schedule context (week, neutral site, conference game,
+    venue), or None when the stored schedule cannot supply it.
+
+    THE NIGHT-GAME STUB (2026-10-20). The odds feed writes its own ET-dated
+    row for a game and the DraftKings prices attach to it, while CFBD's row
+    for the same night game keeps its UTC date. The stub has no week, neutral
+    site, conference flag or venue, and this read used to turn those into 0:
+    week 0, which no training row has (2015-2025: minimum week 1), at a home
+    stadium and out of conference. 13 ncaaf_over_under BETs were written on
+    such rows (10 graded, -2.29 units), one of them Army-Navy (week 15, a
+    neutral site). Measured 2026-10-20: all 9 future stubs, every one already
+    DraftKings-priced, have a CFBD row for the same two teams within a day.
+
+    So a stub takes CFBD's row: the same two teams within a day (either
+    orientation), or failing that the one CFBD game either team has within a
+    day -- a team never plays twice in two days (tracking.record_duplicates),
+    which is how an opponent spelled two ways still resolves. Two different
+    candidates, or none, and the game is not scored, with the reason logged:
+    feeding blanks is the thing being fixed."""
     row = conn.execute("""
-        SELECT game_date FROM games
-        WHERE sport = 'NCAAF' AND (home_team = ? OR away_team = ?)
-          AND game_date < ? AND home_score IS NOT NULL
-        ORDER BY game_date DESC LIMIT 1
-    """, (team, team, as_of_date)).fetchone()
-    return _rest_days([row[0]], as_of_date) if row else None
+        SELECT week, neutral_site, conference_game, venue_id
+        FROM games WHERE game_id = ?
+    """, (game_id,)).fetchone()
+    if row and row[0] is not None:
+        return dict(zip(_SCHED_COLS, row))
+    d = datetime.strptime(str(game_date)[:10], "%Y-%m-%d")
+    lo = (d - timedelta(days=1)).strftime("%Y-%m-%d")
+    hi = (d + timedelta(days=1)).strftime("%Y-%m-%d")
+    cands = conn.execute("""
+        SELECT game_id, home_team, away_team, week, neutral_site,
+               conference_game, venue_id
+        FROM games
+        WHERE sport = 'NCAAF' AND game_id <> ? AND week IS NOT NULL
+          AND game_date >= ? AND game_date <= ?
+          AND (home_team IN (?, ?) OR away_team IN (?, ?))
+    """, (game_id, lo, hi, home_team, away_team, home_team, away_team)).fetchall()
+    pair = {home_team, away_team}
+    exact = [c for c in cands if {c[1], c[2]} == pair]
+    pool = exact or list(cands)
+    ids = {c[0] for c in pool}
+    if len(ids) != 1:
+        logger.warning(
+            f"{game_id}: no single CFBD schedule row for {away_team} @ {home_team} "
+            f"within a day ({sorted(ids) or 'none'}) -- week, venue, neutral site "
+            f"and conference unknown, game not scored")
+        return None
+    c = pool[0]
+    logger.debug(f"{game_id}: schedule context from CFBD row {c[0]}")
+    return dict(zip(_SCHED_COLS, c[3:]))
+
+
+def fbs_refusal_claims(teams, season: int,
+                       fbs_registry: dict | None = None) -> list[str]:
+    """Why an FBS-gate refusal is SURPRISING, one string per team — [] when it
+    is an ordinary FCS opponent. For the refusal LOG only; never for scoring.
+
+    `teams` is ((team, snapshot), ...). The live snapshot carries no
+    `classification` (see `unrated_fbs_claim`), so the registry's value —
+    `fbs_registry`, {school: classification}, read once per scoring pass — is
+    filled in where the snapshot has none. Without it this sees no
+    classification, so the WARNING the docs promised never fired: the worker's
+    logs for 2026-10-12 (06:00Z onward) hold no "FBS gate declined" line,
+    though a scoring pass ran at 10:34Z with two games DraftKings had priced at
+    10:23Z (Nevada @ North Dakota State, Ohio @ Sacramento State, both 10-17),
+    neither of which has a pick row.
+
+    A school listed in `config.NCAAF_PROMOTED_TO_FBS` for this season is named
+    with the reason it is unrated, so the line answers its own question.
+    """
+    promoted = getattr(config, "NCAAF_PROMOTED_TO_FBS", {}) or {}
+    out: list[str] = []
+    for team, stats in teams:
+        probe = dict(stats or {})
+        if fbs_registry is not None and probe.get("classification") is None:
+            probe["classification"] = fbs_registry.get(team)
+        why = unrated_fbs_claim(probe)
+        if not why:
+            continue
+        if promoted.get(team) == season:
+            why += (f" (newly promoted to FBS in {season}: a season's SP+ is "
+                    f"the prior season's final rating and it was FCS then, so "
+                    f"it cannot have one before the first run on or after "
+                    f"{season + 1}-03-01, and only if CFBD rates it)")
+        out.append(f"{team} {why}")
+    return out
 
 
 def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
                               home_team: str, away_team: str, season: int,
-                              odds_row: dict = None) -> dict | None:
-    """Full feature row for one NCAAF game (live scoring path)."""
+                              odds_row: dict = None,
+                              fbs_registry: dict | None = None) -> dict | None:
+    """Full feature row for one NCAAF game (live scoring path).
+
+    `fbs_registry` ({school: classification} from `ncaaf_teams`) feeds the
+    refusal LOG and nothing else: the gate and the returned row never read it.
+    """
     home_stats = _get_ncaaf_team_stats(conn, home_team, season, game_date)
     away_stats = _get_ncaaf_team_stats(conn, away_team, season, game_date)
     if not _is_fbs(home_stats) or not _is_fbs(away_stats):
@@ -496,22 +616,18 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         # A team the REGISTRY calls FBS that SP+ has never rated is a different
         # animal: two of our own tables disagreeing, which is how a DK-priced
         # game leaves the board with no row and no reason (2026-09-12).
-        claims = [f"{team} {why}"
-                  for team, why in ((home_team, unrated_fbs_claim(home_stats)),
-                                    (away_team, unrated_fbs_claim(away_stats)))
-                  if why]
+        claims = fbs_refusal_claims(((home_team, home_stats),
+                                     (away_team, away_stats)),
+                                    season, fbs_registry)
         if claims:
-            logger.warning(f"{game_id}: FBS gate declined — " + "; ".join(claims)
-                           + " (check ncaaf_teams against CFBD)")
+            logger.warning(f"{game_id}: FBS gate declined — " + "; ".join(claims))
         else:
             logger.debug(f"{game_id}: not an FBS-vs-FBS matchup — skipping")
         return None
 
-    row = conn.execute("""
-        SELECT week, neutral_site, conference_game, venue_id
-        FROM games WHERE game_id = ?
-    """, (game_id,)).fetchone()
-    sched = dict(zip(("week", "neutral_site", "conference_game", "venue_id"), row)) if row else {}
+    sched = _schedule_row_live(conn, game_id, game_date, home_team, away_team)
+    if sched is None:
+        return None
 
     venue_ctx = _venue_features(
         _venue_live(conn, sched.get("venue_id")),
@@ -538,8 +654,8 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         home_stats, away_stats,
         _rolling_points_live(conn, home_team, game_date),
         _rolling_points_live(conn, away_team, game_date),
-        _rest_days_live(conn, home_team, game_date),
-        _rest_days_live(conn, away_team, game_date),
+        _rest_days_live(conn, home_team, game_date, game_id),
+        _rest_days_live(conn, away_team, game_date, game_id),
         sched, odds_row, venue_ctx,
         _hfa_live(conn, home_team, season),
         _hfa_live(conn, away_team, season),

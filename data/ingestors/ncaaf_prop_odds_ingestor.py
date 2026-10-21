@@ -64,7 +64,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -335,7 +335,9 @@ def run_ncaaf_prop_odds_ingestor(target_date: str | None = None,
                                  with_alternates: bool = True) -> dict:
     """Today's scoped college slate. Off-season this is a clean no-op."""
     target_date = target_date or datetime.now(_ET).strftime("%Y-%m-%d")
-    snapshot_at = datetime.now(_ET).isoformat()
+    # UTC stamp, Eastern slate date (the line above). "+00:00", never "Z", the
+    # same as the MLB writer: see prop_odds_ingestor.run_prop_odds_ingestor.
+    snapshot_at = datetime.now(timezone.utc).isoformat()
     start = datetime.now()
     logger.info(f"NCAAF prop odds: {target_date} ({snapshot_type})")
 

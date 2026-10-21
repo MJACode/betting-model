@@ -43,8 +43,8 @@ walks the import graph symbol by symbol from `BetslipBar` and is the tripwire.
 Add a new app-root component to that test's roots when you mount one.
 
 **A GUARD THAT GREPS FOR A BANNED WORD DOES NOT CATCH THE SAME CLAIM MADE AS A
-NUMBER.** (2026-09-06, Matt: *"Remove all paper trading. we are not doing paper
-trading."*) `mobile/scripts/verify_live_record_start.ts` has banned "paper" in
+NUMBER.** (2026-09-06, Matt: remove every line that tells a member the bets
+are not real money.) `mobile/scripts/verify_live_record_start.ts` has banned "paper" in
 `screens/` and `components/` since 2026-08-30 and passed on every run — while
 four surfaces told members a model was **"not backed for real money until 50+
 settled picks"**. That is CLAUDE.md §2's go-live gate quoted at them row by row:
@@ -119,3 +119,14 @@ ternary is one it cannot see: `v_player_season_totals_nfl` and `_ncaaf` sat
 outside the manifest from the day they shipped and would have lost anon SELECT
 the moment the default grant is revoked — silently, as an empty screen, which
 is the failure mode that manifest exists to end.
+
+**A PAUSED MODEL'S PICKS SHOW ON THE ALL BOARD, AND ONLY THERE.** (Matt,
+2026-09-26: *"NFL is only showing tackle bets. It should be all bets"* — 11 of
+12 NFL prop models were paused, so the 2026-09-19 hide left NFL a tackles
+board.) `useTodayPicks` returns them as `pausedData`, apart from `data`; only
+PicksHomeScreen's All segment merges them, and `PickCard paused` swaps the
+signal badge for PAUSED and drops stake, Sharp Score, book hand-off and the
+betslip button. Signals, sport badges, Models, Stats and the slip still read
+`data`. The test is `isPausedForDisplay`: a SETTLED pick, or one Discord
+already posted, is still a bet (§1c) and never draws as PAUSED. Pinned by
+`tests/test_mobile_paused_catalog.py`.

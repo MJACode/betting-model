@@ -197,6 +197,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   tile: {
+    // Declared tap floor (verify_a11y); the tile is already ~65pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     width: 86,
     alignItems: 'center',
     backgroundColor: colors.bgGrouped,
@@ -228,7 +231,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   badgeTextDk: {
-    color: '#000',
+    color: colors.textPrimary,
   },
   odds: {
     fontSize: font.size.callout,

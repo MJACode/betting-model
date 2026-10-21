@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
   Pressable,
   RefreshControl,
@@ -18,8 +17,13 @@ import {
 } from '@/lib/queries';
 import { SPORTS } from '@/hooks/useSportFilter';
 import { modelLong } from '@/lib/modelMeta';
-import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
+import { EquityCurve } from '@/components/EquityCurve';
+import { RecordHeroCard } from '@/components/RecordHeroCard';
+import type { EquityPoint } from '@/lib/equityGeometry';
+import { DISCORD_ALL_TIME_LABEL } from '@/lib/recordHero';
 import { SettingsButton } from '@/components/SettingsButton';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
+import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import {
   EMPTY_SUMMARY,
   groupBySport,
@@ -29,21 +33,25 @@ import {
 } from '@/lib/trackRecord';
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
-import { formatPct, formatPctSigned } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { formatPctSigned } from '@/lib/format';
+import { ROW_SLOP_PAD } from '@/lib/a11y';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
-import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** First day of the tracked record. Every published number starts here.
  *  The official live date — see lib/recordStart, which is the one place it is
  *  stated and must match the server's own gate. */
 const RECORD_START = LIVE_RECORD_START;
 
+// Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
+// which are 2.22 / 3.55:1 as text (audit H2).
+// The tone of the ROUNDED percent formatPctSigned prints (1 dp of roi × 100),
+// so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
-  if (roi > 0.001) return colors.positive;
-  if (roi < -0.001) return colors.negative;
-  return colors.textSecondary;
+  return pnlColor(roi, 1, 100);
 }
 
 export function TrackRecordScreen() {
@@ -65,7 +73,7 @@ export function TrackRecordScreen() {
       setRows(recRows);
       setDaily(dailyRows);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -103,27 +111,42 @@ export function TrackRecordScreen() {
   );
   const groups: SportGroup[] = useMemo(() => groupBySport(visibleRows), [visibleRows]);
 
-  // Cumulative flat-bet units over time (sum profit_flat across sports per day).
+  // Cumulative posted-stake units (the same units Discord #results books).
+  // A select from before the units column has daily rows and no units.
+  // Treating the gap as zero draws a flat line that ends at +0.00u.
   const equity: EquityPoint[] = useMemo(() => {
+    if (!visibleDaily.some((d) => d.units != null)) return [];
     const byDate = new Map<string, number>();
     for (const d of visibleDaily) {
-      byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.profit_flat ?? 0));
+      byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.units ?? 0));
     }
     const dates = [...byDate.keys()].sort();
     let cum = 0;
     return dates.map((date) => {
       cum += byDate.get(date) ?? 0;
-      return { date, cumUnits: cum / 100 };
+      return { date, cumUnits: cum };
     });
   }, [visibleDaily]);
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
   const canShare = rows.length > 0 && overall.picks > 0;
+  // Nothing has loaded (still loading, or the load failed): unknown, not zero.
+  const notLoaded = rows.length === 0 && (loading || Boolean(error));
+  // The hero number is the posted stake, the same units Discord #results prints.
+  const heroUnits = Number(overall.units ?? 0);
+  // Daily rows arrived without a units column. Drawing them as zero is a flat
+  // line that ends at +0.00u. A missing overall total is the same gap.
+  const dailyLacksUnits =
+    visibleDaily.length > 0 && !visibleDaily.some((d) => d.units != null);
+  const curveUnknown = overall.units == null || dailyLacksUnits;
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
-        endUnits: equity.length ? equity[equity.length - 1]!.cumUnits : null,
+        endUnits:
+          (overall.risked ?? 0) > 0 && equity.length
+            ? equity[equity.length - 1]!.cumUnits
+            : null,
         since: RECORD_START,
       }),
     }).catch(() => {});
@@ -170,13 +193,29 @@ export function TrackRecordScreen() {
         </Text>
 
         {availableSports.length > 2 ? (
-          <View style={styles.sportTabs}>
+          // One scrolling row, not a wrap: at seven sports the tabs broke onto
+          // a second line and the orphaned NHL chip read as a separate control
+          // (audit L13). The row pads by ROW_SLOP_PAD and pulls back by the
+          // same (sportTabsFrame), reaching only into the subtitle text above
+          // and its own bottom margin, so the ~27pt tabs get 11 + 27 + 11 =
+          // 49pt inside the ScrollView, which is where touches land (H9).
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.sportTabsFrame}
+            contentContainerStyle={styles.sportTabs}
+            accessibilityRole="tablist"
+          >
             {availableSports.map((s) => {
               const active = s === sportSel;
               return (
                 <Pressable
                   key={s}
                   onPress={() => setSportSel(s)}
+                  hitSlop={{ top: ROW_SLOP_PAD, bottom: ROW_SLOP_PAD, left: 2, right: 2 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={s === 'All' ? 'All sports' : s}
                   style={({ pressed }) => [
                     styles.sportTab,
                     active && styles.sportTabActive,
@@ -187,55 +226,69 @@ export function TrackRecordScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
         ) : null}
 
-        {error ? <Text style={styles.error}>Couldn’t load the record: {error}</Text> : null}
-        {loading && rows.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
-
-        {/* Overall hero */}
-        <View style={styles.heroCard}>
-          <Text style={styles.heroLabel}>Flat-bet ROI</Text>
-          <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
-            {overall.stakedFlat > 0 ? formatPctSigned(overall.roiFlat) : '—'}
-          </Text>
-          <Text style={styles.heroRecord}>
-            {overall.wins}–{overall.losses}
-            {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
-          </Text>
-          <View style={styles.heroStatsRow}>
-            <HeroStat label="Win rate" value={formatPct(overall.winRate, 0)} />
-            <HeroStat
-              label="Beat the close"
-              value={overall.clvBeatRate != null ? formatPct(overall.clvBeatRate, 0) : '—'}
-            />
-            <HeroStat label="Since" value={LIVE_RECORD_START_SHORT} />
+        {/* A failed first load says so, with Retry, and the hero below reads
+            "—" rather than a 0–0 record at 0% (usability audit H3). A failed
+            refresh over a record already on screen is a banner instead. */}
+        {error && rows.length === 0 ? (
+          <View style={styles.errCard}>
+            <ErrorState compact what="the track record" error={error} onRetry={() => void load()} retrying={loading} />
           </View>
-        </View>
+        ) : error ? (
+          <ErrorBanner
+            what="the latest record"
+            error={error}
+            onRetry={() => void load()}
+            retrying={loading}
+            style={styles.errBanner}
+          />
+        ) : null}
 
-        {/* Unconditional once loaded: EquityCurve carries its own "not enough
-            settled days" copy, and it is the only thing between the hero and the
-            prose now. Held back on the first load so it cannot assert there are
-            too few settled days while the data is still in flight. */}
-        {loading && rows.length === 0 ? null : (
-          <EquityCurve points={equity} width={chartWidth} />
+        {/* Overall hero. First load: placeholders, never a flash of 0–0.
+            Option B: posted-stake units beside a sparkline, then the 2×2 grid.
+            The end pill on the curve is the same heroUnits string. */}
+        {loading && rows.length === 0 && !error ? (
+          <Skeleton label="the track record" style={styles.heroCard}>
+            <View style={styles.skelTop}>
+              <View>
+                <SkeletonBlock width={70} height={12} />
+                <SkeletonBlock width={140} height={34} style={styles.skelGap} />
+                <SkeletonBlock width={100} height={12} style={styles.skelGap} />
+                <SkeletonBlock width={110} height={12} style={styles.skelGap} />
+              </View>
+              <SkeletonBlock width={104} height={56} />
+            </View>
+            <View style={[styles.skelGrid, styles.skelStats]}>
+              <SkeletonBlock width={120} height={36} />
+              <SkeletonBlock width={120} height={36} />
+              <SkeletonBlock width={120} height={36} />
+              <SkeletonBlock width={120} height={36} />
+            </View>
+          </Skeleton>
+        ) : (
+          <RecordHeroCard
+            label={sportSel === 'All' ? DISCORD_ALL_TIME_LABEL : sportSel}
+            summary={overall}
+            points={equity}
+            notLoaded={notLoaded}
+          />
         )}
 
-        {/* Honest framing — the record is not all green, and says so. */}
+        {/* EquityCurve carries its own "not enough settled days" copy. Held
+            back while nothing has loaded, and while the posted-stake total is
+            unknown, so that copy is not what a missing column says. endUnits
+            is the hero's posted-stake total, so the pill matches it. */}
+        {notLoaded || curveUnknown ? null : (
+          <EquityCurve points={equity} seriesId={sportSel} width={chartWidth} endUnits={heroUnits} />
+        )}
+
+        {/* Two sentences: when the published record starts, and where the percentage is explained. */}
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>Read this first</Text>
           <Text style={styles.noteBody}>
-            {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
-            happened and is still in our books, but the published record starts here — so it is
-            short by design, and the percentages will move a lot for a while.{'\n\n'}
-            This is the real, unedited record — flat $100 bets at the DraftKings price we
-            scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
-            profitable, some aren’t yet, and we show them all. Every sample here is still
-            small, and a few dozen settled bets tells you very little in either direction —
-            where a model has too few to read, its percentage is greyed out and labelled
-            rather than hidden. A pick that had no
-            DraftKings price when we posted it counts in the
-            win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
+            The published record starts {LIVE_RECORD_START_SHORT}. The info button on Return on bets explains the percentage.
           </Text>
         </View>
 
@@ -243,9 +296,10 @@ export function TrackRecordScreen() {
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>What “beat the close” means</Text>
           <Text style={styles.noteBody}>
-            Closing Line Value (CLV) checks whether the price moved in our favor between when we
-            posted a pick and when the line closed. Beating the close consistently is the strongest
-            evidence a model has a real edge — independent of short-run wins and losses.
+            Closing Line Value (CLV) checks whether the book we bet closed at a shorter price than
+            the one we took, on the same number. Beating that book's close is the headline. Market
+            edge, when we have it, is the same bet against Pinnacle’s fair close. Game lines and
+            props are counted apart. A moved number is left out of the beat rate.
             {overall.clvSettled < 30
               ? ' We’ve only just started capturing it, so this number is still building.'
               : ''}
@@ -257,14 +311,14 @@ export function TrackRecordScreen() {
           <View key={g.sport} style={styles.sportCard}>
             <View style={styles.sportHeader}>
               <Text style={styles.sportName}>{g.sport}</Text>
-              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roiFlat) }]}>
-                {g.summary.stakedFlat > 0 ? formatPctSigned(g.summary.roiFlat) : '—'}
+              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roi) }]}>
+                {Number(g.summary.risked ?? 0) > 0 ? formatPctSigned(g.summary.roi) : '—'}
               </Text>
             </View>
             <Text style={styles.sportSub}>
               {g.summary.wins}–{g.summary.losses}
               {g.summary.pushes > 0 ? `–${g.summary.pushes}` : ''} · {g.summary.picks} picks
-              {sportUnpriced(g.summary) > 0 ? ` · ${sportUnpriced(g.summary)} unpriced` : ''}
+              {sportUnpriced(g.summary) > 0 ? ` · ${sportUnpriced(g.summary)} unpriced, staked at 1u` : ''}
             </Text>
             {g.models.map((m) => (
               <ModelRow key={m.model_id} row={m} />
@@ -277,39 +331,31 @@ export function TrackRecordScreen() {
         ) : null}
 
         <Text style={styles.footer}>
-          Every settled pick counts as it was posted — at the line and price we scored it,
+          Every pick Discord posted counts as it was posted — at the line and price we scored it,
           under the criteria that applied that day. Updated after each morning settlement. A
           pick only leaves the record if it was voided, meaning the model should never have
           produced it. If we pause a model, its past bets stay here; it just stops producing
           new picks.
         </Text>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function HeroStat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.heroStat}>
-      <Text style={styles.heroStatValue}>{value}</Text>
-      <Text style={styles.heroStatLabel}>{label}</Text>
-    </View>
-  );
-}
-
-/** Settled picks the view counted in the W-L but did not stake — no book
- *  price, so no money (require_price_for_published_units). The sport header
- *  has to say it too, or the header's W-L and ROI disagree in the same way
- *  its rows explain. */
+/** Settled picks with no book price. They stay in the W-L and are staked at
+ *  1 unit (published_pick_stake). staked_flat still counts only priced picks,
+ *  which is how the gap is named. */
 function sportUnpriced(s: TrackRecordSummary): number {
   return s.picks - Math.round(s.stakedFlat / 100);
 }
 
 function ModelRow({ row }: { row: TrackRecordRow }) {
   const decided = Number(row.wins ?? 0) + Number(row.losses ?? 0);
-  const roi = Number(row.staked_flat ?? 0) > 0 ? Number(row.profit_flat) / Number(row.staked_flat) : 0;
-  // The view counts every settled pick in the W-L but stakes only the priced
-  // ones (require_price_for_published_units), so name the gap when there is one.
+  const risked = Number(row.risked ?? 0);
+  const roi = risked > 0 ? Number(row.units ?? 0) / risked : 0;
+  // staked_flat counts priced picks only, so the gap is the unpriced ones.
+  // Their 1u stake is already inside units and risked.
   const unpriced = Number(row.picks ?? 0) - Math.round(Number(row.staked_flat ?? 0) / 100);
   return (
     <View style={styles.modelRow}>
@@ -320,15 +366,15 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
         <Text style={styles.modelSub}>
           {row.wins}–{row.losses}
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
-          {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
+          {unpriced > 0 ? ` · ${unpriced} unpriced, staked at 1u` : ''}
         </Text>
-        {decided < MIN_PICKS_FOR_COLOURED_ROI && Number(row.staked_flat ?? 0) > 0 ? (
+        {decided < MIN_PICKS_FOR_COLOURED_ROI && risked > 0 ? (
           // Its own line, not a fourth segment: the sub-line is already three
           // segments wide beside the ROI column, and a mid-phrase wrap orphans
           // the one segment that qualifies the number next to it. Same shape
-          // the Models tab already uses for the same reason — and, like that
-          // screen, it only fires when there is an ROI to qualify: an all-
-          // unpriced model renders "—", which "N unpriced" already explains.
+          // the Models tab already uses for the same reason — and it only fires
+          // when there is an ROI to qualify. An unpriced pick is staked at 1
+          // unit, so its ROI still shows, and "N unpriced" names the gap.
           <Text style={styles.modelSub}>{thinSampleCaption()}</Text>
         ) : null}
       </View>
@@ -338,7 +384,7 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           { color: decided < MIN_PICKS_FOR_COLOURED_ROI ? colors.textSecondary : roiColor(roi) },
         ]}
       >
-        {Number(row.staked_flat ?? 0) > 0 ? formatPctSigned(roi) : '—'}
+        {risked > 0 ? formatPctSigned(roi) : '—'}
       </Text>
     </View>
   );
@@ -372,37 +418,18 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
-  error: {
-    fontSize: font.size.footnote,
-    color: colors.avoid,
-    marginBottom: spacing.md,
-  },
-  loading: { marginVertical: spacing.lg },
+  errCard: { backgroundColor: colors.bgCard, borderRadius: radii.md, marginBottom: spacing.md },
+  errBanner: { marginHorizontal: 0, marginTop: 0, marginBottom: spacing.md },
+  skelGap: { marginTop: spacing.sm },
+  skelStats: { marginTop: spacing.md },
+  skelTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  skelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   heroCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
     padding: spacing.lg,
     marginBottom: spacing.md,
-    alignItems: 'center',
   },
-  heroLabel: { fontSize: font.size.footnote, color: colors.textTertiary },
-  heroRoi: { fontSize: font.size.largeTitle, fontWeight: font.weight.bold, marginVertical: 2 },
-  heroRecord: { fontSize: font.size.callout, color: colors.textSecondary, marginBottom: spacing.md },
-  heroStatsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignSelf: 'stretch',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-    paddingTop: spacing.md,
-  },
-  heroStat: { alignItems: 'center' },
-  heroStatValue: {
-    fontSize: font.size.title3,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  heroStatLabel: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
   noteCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
@@ -416,11 +443,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   noteBody: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 19 },
+  sportTabsFrame: {
+    flexGrow: 0,
+    marginTop: -ROW_SLOP_PAD,
+    marginBottom: spacing.md - ROW_SLOP_PAD,
+  },
   sportTabs: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.xs,
-    marginBottom: spacing.md,
+    paddingVertical: ROW_SLOP_PAD,
   },
   sportTab: {
     paddingVertical: spacing.xs + 1,

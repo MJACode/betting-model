@@ -129,6 +129,10 @@ def monitor(run_date: str | None = None) -> int:
             LEFT JOIN games g ON g.game_id = p.game_id
             WHERE p.sport = 'NFL'
               AND p.model_id = ANY(%s)
+              -- Locked picks only. The same models also hold a NONE row per
+              -- evaluated game (nfl_wind_publisher.publish_scored); flagging
+              -- one of those GONE would describe a bet nobody placed.
+              AND p.signal_type = 'BET'
               AND p.result IS NULL
         """, (list(NFL_MODEL_IDS),)).fetchall()
 

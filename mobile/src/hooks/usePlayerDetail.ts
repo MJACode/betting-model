@@ -13,35 +13,53 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useNow } from '@/hooks/useNow';
-import { errorText } from '@/lib/errors';
-import { addDays, todayET } from '@/lib/format';
+import { errorText, isAbortError } from '@/lib/errors';
+import { addDays, todayET, yearET } from '@/lib/format';
 import { MODEL_BOOK } from '@/lib/markets';
-import type { PlayerLogEntry, PlayerLogSport } from '@/lib/playerLog';
+import { positionOf, type PlayerLogEntry, type PlayerLogSport } from '@/lib/playerLog';
+import {
+  mlbGroup,
+  mlbSeasonInProgress,
+  nflPositionGroup,
+  nflSeasonInProgress,
+  rosterGroup,
+  rosterSeasonInProgress,
+  type PositionGroup,
+} from '@/lib/positionVsOpponent';
 import {
   fetchGamesByIds,
+  fetchH2HStatValues,
   fetchLineupSlot,
+  fetchPlayerPositionGroup,
+  fetchPositionVsOpponent,
+  fetchSeasonStarted,
   fetchPropLineRows,
   fetchPropOddsHistory,
   fetchSavantStats,
   fetchSettledPropPicksForPlayer,
   fetchSlateGames,
 } from '@/lib/queries';
-import { propMarketForStat, type StatDef } from '@/lib/statCatalog';
+import { isLogDerivedStat, propMarketForStat, type StatDef } from '@/lib/statCatalog';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
+  playerHeadToHead,
   playerPickRecord,
   propLineMove,
   statSplits,
   tonightLine,
+  type PlayerHeadToHead,
   type PlayerPickRecord,
   type PropLineMove,
   type StatSplits,
   type TonightLine,
 } from '@/lib/playerDetail';
+import type { HitDirection } from '@/lib/hitRate';
 import type {
   GameRow,
+  H2HStatValuesRow,
   LineupSlotRow,
+  PositionVsOpponentRow,
   PlayerType,
   PropOddsByBookRow,
   PropOddsSnapshotRow,
@@ -72,7 +90,7 @@ function useSection<T>(
         if (!cancelled) setState({ data, loading: false, error: null });
       })
       .catch((e: unknown) => {
-        if (!cancelled) setState({ data: initial, loading: false, error: errorText(e) });
+        if (!cancelled) setState({ data: initial, loading: false, error: isAbortError(e) ? null : errorText(e) });
       });
     return () => {
       cancelled = true;
@@ -87,6 +105,14 @@ export interface PlayerNextGame {
   unstarted: boolean;
 }
 
+/**
+ * The season label the H2H read starts from — the same value the Stats
+ * board uses, so the two surfaces cannot disagree about which two seasons
+ * "the last 2 years" means. Football's start-year label falls back a season
+ * inside fetchH2HStatValues, as every other football read does.
+ */
+const SEASON = yearET();
+
 export function usePlayerDetail(args: {
   sport: PlayerLogSport;
   playerId: string | null;
@@ -97,13 +123,26 @@ export function usePlayerDetail(args: {
   stat: StatDef | null;
   /** The page's "at least" threshold; the book's line is the half-point below. */
   threshold: number | null;
+  /**
+   * The page's RESOLVED bet \u2014 `selectionFor(threshold, mode)`. Separate from
+   * `threshold` because they are two idioms for one number and only this one
+   * carries the SIDE: in Under mode `threshold` alone counts the over
+   * (lib/hitMode, and playerDetail.bucket's note).
+   */
+  selection: { line: number; side: HitDirection };
 }) {
-  const { sport, playerId, playerName, playerType, games, stat, threshold } = args;
+  const { sport, playerId, playerName, playerType, games, stat, threshold, selection } = args;
   const { books, ready: booksReady } = usePreferredBooks();
   const today = todayET();
   const now = useNow();
   const team = games[0]?.team ?? null;
   const market = useMemo(() => propMarketForStat(stat), [stat]);
+  // Blocks+Steals and Reb+Ast are summed on the phone from the log; the
+  // head-to-head and same-position reads are server functions that have no
+  // branch for either key and return nothing, which the cards would print as
+  // "no meetings". Those two cards are not shown for them
+  // (statCatalog.LOG_DERIVED_STATS).
+  const serverStat = !isLogDerivedStat(stat);
   // Pull-to-refresh: every section keys on this, so one slow read still
   // cannot hold the others back (UX review: an error with no retry).
   const [nonce, setNonce] = useState(0);
@@ -129,8 +168,9 @@ export function usePlayerDetail(args: {
 
   // ── Tonight's line for the selected stat, and its movement ───────────────
   // fetchPropLineRows is bounded by (game, market, player): a few dozen rows.
-  // The history read is capped at 50 oldest-first, which is enough for the
-  // OPENING row; the latest comes from the all-books view.
+  // The history read is the whole series, sorted by time on the phone: its
+  // first row is the OPENING; the latest comes from the all-books view, and
+  // the history's last row stands in when that view has no DraftKings row.
   const lines = useSection<{ rows: PropOddsByBookRow[]; history: PropOddsSnapshotRow[] }>(
     { rows: [], history: [] },
     gameId && market
@@ -166,8 +206,44 @@ export function usePlayerDetail(args: {
   const gamesById = useMemo(() => new Map(logGames.data.map((g) => [g.game_id, g] as const)), [logGames.data]);
   const splits: StatSplits | null = useMemo(() => {
     if (!stat || threshold == null || games.length === 0) return null;
-    return statSplits(games, gamesById, stat, threshold, opponent, sport === 'NBA' || sport === 'WNBA');
-  }, [games, gamesById, stat, threshold, opponent, sport]);
+    return statSplits(games, gamesById, stat, selection.line, selection.side, sport === 'NBA' || sport === 'WNBA');
+  }, [games, gamesById, stat, threshold, selection.line, selection.side, sport]);
+
+  // ── Head-to-head with the next opponent, last two seasons ─────────────
+  // Its own read rather than a slice of `games` above, and the difference is
+  // SPAN: that log is 25 rows in football and 50 elsewhere, so a "vs KC" cut
+  // out of it answers "inside the last fifty games", not "in the last two
+  // seasons" (playerDetail.playerHeadToHead). The RPC is bounded to the two
+  // seasons server-side and returns one compact row.
+  //
+  // Keyed on the STAT as well as the opponent: the RPC returns one stat's
+  // values, so a chip tap refetches here where it does not for the chart.
+  const h2hRow = useSection<H2HStatValuesRow | null>(
+    null,
+    team && opponent && stat && serverStat
+      ? async () => {
+          const rows = await fetchH2HStatValues(
+            sport,
+            SEASON,
+            String(stat.key),
+            { teams: [team], opponents: [opponent] },
+            playerType ?? undefined,
+          );
+          // The read is narrowed to one fixture, but a fixture is a TEAM pair:
+          // it comes back with every player on that team who has met them.
+          return rows.find((r) => r.player_id === playerId) ?? null;
+        }
+      : null,
+    [sport, team, opponent, playerId, stat?.key, playerType, nonce],
+  );
+  const h2h: PlayerHeadToHead | null = useMemo(() => {
+    if (!opponent || threshold == null || !serverStat) return null;
+    const row = h2hRow.data;
+    // An opponent with no stored meeting is still an answer — "they have not
+    // played" is what the card says, and it needs the opponent's name to say
+    // it. A null row is therefore an EMPTY head-to-head, not a missing one.
+    return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], selection.line, selection.side);
+  }, [h2hRow.data, opponent, threshold, selection.line, selection.side, serverStat]);
 
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(
@@ -190,6 +266,104 @@ export function usePlayerDetail(args: {
     [sport, playerId, gameId, nonce],
   );
 
+  // ── Same position vs the next opponent (Matt, 2026-10-05) ────────────────
+  // "How other players at the same position have done against that team",
+  // this season and last in one read; the card toggles between them and
+  // computes the hit rate at the page's line itself, so neither the toggle nor
+  // the ruler refetches. NFL and MLB (lib/positionVsOpponent).
+  // MLB groups by lineup spot (tonight's posted slot first) and starting
+  // pitcher, so this block sits after the lineup read it depends on.
+  // NBA / WNBA / NCAAF logs carry no position: it is read from the
+  // player_positions table the roster pull fills (one row by key).
+  const isRosterSport = sport === 'NBA' || sport === 'WNBA' || sport === 'NCAAF';
+  const rosterPos = useSection<{ position: string; pos_group: string | null } | null>(
+    null,
+    isRosterSport && playerId ? () => fetchPlayerPositionGroup(sport, playerId) : null,
+    [sport, playerId, nonce],
+  );
+  const posGroup: PositionGroup | null =
+    sport === 'NFL'
+      ? nflPositionGroup(positionOf(games))
+      : sport === 'MLB'
+        ? mlbGroup({ playerType, lineupSlot: lineup.data?.batting_order, games })
+        : isRosterSport
+          ? rosterGroup(sport, rosterPos.data?.pos_group)
+          : null;
+  // Said on the card for MLB hitters: the group can change when the lineup
+  // posts, so the reader is told which slot it was built from.
+  const lastStartSlot = useMemo(() => {
+    for (const g of games) {
+      const b = Number(g.batting_order);
+      if (g.batting_order != null && Number.isInteger(b) && b >= 1 && b <= 9) return b;
+    }
+    return null;
+  }, [games]);
+  const groupBasis =
+    sport === 'MLB' && posGroup != null && posGroup !== 'SP'
+      ? lineup.data?.batting_order != null
+        ? { source: 'tonight' as const, slot: lineup.data.batting_order }
+        : lastStartSlot != null
+          ? { source: 'last_start' as const, slot: lastStartSlot }
+          : null
+      : null;
+  const pvoSeason =
+    sport === 'NFL'
+      ? nflSeasonInProgress(today)
+      : sport === 'MLB'
+        ? mlbSeasonInProgress(today)
+        : isRosterSport
+          ? rosterSeasonInProgress(sport, today)
+          : null;
+  // The rows are tagged with the stat they were read for: useSection keeps the
+  // previous data while it refetches, so without the tag a chip tap would draw
+  // last stat's numbers under the new stat's label for one round trip (UX
+  // review, 2026-10-05). The GROUP is in the tag too: an MLB hitter's group
+  // moves when tonight's lineup lands after the log, and without it the new
+  // title drew over the old group's rows (UX review, 2026-10-06). The
+  // OPPONENT is in the tag for the same reason: the card stays mounted when
+  // the next opponent changes, and the auto-open would otherwise lock onto
+  // the previous opponent's rows for the one render before the refetch's
+  // loading flag flips (UX review, 2026-10-06).
+  // A mismatch is "still loading" only while the read
+  // has not failed. The catch resets the payload to the untagged initial
+  // (`statKey: ''`), and the card's error line sits behind
+  // `loading && rows.length === 0` — counting that reset as loading leaves
+  // the spinner up and the error never shows.
+  const pvo = useSection<{
+    statKey: string;
+    group: string;
+    opponent: string;
+    seasonStarted: boolean | null;
+    rows: PositionVsOpponentRow[];
+  }>(
+    { statKey: '', group: '', opponent: '', seasonStarted: null, rows: [] },
+    opponent && stat && serverStat && posGroup && pvoSeason != null
+      ? async () => {
+          const [rows, seasonStarted] = await Promise.all([
+            fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
+            fetchSeasonStarted(sport, pvoSeason).catch((err) => {
+              // The card still draws. Unknown means it does not auto-open
+              // last season; a failed probe must not hide the rows.
+              console.warn('[positionVsOpponent] season-started read failed', err);
+              return null;
+            }),
+          ]);
+          return {
+            statKey: String(stat.key),
+            group: posGroup,
+            opponent,
+            seasonStarted,
+            rows,
+          };
+        }
+      : null,
+    [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
+  );
+
+  // The rows on screen are the rows for THIS stat, group and opponent, or none.
+  const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '')
+    && pvo.data.opponent === opponent;
+
   return {
     reload,
     loading: slate.loading || lines.loading || logGames.loading || picks.loading,
@@ -197,6 +371,31 @@ export function usePlayerDetail(args: {
     booksReady,
     market,
     nextGame,
+    h2h,
+    h2hLoading: h2hRow.loading,
+    // Blocks+Steals or Reb+Ast with an opponent to read against: the two
+    // cards above are not shown, and the page says why in their place.
+    serverReadsSkipped: !serverStat && stat != null && opponent != null,
+    // The card's place while a roster sport's position is read, or why it
+    // failed; null once the read succeeds (row or no row) and elsewhere.
+    positionVsOpponentPending:
+      serverStat && isRosterSport && opponent && stat && !posGroup && (rosterPos.loading || rosterPos.error)
+        ? { opponent, loading: rosterPos.loading, error: rosterPos.error }
+        : null,
+    positionVsOpponent:
+      opponent && serverStat && posGroup && pvoSeason != null
+        ? {
+            opponent,
+            group: posGroup,
+            seasonThis: pvoSeason,
+            rows: pvoFresh ? pvo.data.rows : [],
+            loading: pvo.loading || (pvo.error == null && !pvoFresh),
+            error: pvo.error,
+            seasonStarted: pvoFresh ? pvo.data.seasonStarted : null,
+            groupBasis,
+            sport,
+          }
+        : null,
     slateLoading: slate.loading,
     tonight,
     move,

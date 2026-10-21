@@ -1,0 +1,17 @@
+# Test-only dependencies. NOT installed on the Railway worker (nixpacks reads
+# requirements.txt alone); install these on any machine that runs the suite:
+#
+#     python -m pip install -r requirements-test.txt
+#
+pytest>=8.0.0
+# node, as a pip wheel. 13 tests shell out to `node --experimental-strip-types`
+# to run the app's TypeScript (publish predicates, CLV card, a11y, error
+# states). tests/_node.py prefers a system node and falls back to this one;
+# without either those tests skip, which is how they went unrun on this
+# machine until 2026-10-16. Type stripping needs node >= 22.6.
+nodejs-wheel-binaries>=22.6
+# Postgres, as a pip wheel (18.x). Two test files drive the real triggers and
+# views on a throwaway cluster that tests/_pg.py starts from these binaries
+# when no system initdb and no LATEST_LINE_TEST_DSN exist. Without any of the
+# three, those 17 tests skip.
+embedded-postgres>=18

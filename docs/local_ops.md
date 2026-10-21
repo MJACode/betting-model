@@ -44,7 +44,7 @@ python run_pipeline.py --step model-quality
 
 ---
 
-## NFL 2026 paper-track (opener + wind)
+## NFL 2026 live track (opener + wind)
 
 Not a retrain and not a unit bump. Re-score the two fragile §28 rules:
 
@@ -94,7 +94,17 @@ scoring silently skips the model — the session-51 UFC failure.
 ```bash
 python -m data.ingestors.wnba_stats_ingestor --backfill 2019 2025   # was wnba_backfill.yml
 python -m scripts.nfl_odds_backfill <args>                          # was nfl_odds_backfill.yml
-python -m data.db_setup                                             # was db_migrate.yml
+python -m data.view_migrations                                      # after a merge: the view/function migrations (the worker also runs them each pass)
+python -m data.db_setup                                             # FIRST-TIME schema setup only (was db_migrate.yml)
+```
+
+`data.db_setup` is not the post-merge step. It replays the whole base schema and
+builds any index it declares that production lacks: on 2026-10-20 it tried to build
+`idx_prop_odds_game` on `player_prop_odds`, held that table's writes for the full
+two-minute statement timeout, and rolled back. A merged view or function change
+goes through `data.view_migrations`.
+
+```bash
 ```
 
 `nfl_props_setup.yml` existed only because the dev sandbox cannot reach Supabase
@@ -127,15 +137,17 @@ Requires `npm i -g eas-cli` and `eas login` once. **Rule of thumb unchanged:** O
 for pure JS/TS; a full build whenever a native module or `app.json` native config
 changes, since an OTA bundle importing a missing native module crashes on launch.
 
-**The app applies OTA updates by itself (2026-08-31).** Publishing is not
+**The app fetches OTA updates by itself (2026-08-31; never applies them in-session since 2026-10-19).** Publishing is not
 delivering: expo-updates' default is check-on-launch, apply on the NEXT cold
 launch, so an installed build kept rendering the bundle it launched with until
 someone force-quit it twice. That produced a visibly wrong number — the in-app
 daily recap showed 2026-08-30 MLB as 7 picks / 2-5 while the Discord recap,
 computed from the same rows, had 10-6 / +11.4% with 9 in-play bets. `App.tsx`
 now mounts `useOtaUpdates()` (`src/lib/otaUpdate.ts`), which checks at launch
-and on every real return from the background and **reloads** when a new bundle
-is fetched. The Settings line shows the running bundle's publish date beside the
+and on every real return from the background and **downloads** what it finds;
+expo-updates runs it at the next cold start. It never reloads a running app
+(Matt, option A, 2026-10-19: the TestFlight crash was expo-updates aborting on
+a fatal JS error right after an in-process reload). The Settings line shows the running bundle's publish date beside the
 app version, so "am I current?" is answerable on the device — `APP_VERSION` is
 app.json's `version` and never moves on an OTA. Behaviour is pinned by
 `mobile/scripts/verify_ota_update.ts` and the wiring by
@@ -200,6 +212,8 @@ unless you set `MONITOR_TOKEN`. Runbook: `docs/monitoring.md`.
 ```bash
 python -m pytest -q tests/            # was tests.yml, on every PR
 python -m pytest tests/test_discord_notifier.py -v   # one file
+python -m pip install -r requirements-test.txt       # once: pytest, node and Postgres as pip wheels
+(cd mobile && python ../scripts/npm.py ci --no-audit --no-fund)   # once: the app's node_modules
 ```
 
 Losing the PR check is the one real tradeoff in removing Actions: nothing now

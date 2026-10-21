@@ -68,7 +68,8 @@ MARKET_STAT = {
 }
 
 
-def load_wnba_prop_quotes(conn: DBConnection, game_date: str) -> dict:
+def load_wnba_prop_quotes(conn: DBConnection, game_date: str,
+                         game_ids: list[str] | None = None) -> dict:
     """
     {(game_id, player, market, book): {line, over_price, under_price, links}}
     for one WNBA slate — the LATEST PRE-TIP snapshot per proposition per book.
@@ -79,20 +80,34 @@ def load_wnba_prop_quotes(conn: DBConnection, game_date: str) -> dict:
     invalidated an entire WNBA threshold sweep). An unparseable snapshot loses
     to any parsed one; a game with no commence_time is treated as pre-tip
     (fail-open matches _is_pregame_snapshot's convention).
+
+    The games side of the join is pinned to THIS slate. The 2026-09-21 evening
+    refresh timed out at 120.785s because `g.sport = 'WNBA' AND o.game_date = %s`
+    nested-looped idx_prop_odds_line_snap once per historical WNBA game (1,830)
+    and discarded them with the odds-table date filter. Pinning `g.game_date`
+    (or `o.game_id = ANY` when the slate is already loaded) is the same
+    population; it is not a cut, a floor, or a publish change.
     """
+    if game_ids is not None and not game_ids:
+        return {}
     mkts = ",".join(["%s"] * len(SHARP_MARKETS))
     books = ",".join(["%s"] * (len(SOFT_BOOKS) + 1))
+    if game_ids is not None:
+        slate_sql = "o.game_id = ANY(%s)"
+        params: list = [list(game_ids)]
+    else:
+        slate_sql = "g.sport = 'WNBA' AND g.game_date = %s"
+        params = [game_date]
     rows = conn.execute(f"""
         SELECT o.game_id, o.player_name, o.market, o.bookmaker,
                o.line, o.over_price, o.under_price, o.over_link, o.under_link,
                o.snapshot_at, {pregame_cutoff_sql("g")}
         FROM player_prop_odds o
         JOIN games g ON g.game_id = o.game_id
-        WHERE g.sport = 'WNBA' AND o.game_date = %s
+        WHERE {slate_sql}
           AND o.market IN ({mkts})
           AND o.bookmaker IN ({books})
-        ORDER BY o.snapshot_at
-    """, [game_date] + list(SHARP_MARKETS) + list(SOFT_BOOKS) + [SHARP_BOOK]
+    """, params + list(SHARP_MARKETS) + list(SOFT_BOOKS) + [SHARP_BOOK]
     ).fetchall()
 
     quotes: dict = {}

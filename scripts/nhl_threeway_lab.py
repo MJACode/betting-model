@@ -90,7 +90,7 @@ def main() -> None:
     a = ap.parse_args()
     conn = get_connection()
     try:
-        df, px = build(conn), prices(conn, a.season)
+        df, px = build(conn, with_prices=False), prices(conn, a.season)
         ot = dict(conn.execute("SELECT game_id, went_to_ot FROM games WHERE sport='NHL' "
                                "AND home_score IS NOT NULL").fetchall())
     finally:

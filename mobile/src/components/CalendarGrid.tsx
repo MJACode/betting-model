@@ -11,6 +11,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { spokenDate } from '@/lib/a11y';
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
@@ -71,6 +72,8 @@ export function CalendarGrid({
     <View style={styles.card}>
       <View style={styles.monthRow}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canPrev }}
           onPress={() => canPrev && setMonth((cur) => addMonths(cur, -1))}
           disabled={!canPrev}
           hitSlop={8}
@@ -85,6 +88,8 @@ export function CalendarGrid({
         </Pressable>
         <Text style={styles.monthLabel}>{monthLabel(month)}</Text>
         <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canNext }}
           onPress={() => canNext && setMonth((cur) => addMonths(cur, 1))}
           disabled={!canNext}
           hitSlop={8}
@@ -112,6 +117,15 @@ export function CalendarGrid({
           return (
             <View key={date} style={styles.cell}>
               <Pressable
+                // 32pt circles in a 36pt row: 2pt slop tiles the weeks exactly
+                // (36pt is the row pitch, so any more steals the next week's
+                // taps). Across, 6pt makes 44: a column is (width − 48) / 7,
+                // ≥ 44pt from a 356pt-wide screen, so neighbours tile there too.
+                // 44pt tall means a taller grid (verify_a11y allowlist, H9).
+                hitSlop={{ top: 2, bottom: 2, left: 6, right: 6 }}
+                accessibilityRole="button"
+                accessibilityLabel={spokenDate(date)}
+                accessibilityState={{ selected: isSelected, disabled }}
                 onPress={() => !disabled && onSelect(date)}
                 disabled={disabled}
                 style={({ pressed }) => [

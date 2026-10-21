@@ -301,7 +301,7 @@ async function main() {
   check('a stale response writes nothing', (s.match(/if \(inFlight\.current !== stamp\) return;/g) ?? []).length >= 4,
     `${(s.match(/if \(inFlight\.current !== stamp\) return;/g) ?? []).length} guards`);
   check('including the error banner and the spinner',
-    /if \(inFlight\.current !== stamp\) return;\s*\n\s*setError/.test(s) && /if \(inFlight\.current === stamp\) setLoading\(false\)/.test(s));
+    /if \(inFlight\.current !== stamp\) return;\s*\n\s*(?:if \(!isAbortError\(e\)\) )?setError/.test(s) && /if \(inFlight\.current === stamp\) setLoading\(false\)/.test(s));
   check('rows known to answer a different question are not shown as the answer',
     /rowsAreStale = shownKey !== null && shownKey !== readKey/.test(s)
     && (s.match(/rowsAreStale \? EMPTY_ROWS :/g) ?? []).length === 2);

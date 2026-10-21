@@ -34,6 +34,9 @@ demand via `python run_pipeline.py --step health-check`. Results are upserted in
   golf odds, missing model artifacts, settlement lag.
 - **Cadence-aware:** every sport's checks gate on that sport having games in the window —
   NBA in July, UFC midweek, golf off-weeks are SKIPPED, never false alarms.
+  Bullpen, the player game log and umpires expect the newest MLB final on or
+  before their ceiling, and skip when that final is more than 7 days behind it,
+  so a missing World Series row does not stay STALE until spring.
 - `KNOWN_UNTRAINED` in the module lists config models intentionally without artifacts
   (F5 O/U+RL, NHL/WNBA/NBA totals+spreads, the 5 golf models) — update it when one trains.
 
@@ -68,6 +71,12 @@ Load-bearing details:
 - **The health check runs as a step, i.e. before the pass calls `finish_run`.** So the first
   pass after this ships has a started row and no finished one; that reports SKIPPED, not a
   failure.
+- **A deploy does not leave a refresh row looking like a live hang.** Pipeline boot
+  (`scheduler.abort_orphaned_refresh_runs`) stamps unfinished `hourly` and `evening`
+  rows that started before this process, the same `failed_steps='aborted'` stamp
+  `_abort_orphans` writes. `daily` is left open. After that, an unfinished row older
+  than 2h is a pass this process may still be inside. Same-kind cleanup alone cannot
+  do this: an evening killed after the window does not start again until the next evening.
 - `refresh_pass_steps` ignores `run_kind='daily'` — the daily pipeline's failure semantics
   are different (it continues past failures by design).
 
