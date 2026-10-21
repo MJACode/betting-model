@@ -618,7 +618,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                   // (UX review, 2026-10-21). Carried as the ruler stop, the
                   // way the Stats board carries its own.
                   line: pick.scored_line != null ? thresholdFromBookLine(Number(pick.scored_line)) : undefined,
-                  lineFromPick: pick.scored_line != null ? true : undefined,
+                  pickScoredLine: pick.scored_line != null ? Number(pick.scored_line) : undefined,
                 })
               }
               style={({ pressed }) => [styles.viewStatsBtn, pressed && styles.viewStatsBtnPressed]}

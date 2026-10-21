@@ -279,9 +279,11 @@ export function PlayerStatsScreen() {
   // held like a touched line (the book's line does not replace it) but NAMED
   // for where it came from, not "your line" (UX review, 2026-09-25).
   const [lineFromBoard, setLineFromBoard] = useState(false);
-  // Pick Detail hands the pick's line the same way; the caption names it as
-  // the pick's, not the board's, because no board was on screen.
-  const lineFromPick = route.params.lineFromPick === true;
+  // Pick Detail hands the pick's line the same way, with the pick's RAW
+  // scored line beside it: the caption names the pick, side and all, the way
+  // the organic snap does ("pick Under 10.5"), never "board line" when no
+  // board was on screen and never the threshold's inverse (7+ is not 6.5).
+  const pickScoredLine = route.params.pickScoredLine ?? null;
 
   // ── The betslip leg ────────────────────────────────────────────────────────
   // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
@@ -400,7 +402,9 @@ export function PlayerStatsScreen() {
   // 7 came from a 6.5 posted line (UX review).
   const lineProvenance = lineTouched
     ? lineFromBoard
-      ? lineFromPick ? `pick line ${bookLineFromThreshold(line ?? 0)}` : 'board line'
+      ? pickScoredLine != null
+        ? `pick ${mode === 'under' ? 'Under' : 'Over'} ${pickScoredLine}`
+        : 'board line'
       : 'your line'
     : pickThreshold != null && line === pickThreshold
       ? `pick line ${bookLineFromThreshold(pickThreshold)}`
