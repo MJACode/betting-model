@@ -125,7 +125,10 @@ class TestTheCard:
         rows = card.pick_rows(_scored(mu=0.9, over=float("nan")), GAMES, "2026-10-01", 1000.0)
         assert len(rows) == 1 and rows[0]["pick_side"] == "under"
 
-    def test_a_second_pass_does_not_touch_a_pick_that_exists(self):
+    def test_a_second_pass_does_not_touch_a_pick_that_exists(self, monkeypatch):
+        import models.nhl_goalie_gate as gate
+        monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
+
         class Conn:
             def __init__(self):
                 self.inserted, self.commits = [], 0
@@ -134,9 +137,6 @@ class TestTheCard:
                 class R:
                     def __init__(s, row): s.row = row
                     def fetchone(s): return s.row
-                    def fetchall(s): return []
-                if "first_pitch_at" in sql:
-                    return R(None)
                 if sql.lstrip().upper().startswith("SELECT"):
                     return R((1,) if any(i["player_key"] == params[2] for i in self.inserted) else None)
                 self.inserted.append(params)

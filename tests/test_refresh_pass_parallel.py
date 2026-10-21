@@ -152,8 +152,11 @@ def test_settle_follows_every_results_ingest():
 
 
 def test_opening_signals_follows_every_scorer():
+    # nba-prop-market replaced nba-prop-scoring in the pass on 2026-10-15: the
+    # generic NBA prop scorer retired with its models. Since 2026-10-20 both NBA
+    # prop cards write through one step, nba-props (scripts/nba_props_card.py).
     for scorer in ("scoring", "prop-scoring", "wnba-prop-scoring",
-                   "nba-prop-scoring", "golf-scoring"):
+                   "nba-props", "golf-scoring"):
         assert _order(scorer) < _order("opening-signals")
 
 
@@ -169,6 +172,28 @@ def test_the_nhl_totals_card_reads_the_fetch_it_follows():
     assert _order("nhl-over-under") < _order("settle")
 
 
+def test_the_nba_prop_card_reads_the_fetch_it_follows():
+    """Both NBA prop cards pair prices in ONE stored prop fetch and decide only
+    games 45-57 minutes from tip, so they must run after `nba-prop-odds` has
+    stored this pass's fetch and as soon after it as the pass allows (before
+    the scoring group), and before settle. ONE sequential step for both
+    (2026-10-20, mike): their candidates meet in one choice, one bet a game
+    across both models, so the order they run in cannot pick the winner. Its
+    closing snapshot follows it, and the retired generic NBA prop scorer is
+    gone from the pass."""
+    assert re.search(r"^par nba-prop-odds$", SH, re.M)
+    assert re.search(r"^step nba-props$", SH, re.M), (
+        "nba-props must be a sequential step")
+    assert re.search(r"^step nba-prop-close$", SH, re.M), (
+        "nba-prop-close must be a sequential step")
+    assert _order("nba-prop-odds") < _order("nba-props") < _order("scoring")
+    assert _order("nba-props") < _order("nba-prop-close") < _order("settle")
+    # one model's card alone would hand the game's one bet to whichever ran first
+    for alone in ("nba-prop-market", "nba-prop-projection", "nba-prop-scoring"):
+        assert not re.search(rf"^(step|par) {alone}$", SH, re.M), (
+            f"{alone} would run a card outside the shared step")
+
+
 def test_parlay_follows_opening_signals():
     """It reads the locked legs."""
     assert _order("opening-signals") < _order("parlay-track-record")
@@ -182,7 +207,7 @@ def test_the_scorers_stay_sequential():
     not worth the risk.
     """
     for scorer in ("scoring", "prop-scoring", "wnba-prop-scoring",
-                   "nba-prop-scoring"):
+                   "nba-props"):
         assert re.search(rf"^step {re.escape(scorer)}$", SH, re.M), (
             f"{scorer} must be sequential, not parallel")
 

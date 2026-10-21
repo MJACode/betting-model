@@ -163,9 +163,11 @@ operational subset, not because it is the best ROI cell.
 5. The same pace construction on receptions and completions, read once on
    2025, is flat or negative (−0.98% on 335 and 143 bets).
 
-**What a forward test needs:**
+**Publishing.** A model either goes live with real bets once it clears the
+repo's evidence bar, or it does not publish. The five points above mean this
+one has not cleared that bar, so it does not publish. Going live, once it
+clears, needs:
 - a new model id (`nfl_live_prop` is struck);
-- paper only;
 - a scheduler job, because `RUN_NFL_LIVE` defaults off;
 - one live event-odds call per game at halftime, for one market in one region.
 
@@ -346,6 +348,31 @@ is recorded in `nfl_odds_history_pulls`.
   Graded at the median book they earn +1.1%: the gain is a book that had not
   caught up, i.e. cross-book latency, not a model.
 - A second season would cost about 161,940 credits (2024).
+
+**A second in-game season, 2024** (mike, 2026-10-12: "Yes buy a second in-game
+season"). 5,398 calls, 161,940 credits, 182,581 rows. Graded with
+`scripts/nfl_edge_inplay_2024.py`:
+- every model refit on 2016-23, so 2024 is out of sample;
+- the 2025 reviewers' fixes applied to both seasons;
+- 2025 reproduced cell for cell first.
+
+Result: marginal, not a model.
+- **The pre-registered family:** pooled 2024+2025, 0 of 60 clean cells survive
+  Benjamini-Hochberg at DraftKings' price or at the median book.
+- **Late-game leader moneyline at DraftKings** (≤ 10 min left, lead 4-16, the
+  2016-23 model's win probability at least 2 points above DK's price): 2024
+  +15.8% on 87 bets, 2025 +2.3% on 80. Pooled 167 bets, +9.4% (90% CI +1.8,
+  +16.8), p 0.022.
+- **The two seasons are statistically consistent** with one effect of about
+  +9-11%. Part of the 2024 gain is that leaders beat the model that season more
+  than usual (+0.026, about one season-to-season SD). Two seasons cannot rule
+  out a +5% edge; its power is about 0.27.
+- **The lagging book is real and is latency.** William Hill and FanDuel quotes
+  were often stale: William Hill's moneyline was unchanged after a score in
+  19.8% of 2024 snapshots, DraftKings' in 3-5%. Buying a stale quote against the
+  other books' median pays on moneylines in both seasons. By the next snapshot
+  the gap had closed in 60-71% of cases. Not proposed: it is cross-book
+  latency, and 5-minute snapshots cannot show whether a quote was bettable.
 
 **The fetched free data** is in `nfl_research_data_backup`:
 - 3,067 files, 467 MB raw, 271.6 MB gzipped;

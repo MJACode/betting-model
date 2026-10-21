@@ -75,12 +75,6 @@ class _PoisonConn:
         return self
 
     def fetchone(self):
-        # The started-game skip re-reads pregame_cutoff_sql at check time.
-        # These rows carry a 1999 commence_time so they are skipped before
-        # feature build; the lookup has to return that time, because the
-        # games-row snapshot is no longer what the skip reads.
-        if "first_pitch_at" in self.last:
-            return ("1999-01-01T00:00:00+00:00",)
         return None
 
     def fetchall(self):
@@ -104,10 +98,8 @@ class _PoisonConn:
 
 def _games():
     # commence_time in the past so the loop skips them before any feature
-    # build. The skip re-reads that time through pregame_cutoff_sql
-    # (fetchone above), not off this tuple. Both sports are present so a
-    # poisoned NCAAF pre-filter would take down the look-ahead pre-filter,
-    # which is the production chain.
+    # build. Both sports are present so a poisoned NCAAF pre-filter would
+    # take down the look-ahead pre-filter, which is the production chain.
     started = "1999-01-01T00:00:00+00:00"
     return [
         ("NCAAF_2026-09-26_A_B", "NCAAF", 2026, "2026-09-26", "B", "A", started),

@@ -48,7 +48,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import models.wnba_prop_market as mk  # noqa: E402
 from config import MODEL_MIN_ODDS  # noqa: E402
 from data.db import get_connection  # noqa: E402
-from data.first_pitch import pregame_cutoff_sql, pregame_still_open_sql  # noqa: E402
 
 MODEL_ID = "wnba_prop_market"
 MIN_EDGE = 0.05                                    # pre-committed; see docstring
@@ -72,23 +71,18 @@ def slate(conn, game_date: str, now: datetime | None = None) -> dict[str, dict]:
     The started check was missing until 2026-10-09 (the MLB cards had the same
     gap): the loader keeps the last pre-tip quote, so after tip the card still
     priced it and wrote two settled BETs after the scheduled start (2026-09-17
-    and 2026-09-23, 1 and 4 minutes after). The query also requires the
-    pregame cutoff (`pregame_still_open_sql`) to still be ahead of `now`.
-    Parsed, because commence_time is TEXT in mixed shapes. When the row
-    carries the cutoff column, that is what is parsed.
+    and 2026-09-23, 1 and 4 minutes after). Parsed, because commence_time is
+    TEXT in mixed shapes.
     """
     from features.feature_engine import _parse_iso_ts
     now = now or datetime.now(timezone.utc)
-    rows = conn.execute(f"""
-        SELECT game_id, home_team, away_team, commence_time,
-               {pregame_cutoff_sql("games")}
+    rows = conn.execute("""
+        SELECT game_id, home_team, away_team, commence_time
         FROM games WHERE sport = 'WNBA' AND game_date = %s
-          AND {pregame_still_open_sql("games")}
-    """, (game_date, now.astimezone(timezone.utc).isoformat())).fetchall()
+    """, (game_date,)).fetchall()
     out = {}
-    for row in rows:
-        gid, home, away, commence = row[:4]
-        start = _parse_iso_ts(row[4] if len(row) > 4 else commence)
+    for gid, home, away, commence in rows:
+        start = _parse_iso_ts(commence)
         if start is None or start <= now:
             continue
         out[gid] = {"home": home, "away": away, "commence_time": commence}
@@ -186,13 +180,7 @@ def publish(conn, rows: list[dict]) -> int:
 
     Not per side (2026-09-13): the other side of a line already bet is never
     added beside it. tests/test_prop_market_one_side_per_line.py
-
-    The pregame cutoff gate runs here, before this card's own INSERT. Routing
-    the row through `_insert_picks` would stamp decision_book DraftKings for a
-    price that is not DraftKings'.
     """
-    from models.scorer import _drop_pregame_after_cutoff
-    rows = _drop_pregame_after_cutoff(conn, rows)
     written = 0
     for r in rows:
         got = conn.execute("""

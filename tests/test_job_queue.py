@@ -448,16 +448,26 @@ def test_the_connection_only_sets_a_timeout_when_asked(monkeypatch):
 
     import data.db
 
-    # The timeout logic moved into data.db._connect on 2026-09-06 when
-    # get_connection gained a session_mode branch; both modes route through it,
-    # so the property is unchanged and this reads the function that now owns it.
-    src = inspect.getsource(data.db._connect)
+    # The env read moved from _connect into _session_options on 2026-10-16.
+    # _connect and _open pass that string into the DSN, and a reconnect
+    # re-reads it. Both get_connection modes still route through _connect.
+    src = inspect.getsource(data.db._session_options)
     assert 'os.environ.get("DB_STATEMENT_TIMEOUT_MS"' in src
     assert "isdigit()" in src, "a non-numeric value must not reach the DSN"
-    # ...and both modes must actually go through it, or one of them silently
-    # loses the timeout opt-in.
+    assert "_session_options(" in inspect.getsource(data.db._connect)
+    assert "_session_options(" in inspect.getsource(data.db._open)
     outer = inspect.getsource(data.db.get_connection)
     assert outer.count("_connect(") >= 2
+
+    # Absent or non-numeric: the database's own timeout. A number is the
+    # only value that sets one.
+    monkeypatch.delenv("DB_STATEMENT_TIMEOUT_MS", raising=False)
+    monkeypatch.delenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", raising=False)
+    assert data.db._session_options() is None
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT_MS", "nope")
+    assert data.db._session_options() is None
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT_MS", "120000")
+    assert data.db._session_options() == "-c statement_timeout=120000"
 
 
 def test_a_reclaim_gives_the_attempt_back():
@@ -617,7 +627,7 @@ def test_void_dedupes_sorts_and_trims():
                                       "reason": "  phantom games row, never scheduled  "})
     assert cleaned == {"pick_ids": [12, 661],
                        "reason": "phantom games row, never scheduled",
-                       "allow_posted": False}
+                       "allow_posted": False, "allow_graded": False}
 
 
 class _VoidConn:
@@ -668,7 +678,9 @@ def test_an_ungraded_pick_is_voided_with_the_reason_on_the_row(monkeypatch):
 def test_a_graded_pick_is_refused_not_rewritten(monkeypatch):
     row = (661, "g", "m", "label", "BET", "WIN", "2026-04-16 11:59:28+00")
     conn, out = _run_void(monkeypatch, [row])
-    assert out["voided"] == [] and out["refused"] == [[661, "already graded WIN"]]
+    assert out["voided"] == []
+    [(pick_id, why)] = out["refused"]
+    assert pick_id == 661 and why.startswith("already graded WIN") and "allow_graded" in why
     assert conn.writes == []
 
 
@@ -718,16 +730,41 @@ def test_the_job_refuses_a_posted_pick_without_the_opt_in(monkeypatch):
 
 
 def test_the_job_voids_a_posted_pick_with_the_opt_in(monkeypatch):
+    notices = []
+
+    def _announce(rows, reason):
+        notices.append((rows, reason))
+        return {"dry_run": False, "posted": 1}
+
+    monkeypatch.setattr("scripts.void_picks.announce_posted_voids", _announce)
     conn, out = _run_void_job(monkeypatch, [_posted_row()], allow_posted=True)
-    assert out == {"voided": [2558703], "refused": [], "missing": []}
+    assert out["voided"] == [2558703] and out["refused"] == [] and out["missing"] == []
+    assert out["void_notice"] == {"dry_run": False, "posted": 1}
     (params,) = conn.writes
     assert params[0] == "NO_ACTION" and params[-1] == 2558703
+    assert [r["pick_id"] for item in notices for r in item[0]] == [2558703]
+    assert notices[0][1] == "decided on a price nobody could bet"
 
 
 def test_the_job_never_voids_a_graded_posted_pick(monkeypatch):
+    """allow_posted alone never reaches a graded pick; that is allow_graded's."""
     conn, out = _run_void_job(monkeypatch, [_posted_row("LOSS")], allow_posted=True)
     assert out["voided"] == [] and conn.writes == []
-    assert out["refused"] == [[2558703, "already graded LOSS"]]
+    [(pick_id, why)] = out["refused"]
+    assert pick_id == 2558703 and why.startswith("already graded LOSS")
+
+
+def test_the_job_voids_a_graded_pick_only_with_allow_graded(monkeypatch):
+    """mike, 2026-10-20: "Void the 6 mlb picks." Graded, unposted, written after
+    first pitch; the grade it overwrites is kept in the note."""
+    row = (2304600, "MLB_2026-09-16_CWS_CLE", "mlb_total_public_fade",
+           "CLE vs CWS Under 6.5 (FD)", "BET", "LOSS", "2026-09-16 22:07:37+00",
+           False, -100.0)
+    conn, out = _run_void_job(monkeypatch, [row], allow_graded=True)
+    assert out["voided"] == [2304600] and out["refused"] == []
+    (params,) = conn.writes
+    assert params[0] == "NO_ACTION" and params[-1] == 2304600
+    assert params[3] == "decided on a price nobody could bet [was LOSS, -1.00 units]"
 
 
 # ── ncaaf_teams_refresh ──────────────────────────────────────────────────────

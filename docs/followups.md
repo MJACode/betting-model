@@ -21,6 +21,324 @@
 
 ---
 
+## [ ] NBA totals overs (`nba_total_luck`): first decisions, and the refit before 2027-28 (2026-10-17)
+
+Live from 2026-10-17; the first bet needs both teams at 10 games, so mid-November.
+Read after the first slates: (1) `nba_total_luck_decisions` — every regular-season
+game should get exactly one row, with `lead_min` 60-66 (the totals window job,
+`nba_total_luck_window`, every minute); a game with no row before tip means every
+tick 61-66 minutes out was skipped or its fetch failed (the card logs "was never
+decided"; the job's heartbeat goes silent after 20 minutes stopped); (2)
+`score_missing` / `box_missing` / `box_mismatch` in the detail column: a game of
+the season before the date with no final score, no box score, or a box whose
+points do not add up to its final (a player stored twice, a box ESPN never
+finished). Each declines EVERY later game until it is fixed (the card logs an
+ERROR naming it; the results step retries a missing one back to the season's
+opening). A box the worker cannot fix is replaced from a residential machine
+(stats.nba.com blocks datacenter addresses):
+`python -m data.ingestors.nba_stats_ingestor --repair-boxes 2027`, which writes a
+game only when NBA.com's box adds up. Never `--game-log-date` for this: it loads
+every game of the date and doubles any player ESPN stored under a fallback id. A
+"presumed not played" WARNING names a game still unscored two weeks on: if it was
+in fact played, its score and box are missing and every gap since is off;
+(3) the NBA Cup knockout games: nba_schedule lists them only as placeholders with
+no teams (production, read 2026-10-17: quarterfinals 12-04 and 12-05, semifinals
+12-08, the final 12-11). The model prices the quarterfinals and semifinals from
+their `games` rows and keeps the final out of the ratings by its date. Since
+2026-10-20 the worker's daily `nba-schedule` step gives them their real rows once
+ESPN lists the teams (`espn:` keys; the placeholders stay, the date rule reads
+them); no reload by hand is needed; (4) the
+artifact's copy in Supabase's `model_artifacts` — not written yet (the
+committed file is what the worker loads); `python -m scripts.nba_total_luck_build
+--store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the
+2027-28 season** refit the artifact through 2026-27
+(`python -m scripts.nba_total_luck_build`): the card refuses a season the artifact
+does not end just before. Re-sweep the gap cut at about 250 settled bets
+(`docs/thresholds.md`, NBA — `nba_total_luck`).
+
+## [ ] The paused marker on the rule cards with their own picks insert (2026-10-17)
+
+config.PAUSED_NOTE says every row a paused model writes carries
+`downgrade_reason = 'model paused'`, so a pick written while paused stays
+unannounced after an unpause. Since 2026-10-17 the shared insert
+(`models.scorer._insert_picks`) stamps it on a row that does not set the column,
+which covers `mlb_game_market`, `mlb_total_public_fade` and `nhl_over_under`, and
+`nba_total_luck` stamps it itself. These cards still write their own INSERT with
+no `downgrade_reason`, so a paused one writes unmarked BET rows:
+`scripts/nba_prop_market_card.py`, `scripts/nba_prop_projection_card.py`,
+`scripts/nhl_prop_card.py`, `scripts/nhl_props_card.py`,
+`scripts/wnba_prop_market_card.py`, `scripts/nfl_prop_market_card.py`, and the BET
+inserts of `scripts/nfl_wind_publisher.py` (its other insert already writes the
+column for its own reason). Each needs `downgrade_reason: models.scorer._pause_note(
+MODEL_ID)` on the row and the column in its insert, with a test that pauses the
+model (tests/test_nba_total_luck.py, `test_a_paused_model_s_rows_carry_the_paused_marker`,
+is the shape). The window it guards is small: while paused the threshold flag
+stops the post; only a pick written while paused, for a game still unstarted at
+the unpause, would post.
+
+## [ ] NBA projection model: what to read after its first nights (2026-10-16)
+
+`nba_prop_projection` went live with three things the archive could not grade
+(`docs/nba_models_2026.md` §5): (1) which books quote steals, blocks and
+blocks+steals near tip — four days out only DraftKings and FanDuel did, and the
+timing verifier graded that case at +2.53% (its five-market version of the card); (2) the stale-quote guard, which refuses
+quotes the archive never stored a clock for — count `stale_rejected` in the card's
+diagnostic line against bets written; (3) closing-line value, from the 'close'
+snapshot each bet game now gets. After the first 250 settled bets, grade the
+record by market and by deciding book, and BetParx-only lines separately
+(32% of the graded 2025-26 units, uncheckable against another book).
+
+## [ ] NBA: Blocks+Steals and Reb+Ast on the Stats leaderboard (2026-10-16)
+
+The app's NBA player pages show both combined stats, summed from the game log, and
+hide the head-to-head and same-position cards for them: the server has neither. To
+put them on the Stats leaderboard, add `blocks_steals` and `rebounds_assists`
+branches to `player_season_stat_values_nba`, `player_h2h_stat_values_nba` and
+`position_vs_opponent_nba`, and both columns to `v_player_season_totals_nba`; then
+move the two entries from `LOG_DERIVED_STATS` into `STAT_CATALOG`
+(`mobile/src/lib/statCatalog.ts`) and remove the gating in
+`mobile/src/hooks/usePlayerDetail.ts`.
+
+## [ ] App: the player record reads at most 200 settled bets (2026-10-16)
+
+"Our picks on <player>" (`mobile/src/lib/queries.ts`, `.limit(200)`) was sized for a
+busiest player of 50 settled bets. The NBA projection model can bet five markets on
+one player in one game. Measure once it has posted:
+`select player_id, count(*) from picks where model_id='nba_prop_projection' and
+signal_type='BET' group by 1 order by 2 desc limit 5`; if the top player nears 200,
+say "Latest 200 bets" on the card or page the read.
+
+## [ ] NBA: a partial ESPN injury pull looks complete (2026-10-16)
+
+`injury_ingestor.fetch_espn_injuries` stores nothing for a team whose ESPN call
+fails and writes the other 29, so the projection reads that team's Out players as
+available. Not observed since 2026-10-01 (no "injuries failed" warning in worker
+logs). The fix is a per-team failure marker the projection can refuse.
+
+## [ ] NBA: the official injury report is not on the worker (2026-10-16)
+
+`data/ingestors/nba_injury_report.py --today` fetches the latest league PDF;
+it is not wired, and whether the worker reaches `ak-static.cms.nba.com` is not
+measured. The shipped rule does not read injuries. The projection model would
+(ESPN's Out ≈ the official Out; Probable and Questionable both read as
+Day-To-Day on ESPN, and Probable players lost −18.4% inside the model's card).
+
+## [ ] NBA: leads graded and not shipped (2026-10-16)
+
+Recorded so they are not re-derived (`docs/nba_models_2026.md` §4):
+- Moneyline outlier prices: each soft book against the other books' no-vig in
+  the same fetch, EV ≥ 0.035, 1,260 bets +17.5%. Looks like quotes that had not
+  updated; whether they could be bet live is unmeasured; DraftKings' lone
+  outliers are the opposite (it moves first on news; the long side won 16.8%).
+- Home team totals vs Pinnacle, same number, EV ≥ 0.01: 182 bets, +6.6%, CI
+  −6.3..+19.1 — re-grade when 2026-27 adds a season.
+- Kalshi carries NBA prop and game ladders with hourly history from 2025-26
+  (free, `api.elections.kalshi.com`); the repo maps only NFL series. Not built.
+
+## [ ] App: a non-DraftKings pick's line move can read as a price move in the member's favour (found 2026-10-16)
+
+From the UX review of the NBA rebuild. `mobile/src/lib/markets.ts`
+`scoredLineBook` falls back to DraftKings while the movement history is the
+deciding book's, so when the book a pick was taken at moves its LINE, the app
+compares the new line's price with the locked line's price and can say "Moved
+3.6pp in your favor" when the line moved a point against the bet. Fixed for
+the three Pinnacle-reference prop rules in the NBA rebuild PR (they read
+`decision_book`, else the label book); every other pick decided at a book other
+than DraftKings still has it. The broad fix changes the movement chip across
+the whole board and wants its own reviewed PR. Same root: on NFL wind and
+opener picks the All books footnote says "The line is DraftKings'" when the
+line is the label book's.
+
+The other direction is open for every over/under model, the three rules
+included: when the bet book's line moves IN the member's favour (Under 4.5 at
+-110 -> 5.5 at -140), `computeMovement` still compares the two prices and the
+board chip reads "Steam -110 -> -140" in red, "Steamed 6.0pp against you" on
+the detail card. Only compute `priceShiftPp` when the current line equals the
+scored line; otherwise return a line-labelled result ("Line 4.5 -> 5.5"), as
+the NFL line-only branch does, and update `summarizeMovement`
+(PickCard.tsx) and the detail verdict (lineMovementView.ts) to match.
+Smaller items from the same review: one exported list of the three rule ids
+(four copies today), `allBooksLineSource` reading the same helper as
+`scoredLineBook`, ", modeled line" in the All books row's VoiceOver label, and
+"(vs Pinnacle)" so the record column never breaks inside the parenthesis.
+
+## [ ] App: a player page opened by name can show a namesake's data (found 2026-10-16)
+
+NFL rule picks carry no player id, so pick detail opens the player page by
+name (`playerId: pick.player_id ?? ''`), and the by-name log fetch is an exact
+name match ordered by date. `nfl_player_game_log` has 7 names since 2025 held
+by two player ids — Justin Jefferson is the Minnesota WR and a Cleveland LB,
+both with a game on 2026-10-11 — so `games[0]` (the page's team, next game,
+and since the NBA rebuild PR its head-to-head, today's picks and same-position
+card via `pagePlayerId`) can be the other player. Fix: pick detail passes the
+pick's game id or teams; when the by-name log holds more than one id, keep the
+rows whose team plays in that game.
+
+## [x] NHL game picks are decided before the night's goalie is known — DECIDED 2026-10-20 (mike): no NHL bet until both goalies are confirmed
+
+mike, 2026-10-20: *"We should absolutely always know the goalie matchup
+before making a bet as well."* Built on branch `nhl-goalie-confirmed`, for
+every NHL model but the shots-on-goal props (mike, same day: *"Ok on shots on
+goal"*; `config.NHL_GOALIE_GATE_EXEMPT`): one gate (`models/nhl_goalie_gate.py`) at the scorer,
+the totals card, both prop cards and every INSERT that can write an NHL pick;
+ESPN's and DailyFaceoff's designations stored as they change
+(`nhl_goalie_designations`); the game's goalie row rewritten when ESPN
+confirms someone else; the side models' 16:00Z-18:00Z clock removed; a
+five-minute NHL goalie window. Detail: `docs/sports/nhl.md` (2026-10-20). The
+existence-only guard proposed below would not have been enough: the 6am
+goalie did not start in 65 of 251 team-games 2026-10-01..10-19. Still open:
+`nhl_over_under` now decides on game day after the confirmations, a regime
+its prior-day evidence does not grade. The original item:
+
+"OTT (Regulation)" (pick 3550652, 2026-10-13) became a BET at 07:22Z, 3:22am
+ET, on Linus Ullmark's goalie row: he started for Ottawa the night before.
+Tonight's probable-starter row, Samuel Ersson, landed in `nhl_goalie_stats`
+at 10:05Z. Re-scored with it, the model says 0.4606 (0.4549 on all of
+tonight's inputs) against the 0.4931 it bet on, and neither clears the 0.20
+EV floor at +145. The hourly overnight passes score every NHL game, and
+`_get_nhl_goalie_stats` falls back to the latest earlier row, so any game
+pick that first clears between midnight and ~6am ET is decided on the last
+start's goalie, which for Ottawa on 10-13 was not the listed starter. MLB already has
+the guard (`models/scorer.score_game`: no game-model score until both
+probable starters are loaded); NHL has none. The fix is the same guard for
+NHL — no game pick until that date's goalie row exists for both teams —
+which changes when NHL picks fire: mike's call, `Updated-By`.
+
+Measured the same day, it is not only overnight. **32 of the 35 NHL game
+BETs since 2026-10-01 were written before that game's first goalie row**,
+31 of them on an Eastern day before the game (up to six days ahead), because
+a game pick locks at the first run that clears and lines open days out. Re-scored with the game-day goalie
+row and everything else as of the pick (all 32 reproduced their stored
+probability exactly first): in **14 of 32** the goalie the model used was not
+the one listed on game day, and there the bet side fell 2.8 points on
+average. Five fall below today's bar at the price taken: WSH ML 10-03 (0.486
+→ 0.378), PIT ML 10-07 (0.498 → 0.484), "PIT (Regulation)" 10-07 (0.483 →
+0.387), "SEA (Regulation)" 10-13 (0.446 → 0.413), "OTT (Regulation)" 10-13
+(0.493 → 0.461). A sixth, FLA ML 10-04, flips only because its probability
+crossed the moneyline correction's 0.50 seam (0.4998 → 0.5002), so it is not
+counted. The guard as written
+would end NHL game bets at early prices; the alternative is to keep the
+early decision and re-check it once the goalie row lands, which collides with
+the pick lock (CLAUDE.md §1c) and is mike's call either way.
+Related: rest. Graded the same day — rest, back-to-back and road-trip
+inputs added to both NHL game models make neither more accurate on 2025-26,
+on all games or on the 350 back-to-back games, and move the Ottawa game by
+0.0001 (`docs/nhl_market_lab.md`, "Rest, back-to-back and road trip in the
+production models"; branch `nhl-rest-candidate`). The goalie is what moves
+a back-to-back game, which is why the timing above is the fix.
+
+## [ ] nhl_over_under now decides after the goalies are confirmed; that moment is ungraded (found 2026-10-20)
+
+The goalie rule (above) moved the totals card's decision from a game's first
+qualifying fetch, often the day before, to the first qualifying fetch after
+both goalies are confirmed on game day. Its six-season grade
+(`models/nhl_totals_market.py`, `docs/thresholds.md`) leans on the prior-day
+quotes. Next: grade the same rule at the game-day fetches on the stored
+seasons, with the goalies who actually started, and report it beside the
+current grid.
+
+## [ ] DailyFaceoff from the worker: answered or not? (found 2026-10-20)
+
+The goalie poll reads DailyFaceoff's starting-goalies page as a veto
+(`data/ingestors/nhl_goalie_designations.py`). It answered this machine. It
+sits behind Cloudflare and has never been called from Railway, so it fails
+open. After the first deploy: count `nhl_goalie_designations` rows with
+`source = 'dailyfaceoff'`, and read the worker log for "DailyFaceoff ... not
+read". None means the gate runs on ESPN alone.
+
+## [ ] NHL goalie rule: the checks to run after it merges (found 2026-10-21)
+
+Every NHL model but shots on goal refuses every bet until these hold, so run
+them on the first refresh pass after the deploy:
+
+1. The table exists: `SELECT to_regclass('public.nhl_goalie_designations')`
+   is not NULL. The first version of the migration could never create it
+   (fixed 2026-10-21; checked twice on a scratch Postgres 17.6).
+2. The poll is storing and re-reading: `SELECT source, count(*),
+   max(observed_at), max(last_seen_at) FROM nhl_goalie_designations GROUP BY
+   source`. ESPN rows within minutes of the pass; `last_seen_at` moving on
+   later passes.
+3. The window beats: `SELECT last_run_at, last_status FROM job_heartbeats
+   WHERE job_id = 'nhl_goalie_window'` after 11:00 ET.
+4. A known game is deciding: an NHL BET or a NONE row whose reason is not a
+   goalie one, on a game with both ESPN rows `confirmed`.
+
+No threshold sync is needed: the change touches no threshold.
+
+## [ ] The daily run and a refresh pass can still overlap on a long morning (found 2026-10-21)
+
+The five-minute window no longer polls while either is in progress, so its
+poll cannot rewrite a goalie row in the middle of their scoring. The two of
+them can still overlap each other, as before this branch: a refresh pass
+that starts while the daily run is scoring runs its own goalie poll first,
+which could rewrite a goalie row between the daily run's input read and its
+gate read. The daily runs measured 25.9 minutes median, 28.1 longest, since
+2026-10-07 (`pipeline_runs`), and the first hourly pass is at 11:17Z, so it
+needs a daily run over an hour late; 2026-10-01's ran 10:10Z to 12:39Z. Next,
+if it matters: have the refresh pass skip its goalie poll while the daily
+run holds its lock.
+
+## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
+
+`injuries` gets a full copy of each team's list on every ingest run
+(report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per
+player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). `query_injuries_for_game`
+reads every row for the latest report_date and `_compute_injury_adjustment`
+sums them, so `home_injury_adj` / `away_injury_adj` grow all day: Ottawa read
+11.2 at 07:22Z and 53.9 at 22:23Z, against 2.8 and 3.5 counting each player once
+(the docstring says 0-3). It is also the "Opponent injury burden: 79.80" note
+on picks. `nhl_moneyline_regulation` never splits on an injury input (0
+splits across all folds), so it changed nothing there. Before a fix (read
+only the latest snapshot), list which live artifacts DO split on injury
+inputs and what their inputs looked like in training, since the fix moves
+those models' inputs: mike's call.
+
+**For the NHL game models the six injury inputs are dead whatever the reader
+does.** NHL rows in `injuries` start 2026-04-05, so every training game
+(2018-19 → 2024-25) had none and the inputs were zero on every training row;
+that is why neither tree splits on them. And two of the six can never switch
+on for NHL even now: every NHL row is stored at `severity_weight` 0.7 and
+`scenario` 'A', while `_has_starter_out` needs severity ≥ 0.8 and
+`_has_returnee` needs scenario 'B'. A usable NHL injury input has to be
+built from history the model can learn from — e.g. who dressed each game in
+the per-game skater logs, weighted by usage — which is a project, not a
+reader fix.
+
+## [ ] App copy that EV-cut models contradict, and a dollars tile (found 2026-10-15, UX review)
+
+Raised by the front-end review of the NHL moneyline rebuild; declined in that
+PR because each was already wrong for the six models whose cut is EV
+(probability and edge bars 0.0 — NHL props, NHL totals, the MLB public fade).
+One front-end PR, with its own review:
+
+- `ExplainerScreen.tsx:108-109` says "moneyline needs ≥72% model prob and ≥12%
+  edge" (MLB's old bar; 11% today); :95-97 says a BET clears probability AND
+  edge; :190 says every BET carries a Sharp Score. Reword: a BET clears that
+  model's own bar — for some models expected value at the price, so it can be
+  an underdog under 50% — and drop the hard-coded numbers.
+- `ExplainerScreen.tsx:218-226` says a BET at noon can become AVOID at 6pm
+  and to honour the latest signal — the opposite of the pick rule (a BET is
+  locked); :84-90 says the probability shown is calibrated (it is the raw one).
+- The All board's and the model screen's tooltips (`PicksHomeScreen.tsx:609`,
+  `BuiltInModelDetailScreen.tsx:192`) say picks lock the first time they are
+  scored; they lock the first time they become a BET.
+- `ReasoningCard.tsx:93` explains a pick by edge only; an EV row would name
+  what an EV-cut model actually bet on.
+- **`BuiltInModelDetailScreen.tsx:246-250, :464` show results in DOLLARS**
+  ("vs $100 flat per bet", `formatCurrencySigned`) — against the units rule
+  (CLAUDE.md §4).
+
+## [ ] Nothing stops the test suite from reaching the production database (found 2026-10-14)
+
+`tests/conftest.py` sets no guard on `DATABASE_URL` or `ODDS_API_KEY`, and the
+local `.env` holds the production values, so any test that opens a connection
+or calls the feed during `python -m pytest -q tests/` does it against
+production. Found by a research agent that started the suite with `.env` in
+its worktree and stopped it after 46 file-only tests; whether any test in the
+suite actually connects has not been checked. Fix: an autouse fixture that
+unsets both for the session unless a test opts in, and a check that lists the
+tests that reach for either.
+
 ## [ ] UFC writes one fight under two `games` rows, and a model can bet both (found 2026-10-09)
 
 Read-only, 2026-10-09: 78 UFC pairs of `games` rows since 2026-06-01 describe
@@ -82,17 +400,22 @@ none under "refused".
 
 Found 2026-10-09 while making posted picks voidable. After a void:
 
-- **Discord.** The original post stays. Nothing new is posted.
+- **Discord.** The original post stays. The correction is a separate gray
+  notice, `notify_discord_void` / job `publish_discord_void` (branch
+  `cursor/discord-void-notice-eaef`). It is not posted until someone runs the
+  job with `dry_run` false, after the migration is applied. The original
+  message is not edited.
 - **Phone.** The "new bet" push went out when the pick was posted. Nothing
-  follows the void.
-- **App.** The card keeps its badge, Track and the betslip button. Only the
-  pick's detail screen adds "Posted to Discord · not counted in the model's
-  record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
+  follows the void. Still open.
+- **App.** Once a `discord_void` row exists, `v_discord_published` drops the
+  lock and the card leaves the board the same way an unpublished VOID does.
+  Until that row exists, the card keeps its badge, Track and the betslip
+  button. The detail screen still adds "Posted to Discord · not counted in
+  the model's record" (`mobile/src/screens/PickDetailScreen.tsx:317`).
 
-So a member who bet one of the eight unders is not told it was withdrawn.
-Two options: a correction post in the channel, or a marker on the app card
-(or both). Either is a small change. The choice is mike's; nothing has been
-posted.
+The notice wording is in that PR for approval. The phone push is still a
+decision.
+
 ## [x] NCAAF picks scored from prices more than a week old — FIXED 2026-10-09
 
 Found by the 2026-10-09 line-movement review: 200 of 682 pre-game NCAAF picks
@@ -388,7 +711,12 @@ The one-time re-grade (`clv-price-taken-recompute-2026-10-08`) must run before
 any pruner fix. The fix should keep, per game and book, the row at every
 pick's `created_at` and the last row at or before the start.
 
-## [ ] [needs-decision] MLB market cards wrote 6 bets after the game started (found 2026-10-08)
+## [x] MLB market cards wrote 6 bets after the game started (found 2026-10-08; voided 2026-10-20)
+
+**2026-10-20, closed:** mike, *"Void the 6 mlb picks."* Voided with
+`scripts/void_picks.py --allow-graded` (added the same day; the grade each
+overwrote is kept in `condition_note`). The two late WNBA prop bets below
+(2371848, 2789745) are still in the record: they were not part of the ask.
 
 Read-only query, 2026-10-08: `mlb_total_public_fade` wrote 4 BETs at
 2026-09-16 22:07Z and `mlb_spread_market` 2 at 2026-09-17 00:57Z, each 3 to 7
@@ -503,10 +831,10 @@ probabilities of a game sum to 1.144). mike: underdog plus-money bets are
 wanted. Not changed. The measurements stay in `docs/nhl_market_lab.md` as a
 record, not an open question.
 
-## [x] Paper-only for the NHL models — DECIDED 2026-10-01 (mike): they are LIVE
+## [x] Hold-back for the NHL models — DECIDED 2026-10-01 (mike): they are LIVE
 
 *"this is a live model."* Gate not met, his call; recorded in CLAUDE.md §2 and
-at the top of `docs/sports/nhl.md`. No paper-only switch was built.
+at the top of `docs/sports/nhl.md`. No hold-back switch was built.
 
 ## [x] NHL week-one inputs: blended toward last season — BUILT, BACKTESTED, NOT ADOPTED (2026-10-01)
 
@@ -778,9 +1106,9 @@ they are untouched until someone measures them.
 so the MLB arm is a small change; MLB Pinnacle prop coverage starts 2026-08-27,
 so the window is thin.
 
-## [ ] Re-score nfl_opener_spread and nfl_wind_totals 2026 paper-track (October)
+## [ ] Re-score nfl_opener_spread and nfl_wind_totals 2026 live track (October)
 
-mike / design review 2026-09-14: paper-track through 2026 with **no unit bump**.
+mike / design review 2026-09-14: live track through 2026 with **no unit bump**.
 Opener retires if 2026 ≤ flat. Wind keeps the physical residual and
 `MAX_FIRE_LEAD=4` (deployed Open-Meteo population). Do not unpause paused XGB
 props. Command: `python -m scripts.nfl_rule_2026_track` (`--settle` runs the

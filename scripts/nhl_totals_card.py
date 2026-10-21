@@ -17,6 +17,19 @@ advisory lock, because the 6am run and a refresh pass can overlap and the
 picks unique index includes the side, so it would not stop an over plus an
 under.
 
+BOTH STARTING GOALIES CONFIRMED FIRST (mike, 2026-10-20: "We should
+absolutely always know the goalie matchup before making a bet as well."). A
+game is priced only once models/nhl_goalie_gate.py says its matchup is known;
+every other game is held back before its quotes are read, and the pass logs how
+many and why. A known game whose newest Pinnacle fetch was taken before the
+matchup became known waits too (`after_confirmation`): that price was set
+without the goalie news, and the next fetch decides. The INSERT refuses an
+unknown game again (refuse_unknown, then the scorer's own insert guard). THIS
+MOVED THE MODEL'S DECISION MOMENT: until 2026-10-20 a game's first qualifying
+fetch was often the day before (the prior-day quotes carry most of the
+evidence, above); now it is the first qualifying fetch after both goalies are
+confirmed on game day. That regime has not been graded on its own.
+
 BET ROWS ONLY. The scorer deletes every model's unsettled non-BET rows on each
 pass, so a "declined" row would not survive. The per-pass diagnostic line in
 the worker log is how an empty card is told apart from a broken one.
@@ -42,9 +55,10 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config
+import models.nhl_goalie_gate as goalie_gate
 import models.nhl_totals_market as mk
 from data.db import get_connection
-from data.first_pitch import pregame_cutoff_sql, pregame_still_open_sql
 from models.market_relative import implied
 from models.scorer import (
     _build_pick_label,
@@ -64,33 +78,52 @@ def slate(conn, now: datetime) -> dict[str, dict]:
     """Every NHL game whose start is after `now`. No horizon.
 
     The game_date bound only lets the query use the date: a game that starts
-    after `now` cannot carry an ET date earlier than yesterday's. The query
-    also requires the pregame cutoff (`pregame_still_open_sql`) to still be
-    ahead of `now`. The started check is done on the parsed cutoff when the
-    row carries it, else the scheduled start, because commence_time is TEXT
-    in mixed shapes. For NHL that cutoff is commence_time until a first pitch
-    is stored; this does not add an NHL-specific offset.
+    after `now` cannot carry an ET date earlier than yesterday's. The started
+    check is done on the parsed start time, because commence_time is TEXT in
+    mixed shapes.
     """
     from features.feature_engine import _parse_iso_ts
     since = (now.astimezone(_ET).date() - timedelta(days=1)).isoformat()
-    rows = conn.execute(f"""
-        SELECT game_id, home_team, away_team, commence_time, game_date,
-               {pregame_cutoff_sql("games")}
+    rows = conn.execute("""
+        SELECT game_id, home_team, away_team, commence_time, game_date
         FROM games
         WHERE sport = 'NHL'
           AND commence_time IS NOT NULL
           AND game_date >= %s
-          AND {pregame_still_open_sql("games")}
-    """, (since, now.astimezone(timezone.utc).isoformat())).fetchall()
+    """, (since,)).fetchall()
     out = {}
-    for row in rows:
-        gid, home, away, commence, gd = row[:5]
-        start = _parse_iso_ts(row[5] if len(row) > 5 else commence)
-        if start is None or start <= now:
+    # The stored start is the odds feed's, about ten minutes after the
+    # scheduled puck drop: nothing is decided that close to it
+    # (config.NHL_DECIDE_BEFORE_START_MIN).
+    margin = timedelta(minutes=config.NHL_DECIDE_BEFORE_START_MIN)
+    for gid, home, away, commence, gd in rows:
+        start = _parse_iso_ts(commence)
+        if start is None or start - margin <= now:
             continue
         out[gid] = {"home": home, "away": away,
                     "commence_time": commence, "game_date": str(gd)[:10]}
     return out
+
+
+def after_confirmation(quotes: list[dict], known_at: dict) -> list[dict]:
+    """The quotes of the games whose newest Pinnacle fetch (odds.created_at,
+    the clock find_bets pairs on) was taken at or after the matchup became
+    known. A game whose newest one predates it is dropped whole, and logged:
+    its next fetch decides. A game with no recorded moment keeps its quotes
+    (a stored designation always carries one; see the scorer's twin,
+    models/scorer._nhl_price_reason)."""
+    newest: dict = {}
+    for q in quotes:
+        if q.get("book") == mk.SHARP_BOOK:
+            ts = mk._fetch_ts(q)
+            if ts is not None and (q["game_id"] not in newest or ts > newest[q["game_id"]]):
+                newest[q["game_id"]] = ts
+    wait = sorted(g for g, at in known_at.items()
+                  if at is not None and g in newest and newest[g] < at)
+    if wait:
+        logger.info(f"NHL totals card: {len(wait)} game(s) wait for a fetch taken after both "
+                    f"goalies were confirmed: {', '.join(wait)}")
+    return [q for q in quotes if q["game_id"] not in wait]
 
 
 def pick_rows(bets, games: dict, bankroll: float) -> list[dict]:
@@ -167,6 +200,8 @@ def publish(conn, rows: list[dict]) -> int:
         return 0
     from scripts.nfl_wind_publisher import _lock_model
     _lock_model(conn, MODEL_ID)
+    # The last line: no bet on a game whose goalie matchup is not known.
+    rows = goalie_gate.refuse_unknown(conn, rows, mode="drop", label=MODEL_ID)
     written = 0
     for r in rows:
         # Any BET on the game counts: the other side, a VOIDed or settled one.
@@ -201,8 +236,19 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         games = slate(conn, now)
         if not games:
             logger.info("NHL totals card: no unstarted NHL games")
-            return {"games": 0, "bets": 0, "published": 0}
-        quotes = mk.load_fetch_quotes(conn, games)
+            return {"games": 0, "held": 0, "bets": 0, "published": 0}
+        # Only a game whose goalie matchup is known may produce a bet
+        # (nhl_over_under is not exempt; models/nhl_goalie_gate.is_exempt).
+        held: dict = {}
+        known_at: dict = {}
+        if not goalie_gate.is_exempt(MODEL_ID):
+            states = goalie_gate.matchup_states(conn, list(games), now=now)
+            games, held = goalie_gate.split_known(games, {g: m.reason for g, m in states.items()})
+            goalie_gate.log_held("NHL totals card", held)
+            known_at = {g: states[g].known_at for g in games}
+        if not games:
+            return {"games": len(held), "held": len(held), "bets": 0, "published": 0}
+        quotes = after_confirmation(mk.load_fetch_quotes(conn, games), known_at)
         # The card's clock goes to the rule, so a fetch older than
         # config.PREGAME_PRICE_MAX_AGE_MIN is refused (diag `stale_fetch`).
         bets, diag = mk.find_bets(quotes, now=now)
@@ -214,7 +260,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             published = publish(conn, rows)
             logger.info(f"NHL totals card: {published} new bet(s) written "
                         f"of {len(bets)} on the card")
-        return {"games": len(games), "bets": len(bets), "published": published}
+        return {"games": len(games) + len(held), "held": len(held), "bets": len(bets),
+                "published": published}
     finally:
         conn.close()
 

@@ -54,7 +54,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -104,17 +103,15 @@ EDGE_TIERS = opener_spread.EDGE_TIERS
 
 
 def load_window_schedule(lo_days: float = LEAD_LO_DAYS,
-                         hi_days: float = LEAD_HI_DAYS) -> pd.DataFrame:
-    g = pd.read_csv("data/games.csv")
-    dt = pd.to_datetime(g.gameday + " " + g.gametime, errors="coerce")
-    g["kick_utc"] = (dt.dt.tz_localize(ZoneInfo("America/New_York"), ambiguous=True,
-                                       nonexistent="shift_forward").dt.tz_convert("UTC"))
-    now = pd.Timestamp.now(tz="UTC")
-    g = g[(g.kick_utc > now + pd.Timedelta(days=lo_days))
-          & (g.kick_utc <= now + pd.Timedelta(days=hi_days))].copy()
-    g["matchup"] = g.away_team + " @ " + g.home_team
-    g["lead_days"] = (g.kick_utc - now).dt.total_seconds() / 86400
-    return g
+                         hi_days: float = LEAD_HI_DAYS, now=None) -> pd.DataFrame:
+    """Games kicking off in (now + lo_days, now + hi_days], from the games table.
+
+    Not data/games.csv, which was frozen on 2026-08-15 and holds no playoff
+    game: see data_ingest/schedule.py. The opener only needs the teams and the
+    kickoff; the venue columns ride along unused.
+    """
+    from data_ingest.schedule import load_schedule as load_db_schedule
+    return load_db_schedule(lo_days, hi_days, now=now)
 
 
 # How far back the number-age label looks. A day is enough to tell "NEW" from
@@ -269,8 +266,11 @@ def main() -> int:
     # this costs in evidence: pre-T-7 bets are outside the backtested span.
     #
     # The LATE bound is untouched at T-2.
+    #
+    # One schedule read per tick, not two: this runs every minute, and the
+    # fire window is the watch window minus its last two days.
     watch = load_window_schedule(lo_days=0.0, hi_days=a.watch_days)
-    sched = load_window_schedule(hi_days=a.watch_days)
+    sched = watch[watch.lead_days > LEAD_LO_DAYS].copy()
     if watch.empty:
         print(f"No games inside the {a.watch_days:.0f}-day watch horizon.")
         return 0
@@ -298,7 +298,7 @@ def main() -> int:
     # never sink the card. Runs BEFORE the no-qualifying-bets early exit.
     try:
         from data_ingest.line_snapshots import dump_dk_lines
-        dump_dk_lines(frame, "spreads")
+        dump_dk_lines(frame, "spreads", sched=watch)
         from data_ingest.pick_eval import dump_board
         dump_board(frame)
     except Exception as exc:

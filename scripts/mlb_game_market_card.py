@@ -43,7 +43,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 import models.mlb_game_market as mk
 from data.db import get_connection
-from data.first_pitch import pregame_cutoff_sql, pregame_still_open_sql
 from models.scorer import (
     _build_pick_label,
     _get_current_bankroll,
@@ -93,30 +92,23 @@ def slate(conn, game_date: str, now: datetime | None = None) -> dict[str, dict]:
     still priced the last pre-game quotes and could write a bet nobody could
     take. It did on 2026-09-16, six BETs 180-436 minutes after first pitch,
     on games that were over by the time the rows were written. Shared by the
-    public-fade card. The query keeps a game only while its pregame cutoff
-    (`pregame_still_open_sql`, the same bound as the insert gate) is still
-    ahead of `now`, so an early first pitch drops it while commence_time is
-    still in the future. The Python check reads that cutoff when the row
-    carries it and the scheduled start otherwise, because commence_time is
-    TEXT in mixed shapes. A replay of a past `--date` is therefore an empty
+    public-fade card. The check is on the parsed start because commence_time
+    is TEXT in mixed shapes. A replay of a past `--date` is therefore an empty
     slate: every game on it has started.
     """
     from features.feature_engine import _parse_iso_ts
     now = now or datetime.now(timezone.utc)
     nxt = (date.fromisoformat(game_date) + timedelta(days=1)).isoformat()
-    rows = conn.execute(f"""
-        SELECT game_id, home_team, away_team, commence_time, game_date,
-               {pregame_cutoff_sql("games")}
+    rows = conn.execute("""
+        SELECT game_id, home_team, away_team, commence_time, game_date
         FROM games
         WHERE sport = 'MLB'
           AND game_date IN (%s, %s)
           AND commence_time IS NOT NULL
-          AND {pregame_still_open_sql("games")}
-    """, (game_date, nxt, now.astimezone(timezone.utc).isoformat())).fetchall()
+    """, (game_date, nxt)).fetchall()
     out = {}
-    for row in rows:
-        gid, home, away, commence, gd = row[:5]
-        start = _parse_iso_ts(row[5] if len(row) > 5 else commence)
+    for gid, home, away, commence, gd in rows:
+        start = _parse_iso_ts(commence)
         if start is None or start <= now:
             continue
         out[gid] = {

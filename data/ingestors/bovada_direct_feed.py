@@ -225,51 +225,63 @@ def _seen_key(row: dict) -> tuple:
 
 def poll_once(conn: DBConnection, sess, seen: set, game_cache: dict,
               dry_run: bool = False) -> dict:
+    """One coupon read. A tick that writes nothing rolls its game-id SELECTs
+    back — this connection is held for the whole run, and a quiet board never
+    commits."""
     from config import live_slate_dates
+    from data.db import release_read
     out = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0}
+    committed = False
     try:
-        body = sess.get(COUPON_URL, headers=HEADERS, timeout=15).json()
-    except Exception as exc:                              # noqa: BLE001
-        logger.debug(f"bovada: {type(exc).__name__} on coupon")
-        out["errors"] += 1
+        try:
+            body = sess.get(COUPON_URL, headers=HEADERS, timeout=15).json()
+        except Exception as exc:                          # noqa: BLE001
+            logger.debug(f"bovada: {type(exc).__name__} on coupon")
+            out["errors"] += 1
+            return out
+
+        now = datetime.now(timezone.utc).isoformat()
+        dates = live_slate_dates()
+        rows = []
+        for rec in parse_coupon(body, live_only=True):
+            out["quotes"] += 1
+            game_id = resolve_game_id(conn, "MLB", rec["event_name"], dates,
+                                      game_cache)
+            if not game_id:
+                out["unmatched"] += 1
+                continue
+            row = _row_for(rec, game_id, now)
+            key = _seen_key(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+
+        if rows and not dry_run:
+            sql = (f"INSERT INTO odds ({', '.join(_COLS)}) VALUES "
+                   f"({', '.join('%(' + c + ')s' for c in _COLS)})")
+            for r in rows:
+                try:
+                    conn.execute(sql, r)
+                except Exception as exc:                  # noqa: BLE001
+                    # Per row: a failed statement poisons the connection and every
+                    # later write in the pass fails silently behind it.
+                    conn.rollback()
+                    out["errors"] += 1
+                    logger.debug(f"bovada insert failed: {exc}")
+            conn.commit()
+            committed = True
+        out["written"] += len(rows)
         return out
-
-    now = datetime.now(timezone.utc).isoformat()
-    dates = live_slate_dates()
-    rows = []
-    for rec in parse_coupon(body, live_only=True):
-        out["quotes"] += 1
-        game_id = resolve_game_id(conn, "MLB", rec["event_name"], dates,
-                                  game_cache)
-        if not game_id:
-            out["unmatched"] += 1
-            continue
-        row = _row_for(rec, game_id, now)
-        key = _seen_key(row)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append(row)
-
-    if rows and not dry_run:
-        sql = (f"INSERT INTO odds ({', '.join(_COLS)}) VALUES "
-               f"({', '.join('%(' + c + ')s' for c in _COLS)})")
-        for r in rows:
-            try:
-                conn.execute(sql, r)
-            except Exception as exc:                      # noqa: BLE001
-                # Per row: a failed statement poisons the connection and every
-                # later write in the pass fails silently behind it.
-                conn.rollback()
-                out["errors"] += 1
-                logger.debug(f"bovada insert failed: {exc}")
-        conn.commit()
-    out["written"] += len(rows)
-    return out
+    finally:
+        if not committed:
+            release_read(conn)
 
 
 def run(minutes: float, dry_run: bool = False) -> dict:
     from data.ingestors.dk_direct_feed import _ensure_schema
+    from data.db import use_poller_session
+    use_poller_session()
     conn = get_connection()
     sess = requests.Session()
     seen: set = set()

@@ -22,11 +22,11 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
-import { isDuplicateCopy, isPausedRow, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
+import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
-import { statForPropModel, type StatDef } from '@/lib/statCatalog';
-import { modelShort } from '@/lib/modelMeta';
+import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
+import { modelLong, modelShort, sportOfModel } from '@/lib/modelMeta';
 import type { GameRow, PropOddsByBookRow, PropOddsSnapshotRow, SettledPick } from '@/types';
 
 // ── Line conversions ─────────────────────────────────────────────────────────
@@ -373,6 +373,8 @@ export function statSplits(
 // ── Our record on this player ────────────────────────────────────────────────
 
 export interface PlayerPickLine {
+  /** Unique per line: the model id, plus the market for a multi-market rule. */
+  key: string;
   modelId: string;
   /** The stat the model prices ("Hits", "Points"), or the model's short label. */
   label: string;
@@ -394,6 +396,19 @@ export interface PlayerPickRecord {
   pushes: number;
   units: number | null;
   unpriced: number;
+  /** A ledger read failed. Unknown stamps stayed in the counts. */
+  ledgerUnread: boolean;
+}
+
+/**
+ * What a multi-market model's line on the player page is called after its
+ * stat: the parenthetical of the model's own name, so "Points (vs Pinnacle)"
+ * for the three rules priced against Pinnacle and "Steals (Projection)" for
+ * the NBA projection model, which is not priced against Pinnacle. The short
+ * name when the long one carries no parenthetical.
+ */
+function multiMarketModelName(modelId: string): string {
+  return /\(([^()]+)\)\s*$/.exec(modelLong(modelId))?.[1] ?? modelShort(modelId);
 }
 
 /**
@@ -403,7 +418,9 @@ export interface PlayerPickRecord {
  */
 export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   const by = new Map<string, PlayerPickLine>();
-  const total: PlayerPickRecord = { lines: [], settled: 0, wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0 };
+  const total: PlayerPickRecord = {
+    lines: [], settled: 0, wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, ledgerUnread: false,
+  };
   for (const p of picks) {
     if (p.signal_type !== 'BET') continue;
     // Paused-model BETs were never bet (#850); same rule as passesRecordFilter.
@@ -412,16 +429,34 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     if (RECORD_EXCLUDED_MODELS.has(p.model_id)) continue;
     // The second copy of one bet under another game id counts once (2026-10-09).
     if (isDuplicateCopy(p)) continue;
+    // The published record is the picks Discord still has. Omitted and
+    // unknown stay; only an explicit unpublished stamp leaves.
+    if (!publishedRecordKeeps(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
-    let line = by.get(p.model_id);
+    // A multi-market model (nba/wnba/nfl_prop_market, nba_prop_projection) is
+    // one model id across several markets, so its picks are split by the
+    // row's prop_market and each line is named for that market's stat.
+    // Without this every one of its bets was one line labelled "Prop Mkt".
+    const modelStat = statForPropModel(p.model_id);
+    const market = modelStat ? null : (p.prop_market ?? null);
+    const key = market ? `${p.model_id}|${market}` : p.model_id;
+    let line = by.get(key);
     if (!line) {
-      const stat = statForPropModel(p.model_id);
+      const stat = modelStat ?? statForPropMarket(sportOfModel(p.model_id), market);
+      // A rule's line names the rule too: named for the stat alone, it read
+      // as a second per-stat line ("Assists 1-0" over "Assists 0-1").
+      const label = !stat
+        ? modelShort(p.model_id)
+        : market
+          ? `${stat.label} (${multiMarketModelName(p.model_id)})`
+          : stat.label;
       line = {
+        key,
         modelId: p.model_id,
-        label: stat?.label ?? modelShort(p.model_id),
+        label,
         wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, overs: 0, unders: 0,
       };
-      by.set(p.model_id, line);
+      by.set(key, line);
     }
     if (p.result === 'WIN') { line.wins += 1; total.wins += 1; }
     else if (p.result === 'LOSS') { line.losses += 1; total.losses += 1; }
@@ -439,6 +474,7 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
       line.unpriced += 1;
       total.unpriced += 1;
     }
+    if (p.discordPublish === 'unknown') total.ledgerUnread = true;
     total.settled += 1;
   }
   total.lines = [...by.values()].sort((a, b) => (b.wins + b.losses + b.pushes) - (a.wins + a.losses + a.pushes));

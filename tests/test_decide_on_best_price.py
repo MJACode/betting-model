@@ -240,7 +240,9 @@ def test_the_prop_lanes_requalify_before_dedupe_sees_the_signal():
     calls = re.findall(r"_tag_prop\(pick, _best_ctx(, conn)?\)", src)
     assert calls and all(c == ", conn" for c in calls), calls
     ctxs = re.findall(r"_best_ctx = \(game_id,\s*\n\s*\(prop_odds or \{\}\)\.get\(\"player_name\"\) or player_name,\s*\n\s*market, (\w+)\.get\(game_id\)\)", src)
-    assert len(ctxs) == 5 and set(ctxs) <= {"cut_map", "cutoffs"}, ctxs
+    # Four lanes since 2026-10-15: the NBA prop loop (run_nba_prop_scorer) left
+    # with the nine retired NBA prop models. Every lane that remains is checked.
+    assert len(ctxs) == 4 and set(ctxs) <= {"cut_map", "cutoffs"}, ctxs
 
 
 def test_every_scorer_insert_carries_the_decision_columns():

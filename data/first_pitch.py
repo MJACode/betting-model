@@ -138,30 +138,3 @@ def pregame_cutoff_sql(alias: str = "g") -> str:
         f" - interval '{SUSPICIOUS_EARLY_MINUTES} minutes'"
         f" THEN {alias}.first_pitch_at END, {alias}.commence_time)"
     )
-
-
-def pregame_still_open_sql(alias: str = "g") -> str:
-    """SQL predicate: this game's pregame cutoff is strictly after one `%s`.
-
-    At the cutoff the game has started. A NULL cutoff does not match, so a
-    card slate leaves an unknown start off the card. The parameter is a
-    timestamptz (the caller's `now`, not a once-per-pass snapshot).
-    """
-    return f"({pregame_cutoff_sql(alias)})::timestamptz > %s::timestamptz"
-
-
-def nfl_pregame_cutoff_sql(stats_alias: str = "s", games_alias: str = "g") -> str:
-    """`pregame_cutoff_sql` when kickoff and first pitch sit on two tables.
-
-    `nfl_team_game_stats.commence_time` is timestamptz and `games.first_pitch_at`
-    is text, so the THEN arm is cast. Same clamp, same constant. LEFT JOIN the
-    games alias: an NFL slate row often has no `games` row, and then the
-    kickoff is the cutoff.
-    """
-    return (
-        f"COALESCE(CASE WHEN {games_alias}.first_pitch_at::timestamptz"
-        f" >= {stats_alias}.commence_time::timestamptz"
-        f" - interval '{SUSPICIOUS_EARLY_MINUTES} minutes'"
-        f" THEN {games_alias}.first_pitch_at::timestamptz END,"
-        f" {stats_alias}.commence_time)"
-    )

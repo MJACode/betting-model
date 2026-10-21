@@ -20,6 +20,13 @@ Deliberate, and load-bearing:
   row carries a name; the model needs his game log and which side he plays
   for, and settlement needs his id.
 
+  BOTH STARTING GOALIES CONFIRMED FIRST (mike, 2026-10-20: "We should
+  absolutely always know the goalie matchup before making a bet as well.").
+  Only games models/nhl_goalie_gate.py calls known are scored, and only on a
+  quote fetched after the matchup became known: a newer fetch is owed then
+  (data/ingestors/nhl_prop_odds_ingestor.due). publish() refuses an unknown
+  game again.
+
   DraftKings posts this market within a few hours of puck drop (none at any
   book five hours out on 2026-10-01), so the card runs right after the prop
   price step on every refresh pass and is a clean no-op until quotes exist.
@@ -41,9 +48,9 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config  # noqa: E402
+import models.nhl_goalie_gate as goalie_gate  # noqa: E402
 import models.nhl_prop_blocked_shots as bs  # noqa: E402
 from data.db import get_connection  # noqa: E402
-from data.first_pitch import pregame_cutoff_sql, pregame_still_open_sql  # noqa: E402
 from data.season_labels import nhl_season_label  # noqa: E402
 
 MODEL_ID = bs.MODEL_ID
@@ -57,34 +64,53 @@ def _utc(v) -> datetime:
 
 
 def slate(conn, game_date: str, now: datetime) -> dict[str, dict]:
-    """Tonight's games whose pregame cutoff is still ahead of `now`.
-
-    Shared with the other NHL prop card. The cutoff is `pregame_cutoff_sql`.
-    For NHL that is commence_time until a first pitch is stored; this does
-    not add an NHL-specific offset. A row that also carries the cutoff column
-    is filtered on that column. At the cutoff the game has started.
-    """
-    rows = conn.execute(f"""
-        SELECT game_id, home_team, away_team, commence_time,
-               {pregame_cutoff_sql("games")}
+    """Tonight's games that have not started."""
+    rows = conn.execute("""
+        SELECT game_id, home_team, away_team, commence_time
         FROM games WHERE sport = 'NHL' AND game_date = %s AND commence_time IS NOT NULL
-          AND {pregame_still_open_sql("games")}
-    """, (game_date, now.astimezone(timezone.utc).isoformat())).fetchall()
-    out = {}
-    for r in rows:
-        if len(r) > 4:
-            stamp = r[4]
-            if stamp is None:
-                continue
-            start = stamp if isinstance(stamp, datetime) else _utc(stamp)
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            if start.astimezone(timezone.utc) <= now:
-                continue
-        elif not (_utc(r[3]) > now):
-            continue
-        out[r[0]] = {"home": r[1], "away": r[2], "commence_time": r[3]}
-    return out
+    """, (game_date,)).fetchall()
+    return {r[0]: {"home": r[1], "away": r[2], "commence_time": r[3]}
+            for r in rows if _utc(r[3]) > now}
+
+
+def known_slate(conn, games: dict[str, dict], label: str,
+                now: datetime | None = None) -> tuple[dict[str, dict], dict]:
+    """The games whose goalie matchup is known, each with `known_at`, and the
+    gate's reading per game (models/nhl_goalie_gate.Matchup). Both NHL prop
+    cards call this before anything is pooled, so an unknown game cannot take
+    the one prop bet a game allows. The rest are logged with the reason.
+
+    For the gated models only: an exempt model (config.NHL_GOALIE_GATE_EXEMPT,
+    shots on goal) is handed the slate as it is, with no `known_at`
+    (`slate_for`)."""
+    states = goalie_gate.matchup_states(conn, list(games), now=now)
+    known, held = goalie_gate.split_known(games, {g: m.reason for g, m in states.items()})
+    goalie_gate.log_held(label, held)
+    return {g: {**v, "known_at": states[g].known_at} for g, v in known.items()}, states
+
+
+def slate_for(model_id: str, games: dict[str, dict], known: dict[str, dict]) -> dict[str, dict]:
+    """The games `model_id` may decide: the known ones, or for an exempt model
+    (shots on goal, mike 2026-10-20) the whole slate exactly as before the rule."""
+    return games if goalie_gate.is_exempt(model_id) else known
+
+
+def after_confirmation(q: pd.DataFrame, games: dict[str, dict], label: str,
+                       model_id: str) -> pd.DataFrame:
+    """Only quotes fetched after the game's matchup became known. A newest
+    fetch taken before the confirmation priced a market that did not know the
+    goalies yet; the next pass's fetch decides instead. An exempt model's
+    quotes (config.NHL_GOALIE_GATE_EXEMPT, shots on goal) are all kept: it
+    decides at its opening fetch, before any goalie is confirmed."""
+    if q.empty or goalie_gate.is_exempt(model_id):
+        return q
+    stale = [s < games[g]["known_at"] if games[g].get("known_at") else False
+             for g, s in zip(q.game_id, q.snap)]
+    if any(stale):
+        held = sorted({g for g, st in zip(q.game_id, stale) if st})
+        logger.info(f"{label}: {len(held)} game(s) wait for a prop fetch taken after both "
+                    f"goalies were confirmed: {', '.join(held)}")
+    return q[[not st for st in stale]]
 
 
 def latest_quotes(conn, games: dict[str, dict]) -> pd.DataFrame:
@@ -104,6 +130,7 @@ def latest_quotes(conn, games: dict[str, dict]) -> pd.DataFrame:
         q[c] = pd.to_numeric(q[c], errors="coerce")
     q = q[[s <= _utc(games[g]["commence_time"]) for g, s in zip(q.game_id, q.snap)]]
     q = q.sort_values("snap").drop_duplicates(["game_id", "player"], keep="last")
+    q = after_confirmation(q, games, "nhl-prop-card", MODEL_ID)
     two = q.over.notna() & q.under.notna()
     total = q.over.map(bs_implied, na_action="ignore") + q.under.map(bs_implied, na_action="ignore")
     bad = two & ~total.between(*COHERENT_SUM)
@@ -225,14 +252,14 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"VALUES ({', '.join('%(' + c + ')s' for c in _COLS)})")
 
 
-def publish(conn, rows: list[dict]) -> int:
+def publish(conn, rows: list[dict], commit: bool = True) -> int:
     """Insert-once per (game, player, market): a second pass never touches a pick that exists.
 
-    The pregame cutoff gate runs here. This INSERT keeps prop_market and
-    player_key, which `_insert_picks` does not write.
+    The last line first: a row whose game's goalie matchup is not known is
+    dropped (models/nhl_goalie_gate.refuse_unknown). `commit=False` leaves the
+    commit to the caller holding the prop pool's lock (publish_across_models).
     """
-    from models.scorer import _drop_pregame_after_cutoff
-    rows = _drop_pregame_after_cutoff(conn, rows)
+    rows = goalie_gate.refuse_unknown(conn, rows, mode="drop", label="nhl-prop-card")
     written = 0
     for r in rows:
         if conn.execute("""
@@ -241,7 +268,7 @@ def publish(conn, rows: list[dict]) -> int:
             continue
         conn.execute(_INSERT, {c: r[c] for c in _COLS})
         written += 1
-    if written:
+    if written and commit:
         conn.commit()
     return written
 
@@ -269,7 +296,8 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     out = {"date": game_date, "priced": 0, "scored": 0, "bets": 0, "published": 0, "skipped": 0}
     conn = get_connection()
     try:
-        games = slate(conn, game_date, now)
+        everything = slate(conn, game_date, now)
+        games = slate_for(MODEL_ID, everything, known_slate(conn, everything, "nhl-prop-card", now)[0])
         quotes = latest_quotes(conn, games)
         out["priced"] = len(quotes)
         if quotes.empty:

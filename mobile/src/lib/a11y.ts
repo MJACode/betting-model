@@ -176,6 +176,17 @@ export function addBetHint(o: { bet: string; stake: string }): string | undefine
   return missing.length === 0 ? undefined : `Enter ${missing.join(' and ')} to add this bet.`;
 }
 
+/**
+ * Spoken name of a Retry control. "Retry" + "today’s picks" is "Retry loading
+ * today’s picks". "Try again" does not take "loading" after it — "Try again
+ * loading today’s lines" is not a sentence — so that button is "Try loading
+ * today’s lines again".
+ */
+export function retryAccessibilityLabel(retryLabel: string, what: string): string {
+  if (/^try again\b/i.test(retryLabel.trim())) return `Try loading ${what} again`;
+  return `${retryLabel} loading ${what}`;
+}
+
 /** "1.2u → 1.0u" is read as "1.2 u arrow"; this says "stake 1.2 units to win 1.0 units". */
 export function unitsSpeech(text: string): string {
   return text.replace(/(\d)u\b/g, '$1 units').replace(/\s*→\s*/g, ' to win ');

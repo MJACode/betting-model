@@ -34,21 +34,34 @@ _LATEST: dict | None = None
 
 
 def record_quota_headers(resp) -> None:
-    """Capture x-requests-used / x-requests-remaining off an Odds API response."""
+    """Capture x-requests-used / x-requests-remaining off an Odds API response,
+    and x-requests-last: what the feed billed for THIS call."""
     global _LATEST
     try:
         used      = resp.headers.get("x-requests-used")
         remaining = resp.headers.get("x-requests-remaining")
+        last      = resp.headers.get("x-requests-last")
         if used in (None, "") and remaining in (None, ""):
             return
         _LATEST = {
             "used":        float(used) if used not in (None, "") else None,
             "remaining":   float(remaining) if remaining not in (None, "") else None,
+            "last":        float(last) if last not in (None, "") else None,
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception:
         # Never let telemetry interfere with the fetch path.
         pass
+
+
+def latest() -> dict | None:
+    """This process's newest observation, or None before any response.
+
+    A NEW dict on every recorded response, so a caller that holds the one from
+    before its call can tell whether its own call was recorded (identity), and
+    read that call's cost off "last" -- the feed's own x-requests-last, which
+    no other process's spending can contaminate (a difference of "used" can)."""
+    return _LATEST
 
 
 def persist_quota(conn) -> None:

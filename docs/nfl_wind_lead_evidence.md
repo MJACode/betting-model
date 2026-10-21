@@ -57,7 +57,7 @@ too many picks", and it gets worse the further out you go.
 
 `MAX_FIRE_LEAD = 4` (mike, 2026-09-06) rests on this plus the calibration
 argument, which stands on its own. **It stays 4.** Do not widen the fire
-window. 2026 is paper-tracked on the deployed Open-Meteo + T-4 population
+window. 2026 is tracked live on the deployed Open-Meteo + T-4 population
 (`docs/nfl_rule_2026_track.md`, `python -m scripts.nfl_rule_2026_track`). No
 unit bump.
 

@@ -55,7 +55,7 @@ _BOOK = {"draftkings": "DK", "fanduel": "FD", "betmgm": "MGM",
          "williamhill_us": "CZR", "espnbet": "ESPN", "pinnacle": "PIN"}
 
 
-def slate(conn, start: str, end: str, now: datetime | None = None) -> dict[str, dict]:
+def slate(conn, start: str, end: str) -> dict[str, dict]:
     """{game_id: {kickoff, away, home}} for scheduled games in a window.
 
     From nfl_team_game_stats, not `games`: an NFL game only gets a `games` row
@@ -65,12 +65,6 @@ def slate(conn, start: str, end: str, now: datetime | None = None) -> dict[str, 
     whole card exercisable offline — the cache guard returns nothing rather than
     a short answer if a season is missing, so an offline run cannot quietly
     price a partial slate.
-
-    `now` is the live clock. When it is set, the SQL keeps a game only while
-    `nfl_pregame_cutoff_sql` (kickoff on the stats row, first pitch on games)
-    is still ahead of that clock. A replay that omits `now`
-    (`scripts/nfl_prop_replay.py` calls `slate(None, d, d)`) reads the whole
-    window: filtering on wall-clock now would empty every past slate.
     """
     if conn is None:
         df = local_store.read_table(
@@ -83,39 +77,18 @@ def slate(conn, start: str, end: str, now: datetime | None = None) -> dict[str, 
         df = df[(df.game_date.astype(str) >= start) & (df.game_date.astype(str) <= end)]
         rows = [(r.game_id, r.commence_time, r.team, r.opponent, r.is_home, r.game_date)
                 for r in df.itertuples(index=False)]
-        return _slate_rows(rows, now=now)
-    if now is None:
-        rows = conn.execute("""
-            SELECT game_id, commence_time, team, opponent, is_home, game_date
-            FROM nfl_team_game_stats
-            WHERE game_date BETWEEN %s AND %s AND commence_time IS NOT NULL
-        """, (start, end)).fetchall()
         return _slate_rows(rows)
-    from data.first_pitch import nfl_pregame_cutoff_sql
-    cut = nfl_pregame_cutoff_sql("s", "g")
-    rows = conn.execute(f"""
-        SELECT s.game_id, s.commence_time, s.team, s.opponent, s.is_home,
-               s.game_date, {cut}
-        FROM nfl_team_game_stats s
-        LEFT JOIN games g ON g.game_id = s.game_id
-        WHERE s.game_date BETWEEN %s AND %s
-          AND s.commence_time IS NOT NULL
-          AND ({cut})::timestamptz > %s::timestamptz
-    """, (start, end, now.astimezone(timezone.utc).isoformat())).fetchall()
-    return _slate_rows(rows, now=now)
+    rows = conn.execute("""
+        SELECT game_id, commence_time, team, opponent, is_home, game_date
+        FROM nfl_team_game_stats
+        WHERE game_date BETWEEN %s AND %s AND commence_time IS NOT NULL
+    """, (start, end)).fetchall()
+    return _slate_rows(rows)
 
 
-def _slate_rows(rows, now: datetime | None = None) -> dict[str, dict]:
+def _slate_rows(rows) -> dict[str, dict]:
     out: dict[str, dict] = {}
-    for row in rows:
-        gid, ko, team, opp, is_home, gd = row[:6]
-        # The cutoff column is present only on the live query. A short row
-        # (the offline cache, a replay, an older fixture) keeps the kickoff
-        # filter in card(), which is what those callers already test.
-        if now is not None and len(row) > 6:
-            start = _as_dt(row[6])
-            if start is None or start <= now:
-                continue
+    for gid, ko, team, opp, is_home, gd in rows:
         ko = ko.isoformat() if hasattr(ko, "isoformat") else str(ko)
         d = out.setdefault(gid, {"kickoff": ko, "date": str(gd)})
         if is_home:
@@ -160,16 +133,13 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     must pass `replay=False`: keyed only on "was a clock supplied", the quote
     filter would clip to the pass start and drop rows `--fetch` just stored.
     """
-    # Replay is "a clock was supplied", decided before `now` is filled in.
-    # When this function loads the slate, that clock is the cutoff bound.
-    # A replay that already loaded the window with slate(..., now=None)
-    # passes games= and is not filtered again here.
+    games = slate(conn, start, end) if games is None else games
+    if not games:
+        return [], {"reason": "no scheduled games in window"}, {}
+
     if replay is None:
         replay = now is not None
     now = now or datetime.now(timezone.utc)
-    games = slate(conn, start, end, now=now) if games is None else games
-    if not games:
-        return [], {"reason": "no scheduled games in window"}, {}
     live = {g for g, d in games.items()
             if (_as_dt(d["kickoff"]) or now) <= now}
 
@@ -478,12 +448,6 @@ def publish(conn, rows: list[dict]) -> int:
                      "the nfl-props-data step: %s", len(absent), ", ".join(absent))
         rows = [r for r in rows if r["game_id"] in known]
 
-    # Same pregame cutoff gate as _insert_picks. This INSERT keeps
-    # prop_market and player_key, and dk_odds here is the soft book's price,
-    # so the row does not go through the scorer's normalizer.
-    from models.scorer import _drop_pregame_after_cutoff
-    rows = _drop_pregame_after_cutoff(conn, rows)
-
     # The lock is on the LINE, not the side (2026-09-13): a later tick where the
     # other side has become the cheap one must not add it beside the bet that
     # already stands. tests/test_prop_market_one_side_per_line.py
@@ -541,7 +505,7 @@ def main() -> None:
         local_store.activate()
     conn = None if a.offline else get_connection()
     try:
-        games = slate(conn, start, end, now=now)
+        games = slate(conn, start, end)
         bets, diag, names = card(conn, start, end, a.min_edge, games=games,
                                  now=now, replay=as_of is not None)
         if a.publish and as_of:

@@ -273,8 +273,7 @@ def test_open_quotes_do_not_read_commence_time_on_odds():
     src = inspect.getsource(mk.load_latest_quotes)
     assert "o.snapshot_type = 'open'" in src
     assert "o.commence_time" not in src
-    assert "pregame_cutoff_sql(" in src
-    assert "<= g.commence_time" not in src
+    assert "g.commence_time" in src
 
 
 def test_totals_pick_label_quotes_the_line():

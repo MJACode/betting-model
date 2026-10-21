@@ -83,6 +83,7 @@ from data.live_quote_guard import quote_predates_score
 from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
 from data.name_match import resolve_feed_name
+from data.schedule_context import SCHEDULE_UNREADABLE, SCORER_GATED_SPORTS, ScheduleBook
 
 # Max minutes two books' opening snapshots may be apart and still count as
 # "simultaneous" for the NCAAF cross-book opener rule. A refresh pass is ~60
@@ -224,6 +225,16 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         direction = "Over" if pick_side == "over" else "Under"
         line_str = f" {line}" if line is not None else ""
         return f"{home_team} vs {away_team} {direction}{line_str}{f5_tag}"
+    elif market in ("team_totals_home", "team_totals_away"):
+        # One team's points: "BOS @ MIL — MIL Team Total Under 115.5". The
+        # matchup leads, as the NFL opener's "TB @ CAR — CAR -3", so the label
+        # cannot be read as the full-game total, and the app does not split
+        # it into a player-prop title. tracking/pick_integrity refuses a
+        # team-total label without "Team Total", or naming the other team.
+        team = home_team if market == "team_totals_home" else away_team
+        direction = "Over" if pick_side == "over" else "Under"
+        line_str = f" {line}" if line is not None else ""
+        return f"{away_team} @ {home_team} — {team} Team Total {direction}{line_str}"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -251,12 +262,34 @@ def score_game(conn: DBConnection,
                features: dict,
                bankroll: float,
                dry_run: bool = False,
-               commence_time: str | None = None) -> list[dict]:
+               commence_time: str | None = None,
+               write: bool = True,
+               schedule_hold: str | None = None) -> list[dict]:
     """
     Score one game with one model. Generates 0, 1, or 2 pick rows
     (BET and/or AVOID signals).
 
     Returns list of pick dicts ready for DB insert.
+
+    `write=False` returns the rows without inserting them, so the caller can
+    check them against the game's other picks first (_apply_side_conflicts).
+    Only the stock path and the NHL 3-way path honour it, which covers every
+    model in side_checked_models(); run_scorer passes it for those alone.
+
+    NO NHL BET OF ANY KIND UNTIL BOTH STARTING GOALIES ARE CONFIRMED (mike,
+    2026-10-20: "We should absolutely always know the goalie matchup before
+    making a bet as well."). Both NHL paths here end in the sport-level
+    goalie guard, _apply_nhl_goalie_gate, just before their rows are written:
+    the stock path, which every artifact kind falls through to (nhl_puckline,
+    the anchored moneyline, any kind added later), and the 3-way path. A BET
+    on a game whose matchup is not known becomes NONE with the reason
+    (models/nhl_goalie_gate.py). Anything that reached _insert_picks another
+    way meets the same gate there.
+
+    `schedule_hold` is the reason this pass may not decide the game at all: a
+    team still has an earlier game to play or to log (data/schedule_context,
+    run_scorer). Every row is still written, as NONE, with that reason
+    (_apply_schedule_hold), on every path below that writes.
     """
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
@@ -335,7 +368,8 @@ def score_game(conn: DBConnection,
     if market == "method":
         return _score_ufc_method(conn, game_id, model_id, sport, game_date,
                                  home_team, away_team, clf, x, features,
-                                 bankroll, dry_run, commence_time)
+                                 bankroll, dry_run, commence_time,
+                                 schedule_hold=schedule_hold)
 
     # NHL regulation 3-way — 3-class (away reg win / draw / home reg win),
     # priced against DK's h2h_3way market. Also handled before the binary
@@ -343,7 +377,8 @@ def score_game(conn: DBConnection,
     if market == "h2h_3way":
         return _score_nhl_3way(conn, game_id, model_id, sport, game_date,
                                home_team, away_team, clf, x, features,
-                               bankroll, dry_run, commence_time)
+                               bankroll, dry_run, commence_time, write=write,
+                               schedule_hold=schedule_hold)
 
     # A model can decline to BET a game and still have something worth
     # showing. When a rule's gate/preconditions fail we set a reason here and
@@ -377,6 +412,19 @@ def score_game(conn: DBConnection,
     elif artifact.get("kind") == "cross_book_opener":
         home_prob, away_prob, no_signal = _opener_rule(
             conn, game_id, model_id, market, artifact)
+        if home_prob is None:
+            return []
+    elif artifact.get("kind") == "anchored_logit":
+        # nhl_moneyline, rebuilt 2026-10-13 (mike: "Look at and rebuild the
+        # money line model"; models/nhl_moneyline_anchored.py,
+        # docs/nhl_moneyline_rebuild.md): DraftKings' no-vig price, moved by
+        # inputs built from the per-game logs. It decides at the first run
+        # where both starting goalies are confirmed and last night's logs are
+        # in (_nhl_game_day_reason; no clock since 2026-10-20); any other run
+        # writes its number as NONE with the reason. No DraftKings price,
+        # nothing to anchor on: skip, never prob-only.
+        home_prob, away_prob, no_signal = _anchored_probability(
+            conn, game_id, game_date, home_team, away_team, commence_time, artifact)
         if home_prob is None:
             return []
     elif artifact.get("kind") == "total_regression":
@@ -463,7 +511,8 @@ def score_game(conn: DBConnection,
     if not odds and sport == "UFC" and market == "totals":
         return _score_ufc_totals_prob_only(
             conn, game_id, model_id, sport, game_date, home_team, away_team,
-            home_prob, away_prob, feat, features, bankroll, dry_run, commence_time)
+            home_prob, away_prob, feat, features, bankroll, dry_run, commence_time,
+            schedule_hold=schedule_hold)
 
     if not odds:
         logger.debug(f"  No DK odds for {game_id}/{model_id}")
@@ -574,6 +623,23 @@ def score_game(conn: DBConnection,
     # otherwise fire a BET the walk-forward never validated.
     if no_signal:
         _apply_no_signal(picks, no_signal)
+    # After the rule's own reason: a game the model may not decide yet beats
+    # anything it said about this number.
+    if schedule_hold:
+        _apply_schedule_hold(picks, schedule_hold)
+
+    if artifact.get("kind") == "anchored_logit":
+        # Its rule is EV at the price and nothing else; AVOID is not part of
+        # it. With the edge cut at 0.0 the stock path would otherwise label the
+        # other side of nearly every game AVOID.
+        for p in picks:
+            if p.get("signal_type") == "AVOID":
+                p["signal_type"] = "NONE"
+            # The stock tier reads the DraftKings EDGE: for an EV rule it labels
+            # most bets LOW, and an underdog lower than a favourite at the same
+            # EV (UX review, 2026-10-15). The other EV rules (NHL props, NHL
+            # totals) write a fixed MED from their cards; so does this one.
+            p["confidence_tier"] = "MED"
 
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
@@ -581,8 +647,12 @@ def score_game(conn: DBConnection,
     _apply_game_market_gate(conn, picks, market, odds, commence_time,
                             dry_run=dry_run)
 
+    # The goalie rule, for every NHL model by sport (docstring).
+    if sport == NHL_GOALIE_SPORT:
+        _apply_nhl_goalie_gate(conn, game_id, picks, market=market)
+
     # Write to DB
-    if picks and not dry_run:
+    if picks and not dry_run and write:
         _insert_picks(conn, picks)
 
     return picks
@@ -802,6 +872,307 @@ def _score_f5_prob_only(
 _UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
 
 
+def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
+                          away_team: str, commence_time: str | None,
+                          artifact: dict) -> tuple:
+    """(home_prob, away_prob, no_signal) for the anchored NHL moneyline, or
+    (None, None, None) to skip the game: no DraftKings price to anchor on, or
+    an input the logs cannot supply.
+
+    `no_signal` is the reason this run may not decide (the game has started,
+    a starting goalie is not confirmed yet, or last night's logs are not in).
+    The number is still written, as NONE -- an empty board and a broken
+    pipeline look identical.
+    """
+    import models.nhl_moneyline_anchored as anc
+    odds = _get_dk_odds(conn, game_id, "h2h")
+    if not odds or odds.get("home_price") is None or odds.get("away_price") is None:
+        logger.debug(f"  {game_id}/nhl_moneyline: no DK moneyline — nothing to anchor on")
+        return None, None, None
+    hi = american_to_implied_prob(odds["home_price"])
+    ai = american_to_implied_prob(odds["away_price"])
+    if not hi or not ai:
+        return None, None, None
+    try:
+        rows, goalies, stale = anc.inputs_for_date(conn, game_date)
+    except Exception as exc:  # noqa: BLE001 - one game's inputs must not stop the pass
+        logger.error(f"  {game_id}/nhl_moneyline: inputs failed: {exc}")
+        return None, None, None
+    if game_id not in rows.index:
+        logger.debug(f"  {game_id}/nhl_moneyline: no input row")
+        return None, None, None
+    x = rows.loc[game_id, anc.FEATURES].astype(float).values
+    if np.isnan(x).any():
+        missing = [f for f, v in zip(anc.FEATURES, x) if np.isnan(v)]
+        logger.debug(f"  {game_id}/nhl_moneyline: inputs missing {missing}")
+        return None, None, None
+    offset = anc.market_logit([hi / (hi + ai)])
+    p_home = float(artifact["model"].predict_proba(x.reshape(1, -1), offset)[0, 1])
+    reason = _nhl_game_day_reason(conn, game_id, game_date, home_team, away_team,
+                                  commence_time, stale)
+    return p_home, 1.0 - p_home, reason
+
+
+def _nhl_game_day_reason(conn, game_id: str, game_date: str, home_team: str,
+                         away_team: str, commence_time: str | None,
+                         stale: set) -> str | None:
+    """None when this run may decide an NHL side on game `game_id`; otherwise
+    the reason it may not. ONE gate for both NHL side models, so the moneyline
+    and the regulation model always decide at the same moment on the same
+    facts (mike, 2026-10-17): the game has not started, both starting goalies
+    are confirmed (models/nhl_goalie_gate.py, read once per game per pass,
+    _nhl_matchup_reason), and last night's games are in the logs.
+
+    No clock (2026-10-20). The 16:00Z-18:00Z window this replaced decided off
+    the goalie row's EXISTENCE, and the 6am goalie did not start in 65 of 251
+    team-games 2026-10-01..10-19. See models/nhl_moneyline_anchored.
+    decision_window for why the lower bound is the game-day goalie row."""
+    import models.nhl_moneyline_anchored as anc
+    reason = anc.decision_window(game_date, commence_time)
+    if reason is None:
+        reason = _nhl_matchup_reason(conn, game_id)
+    if reason is None and (home_team in stale or away_team in stale):
+        reason = "waiting for last night's game logs"
+    return reason
+
+
+def _nhl_regulation_reason(conn, game_id: str, game_date: str, home_team: str,
+                           away_team: str, commence_time: str | None) -> str | None:
+    """The regulation model's copy of the moneyline model's decision gate.
+
+    It used to decide the moment DraftKings posted the 3-way line and lock:
+    every one of its 33 BETs this season was written 10-72 hours before puck
+    drop. On 2026-10-17 that put "BOS (Regulation)" (locked 18:26Z the day
+    before, before Boston's game at Anaheim that night) on the same game as
+    the moneyline model's "LAK ML" (16:22Z on game day, knowing Boston was on
+    a back-to-back). Graded on the 120 finished 2026-27 games, the game-day
+    decision bet 7 times for +1.1 units where the early one bet 31 times for
+    -4.9 (scripts/nhl_regulation_game_day_grade.py).
+
+    Fails CLOSED: inputs that cannot be read mean no decision this pass, the
+    rows still written as NONE with the reason, and the next pass retries.
+    """
+    import models.nhl_moneyline_anchored as anc
+    reason = anc.decision_window(game_date, commence_time)
+    if reason is not None:
+        return reason
+    try:
+        _, _goalies, stale = anc.inputs_for_date(conn, game_date)
+    except Exception as exc:  # noqa: BLE001 - one game's gate must not stop the pass
+        logger.error(f"  {game_id}/nhl_moneyline_regulation: game-day check failed: {exc}")
+        return "game-day check failed; not deciding this pass"
+    return _nhl_game_day_reason(conn, game_id, game_date, home_team, away_team,
+                                commence_time, stale)
+
+
+# ── No NHL bet until both starting goalies are confirmed (mike, 2026-10-20) ──
+#
+# models/nhl_goalie_gate.py decides; the functions below apply it inside the
+# scorer. run_scorer reads the gate ONCE per NHL game per pass, before the
+# game's models are scored, into _NHL_GATE_MEMO: the moneyline and regulation
+# models (and the insert guard behind them) then see one answer, so a
+# designation stored in the middle of a game's scoring cannot put the two side
+# models on different sides of the rule. Outside run_scorer (a single
+# score_game call, a card writing through _insert_picks) the gate is read
+# directly. Fails closed either way.
+#
+# AND THE PRICE MUST POSTDATE THE CONFIRMATION (review, 2026-10-21). A known
+# matchup priced off a fetch taken before it became known bets a number the
+# market set without the goalie news: the five-minute window decided a game
+# confirmed at 16:40Z on the 16:17Z hourly fetch. Before a gated BET stands,
+# DraftKings' newest fetch for the game's market (odds.created_at, our fetch
+# time; snapshot_at is the book's own last-change time and can be hours older
+# in a fresh fetch) must be at or after the moment the matchup became known.
+# Otherwise NONE with PRICE_WAIT, and the next fetch decides. The window
+# fetches NHL odds right before it scores (run_pipeline step nhl-odds).
+NHL_GOALIE_SPORT = "NHL"
+_NHL_GATE_MEMO: dict = {}          # game_id -> models.nhl_goalie_gate.Matchup
+_NHL_NEWEST_FETCH_SQL = """
+    SELECT max(created_at::timestamptz) FROM odds
+    WHERE game_id = ? AND market = ? AND bookmaker = 'draftkings'
+      AND snapshot_type <> 'in_play'
+"""
+
+
+def _nhl_matchup(conn, game_id: str):
+    """The gate's reading of `game_id` (models.nhl_goalie_gate.Matchup): this
+    pass's memo when run_scorer took one, else a direct read."""
+    if game_id in _NHL_GATE_MEMO:
+        return _NHL_GATE_MEMO[game_id]
+    import models.nhl_goalie_gate as gate
+    return gate.matchup_states(conn, [game_id]).get(game_id) or gate.Matchup(game_id, gate.CHECK_FAILED)
+
+
+def _nhl_matchup_reason(conn, game_id: str) -> str | None:
+    """None when both starting goalies of `game_id` are confirmed, else why not."""
+    return _nhl_matchup(conn, game_id).reason
+
+
+def _nhl_price_reason(conn, game_id: str, market: str, known_at) -> str | None:
+    """PRICE_WAIT when DraftKings' newest fetch of this game's `market` was
+    taken before the matchup became known (or cannot be read). None when it
+    was taken at or after, or when no moment is recorded (known_at None: a
+    stored designation always carries observed_at, so only a caller that did
+    not read the gate gets here). Fails closed on a failed read."""
+    if known_at is None:
+        return None
+    import models.nhl_goalie_gate as gate
+    from data.db import ConnectionLost
+    try:
+        rows = gate._select(conn, _NHL_NEWEST_FETCH_SQL, (game_id, market))
+    except ConnectionLost:
+        raise
+    except Exception as exc:                                # noqa: BLE001 - fail closed
+        logger.error(f"  {game_id}: newest NHL fetch read failed ({exc!r}); not deciding")
+        return gate.PRICE_WAIT
+    fetched = gate._utc(rows[0][0]) if rows and rows[0] else None
+    if fetched is None or fetched < known_at:
+        return gate.PRICE_WAIT
+    return None
+
+
+def _apply_nhl_goalie_gate(conn, game_id: str, picks: list[dict], market: str | None = None) -> int:
+    """Every BET in `picks` turned NONE with the reason when the game's goalie
+    matchup is not known, except an exempt model's (config.
+    NHL_GOALIE_GATE_EXEMPT, shots on goal; per row, by model_id). With
+    `market` (the game models' paths), also when DraftKings' newest fetch of
+    that market predates the confirmation (_nhl_price_reason). Mutates in
+    place; returns how many."""
+    import models.nhl_goalie_gate as gate
+
+    def held(p):
+        return p.get("signal_type") == "BET" and not gate.is_exempt(p.get("model_id"))
+    if not any(held(p) for p in picks):
+        return 0
+    matchup = _nhl_matchup(conn, game_id)
+    reason = matchup.reason
+    if reason is None and market:
+        reason = _nhl_price_reason(conn, game_id, market, matchup.known_at)
+    if reason is None:
+        return 0
+    n = 0
+    for p in picks:
+        if held(p):
+            logger.info(f"  {game_id}: {p.get('pick_label')} not bet -- {reason}")
+            p.update(_downgrade(p, reason))
+            n += 1
+    return n
+
+
+def _refuse_unknown_nhl_bets(conn, picks: list[dict]) -> None:
+    """The last line, at the scorer's INSERT: an NHL BET whose game's goalie
+    matchup is not known is written NONE with the reason. It reaches only what
+    got past every gate above it (the totals card writes through here too), so
+    it logs at WARNING. Mutates in place, so the caller's rows say what was
+    written."""
+    import models.nhl_goalie_gate as gate
+    bets = [p for p in picks if gate.is_gated_bet(p)]     # the exempt model's pass
+    if not bets:
+        return
+    ids = {p.get("game_id") for p in bets}
+    memo = ({g: _NHL_GATE_MEMO[g].reason for g in ids}
+            if ids <= _NHL_GATE_MEMO.keys() else None)
+    kept = gate.refuse_unknown(conn, picks, mode="none", label="scorer insert", reasons=memo)
+    for p, q in zip(picks, kept):
+        if q is not p:
+            p.update(q)
+
+
+# ── One game never gets two picks that cannot both win (mike, 2026-10-17) ────
+#
+# "It can't be both." On 2026-10-17 two NHL models posted "BOS (Regulation)"
+# and "LAK ML" on the same game: if LA won only one paid, if Boston won in
+# regulation only the other, and a Boston overtime win lost both. It had
+# happened once before, on 2026-10-04 ("FLA ML" and "ANA (Regulation)",
+# Anaheim won after regulation, both lost). Nothing compared one model's pick
+# with another's.
+#
+# Each pick is mapped to the game endings it wins on. Two picks whose endings
+# do not overlap cannot both win, and a game gets at most one of them:
+#   - a BET already standing on the game (an earlier pass) keeps it, because a
+#     pick is a pick (CLAUDE.md 1c) -- the new one is written NONE with why;
+#   - two such BETs decided in the SAME pass are both written NONE: the models
+#     disagree about the game and there is no telling which is wrong.
+#
+# Only markets listed here are checked. Assessed across every sport on
+# 2026-10-17: no other pair of pre-game models has bet outcomes that cannot
+# both win since 2026-08-01 (the only opposite-side pair, MLB first-five
+# moneyline against the full-game +1.5 run line, can both win). A market that
+# can conflict joins by adding its endings here.
+_SIDE_ENDINGS: dict[tuple[str, str], dict[str, frozenset]] = {
+    ("NHL", "h2h"): {
+        "home": frozenset({"home_regulation", "home_overtime"}),
+        "away": frozenset({"away_regulation", "away_overtime"}),
+    },
+    ("NHL", "h2h_3way"): {
+        "home": frozenset({"home_regulation"}),
+        "away": frozenset({"away_regulation"}),
+        "draw": frozenset({"home_overtime", "away_overtime"}),
+    },
+}
+
+
+def _endings_won(pick: dict) -> frozenset | None:
+    """The game endings this pick wins on, or None for a market not listed."""
+    sport, market, _ = MODELS.get(pick.get("model_id"), (None, None, None))
+    return _SIDE_ENDINGS.get((sport, market), {}).get(pick.get("pick_side"))
+
+
+def picks_cannot_both_win(a: dict, b: dict) -> bool:
+    wa, wb = _endings_won(a), _endings_won(b)
+    return wa is not None and wb is not None and not (wa & wb)
+
+
+def side_checked_models() -> set:
+    """The models whose picks are held back for the check before writing."""
+    return {mid for mid, (sport, market, _) in MODELS.items()
+            if (sport, market) in _SIDE_ENDINGS}
+
+
+def _apply_side_conflicts(conn, game_id: str, picks: list[dict]) -> int:
+    """Turn every BET in `picks` that cannot win alongside another BET on the
+    game into NONE with the reason. Mutates in place; returns how many.
+
+    A standing BET counts unless it is VOID or was written while its model was
+    paused (not a signal, so it holds nothing).
+    """
+    def bets(p):
+        return (p.get("signal_type") == "BET" and not _is_paused_row(p)
+                and _endings_won(p) is not None)
+
+    new = [p for p in picks if bets(p)]
+    if not new:
+        return 0
+    standing = [
+        {"model_id": m, "pick_side": s, "pick_label": label}
+        for m, s, label in conn.execute("""
+            SELECT model_id, pick_side, pick_label FROM picks
+            WHERE game_id = %s AND signal_type = 'BET'
+              AND model_id = ANY(%s)
+              AND condition_status IS DISTINCT FROM 'VOID'
+              AND downgrade_reason IS DISTINCT FROM %s
+        """, (game_id, sorted(side_checked_models()), config.PAUSED_NOTE)).fetchall()]
+    notes: dict[int, str] = {}
+    for p in new:
+        held = next((s for s in standing if picks_cannot_both_win(p, s)), None)
+        if held is not None:
+            notes[id(p)] = (f"cannot both win with {held['pick_label']}, "
+                            f"already bet on this game")
+    rest = [p for p in new if id(p) not in notes]
+    for i, a in enumerate(rest):
+        for b in rest[i + 1:]:
+            if picks_cannot_both_win(a, b):
+                notes.setdefault(id(a), f"cannot both win with {b['pick_label']}, "
+                                        f"decided in the same pass; neither is bet")
+                notes.setdefault(id(b), f"cannot both win with {a['pick_label']}, "
+                                        f"decided in the same pass; neither is bet")
+    for p in new:
+        if id(p) in notes:
+            logger.info(f"  {game_id}: {p['pick_label']} not bet -- {notes[id(p)]}")
+            p.update(_downgrade(p, notes[id(p)]))
+    return len(notes)
+
+
 # Class index → pick_side for the NHL regulation 3-way model. Must match the
 # target encoding in feature_engine._compute_target (0=away, 1=draw, 2=home).
 NHL_3WAY_CLASSES = ["away", "draw", "home"]
@@ -810,7 +1181,9 @@ NHL_3WAY_CLASSES = ["away", "draw", "home"]
 def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                     game_date: str, home_team: str, away_team: str,
                     clf, x, features: dict, bankroll: float,
-                    dry_run: bool, commence_time: str | None) -> list[dict]:
+                    dry_run: bool, commence_time: str | None,
+                    write: bool = True,
+                    schedule_hold: str | None = None) -> list[dict]:
     """
     NHL regulation-result scoring — 3-class (away reg win / draw / home reg
     win) priced against DraftKings' 3-way regulation market. Each side with a
@@ -872,8 +1245,19 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
     # The best bettable price on each side, and the decision re-made there
     # (2026-09-09) -- the same step the two-way game path takes.
     _stamp_best_game_prices(conn, picks, "h2h_3way")
+    # Decides only when the moneyline model does (mike, 2026-10-17). Outside
+    # that moment every row is still written, NONE, with the reason.
+    reason = _nhl_regulation_reason(conn, game_id, game_date, home_team,
+                                    away_team, commence_time)
+    if reason:
+        _apply_no_signal(picks, reason)
+    if schedule_hold:
+        _apply_schedule_hold(picks, schedule_hold)
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
+    # The sport-level goalie guard (score_game's docstring). The reason above
+    # already holds this model to it; this keeps every NHL path the same.
+    _apply_nhl_goalie_gate(conn, game_id, picks, market="h2h_3way")
     for p in picks:
         p.update(_get_public_betting(conn, game_id, "h2h_3way", p["pick_side"]))
         p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
@@ -884,7 +1268,7 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
                 f"bet=${p['recommended_bet']:.0f} | [{p['confidence_tier']}]"
             )
 
-    if picks and not dry_run:
+    if picks and not dry_run and write:
         _insert_picks(conn, picks)
     return picks
 
@@ -892,7 +1276,8 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
 def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
                       game_date: str, home_team: str, away_team: str,
                       clf, x, features: dict, bankroll: float,
-                      dry_run: bool, commence_time: str | None) -> list[dict]:
+                      dry_run: bool, commence_time: str | None,
+                      schedule_hold: str | None = None) -> list[dict]:
     """
     UFC method-of-victory scoring — 3-class (decision / ko_tko / submission),
     prob-only (model_id is in PROB_ONLY_MODELS; The Odds API carries no method
@@ -968,8 +1353,10 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
         "game_time":         commence_time,
         "downgrade_reason":  _pause_note(model_id),
     }
+    if schedule_hold:
+        _apply_schedule_hold([pick], schedule_hold)
 
-    if signal_type == "BET":
+    if pick["signal_type"] == "BET":
         logger.info(
             f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
             f"model={model_prob:.3f} | edge={edge*100:+.1f}% (vs fair 1/3) | "
@@ -984,7 +1371,8 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
                                 game_date: str, home_team: str, away_team: str,
                                 over_prob: float, under_prob: float,
                                 feat: dict, features: dict, bankroll: float,
-                                dry_run: bool, commence_time: str | None) -> list[dict]:
+                                dry_run: bool, commence_time: str | None,
+                                schedule_hold: str | None = None) -> list[dict]:
     """
     UFC round totals without DK lines: prob-only against the synthetic line
     carried by the feature row (2.5 for 3-round bouts, 4.5 for 5-round).
@@ -1045,6 +1433,8 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
             f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
         )
 
+    if schedule_hold:
+        _apply_schedule_hold(picks, schedule_hold)
     if picks and not dry_run:
         _insert_picks(conn, picks)
     return picks
@@ -1247,6 +1637,44 @@ def _apply_no_signal(picks: list[dict], reason: str) -> list[dict]:
     for p in picks:
         p.update(_downgrade(p, reason))
     return picks
+
+
+def _apply_schedule_hold(picks: list[dict], reason: str) -> list[dict]:
+    """A game the model may not decide yet (data/schedule_context): every row
+    NONE and unsized, with the reason persisted -- except that a paused
+    model's row keeps config.PAUSED_NOTE. Every paused-row exclusion keys on
+    that exact string (config.paused_row_exclusion_sql), so the pause note
+    wins here as it does over the EV floor's (_requalify_keeping_pause).
+    Mutates in place, like _apply_no_signal."""
+    for p in picks:
+        if _is_paused_row(p):
+            p.update({"signal_type": "NONE", "kelly_fraction": 0.0,
+                      "recommended_bet": 0.0})
+        else:
+            p.update(_downgrade(p, reason))
+    return picks
+
+
+def _schedule_hold(books: dict, sport: str, game_id: str, game_date: str,
+                   home_team: str, away_team: str, commence_time,
+                   now: datetime) -> str | None:
+    """Why run_scorer may not decide this game yet, or None.
+
+    None for a sport the gate does not cover (data.schedule_context.
+    SCORER_GATED_SPORTS). A gated sport whose schedule could not be read, or a
+    game the check itself fails on, is held: fails CLOSED."""
+    if sport not in SCORER_GATED_SPORTS:
+        return None
+    book = books.get(sport)
+    if book is None:
+        return SCHEDULE_UNREADABLE
+    try:
+        return book.pending_reason(game_id, game_date, home_team, away_team,
+                                   commence_time, now)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"  {game_id}: schedule check failed ({exc!r})\n"
+                     + traceback.format_exc())
+        return SCHEDULE_UNREADABLE
 
 
 def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
@@ -2794,19 +3222,26 @@ def _calibrated(model_id, prob):
         return float(prob)
 
 
-def _cutoff_by_game(conn: DBConnection, game_ids: list[str]) -> dict:
+def _cutoff_by_game(conn: DBConnection, game_ids: list[str]) -> dict | None:
     """{game_id: pregame cutoff} for these games. Missing ids are absent.
 
     The value is `pregame_cutoff_sql` — actual first pitch, clamped — not
     the scheduled start. A game with no row, or a NULL cutoff, is unknown.
+    None means the read failed; the caller keeps the rows.
     """
     if not game_ids:
         return {}
-    rows = conn.execute(
-        f"SELECT game_id, {pregame_cutoff_sql('games')} "
-        "FROM games WHERE game_id = ANY(?)",
-        (list(game_ids),),
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            f"SELECT game_id, {pregame_cutoff_sql('games')} "
+            "FROM games WHERE game_id = ANY(?)",
+            (list(game_ids),),
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001 — unknown start is kept
+        logger.warning(
+            f"pregame cutoff lookup failed ({exc!r}); keeping the rows"
+        )
+        return None
     return {r[0]: r[1] for r in rows}
 
 
@@ -2827,6 +3262,10 @@ def _drop_pregame_after_cutoff(conn: DBConnection, picks: list[dict]) -> list[di
     if not pregame_ids:
         return list(picks)
     cutoffs = _cutoff_by_game(conn, sorted(set(pregame_ids)))
+    # A failed read is not evidence the game has started. Keep the rows;
+    # the next pass reads the cutoff again.
+    if cutoffs is None:
+        return list(picks)
     now = _utcnow()
     kept: list[dict] = []
     for p in picks:
@@ -2893,6 +3332,10 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
         -- the losing side of a race harmless. A no-op until the index exists.
         ON CONFLICT DO NOTHING
     """
+    # No NHL BET on a game whose goalie matchup is not known (mike,
+    # 2026-10-20). The last line behind every NHL gate: score_game's guard and
+    # the totals card's own filter come first.
+    _refuse_unknown_nhl_bets(conn, picks)
     # Prop picks arrive tagged with (game_id, player_name, market) instead of
     # pre-stamped, because their best price is a per-player lookup and the five
     # prop scorers build picks in eleven places. Resolve it once here.
@@ -2981,8 +3424,13 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "inning_at_pick":     p.get("inning_at_pick"),
             "score_diff_at_pick": p.get("score_diff_at_pick"),
             # Why a row that cleared its cut is a NONE anyway. NULL on every
-            # row the model itself declined; see _downgrade().
-            "downgrade_reason":   p.get("downgrade_reason"),
+            # row the model itself declined; see _downgrade(). A row that does
+            # not set it at all (the rule cards that write through here:
+            # mlb_game_market, mlb_total_public_fade, nhl_over_under) gets the
+            # paused marker when its model is paused, as every builder above
+            # stamps it (config.PAUSED_NOTE: every row a paused model writes).
+            "downgrade_reason":   (p["downgrade_reason"] if "downgrade_reason" in p
+                                   else _pause_note(p.get("model_id"))),
         }
         for p in picks
     ]
@@ -3017,7 +3465,17 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id LIKE '%%f5_runline%%' THEN 'spreads_1st_5_innings'
               WHEN p.model_id LIKE '%%f5_moneyline%%' THEN 'h2h_1st_5_innings'
               WHEN p.model_id LIKE '%%over_under%%' THEN 'totals'
-              WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%' THEN 'spreads'
+              -- The rule cards whose ids carry no 'over_under' (pinned against
+              -- tracking.paper_tracker._RULE_MODEL_MARKETS by
+              -- tests/test_rule_model_markets_everywhere.py).
+              WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market'
+                OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
+                THEN 'totals'
+              -- The home team's own points, not the game total.
+              WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
+              WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
+                OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
+                THEN 'spreads'
               ELSE 'h2h' END
         ORDER BY o.snapshot_at DESC
     """, (game_date,)).fetchall()
@@ -3037,7 +3495,9 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
 
         warning = {"pick_label": label, "status": None, "detail": ""}
 
-        if market == "totals":
+        # Named markets, not a substring: "totals" in market would also start
+        # line-checking the MLB first-five totals, which this never covered.
+        if market in ("totals", "team_totals_home", "team_totals_away"):
             cur_line = current.get("total_line")
             if cur_line is not None and scored_line is not None:
                 delta = cur_line - scored_line
@@ -3234,10 +3694,20 @@ def _log_pipeline(conn, run_date, status, records_in, records_out,
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
+def _model_id_filter(model_ids) -> tuple[str, tuple]:
+    """(` AND model_id IN (...)`, params) for a no-bet clear that must touch
+    only these models' rows. Never builds `IN ()`: no models means no rows."""
+    ids = sorted(set(model_ids))
+    if not ids:
+        return " AND FALSE", ()
+    return f" AND model_id IN ({','.join(['%s'] * len(ids))})", tuple(ids)
+
+
 # ── Main Daily Run ────────────────────────────────────────────────────────────
 
 def run_scorer(target_date: str = None, dry_run: bool = False,
-               only_games: set | None = None) -> dict:
+               only_games: set | None = None,
+               game_models_only: bool = False) -> dict:
     """
     Score all games scheduled for target_date across all models.
 
@@ -3255,6 +3725,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                      It is deliberately distinct from None: conflating them
                      would turn a quiet poll into a full re-score, which is the
                      entire cost this parameter exists to avoid.
+        game_models_only:
+                     Clear only the rows of the game-level models this call
+                     re-scores (config.MODELS), and leave every other model's
+                     unsettled no-bet rows where they are. ONLY the pre-game
+                     poller passes it: it re-runs this scorer and nothing else,
+                     so the player-prop NONE/AVOID rows its clears used to take
+                     were never re-written before the game started (see the
+                     per-game clear below). The refresh pass and the daily
+                     pipeline must NOT pass it: their clear is what releases a
+                     prop player held at NONE by the first-signal lock
+                     (_locked_prop_keys) so the prop scorers that run next can
+                     score him again.
 
     Returns:
         Summary dict with total picks and breakdown.
@@ -3414,6 +3896,25 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 logger.warning(
                     "NCAAF price pre-filter traceback:\n" + traceback.format_exc())
                 ncaaf_unpriced = set()
+
+        # The FBS registry, read ONCE per pass, for the refusal LOG only. The
+        # gate itself never sees it (it reads the team's snapshot, and the
+        # snapshot read deliberately carries no classification). It lets the
+        # log tell "an FCS opponent" (expected, debug) from "a school the
+        # registry calls FBS that has no SP+ rating" (named, WARNING) — without
+        # it the second case logged at debug like the first. Fails open: no
+        # registry means the old debug line, never a different score.
+        ncaaf_fbs_registry = None
+        if any(g[1] == "NCAAF" for g in games):
+            try:
+                ncaaf_fbs_registry = {
+                    r[0]: r[1] for r in _select_isolated(
+                        conn, "ncaaf_fbs_registry",
+                        "SELECT school, classification FROM ncaaf_teams", ())}
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning(f"NCAAF FBS registry read failed ({exc}); "
+                               f"refusal log falls back to debug")
+                ncaaf_fbs_registry = None
 
         # THE SAME GATE FOR THE NEW LOOK-AHEAD SPORTS, and here it is not only
         # a cost filter — it is the rule.
@@ -3642,6 +4143,41 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             AND (commence_time IS NULL OR commence_time > %s)
                       )""" + _sc, (target_date, ufc_horizon, now_utc) + _sp)
 
+        # THE SCHEDULE GATE (mike, 2026-10-20: "The repo/models should look
+        # ahead schedules for all markets and sports and models"). A model
+        # never decides a game while either team still has an earlier game not
+        # played, being played, or not yet in the logs its inputs read
+        # (data/schedule_context has the rule and the evidence). ncaaf_over_under
+        # decided 9 of its 77 kept BETs that way, reading stats one game stale;
+        # wnba_moneyline bet game N+1 seconds after the book listed it, with
+        # game N still on.
+        #
+        # One read of each gated sport's stored schedule per pass, then one
+        # answer per game. The rows are still written, NONE, with the reason;
+        # NONE never locks, so the first pass after the game is logged decides
+        # it. A BET already standing is in locked_pairs and never re-scored.
+        #
+        # Fails CLOSED, like the NHL game-day check and the side check: a
+        # schedule that cannot be read means nobody in that sport decides this
+        # pass (loud), not that everybody does.
+        schedule_books: dict = {}
+        now_dt = datetime.fromisoformat(now_utc)
+        for _sp_name in SCORER_GATED_SPORTS:
+            _targets = [(g[0], g[3]) for g in games if g[1] == _sp_name]
+            if not _targets:
+                continue
+            try:
+                schedule_books[_sp_name] = _call_in_savepoint(
+                    conn, "sp_schedule_book",
+                    lambda s=_sp_name, t=_targets: ScheduleBook.load(conn, s, t))
+            except ConnectionLost:
+                raise
+            except Exception as exc:                          # noqa: BLE001
+                logger.error(f"{_sp_name} schedule read failed ({exc!r}); no "
+                             f"{_sp_name} model decides this pass\n"
+                             + traceback.format_exc())
+                schedule_books[_sp_name] = None
+
         all_picks = []
         rescored: set[str] = set()
         model_failures: list[str] = []
@@ -3649,6 +4185,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         skipped_postponed = 0
         skipped_locked = 0
         skipped_twin = 0
+        side_models = side_checked_models()
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
@@ -3720,6 +4257,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             f"odds (unconfirmed/speculative bout)")
                 continue
 
+            # A sport with no game model in config.MODELS has nothing to score
+            # here. NBA since 2026-10-15: its models are cards (docs/
+            # nba_models_2026.md), and building features for a game no model
+            # reads only spends database time.
+            if not any(sp == sport for sp, _, _ in MODELS.values()):
+                continue
+
             if sport == "MLB":
                 features = build_mlb_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
@@ -3728,12 +4272,6 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             elif sport == "WNBA":
                 from features.wnba_feature_engine import build_wnba_game_features
                 features = build_wnba_game_features(
-                    conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_mlb_h2h
-                )
-            elif sport == "NBA":
-                from features.nba_feature_engine import build_nba_game_features
-                features = build_nba_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
@@ -3747,13 +4285,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 from features.ncaaf_feature_engine import build_ncaaf_game_features
                 features = build_ncaaf_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_mlb_h2h
+                    odds_row=odds_mlb_h2h, fbs_registry=ncaaf_fbs_registry
                 )
-            else:  # NHL
+            elif sport == "NHL":
                 features = build_nhl_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
+            else:
+                # Never borrow another sport's features: an NBA game once fell
+                # through to the NHL builder by being the last `else`.
+                logger.warning(f"  [SKIP] {game_id}: no game feature builder for {sport}")
+                continue
 
             if not features:
                 continue
@@ -3761,6 +4304,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             # Run all models for this sport
             relevant_models = [mid for mid, (sp, _, _) in MODELS.items()
                                if sp == sport]
+
+            schedule_hold = _schedule_hold(schedule_books, sport, game_id,
+                                           game_date, home_team, away_team,
+                                           commence_time, now_dt)
+            if schedule_hold:
+                logger.info(f"  [HOLD] {away_team} @ {home_team} — {schedule_hold}")
 
             # -- ONE GAME = ONE TRANSACTION (2026-09-08) ------------------
             # Clear this game's non-BET rows, score every model, commit. A
@@ -3770,6 +4319,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             game_picks: list[dict] = []
             for attempt in (1, 2):
                 game_picks = []
+                held_back: list[dict] = []
                 try:
                     if not dry_run:
                         # '%%' not '%': psycopg2 %-interpolates the statement
@@ -3778,6 +4328,39 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         # of range (#243, and again on 2026-09-22 after #813
                         # added this clause unescaped — every hourly scoring
                         # step failed mid-loop after pick-lock).
+                        #
+                        # WHOSE ROWS (2026-10-12). By default every model's
+                        # no-bet rows on the game, player props included: on
+                        # the refresh pass and the daily run the prop scorers
+                        # run right after this, and this clear is what lets
+                        # them re-score a player the prop lock holds at NONE.
+                        # The pre-game poller (game_models_only) clears only
+                        # the game-level models re-scored just below, because
+                        # it re-writes nothing else. On MLB_2026-10-11_LAD_MIL
+                        # its run at 00:17:18Z took 103 prop NONE/AVOID rows
+                        # 2m41s before first pitch; the game ended with only
+                        # its one prop BET.
+                        #
+                        # NOT EXEMPTED: a game that starts while this pass is
+                        # running (now_utc and commence_time are read before
+                        # the loop). Its prop rows are still cleared and the
+                        # prop scorers usually skip it, so they are lost
+                        # (WNBA_2026-10-09_ATL_NY, 91 rows at 23:36:48Z, 2m48s
+                        # after its start). Sparing them is NOT bet-neutral:
+                        # the odds feed pushes a start back around first
+                        # pitch/tip and the poller writes that into
+                        # games.commence_time every 30s. The prop scorers
+                        # re-read it, score the game as pre-game, and a kept
+                        # NONE row would hold that player in _locked_prop_keys
+                        # where this clear frees him. docs/signal_timing.md,
+                        # trap 4.
+                        #
+                        # The game-level rows are cleared and re-scored exactly
+                        # as before on both paths: a stale row left in place
+                        # would turn the re-insert into a silent no-op
+                        # (uq_picks_one_row_per_pick, ON CONFLICT DO NOTHING).
+                        _mf, _mp = (_model_id_filter(relevant_models)
+                                    if game_models_only else ("", ()))
                         conn.execute("""
                             DELETE FROM picks
                             WHERE game_id = %s
@@ -3785,7 +4368,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                               AND signal_type != 'BET'
                               AND is_live IS NOT TRUE
                               AND model_id NOT LIKE 'nfl_prop_%%'
-                        """, (game_id,))
+                        """ + _mf, (game_id,) + _mp)
+                    if sport == NHL_GOALIE_SPORT:
+                        # The goalie gate, read once for this game's models
+                        # (_NHL_GATE_MEMO). Fails closed inside.
+                        _NHL_GATE_MEMO.pop(game_id, None)
+                        _NHL_GATE_MEMO[game_id] = _nhl_matchup(conn, game_id)
                     for model_id in relevant_models:
                         # Pick lock: this pair has already produced a BET, so it is
                         # frozen — the number given is the bet of record and nothing
@@ -3818,12 +4406,21 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             # never reaches this log. Bind model_id: the loop
                             # variable would otherwise score every model as
                             # the last one.
+                            # A side model's rows come back unwritten
+                            # (write=False) for the check below; every other
+                            # model is called exactly as before. A schedule
+                            # hold is passed only when there is one, so an
+                            # ungated game's call is unchanged too.
+                            hold = model_id in side_models
                             picks = _call_in_savepoint(
                                 conn, "sp_model_game",
                                 lambda model_id=model_id: score_game(
                                     conn, game_id, model_id, features,
                                     bankroll, dry_run=dry_run,
-                                    commence_time=commence_time))
+                                    commence_time=commence_time,
+                                    **({"write": False} if model_id in side_models else {}),
+                                    **({"schedule_hold": schedule_hold}
+                                       if schedule_hold else {})))
                         except ConnectionLost:
                             raise                      # the game's unit, not the model's
                         except Exception as exc:
@@ -3833,6 +4430,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                 f"{traceback.format_exc()}")
                             continue
                         game_picks.extend(picks)
+                        if hold:
+                            held_back.extend(picks)
 
                         for p in picks:
                             signal = p["signal_type"]
@@ -3852,6 +4451,32 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                 f"bet=${p['recommended_bet']:.0f} | "
                                 f"[{tier}]"
                             )
+                    # One game never gets two picks that cannot both win
+                    # (mike, 2026-10-17). The side models' rows were held
+                    # back above; they are checked against each other and
+                    # against any BET already standing on the game, then
+                    # written. Fails CLOSED: if the check cannot run, none of
+                    # them is written this pass (loud, and the next pass
+                    # re-scores them) -- writing them unchecked is the bug.
+                    if held_back:
+                        try:
+                            _call_in_savepoint(
+                                conn, "sp_side_conflicts",
+                                lambda: _apply_side_conflicts(conn, game_id, held_back))
+                            if not dry_run:
+                                _call_in_savepoint(
+                                    conn, "sp_side_insert",
+                                    lambda: _insert_picks(conn, held_back))
+                        except ConnectionLost:
+                            raise
+                        except Exception as exc:
+                            model_failures.append(f"{game_id} side check: {exc!r}")
+                            logger.error(
+                                f"  {game_id}: side check FAILED, its "
+                                f"{len(held_back)} held row(s) not written: {exc!r}\n"
+                                f"{traceback.format_exc()}")
+                            kept = {id(p) for p in held_back}
+                            game_picks = [p for p in game_picks if id(p) not in kept]
                     if not dry_run:
                         conn.commit()
                     rescored.add(game_id)
@@ -3880,6 +4505,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     except Exception:  # noqa: BLE001 — best-effort
                         pass
                     break
+            # The game's goalie reading belongs to this game's unit only.
+            _NHL_GATE_MEMO.pop(game_id, None)
 
         # Housekeeping for the pairs the lock deliberately leaves open.
         #
@@ -3926,6 +4553,15 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # %-interpolates the whole statement. A bare % is a format spec and
         # raises IndexError: tuple index out of range (same class as #243;
         # produced every scoring pass after #813 until escaped).
+        #
+        # ONE MORE LIMIT (2026-10-12), the same as the per-game clear: the
+        # pre-game poller (game_models_only) sweeps only game-level models'
+        # rows. It re-writes nothing else, so player-prop rows and the NFL
+        # opener and wind no-bet rows stay for the writers that own them.
+        # "Not started" stays on now_utc (read before the loop) for the same
+        # reason the per-game clear does not exempt a game that started
+        # mid-pass: a start the feed pushes back makes that exemption hold
+        # prop players the prop scorers would otherwise have re-scored.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -3933,6 +4569,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if rescored:
                 _keep = f" AND game_id NOT IN ({','.join(['%s'] * len(rescored))})"
                 _keep_p = tuple(sorted(rescored))
+            _mf, _mp = (_model_id_filter(MODELS) if game_models_only
+                        else ("", ()))
             try:
                 conn.execute("SET LOCAL lock_timeout = '10s'")
                 conn.execute("""
@@ -3945,7 +4583,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                   SELECT game_id FROM games
                   WHERE game_date >= %s AND game_date <= %s
                     AND (commence_time IS NULL OR commence_time > %s)
-              )""" + _sc + _keep,
+              )""" + _sc + _keep + _mf,
             (target_date,
              # EVERY look-ahead horizon, not just the two that existed when
              # this was written. The bound has to cover the whole window
@@ -3954,7 +4592,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
              # ever clearing the last one — duplicates on exactly the games
              # this change just started scoring.
              max(ncaaf_horizon, ufc_horizon, game_horizon),
-             now_utc) + _sp + _keep_p)
+             now_utc) + _sp + _keep_p + _mp)
                 conn.commit()
             except Exception as exc:                          # noqa: BLE001
                 # A sweep that cannot get its locks in 10s yields; the
@@ -4023,6 +4661,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         logger.error(f"Scorer failed: {exc!r}\n{traceback.format_exc()}")
         raise
     finally:
+        _NHL_GATE_MEMO.clear()
         conn.close()
 
 
@@ -5199,215 +5838,6 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
 
     logger.success(
         f"WNBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
-    )
-    return {
-        "target_date": target_date,
-        "prop_picks":  total_picks,
-        "bets":        total_bets,
-        "dry_run":     dry_run,
-    }
-
-
-# ── NBA Prop Config ───────────────────────────────────────────────────────────
-
-# Per-model: DK market name + stat label. Counts are Poisson over/under; the
-# double-double model is logistic + over-only (Yes/No, 0.5 line) and prob-only
-# (decided on model probability — DK juices DD heavily; see PROB_ONLY_MODELS).
-_NBA_PROP_CONFIG: dict[str, dict] = {
-    "nba_prop_player_points":    {"market": "player_points",                  "stat_label": "Pts"},
-    "nba_prop_player_rebounds":  {"market": "player_rebounds",                "stat_label": "Reb"},
-    "nba_prop_player_assists":   {"market": "player_assists",                 "stat_label": "Ast"},
-    "nba_prop_player_threes":    {"market": "player_threes",                  "stat_label": "3PM"},
-    "nba_prop_player_pra":       {"market": "player_points_rebounds_assists", "stat_label": "PRA"},
-    "nba_prop_player_blocks":    {"market": "player_blocks",                  "stat_label": "Blk"},
-    "nba_prop_player_steals":    {"market": "player_steals",                  "stat_label": "Stl"},
-    "nba_prop_player_turnovers": {"market": "player_turnovers",               "stat_label": "TO"},
-    "nba_prop_player_dd":        {"market": "player_double_double",           "stat_label": "DD",
-                                  "over_only": True},
-}
-
-
-def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
-    """
-    Score NBA player prop markets (points/reb/ast/threes/PRA/blocks/steals/
-    turnovers + double-double).
-
-    Poisson models: predict lambda → P(over line) via Poisson CDF → edge vs DK.
-    Logistic model (double-double): predict_proba → P(Yes), prob-only signal.
-    Candidate players come from build_nba_prop_scoring_rows (recent rotation).
-
-    Idempotent: deletes unsettled NBA prop picks for target_date before insert.
-    """
-    from features.nba_prop_feature_engine import build_nba_prop_scoring_rows
-
-    if target_date is None:
-        target_date = today_et()
-
-    logger.info(f"NBA Prop Scorer — {target_date}")
-
-    conn = get_connection()
-    bankroll = _get_current_bankroll(conn)
-    ct_map = _commence_time_map(conn, target_date, "NBA")
-    cut_map = _pregame_cutoff_map(conn, target_date, "NBA")
-    final_ids = _final_game_ids(conn, target_date, "NBA")
-    total_picks = 0
-    total_bets  = 0
-
-    try:
-        locked_prop_keys = _locked_prop_keys(conn, target_date, _NBA_PROP_CONFIG.keys())
-        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
-            for mid in _NBA_PROP_CONFIG:
-                conn.execute("""
-                    DELETE FROM picks
-                    WHERE game_date = %s AND model_id = %s AND result IS NULL
-                """, (target_date, mid))
-            conn.commit()
-
-        for model_id, cfg in _NBA_PROP_CONFIG.items():
-            market     = cfg["market"]
-            stat_label = cfg["stat_label"]
-            over_only  = cfg.get("over_only", False)
-
-            artifact = load_model(model_id)
-            if artifact is None:
-                logger.debug(f"  No trained model for {model_id} — skipping")
-                continue
-
-            model_type   = artifact.get("model_type", "poisson")
-            feature_cols = artifact["feature_cols"]
-            model_obj    = artifact["model"]
-
-            df = build_nba_prop_scoring_rows(target_date, model_id)
-            if df.empty:
-                logger.info(f"  {model_id}: no scoring rows for {target_date}")
-                continue
-
-            df, X = prop_feature_matrix(df, feature_cols, model_id)
-            if df.empty:
-                logger.info(f"  {model_id}: every row is missing a feature -- nothing scored this pass")
-                continue
-            if model_type == "logistic":
-                probs_over = model_obj.predict_proba(X)[:, 1]
-                lambdas    = None
-            else:
-                lambdas    = np.clip(model_obj.predict(X), 1e-6, None)
-                probs_over = None
-
-            is_prob_only = model_id in PROB_ONLY_MODELS
-
-            model_picks = []
-            for i, row in df.iterrows():
-                player_name = row["player_name"]
-                game_id     = row["game_id"]
-                player_id   = row.get("player_id")
-                if (game_id, model_id, player_id) in locked_prop_keys:
-                    continue  # first-signal prop lock — already locked today
-                if _game_started(cut_map.get(game_id)) or game_id in final_ids:
-                    continue  # game underway or already final — no pre-game price left
-
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              cut_map.get(game_id))
-                _best_ctx = (game_id,
-                             (prop_odds or {}).get("player_name") or player_name,
-                             market, cut_map.get(game_id))
-                if prop_odds is None or prop_odds.get("line") is None:
-                    if not is_prob_only:
-                        continue
-                    # prob-only (double-double): DK may not list it — still emit
-                    # the model's pick with NULL pricing on the 0.5 over side.
-                    line        = 0.5
-                    over_price  = None
-                    under_price = None
-                    over_link   = None
-                    under_link  = None
-                else:
-                    line        = float(prop_odds["line"])
-                    over_price  = prop_odds.get("over_price")
-                    under_price = prop_odds.get("under_price")
-                    over_link   = prop_odds.get("over_link")
-                    under_link  = prop_odds.get("under_link")
-
-                if model_type == "logistic":
-                    p_over = float(probs_over[i])
-                else:
-                    p_over = _poisson_over_prob(float(lambdas[i]), line)
-                p_under = 1.0 - p_over
-
-                # ── Score over ────────────────────────────────────────────────
-                if over_price is not None:
-                    dk_ip_over = american_to_implied_prob(over_price)
-                    if dk_ip_over:
-                        pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                            game_id=game_id, model_id=model_id,
-                            game_date=target_date,
-                            player_name=player_name, pick_side="over",
-                            model_prob=p_over, dk_implied_prob=dk_ip_over,
-                            edge=p_over - dk_ip_over,
-                            dk_odds=over_price, line=line,
-                            bankroll=bankroll, stat_label=stat_label,
-                            player_id=player_id, sport="NBA",
-                            dk_bet_link=over_link,
-                            commence_time=ct_map.get(game_id),
-                        )
-                        if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
-                elif is_prob_only:
-                    pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                        game_id=game_id, model_id=model_id,
-                        game_date=target_date,
-                        player_name=player_name, pick_side="over",
-                        model_prob=p_over, dk_implied_prob=None,
-                        edge=None, dk_odds=None, line=line,
-                        bankroll=bankroll, stat_label=stat_label,
-                        player_id=player_id, sport="NBA",
-                        dk_bet_link=over_link,
-                        commence_time=ct_map.get(game_id),
-                    )
-                    if pick:
-                        model_picks.append(_tag_prop(pick, _best_ctx, conn))
-
-                # ── Score under ───────────────────────────────────────────────
-                if under_price is not None and not over_only:
-                    dk_ip_under = american_to_implied_prob(under_price)
-                    if dk_ip_under:
-                        pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                            game_id=game_id, model_id=model_id,
-                            game_date=target_date,
-                            player_name=player_name, pick_side="under",
-                            model_prob=p_under, dk_implied_prob=dk_ip_under,
-                            edge=p_under - dk_ip_under,
-                            dk_odds=under_price, line=line,
-                            bankroll=bankroll, stat_label=stat_label,
-                            player_id=player_id, sport="NBA",
-                            dk_bet_link=under_link,
-                            commence_time=ct_map.get(game_id),
-                        )
-                        if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
-
-            bets = [p for p in model_picks if p["signal_type"] == "BET"]
-            logger.info(
-                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
-                f"({len(df)} players evaluated)"
-            )
-            if model_picks and not dry_run:
-                _insert_picks(conn, model_picks)
-                conn.commit()
-            total_picks += len(model_picks)
-            total_bets  += len(bets)
-
-    except Exception as exc:
-        conn.rollback()
-        logger.error(f"NBA prop scorer failed: {exc}")
-        raise
-    finally:
-        conn.close()
-
-    logger.success(
-        f"NBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
     )
     return {
         "target_date": target_date,

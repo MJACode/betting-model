@@ -42,6 +42,11 @@ Checked:
   * home/away  -- the label does not name the other team.
   * the STAT   -- a player prop's label does not name a DIFFERENT market from
                   the one the pick stores and settles on.
+  * team total -- a pick that settles on ONE team's points (its model's market
+                  is team_totals_home / team_totals_away) says "Team Total",
+                  so it cannot be read as the full-game total, and does not
+                  name the other team as the one whose points it is. Keyed on
+                  the model's market, so no other model's verdict changes.
 
 A producer that does not supply `side` and `line` cannot be checked, so its
 picks are refused too. A check that dead code can satisfy is not a check (§1b).
@@ -104,15 +109,41 @@ _PICKEM = re.compile(r"\bPK\b|pick\s*'?\s*em|(?<![\w.+-])0(?:\.0)?(?![\w.])",
                      re.IGNORECASE)
 
 
-def _is_spread(model_id: str | None) -> bool:
-    mid = model_id or ""
+def _market(model_id: str | None) -> str:
+    """The market the pick settles on, or "" when it cannot be read."""
     try:
         # Lazy: paper_tracker imports config and the notifiers import this.
         from tracking.paper_tracker import _market_for_pick
-        market = _market_for_pick(mid)
+        return _market_for_pick(model_id or "")
     except Exception:
-        market = ""
-    return market.startswith("spreads") or any(h in mid for h in _SPREAD_HINTS)
+        return ""
+
+
+def _is_spread(model_id: str | None) -> bool:
+    mid = model_id or ""
+    return _market(mid).startswith("spreads") or any(h in mid for h in _SPREAD_HINTS)
+
+
+_TEAM_TOTAL = re.compile(r"\bteam[\s-]*total\b", re.IGNORECASE)
+
+
+def _team_total_problem(label: str, model_id: str | None,
+                        home: str | None, away: str | None) -> str | None:
+    """A team-total pick whose label reads as the game total or names the
+    other team. None for every model whose market is not a team total."""
+    market = _market(model_id)
+    if market not in ("team_totals_home", "team_totals_away"):
+        return None
+    mine, theirs = (home, away) if market == "team_totals_home" else (away, home)
+    if not _TEAM_TOTAL.search(label):
+        return ("the label does not say Team Total, so it reads as the "
+                "full-game total; the pick settles on one team's points"
+                + (f" ({mine})" if mine else ""))
+    tail = _tail(label)
+    if _names(tail, theirs) and not _names(tail, mine):
+        return (f"the label names {theirs}, but the pick is on {mine}'s "
+                f"team total")
+    return None
 
 
 def _tail(label: str) -> str:
@@ -166,6 +197,9 @@ def pick_problems(label, side, line, model_id, home=None, away=None,
     stat = _stat_problem(label, prop_market)
     if stat:
         problems.append(stat)
+    team_total = _team_total_problem(label, model_id, home, away)
+    if team_total:
+        problems.append(team_total)
     return problems
 
 
