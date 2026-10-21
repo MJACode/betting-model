@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, the NHL goalie rule after review: the migration creates its table; an id-less goalie row, a confirmation unread for 30 minutes and an unreadable new starter are not known; prices must be fetched after the confirmation; nothing decides in the last 10 minutes; the window never polls during a pass |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, no NHL bet until both starting goalies are confirmed: one gate at every NHL writer and INSERT; nhl_goalie_designations; the goalie row rewritten on an ESPN confirmation; the side models' 16:00Z clock removed; a five-minute NHL goalie window; one more prop fetch after a late confirmation; shots on goal exempt (mike) |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, restatements stay in the 6:00am–noon window and wait on a live game; a missed daily carries over for 7 mornings and posts for that date |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, recaps post from 6:00am or 7:30am through noon ET only, and wait while a game of that sport is in progress; a missed week or month rolls to the next morning |

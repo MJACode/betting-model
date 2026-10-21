@@ -37,8 +37,10 @@ well."). The prop cards decide a game only once both starting goalies are
 confirmed (models/nhl_goalie_gate.py), and only on a quote fetched after that
 moment (scripts/nhl_prop_card.after_confirmation). A game whose matchup became
 known after its newest 'open'-series snapshot therefore owes ONE more 'open'
-snapshot, bought by the next pass; once it is held, nothing more is owed for
-that reason. Cost: one extra snapshot per such game per night, which is two
+snapshot, bought by the next pass; once it is held, nothing more is owed
+until the moment the matchup became known moves past it again (a different
+goalie confirmed, or ESPN back to expected and confirming again). Cost: one
+extra snapshot each time that happens, usually once a game, and each is two
 event calls (featured + alternates). The code's older figure of 5 credits a
 snapshot predates the alternates call; api_call_log measured the pair at 10-11
 credits on the quiet evening passes of 2026-10-19 (featured 5-6, alternates 5;

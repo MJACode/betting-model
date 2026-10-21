@@ -245,6 +245,38 @@ open. After the first deploy: count `nhl_goalie_designations` rows with
 `source = 'dailyfaceoff'`, and read the worker log for "DailyFaceoff ... not
 read". None means the gate runs on ESPN alone.
 
+## [ ] NHL goalie rule: the checks to run after it merges (found 2026-10-21)
+
+Every NHL model but shots on goal refuses every bet until these hold, so run
+them on the first refresh pass after the deploy:
+
+1. The table exists: `SELECT to_regclass('public.nhl_goalie_designations')`
+   is not NULL. The first version of the migration could never create it
+   (fixed 2026-10-21; checked twice on a scratch Postgres 17.6).
+2. The poll is storing and re-reading: `SELECT source, count(*),
+   max(observed_at), max(last_seen_at) FROM nhl_goalie_designations GROUP BY
+   source`. ESPN rows within minutes of the pass; `last_seen_at` moving on
+   later passes.
+3. The window beats: `SELECT last_run_at, last_status FROM job_heartbeats
+   WHERE job_id = 'nhl_goalie_window'` after 11:00 ET.
+4. A known game is deciding: an NHL BET or a NONE row whose reason is not a
+   goalie one, on a game with both ESPN rows `confirmed`.
+
+No threshold sync is needed: the change touches no threshold.
+
+## [ ] The daily run and a refresh pass can still overlap on a long morning (found 2026-10-21)
+
+The five-minute window no longer polls while either is in progress, so its
+poll cannot rewrite a goalie row in the middle of their scoring. The two of
+them can still overlap each other, as before this branch: a refresh pass
+that starts while the daily run is scoring runs its own goalie poll first,
+which could rewrite a goalie row between the daily run's input read and its
+gate read. The daily runs measured 25.9 minutes median, 28.1 longest, since
+2026-10-07 (`pipeline_runs`), and the first hourly pass is at 11:17Z, so it
+needs a daily run over an hour late; 2026-10-01's ran 10:10Z to 12:39Z. Next,
+if it matters: have the refresh pass skip its goalie poll while the daily
+run holds its lock.
+
 ## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
 
 `injuries` gets a full copy of each team's list on every ingest run
