@@ -454,3 +454,13 @@ def test_full_refuses_without_a_bets_folder(monkeypatch, tmp_path):
     assert any("NBA_GAME2_BETS" in w for w in Q.refuse_full(tmp_path))
     monkeypatch.setenv("NBA_GAME2_BETS", str(tmp_path / "bets"))
     assert Q.refuse_full(tmp_path) == []
+
+
+def test_the_synthetic_checks_write_no_bets_into_the_real_folder(monkeypatch, tmp_path):
+    """RULE: the synthetic checks run inside --full with the bets folder named;
+    they must leave it empty (the 2026-10-18 run wrote 9 synthetic files there)."""
+    import os
+    monkeypatch.setenv("NBA_GAME2_BETS", str(tmp_path))
+    Q.synthetic_checks()
+    assert list(tmp_path.iterdir()) == []
+    assert os.environ["NBA_GAME2_BETS"] == str(tmp_path)
