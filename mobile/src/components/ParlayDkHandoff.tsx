@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useBettingState } from '@/hooks/useBettingState';
 import { useBookAppInstalled } from '@/hooks/useBookAppInstalled';
+import { combineBetslipLinks } from '@/lib/betslipLinks';
 import { bookButtonColors, bookStoreUrl, openBookBetslip, openBookStore } from '@/lib/sportsbookLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
@@ -33,13 +34,23 @@ interface Props {
 }
 
 /**
- * Leg-by-leg sportsbook hand-off. No book has a public multi-leg deep link, so
- * the honest path is: open the book once (pre-filling the first available leg),
- * then let the user add each remaining leg to their betslip and place the
- * parlay there.
+ * Sportsbook hand-off for a multi-leg slip.
+ *
+ * `combineBetslipLinks` joins every linked leg into one URL on books whose
+ * stored link has a measured multi-selection form (DraftKings `outcomes=`,
+ * FanDuel indexed market/selection, BetMGM `options=`, Caesars
+ * `selectionIds=`, ESPN BET indexed market_selection_id). Opening that URL
+ * is what puts ALL intended picks on the slip — opening only the first
+ * linked leg is the bug Matt reported. Books we cannot combine still open the
+ * first linked leg; the per-leg "Add to slip" row is how the rest get there.
  */
 export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: Props) {
-  const firstLink = legs.find((l) => l.betLink)?.betLink ?? null;
+  const linked = legs.map((l) => l.betLink).filter((u): u is string => !!u && !!u.trim());
+  const combined = combineBetslipLinks(linked);
+  // A book we cannot join still opens the first linked leg — same as before
+  // this fix — so Hard Rock / BetRivers do not lose the one-pick hand-off.
+  const openLink = combined ?? linked[0] ?? null;
+  const combinedCount = combined && linked.length > 1 ? linked.length : 0;
   const name = bookName(book);
   // Through the hook, not the sync read: betPARX's page depends on the state,
   // which can land after this sheet mounts.
@@ -54,20 +65,39 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       {/* Backdrop tap dismisses, as every other sheet in the app does — the X
           alone sits in the one corner a thumb cannot reach (UX review). */}
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close DraftKings hand-off"
+        />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the rows unreachable. */}
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.header}>
             <Text style={styles.title}>Bet on {name}</Text>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close DraftKings hand-off">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
 
           <Text style={styles.note}>
-            {name} can&apos;t accept a whole parlay from a link. Open {name}, then add each leg
-            below to your betslip and place the parlay there.
+            {combinedCount > 0 && combinedCount === legs.length
+              ? `Open ${name} with all ${combinedCount} legs on your slip, then place the parlay there.`
+              : combinedCount > 0
+                ? `Open ${name} with ${combinedCount} of ${legs.length} legs on your slip. ${
+                    legs.length - combinedCount === 1
+                      ? `The other leg isn't on a link — add it in ${name}`
+                      : `The other ${legs.length - combinedCount} legs aren't on a link — add them in ${name}`
+                  }, then place the parlay there.`
+                : legs.length <= 1
+                  ? `Open ${name} with this bet on your slip.`
+                  : `${name} can't take every leg from one link. Open ${name}, then add each leg below to your betslip and place the parlay there.`}
             {book !== MODEL_BOOK
               ? ` Prices below are ${name}'s — the models still score at ${bookName(MODEL_BOOK)}.`
               : ''}
@@ -75,10 +105,14 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
 
           <Pressable
             onPress={() => {
-              void openBookBetslip(book, firstLink);
+              void openBookBetslip(book, openLink);
             }}
             accessibilityRole="button"
-            accessibilityLabel={`Open in ${name}`}
+            accessibilityLabel={
+              combinedCount > 0
+                ? `Open in ${name} with ${combinedCount} picks`
+                : `Open in ${name}`
+            }
             style={({ pressed }) => [
               styles.openBtn,
               { backgroundColor: btn.bg },
@@ -143,7 +177,7 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
             )}
           />
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

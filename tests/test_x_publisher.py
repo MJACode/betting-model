@@ -1,9 +1,10 @@
 """
-Posting the daily free pick and the settled recap to X (@signalbasepicks).
+Posting every released pre-game pick, and the settled recap, to X
+(@signalbasepicks).
 
-SCOPE. mike, 2026-08-30, choosing between three options: "A without links."
-A is the free pick + the recap — exactly what the free Discord channel gets.
-Posting every paid signal publicly would destroy what Whop members pay for.
+SCOPE. mike, 2026-08-30, chose the free pick plus the recap, with no links.
+mike, 2026-10-18: every released pre-game pick is posted, and every pick
+post is the same format. Discord's free pick is not an input to X.
 
 THE THREE THINGS THAT COULD GO WRONG, and all three are cheap to get wrong:
 
@@ -26,7 +27,7 @@ THE THREE THINGS THAT COULD GO WRONG, and all three are cheap to get wrong:
 from __future__ import annotations
 
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -53,8 +54,7 @@ def test_anything_that_reads_as_a_url_is_refused(bad):
 
 
 def test_ordinary_pick_text_passes():
-    xp._assert_no_link("⚾ Free pick — Yankees Over 8.5. -110 at DraftKings. "
-                       "Good to -120. More in Discord.")
+    xp._assert_no_link("⚾ Yankees Over 8.5 -110 at DraftKings. Good to -120.")
 
 
 def test_post_tweet_refuses_a_link_instead_of_raising(monkeypatch):
@@ -74,7 +74,7 @@ def test_post_tweet_refuses_a_link_instead_of_raising(monkeypatch):
 def test_both_renderers_are_link_free_and_fit_one_tweet():
     pick = {"sport": "MLB", "label": "Yankees Over 8.5", "dk_odds": -110,
             "good_to": -120}
-    t = xp.render_free_pick(pick, "2026-08-30")
+    t = xp.render_pick(pick)
     assert len(t) <= xp.MAX_TWEET
     xp._assert_no_link(t)
 
@@ -87,7 +87,7 @@ def test_both_renderers_are_link_free_and_fit_one_tweet():
 
 def test_a_very_long_label_is_truncated_not_rejected():
     pick = {"sport": "NCAAF", "label": "X" * 400, "dk_odds": -110}
-    assert len(xp.render_free_pick(pick, "2026-08-30")) <= xp.MAX_TWEET
+    assert len(xp.render_pick(pick)) <= xp.MAX_TWEET
 
 
 # ── 2. the signature, against the RFC's own vector ────────────────────────────
@@ -380,7 +380,7 @@ def test_an_unknown_sport_still_gets_the_community_tag():
 
 def test_tags_are_inside_the_character_budget():
     pick = {"sport": "MLB", "label": "X" * 300, "dk_odds": -110}
-    assert len(xp.render_free_pick(pick, "2026-08-30")) <= xp.MAX_TWEET
+    assert len(xp.render_pick(pick)) <= xp.MAX_TWEET
 
 
 def test_a_reply_carries_the_parent_id(monkeypatch):
@@ -457,7 +457,7 @@ def test_the_pipeline_wires_both_surfaces_independently():
     try so a bad tweet cannot cost a Discord recap, and vice versa.
     """
     src = (Path(__file__).parent.parent / "run_pipeline.py").read_text(encoding="utf-8")
-    assert "notify_x_free_pick" in src and "notify_x_results" in src
+    assert "notify_x_picks" in src and "notify_x_results" in src
     i = src.index("notify_x_results")
     block = src[i - 400:i + 400]
     assert "except Exception" in block
@@ -531,9 +531,29 @@ def test_x_does_price_a_day_that_is_over(monkeypatch):
 
     monkeypatch.setattr(data.db, "get_connection", _open)
     from datetime import datetime as _dt
-    yesterday = (_dt.now(xp.ET).date() - timedelta(days=1)).isoformat()
-    xp.notify_x_results(yesterday)
+    clock = _dt.now(xp.ET)
+    morning = clock.replace(hour=8, minute=0, second=0, microsecond=0)
+    yesterday = (clock.date() - timedelta(days=1)).isoformat()
+    xp.notify_x_results(yesterday, now=morning)
     assert opened, "a settled, finished day must still be published"
+
+
+def test_x_refuses_a_finished_day_after_noon(monkeypatch):
+    """Noon through 6:00am returns before the database, same as a day that
+    is not over. A restatement uses this function too."""
+    _creds_on(monkeypatch)
+    import data.db
+    opened = []
+    monkeypatch.setattr(data.db, "get_connection",
+                        lambda *a, **k: opened.append(1))
+    from datetime import datetime as _dt
+    clock = _dt.now(xp.ET)
+    evening = clock.replace(hour=21, minute=56, second=0, microsecond=0)
+    yesterday = (clock.date() - timedelta(days=1)).isoformat()
+    assert xp.notify_x_results(yesterday, now=evening) == 0
+    assert xp.notify_x_period(
+        "week", clock.date(), clock.date(), "Week", now=evening) == 0
+    assert not opened
 
 
 def test_the_tweeted_record_carries_pushes():
@@ -557,11 +577,11 @@ def test_the_tweeted_record_carries_roi_like_the_embed():
     assert "+26.1% ROI" in text
 
 
-def test_a_record_only_day_says_so_rather_than_dividing_by_zero():
+def test_a_day_with_nothing_risked_states_units_and_does_not_divide():
     text = xp.render_results(
-        {"wins": 2, "losses": 1, "pushes": 0, "units": 0.0, "risked": 0.0,
+        {"wins": 0, "losses": 0, "pushes": 2, "units": 0.0, "risked": 0.0,
          "by_sport": []}, "2026-09-01")
-    assert "record only" in text
+    assert "+0.00u" in text
     assert "ROI" not in text
 
 
@@ -618,13 +638,12 @@ def test_the_per_sport_split_is_not_permanently_empty():
     assert "MLB 2-1" in text and "NCAAF 1-0-1" in text
 
 
-# ── 5. the free pick is the SAME pick ─────────────────────────────────────────
-# _pick_free ends in random.choice and this module used to call it a second
-# time, independently of Discord. Over the 22-candidate MLB pools of early
-# September the two surfaces agreed about 4% of the time.
+# ── 5. X does not have a free pick ────────────────────────────────────────────
+# Discord still chooses one free pick for its own channel. X posts the
+# released slate and does not read that choice or wait for it.
 
 def _fake_conn(discord_choice):
-    """A push_sent holding no x_free row and Discord's recorded choice."""
+    """A connection whose only special row is Discord's free-pick choice."""
     class _Conn:
         _sql = ""
 
@@ -633,9 +652,14 @@ def _fake_conn(discord_choice):
             return self
 
         def fetchone(self):
+            if "pg_try_advisory_lock" in self._sql:
+                return (True,)
             if "discord_free_pick" in self._sql:
                 return (discord_choice,)
             return None
+
+        def fetchall(self):
+            return []
 
         def commit(self):
             pass
@@ -645,34 +669,9 @@ def _fake_conn(discord_choice):
     return _Conn()
 
 
-def test_x_publishes_the_pick_discord_chose(monkeypatch):
-    _creds_on(monkeypatch)
-    import data.db
-    from tracking import discord_notifier as dn
-
-    pool = [{"lock_key": f"k{i}", "label": f"Pick {i}", "sport": "MLB",
-             "dk_odds": -110, "good_to": None} for i in range(22)]
-    monkeypatch.setattr(dn, "_free_pick_candidates", lambda conn, d: pool)
-    monkeypatch.setattr(data.db, "get_connection",
-                        lambda *a, **k: _fake_conn("k17"))
-    monkeypatch.setattr(xp, "_already_sent", lambda *a, **k: False)
-    monkeypatch.setattr(xp, "_ledger", lambda *a, **k: None)
-
-    posted = []
-    monkeypatch.setattr(xp, "post_tweet",
-                        lambda text, **k: posted.append(text) or "1")
-
-    assert xp.notify_x_free_pick("2026-09-02") == 1
-    assert "Pick 17" in posted[0], (
-        f"X tweeted a different free pick from the one Discord posted: "
-        f"{posted[0]!r}")
-
-
-def test_x_waits_rather_than_choosing_its_own(monkeypatch):
-    """
-    No recorded Discord choice means Discord has not posted yet. Choosing here
-    is what produced two different free picks; waiting costs one pass.
-    """
+def test_x_posts_without_reading_discords_free_pick(monkeypatch):
+    """Discord's recorded choice is not a tweet, and the free-pick pool is
+    not consulted. The released slate is what posts."""
     _creds_on(monkeypatch)
     import config
     import data.db
@@ -680,23 +679,42 @@ def test_x_waits_rather_than_choosing_its_own(monkeypatch):
 
     monkeypatch.setattr(config, "DISCORD_WEBHOOK_FREE",
                         "https://discord.example/webhook", raising=False)
-    pool = [{"lock_key": "k1", "label": "Pick 1", "sport": "MLB",
-             "dk_odds": -110, "good_to": None}]
-    monkeypatch.setattr(dn, "_free_pick_candidates", lambda conn, d: pool)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("X consulted the free-pick pool")
+
+    monkeypatch.setattr(dn, "_free_pick_candidates", _boom)
+    monkeypatch.setattr(dn, "_pick_free", _boom)
+    monkeypatch.setattr(
+        dn, "_new_signals",
+        lambda conn, d, include_already_posted=False: [
+            {"lock_key": "k-slate", "label": "NYY ML", "sport": "MLB",
+             "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home"}])
     monkeypatch.setattr(data.db, "get_connection",
-                        lambda *a, **k: _fake_conn(None))
+                        lambda *a, **k: _fake_conn("k17"))
     monkeypatch.setattr(xp, "_already_sent", lambda *a, **k: False)
+    monkeypatch.setattr(xp, "_ledger", lambda *a, **k: None)
 
     posted = []
-    monkeypatch.setattr(xp, "post_tweet",
-                        lambda text, **k: posted.append(text) or "1")
-    assert xp.notify_x_free_pick("2026-09-02") == 0
-    assert not posted
+
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
+        posted.append(text)
+        return "id1", False
+
+    monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
+    afternoon = datetime(2026, 9, 2, 16, 23, tzinfo=xp.ET)
+    assert xp.notify_x_picks("2026-09-02", now=afternoon) == 1
+    assert len(posted) == 1
+    assert "NYY ML" in posted[0]
+    assert "Free pick" not in posted[0]
+    assert "More in Discord" not in posted[0]
+    assert "#FreePicks" not in posted[0]
+    assert "Pick 17" not in posted[0]
 
 
 def test_discord_records_which_pick_it_posted():
-    """X reads the choice back out of push_sent.message_id, so the write is
-    load-bearing rather than bookkeeping."""
+    """Discord stores the chosen lock key on its own free-pick row. X does
+    not read that row; the write is still what the free channel posted."""
     src = (Path(__file__).parent.parent / "tracking" / "discord_notifier.py"
            ).read_text(encoding="utf-8")
     i = src.index("INSERT INTO push_sent",
@@ -756,3 +774,510 @@ def test_a_split_that_cannot_fit_says_how_many_it_dropped():
     assert len(text) <= xp.MAX_TWEET
     assert "more" in text, "sports were dropped without saying so"
     assert text.endswith(xp.hashtags_for(None)), "the tags were truncated away"
+
+
+# ── 6. every released pick, one format, posted once ──────────────────────────
+# mike, 2026-10-18: the slate is the X post. X_POST_ALL_PICKS=0 posts no
+# pick slate. There is no free-pick tweet.
+
+def _slate():
+    return [
+        {"lock_key": "k-free", "label": "NYY ML", "sport": "MLB",
+         "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home",
+         "good_to": None},
+        {"lock_key": "k-total", "label": "NYY vs BOS Over 8.5", "sport": "MLB",
+         "dk_odds": -110, "home": "NYY", "away": "BOS", "side": "over",
+         "good_to": None},
+        {"lock_key": "k-nfl", "label": "SF -3.5", "sport": "NFL",
+         "dk_odds": -110, "home": "SF", "away": "SEA", "side": "home",
+         "good_to": None},
+    ]
+
+
+def _wire_slate(monkeypatch, slate, already=None):
+    """Creds on, Discord chose k-free, ledger and network replaced."""
+    _creds_on(monkeypatch)
+    import data.db
+    from tracking import discord_notifier as dn
+
+    monkeypatch.setattr(dn, "_free_pick_candidates",
+                        lambda conn, d: [slate[0]])
+    monkeypatch.setattr(
+        dn, "_new_signals",
+        lambda conn, d, include_already_posted=False: list(slate))
+    monkeypatch.setattr(data.db, "get_connection",
+                        lambda *a, **k: _fake_conn("k-free"))
+    sent = already or set()
+
+    def _sent(conn, key, kind):
+        return (key, kind) in sent
+
+    monkeypatch.setattr(xp, "_already_sent", _sent)
+    ledgered = []
+    pace = {"last": None, "now": None}
+
+    def _last(conn):
+        if pace["last"] == "unreadable":
+            raise RuntimeError("ledger unreadable")
+        return pace["last"]
+
+    monkeypatch.setattr(xp, "_latest_x_pick_sent", _last)
+
+    def _remember(conn, key, kind, tweet_id):
+        ledgered.append((key, kind, tweet_id))
+        sent.add((key, kind))
+        if kind == xp.X_PICK_KIND:
+            pace["last"] = pace["now"]
+
+    monkeypatch.setattr(xp, "_ledger", _remember)
+    posted = []
+
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
+        posted.append(text)
+        return f"id{len(posted)}", False
+
+    monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
+
+    def post_at(when, dry_run=False):
+        pace["now"] = when
+        return xp.notify_x_picks("2026-10-18", dry_run=dry_run, now=when)
+
+    return posted, ledgered, post_at, pace
+
+
+def test_team_hashtags_use_the_nickname():
+    from tracking.x_teams import team_hashtag, team_tags
+    assert team_hashtag("MLB", "NYY") == "Yankees"
+    assert team_hashtag("MLB", "BOS") == "RedSox"
+    assert team_hashtag("NFL", "SF") == "49ers"
+    assert team_hashtag("NFL", "WAS") == "Commanders"
+    assert team_hashtag("NHL", "TOR") == "MapleLeafs"
+    assert team_hashtag("NBA", "PHI") == "76ers"
+    side = team_tags({"sport": "MLB", "home": "NYY", "away": "BOS", "side": "home"})
+    assert side == ["#Yankees"]
+    total = team_tags({"sport": "MLB", "home": "NYY", "away": "BOS", "side": "over"})
+    assert total == ["#Yankees", "#RedSox"]
+
+
+def test_college_nicknames_and_a_shared_mascot_falls_back_to_the_school():
+    from tracking.x_teams import team_tags
+    both = team_tags(
+        {"sport": "NCAAF", "home": "Ohio State", "away": "Michigan", "side": "under"},
+        {"Ohio State": "Buckeyes", "Michigan": "Wolverines"})
+    assert both == ["#Buckeyes", "#Wolverines"]
+    shared = team_tags(
+        {"sport": "NCAAF", "home": "USC", "away": "Troy", "side": "under"},
+        {"USC": "Trojans", "Troy": "Trojans"})
+    assert shared == ["#USC", "#Troy"]
+
+
+def test_every_pick_post_uses_the_same_format():
+    side = xp.render_pick(
+        {"sport": "MLB", "label": "NYY ML", "dk_odds": -115,
+         "home": "NYY", "away": "BOS", "side": "home"})
+    total = xp.render_pick(
+        {"sport": "MLB", "label": "NYY vs BOS Over 8.5", "dk_odds": -110,
+         "home": "NYY", "away": "BOS", "side": "over"})
+    for text in (side, total):
+        assert "Free pick" not in text
+        assert "More in Discord" not in text
+        assert "#FreePicks" not in text
+        assert text.count("#") <= xp.MAX_PICK_HASHTAGS
+        assert len(text) <= xp.MAX_TWEET
+        xp._assert_no_link(text)
+    assert "#Yankees" in side and "#MLB" in side and "#GamblingX" in side
+    assert "#RedSox" not in side
+    assert "#Yankees" in total and "#RedSox" in total and "#MLB" in total
+    assert "#GamblingX" in total
+
+
+def test_a_pick_shows_the_event_date_in_et_and_a_prop_shows_the_matchup():
+    """A start after midnight UTC is still the previous evening in New York."""
+    prop = xp.render_pick({
+        "sport": "MLB", "label": "Aaron Judge Over 1.5 Hits", "dk_odds": -110,
+        "home": "BOS", "away": "NYY", "side": "over",
+        "prop_market": "player_hits",
+        "commence": "2026-10-21T02:10:00+00:00",
+    })
+    assert "Tue 10/20" in prop
+    assert "NYY @ BOS" in prop
+    assert prop.index("NYY @ BOS") < prop.index("Tue 10/20")
+    assert "#Yankees" in prop and "#RedSox" in prop
+    assert len(prop) <= xp.MAX_TWEET
+
+
+def test_a_side_that_omits_the_opponent_gains_the_matchup_when_it_fits():
+    text = xp.render_pick({
+        "sport": "MLB", "label": "NYY ML", "dk_odds": -115,
+        "best_book": "draftkings", "best_odds": -115,
+        "home": "BOS", "away": "NYY", "side": "away",
+        "commence": "2026-10-20T23:10:00+00:00",
+    })
+    assert "NYY ML" in text
+    assert "NYY @ BOS" in text
+    assert "Tue 10/20" in text
+    assert "#Yankees" in text and "#RedSox" not in text
+    assert text.index("Tue 10/20") < text.index("#Yankees")
+
+
+def test_a_total_that_already_names_both_clubs_does_not_repeat_the_matchup():
+    text = xp.render_pick({
+        "sport": "MLB", "label": "NYY vs BOS Over 8.5", "dk_odds": -105,
+        "best_book": "fanduel", "best_odds": -105,
+        "home": "BOS", "away": "NYY", "side": "over",
+        "commence": "2026-10-20T23:10:00+00:00",
+    })
+    assert text.count("NYY") == 1 or "NYY vs BOS" in text
+    assert "NYY @ BOS" not in text
+    assert "Tue 10/20" in text
+
+
+def test_a_long_post_drops_reach_tags_before_the_date_and_the_matchup():
+    body = "X" * 250
+    text = xp.assemble_text(
+        body, ["#Yankees", "#RedSox"],
+        ["#MLB", "#GamblingX", "#BettingTips"],
+        keep=["NYY @ BOS", "Tue 10/20"])
+    assert len(text) <= xp.MAX_TWEET
+    assert "NYY @ BOS" in text and "Tue 10/20" in text
+    assert text.index("Tue 10/20") < text.index("#Yankees")
+    for dropped in ("#MLB", "#GamblingX", "#BettingTips"):
+        assert dropped not in text
+
+
+def test_a_long_post_drops_reach_tags_before_team_tags():
+    body = "X" * 270
+    text = xp.assemble_text(
+        body, ["#Yankees", "#RedSox"], ["#MLB", "#GamblingX", "#BettingTips"])
+    assert len(text) <= xp.MAX_TWEET
+    assert text.endswith("#Yankees #RedSox")
+    for dropped in ("#MLB", "#GamblingX", "#BettingTips"):
+        assert dropped not in text
+
+
+def test_freepicks_in_the_pool_is_dropped(monkeypatch):
+    monkeypatch.setenv("X_HASHTAG_POOL", "FreePicks,CustomTag")
+    pick = {"sport": "MLB", "home": "NYY", "away": "BOS", "side": "home"}
+    _teams, reach = xp.pick_hashtags(pick)
+    assert "#CustomTag" in reach
+    assert "#FreePicks" not in reach
+    assert "#GamblingX" not in reach
+    text = xp.render_pick(
+        {"sport": "MLB", "label": "NYY ML", "dk_odds": -115,
+         "home": "NYY", "away": "BOS", "side": "home"})
+    assert "#FreePicks" not in text and "#CustomTag" in text
+
+
+def _afternoon():
+    return datetime(2026, 10, 18, 16, 23, tzinfo=xp.ET)
+
+
+def test_all_released_picks_are_posted_once_in_one_format(monkeypatch):
+    """The same three picks still post, one per call, 10 minutes apart."""
+    slate = _slate()
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
+    start = _afternoon()
+    assert post_at(start) == 1
+    assert post_at(start + timedelta(minutes=9, seconds=59)) == 0
+    assert post_at(start + timedelta(minutes=10)) == 1
+    assert post_at(start + timedelta(minutes=20)) == 1
+    assert post_at(start + timedelta(minutes=30)) == 0
+    assert len(posted) == 3, posted
+    assert all("Free pick" not in t and "More in Discord" not in t
+               and "#FreePicks" not in t for t in posted)
+    assert sum("NYY ML" in t for t in posted) == 1
+    assert any("NYY ML" in t and "#Yankees" in t and "#MLB" in t for t in posted)
+    assert any("Over 8.5" in t and "#Yankees" in t and "#RedSox" in t for t in posted)
+    assert any("SF -3.5" in t and "#49ers" in t and "#NFL" in t for t in posted)
+    assert {row[0] for row in ledgered} == {"k-free", "k-total", "k-nfl"}
+    assert [row[0] for row in ledgered] == ["k-free", "k-total", "k-nfl"]
+    assert all(kind == "x_pick" for _key, kind, _id in ledgered)
+    assert not any(kind == "x_free_pick" for _key, kind, _id in ledgered)
+
+
+def test_the_flag_off_posts_no_pick_slate(monkeypatch):
+    monkeypatch.setenv("X_POST_ALL_PICKS", "0")
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    assert post_at(_afternoon()) == 0
+    assert posted == []
+    assert ledgered == []
+
+
+def test_the_kill_switch_posts_no_pick_slate(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    monkeypatch.setenv("RUN_X_PUBLISHER", "0")
+    assert post_at(_afternoon()) == 0
+    assert posted == []
+    assert ledgered == []
+
+
+def test_a_pick_already_tweeted_is_not_posted_again(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(
+        monkeypatch, _slate(), already={("k-total", "x_pick")})
+    start = _afternoon()
+    assert post_at(start) == 1
+    assert post_at(start + timedelta(minutes=10)) == 1
+    assert post_at(start + timedelta(minutes=20)) == 0
+    assert not any("Over 8.5" in t for t in posted)
+    assert any("SF -3.5" in t for t in posted)
+    assert any("NYY ML" in t for t in posted)
+    assert not any(key == "k-total" for key, _kind, _id in ledgered)
+
+
+def test_a_rate_limit_does_not_ledger_and_the_same_pick_retries(monkeypatch):
+    slate = _slate()
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
+    calls = {"n": 0}
+
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None, True
+        posted.append(text)
+        return f"id{calls['n']}", False
+
+    monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
+    start = _afternoon()
+    assert post_at(start) == 0
+    assert posted == []
+    assert ledgered == []
+    assert calls["n"] == 1
+    # Nothing was confirmed, so the gap does not start. The next call retries
+    # the same pick.
+    assert post_at(start) == 1
+    assert len(posted) == 1
+    assert "NYY ML" in posted[0]
+    assert "Free pick" not in posted[0]
+    assert ledgered[0][0] == "k-free"
+    assert calls["n"] == 2
+
+
+def test_quiet_hours_hold_the_pick_until_8am(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 0, 59, tzinfo=xp.ET)) is False
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 1, 0, tzinfo=xp.ET)) is True
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 7, 59, tzinfo=xp.ET)) is True
+    assert xp._in_pick_quiet_hours(datetime(2026, 10, 19, 8, 0, tzinfo=xp.ET)) is False
+    assert post_at(datetime(2026, 10, 19, 1, 0, tzinfo=xp.ET)) == 0
+    assert post_at(datetime(2026, 10, 19, 7, 59, tzinfo=xp.ET)) == 0
+    assert posted == [] and ledgered == []
+    assert post_at(datetime(2026, 10, 19, 8, 0, tzinfo=xp.ET)) == 1
+    assert len(posted) == 1 and ledgered[0][0] == "k-free"
+
+
+def test_a_pick_whose_game_has_started_is_dropped_and_not_ledgered(monkeypatch):
+    slate = _slate()
+    slate[0]["commence"] = "2026-10-18T16:00:00-04:00"
+    slate[1]["commence"] = "2026-10-18T21:00:00-04:00"
+    slate[2]["commence"] = "2026-10-19T07:00:00-04:00"
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
+    eight = datetime(2026, 10, 19, 8, 0, tzinfo=xp.ET)
+    assert post_at(datetime(2026, 10, 18, 16, 23, tzinfo=xp.ET)) == 1
+    assert "Over 8.5" in posted[0]
+    assert not any(key == "k-free" for key, _kind, _id in ledgered)
+    assert post_at(eight) == 0
+    assert not any(key == "k-nfl" for key, _kind, _id in ledgered)
+    assert len(posted) == 1
+
+
+def test_a_missing_commence_is_still_posted(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    assert post_at(_afternoon()) == 1
+    assert ledgered[0][0] == "k-free"
+
+
+def test_an_unreadable_pick_clock_posts_nothing(monkeypatch):
+    posted, ledgered, post_at, pace = _wire_slate(monkeypatch, _slate())
+    pace["last"] = "unreadable"
+    assert post_at(_afternoon()) == 0
+    assert posted == [] and ledgered == []
+
+
+def test_a_held_lock_posts_nothing(monkeypatch):
+    from contextlib import contextmanager
+
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+
+    @contextmanager
+    def _held(*_a, **_k):
+        yield False
+
+    monkeypatch.setattr("tracking.publish_lock.publish_lock", _held)
+    assert post_at(_afternoon()) == 0
+    assert posted == [] and ledgered == []
+
+
+def test_the_pick_clock_uses_the_later_instant_across_the_dst_overlap():
+    class _Conn:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchall(self):
+            # 01:30 EDT is 05:30 UTC. 01:00 EST is 06:00 UTC and is later,
+            # even though the clock face looks earlier.
+            return [
+                ("2026-11-01T01:30:00-04:00",),
+                ("2026-11-01T01:00:00-05:00",),
+            ]
+
+    got = xp._latest_x_pick_sent(_Conn())
+    assert got == datetime.fromisoformat("2026-11-01T06:00:00+00:00")
+
+
+def test_recaps_are_not_on_the_pick_clock():
+    import inspect
+    for fn in (xp.notify_x_results, xp.notify_x_period):
+        src = inspect.getsource(fn)
+        assert "PICK_MIN_GAP" not in src
+        assert "_in_pick_quiet_hours" not in src
+        assert "X_PICKS_LOCK" not in src
+
+
+def test_pick_posts_use_a_session_connection_and_the_five_minute_job():
+    import inspect
+    src = inspect.getsource(xp.notify_x_picks)
+    assert "session_mode=True" in src
+    body = inspect.getsource(xp._post_released_picks)
+    assert "X_PICKS_LOCK" in body
+    assert "publish_lock(" in body
+    sched = (Path(__file__).parent.parent / "scheduler.py").read_text(encoding="utf-8")
+    job = sched[sched.index("def run_social_post_queue"):sched.index("def run_job_queue")]
+    assert "notify_x_picks" in job
+    assert "notify_x_results" not in job
+    assert "notify_x_period" not in job
+
+
+def test_a_tweet_without_media_omits_the_media_key(monkeypatch):
+    _creds_on(monkeypatch)
+    sent = {}
+
+    class _R:
+        status_code = 201
+        text = ""
+
+        def json(self):
+            return {"data": {"id": "55"}}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        sent["url"] = url
+        sent["json"] = json
+        return _R()
+
+    monkeypatch.setattr(xp.requests, "post", _post)
+    assert xp.deliver_tweet("hello").tweet_id == "55"
+    assert sent["url"] == xp.X_POST_URL
+    assert sent["json"] == {"text": "hello"}
+
+
+def test_media_ids_are_attached_and_a_bad_id_is_not_sent(monkeypatch):
+    _creds_on(monkeypatch)
+    sent = []
+
+    class _R:
+        status_code = 201
+        text = ""
+
+        def json(self):
+            return {"data": {"id": "56"}}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        sent.append(json)
+        return _R()
+
+    monkeypatch.setattr(xp.requests, "post", _post)
+    delivered = xp.deliver_tweet("hello", media_ids=["11", "22"])
+    assert delivered.outcome == "posted"
+    assert sent == [{"text": "hello", "media": {"media_ids": ["11", "22"]}}]
+    refused = xp.deliver_tweet("hello", media_ids=["nope"])
+    assert refused.outcome == "refused"
+    assert len(sent) == 1
+
+
+def test_upload_tweet_image_uses_the_oauth_header_and_does_not_tweet(monkeypatch):
+    import base64
+    _creds_on(monkeypatch)
+    png = b"\x89PNG\r\n\x1a\n" + b"pixels"
+    sent = {}
+
+    class _R:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"data": {"id": "1146654567674912769", "media_key": "3_1"}}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        sent["url"] = url
+        sent["json"] = json
+        sent["auth"] = headers["Authorization"]
+        sent["timeout"] = timeout
+        return _R()
+
+    monkeypatch.setattr(xp.requests, "post", _post)
+    uploaded = xp.upload_tweet_image(png, "image/png")
+    assert uploaded.outcome == "uploaded"
+    assert uploaded.media_id == "1146654567674912769"
+    assert sent["url"] == xp.X_MEDIA_UPLOAD_URL
+    assert sent["url"] != xp.X_POST_URL
+    assert sent["json"]["media_category"] == "tweet_image"
+    assert sent["json"]["media_type"] == "image/png"
+    assert sent["json"]["media"] == base64.b64encode(png).decode("ascii")
+    assert sent["auth"].startswith("OAuth ")
+    assert "oauth_signature" in sent["auth"]
+    assert sent["timeout"] == 60
+
+
+def test_a_refused_upload_returns_no_media_id(monkeypatch):
+    _creds_on(monkeypatch)
+
+    class _R:
+        status_code = 403
+        text = "forbidden"
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(xp.requests, "post", lambda *a, **k: _R())
+    uploaded = xp.upload_tweet_image(b"\x89PNG\r\n\x1a\n", "image/png")
+    assert uploaded.outcome == "rejected"
+    assert uploaded.media_id is None
+    assert "403" in uploaded.detail
+
+
+def test_fetch_https_image_sniffs_bytes_and_refuses_gif(monkeypatch):
+    png = b"\x89PNG\r\n\x1a\n" + b"pixels"
+    gif = b"GIF89a" + b"pixels"
+
+    class _Resp:
+        def __init__(self, body, status=200, url="https://cdn.example/a.png"):
+            self._body = body
+            self.status_code = status
+            self.url = url
+            self.closed = False
+
+        def iter_content(self, _n):
+            yield self._body
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(xp.requests, "get", lambda url, timeout=None, stream=None: _Resp(png))
+    fetched = xp.fetch_https_image("https://cdn.example/a.png")
+    assert fetched.outcome == "fetched"
+    assert fetched.media_type == "image/png"
+    assert fetched.content == png
+
+    monkeypatch.setattr(xp.requests, "get", lambda url, timeout=None, stream=None: _Resp(gif))
+    refused = xp.fetch_https_image("https://cdn.example/a.gif")
+    assert refused.outcome == "failed"
+    assert refused.content is None
+    assert "gif" in refused.detail
+
+    monkeypatch.setattr(
+        xp.requests, "get",
+        lambda url, timeout=None, stream=None: _Resp(b"\xff\xd8\xff" + b"x" * (xp.MAX_IMAGE_BYTES + 1)))
+    huge = xp.fetch_https_image("https://cdn.example/huge.jpg")
+    assert huge.outcome == "failed"
+    assert "5MB" in huge.detail
+
+    assert xp.fetch_https_image("http://cdn.example/a.png").outcome == "failed"

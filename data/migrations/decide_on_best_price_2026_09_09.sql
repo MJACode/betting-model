@@ -107,8 +107,10 @@ BEGIN
   END IF;
 
   -- ── 2. the graded universe, at the decision price ────────────────────────
+  -- to_regclass, not a ::regclass cast: a missing matview must make this
+  -- NOT EXISTS true so the rebuild below runs. The cast errors first.
   IF NOT EXISTS (SELECT 1 FROM pg_attribute
-                  WHERE attrelid = 'public.mv_scored_pick_outcomes'::regclass
+                  WHERE attrelid = to_regclass('public.mv_scored_pick_outcomes')
                     AND attname = 'decision_edge' AND NOT attisdropped) THEN
     DROP VIEW IF EXISTS public.v_model_full_outcome_record;
     DROP MATERIALIZED VIEW IF EXISTS public.mv_scored_pick_outcomes;

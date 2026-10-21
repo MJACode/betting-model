@@ -64,6 +64,9 @@ logger = logging.getLogger(__name__)
 DISCORD_SIGNALS_LOCK = 812_090_601
 DISCORD_LIVE_LOCK = 812_090_602
 PUSH_SIGNALS_LOCK = 812_090_603
+# Pick posts on X. Not shared with Discord or push: a slow webhook must not
+# hold the slate, and a slate must not hold a webhook.
+X_PICKS_LOCK = 812_090_604
 
 
 @contextmanager

@@ -10,10 +10,10 @@ type NavRef = NavigationContainerRef<RootStackParamList>;
 
 /**
  * Identifiers already acted on in THIS JS runtime. Survives a remount of the
- * hook (Fast Refresh, a parent re-create). Does NOT survive
- * `Updates.reloadAsync()` — that starts a new runtime, which is why the
- * native last-response must also be cleared. `useOtaUpdates` reloads on
- * launch and on foreground whenever a bundle is waiting.
+ * hook (Fast Refresh, a parent re-create). Does NOT survive a new JS runtime
+ * (a cold start, a dev reload), which is why the native last-response must
+ * also be cleared. The app no longer reloads itself for updates
+ * (src/lib/otaUpdate.ts).
  */
 const handledResponseIds = new Set<string>();
 

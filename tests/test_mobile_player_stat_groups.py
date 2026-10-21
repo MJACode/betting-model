@@ -123,11 +123,21 @@ def test_a_tab_opens_on_the_stat_the_player_fills_most():
 
 
 def test_the_screen_derives_its_tabs_from_the_filtered_chips():
-    """The raw catalog must not reach GroupTabs -- that is the bypass."""
+    """The raw catalog must not reach GroupTabs -- that is the bypass.
+
+    `chipsWithRequested` wraps the filter (2026-09-20) so the ONE group the
+    reader explicitly tapped through on survives it -- an Anytime TD row has to
+    open on Anytime TD even for a receiver who has not scored. That is the only
+    sanctioned way past this filter, and it still runs `chipsForLoadedPlayer`
+    over everything else, so the pattern below allows that wrapper and nothing
+    wider: `allChips` reaching `chips` on its own is still the bypass.
+    """
     src = _src(SCREEN)
     assert "chipsForLoadedPlayer" in src, "PlayerStatsScreen does not filter its chips"
     assert re.search(
-        r"const chips = useMemo\(\s*\(\)\s*=>\s*chipsForLoadedPlayer\(", src
+        r"const chips = useMemo\(\s*\(\)\s*=>\s*"
+        r"(chipsWithRequested\(allChips,\s*)?chipsForLoadedPlayer\(",
+        src,
     ), "`chips` must be the filtered list"
     assert re.search(
         r"const groups = useMemo\(\s*\(\)\s*=>\s*groupsOfChips\(chips\)", src

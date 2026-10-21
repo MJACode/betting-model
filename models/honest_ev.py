@@ -5,9 +5,10 @@ Phase 3 (2026-09-19, mike): a pick is a BET only if its CALIBRATED probability
 (models/probability_calibration.py, the promoted map) times the decimal of the
 price it is decided at, minus one, is at least `config.min_ev_for(model_id)`.
 The pre-game scorer, the MLB and NCAAF live loops and the NFL live executor
-each already had a decision function and gained the gate inline; the five
-rule cards (nfl_prop_market, wnba_prop_market, mlb_game_market,
-mlb_total_public_fade, nfl wind/opener) had no decision function at all --
+each already had a decision function and gained the gate inline; the rule
+cards (nfl_prop_market, wnba_prop_market, mlb_game_market,
+mlb_total_public_fade, nfl wind/opener, nhl_over_under) had no decision
+function at all --
 a rule's selection WAS the bet -- so they call this. Same arithmetic, same
 map, same floor, or a surface would disagree silently.
 
@@ -46,7 +47,14 @@ class Gate:
 
 
 def honest_probability(model_id: str, prob: float) -> float:
-    """The promoted map applied; identity when there is none or it fails."""
+    """The promoted map applied; identity when there is none or it fails.
+
+    The two NFL rules in config.MODELS_ON_OWN_PROBABILITY decide on their own
+    number (mike, 2026-09-20): their map is the pooled offset borrowed from
+    other models, and it puts every bet they make under water.
+    """
+    if model_id in config.MODELS_ON_OWN_PROBABILITY:
+        return float(prob)
     from models.scorer import _calibrated
     cal = _calibrated(model_id, prob)
     return float(prob) if cal is None else float(cal)

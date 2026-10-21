@@ -391,3 +391,37 @@ def extract_player_stats(summary: dict) -> list[dict]:
                     "raw": row,
                 })
     return out
+
+
+def rushing_accrued(summary: dict) -> dict:
+    """
+    Carries so far this game, per player, from the SITE host's boxscore.
+
+    The site path is the richer of the two -- every player who has carried the
+    ball appears, not only the leaders -- so where this host answers, it is
+    preferred. `espn_core.rushing_accrued` is the same map built from the
+    leaders document for the host the Railway worker actually reaches, and the
+    two return the same shape so `gameday` does not care which produced it.
+
+    Read BY LABEL, like `extract_player_stats`, because the label order has
+    changed before and an index read would silently return yards as carries.
+    Keys are `flow_validate.norm_name` form.
+    """
+    from nfl.live_model.backtest.flow_validate import norm_name
+
+    out: dict[str, int] = {}
+    for row in extract_player_stats(summary):
+        if row.get("category") != "rushing":
+            continue
+        raw = (row.get("raw") or {}).get("CAR")
+        name = row.get("name")
+        if raw is None or not name:
+            continue
+        try:
+            car = int(str(raw).strip())
+        except (TypeError, ValueError):
+            continue
+        key = norm_name(name)
+        if key:
+            out[key] = max(out.get(key, 0), car)
+    return out

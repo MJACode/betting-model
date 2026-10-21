@@ -5,15 +5,18 @@ import { useCallback, useEffect, useState } from 'react';
  * How tracked bets are scored on the Performance tab.
  *
  *   'flat'   — $100 per bet (default; matches the rest of the app's records)
- *   'kelly'  — each bet at its pick's Kelly-sized stake (kelly_fraction x the
- *              user's bankroll x their Kelly multiplier/cap — the same number
- *              the pick card showed as "Bet $X")
  *   'custom' — per-bet dollar amounts the user enters (default $100 each)
  *
- * Stored on-device (module store + AsyncStorage, same pattern as
- * useKellySettings). Custom stakes are keyed by pick_id.
+ * A 'kelly' mode used to size each bet off an on-device bankroll and a Kelly
+ * aggressiveness multiplier. Both were removed on 2026-09-20 — every stake the
+ * app publishes is flat units now, so a dollar mode keyed on a private bankroll
+ * had nothing left to derive from. `sanitizeMode` folds the stored legacy value
+ * back to 'flat' so an upgrading device does not land on a mode that is gone.
+ *
+ * Stored on-device (module store + AsyncStorage). Custom stakes are keyed by
+ * pick_id.
  */
-export type StakeMode = 'flat' | 'kelly' | 'custom';
+export type StakeMode = 'flat' | 'custom';
 
 export const FLAT_STAKE = 100;
 
@@ -31,7 +34,8 @@ const listeners = new Set<(s: StakeState) => void>();
 let cached: StakeState | null = null;
 
 function sanitizeMode(raw: string | null): StakeMode {
-  return raw === 'kelly' || raw === 'custom' ? raw : 'flat';
+  // 'kelly' is the retired third mode; anything unrecognised falls to flat.
+  return raw === 'custom' ? raw : 'flat';
 }
 
 function sanitizeCustom(raw: string | null): Record<string, number> {

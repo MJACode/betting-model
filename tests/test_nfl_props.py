@@ -146,6 +146,118 @@ class TestKickoff:
         assert _kickoff_utc("2026-09-13", "") is None
 
 
+class TestVenueAndScheduleOfRecord:
+    """The wind card reads WHERE a game is played from these rows (2026-10-20).
+
+    Until then it read a schedule file frozen on 2026-08-15, and nflverse's
+    venue columns were fetched every day and thrown away. The row below is
+    PHI @ JAX at Tottenham exactly as nflverse publishes it today: Neutral,
+    but carrying Jacksonville's stadium id. All three fields must survive the
+    ingest, because the id alone points at Jacksonville.
+    """
+
+    LONDON = {
+        "2026_05_PHI_JAX": {
+            "game_id": "2026_05_PHI_JAX", "season": "2026", "week": "5",
+            "gameday": "2026-10-11", "gametime": "09:30", "game_type": "REG",
+            "home_team": "JAX", "away_team": "PHI", "home_score": "", "away_score": "",
+            "location": "Neutral", "stadium_id": "JAX00",
+            "stadium": "Tottenham Hotspur Stadium", "roof": "outdoors",
+        },
+    }
+
+    def test_upcoming_rows_carry_the_raw_venue(self):
+        rows = parse_upcoming_team_rows(self.LONDON, 2026, set())
+        assert {r["team"] for r in rows} == {"JAX", "PHI"}
+        for r in rows:
+            assert (r["stadium_id"], r["stadium"], r["location"]) == (
+                "JAX00", "Tottenham Hotspur Stadium", "Neutral")
+
+    def test_played_rows_carry_the_raw_venue(self):
+        kc = next(r for r in parse_team_rows(
+            parse_player_rows(PLAYER_CSV, SCHEDULE), SCHEDULE) if r["team"] == "KC")
+        # the fixture has no venue columns: absent is None, never ""
+        assert kc["stadium_id"] is None and kc["location"] is None
+
+    def test_games_row_carries_week_and_neutral_site(self):
+        g = games_rows(parse_upcoming_team_rows(self.LONDON, 2026, set()))[0]
+        assert g["week"] == 5
+        assert g["neutral_site"] == 1
+        home = games_rows(parse_upcoming_team_rows(SCHEDULE, 2025, set()))[0]
+        assert home["neutral_site"] is None     # no location column in that fixture
+
+    def test_every_team_column_is_written_by_both_parsers(self):
+        from data.ingestors.nfl_props_data_ingestor import TEAM_COLUMNS
+        up = parse_upcoming_team_rows(self.LONDON, 2026, set())[0]
+        played = parse_team_rows(parse_player_rows(PLAYER_CSV, SCHEDULE), SCHEDULE)[0]
+        assert set(TEAM_COLUMNS) <= set(up) and set(TEAM_COLUMNS) <= set(played)
+
+    def test_playoff_rows_are_kept(self):
+        """POST games reach the schedule of record the same way REG games do.
+
+        A regression pin, not a fail-first test: parse_upcoming_team_rows has
+        filtered on season only since it was written, and 13 POST games per
+        season already sit in nfl_team_game_stats for 2024 and 2025.
+        """
+        wc = {"2026_19_GB_CHI": {
+            "game_id": "2026_19_GB_CHI", "season": "2026", "week": "19",
+            "gameday": "2027-01-16", "gametime": "16:30", "game_type": "WC",
+            "home_team": "CHI", "away_team": "GB", "home_score": "", "away_score": "",
+            "location": "Home", "stadium_id": "CHI98", "stadium": "Soldier Field"}}
+        rows = parse_upcoming_team_rows(wc, 2026, set())
+        assert len(rows) == 2 and rows[0]["season_type"] == "WC"
+        assert games_rows(rows)[0]["commence_time"].startswith("2027-01-16T21:30")
+
+    def test_team_upsert_drops_the_venue_columns_when_the_table_lacks_them(self):
+        from data.ingestors import nfl_props_data_ingestor as ing
+
+        class _Conn:
+            def __init__(self, n):
+                self.n = n
+
+            def execute(self, sql, params=None):
+                n = self.n
+
+                class _R:
+                    def fetchone(self):
+                        return (n,)
+                return _R()
+
+        assert ing._team_upsert_for(_Conn(3)) == ing._TEAM_UPSERT
+        no_venue = ing._team_upsert_for(_Conn(0))
+        assert no_venue == ing._TEAM_UPSERT_NO_VENUE
+        assert "stadium_id" not in no_venue and "commence_time" in no_venue
+
+    def test_a_same_named_table_in_another_schema_does_not_drop_the_venue(self):
+        """The catalog probe counts columns, and information_schema lists every
+        schema the role can see. A second nfl_team_game_stats (a backup copy,
+        a staging schema) doubled the count to 6, the `== 3` test failed, and
+        the venue was never written again -- silently, as "no venue columns
+        yet". This catalog answers each probe the way Postgres would."""
+        from data.ingestors import nfl_props_data_ingestor as ing
+
+        catalog = [(schema, col) for schema in ("public", "archive")
+                   for col in ing.VENUE_COLUMNS]
+
+        class _Catalog:
+            def execute(self, sql, params=None):
+                flat = " ".join(sql.split())
+                seen = [(s, c) for s, c in catalog
+                        if "table_schema = 'public'" not in flat or s == "public"]
+                n = (len({c for _, c in seen}) if "DISTINCT column_name" in flat
+                     else len(seen))
+
+                class _R:
+                    def fetchone(self):
+                        return (n,)
+                return _R()
+
+            def rollback(self):
+                pass
+
+        assert ing._team_upsert_for(_Catalog()) == ing._TEAM_UPSERT
+
+
 # ── Response distributions ────────────────────────────────────────────────────
 # These are the tests that matter. Everything above is plumbing; this is where a
 # wrong answer costs money silently.
@@ -1198,9 +1310,16 @@ class TestMarketCardPublisher:
         assert c.publish(conn, rows) == 0          # second run re-prices nothing
         assert len(conn.inserted) == 1
 
-    def test_anytime_td_label_does_not_claim_a_line(self):
+    def test_anytime_td_label_does_not_claim_a_line(self, monkeypatch):
+        import config
         import scripts.nfl_prop_market_card as c
         from models.nfl_prop_market import MarketBet
+
+        # This test is about the LABEL, not the EV gate. nfl_prop_market's own
+        # floor (0.20 since 2026-09-20) drops this fixture at EV 0.100, and the
+        # conftest fixture holds only GLOBAL_MIN_EV at identity, not the
+        # per-model floors. Clear it so the label logic is what is exercised.
+        monkeypatch.setattr(config, "MODEL_OWN_EV_FLOOR", {})
         b = [MarketBet("NFL_2025_01_KC_BUF", "jamesscook", "player_anytime_td",
                        "over", "fanduel", 0.5, 150.0, 0.44, 0.07, 120.0)]
         r = c.pick_rows(b, self._games(), {"jamesscook": "James Cook"}, 1000.0)[0]
@@ -1573,9 +1692,14 @@ def test_the_soft_book_set_is_the_one_the_sweep_endorses():
     import config
     import models.nfl_prop_market as mkt
 
+    # fliff LEFT on 2026-09-20 (mike: "yes drop the 4 books"). Not a verdict on
+    # the book -- the sweep endorsed it -- but on the bill: the feed charges
+    # every ten named books as a region, fourteen had doubled every call, and
+    # fliff had decided 3 live bets. A soft book the pull does not request
+    # produces no quotes, so it cannot stay named here.
     assert set(mkt.SOFT_BOOKS) == {
         "draftkings", "fanduel", "betmgm", "williamhill_us",
-        "betrivers", "fliff", "hardrockbet",
+        "betrivers", "hardrockbet",
     }, mkt.SOFT_BOOKS
     assert mkt.SHARP_BOOK not in mkt.SOFT_BOOKS
     assert "espnbet" not in mkt.SOFT_BOOKS, (
@@ -1585,17 +1709,17 @@ def test_the_soft_book_set_is_the_one_the_sweep_endorses():
 
 
 def test_fliff_is_fetched_or_it_contributes_nothing():
-    """fliff was the only one of the three NOT already in the pull. A book in
-    SOFT_BOOKS that is never requested produces no quotes and silently shrinks
-    the board rather than erroring -- it would have looked like the widening
-    simply did not help. Pinned separately from the generic coverage test
-    because this one names the failure that was actually possible here."""
+    """A book in SOFT_BOOKS that is never requested produces no quotes and
+    silently shrinks the board rather than erroring. fliff was added to both on
+    2026-09-07 and left both on 2026-09-20 (the ten-book cut); what must never
+    happen is ONE without the other."""
     import config
     import models.nfl_prop_market as mkt
 
-    assert "fliff" in mkt.SOFT_BOOKS
-    assert "fliff" in config.LINE_SHOP_BOOKMAKERS
-    assert "fliff" in config.ODDS_API_BOOKMAKERS_PARAM
+    named = "fliff" in mkt.SOFT_BOOKS
+    fetched = ("fliff" in config.LINE_SHOP_BOOKMAKERS
+               and "fliff" in config.ODDS_API_BOOKMAKERS_PARAM)
+    assert named == fetched, "fliff is bet at but not fetched, or fetched and unused"
 
 
 def test_both_sharp_references_are_fetched():

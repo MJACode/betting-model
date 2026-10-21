@@ -124,8 +124,17 @@ def _ledger_entry_is_resumable(pulled_at) -> bool:
 # MLB first-5-innings markets (pulled only for MLB)
 MLB_F5_MARKETS = ["h2h_1st_5_innings", "spreads_1st_5_innings", "totals_1st_5_innings"]
 
-# NHL 3-way regulation market (separate endpoint call)
+# NHL 3-way regulation market (separate endpoint call).
+#
+# TWO NAMES, AND THEY ARE NOT THE SAME STRING. `h2h_3way` is OUR market name —
+# it is what `odds.market`, the scorer, the feature engine and settlement all
+# read. The FEED's key is `h2h_3_way` (the-odds-api.com betting-markets page;
+# a historical probe on 2026-09-20 got DraftKings and Pinnacle NHL prices back
+# under it). This module requested the feed under OUR name from the day it was
+# written, and `odds` has never held one 3-way row. Ask with the feed's key,
+# store under ours.
 NHL_3WAY_MARKET = "h2h_3way"
+NHL_3WAY_API_KEY = "h2h_3_way"
 
 # Out of season DK offers no 3-way regulation market, but the events endpoint
 # still lists the whole future slate, so the per-event loop walked all ~32 of
@@ -259,6 +268,14 @@ NHL_ODDS_API_MAP = {
 }
 
 
+def _name_key(name: str) -> str:
+    """A team name with accents, punctuation and case folded away."""
+    import unicodedata
+    flat = unicodedata.normalize("NFKD", name or "")
+    flat = "".join(c for c in flat if not unicodedata.combining(c))
+    return "".join(c for c in flat.lower() if c.isalnum())
+
+
 def _normalize_team(name: str, sport: str) -> str:
     if sport == "UFC":
         # Fighters have no abbreviations. games.home_team/away_team store the
@@ -286,6 +303,14 @@ def _normalize_team(name: str, sport: str) -> str:
     else:  # WNBA
         mapping = WNBA_ODDS_API_MAP
     abbrev = mapping.get(name)
+    if not abbrev:
+        # The feed's spelling drifts from the map's: it sends 'Montréal
+        # Canadiens' and 'St Louis Blues' where the map holds 'Montreal' and
+        # 'St. Louis' (worker log, 2026-09-20), and the fallback below turned
+        # those into the invented ids CAN and BLU on every opening-week game.
+        # Compare with accents and punctuation folded away before giving up.
+        key = _name_key(name)
+        abbrev = next((v for k, v in mapping.items() if _name_key(k) == key), None)
     if not abbrev:
         # Fuzzy fallback: last word of team name
         abbrev = name.split()[-1][:3].upper()
@@ -732,7 +757,7 @@ def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
         if not event_id:
             continue
         try:
-            ev_odds = _get_event_odds(sport_key, event_id, [NHL_3WAY_MARKET])
+            ev_odds = _get_event_odds(sport_key, event_id, [NHL_3WAY_API_KEY])
         except Exception as exc:
             logger.debug(f"  NHL 3-way per-event fetch failed for {event_id}: {exc}")
             continue
@@ -845,8 +870,14 @@ def _process_events(events: list[dict], sport: str,
         # Extract season from game_date
         year = int(game_date[:4])
         month = int(game_date[5:7])
-        if sport in ("NHL", "NBA") and month >= 10:
-            season = year + 1   # NHL/NBA seasons span Oct–Jun, labeled by ending year
+        if sport == "NHL":
+            # Ending-year label, and the season can open in September
+            # (2026-27: 09-29). The old October rule split that opening week across
+            # two seasons — data/season_labels.py.
+            from data.season_labels import nhl_season_label
+            season = nhl_season_label(game_date)
+        elif sport == "NBA" and month >= 10:
+            season = year + 1   # NBA seasons span Oct–Jun, labeled by ending year
         elif sport == "NCAAF" and month <= 2:
             # CFB is labeled by the year of the FALL, so a January bowl or
             # playoff game belongs to the PRIOR season. Mirror image of the
@@ -897,6 +928,8 @@ def _process_events(events: list[dict], sport: str,
 
             for mkt in book.get("markets", []):
                 market_key = mkt.get("key")
+                if market_key == NHL_3WAY_API_KEY:
+                    market_key = NHL_3WAY_MARKET   # the feed's name -> ours
                 outcomes   = mkt.get("outcomes", [])
                 last_update = mkt.get("last_update", snapshot_at)
 

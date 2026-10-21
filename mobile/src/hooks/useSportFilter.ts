@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
  * Keeps each sport's picks fully separate in the UI: the Picks / Signals / Live
  * screens show ONLY the selected sport, never a mix. Default is MLB so existing
  * behavior is unchanged. Persisted to AsyncStorage and shared across screens via
- * a module-level store + listeners (same pattern as useKellySettings).
+ * a module-level store + listeners (same pattern as useOnboarding).
  */
 export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL';
 

@@ -70,13 +70,21 @@ row at all. The result was a sport that looked like it was not running. It also
 made the opener rule structurally DORMANT: it only fires while DK is still on
 its opening number, which is rarely true by kickoff.
 
-- **Look-ahead**: `NCAAF_SCORE_AHEAD_DAYS` (150) puts every game DraftKings
-  has priced in the scorer's game query and in the app
-  (`fetchUpcomingNcaafPicks`). It was 7 until 2026-09-07 (Matt: *"it should
-  be whenever lines are released. speed speed speed is what matters to get a
-  good line"*); the DK-price prefilter is what admits a game, so the window
-  is the season and the extra rows are the marquee games DK lists months out
-  (44 beyond 14 days on the day it changed).
+- **Look-ahead**: `NCAAF_SCORE_AHEAD_DAYS` (150) is the outer edge of the
+  scorer's game query and of the app's (`fetchUpcomingNcaafPicks`). It was 7
+  until 2026-09-07 (Matt: *"it should be whenever lines are released. speed
+  speed speed is what matters to get a good line"*). What admits a game is a
+  CURRENT DraftKings price: a DraftKings row stored within
+  `PREGAME_PRICE_MAX_AGE_MIN` (180 minutes). Until 2026-10-09 the check was
+  "has DraftKings ever priced it", and that is how 31 games DraftKings pulled
+  in early September were scored off their 09-04 to 09-06 rows into October
+  (16 BETs; `docs/sessions/2026-10.md`, 2026-10-09).
+  - **Corrected 2026-10-09.** This line used to say DraftKings listed 44
+    games more than 14 days out on the day the window changed. That counted
+    rows already stored. Our own DraftKings totals rows stamped 2026-09-07
+    12:00-13:30Z cover 50 games, none more than 14 days out (latest 09-13).
+    DraftKings lists the big games early, pulls them, and re-lists them about
+    ten days before kickoff.
 - **A decline writes a row.** Every precondition failure now yields a NONE row
   carrying DK's live number and a reason, instead of nothing. An empty board
   and a broken pipeline are indistinguishable to a user — which is exactly how
@@ -131,19 +139,100 @@ its opening number, which is rarely true by kickoff.
   number.
   **The gate is still right, for a different reason:** a school SP+ has not
   rated cannot be MODELLED whatever division it plays in, because `sp_overall`
-  is itself a feature (`d_sp_overall`) and a missing feature is not 0.0. SP+
-  needs FBS history, so it lags a promotion by a season. The same shape recurs
-  every season on schools crossing between the divisions: 2025 Delaware, Idaho,
-  Missouri State; 2024 those three plus Kennesaw State.
-  A decline where the school is FBS but unrated logs at WARNING (an ordinary
-  FCS opponent stays at debug, or 33 of a 98-game Saturday would bury the two
-  that matter), and `system_health`'s **`ncaaf_fbs_registry`** check reports any
-  FBS school with no current-season rating. **A re-pull does not clear it** —
-  it clears when SP+ rates the school.
-  Tests: `tests/test_ncaaf_fbs_registry.py` (14; the two gate cases watched
-  failing, and the check's FBS-only bound watched failing under mutation).
+  is itself a feature (`d_sp_overall`) and a missing feature is not 0.0.
+- **WHY A NEWLY PROMOTED SCHOOL IS UNRATED ALL SEASON — by design, not a lag**
+  (corrected 2026-10-12; this said "SP+ needs FBS history, so it lags a
+  promotion" and "it clears when SP+ rates the school"). A season's
+  `sp_overall` is CFBD's **prior** season's final SP+, held constant all year
+  (`cfbd_ingestor._prior_season_context`; measured: one distinct value per
+  team-season). North Dakota State and Sacramento State were FCS in 2025,
+  which SP+ does not rate, so they have no rating for any of 2026 and **their
+  2026 games stay refused at the FBS gate**. A rating can first appear on the
+  first run on or after **2027-03-01**, when the season label rolls to 2027
+  and the 2027 preseason rows are built from the 2026 final SP+ — and only if
+  CFBD rates them. Precedent in `ncaaf_team_stats`: Delaware and Missouri State
+  (FBS from 2025) are unrated in 2025 and rated in 2026; Kennesaw State (FBS
+  from 2024) unrated in 2024, rated in 2025.
+  **`config.NCAAF_PROMOTED_TO_FBS`** lists each promoted school with its first
+  FBS season (NDSU 2026, Sacramento State 2026). It is monitoring only — the
+  gate never reads it and nothing boards these games with a stand-in rating
+  (that would be a model update). `system_health`'s **`ncaaf_fbs_registry`**
+  check reports a listed school as **OK in its promotion season**, with the
+  reason and the earliest date it can change; the exemption ends with that
+  season by itself, so a school still unrated in its second FBS season is
+  STALE again, and so is any established school that loses its rating. Before
+  this the check sat STALE for 30 straight days (2026-09-13 → 10-12), and the
+  failure alerter repeats a standing STALE warning to the ops channel every 12
+  hours — about something nobody could act on. **Add a school to the list the season CFBD
+  first calls it FBS.**
+  A decline where the registry calls the school FBS but it is unrated logs at
+  WARNING, naming the school (and, for a listed school, why); an ordinary FCS
+  opponent stays at debug, or 33 of a 98-game Saturday would bury the two that
+  matter. Until 2026-10-12 that WARNING never fired: the live snapshot read
+  carries no `classification`, so every refusal logged at debug. The scorer
+  now reads the `ncaaf_teams` classification once per pass and hands it to the
+  refusal log only — `classification` must NEVER be added to the feature
+  engine's `_STAT_COLS`, which would switch the gate's classification veto on
+  in training and backtests (a model update).
+  **A re-pull does not change any of this** (`ncaaf_teams_refresh`, tried
+  2026-09-13).
+  Tests: `tests/test_ncaaf_fbs_registry.py` (the two gate cases watched
+  failing, the check's FBS-only bound watched failing under mutation, and the
+  promoted-school exemption, its expiry and the refusal log each watched
+  failing on the code before 2026-10-12).
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
   ~52 DK-priced — so the board is tens of games, not hundreds.
+
+### The schedule gate, rest at kickoff and the night-game stub (2026-10-20)
+
+mike: *"The repo/models should look ahead schedules for all markets and sports
+and models."* Three changes, all reading the stored schedule through one module
+(`data/schedule_context.py`).
+
+- **No decision while a team has an earlier game to play or log.** A game is
+  held when either team has an earlier game that is not played, being played,
+  or played but not yet in `ncaaf_team_game_log` (the log the team stats are
+  built from). Every model's row is still written, as NONE, with the reason
+  ("waiting for Wisconsin's 2026-10-17 game to be played and logged"). NONE
+  never locks, so the first pass after the game is logged decides it
+  (`models/scorer.run_scorer`, `_schedule_hold`). Why: `ncaaf_over_under`
+  decided 9 of its 77 kept BETs before a team's intermediate game, all 9 more
+  than 7 days ahead; its stats and early-season flag were one game stale. The 8
+  graded went 3-5, -2.31 units, against 36-25, +7.48 units on the other 61 (too
+  few to show a cost; the reason is input correctness). The open one, 3688041
+  (Wisconsin vs USC Under 52.5, 10-24), is a locked BET and is not touched.
+- **Rest at kickoff.** `_rest_days_live` read played games only, so the game in
+  between looked like a bye (pick 3094504 read 14/14 where it was 7/7). It now
+  counts a game still to be played. Training reads the latest played game,
+  which for a past game is the same thing, so **no retrain**: the training
+  value does not change. With the gate on, a game it lets through has no
+  pending earlier game, so its rest was already right; this corrects the
+  number on held rows and on any path that skips the gate. Only the paused
+  `ncaaf_moneyline` has a rest input; the totals model does not.
+- **The night-game stub takes CFBD's schedule row.** The odds feed's ET-dated
+  row carries the prices and no week, venue, neutral-site or conference flag;
+  the scorer used to read those as 0 (week 0 never occurs in training). It now
+  takes them from CFBD's row for the same two teams within a day, or from the
+  one CFBD game either team has within a day; none or two, and the game is not
+  scored, with the reason logged (`_schedule_row_live`). Measured 2026-10-20:
+  all 9 future stubs (Miami @ Notre Dame 11-07, Texas @ Texas A&M 11-27,
+  Army-Navy 12-12 among them) have that row.
+- **What counts as one game.** A team never plays twice inside two days, so
+  every row for a team within a day of another is the same game. That is what
+  catches the stub and an opponent spelled two ways ('LIU Sharks' beside 'Long
+  Island University', 'Bryant Bulldogs' beside 'Bryant'). A past game that
+  never gets a result stops holding after 10 days (the results step's own
+  self-heal window).
+- **On today's board (2026-10-20, read-only SQL):** 0 of the 56 priced games
+  would be held. Every team's previous game is scored and logged, and no team
+  has a game before this week's. The gate bites when DraftKings prices a game
+  more than a week out.
+- **What it costs.** A Saturday game reaches the team log in the next morning's
+  6am ET run: 439 of 446 Saturday games since 2026-09-01 were logged on the
+  Sunday, 6 on the Monday (log `created_at`, which an upsert never rewrites;
+  median 14.2 hours after kickoff). So the next Saturday's game can be decided
+  from Sunday morning, about 6.5 days before kickoff, against a median BET lead
+  of 5.2 days.
 
 ### Data / conventions (load-bearing)
 
@@ -171,7 +260,7 @@ its opening number, which is rarely true by kickoff.
   population — not this rule.
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
   slugs. Odds API names no fold / "school mascot" / prefix rule can bridge
-  (Southern Miss, App State, UMass, SE Louisiana) live in
+  (Southern Miss, App State, UMass, SE Louisiana, The Citadel) live in
   `config.NCAAF_ODDS_API_MAP`; without an entry the odds ingest mints a
   second `games` row and `ncaaf_game_identity` goes CRIT. Historical lines
   under `cfbd_*` bookmakers (provider priority
@@ -329,8 +418,9 @@ session needs to know:
 - **A paused model is paused on both sides** (`scorer._paused_signal`,
   sport-agnostic): `ncaaf_moneyline` had written 80 AVOID rows the Signals
   board rendered as fade signals.
-- **The totals under-lean is real and small; it is spread across inputs, with
-  no single feature, NaN column or artifact bias found.**
+- **The totals under-lean, as measured on 2026-09-10, looked spread across
+  inputs.** That reading is not the 2026-09-26 one — see the remeasure below.
+  What was measured that day, and is kept so it is not re-derived:
   `scripts/ncaaf_search/totals_input_drift.py`: on the 2026 board the
   production artifact predicts a mean 0.85 below DK (56.6% of games below)
   against +0.68 (47.3% below) on 2025's games through 09-20; the same lean
@@ -380,3 +470,146 @@ session needs to know:
   47.6%; no weather at all is worst (51.7% / 44.8%). The forecast haircut is
   real in one season of two and not separable at ~90 bets a season. Artifact
   unchanged; the issued series accrues for a two-season refit.
+
+### Remeasured 2026-09-26 — low PPA, not an under-only scorer
+
+The Sep 26 board was 10 open under BETs and 0 overs
+(`picks`, `model_id='ncaaf_over_under'`, `signal_type='BET'`,
+`game_date='2026-09-26'`). Season settled record from `profit_flat / 100`,
+`WIN`/`LOSS` only, `result='NO_ACTION'` excluded (those 13 rows are the
+2026-09-19 EV-floor void, `condition_status='VOID'`): over 6 bets 4-2
+**+1.54 units**, under 16 bets 5-11 **−6.50 units**. The point gate is still
+symmetric. The predictions are low, and a promoted calibration map then
+deletes the marginal over.
+
+**The scorer is side-symmetric in points.** `models/scorer.py` (`kind ==
+"total_regression"`) sets `disagreement = predicted_total − DK total` and
+forces NONE unless `abs(disagreement) >= artifact d_threshold` (8.0 on
+`models/saved/ncaaf_over_under_20260825_204305.pkl`). Both sides are then
+evaluated. The OOS residual ECDF (772 residuals, mean −0.618) is not centred:
+P(over) at +8 is 0.6503 and P(under) at −8 is 0.7098, which is why the point
+gate exists — a lone 0.65 floor would fire unders near −5. It is not doing
+that. Every stored under BET inverts to a disagreement in **[−9.25, −8.0]**;
+every stored over BET inverts to **[+8.12, +10.93]**.
+
+**The market is not the lean.** 149 completed games that have a pick row:
+mean actual − line **+0.29** (76 went over, 73 under). Mean predicted − line
+on those games **−1.18**, so actual − predicted is **+1.47**. The model is
+the thing sitting low. On the 200 games with a `game_date` before 2026-10-01
+(one row per game; BET disagreements inverted through the ECDF, inside-gate
+rows from `downgrade_reason` or the over-side probability): mean predicted −
+line **−1.47** (median −1.50), 136 below the line and 64 above, 29 under the
+−8 gate and 10 over the +8 gate. The Sep 26 slate is 51 games, mean **−2.31**,
+10 at or past −8 and 1 at or past +8.
+
+**Weather, tempo, SP+, and the line are not it.** All 10 open Sep 26 unders
+have a `game_weather` row fetched 2026-09-26 10:21Z: temperature 58–90°F,
+wind 4–12 mph, precipitation 0. FBS snapshot `as_of_date` 2026-09-23 versus
+2025-09-24 (138 teams): plays/game 66.55 vs 66.57, SP+ offense 27.16 vs
+27.14, SP+ defense 26.46 vs 26.61, points/game 29.18 vs 29.11. Raw scoring
+in `ncaaf_team_game_log` through Sep 26 is **up**, not down: 27.90 points
+per team-game in 2026 versus 27.23 in 2025 and 26.96 in 2024, on slightly
+fewer plays (64.74 vs 65.35). `decision_book` on the open unders is
+DraftKings or FanDuel; `line_book` is null; the gate reads the DraftKings
+total.
+
+**The input that moved is PPA, stored as `epa_per_play_*`.** Same two
+snapshots: EPA offense 0.135 vs 0.202, EPA defense 0.066 vs 0.148. Success
+rate and explosiveness, from the same CFBD advanced payload, did not move
+(success rate offense 0.433 vs 0.435, explosiveness 1.240 vs 1.263). The
+preseason prior (`as_of_date` August 1) matches the previous season's final
+snapshot within 0.01 in every year 2022–2025. For 2026 it does not: offense
+**−0.069**, defense **−0.068**, correlation with the 2025-12-12 finals still
+0.944 (138 FBS teams). SP+ is the prior-season rating held constant on
+purpose (`cfbd_ingestor._stat_row`); that part matches 2025. One snapshot,
+2026-09-10, sat back near the old scale (EPA offense 0.183, defense 0.129)
+and the weekends scored after 09-16 / 09-23 did not. A uniform −0.069 shift
+on all four EPA columns of the production artifact, on 400 random games
+drawn around these means, moves the predicted total by a mean **−2.36**
+(median −2.55). That is the size of the Sep 26 lean. It is a sensitivity,
+not a rescore of the live vectors. Every current under BET is only 0 to 1.3
+points past the gate, so a shift of that size is what fills the under tail
+and empties the over tail.
+
+**The 0.65 floor does not treat the two arms the same, once the Platt map
+is on.** The point gate is still symmetric (`abs(disagreement) >= 8`). The
+decision is not, because `_decide` uses the calibrated probability and the
+residual ECDF is not centred (772 residuals, mean −0.618). Read off that
+ECDF and the promoted map (`a=1`, `b=−0.2816`):
+
+| Disagreement | Raw P(side) | Calibrated | Clears 0.65? |
+|---|---|---|---|
+| +8.0 over | 0.6503 | 0.5838 | no |
+| −8.0 under | 0.7098 | 0.6486 | no |
+| +10.72 over | 0.7111 | 0.6501 | yes |
+| −8.09 under | 0.7111 | 0.6501 | yes |
+
+A large positive disagreement does produce a high P(over). It does not
+produce one that clears 0.65 at the same point gap that a large negative
+disagreement does. After the map, both sides need raw probability about
+0.711. That is −8.1 points for an under (the gate already requires 8) and
++10.7 points for an over. Before the map, raw 0.65 is +7.95 for an over
+and −5.13 for an under; the point gate is what stops the under arm firing
+at −5. The map undoes that protection on the over arm only.
+
+**What the rows do, split at the promotion.** Map promoted 2026-09-19
+17:45 ET. Over BETs, all 11, were locked by 2026-09-18 13:36 UTC with
+calibrated = raw (0.6516–0.7137). No over BET has been written since.
+Under BETs written from 2026-09-20 on: 18, raw 0.7111–0.7280, calibrated
+0.6500–0.6688, of which 16 are still open. The one post-map over that
+cleared raw 0.65 is `Fresno State vs Rice Over 44.5` (raw 0.6593,
+calibrated 0.5935, stored NONE). The under-BET probability knots are the
+ECDF itself: 0.7150 (13 bets), 0.7176 (7), 0.7098 (4). 0.7098 is P(under)
+at exactly −8.
+
+**The 0.35–0.50 over rows are not large positive disagreements the floor
+rejected.** 180 over-side `NONE` rows have median raw probability 0.4378.
+They are games that have not locked a BET. 142 of them have P(over) below
+0.50 (the model is not high versus the line); 109 of those carry the
+inside-the-gate reason. Six more sit at raw 0.608–0.648, five of them
+inside the gate, including `Boston College vs Virginia Tech Over 46.5`
+(raw 0.6477) and `Georgia vs Oklahoma Over 43.5` (raw 0.6386). The over
+side of an under BET is not in the table: 0 of 40 under BETs still have
+an over row. The next scoring pass deletes `signal_type != 'BET'` and the
+lock does not rewrite that side, so the complement (about 0.27–0.29) is
+gone. Season settled record is unchanged: 22 priced bets, over 4-2
+**+1.54 units**, under 5-11 **−6.50 units** (together **−4.96 units**;
+the kelly sum of those 22 is −212.1).
+
+**Demoted 2026-09-26.** Michael Alksninis approved taking that map out of
+the decision path ("Demote ncaaf_over_under Platt map"). Updated-By:
+mike. `data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql`
+clears `promoted` on the row whose `promoted_at` is
+`2026-09-19T17:45:14.751731-04:00` and whose `promoted_b` is −0.281555.
+`load_calibrations` then misses the model, and `apply_calibration`
+returns the raw probability. Both arms are back at the ±8 gate: raw
+P(over) at +8 is 0.6503 and raw P(under) at −8 is 0.7098, and the point
+gate is what still stops an under near −5. The 0.65 floor and the ±8
+gate are unchanged. No side-only floor. Already-locked BETs are not
+rewritten. A later promotion with a different `promoted_at` is a new
+model update; this migration will not clear it.
+
+**Open book, rechecked the same day.** Result-null BETs with
+`game_date >= 2026-08-01`: **16 under, 0 over**. Raw `model_probability`
+on those 16 is **0.7111–0.7280** (games 2026-09-26 through 2026-11-28).
+That cluster is P(under) just past the −8 gate (the ECDF gives 0.7098 at
+exactly −8). It is the left tail of a low predicted total.
+
+**`ncaaf_live_total` does not share this path.** A search of `ncaaf_live/`
+for `NCAAF_TOTALS_FEATURES`, `total_regression`, `epa_per_play`, and
+`ncaaf_over_under` is empty. Its engine is LightGBM remaining points
+(`ncaaf_live/engine/remaining.py`); the features are clock, score, the
+posted pregame line, pace, and wind. Config kind is `"engine"`. Its record
+stays with the Model Quality inventory.
+
+**Not done, and why.** Nothing was paused. No side was flipped. The artifact
+was not refit. The EV floor was not moved. The 0.65 floor was not moved.
+Predicted totals are still low because 2026 PPA is. The next measurement
+on that bias is one CFBD read: `/stats/season/advanced?year=2025` (no week bounds — that is what
+`_prior_season_context` stores as the 2026 prior) and
+`?year=2026&startWeek=1&endWeek=4`, and compare `offense.ppa` /
+`defense.ppa` for one FBS school to the 2026-08-01 prior and the 2025-12-12
+final. If the API still returns the ~0.18 scale, rebuild the 2026
+snapshots with `refresh_ncaaf_stats`. If the API returns the low number,
+the live scale has left the scale the artifact was fit on, and the prior
+should be pinned to the 2025-12-12 snapshot before anyone refits.

@@ -62,12 +62,19 @@ HOOK = os.path.join(ROOT, ".claude", "hooks", "connector_reminder.json")
 # docstring. The layering is what bounds growth now, and a raise that skips
 # question 4 is the 2026-09-07 mistake again -- the cap was lifted six times in
 # four days that week and each raise bought about a day.
-MAX_CLAUDE_MD_BYTES = 39_000
+#
+# 2026-10-15: 39,000 -> 42,000 for the `## graphify` section (CLAUDE.md measured
+# 40,050 with it, 38,890 without). This one DID pass question 4: the rule is
+# "query the graph BEFORE the first grep or file read", and a path-scoped rule
+# loads only after a file is opened -- too late by construction. The section
+# also cannot be shortened: `graphify claude install` rewrites the whole
+# `## graphify` block to its canonical text whenever the two differ.
+MAX_CLAUDE_MD_BYTES = 42_000
 
 # CLAUDE.md + the hook's injected context. This is the real per-session cost and
 # the number worth watching: moving prose from the file into the hook does not
 # make a session cheaper, so the budget covers both and cannot be gamed that way.
-MAX_ALWAYS_LOADED_BYTES = 41_000
+MAX_ALWAYS_LOADED_BYTES = 44_000  # +3,000 with MAX_CLAUDE_MD_BYTES, 2026-10-15
 
 # Per rules file. The largest today is data-integrity.md at 9,926 bytes. A rules
 # file only costs the sessions that open its paths, so the cap is looser than

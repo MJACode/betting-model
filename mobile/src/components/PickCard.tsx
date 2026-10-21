@@ -7,10 +7,13 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { gameStatus } from '@/lib/format';
+import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
+  bookLabelShort,
+  bookName,
+  currentLineQuotes,
   formatSideLine,
   gameMarketForModel,
   heroAmericanForPick,
@@ -18,25 +21,72 @@ import {
   movementFromLatest,
   numOrNull,
   pickTimingInfo,
+  playerNameFromPickLabel,
+  priceAgeFor,
+  propMarketForPick,
   splitPickTitle,
+  storedQuoteBook,
+  todayBoardHandoff,
+  MODEL_BOOK,
+  type HeroAmerican,
   type Movement,
 } from '@/lib/markets';
-import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
+import { modelLong, isPropModel } from '@/lib/modelMeta';
+import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
+import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import {
+  foundAtText,
+  myBooksView,
+  NOT_AT_MY_BOOKS,
+} from '@/lib/myBooks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
+import { openForAction } from '@/lib/discordPublish';
+import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
+import { gameStatusSpeech, sharpScoreSpeech, unitsSpeech } from '@/lib/a11y';
+import { priceCheckForItem } from '@/lib/pickPriceCheck';
+import {
+  signalsBetHeadline,
+  signalsCardSpeech,
+  signalsContextLine,
+  signalsContextTime,
+  signalsCtaLabel,
+  signalsCtaSpeech,
+  signalsHeroSpeech,
+  signalsModelCaption,
+  signalsNowLine,
+  signalsReasonLine,
+  signalsStakeLine,
+  signalsStakeSpeech,
+  signalsTeamsSpeech,
+  trueMinus,
+} from '@/lib/signalsCard';
+import {
+  heroPriceSpeech,
+  lockedCaptionText,
+  priceCheckChipText,
+  priceCheckSpeech,
+} from '@/lib/heroPriceText';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
 
+/** Card VoiceOver. A part that already ends with a period is not given another. */
+function joinCardSpeech(parts: Array<string | null | false | undefined>): string {
+  return parts.filter((p): p is string => Boolean(p)).reduce((acc, part) => {
+    if (acc.length === 0) return part;
+    return acc.endsWith('.') ? `${acc} ${part}` : `${acc}. ${part}`;
+  }, '');
+}
+
 interface Props {
   item: EnrichedPick;
-  bankroll: number;
-  kelly: KellySizingOpts;
   onPress: () => void;
   /** Whether this bet is tracked (Performance-tab scoring + line alerts). */
   tracked?: boolean;
@@ -52,16 +102,31 @@ interface Props {
   /** Freshest live snapshot for this pick's game — drives the score + inning
    * beside the LIVE badge. Omitted (or null) falls back to a bare badge. */
   liveState?: LiveGameStateRow | null;
-  /** Today board only: BET/AVOID/NONE sits immediately before the label.
-   * Signals and Live are already BET-only, so the small badge is omitted. */
+  /** Board layout, All only: BET / AVOID / NEUTRAL before the stored label.
+   * The signals layout always shows that chip — All includes NONE rows. */
   showSignalBadge?: boolean;
+  /** This pick's model is PAUSED (Matt, 2026-09-26). Every picks view passes
+   * it. The card shows the model's number but nothing that reads as a bet —
+   * a PAUSED chip, the reference sentence, no stake, no Sharp Score, no book
+   * hand-off and no betslip button. */
+  paused?: boolean;
+  /** Option 1 card. Picks home uses it on All, Signals and Live. */
+  layout?: 'board' | 'signals';
+  /** NCAAF school → abbreviation for the Signals compact line. */
+  teamAbbrevs?: ReadonlyMap<string, string> | null;
 }
 
 export function PickCard({
-  item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
+  item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
   showSignalBadge = false,
+  paused = false,
+  layout = 'board',
+  teamAbbrevs = null,
 }: Props) {
-  const { pick, game } = item;
+  const { pick, game, weather } = item;
+  // The member's own books (Matt, 2026-10-19). Display only: what this card
+  // SHOWS, never what the pick is (lib/myBooks.ts).
+  const { books: myBooks, ready: myBooksReady } = usePreferredBooks();
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -77,32 +142,97 @@ export function PickCard({
   // gradeGood / gradeBad, not bet/avoid: Edge is now the hero number and
   // colors.bet is 2.22:1 on bgCard (theme.ts). The ramp already exists for
   // a readable good/bad (UX review).
-  const edgeColor = qualifies
+  // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
+  const modelEv = expectedValue(pick.model_probability, decisionOdds(pick));
+  // H4 price check (display only, lib/priceCheck.ts): an implausible edge or a
+  // lock far from the book's current price shows "Price check" and "—" for
+  // edge and EV instead of headlining the board. After the start "Now" is the
+  // in-play price, so only the edge rule applies then (Reviewer #847).
+  const check = priceCheckForItem(item, liveState);
+  const flagged = check.flagged;
+  // The scorer's price-age rule (markets.PREGAME_PRICE_MAX_AGE_MIN): before
+  // the start, a deciding price the book stopped updating is no price, so
+  // the card shows "Now —" and offers no hand-off at it. Same start test
+  // as the price check above.
+  const priceAge = priceAgeFor(pick, game, liveState);
+  const modelHero = heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge);
+  // At THEIR books. 'mine': the record book is not theirs but one of theirs
+  // has the same bet, so the card shows that price with the edge and return
+  // at it. 'none': none of theirs has it. Only on an open BET with a price;
+  // a settled or non-BET row keeps the pick's own numbers.
+  const myView =
+    myBooksReady && pick.signal_type === 'BET' && hasPricedLine(pick) && openForAction(pick)
+      ? myBooksView({
+          quotes: currentLineQuotes(pick, item.bookRows, modelHero, priceAge),
+          recordBook: pick.is_live === true ? MODEL_BOOK : storedQuoteBook(pick),
+          myBooks,
+          modelProbability: pick.model_probability,
+        })
+      : null;
+  const myQuote = myView?.status === 'mine' ? myView.best : null;
+  const notAtMyBooks = myView?.status === 'none';
+  // The price the card shows. On 'mine' it is their best book at the scored
+  // line, drawn as a plain decision price (no Now/Locked pill: there is no
+  // lock at that book to compare against).
+  const heroPrice: HeroAmerican | null = myQuote
+    ? {
+        kind: 'decision',
+        price: myQuote.price,
+        book: myQuote.bookmaker,
+        line: numOrNull(pick.scored_line),
+        link: myQuote.link,
+        lockedPrice: myQuote.price,
+        showLockedCaption: false,
+      }
+    : modelHero;
+  const shownEdge = myView?.status === 'mine' && myView.edge != null ? myView.edge : decisionEdge(pick);
+  const ev = myView?.status === 'mine' ? myView.ev : modelEv;
+  const edgeText = flagged ? '—' : formatPctSigned(shownEdge);
+  // "Found at HRB +110" under a price from one of their books, and the line
+  // that says the record is not kept at their price.
+  const modelPrice = decisionOdds(pick);
+  // No edge left at their price: said in words, and no stake is offered.
+  const noEdgeAtMine = myView?.status === 'mine' && (myView.edge ?? 0) <= 0;
+  // One short line on a scanned board (UX review): where the model found it,
+  // and that the record is kept there. The longer sentence is on Pick Detail.
+  const myBooksNote = myQuote && modelPrice != null
+    ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}${
+        noEdgeAtMine ? ' · No edge at your books' : ' · record uses best price'
+      }`
+    : notAtMyBooks
+      ? NOT_AT_MY_BOOKS
+      : null;
+  // Green only when the edge on screen is one they can take: at their price
+  // it may be gone, and off their books there is nothing to take.
+  const myEdgeGone = (myView?.status === 'mine' && (myView.edge ?? 0) <= 0) || notAtMyBooks;
+  const edgeColor = qualifies && !myEdgeGone
     ? colors.gradeGood
     : pick.signal_type === 'AVOID'
       ? colors.gradeBad
       : colors.textSecondary;
-  // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
-  const ev = expectedValue(pick.model_probability, decisionOdds(pick));
-  const evColor =
-    ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
+  // H4: on NONE / AVOID the edge is a secondary line, not the hero number —
+  // a non-bet must not read like a BET. BET keeps the hero edge.
+  const demoteEdge = pick.signal_type !== 'BET';
+  // H5: what the card offers once the game has started (lib/pickCta.ts). The
+  // pick's game_time stands in for a missing games row, and a game called off
+  // before first pitch is not "started" (gameStartState).
+  const cta = pickCtaFor(pick, game, liveState);
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
+  // A flagged row's movement line is built from the same suspect price, so it
+  // is suppressed too.
   const movement =
-    gameStatus(game, liveState).kind === 'pre'
+    gameStatus(game, liveState).kind === 'pre' && !flagged
       ? movementFromLatest(pick, item.latestOdds, item.bookRows)
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
-  const showClv = pick.clv_pct != null;
-  const clvColor =
-    pick.clv_pct == null
-      ? colors.textTertiary
-      : pick.clv_pct > 0
-        ? colors.bet
-        : pick.clv_pct < 0
-          ? colors.avoid
-          : colors.textTertiary;
+  const showClv = pick.clv_method === 'standard_v2' && pick.clv_pct != null;
+  // Icon and words share one ink (non-text 3:1 ruling), toned from the CLV
+  // ROUNDED as formatClv prints it (1 dp): −0.03 reads "0.0%" and stays
+  // neutral, never a red zero (audit H2, Reviewer).
+  const clvRounded = roundedAt(pick.clv_pct, 1);
+  const clvTone = pnlTone(pick.clv_pct, 1);
+  const clvInk = clvTone === 'textSecondary' ? colors.textTertiary : colors[clvTone];
 
-  const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
   // Compare home-relative as numbers: PostgREST can send NUMERIC as a string,
   // and "-1" !== -1 would print a line on every card. Print from the pick's
   // side so an away spread that has moved (NYJ +5, scored −5, Now −4.5)
@@ -124,12 +254,16 @@ export function PickCard({
         );
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
-  const stake = stakeFor(pick.kelly_fraction, decisionOdds(pick), kelly);
+  // On 'mine' the risk is grossed up at their price, so "Bet 0.95u · Win 1u"
+  // is what that book takes to win the same unit.
+  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick));
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
-  const sharp = preview ? null : sharpScore(pick);
-  const contra = contrarianTag(pick);
+  const sharp = preview || paused ? null : sharpScore(pick);
+  // A paused card must not carry the green "Sharp side" chip — it reads as a
+  // recommendation. The neutral crowd line below shows instead.
+  const contra = paused ? null : contrarianTag(pick);
   // Where the crowd is, for every pick that carries a split. contrarianTag only
   // speaks on a BET sitting in a decisive band, but nearly all captured splits
   // land on NONE/AVOID rows — and the Public sort orders the whole board by this
@@ -142,40 +276,280 @@ export function PickCard({
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c).
-  const timing = pick.result == null ? pickTimingInfo(pick) : null;
+  const timing = openForAction(pick) && !paused ? pickTimingInfo(pick) : null;
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
       : 'Preview — locks fight-day morning'
     : null;
+  const pausedLabel = paused ? 'Model paused — shown for reference, not a bet' : null;
   const hasExtras =
-    Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
+    Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
-  const handoff = !preview && pick.signal_type === 'BET'
-    ? bestHandoffForPick(pick, item.bookRows, heroPrice)
+  // Before the start it is always the BEST available book (bestHandoffForPick),
+  // never DraftKings-only. After the start a pre-game pick has no hand-off: the
+  // in-play price is not the price it was made at (H5).
+  // Signals price-check and stale cards are not a bet: no Bet button, no Slip.
+  // Today keeps both (a stale Today leg already in the slip can still come out).
+  const signals = layout === 'signals';
+  const signalsMuted = signals && (flagged || Boolean(heroPrice?.stale) || paused);
+  // NONE and AVOID are not a bet. On this card the headline and the price
+  // drop to the secondary ink so a NEUTRAL row does not read as a 22pt bet.
+  const quietHeadline = signalsMuted || (signals && demoteEdge);
+  // None of their books has it: no hand-off, no slip, no stake.
+  const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted && !notAtMyBooks;
+  const handoff = offersBook && cta.handoff
+    ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : null;
-  const canTrack = Boolean(onToggleTrack) && pick.result == null;
-  // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
+  // Today prints the lock and does not name a line. A line-only move with
+  // no book left at the picked line is Open: no "Bet DK −110", and no slip
+  // at the new line. Signals names the line, so it keeps `handoff`.
+  const boardHandoff = todayBoardHandoff(handoff, heroPrice);
+  // Open = unsettled, or a VOID Discord still shows (openForAction).
+  const open = openForAction(pick);
+  // "Game started · picked at −125 DK" in the hand-off's place (H5). Not gated
+  // on paused: it states a fact about the pick, and this PR adds no paused
+  // gating (the existing !paused gates flip in the paused-on-All PR).
+  const startedText =
+    pick.signal_type === 'BET' && !preview && open && cta.startedLine
+      ? gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))
+      : null;
+  // Track stays after the start; it scores the pick at its lock.
+  const canTrack = Boolean(onToggleTrack) && open && cta.track;
+  // Betslip — priced (decision price, not dk_odds), unsettled, non-preview,
+  // and hidden once a pre-game pick's game has started (H5). Not offered on
+  // a stale price either: the slip prices the leg at the lock with its full
+  // edge, so "Add to betslip" was a bet link at a September number (second
+  // review). A leg already in the slip can still be taken out here.
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && pick.result == null && !preview;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused &&
+    (!notAtMyBooks || Boolean(inSlip)) &&
+    (!heroPrice?.stale || Boolean(inSlip)) && (!signalsMuted || Boolean(inSlip)) && cta.slip;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
-  const showSharp = Boolean(sharp);
-  const showTier = Boolean(pick.confidence_tier) && !showSharp;
+  // A flagged row carries "Price check" in the chip slot instead (H4).
+  const showSharp = Boolean(sharp) && !flagged;
+  // The tier is the model's confidence in a BET. On a NONE / AVOID card a
+  // "HIGH" chip reads as a high-confidence non-pick, so it is BET-only (M6).
+  const showTier = Boolean(pick.confidence_tier) && !showSharp && !flagged && pick.signal_type === 'BET';
+  // No stake on a stale price: EV reads "—" there, and a stake is an
+  // instruction to bet at a number the book no longer offers.
   const stakeCaption =
-    pick.signal_type !== 'BET' || preview
+    pick.signal_type !== 'BET' || preview || paused || heroPrice?.stale || signalsMuted || notAtMyBooks || noEdgeAtMine
       ? null
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
         : formatUnits(stake.conviction);
   const caption = [
     `Model ${formatPct(pick.model_probability)}`,
-    ev == null ? null : `EV ${formatPctSigned(ev)}`,
+    flagged ? 'EV —' : ev == null ? null : `EV ${formatPctSigned(ev)}`,
     stakeCaption,
   ]
     .filter((p): p is string => p != null)
     .join(' · ');
   const { primary: titlePrimary, secondary: titleSecondary } = splitPickTitle(pick);
+  // VoiceOver (audit M8): the card is ONE accessible element, so its label has
+  // to carry what the eye gets from the whole card — game status and time,
+  // the stake, when it posted — not just matchup, pick and edge.
+  // Signals (Option A) reads the bet first, then the teams, the time, the
+  // edge, and the rest of the cells. Today / Live keep the old order.
+  const startedSpoken = startedText
+    ? gameStartedSpeech(decisionOdds(pick), bookName(storedQuoteBook(pick)))
+    : null;
+  const contextSport = game?.sport ?? pick.sport;
+  const contextWhen = game?.commence_time ?? pick.game_time;
+  const contextTime = signalsContextTime(gameDayLabelET(contextWhen), formatGameTimeET(contextWhen));
+  const decisionPrice = decisionOdds(pick);
+  // One formatted decision price for the 22pt number and for VoiceOver.
+  // hero.lockedPrice is decisionOdds; the book is the hero's book when we
+  // have one, which is the stored quote book before the start.
+  const lockedAmerican = heroPrice ? formatAmerican(heroPrice.lockedPrice) : null;
+  const quoteBookKey = heroPrice?.book ?? (decisionPrice == null ? null : storedQuoteBook(pick));
+  // The book's line now, from the pick's side, when it is not the lock.
+  // `movedLine` is set even when the price has not moved (kind stays
+  // `decision`, so the board pill is unchanged).
+  const signalsMarket = gameMarketForModel(pick.model_id) ?? marketForPick(pick);
+  const signalsMovedLineText =
+    heroPrice?.movedLine != null
+      ? formatSideLine(heroPrice.movedLine, pick.pick_side, signalsMarket)
+      : null;
+  const nowPrice =
+    heroPrice && !heroPrice.stale && !heroPrice.untracked && heroPrice.price != null
+      ? formatAmerican(heroPrice.price)
+      : null;
+  const priceDiffers = Boolean(
+    nowPrice && heroPrice && heroPrice.kind === 'now' && heroPrice.price !== heroPrice.lockedPrice,
+  );
+  const signalsNow = quoteBookKey
+    ? signalsNowLine({
+        line: signalsMovedLineText,
+        price: nowPrice,
+        priceDiffers,
+        book: bookLabel(quoteBookKey),
+      })
+    : null;
+  // Same numbers as the screen. The spoken book is the full name.
+  const signalsNowSpoken = quoteBookKey
+    ? signalsNowLine({
+        line: signalsMovedLineText,
+        price: nowPrice,
+        priceDiffers,
+        book: bookName(quoteBookKey),
+      })
+    : null;
+  // The button names the line when it is a bet at the deciding book's
+  // current line (same book, that price). movedLine is enough: a line-only
+  // move stays kind decision. Open, and a book still at the scored line, do not.
+  const ctaAtMovedLine = Boolean(
+    signalsMovedLineText &&
+    handoff &&
+    heroPrice &&
+    !heroPrice.stale &&
+    !heroPrice.untracked &&
+    handoff.bookmaker === heroPrice.book &&
+    handoff.price != null &&
+    handoff.price === heroPrice.price,
+  );
+  // Open (no price) is not a different bet. A different book, a different
+  // price, or a line this button names that is not the lock is "Best now".
+  // A line-only move keeps the locked price, so the named line is the difference.
+  const buttonDiffers = Boolean(
+    handoff &&
+    handoff.price != null &&
+    heroPrice &&
+    (handoff.bookmaker !== heroPrice.book ||
+      handoff.price !== heroPrice.lockedPrice ||
+      ctaAtMovedLine),
+  );
+  const signalsCta = handoff
+    ? signalsCtaLabel(
+        bookLabel(handoff.bookmaker),
+        handoff.price == null ? null : formatAmerican(handoff.price),
+        ctaAtMovedLine ? signalsMovedLineText : null,
+        { bestNow: buttonDiffers },
+      )
+    : null;
+  const signalsCtaSpoken = handoff
+    ? signalsCtaSpeech(
+        bookName(handoff.bookmaker),
+        handoff.price == null ? null : formatAmerican(handoff.price),
+        ctaAtMovedLine ? signalsMovedLineText : null,
+        { bestNow: buttonDiffers },
+      )
+    : null;
+  const signalsRiskUnits = formatUnits(stake.risk);
+  const signalsWinUnits = formatUnits(stake.win);
+  const signalsStakeShown = stakeCaption ? signalsStakeLine(signalsRiskUnits, signalsWinUnits) : null;
+  const signalsReturn =
+    flagged || ev == null ? '—' : formatPctSigned(ev);
+  // Game markets come from the model. Props come from the row's market.
+  // The player name has no column (player_key is a slug on some models), so
+  // a prop passes that one token from the label. The headline is still not
+  // the label: the "· 0.77u" suffix and the wind parenthetical stay out.
+  const signalsGameMarket = gameMarketForModel(pick.model_id);
+  const signalsPropMarket = signalsGameMarket ? null : propMarketForPick(pick);
+  const betHeadline = signalsBetHeadline({
+    side: pick.pick_side,
+    line: pick.scored_line,
+    market: signalsGameMarket ?? signalsPropMarket,
+    homeTeam: game?.home_team ?? '',
+    awayTeam: game?.away_team ?? '',
+    player: signalsPropMarket && isPropModel(pick.model_id)
+      ? playerNameFromPickLabel(pick.pick_label)
+      : null,
+    stat: pick.model_id === 'ufc_total_rounds' ? 'Rounds' : null,
+    label: pick.pick_label,
+  });
+  const reasonLine = signalsReasonLine({
+    modelId: pick.model_id,
+    windMph: weather?.wind_mph,
+    label: pick.pick_label,
+  });
+  // A live lock is its own row. The sentence is neutral, so it uses secondary
+  // ink. Green stays on the BET chip and on a BET's edge. The grey caption is
+  // the model name, so the lock sentence is not printed twice.
+  const modelCaption = signalsModelCaption(
+    modelLong(pick.model_id),
+    timing?.kind === 'live' ? null : (timing?.label ?? null),
+  );
+  const signalsPriceSpoken =
+    signals && lockedAmerican && quoteBookKey && heroPrice && !heroPrice.stale && !heroPrice.untracked
+      ? signalsHeroSpeech({
+          decisionPrice: lockedAmerican,
+          book: bookName(quoteBookKey),
+          now: signalsNowSpoken,
+        })
+      : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null);
+  const signalsStakeSpoken = signalsStakeShown
+    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}`
+    : 'Stake unavailable';
+  const statusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+  // The first spoken word is the chip on the card. A paused or preview row
+  // does not say BET before the member hears that it is not a bet.
+  const signalsVerdict = preview
+    ? (previewLabel ?? 'Preview')
+    : paused
+      ? 'Paused model, not a bet'
+      : signalDisplayName(pick.signal_type);
+  const cardLabel = signals
+    ? signalsCardSpeech({
+        verdict: signalsVerdict,
+        bet: betHeadline,
+        price: signalsPriceSpoken,
+        reason: reasonLine,
+        teams: signalsTeamsSpeech(contextSport, game?.away_team ?? '', game?.home_team ?? ''),
+        time: contextTime || null,
+        edge: flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
+        modelChance: `Model chance ${formatPct(pick.model_probability)}`,
+        expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
+        stake: myBooksNote ? `${signalsStakeSpoken}. ${myBooksNote}` : signalsStakeSpoken,
+        modelName: `${modelLong(pick.model_id)} model`,
+        posted: timing?.label ?? null,
+        paused: null,
+        gameStatus: gameStatus(game, liveState).kind !== 'pre' ? statusSpeech : null,
+        sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
+        started: startedSpoken,
+      })
+    : joinCardSpeech([
+        matchup,
+        gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
+        pick.pick_label,
+        paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
+        // The reason in words (lib/heroPriceText.ts): "looks off" for an
+        // implausible edge or a moved price; for an old price, which book has not
+        // updated it and since when.
+        flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
+        heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
+        stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
+        myBooksNote,
+        timing ? timing.label : null,
+        startedSpoken,
+      ]);
+  // Nested buttons inside an accessible card aren't separately focusable on
+  // iOS — VoiceOver groups the card — so Track, Betslip and the book hand-off
+  // are also offered as custom actions (swipe up/down on the card).
+  // Today uses boardHandoff, which is Open when the slip would be a
+  // different line from the lock the button would otherwise quote.
+  const actionHandoff = signals ? handoff : boardHandoff;
+  const a11yActions = [
+    ...(actionHandoff
+      ? [{
+          name: 'book',
+          label: signals && signalsCtaSpoken
+            ? signalsCtaSpoken
+            : actionHandoff.price == null
+              ? `Open ${bookName(actionHandoff.bookmaker)} to check the live price`
+              : signalsCtaSpeech(
+                  bookName(actionHandoff.bookmaker),
+                  formatAmerican(actionHandoff.price),
+                  null,
+                  { bestNow: actionHandoff.verb === 'Best' },
+                ),
+        }]
+      : []),
+    ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
+    ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
+  ];
 
   return (
     // The card tap is the only route to the pick's breakdown now that the
@@ -185,20 +559,19 @@ export function PickCard({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={[
-        matchup,
-        pick.pick_label,
-        pick.signal_type,
-        `Edge ${formatPctSigned(decisionEdge(pick))}`,
-        heroPrice
-          ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
-          : null,
-      ]
-        .filter((p): p is string => Boolean(p))
-        .join('. ')}
+      accessibilityLabel={cardLabel}
+      accessibilityActions={a11yActions.length > 0 ? a11yActions : undefined}
+      onAccessibilityAction={(e) => {
+        const name = e.nativeEvent.actionName;
+        if (name === 'book' && actionHandoff) void openBookBetslip(actionHandoff.bookmaker, actionHandoff.link);
+        else if (name === 'slip' && canSlip) onToggleSlip!();
+        else if (name === 'track' && canTrack) onToggleTrack!();
+      }}
       accessibilityHint="Opens the full breakdown, including recent form and matchup context."
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
+      {layout !== 'signals' ? (
+      <>
       <View style={styles.headerRow}>
         <Text style={styles.matchup} numberOfLines={1}>
           {matchup}
@@ -214,6 +587,13 @@ export function PickCard({
             <View style={[styles.labelChip, styles.previewBadge]}>
               <Text style={styles.previewBadgeText}>PREVIEW</Text>
             </View>
+          ) : paused ? (
+            // Same neutral pill as PREVIEW, and for the same reason: this is a
+            // number, not a bet. Replaces BET/AVOID/NONE rather than sitting
+            // beside it, so a paused BET never draws a green badge.
+            <View style={[styles.labelChip, styles.previewBadge]}>
+              <Text style={styles.previewBadgeText}>PAUSED</Text>
+            </View>
           ) : showSignalBadge ? (
             <View style={styles.labelChip}>
               <SignalBadge signal={pick.signal_type} small />
@@ -223,9 +603,12 @@ export function PickCard({
             <Text
               style={styles.label}
               numberOfLines={1}
+              // A game pick that runs out of room clips its middle, never the
+              // line at the end — "-4.5" is the number the member came for
+              // (UX review: the NEUTRAL badge is ~17pt wider than NONE).
               {...(titleSecondary
                 ? { adjustsFontSizeToFit: true, minimumFontScale: 0.75 }
-                : {})}
+                : { ellipsizeMode: 'middle' as const })}
             >
               {titlePrimary}
             </Text>
@@ -235,6 +618,27 @@ export function PickCard({
               </Text>
             ) : null}
           </View>
+          {flagged ? (
+            // Read ONCE, in cardLabel (priceCheckSpeech): the card is the
+            // accessible element, so a separately accessible chip inside it
+            // said it twice (Reviewer #848). "Old price" when the only reason
+            // is a price the book stopped updating, "Price check" otherwise.
+            <View
+              style={[styles.labelChip, styles.priceCheckChip]}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="alert-circle-outline"
+                size={12}
+                color={colors.medInk}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.priceCheckText}>{priceCheckChipText(check)}</Text>
+            </View>
+          ) : null}
           {showSharp && sharp ? (
             <View style={styles.labelChip}>
               <SharpScorePill score={sharp.score} band={sharp.band} />
@@ -251,17 +655,21 @@ export function PickCard({
       </View>
 
       <View style={styles.heroRow}>
-        <View style={styles.heroEdgeBlock}>
-          <Text style={[styles.heroEdge, { color: edgeColor }]}>
-            {formatPctSigned(decisionEdge(pick))}
-          </Text>
-          <Text style={styles.heroEdgeLabel}>Edge</Text>
-        </View>
+        {demoteEdge ? (
+          <Text style={styles.edgeSecondary}>Edge {edgeText}</Text>
+        ) : (
+          <View style={styles.heroEdgeBlock}>
+            <Text style={[styles.heroEdge, { color: flagged ? colors.textSecondary : edgeColor }]}>
+              {edgeText}
+            </Text>
+            <Text style={styles.heroEdgeLabel}>Edge</Text>
+          </View>
+        )}
         {heroPrice ? (
           <View style={styles.heroPriceBlock}>
             <View style={heroPrice.kind === 'now' ? styles.pricePill : styles.heroPriceRow}>
               {heroPrice.kind !== 'decision' ? (
-                <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? 'Now' : 'Locked'}</Text>
+                <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? cta.priceTag : 'Locked'}</Text>
               ) : null}
               <Text style={styles.heroPrice}>
                 {heroPrice.price == null
@@ -275,9 +683,9 @@ export function PickCard({
               <Text style={styles.heroBook}>{bookLabel(heroPrice.book)}</Text>
             </View>
             {heroPrice.showLockedCaption ? (
-              <Text style={styles.lockedCaption}>
-                Locked {formatAmerican(heroPrice.lockedPrice)}
-              </Text>
+              // On a stale price: "Locked −112 · DK last priced Sat, 9/5 ·
+              // 7:59 PM ET", so "Now —" is not read as "still loading".
+              <Text style={styles.lockedCaption}>{lockedCaptionText(heroPrice)}</Text>
             ) : null}
           </View>
         ) : null}
@@ -288,6 +696,17 @@ export function PickCard({
           {caption}
         </Text>
       ) : null}
+      {myBooksNote ? (
+        <View style={styles.myBooksRow}>
+          <Ionicons
+            name={notAtMyBooks ? 'remove-circle-outline' : 'information-circle-outline'}
+            size={13}
+            color={colors.textTertiary}
+            style={styles.extraIcon}
+          />
+          <Text style={styles.myBooksText}>{trueMinus(myBooksNote)}</Text>
+        </View>
+      ) : null}
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
@@ -296,13 +715,13 @@ export function PickCard({
               <Ionicons
                 name={movementSummary.icon}
                 size={13}
-                color={movementSummary.color}
+                color={inkFor(movementSummary.color)}
                 style={styles.extraIcon}
               />
               <Text
                 style={[
                   styles.extraText,
-                  { color: movementSummary.color, fontWeight: font.weight.medium },
+                  { color: inkFor(movementSummary.color), fontWeight: font.weight.medium },
                 ]}
               >
                 {movementSummary.label}
@@ -314,14 +733,14 @@ export function PickCard({
               <Ionicons
                 name={contra.tone === 'sharp' ? 'shield-checkmark-outline' : 'people-outline'}
                 size={13}
-                color={contra.tone === 'sharp' ? colors.bet : colors.med}
+                color={contra.tone === 'sharp' ? colors.betInk : colors.medInk}
                 style={styles.extraIcon}
               />
               <Text
                 style={[
                   styles.extraText,
                   {
-                    color: contra.tone === 'sharp' ? colors.bet : colors.med,
+                    color: contra.tone === 'sharp' ? colors.betInk : colors.medInk,
                     fontWeight: font.weight.medium,
                   },
                 ]}
@@ -346,12 +765,12 @@ export function PickCard({
           {showClv && hero.has('clv') ? (
             <View style={styles.extraItem}>
               <Ionicons
-                name={pick.clv_pct! >= 0 ? 'trending-up-outline' : 'trending-down-outline'}
+                name={(clvRounded ?? 0) < 0 ? 'trending-down-outline' : 'trending-up-outline'}
                 size={13}
-                color={clvColor}
+                color={clvInk}
                 style={styles.extraIcon}
               />
-              <Text style={[styles.extraText, { color: clvColor, fontWeight: font.weight.medium }]}>
+              <Text style={[styles.extraText, { color: clvInk, fontWeight: font.weight.medium }]}>
                 CLV {formatClv(pick.clv_pct!)}
               </Text>
             </View>
@@ -367,12 +786,23 @@ export function PickCard({
               <Text style={styles.extraText}>{previewLabel}</Text>
             </View>
           ) : null}
+          {pausedLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="pause-circle-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{pausedLabel}</Text>
+            </View>
+          ) : null}
           {pick.injury_flag ? (
             <View style={styles.extraItem}>
               <Ionicons
                 name="medkit-outline"
                 size={13}
-                color={colors.med}
+                color={colors.medInk}
                 style={styles.extraIcon}
               />
               <Text style={[styles.extraText, styles.injuryText]} numberOfLines={1}>
@@ -383,27 +813,62 @@ export function PickCard({
         </View>
       ) : null}
 
-      {handoff || canTrack || canSlip ? (
+      {boardHandoff || startedText || canTrack || canSlip ? (
         <View style={styles.actionsRow}>
-          {handoff ? (
+          {startedText ? (
+            // Not a button: the pick was made at this price, before the start.
+            // Spoken once, in cardLabel (startedSpoken), not again here
+            // (Reviewer #848).
+            <View
+              style={styles.startedLine}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="lock-closed"
+                size={12}
+                color={colors.textSecondary}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.startedText} numberOfLines={1}>
+                {startedText}
+              </Text>
+            </View>
+          ) : boardHandoff ? (
             <Pressable
               onPress={() => {
-                void openBookBetslip(handoff.bookmaker, handoff.link);
+                void openBookBetslip(boardHandoff.bookmaker, boardHandoff.link);
               }}
               hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
-              accessibilityLabel={`${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`}
+              accessibilityLabel={
+                boardHandoff.price == null
+                  ? `Open ${bookName(boardHandoff.bookmaker)} to check the live price`
+                  : signalsCtaSpeech(
+                      bookName(boardHandoff.bookmaker),
+                      formatAmerican(boardHandoff.price),
+                      null,
+                      { bestNow: boardHandoff.verb === 'Best' },
+                    )
+              }
               style={({ pressed }) => [
                 styles.handoff,
-                handoff.bookmaker === 'draftkings' && styles.handoffDk,
+                boardHandoff.bookmaker === 'draftkings' && styles.handoffDk,
                 pressed && styles.pressed,
               ]}
             >
               <Text
-                style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
+                style={[styles.handoffText, boardHandoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
                 numberOfLines={1}
               >
-                {handoff.verb} {bookLabel(handoff.bookmaker)} {formatAmerican(handoff.price)}
+                {signalsCtaLabel(
+                  bookLabel(boardHandoff.bookmaker),
+                  boardHandoff.price == null ? null : formatAmerican(boardHandoff.price),
+                  null,
+                  { bestNow: boardHandoff.verb === 'Best' },
+                )}
               </Text>
             </Pressable>
           ) : (
@@ -425,7 +890,7 @@ export function PickCard({
           <Ionicons
             name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
             size={13}
-            color={timing.kind === 'live' ? colors.bet : colors.textTertiary}
+            color={timing.kind === 'live' ? colors.betInk : colors.textTertiary}
             style={styles.extraIcon}
           />
           <Text
@@ -433,7 +898,7 @@ export function PickCard({
               styles.extraText,
               styles.timingText,
               timing.kind === 'live'
-                ? { color: colors.bet, fontWeight: font.weight.medium }
+                ? { color: colors.betInk, fontWeight: font.weight.medium }
                 : null,
             ]}
           >
@@ -441,6 +906,308 @@ export function PickCard({
           </Text>
         </View>
       ) : null}
+      </>
+      ) : (
+      <>
+      <View style={styles.contextRow}>
+        {preview ? (
+          <View style={[styles.labelChip, styles.previewBadge]}>
+            <Text style={styles.previewBadgeText}>PREVIEW</Text>
+          </View>
+        ) : paused ? (
+          <View style={[styles.labelChip, styles.previewBadge]}>
+            <Text style={styles.previewBadgeText}>PAUSED</Text>
+          </View>
+        ) : (
+          <View style={styles.labelChip}>
+            <SignalBadge signal={pick.signal_type} small />
+          </View>
+        )}
+        <Text style={styles.matchupLine}>
+          {signalsContextLine({
+            sport: contextSport,
+            away: game?.away_team ?? '',
+            home: game?.home_team ?? '',
+            timeLabel: contextTime,
+            abbrevs: teamAbbrevs,
+          })}
+        </Text>
+        {flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
+        <View style={styles.contextTrail}>
+          {flagged ? (
+            <View
+              style={[styles.labelChip, styles.priceCheckChip]}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="alert-circle-outline"
+                size={12}
+                color={colors.medInk}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.priceCheckText}>{priceCheckChipText(check)}</Text>
+            </View>
+          ) : null}
+          {showSharp && sharp && !signalsMuted ? (
+            <View style={styles.labelChip}>
+              <SharpScorePill score={sharp.score} band={sharp.band} />
+            </View>
+          ) : null}
+          {showTier && pick.confidence_tier ? (
+            <View style={[styles.labelChip, styles.tierChip, tierBg(pick.confidence_tier)]}>
+              <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
+                {pick.confidence_tier}
+              </Text>
+            </View>
+          ) : null}
+          {gameStatus(game, liveState).kind !== 'pre' ? (
+            <GameStatusPill game={game} live={liveState} />
+          ) : null}
+        </View>
+        ) : null}
+      </View>
+
+      <View style={styles.betRow}>
+        <Text style={[styles.betLeft, quietHeadline && styles.betMuted]}>
+          {betHeadline}
+        </Text>
+        {lockedAmerican && quoteBookKey ? (
+          <Text style={[styles.betRight, quietHeadline && styles.betMuted]}>
+            {trueMinus(lockedAmerican)}
+            <Text style={styles.betBook}> {bookLabel(quoteBookKey)}</Text>
+          </Text>
+        ) : null}
+      </View>
+      {reasonLine ? (
+        <Text style={[styles.reasonLine, signalsMuted && styles.betMuted]}>{reasonLine}</Text>
+      ) : null}
+      {signalsNow ? (
+        <Text style={styles.nowLine}>{signalsNow}</Text>
+      ) : null}
+      {heroPrice?.showLockedCaption && (heroPrice.stale || heroPrice.untracked) ? (
+        <Text style={styles.lockedCaption}>{trueMinus(lockedCaptionText(heroPrice))}</Text>
+      ) : null}
+
+      <View style={styles.metrics}>
+        <View style={styles.metric}>
+          <Text style={[styles.metricValue, {
+            color: flagged || signalsMuted || pick.signal_type === 'NONE'
+              ? colors.textSecondary
+              : edgeColor,
+          }]}>
+            {edgeText}
+          </Text>
+          <Text style={styles.metricLabel}>Edge</Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={[styles.metricValue, signalsMuted && styles.betMuted]}>
+            {formatPct(pick.model_probability)}
+          </Text>
+          <Text style={styles.metricLabel}>Model chance</Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={[
+            styles.metricValue,
+            signalsReturn === '—' ? styles.metricMuted : null,
+            signalsMuted && signalsReturn !== '—' ? styles.betMuted : null,
+          ]}>
+            {signalsReturn}
+          </Text>
+          <Text style={styles.metricLabel}>Expected return</Text>
+        </View>
+      </View>
+      <Text style={[styles.stakeRow, signalsStakeShown == null ? styles.metricMuted : null]}>
+        {signalsStakeShown ?? '—'}
+      </Text>
+      {myBooksNote ? (
+        <View style={styles.myBooksRow}>
+          <Ionicons
+            name={notAtMyBooks ? 'remove-circle-outline' : 'information-circle-outline'}
+            size={13}
+            color={colors.textTertiary}
+            style={styles.extraIcon}
+          />
+          <Text style={styles.myBooksText}>{trueMinus(myBooksNote)}</Text>
+        </View>
+      ) : null}
+
+      {hasExtras ? (
+        <View style={styles.extrasRow}>
+          {movementSummary && hero.has('movement') && !(signalsMuted && movementSummary.color === colors.bet) ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={movementSummary.icon}
+                size={13}
+                color={inkFor(movementSummary.color)}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[
+                  styles.extraText,
+                  { color: inkFor(movementSummary.color), fontWeight: font.weight.medium },
+                ]}
+              >
+                {trueMinus(movementSummary.label)}
+              </Text>
+            </View>
+          ) : null}
+          {contra && !(signalsMuted && contra.tone === 'sharp') ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={contra.tone === 'sharp' ? 'shield-checkmark-outline' : 'people-outline'}
+                size={13}
+                color={contra.tone === 'sharp' ? colors.betInk : colors.medInk}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[
+                  styles.extraText,
+                  {
+                    color: contra.tone === 'sharp' ? colors.betInk : colors.medInk,
+                    fontWeight: font.weight.medium,
+                  },
+                ]}
+              >
+                {contra.label} · {Math.round(contra.betPct)}% public
+              </Text>
+            </View>
+          ) : null}
+          {crowd ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="people-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>
+                {Math.round(crowd.betPct)}% public on this side
+              </Text>
+            </View>
+          ) : null}
+          {showClv && hero.has('clv') ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={(clvRounded ?? 0) < 0 ? 'trending-down-outline' : 'trending-up-outline'}
+                size={13}
+                color={clvInk}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: clvInk, fontWeight: font.weight.medium }]}>
+                CLV {formatClv(pick.clv_pct!)}
+              </Text>
+            </View>
+          ) : null}
+          {pausedLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="pause-circle-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{pausedLabel}</Text>
+            </View>
+          ) : null}
+          {previewLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="lock-open-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{previewLabel}</Text>
+            </View>
+          ) : null}
+          {pick.injury_flag ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="medkit-outline"
+                size={13}
+                color={colors.medInk}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, styles.injuryText]}>
+                {pick.injury_flag}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {handoff || startedText || canTrack || canSlip ? (
+        <View style={styles.signalsActions}>
+          {startedText ? (
+            <View
+              style={styles.startedLine}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="lock-closed"
+                size={12}
+                color={colors.textSecondary}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.startedText}>
+                {trueMinus(startedText)}
+              </Text>
+            </View>
+          ) : signalsCta && handoff ? (
+            <Pressable
+              onPress={() => {
+                void openBookBetslip(handoff.bookmaker, handoff.link);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={signalsCtaSpoken ?? signalsCta}
+              style={({ pressed }) => [styles.handoffNavy, pressed && styles.pressed]}
+            >
+              <Text style={styles.handoffNavyText}>
+                {signalsCta}
+              </Text>
+            </Pressable>
+          ) : (
+            <View />
+          )}
+          <View style={styles.actionsRight}>
+            {canSlip ? (
+              <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} tall />
+            ) : null}
+            {canTrack ? (
+              <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} tall />
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {timing?.kind === 'live' ? (
+        <View style={styles.timingRow}>
+          <Ionicons
+            name="lock-closed-outline"
+            size={13}
+            color={colors.textSecondary}
+            style={styles.extraIcon}
+          />
+          <Text
+            style={[
+              styles.extraText,
+              styles.timingText,
+              { color: colors.textSecondary, fontWeight: font.weight.medium },
+            ]}
+          >
+            {timing.label}
+          </Text>
+        </View>
+      ) : null}
+      <Text style={styles.modelCaption}>{modelCaption}</Text>
+      </>
+      )}
     </Pressable>
   );
 }
@@ -475,10 +1242,10 @@ function summarizeMovement(
   return { icon: 'trending-up-outline', color: colors.bet, label: prices };
 }
 
-// CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).
+// Primary CLV is a percent (e.g. 8.5 = the price taken was 8.5% longer than
+// that same book's close). Older methods are not shown.
 function formatClv(clvPct: number): string {
-  const sign = clvPct > 0 ? '+' : '';
-  return `${sign}${clvPct.toFixed(1)}pp`;
+  return formatSigned(clvPct, 1, '%');
 }
 
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
@@ -488,13 +1255,28 @@ function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
 }
 
 function tierFg(tier: 'HIGH' | 'MED' | 'LOW') {
-  if (tier === 'HIGH') return { color: colors.high };
-  if (tier === 'MED') return { color: colors.med };
-  return { color: colors.low };
+  // Inks, not the bright confidence hues (2.02:1 at 10pt; audit M6).
+  if (tier === 'HIGH') return { color: colors.betInk };
+  if (tier === 'MED') return { color: colors.medInk };
+  return { color: colors.textSecondary };
 }
 
 const styles = StyleSheet.create({
+  // "Found at HRB +110 …" / "Not offered at your books" (lib/myBooks.ts).
+  myBooksRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.xs,
+  },
+  myBooksText: {
+    flex: 1,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+  },
   card: {
+    // Declared tap floor (verify_a11y); the card is already ~150pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
     paddingVertical: spacing.sm,
@@ -581,6 +1363,46 @@ const styles = StyleSheet.create({
   },
   heroEdgeBlock: {
     flexShrink: 0,
+  },
+  // H4: NONE / AVOID edge as a secondary line (13pt medium textSecondary),
+  // not the 20pt hero, always textSecondary (10.94:1) — no verdict colour.
+  edgeSecondary: {
+    flexShrink: 1,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    fontVariant: ['tabular-nums'],
+    color: colors.textSecondary,
+  },
+  // H4 "Price check": medSoft fill, textPrimary 11pt semibold, medInk icon.
+  priceCheckChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    backgroundColor: colors.medSoft,
+  },
+  priceCheckText: {
+    fontSize: font.size.micro,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  // H5 "Game started · picked at …": 12pt semibold textSecondary, no fill —
+  // it must not read as a button.
+  startedLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 1,
+    minHeight: 36,
+  },
+  startedText: {
+    flexShrink: 1,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
   heroEdge: {
     fontSize: font.size.title3,
@@ -678,10 +1500,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.nano,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    color: colors.none,
+    // textSecondary, not colors.none: none on noneSoft is ~2.85:1 at 10pt
+    // (UX review, 2026-09-26), and PAUSED put this pill on far more cards.
+    color: colors.textSecondary,
   },
   injuryText: {
-    color: colors.med,
+    // medInk, not med (2.20:1): the medkit icon keeps the amber (audit H8).
+    color: colors.medInk,
     fontWeight: font.weight.medium,
   },
   actionsRow: {
@@ -730,5 +1555,171 @@ const styles = StyleSheet.create({
   // wrapping (UX review, 2026-09-03).
   timingText: {
     flexShrink: 1,
+  },
+  // Signals (Option A). The context line wraps at large text instead of
+  // truncating. The bet is 22pt (title2) and may wrap the price onto a
+  // second line. Metric cells shrink-wrap so "Expected return" is not clipped.
+  contextRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: spacing.sm,
+    rowGap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  context: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '60%',
+    minWidth: 0,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  contextTrail: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  betRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    columnGap: spacing.md,
+    rowGap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  // Size to the bet. A short bet ("Under 56") stays on one row with the
+  // price at the trailing edge. A long school name takes the full row and
+  // the price wraps under it, so the spread number does not wrap alone.
+  betLeft: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: '100%',
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  betRight: {
+    flexGrow: 0,
+    flexShrink: 0,
+    marginLeft: 'auto',
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  // The book is a footnote inside the price, lighter than the 22pt number.
+  betBook: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  // Price-check and stale: the hero is not a bet, so it is not bold.
+  betMuted: {
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  // Under the bet. Wraps. No line cap — a long forecast stays whole.
+  reasonLine: {
+    marginBottom: spacing.xs,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  // Matchup sits above the bet, beside the score. It wraps; the badge does not.
+  matchupLine: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '60%',
+    minWidth: 0,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  // Stake is its own row: "Bet 1.1u · Win 1u". Not a cell, not a "· 0.77u" suffix.
+  stakeRow: {
+    marginBottom: spacing.xs,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  modelCaption: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.medium,
+    color: colors.textTertiary,
+  },
+  // The book's current line or price, when it is not the lock. Same "Now"
+  // ink as the board's tag (textSecondary, above 4.5:1). Wraps at large text.
+  nowLine: {
+    marginTop: 2,
+    marginBottom: spacing.xs,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+  },
+  metrics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    columnGap: spacing.sm,
+    rowGap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  // Three figures across one row. ~30% leaves room for the column gap.
+  // Stake is the row under them.
+  metric: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '30%',
+    maxWidth: '32%',
+    minWidth: 0,
+  },
+  metricValue: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  metricMuted: {
+    color: colors.textSecondary,
+  },
+  metricLabel: {
+    marginTop: 1,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  signalsActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  // Filled navy. tint on its own is the mark's ink; the label is textInverse.
+  // Not the DraftKings green and not colors.info.
+  handoffNavy: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 44,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.tint,
+    justifyContent: 'center',
+  },
+  handoffNavyText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textInverse,
+    fontVariant: ['tabular-nums'],
   },
 });

@@ -7,7 +7,7 @@ import {
   type PlayerLogSport,
 } from '@/lib/playerLog';
 import { STAT_CATALOG, type StatDef } from '@/lib/statCatalog';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { PlayerType, TrendBuckets } from '@/types';
 
 /**
@@ -118,7 +118,8 @@ export function usePlayerTrends({
   const [nonce, setNonce] = useState(0);
   // Loading flips true here, not only in the effect: pull-to-refresh
   // batches the nonce with this so the spinner does not clear on the
-  // one frame before the effect runs (Reviewer Medium on #781).
+  // one frame before the effect runs (Reviewer Medium on #781). The same
+  // bump is what Retry uses on a failed load.
   const reload = useCallback(() => {
     setLoading(true);
     setNonce((n) => n + 1);
@@ -162,7 +163,7 @@ export function usePlayerTrends({
       })
       .catch((e: unknown) => {
         if (!mounted) return;
-        setError(errorText(e));
+        if (!isAbortError(e)) setError(errorText(e));
       })
       .finally(() => {
         if (!mounted) return;

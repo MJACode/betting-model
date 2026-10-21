@@ -40,5 +40,14 @@ def _platform_gates_at_identity(monkeypatch):
     # -1.0, not 0.0: a model whose stored probability IS the price's implied
     # (mlb_total_public_fade) has a negative EV at any price, so 0.0 would
     # still refuse it; -1.0 is "the floor cannot bind".
+    #
+    # config.MODEL_OWN_EV_FLOOR is DELIBERATELY NOT held at identity. Since
+    # 2026-09-20 nearly every model carries an entry there, and min_ev_for
+    # checks it BEFORE the global floor, so a model's own floor still binds
+    # inside a test even with GLOBAL_MIN_EV at -1.0. Emptying it here would
+    # make the tests that assert the floors (tests/test_config.py) vacuous. A
+    # test whose fixture trips a floor it does not mean to exercise clears the
+    # dict itself, in one line, where a reader can see it:
+    #     monkeypatch.setattr(config, "MODEL_OWN_EV_FLOOR", {})
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", -1.0)
     monkeypatch.setattr(sc, "_CAL_CACHE", {})

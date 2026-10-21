@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 export function ExplainerScreen() {
   return (
@@ -42,22 +43,22 @@ export function ExplainerScreen() {
             the first of those books that does, and the pick says so.
           </P>
           <P>
-            Every pick lists each book's line, <Strong>best price first</Strong>,
-            so you can place it wherever pays most. We compare every book we
-            price and put the best payout first. You can't change that ordering,
-            and the price a pick is measured at is always DraftKings.
+            Every pick lists each of your books' lines, <Strong>best price first</Strong>,
+            so you can place it wherever pays most. The model's own record is
+            always graded at the best price across every book we price.
           </P>
           <P>
             Book coverage is uneven — DraftKings posts far more prop markets than
             anyone else. Open a pick and check <Strong>All books</Strong> to
-            compare every book side by side. You choose the books you bet at in
-            Settings → Your sportsbooks, and you can pick as many as you like.
-            They set two things: the line the Stats leaderboard prints beside
-            each player — the <Strong>best of your books</Strong> on that number,
-            badged with the one offering it — and which book the betslip's bet
-            button opens. They never change what a pick is measured at, and they
-            never limit where you can place: the betslip lists every book we
-            price, whether you selected it or not.
+            compare your books side by side. You choose the books you can bet at
+            in Settings → Your sportsbooks, and you can pick as many as you like;
+            the more you use, the better the prices you get. Picks and the Stats
+            leaderboard show the <Strong>best of your books</Strong>. When a pick
+            was found at a book you don't use, the card shows your best price
+            with the edge worked out at that price, and says where the model
+            found it. When none of your books offers it, the card says so. Your
+            books never change what a pick is or how the model's record is
+            graded.
           </P>
         </Section>
 
@@ -89,19 +90,19 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="BET / AVOID / NONE">
+        <Section heading="BET / AVOID / NEUTRAL">
           <Bullet>
             <Strong>BET</Strong> — model probability AND edge both clear that
-            model's threshold. Tenth-Kelly bet size attached. These are the
-            picks worth backing.
+            model's threshold. Unit stake attached. These are the picks worth
+            backing.
           </Bullet>
           <Bullet>
-            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge ≤
-            -3%). Informational; do NOT bet the other side blindly.
+            <Strong>AVOID</Strong> — model strongly disagrees with DK (edge at or
+            below that model's AVOID cut). Informational; do NOT bet the other side blindly.
           </Bullet>
           <Bullet>
-            <Strong>NONE</Strong> — edge is in the dead zone (between -3% and
-            +3%). Model and DK essentially agree; no advantage either way.
+            <Strong>NEUTRAL</Strong> — edge sits between that model's AVOID and
+            BET cuts. Model and DK essentially agree; no advantage either way.
           </Bullet>
           <P>
             The Signals tab applies the per-model action filter (e.g. moneyline
@@ -111,19 +112,30 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="Tenth-Kelly bet sizing">
+        <Section heading="Stakes are in units, not dollars">
           <P>
-            Full Kelly is the math-optimal staking fraction for a known edge.
-            It's also volatile — drawdowns are brutal. We use{' '}
-            <Strong>10% of full Kelly</Strong>:
+            Every stake we publish is in <Strong>units</Strong>. One unit is one
+            flat bet at whatever size you bet, and we never put a dollar figure
+            on a pick, because the same "$50" means something different to every
+            reader. You can add a bankroll in Settings if you like: it's
+            optional, it stays on this device, and it only converts your units
+            into dollars. It never sizes a bet: every pick is still the same
+            1u play for everyone.
           </P>
-          <Mono>{`fraction = 0.10 × (model_prob − implied_prob) / (1 − implied_prob)`}</Mono>
-          <Mono>bet = min(fraction × bankroll, 5% × bankroll)</Mono>
           <P>
-            The 5% cap keeps any single bet survivable. Tenth-Kelly typically
-            lands in the 2-4% range, letting edge differences differentiate
-            sizes (vs quarter-Kelly which always hit the cap and produced flat
-            bets). Change your bankroll in Settings — bet sizes recompute live.
+            A pick is quoted as units to <Strong>win</Strong>, then grossed up by
+            the price into what you actually lay:
+          </P>
+          <Mono>{`risk = conviction / (decimal_odds − 1)`}</Mono>
+          <P>
+            Every BET is a 1-unit play today, so at −110 you lay 1.1u to win 1u,
+            and at +150 you lay 0.67u to win the same 1u. Risk is hard-capped at
+            3u on any one event.
+          </P>
+          <P>
+            The app, the Discord channels and push all publish the identical
+            number. There is nothing per-user to configure, so nothing can drift
+            between them.
           </P>
         </Section>
 
@@ -134,7 +146,7 @@ export function ExplainerScreen() {
             model HR probabilities top out around <Mono>25%</Mono>. Forcing an
             edge filter would mean we never fire HR picks even when the model
             is confident, so HR signals on model probability alone (≥20%) and
-            ignore edge. Bet sizing is informational only on those.
+            ignore edge. The stake shown is informational only on those.
           </P>
         </Section>
 
@@ -264,7 +276,7 @@ export function ExplainerScreen() {
           <P>
             Below that, <Strong>Tracked picks</Strong> grades the picks you tap
             Track on. Those score automatically from our settled results at the
-            stake basis you choose ($100 flat, Kelly, or a custom amount), so
+            stake basis you choose ($100 flat or a custom amount), so
             you can see how the model's calls would have done for you without
             logging anything.
           </P>
@@ -305,9 +317,9 @@ export function ExplainerScreen() {
             bleed out.
           </Bullet>
           <Bullet>
-            <Strong>Size with fractional Kelly.</Strong> Bets default to a small
-            fraction of full Kelly so one cold stretch can't wipe you out. Set a
-            bankroll you can afford to lose in Settings.
+            <Strong>Keep your unit small.</Strong> Every pick is a 1-unit play,
+            so pick a unit size you can lose thirty times over without flinching
+            — that is what keeps a cold stretch survivable.
           </Bullet>
           <Bullet>
             <Strong>Shop for the best price.</Strong> Getting −105 instead of −110
@@ -337,6 +349,7 @@ export function ExplainerScreen() {
             history through your own conviction rules.
           </P>
         </Section>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -413,7 +426,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     backgroundColor: colors.bg,
     paddingHorizontal: 4,
-    fontSize: 13,
+    fontSize: font.size.footnote,
     color: colors.textPrimary,
   },
   bullet: {

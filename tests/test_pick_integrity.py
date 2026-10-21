@@ -99,6 +99,85 @@ def test_a_producer_that_does_not_supply_side_and_line_is_refused():
     assert refuse_mismatched([{"lock_key": "k", "label": "BOS ML"}], "t") == []
 
 
+# A team total is one team's points (nba_team_total_luck: the HOME team's).
+# Side and number alone pass "MIL vs BOS Under 115.5", which reads as the full
+# game, and "BOS Team Total Under 115.5", which names the wrong team: measured
+# 2026-10-18 on the guard as it stood (buildmap/pick_row.md 2b).
+TT = "nba_team_total_luck"
+TT_LABEL = "BOS @ MIL — MIL Team Total Under 115.5"
+
+
+@pytest.mark.parametrize("label,ok", [
+    (TT_LABEL, True),                                     # what the card writes
+    ("MIL Team Total Under 115.5", True),
+    ("BOS @ MIL — MIL team total under 115.5", True),     # case is not a market
+    ("BOS @ MIL — BOS Team Total Under 115.5", False),    # the away team's points
+    ("BOS Team Total Under 115.5", False),
+    ("MIL vs BOS Under 115.5", False),                    # reads as the game total
+    ("BOS @ MIL — MIL Under 115.5", False),               # no "Team Total"
+    ("BOS @ MIL — MIL Team Total Under 116.5", False),    # wrong number
+    ("BOS @ MIL — MIL Team Total Over 115.5", False),     # wrong side
+])
+def test_a_team_total_says_team_total_and_names_its_own_team(label, ok):
+    got = pick_problems(label, "under", 115.5, TT, "MIL", "BOS")
+    assert (got == []) is ok, got
+
+
+def test_the_team_total_wording_is_checked_without_the_teams():
+    """A producer that does not pass home and away still cannot send a
+    team-total pick worded as a full-game total."""
+    got = pick_problems("MIL vs BOS Under 115.5", "under", 115.5, TT)
+    assert any("Team Total" in p for p in got), got
+    assert pick_problems(TT_LABEL, "under", 115.5, TT) == []
+
+
+def test_an_away_team_total_names_the_away_team(monkeypatch):
+    """Keyed on the market, not the id: a model mapped to team_totals_away must
+    name the AWAY team. (No model bets one today.)"""
+    from tracking import paper_tracker
+    monkeypatch.setitem(paper_tracker._RULE_MODEL_MARKETS, "x_away_tt", "team_totals_away")
+    assert pick_problems("BOS @ MIL — BOS Team Total Under 104.5", "under", 104.5,
+                         "x_away_tt", "MIL", "BOS") == []
+    assert pick_problems("BOS @ MIL — MIL Team Total Under 104.5", "under", 104.5,
+                         "x_away_tt", "MIL", "BOS")
+
+
+@pytest.mark.parametrize("label,side,line,model_id,home,away", [
+    # Real BET labels of other models (picks, read-only). On 2026-10-19, 320
+    # such labels across 54 models (up to four per model and side, games from
+    # 2026-07-01) got the same verdict from the guard before and after the
+    # team-total check, and none was refused.
+    ("LAK vs EDM Under 6.0", "under", 6.0, "nhl_over_under", "LAK", "EDM"),
+    ("CAR @ PHI Under 39 (Wind 12 mph, MGM) · 0.77u", "under", 39.0,
+     "nfl_wind_totals", "PHI", "CAR"),
+    ("STL vs WSH Under 8.5 (MGM)", "under", 8.5, "mlb_total_public_fade", "STL", "WSH"),
+    ("SD vs MIA Under 11.5 (live)", "under", 11.5, "mlb_live_total_runs", "SD", "MIA"),
+    # nba_total_luck has written no pick yet; this is its card's label shape.
+    ("BOS vs NYK Over 225.5", "over", 225.5, "nba_total_luck", "BOS", "NYK"),
+])
+def test_other_models_totals_are_not_asked_for_a_team_total(label, side, line,
+                                                            model_id, home, away):
+    assert pick_problems(label, side, line, model_id, home, away) == []
+
+
+def test_a_team_whose_name_starts_with_the_other_team_s_is_not_the_wrong_team(monkeypatch):
+    """College names nest ("Ohio" and "Ohio State"), so "Ohio State Team
+    Total" also starts with "Ohio ". As in the side check, a label naming its
+    own team is not refused for also matching the other's name."""
+    from tracking import paper_tracker
+    monkeypatch.setitem(paper_tracker._RULE_MODEL_MARKETS, "x_home_tt", "team_totals_home")
+    assert pick_problems("Ohio @ Ohio State — Ohio State Team Total Under 30.5", "under",
+                         30.5, "x_home_tt", "Ohio State", "Ohio") == []
+
+
+def test_refuse_mismatched_drops_a_team_total_naming_the_wrong_team():
+    good = {"lock_key": "g1", "label": TT_LABEL, "side": "under", "line": 115.5,
+            "model_id": TT, "home": "MIL", "away": "BOS"}
+    bad = dict(good, lock_key="g2",
+               label="BOS @ MIL — BOS Team Total Under 115.5")
+    assert refuse_mismatched([good, bad], "t") == [good]
+
+
 # ── 2. every publisher refuses it ────────────────────────────────────────────
 
 class _Conn:
@@ -345,3 +424,128 @@ def test_the_rule_is_in_the_always_loaded_file():
     a path-scoped copy would not load for the session that makes this error."""
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     assert "QUOTE A PICK FROM ITS LABEL" in text
+
+
+# ── the stat a label names, against the market the pick settles on ───────────
+
+STAT_CASES = [
+    # (label, prop_market, refused?)  -- the first is the one that shipped.
+    ("Blake Corum Under 11.5 Pass Attempts", "player_rush_attempts", True),
+    ("Blake Corum Under 11.5 Carries",       "player_rush_attempts", False),
+    ("Blake Corum Under 11.5 Rush Att",      "player_rush_attempts", False),
+    ("Puka Nacua Over 5.5 Receptions",       "player_receptions",    False),
+    ("Puka Nacua Over 5.5 Rec",              "player_receptions",    False),
+    ("Puka Nacua Over 5.5 Rec Yds",          "player_receptions",    True),
+    ("Josh Allen Over 32.5 Pass Attempts",   "player_pass_attempts", False),
+    ("Josh Allen Over 32.5 Carries",         "player_pass_attempts", True),
+]
+
+
+@pytest.mark.parametrize("label,market,refused", STAT_CASES)
+def test_a_label_may_not_name_a_market_the_pick_does_not_settle_on(
+        label, market, refused):
+    """THE ONE THIS WAS ADDED FOR, 2026-09-21.
+
+    The live NFL prop model changed market from pass attempts to rushing
+    attempts and one display string was left behind, so "Blake Corum Under 11.5
+    Pass Attempts" went to the live channel: a running back on a passing line,
+    with an entirely correct bet underneath it. The side agreed with the row and
+    the line agreed with the row, so every check that existed passed. What
+    disagreed was the STAT, and nothing was looking at it.
+    """
+    side = "under" if " Under " in label else "over"
+    line = float(label.rsplit(side.capitalize() + " ", 1)[1].split()[0])
+    problems = pick_problems(label, side, line, "nfl_live_prop",
+                             prop_market=market)
+    assert bool(problems) is refused, problems
+
+
+def test_an_unusual_spelling_is_not_refused():
+    """Deliberately a NEGATIVE check. A publishing guard stricter than it needs
+    to be is an outage waiting for the first model that words a label its own
+    way, so only a label naming a DIFFERENT market is refused -- never one
+    whose wording merely differs from the platform's."""
+    for label in ("D. Henry Under 18.5 Carries", "D. Henry Under 18.5 Rush Att",
+                  "D. Henry Under 18.5 Rushing Attempts"):
+        assert pick_problems(label, "under", 18.5, "nfl_live_prop",
+                             prop_market="player_rush_attempts") == []
+
+
+def test_a_market_nobody_has_taught_it_is_never_refused():
+    """An unknown market must not block publishing."""
+    assert pick_problems("Someone Over 1.5 Widgets", "over", 1.5, "x",
+                         prop_market="player_widgets") == []
+    assert pick_problems("Someone Over 1.5 Widgets", "over", 1.5, "x") == []
+
+
+def test_the_live_publisher_supplies_the_market_so_the_check_is_not_dead():
+    """A guard dead code can satisfy is not a guard (CLAUDE.md section 1b).
+
+    `refuse_mismatched` reads `prop_market` off each signal dict. The live
+    Discord producer did not select it, so when this check was written the
+    model that had just published a wrong stat name would still have sailed
+    through it.
+    """
+    src = (ROOT / "tracking" / "discord_notifier.py").read_text(encoding="utf-8")
+    body = src[src.index("def _new_live_signals("):src.index("def notify_discord_live(")]
+    assert "p.prop_market" in body, "the live producer does not select the market"
+    assert '"prop_market":' in body, "the live producer does not pass it on"
+
+
+def test_refuse_mismatched_actually_drops_the_pick_that_shipped():
+    """End to end through the publishing gate, not just the predicate."""
+    bad = {"lock_key": "k1", "label": "Blake Corum Under 11.5 Pass Attempts",
+           "side": "under", "line": 11.5, "model_id": "nfl_live_prop",
+           "prop_market": "player_rush_attempts"}
+    good = {**bad, "lock_key": "k2",
+            "label": "Blake Corum Under 11.5 Carries"}
+    kept = refuse_mismatched([bad, good], "test")
+    assert [s["lock_key"] for s in kept] == ["k2"]
+
+
+def test_the_live_query_selects_exactly_what_the_dict_reads():
+    """Positional row tuples break silently, three files away.
+
+    `_new_live_signals` reads its columns as `r[0]`..`r[N]` against a SELECT
+    written a hundred lines earlier. Adding `p.prop_market` to that SELECT --
+    one column, at the end -- raised `IndexError: tuple index out of range` in
+    test_discord_notifier, test_discord_live_field and test_publish_key_identity,
+    none of which mention the live query, because each builds a fixed-length
+    tuple standing in for the row.
+
+    So this compares the two halves directly and fails with a sentence instead
+    of an IndexError: the SELECT's column count against the highest index the
+    dict actually reads.
+    """
+    import re as _re
+
+    src = (ROOT / "tracking" / "discord_notifier.py").read_text(encoding="utf-8")
+    body = src[src.index("def _new_live_signals("):src.index("def notify_discord_live(")]
+
+    select = body[body.index("SELECT DISTINCT"):body.index("FROM picks")]
+    # SQL comments FIRST. The select list carries `-- ...` notes containing
+    # commas, and counting those as columns is how this guard first reported 27
+    # columns for a 25-column query -- a check that miscounts is worse than no
+    # check at all.
+    select = _re.sub(r"--.*", "", select)
+    # Split on commas that are not inside a call such as COALESCE(a, b).
+    depth, cols, cur = 0, [], ""
+    for ch in select[len("SELECT DISTINCT"):]:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            cols.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    cols.append(cur)
+    selected = len([c for c in cols if c.strip()])
+
+    highest = max(int(m) for m in _re.findall(r"\br\[(\d+)\]", body))
+    assert selected == highest + 1, (
+        f"the live SELECT projects {selected} columns and the dict reads up to "
+        f"r[{highest}]. Adding a column without reading it, or reading one that "
+        f"is not projected, breaks three test files with an IndexError that "
+        f"names none of them.")

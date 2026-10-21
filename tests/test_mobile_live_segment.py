@@ -207,7 +207,7 @@ def test_the_live_sports_constant_matches_the_python_registry():
 def test_all_three_segments_are_unconditional():
     """Since 2026-09-12 none of the three is allowed a render guard."""
     src = _read(PICKS)
-    for label in ("Today", "Signals"):
+    for label in ("All", "Signals"):
         m = re.search(rf'<SubTabBtn label="{label}"', src)
         assert m, f"the {label} segment disappeared"
         preceding = src[max(0, m.start() - 120) : m.start()]
@@ -388,6 +388,7 @@ def test_no_app_root_component_reaches_a_focus_aware_hook():
     roots = [
         src_dir / "components" / "BetslipBar.tsx",
         src_dir / "hooks" / "usePushDeepLink.ts",
+        src_dir / "components" / "AppErrorBoundary.tsx",
     ]
     for root in roots:
         assert root.exists(), f"{root} moved -- re-point this test"

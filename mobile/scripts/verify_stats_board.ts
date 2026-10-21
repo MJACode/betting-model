@@ -21,6 +21,8 @@
  *    and yields to Live/Final once the game is under way.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { GameRow } from '../src/types';
 import * as board from '../src/lib/statsBoard';
 import {
@@ -36,12 +38,46 @@ import {
   hitRateBand,
   inHitRateBand,
   isOnSlate,
+  fixtureSubline,
+  canOpenPlayerDetail,
+  isLineOnlyId,
+  lineOnlyRowLabel,
+  LINE_ONLY_ROW_TAIL,
+  slateChipDisabled,
+  slateReadKey,
+  SLATE_CHECKING_HINT,
+  TEAMS_SLATE_FAILED_HINT,
+  TEAMS_SLATE_OFF_HINT,
+  TEAMS_SLATE_ON_HINT,
+  teamsNoGamesHint,
+  PLAYERS_SLATE_CUT_HINT,
+  PLAYERS_SLATE_EMPTY_HINT,
+  PLAYERS_SLATE_GAMES_HINT,
+  PLAYERS_SLATE_LOADING_HINT,
   isStatParticipant,
+  isTeamPropName,
+  LINE_ONLY_ID_PREFIX,
+  lineOnlyPlayers,
+  pricedPlayers,
+  needsTouchSet,
+  seasonTouchFlag,
+  shouldFetchTouchSet,
+  touchBoardView,
+  touchCommitAction,
+  touchRejectionRecordsFailure,
+  touchSetAfterFailure,
+  touchSetCopy,
+  touchSetErrorLine,
+  touchSetFromResponse,
+  touchedPlayerIds,
+  fixtureForRow,
   slateGameFor,
   slateSubline,
+  sublineSpoken,
   type SortableRow,
 } from '../src/lib/statsBoard';
 import { todayET } from '../src/lib/format';
+import { errorAnnouncement } from '../src/lib/errors';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -196,6 +232,254 @@ check('MLB all-zero player stays (cold streaks are real outcomes)',
 check('empty value list: football drops, others keep',
   !isStatParticipant('NFL', []) && !isStatParticipant('NCAAF', []) && isStatParticipant('WNBA', []));
 
+// Anytime TD: zero is the usual answer, so a ball-carrier with no TD stays
+// (Matt, 2026-10-08 — Pickens was missing from the TB @ DAL board), while a
+// lineman with no touches still drops.
+const TD = { statKey: 'rush_rec_tds' };
+check('Anytime TD: a receiver with targets and no TD stays',
+  isStatParticipant('NFL', [0, 0, 0], { ...TD, rows: [{ carries: 0, receptions: 5, targets: 7 }] }));
+check('Anytime TD: a back with carries and no TD stays (NCAAF too)',
+  isStatParticipant('NCAAF', [0], { ...TD, rows: [{ carries: 12, receptions: null, targets: null }] }));
+check('Anytime TD: a player with no touches still drops',
+  !isStatParticipant('NFL', [0, 0], { ...TD, rows: [{ carries: 0, receptions: 0, targets: 0 }] }));
+check('Season/H2H Anytime TD with no touch set drops a player with games',
+  !isStatParticipant('NFL', [0, 0], TD)
+  && !isStatParticipant('NFL', [0, 0], { ...TD, touched: undefined })
+  && !isStatParticipant('NFL', [], TD));
+check('a mismatched touch key does not build the wide list',
+  !isStatParticipant('NFL', [0, 0], {
+    ...TD,
+    touched: seasonTouchFlag(true, 'NFL|rb', 'NFL|wrte', true),
+  }));
+check('a matching touch key keeps a zero-TD carrier',
+  isStatParticipant('NFL', [0, 0], {
+    ...TD,
+    touched: seasonTouchFlag(true, 'NFL|wrte', 'NFL|wrte', true),
+  }));
+check('a TD still stays while the touch set is unknown',
+  isStatParticipant('NFL', [1, 0], TD));
+check('Season/H2H: the touch set decides — a lineman with games drops, a receiver stays',
+  !isStatParticipant('NFL', [0, 0], { ...TD, touched: false }) &&
+  isStatParticipant('NFL', [0, 0], { ...TD, touched: true }));
+check('touchedPlayerIds keeps only ball-carriers',
+  [...touchedPlayerIds([
+    { player_id: 'wr', carries: 0, receptions: 3, targets: 5 },
+    { player_id: 'ol', carries: 0, receptions: 0, targets: 0 },
+    { player_id: 'k', carries: null, receptions: null, targets: null },
+  ])].join() === 'wr');
+check('needsTouchSet: Anytime TD on football only',
+  needsTouchSet('NFL', 'rush_rec_tds') && needsTouchSet('NCAAF', 'rush_rec_tds') &&
+  !needsTouchSet('NFL', 'receptions') && !needsTouchSet('MLB', 'rush_rec_tds'));
+// Anytime TD shows everyone with a betting line (Matt, 2026-10-09).
+check('Anytime TD: a priced player stays even with no touches and no TD',
+  isStatParticipant('NFL', [0, 0], { ...TD, priced: true, rows: [{ carries: 0, receptions: 0, targets: 0 }] }));
+check('Anytime TD: priced overrides a negative touch answer (Season/H2H)',
+  isStatParticipant('NFL', [0], { ...TD, priced: true, touched: false }));
+check('priced does not keep an all-zero player on a yardage board',
+  !isStatParticipant('NFL', [0, 0], { statKey: 'receiving_yards', priced: true }));
+check('team names in the TD market are not players',
+  isTeamPropName('Dallas Cowboys D/ST') && isTeamPropName('Dallas Cowboys Defense') &&
+  isTeamPropName('No Scorer') && !isTeamPropName('George Pickens') && !isTeamPropName('Tyler Conklin'));
+const tdRows = [
+  { market: 'player_anytime_td', player_name: 'George Pickens', game_id: 'g1' },
+  { market: 'player_anytime_td', player_name: 'George Pickens', game_id: 'g1' },
+  { market: 'player_anytime_td', player_name: 'Michael Pittman Jr.', game_id: 'g2' },
+  { market: 'player_anytime_td', player_name: 'Tank Dell', game_id: 'g2' },
+  { market: 'player_anytime_td', player_name: 'Houston Texans D/ST', game_id: 'g2' },
+  { market: 'player_anytime_td', player_name: 'Off Slate', game_id: 'g9' },
+  { market: 'player_reception_yds', player_name: 'Other Market', game_id: 'g1' },
+];
+const priced = pricedPlayers(tdRows, 'player_anytime_td', new Set(['g1', 'g2']));
+check('pricedPlayers: one per player, slate and market bounded, no team rows',
+  [...priced.keys()].sort().join('|') === 'george pickens|michael pittman|tank dell');
+const missing = lineOnlyPlayers(priced, ['George Pickens', 'Michael Pittman']);
+check('lineOnlyPlayers: suffix-folded names count as present; the rest are listed',
+  missing.map((p) => p.name).join() === 'Tank Dell' && missing[0]!.gameId === 'g2');
+check('line-only ids are recognisable and never a real id',
+  isLineOnlyId(`${LINE_ONLY_ID_PREFIX}tank dell`) && !isLineOnlyId('00-0036900'));
+check('a line-only or blank id does not open a player page',
+  !canOpenPlayerDetail(`${LINE_ONLY_ID_PREFIX}tank dell`) &&
+    !canOpenPlayerDetail('') &&
+    !canOpenPlayerDetail(null));
+check('a real player id still opens', canOpenPlayerDetail('00-0036900'));
+check('a fixture is spoken with "at", not "at sign"',
+  sublineSpoken('SUN 1:00 PM ET · HOU @ TEN') === 'SUN 1:00 PM ET, HOU at TEN' &&
+    sublineSpoken('9:40 PM ET · @ SEA') === '9:40 PM ET, at SEA');
+check('a line-only label speaks the fixture, then ", no games logged yet"',
+  lineOnlyRowLabel('Tank Dell', sublineSpoken('SUN 1:00 PM ET · HOU @ TEN')) ===
+    'Tank Dell, SUN 1:00 PM ET, HOU at TEN, no games logged yet');
+check('a line-only label ends with ", no games logged yet"',
+  lineOnlyRowLabel('Tank Dell', null) === `Tank Dell${LINE_ONLY_ROW_TAIL}` &&
+    lineOnlyRowLabel('Tank Dell', 'SUN 1:00 PM ET, HOU at TEN') ===
+      'Tank Dell, SUN 1:00 PM ET, HOU at TEN, no games logged yet' &&
+    LINE_ONLY_ROW_TAIL === ', no games logged yet');
+{
+  const mark = SLATE_CHECKING_HINT.indexOf('s schedule') - 1;
+  check('the checking hint is "Checking today’s schedule" with U+2019',
+    SLATE_CHECKING_HINT === 'Checking today\u2019s schedule' &&
+      SLATE_CHECKING_HINT.charCodeAt(mark) === 0x2019 &&
+      !SLATE_CHECKING_HINT.includes("'"));
+}
+check('a restored hint drops the control name and ends with a period',
+  teamsNoGamesHint('NFL') === 'Unavailable: no NFL games in the next week.' &&
+    TEAMS_SLATE_FAILED_HINT === 'Unavailable: the schedule could not be loaded.' &&
+    TEAMS_SLATE_ON_HINT === 'On. Showing only teams on this slate.' &&
+    TEAMS_SLATE_OFF_HINT === 'Off. Showing every team.' &&
+    PLAYERS_SLATE_EMPTY_HINT === 'Unavailable: no games scheduled.' &&
+    PLAYERS_SLATE_GAMES_HINT === 'Unavailable while a game is picked above.' &&
+    PLAYERS_SLATE_LOADING_HINT === 'Loading.' &&
+    PLAYERS_SLATE_CUT_HINT === 'On shows only players in action, off shows every player.' &&
+    ![TEAMS_SLATE_FAILED_HINT, TEAMS_SLATE_ON_HINT, TEAMS_SLATE_OFF_HINT,
+      teamsNoGamesHint('NFL'), PLAYERS_SLATE_EMPTY_HINT, PLAYERS_SLATE_GAMES_HINT,
+      PLAYERS_SLATE_LOADING_HINT, PLAYERS_SLATE_CUT_HINT,
+    ].some((h) => h.startsWith('Playing today') || h.startsWith('Next slate')));
+check('the Teams chip stays disabled while the previous sport\'s slate is still in state',
+  slateChipDisabled(true, true) === true);
+check('the Teams chip stays disabled with no slate', slateChipDisabled(false, false) === true);
+check('the Teams chip is tappable once this sport\'s slate has teams',
+  slateChipDisabled(false, true) === false);
+check('an ET rollover is a different slate read',
+  slateReadKey('NFL', '2026-10-09') !== slateReadKey('NFL', '2026-10-10'));
+check('a sport switch is a different slate read',
+  slateReadKey('NFL', '2026-10-09') !== slateReadKey('NBA', '2026-10-09'));
+check('fixtureSubline: a line-only row names its game, not a team it does not know',
+  /· HOU @ TEN$/.test(fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, null) ?? '') &&
+  fixtureSubline({ away_team: 'HOU', home_team: 'TEN', commence_time: '2026-10-11T17:00:00Z' } as never, 'Live') === 'Live · HOU @ TEN' &&
+  fixtureSubline({ away_team: null, home_team: 'TEN' } as never, null) === null);
+check('the TD exemption does not leak to other stats',
+  !isStatParticipant('NFL', [0, 0], { statKey: 'passing_yards', rows: [{ carries: 9 }] }));
+
+// A touch-set response is not awaited, so it can land after the user has
+// switched sport or player type and overwrite the set that is already on
+// screen. Modelled the way StatsScreen.load does it: each load writes its
+// stamp into inFlight, and a response may commit only while that stamp is
+// still the one in flight.
+type TouchSet = { key: string; ids: Set<string> };
+function landTouch(
+  inFlight: string,
+  current: TouchSet | null,
+  stamp: string,
+  touchKey: string,
+  ids: string[],
+): TouchSet | null {
+  return touchSetFromResponse(inFlight, stamp, touchKey, new Set(ids)) ?? current;
+}
+const stampNflRb = 'NFL|rb|season|hitRate|rush_rec_tds||';
+const stampNcaaf = 'NCAAF|wrte|season|hitRate|rush_rec_tds||';
+const stampNflWr = 'NFL|wrte|season|hitRate|rush_rec_tds||';
+let inFlight = stampNflRb;
+let touch: TouchSet | null = null;
+// The NFL read is still in flight when the board switches to NCAAF. NCAAF
+// lands first; the NFL response arrives after it.
+inFlight = stampNcaaf;
+touch = landTouch(inFlight, touch, stampNcaaf, 'NCAAF|wrte', ['bowers']);
+touch = landTouch(inFlight, touch, stampNflRb, 'NFL|rb', ['lineman']);
+check('a late touch set after a sport switch keeps the current key',
+  touch?.key === 'NCAAF|wrte' && touch.ids.has('bowers') && !touch.ids.has('lineman'),
+  touch ? `${touch.key}:${[...touch.ids].join()}` : 'null');
+// Same shape for a player-type switch: RB's response must not replace WR/TE.
+inFlight = stampNflWr;
+touch = landTouch(inFlight, touch, stampNflWr, 'NFL|wrte', ['pickens']);
+touch = landTouch(inFlight, touch, stampNcaaf, 'NCAAF|wrte', ['bowers']);
+check('a late touch set after a playerType switch keeps the current key',
+  touch?.key === 'NFL|wrte' && touch.ids.has('pickens') && !touch.ids.has('bowers'),
+  touch ? `${touch.key}:${[...touch.ids].join()}` : 'null');
+touch = landTouch(inFlight, touch, stampNflWr, 'NFL|wrte', ['pickens', 'lamb']);
+check('the touch set for the load still in flight still commits',
+  touch?.key === 'NFL|wrte' && touch.ids.has('lamb') && touch.ids.has('pickens'));
+
+// A failed touch read used to resolve to undefined and leave `touched`
+// unset, so Season/H2H Anytime TD fell open to anyone with games and stayed
+// there. A failure keeps a set only when it is already for this key, records
+// the key so the next load retries, and with nothing kept asks the board to
+// show the error line instead of that wide list.
+const good = { key: 'NFL|qb', ids: new Set(['mahomes']) };
+const failedWithSet = touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|qb');
+check('a failed touch read keeps the last good set for the same key',
+  failedWithSet === 'NFL|qb' && good.ids.has('mahomes')
+  && touchBoardView(true, good.key, 'NFL|qb', true) === 'list'
+  && shouldFetchTouchSet(true, true, true));
+const failedWithout = touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|qb');
+check('a failed touch read with no set is an error, not the wide list',
+  failedWithout === 'NFL|qb'
+  && touchBoardView(true, null, 'NFL|qb', true) === 'error'
+  && shouldFetchTouchSet(true, false, true));
+const failedOtherKey = touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|wrte');
+check('a failure for another key does not drop the set that was kept',
+  failedOtherKey === 'NFL|wrte' && good.key === 'NFL|qb' && good.ids.has('mahomes')
+  && touchBoardView(true, good.key, 'NFL|wrte', true) === 'error');
+check('the touch-set error line for offline',
+  touchSetErrorLine('offline')
+  === 'Couldn’t load this list. You’re offline. Check your connection, then try again.');
+check('the touch-set error line for a slow response',
+  touchSetErrorLine('slow')
+  === 'Couldn’t load this list. Signalbase is slow to respond right now. Try again in a moment.');
+check('the touch-set error line for an expired session',
+  touchSetErrorLine('auth')
+  === 'Couldn’t load this list. Your session has expired. Try again, or sign out and back in.');
+check('the touch-set error line for a server failure',
+  touchSetErrorLine('server')
+  === 'Couldn’t load this list. Something went wrong on our side. Try again in a moment.');
+check('a missing touch-set cause still shows the server line',
+  touchSetErrorLine(null) === touchSetErrorLine('server')
+  && touchSetErrorLine(undefined) === touchSetErrorLine('server')
+  && errorAnnouncement(touchSetCopy(null)) === touchSetErrorLine('server')
+  && errorAnnouncement(touchSetCopy(undefined)) === touchSetErrorLine('server'));
+check('the alert reads the same sentence as the line',
+  (['offline', 'slow', 'auth', 'server'] as const).every((k) =>
+    errorAnnouncement(touchSetCopy(k)) === touchSetErrorLine(k)));
+// The user has moved on: the failure belongs to a load that is no longer in
+// flight, so it must not mark the new key failed.
+inFlight = stampNcaaf;
+const staleFail = touchSetAfterFailure(null, inFlight, stampNflRb, 'NFL|qb');
+check('a stale touch failure does not mark the new key failed',
+  staleFail === null
+  && touchBoardView(true, 'NCAAF|wrte', 'NCAAF|wrte', false) === 'list');
+check('an abort of the touch read still on screen records a failure',
+  touchRejectionRecordsFailure(stampNflRb, stampNflRb)
+  && touchSetAfterFailure(null, stampNflRb, stampNflRb, 'NFL|qb') === 'NFL|qb'
+  && touchBoardView(true, null, 'NFL|qb', true) === 'error');
+check('an abort from a superseded stamp is ignored',
+  !touchRejectionRecordsFailure(stampNcaaf, stampNflRb)
+  && touchSetAfterFailure('NCAAF|wrte', stampNcaaf, stampNflRb, 'NFL|qb') === 'NCAAF|wrte');
+check('an empty touch total is not committed, and the last good set stays',
+  touchCommitAction(stampNflRb, stampNflRb, 0) === 'fail'
+  && touchSetFromResponse(stampNflRb, stampNflRb, 'NFL|qb', new Set()) === null
+  && landTouch(stampNflRb, good, stampNflRb, 'NFL|qb', []) === good
+  && touchCommitAction(stampNcaaf, stampNflRb, 0) === 'ignore');
+check('the list stays on its skeleton until the touch set for this key resolves',
+  touchBoardView(true, null, 'NFL|qb', false) === 'loading'
+  && touchBoardView(true, undefined, 'NFL|qb', false) === 'loading'
+  && touchBoardView(false, null, 'NFL|qb', false) === 'list');
+check('a good set is not refetched, and a failed key is',
+  !shouldFetchTouchSet(true, true, false) && shouldFetchTouchSet(true, false, false)
+  && !shouldFetchTouchSet(false, false, true));
+
+const statsBoardSrc = readFileSync(join(import.meta.dirname, '..', 'src/lib/statsBoard.ts'), 'utf-8');
+const statsScreen = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
+const touchCatch = /\.catch\(\(e: unknown\) => \{([\s\S]*?)\n            \}\);/.exec(statsScreen)?.[1] ?? '';
+check('StatsScreen commits the touch set only through touchSetFromResponse',
+  /touchSetFromResponse\(inFlight\.current, stamp, touchKey, ids\)/.test(statsScreen)
+  && /touchCommitAction\(inFlight\.current, stamp, ids\.size\)/.test(statsScreen)
+  && /if \(!next\) return;/.test(statsScreen)
+  && /setTouchSet\(next\)/.test(statsScreen)
+  && !/setTouchSet\(\{/.test(statsScreen)
+  && !/\.catch\(\(\) => undefined\)/.test(statsScreen)
+  && /touchSetAfterFailure\(/.test(statsScreen)
+  && /shouldFetchTouchSet\(/.test(statsScreen)
+  && /touchBoardView\(/.test(statsScreen)
+  && /touchSetCopy\(touchFailure\?\.kind\)/.test(statsScreen)
+  && /<ErrorState/.test(statsScreen)
+  && /onRetry=\{\(\) => void load\(\)\}/.test(statsScreen)
+  && /seasonTouchFlag\(/.test(statsScreen)
+  && /touchView !== 'list' \? EMPTY_ROWS : hitRatePlayers/.test(statsScreen)
+  && /emptyLabel=\{touchView === 'error' \? 'Couldn’t load this list\. Pull down to retry\.' : undefined\}/.test(statsScreen)
+  && /touchRejectionRecordsFailure\(inFlight\.current, stamp\)/.test(touchCatch)
+  && !/if \(isAbortError\(e\)\) return;/.test(touchCatch)
+  && !/setTouchSet\(/.test(touchCatch)
+  && /export function touchRejectionRecordsFailure\(inFlight: string \| null, stamp: string\): boolean/.test(statsBoardSrc)
+  && !/function touchRejectionRecordsFailure\([^)]*_aborted/.test(statsBoardSrc));
+
 // ── The row subline: when the game starts, and against whom ────────────────
 // Matt, 2026-09-05: "add the time of the game and who they are playing under
 // the name … for all sports". Built off `games`, so what is pinned here is
@@ -328,6 +612,35 @@ check(
     slateGameFor({ team: 'SF' }, buildSlateGameIndex(nflSlate, { date: SUB_TODAY, keys: new Set(['SF']), isToday: true }, NOW))?.game ?? null,
     null,
   ) ?? '').endsWith('· @ SEA'),
+);
+
+// Thursday's slate must not blank a Sunday team. The slate index wins when
+// the team is on that date; otherwise the next game already loaded for H2H.
+const thuIdx = buildSlateGameIndex(
+  [subGame({ game_id: 'thu-kc', sport: 'NFL', home_team: 'KC', away_team: 'BAL' })],
+  { date: SUB_TODAY, keys: new Set(['KC', 'BAL']), isToday: true },
+  NOW,
+);
+const sunBuf = subGame({
+  game_id: 'sun-buf',
+  sport: 'NFL',
+  home_team: 'BUF',
+  away_team: 'MIA',
+  game_date: '2099-01-08',
+  commence_time: '2099-01-08T18:00:00Z',
+});
+const nextBuf = new Map([['BUF', { game: sunBuf, opponent: 'MIA', isHome: true }]]);
+check(
+  'a team on the slate date keeps that game over a later one',
+  fixtureForRow({ team: 'KC', player_name: 'P. Mahomes' }, thuIdx, nextBuf)?.game.game.game_id === 'thu-kc',
+);
+check(
+  'a team missing from the slate date uses its next loaded game',
+  fixtureForRow({ team: 'BUF', player_name: 'J. Allen' }, thuIdx, nextBuf)?.game.opponent === 'MIA',
+);
+check(
+  'a row with no team and no slate game stays blank',
+  fixtureForRow({ team: null, player_name: 'Nobody' }, thuIdx, nextBuf) === null,
 );
 
 // ── Next game in a multi-day window (team / player detail) ──

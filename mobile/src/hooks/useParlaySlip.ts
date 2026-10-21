@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
  * resolves these keys against today's live picks and packages them into one
  * parlay, and the persistent betslip bar (components/BetslipBar) prices the
  * same keys from every page. Persisted to AsyncStorage and shared across screens via a module-level
- * store + listeners (same pattern as useSportFilter / useKellySettings). Custom
+ * store + listeners (same pattern as useSportFilter / useOnboarding). Custom
  * hand-entered legs are NOT stored here — they live in the Parlay screen's
  * session state, same as auto mode.
  *

@@ -91,7 +91,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
           <InfoTooltip
             title="Place this bet at"
             body={
-              'Every book we price this slip at, best payout first. Tap one to place the slip there.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nBooks can’t accept a whole parlay from a link, so you add each leg once you’re there — the sheet lists them in order.\n\nThis row is every book, not just the ones you selected in Settings. The slip is always priced and modelled at DraftKings, whichever book you place it at.'
+              'Every book we price this slip at, best payout first. Tap one to place the slip there.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nOpening a book puts every linked leg on that book’s slip when the book accepts a multi-pick link. A book that doesn’t still lists each leg so you can add it there.\n\nThis row is every book, not just the ones you selected in Settings. The slip is always priced and modelled at DraftKings, whichever book you place it at.'
             }
             accessibilityLabel="About placing this bet"
           />
@@ -197,6 +197,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   tile: {
+    // Declared tap floor (verify_a11y); the tile is already ~65pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     width: 86,
     alignItems: 'center',
     backgroundColor: colors.bgGrouped,
@@ -228,7 +231,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   badgeTextDk: {
-    color: '#000',
+    color: colors.textPrimary,
   },
   odds: {
     fontSize: font.size.callout,

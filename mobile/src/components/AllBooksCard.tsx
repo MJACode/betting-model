@@ -3,15 +3,13 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   allBookPrices,
+  allBooksLineSource,
   bookName,
   formatSideLine,
-  gameMarketForModel,
   isBettableBook,
-  propMarketForModel,
-  MODEL_BOOK,
+  marketForPick,
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
-import { lineBook } from '@/lib/decisionPrice';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
@@ -28,19 +26,30 @@ import type { BookPricedRow, Pick } from '@/types';
  * The line is shown next to the price because a better price on a worse number
  * is not actually a better bet — the user needs to see both.
  *
- * No row is marked as "yours": the book picker sets the Stats lines and the
- * betslip's bet button, and it does not reach the pick boards
- * (Matt, 2026-09-04).
+ * Since 2026-10-19 (Matt) the detail screen passes the member's books, and a
+ * book outside them is not listed: a price they cannot bet in their state is
+ * not a comparison they can use.
  */
 export function AllBooksCard({
   pick,
   bookRows,
+  allowedBooks,
 }: {
   pick: Pick;
   bookRows: BookPricedRow[] | undefined;
+  /** The member's own books. Rows at any other book are not shown (Matt,
+   *  2026-10-19). Omitted: every book the feed carries. */
+  allowedBooks?: readonly string[];
 }) {
-  const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
-  const quotes = allBookPrices(bookRows ?? [], pick.pick_side, market);
+  // marketForPick reads a multi-market rule's prop_market off the row; without
+  // it those picks' rows drew with no Line column, a price at another number
+  // looking like the same bet.
+  const market = marketForPick(pick);
+  const mine = allowedBooks ? new Set(allowedBooks) : null;
+  const rows = (bookRows ?? []).filter((r) => mine == null || mine.has(r.bookmaker));
+  const quotes = allBookPrices(rows, pick.pick_side, market);
+  // Whose line it is: the "modeled" row and the footnote (allBooksLineSource).
+  const lineSource = allBooksLineSource(pick);
 
   // One book pricing a side isn't a comparison — nothing to shop.
   if (quotes.length < 2) return null;
@@ -49,10 +58,11 @@ export function AllBooksCard({
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>All books</Text>
+      <Text style={styles.title}>{mine ? 'Your books' : 'All books'}</Text>
       <Text style={styles.subtitle}>
-        Every book and line, including ones at a different number or that you can’t bet.
-        Best payout first.
+        {mine
+          ? 'Every line at your books, including ones at a different number. Best payout first.'
+          : 'Every book and line, including ones at a different number or that you can’t bet. Best payout first.'}
       </Text>
 
       <View style={styles.headerRow}>
@@ -70,6 +80,8 @@ export function AllBooksCard({
           <Pressable
             key={q.bookmaker}
             style={[styles.row, reference && styles.rowReference]}
+            // ~38-46pt row (one or two lines); 3pt slop tops up the one-line case.
+            hitSlop={{ top: 3, bottom: 3, left: 0, right: 0 }}
             accessibilityRole="button"
             accessibilityState={{ disabled: reference }}
             disabled={reference}
@@ -90,7 +102,7 @@ export function AllBooksCard({
                 {bookName(q.bookmaker)}
               </Text>
               <View style={styles.tagRow}>
-                {q.bookmaker === (lineBook(pick) ?? MODEL_BOOK) ? (
+                {q.bookmaker === lineSource.modeledBook ? (
                   <Text style={styles.modelTag}>modeled</Text>
                 ) : null}
                 {reference ? <Text style={styles.modelTag}>reference</Text> : null}
@@ -116,9 +128,7 @@ export function AllBooksCard({
       })}
 
       <Text style={styles.footnote}>
-        {lineBook(pick)
-          ? `The line is ${bookName(lineBook(pick)!)}’s — DraftKings doesn’t post this one, so it can’t go in a DraftKings slip. `
-          : `The line is DraftKings’. Parlays are priced at DraftKings. `}
+        {lineSource.note}
         Edge and stake use the price the pick was decided at. Tap a book to
         open its betslip (reference books excluded).
       </Text>
@@ -185,10 +195,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
-  priceBest: { color: colors.positive },
+  priceBest: { color: colors.betInk },
   bestTag: {
     fontSize: font.size.caption,
-    color: colors.positive,
+    color: colors.betInk,
     fontWeight: '600',
   },
   footnote: {

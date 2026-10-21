@@ -65,6 +65,37 @@ def test_artifact_deserialises(path: Path):
         with open(path, "rb") as fh:
             artifact = pickle.load(fh)
     assert artifact is not None
+    if isinstance(artifact, dict) and artifact.get("kind") == "nba_prop_projection":
+        # Two stages, not one estimator (models/nba_prop_projection.py): a minutes model and
+        # one per-minute rate model per base stat, plus the widths and maps that price them.
+        assert artifact["minutes"]["model"] is not None, f"{path.name}: no minutes model"
+        assert artifact["rates"] and all(r["model"] is not None for r in artifact["rates"].values()), (
+            f"{path.name}: a rate model is missing")
+        assert artifact["alphas"] and artifact["calibration"], f"{path.name}: no widths or maps"
+        return
+    if isinstance(artifact, dict) and artifact.get("kind") == "nba_total_luck":
+        # A rule's parameters, not an estimator (models/nba_total_luck.py): the
+        # residual sample the offer is priced with, per season, and the gap >= 3
+        # bucket's per-season counts its probability's uplift is fitted on.
+        assert artifact["model"] is None
+        seasons = {int(s) for s, _ in artifact["close_resid"]}
+        assert {2021, 2022, 2023, 2024, 2025, 2026} <= seasons, f"{path.name}: residual seasons {seasons}"
+        assert len(artifact["close_resid"]) > 5000, f"{path.name}: too few residuals"
+        assert all(v["n"] > 0 for v in artifact["bucket"].values()), f"{path.name}: an empty bucket season"
+        return
+    if isinstance(artifact, dict) and artifact.get("kind") == "nba_team_total_luck":
+        # A rule's parameters, not an estimator (models/nba_team_total_luck.py):
+        # each team's score around the team total Pinnacle's full-game close
+        # implies, two rows a game per season, and the home under bucket's
+        # per-season counts its probability's uplift is fitted on. 2026-27 is
+        # priced on 14,460 rows (2020-21 .. 2025-26).
+        assert artifact["model"] is None
+        seasons = {int(s) for s, _ in artifact["tt_resid"]}
+        assert {2021, 2022, 2023, 2024, 2025, 2026} <= seasons, f"{path.name}: residual seasons {seasons}"
+        assert len(artifact["tt_resid"]) >= 14000, f"{path.name}: too few residuals"
+        assert {2024, 2025, 2026} <= {int(s) for s in artifact["bucket"]}, f"{path.name}: bucket seasons"
+        assert all(v["n"] > 0 for v in artifact["bucket"].values()), f"{path.name}: an empty bucket season"
+        return
     if isinstance(artifact, dict):
         assert "model" in artifact, f"{path.name} has no 'model' key"
         # A NULL `model` is legitimate for a RULE. ncaaf_spread and

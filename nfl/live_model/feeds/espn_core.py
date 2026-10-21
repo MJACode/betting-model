@@ -252,7 +252,20 @@ def parse_core_event(ev: dict, fetch) -> dict | None:
         "away_abbrev": away_abbrev,
         "home": home_abbrev, "away": away_abbrev,
         "season_type": season_type(ev),
+        # Carries so far, per player, for the rushing model. Built HERE because
+        # this is where the core fetcher is in scope -- `live_events` creates
+        # it and discards it, so the worker has no way to chase a ref later.
+        # Swallowed: a missing accrual must cost a bet, never a state.
+        "rushing_accrued": _safe_rushing(ev, fetch),
     }
+
+
+def _safe_rushing(ev: dict, fetch) -> dict:
+    try:
+        return rushing_accrued(ev, fetch)
+    except Exception as e:                          # noqa: BLE001
+        log.debug("core rushing accrual unavailable: %s", e)
+        return {}
 
 
 def _yardline_from_core(situation: dict, possession: str | None):
@@ -267,3 +280,62 @@ def _yardline_from_core(situation: dict, possession: str | None):
     if v is None or not (0 <= v <= 100):
         return None
     return 100 - v if possession else None
+
+
+_CAR_IN_LEADER = re.compile(r"^\s*(\d+)\s*CAR\b", re.IGNORECASE)
+
+
+def rushing_accrued(ev: dict, fetch) -> dict:
+    """
+    Carries so far this game, per player, from the CORE host.
+
+    WHY THIS IS NOT READ FROM THE BOXSCORE. The boxscore that carries a clean
+    `CAR` column per player belongs to the SITE host, and core is the only host
+    that answers the Railway worker -- so on the machine that actually places
+    bets, that document does not exist. Core's per-athlete statistics endpoint
+    (`.../roster/{athleteId}/statistics/0`) answers 404 for every player,
+    measured on a full slate. What core does carry is the competition's
+    `leaders` document, whose rushing entries read "18 CAR, 81 YDS, 1 TD".
+
+    COVERAGE, MEASURED RATHER THAN HOPED. Against every rush-attempt prop
+    DraftKings listed on the 2026-09-18 slate, the leaders covered 79 of 82
+    players (96.3%); the three misses were backups with almost no carries. That
+    is the right shape of coverage for this model, because the players a book
+    hangs a rushing line on are the players who lead their team in rushing.
+
+    A MISS IS SAFE, NOT SILENT. A player absent here simply has no entry, and
+    `rush_attempt_pace.under_prob` refuses to price a quote whose accrued count
+    is missing. So a name the feed spells differently costs a bet; it can never
+    cause one at the wrong number.
+
+    Keys are `flow_validate.norm_name` form so the Odds API's "Aaron Jones" and
+    ESPN's "Aaron Jones Sr." land on the same entry.
+    """
+    from nfl.live_model.backtest.flow_validate import norm_name
+
+    out: dict[str, int] = {}
+    comps = (ev or {}).get("competitions") or []
+    if not comps:
+        return out
+    lead = comps[0].get("leaders")
+    if not lead:
+        return out
+    doc = _deref(lead if isinstance(lead, dict) else {"$ref": lead}, fetch,
+                 need="categories")
+    for cat in (doc.get("categories") or []):
+        if (cat.get("name") or "") != "rushingLeader":
+            continue
+        for entry in (cat.get("leaders") or []):
+            m = _CAR_IN_LEADER.match(str(entry.get("displayValue") or ""))
+            if not m:
+                continue
+            ath = _deref(entry.get("athlete") or {}, fetch, need="displayName")
+            name = ath.get("displayName")
+            if not name:
+                continue
+            key = norm_name(name)
+            if key:
+                # Highest wins: the same athlete can appear under more than one
+                # leader category, and a stale ref must never lower a count.
+                out[key] = max(out.get(key, 0), int(m.group(1)))
+    return out

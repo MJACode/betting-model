@@ -29,11 +29,10 @@ type Case = {
   win: number; capped: boolean; priced: boolean; fmt: string;
 };
 const cases: Case[] = JSON.parse(fs.readFileSync(FIXTURE, 'utf8')).cases;
-const DEFAULT = { multiplier: 1, cap: null };
 
 let failures = 0;
 for (const c of cases) {
-  const s = stakeFor(c.kelly, c.odds, DEFAULT);
+  const s = stakeFor(c.kelly, c.odds);
   const diffs: string[] = [];
   if (Math.abs(s.conviction - c.conviction) > 1e-9) diffs.push(`conviction ${s.conviction} != ${c.conviction}`);
   if (Math.abs(s.risk - c.risk) > 1e-6) diffs.push(`risk ${s.risk} != ${c.risk}`);

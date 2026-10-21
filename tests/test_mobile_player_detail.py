@@ -166,7 +166,7 @@ def test_results_are_units_never_dollars_and_never_paper():
         src = _read(p)
         assert "formatCurrency" not in src, f"{p.name} formats a result as money"
         assert not re.search(r"\$\d", src), f"{p.name} prints a dollar figure"
-        assert "paper" not in src.lower(), f"{p.name} mentions paper trading"
+        assert "paper" not in src.lower(), f"{p.name} mentions paper"
 
 
 def test_the_hook_is_plain_effects_only():

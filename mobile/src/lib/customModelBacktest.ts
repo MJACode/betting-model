@@ -13,7 +13,7 @@
  */
 
 import { isOutcomeGraded, pickMatchesModel } from './customModelFilters';
-import { flatPnl, isModelRetired, passesRecordFilter } from './thresholds';
+import { flatPnl, isDuplicateCopy, isModelRetired, passesRecordFilter, publishedRecordKeeps } from './thresholds';
 import type { CustomModel, CustomModelRule, SettledPick, SignalType } from '@/types';
 
 export interface CustomModelStats {
@@ -151,6 +151,10 @@ export function computeCustomModelStats(model: CustomModel, settled: SettledPick
 
   for (const p of settled) {
     if (!pickMatchesModel(p, model)) continue;
+    // One bet stored under two game ids counts once (mike, 2026-10-09). The
+    // labelled copy keeps its real result, so the W/L/P check below would
+    // count it: skip it here, as passesRecordFilter does for built-in models.
+    if (isDuplicateCopy(p)) continue;
     // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
     // would otherwise inflate the count vs the displayed record.
     if (p.result === 'WIN') wins++;
@@ -199,6 +203,9 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
     // showed its settled bets. The custom-model callers keep passesActionFilter:
     // "what would this filter do" is a different question.
     if (!passesRecordFilter(p)) continue;
+    // Discord still has the lock. An omitted or unknown stamp stays, so a
+    // ledger outage does not zero the fallback behind the published view.
+    if (!publishedRecordKeeps(p)) continue;
     // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
     // would otherwise inflate the count vs the displayed record.
     if (p.result === 'WIN') wins++;

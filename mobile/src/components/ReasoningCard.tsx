@@ -6,14 +6,10 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import {
-  KELLY_MULTIPLIER,
   isProbOnlyModel,
   stakeFor,
   formatUnits,
-  MAX_CONVICTION,
   MAX_RISK_UNITS,
-  UNIT_KELLY_FRACTION,
-  type KellySizingOpts,
   isUnlockedPreview,
   passesActionFilter,
 } from '@/lib/thresholds';
@@ -27,14 +23,22 @@ import {
   storedQuoteBook,
 } from '@/lib/markets';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
+import { modelProbabilityNote } from '@/lib/modelMeta';
+import { reasoningHeading } from '@/lib/pickCta';
 
 interface Props {
   pick: Pick;
-  bankroll: number;
-  kelly: KellySizingOpts;
+  /** Paused model, never posted (isPausedForDisplay): no stake row — the
+   *  model's number is shown, but nothing sizes it as a bet. */
+  paused?: boolean;
+  /** The deciding book has not updated this price within the 3-hour bound
+   *  (markets.heroAmericanForPick `stale`; the card's "Old price"): no stake
+   *  row and no edge, as on the card. A stake is an instruction to bet at a
+   *  number the book no longer offers. */
+  stale?: boolean;
 }
 
-export function ReasoningCard({ pick, bankroll, kelly }: Props) {
+export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
   // Everything here is at the price the pick was DECIDED at (2026-09-09):
   // the best bettable price at the DraftKings line, DraftKings itself on
   // rows from before the flip.
@@ -48,22 +52,22 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
   // (2026-09-12). It shows the pick's own side, as the label does.
   const lineMarket = marketForPick(pick);
   const implied = pick.decision_implied_prob ?? pick.dk_implied_prob;
-  const stake = stakeFor(pick.kelly_fraction, odds, kelly);
+  const stake = stakeFor(pick.kelly_fraction, odds);
   // isProbOnlyModel, not the strict config mirror: a retired prob-only model's
   // pick must keep being explained the way it was made.
   const isProbOnly = isProbOnlyModel(pick.model_id);
-  const capLabel = kelly.cap != null ? `capped at ${formatPct(kelly.cap)}` : 'uncapped';
-  const multLabel =
-    kelly.multiplier === 1 ? '' : ` × ${kelly.multiplier.toFixed(2)}× aggressiveness`;
 
   return (
     <View style={styles.card}>
-      <Text style={styles.heading}>Why this bet?</Text>
+      {/* M14: "Why this bet?" only on a bet (lib/pickCta reasoningHeading). */}
+      <Text style={styles.heading}>
+        {reasoningHeading(pick.signal_type, { paused, preview: isUnlockedPreview(pick) })}
+      </Text>
 
       <Row
         label="Model probability"
         value={formatPct(pick.model_probability)}
-        sub="What our model says is the chance this side hits."
+        sub={modelProbabilityNote(pick.model_id)}
       />
 
       {odds != null ? (
@@ -80,11 +84,17 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
         />
       )}
 
-      {!isProbOnly ? (
+      {!isProbOnly && stale ? (
+        <Row
+          label="Edge"
+          value="—"
+          sub={`${bookFull} has not updated this price since the time shown above, so edge is not shown.`}
+        />
+      ) : !isProbOnly ? (
         <Row
           label="Edge"
           value={formatPctSigned(edge)}
-          tint={passesActionFilter(pick) ? colors.bet : pick.signal_type === 'AVOID' ? colors.avoid : undefined}
+          tint={passesActionFilter(pick) ? colors.betInk : pick.signal_type === 'AVOID' ? colors.avoidInk : undefined}
           sub={`= model ${formatPct(pick.model_probability)} − ${book} ${formatPct(implied)}. Positive means we think the side is mispriced in our favor.`}
         />
       ) : (
@@ -95,7 +105,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
         />
       )}
 
-      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) ? (
+      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) && !paused && !stale ? (
         <Row
           label="Stake"
           value={
@@ -110,7 +120,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
             (stake.capped
               ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `
               : '') +
-            `Conviction runs 1u–${formatUnits(MAX_CONVICTION)} (${formatUnits(MAX_CONVICTION)} = highest), scaled from tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied))${multLabel}, ${capLabel}. 1 unit = ${formatPct(UNIT_KELLY_FRACTION)} of roll. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. Tap Settings to change aggressiveness.`
+            `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake the Discord channel and push publish; it is not sized to a bankroll.`
           }
         />
       ) : null}

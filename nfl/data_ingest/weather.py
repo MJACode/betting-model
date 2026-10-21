@@ -41,15 +41,23 @@ scripts/validate_wind_forecast.py for the derivation.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 import requests
 
+log = logging.getLogger(__name__)
+
+# A CACHE of Supabase (CLAUDE.md section 1b). Every issued-forecast file here
+# is also a set of rows in `nfl_stadium_weather_hourly`: a window the table
+# already covers is read from the table and never re-fetched, and a window
+# fetched from Open-Meteo is written to the table in the same call. Created
+# on first write, not at import.
 CACHE = Path(os.environ.get("WX_CACHE", "data/weather_cache"))
-CACHE.mkdir(parents=True, exist_ok=True)
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 HISTFC_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
@@ -111,7 +119,84 @@ STADIUM_COORDS = {
     "MEX00": (19.3029, -99.1505), "GER00": (48.2188, 11.6247),
     "FRA00": (50.0686, 8.6455), "SAO00": (-23.5453, -46.4742),
     "MAD00": (40.4531, -3.6883),
+    # The ids nflverse uses for the 2026 games abroad (live games.csv,
+    # 2026-10-20). Coordinates from Wikipedia's coordinates API the same day;
+    # MUN01 and MAD01 are the venues GER00 and MAD00 already name, so they
+    # carry the same pair. DUB00/BER00: Dublin and Berlin hosted in 2025 under
+    # the home team's US id, so nflverse has no id for them; these are ours.
+    "MEL00": (-37.8200, 144.9833), "RIO00": (-22.9122, -43.2303),
+    "PAR00": (48.9244, 2.3600), "MAD01": (40.4531, -3.6883),
+    "MUN01": (48.2188, 11.6247), "DUB00": (53.3608, -6.2511),
+    "BER00": (52.5147, 13.2394),
 }
+
+# Every venue outside the home teams' own stadiums, by NAME, as nflverse has
+# spelled it. Keys are `_venue_key(name)`.
+#
+# WHY BY NAME. For a game abroad nflverse's `stadium_id` is the weakest field
+# it carries. In the 2025 schedule all seven games abroad carry the home
+# team's US id AND its US stadium name (Dublin is "PIT00 Acrisure Stadium").
+# In the 2026 schedule the names are right and, on 2026-10-20, eight of nine
+# ids are too -- but PHI @ JAX at Tottenham still carries JAX00, and the
+# schedule file the cards read until that date carried the home team's id for
+# all nine. Reading the id put two London wind BETs on Jacksonville's
+# forecast (3465055, 3583736). The name, checked against ESPN's venue for all
+# nine 2026 games abroad, was right every time.
+#
+# NEVER ADD A US STADIUM HERE. The failure above is nflverse writing the HOME
+# team's own name on a game abroad; a US name in this table would turn that
+# into a confident forecast at the wrong stadium. A neutral US site (a Super
+# Bowl, a relocated game) therefore resolves to nothing and is not forecast.
+NEUTRAL_VENUE_NAMES = {
+    "wembleystadium": "LON00", "wembley": "LON00",
+    "twickenhamstadium": "LON01", "twickenham": "LON01",
+    "tottenhamhotspurstadium": "LON02", "tottenhamstadium": "LON02",
+    "estadioazteca": "MEX00", "aztecastadium": "MEX00", "estadiobanorte": "MEX00",
+    "fcbayernmunichstadium": "MUN01", "allianzarena": "MUN01",
+    "deutschebankpark": "FRA00", "frankfurtstadium": "FRA00",
+    "arenacorinthians": "SAO00", "neoquimicaarena": "SAO00",
+    "bernabeu": "MAD01", "santiagobernabeu": "MAD01",
+    "estadiosantiagobernabeu": "MAD01", "santiagobernabeustadium": "MAD01",
+    "melbournecricketground": "MEL00",
+    "maracanastadium": "RIO00", "maracana": "RIO00", "estadiodomaracana": "RIO00",
+    "stadedefrance": "PAR00",
+    "crokepark": "DUB00",
+    "olympiastadion": "BER00", "olympiastadionberlin": "BER00",
+}
+
+
+def _venue_key(name) -> str:
+    """'Maracanã Stadium' -> 'maracanastadium'. Accents, case and punctuation go."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode()
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def resolve_venue(stadium_id, stadium, location) -> tuple[str | None, str]:
+    """(STADIUM_COORDS key, note) for one schedule row, or (None, why not).
+
+    The three raw nflverse fields as the games table stores them. A game is
+    NEUTRAL when nflverse says so or when its stadium name is a known venue
+    abroad (the file this replaces had PHI @ JAX at Tottenham as 'Home'). A
+    neutral game is resolved by name only -- see NEUTRAL_VENUE_NAMES for why
+    its id is never trusted -- and a home game by its id, only when nflverse
+    says 'Home'. Anything else is None: the wind card does not forecast a
+    game whose venue it cannot establish, and never falls back to the home
+    team's stadium.
+    """
+    sid = (str(stadium_id).strip() if stadium_id is not None else "") or None
+    loc = (str(location).strip() if location is not None else "") or None
+    by_name = NEUTRAL_VENUE_NAMES.get(_venue_key(stadium))
+    if by_name is not None:
+        return by_name, f"{stadium} (by name; nflverse id {sid or '-'})"
+    if loc == "Neutral":
+        return None, (f"neutral site {stadium or '?'} (nflverse id {sid or '-'}) "
+                      "is not in the venue table")
+    if loc != "Home":
+        return None, "the schedule row carries no venue yet"
+    if sid in STADIUM_COORDS:
+        return sid, ""
+    return None, f"stadium {sid or '?'} ({stadium or '?'}) has no coordinates"
 
 # Roof values that mean weather cannot affect the game.
 INDOOR_ROOFS = {"dome", "closed"}
@@ -138,7 +223,67 @@ INDOOR_ROOFS = {"dome", "closed"}
 # blank here is NOT eligible until the state is known. That loses nothing: if
 # the roof is in fact open, the state lands before kickoff and the game
 # re-qualifies inside the firing window.
-RETRACTABLE_STADIUMS = {"ATL97", "DAL00", "HOU00", "IND00", "PHO00"}
+RETRACTABLE_IN_HISTORY = {"ATL97", "DAL00", "HOU00", "IND00", "PHO00"}
+
+# Retractable venues ABROAD, which nflverse's history cannot show: they host
+# one game, so no 'open' or 'closed' row exists before it is played. The
+# Bernabeu's renovation added a retractable roof; ESPN lists the 2026-11-08
+# game there as indoor (scoreboard, 2026-10-20) and nflverse leaves its roof
+# blank. Until the venue came from the games table (2026-10-20) the card saw
+# this game at ATL97 and held it back as retractable; this keeps it held back
+# now that it is placed in Madrid.
+RETRACTABLE_ABROAD = {"MAD00", "MAD01"}
+RETRACTABLE_STADIUMS = RETRACTABLE_IN_HISTORY | RETRACTABLE_ABROAD
+
+# THE ROOF OF A GAME ABROAD IS THE VENUE'S, NEVER THE SCHEDULE ROW'S
+# (2026-10-21, mike's 2026-10-20 ask that the models read the real schedule).
+#
+# nflverse fills a FUTURE game's `roof` from the home team's US stadium -- the
+# same failure as its stadium id (NEUTRAL_VENUE_NAMES). In the 2026 schedule
+# Melbourne carries the Rams' 'dome', Paris the Saints' 'dome', Munich the
+# Lions' 'dome', and Rio and Madrid the blank of Dallas's and Atlanta's
+# retractable roofs. A 'dome' meant the wind model never forecast Paris or
+# Munich at all, placed or not.
+#
+# The venues' own record disagrees with every one of those copies. ESPN's
+# scoreboard `venue.indoor`, fetched 2026-10-21 for all 22 games abroad from
+# 2022 to 2026: False at every venue below except the Bernabeu (True, both
+# games). nflverse's record of games already PLAYED says the same: Wembley
+# 'outdoors' 26 of 26, Tottenham 10 of 10, Twickenham 3, Azteca 5, Allianz
+# Arena 2, Frankfurt 2, Sao Paulo 1.
+#
+# None marks a retractable roof: there the row counts only when it carries an
+# observed state ('open' / 'closed'); anything else is an unknown state, and
+# the game is held back (RETRACTABLE_ABROAD). Every venue the name table can
+# resolve to must be here -- a venue abroad with no entry would fall back to
+# the home team's roof, which is the bug.
+#
+# The STORED roof is left exactly as nflverse wrote it. The NFL prop models
+# read nfl_team_game_stats.roof as a feature, and this is the wind card's
+# reading of where the game is played, not a correction to their inputs.
+VENUE_ROOF_ABROAD = {
+    "LON00": "outdoors", "LON01": "outdoors", "LON02": "outdoors",
+    "MEX00": "outdoors", "GER00": "outdoors", "MUN01": "outdoors",
+    "FRA00": "outdoors", "SAO00": "outdoors", "RIO00": "outdoors",
+    "MEL00": "outdoors", "PAR00": "outdoors", "DUB00": "outdoors",
+    "BER00": "outdoors",
+    "MAD00": None, "MAD01": None,
+}
+
+
+def venue_roof(stadium_id, row_roof):
+    """The roof to judge a game by: the venue's abroad, the row's at home.
+
+    `stadium_id` is the RESOLVED venue (resolve_venue), `row_roof` the value
+    on the schedule row. A home game keeps its row's value untouched.
+    """
+    if stadium_id not in VENUE_ROOF_ABROAD:
+        return row_roof
+    fixed = VENUE_ROOF_ABROAD[stadium_id]
+    if fixed is not None:
+        return fixed
+    observed = str(row_roof).strip().lower() if isinstance(row_roof, str) else ""
+    return observed if observed in ("open", "closed") else None
 
 
 def open_air_mask(games) -> "pd.Series":
@@ -173,6 +318,7 @@ def _get(url: str, params: dict, key: str | None, retries: int = 5, timeout: int
             if r.status_code == 200:
                 d = r.json()
                 if cp is not None:
+                    cp.parent.mkdir(parents=True, exist_ok=True)
                     tmp = cp.with_suffix(".tmp")
                     tmp.write_text(json.dumps(d))
                     os.replace(tmp, cp)
@@ -209,24 +355,129 @@ def fetch_era5(sid: str, start: str, end: str) -> pd.DataFrame:
                            "temperature_2m": "era5_temp", "precipitation": "era5_precip"})
 
 
+ISSUED_TABLE = "nfl_stadium_weather_hourly"
+ALL_LEADS = (1, 2, 3, 4, 5, 6, 7)
+
+
+def _issued_columns(leads) -> dict[str, str]:
+    """table column -> frame column, in the frame's order."""
+    # the same order _frame() produces from an API response
+    cols = {"wind_analysis_mph": "om_analysis", "temp_f": "om_temp", "precip_mm": "om_precip"}
+    cols.update({f"fc_d{i}_mph": f"fc_d{i}" for i in leads})
+    return cols
+
+
+def _issued_from_supabase(sid: str, start: str, end: str, leads) -> pd.DataFrame | None:
+    """
+    The window [start 00:00, end 23:00] UTC from `nfl_stadium_weather_hourly`,
+    in the shape fetch_issued_forecasts returns -- or None when any hour is
+    missing, any requested lead is NULL on any hour, or the database cannot
+    be reached (no DATABASE_URL, the sandbox), in which case the caller falls
+    through to the cache file and then the API. A partial window is never
+    returned: the replays run wind_at_kickoff over the whole season and a gap
+    would read as a missing game, not as a missing hour.
+    """
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+    except Exception as exc:                 # noqa: BLE001 -- no DB is a normal state here
+        log.info(f"{ISSUED_TABLE} not reachable ({exc.__class__.__name__}); using the file/API")
+        return None
+    cols = _issued_columns(leads)
+    lo = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+    hi = datetime.fromisoformat(end).replace(tzinfo=timezone.utc) + timedelta(days=1)
+    try:
+        rows = conn.execute(
+            f"SELECT ts, {', '.join(cols)} FROM {ISSUED_TABLE} "
+            "WHERE stadium_id = %s AND ts >= %s AND ts < %s ORDER BY ts",
+            (sid, lo, hi),
+        ).fetchall()
+    except Exception as exc:                 # noqa: BLE001
+        log.warning(f"{ISSUED_TABLE} read failed ({exc}); using the file/API")
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:                    # noqa: BLE001
+            pass
+    expected = int((hi - lo).total_seconds() // 3600)
+    if len(rows) != expected:
+        log.info(f"{ISSUED_TABLE}: {sid} {start}..{end} holds {len(rows)}/{expected} hours; fetching")
+        return None
+    lead_idx = [1 + k for k, c in enumerate(cols) if c.startswith("fc_d")]
+    if any(r[i] is None for r in rows for i in lead_idx):
+        log.info(f"{ISSUED_TABLE}: {sid} {start}..{end} lacks a requested lead; fetching")
+        return None
+    out = pd.DataFrame({"stadium_id": sid,
+                        "ts": pd.to_datetime([r[0] for r in rows], utc=True)})
+    for k, dst in enumerate(cols.values(), start=1):
+        out[dst] = [None if r[k] is None else float(r[k]) for r in rows]
+    return out
+
+
+def _store_issued(payload: dict, name: str) -> int:
+    """
+    Write a freshly fetched issued-forecast response to `nfl_stadium_weather_hourly`
+    in the same call that fetched it (CLAUDE.md section 1b). Only a response
+    carrying every lead 1..7 is stored: the table's key is (stadium, hour) and
+    the insert is ON CONFLICT DO NOTHING, so a one-lead row written first
+    would block the full row forever. Returns rows written; 0 and a warning
+    when the database is unreachable -- the file on disk still exists, and
+    `python -m data.ingestors.nfl_weather_cache_import --apply` catches up.
+    """
+    hourly = payload.get("hourly") or {}
+    if any(f"wind_speed_10m_previous_day{i}" not in hourly for i in ALL_LEADS):
+        log.info(f"{name}: not every lead 1..7 requested; not stored (run the full pull to store)")
+        return 0
+    try:
+        from data.db import get_connection
+        from data.ingestors.nfl_weather_cache_import import _INSERT, rows_from_file
+        rows = rows_from_file(payload, name)
+        if not rows:
+            return 0
+        conn = get_connection()
+        try:
+            conn.executemany(_INSERT, rows)
+            conn.commit()
+        finally:
+            conn.close()
+        return len(rows)
+    except Exception as exc:                 # noqa: BLE001
+        log.warning(f"{name}: fetched but NOT stored in Supabase ({exc}); "
+                    "run data.ingestors.nfl_weather_cache_import --apply")
+        return 0
+
+
 def fetch_issued_forecasts(sid: str, start: str, end: str,
-                           leads=(1, 2, 3, 4, 5, 6, 7)) -> pd.DataFrame:
+                           leads=ALL_LEADS) -> pd.DataFrame:
     """
     Archived forecasts AS ISSUED N days before each timestamp. Leakage-free.
     Raises if the window predates ISSUED_FORECAST_START.
+
+    Three sources, in order: the cache file on disk; `nfl_stadium_weather_hourly`
+    when it holds every hour of the window; Open-Meteo, whose response is then
+    written to the table in the same call.
     """
     if end < ISSUED_FORECAST_START:
         raise OpenMeteoError(
             f"issued forecasts start {ISSUED_FORECAST_START}; requested window ends {end}. "
             "Before that date only the assembled near-analysis series exists, which leaks."
         )
+    key = f"issued_{sid}_{start}_{end}"
+    cached = (CACHE / f"{key}.json").exists()
+    if not cached:
+        stored = _issued_from_supabase(sid, start, end, leads)
+        if stored is not None:
+            return stored
     lat, lon = STADIUM_COORDS[sid]
     hourly = ["wind_speed_10m"] + [f"wind_speed_10m_previous_day{i}" for i in leads] + \
              ["temperature_2m", "precipitation"]
     p = {"latitude": lat, "longitude": lon, "start_date": start, "end_date": end,
          "hourly": ",".join(hourly), "wind_speed_unit": "mph",
          "temperature_unit": "fahrenheit", "timezone": "UTC"}
-    d = _get(HISTFC_URL, p, f"issued_{sid}_{start}_{end}")
+    d = _get(HISTFC_URL, p, key)
+    if not cached:
+        _store_issued(d, f"{key}.json")
     rename = {"wind_speed_10m": "om_analysis", "temperature_2m": "om_temp",
               "precipitation": "om_precip"}
     rename.update({f"wind_speed_10m_previous_day{i}": f"fc_d{i}" for i in leads})

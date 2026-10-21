@@ -4,10 +4,12 @@ import {
   fetchUpcomingUfcPicks,
   fetchUpcomingNflPicks,
   fetchUpcomingNcaafPicks,
+  fetchUpcomingNhlPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
-import { isModelPaused, isModelRetired } from '@/lib/thresholds';
-import { errorText } from '@/lib/errors';
+import { attachDiscordPublish, voidHiddenFromBoard } from '@/lib/discordPublish';
+import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
 
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
@@ -42,12 +44,37 @@ const NFL_AHEAD_DAYS = 11;
  * 107 games (924 `games` rows, 2,309 all-books rows), so every read is paged.
  */
 const NCAAF_AHEAD_DAYS = 150;
+/**
+ * Mirrors config.GAME_SCORE_AHEAD_DAYS for NHL. The scorer prices NHL (with
+ * MLB, NBA and WNBA) this far ahead of `game_date`; a DraftKings price is
+ * the real gate and this number is the outer bound. 7, not the NFL card's
+ * 11: NHL has no poll or prop horizon past this constant, and the board has
+ * to reach every date the scorer can write. A game exactly 7 days out is
+ * inside the window (`lte`), which is the 2026-09-29 opener read on
+ * 2026-09-22.
+ */
+const NHL_AHEAD_DAYS = 7;
 
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();
   const [data, setData] = useState<EnrichedPick[]>([]);
+  // PAUSED models' rows, kept apart from `data` (Matt, 2026-09-26: "NFL is only
+  // showing tackle bets. It should be all bets"). Eleven of twelve NFL prop
+  // models are paused, so hiding them left the NFL board a tackles board. Only
+  // the Picks screen's All segment reads this, and labels every card PAUSED.
+  // A paused pick Discord already POSTED stays in `data` (isPausedForDisplay):
+  // it is the bet of record, so it draws as one and the betslip can hold it;
+  // every other consumer of this hook (Signals, the sport badges, Models, the
+  // Stats pills, the betslip) still sees `data` alone, so the 2026-09-19 rule
+  // holds everywhere else. passesActionFilter already refuses a paused model,
+  // so none of these rows can be counted or drawn as a bet.
+  const [pausedData, setPausedData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  // At least one load has SUCCEEDED. Until then a count is unknown ("—"), not
+  // zero: `loading` alone can't say it, because every refresh sets it too
+  // (lib/loadState countsKnown, Designer #845).
+  const [loaded, setLoaded] = useState(false);
   // Reads that failed WITHOUT taking the board down: the odds views behind the
   // line pills, or one sport's look-ahead card. What failed, deduped, plus the
   // FIRST reason (the 2026-09-04 failure took three reads down with the same
@@ -62,6 +89,8 @@ export function useTodayPicks(date?: string) {
     const whats: string[] = [];
     let reason: string | null = null;
     const note = (what: string) => (e: unknown) => {
+      // A cancel is not a missing section: no partial banner for it.
+      if (isAbortError(e)) return;
       if (!whats.includes(what)) whats.push(what);
       if (reason == null) reason = errorText(e);
       console.warn(`[useTodayPicks] ${what} failed`, e);
@@ -71,15 +100,18 @@ export function useTodayPicks(date?: string) {
       return [] as EnrichedPick[];
     };
     try {
-      // Today's picks (all sports) + the upcoming UFC card. UFC events are
-      // weekly, so the UFC tab shows the next card's picks ahead of fight day.
+      // Today's picks (all sports) plus each look-ahead card. UFC, NFL and
+      // NCAAF have had one; NHL joined the scorer's 7-day game window
+      // (config.GAME_SCORE_AHEAD_DAYS) and was still same-day here, so a
+      // slate dated inside that window never reached the chip or the board.
       // The look-ahead fetches are enrichment — don't fail the whole feed on
       // them, but record each failure in `partial`.
-      const [rows, ufcRows, nflRows, ncaafRows] = await Promise.all([
+      const [rows, ufcRows, nflRows, ncaafRows, nhlRows] = await Promise.all([
         fetchPicksForDate(target, (what, e) => note(what)(e)),
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
         fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
+        fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
       // linger on the board for the rest of the day. A retired or paused
@@ -92,25 +124,29 @@ export function useTodayPicks(date?: string) {
       // count excluded it. The rows stay in the DB as the record of what was
       // published (§1c).
       //
-      // A VOIDED pick is dropped here for exactly the same reason, and it has
-      // to be HERE rather than only in passesActionFilter (2026-09-09). Five
-      // surfaces read this hook without ever calling that filter — the Today
-      // segment itself, the built-in and custom model screens, the Stats odds
-      // pill and the betslip hand-off — so a filter-only fix left all six
-      // voided wind picks rendering as green, stakeable BET cards while the
-      // header count above them excluded them. That is the retired-model bug
-      // this comment already describes, one row down. Both guards stay: this
-      // one for the board, passesActionFilter for the settled/server paths.
-      const all = [...rows, ...ufcRows, ...nflRows, ...ncaafRows].filter(
+      // A VOID the channel does not still show is dropped here, not only in
+      // passesActionFilter (2026-09-09). Five surfaces read this hook without
+      // that filter — the Today segment, both model screens, the Stats odds
+      // pill and the betslip hand-off. A VOID Discord already posted stays:
+      // the message is the bet (Matt, 2026-09-23). voidHiddenFromBoard is
+      // that split. passesActionFilter is the Signals / green-bet half.
+      const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...nhlRows];
+      const stamped = await attachDiscordPublish(merged.map((d) => d.pick));
+      const byId = new Map(stamped.map((p) => [p.pick_id, p]));
+      const all = merged.map((d) => ({
+        ...d,
+        pick: byId.get(d.pick.pick_id) ?? d.pick,
+      })).filter(
         (d) => !isGameOver(d.game, d.pick.sport)
           && !isModelRetired(d.pick.model_id)
-          && !isModelPaused(d.pick.model_id)
-          && d.pick.condition_status !== 'VOID',
+          && !voidHiddenFromBoard(d.pick),
       );
-      setData(all);
+      setData(all.filter((d) => !isPausedForDisplay(d.pick)));
+      setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
       setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
+      setLoaded(true);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -120,5 +156,5 @@ export function useTodayPicks(date?: string) {
     void load();
   }, [load]);
 
-  return { data, loading, error, partial, refresh: load, date: target };
+  return { data, pausedData, loading, loaded, error, partial, refresh: load, date: target };
 }

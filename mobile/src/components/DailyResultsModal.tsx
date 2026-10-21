@@ -11,18 +11,23 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, radii, spacing } from '@/lib/theme';
-import { addDays, formatAmerican, formatCurrencySigned, formatPctSigned } from '@/lib/format';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { friendlyCause } from '@/lib/errors';
+import { unitsSpeech } from '@/lib/a11y';
+import { addDays, formatAmerican } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
-import { RECORD_ONLY_MODELS } from '@/lib/thresholds';
+import { postedPickUnits } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
-import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import {
   ALL_SPORTS,
+  dayRoiText,
+  dayUnitsText,
+  dayWinRateText,
   EMPTY_DAILY,
   scopeDailyResults,
   type DailyResults,
   type DayGameSummary,
+  type DayStakeStats,
   type ModelDayStats,
   type SportDayBreakdown,
 } from '@/lib/dailyResults';
@@ -62,14 +67,29 @@ export function DailyResultsModal({
 }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [sportFilter, setSportFilter] = useState<string>('ALL');
+  // Sport cards open collapsed — the header carries the sport's record; a tap
+  // shows its models.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   // Snap the sport filter back to All every time the modal opens — a sticky
   // per-sport filter from a previous open would read as missing data.
   const wasVisible = useRef(false);
   useEffect(() => {
-    if (visible && !wasVisible.current) setSportFilter('ALL');
+    if (visible && !wasVisible.current) {
+      setSportFilter('ALL');
+      setExpanded(new Set());
+    }
     wasVisible.current = visible;
   }, [visible]);
+  // A new day starts collapsed too.
+  useEffect(() => setExpanded(new Set()), [date]);
+  const toggleSport = (sport: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(sport)) next.delete(sport);
+      else next.add(sport);
+      return next;
+    });
 
   const scoped = useMemo(() => scopeDailyResults(results, sportFilter), [results, sportFilter]);
 
@@ -86,12 +106,23 @@ export function DailyResultsModal({
           models: [],
           live: 0,
           pending: 0,
+          unpublished: 0,
         },
     ),
     ...results.sports.filter((s) => !ALL_SPORTS.includes(s.sport)),
   ];
   const visibleSections =
     sportFilter === 'ALL' ? sportSections : sportSections.filter((s) => s.sport === sportFilter);
+  // Sports that had picks come first (canonical order kept); the quiet ones are
+  // still listed — never dropped — but as one line underneath, so they don't
+  // split up the sports that did play.
+  const activeSections = visibleSections.filter(sportHasActivity);
+  const quietSections = visibleSections.filter((s) => !sportHasActivity(s));
+  // One sport filtered, or only one sport played: its card opens — collapsing
+  // the only card would add a tap and hide nothing.
+  const single = sportFilter !== 'ALL' || activeSections.length === 1;
+  const noPickSports = quietSections.filter((s) => s.unpublished === 0).map((s) => s.sport);
+  const notPostedSports = quietSections.filter((s) => s.unpublished > 0).map((s) => s.sport);
 
   // The displayed results can lag the selected date by one render while a new
   // day loads — treat that as loading so we never show day A under day B's header.
@@ -104,8 +135,9 @@ export function DailyResultsModal({
     !stale &&
     (results.overall.picks > 0 ||
       results.pending > 0 ||
-      results.gradedPicks.length > 0 || // record-only picks (HR) grade without counting
-      results.games.length > 0);
+      results.gradedPicks.length > 0 ||
+      results.games.length > 0 ||
+      results.unpublished > 0);
   const isYesterday = date === maxDate;
   const canPrev = date > minDate;
   const canNext = date < maxDate;
@@ -133,7 +165,7 @@ export function DailyResultsModal({
             hitSlop={12}
             style={styles.closeBtn}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel="Close daily results"
           >
             <Ionicons name="close" size={22} color={colors.textSecondary} />
           </Pressable>
@@ -142,6 +174,7 @@ export function DailyResultsModal({
         {/* Day navigation — always visible so an empty/error day isn't a dead end. */}
         <View style={styles.dateNav}>
           <Pressable
+            accessibilityRole="button"
             onPress={() => canPrev && onSelectDate(addDays(date, -1))}
             disabled={!canPrev}
             hitSlop={10}
@@ -155,6 +188,8 @@ export function DailyResultsModal({
             />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: calendarOpen }}
             onPress={() => setCalendarOpen((open) => !open)}
             hitSlop={8}
             accessibilityLabel="Pick a date"
@@ -169,6 +204,7 @@ export function DailyResultsModal({
             />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
             onPress={() => canNext && onSelectDate(addDays(date, 1))}
             disabled={!canNext}
             hitSlop={10}
@@ -206,7 +242,7 @@ export function DailyResultsModal({
         ) : error ? (
           <View style={styles.center}>
             <Text style={styles.error}>Couldn’t load this day’s results.</Text>
-            <Text style={styles.errorDetail}>{error}</Text>
+            <Text style={styles.errorDetail}>{friendlyCause(error)}</Text>
           </View>
         ) : !hasContent ? (
           <View style={styles.center}>
@@ -223,12 +259,18 @@ export function DailyResultsModal({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              style={styles.sportChipsFrame}
               contentContainerStyle={styles.sportChips}
             >
               {['ALL', ...ALL_SPORTS].map((s) => {
                 const active = sportFilter === s;
                 return (
                   <Pressable
+                    // ~30pt chip; the row's frame (sportChipsFrame) keeps this slop
+                    // inside the horizontal ScrollView.
+                    hitSlop={{ top: 7, bottom: 7, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                     key={s}
                     onPress={() => setSportFilter(s)}
                     style={[styles.sportChip, active && styles.sportChipActive]}
@@ -246,10 +288,13 @@ export function DailyResultsModal({
             {scoped.record.picks > 0 ? (
               <View style={styles.hero}>
                 <Text style={styles.heroLabel}>
-                  {sportFilter === 'ALL' ? 'All models' : sportFilter} — flat-bet ROI
+                  {sportFilter === 'ALL' ? 'All models' : sportFilter} — return on bets
                 </Text>
-                <Text style={[styles.heroRoi, { color: roiColor(scoped.record.roiFlat) }]}>
-                  {formatPctSigned(scoped.record.roiFlat)}
+                <Text
+                  style={[styles.heroRoi, { color: scoped.record.risked > 0 ? roiColor(scoped.record.roi) : colors.textSecondary }]}
+                  accessibilityLabel={scoped.record.risked > 0 ? undefined : 'Return on bets unavailable'}
+                >
+                  {dayRoiText(scoped.record.risked, scoped.record.roi)}
                 </Text>
                 <Text style={styles.heroRecord}>{recordLine(scoped.record)}</Text>
                 {/* How the day splits. Both halves count identically — a live
@@ -265,13 +310,14 @@ export function DailyResultsModal({
                 <View style={styles.heroStats}>
                   <HeroStat label="Picks" value={String(scoped.record.picks)} />
                   <HeroStat
-                    label="P&L (flat)"
-                    value={formatCurrencySigned(scoped.record.profitFlat)}
-                    color={roiColor(scoped.record.roiFlat)}
+                    label="Units"
+                    value={dayUnitsText(scoped.record.units)}
+                    color={unitsColor(scoped.record.units)}
                   />
                   <HeroStat
                     label="Win rate"
-                    value={formatPctSigned(scoped.record.winRate).replace('+', '')}
+                    value={dayWinRateText(scoped.record.wins, scoped.record.losses, scoped.record.winRate)}
+                    color={scoped.record.wins + scoped.record.losses > 0 ? undefined : colors.textSecondary}
                   />
                 </View>
                 {scoped.pending > 0 ? (
@@ -289,59 +335,55 @@ export function DailyResultsModal({
                   color={colors.textTertiary}
                 />
                 <Text style={styles.heroEmptyTitle}>
-                  {scoped.pending > 0 ? 'Nothing graded yet' : 'No qualifying picks'}
+                  {scoped.pending > 0
+                    ? 'Nothing graded yet'
+                    : scoped.unpublished > 0
+                      ? 'Nothing posted'
+                      : 'No qualifying picks'}
                 </Text>
                 <Text style={styles.heroEmptyBody}>
                   {scoped.pending > 0
                     ? `${scoped.pending} ${scoped.pending === 1 ? 'pick is' : 'picks are'} still awaiting a result — check back once the games settle.`
-                    : sportFilter === 'ALL'
-                      ? 'No picks cleared the bar this day.'
-                      : `No ${sportFilter} picks cleared the bar this day.`}
+                    : scoped.unpublished > 0
+                      ? sportFilter === 'ALL'
+                        ? 'No picks were posted this day.'
+                        : `No ${sportFilter} picks were posted this day.`
+                      : sportFilter === 'ALL'
+                        ? 'No picks cleared the bar this day.'
+                        : `No ${sportFilter} picks cleared the bar this day.`}
                 </Text>
               </View>
             )}
 
-            {/* Per-sport breakdown — every sport always listed (filtered by chip) */}
-            {visibleSections.map((s) =>
-              s.total.picks > 0 || s.pending > 0 || s.models.length > 0 ? (
-                <View key={s.sport} style={styles.sportCard}>
-                  <View style={styles.sportHeader}>
-                    <Text style={styles.sportName}>{s.sport}</Text>
-                    {s.total.picks > 0 ? (
-                      <Text style={[styles.sportRoi, { color: roiColor(s.total.roiFlat) }]}>
-                        {formatPctSigned(s.total.roiFlat)}
-                      </Text>
-                    ) : s.pending > 0 ? (
-                      <Text style={styles.sportEmptyNote}>
-                        {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
-                      </Text>
-                    ) : (
-                      <Text style={styles.sportEmptyNote}>Record only</Text>
-                    )}
-                  </View>
-                  {s.total.picks > 0 ? (
-                    <Text style={styles.sportSub}>
-                      {recordLine(s.total)} · {formatCurrencySigned(s.total.profitFlat)}
-                      {s.pending > 0 ? ` · ${s.pending} pending` : ''}
-                    </Text>
-                  ) : s.pending > 0 ? (
-                    <Text style={styles.sportSub}>Signals fired — results not graded yet</Text>
-                  ) : (
-                    <Text style={styles.sportSub}>Record-only picks — not counted in the totals</Text>
-                  )}
-                  {s.models.map((m) => (
-                    <ModelRow key={m.modelId} model={m} />
-                  ))}
-                </View>
-              ) : (
-                <View key={s.sport} style={[styles.sportCard, styles.sportCardEmpty]}>
-                  <View style={styles.sportHeader}>
-                    <Text style={styles.sportNameEmpty}>{s.sport}</Text>
-                    <Text style={styles.sportEmptyNote}>No picks</Text>
-                  </View>
-                </View>
-              ),
-            )}
+            {/* Per-sport breakdown — sports with picks first, each collapsible.
+                A single-sport filter shows its one card already open. */}
+            {activeSections.map((s) => (
+              <SportCard
+                key={s.sport}
+                section={s}
+                open={single || expanded.has(s.sport)}
+                collapsible={!single}
+                onToggle={() => toggleSport(s.sport)}
+              />
+            ))}
+
+            {/* Every sport is still accounted for: the quiet ones share one line. */}
+            {quietSections.length > 0 ? (
+              <View style={[styles.sportCard, styles.sportCardEmpty]}>
+                {noPickSports.length > 0 ? (
+                  <Text style={styles.quietLine}>
+                    <Text style={styles.quietLabel}>No picks  </Text>
+                    {noPickSports.join(' · ')}
+                  </Text>
+                ) : null}
+                {notPostedSports.length > 0 ? (
+                  <Text style={styles.quietLine}>
+                    <Text style={styles.quietLabel}>Not posted  </Text>
+                    {notPostedSports.join(' · ')}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
 
             {/* Every pick behind the record — graded first, then still-open */}
             {scoped.gradedPicks.length > 0 || scoped.pendingPicks.length > 0 ? (
@@ -370,15 +412,101 @@ export function DailyResultsModal({
             ) : null}
 
             <Text style={styles.footer}>
-              Settled BET picks only, settled BET picks that meet our current criteria, as posted. Flat ROI assumes a $100
-              stake per pick. Open picks settle after their games go final. Home-run picks are
-              record-only — shown for transparency but never counted in the record or P&L.
+              Settled picks that Discord posted. Each pick risks the amount
+              needed to win 1 unit. At −110 that’s 1.1 units to win 1. Risk is
+              capped at 3 units, and a pick with no price counts as 1 unit. The
+              percentage is units won or lost divided by units risked. The Models
+              tab uses a flat $100 bet, so its percentages won’t match. Open
+              picks settle after their games go final.
             </Text>
           </ScrollView>
         )}
       </SafeAreaView>
       </SafeAreaProvider>
     </Modal>
+  );
+}
+
+function sportHasActivity(s: SportDayBreakdown): boolean {
+  return s.total.picks > 0 || s.pending > 0 || s.models.length > 0;
+}
+
+/** One sport's day: the header is its record; opening it lists the models. */
+function SportCard({
+  section: s,
+  open,
+  collapsible,
+  onToggle,
+}: {
+  section: SportDayBreakdown;
+  open: boolean;
+  collapsible: boolean;
+  onToggle: () => void;
+}) {
+  const roiText = s.total.picks > 0 ? dayRoiText(s.total.risked, s.total.roi) : null;
+  const sub =
+    s.total.picks > 0
+      ? `${recordLine(s.total)} · ${stakeLine(s.total)}${s.pending > 0 ? ` · ${s.pending} pending` : ''}`
+      : s.pending > 0
+        ? 'Signals fired — results not graded yet'
+        : `${recordLine(s.total)} · ${dayUnitsText(s.total.units)}`;
+  const header = (
+    <>
+      <View style={styles.sportHeader}>
+        <Text style={styles.sportName}>{s.sport}</Text>
+        <View style={styles.sportHeaderRight}>
+          {roiText != null ? (
+            <Text
+              style={[styles.sportRoi, { color: s.total.risked > 0 ? roiColor(s.total.roi) : colors.textSecondary }]}
+              accessibilityLabel={s.total.risked > 0 ? undefined : 'Return on bets unavailable'}
+            >
+              {roiText}
+            </Text>
+          ) : s.pending > 0 ? (
+            <Text style={styles.sportEmptyNote}>
+              {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
+            </Text>
+          ) : (
+            <Text style={styles.sportEmptyNote}>{dayUnitsText(s.total.units)}</Text>
+          )}
+          {collapsible && s.models.length > 0 ? (
+            <Ionicons
+              name={open ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.textTertiary}
+            />
+          ) : null}
+        </View>
+      </View>
+      <Text style={[styles.sportSub, !open && styles.sportSubCollapsed]}>{sub}</Text>
+    </>
+  );
+  return (
+    <View style={styles.sportCard}>
+      {collapsible && s.models.length > 0 ? (
+        <Pressable
+          onPress={onToggle}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={`${s.sport}, ${sub}${
+            s.total.picks === 0
+              ? s.pending > 0
+                ? `, ${s.pending} pending`
+                : ''
+              : s.total.risked > 0
+                ? `, ${roiText} return`
+                : ', return unavailable'
+          }`}
+          accessibilityHint={open ? 'Hides the models' : 'Shows the models'}
+          style={({ pressed }) => [styles.sportToggle, pressed && { opacity: 0.6 }]}
+        >
+          {header}
+        </Pressable>
+      ) : (
+        header
+      )}
+      {open ? s.models.map((m) => <ModelRow key={m.modelId} model={m} />) : null}
+    </View>
   );
 }
 
@@ -392,6 +520,7 @@ function HeroStat({ label, value, color }: { label: string; value: string; color
 }
 
 function ModelRow({ model }: { model: ModelDayStats }) {
+  const priced = model.risked > 0;
   return (
     <View style={styles.modelRow}>
       <View style={styles.modelLeft}>
@@ -404,37 +533,35 @@ function ModelRow({ model }: { model: ModelDayStats }) {
           </Text>
           <Text style={styles.modelSub}>
             {recordLine(model)}
-            {model.recordOnly ? ' · record only' : ` · ${formatCurrencySigned(model.profitFlat)}`}
+            {` · ${stakeLine(model)}`}
           </Text>
         </View>
       </View>
-      {model.recordOnly ? (
-        <Text style={styles.recordOnlyLabel}>Not counted</Text>
-      ) : (
-        <Text style={[styles.modelRoi, { color: roiColor(model.roiFlat) }]}>
-          {formatPctSigned(model.roiFlat)}
-        </Text>
-      )}
+      <Text
+        style={[styles.modelRoi, { color: priced ? roiColor(model.roi) : colors.textSecondary }]}
+        accessibilityLabel={priced ? undefined : 'Return on bets unavailable'}
+      >
+        {dayRoiText(model.risked, model.roi)}
+      </Text>
     </View>
   );
 }
 
 const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = {
-  WIN: { label: 'W', color: colors.positive, bg: colors.betSoft },
-  LOSS: { label: 'L', color: colors.negative, bg: colors.avoidSoft },
-  PUSH: { label: 'P', color: colors.none, bg: colors.noneSoft },
+  // The letter carries the result; the ink makes it readable on its wash
+  // (4.61 / 5.01 / 9.55:1 — the bright hues were 2.0–3.1:1; audit H2).
+  WIN: { label: 'W', color: colors.betInk, bg: colors.betSoft },
+  LOSS: { label: 'L', color: colors.avoidInk, bg: colors.avoidSoft },
+  PUSH: { label: 'P', color: colors.textSecondary, bg: colors.noneSoft },
 };
 
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
-  const profit = Number(pick.profit_flat ?? 0);
-  // A pick with no book price is record-only too: the model line above it
-  // sums through flatPnl, so showing the settled -110 here would print money
-  // the total just excluded.
-  // decisionOdds, not dk_odds (2026-09-12): the day's total counts a pick
-  // whose price came from another book, so a row keyed on dk_odds would
-  // print 'record only' beside units the total above it already added.
-  const recordOnly = RECORD_ONLY_MODELS.has(pick.model_id) || decisionOdds(pick) == null;
+  // The row shows the same money the day's total added: postedPickUnits.
+  const profit = postedPickUnits(pick).units;
+  const price = decisionOdds(pick);
+  const missingPrice = price == null;
+  const unitsLabel = unitsSpeech(dayUnitsText(profit));
   return (
     <View style={styles.modelRow}>
       <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>
@@ -446,16 +573,17 @@ function PickRow({ pick }: { pick: Pick }) {
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
-          {decisionOdds(pick) != null ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` : ''}
+          {missingPrice
+            ? ' · no price'
+            : ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(price)}`}
         </Text>
       </View>
-      {recordOnly ? (
-        <Text style={styles.recordOnlyLabel}>Record only</Text>
-      ) : (
-        <Text style={[styles.modelRoi, { color: roiColor(profit) }]}>
-          {formatCurrencySigned(profit)}
-        </Text>
-      )}
+      <Text
+        style={[styles.modelRoi, { color: unitsColor(profit) }]}
+        accessibilityLabel={missingPrice ? `no price, ${unitsLabel}` : unitsLabel}
+      >
+        {dayUnitsText(profit)}
+      </Text>
     </View>
   );
 }
@@ -504,15 +632,28 @@ function GameScoreRow({ game, showSport }: { game: DayGameSummary; showSport: bo
   );
 }
 
-function recordLine(s: CustomModelStats): string {
+function recordLine(s: DayStakeStats): string {
   const base = `${s.wins}–${s.losses}`;
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
 }
 
+/** Units beside a record line. A push-only total is 0.00u, not a dash. */
+function stakeLine(s: DayStakeStats): string {
+  return dayUnitsText(s.units);
+}
+
+// Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
+// which are 2.22 / 3.55:1 as text (audit H2).
+// The tone of the ROUNDED percent formatPctSigned prints (1 dp of roi × 100),
+// so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
-  if (roi > 0.001) return colors.positive;
-  if (roi < -0.001) return colors.negative;
-  return colors.textSecondary;
+  return pnlColor(roi, 1, 100);
+}
+
+/** Colour a units figure by what dayUnitsText prints (2 dp), so a day that
+ *  rounds to "0.00u" never reads as a win or a loss. */
+function unitsColor(units: number): string {
+  return pnlColor(units, 2);
 }
 
 function prettyDate(date: string): string {
@@ -619,10 +760,15 @@ const styles = StyleSheet.create({
   },
   list: { padding: spacing.lg, paddingTop: spacing.xs, gap: spacing.md },
 
+  // The chips' 7pt vertical slop has to land inside the ScrollView (which
+  // clips touches to its bounds): pad by 7 and pull back by 7 — no visual move.
+  sportChipsFrame: {
+    marginVertical: -7,
+  },
   sportChips: {
     flexDirection: 'row',
     gap: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 2 + 7,
   },
   sportChip: {
     paddingHorizontal: spacing.md,
@@ -707,14 +853,17 @@ const styles = StyleSheet.create({
   },
   sportName: { fontSize: font.size.headline, fontWeight: font.weight.bold, color: colors.textPrimary },
   sportRoi: { fontSize: font.size.headline, fontWeight: font.weight.bold },
-  sportCardEmpty: { paddingVertical: spacing.sm, opacity: 0.75 },
-  sportNameEmpty: {
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-  },
+  // No opacity: 0.75 over textTertiary was 3.15:1. The muted look comes from
+  // the tertiary ink itself (5.23:1 on bgCard).
+  sportCardEmpty: { paddingVertical: spacing.sm },
   sportEmptyNote: { fontSize: font.size.footnote, color: colors.textTertiary },
   sportSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.sm },
+  sportSubCollapsed: { marginBottom: 0 },
+  // The whole header is the tap target: name + record line, never under 44pt.
+  sportToggle: { minHeight: 44, justifyContent: 'center' },
+  sportHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  quietLine: { fontSize: font.size.footnote, color: colors.textTertiary, lineHeight: 20 },
+  quietLabel: { fontWeight: font.weight.semibold },
   picksTitle: {
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
@@ -757,12 +906,6 @@ const styles = StyleSheet.create({
   modelName: { fontSize: font.size.body, fontWeight: font.weight.medium, color: colors.textPrimary },
   modelSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 1 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.sm },
-  recordOnlyLabel: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    marginLeft: spacing.sm,
-  },
   openLabel: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,

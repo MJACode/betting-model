@@ -28,6 +28,8 @@ from zoneinfo import ZoneInfo
 import requests
 from loguru import logger
 
+import config
+
 from data.db import get_connection
 from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
 from tracking.publish_filters import live_publishable_sql
@@ -135,6 +137,10 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
               -- STANDING picks, which must keep publishing.
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
+              -- A paused model's pick is NOT A SIGNAL (scorer._paused_signal,
+              -- 2026-09-28): keyed on the row's own marker, so a pick written
+              -- while paused is never announced, even after an unpause.
+              {config.paused_row_exclusion_sql("p")}
               AND p.model_probability >= t.min_prob
               -- The cut at the price the pick was DECIDED at (2026-09-09):
               -- decision_* since the flip, DraftKings before. Same clause as
@@ -186,6 +192,9 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
           AND os.lock_key NOT LIKE '%%:early'
           AND os.result IS NULL
           AND p.signal_type = 'AVOID'
+          -- A paused model's AVOID is its real verdict but not a signal
+          -- (scorer._paused_signal): it never announces a "dropped" bet.
+          {config.paused_row_exclusion_sql("p")}
           AND NOT EXISTS (
               SELECT 1 FROM push_sent s
               WHERE s.lock_key = os.lock_key AND s.kind = 'dropped'
@@ -469,10 +478,21 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
         col = _SIDE_PRICE_COL.get(pick_side)
         if not col:
             continue
-        odds = _get_dk_odds(conn, game_id, _market_for_pick(model_id))
+        market = _market_for_pick(model_id)
+        odds = _get_dk_odds(conn, game_id, market)
         current = odds.get(col) if odds else None
         if current is None:
             continue
+        # A price at another number is another bet: Under 113.5 at +105 says
+        # nothing about the Under 115.5 at -112 that was tracked. A line market
+        # is compared only while DraftKings is at the tracked number
+        # (spread_home and locked_line are both the HOME number).
+        line_col = ("spread_home" if "spreads" in market
+                    else "total_line" if "totals" in market else None)
+        if line_col and locked_line is not None:
+            now_line = odds.get(line_col)
+            if now_line is None or abs(float(now_line) - float(locked_line)) > 1e-9:
+                continue
         shift = (american_to_implied_prob(float(current))
                  - american_to_implied_prob(float(locked_odds))) * 100
         if abs(shift) < LINE_CHANGE_NOTIFY_PP:

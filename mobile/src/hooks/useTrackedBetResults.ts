@@ -2,10 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useTrackedBets, type LiveTrackSnapshot } from './useTrackedBets';
 import { useStakeSettings, FLAT_STAKE, type StakeMode } from './useStakeSettings';
-import { useBankroll } from './useBankroll';
-import { useKellySettings } from './useKellySettings';
 import { fetchPicksByIds, fetchLivePicksForGames, fetchGamesByIds } from '@/lib/queries';
-import { recommendedBet } from '@/lib/thresholds';
 import {
   computeTrackedResults,
   sortTrackedRows,
@@ -29,14 +26,13 @@ import type { Pick } from '@/types';
  * Fetch is failure-tolerant — a network error keeps the last-known rows so the
  * card degrades instead of vanishing.
  *
- * Stake per bet comes from useStakeSettings: $100 flat (default), the pick's
- * Kelly-sized bet, or a per-bet custom amount.
+ * Stake per bet comes from useStakeSettings: $100 flat (default) or a per-bet
+ * custom amount. There is no bankroll-derived mode — the app publishes flat
+ * units and holds no bankroll to size off.
  */
 export function useTrackedBetResults() {
   const { ids, liveSnapshots, untrackPick } = useTrackedBets();
   const stakes = useStakeSettings();
-  const { bankroll } = useBankroll();
-  const { multiplier, cap } = useKellySettings();
   const [picks, setPicks] = useState<Pick[]>([]);
   const [livePicks, setLivePicks] = useState<Pick[]>([]);
   const [finalGameIds, setFinalGameIds] = useState<Set<string>>(new Set());
@@ -79,15 +75,12 @@ export function useTrackedBetResults() {
 
   const stakeFor = useCallback(
     (p: Pick): number => {
-      if (stakes.mode === 'kelly') {
-        return recommendedBet(Number(p.kelly_fraction ?? 0), bankroll, { multiplier, cap });
-      }
       if (stakes.mode === 'custom') {
         return stakes.customStakes[String(p.pick_id)] ?? FLAT_STAKE;
       }
       return FLAT_STAKE;
     },
-    [stakes.mode, stakes.customStakes, bankroll, multiplier, cap],
+    [stakes.mode, stakes.customStakes],
   );
 
   const { rows, summary } = useMemo(() => {
@@ -117,7 +110,6 @@ export function useTrackedBetResults() {
     stakeMode: stakes.mode,
     setStakeMode: stakes.setMode,
     setCustomStake: stakes.setCustomStake,
-    bankroll,
   };
 }
 

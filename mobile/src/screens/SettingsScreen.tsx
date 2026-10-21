@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  InputAccessoryView,
+  Keyboard,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -21,16 +23,23 @@ import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { StatePickerSheet } from '@/components/StatePickerSheet';
 import { useBettingState } from '@/hooks/useBettingState';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
-import { useBankroll } from '@/hooks/useBankroll';
-import {
-  MULTIPLIER_MAX,
-  MULTIPLIER_MIN,
-  MULTIPLIER_STEP,
-  useKellySettings,
-} from '@/hooks/useKellySettings';
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
-import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
+import { useBankroll } from '@/hooks/useBankroll';
+import {
+  BANKROLL_CARD_COPY,
+  BANKROLL_FOOTER_COPY,
+  bankrollDraft,
+  bankrollFieldText,
+  canStepUnitPct,
+  checkBankroll,
+  commitBankrollText,
+  editBankrollInput,
+  formatPct,
+  unitRowSubtitle,
+  unitRowTitle,
+  visibleBankrollError,
+} from '@/lib/bankroll';
 import { NotificationsCard } from '@/components/NotificationsCard';
 import { useFeedbackUnread } from '@/hooks/useFeedback';
 import { useAuth } from '@/hooks/useAuth';
@@ -46,6 +55,7 @@ import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
 import { describeSubscription } from '@/lib/billingHelpers';
 import { BUILD_STAMP } from '@/lib/buildStamp';
+import { isUpdateReady, subscribeUpdateReady, UPDATE_READY_SETTINGS } from '@/lib/updateReady';
 import {
   APP_VERSION,
   DISCORD_URL,
@@ -53,9 +63,9 @@ import {
   WEBSITE_URL,
   openLink,
 } from '@/lib/socialLinks';
-import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -85,6 +95,11 @@ function LinkRow({
     <Pressable
       style={({ pressed }) => [styles.linkCard, pressed && styles.pressed]}
       onPress={onPress}
+      // Role only, NO accessibilityLabel: a label REPLACES what VoiceOver reads
+      // from the children, and five rows carry their status in `right` (Not
+      // signed in, Active, the connected books, Connected, "2 new replies").
+      // Left to the children, VoiceOver reads label, status and sub in order.
+      accessibilityRole="button"
     >
       <View style={{ flex: 1 }}>
         {right ? (
@@ -102,17 +117,168 @@ function LinkRow({
   );
 }
 
+/** The iOS decimal pad has no return key; this bar is its Done. */
+const BANKROLL_ACCESSORY_ID = 'bankrollDone';
+
+/** A labeled Lower | Raise pair — words, not icon steppers, so VoiceOver reads
+ *  the action (#786 removed the icon-only ones for exactly that). */
+function LowerRaise({
+  what,
+  canLower,
+  canRaise,
+  onStep,
+}: {
+  what: string;
+  canLower: boolean;
+  canRaise: boolean;
+  onStep: (dir: -1 | 1) => void;
+}) {
+  return (
+    <View style={styles.stepPill}>
+      {([-1, 1] as const).map((dir) => {
+        const enabled = dir === -1 ? canLower : canRaise;
+        const word = dir === -1 ? 'Lower' : 'Raise';
+        return (
+          <Pressable
+            key={dir}
+            onPress={() => onStep(dir)}
+            disabled={!enabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${word} ${what}`}
+            accessibilityState={{ disabled: !enabled }}
+            hitSlop={{ top: 6, bottom: 6 }}
+            style={({ pressed }) => [
+              styles.stepBtn,
+              dir === 1 && styles.stepBtnRight,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={[styles.stepText, !enabled && styles.stepTextOff]}>{word}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * The optional bankroll — display only (lib/bankroll.ts). It converts the
+ * app's flat units into the member's dollars and sizes nothing. Typing only
+ * edits the field (the unit row follows it); blur or Done saves a valid amount,
+ * clears on empty, and on invalid keeps the saved amount, shows the error and
+ * puts the saved amount back. Every error waits for blur or Done except the
+ * over-$10M one, which shows as you type.
+ */
+function BankrollCard() {
+  const { settings, ready, setAmount, stepUnit } = useBankroll();
+  const [text, setText] = useState(() => bankrollFieldText(settings.amount));
+  const [focused, setFocused] = useState(false);
+  const [blurError, setBlurError] = useState<string | null>(null);
+
+  // The stored amount arrives after the first render (AsyncStorage); show it
+  // unless the member is mid-edit.
+  useEffect(() => {
+    if (!focused) setText(bankrollFieldText(settings.amount));
+  }, [settings.amount]); // not `focused`: a blur must not undo the text just committed
+
+  const fieldMessage = visibleBankrollError(checkBankroll(text), false) ?? blurError;
+  const shown = bankrollDraft(text, settings.unitPct);
+
+  const onChange = (raw: string) => {
+    setText(editBankrollInput(text, raw));
+    setBlurError(null);
+  };
+
+  const commit = () => {
+    setFocused(false);
+    const c = commitBankrollText(text, settings.amount);
+    setText(c.text);
+    setBlurError(c.error);
+    if (c.save !== undefined) setAmount(c.save);
+  };
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.bookRow}>
+        <Text style={[styles.cardLabel, styles.noMargin]}>Your bankroll</Text>
+        <Text style={styles.bookPillMuted}>Optional</Text>
+      </View>
+      <Text style={styles.bookHint}>{BANKROLL_CARD_COPY}</Text>
+      <View style={[styles.moneyField, fieldMessage ? styles.moneyFieldError : null]}>
+        <Text
+          style={[styles.moneyPrefix, text === '' && styles.moneyPrefixEmpty]}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          $
+        </Text>
+        <TextInput
+          style={styles.moneyInput}
+          value={text}
+          onChangeText={onChange}
+          onFocus={() => setFocused(true)}
+          onBlur={commit}
+          onSubmitEditing={() => Keyboard.dismiss()}
+          keyboardType="decimal-pad"
+          returnKeyType="done"
+          clearButtonMode="while-editing"
+          placeholder="Enter amount"
+          placeholderTextColor={colors.textTertiary}
+          inputAccessoryViewID={Platform.OS === 'ios' ? BANKROLL_ACCESSORY_ID : undefined}
+          accessibilityLabel="Your bankroll in dollars, optional"
+          accessibilityHint="Only used to show your units in dollars. Stays on this device."
+        />
+      </View>
+      {fieldMessage ? (
+        <View style={styles.fieldErrorRow} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          <Ionicons name="alert-circle" size={14} color={colors.avoid} />
+          <Text style={styles.fieldErrorText}>{fieldMessage}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.unitRow}>
+        <View style={styles.unitRowText}>
+          <Text style={styles.unitRowTitle}>{unitRowTitle(shown)}</Text>
+          <Text style={styles.unitRowSub}>{unitRowSubtitle(shown)}</Text>
+        </View>
+        {/* Disabled until the stored % has loaded, and stepped inside the
+            store from the latest value either way. */}
+        <LowerRaise
+          what={`unit size, now ${formatPct(settings.unitPct)} of bankroll`}
+          canLower={ready && canStepUnitPct(settings.unitPct, -1)}
+          canRaise={ready && canStepUnitPct(settings.unitPct, 1)}
+          onStep={stepUnit}
+        />
+      </View>
+      <Text style={styles.bankrollFooter}>{BANKROLL_FOOTER_COPY}</Text>
+
+      {Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={BANKROLL_ACCESSORY_ID}>
+          <View style={styles.doneBar}>
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
+    </View>
+  );
+}
+
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
-  const { bankroll, setBankroll, ready } = useBankroll();
   const { books } = usePreferredBooks();
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const { name: stateName } = useBettingState();
   const [statePickerOpen, setStatePickerOpen] = useState(false);
-  const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
-  const { settings: rg, setExposureCapUnits } = useResponsibleGambling();
   const feedbackUnread = useFeedbackUnread();
   const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
   // Two different questions, deliberately asked of two different hooks:
@@ -122,71 +288,6 @@ export function SettingsScreen() {
   const { entitled } = useEntitlement();
   const { access, unlink, busy: discordBusy } = useAccess();
   const [discordSheet, setDiscordSheet] = useState(false);
-  const [draft, setDraft] = useState<string>('');
-  const [capDraft, setCapDraft] = useState<string>('');
-  const [rgDraft, setRgDraft] = useState<string>('');
-
-  useEffect(() => {
-    setRgDraft(rg.exposureCapUnits != null ? String(rg.exposureCapUnits) : '');
-  }, [rg.exposureCapUnits]);
-
-  useEffect(() => {
-    if (ready) setDraft(String(bankroll));
-  }, [bankroll, ready]);
-
-  useEffect(() => {
-    setCapDraft(cap != null ? (cap * 100).toFixed(2) : '');
-  }, [cap]);
-
-  const onSave = () => {
-    const v = parseFloat(draft);
-    if (!Number.isFinite(v) || v <= 0) {
-      Alert.alert('Invalid bankroll', 'Enter a positive number.');
-      return;
-    }
-    setBankroll(v);
-    Alert.alert('Saved', `Bankroll set to $${v.toFixed(2)}.`);
-  };
-
-  const stepMultiplier = (delta: number) => {
-    const next = Math.round((multiplier + delta) * 100) / 100;
-    const clamped = Math.max(MULTIPLIER_MIN, Math.min(MULTIPLIER_MAX, next));
-    setMultiplier(clamped);
-  };
-
-  const commitCap = (raw: string) => {
-    if (raw.trim() === '') return;
-    const pct = parseFloat(raw);
-    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
-      Alert.alert('Invalid cap', 'Enter a percent between 0 and 100.');
-      setCapDraft(cap != null ? (cap * 100).toFixed(2) : '');
-      return;
-    }
-    setCap(pct / 100);
-  };
-
-  const toggleCap = (on: boolean) => {
-    if (!on) {
-      setCap(null);
-    } else {
-      // Sensible default when enabling: 5% of bankroll (the old hard cap).
-      setCap(0.05);
-    }
-  };
-
-  const commitRgCap = (raw: string) => {
-    if (raw.trim() === '') return;
-    const pct = parseFloat(raw);
-    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
-      Alert.alert('Invalid limit', 'Enter a percent between 0 and 100.');
-      setRgDraft(rg.exposureCapUnits != null ? (rg.exposureCapUnits * 100).toFixed(0) : '');
-      return;
-    }
-    setExposureCapUnits(pct / 100);
-  };
-
-  const toggleRgCap = (on: boolean) => setExposureCapUnits(on ? 0.15 : null);
-
   const openHelpline = () => {
     Linking.openURL('tel:1-800-522-4700').catch(() =>
       Alert.alert('Need help?', 'Call or text 1-800-GAMBLER (1-800-522-4700), available 24/7.'),
@@ -194,7 +295,7 @@ export function SettingsScreen() {
   };
 
   const confirmSignOut = () => {
-    Alert.alert('Sign out?', 'Your bankroll, models and tracked bets stay on this device.', [
+    Alert.alert('Sign out?', 'Your models and tracked bets stay on this device.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign out',
@@ -206,13 +307,23 @@ export function SettingsScreen() {
     ]);
   };
 
-  const multLabel = describeMultiplier(multiplier);
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
+  // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
+  const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
   const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+      {/* automaticallyAdjustKeyboardInsets (iOS): the keyboard insets the list
+          and RN scrolls the focused field — the bankroll input, with its Done
+          bar — above it natively, so no measure/scrollTo is needed. Android
+          resizes the window. "handled" was already here: a tap on a switch or
+          row while the keyboard is up still lands. */}
+      <ScrollView
+        contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
 
         {/* Account + Subscription. Both are behind flags — while auth is dark
             this is the ONLY sign-in entry point in the app, so the whole
@@ -232,10 +343,12 @@ export function SettingsScreen() {
                 </View>
               </View>
               <Text style={styles.sub}>
-                Your bankroll, models and tracked bets stay on this device.
+                Your models and tracked bets stay on this device.
               </Text>
               <Pressable
                 onPress={confirmSignOut}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
                 style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.signOutText}>Sign out</Text>
@@ -246,7 +359,7 @@ export function SettingsScreen() {
             // session-only today. Update when account-scoped data lands.
             <LinkRow
               label="Sign in"
-              sub="Optional. Everything works without an account — your bankroll, models and tracked bets stay on this device."
+              sub="Optional. Everything works without an account — your models and tracked bets stay on this device."
               onPress={() => navigation.navigate('SignIn')}
               right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
             />
@@ -301,32 +414,11 @@ export function SettingsScreen() {
         <SectionHeader title="Betting" />
 
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Bankroll</Text>
-          <View style={styles.bankrollRow}>
-            <Text style={styles.dollar}>$</Text>
-            <TextInput
-              style={styles.input}
-              value={draft}
-              onChangeText={setDraft}
-              keyboardType="decimal-pad"
-              placeholder="1000"
-              placeholderTextColor={colors.textTertiary}
-            />
-            <Pressable onPress={onSave} style={styles.saveBtn}>
-              <Text style={styles.saveBtnText}>Save</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.sub}>
-            Bet sizes recompute across the app. Stored on this device.
-          </Text>
-        </View>
-
-        <View style={styles.card}>
           <Text style={styles.cardLabel}>Your sportsbooks</Text>
           <Text style={styles.bookHint}>
-            The books you bet at. The Stats page prints the best line among them beside each
-            player, and the betslip’s bet button opens the one taking your slip. It changes
-            nothing about how picks are priced.
+            The books you can bet at. Picks and Stats show the best price among them. You get
+            the most value by using every book you can. Model records and stats still use the
+            best price across all books.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
@@ -414,103 +506,27 @@ export function SettingsScreen() {
           }
         />
 
-        <SectionHeader title="Bet sizing" />
+        {/* Display only: units in the member's dollars. The daily exposure
+            limit below is unchanged and does not read it. */}
+        <SectionHeader title="Bankroll" />
 
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Kelly aggressiveness</Text>
-          <View style={styles.stepperRow}>
-            <Pressable
-              onPress={() => stepMultiplier(-MULTIPLIER_STEP)}
-              style={({ pressed }) => [styles.stepperBtn, pressed && styles.pressed]}
-              disabled={multiplier <= MULTIPLIER_MIN}
-            >
-              <Ionicons name="remove" size={20} color={colors.tint} />
-            </Pressable>
-            <View style={styles.multValueWrap}>
-              <Text style={styles.multValue}>{multiplier.toFixed(2)}×</Text>
-              <Text style={styles.multSub}>{multLabel}</Text>
-            </View>
-            <Pressable
-              onPress={() => stepMultiplier(MULTIPLIER_STEP)}
-              style={({ pressed }) => [styles.stepperBtn, pressed && styles.pressed]}
-              disabled={multiplier >= MULTIPLIER_MAX}
-            >
-              <Ionicons name="add" size={20} color={colors.tint} />
-            </Pressable>
-          </View>
-          <Text style={styles.sub}>
-            Scales the tenth-Kelly stake we recommend. 1.00× is the default; 2.50× ≈ quarter-Kelly,
-            5.00× ≈ half-Kelly, 10.00× = full Kelly.
-          </Text>
-        </View>
+        <BankrollCard />
 
-        <View style={styles.card}>
-          <View style={styles.capHeader}>
-            <Text style={styles.cardLabel}>Max bet cap</Text>
-            <Switch value={cap != null} onValueChange={toggleCap} />
-          </View>
-          {cap != null ? (
-            <>
-              <View style={styles.capRow}>
-                <TextInput
-                  style={styles.capInput}
-                  value={capDraft}
-                  onChangeText={setCapDraft}
-                  onBlur={() => commitCap(capDraft)}
-                  onSubmitEditing={() => commitCap(capDraft)}
-                  keyboardType="decimal-pad"
-                  placeholder="5"
-                  placeholderTextColor={colors.textTertiary}
-                  returnKeyType="done"
-                />
-                <Text style={styles.capUnit}>% of bankroll</Text>
-              </View>
-              <Text style={styles.sub}>
-                No suggestion will exceed {formatPct(cap)} of your bankroll. Stakes you’ve already
-                saved aren’t changed.
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.sub}>
-              No cap — suggestions are bounded only by the multiplier above. Turn this on to set
-              your own ceiling.
-            </Text>
-          )}
-        </View>
+        <SectionHeader title="Staying in control" />
 
+        {/* The daily exposure limit card that sat above this was removed on
+            2026-09-26 (Matt), with the Picks banner it drove. The helpline
+            stays: it is the one support resource in the app. */}
         <View style={styles.card}>
-          <View style={styles.capHeader}>
-            <Text style={styles.cardLabel}>Daily exposure limit</Text>
-            <Switch value={rg.exposureCapUnits != null} onValueChange={toggleRgCap} />
-          </View>
-          {rg.exposureCapUnits != null ? (
-            <>
-              <View style={styles.capRow}>
-                <TextInput
-                  style={styles.capInput}
-                  value={rgDraft}
-                  onChangeText={setRgDraft}
-                  onBlur={() => commitRgCap(rgDraft)}
-                  onSubmitEditing={() => commitRgCap(rgDraft)}
-                  keyboardType="decimal-pad"
-                  placeholder="10"
-                  placeholderTextColor={colors.textTertiary}
-                  returnKeyType="done"
-                />
-                <Text style={styles.capUnit}>units / day</Text>
-              </View>
-              <Text style={styles.sub}>
-                We’ll warn you when today’s recommended stakes add up to more than{' '}
-                {formatPct(rg.exposureCapUnits)} of your bankroll. Staying small keeps you in the
-                game.
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.sub}>
-              Off by default. Turn it on for a heads-up before a day’s picks over-extend you.
-            </Text>
-          )}
-          <Pressable onPress={openHelpline} style={styles.helplineRow}>
+          <Pressable
+            onPress={openHelpline}
+            accessibilityRole="link"
+            accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
+            // The row's top padding is inside the card's divider; slop below
+            // brings a one-line wrap up to 44pt without moving the rule (M9).
+            hitSlop={{ top: 0, bottom: 12, left: 0, right: 0 }}
+            style={styles.helplineRow}
+          >
             <Ionicons name="call-outline" size={15} color={colors.tint} />
             <Text style={styles.helplineText}>
               Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
@@ -544,7 +560,7 @@ export function SettingsScreen() {
 
         <LinkRow
           label="How this works"
-          sub="Edge, BET/AVOID, Kelly sizing and how results are tracked — explained."
+          sub="Edge, BET/AVOID, unit sizing and how results are tracked — explained."
           onPress={() => navigation.navigate('Explainer')}
         />
 
@@ -644,28 +660,26 @@ export function SettingsScreen() {
 
         <Pressable
           onPress={() => openLink(WEBSITE_URL, 'the website')}
+          accessibilityRole="link"
+          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}, ${websiteLabel}`}
+          accessibilityHint="Opens the website"
+          hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>
             Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
           </Text>
         </Pressable>
+        {/* Its own line, outside the website link, so the status is not buried
+            in a wrapped caption (UX review, 2026-10-19). */}
+        {updateReady ? <Text style={styles.version}>{UPDATE_READY_SETTINGS}</Text> : null}
+        <BetslipBarSpacer />
       </ScrollView>
       <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />
       <StatePickerSheet visible={statePickerOpen} onClose={() => setStatePickerOpen(false)} />
       <DiscordLinkModal visible={discordSheet} onClose={() => setDiscordSheet(false)} />
     </SafeAreaView>
   );
-}
-
-function describeMultiplier(m: number): string {
-  if (m <= 0.5) return 'Conservative';
-  if (m < 1) return 'Below tenth-Kelly';
-  if (m === 1) return 'Tenth-Kelly (default)';
-  if (m < 2.5) return 'Above tenth-Kelly';
-  if (m < 5) return 'Roughly quarter-Kelly';
-  if (m < 10) return 'Roughly half-Kelly';
-  return 'Full Kelly';
 }
 
 const styles = StyleSheet.create({
@@ -747,7 +761,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   bookBadgeTextDk: {
-    color: '#000',
+    color: colors.textPrimary,
   },
   bookRowName: {
     flex: 1,
@@ -766,100 +780,124 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginTop: spacing.sm,
   },
-  bankrollRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  dollar: {
-    fontSize: font.size.title3,
-    color: colors.textPrimary,
-    fontWeight: font.weight.semibold,
-  },
-  input: {
-    flex: 1,
-    fontSize: font.size.title3,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-    backgroundColor: colors.bg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-  },
-  saveBtn: {
-    backgroundColor: colors.tint,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-  },
-  saveBtnText: {
-    color: colors.textInverse,
-    fontWeight: font.weight.semibold,
-    fontSize: font.size.body,
-  },
   sub: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     lineHeight: 18,
   },
-  stepperRow: {
+  noMargin: {
+    marginBottom: 0,
+  },
+  moneyField: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.bg,
-    borderRadius: radii.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
+    gap: spacing.xs,
+    backgroundColor: colors.bgGrouped,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    paddingHorizontal: spacing.md,
   },
-  stepperBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-    backgroundColor: colors.bgCard,
+  moneyFieldError: {
+    borderColor: colors.avoid,
   },
-  multValueWrap: {
+  moneyPrefix: {
+    fontSize: font.size.title3,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  moneyPrefixEmpty: {
+    color: colors.textTertiary,
+  },
+  moneyInput: {
+    flex: 1,
+    minHeight: 48,
+    fontSize: font.size.title3,
+    fontWeight: font.weight.medium,
+    color: colors.textPrimary,
+  },
+  fieldErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: spacing.sm,
+  },
+  // Words take the text-safe red; the icon beside them and the field's
+  // outline keep `avoid` (non-text, 3:1 is enough there).
+  fieldErrorText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.avoidInk,
+  },
+  // The mockup's grouped inset, as the sportsbook row above it uses.
+  unitRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    backgroundColor: colors.bgGrouped,
+    borderRadius: radii.md,
+    padding: spacing.md,
+  },
+  unitRowText: {
     flex: 1,
   },
-  multValue: {
-    fontSize: font.size.title2,
+  unitRowTitle: {
+    fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  multSub: {
+  unitRowSub: {
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
-  capHeader: {
+  stepPill: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separatorOpaque,
+    borderRadius: radii.pill,
+    overflow: 'hidden',
   },
-  capRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
+  stepBtn: {
+    minHeight: 32,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
   },
-  capInput: {
-    width: 80,
-    fontSize: font.size.title3,
+  stepBtnRight: {
+    borderLeftWidth: 1,
+    borderLeftColor: colors.separatorOpaque,
+  },
+  stepText: {
+    fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
-    backgroundColor: colors.bg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-    textAlign: 'center',
   },
-  capUnit: {
-    fontSize: font.size.body,
+  stepTextOff: {
+    color: colors.textTertiary,
+  },
+  bankrollFooter: {
+    fontSize: font.size.caption,
     color: colors.textSecondary,
+    marginTop: spacing.md,
+  },
+  doneBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    backgroundColor: colors.bgGrouped,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  doneBtn: {
+    paddingVertical: spacing.xs,
+  },
+  doneText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   helplineRow: {
     flexDirection: 'row',
@@ -906,7 +944,7 @@ const styles = StyleSheet.create({
   },
   bookPillText: {
     fontSize: font.size.caption,
-    color: colors.bet,
+    color: colors.betInk,
     fontWeight: font.weight.semibold,
   },
   bookPillMuted: {
@@ -927,7 +965,7 @@ const styles = StyleSheet.create({
   },
   signOutBtn: {
     marginTop: spacing.md,
-    height: 40,
+    minHeight: 44,
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -936,7 +974,7 @@ const styles = StyleSheet.create({
   signOutText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.avoid,
+    color: colors.avoidInk,
   },
   version: {
     fontSize: font.size.caption,

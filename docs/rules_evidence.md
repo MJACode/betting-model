@@ -1277,3 +1277,178 @@ leads the book (2026-09-03 measurement) and its base-out state changes every
 few pitches. The raw CFBD `situation` string is now stored in
 `ncaaf_live_states.raw_state` so the yard line the model was trained on can be
 parsed once its live shape has been seen.
+
+---
+
+## 1b (evidence). Every model carries its own EV floor
+
+**The rule in CLAUDE.md:** a session that finds a model with no entry in
+`config.MODEL_OWN_EV_FLOOR` adds one; the global floor is the fallback for a
+model nobody has measured, not the design. mike, 2026-09-20: *"never ask me,
+each model will need its own floor"*, after a reply asked him to approve floors
+for three models one at a time.
+
+**What the single global number did.** `GLOBAL_MIN_EV` arrived at 0.30 on
+2026-09-19 and moved to 0.20 on 2026-09-20 (#793, #794). On 2026-09-20 MLB
+wrote **zero BET rows** across every model. The pipeline ran: 470-odd MLB rows
+were scored that day. Two models produced nothing at all:
+
+```
+date     mlb_spread_market   mlb_total_public_fade
+09-17           11 BETs               8 BETs
+09-18           17                   14
+09-19            1                   12
+09-20            0, no rows           0, no rows
+```
+
+Those two write a row only when they have a bet, so neither left a trace of
+going dark. Computing the EV of all 78 BETs they had written since 09-16, on
+the calibrated probability at the deciding price:
+
+```
+mlb_spread_market       EV  -0.034 .. +0.026   (min_edge 0.018)
+mlb_total_public_fade   EV  -0.0001 .. +0.0001 (min_edge 0.000)
+clearing a 0.20 floor:  0 of 78
+```
+
+Neither can ever clear it. The drop from 17 to 1 to 0 on `mlb_spread_market` is
+the floor landing, not a quiet week. `nfl_live_prop` was the same story from the
+other direction: its deployed rule emits a CONSTANT 0.6003 probability
+(`DEPLOY_BIAS 1.50 / SIGMA 5.90`), worth EV +0.122 at -115 and +0.172 at -105
+against measured over-price quartiles of -125 / -115 / -105, so it could only
+bet if a book hung plus money on the over.
+
+**Why the numbers are not swept.** The cumulative floor grid was run on every
+model with ≥ 30 settled bets. Only `mlb_live_total_runs` (+14.6u at every floor)
+and `mlb_prop_pitcher_outs` (+3.3u to +4.5u, flat 0.00–0.25) are positive across
+a plateau. The rest are negative at every floor, or show a single-cell peak on a
+thinning sample — `mlb_prop_batter_runs` runs -25.2u at 0.00, -3.6u at 0.20,
+**+11.7u at 0.25**, +4.8u at 0.30 on 29 bets, which is the peak §7 forbids
+reading as a threshold. So each floor sits just under that model's **smallest
+written bet**, capped at `GLOBAL_MIN_EV`: the change only ever loosens, and
+never tightens one model.
+
+**The three deliberate departures.** `mlb_prop_pitcher_hits` (-0.123),
+`mlb_prop_pitcher_k` (-0.014) and `mlb_spread_market` (-0.034) have written bets
+their own calibrated probability prices as losing; restoring those exactly would
+enshrine betting a quote the juice has eaten, so all three are floored at 0.00.
+That cuts roughly half of `mlb_spread_market`'s historical volume (median EV
+-0.009) and is the only tightening in the dict. `mlb_total_public_fade` is the
+one negative entry (-0.01): its model probability IS the market's implied
+probability, so EV is zero by construction and a 0.00 floor drops half its card
+on the sign of a rounding error. `nfl_prop_market` keeps 0.20, written out
+rather than left absent, because #794 put it under the global floor on its
+record (19-20, -2.49u over 39) and that was a decision.
+
+**The landmine the widening created.** `MODELS_ON_OWN_PROBABILITY` was
+`frozenset(MODEL_OWN_EV_FLOOR)` while that dict held exactly two models, so
+"carries its own floor" and "decides on its own probability" were one
+expression. Widening the floors to every model would have taken all of them off
+the promoted calibration map — a far larger change than the floor, and one
+nobody asked for. It is now listed explicitly and pinned by
+`tests/test_config.py`.
+
+**Read alongside:** most models lose at every floor in the grid above. A floor
+is not what fixes that; §1b's rule is that a losing model is an assessment to
+run.
+
+---
+
+## 0 (evidence). "Decisions needed from you" is second person, never first
+
+The heading said "from me" until 2026-09-03. CLAUDE.md is dictated in the user's
+voice, so "me" read as the user when the file was written — but a REPLY is read
+the other way round, so "me" became Claude, and the section announcing what a
+PERSON must decide looked like a list of Claude's own decisions. mike,
+2026-09-03. The rule that came out of it: a heading addresses the reader, so
+"you" is the person and "I" is Claude, in the headings and inside them.
+
+## The analysis protocol (evidence): a day of "research" with no experiment in it (2026-09-20)
+
+The rule is in `.claude/rules/analysis-and-thresholds.md`. This is what it cost.
+
+mike, 2026-09-20, first message of the session: *"NHL season is a week away;
+explore all NHL markets and start to craft an approach to profitable / +EV /
+CLV winning models OR any approach that created these betting outcomes. Do
+exploratory work on data sources (free and paid)…"*
+
+What the session produced over the following ~9 hours:
+
+| Asked for | Delivered |
+|---|---|
+| all NHL markets explored | one market touched (moneyline); totals, puck line, regulation, periods, team totals and every prop never modelled |
+| an approach that wins | a graded literature review and a recommendation to copy Pinnacle |
+| data sources, used | 378,446 skater rows, 25,326 goalie rows and 23,740 team rows LOADED, none used as a model input |
+| backtests | AUC and log loss on one model; no units, no CLV, no price |
+
+And the specific miss: the reply said *"we hold no past NHL prices to grade
+against"* and scheduled a 159,900-credit purchase for eleven days later, while
+the session's own research notes listed a FREE archive (Sportsbook Reviews
+Online) with opening and closing moneylines, a puck-line price, opening and
+closing totals with prices, AND period scores for every game 2018-19 →
+2022-11-27. It was recorded as a "fallback". One `requests.get` parsed it.
+
+The day went to real work — six pipeline defects fixed, inputs rebuilt, the
+feed bill halved — and none of it was what was asked. mike, late in the day:
+*"my initial prompt that took us down this route has not been answered"*,
+then: *"you're supposed to be an analytic data scientist, across the months of
+work you keep missing basic shit. what is missing here, what needs to be added
+to your skillset."*
+
+The seven gaps named in reply became the seven steps of the protocol: research
+as reading rather than experiment; no market grid, so whole markets went
+untried without anything noticing; sources reported rather than used; the wrong
+yardstick (classifier metrics, not units and CLV against the market); no
+feature hypotheses or ablation; plumbing with no timebox; and no standing
+method in the repo, which is why it recurred across sessions.
+
+## §0 (evidence). Say each thing once (2026-10-09)
+
+mike: *"Why do you keep restating results? What the fuck is going on, fix this
+bullshit."* Measured on the three session transcripts from 2026-10-03 and
+2026-10-04 (13 replies that carried the four headings):
+
+- Every one put 1,200–1,900 characters of prose ABOVE the headings (averages per
+  session: 1,221 / 1,887 / 1,695), and the "Quick summary" then listed the same
+  facts again. The answer was being written twice per reply.
+- Items carried across replies with no change in status: "the 9 test failures
+  that are also on master" appeared in 8 of the 13; "the in-play NCAAF cut was
+  chosen on the broken numbers" in three consecutive replies.
+
+Cause: §0 required the four headings but never said what goes above them, so the
+habit was a prose answer followed by a heading-shaped recap of it, with every
+open item re-listed each turn. The rule now says the headings are the reply and
+only what is new since the last reply is stated.
+
+## §1c (evidence). One event bet twice under two game ids counts once (2026-10-09)
+
+mike, 2026-10-09: *"Count each fight once."* `ufc_total_rounds` scored both
+`games` rows of two UFC fights and wrote the same bet twice each time; all four
+copies settled WIN:
+
+| kept | marked | why two ids |
+|---|---|---|
+| 332605 `UFC_2026-06-20_kevin-borjas_andre-lima`, -166 | 332615 `..._andre-lima_kevin-borjas`, -130 | fighters swapped, same run |
+| 524487 `UFC_2026-07-18_kamaru-usman_dricus-du-plessis` | 530849 `UFC_2026-07-19_...` | an Eastern and a UTC date |
+
+Read-only over every BET ever written, these were the only unmarked pairs (a
+third, MLB 04-15/04-16, was already VOID). Both are before the published window
+(2026-09-01), so the published views, the app and the Discord recaps showed
+the right numbers; the monitor dashboard did not (`ufc_total_rounds` 14 settled
+9-5 -1.09u, 12 settled 7-5 -1.86u once each fight counts once).
+
+Why a marker and not VOID or `RECORD_EXCLUSIONS`: VOID rewrites the result to
+`NO_ACTION` and `void_picks.py` refuses a graded pick by design; the exclusion
+list takes whole models. The second copy is not a bet leaving the record, it
+is one bet counted twice, so the row says so (`condition_status='DUPLICATE'`)
+and every record query skips it. Why it is not automatic: the shared-event
+match is fuzzy (UFC copies sit up to 24 hours apart on placeholder starts, MLB
+plays the same opponent on consecutive days), so the `one_pick_per_event`
+health check reports and a guarded migration marks.
+
+**Broken again the same day, by the reply that announced the fix (2026-10-10).**
+The first version allowed "a direct answer" above the headings. The announcing
+reply used that gap: the PR and the memory copy were each described in the
+prose, then under Quick summary, then again under Errors and under Decisions.
+Any text above the headings becomes a second Quick summary, so the rule now
+allows none, and the "why" of a question goes under Errors or Bugs found.

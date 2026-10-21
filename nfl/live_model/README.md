@@ -9,7 +9,7 @@ Status against the build spec's build order, honestly:
 | 3 | Props engine (projection) | Built. **Calibration gate: ALL 7 MARKETS FAIL.** Superseded, see below. |
 | 3b | Props engine (flow vs the line) | **Graded against real lines 2026-08-28. 2 of 4 markets cut, 1 cut as a flow lane, pass attempts survives on a side bias rather than on flow.** See the verdict above. |
 | 4 | Feeds + worker | Built, ported to `sports.core` (site.api is blocked from Railway), self-checking. Shapes still unverified against a live payload. |
-| 5 | Paper trade a slate | Not started. Blocked on 1 and 4. |
+| 5 | Score a slate | Not started. Blocked on 1 and 4. |
 | 6 | Live at minimum size | Not started. |
 | 7 | Evaluate a push feed | Not started, and per the spec must not be considered before 6. |
 
@@ -79,7 +79,7 @@ something, but it is a refinement of the bias rather than the source of it.
 
 **This clears the persistence gate. It does not clear the executability one.**
 Snapshots are 5 minute, DK suspends props at the snap, and a 91% over book is
-the fastest way to get limited. That is phase 5, paper trading at live cadence,
+the fastest way to get limited. That is phase 5, scoring at the in-play cadence,
 not live money.
 
 ### Where pass attempts actually landed
@@ -356,7 +356,7 @@ field renamed prices every game off a default.
    A lane without positive pseudo-CLV in two seasons is cut.
 2. **Run `python -m live_model.verify_espn` during a live game** as a belt to
    the worker's braces. It checks both hosts and runs the same predicate.
-3. **Paper trade a full slate** with the worker writing decisions and alerting
+3. **Score a full slate** with the worker writing decisions and alerting
    nothing.
 
 ## Layout

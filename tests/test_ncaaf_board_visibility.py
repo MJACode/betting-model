@@ -211,10 +211,12 @@ def test_a_no_signal_row_does_not_lock_an_ncaaf_game_for_the_week():
 
 def test_one_model_cannot_take_down_every_sport():
     # Indentation-agnostic: since 2026-09-08 the model loop sits inside the
-    # per-game transaction unit, one level deeper.
-    j = _SRC.index("picks = score_game(")
+    # per-game transaction unit, one level deeper; since 2026-09-28 (#843)
+    # the call itself runs through _call_in_savepoint with model_id bound.
+    j = _SRC.index("lambda model_id=model_id: score_game(")
     i = _SRC.rindex("try:", 0, j)
-    block = _SRC[i:i + 900]
+    k = _SRC.index("except Exception as exc:", j)
+    block = _SRC[i:k + 400]
     assert "model_failures.append" in block
     assert "continue" in block
     # ...but the step must still fail, or the outage goes silent.
@@ -247,7 +249,7 @@ def test_unpriced_ncaaf_games_are_skipped_before_the_feature_build():
 def test_the_price_prefilter_can_only_ever_skip_ncaaf():
     """A cost filter that reached another sport would be a behaviour change."""
     i = _SRC.index("        ncaaf_unpriced: set = set()")
-    block = _SRC[i:i + 1600]
+    block = _SRC[i:_SRC.index("        ahead_unpriced: set = set()", i)]
     assert 'if g[1] == "NCAAF" and g[0] not in priced' in block, (
         "only NCAAF games may enter the skip set")
     assert "sport = 'NCAAF'" in block
@@ -259,6 +261,6 @@ def test_the_price_prefilter_fails_open():
     mode is paying the old cost, never showing nothing.
     """
     i = _SRC.index("        ncaaf_unpriced: set = set()")
-    block = _SRC[i:i + 1600]
+    block = _SRC[i:_SRC.index("        ahead_unpriced: set = set()", i)]
     assert "except Exception as exc:" in block
     assert "ncaaf_unpriced = set()" in block.split("except Exception as exc:")[1]

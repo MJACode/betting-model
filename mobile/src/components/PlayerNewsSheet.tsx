@@ -50,8 +50,18 @@ export function PlayerNewsSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close player news"
+        />
+        <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
           <View style={styles.grabber} />
 
           <View style={styles.header}>
@@ -93,6 +103,8 @@ export function PlayerNewsSheet({
                   ) : null}
                   {item.url ? (
                     <Pressable
+                      hitSlop={{ top: 10, bottom: 12, left: 0, right: 8 }}
+                      accessibilityLabel={`Read on ${sourceLabel(item.source)}`}
                       style={styles.readMore}
                       onPress={() => Linking.openURL(item.url!).catch(() => {})}
                       accessibilityRole="link"
@@ -108,11 +120,16 @@ export function PlayerNewsSheet({
             )}
           </ScrollView>
 
-          <Pressable style={styles.closeButton} onPress={onClose} accessibilityRole="button">
+          <Pressable
+            accessibilityLabel="Close player news"
+            style={styles.closeButton}
+            onPress={onClose}
+            accessibilityRole="button"
+          >
             <Text style={styles.closeText}>Close</Text>
           </Pressable>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
