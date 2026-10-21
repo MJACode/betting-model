@@ -425,6 +425,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # until this lands the gate fails closed and no NHL model bets. One new
     # table, anon locked out. Does not rewrite the record views or picks.
     "add_nhl_goalie_designations_2026_10_20.sql",
+    # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
+    # return when the function body already has the marker. Unapplied.
+    # Does not touch picks or the record views. Win, loss, or push.
+    # No spread, price, or line filter. After master's list. The
+    # posted-stake pair stays last and adjacent.
+    "byom_backtest_rpc_2026_10_16.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
