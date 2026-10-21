@@ -14,7 +14,7 @@
 
 import { decisionEdge, decisionOdds } from './decisionPrice';
 import { discordLedVisible, type DiscordPublish } from './discordPublish';
-import { todayET } from './format';
+import { etDate, parseStamp, todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
 import {
@@ -27,11 +27,23 @@ import {
   DUPLICATE_STATUS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
+  DECIDES_ON_RAW_MODELS,
+  DECIDES_CALIBRATED_AT_DK_MODELS,
+  DECIDE_ON_CALIBRATED_PROB,
+  PUBLISH_MAX_PRICE_GAP,
+  DECIDED_ONLY_PUBLISH_WITHIN_HOURS,
+  PUBLISH_MAX_PRICE_AGE_HOURS,
 } from './thresholds.generated';
 export type { ModelThreshold } from './thresholds.generated';
 // `export { X } from` re-exports without binding X in this module, so
 // isProbOnlyModel / thresholdFor / etc. cannot see the names (TS2304).
 export {
+  DECIDES_ON_RAW_MODELS,
+  DECIDES_CALIBRATED_AT_DK_MODELS,
+  DECIDE_ON_CALIBRATED_PROB,
+  PUBLISH_MAX_PRICE_GAP,
+  DECIDED_ONLY_PUBLISH_WITHIN_HOURS,
+  PUBLISH_MAX_PRICE_AGE_HOURS,
   ACTION_THRESHOLDS,
   PAUSED_MODELS,
   PROB_ONLY_MODELS,
@@ -54,10 +66,23 @@ export type ActionFilterable = Pick<
 > & {
   decision_odds?: number | null;
   decision_edge?: number | null;
+  /** The scorer's calibrated probability (picks.model_probability_cal). */
+  model_probability_cal?: number | null;
+  /** Implied probability of the deciding price; DraftKings' before 2026-09-09. */
+  decision_implied_prob?: number | null;
+  dk_implied_prob?: number | null;
   /** Set by attachDiscordPublish. Omitted means the ledger was not read. */
   discordPublish?: DiscordPublish;
   /** 'model paused' on a pick written while its model was paused. */
   downgrade_reason?: string | null;
+  /** In-play row; the publish-time guards are pre-game only. */
+  is_live?: boolean | null;
+  /** Game start (picks.game_time, UTC ISO). The decided-only window reads it. */
+  game_time?: string | null;
+  /** ET date (YYYY-MM-DD); the window's fallback when game_time is unknown. */
+  game_date?: string | null;
+  /** When the row was written, i.e. when its decision price was read. */
+  created_at?: string | null;
 };
 
 /**
@@ -262,6 +287,101 @@ export function isUnlockedPreview(
   return UNLOCKED_LOOKAHEAD_SPORTS.has(p.sport) && p.game_date > today;
 }
 
+/** What decided this model's BET -- config.decision_source. */
+export function decisionSource(modelId: string): 'raw' | 'calibrated' | 'calibrated_at_dk' {
+  if (DECIDES_CALIBRATED_AT_DK_MODELS.has(modelId)) return 'calibrated_at_dk';
+  if (!DECIDE_ON_CALIBRATED_PROB || DECIDES_ON_RAW_MODELS.has(modelId)) return 'raw';
+  return 'calibrated';
+}
+
+/** Does the scorer decide this model's BET on the calibrated probability? */
+export function decidesOnCalibrated(modelId: string): boolean {
+  return decisionSource(modelId) !== 'raw';
+}
+
+/** An implied probability of 0 (or none) is a missing price (config NULLIF). */
+function impliedOrNull(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return n === 0 || Number.isNaN(n) ? null : n;
+}
+
+/**
+ * THE NUMBERS THE SCORER DECIDED ON — the app twin of config.decided_prob_sql /
+ * decided_edge_sql, which Discord, push and the health check filter on.
+ *
+ * models.scorer._decide decides on the calibrated probability and on that
+ * number minus the implied probability of the deciding price; it STORES the
+ * raw pair. Filtering on the raw pair hid every BET the calibration had lifted
+ * over the cut (18 NHL underdog BETs, 2026-09-22..10-02): written, shown
+ * nowhere. The NCAAF live engine (calibrated_at_dk) subtracts DraftKings'
+ * implied instead. Raw when the model decides raw, when the row has no
+ * calibrated number, and — edge only — when the row has no price to subtract
+ * (an implied of 0 counts as none).
+ */
+export type DecidedInput = Pick<
+  ActionFilterable,
+  'model_id' | 'model_probability' | 'edge' | 'decision_edge'
+  | 'model_probability_cal' | 'decision_implied_prob' | 'dk_implied_prob'
+>;
+
+export function decidedNumbers(p: DecidedInput): { prob: number; edge: number } {
+  const rawEdge = decisionEdge(p);
+  const cal = p.model_probability_cal;
+  const src = decisionSource(p.model_id);
+  if (src === 'raw' || cal == null) {
+    return { prob: Number(p.model_probability), edge: rawEdge };
+  }
+  const prob = Number(cal);
+  const dk = impliedOrNull(p.dk_implied_prob);
+  const implied = src === 'calibrated_at_dk' ? dk : (impliedOrNull(p.decision_implied_prob) ?? dk);
+  if (implied == null) return { prob, edge: rawEdge };
+  return { prob, edge: prob - implied };
+}
+
+type Cut = { min_prob: number; min_edge: number | null; prob_only: boolean };
+
+function clearsCut(prob: number, edge: number, cut: Cut): boolean {
+  if (prob < cut.min_prob) return false;
+  if (cut.prob_only) return true;
+  return edge >= (cut.min_edge ?? 0);
+}
+
+/**
+ * THE PUBLISH-TIME GUARDS — the app twin of config.price_gap_ok_sql and
+ * decided_only_window_sql. Pre-game only.
+ *   1. The deciding price's implied probability within PUBLISH_MAX_PRICE_GAP
+ *      of DraftKings' (3101240: BetMGM +154 vs DK -125, 16pp).
+ *   2. A pick that clears the cut only on the decided numbers (fails the raw
+ *      cut) waits until its game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS
+ *      (game_date at most tomorrow ET when the start is unknown)...
+ *   3. ...and its price (created_at) is at most PUBLISH_MAX_PRICE_AGE_HOURS
+ *      older than the start (than now, start unknown). Against the start so
+ *      the verdict is fixed: a posted pick never drops off the board later.
+ */
+export function publishGuardsPass(p: ActionFilterable, cut: Cut, nowMs: number = Date.now()): boolean {
+  if (p.is_live || isLiveModel(p.model_id)) return true;
+  const dec = impliedOrNull(p.decision_implied_prob);
+  const dk = impliedOrNull(p.dk_implied_prob);
+  if (dec != null && dk != null && Math.abs(dec - dk) > PUBLISH_MAX_PRICE_GAP + 1e-12) return false;
+  if (clearsCut(Number(p.model_probability), decisionEdge(p), cut)) return true;
+  const priced = p.created_at ? parseStamp(p.created_at).getTime() : NaN;
+  if (Number.isNaN(priced)) return false;
+  const maxAgeMs = PUBLISH_MAX_PRICE_AGE_HOURS * 3600_000;
+  const start = p.game_time ? parseStamp(p.game_time).getTime() : NaN;
+  if (!Number.isNaN(start)) {
+    return start <= nowMs + DECIDED_ONLY_PUBLISH_WITHIN_HOURS * 3600_000
+      && priced >= start - maxAgeMs;
+  }
+  if (!p.game_date) return false;
+  // Tomorrow's ET calendar date, from the same clock the age bound uses.
+  // Date.UTC day arithmetic on an ET Y-M-D, so this is not "today in UTC".
+  const [y, m, d] = etDate(new Date(nowMs)).split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const tomorrow = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+  return p.game_date <= tomorrow && priced >= nowMs - maxAgeMs;
+}
+
 export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
   // A VOIDED pick is not an action either (CLAUDE.md §1c). It is a row the
@@ -299,7 +419,9 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // config.py); fall back to the bundled constants when not yet loaded / offline.
   // The cut is applied at the price the pick was DECIDED at (2026-09-09):
   // decision_* since the flip, DraftKings before it. Same clause the scorer,
-  // the Discord and push producers and the record views apply.
+  // the Discord and push producers apply. The settled record does not.
+  // ...on the numbers the scorer DECIDED on (decidedNumbers): calibrated
+  // where it decides calibrated, raw otherwise.
   //
   // The price floor, the probability floor and the edge cut decide what a
   // model may bet NEXT. A bet Discord has already posted keeps the cuts it
@@ -313,28 +435,30 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // event under one key, both rows read as posted and both keep their cuts;
   // one such pre-game key between 2026-08-17 and 2026-10-16, none open, and
   // the later copy is marked DUPLICATE, refused above. Pause, retirement,
-  // VOID, DUPLICATE and the paused-row marker still apply.
+  // VOID, DUPLICATE and the paused-row marker still apply. The settled
+  // record is passesRecordFilter and does not use this cut.
   const odds = decisionOdds(p);
-  const edge = decisionEdge(p);
+  const { prob, edge } = decidedNumbers(p);
   const posted = p.discordPublish === 'published';
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
     if (sv.paused) return false;
     if (posted) return true;
-    if (p.model_probability < sv.min_prob) return false;
+    if (prob < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;
-    if (sv.prob_only) return true;
-    return edge >= sv.min_edge;
+    if (!sv.prob_only && !(edge >= sv.min_edge)) return false;
+    return publishGuardsPass(p, { min_prob: sv.min_prob, min_edge: sv.min_edge, prob_only: !!sv.prob_only });
   }
 
   if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
   if (posted) return true;
-  if (p.model_probability < t.min_prob) return false;
+  if (prob < t.min_prob) return false;
   if (!passesMinOdds(odds, t.min_odds)) return false;
-  if (PROB_ONLY_MODELS.has(p.model_id)) return true;
-  return edge >= t.min_edge;
+  const probOnly = PROB_ONLY_MODELS.has(p.model_id);
+  if (!probOnly && !(edge >= t.min_edge)) return false;
+  return publishGuardsPass(p, { min_prob: t.min_prob, min_edge: t.min_edge, prob_only: probOnly });
 }
 
 /**

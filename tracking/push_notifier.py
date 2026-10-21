@@ -141,12 +141,13 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
               -- 2026-09-28): keyed on the row's own marker, so a pick written
               -- while paused is never announced, even after an unpause.
               {config.paused_row_exclusion_sql("p")}
-              AND p.model_probability >= t.min_prob
+              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON, plus the publish-time
+              -- price-gap and decided-only 24h guards (config.publishable_cut_sql):
+              -- calibrated where the scorer decides on it, raw otherwise.
               -- The cut at the price the pick was DECIDED at (2026-09-09):
               -- decision_* since the flip, DraftKings before. Same clause as
               -- the Discord producer and the app (test_nfl_lookahead_signals).
-              AND (t.prob_only = TRUE
-                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              AND {config.publishable_cut_sql("p", "t")}
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
