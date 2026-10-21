@@ -84,10 +84,12 @@ def test_every_model_carries_its_own_thresholds():
     """The per-model cut is the swept, validated one; the module-level fallback
     is a number nobody chose for any particular market. A model that reaches
     production without its own entry would be scored against that fallback
-    silently, so the fallback must stay unreachable."""
-    from config import LIVE_MODELS, MODEL_PROB_THRESHOLDS, PROP_MODELS
+    silently, so the fallback must stay unreachable. A rule card scored
+    outside the registries (nba_total_luck, nba_team_total_luck, ...) is
+    registered by its ACTION_THRESHOLDS entry, so that counts too."""
+    from config import ACTION_THRESHOLDS, LIVE_MODELS, MODEL_PROB_THRESHOLDS, PROP_MODELS
 
-    registered = set(MODELS) | set(PROP_MODELS) | set(LIVE_MODELS)
+    registered = set(MODELS) | set(PROP_MODELS) | set(LIVE_MODELS) | set(ACTION_THRESHOLDS)
     assert not registered - set(MODEL_EDGE_THRESHOLDS), \
         f"no edge threshold: {sorted(registered - set(MODEL_EDGE_THRESHOLDS))}"
     assert not registered - set(MODEL_PROB_THRESHOLDS), \
@@ -201,7 +203,13 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # 2026-10-16 (mike: "build the projection model"): its probability is
          # calibrated per market inside its own artifact, on the graded seasons'
          # main-line pairs, and every floor was chosen on that number.
-         "nba_prop_projection"}
+         "nba_prop_projection",
+         # 2026-10-17 (mike): the NBA totals overs; market-fair P(over) plus the
+         # gap >= 3 bucket's walk-forward uplift, and no record to fit a map on.
+         "nba_total_luck",
+         # The NBA home team-total unders: market-fair P(under) plus the earlier
+         # graded seasons' walk-forward uplift, and no record either.
+         "nba_team_total_luck"}
     )
 
 
@@ -214,6 +222,16 @@ def test_every_own_floor_names_a_live_model():
     assert not unknown, f"{unknown} carry a floor but are not registered models"
     retired = [m for m in config.MODEL_OWN_EV_FLOOR if m in config.RETIRED_MODELS]
     assert not retired, f"{retired} are retired and should carry no floor"
+
+
+def test_the_nba_home_team_total_floor_does_not_move_with_the_platform_default(monkeypatch):
+    """It laid -122 to +110 on its 349 graded bets, so its -200 is pinned in
+    MODEL_MIN_ODDS: a Railway DEFAULT_MIN_ODDS override must not move it, and
+    the default being -200 today is not the pin."""
+    import config
+
+    monkeypatch.setattr(config, "DEFAULT_MIN_ODDS", -1000.0)
+    assert config.min_odds_for("nba_team_total_luck") == -200
 
 
 def test_the_models_the_global_floor_silently_removed_can_bet_again():
@@ -270,5 +288,7 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         # prop rule decides on Pinnacle's no-vig under, its own number.
         "nba_prop_market",
         "nba_prop_projection",      # 2026-10-16 (mike): calibrated inside its own artifact
+        "nba_total_luck",           # 2026-10-17 (mike): market-fair P(over) + its bucket's uplift
+        "nba_team_total_luck",      # market-fair P(under) + the walk-forward uplift
     }
     assert not not_named_here

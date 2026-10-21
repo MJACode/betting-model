@@ -26,22 +26,28 @@ import type { BookPricedRow, Pick } from '@/types';
  * The line is shown next to the price because a better price on a worse number
  * is not actually a better bet — the user needs to see both.
  *
- * No row is marked as "yours": the book picker sets the Stats lines and the
- * betslip's bet button, and it does not reach the pick boards
- * (Matt, 2026-09-04).
+ * Since 2026-10-19 (Matt) the detail screen passes the member's books, and a
+ * book outside them is not listed: a price they cannot bet in their state is
+ * not a comparison they can use.
  */
 export function AllBooksCard({
   pick,
   bookRows,
+  allowedBooks,
 }: {
   pick: Pick;
   bookRows: BookPricedRow[] | undefined;
+  /** The member's own books. Rows at any other book are not shown (Matt,
+   *  2026-10-19). Omitted: every book the feed carries. */
+  allowedBooks?: readonly string[];
 }) {
   // marketForPick reads a multi-market rule's prop_market off the row; without
   // it those picks' rows drew with no Line column, a price at another number
   // looking like the same bet.
   const market = marketForPick(pick);
-  const quotes = allBookPrices(bookRows ?? [], pick.pick_side, market);
+  const mine = allowedBooks ? new Set(allowedBooks) : null;
+  const rows = (bookRows ?? []).filter((r) => mine == null || mine.has(r.bookmaker));
+  const quotes = allBookPrices(rows, pick.pick_side, market);
   // Whose line it is: the "modeled" row and the footnote (allBooksLineSource).
   const lineSource = allBooksLineSource(pick);
 
@@ -52,10 +58,11 @@ export function AllBooksCard({
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>All books</Text>
+      <Text style={styles.title}>{mine ? 'Your books' : 'All books'}</Text>
       <Text style={styles.subtitle}>
-        Every book and line, including ones at a different number or that you can’t bet.
-        Best payout first.
+        {mine
+          ? 'Every line at your books, including ones at a different number. Best payout first.'
+          : 'Every book and line, including ones at a different number or that you can’t bet. Best payout first.'}
       </Text>
 
       <View style={styles.headerRow}>

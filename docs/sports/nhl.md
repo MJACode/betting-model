@@ -4,6 +4,186 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+> **2026-10-20 (mike): NO NHL BET OF ANY KIND UNTIL BOTH STARTING GOALIES ARE
+> CONFIRMED.** *"We should absolutely always know the goalie matchup before
+> making a bet as well."* Every NHL model (`nhl_moneyline`,
+> `nhl_moneyline_regulation`, `nhl_over_under`, `nhl_puckline`, and the
+> blocked-shots, saves and assists props) and any added later, **except the
+> shots-on-goal props** (below).
+>
+> **The one exemption: `nhl_prop_shots_on_goal`** (mike, same day: *"Ok on
+> shots on goal"*, answering a proposal that measured the cost of gating it).
+> The model never reads the goalie, and its record is its early price: bets
+> placed 6+ hours before puck drop were +11.66 units on 39 (average 8.75%
+> better than the closing price, over the 35 that carry a CLV), against
+> -1.12 on 33 placed later. Those units are 1u risked a bet
+> (`profit_flat / 100`), settled games through 2026-10-19; sized the
+> record's way (1u to win, risk capped at 3) the same bets are +9.27 and
+> -1.06. So it keeps deciding at its opening fetch, on the whole slate,
+> exactly as before the rule. `config.NHL_GOALIE_GATE_EXEMPT` names it, and
+> every check honours it per row, by `model_id`: the props card hands it the
+> whole slate (`slate_for`), the quote filter keeps its pre-confirmation
+> fetch, and the INSERT guards and the scorer's guard let its row through.
+> A model the constant does not name is gated, so a new NHL model waits by
+> default. `tests/test_nhl_goalie_gate.py` pins the set to this one model.
+> **What it means for the one-prop-a-game pool:** a shots-on-goal bet may
+> take a game's single prop slot before the goalies are confirmed, and then
+> the saves and assists models cannot bet that game. The pool drops a gated
+> model's row on an unknown game before it chooses, so such a row cannot
+> win the slot and leave the game with nothing.
+>
+> **Why.** `nhl_goalie_stats` held one row per team per game, written once at
+> ~10:06Z from ESPN's probable starter (`data/ingestors/nhl_stats_ingestor.py`).
+> ESPN says whether that name is `expected` or `confirmed`; the parser kept
+> the flag and the writer threw it away. The 6am goalie did not start in 65
+> of 251 team-games 2026-10-01..10-19, and in 22 of 70 (31%) for
+> 10-14..10-19. On 10-20, MTL (a Fowler row; Dobes confirmed) and SEA
+> (Daccord; Grubauer confirmed) changed after the write. The moneyline gate
+> only checked that a row existed. The totals card and the prop cards had no
+> goalie gate.
+>
+> **Known**, for a game (`models/nhl_goalie_gate.py`), means for both teams:
+> ESPN's latest designation is `confirmed`; the game's `nhl_goalie_stats` row
+> names the same goalie; and DailyFaceoff, if it has named anyone for that
+> team, names the same goalie. DailyFaceoff's status is not required: it is
+> a veto on a disagreement. ESPN's "confirmed" follows the morning skate and
+> is looser than DailyFaceoff's (10-20: ESPN confirmed Kuemper while
+> DailyFaceoff said Likely). Names compare with accents stripped and a small
+> first-name alias step (Matt/Matthew, Dan/Daniel); ids decide when both
+> sides have one. The gate fails closed: a read that fails means not known.
+>
+> Three more conditions since the review of 2026-10-21:
+> - **The goalie row carries his NHL id.** The moneyline reads a goalie's
+>   form by id, and a row with none was filled with the team's previous
+>   starter, so it would have bet another goalie's form (NYI 2026-10-06,
+>   Varlamov, was such a row; 13 of the 286 goalie rows dated 2026-10-01 to
+>   10-21 have no id, 12 of them on opening night). Master waited on these
+>   games; so does the gate.
+> - **A poll has read the confirmation in the last 30 minutes**
+>   (`config.NHL_GOALIE_READ_MAX_AGE_MIN`, the `last_seen_at` column). A
+>   poll that reads nothing (ESPN has IP-blocked the worker twice) stores
+>   nothing, so a confirmation used to stand all evening whoever ESPN named
+>   after it. A DailyFaceoff name that old stops vetoing: it fails open, as
+>   the poll does. 30 minutes: the window re-reads every five, and a
+>   refresh pass decides inside its own run (hourly passes 7.9 minutes
+>   median, 13.1 longest, since 2026-10-07).
+> - **ESPN's newest starter has a name.** When ESPN names a new athlete and
+>   his page cannot be read, the poll stores an `unread` row, which closes
+>   the gate until a later poll reads him. It used to skip the team, leaving
+>   the old confirmation as the latest row.
+>
+> And a poll that cannot read ESPN's listing (or finds none of our games in
+> it) stores what DailyFaceoff said, then fails the step, so the refresh pass
+> and the window's heartbeat show it.
+>
+> **Where it holds.** The scorer: both side models decide through
+> `_nhl_game_day_reason`, which reads the gate, and `score_game` applies it to
+> every NHL model by sport (puckline, and any later kind). The totals card and
+> both prop cards drop unknown games before anything is pooled (for every
+> model but shots on goal), so an unknown game cannot take the one prop bet a
+> game allows through a gated model. And the last line, at every
+> INSERT that can write an NHL pick: `_insert_picks` turns an unknown BET into
+> NONE with the reason, and the two prop cards' `publish` drop it.
+> `tests/test_nhl_goalie_guards.py` fails on any file that inserts into
+> `picks` without the guard and is not on its allowlist. The allowlist is the
+> NBA/NFL/WNBA cards, and `tracking/first_signal_repair.py`: it restores a
+> BET that already existed (CLAUDE.md §1c), and refusing it would erase a
+> pick rather than stop a bet.
+>
+> **When the side models decide.** No clock. The 16:00Z-18:00Z window is gone.
+> Both side models decide at the first scoring run where the matchup is
+> known, last night's games are in the logs (`stale_teams`, unchanged), and
+> the game is more than 10 minutes from its stored start
+> (`config.NHL_DECIDE_BEFORE_START_MIN`; the totals card uses the same
+> margin). Before a game is played its stored start is the odds feed's,
+> about ten minutes after the scheduled puck drop (2026-10-21: 23:40 for two
+> games the NHL schedules at 23:30), so a decision in those last minutes
+> could price a game already under way. The lower bound is data: a game is known only
+> once its game-day goalie row exists (the ~10:06Z write), and the poll
+> rewrites rows, never creates them. The 16:00Z window was justified as
+> "what the walk-forward decided against". It did not: the original grade
+> decided at each game's first stored quote, 95.8% of them the day before
+> (median lead about 27 hours). Re-graded with the goalies who actually
+> started (as-built artifact, EV ≥ 0.06, −200 floor, best price, the games
+> all four timings share): at the 16:00Z game-day quote +5.08% on 1,588 bets
+> (bootstrap 95% +0.3..+10.0); at the last pre-game quote +5.21% on 1,633
+> (+0.6..+10.0). A confirmed-goalie decision lands between the two.
+>
+> **The price must be fetched after the confirmation** (review, 2026-10-21).
+> A known matchup is not enough: the five-minute window decided the side
+> models and the totals card on the newest stored fetch, which on the hourly
+> passes could be an hour older than the confirmation (a game confirmed at
+> 16:40Z decided at 16:45Z on the 16:17Z prices). Now the moneyline, the
+> regulation model and the puck line refuse a BET when DraftKings' newest
+> fetch of that market (`odds.created_at`, our fetch time) was taken before
+> the matchup became known (`models/scorer._nhl_price_reason`), and the
+> totals card holds a game whose newest Pinnacle fetch was
+> (`scripts/nhl_totals_card.after_confirmation`). The reason on the row:
+> "waiting for a price fetched after both goalies were confirmed". The
+> window fetches NHL game odds itself before it scores (below).
+>
+> **`nhl_over_under`'s decision moment moved.** It took a game's first
+> qualifying fetch, often the day before puck drop, and its evidence leans on
+> those prior-day quotes. It now takes the first qualifying fetch after both
+> goalies are confirmed on game day. That regime has not been graded on its
+> own.
+>
+> **The history: `nhl_goalie_designations`** (append-only but for
+> `last_seen_at`; migration `add_nhl_goalie_designations_2026_10_20.sql`, RLS
+> on, anon locked out). One row per (game, team, source) each time the named
+> goalie or the status changes: `source` `espn` or `dailyfaceoff`; `status`
+> `confirmed`, `expected`, `likely`, `unconfirmed`, `none` (listed with no
+> starter), `unread` (named, name not read); `player_id` resolved the way the
+> 6am write resolves a name; `source_player_id`; `last_seen_at`, the last
+> poll that read the row as still standing (each poll moves it on the rows it
+> saw unchanged). The migration's skip check reads the catalog through
+> `to_regclass`: the first version cast the name to `regclass`, which errors
+> on a database without the table, so it could never have created it. Written by `data/ingestors/nhl_goalie_designations.py`,
+> which also rewrites the game's goalie row when ESPN confirms someone else
+> (same row builder as the 6am write: `nhl_stats_ingestor.goalie_row`). Only
+> today's games are rewritten, a started game is never touched, and a run on
+> unchanged data writes nothing. DailyFaceoff sits behind Cloudflare and has
+> not been tested from the worker, so it fails open with one warning.
+>
+> **When it runs.** Early in every refresh pass (step
+> `nhl-goalie-designations`, before any NHL decider; today and tomorrow on
+> the hourly passes, today only on the evening ones), after `nhl_stats` in
+> the 6am run, and every five minutes from 11:00 to 23:55 ET in the NHL
+> goalie window (`scheduler.run_nhl_goalie_window`,
+> `scripts/nhl_goalie_window.py`). The window polls today's games; for any
+> game that has just become known it fetches NHL game odds (step `nhl-odds`:
+> the bulk call plus the per-game 3-way calls, a median 35 credits and 55 at
+> the 90th percentile, `api_call_log` 2026-10-19 14:00Z to 10-21 04:00Z, on
+> deciding ticks only), runs the NHL prop odds step, the NHL game models for
+> exactly those games (`run_scorer(only_games=...)`, the pre-game poller's
+> entry point), the totals card and the prop cards, then publishes. With no
+> game odds (the fetch stored nothing), the side models and the totals card
+> wait for the next tick. A poll that failed decides nothing. A matinee
+> confirmed at warmups falls between two hourly passes; this is for that.
+> While a refresh pass or the daily run is in progress the window does
+> nothing, the poll included (the pass polls first and decides after, and a
+> rewrite in the middle of its scoring could put two models on different
+> goalies); it checks again after taking its own lock. A pass that starts
+> during a tick waits for it, then lets go of the lock rather than holding
+> it for its whole run. Its heartbeat must beat within 30 minutes from 11:30
+> to 23:59 ET (`tracking/job_heartbeat.ACTIVE_HOURS_ET`), and within 700
+> overnight. An unchanged slate costs ESPN the listing plus one call a game,
+> a tick.
+>
+> **Props decide on a fetch taken after the confirmation.** A game whose
+> matchup became known after its newest prop fetch owes one more opening
+> snapshot (`nhl_prop_odds_ingestor.due`), and the cards will not decide it
+> on the older fetch (shots on goal excepted: it still decides at its opening
+> fetch, and the extra snapshot is one more fetch it may see later, as the
+> 70-minute one is). That is one extra snapshot each time a game's matchup
+> becomes known after its newest prop fetch: usually once a game, again if
+> the confirmation changes after it (a new goalie confirmed, or ESPN going
+> back to expected and then confirming again). Each is two event calls
+> (featured + alternates). The older "5 credits a game per
+> snapshot" below predates the alternates call; `api_call_log` measured the
+> pair at 10-11 credits on the quiet evening passes of 2026-10-19 (featured
+> 5-6, alternates 5). A saves bet is taken on the confirmed starter only.
+
 > **2026-10-17 (mike, "Build the fix"): ONE NHL GAME NEVER GETS TWO PICKS
 > THAT CANNOT BOTH WIN, AND THE TWO SIDE MODELS DECIDE AT THE SAME MOMENT.**
 > That day the regulation model had locked "BOS (Regulation)" at 18:26Z the
@@ -14,7 +194,8 @@
 > on 2026-10-04 "FLA ML" and "ANA (Regulation)" both lost. Two changes:
 > - `nhl_moneyline_regulation` now decides only in the moneyline model's
 >   window: 16:00Z-18:00Z on game day, both listed goalies, last night's logs
->   in. Every other run writes its rows NONE with the reason. Both models read
+>   in (superseded 2026-10-20: no clock, both goalies CONFIRMED, above).
+>   Every other run writes its rows NONE with the reason. Both models read
 >   one gate (`models/scorer._nhl_game_day_reason`). Before this change, every
 >   one of its 33 BETs this season was written 10-72 hours before puck drop.
 >   Graded on the 120 finished 2026-27 games
@@ -22,9 +203,9 @@
 >   7 bets for +1.1 units, against 31 for -4.9 the early one actually made.
 >   The 7 are all among the 31 and on the same outcome, at a better average
 >   price (+173 against +159). The 24 it would not have made lost 5.8 units.
->   About 120 games: this rules out "clearly worse", nothing more. A game
->   that starts by 16:00Z has no window, so neither model bets it. None of
->   the first 136 games of 2026-27 did; a Europe game would.
+>   About 120 games: this rules out "clearly worse", nothing more. (Until
+>   2026-10-20 a game that started by 16:00Z had no window; with the clock
+>   gone, a Europe game is decided once its goalies are confirmed.)
 > - Both side models' rows for a game are held back and checked before they
 >   are written (`_apply_side_conflicts`). Each pick maps to the endings it
 >   wins on. A BET already standing on the game keeps it, and the new pick is
@@ -140,8 +321,10 @@
 >   closing snapshot per game, six markets, ten books
 >   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step
 >   `nhl-prop-odds`, kill switch `RUN_NHL_PROP_ODDS=0`). Measured on the live
->   endpoint: 5 credits a game per snapshot. Four of the six markets now have a
->   model; points and anytime scorer do not.
+>   endpoint: 5 credits a game per snapshot. (Since the alternate-lines call
+>   was added, a snapshot is two calls: 10-11 credits a game on 2026-10-19,
+>   `api_call_log`.) Four of the six markets now have a model; points and
+>   anytime scorer do not.
 > - A returning starter is now matched to his own history before his first
 >   game of the season (`GoalieBook.player_named`); until 2026-10-01, 28 of 32
 >   probable starters carried the league-average line.
@@ -204,10 +387,11 @@ rating, goalie workload, home ice, travel). It is NOT fit by
 `models.trainer` (`OWN_FIT_PATH` refuses it): refit with
 `scripts/nhl_moneyline_anchored_train.py`, grade with
 `scripts/nhl_moneyline_anchored_backtest.py` (it must reproduce before a new
-artifact goes live). **One decision a game: 16:00Z-18:00Z on game day, with
-both teams' game-day goalie rows in `nhl_goalie_stats`, and both teams' games
-of the last two days already in `nhl_team_game_log`** (they land ~10:05Z; if
-that ingest is late the model waits rather than read stale rest and form);
+artifact goes live). **One decision a game, at the first scoring run where
+both starting goalies are confirmed (the NHL goalie gate, top of this file;
+no clock since 2026-10-20), with both teams' games of the last two days
+already in `nhl_team_game_log`** (they land ~10:05Z; if that ingest is late
+the model waits rather than read stale rest and form);
 every other run writes NONE with the reason, and it never writes AVOID. EV ≥ 0.06 on its own
 probability at the best price, −200 floor; evidence in `docs/thresholds.md`
 and `docs/nhl_moneyline_rebuild.md`. Gate standing: 0 settled bets, live by
@@ -250,13 +434,20 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 - **Franchise id:** Arizona Coyotes → Utah (Hockey Club → Mammoth) all map to the canonical **`UTA`** across every season — in `nhl_stats_ingestor.NHL_API_ABBREV_MAP`, `odds_ingestor.NHL_ODDS_API_MAP`, and `sbr_loader.NHL_NAME_MAP`. Historical ARI rows fold into UTA so the franchise has one identity.
 - **Goalie features:** save%/GAA/GSAA diffs, built as-of from the per-game log (see "Inputs as they are now"). The `_last5` columns are populated for every game since 2026-09-20 but are NOT in the model feature lists — `build_training_dataset` keeps only listed features, and adding them is a feature-list change that needs its own walk-forward.
 - **Starting-goalie confirm:** NHL `/v1/schedule` has no `probableGoalie` (measured 2026-09-14). ESPN core `probableStartingGoalie` overlays the game-day `nhl_goalie_stats` row (`data/ingestors/espn_probables.py`). The game-model gate then vetoes a BET when that named goalie is Out/Doubtful with `status_ts` ≤ the quote (`docs/game_injury_gate.md`). No ASOF fallback to the season snapshot for the gate — that is last year's #1.
+- **The last-night check reads the shared schedule reader** (2026-10-20):
+  `nhl_moneyline_anchored.stale_teams` now calls
+  `data/schedule_context.games_between` / `teams_missing_from_logs`, with its
+  behaviour pinned unchanged (every row in the two days, no de-duplication,
+  compared by game id with the team log; `tests/test_schedule_context.py`).
+  NHL is not in the generic scorer's schedule gate: both side models already
+  decide on game day behind this check.
 - **Season label:** ending year, rolling from SEPTEMBER (`data/season_labels.py`); the 2020 bubble playoffs are the one September that belongs to the season before.
 
 ### Pipeline
 
 | Step | Runs where | Frequency | What it does |
 |---|---|---|---|
-| NHL results (`nhl-results`) | GitHub Actions (step 0b, **before settle**) | daily 7am | `ingest_nhl_scores_for_date` — trailing-3-day final scores + regulation outcomes into `games` (settlement reads `home_score`; the MLB statsapi fetch in paper_tracker doesn't cover NHL) |
+| NHL results (`nhl-results`) | GitHub Actions (step 0b, **before settle**) and every refresh pass | daily 7am, hourly 7am–5pm ET, every 10 min 6–11pm ET | `ingest_nhl_scores_for_date` — trailing-3-day final scores + regulation outcomes into `games` (settlement reads `home_score`; the MLB statsapi fetch in paper_tracker doesn't cover NHL). Then `nhl_period_scores_api.top_up`: finals that have no `nhl_api_score` row, from the same `/v1/score` goals array, at most 40 dates a pass |
 | NHL odds (h2h/totals/spreads bulk + per-event 3-way) | GitHub Actions (`step_odds`) | 6am + hourly to 5pm + every 10 min 6pm–11pm | DK lines; 3-way attempted per-event (bulk 422s it), non-fatal when absent |
 | NHL team + goalie stats (`nhl_stats`) | GitHub Actions (`step_nhl_stats`) | daily 7am | season-to-date team metrics + probable-starter goalie rows (ESPN `probableStartingGoalie` overlay) |
 | NHL totals (`nhl-over-under`) | Railway worker (`step_nhl_over_under`) | 6am (right after the odds step) + every refresh pass (right after `par odds`) | `scripts/nhl_totals_card.py`: every unstarted NHL game, Pinnacle vs the bettable books in the newest fetch; writes at most one `nhl_over_under` BET a game, once, under the model's advisory lock. Logs a diagnostic line every pass (`no_sharp`, `pinnacle_withdrawn`, ...) so an empty card can be told from a broken one |

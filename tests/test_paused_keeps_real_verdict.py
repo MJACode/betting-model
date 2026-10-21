@@ -407,6 +407,7 @@ def test_the_app_filters_the_paused_row_out_of_signals_and_the_record():
     for const in ("const PICK_COLUMNS =", "const SETTLED_PICK_COLUMNS ="):
         block = q.split(const)[1].split(";")[0]
         assert "downgrade_reason" in block, const
+    # v9 still carries downgrade_reason. It also carries clv_method.
     assert "const KEY = 'settledPicks.v9';" in _src("mobile/src/lib/settledPickCache.ts")
 
 

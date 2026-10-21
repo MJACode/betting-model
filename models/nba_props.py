@@ -276,12 +276,34 @@ def settle_value(spec: Spec, rows: pd.DataFrame) -> pd.Series:
 
 # ── schedule and teams ───────────────────────────────────────────────────────
 
+def regular_game_ids(games: pd.DataFrame, schedule: pd.DataFrame) -> set:
+    """The regular-season games among `games` (game_id, season, game_date): the ones nba_schedule
+    (game_id, season, game_date, game_type) types 'regular', and the ones it does not list at all
+    that fall on a regular-season day -- models.nba_total_luck.regular_season, the totals model's
+    rule. The second half is a game the stored schedule has not caught up with: the 2026-27
+    schedule was loaded on 2026-10-15, before the league set the NBA Cup week (24 games absent, the
+    knockout games only placeholders), and the odds feed and the results step write such a game
+    into `games` first. Without it the game drops out of every team's rest, back-to-back,
+    games-in-four-days and road trip, and its box lines out of every player's history. On
+    2026-10-20 no NBA games row of 2018-19..2026-27 was unlisted (production), so the frame the
+    model was graded on is unchanged."""
+    from models.nba_total_luck import regular_season
+    reg = set(schedule.loc[schedule.game_type == "regular", "game_id"])
+    unlisted = games[~games.game_id.isin(schedule.game_id)]
+    if len(unlisted):
+        rows = unlisted[["game_id", "season", "game_date"]].assign(game_type=None)
+        reg |= set(regular_season(rows, schedule[["season", "game_date", "game_type"]])["game_id"])
+    return reg
+
+
 def team_games(data: dict, upcoming: pd.DataFrame | None = None) -> pd.DataFrame:
-    """One row per (game, team) of the regular season (and tonight's games): when it starts,
-    the opponent, home, and the schedule facts known in advance."""
+    """One row per (game, team) of the regular season and the NBA Cup final (and tonight's games):
+    when it starts, the opponent, home, and the schedule facts known in advance. A regular-season
+    game counts whether or not the stored schedule lists it yet (regular_game_ids)."""
     g = data["nba_games"]
-    g = g[g.game_id.isin(data["nba_schedule"].query("game_type in ['regular', 'cup_final']").game_id)
-          | g.game_id.isin(data["nba_player_game_adv"].game_id)]
+    s = data["nba_schedule"]
+    keep = regular_game_ids(g, s) | set(s.loc[s.game_type == "cup_final", "game_id"])
+    g = g[g.game_id.isin(keep) | g.game_id.isin(data["nba_player_game_adv"].game_id)]
     g = g[["game_id", "season", "game_date", "home_team", "away_team", "commence_time"]].copy()
     if upcoming is not None and len(upcoming):
         u = upcoming[["game_id", "season", "game_date", "home_team", "away_team", "commence_time"]]

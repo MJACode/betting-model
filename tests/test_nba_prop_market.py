@@ -5,8 +5,10 @@ Each test pins one property of the rule as it was graded
 (docs/nba_models_2026.md 4.3) or of the card that writes it: the same line and
 the same fetch, coherent two-way quotes, the EV floor on Pinnacle's own number,
 unders only, the best bettable price with Pinnacle and Bovada never taken, the
-45-57 minute window, every qualifying proposition (no game or night cap), each
-game decided once (the decisions ledger), insert-once under the lock, name
+45-57 minute window, every qualifying proposition found (the shared door,
+scripts/nba_props_card.py, then writes one a game across both NBA prop models
+and a few a night), each game decided once (the decisions ledger),
+insert-once under the lock, name
 refusal, the row shape, settlement and the closing-line path.
 """
 from __future__ import annotations
@@ -206,28 +208,72 @@ def test_the_tip_is_the_earlier_of_the_schedule_and_the_feed():
     assert mk.tip_of(None, feed) == mk.parse_ts(feed)
 
 
+class _SlateConn:
+    """The slate's two reads: tonight's games joined to the schedule, and the
+    season's schedule days (scripts.nba_total_luck_card.schedule_days)."""
+
+    def __init__(self, games, days):
+        self.games, self.days = games, days
+
+    def execute(self, sql, params):
+        self._rows = self.days if "SELECT DISTINCT season, game_date, game_type" in sql else self.games
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+
+# 2026-27 as stored: regular-season days 10-20..04-11, a Cup final placeholder.
+_DAYS = [(2027, "2026-10-20", "regular"), (2027, "2027-04-11", "regular"),
+         (2027, "2026-12-11", "cup_final")]
+
+
+def _t(m):
+    return (TIP + timedelta(minutes=m)).isoformat()
+
+
 def test_the_slate_is_regular_season_games_inside_the_horizon():
-    """The rule was graded on regular-season games only; the tip is the
-    schedule's when the feed's is later; a game past its tip is not priced."""
-    class _C:
-        def execute(self, sql, params):
-            self.params = params
-            return self
-
-        def fetchall(self):
-            t = lambda m: (TIP + timedelta(minutes=m)).isoformat()      # noqa: E731
-            return [
-                ("REG", "LAL", "GSW", "2026-10-21", 2027, t(10), t(0), "regular"),
-                ("CUP", "LAL", "GSW", "2026-10-21", 2027, t(0), t(0), "cup_final"),
-                ("NOSCHED", "LAL", "GSW", "2026-10-21", 2027, t(0), None, None),
-                ("LATER", "LAL", "GSW", "2026-10-21", 2027, t(30), t(30), "regular"),
-                ("STARTED", "LAL", "GSW", "2026-10-21", 2027, t(-60), t(-60), "regular"),
-            ]
-
+    """The tip is the schedule's when the feed's is later; a game past its tip
+    or beyond the window is not priced; the Cup final is not priced."""
+    rows = [
+        ("REG", "LAL", "GSW", "2026-10-21", 2027, _t(10), _t(0), "regular"),
+        ("CUP", "LAL", "GSW", "2026-10-21", 2027, _t(0), _t(0), "cup_final"),
+        ("LATER", "LAL", "GSW", "2026-10-21", 2027, _t(30), _t(30), "regular"),
+        ("STARTED", "LAL", "GSW", "2026-10-21", 2027, _t(-60), _t(-60), "regular"),
+    ]
     skipped = []
-    games = card.slate(_C(), NOW, skipped)
+    games = card.slate(_SlateConn(rows, _DAYS), NOW, skipped)
     assert sorted(games) == ["REG"] and games["REG"]["tip"] == TIP
-    assert sorted(s.split()[0] for s in skipped) == ["CUP", "NOSCHED"]
+    assert sorted(s.split()[0] for s in skipped) == ["CUP"]
+
+
+def test_an_nba_cup_week_game_the_schedule_does_not_list_is_still_priced():
+    """The 2026-27 schedule was loaded before the league set the Cup week, so
+    24 regular-season games were not in it, while the odds feed writes each into
+    `games`. Such a game on a regular-season day is in the graded population
+    (1,230 regular-season games a season) and is priced; one on a day the
+    schedule gives to another kind of game (the Cup final's) is not."""
+    rows = [
+        ("CUPWEEK", "LAL", "GSW", "2026-12-07", 2027, _t(0), None, None),
+        ("FINALDAY", "LAL", "GSW", "2026-12-11", 2027, _t(0), None, None),
+        ("NOSEASON", "LAL", "GSW", "2026-12-07", 2028, _t(0), None, None),
+    ]
+    skipped = []
+    games = card.slate(_SlateConn(rows, _DAYS), NOW, skipped)
+    assert sorted(games) == ["CUPWEEK"] and games["CUPWEEK"]["tip"] == TIP
+    assert sorted(s.split()[0] for s in skipped) == ["FINALDAY", "NOSEASON"]
+
+
+def test_the_postseason_is_never_priced():
+    """Neither NBA prop model was graded on a play-in, playoff or Cup final game:
+    the stored prop history holds none of the 272 of 2023-24..2025-26 (and all
+    3,690 regular-season games). Each is skipped and named, by its type."""
+    rows = [(gid, "LAL", "GSW", "2026-10-21", 2027, _t(0), _t(0), kind)
+            for gid, kind in (("PI", "playin"), ("PO", "playoff"), ("CF", "cup_final"),
+                              ("PRE", "preseason"))]
+    skipped = []
+    assert card.slate(_SlateConn(rows, _DAYS), NOW, skipped) == {}
+    assert sorted(skipped) == ["CF (cup_final)", "PI (playin)", "PO (playoff)", "PRE (preseason)"]
 
 
 def test_a_fetch_after_now_or_at_tip_and_a_close_row_never_decide():
@@ -350,23 +396,24 @@ def _decision(gid=GID, n_bets=0, n_quotes=2):
                               n_bets=n_bets, detail="test")
 
 
-def test_no_game_or_night_cap_is_left_anywhere():
-    """The caps are gone, not set high: nine bets over six games of one night,
-    three of them in one game, are all written."""
-    for name in ("MAX_BETS_PER_GAME", "MAX_BETS_PER_NIGHT"):
-        assert not hasattr(mk, name), name
-    for name in ("one_per_game", "per_night", "bets_by_night"):
-        assert not hasattr(card, name), name
+def test_the_no_cap_rule_is_replaced_by_one_a_game_and_a_few_a_night():
+    """mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL." The 2026-10-16 rule
+    wrote every qualifying proposition; nine over six games of one night, three in one game, are
+    now one a game, the best MAX_NBA_PROP_BETS_PER_NIGHT games, through the shared door."""
+    import scripts.nba_props_card as door
     bets = [_bet(f"G{i}", ev=0.01 * (i + 1)) for i in range(6)]
-    bets += [_bet("G0", market="player_rebounds", line=7.5),
+    bets += [_bet("G0", market="player_rebounds", line=7.5, ev=0.20),
              _bet("G0", market="player_assists", line=6.5),
              _bet("G1", market="player_threes", line=3.5)]
     rows = card.pick_rows(bets, bankroll=1000.0)
-    decisions = [_decision(f"G{i}", n_bets=sum(r["game_id"] == f"G{i}" for r in rows))
-                 for i in range(6)]
+    decisions = [_decision(f"G{i}") for i in range(6)]
     conn = _PublishConn()
-    assert card.publish(conn, rows, decisions) == (9, 6)
-    assert len(conn.inserted) == 9 and len(conn.decisions) == 6
+    out = door.publish_across_models(conn, rows, decisions, [])
+    assert out["written"] == door.MAX_NBA_PROP_BETS_PER_NIGHT == len(conn.inserted)
+    assert len(conn.decisions) == 6                                   # every game still decided
+    assert sorted((p["game_id"], p["prop_market"]) for p in conn.inserted) == [
+        ("G0", "player_rebounds"), ("G3", "player_points"), ("G4", "player_points"),
+        ("G5", "player_points")]
 
 
 # ── each game decided once ───────────────────────────────────────────────────
@@ -413,15 +460,9 @@ def test_a_game_already_decided_is_never_looked_at_again():
 
 
 def test_the_card_records_a_decision_when_nothing_qualifies(monkeypatch):
-    """A zero-bet decision is still a decision: the card must write it, or the
-    next look re-decides the game on a later price."""
-    seen = {}
-
-    class _Conn:
-        def close(self):
-            pass
-
-    monkeypatch.setattr(card, "get_connection", lambda: _Conn())
+    """A zero-bet decision is still a decision: the look must return it and the door must write
+    it, or the next look re-decides the game on a later price."""
+    import scripts.nba_props_card as door
     monkeypatch.setattr(card, "ensure_decisions_table", lambda c: None)
     monkeypatch.setattr(card, "slate", lambda c, now, skipped=None: dict(GAMES))
     monkeypatch.setattr(card, "games_with_a_bet", lambda c, ids: set())
@@ -429,15 +470,12 @@ def test_the_card_records_a_decision_when_nothing_qualifies(monkeypatch):
     monkeypatch.setattr(card, "load_roster", lambda c, g: ROSTER)
     monkeypatch.setattr(mk, "load_quotes",
                         lambda c, g, now: [q("pinnacle", -110, -110), q("fanduel", -110, -110)])
-
-    def _publish(c, rows, decisions):
-        seen.update(rows=rows, decisions=decisions)
-        return 0, len(decisions)
-
-    monkeypatch.setattr(card, "publish", _publish)
-    out = card.run_card(do_publish=True, now=NOW)
-    assert seen["rows"] == [] and [d.game_id for d in seen["decisions"]] == [GID]
-    assert out["decided"] == 1 and out["published"] == 0
+    got = card.look(object(), NOW)
+    assert got["bets"] == [] and [d.game_id for d in got["decisions"]] == [GID]
+    monkeypatch.undo()
+    conn = _PublishConn()
+    out = door.publish_across_models(conn, [], got["decisions"], [])
+    assert conn.decisions == [GID] and conn.inserted == [] and out["written"] == 0
 
 
 def test_the_decisions_ledger_is_worker_only_and_created_behind_the_guard(monkeypatch):
@@ -531,51 +569,55 @@ def test_publish_reads_under_the_lock_and_writes_once_in_one_transaction():
     """The ledger and the picks are read AFTER the lock, and the decision rows
     and the bets land in ONE commit: two overlapping writers (the 6am run, a
     refresh pass, the window job) can neither both decide a game nor leave a
-    decision without its bets."""
+    decision without its bets. Through the shared door, one bet a game."""
+    import scripts.nba_props_card as door
     conn = _PublishConn(taken={"G_TAKEN"}, decided={"G_DONE"})
     rows = card.pick_rows([_bet("G_TAKEN", ev=0.09), _bet("G_DONE", ev=0.07),
                            _bet("G2", ev=0.05), _bet("G2", market="player_rebounds", line=7.5)],
                           bankroll=1000.0)
     decisions = [_decision("G_TAKEN", 1), _decision("G_DONE", 1), _decision("G2", 2),
                  _decision("G3", 0)]
-    n, nd = card.publish(conn, rows, decisions)
+    out = door.publish_across_models(conn, rows, decisions, [])
     lock = next(i for i, s in enumerate(conn.sql) if "pg_advisory_xact_lock" in s)
     reads = [i for i, s in enumerate(conn.sql)
              if s.startswith("SELECT") and ("FROM picks" in s or "FROM nba_prop_market_decisions" in s)]
     writes = [i for i, s in enumerate(conn.sql) if s.startswith("INSERT")]
     assert reads and lock < min(reads), "the ledger and the picks must be read under the lock"
     assert conn.sql[-1] == "COMMIT" and conn.commits == 1 and max(writes) < len(conn.sql) - 1
-    assert (n, nd) == (2, 2)
+    assert out["written"] == 1 and out["decided"]["nba_prop_market"] == 2
     assert sorted(conn.decisions) == ["G2", "G3"]                     # G3: decided, no bet
-    assert [p["game_id"] for p in conn.inserted] == ["G2", "G2"]
+    assert [(p["game_id"], p["prop_market"]) for p in conn.inserted] == [("G2", "player_points")]
 
 
-def test_publish_skips_a_proposition_the_projection_model_already_holds():
+def test_a_game_the_projection_model_already_bet_gets_no_bet_here():
     """nba_prop_projection decides a game alone when this card has not decided it 50 minutes
-    out. A later decision here must not bet the same (game, player, market) a second time;
-    the game's other propositions are still bet, and the game is still decided."""
+    out. A later decision here adds no second bet to that game (one a game across both
+    models); the game is still decided."""
+    import scripts.nba_props_card as door
+
     class _Held(_PublishConn):
         def execute(self, sql, params=None):
             super().execute(sql, params)
-            if "model_id = 'nba_prop_projection'" in " ".join(sql.split()):
-                self._all = [(GID, "201939", "player_points")]
+            s = " ".join(sql.split())
+            if s.startswith("SELECT DISTINCT game_id FROM picks WHERE model_id = ANY"):
+                self._all = [(GID,)]
             return self
 
     conn = _Held()
     rows = card.pick_rows([_bet(), _bet(market="player_rebounds", line=7.5)], bankroll=1000.0)
-    n, nd = card.publish(conn, rows, [_decision(GID, 2)])
-    assert (n, nd) == (1, 1)
-    assert [p["prop_market"] for p in conn.inserted] == ["player_rebounds"]
+    out = door.publish_across_models(conn, rows, [_decision(GID, 2)], [])
+    assert out["written"] == 0 and conn.inserted == [] and conn.decisions == [GID]
 
 
 def test_publish_writes_bet_rows_once_with_its_own_column_list():
+    import scripts.nba_props_card as door
     assert "prop_market" in card._INSERT and "player_key" in card._INSERT
     assert "ON CONFLICT DO NOTHING" in card._INSERT
     conn = _PublishConn(taken={GID})
-    assert card.publish(conn, card.pick_rows([_bet()], bankroll=1000.0), [_decision(GID, 1)]) == (0, 0)
-    assert conn.inserted == [] and conn.decisions == []
+    out = door.publish_across_models(conn, card.pick_rows([_bet()], bankroll=1000.0), [_decision(GID, 1)], [])
+    assert out["written"] == 0 and conn.inserted == [] and conn.decisions == []
     conn = _PublishConn(decided={GID})
-    assert card.publish(conn, card.pick_rows([_bet()], bankroll=1000.0), [_decision(GID, 1)]) == (0, 0)
+    door.publish_across_models(conn, card.pick_rows([_bet()], bankroll=1000.0), [_decision(GID, 1)], [])
     assert conn.inserted == []
 
 

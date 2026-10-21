@@ -113,3 +113,45 @@ def test_a_cell_below_the_bet_count_enters_the_correction_at_p_one():
     assert bool(m["bh"]) is False
     m = _mid(V.verdict(_grid(n_choose=3, p_choose=0.0), "choose"))
     assert bool(m["bh"]) is False
+
+
+def _house(k=1, **over):
+    row = {**_cell(k), "pool_n": 600, "pool_units": 40.0, "pool_roi": 0.06,
+           "pool_ci95_lo": 0.01, "pool_ci95_hi": 0.11, "pool_seasons_counted": 5,
+           "pool_seasons_positive": 4, "pool_share_home": 0.0, "pool_share_fav": 0.5,
+           "pool_share_over": np.nan, "blind_pool_away": -0.03, "blind_pool_home": -0.04,
+           "blind_pool_fav": -0.04, "blind_pool_dog": -0.02, "blind_pool_over": np.nan,
+           "blind_pool_under": np.nan}
+    row.update(over)
+    return row
+
+
+def _hgrid(**over_mid):
+    return pd.DataFrame([_house(0), _house(1, **over_mid), _house(2)])
+
+
+def test_the_house_standard_passes_a_cell_that_meets_it():
+    assert bool(_mid(V.house_verdict(_hgrid()))["house_passes"]) is True
+
+
+@pytest.mark.parametrize("over,bar", [
+    ({"pool_n": 199}, "h1_bets"),
+    ({"pool_ci95_lo": -0.001}, "h2_ci95"),
+    ({"pool_seasons_positive": 3}, "h3_seasons"),           # two of five negative
+    ({"blind_pool_away": 0.07}, "h4_blind"),
+    ({"placebo_rois": [0.3] * 20}, "h6_placebo"),
+])
+def test_each_house_bar_alone_fails_the_cell_for_its_own_reason(over, bar):
+    m = _mid(V.house_verdict(_hgrid(**over)))
+    assert bool(m["house_passes"]) is False and m["house_failed"] == bar
+
+
+def test_the_house_plateau_reads_the_pooled_neighbours():
+    g = _hgrid()
+    g.loc[g["cut_index"] == 0, "pool_roi"] = -0.01
+    assert _mid(V.house_verdict(g))["house_failed"] == "h5_plateau"
+
+
+def test_one_losing_season_is_allowed_and_the_newest_season_is_not_a_separate_bar():
+    m = _mid(V.house_verdict(_hgrid(pool_seasons_positive=4, n_confirm=10, roi_confirm=-0.2)))
+    assert bool(m["house_passes"]) is True

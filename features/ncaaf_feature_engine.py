@@ -38,7 +38,7 @@ model validates.
 
 import bisect
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 
@@ -493,14 +493,74 @@ def _rolling_points_live(conn: DBConnection, team: str, as_of_date: str,
     return round(float(np.mean(pts)), 2) if pts else None
 
 
-def _rest_days_live(conn: DBConnection, team: str, as_of_date: str) -> int | None:
+def _rest_days_live(conn: DBConnection, team: str, as_of_date: str,
+                    game_id: str) -> int | None:
+    """Rest at KICKOFF, from the stored schedule (data/schedule_context).
+
+    This read only PLAYED games until 2026-10-20, so a game the team had still
+    to play before this one was invisible and looked like a bye: on the paused
+    moneyline model's pick 3094504 (Missouri ML, decided 9 days out) rest read
+    14/14 where it was 7/7. Training reads every completed game, which for a
+    game in the past is every game the team played -- the same thing this now
+    returns. No retrain: the training value does not change."""
+    from data.schedule_context import rest_days_as_of_kickoff
+    return rest_days_as_of_kickoff(conn, SPORT, team, game_id, as_of_date)
+
+
+_SCHED_COLS = ("week", "neutral_site", "conference_game", "venue_id")
+
+
+def _schedule_row_live(conn: DBConnection, game_id: str, game_date: str,
+                       home_team: str, away_team: str) -> dict | None:
+    """The scored row's schedule context (week, neutral site, conference game,
+    venue), or None when the stored schedule cannot supply it.
+
+    THE NIGHT-GAME STUB (2026-10-20). The odds feed writes its own ET-dated
+    row for a game and the DraftKings prices attach to it, while CFBD's row
+    for the same night game keeps its UTC date. The stub has no week, neutral
+    site, conference flag or venue, and this read used to turn those into 0:
+    week 0, which no training row has (2015-2025: minimum week 1), at a home
+    stadium and out of conference. 13 ncaaf_over_under BETs were written on
+    such rows (10 graded, -2.29 units), one of them Army-Navy (week 15, a
+    neutral site). Measured 2026-10-20: all 9 future stubs, every one already
+    DraftKings-priced, have a CFBD row for the same two teams within a day.
+
+    So a stub takes CFBD's row: the same two teams within a day (either
+    orientation), or failing that the one CFBD game either team has within a
+    day -- a team never plays twice in two days (tracking.record_duplicates),
+    which is how an opponent spelled two ways still resolves. Two different
+    candidates, or none, and the game is not scored, with the reason logged:
+    feeding blanks is the thing being fixed."""
     row = conn.execute("""
-        SELECT game_date FROM games
-        WHERE sport = 'NCAAF' AND (home_team = ? OR away_team = ?)
-          AND game_date < ? AND home_score IS NOT NULL
-        ORDER BY game_date DESC LIMIT 1
-    """, (team, team, as_of_date)).fetchone()
-    return _rest_days([row[0]], as_of_date) if row else None
+        SELECT week, neutral_site, conference_game, venue_id
+        FROM games WHERE game_id = ?
+    """, (game_id,)).fetchone()
+    if row and row[0] is not None:
+        return dict(zip(_SCHED_COLS, row))
+    d = datetime.strptime(str(game_date)[:10], "%Y-%m-%d")
+    lo = (d - timedelta(days=1)).strftime("%Y-%m-%d")
+    hi = (d + timedelta(days=1)).strftime("%Y-%m-%d")
+    cands = conn.execute("""
+        SELECT game_id, home_team, away_team, week, neutral_site,
+               conference_game, venue_id
+        FROM games
+        WHERE sport = 'NCAAF' AND game_id <> ? AND week IS NOT NULL
+          AND game_date >= ? AND game_date <= ?
+          AND (home_team IN (?, ?) OR away_team IN (?, ?))
+    """, (game_id, lo, hi, home_team, away_team, home_team, away_team)).fetchall()
+    pair = {home_team, away_team}
+    exact = [c for c in cands if {c[1], c[2]} == pair]
+    pool = exact or list(cands)
+    ids = {c[0] for c in pool}
+    if len(ids) != 1:
+        logger.warning(
+            f"{game_id}: no single CFBD schedule row for {away_team} @ {home_team} "
+            f"within a day ({sorted(ids) or 'none'}) -- week, venue, neutral site "
+            f"and conference unknown, game not scored")
+        return None
+    c = pool[0]
+    logger.debug(f"{game_id}: schedule context from CFBD row {c[0]}")
+    return dict(zip(_SCHED_COLS, c[3:]))
 
 
 def fbs_refusal_claims(teams, season: int,
@@ -565,11 +625,9 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
             logger.debug(f"{game_id}: not an FBS-vs-FBS matchup — skipping")
         return None
 
-    row = conn.execute("""
-        SELECT week, neutral_site, conference_game, venue_id
-        FROM games WHERE game_id = ?
-    """, (game_id,)).fetchone()
-    sched = dict(zip(("week", "neutral_site", "conference_game", "venue_id"), row)) if row else {}
+    sched = _schedule_row_live(conn, game_id, game_date, home_team, away_team)
+    if sched is None:
+        return None
 
     venue_ctx = _venue_features(
         _venue_live(conn, sched.get("venue_id")),
@@ -596,8 +654,8 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         home_stats, away_stats,
         _rolling_points_live(conn, home_team, game_date),
         _rolling_points_live(conn, away_team, game_date),
-        _rest_days_live(conn, home_team, game_date),
-        _rest_days_live(conn, away_team, game_date),
+        _rest_days_live(conn, home_team, game_date, game_id),
+        _rest_days_live(conn, away_team, game_date, game_id),
         sched, odds_row, venue_ctx,
         _hfa_live(conn, home_team, season),
         _hfa_live(conn, away_team, season),

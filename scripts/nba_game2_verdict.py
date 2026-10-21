@@ -145,6 +145,156 @@ def verdict(cells: pd.DataFrame, bh_basis: str = "confirm", m_first: int = M_FIR
     return c
 
 
+HOUSE_BARS = ["h1_bets", "h2_ci95", "h3_seasons", "h4_blind", "h5_plateau", "h6_placebo"]
+
+
+def house_bar4(row: pd.Series) -> bool:
+    """Beats the blind same real side, pooled (bar 9's rule on pooled numbers)."""
+    for split, (a, b) in SPLITS.items():
+        share = row.get(f"pool_share_{split}", np.nan)
+        if not np.isfinite(share):
+            continue
+        side = a if share > DOMINANT else b if share < 1 - DOMINANT else None
+        if side is None:
+            continue
+        blind = row.get(f"blind_pool_{side}", np.nan)
+        if not (np.isfinite(blind) and row["pool_roi"] > blind):
+            return False
+    return True
+
+
+def house_verdict(cells: pd.DataFrame, judge_controls=()) -> pd.DataFrame:
+    """§6.7: the standard the repo's shipped models were held to, one fixed list.
+
+    1 pooled bets >= 200; 2 pooled 95% interval above zero; 3 of the graded
+    seasons with >= 30 bets, all but at most one positive; 4 beats the blind
+    same real side, pooled; 5 every existing cut neighbour positive, pooled;
+    6 placebo (bar 10). Closing-line value is reported, never a bar.
+    `judge_controls`: control families judged like candidates (section 9.8);
+    none by default, so every earlier caller reads the same rows."""
+    fam = cells["family"].astype(str)
+    c = cells[~fam.str.startswith(CONTROL_PREFIX) | fam.isin(tuple(judge_controls))].copy()
+    axes = axes_of(c)
+    c["key"] = [cell_key(r, axes) for _, r in c.iterrows()]
+    assert c["key"].is_unique, "two cells share every axis"
+    c["h1_bets"] = c["pool_n"] >= MIN_BETS
+    c["h2_ci95"] = c["pool_ci95_lo"] > 0
+    c["h3_seasons"] = (c["pool_seasons_counted"] >= 2) & (
+        c["pool_seasons_counted"] - c["pool_seasons_positive"] <= 1)
+    c["h4_blind"] = c.apply(house_bar4, axis=1) & c["pool_roi"].notna()
+    ok = pd.Series(True, index=c.index)
+    for _, grp in c.groupby(axes, dropna=False, sort=False):
+        by_k = grp.set_index("cut_index")["pool_roi"]
+        for i, row in grp.iterrows():
+            nb = [by_k.get(row["cut_index"] - 1), by_k.get(row["cut_index"] + 1)]
+            ok[i] = all(np.isfinite(x) and x > 0 for x in nb if x is not None)
+    c["h5_plateau"] = ok & (c["pool_roi"] > 0)
+    p95 = c["placebo_rois"].apply(lambda v: np.percentile(_floats(v), 95)
+                                  if len(_floats(v)) else np.nan)
+    c["h6_placebo"] = c["roi_choose"] > p95.fillna(np.inf)
+    c["house_passes"] = c[HOUSE_BARS].all(axis=1)
+    c["house_failed"] = c[HOUSE_BARS].apply(lambda r: ",".join(b for b in HOUSE_BARS if not r[b]),
+                                            axis=1)
+    return c
+
+
+# ── the fifth search's bars (docs/nba_models_2026.md section 9, 2026-10-20) ──
+# The house standard above with the two flaws section 8.4 found, fixed before
+# any fifth-search cell was graded:
+#   * bar 5 compares BANDS, not nested cuts: the band just below the cut and
+#     every band from the cut to the top must each be positive, pooled. The
+#     nested neighbour (cut >= 1 holds every cut >= 2 bet) never tested the
+#     band below the cut, and that band lost for both fourth-search passes.
+#     A band with fewer than BAND_MIN_BETS pooled bets is reported, not judged
+#     (the house standard's own floor for a season to count).
+#   * bar 6's placebo has PLACEBO_RUNS_5 shuffles (seeds 1-200), not 20; a
+#     cell carrying any other count is a lab error and stops the verdict.
+# house_verdict itself is unchanged: the fourth search's stored cells read
+# through it.
+# Section 9.8 (2026-10-20, after the check, before any cell was graded):
+#   * the control (control_F7_league) is judged under the same bars, with its
+#     own 200 placebo runs, and an F7 cell is credited to team tendencies only
+#     when it passes AND its pooled return beats its control's at the same
+#     market, side and cut (a control with no bet counts as 0);
+#   * a placebo run that placed no bet counts as a return of 0 (it made
+#     nothing); the 200-run check still counts runs.
+
+PLACEBO_RUNS_5, BAND_MIN_BETS, BAND_SLOTS = 200, 30, 5
+FIFTH_BARS = ["h1_bets", "h2_ci95", "h3_seasons", "h4_blind", "h5_bands", "h6_placebo"]
+JUDGED_CONTROLS_5 = ("control_F7_league",)
+CREDIT_CONTROL_5 = {"F7": "control_F7_league"}
+
+
+def placebo_runs(v) -> np.ndarray:
+    """Section 9.8: every placebo run as a float, a run with no bet (NaN or
+    None, as parquet reads it back) counted as a return of 0."""
+    if v is None:
+        return np.array([], float)
+    a = np.array(list(v), dtype=float)          # a None element reads as NaN
+    return np.where(np.isfinite(a), a, 0.0)
+
+
+def bands_ok(row: pd.Series, min_bets: int = BAND_MIN_BETS) -> bool:
+    """Every band the lab wrote (band0 = just below the cut, band1.. = from
+    the cut up) with at least `min_bets` pooled bets has a positive return."""
+    for i in range(BAND_SLOTS):
+        n = row.get(f"band{i}_n", 0)
+        n = 0 if n is None or not np.isfinite(n) else n
+        if n < min_bets:
+            continue
+        r = row.get(f"band{i}_roi", np.nan)
+        if not (r is not None and np.isfinite(r) and r > 0):
+            return False
+    return True
+
+
+def house_verdict_bands(cells: pd.DataFrame, n_placebo: int = PLACEBO_RUNS_5,
+                        judge_controls=JUDGED_CONTROLS_5, credit=CREDIT_CONTROL_5) -> pd.DataFrame:
+    """Section 9: house_verdict's bars 1-4, bar 5 on bands (bands_ok and the
+    cell's own pooled return above zero), bar 6 on exactly `n_placebo` placebo
+    runs per judged cell with a run that bet nothing counted as 0, and the
+    controls in `judge_controls` judged like candidates (section 9.8).
+    `credit`: {family: its control}; beats_control is the family's pooled
+    return above its control's at the same market, side and cut_index (a
+    control with no bet counts as 0), and credited is the cell passing AND,
+    where it has a control, beating it. A family whose control is missing
+    from `cells` is never credited."""
+    c = house_verdict(cells, judge_controls)
+    runs = c["placebo_rois"].apply(lambda v: len(placebo_runs(v)))
+    bad = c.loc[runs != n_placebo, "key"]
+    if len(bad):
+        raise ValueError(f"{len(bad)} cells carry a placebo count other than {n_placebo} "
+                         f"(e.g. {list(bad)[:3]}): section 9 fixes {n_placebo} shuffles")
+    if not any(f"band{i}_n" in c for i in range(BAND_SLOTS)):
+        raise ValueError("no band columns: section 9's bar 5 reads the lab's band0..band4")
+    runs_z = c["placebo_rois"].apply(placebo_runs)
+    c["placebo_empty_runs"] = c["placebo_rois"].apply(
+        lambda v: 0 if v is None else int((~np.isfinite(np.array(list(v), dtype=float))).sum()))
+    c["placebo_p95"] = runs_z.apply(lambda a: float(np.percentile(a, 95)) if len(a) else np.nan)
+    c["h6_placebo"] = c["roi_choose"] > c["placebo_p95"].fillna(np.inf)
+    c["h5_bands"] = c.apply(bands_ok, axis=1) & (c["pool_roi"] > 0)
+    c["house5_passes"] = c[FIFTH_BARS].all(axis=1)
+    c["house5_failed"] = c[FIFTH_BARS].apply(lambda r: ",".join(b for b in FIFTH_BARS if not r[b]), axis=1)
+    c["control_pool_roi"] = np.nan
+    c["beats_control"] = pd.Series(pd.NA, index=c.index, dtype="boolean")
+    for fam, ctl_fam in (credit or {}).items():
+        m = c["family"].astype(str) == fam
+        if not m.any():
+            continue
+        ctl = c[c["family"].astype(str) == ctl_fam]
+        if ctl.empty:
+            continue
+        ref = ctl.set_index(["market", "side", "cut_index"])["pool_roi"]
+        got = np.array([ref.get(k, np.nan) for k in zip(c.loc[m, "market"], c.loc[m, "side"],
+                                                         c.loc[m, "cut_index"])], dtype=float)
+        c.loc[m, "control_pool_roi"] = got
+        c.loc[m, "beats_control"] = c.loc[m, "pool_roi"].to_numpy(float) > np.nan_to_num(got, nan=0.0)
+    need = c["family"].astype(str).isin(tuple(credit or {})).to_numpy()
+    beat = c["beats_control"].fillna(False).astype(bool).to_numpy()
+    c["credited"] = c["house5_passes"].to_numpy() & np.where(need, beat, True)
+    return c
+
+
 def load_cells(results: Path) -> pd.DataFrame:
     parts = [pd.read_parquet(p) for p in sorted(results.glob("cells_*.parquet"))]
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
@@ -154,8 +304,29 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--results", type=Path, required=True)
     ap.add_argument("--bh-basis", choices=["confirm", "choose"], default="confirm")
+    ap.add_argument("--house", action="store_true", help="the house standard of §6.7")
+    ap.add_argument("--house5", action="store_true",
+                    help="section 9: the house standard with bands and 200 placebo runs")
     a = ap.parse_args()
     cells = load_cells(a.results)
+    if a.house5:
+        h = house_verdict_bands(cells)
+        h.drop(columns=["placebo_rois"]).to_parquet(a.results / "verdict_house5.parquet")
+        reg = ~h["family"].astype(str).str.startswith(CONTROL_PREFIX)
+        for name, x in (("registered", h[reg]), ("with the control", h)):
+            print(f"{name}: {len(x)} cells; {int(x['house5_passes'].sum())} pass section 9's bars "
+                  f"({int(x['credited'].sum())} credited); {int(x['h2_ci95'].sum())} clear the 95% "
+                  f"interval alone (about {0.025 * len(x):.2f} expected by chance before correlation)")
+        print(h.groupby("family")[FIFTH_BARS + ["house5_passes", "credited"]].sum())
+        return
+    if a.house:
+        h = house_verdict(cells)
+        h.drop(columns=["placebo_rois"]).to_parquet(a.results / "verdict_house.parquet")
+        print(f"{len(h)} cells; {int(h['house_passes'].sum())} pass the house standard; "
+              f"{int(h['h2_ci95'].sum())} clear the 95% interval alone "
+              f"(about {0.025 * len(h):.1f} expected by chance before correlation)")
+        print(h.groupby("family")[HOUSE_BARS + ["house_passes"]].sum())
+        return
     v = verdict(cells, a.bh_basis)
     v.drop(columns=["placebo_rois"]).to_parquet(a.results / f"verdict_{a.bh_basis}.parquet")
     print(f"{len(v)} cells; {int(v['passes'].sum())} pass (BH basis {a.bh_basis}, m = {v['bh_m'].iloc[0]})")

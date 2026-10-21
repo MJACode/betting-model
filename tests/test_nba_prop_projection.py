@@ -285,11 +285,15 @@ def test_a_pick_row_names_its_side_book_and_market():
     assert set(card._COLS) <= set(r)
 
 
-def test_publish_never_writes_a_proposition_nba_prop_market_holds():
+def test_publish_never_writes_into_a_game_nba_prop_market_has_bet():
+    """The rule bet the game between this look and the lock: the shared door re-reads under the
+    lock and writes nothing more into it (one bet a game across both models), and still records
+    this model's decision."""
     import scripts.nba_prop_projection_card as card
+    import scripts.nba_props_card as door
     bets, _, decisions = _run([_q("draftkings", 1.5, +105, -135)])
     rows = card.pick_rows(bets, 1000.0)
-    written = []
+    written, ledger = [], []
 
     class _C:
         def execute(self, sql, params=None):
@@ -297,11 +301,13 @@ def test_publish_never_writes_a_proposition_nba_prop_market_holds():
             self.params = params
             if "INSERT INTO picks" in self.sql:
                 written.append(params)
+            if "INSERT INTO nba_prop_projection_decisions" in self.sql:
+                ledger.append((params["game_id"], params["n_bets"]))
             return self
 
         def fetchall(self):
-            if "FROM picks" in self.sql and "nba_prop_market" in str(self.params):
-                return [(GID, PID, "player_steals")]      # the rule bet it between the look and the lock
+            if self.sql.startswith("SELECT DISTINCT game_id FROM picks WHERE model_id = ANY"):
+                return [(GID,)]                            # the rule's bet, committed before the lock
             return []
 
         def fetchone(self):
@@ -314,10 +320,11 @@ def test_publish_never_writes_a_proposition_nba_prop_market_holds():
     orig = wp._lock_model
     wp._lock_model = lambda conn, mid: None
     try:
-        n_bets, n_dec = card.publish(_C(), rows, decisions)
+        out = door.publish_across_models(_C(), rows, [], decisions)
     finally:
         wp._lock_model = orig
-    assert n_dec == 1 and n_bets == 0 and written == []
+    assert rows and out["decided"]["nba_prop_projection"] == 1 and out["written"] == 0 and written == []
+    assert ledger == [(GID, 0)]
 
 
 def test_settlement_and_closing_value_know_the_model():
@@ -492,9 +499,10 @@ def test_each_market_settles_either_side_from_the_box(side, line, market, expect
 
 
 def test_publish_takes_the_rules_lock_before_its_own():
-    """Both cards read the other's holdings before writing. Without the rule's lock the
-    decide-alone path could race a late rule decision and bet one proposition twice."""
+    """Every NBA prop write goes through the shared door, which takes nba_prop_market's lock and
+    then this model's: two overlapping writers cannot both bet one game."""
     import scripts.nba_prop_projection_card as card
+    import scripts.nba_props_card as door
     import scripts.nfl_wind_publisher as wp
     bets, _, decisions = _run([_q("draftkings", 1.5, +105, -135)])
     locks = []
@@ -516,7 +524,7 @@ def test_publish_takes_the_rules_lock_before_its_own():
     orig = wp._lock_model
     wp._lock_model = lambda conn, mid: locks.append(mid)
     try:
-        card.publish(_C(), card.pick_rows(bets, 1000.0), decisions)
+        door.publish_across_models(_C(), card.pick_rows(bets, 1000.0), [], decisions)
     finally:
         wp._lock_model = orig
     assert locks == ["nba_prop_market", "nba_prop_projection"]

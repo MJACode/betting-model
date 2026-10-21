@@ -330,8 +330,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # one gzipped row per file (scripts/nfl_research_backup.py).
     "add_nfl_research_data_backup_2026_10_12.sql",
     # 2026-10-14: units and the W-L are the same graded picks, at the price
-    # the bet was taken at. Rewrites results_snapshots and drops the column
-    # that counted a pick in the record and left it out of the units.
+    # the bet was taken at. Rewrites results_snapshots only while the old
+    # column is still there, then drops it. A later pass must not restate
+    # units: published_picks_record owns the snapshot numbers after that,
+    # and an unguarded rewrite would commit all-bets units onto posted W-L.
     # The view patch removes the one-model units zeroing. It reads the live
     # view, so it runs after every migration that owns that view.
     "recompute_snapshot_units_2026_10_14.sql",
@@ -339,14 +341,23 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-10-14: 35 extra picks rows behind one Discord lock are marked
     # DUPLICATE (kept row untouched; none of the extras is a graded
     # WIN/LOSS/PUSH). Two unique indexes stop a second standing BET on a
-    # publish lock and a second live row on the same side. Skips the
+    # publish lock and a second live BET on the same side. Skips the
     # create, and does not raise, when a duplicate of that identity remains.
     "discord_post_one_pick_2026_10_14.sql",
+    # 2026-10-14: uq_picks_one_live_row, if already created, covers every
+    # non-DUPLICATE live row. The NFL writer inserts AVOID then BET with
+    # ON CONFLICT DO NOTHING, so the BET is dropped. This narrows the
+    # index to signal_type BET. Property-guarded (the file above skips
+    # once the name exists). Not CONCURRENTLY; the worker applies it.
+    # Does not post. Does not change a pick row. Before the published
+    # record pass, which must stay last because it reads the live views.
+    "live_row_index_bets_only_2026_10_14.sql",
     # 2026-10-14: the published record is the picks Discord still has.
-    # Rewrites results_snapshots (W-L and stake_for units) and adds the
-    # same lock to the two app views. Reads the live view text, so it
-    # runs after every migration that owns those views, including the
-    # duplicate-row pass above. Does not post.
+    # Rewrites results_snapshots once (until clv_rule = 'standard_v2'), and
+    # that pass skips a row that already matches. CLV uses standard_v2.
+    # Adds the same lock to the two app views. Reads the live view
+    # text, so it runs after every migration that owns those views,
+    # including the duplicate-row pass above. Does not post.
     "published_picks_record_2026_10_14.sql",
     # 2026-10-16: the 03:50Z evening pass was still unfinished after the
     # deploy (the only open pipeline_runs row). Same aborted stamp as
@@ -371,11 +382,6 @@ ACTIVE_MIGRATIONS: list[str] = [
     # basis is a label. Does not touch picks, the record views, or a
     # live model. Unapplied until the worker's next pass.
     "byom_facts_schema_2026_10_16.sql",
-    # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
-    # return when the function body already has the marker. Unapplied.
-    # Does not touch picks or the record views. Win, loss, or push.
-    # No spread, price, or line filter.
-    "byom_backtest_rpc_2026_10_16.sql",
     # 2026-10-16: NHL Stats-tab reads (season totals, per-game value arrays,
     # team totals, latest pre-game prop quote). Display only. Does not
     # rewrite v_public_track_record and does not run before the CLV stamp.
@@ -388,6 +394,43 @@ ACTIVE_MIGRATIONS: list[str] = [
     # v_public_track_record. Sits with the other display reads, before the
     # posted-stake pair. Guards each piece so the DDL fires once.
     "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-10-19: the member's own sportsbooks (onboarding + Settings).
+    # Display only: one new table behind two device-scoped RPCs. No model,
+    # pick or record view reads it. Returns on a catalog read once applied.
+    "member_sportsbooks_2026_10_19.sql",
+    # 2026-10-20: manual posts to @SignalBasePicks. One table, anon locked
+    # out, and the all-time ledger thread seeded as queued. The worker
+    # drains it. Does not rewrite the record views, picks, or push_sent.
+    "social_post_queue_2026_10_20.sql",
+    # 2026-10-20: images and an optional reply target on a manual post.
+    # Nullable columns only. Does not rewrite the ledger seed, picks, or
+    # push_sent. Returns before ALTER once the columns and checks exist.
+    "social_post_media_2026_10_20.sql",
+    # 2026-10-20: one queued X profile update for @SignalBasePicks.
+    # A new table. Does not rewrite the post queue, picks, or push_sent.
+    # Returns before CREATE once the table is locked down, so a second
+    # pass does not insert the seed again.
+    "social_profile_update_2026_10_20.sql",
+    # 2026-10-21: the sheet URL again, single-quoted, so the ? survives
+    # data.db's rewrite. Inserts only when that URL is not already queued
+    # or done. Does not rewrite the failed row, picks, or push_sent.
+    "social_profile_url_2026_10_21.sql",
+    # 2026-10-20: Eggz's Discord posts. Three tables, anon locked out.
+    # Not the model record. Does not rewrite picks, snapshots, or the
+    # published views. Returns before ALTER once the tables are locked down.
+    "add_capper_picks_2026_10_20.sql",
+    # 2026-10-20 (mike: "We should absolutely always know the goalie matchup
+    # before making a bet as well."): who ESPN and DailyFaceoff say will start
+    # in goal, one row per change. The NHL goalie gate reads its latest rows;
+    # until this lands the gate fails closed and no NHL model bets. One new
+    # table, anon locked out. Does not rewrite the record views or picks.
+    "add_nhl_goalie_designations_2026_10_20.sql",
+    # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
+    # return when the function body already has the marker. Unapplied.
+    # Does not touch picks or the record views. Win, loss, or push.
+    # No spread, price, or line filter. After master's list. The
+    # posted-stake pair stays last and adjacent.
+    "byom_backtest_rpc_2026_10_16.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

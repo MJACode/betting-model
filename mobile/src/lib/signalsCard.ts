@@ -170,7 +170,8 @@ function isPropMarket(market: string | null, player: string | null): boolean {
 /**
  * The bet the card headlines. "Under 56", "Sam Houston −7.5", "Sam Houston ML",
  * "Roquan Smith Under 9.5 Tackles + Assists". A first-five market keeps " F5". A team
- * total names the club the market belongs to ("Boston Bruins Over 3.5").
+ * total names the club the market belongs to and the market ("Boston Bruins Team
+ * Total Over 3.5"), as DraftKings names it.
  * Regulation moneyline is "(Regulation)", not "ML" — it pays only on a
  * regulation win. Golf and UFC method of victory have no structured market,
  * so the stored label is the headline.
@@ -199,7 +200,7 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     const club = market === 'team_totals_away' ? away : home;
     const word = side === 'over' ? 'Over' : side === 'under' ? 'Under' : '';
     const num = line == null ? '' : totalNumber(line);
-    bet = [club, word, num].filter((part) => part.length > 0).join(' ');
+    bet = [club, 'Team Total', word, num].filter((part) => part.length > 0).join(' ');
   } else if (market != null && market.startsWith('spreads')) {
     const num = line == null ? '' : spreadNumber(line, side, market);
     bet = [team, num].filter((part) => part.length > 0).join(' ');

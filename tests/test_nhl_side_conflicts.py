@@ -158,7 +158,10 @@ class _ThreeWay:
 
 
 def _score_regulation(monkeypatch, *, window=None, goalies=("BOS", "LAK"),
-                      stale=(), dry_run=True, write=True, inserted=None):
+                      stale=(), dry_run=True, write=True, inserted=None, matchup=None):
+    import models.nhl_goalie_gate as gate
+    # `matchup`: the goalie gate's reason; None = both starters confirmed.
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, matchup) for g in ids})
     monkeypatch.setattr(sc, "load_model", lambda mid: {
         "model": _ThreeWay(), "feature_cols": ["x"]})
     # +195 on BOS in regulation: EV 0.42 x 2.95 - 1 = 0.239, over the 0.20 floor
@@ -185,17 +188,25 @@ def test_in_the_window_it_can_bet(monkeypatch):
 
 
 def test_the_day_before_every_row_is_none_with_the_reason(monkeypatch):
-    """The 2026-10-16 18:26Z run that locked BOS (Regulation)."""
-    picks = _score_regulation(
-        monkeypatch, window="decides on game day from 16:00Z, with both listed goalies")
+    """The 2026-10-16 18:26Z run that locked BOS (Regulation): the day before,
+    the game has no goalie row, so the gate cannot call it known."""
+    why = "waiting for both confirmed starting goalies (BOS no goalie row yet; LAK no goalie row yet)"
+    picks = _score_regulation(monkeypatch, matchup=why)
     assert picks and all(p["signal_type"] == "NONE" for p in picks)
-    assert all("decides on game day" in p["downgrade_reason"] for p in picks)
+    assert all(p["downgrade_reason"] == why for p in picks)
 
 
-def test_without_both_listed_goalies_it_does_not_decide(monkeypatch):
-    picks = _score_regulation(monkeypatch, goalies=("LAK",))
+def test_a_started_game_is_not_decided(monkeypatch):
+    picks = _score_regulation(monkeypatch, window="game has started")
     assert picks and all(p["signal_type"] == "NONE" for p in picks)
-    assert all("listed goalies" in p["downgrade_reason"] for p in picks)
+    assert all("game has started" in p["downgrade_reason"] for p in picks)
+
+
+def test_without_both_goalies_confirmed_it_does_not_decide(monkeypatch):
+    why = "waiting for both confirmed starting goalies (LAK expected)"
+    picks = _score_regulation(monkeypatch, matchup=why)
+    assert picks and all(p["signal_type"] == "NONE" for p in picks)
+    assert all(p["downgrade_reason"] == why for p in picks)
 
 
 def test_without_last_nights_logs_it_does_not_decide(monkeypatch):

@@ -22,6 +22,7 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
+import { gameMarketForModel } from '@/lib/markets';
 import { isDuplicateCopy, isPausedRow, publishedRecordKeeps } from '@/lib/thresholds';
 import {
   teamStatsForSport,
@@ -441,7 +442,10 @@ export interface TeamPickRecords {
   /** Totals in its games. */
   over: PickRecord;
   under: PickRecord;
+  /** Every bet counted, the team totals included. */
   settled: number;
+  /** Team totals (one team's points): in `settled`, in no tile. */
+  teamTotals: number;
   /** A ledger read failed. Unknown stamps stayed in the counts. */
   ledgerUnread: boolean;
 }
@@ -475,7 +479,7 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
   const byId = new Map(games.map((g) => [g.game_id, g] as const));
   const out: TeamPickRecords = {
     on: emptyRecord(), against: emptyRecord(), over: emptyRecord(), under: emptyRecord(),
-    settled: 0, ledgerUnread: false,
+    settled: 0, teamTotals: 0, ledgerUnread: false,
   };
   for (const p of picks) {
     const g = byId.get(p.game_id);
@@ -497,6 +501,17 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
     // are player props, not team totals. Same for every *prop* model_id.
     if ((p.model_id ?? '').includes('prop')) continue;
     if (p.player_id != null) continue;
+    // A team total (nba_team_total_luck: the home team's points, under) is
+    // neither side of the game nor its total. Filed under "Unders" it would
+    // put a different bet, on a different line, in a game-total record, so
+    // it stays out of all four tiles. It is still a posted bet in the team's
+    // games, so it counts in `settled`, and the page says the tiles leave it out.
+    if (gameMarketForModel(p.model_id ?? '')?.startsWith('team_totals')) {
+      if (p.discordPublish === 'unknown') out.ledgerUnread = true;
+      out.teamTotals += 1;
+      out.settled += 1;
+      continue;
+    }
     const side = String(p.pick_side ?? '').toLowerCase();
     const teamIsHome = g.home_team === team;
     if (side === 'over') addPick(out.over, p);

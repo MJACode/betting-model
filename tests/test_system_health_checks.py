@@ -743,3 +743,20 @@ class TestDailyOnlyFeedsOvernightWindow:
         ), row
         assert row["cadence"] == "each game day", row
         assert "every " not in row["cadence"]
+
+
+# ── the NBA schedule refresh check is part of the run ────────────────────────
+
+@pytest.mark.parametrize("age_h,status", [(2, sh.OK), (48, sh.STALE)])
+def test_the_run_reports_whether_the_nba_schedule_is_being_refreshed(db, age_h, status):
+    """check_nba_schedule_refresh is tested on its own in
+    tests/test_nba_schedule_refresh.py; this pins that run_system_health calls
+    it. Dropped from the run, every other test stays green and a refresh that
+    has stopped is never reported."""
+    db.execute("CREATE TABLE IF NOT EXISTS nba_schedule (nba_game_id TEXT PRIMARY KEY, updated_at TEXT)")
+    db.execute("INSERT INTO nba_schedule VALUES ('0022600001', ?)", (_iso(age_h * 60),))
+    db.execute("INSERT INTO games (game_id, sport, season, game_date, home_team, away_team)"
+               " VALUES ('NBA_g1', 'NBA', 2027, ?, 'BOS', 'NYK')", (today_et(),))
+    db.commit()
+    row = _results("nba_schedule_refresh")
+    assert row["status"] == status and row["severity"] == "WARN", row

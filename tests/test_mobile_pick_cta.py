@@ -382,7 +382,7 @@ def test_a_stale_card_offers_no_bet():
     slip = re.search(r"const canSlip =[^;]*;", card).group(0)
     assert "(!heroPrice?.stale || Boolean(inSlip))" in slip and slip.endswith("&& cta.slip;")
     assert re.search(r"const stakeCaption =\s*pick\.signal_type !== 'BET' \|\| preview"
-                     r" \|\| paused \|\| heroPrice\?\.stale \|\| signalsMuted\s*\?\s*null", card)
+                     r" \|\| paused \|\| heroPrice\?\.stale \|\| signalsMuted( \|\| notAtMyBooks \|\| noEdgeAtMine)?\s*\?\s*null", card)
     # The words come from the reasons (lib/heroPriceText.ts).
     assert "{priceCheckChipText(check)}" in card and ">Price check<" not in card
     assert "flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`" in card
@@ -454,15 +454,18 @@ def test_pick_detail_applies_the_price_age_rule():
     detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
     assert "const priceAge = priceAgeFor(pick, game, liveState);" in detail
     assert "heroAmericanForPick(pick, enriched.latestOdds ?? null, bookRows, priceAge)" in detail
-    assert "<BookLinesRow pick={pick} bookRows={bookRows} hero={hero} priceAge={priceAge} />" in detail
-    assert "<AllBooksCard pick={pick} bookRows={freshBookRows(pick, bookRows, priceAge)} />" in detail
+    # allowedBooks: the member's own books (2026-10-19, test_mobile_my_books.py).
+    assert re.search(r"<BookLinesRow\s+pick=\{pick\}\s+bookRows=\{bookRows\}\s+hero=\{hero\}\s+priceAge=\{priceAge\}"
+                     r"(\s+allowedBooks=\{allowedBooks\})?\s*/>", detail)
+    assert re.search(r"<AllBooksCard pick=\{pick\} bookRows=\{freshBookRows\(pick, bookRows, priceAge\)\}"
+                     r"( allowedBooks=\{allowedBooks\})? />", detail)
     assert "&& (!hero?.stale || inSlip) && !voided && cta.slip ?" in detail
     assert "stalePriceNote(hero)" in detail
     # No chip left: no empty "Betting lines" card either.
-    assert "const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge);" in detail
+    assert re.search(r"const lineQuotes = currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\);", detail)
     assert re.search(r"cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>", detail)
     row = _read(SRC / "components" / "BookLinesRow.tsx")
-    assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in row
+    assert re.search(r"currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\)", row)
     assert "pickLineQuotes(" not in row
 
 
@@ -495,7 +498,7 @@ def test_the_card_applies_the_price_age_rule():
     assert "priceAge?: PriceAgeContext" in hero
     assert "priceAgeApplies(pick, priceAge)" in hero and "stale: true" in hero
     handoff = markets[markets.index("export function bestHandoffForPick("):]
-    assert "currentLineQuotes(pick, bookRows, hero, priceAge)" in handoff[:1500]
+    assert re.search(r"currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\)", handoff[:1800])
     # One list for the card's hand-off and Pick Detail's chips.
     shop = markets[markets.index("export function currentLineQuotes("):]
     shop = shop[:shop.index("\nexport function ")]
@@ -520,7 +523,7 @@ def test_best_handoff_rerank_is_wired():
     assert re.search(r"export function bestHandoffForPick\(", markets)
     assert "hero" in markets[markets.index("export function bestHandoffForPick("):][:3000]
     card = _read(SRC / "components" / "PickCard.tsx")
-    assert re.search(r"bestHandoffForPick\(pick, item\.bookRows, heroPrice, priceAge\)", card)
+    assert re.search(r"bestHandoffForPick\(pick, item\.bookRows, heroPrice, priceAge(, myBooksReady \? myBooks : undefined)?\)", card)
 
 
 def test_pick_card_wiring():
@@ -542,7 +545,10 @@ def test_pick_card_wiring():
     assert re.search(r"startedText: \{[^}]*color: colors\.textSecondary", card)
     assert card.count("cta.priceTag") >= 2 and "kind === 'now' ? 'Now'" not in card
     assert "{priceCheckChipText(check)}" in card and re.search(r"priceCheckChip: \{[^}]*colors\.medSoft", card)
-    assert "flagged ? '—' : formatPctSigned(decisionEdge(pick))" in card and "flagged ? 'EV —'" in card
+    # shownEdge is decisionEdge(pick) unless the member's own book re-prices it
+    # (lib/myBooks.ts); a flagged row still shows "—" either way.
+    assert "flagged ? '—' : formatPctSigned(shownEdge)" in card and "flagged ? 'EV —'" in card
+    assert ": decisionEdge(pick);" in card
     assert "const demoteEdge = pick.signal_type !== 'BET';" in card
     assert "kind === 'pre' && !flagged" in card
 
@@ -688,8 +694,8 @@ ok(signalsBetHeadline({ side: 'home', line: null, market: 'h2h_1st_5_innings', h
 ok(signalsBetHeadline({ side: 'under', line: 6, market: 'totals', homeTeam: 'EDM', awayTeam: 'LAK' }) === 'Under 6', 'whole-number total drops .0');
 ok(signalsBetHeadline({ side: 'under', line: 56, market: 'totals', homeTeam: 'BUF', awayTeam: 'KC' }) === 'Under 56', 'wind total is the bet only');
 ok(!signalsBetHeadline({ side: 'under', line: 56, market: 'totals' }).includes('0.77u'), 'no stake suffix');
-ok(signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Over 3.5', 'team total names the club');
-ok(signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Under 2.5', 'away team total');
+ok(signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Team Total Over 3.5', 'team total names the club');
+ok(signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Team Total Under 2.5', 'away team total');
 ok(signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'Los Angeles', awayTeam: 'New York' }) === 'Over 8.5', 'two-word teams are not a qualifier');
 ok(signalsBetHeadline({ side: 'under', line: 9.5, market: 'player_tackles_assists', player: 'Roquan Smith' }) === 'Roquan Smith Under 9.5 Tackles + Assists', 'prop');
 ok(signalsBetHeadline({ side: 'over', line: 2.5, market: 'player_threes', player: 'Karl-Anthony Towns' }) === 'Karl-Anthony Towns Over 2.5 Three-pointers', 'three pointers');

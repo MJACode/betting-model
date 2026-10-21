@@ -75,7 +75,7 @@ ANON_READABLE: tuple[str, ...] = (
     # Build Your Own Model facts (2026-10-16). Granted before the screen
     # exists: an undeclared table arrives with no SELECT and the first read
     # is an empty error. Nothing in mobile/src names these yet, so they are
-    # also AHEAD_OF_THE_APP. Display data only: win, loss, or push.
+    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
     "byom_game_facts",
     "byom_prop_facts",
     "tracked_bets",
@@ -315,6 +315,18 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # creates it on demand). Read by the card and the window job, never by
     # the app.
     "nba_prop_market_decisions",
+    # The NBA totals card's decisions ledger: one row per game it has decided,
+    # bet or not, with the reason (scripts/nba_total_luck_card.py, which
+    # creates it on demand). Read by the card, never by the app.
+    "nba_total_luck_decisions",
+    # The NBA home team-total model's two: its decisions ledger, one row per
+    # decided game with the home team's part of the gap and the best under
+    # offer (scripts/nba_team_total_luck_card.py), and its fetch ledger, one
+    # row per Odds API call with the credits it billed
+    # (data/ingestors/nba_team_total_odds.py). Each created on demand by its
+    # writer; read by the card and the window job, never by the app.
+    "nba_team_total_luck_decisions",
+    "nba_team_total_fetches",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.
@@ -519,6 +531,14 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "feedback_submit",
     "feedback_threads_for_device",
     "feedback_unread_count",
+    # the member's own sportsbooks -- SECURITY DEFINER, device/user-scoped
+    # (data/migrations/member_sportsbooks_2026_10_19.sql, which carries its own
+    # GRANT; apply_anon_grants skips them until the worker has applied it)
+    "member_books_get",
+    "member_books_set",
+    # crash logging -- SECURITY DEFINER, insert-only, returns nothing
+    # (data/migrations/add_app_errors.sql, mobile/src/lib/crashLogSetup.ts)
+    "log_app_error",
     # NOT called by the app, but REQUIRED by it: custom_model_picks and
     # custom_model_backtest are SECURITY INVOKER and both call this helper, so
     # the CALLER needs EXECUTE. Revoking it breaks the custom-model screen with

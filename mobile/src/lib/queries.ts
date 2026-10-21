@@ -15,6 +15,7 @@ import {
   type PlayerLogEntry,
   type PlayerLogSport,
 } from './playerLog';
+import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
 import {
   gameMarketForModel,
   lineShopForPick,
@@ -956,6 +957,78 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
       .order('bookmaker')
       .range(from, to),
   );
+}
+
+/**
+ * Today's NHL and NBA games for the Lines board — every game, not the ones
+ * a model picked. Measured 2026-10-16: 11 NHL games on 2026-10-15, 2 on
+ * 2026-10-16, 3 NBA games on 2026-10-20. Well under the 1,000-row cap.
+ */
+export async function fetchGamesForLinesBoard(date: string): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .in('sport', [...LINES_SPORTS])
+    .eq('game_date', date)
+    .order('commence_time')
+    .order('game_id');
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
+/**
+ * Every book's latest line for those games.
+ *
+ * Measured 2026-10-16 on v_latest_odds_all_books: NHL 2026-10-13 was 592
+ * rows, the largest NHL day from 2026-10-01 through that read; NBA
+ * 2026-10-21 was 363. A day with both full slates can pass the 1,000-row
+ * cap, so this is paged and narrowed to the board's game ids and to
+ * LINES_ODDS_MARKETS (h2h, h2h_3way, spreads, totals) — not the whole slate.
+ */
+function drawPriceNotOnView(e: unknown): boolean {
+  const msg = e instanceof Error
+    ? e.message
+    : e && typeof e === 'object' && 'message' in e
+      ? String((e as { message: unknown }).message)
+      : '';
+  return /draw_price/i.test(msg);
+}
+
+/**
+ * Set after one select learns the view has no draw_price column. Later loads
+ * in this process skip that failing select. A new app session tries again,
+ * which is how the tie appears after the hand-applied view lands.
+ */
+let linesDrawPriceMissing = false;
+
+export async function fetchLinesBoardOdds(gameIds: readonly string[]): Promise<OddsByBookRow[]> {
+  if (gameIds.length === 0) return [];
+  // draw_price is on latest_odds and missing from the view until Matt applies
+  // add_draw_price_to_latest_odds_view_2026_10_16.sql. The first miss retries
+  // without the column. linesDrawPriceMissing keeps every later load off that
+  // failing select.
+  const read = (columns: string) =>
+    fetchAllPages<OddsByBookRow>(
+      (from, to) =>
+        supabase
+          .from('v_latest_odds_all_books')
+          .select(columns)
+          .in('game_id', [...gameIds])
+          .in('market', [...LINES_ODDS_MARKETS])
+          .order('game_id')
+          .order('market')
+          .order('bookmaker')
+          .range(from, to),
+      (row) => `${row.game_id}|${row.market}|${row.bookmaker}`,
+    );
+  if (linesDrawPriceMissing) return read(ODDS_BY_BOOK_COLUMNS);
+  try {
+    return await read(`${ODDS_BY_BOOK_COLUMNS}, draw_price`);
+  } catch (e: unknown) {
+    if (!drawPriceNotOnView(e)) throw e;
+    linesDrawPriceMissing = true;
+    return read(ODDS_BY_BOOK_COLUMNS);
+  }
 }
 
 /**
@@ -2121,19 +2194,6 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }
 
-export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
-  const { data, error } = await supabase
-    .from('games')
-    .select(GAME_COLUMNS)
-    .or(`home_team.eq.${team},away_team.eq.${team}`)
-    .lt('game_date', beforeDate)
-    .not('home_score', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []) as GameRow[];
-}
-
 export async function fetchPlayerRecentGames(
   playerId: string,
   beforeDate: string,
@@ -2679,8 +2739,9 @@ export async function fetchTeamStats(
 
 /**
  * A team's most recent finished games IN ONE SPORT, newest first. Scoped by
- * sport, unlike fetchTeamRecentGames: 'BUF' is Buffalo in the NFL and the
- * NHL, and a form strip that mixes the two is wrong on both.
+ * sport: 'BUF' is Buffalo in the NFL and the NHL, and a form strip that mixes
+ * the two is wrong on both. The only team-form read: the unscoped one it
+ * replaced put Red Sox and Bruins games on a Celtics pick (2026-10-17).
  */
 export async function fetchTeamRecentGamesForSport(
   sport: string,

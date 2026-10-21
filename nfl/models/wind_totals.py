@@ -421,10 +421,21 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
 
     Indoor games are dropped before this is called; if any survive, they are
     dropped here too rather than silently scored.
+
+    NO VENUE, NO BET (2026-10-20, mike). A game whose `stadium_id` is not a
+    `STADIUM_COORDS` key -- the live schedule sets None when it cannot
+    establish where the game is played (weather.resolve_venue) -- is dropped
+    here, whatever its forecast says. A forecast at the wrong stadium is
+    worse than none: two London BETs (3465055, 3583736) were forecast at
+    Jacksonville's coordinates, because the schedule the card read gave every
+    game abroad the home team's US stadium. The gate is in the model, like
+    the lead gate, so a stale wind reading stored under the game cannot
+    carry it onto the card either.
     """
-    from data_ingest.weather import open_air_mask
+    from data_ingest.weather import STADIUM_COORDS, open_air_mask
 
     g = games[open_air_mask(games)].copy()
+    g = g[g.stadium_id.isin(STADIUM_COORDS)]
     g = _apply_ruling_wind(g, wind_reads)
     g = g[g.forecast_wind >= threshold]
     # Nothing fires outside the firing window. The card is run against the
@@ -505,7 +516,7 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
     deleting the pick.
     """
     from data_ingest.pick_eval import eval_row
-    from data_ingest.weather import INDOOR_ROOFS, RETRACTABLE_STADIUMS
+    from data_ingest.weather import INDOOR_ROOFS, RETRACTABLE_STADIUMS, STADIUM_COORDS
 
     out: list[dict] = []
     for r in games.itertuples():
@@ -534,6 +545,16 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
                 qualifies=False,
                 reason=(f"retractable roof at {getattr(r, 'stadium_id', '?')} "
                         "and the roof state is not known yet"),
+                **quote, **common))
+            continue
+
+        if getattr(r, "stadium_id", None) not in STADIUM_COORDS:
+            # The same gate as select_bets: no venue, no forecast, no bet.
+            # The note says which field failed, so the board is not silent.
+            note = str(getattr(r, "venue_note", "") or "").strip()
+            out.append(eval_row(
+                qualifies=False,
+                reason="venue not established" + (f": {note}" if note else ""),
                 **quote, **common))
             continue
 

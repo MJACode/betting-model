@@ -1,0 +1,692 @@
+{
+ "_note": "ESPN site scoreboard, dates=YYYYMM&limit=1000, fetched 2026-10-20; events trimmed to the keys the schedule refresh reads",
+ "events": [
+  {
+   "id": "401910169",
+   "date": "2026-12-23T00:00Z",
+   "name": "Toronto Raptors at Washington Wizards",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401910169",
+     "date": "2026-12-23T00:00Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [],
+     "broadcasts": [],
+     "venue": {
+      "fullName": "Capital One Arena",
+      "address": {
+       "city": "Washington",
+       "state": "DC"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "27",
+        "abbreviation": "WSH",
+        "displayName": "Washington Wizards",
+        "location": "Washington",
+        "name": "Wizards"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "28",
+        "abbreviation": "TOR",
+        "displayName": "Toronto Raptors",
+        "location": "Toronto",
+        "name": "Raptors"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401910171",
+   "date": "2026-12-23T03:30Z",
+   "name": "Dallas Mavericks at Golden State Warriors",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401910171",
+     "date": "2026-12-23T03:30Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "NBC"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Chase Center",
+      "address": {
+       "city": "San Francisco",
+       "state": "CA"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "9",
+        "abbreviation": "GS",
+        "displayName": "Golden State Warriors",
+        "location": "Golden State",
+        "name": "Warriors"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL",
+        "displayName": "Dallas Mavericks",
+        "location": "Dallas",
+        "name": "Mavericks"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909450",
+   "date": "2026-12-04T05:00Z",
+   "name": "TBD at TBD",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401909450",
+     "date": "2026-12-04T05:00Z",
+     "timeValid": false,
+     "neutralSite": false,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup - Quarterfinals"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Prime Video"
+       ]
+      }
+     ],
+     "venue": null,
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "-1",
+        "abbreviation": "TBD",
+        "displayName": "TBD",
+        "location": "TBD",
+        "name": "TBD"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "-2",
+        "abbreviation": "TBD",
+        "displayName": "TBD",
+        "location": "TBD",
+        "name": "TBD"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909456",
+   "date": "2026-12-11T05:00Z",
+   "name": "TBD at TBD",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401909456",
+     "date": "2026-12-11T05:00Z",
+     "timeValid": false,
+     "neutralSite": true,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup Championship"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Prime Video"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Hinkle Fieldhouse",
+      "address": {
+       "city": "Indianapolis",
+       "state": "IN"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "-1",
+        "abbreviation": "TBD",
+        "displayName": "TBD",
+        "location": "TBD",
+        "name": "TBD"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "-2",
+        "abbreviation": "TBD",
+        "displayName": "TBD",
+        "location": "TBD",
+        "name": "TBD"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401809833",
+   "date": "2025-12-09T23:00Z",
+   "name": "Miami Heat at Orlando Magic",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401809833",
+     "date": "2025-12-09T23:00Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup - Quarterfinals"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Prime Video"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Kia Center",
+      "address": {
+       "city": "Orlando",
+       "state": "FL"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "117",
+       "team": {
+        "id": "19",
+        "abbreviation": "ORL",
+        "displayName": "Orlando Magic",
+        "location": "Orlando",
+        "name": "Magic"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "108",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA",
+        "displayName": "Miami Heat",
+        "location": "Miami",
+        "name": "Heat"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401809837",
+   "date": "2025-12-13T22:30Z",
+   "name": "New York Knicks at Orlando Magic",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401809837",
+     "date": "2025-12-13T22:30Z",
+     "timeValid": true,
+     "neutralSite": true,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup - Semifinals"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Prime Video"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "T-Mobile Arena",
+      "address": {
+       "city": "Las Vegas",
+       "state": "NV"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "120",
+       "team": {
+        "id": "19",
+        "abbreviation": "ORL",
+        "displayName": "Orlando Magic",
+        "location": "Orlando",
+        "name": "Magic"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "132",
+       "team": {
+        "id": "18",
+        "abbreviation": "NY",
+        "displayName": "New York Knicks",
+        "location": "New York",
+        "name": "Knicks"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401809839",
+   "date": "2025-12-17T01:30Z",
+   "name": "San Antonio Spurs at New York Knicks",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401809839",
+     "date": "2025-12-17T01:30Z",
+     "timeValid": true,
+     "neutralSite": true,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Cup Championship"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Prime Video"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "T-Mobile Arena",
+      "address": {
+       "city": "Las Vegas",
+       "state": "NV"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "124",
+       "team": {
+        "id": "18",
+        "abbreviation": "NY",
+        "displayName": "New York Knicks",
+        "location": "New York",
+        "name": "Knicks"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "113",
+       "team": {
+        "id": "24",
+        "abbreviation": "SA",
+        "displayName": "San Antonio Spurs",
+        "location": "San Antonio",
+        "name": "Spurs"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401866755",
+   "date": "2026-04-14T23:30Z",
+   "name": "Miami Heat at Charlotte Hornets",
+   "season": {
+    "year": 2026,
+    "type": 5,
+    "slug": "play-in-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401866755",
+     "date": "2026-04-14T23:30Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Play-In - East - 9th Place vs 10th Place"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Prime Video"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Spectrum Center",
+      "address": {
+       "city": "Charlotte",
+       "state": "NC"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "127",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "Charlotte Hornets",
+        "location": "Charlotte",
+        "name": "Hornets"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "126",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA",
+        "displayName": "Miami Heat",
+        "location": "Miami",
+        "name": "Heat"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401869187",
+   "date": "2026-04-18T17:00Z",
+   "name": "Toronto Raptors at Cleveland Cavaliers",
+   "season": {
+    "year": 2026,
+    "type": 3,
+    "slug": "post-season"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401869187",
+     "date": "2026-04-18T17:00Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "East 1st Round - Game 1"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Prime Video"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Rocket Arena",
+      "address": {
+       "city": "Cleveland",
+       "state": "OH"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "126",
+       "team": {
+        "id": "5",
+        "abbreviation": "CLE",
+        "displayName": "Cleveland Cavaliers",
+        "location": "Cleveland",
+        "name": "Cavaliers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "113",
+       "team": {
+        "id": "28",
+        "abbreviation": "TOR",
+        "displayName": "Toronto Raptors",
+        "location": "Toronto",
+        "name": "Raptors"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401902644",
+   "date": "2026-10-03T23:00Z",
+   "name": "Miami Heat at Toronto Raptors",
+   "season": {
+    "year": 2027,
+    "type": 1,
+    "slug": "preseason"
+   },
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401902644",
+     "date": "2026-10-03T23:00Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "notes": [
+      {
+       "type": "event",
+       "headline": "NBA Canada Games 2026"
+      }
+     ],
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "NBA TV"
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Videotron Centre",
+      "address": {
+       "city": "Quebec City",
+       "state": "PQ"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "105",
+       "team": {
+        "id": "28",
+        "abbreviation": "TOR",
+        "displayName": "Toronto Raptors",
+        "location": "Toronto",
+        "name": "Raptors"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "129",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA",
+        "displayName": "Miami Heat",
+        "location": "Miami",
+        "name": "Heat"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
