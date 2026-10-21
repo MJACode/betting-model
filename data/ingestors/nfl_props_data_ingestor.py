@@ -433,11 +433,17 @@ def _team_upsert_for(conn) -> str:
     scheduled-game rows the NFL prop scorer reads its slate from. Without the
     columns the rows still land and only the venue is missing, which the wind
     card treats as "venue not established". One catalog read per season.
+
+    Scoped to the public schema and counted by distinct name: the catalog
+    lists every schema the role can see, so a same-named table elsewhere (a
+    backup copy) would double an unscoped count, fail the equality, and stop
+    the venue being written for good -- logged as "no venue columns yet".
     """
     try:
         row = conn.execute("""
-            SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_name = 'nfl_team_game_stats' AND column_name = ANY(%s)
+            SELECT COUNT(DISTINCT column_name) FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'nfl_team_game_stats'
+              AND column_name = ANY(%s)
         """, (VENUE_COLUMNS,)).fetchone()
         if row and int(row[0]) == len(VENUE_COLUMNS):
             return _TEAM_UPSERT

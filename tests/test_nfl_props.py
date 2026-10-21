@@ -228,6 +228,35 @@ class TestVenueAndScheduleOfRecord:
         assert no_venue == ing._TEAM_UPSERT_NO_VENUE
         assert "stadium_id" not in no_venue and "commence_time" in no_venue
 
+    def test_a_same_named_table_in_another_schema_does_not_drop_the_venue(self):
+        """The catalog probe counts columns, and information_schema lists every
+        schema the role can see. A second nfl_team_game_stats (a backup copy,
+        a staging schema) doubled the count to 6, the `== 3` test failed, and
+        the venue was never written again -- silently, as "no venue columns
+        yet". This catalog answers each probe the way Postgres would."""
+        from data.ingestors import nfl_props_data_ingestor as ing
+
+        catalog = [(schema, col) for schema in ("public", "archive")
+                   for col in ing.VENUE_COLUMNS]
+
+        class _Catalog:
+            def execute(self, sql, params=None):
+                flat = " ".join(sql.split())
+                seen = [(s, c) for s, c in catalog
+                        if "table_schema = 'public'" not in flat or s == "public"]
+                n = (len({c for _, c in seen}) if "DISTINCT column_name" in flat
+                     else len(seen))
+
+                class _R:
+                    def fetchone(self):
+                        return (n,)
+                return _R()
+
+            def rollback(self):
+                pass
+
+        assert ing._team_upsert_for(_Catalog()) == ing._TEAM_UPSERT
+
 
 # ── Response distributions ────────────────────────────────────────────────────
 # These are the tests that matter. Everything above is plumbing; this is where a
