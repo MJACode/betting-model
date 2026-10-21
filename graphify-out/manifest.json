@@ -3948,9 +3948,9 @@
     "semantic_hash": "7d0659c1e7cf4f2719242061e09f24bc"
   },
   "run_pipeline.py": {
-    "mtime": 1792550081.8515322,
-    "seen": 1792550350.2972682,
-    "ast_hash": "4e38ecdd020a40d311c7bb385985bf94",
+    "mtime": 1792552371.5495486,
+    "seen": 1792552727.9551888,
+    "ast_hash": "da8017499d880769db11824d3581aa48",
     "semantic_hash": ""
   },
   "scheduler.py": {
@@ -6990,15 +6990,15 @@
     "semantic_hash": "4c74ea010f3fb07341445a2ead37211c"
   },
   "tests/test_recap_restatement.py": {
-    "mtime": 1792519930.876117,
-    "seen": 1792546081.179054,
-    "ast_hash": "db6aef0d63384d50e0296e26a72698ae",
-    "semantic_hash": "db6aef0d63384d50e0296e26a72698ae"
+    "mtime": 1792552371.553573,
+    "seen": 1792552727.9584007,
+    "ast_hash": "1f977aeb9d4cbad120b951e2926db870",
+    "semantic_hash": ""
   },
   "tests/test_recap_retries_a_skipped_day.py": {
-    "mtime": 1792550081.862541,
-    "seen": 1792550350.3006797,
-    "ast_hash": "76144eae62c6fea1648d5a04e514324b",
+    "mtime": 1792552371.5555835,
+    "seen": 1792552727.9584062,
+    "ast_hash": "e7a907e7ec963de5608748fdd01a8718",
     "semantic_hash": ""
   },
   "tests/test_recap_waits_for_nfl_box_scores.py": {
@@ -7050,9 +7050,9 @@
     "semantic_hash": "c25ef3d1060fe692ebf4df9a66c39547"
   },
   "tests/test_results_recap_message_id.py": {
-    "mtime": 1792519930.8835592,
-    "seen": 1792546081.1791215,
-    "ast_hash": "a1bec6524e9902b4d7c93d4e795b7e62",
+    "mtime": 1792552371.5582094,
+    "seen": 1792552727.9584627,
+    "ast_hash": "7d53d8d30e43844c6e56f3aafc1989c5",
     "semantic_hash": ""
   },
   "tests/test_retired_models.py": {
@@ -7392,9 +7392,9 @@
     "semantic_hash": "451dc0ee09b73547cedc9967c74df3a7"
   },
   "tests/test_x_publisher.py": {
-    "mtime": 1792550081.8645496,
-    "seen": 1792550350.3010988,
-    "ast_hash": "d11bd2db86d813df79bbcd0f4bbc6a04",
+    "mtime": 1792552371.55922,
+    "seen": 1792552727.9587975,
+    "ast_hash": "ddd10a74e2ba78bf0861f66d627a83ae",
     "semantic_hash": ""
   },
   "tracking/__init__.py": {
@@ -7428,9 +7428,9 @@
     "semantic_hash": "5f574c2db7faffb1b0ced8b33d371d53"
   },
   "tracking/discord_notifier.py": {
-    "mtime": 1792550081.8660517,
-    "seen": 1792550350.3011355,
-    "ast_hash": "373605a7aeca31caa5ec1d70db2a6441",
+    "mtime": 1792552371.563242,
+    "seen": 1792552727.9588337,
+    "ast_hash": "8bbba787b666959e5276d6589e307c3a",
     "semantic_hash": ""
   },
   "tracking/discord_publish.py": {
@@ -7602,9 +7602,9 @@
     "semantic_hash": "5f326601427f3660ecf067a205dab6c9"
   },
   "tracking/x_publisher.py": {
-    "mtime": 1792550081.8660517,
-    "seen": 1792550350.3013055,
-    "ast_hash": "ad263e7340796a15b98a939abb9a1e80",
+    "mtime": 1792552371.5687168,
+    "seen": 1792552727.9589772,
+    "ast_hash": "b9370226f121c5a6ee402e0772c9c807",
     "semantic_hash": ""
   },
   ".claude/CLAUDE.md": {
@@ -7776,9 +7776,9 @@
     "semantic_hash": ""
   },
   "docs/discord.md": {
-    "mtime": 1792550081.845338,
-    "seen": 1792550350.3014767,
-    "ast_hash": "5bd34e670fa2dc8e521ce1ff943738a5",
+    "mtime": 1792552371.4837961,
+    "seen": 1792552727.9591193,
+    "ast_hash": "7a525eaea3a7063373e911d16cf89160",
     "semantic_hash": ""
   },
   "docs/feedback.md": {
@@ -9372,9 +9372,9 @@
     "semantic_hash": ""
   },
   "tests/test_period_recaps.py": {
-    "mtime": 1792550081.860533,
-    "seen": 1792550350.3004417,
-    "ast_hash": "3f1e23f7853a449815331a67ff8a95ed",
+    "mtime": 1792552371.553573,
+    "seen": 1792552727.9581602,
+    "ast_hash": "0628de10187d4812d73f4740e61ec7ea",
     "semantic_hash": ""
   },
   "tests/test_position_defense_ranks.py": {
@@ -9708,9 +9708,9 @@
     "semantic_hash": ""
   },
   "tests/test_eggz_picks.py": {
-    "mtime": 1792550081.8600266,
-    "seen": 1792550350.2990756,
-    "ast_hash": "fb92b3f3bcf1f1dafbae45246535622a",
+    "mtime": 1792552371.5515616,
+    "seen": 1792552727.9568226,
+    "ast_hash": "0d9e1c059a71a4f28e31e4c918041620",
     "semantic_hash": ""
   },
   "tests/test_live_bet_index.py": {
@@ -9744,9 +9744,9 @@
     "semantic_hash": ""
   },
   "tracking/eggz_picks.py": {
-    "mtime": 1792550081.8660517,
-    "seen": 1792550350.3011453,
-    "ast_hash": "ed17de83005d0132c10614642ef0e637",
+    "mtime": 1792552371.5652547,
+    "seen": 1792552727.9588425,
+    "ast_hash": "06637f636acd6c1fe91432e381880bed",
     "semantic_hash": ""
   },
   "tracking/social_profile.py": {
