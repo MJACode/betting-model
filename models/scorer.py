@@ -3069,7 +3069,7 @@ def _game_board(conn: DBConnection, target_date: str, ufc_horizon: str,
     filter that failed open would hand the models every one of them, and a
     game no book listed by its own day would be scored with no price."""
     from data.ingestors.nhl_schedule_refresh import DATA_SOURCE as nhl_schedule_only
-    ahead_marks = ",".join(["?"] * len(GAME_SCORE_AHEAD_SPORTS))
+    _ahead_marks = ",".join(["?"] * len(GAME_SCORE_AHEAD_SPORTS))
     return conn.execute(f"""
         SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
         FROM games
@@ -3078,7 +3078,7 @@ def _game_board(conn: DBConnection, target_date: str, ufc_horizon: str,
           AND (game_date = ?
                OR (sport = 'UFC' AND game_date > ? AND game_date <= ?)
                OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?)
-               OR (sport IN ({ahead_marks})
+               OR (sport IN ({_ahead_marks})
                    AND game_date > ? AND game_date <= ?))
         ORDER BY sport, game_date
     """, (target_date, target_date, ufc_horizon,
