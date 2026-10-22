@@ -760,3 +760,45 @@ def test_the_run_reports_whether_the_nba_schedule_is_being_refreshed(db, age_h, 
     db.commit()
     row = _results("nba_schedule_refresh")
     assert row["status"] == status and row["severity"] == "WARN", row
+
+
+# ── the NHL schedule refresh check is part of the run ────────────────────────
+
+def _nhl_row(db, gid, game_date, source, updated_min_ago, score=None):
+    db.execute("INSERT INTO games (game_id, sport, season, game_date, home_team, away_team,"
+               " home_score, data_source, updated_at) VALUES (?, 'NHL', 2027, ?, 'BOS', 'NSH', ?, ?, ?)",
+               (gid, game_date, score, source, _iso(updated_min_ago)))
+
+
+@pytest.mark.parametrize("age_h,status", [(2, sh.OK), (48, sh.STALE)])
+def test_the_run_reports_whether_the_nhl_schedule_is_being_refreshed(db, age_h, status):
+    """Dropped from the run, every other test stays green and a refresh that
+    has stopped is never reported. The newest updated_at among the rows only
+    the refresh holds is the last run that reached the NHL API."""
+    ahead = (datetime.strptime(today_et(), "%Y-%m-%d") + timedelta(days=5)).strftime("%Y-%m-%d")
+    _nhl_row(db, "NHL_x_NSH_BOS", ahead, "nhl_schedule", age_h * 60)
+    # A row the odds feed has listed is stamped hourly by the feed: it must not
+    # be what keeps the check green.
+    _nhl_row(db, "NHL_y_NSH_BOS", today_et(), "live", 5)
+    db.commit()
+    row = _results("nhl_schedule_refresh")
+    assert row["status"] == status and row["severity"] == "WARN", row
+
+
+@pytest.mark.parametrize("what", ["only_feed_rows", "only_past", "only_scored"])
+def test_the_nhl_schedule_check_stands_down_with_nothing_of_its_own_ahead(db, what):
+    """Late in the season (or in the summer) every stored game may be the odds
+    feed's: nothing for the refresh to confirm, so SKIPPED, not STALE."""
+    today = datetime.strptime(today_et(), "%Y-%m-%d")
+    ahead = (today + timedelta(days=5)).strftime("%Y-%m-%d")
+    past = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+    if what == "only_feed_rows":
+        _nhl_row(db, "NHL_a_NSH_BOS", ahead, "live", 60 * 48)
+    elif what == "only_past":
+        _nhl_row(db, "NHL_b_NSH_BOS", past, "nhl_schedule", 60 * 72)
+    else:
+        _nhl_row(db, "NHL_c_NSH_BOS", ahead, "nhl_schedule", 60 * 72, score=3)
+    db.commit()
+    row = _results("nhl_schedule_refresh")
+    assert row["status"] == sh.SKIPPED, row
+    assert sh.SKIP_BUDGET_DAYS["nhl_schedule_refresh"] == 120

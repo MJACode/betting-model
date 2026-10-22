@@ -75,7 +75,7 @@ _ET = ZoneInfo("America/New_York")
 
 
 def slate(conn, now: datetime) -> dict[str, dict]:
-    """Every NHL game whose start is after `now`. No horizon.
+    """Every NHL game a book has listed whose start is after `now`. No horizon.
 
     The game_date bound only lets the query use the date: a game that starts
     after `now` cannot carry an ET date earlier than yesterday's. The started
@@ -83,13 +83,18 @@ def slate(conn, now: datetime) -> dict[str, dict]:
     mixed shapes.
     """
     from features.feature_engine import _parse_iso_ts
+    from data.ingestors.nhl_schedule_refresh import listed_by_a_book
     since = (now.astimezone(_ET).date() - timedelta(days=1)).isoformat()
-    rows = conn.execute("""
+    # A game no book has listed has no Pinnacle total either. Without this the
+    # season the schedule refresh stores ahead (~1,200 games) would be read,
+    # goalie-gated and logged as held on every pass.
+    rows = conn.execute(f"""
         SELECT game_id, home_team, away_team, commence_time, game_date
         FROM games
         WHERE sport = 'NHL'
           AND commence_time IS NOT NULL
           AND game_date >= %s
+          AND {listed_by_a_book()}
     """, (since,)).fetchall()
     out = {}
     # The stored start is the odds feed's, about ten minutes after the
