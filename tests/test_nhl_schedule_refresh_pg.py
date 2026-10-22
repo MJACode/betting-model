@@ -24,7 +24,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 import data.ingestors.nhl_schedule_refresh as nsr  # noqa: E402
 from data.db import DBConnection  # noqa: E402
 from tests._pg import can_scratch, env_dsn, scratch_cluster  # noqa: E402
-from tests.test_nhl_schedule_refresh import NOW, WEEK1  # noqa: E402
+from tests.test_nhl_schedule_refresh import BEFORE, NOW, TEN, WEEK1, _game, _week_from  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -70,7 +70,7 @@ def _get(pages):
     return lambda url: pages[url.rsplit("/", 1)[1]]
 
 
-ONE_WEEK = _get({"2026-10-22": dict(WEEK1, nextStartDate=None)})
+ONE_WEEK = _get({"2026-10-15": BEFORE, "2026-10-22": dict(WEEK1, nextStartDate=None)})
 
 
 def _refresh(conn, get=ONE_WEEK, now=NOW):
@@ -190,3 +190,51 @@ def test_the_readers_that_bet_or_buy_never_see_a_row_only_the_refresh_wrote(conn
     board = {g[0] for g in _game_board(conn, "2026-10-22", "2026-10-29", "2027-03-21", "2026-10-29")}
     assert board == {listed, "NBA_2026-10-22_BOS_NYK"}               # other sports' rows untouched
     assert _schedule_only_ids(conn, sorted(today)) == today - {listed}
+
+
+def test_a_book_listing_the_game_the_other_way_round_takes_it_over(conn):
+    """The refresh writes first, months ahead. If the odds feed then keys the
+    game with home and away swapped (a neutral site), the next run removes the
+    refresh's row and does not write it again: one game, one row, the book's,
+    exactly as before the refresh existed."""
+    from data.ingestors.odds_ingestor import _upsert_games
+    _refresh(conn)
+    assert _count(conn) == 27
+    feed_id = "NHL_2026-10-25_WPG_MTL"                  # the API's is NHL_2026-10-25_MTL_WPG
+    _upsert_games(conn, [{"game_id": feed_id, "sport": "NHL", "season": 2027,
+                          "game_date": "2026-10-25", "home_team": "MTL", "away_team": "WPG",
+                          "commence_time": "2026-10-25T23:10:00+00:00", "data_source": "live"}])
+    conn.commit()
+    assert _count(conn) == 28
+    before = _row(conn, feed_id, ("data_source", "commence_time", "home_team", "updated_at"))
+    t = _refresh(conn)
+    assert _count(conn) == 27 and _row(conn, "NHL_2026-10-25_MTL_WPG") is None
+    assert t["twins"] == 1 and nsr.step_ok(t)
+    assert _row(conn, feed_id, ("data_source", "commence_time", "home_team", "updated_at")) == before
+    t = _refresh(conn)                                     # and it stays that way
+    assert t["conflicts"] == 1 and t["insert"] == 0 and _count(conn) == 27
+
+
+def test_a_game_that_did_not_happen_is_gone_the_morning_after_and_nothing_else_is(conn):
+    """Ten of the refresh's rows on 10-21, games the API no longer lists that
+    day: removed by the 10-22 run, more than the cap. Left alone: a game the
+    API lists as played that the results step has not scored yet, a row
+    something references, the odds feed's own unplayed row, and a row older
+    than the days the run reads."""
+    for a, h in TEN:
+        _put(conn, f"NHL_2026-10-21_{a}_{h}", "nhl_schedule", "2026-10-21T23:00:00Z")
+    _put(conn, "NHL_2026-10-21_CBJ_PHI", "nhl_schedule", "2026-10-21T23:00:00Z")   # played
+    _put(conn, "NHL_2026-10-21_BOS_CAR", "nhl_schedule", "2026-10-21T23:30:00Z")   # referenced
+    _put(conn, "NHL_2026-10-21_STL_FLA", "live", "2026-10-21T23:10:00+00:00")      # the feed's
+    _put(conn, "NHL_2026-10-13_STL_FLA", "nhl_schedule", "2026-10-13T23:00:00Z")   # before the days read
+    conn.execute("INSERT INTO nhl_goalie_stats (game_id, team) VALUES ('NHL_2026-10-21_BOS_CAR', 'CAR')")
+    conn.commit()
+    played = _game("CBJ", "PHI", "2026-10-21T23:00:00Z", state="OFF")
+    t = _refresh(conn, get=_get({
+        "2026-10-15": _week_from("2026-10-15", {"2026-10-21": [played]}, nxt="2026-10-22"),
+        "2026-10-22": dict(WEEK1, nextStartDate=None)}))
+    assert nsr.step_ok(t) and t["orphans_held"] == 0
+    left = {r[0] for r in conn.execute(
+        "SELECT game_id FROM games WHERE game_date < '2026-10-22' AND home_score IS NULL").fetchall()}
+    assert left == {"NHL_2026-10-21_CBJ_PHI", "NHL_2026-10-21_BOS_CAR", "NHL_2026-10-21_STL_FLA",
+                    "NHL_2026-10-13_STL_FLA"}

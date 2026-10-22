@@ -643,8 +643,12 @@ def step_nhl_schedule(run_date: str) -> bool:
     (data/ingestors/nhl_schedule_refresh.py): every remaining scheduled game,
     keyed exactly as the odds feed keys it, so the feed's later upsert lands on
     the same row. Until this step a game reached `games` only when a book
-    listed it, about a day ahead. Only games that have not started; never a
-    score, never a row the odds feed has written. Fail-open: an API that does
+    listed it, about a day ahead. Inserts only games that have not started;
+    never a score, never a row the odds feed or the results step wrote. It
+    removes only its own rows a book has not listed: a twin of a book's row,
+    a game postponed or cancelled, a game whose start passed unlisted, or one
+    no longer listed (capped). Runs after `nhl-results`, so a game the league
+    played is scored before this step looks at it. Fail-open: an API that does
     not answer leaves `games` as it is; the step returns False so
     pipeline_runs names it, and the health check nhl_schedule_refresh goes
     STALE after 36 hours without a confirmed row.
@@ -1974,9 +1978,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 0b1: NHL schedule via the NHL API ───────────────────────────────
     # The rest of the season stored ahead (data/ingestors/nhl_schedule_refresh.
     # py). Before this a game reached `games` only once a book listed it, about
-    # a day out, so the schedule readers (rest at kickoff, the earlier-game
-    # rule) could see no further. The readers that bet or buy skip a row no
-    # book has listed yet.
+    # a day out. The readers that bet or buy skip a row no book has listed yet.
+    # After nhl-results (a played game is scored first) and before settle,
+    # nhl_stats and the health check, so a row for a game that did not happen
+    # is gone before the recap, the goalie rows and the missing-finals check.
     logger.info("Step 0b1: Refreshing the NHL schedule from the NHL API...")
     results["nhl_schedule"] = step_nhl_schedule(run_date)
     time.sleep(1)

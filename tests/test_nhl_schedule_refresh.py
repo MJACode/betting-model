@@ -104,6 +104,26 @@ def test_a_game_that_has_started_by_the_clock_is_not_kept():
 
 # ── the walk ─────────────────────────────────────────────────────────────────
 
+def _week_from(start: str, games_by_day: dict | None = None, nxt: str | None = None) -> dict:
+    """An API answer for the seven days from `start`, with the season's dates."""
+    d0 = date.fromisoformat(start)
+    days = [(d0 + timedelta(days=i)).isoformat() for i in range(7)]
+    games_by_day = games_by_day or {}
+    return {"gameWeek": [{"date": d, "games": games_by_day.get(d, [])} for d in days],
+            "nextStartDate": nxt, "regularSeasonEndDate": "2027-04-10",
+            "playoffEndDate": "2027-06-10"}
+
+
+def _game(away, home, start, state="FUT", sched="OK", gid=1):
+    return {"id": gid, "season": 20262027, "gameType": 2, "neutralSite": False,
+            "startTimeUTC": start, "gameState": state, "gameScheduleState": sched,
+            "awayTeam": {"abbrev": away}, "homeTeam": {"abbrev": home}}
+
+
+# The week before the 10-22 run: the run reads it again (nsr.LOOKBACK_DAYS).
+BEFORE = _week_from("2026-10-15", nxt="2026-10-22")
+
+
 def _api(pages: dict, fail_at: str | None = None):
     asked = []
 
@@ -212,11 +232,11 @@ def test_a_game_moved_to_another_date_leaves_its_old_row_as_an_orphan():
     assert "NHL_2026-10-24_ANA_PHI" in [r["game_id"] for r in p["insert"]]
 
 
-def test_an_orphan_is_only_ever_the_refreshs_own_future_row_inside_the_weeks_read():
+def test_an_orphan_is_only_ever_the_refreshs_own_row_inside_the_days_read():
     p = _plan([
         _stored("NHL_2026-10-27_ANA_PHI", "live", "2026-10-27T23:10:00+00:00"),   # the feed's
         _stored("NHL_2026-11-05_ANA_PHI", start="2026-11-05T23:00:00Z"),          # past the weeks read
-        _stored("NHL_2026-10-21_ANA_PHI", start="2026-10-21T23:00:00Z"),          # already started
+        _stored("NHL_2026-10-21_ANA_PHI", start="2026-10-21T23:00:00Z"),          # before the days read
         _stored("NHL_2026-10-26_ANA_PHI", start="2026-10-26T23:00:00Z", score=2),  # scored
     ])
     assert p["orphans"] == []
@@ -269,9 +289,14 @@ class _Conn:
         self.rolled_back += 1
 
 
-def _run(conn, pages=None, fail_at=None, **kw):
-    get, _ = _api(pages or {"2026-10-22": dict(WEEK1, nextStartDate=None)}, fail_at)
-    return nsr.refresh("2026-10-22", get_json=get, connect=lambda: conn, now=NOW, sleep=0, **kw)
+def _run(conn, pages=None, fail_at=None, run="2026-10-22", now=NOW, **kw):
+    get, _ = _api(pages or {"2026-10-15": BEFORE, "2026-10-22": dict(WEEK1, nextStartDate=None)},
+                  fail_at)
+    return nsr.refresh(run, get_json=get, connect=lambda: conn, now=now, sleep=0, **kw)
+
+
+def _deleted(conn) -> list[str]:
+    return [w[1][0] for w in conn.writes if w[0].startswith("DELETE")]
 
 
 def test_a_run_writes_its_plan_once():
@@ -304,7 +329,7 @@ def test_an_api_that_does_not_answer_writes_nothing():
 
 def test_a_week_that_fails_mid_walk_fails_the_step_but_writes_the_weeks_read():
     conn = _Conn()
-    t = _run(conn, pages={"2026-10-22": WEEK1}, fail_at="2026-10-29")
+    t = _run(conn, pages={"2026-10-15": BEFORE, "2026-10-22": WEEK1}, fail_at="2026-10-29")
     assert t["insert"] == 27 and conn.committed == 1 and not nsr.step_ok(t)
 
 
@@ -314,7 +339,7 @@ def test_an_empty_answer_over_stored_games_removes_nothing():
     for d in empty["gameWeek"]:
         d["games"] = []
     conn = _Conn([_stored("NHL_2026-10-27_ANA_PHI", start="2026-10-27T23:00:00Z")])
-    t = _run(conn, pages={"2026-10-22": empty})
+    t = _run(conn, pages={"2026-10-15": BEFORE, "2026-10-22": empty})
     assert t["orphans"] == 0 and not any(w[0].startswith("DELETE") for w in conn.writes)
     assert not nsr.step_ok(t)
 
@@ -328,6 +353,122 @@ def test_more_vanished_rows_than_postponements_explain_are_kept_and_fail_the_ste
     assert t["orphans_held"] == len(gone) and t["orphans"] == 0
     assert not any(w[0].startswith("DELETE") for w in conn.writes)
     assert not nsr.step_ok(t)
+
+
+# Ten games of one date, twenty teams, none of them on 10-27 in the fixture.
+TEN = [("BUF", "TOR"), ("MTL", "OTT"), ("NYR", "NJD"), ("PIT", "WSH"), ("CHI", "DET"),
+       ("COL", "DAL"), ("EDM", "CGY"), ("VAN", "SEA"), ("LAK", "ANA"), ("VGK", "SJS")]
+
+
+def test_the_run_reads_the_week_before_its_date_again():
+    """A game called off after one run is in the past by the next. Only by
+    reading its date again can the run see the game is not there."""
+    get, asked = _api({"2026-10-15": BEFORE, "2026-10-22": dict(WEEK1, nextStartDate=None)})
+    t = nsr.refresh("2026-10-22", get_json=get, connect=lambda: _Conn(), now=NOW, sleep=0)
+    assert [u.rsplit("/", 1)[1] for u in asked] == ["2026-10-15", "2026-10-22"]
+    assert nsr.step_ok(t) and t["insert"] == 27
+
+
+def test_rows_for_games_that_did_not_happen_are_removed_the_morning_after_however_many():
+    """Ten rows only the refresh wrote, for games the NHL API does not list on
+    their date, whose start has passed: they did not happen. Left in place
+    they hold both teams' side models (the last-night check reads every row
+    of the two days before a game), turn the missing-finals check critical
+    and hold the results recaps. The cap is for rows still ahead."""
+    gone = [_stored(f"NHL_2026-10-21_{a}_{h}", start="2026-10-21T23:00:00Z") for a, h in TEN]
+    assert len(gone) > nsr.MAX_ORPHAN_DELETES
+    conn = _Conn(gone)
+    t = _run(conn)
+    assert sorted(_deleted(conn)) == sorted(s["game_id"] for s in gone)
+    assert t["orphans_held"] == 0 and nsr.step_ok(t)
+
+
+def test_rows_the_cap_held_are_removed_once_their_games_would_have_started():
+    """The reviewers' case: a batch of the refresh's rows vanishes with no
+    reason given, more than the cap. The run that sees it holds them and
+    fails. The first run after their start removes them and passes."""
+    gone = [_stored(f"NHL_2026-10-23_{a}_{h}", start="2026-10-23T23:00:00Z") for a, h in TEN]
+    conn = _Conn(gone)
+    t = _run(conn)
+    assert t["orphans_held"] == len(gone) and _deleted(conn) == [] and not nsr.step_ok(t)
+
+    later = datetime(2026, 10, 24, 10, 5, tzinfo=timezone.utc)
+    played = _game("CBJ", "PHI", "2026-10-23T23:00:00Z", state="OFF")
+    ahead = _game("BOS", "CAR", "2026-10-25T23:00:00Z")
+    conn = _Conn(gone)
+    t = _run(conn, run="2026-10-24", now=later, pages={
+        "2026-10-17": _week_from("2026-10-17", {"2026-10-23": [played]}, nxt="2026-10-24"),
+        "2026-10-24": _week_from("2026-10-24", {"2026-10-25": [ahead]})})
+    assert sorted(_deleted(conn)) == sorted(s["game_id"] for s in gone)
+    assert t["orphans_held"] == 0 and nsr.step_ok(t)
+
+
+def test_games_the_api_marks_postponed_are_removed_whatever_their_number():
+    """The NHL API saying a game is postponed is a reason, not a broken
+    answer: the cap does not hold those rows."""
+    week = json.loads(json.dumps(WEEK1))
+    week["nextStartDate"] = None
+    day = next(d for d in week["gameWeek"] if d["date"] == "2026-10-27")
+    day["games"] += [_game(a, h, "2026-10-27T23:30:00Z", sched="PPD", gid=100 + i)
+                     for i, (a, h) in enumerate(TEN)]
+    gone = [_stored(f"NHL_2026-10-27_{a}_{h}", start="2026-10-27T23:30:00Z") for a, h in TEN]
+    conn = _Conn(gone)
+    t = _run(conn, pages={"2026-10-15": BEFORE, "2026-10-22": week})
+    assert t["skipped"]["state_ppd"] == len(TEN)
+    assert sorted(_deleted(conn)) == sorted(s["game_id"] for s in gone)
+    assert t["orphans_held"] == 0 and nsr.step_ok(t)
+
+
+def test_an_answer_that_lists_only_postponed_games_is_not_taken_for_a_broken_one():
+    """A league-wide pause: every game the API lists is postponed. That is an
+    answer with games in it, so the refresh's rows for them go."""
+    week = _week_from("2026-10-22", {"2026-10-24": [
+        _game(a, h, "2026-10-24T23:00:00Z", sched="PPD", gid=200 + i) for i, (a, h) in enumerate(TEN)]})
+    gone = [_stored(f"NHL_2026-10-24_{a}_{h}", start="2026-10-24T23:00:00Z") for a, h in TEN]
+    conn = _Conn(gone)
+    t = _run(conn, pages={"2026-10-15": BEFORE, "2026-10-22": week})
+    assert sorted(_deleted(conn)) == sorted(s["game_id"] for s in gone)
+    assert nsr.step_ok(t)
+
+
+def test_a_past_row_the_api_lists_as_played_is_left_for_the_results_step():
+    """A game no book listed but the league played: the API lists it, so its
+    row stays for the results step to score. Never called gone, never named
+    as unlisted near puck drop."""
+    played = _game("CBJ", "PHI", "2026-10-21T23:00:00Z", state="OFF")
+    conn = _Conn([_stored("NHL_2026-10-21_CBJ_PHI", start="2026-10-21T23:00:00Z")])
+    t = _run(conn, pages={
+        "2026-10-15": _week_from("2026-10-15", {"2026-10-21": [played]}, nxt="2026-10-22"),
+        "2026-10-22": dict(WEEK1, nextStartDate=None)})
+    assert _deleted(conn) == [] and t["orphans"] == 0 and t["unlisted_soon"] == 0
+    assert nsr.step_ok(t)
+
+
+def test_an_own_row_a_book_has_since_listed_the_other_way_round_is_removed():
+    """The refresh now writes first, months ahead. If the odds feed then keys
+    a game with home and away the other way round (a neutral site), the game
+    has two rows, and the side models' inputs read both: a team's rest and
+    travel would come out by row order. The book's row is the game; the
+    refresh's own goes, and is not written again."""
+    conn = _Conn([_stored("NHL_2026-10-25_MTL_WPG", start="2026-10-25T23:00:00Z"),
+                  _stored("NHL_2026-10-25_WPG_MTL", "live", "2026-10-25T23:10:00+00:00")])
+    t = _run(conn)
+    assert _deleted(conn) == ["NHL_2026-10-25_MTL_WPG"]
+    assert t["twins"] == 1 and t["confirm"] == 0 and nsr.step_ok(t)
+    inserted = [r[0] for w in conn.writes if w[0].startswith("INSERT INTO games") for r in w[1]]
+    assert "NHL_2026-10-25_MTL_WPG" not in inserted
+
+
+def test_a_game_listed_under_another_day_than_its_eastern_start_is_keyed_on_the_start():
+    """Never seen (0 of 4,136 games, three seasons), but the odds feed dates a
+    game by the Eastern date of its start, so that is the key."""
+    week = json.loads(json.dumps(WEEK1))
+    g = week["gameWeek"][1]["games"][0]                     # MTL @ CHI, listed on 10-23
+    week["gameWeek"][1]["games"][0] = dict(g, startTimeUTC="2026-10-22T23:45:00Z")
+    counts: dict = {}
+    rows, _ = _rows(week, counts=counts)
+    assert "NHL_2026-10-22_MTL_CHI" in rows and "NHL_2026-10-23_MTL_CHI" not in rows
+    assert counts["date_disagrees"] == 1
 
 
 def test_a_dry_run_writes_nothing():
