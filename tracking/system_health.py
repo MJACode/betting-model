@@ -90,6 +90,14 @@ SKIP_BUDGET_DAYS: dict = {
     # The same offseason, read through a 45-day look ahead: dark from mid-June
     # until next season's games reach `games`, well inside 165.
     "nba_schedule_refresh": 165,
+    # NHL: shut while no game is held only by the schedule refresh, which is
+    # from the last playoff game no book has listed yet to the day the NHL API
+    # lists the next season (the walk follows its nextStartDate across the
+    # summer; asked on 2026-10-22 for the week of 2026-07-10 it points at the
+    # 09-18 preseason, but when it first listed 2026-27 is not recorded). The
+    # 2025-26 final was 2026-06-14 and 2026-27 opened 09-29 (`games`), 107
+    # days: the worst case, an API that listed nothing before opening night.
+    "nhl_schedule_refresh": 120,
     # WNBA: mid-September to early May is ~230 days off. The 2026 season also
     # carries a FIBA World Cup break (Sept 4-13, resuming Sept 17), which is
     # well inside this budget and correctly stays quiet.
@@ -618,6 +626,40 @@ def check_nba_schedule_refresh(conn, r: "HealthReport", run_date: str) -> None:
     r.ts_check(conn, "nba_schedule_refresh", "WARN", "nba_schedule", "updated_at",
                NBA_SCHEDULE_MAX_AGE_HOURS, gate_ok=soon > 0,
                gate_note=f"no NBA games scheduled {lo}..{hi}")
+
+
+# ── Is the NHL schedule being kept current? ──────────────────────────────────
+# Until 2026-10-22 an NHL game reached `games` only when a book listed it,
+# about a day ahead. The daily `nhl-schedule` step (data/ingestors/
+# nhl_schedule_refresh.py) now stores the rest of the season and stamps
+# updated_at on every row it wrote that the NHL API still lists, so the newest
+# updated_at among those rows IS the last refresh that reached the API. A row
+# leaves that set the moment the odds feed lists the game (data_source becomes
+# 'live') or the game is scored. 36 hours: one day's 6am run and slack for a
+# late one, as nba_schedule_refresh. The gate is "some unplayed game ahead is
+# held only by the refresh": while the season has weeks to run that is always
+# true, and a refresh that has stopped leaves those rows behind it.
+NHL_SCHEDULE_MAX_AGE_HOURS = 36
+
+
+def check_nhl_schedule_refresh(conn, r: "HealthReport", run_date: str) -> None:
+    """Add the nhl_schedule_refresh row (WARN): has the refresh confirmed its
+    own rows while games it stored are still ahead?"""
+    from data.ingestors.nhl_schedule_refresh import DATA_SOURCE
+    own = (f"(SELECT updated_at FROM games WHERE sport = 'NHL' "
+           f"AND data_source = '{DATA_SOURCE}' AND home_score IS NULL) nhl_schedule_rows")
+    try:
+        ahead = _scalar(conn, f"SELECT COUNT(*) FROM games WHERE sport = 'NHL' "
+                              f"AND data_source = ? AND home_score IS NULL AND game_date >= ?",
+                        (DATA_SOURCE, run_date)) or 0
+    except Exception as exc:                                  # noqa: BLE001
+        getattr(conn, "rollback", lambda: None)()
+        r.add("nhl_schedule_refresh", ERROR, "WARN", f"query failed: {exc}",
+              reason=REASON_QUERY_ERROR)
+        return
+    r.ts_check(conn, "nhl_schedule_refresh", "WARN", own, "updated_at",
+               NHL_SCHEDULE_MAX_AGE_HOURS, gate_ok=ahead > 0,
+               gate_note=f"no NHL game from {run_date} on is held only by the schedule refresh")
 
 
 def check_pregame_prices_current(conn, r: "HealthReport",
@@ -1431,6 +1473,9 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # ── NBA schedule: confirmed by its daily ESPN refresh ────────────────
         check_nba_schedule_refresh(conn, r, run_date)
+
+        # ── NHL schedule: confirmed by its daily NHL API refresh ─────────────
+        check_nhl_schedule_refresh(conn, r, run_date)
 
         # ── ESPN reachability probe (diagnostic, not an impact check) ────────
         # WNBA finals come from site.api.espn.com, which stopped serving the

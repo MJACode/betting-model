@@ -637,6 +637,36 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
+def step_nhl_schedule(run_date: str) -> bool:
+    """
+    The NHL season stored ahead in `games`, from the NHL's own API
+    (data/ingestors/nhl_schedule_refresh.py): every remaining scheduled game,
+    keyed exactly as the odds feed keys it, so the feed's later upsert lands on
+    the same row. Until this step a game reached `games` only when a book
+    listed it, about a day ahead. Inserts only games that have not started;
+    never a score, never a row the odds feed or the results step wrote. It
+    removes only its own rows a book has not listed: a twin of a book's row,
+    a game postponed or cancelled, a game whose start passed unlisted, or one
+    no longer listed (capped). Runs after `nhl-results`, so a game the league
+    played is scored before this step looks at it. Fail-open: an API that does
+    not answer leaves `games` as it is; the step returns False so
+    pipeline_runs names it, and the health check nhl_schedule_refresh goes
+    STALE after 36 hours without a confirmed row.
+    """
+    try:
+        from data.ingestors.nhl_schedule_refresh import refresh, step_ok
+        t = refresh(run_date)
+        summary = {k: v for k, v in t.items() if k != "plan"}
+        if not step_ok(t):
+            logger.error(f"✗ NHL schedule (NHL API): {summary}")
+            return False
+        logger.success(f"✓ NHL schedule (NHL API): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL schedule failed: {exc}")
+        return False
+
+
 def step_weather(run_date: str, max_age_min: int | None = None,
                  ahead_days: int | None = None) -> bool:
     """Fetch and store weather for run_date AND the look-ahead window, from
@@ -1945,6 +1975,17 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nhl_results"] = step_nhl_results(run_date)
     time.sleep(1)
 
+    # ── Step 0b1: NHL schedule via the NHL API ───────────────────────────────
+    # The rest of the season stored ahead (data/ingestors/nhl_schedule_refresh.
+    # py). Before this a game reached `games` only once a book listed it, about
+    # a day out. The readers that bet or buy skip a row no book has listed yet.
+    # After nhl-results (a played game is scored first) and before settle,
+    # nhl_stats and the health check, so a row for a game that did not happen
+    # is gone before the recap, the goalie rows and the missing-finals check.
+    logger.info("Step 0b1: Refreshing the NHL schedule from the NHL API...")
+    results["nhl_schedule"] = step_nhl_schedule(run_date)
+    time.sleep(1)
+
     # ── Step 0c: Golf results (must precede settlement) ─────────────────────
     logger.info("Step 0c: Ingesting completed golf results from DataGolf...")
     results["golf_results"] = step_golf_results(run_date)
@@ -2444,7 +2485,7 @@ Examples:
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nba-results", "nba-schedule", "nfl-results",
+                                 "nhl-results", "nhl-schedule", "wnba-results", "nba-results", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
@@ -2536,6 +2577,7 @@ Examples:
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
+            "nhl-schedule": lambda: step_nhl_schedule(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
             "nba-results":  lambda: step_nba_results(run_date),
             "nba-schedule": lambda: step_nba_schedule(run_date),

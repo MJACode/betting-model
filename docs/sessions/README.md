@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-22 | [2026-10](./2026-10.md) | 2026-10-22, NHL schedule refresh review round: a row for a game that did not happen is removed the morning after (each run rereads the week before), a postponed game's row is removed whatever the number, and the refresh's row gives way to a book's row of the same two teams that day; corrected the lead-time, NHL-input and app claims |
+| 2026-10-22 | [2026-10](./2026-10.md) | 2026-10-22, the NHL season stored ahead in `games` from the NHL API (daily `nhl-schedule` step, odds-feed ids matched on every scored game of two seasons and 167 of 167 this season); the readers that bet or buy skip a row no book has listed; health check `nhl_schedule_refresh` |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, repo cleanup: 180 dead branches deleted, 11 stale drafts closed; #785 and #808 UX-reviewed, fixed and merged (Under picks keep their betslip card and are labelled with their side); NHL shot-events opened as #1036, rest-candidate superseded; CIN @ BAL opener pick confirmed against FanDuel; the five full-suite failures all pre-exist on 897c5763 |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM mobile data: master 0aee0c5c merged; base is master; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; no migration file; unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM mobile data layer: types, fetchers, and hooks only; tsc message set matches origin/master d135a5ab; no screen, sign-in left off |

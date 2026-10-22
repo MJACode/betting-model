@@ -185,6 +185,17 @@ def _events(today_et: str) -> tuple[list[dict], int]:
     return out, cost
 
 
+def _schedule_only_ids(conn: DBConnection, game_ids: list[str]) -> set[str]:
+    """Which of `game_ids` are rows only the NHL schedule refresh has written
+    (data/ingestors/nhl_schedule_refresh.py): no book has listed the game."""
+    if not game_ids:
+        return set()
+    from data.ingestors.nhl_schedule_refresh import DATA_SOURCE
+    return {r[0] for r in conn.execute(
+        "SELECT game_id FROM games WHERE game_id = ANY(%s) AND data_source = %s",
+        (list(game_ids), DATA_SOURCE)).fetchall()}
+
+
 def _stored_snapshots(conn: DBConnection, game_ids: list[str]) -> tuple[dict[str, list[datetime]], set[str]]:
     """Open-series snapshot times already held, per game, and the games whose
     final is held. Asked BY GAME ID: the table is indexed on it and is far too
@@ -276,6 +287,11 @@ def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = Fals
             ev["game_id"] = _build_game_id("NHL", today_et, _normalize_team(ev["away"], "NHL"),
                                            _normalize_team(ev["home"], "NHL"))
         known = _existing_game_ids(conn, [e["game_id"] for e in events])
+        # A row only the schedule refresh has written is a game no book lists
+        # game lines for yet. Before that refresh such a game had no row and
+        # was skipped here, so it still is: the refresh buys nothing.
+        schedule_only = _schedule_only_ids(conn, sorted(known))
+        known -= schedule_only
         stored, finals = _stored_snapshots(conn, sorted(known))
         # When each game's goalie matchup became known: a game confirmed
         # after its newest open snapshot owes one more (due()).
@@ -285,8 +301,12 @@ def run_nhl_prop_odds_ingestor(now: datetime | None = None, dry_run: bool = Fals
         for ev in events:
             gid = ev["game_id"]
             if gid not in known:
-                # No `games` row: the prices cannot be stored (FK), so do not buy them.
-                logger.warning(f"NHL prop odds: {gid} has no games row ({ev['away']} @ {ev['home']})")
+                if gid in schedule_only:
+                    logger.warning(f"NHL prop odds: {gid} is on the NHL schedule but no book lists "
+                                   f"its game lines yet ({ev['away']} @ {ev['home']}); not bought")
+                else:
+                    # No `games` row: the prices cannot be stored (FK), so do not buy them.
+                    logger.warning(f"NHL prop odds: {gid} has no games row ({ev['away']} @ {ev['home']})")
                 out["unknown_games"] += 1
                 continue
             which = due(ev["start"], now, stored.get(gid, []), final_taken=gid in finals,
