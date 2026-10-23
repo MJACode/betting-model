@@ -27,8 +27,8 @@ _BANNED_KEYS = (
     "lock_window_hours", "near_window_hours", "lock_spread_at",
     "close_spread_home", "near_spread_home", "line_source",
     "grade_spread_home_price", "grade_spread_home_book",
-    "dk_spread_home_price", "ats_home_units_uncapped",
-    "ats_home_units_capped", "ml_home_units_uncapped",
+    "ats_home_units_uncapped", "ats_home_units_capped",
+    "ml_home_units_uncapped",
 )
 
 
@@ -233,10 +233,9 @@ def test_quotes_are_read_per_game_and_the_odds_cast_is_inside_a_case():
     text = (ROOT / "byom" / "load.py").read_text(encoding="utf-8")
     assert "game_id IN (%s, %s)" in text
     assert "bookmaker = 'draftkings'" in text
-    assert "market IN ('spreads', 'totals')" in text
-    assert "'h2h'" not in text
+    assert "('h2h', 'spreads', 'totals')" in text
     assert "make_interval" not in text
-    assert "price_home" not in text
+    assert "price_home" in text
     assert "_shop_quotes" not in text
     assert "bookmaker <> 'draftkings'" not in text
     assert "FROM nfl_odds_history\n WHERE season = %s" not in text
@@ -314,12 +313,17 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
               odds_id bigserial PRIMARY KEY, game_id text, sport text,
               market text, bookmaker text, snapshot_type text, snapshot_at text,
               home_price numeric, away_price numeric, spread_home numeric,
-              total_line numeric, over_price numeric, under_price numeric);
+              total_line numeric, over_price numeric, under_price numeric,
+              created_at text);
         """)
         text = (ROOT / "data/migrations" / "byom_facts_schema_2026_10_16.sql").read_text(
             encoding="utf-8")
         cur.execute(text)
         cur.execute(text)
+        price = (ROOT / "data/migrations" / "byom_dk_start_price_2026_10_23.sql").read_text(
+            encoding="utf-8")
+        cur.execute(price)
+        cur.execute(price)
         _load_fixture(cur)
         raw.autocommit = False
         from byom.load import build_season
@@ -374,6 +378,20 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
         assert row[7] == "loss"
         assert row[8] == "favorite"
         assert row[9] is True
+        cur.execute("""
+            SELECT dk_spread_home_price, dk_spread_away_price,
+                   dk_total_over_price, dk_total_under_price,
+                   dk_ml_home_price, dk_ml_away_price
+              FROM byom_game_facts
+             WHERE canonical_key = '2024_01_BAL_KC'
+        """)
+        px = [None if value is None else Decimal(str(value))
+              for value in cur.fetchone()]
+        assert px == [
+            Decimal("-112"), Decimal("-108"),
+            Decimal("-110"), Decimal("-110"),
+            Decimal("-150"), Decimal("130"),
+        ]
         cur.execute("""
             SELECT dk_spread_home, ats_home_result, ml_home_result, line_basis
               FROM byom_game_facts WHERE canonical_key = '2024_03_NYJ_SF'

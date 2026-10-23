@@ -1,8 +1,10 @@
-"""Pure grading for one NFL game's Build Your Own Model fact.
+"""Pure grading for one game's Build Your Own Model fact.
 
 No database. The line is the last DraftKings snapshot at or before
 game start. A missing line does not skip the game. Moneyline is the
-score only. There is no price and no unit.
+score only. Each side's price is the last DraftKings quote for that
+side at or before game start. Another book is never the price. A
+missing price does not skip the game. Units are not stored here.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from byom.constants import DK_HISTORY_START_SEASON, LINE_BASIS
 
 _KEY = re.compile(r"^(?:NFL_)?(\d{4})_(\d{2})_([A-Z]{2,3})_([A-Z]{2,3})$")
 _ET = ZoneInfo("America/New_York")
+_NO_CAPTURE = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def parse_ts(value):
@@ -85,19 +88,80 @@ def _pre_start(quotes, market: str) -> list[dict]:
     return out
 
 
-def line_at_start(quotes) -> dict | None:
-    """Latest snapshot at or before game start.
+def _line_text(quote) -> str:
+    """One text for the point. The last tie-break, so arrival order
+    cannot choose between two lines."""
+    point = quote.get("point")
+    if point is None or point == "":
+        return ""
+    text = format(Decimal(str(point)), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
 
-    In-play (negative lead) is not the line. There is no hour window:
-    an older pre-start snapshot is the line when it is the latest one.
+
+def _quote_id(quote) -> int:
+    """Higher id wins a tie. A missing id loses to a real one."""
+    raw = quote.get("quote_id")
+    if raw is None or raw == "":
+        raw = quote.get("odds_id")
+    try:
+        return int(raw) if raw is not None and raw != "" else -1
+    except (TypeError, ValueError):
+        return -1
+
+
+def _rank(quote) -> tuple:
+    """Latest snapshot, then latest created_at, then the higher id,
+    then the line text.
+
+    A missing created_at loses to one that parsed. Same rule as the
+    prop capture rank, on the game-line quote.
+    """
+    created = parse_ts(quote.get("created_at")) or _NO_CAPTURE
+    return (quote["snapshot_at"], created, _quote_id(quote), _line_text(quote))
+
+
+def _choose(quotes, field: str | None) -> dict | None:
+    """Last DraftKings quote at or before game start.
+
+    `field` None considers every pre-start quote. A field name considers
+    only quotes that carry that side's price. In-play (negative lead)
+    is not a candidate. There is no hour window.
     """
     chosen = None
     for quote in quotes:
         if quote["lead_hours"] < 0:
             continue
-        if chosen is None or quote["snapshot_at"] > chosen["snapshot_at"]:
+        if field is not None and (quote.get(field) is None or quote.get(field) == ""):
+            continue
+        if chosen is None or _rank(quote) > _rank(chosen):
             chosen = quote
     return chosen
+
+
+def line_at_start(quotes) -> dict | None:
+    """Latest snapshot at or before game start.
+
+    In-play (negative lead) is not the line. There is no hour window:
+    an older pre-start snapshot is the line when it is the latest one.
+    A tie on snapshot_at breaks on created_at, then the higher id, then
+    the line text.
+    """
+    return _choose(quotes, None)
+
+
+def price_at_start(quotes, field: str):
+    """The price on the last pre-start DraftKings quote that has it.
+
+    `field` is price_home or price_away. For a total, those are the over
+    and the under. A missing price is None. Another book's quote is not
+    in `quotes`.
+    """
+    chosen = _choose(quotes, field)
+    if chosen is None:
+        return None
+    return chosen.get(field)
 
 
 def is_primetime(commence) -> bool | None:
@@ -188,23 +252,81 @@ def _side(pair, index: int):
     return pair[index]
 
 
+def _week(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _identity(game: dict) -> dict | None:
+    """Who this row is, or None when the game is not built.
+
+    An NFL id is season, week, away, home. A season in that id before
+    DraftKings history is not built. Any other sport uses the game id
+    as the key and the week stored on the game, which may be null.
+    """
+    parsed = parse_game_id(game.get("game_id") or "")
+    if parsed is not None:
+        key, season, week, away, home = parsed
+        if season < DK_HISTORY_START_SEASON:
+            return None
+        return {
+            "canonical_key": key,
+            "sport": "NFL",
+            "season": season,
+            "week": week,
+            "away_team": away,
+            "home_team": home,
+        }
+    sport = game.get("sport")
+    season = game.get("season")
+    away = game.get("away_team")
+    home = game.get("home_team")
+    game_id = game.get("game_id")
+    if (not sport or sport == "NFL" or season is None or not away or not home
+            or not game_id):
+        return None
+    try:
+        season_n = int(season)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "canonical_key": str(game_id),
+        "sport": str(sport),
+        "season": season_n,
+        "week": _week(game.get("week")),
+        "away_team": str(away),
+        "home_team": str(home),
+    }
+
+
 def assemble_game(game: dict, quotes: list[dict],
                   played: dict[str, list[date]]) -> dict | None:
     """One facts dict, or None when this game is not built.
 
-    Not built: the id does not parse, or the season in the id is before
-    DraftKings history. A missing line is not a reason to skip. A large
-    spread is not a reason to skip. Moneyline uses the score only.
+    Not built: an NFL id does not parse, or the season in that id is
+    before DraftKings history, or a non-NFL game has no sport, season,
+    or teams. A missing line is not a reason to skip. A missing price
+    is not a reason to skip. A large spread is not a reason to skip.
+    Moneyline uses the score only.
     """
-    parsed = parse_game_id(game.get("game_id") or "")
-    if parsed is None:
+    ident = _identity(game)
+    if ident is None:
         return None
-    key, season, week, away, home = parsed
-    if season < DK_HISTORY_START_SEASON:
-        return None
+    key = ident["canonical_key"]
+    season = ident["season"]
+    week = ident["week"]
+    away = ident["away_team"]
+    home = ident["home_team"]
 
-    spread = line_at_start(_pre_start(quotes, "spreads"))
-    total = line_at_start(_pre_start(quotes, "totals"))
+    spreads = _pre_start(quotes, "spreads")
+    totals = _pre_start(quotes, "totals")
+    moneylines = _pre_start(quotes, "h2h")
+    spread = line_at_start(spreads)
+    total = line_at_start(totals)
     dk_spread = None if spread is None else spread.get("point")
     dk_total = None if total is None else total.get("point")
 
@@ -224,7 +346,7 @@ def assemble_game(game: dict, quotes: list[dict],
 
     return {
         "canonical_key": key,
-        "sport": "NFL",
+        "sport": ident["sport"],
         "season": season,
         "week": week,
         "away_team": away,
@@ -236,6 +358,12 @@ def assemble_game(game: dict, quotes: list[dict],
         "line_basis": LINE_BASIS,
         "dk_spread_home": _num(dk_spread),
         "dk_total": _num(dk_total),
+        "dk_ml_home_price": _num(price_at_start(moneylines, "price_home")),
+        "dk_ml_away_price": _num(price_at_start(moneylines, "price_away")),
+        "dk_spread_home_price": _num(price_at_start(spreads, "price_home")),
+        "dk_spread_away_price": _num(price_at_start(spreads, "price_away")),
+        "dk_total_over_price": _num(price_at_start(totals, "price_home")),
+        "dk_total_under_price": _num(price_at_start(totals, "price_away")),
         "ats_home_result": _side(ats, 0),
         "ats_away_result": _side(ats, 1),
         "ml_home_result": _side(ml, 0),
