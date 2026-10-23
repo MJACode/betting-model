@@ -2,15 +2,17 @@
 
 No database. The line is the last DraftKings snapshot at or before
 game start. A missing line does not skip the game. Moneyline is the
-score only. Each side's price is the last DraftKings quote for that
-side at or before game start. Another book is never the price. A
-missing price does not skip the game. Units are not stored here.
+score only. A spread price and a total price come from that same
+quote. A moneyline price is the last pre-start quote that has that
+side. Another book is never the price. A missing price, or a price
+that is not American, does not skip the game. Units are not stored
+here.
 """
 from __future__ import annotations
 
 import re
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from byom.constants import DK_HISTORY_START_SEASON, LINE_BASIS
@@ -151,25 +153,64 @@ def line_at_start(quotes) -> dict | None:
     return _choose(quotes, None)
 
 
-def price_at_start(quotes, field: str):
-    """The price on the last pre-start DraftKings quote that has it.
+def american_odds(value):
+    """A DraftKings American price, or None.
 
-    `field` is price_home or price_away. For a total, those are the over
-    and the under. A missing price is None. Another book's quote is not
-    in `quotes`.
+    A stored price is a whole number whose absolute value is at least
+    100. 100 and -100 are even money. A decimal price such as 1.91, and
+    any price whose absolute value is under 100, is None, so the leg is
+    skipped. A missing price is None.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if not number.is_finite():
+        return None
+    if number != number.to_integral_value():
+        return None
+    if abs(number) < 100:
+        return None
+    return number
+
+
+def price_on_quote(quote, field: str):
+    """The American price on this quote, or None.
+
+    The spread and the total grade on one quote, the one `line_at_start`
+    chose. A missing price on that quote is None. An older quote is not
+    read, and a price that is not American is None.
+    """
+    if quote is None:
+        return None
+    return american_odds(quote.get(field))
+
+
+def price_at_start(quotes, field: str):
+    """American price on the last pre-start quote that carries this side.
+
+    Moneyline only. The spread and the total use `price_on_quote` on the
+    quote `line_at_start` chose. `field` is price_home or price_away. A
+    missing price is None. A price that is not American is None, with no
+    fallback to an older quote. Another book's quote is not in `quotes`.
     """
     chosen = _choose(quotes, field)
     if chosen is None:
         return None
-    return chosen.get(field)
+    return american_odds(chosen.get(field))
 
 
-def is_primetime(commence) -> bool | None:
-    """Thursday and Monday kickoffs, and any kickoff at 7pm ET or later.
+def is_primetime(commence, sport: str = "NFL") -> bool | None:
+    """NFL Thursday and Monday kickoffs, and any NFL kickoff at 7pm ET or later.
 
-    A Sunday 1pm or 4pm ET kickoff is not primetime. Missing commence is
-    None, not a guess.
+    A Sunday 1pm or 4pm ET kickoff is not primetime. Any other sport is
+    None. That NFL rule would mark nearly every NBA or NHL game, and
+    those sports do not use it. Missing commence is None, not a guess.
     """
+    if sport != "NFL":
+        return None
     kick = parse_ts(commence)
     if kick is None:
         return None
@@ -358,12 +399,12 @@ def assemble_game(game: dict, quotes: list[dict],
         "line_basis": LINE_BASIS,
         "dk_spread_home": _num(dk_spread),
         "dk_total": _num(dk_total),
-        "dk_ml_home_price": _num(price_at_start(moneylines, "price_home")),
-        "dk_ml_away_price": _num(price_at_start(moneylines, "price_away")),
-        "dk_spread_home_price": _num(price_at_start(spreads, "price_home")),
-        "dk_spread_away_price": _num(price_at_start(spreads, "price_away")),
-        "dk_total_over_price": _num(price_at_start(totals, "price_home")),
-        "dk_total_under_price": _num(price_at_start(totals, "price_away")),
+        "dk_ml_home_price": price_at_start(moneylines, "price_home"),
+        "dk_ml_away_price": price_at_start(moneylines, "price_away"),
+        "dk_spread_home_price": price_on_quote(spread, "price_home"),
+        "dk_spread_away_price": price_on_quote(spread, "price_away"),
+        "dk_total_over_price": price_on_quote(total, "price_home"),
+        "dk_total_under_price": price_on_quote(total, "price_away"),
         "ats_home_result": _side(ats, 0),
         "ats_away_result": _side(ats, 1),
         "ml_home_result": _side(ml, 0),
@@ -372,7 +413,7 @@ def assemble_game(game: dict, quotes: list[dict],
         "ou_under_result": _side(ou, 1),
         "home_rest_days": rest_days(home, game_day, played),
         "away_rest_days": rest_days(away, game_day, played),
-        "is_primetime": is_primetime(commence),
+        "is_primetime": is_primetime(commence, ident["sport"]),
         "home_role": home_role,
         "away_role": away_role,
     }

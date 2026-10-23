@@ -21,17 +21,23 @@ snapshot at or before kickoff. That label is stored on the row and is
 what a screen shows. The line is not a filter and not a reason to skip
 a game. A moneyline result is the score only. Pushes and ties are stored.
 
-Each side also stores the DraftKings price on that same rule: the last
-DraftKings quote at or before commence for that market and side. A tie
-on the snapshot breaks on `created_at`, then the higher id, then the
-line text. Another book is never the price. A missing price is null.
-The columns are `dk_ml_home_price`, `dk_ml_away_price`,
+The spread price and the total price come from the same DraftKings
+quote that supplied that line. If that quote has no price for a side,
+the side is null. An older priced quote is not used. A moneyline has
+no point, so each side is the last pre-start DraftKings quote that has
+that side's price. A tie on the snapshot breaks on `created_at`, then
+the higher id, then the line text. Another book is never the price. A
+stored price is American: a whole number with absolute value at least
+100. A decimal such as 1.91, or any absolute value under 100, is stored
+null. The columns are `dk_ml_home_price`, `dk_ml_away_price`,
 `dk_spread_home_price`, `dk_spread_away_price`, `dk_total_over_price`,
 and `dk_total_under_price`. They are added by
 `data/migrations/byom_dk_start_price_2026_10_23.sql`, which is **not**
-in `ACTIVE_MIGRATIONS`. The worker will not apply it. Matt applies it
-by hand. `week` may be null after that file: NFL week still comes from
-the id, and the other sports have no week.
+in `ACTIVE_MIGRATIONS`. The worker will not apply it. Matt applies that
+file and then runs the backfill, in that order, in one window. `week`
+may be null after that file: NFL week still comes from the id, and the
+other sports have no week. `is_primetime` is the NFL rule only
+(Thursday, Monday, or 7pm ET or later). Any other sport stores null.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
@@ -45,17 +51,22 @@ NFL seasons before `DK_HISTORY_START_SEASON` (2020) are refused. Other
 sports are not. For each game it takes the latest DraftKings spread and
 the latest DraftKings total whose snapshot is at or before game start.
 NFL reads `nfl_odds_history` and `odds` together. Every sport reads
-`odds`. The same quote supplies the side's price when that quote has
-one; a side whose latest pre-start DraftKings quote has no price stays
-null. `line_basis` is `DraftKings line at game start` on every built
+`odds`, matched on `games.game_id`. Measured 2026-10-23 on two NFL
+games in each season 2020–2026: DraftKings h2h, spread, and total rows
+were on that id, and the bare key had zero. `nfl_odds_history` still
+matches the bare key and the `NFL_` key. The spread and the total take
+their prices from the quote that supplied the line. A moneyline side
+uses the last pre-start quote that has that side. A price that is not
+American is stored null. `line_basis` is `DraftKings line at game start` on every built
 row, including a row whose spread, total, and prices are null. Moneyline
 is graded from the score. The builder reads one game at a time. Other
 books are not read. A season is not loaded in one fetch.
 
 The script defaults to NFL and writes nothing without `--apply`.
-`--sport all` is the backfill across every sport in `games`. It was not
-run. The worker job `byom_game_facts` still accepts NFL only and is
-still undeclared.
+`--sport all --apply` is the backfill across every sport in `games`.
+It runs after the price migration, in the same window. It was not run.
+`byom-nfl-refresh` stays off. The worker job `byom_game_facts` still
+accepts NFL only and is still undeclared.
 
 ## Prop facts
 
@@ -114,8 +125,8 @@ market row counts wins, losses, pushes, and ties, and, once
 Staking is 1u to win at the stored DraftKings price. A win is +1. A
 loss is `-abs(price)/100` on minus odds and `-100/price` on plus odds.
 A push and a tie are 0 and stay in the push or tie count. A graded
-game leg with no price is left out of those counts and added to
-`skipped`. Graded prop legs have no price column in that file, so they
+game leg with no American price is left out of those counts and added
+to `skipped`. Graded prop legs have no price column in that file, so they
 stay in the win-loss counts, add 0 to units, and are not skipped. An
 ungraded row stays out of the record and out of `skipped`. Unknown
 filter keys are rejected. The field names `market`, `bets`, `wins`,

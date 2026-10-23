@@ -5,9 +5,14 @@
 -- ADD COLUMN IF NOT EXISTS, DROP NOT NULL (already nullable is a no-op),
 -- DROP FUNCTION IF EXISTS, CREATE OR REPLACE.
 --
--- A price is the last DraftKings quote at or before commence_time for
--- that market and side. The columns are nullable. A missing price is
--- not filled in. Another book is not stored here.
+-- A spread price and a total price are the prices on the DraftKings
+-- quote that supplied that line (the last quote at or before
+-- commence_time). If that quote has no price for a side, the column
+-- is null. An older priced quote is not used. A moneyline has no
+-- point, so each side is the last pre-start DraftKings quote that has
+-- that side's price. A stored price is American: a whole number with
+-- absolute value at least 100. Anything else is null. Another book
+-- is not stored here.
 --
 -- week stays the NFL week parsed from the id. Other sports have no week
 -- on games (measured 2026-10-23: only NCAAF has games.week populated,
@@ -17,7 +22,8 @@
 -- losses, pushes, ties in that order. Staking is 1u to win at the stored
 -- DraftKings price: a win is +1, a loss is -abs(price)/100 on minus odds
 -- and -100/price on plus odds, a push or a tie is 0. A graded game leg
--- with no price is left out of those counts and added to skipped.
+-- with no American price (missing, fractional, or absolute value under
+-- 100) is left out of those counts and added to skipped.
 -- Graded prop legs have no price column in this file. They stay in the
 -- win-loss counts, add 0 to units, and are not skipped. An ungraded row
 -- (null result: non_participant, missing_log, unplayed, ambiguous, or
@@ -61,14 +67,15 @@ BEGIN
 
   ALTER TABLE public.byom_game_facts ALTER COLUMN week DROP NOT NULL;
 
+  -- plpgsql does not write a pg_depend row for a function it calls,
+  -- so a caller such as byom_save_model is read from its source. A
+  -- view that depends on byom_backtest still makes the DROP below
+  -- fail on its own.
   SELECT p.proname INTO dep
-    FROM pg_depend d
-    JOIN pg_proc p ON p.oid = d.objid
-    JOIN pg_proc ref ON ref.oid = d.refobjid
-   WHERE ref.proname = 'byom_backtest'
-     AND ref.pronamespace = 'public'::regnamespace
-     AND d.deptype = 'n'
-     AND p.oid <> ref.oid
+    FROM pg_proc p
+   WHERE p.pronamespace = 'public'::regnamespace
+     AND p.proname <> 'byom_backtest'
+     AND position('byom_backtest' in p.prosrc) > 0
    LIMIT 1;
   IF dep IS NOT NULL THEN
     RAISE EXCEPTION 'byom_backtest is used by %; refusing to drop it', dep;
@@ -243,9 +250,15 @@ BEGIN
       ),
       kept AS (
         SELECT legs.*,
+               -- Game prices count only as American odds: a whole number
+               -- with absolute value at least 100. 1.91 is not a price.
                (
                  legs.mkt NOT IN ('h2h', 'spreads', 'totals')
-                 OR (legs.px IS NOT NULL AND legs.px <> 0)
+                 OR (
+                   legs.px IS NOT NULL
+                   AND legs.px = trunc(legs.px)
+                   AND abs(legs.px) >= 100
+                 )
                ) AS priced
           FROM legs
          WHERE res IS NOT NULL

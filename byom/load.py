@@ -4,10 +4,13 @@ Reads games, and for NFL also nfl_odds_history. Every sport is read
 from odds. Writes only byom_game_facts. Does not touch picks.
 `apply=False` is the default: count the rows and write nothing.
 
-The line, and each side's price, is the last DraftKings quote at or
-before game start. nfl_odds_history and odds are one pool for NFL.
-Another book is not read. A missing line does not skip the game. A
-missing price is stored as null. Moneyline grading is the score only.
+The line is the last DraftKings quote at or before game start.
+nfl_odds_history and odds are one pool for NFL. The spread price and
+the total price are taken from that same quote. A moneyline price is
+the last pre-start quote that has that side. Another book is not read.
+A missing line does not skip the game. A missing price, or a price
+that is not American, is stored as null. Moneyline grading is the
+score only.
 """
 from __future__ import annotations
 
@@ -158,8 +161,10 @@ def _played(games: list[dict]) -> dict:
 def _dk_quotes(conn, game_id: str, sport: str) -> list[dict]:
     """DraftKings quotes for one game. NFL also reads nfl_odds_history.
 
-    odds is keyed by games.game_id. History uses the bare key and the
-    NFL_ key. Other books are not in either query.
+    odds is read on games.game_id only. Measured 2026-10-23, two NFL
+    games in each season 2020–2026: every DraftKings h2h/spread/total
+    row was on that id, and the bare key had zero. History still uses
+    the bare key and the NFL_ key. Other books are not in either query.
     """
     odds = _as_quotes(_fetch(conn, _QUOTE_FROM_ODDS, (game_id,)))
     if sport != SPORT:

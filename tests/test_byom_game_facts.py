@@ -232,6 +232,7 @@ def test_rest_days_and_a_sunday_afternoon_is_not_primetime():
 def test_quotes_are_read_per_game_and_the_odds_cast_is_inside_a_case():
     text = (ROOT / "byom" / "load.py").read_text(encoding="utf-8")
     assert "game_id IN (%s, %s)" in text
+    assert "WHERE o.game_id = %s" in text
     assert "bookmaker = 'draftkings'" in text
     assert "('h2h', 'spreads', 'totals')" in text
     assert "make_interval" not in text

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1 review: spread and total prices come from the line's own DraftKings quote; non-American prices are stored null and skipped; primetime is NFL-only; migration drop guard reads prosrc |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1: DraftKings game-start prices on byom_game_facts for every sport, byom_backtest units and skipped, unknown filter keys rejected; migration not registered; refresh stays off; not applied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, repo cleanup: 180 dead branches deleted, 11 stale drafts closed; #785 and #808 UX-reviewed, fixed and merged (Under picks keep their betslip card and are labelled with their side); NHL shot-events opened as #1036, rest-candidate superseded; CIN @ BAL opener pick confirmed against FanDuel; the five full-suite failures all pre-exist on 897c5763 |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM mobile data: master 0aee0c5c merged; base is master; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; no migration file; unapplied |
