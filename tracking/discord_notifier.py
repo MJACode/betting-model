@@ -1003,12 +1003,14 @@ _BOOK_NAMES = {
 # Old labels, still in `picks` and not rewritten:
 #   "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
 #   "... (no bet, FD)"
-#   "Jadarian Price Over 1.5 Rec (FD)" / "A'ja Wilson Over 21.5 Pts (DK)"
+# A trailing "(FD)" on a prop is NOT read here. Master printed DraftKings
+# for those, and for every model that is not the two NFL cards below.
 _LABEL_BOOK_RE = re.compile(r"\((?:[^()]*,\s*)([A-Za-z_]+)\)")
-_SUFFIX_BOOK_RE = re.compile(r"\(([A-Za-z_]+)\)\s*$")
-# A trailing "(FD)" is a book only on these two. "(F5)", "(Regulation)" and
-# "(matchup)" are the bet, and a comma annotation is the NFL form above.
-_SUFFIX_LABEL_MODELS = frozenset({"nfl_prop_market", "wnba_prop_market"})
+# The only models whose Discord price line named a book other than
+# DraftKings, and only by parsing the comma annotation above. A new row
+# stores that same book on decision_book. Using the column for any other
+# model would rename a price master printed as DraftKings.
+_DECISION_BOOK_MODELS = frozenset({"nfl_wind_totals", "nfl_opener_spread"})
 
 
 def _display_book(token: str) -> str:
@@ -1034,29 +1036,25 @@ def _same_american(a, b) -> bool:
 def book_for_pick(s: dict) -> str | None:
     """Human name of the book whose price is being published.
 
-    Order matters. An explicitly recorded `book` wins. Then `decision_book`,
-    but only when `decision_odds` is the same number as `dk_odds` — the
-    price this card publishes when no strictly better `best_odds` exists.
-    Naming a different book's decision onto DraftKings' number would send
-    the reader to the wrong place. Then the old label, for rows that stored
-    the book only in parentheses. Then DraftKings, and only when the pick
-    actually carries a price: a prob-only pick has no book because it has
-    no quote.
+    The name master printed, in that order. An explicit `book` wins. Then
+    `decision_book`, and only for nfl_wind_totals and nfl_opener_spread when
+    `decision_odds` is the same number as `dk_odds`: those two cards are the
+    only ones whose price line named a book other than DraftKings, and the
+    column carries the book the old comma annotation named. Then that old
+    annotation, for a row written before the column. Then DraftKings, and
+    only when the pick carries a price. A prop suffix, an MLB `decision_book`,
+    "(F5)" and "(Regulation)" do not change the name.
     """
     raw = (s.get("book") or "").strip()
     if raw:
         return _display_book(raw)
-    decided = (s.get("decision_book") or "").strip()
-    if decided and _same_american(s.get("decision_odds_raw"), s.get("dk_odds")):
-        return _display_book(decided)
-    label = s.get("label") or ""
     model = s.get("model_id") or ""
+    decided = (s.get("decision_book") or "").strip()
+    if (model in _DECISION_BOOK_MODELS and decided
+            and _same_american(s.get("decision_odds_raw"), s.get("dk_odds"))):
+        return _display_book(decided)
     if model.startswith("nfl_"):
-        m = _LABEL_BOOK_RE.search(label)
-        if m:
-            return _display_book(m.group(1))
-    if model in _SUFFIX_LABEL_MODELS:
-        m = _SUFFIX_BOOK_RE.search(label)
+        m = _LABEL_BOOK_RE.search(s.get("label") or "")
         if m:
             return _display_book(m.group(1))
     if s.get("dk_odds") is None:
