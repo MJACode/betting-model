@@ -5,12 +5,13 @@ from odds. Writes only byom_game_facts. Does not touch picks.
 `apply=False` is the default: count the rows and write nothing.
 
 The line is the last DraftKings quote at or before game start.
-nfl_odds_history and odds are one pool for NFL. The spread price and
-the total price are taken from that same quote. A moneyline price is
-the last pre-start quote that has that side. Another book is not read.
-A missing line does not skip the game. A missing price, or a price
-that is not American, is stored as null. Moneyline grading is the
-score only.
+nfl_odds_history and odds are one pool for NFL. Grading uses that
+line. The spread price and the total price are the American price on
+that quote, or the closest earlier DraftKings price for the same
+market and side: same point first, then any point. A moneyline price
+is the last pre-start quote that has that side. Another book is not
+read. A missing line does not skip the game. A missing American price
+is stored as null. Moneyline grading is the score only.
 """
 from __future__ import annotations
 

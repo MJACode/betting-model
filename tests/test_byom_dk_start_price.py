@@ -1,4 +1,4 @@
-"""DraftKings game-start prices, 1u-to-win units, and skipped unpriced bets.
+"""DraftKings game-start prices, 1u-to-win units, and skipped no-line bets.
 
 The migration is not in ACTIVE_MIGRATIONS. Scratch Postgres is local.
 Nothing here writes production.
@@ -20,6 +20,8 @@ from tests.test_byom_game_facts import KICK, _game, _q
 ROOT = Path(__file__).resolve().parents[1]
 SQL_NAME = "byom_dk_start_price_2026_10_23.sql"
 SQL = (ROOT / "data/migrations" / SQL_NAME).read_text(encoding="utf-8")
+FALLBACK_NAME = "byom_dk_price_fallback_2026_10_23.sql"
+FALLBACK = (ROOT / "data/migrations" / FALLBACK_NAME).read_text(encoding="utf-8")
 
 
 def _near(got, expected) -> None:
@@ -55,6 +57,11 @@ def test_the_migration_is_hand_applied_and_the_refresh_stays_off():
     refresh = next(row for row in declared if row["job_type"] == "byom_refresh")
     assert refresh["enabled"] is False
     assert refresh["args"]["apply"] is False
+    assert FALLBACK_NAME not in ACTIVE_MIGRATIONS
+    assert "byom_dk_price_fallback" in FALLBACK
+    assert "CREATE OR REPLACE FUNCTION public.byom_backtest" in FALLBACK
+    assert "DROP FUNCTION" not in FALLBACK
+    assert "kept.no_line AND NOT kept.priced" in FALLBACK
     assert sports_requested(None) == ["NFL"]
     assert sports_requested(["nba"]) == ["NBA"]
     assert sports_requested(["all"]) is None
@@ -83,21 +90,78 @@ def test_the_price_is_the_last_draftkings_quote_at_or_before_start():
     assert missing["ats_home_result"] == "win"
 
 
-def test_a_newer_priceless_line_does_not_keep_an_older_price():
+def test_a_newer_priceless_line_takes_the_price_from_the_older_quote():
+    """No quote at -6 has a price, so the price is the older -3 quote."""
     played = {"BAL": [], "KC": []}
     older = _q(5, "draftkings", "spreads", -3, home=-110, away=-110)
     newer = _q(1, "draftkings", "spreads", -6)
     fact = assemble_game(_game(), [older, newer], played)
     assert fact["dk_spread_home"] == Decimal("-6")
-    assert fact["dk_spread_home_price"] is None
-    assert fact["dk_spread_away_price"] is None
+    assert fact["ats_home_result"] == "win"
+    assert fact["dk_spread_home_price"] == Decimal("-110")
+    assert fact["dk_spread_away_price"] == Decimal("-110")
 
     older_total = _q(5, "draftkings", "totals", 44, home=-110, away=-110)
     newer_total = _q(1, "draftkings", "totals", 47)
     fact = assemble_game(_game(), [older_total, newer_total], played)
     assert fact["dk_total"] == Decimal("47")
-    assert fact["dk_total_over_price"] is None
-    assert fact["dk_total_under_price"] is None
+    assert fact["dk_total_over_price"] == Decimal("-110")
+    assert fact["dk_total_under_price"] == Decimal("-110")
+
+
+def test_the_line_quotes_own_price_wins():
+    played = {"BAL": [], "KC": []}
+    older_same = _q(6, "draftkings", "spreads", -6, home=-105, away=-115)
+    older_other = _q(4, "draftkings", "spreads", -3, home=-200, away=170)
+    line = _q(1, "draftkings", "spreads", -6, home=-115, away=-105)
+    fact = assemble_game(_game(), [older_same, older_other, line], played)
+    assert fact["dk_spread_home"] == Decimal("-6")
+    assert fact["dk_spread_home_price"] == Decimal("-115")
+    assert fact["dk_spread_away_price"] == Decimal("-105")
+
+
+def test_a_missing_price_prefers_the_same_point():
+    played = {"BAL": [], "KC": []}
+    same = _q(8, "draftkings", "spreads", -6, home=-105, away=-115)
+    other = _q(3, "draftkings", "spreads", -3, home=-110, away=-110)
+    line = _q(1, "draftkings", "spreads", -6)
+    fact = assemble_game(_game(), [same, other, line], played)
+    assert fact["dk_spread_home"] == Decimal("-6")
+    assert fact["dk_spread_home_price"] == Decimal("-105")
+    assert fact["dk_spread_away_price"] == Decimal("-115")
+
+    same_total = _q(8, "draftkings", "totals", 47, home=-102, away=-118)
+    other_total = _q(3, "draftkings", "totals", 44, home=-110, away=-110)
+    bare_total = _q(1, "draftkings", "totals", 47)
+    fact = assemble_game(
+        _game(), [same_total, other_total, bare_total], played)
+    assert fact["dk_total"] == Decimal("47")
+    assert fact["dk_total_over_price"] == Decimal("-102")
+    assert fact["dk_total_under_price"] == Decimal("-118")
+
+
+def test_a_post_start_quote_and_another_book_are_not_the_price():
+    played = {"BAL": [], "KC": []}
+    older = _q(5, "draftkings", "spreads", -3, home=-110, away=-110)
+    line = _q(1, "draftkings", "spreads", -6)
+    after = _q(-0.25, "draftkings", "spreads", -6, home=-150, away=130)
+    fanduel = _q(0.5, "fanduel", "spreads", -6, home=-101, away=-101)
+    fact = assemble_game(_game(), [older, line, after, fanduel], played)
+    assert fact["dk_spread_home"] == Decimal("-6")
+    assert fact["dk_spread_home_price"] == Decimal("-110")
+    assert fact["dk_spread_away_price"] == Decimal("-110")
+
+
+def test_no_draftkings_line_excludes_the_bet():
+    played = {"BAL": [], "KC": []}
+    fanduel = _q(1, "fanduel", "spreads", -6, home=-110, away=-110)
+    fact = assemble_game(_game(), [fanduel], played)
+    assert fact["dk_spread_home"] is None
+    assert fact["dk_spread_home_price"] is None
+    assert fact["dk_spread_away_price"] is None
+    assert fact["ats_home_result"] is None
+    assert fact["ml_home_result"] == "win"
+    assert fact["dk_ml_home_price"] is None
 
 
 def test_a_stored_price_is_american_odds():
@@ -121,8 +185,8 @@ def test_a_stored_price_is_american_odds():
     newer = _q(1, "draftkings", "spreads", -6, home="1.91", away="1.83")
     fact = assemble_game(_game(), [older, newer], played)
     assert fact["dk_spread_home"] == Decimal("-6")
-    assert fact["dk_spread_home_price"] is None
-    assert fact["dk_spread_away_price"] is None
+    assert fact["dk_spread_home_price"] == Decimal("-110")
+    assert fact["dk_spread_away_price"] == Decimal("-110")
 
 
 def test_primetime_is_the_nfl_rule_only():
@@ -227,6 +291,8 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
         cur.execute(schema)
         cur.execute(SQL)
         cur.execute(SQL)
+        cur.execute(FALLBACK)
+        cur.execute(FALLBACK)
         cur.execute("""
             INSERT INTO games (
               game_id, sport, season, week, game_date, home_team, away_team,
@@ -267,9 +333,10 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
                '2018-10-16T18:00:00Z');
             INSERT INTO byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team, line_basis,
-              ats_home_result, ats_away_result,
+              home_score, away_score,
+              dk_spread_home, ats_home_result, ats_away_result,
               dk_spread_home_price, dk_spread_away_price,
-              ou_over_result, ou_under_result,
+              dk_total, ou_over_result, ou_under_result,
               dk_total_over_price, dk_total_under_price,
               ml_home_result, ml_away_result,
               dk_ml_home_price, dk_ml_away_price,
@@ -277,22 +344,32 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
             VALUES
               ('2026_01_BAL_KC', 'NFL', 2026, 1, 'BAL', 'KC',
                'DraftKings line at game start',
-               'win', 'loss', 180, -110,
-               'push', 'push', -105, -105,
+               27, 20,
+               -3, 'win', 'loss', 180, -110,
+               47, 'push', 'push', -105, -105,
                'win', 'loss', NULL, 150,
                'favorite', 'underdog', 7, 7, true),
               ('2026_02_DET_GB', 'NFL', 2026, 2, 'DET', 'GB',
                'DraftKings line at game start',
-               'loss', 'win', NULL, NULL,
-               NULL, NULL, NULL, NULL,
+               17, 17,
+               NULL, NULL, NULL, NULL, NULL,
+               NULL, NULL, NULL, NULL, NULL,
                'tie', 'tie', 100, -110,
                'favorite', 'underdog', 3, 10, false),
               ('2026_03_SEA_SF', 'NFL', 2026, 3, 'SEA', 'SF',
                'DraftKings line at game start',
-               'loss', 'win', 1.91, -110,
+               24, 20,
+               -6, 'loss', 'win', 1.91, -110,
+               44, NULL, NULL, NULL, NULL,
+               NULL, NULL, -110, -110,
+               'underdog', 'favorite', 7, 7, false),
+              ('2026_04_DAL_PHI', 'NFL', 2026, 4, 'DAL', 'PHI',
+               'DraftKings line at game start',
+               NULL, NULL,
+               NULL, NULL, NULL, NULL, NULL,
+               NULL, NULL, NULL, NULL, NULL,
                NULL, NULL, NULL, NULL,
-               NULL, NULL, NULL, NULL,
-               'underdog', 'favorite', 7, 7, false);
+               NULL, NULL, NULL, NULL, false);
             INSERT INTO byom_prop_facts (
               prop_key, canonical_key, sport, season, week, player_name,
               team, market, line, line_basis, over_result, under_result,
@@ -372,9 +449,9 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
         spreads = rows["spreads"]
         assert spreads[1:][:5] == (3, 2, 1, 0, 0)
         _near(spreads[6], Decimal("0.9"))
-        assert spreads[7] == 3
+        assert spreads[7] == 2
         totals = rows["totals"]
-        assert totals[1] == 2 and totals[4] == 2 and totals[7] == 0
+        assert totals[1] == 2 and totals[4] == 2 and totals[7] == 2
         _near(totals[6], 0)
         h2h = rows["h2h"]
         assert (h2h[1], h2h[2], h2h[3], h2h[5], h2h[7]) == (3, 0, 1, 2, 1)
@@ -405,6 +482,7 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
         body, config = cur.fetchone()
         assert "byom_backtest_v1" in body
         assert "byom_dk_start_price" in body
+        assert "byom_dk_price_fallback" in body
         assert "statement_timeout=3s" in config
         assert "SECURITY INVOKER" in SQL
     finally:

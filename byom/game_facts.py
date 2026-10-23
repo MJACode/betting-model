@@ -1,12 +1,12 @@
 """Pure grading for one game's Build Your Own Model fact.
 
 No database. The line is the last DraftKings snapshot at or before
-game start. A missing line does not skip the game. Moneyline is the
-score only. A spread price and a total price come from that same
-quote. A moneyline price is the last pre-start quote that has that
-side. Another book is never the price. A missing price, or a price
-that is not American, does not skip the game. Units are not stored
-here.
+game start. A missing line does not skip the game. Grading uses that
+line. A spread or total price is the American price on that quote, or
+the closest earlier DraftKings price for the same market and side.
+A moneyline price is the last pre-start quote that has that side.
+Another book is never the price. No constant fills a missing price.
+Units are not stored here.
 """
 from __future__ import annotations
 
@@ -177,24 +177,64 @@ def american_odds(value):
 
 
 def price_on_quote(quote, field: str):
-    """The American price on this quote, or None.
-
-    The spread and the total grade on one quote, the one `line_at_start`
-    chose. A missing price on that quote is None. An older quote is not
-    read, and a price that is not American is None.
-    """
+    """The American price on this quote, or None."""
     if quote is None:
         return None
     return american_odds(quote.get(field))
 
 
+def _priced(quotes, field: str):
+    """Pre-start quotes that carry an American price for this side."""
+    out = []
+    for quote in quotes:
+        if quote["lead_hours"] < 0:
+            continue
+        if price_on_quote(quote, field) is None:
+            continue
+        out.append(quote)
+    return out
+
+
+def price_for_line(quotes, line, field: str):
+    """American price for the spread or total `line_at_start` graded.
+
+    The quote that supplied the line wins when it has an American price.
+    Otherwise the most recent pre-start DraftKings quote at that same
+    point that has one. Otherwise the most recent pre-start priced quote
+    for this side, whatever its point. A quote after game start is not
+    a candidate. Another book is not in `quotes`. There is no constant.
+    None when there is no graded point, or when no pre-start quote has
+    an American price for this side.
+    """
+    if line is None:
+        return None
+    target = _line_text(line)
+    if not target:
+        return None
+    on_line = price_on_quote(line, field)
+    if on_line is not None:
+        return on_line
+    same = None
+    other = None
+    for quote in _priced(quotes, field):
+        if _line_text(quote) == target:
+            if same is None or _rank(quote) > _rank(same):
+                same = quote
+        if other is None or _rank(quote) > _rank(other):
+            other = quote
+    chosen = same if same is not None else other
+    if chosen is None:
+        return None
+    return price_on_quote(chosen, field)
+
+
 def price_at_start(quotes, field: str):
     """American price on the last pre-start quote that carries this side.
 
-    Moneyline only. The spread and the total use `price_on_quote` on the
-    quote `line_at_start` chose. `field` is price_home or price_away. A
-    missing price is None. A price that is not American is None, with no
-    fallback to an older quote. Another book's quote is not in `quotes`.
+    Moneyline only. The spread and the total use `price_for_line`.
+    `field` is price_home or price_away. A missing price is None. A
+    price that is not American is None. Another book's quote is not in
+    `quotes`.
     """
     chosen = _choose(quotes, field)
     if chosen is None:
@@ -401,10 +441,10 @@ def assemble_game(game: dict, quotes: list[dict],
         "dk_total": _num(dk_total),
         "dk_ml_home_price": price_at_start(moneylines, "price_home"),
         "dk_ml_away_price": price_at_start(moneylines, "price_away"),
-        "dk_spread_home_price": price_on_quote(spread, "price_home"),
-        "dk_spread_away_price": price_on_quote(spread, "price_away"),
-        "dk_total_over_price": price_on_quote(total, "price_home"),
-        "dk_total_under_price": price_on_quote(total, "price_away"),
+        "dk_spread_home_price": price_for_line(spreads, spread, "price_home"),
+        "dk_spread_away_price": price_for_line(spreads, spread, "price_away"),
+        "dk_total_over_price": price_for_line(totals, total, "price_home"),
+        "dk_total_under_price": price_for_line(totals, total, "price_away"),
         "ats_home_result": _side(ats, 0),
         "ats_away_result": _side(ats, 1),
         "ml_home_result": _side(ml, 0),
