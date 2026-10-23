@@ -24,7 +24,7 @@ import {
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, modelBadgeWidth, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
@@ -167,7 +167,7 @@ export function BuiltInModelDetailScreen() {
             <View style={styles.headerCard}>
               <View style={styles.headerRow}>
                 <View style={styles.modelChip}>
-                  <Text style={styles.modelChipText}>{modelShort(modelId)}</Text>
+                  <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(modelId)}</Text>
                 </View>
                 <Text style={styles.modelTitle}>{modelLong(modelId)}</Text>
                 {paused ? <TagChip label="Paused" /> : null}
@@ -547,13 +547,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: radii.pill,
-    minWidth: 50,
-    alignItems: 'center',
+    width: modelBadgeWidth,
+    flexShrink: 0,
+    alignItems: 'stretch',
+    justifyContent: 'center',
   },
   modelChipText: {
     fontSize: font.size.caption,
     color: colors.textSecondary,
     fontWeight: font.weight.semibold,
+    textAlign: 'center',
   },
   modelTitle: {
     fontSize: font.size.title3,

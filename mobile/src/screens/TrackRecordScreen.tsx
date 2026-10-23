@@ -361,7 +361,8 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
   return (
     <View style={styles.modelRow}>
       <View style={{ flex: 1 }}>
-        <Text style={styles.modelName} numberOfLines={1}>
+        {/* Wraps. A one-line cap cut the bet type off the end of the name. */}
+        <Text style={styles.modelName}>
           {modelLong(row.model_id)}
         </Text>
         <Text style={styles.modelSub}>

@@ -28,6 +28,7 @@ import {
   betTypeStatusSuffix,
   choiceAddedLabel,
   modelHistoryMark,
+  modelLongWithMark,
   modelLong,
   modelProbabilityNote,
   withdrawnRulesEmpty,
@@ -115,7 +116,7 @@ check('the "Why this bet?" card reads that note for the pick\'s own model',
   const screen = readFileSync(join(__dirname, '..', 'src/screens/BuiltInModelDetailScreen.tsx'), 'utf-8');
   check('the built-in model screen is titled with the long label',
     /navigation\.setOptions\(\{ title: modelLong\(modelId\) \}\)/.test(screen));
-  check('its chip keeps the short label', /<Text style=\{styles\.modelChipText\}>\{modelShort\(modelId\)\}<\/Text>/.test(screen));
+  check('its chip keeps the short label', /<Text style=\{styles\.modelChipText\}[^>]*>\{modelShort\(modelId\)\}<\/Text>/.test(screen));
   const titles = new Set(
     ['nba_prop_market', 'nba_prop_projection', 'nfl_prop_market', 'wnba_prop_market'].map(modelLong),
   );
@@ -281,6 +282,17 @@ check('a paused model that shares MLB Spreads is marked Paused, and the live one
   modelHistoryMark('mlb_runline') === 'Paused' && modelHistoryMark('mlb_spread_market') === null);
 check('a retired model that shares NBA Totals is marked Retired, and the live one is not',
   modelHistoryMark('nba_over_under') === 'Retired' && modelHistoryMark('nba_total_luck') === null);
+check('a settled pick names the paused model, not the live one that shares the title',
+  modelLongWithMark('mlb_over_under') === 'MLB Totals · Paused' &&
+  modelLongWithMark('mlb_total_market') === 'MLB Totals' &&
+  modelLongWithMark('mlb_runline') === 'MLB Spreads · Paused' &&
+  modelLongWithMark('mlb_spread_market') === 'MLB Spreads' &&
+  modelLongWithMark('nba_over_under') === 'NBA Totals · Retired' &&
+  modelLongWithMark('nba_total_luck') === 'NBA Totals');
+check('pitcher outs keeps the role in the name',
+  MODEL_META.mlb_prop_pitcher_outs.longLabel === 'MLB Pitcher Outs' &&
+  MODEL_META.mlb_prop_pitcher_outs.shortLabel === 'P Outs' &&
+  MODEL_META.mlb_prop_pitcher_outs.statLabel === 'Outs');
 check('a paused rule chip is labelled (paused), not (retired)',
   betTypeStatusSuffix('mlb_prop_batter_hits') === ' (paused)');
 check('a live rule chip has no status suffix',

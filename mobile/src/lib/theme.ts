@@ -156,6 +156,14 @@ export const spacing = {
   xxl: 32,
 };
 
+/**
+ * Model-badge column. The longest short label is "LIVE Carries" (~72pt at
+ * the caption size). A fixed width keeps the name beside every badge on one
+ * left edge. The label wraps inside the box at larger text instead of
+ * widening the column and pushing the name.
+ */
+export const modelBadgeWidth = 112;
+
 export const font = {
   family: Platform.select({
     ios: 'System',

@@ -161,7 +161,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   },
   mlb_prop_pitcher_outs: {
     shortLabel: 'P Outs',
-    longLabel: 'MLB Outs',
+    longLabel: 'MLB Pitcher Outs',
     type: 'pitcher_prop',
     statKey: 'outs',
     statLabel: 'Outs',
@@ -1024,6 +1024,15 @@ export function modelHistoryMark(modelId: string): 'Retired' | 'Paused' | null {
   if (isModelRetired(modelId)) return 'Retired';
   if (isModelPaused(modelId)) return 'Paused';
   return null;
+}
+
+/** Long name, with the history mark when this id no longer scores.
+ *  "MLB Totals · Paused" is not the live "MLB Totals". Retired wins, same
+ *  as `modelHistoryMark`. A live id is the long name alone. */
+export function modelLongWithMark(modelId: string): string {
+  const name = modelLong(modelId);
+  const mark = modelHistoryMark(modelId);
+  return mark ? `${name} · ${mark}` : name;
 }
 
 /**

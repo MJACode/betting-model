@@ -11,7 +11,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, modelBadgeWidth, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { unitsSpeech } from '@/lib/a11y';
 import { addDays, formatAmerican } from '@/lib/format';
@@ -526,10 +526,11 @@ function ModelRow({ model }: { model: ModelDayStats }) {
     <View style={styles.modelRow}>
       <View style={styles.modelLeft}>
         <View style={styles.chip}>
-          <Text style={styles.chipText}>{modelShort(model.modelId)}</Text>
+          <Text style={styles.chipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(model.modelId)}</Text>
         </View>
         <View style={styles.modelNameWrap}>
-          <Text style={styles.modelName} numberOfLines={1}>
+          {/* Wraps. A one-line cap cut the bet type off the end of the name. */}
+          <Text style={styles.modelName}>
             {modelLong(model.modelId)}
           </Text>
           <Text style={styles.modelSub}>
@@ -893,8 +894,16 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radii.sm,
     backgroundColor: colors.noneSoft,
+    width: modelBadgeWidth,
+    flexShrink: 0,
+    alignItems: 'stretch',
   },
-  chipText: { fontSize: font.size.caption, fontWeight: font.weight.semibold, color: colors.textSecondary },
+  chipText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
   resultBadge: {
     width: 26,
     height: 26,

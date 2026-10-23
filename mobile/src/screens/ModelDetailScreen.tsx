@@ -22,7 +22,7 @@ import {
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, modelBadgeWidth, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
@@ -195,10 +195,10 @@ export function ModelDetailScreen() {
                 >
                   <View style={styles.pickLeft}>
                     <View style={styles.modelChip}>
-                      <Text style={styles.modelChipText}>{modelShort(ep.pick.model_id)}</Text>
+                      <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(ep.pick.model_id)}</Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.pickLabel} numberOfLines={1}>
+                      <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
                         {ep.pick.pick_label}
                       </Text>
                       <View style={styles.pickMeta}>
@@ -227,10 +227,10 @@ export function ModelDetailScreen() {
           >
             <View style={styles.pickLeft}>
               <View style={styles.modelChip}>
-                <Text style={styles.modelChipText}>{modelShort(item.model_id)}</Text>
+                <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(item.model_id)}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.pickLabel} numberOfLines={1}>
+                <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
                   {item.pick_label}
                 </Text>
                 <View style={styles.pickMeta}>
@@ -377,13 +377,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: radii.pill,
-    minWidth: 50,
-    alignItems: 'center',
+    width: modelBadgeWidth,
+    flexShrink: 0,
+    alignItems: 'stretch',
+    justifyContent: 'center',
   },
   modelChipText: {
     fontSize: font.size.caption,
     color: colors.textSecondary,
     fontWeight: font.weight.semibold,
+    textAlign: 'center',
   },
   pickLabel: {
     fontSize: font.size.body,
