@@ -257,7 +257,7 @@ export function signalsReasonLine(input: {
 }
 
 /**
- * Footer caption. `longName` is `modelLong` ("Wind Totals (Under)").
+ * Footer caption. `longName` is `modelLong` ("NFL Totals").
  * `when` is the existing timing label ("Posted 11:07 AM ET", "Locked …",
  * "Priced …"), or null when the card is not showing one.
  */

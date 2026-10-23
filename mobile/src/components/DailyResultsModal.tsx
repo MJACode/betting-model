@@ -15,7 +15,7 @@ import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { unitsSpeech } from '@/lib/a11y';
 import { addDays, formatAmerican } from '@/lib/format';
-import { modelLong, modelShort } from '@/lib/modelMeta';
+import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
 import { postedPickUnits } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
 import {
@@ -521,6 +521,7 @@ function HeroStat({ label, value, color }: { label: string; value: string; color
 
 function ModelRow({ model }: { model: ModelDayStats }) {
   const priced = model.risked > 0;
+  const mark = modelHistoryMark(model.modelId);
   return (
     <View style={styles.modelRow}>
       <View style={styles.modelLeft}>
@@ -534,6 +535,7 @@ function ModelRow({ model }: { model: ModelDayStats }) {
           <Text style={styles.modelSub}>
             {recordLine(model)}
             {` · ${stakeLine(model)}`}
+            {mark ? ` · ${mark}` : ''}
           </Text>
         </View>
       </View>

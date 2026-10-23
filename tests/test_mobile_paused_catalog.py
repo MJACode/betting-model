@@ -68,8 +68,8 @@ def test_the_custom_model_picker_is_three_bet_types():
     """
     meta = _read(MOBILE / "src" / "lib" / "modelMeta.ts")
     assert "{ label: 'ML', subtitle: 'Moneyline' }" in meta
-    assert "{ label: 'Run line', subtitle: '±1.5' }" in meta
-    assert "{ label: 'Puck line', subtitle: '±1.5' }" in meta
+    assert "{ label: 'Run line', subtitle: '±1.5' }" not in meta
+    assert "{ label: 'Puck line', subtitle: '±1.5' }" not in meta
     assert "{ label: 'Spread', subtitle: 'Spread line' }" in meta
     assert "{ label: 'Player props', subtitle: 'All player markets' }" in meta
     collapse = _block(meta, "export function betTypePickerGroups", "\n}")

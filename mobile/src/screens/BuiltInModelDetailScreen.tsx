@@ -131,7 +131,7 @@ export function BuiltInModelDetailScreen() {
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
-  // The long name: three prop rules share the short label "Prop Mkt", so a
+  // The long name: the prop-market rules share the short label "Props", so a
   // short title made their screens indistinguishable. The chip keeps it.
   useEffect(() => {
     navigation.setOptions({ title: modelLong(modelId) });
