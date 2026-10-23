@@ -1928,7 +1928,7 @@ def _job_byom_game_facts(**kw):
     try:
         return build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
-            sport=kw.get("sport", "nfl").upper())
+            sport=(kw.get("sport") or "nfl").upper())
     finally:
         conn.close()
 

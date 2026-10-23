@@ -74,6 +74,13 @@ The script defaults to NFL and writes nothing without `--apply`.
 `--sport all --apply` is the backfill across every sport in `games`.
 It runs after `byom_dk_price_fallback_2026_10_23.sql`, in the same
 window, so the stored prices follow the fallback rule. It was not run.
+The printed JSON includes `same_point`, `cross_point`, and
+`line_no_price`: how many spread and total sides were priced from an
+earlier quote at the graded point, how many from an earlier quote at
+another point, and how many graded lines still have no American price.
+Each of those four sides is one count. Moneyline sides are not in the
+three counts. A queued `byom_game_facts` job with `sport` null builds
+NFL and still does not write unless `apply` is true.
 `byom-nfl-refresh` stays off. The worker job `byom_game_facts` still
 accepts NFL only and is still undeclared.
 
@@ -134,11 +141,13 @@ market row counts wins, losses, pushes, and ties, plus `units` and
 is +1. A loss is `-abs(price)/100` on minus odds and `-100/price` on
 plus odds. A push and a tie are 0 and stay in the push or tie count.
 `skipped` counts a played bet with no DraftKings line at all: no
-spread point, no total, or no American moneyline price. There is no
-screen for that count. A line whose quote had no price is priced from
-the fallback above and is in the record. A played game that has a line
-and still has no American price is left out of the record and out of
-`skipped`. An unplayed game stays out of both. Graded prop legs have
+spread point, no total, or no American moneyline price. It also counts
+a played bet that has a DraftKings line but no American price anywhere
+before kickoff. Those bets stay out of wins, losses, pushes, ties, and
+units. There is no screen for that count. A line whose quote had no
+price is priced from the fallback above and is in the record when that
+fallback finds an American price. An unplayed game stays out of the
+record and out of `skipped`. Graded prop legs have
 no price column, so they stay in the win-loss counts, add 0 to units,
 and are not skipped. Unknown filter keys are rejected. The field names `market`, `bets`, `wins`,
 `losses`, `pushes`, and `ties` are unchanged.

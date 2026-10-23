@@ -1,5 +1,6 @@
--- Closest DraftKings price when the game-start line has none, and
--- skipped counts only a played bet with no DraftKings line.
+-- Closest DraftKings price when the game-start line has none.
+-- skipped counts a played bet with no DraftKings line, and a played
+-- bet that has a line but no American price.
 --
 -- byom_dk_start_price_2026_10_23.sql is already applied in production
 -- (2026-10-23 8:10 AM CT, version 20261023131032). Do not edit that
@@ -18,11 +19,13 @@
 -- priced quote for that side. The builder writes that price. This
 -- function only reads the stored row.
 --
--- skipped counts a played game's side that has no DraftKings line:
--- no spread point, no total, or no American moneyline price. A line
--- with no American price is not in the record and is not skipped.
--- An unplayed game stays out of both. Prop legs are unchanged: they
--- stay in the win-loss counts, add 0 to units, and are not skipped.
+-- skipped counts a played bet with no DraftKings line (no spread
+-- point, no total, or no American moneyline price), and a played bet
+-- that has a DraftKings line but no American price. Those bets stay
+-- out of wins, losses, pushes, ties, and units. An unplayed game
+-- stays out of the record and out of skipped. Prop legs are
+-- unchanged: they stay in the win-loss counts, add 0 to units, and
+-- are not skipped.
 --
 -- The body still carries byom_backtest_v1, so the registered
 -- migration byom_backtest_rpc_2026_10_16.sql does not put the old
@@ -144,7 +147,9 @@ BEGIN
     -- Output names are also plpgsql variables. The leg columns use
     -- other names so `market` is not ambiguous. The function-level
     -- statement_timeout above does not apply; the role timeouts govern.
-    -- no_line is a played game with no DraftKings line for that bet.
+    -- no_line is a played bet with no DraftKings line, or a played bet
+    -- whose stored price is not American. skipped counts both. Null
+    -- scores are an unplayed game, so that game is not no_line.
     RETURN QUERY
     WITH legs AS (
       SELECT 'spreads'::text AS mkt,
@@ -153,14 +158,24 @@ BEGIN
              g.home_role AS leg_role, 'home'::text AS leg_side,
              g.dk_spread_home_price AS px,
              (g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-              AND g.dk_spread_home IS NULL) AS no_line
+              AND (
+                g.dk_spread_home IS NULL
+                OR NOT (
+                  g.dk_spread_home_price IS NOT NULL
+                  AND g.dk_spread_home_price = trunc(g.dk_spread_home_price)
+                  AND abs(g.dk_spread_home_price) >= 100))) AS no_line
         FROM byom_game_facts g
        WHERE g.sport = 'NFL' AND g.season = v_season
       UNION ALL
       SELECT 'spreads', g.ats_away_result, g.week, g.away_rest_days,
              g.is_primetime, g.away_role, 'away', g.dk_spread_away_price,
              (g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-              AND g.dk_spread_home IS NULL)
+              AND (
+                g.dk_spread_home IS NULL
+                OR NOT (
+                  g.dk_spread_away_price IS NOT NULL
+                  AND g.dk_spread_away_price = trunc(g.dk_spread_away_price)
+                  AND abs(g.dk_spread_away_price) >= 100)))
         FROM byom_game_facts g
        WHERE g.sport = 'NFL' AND g.season = v_season
       UNION ALL
@@ -187,14 +202,24 @@ BEGIN
       SELECT 'totals', g.ou_over_result, g.week, NULL::integer,
              g.is_primetime, NULL::text, NULL::text, g.dk_total_over_price,
              (g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-              AND g.dk_total IS NULL)
+              AND (
+                g.dk_total IS NULL
+                OR NOT (
+                  g.dk_total_over_price IS NOT NULL
+                  AND g.dk_total_over_price = trunc(g.dk_total_over_price)
+                  AND abs(g.dk_total_over_price) >= 100)))
         FROM byom_game_facts g
        WHERE g.sport = 'NFL' AND g.season = v_season
       UNION ALL
       SELECT 'totals', g.ou_under_result, g.week, NULL::integer,
              g.is_primetime, NULL::text, NULL::text, g.dk_total_under_price,
              (g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-              AND g.dk_total IS NULL)
+              AND (
+                g.dk_total IS NULL
+                OR NOT (
+                  g.dk_total_under_price IS NOT NULL
+                  AND g.dk_total_under_price = trunc(g.dk_total_under_price)
+                  AND abs(g.dk_total_under_price) >= 100)))
         FROM byom_game_facts g
        WHERE g.sport = 'NFL' AND g.season = v_season
       UNION ALL

@@ -3,6 +3,8 @@
 Dry run unless --apply. Does not declare a worker job, and does not
 enable byom_refresh, so a merge does not run this against production.
 --sport all is the backfill path. It still writes nothing without --apply.
+The printed JSON counts spread and total sides priced via same_point,
+via cross_point, and left as line_no_price. A null sport is NFL.
 
     python -m scripts.byom_game_facts
     python -m scripts.byom_game_facts --season 2024

@@ -6,7 +6,10 @@ line. A spread or total price is the American price on that quote, or
 the closest earlier DraftKings price for the same market and side.
 A moneyline price is the last pre-start quote that has that side.
 Another book is never the price. No constant fills a missing price.
-Units are not stored here.
+A played bet whose spread or total still has no American price is
+counted in byom_backtest's skipped, and stays out of the win-loss
+record and the units. An unplayed game is in neither. Units are not
+stored here.
 """
 from __future__ import annotations
 
@@ -158,8 +161,9 @@ def american_odds(value):
 
     A stored price is a whole number whose absolute value is at least
     100. 100 and -100 are even money. A decimal price such as 1.91, and
-    any price whose absolute value is under 100, is None, so the leg is
-    skipped. A missing price is None.
+    any price whose absolute value is under 100, is None. A missing
+    price is None. The backtest counts a played side that still has
+    no American price in skipped.
     """
     if value is None or value == "":
         return None
@@ -198,22 +202,25 @@ def _priced(quotes, field: str):
 def price_for_line(quotes, line, field: str):
     """American price for the spread or total `line_at_start` graded.
 
-    The quote that supplied the line wins when it has an American price.
-    Otherwise the most recent pre-start DraftKings quote at that same
-    point that has one. Otherwise the most recent pre-start priced quote
-    for this side, whatever its point. A quote after game start is not
-    a candidate. Another book is not in `quotes`. There is no constant.
-    None when there is no graded point, or when no pre-start quote has
-    an American price for this side.
+    Returns `(price, basis)`. The quote that supplied the line wins
+    when it has an American price (`exact`). Otherwise the most recent
+    pre-start DraftKings quote at that same point that has one
+    (`same_point`). Otherwise the most recent pre-start priced quote
+    for this side, whatever its point (`cross_point`). A quote after
+    game start is not a candidate. Another book is not in `quotes`.
+    There is no constant. A graded point with no American price on any
+    pre-start quote is `(None, "line_no_price")`: the backtest counts
+    that played side in skipped and leaves it out of the record.
+    `(None, None)` when there is no graded point.
     """
     if line is None:
-        return None
+        return None, None
     target = _line_text(line)
     if not target:
-        return None
+        return None, None
     on_line = price_on_quote(line, field)
     if on_line is not None:
-        return on_line
+        return on_line, "exact"
     same = None
     other = None
     for quote in _priced(quotes, field):
@@ -224,8 +231,9 @@ def price_for_line(quotes, line, field: str):
             other = quote
     chosen = same if same is not None else other
     if chosen is None:
-        return None
-    return price_on_quote(chosen, field)
+        return None, "line_no_price"
+    basis = "same_point" if same is not None else "cross_point"
+    return price_on_quote(chosen, field), basis
 
 
 def price_at_start(quotes, field: str):
@@ -417,6 +425,14 @@ def assemble_game(game: dict, quotes: list[dict],
     ml = grade_ml(home_score, away_score)
     ou = grade_total(home_score, away_score, dk_total)
     home_role, away_role = roles(dk_spread)
+    spread_home_price, spread_home_basis = price_for_line(
+        spreads, spread, "price_home")
+    spread_away_price, spread_away_basis = price_for_line(
+        spreads, spread, "price_away")
+    total_over_price, total_over_basis = price_for_line(
+        totals, total, "price_home")
+    total_under_price, total_under_basis = price_for_line(
+        totals, total, "price_away")
     game_day = parse_date(game.get("game_date"))
     commence = game.get("commence_time")
     if parse_ts(commence) is None:
@@ -441,10 +457,18 @@ def assemble_game(game: dict, quotes: list[dict],
         "dk_total": _num(dk_total),
         "dk_ml_home_price": price_at_start(moneylines, "price_home"),
         "dk_ml_away_price": price_at_start(moneylines, "price_away"),
-        "dk_spread_home_price": price_for_line(spreads, spread, "price_home"),
-        "dk_spread_away_price": price_for_line(spreads, spread, "price_away"),
-        "dk_total_over_price": price_for_line(totals, total, "price_home"),
-        "dk_total_under_price": price_for_line(totals, total, "price_away"),
+        "dk_spread_home_price": spread_home_price,
+        "dk_spread_away_price": spread_away_price,
+        "dk_total_over_price": total_over_price,
+        "dk_total_under_price": total_under_price,
+        # Not a column. The backfill log counts these. The upsert writes
+        # FACT_COLUMNS only.
+        "_price_basis": {
+            "dk_spread_home_price": spread_home_basis,
+            "dk_spread_away_price": spread_away_basis,
+            "dk_total_over_price": total_over_basis,
+            "dk_total_under_price": total_under_basis,
+        },
         "ats_home_result": _side(ats, 0),
         "ats_away_result": _side(ats, 1),
         "ml_home_result": _side(ml, 0),

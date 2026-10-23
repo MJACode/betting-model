@@ -11,7 +11,12 @@ that quote, or the closest earlier DraftKings price for the same
 market and side: same point first, then any point. A moneyline price
 is the last pre-start quote that has that side. Another book is not
 read. A missing line does not skip the game. A missing American price
-is stored as null. Moneyline grading is the score only.
+is stored as null. byom_backtest counts a played bet with no
+DraftKings line, and a played bet that has a line but no American
+price, in skipped. Both stay out of the win-loss record and the units.
+An unplayed game is in neither. Each build reports how many spread and
+total sides used same_point, how many used cross_point, and how many
+are line_no_price. Moneyline grading is the score only.
 """
 from __future__ import annotations
 
@@ -223,23 +228,54 @@ def _upsert(conn, facts: list[dict]) -> int:
     return len(values)
 
 
+def price_fallback_counts(facts) -> dict:
+    """Spread and total sides priced by a fallback, or left unpriced.
+
+    `same_point` is a side whose graded quote had no American price and
+    an earlier pre-start DraftKings quote at that point did.
+    `cross_point` is a side priced from an earlier quote at a different
+    point. `line_no_price` is a graded line with no American price on
+    any pre-start DraftKings quote for that side. Each of the four
+    sides is one count. Moneyline sides are not in these counts. A
+    side with no graded line is not `line_no_price`.
+    """
+    counts = {"same_point": 0, "cross_point": 0, "line_no_price": 0}
+    for fact in facts:
+        for basis in (fact.get("_price_basis") or {}).values():
+            if basis in counts:
+                counts[basis] += 1
+    return counts
+
+
+def _sport_or_nfl(sport) -> str:
+    """An omitted sport is NFL. An explicit null is the same."""
+    if not sport:
+        return SPORT
+    return str(sport)
+
+
 def build_season(conn, season: int, apply: bool = False,
                  game_ids: list[str] | None = None,
-                 sport: str = SPORT) -> dict:
+                 sport: str | None = SPORT) -> dict:
     """One season of one sport. apply=False writes nothing.
 
     `game_ids` limits which games are read. None is the whole season.
+    `sport` null is NFL. The result includes the fallback counts.
     """
+    sport = _sport_or_nfl(sport)
+    empty_counts = {"same_point": 0, "cross_point": 0, "line_no_price": 0}
     if sport == SPORT and season < DK_HISTORY_START_SEASON:
         return {
             "season": season, "sport": sport, "facts": 0, "written": 0,
             "skipped": "before DraftKings history",
+            **empty_counts,
         }
     facts = facts_for_season(conn, season, game_ids=game_ids, sport=sport)
     written = _upsert(conn, facts) if apply else 0
     return {
         "season": season, "sport": sport,
         "facts": len(facts), "written": written,
+        **price_fallback_counts(facts),
     }
 
 
@@ -267,7 +303,9 @@ def sports_in_games(conn) -> list[str]:
 
 
 def build_seasons(conn, seasons, apply: bool = False,
-                  sport: str = SPORT) -> dict:
+                  sport: str | None = SPORT) -> dict:
+    """`sport` null is NFL. Passing None does not query with a null sport."""
+    sport = _sport_or_nfl(sport)
     if seasons is None:
         seasons = seasons_in_games(conn, sport)
     elif isinstance(seasons, int):

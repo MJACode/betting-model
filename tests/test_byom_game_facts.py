@@ -288,6 +288,14 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
     assert seen["seasons"] is None
     assert seen["closed"] is True
     assert out["sport"] == "NFL"
+    # An explicit null is the same call. .get's default does not apply
+    # when the key is present, so the job must treat None as NFL.
+    seen.clear()
+    out = fn(sport=None, season=None, apply=False)
+    assert seen["sport"] == "NFL"
+    assert seen["apply"] is False
+    assert seen["closed"] is True
+    assert out["sport"] == "NFL"
 
 
 def test_the_job_defaults_to_not_writing_and_is_not_declared():

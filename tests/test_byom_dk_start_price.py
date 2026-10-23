@@ -62,6 +62,8 @@ def test_the_migration_is_hand_applied_and_the_refresh_stays_off():
     assert "CREATE OR REPLACE FUNCTION public.byom_backtest" in FALLBACK
     assert "DROP FUNCTION" not in FALLBACK
     assert "kept.no_line AND NOT kept.priced" in FALLBACK
+    assert "has a DraftKings line but no American price" in FALLBACK
+    assert "is not skipped" not in FALLBACK
     assert sports_requested(None) == ["NFL"]
     assert sports_requested(["nba"]) == ["NBA"]
     assert sports_requested(["all"]) is None
@@ -118,6 +120,53 @@ def test_the_line_quotes_own_price_wins():
     assert fact["dk_spread_home"] == Decimal("-6")
     assert fact["dk_spread_home_price"] == Decimal("-115")
     assert fact["dk_spread_away_price"] == Decimal("-105")
+
+
+def test_fallback_counts_name_same_point_cross_point_and_a_priceless_line():
+    """The backfill log splits the three ways a spread or total side ends."""
+    from byom.load import price_fallback_counts
+
+    played = {"BAL": [], "KC": []}
+    same = assemble_game(_game(), [
+        _q(6, "draftkings", "spreads", -6, home=-105, away=-115),
+        _q(1, "draftkings", "spreads", -6),
+        _q(5, "draftkings", "totals", 44, home=-110, away=-110),
+        _q(1, "draftkings", "totals", 47),
+    ], played)
+    assert same["_price_basis"]["dk_spread_home_price"] == "same_point"
+    assert same["_price_basis"]["dk_spread_away_price"] == "same_point"
+    assert same["dk_spread_home_price"] == Decimal("-105")
+    assert same["_price_basis"]["dk_total_over_price"] == "cross_point"
+    assert same["_price_basis"]["dk_total_under_price"] == "cross_point"
+    assert same["dk_total"] == Decimal("47")
+    bare = assemble_game(_game(), [
+        _q(1, "draftkings", "spreads", -3),
+    ], played)
+    assert bare["dk_spread_home"] == Decimal("-3")
+    assert bare["dk_spread_home_price"] is None
+    assert bare["ats_home_result"] == "win"
+    assert bare["_price_basis"]["dk_spread_home_price"] == "line_no_price"
+    assert bare["_price_basis"]["dk_spread_away_price"] == "line_no_price"
+    assert bare["_price_basis"]["dk_total_over_price"] is None
+    assert bare["_price_basis"]["dk_total_under_price"] is None
+    exact = assemble_game(_game(), [
+        _q(1, "draftkings", "spreads", -3, home=-110, away=-110),
+    ], played)
+    assert exact["_price_basis"]["dk_spread_home_price"] == "exact"
+    none = assemble_game(_game(), [], played)
+    assert none["dk_spread_home"] is None
+    assert none["_price_basis"]["dk_spread_home_price"] is None
+    assert price_fallback_counts([same, bare, exact, none]) == {
+        "same_point": 2, "cross_point": 2, "line_no_price": 2,
+    }
+
+
+def test_a_null_sport_builds_nfl_without_a_query():
+    from byom.load import build_seasons
+
+    out = build_seasons(None, [], sport=None)
+    assert out["sport"] == "NFL"
+    assert out["seasons"] == []
 
 
 def test_a_missing_price_prefers_the_same_point():
@@ -405,6 +454,9 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
         conn = Conn()
         nba = build_season(conn, 2026, apply=True, sport="NBA")
         assert nba["written"] == 1
+        assert nba["same_point"] == 0
+        assert nba["cross_point"] == 0
+        assert nba["line_no_price"] == 0
         old = build_season(conn, 2018, apply=True, sport="NBA")
         assert old["written"] == 1
         cur = raw.cursor()
@@ -449,11 +501,21 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
         spreads = rows["spreads"]
         assert spreads[1:][:5] == (3, 2, 1, 0, 0)
         _near(spreads[6], Decimal("0.9"))
-        assert spreads[7] == 2
+        # DET has scores and no spread (two sides). SEA home is -6 at
+        # 1.91: a line and no American price, so that side is skipped
+        # and stays out of the three bets. SEA away is -110 and is one
+        # of those bets. DAL has no scores, so it is in neither.
+        assert spreads[7] == 3
         totals = rows["totals"]
-        assert totals[1] == 2 and totals[4] == 2 and totals[7] == 2
+        # DET has no total (two sides). SEA is 44 with null prices and
+        # null results (two sides): a played line with no price, skipped,
+        # and not in the two push bets. DAL is unplayed.
+        assert totals[1] == 2 and totals[4] == 2 and totals[7] == 4
         _near(totals[6], 0)
         h2h = rows["h2h"]
+        # BAL home has scores and no American price: skipped. SEA has
+        # American prices and null results, so it is in neither. DAL
+        # is unplayed and is in neither. The one skipped side is BAL.
         assert (h2h[1], h2h[2], h2h[3], h2h[5], h2h[7]) == (3, 0, 1, 2, 1)
         _near(h2h[6], -(Decimal(100) / Decimal(150)))
         props = rows["player_pass_yds"]

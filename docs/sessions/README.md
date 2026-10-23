@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM skipped: a played line with no American price counts in skipped and stays out of the record and units; sport null is NFL; the backfill log splits same-point, cross-point, and line-but-no-price; fallback file still unapplied |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM price fallback: a priceless game-start line takes the closest earlier DraftKings price; skipped counts only a played bet with no DK line; new migration not applied |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM game-facts job: a queued row with no sport builds NFL; apply still defaults false |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1 review: spread and total prices come from the line's own DraftKings quote; non-American prices are stored null and skipped; primetime is NFL-only; migration drop guard reads prosrc |
