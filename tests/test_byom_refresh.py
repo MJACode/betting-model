@@ -83,7 +83,8 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
               odds_id bigserial PRIMARY KEY, game_id text, sport text,
               market text, bookmaker text, snapshot_type text, snapshot_at text,
               home_price numeric, away_price numeric, spread_home numeric,
-              total_line numeric, over_price numeric, under_price numeric);
+              total_line numeric, over_price numeric, under_price numeric,
+              created_at text);
             CREATE TABLE player_prop_odds (
               prop_id bigserial PRIMARY KEY, game_id text, game_date text,
               player_name text, team text, market text, bookmaker text,
@@ -102,6 +103,9 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
             encoding="utf-8")
         cur.execute(text)
         cur.execute(text)
+        price = (ROOT / "data/migrations" / "byom_dk_start_price_2026_10_23.sql").read_text(
+            encoding="utf-8")
+        cur.execute(price)
         _load(cur)
         raw.autocommit = False
 

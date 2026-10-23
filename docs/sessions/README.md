@@ -19,6 +19,11 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM skipped: a played line with no American price counts in skipped and stays out of the record and units; sport null is NFL; the backfill log splits same-point, cross-point, and line-but-no-price; fallback file still unapplied |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM price fallback: a priceless game-start line takes the closest earlier DraftKings price; skipped counts only a played bet with no DK line; new migration not applied |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM game-facts job: a queued row with no sport builds NFL; apply still defaults false |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1 review: spread and total prices come from the line's own DraftKings quote; non-American prices are stored null and skipped; primetime is NFL-only; migration drop guard reads prosrc |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1: DraftKings game-start prices on byom_game_facts for every sport, byom_backtest units and skipped, unknown filter keys rejected; migration not registered; refresh stays off; not applied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, repo cleanup: 180 dead branches deleted, 11 stale drafts closed; #785 and #808 UX-reviewed, fixed and merged (Under picks keep their betslip card and are labelled with their side); NHL shot-events opened as #1036, rest-candidate superseded; CIN @ BAL opener pick confirmed against FanDuel; the five full-suite failures all pre-exist on 897c5763 |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM mobile data: master 0aee0c5c merged; base is master; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; no migration file; unapplied |
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM mobile data layer: types, fetchers, and hooks only; tsc message set matches origin/master d135a5ab; no screen, sign-in left off |
