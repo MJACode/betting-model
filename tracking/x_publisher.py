@@ -567,9 +567,11 @@ def _publish_price(pick: dict) -> tuple[float | None, str | None]:
     """The price to publish and the book to publish it at.
 
     Deliberately the same rule as tracking/discord_notifier.publish_price: the
-    best BETTABLE price wins, and DraftKings is the fallback whenever the
-    alternative is absent, equal or worse. Publishing a worse price as though it
-    were an upgrade is the one failure mode worse than publishing DK's.
+    best BETTABLE price wins, and the row's own book is the fallback whenever
+    the alternative is absent, equal or worse. That book is decision_book when
+    it was taken at dk_odds, else the old label, else DraftKings. Publishing a
+    worse price as though it were an upgrade is the one failure mode worse
+    than publishing the price the row already stores.
 
     The book set is filtered upstream — config.BEST_LINE_BOOKMAKERS excludes
     books that cannot be bet from the US — so this never sends a public audience
@@ -586,11 +588,17 @@ def _publish_price(pick: dict) -> tuple[float | None, str | None]:
             return None
         return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
 
+    # The same book Discord names for this price. A line-shopped card stores
+    # it on decision_book; a row written before that still names it in the
+    # label. Hardcoding DraftKings here published FanDuel's number as
+    # DraftKings once the label stopped carrying the book.
+    from tracking.discord_notifier import book_for_pick
+
     if best is None or not book:
-        return dk, ("DraftKings" if dk is not None else None)
+        return dk, book_for_pick(pick)
     b, d = _decimal(best), _decimal(dk)
     if b is None or (d is not None and b <= d + 1e-9):
-        return dk, ("DraftKings" if dk is not None else None)
+        return dk, book_for_pick(pick)
     return best, _BOOK_DISPLAY.get(book, book)
 
 

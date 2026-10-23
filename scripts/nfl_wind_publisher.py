@@ -17,7 +17,9 @@ Conventions (load-bearing):
 - dk_odds stores the card's BEST-BOOK price. The wind card line-shops across
   books by design; the platform's DraftKings-only invariant applies to models
   that score against DK lines, which this standalone model never does. The
-  book is named in pick_label so the price is never mistaken for a DK quote.
+  book is `decision_book` (the feed key), with `decision_odds` equal to that
+  same price, so the label does not have to carry it. Rows already stored
+  still name the book inside the old parenthetical; readers keep parsing that.
 - Delete + replace for FUTURE kickoffs only: each card run re-prices whatever
   is still in its window (runbook: later is better — the edge is vs the close
   and forecast skill improves), so unstarted NFL wind picks that are NOT on
@@ -133,8 +135,9 @@ def _opener_model():
 
 _ET = ZoneInfo("America/New_York")
 
-# Short labels for the best-price book named in pick_label. Unknown keys fall
-# back to the raw key so a new book can never crash the publisher.
+# Short labels for the best-price book. Kept so an old parenthetical still
+# maps ("FD" → fanduel) in the readers. New rows store the feed key in
+# decision_book and do not write the abbreviation into pick_label.
 BOOK_ABBREV = {
     "draftkings": "DK",
     "fanduel": "FD",
@@ -147,6 +150,32 @@ BOOK_ABBREV = {
     "pinnacle": "PIN",
     "matchbook": "MB (exch.)",  # exchange — price gross of commission
 }
+
+
+def _taken_at(book: str, price: float, implied: float, edge: float) -> dict:
+    """The sportsbook the quoted price was taken at, on the row.
+
+    `decision_odds` is the same number stored in `dk_odds`. Stake, the
+    action cut and the grade all read COALESCE(decision_odds, dk_odds), so
+    copying the price does not move them. The key is the feed's book key
+    (`fanduel`), not the old parenthetical abbreviation (`FD`). A blank
+    book leaves the columns null; readers then fall back to the label,
+    which is how every row written before this still names its book.
+    """
+    key = (book or "").strip().lower()
+    if not key:
+        return {
+            "decision_book": None,
+            "decision_odds": None,
+            "decision_implied_prob": None,
+            "decision_edge": None,
+        }
+    return {
+        "decision_book": key,
+        "decision_odds": price,
+        "decision_implied_prob": implied,
+        "decision_edge": edge,
+    }
 
 
 def parse_matchup(matchup: str) -> tuple[str, str]:
@@ -202,7 +231,9 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
             market_prob = float(r["market_prob"])
             edge = float(r["edge"])
             stake_pct = float(r["stake_pct"])
-            wind = float(r["forecast_wind"])
+            # A non-numeric forecast still skips the row. The mph stays off
+            # the label (Matt, 2026-10-23).
+            float(r["forecast_wind"])
             book = (r.get("book") or "").strip()
         except (KeyError, ValueError, IndexError) as exc:
             print(f"skipping unparseable card row ({exc}): {r}", file=sys.stderr)
@@ -236,14 +267,14 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
             "pick_side": "under",
             "pick_label": (
                 f"{away} @ {home} Under {_fmt_line(total_line)} "
-                f"(Wind {wind:.0f} mph, {BOOK_ABBREV.get(book, book or '?')}) "
                 f"· {stake_pct:.2f}u"
             ),
             "model_probability": model_prob,
             "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": market_prob,   # de-vigged best-book prob
             "edge": edge,
-            "dk_odds": price,                 # best-book price; book in label
+            "dk_odds": price,                 # best-book price; book in decision_book
+            **_taken_at(book, price, market_prob, edge),
             "scored_line": total_line,
             "kelly_fraction": kelly_fraction,
             "recommended_bet": round(kelly_fraction * bankroll, 2),
@@ -282,7 +313,9 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             model_prob = float(r["model_prob"])
             market_prob = float(r["market_prob"])
             edge = float(r["edge"])
-            dev = float(r["dev"])
+            # A non-numeric deviation still skips the row. The opener gap
+            # and the Pinnacle comparison stay off the label (Matt, 2026-10-23).
+            float(r["dev"])
             book = (r.get("book") or "").strip()
             held_raw = r.get("held_min")
             held_min = (None if held_raw in (None, "", "nan")
@@ -360,14 +393,14 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             "pick_side": side,
             "pick_label": (
                 f"{away} @ {home} — {bet_team} {side_line:+g} "
-                f"(Opener {dev:+g} vs Pinnacle, {BOOK_ABBREV.get(book, book or '?')}) "
                 f"· {kelly_fraction / OPENER_UNIT_PCT:.2f}u{age}"
             ),
             "model_probability": model_prob,
             "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": market_prob,
             "edge": edge,
-            "dk_odds": price,                 # soft-book price; book in label
+            "dk_odds": price,                 # soft-book price; book in decision_book
+            **_taken_at(book, price, market_prob, edge),
             "scored_line": soft_home_line,    # HOME spread — settle convention
             "kelly_fraction": kelly_fraction,
             "recommended_bet": round(kelly_fraction * bankroll, 2),
@@ -856,13 +889,17 @@ def publish(run_date: str | None = None) -> int:
                                    pick_side, pick_label, model_probability,
                                    dk_implied_prob, edge, dk_odds, scored_line,
                                    kelly_fraction, recommended_bet, bankroll_at_pick,
-                                   signal_type, model_probability_cal)
+                                   signal_type, model_probability_cal,
+                                   decision_book, decision_odds,
+                                   decision_implied_prob, decision_edge)
                 VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
                         %(game_time)s, %(pick_side)s, %(pick_label)s,
                         %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
                         %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
                         %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
-                        %(model_probability_cal)s)
+                        %(model_probability_cal)s, %(decision_book)s,
+                        %(decision_odds)s, %(decision_implied_prob)s,
+                        %(decision_edge)s)
             """, p)
         conn.commit()
     finally:
@@ -938,13 +975,17 @@ def publish_opener(run_date: str | None = None) -> int:
                                    pick_side, pick_label, model_probability,
                                    dk_implied_prob, edge, dk_odds, scored_line,
                                    kelly_fraction, recommended_bet, bankroll_at_pick,
-                                   signal_type, model_probability_cal)
+                                   signal_type, model_probability_cal,
+                                   decision_book, decision_odds,
+                                   decision_implied_prob, decision_edge)
                 VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
                         %(game_time)s, %(pick_side)s, %(pick_label)s,
                         %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
                         %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
                         %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
-                        %(model_probability_cal)s)
+                        %(model_probability_cal)s, %(decision_book)s,
+                        %(decision_odds)s, %(decision_implied_prob)s,
+                        %(decision_edge)s)
             """, p)
             written += 1
         conn.commit()
@@ -1025,10 +1066,10 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
     for (game_id, model_id), r in sorted(latest.items()):
         held = holds.get(game_id)
         # The model FIRED on this tick. Its BET row is the publisher's to
-        # write (publish / publish_opener); a "(no bet)" row carrying the
-        # firing edge would be a bet dressed as a pass. Write nothing and
-        # let the BET land (Reviewer, #838 post-merge) -- unless the game is
-        # held, in which case no BET will land this tick.
+        # write (publish / publish_opener); a pass row carrying the firing
+        # edge would be a bet dressed as a pass. Write nothing and let the
+        # BET land (Reviewer, #838 post-merge) -- unless the game is held,
+        # in which case no BET will land this tick.
         if str(r.get("qualifies") or "").strip() == "1" and not held:
             continue
         g = games.get(game_id)
@@ -1036,16 +1077,14 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
         if g is None or line is None or price is None or price == 0:
             continue
         book = (r.get("current_book") or "").strip()
-        # "(<words>, <BOOK>)" is the shape the app reads the quote's book from
-        # (mobile storedQuoteBook / clvBet.ts): the BET rows' own form. A
-        # bare "(FD)" falls through to DraftKings there and mislabels the price.
-        tag = BOOK_ABBREV.get(book, book or "?")
+        # The quote's book is decision_book (the feed key). The label is the
+        # bet only. Rows already stored still name the book in "(no bet, FD)".
         home, away = g["home_team"], g["away_team"]
         market = _american_to_prob(price)
         m_prob, m_edge = _num(r.get("model_prob")), _num(r.get("edge"))
         if model_id == NFL_WIND_MODEL_ID:
             side = "under"
-            label = f"{away} @ {home} Under {_fmt_line(line)} (no bet, {tag})"
+            label = f"{away} @ {home} Under {_fmt_line(line)}"
             if m_prob is not None and m_edge is not None:
                 # The card de-vigs; its edge is against that market number.
                 model_prob, implied, edge = m_prob, m_prob - m_edge, m_edge
@@ -1053,8 +1092,11 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
                 model_prob, implied, edge = market, market, 0.0
         else:
             side = "home"
-            label = f"{away} @ {home} — {home} {_fmt_spread(line)} (no bet, {tag})"
+            label = f"{away} @ {home} — {home} {_fmt_spread(line)}"
             model_prob, implied, edge = market, market, 0.0
+        stored_prob = round(model_prob, 4)
+        stored_implied = round(implied, 4)
+        stored_edge = round(edge, 4)
         out.append({
             "game_id": game_id,
             "model_id": model_id,
@@ -1063,10 +1105,11 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
             "game_time": g["commence_time"],
             "pick_side": side,
             "pick_label": label,
-            "model_probability": round(model_prob, 4),
-            "dk_implied_prob": round(implied, 4),
-            "edge": round(edge, 4),
+            "model_probability": stored_prob,
+            "dk_implied_prob": stored_implied,
+            "edge": stored_edge,
             "dk_odds": price,
+            **_taken_at(book, price, stored_implied, stored_edge),
             "scored_line": line,          # total (wind) / HOME spread (opener)
             "kelly_fraction": 0.0,
             "recommended_bet": 0.0,
@@ -1081,7 +1124,9 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
 # else on the row, and must still be refreshed (Reviewer, #838 post-merge).
 _SCORED_FIELDS = ("pick_label", "pick_side", "model_probability",
                   "dk_implied_prob", "edge", "dk_odds", "scored_line",
-                  "downgrade_reason", "game_date", "game_time")
+                  "downgrade_reason", "game_date", "game_time",
+                  "decision_book", "decision_odds",
+                  "decision_implied_prob", "decision_edge")
 
 
 def _changed(existing: dict, new: dict) -> bool:
@@ -1156,7 +1201,9 @@ def publish_scored(run_date: str | None = None) -> int:
         for row in conn.execute("""
             SELECT pick_id, game_id, model_id, signal_type, pick_label, pick_side,
                    model_probability, dk_implied_prob, edge, dk_odds,
-                   scored_line, downgrade_reason, game_date::text, game_time
+                   scored_line, downgrade_reason, game_date::text, game_time,
+                   decision_book, decision_odds, decision_implied_prob,
+                   decision_edge
             FROM picks
             WHERE model_id = ANY(%s) AND game_id = ANY(%s)
         """, (list(SCORED_MODEL_IDS), ids)).fetchall():
@@ -1188,13 +1235,17 @@ def publish_scored(run_date: str | None = None) -> int:
                                        pick_side, pick_label, model_probability,
                                        dk_implied_prob, edge, dk_odds, scored_line,
                                        kelly_fraction, recommended_bet, bankroll_at_pick,
-                                       signal_type, downgrade_reason)
+                                       signal_type, downgrade_reason,
+                                       decision_book, decision_odds,
+                                       decision_implied_prob, decision_edge)
                     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
                             %(game_time)s, %(pick_side)s, %(pick_label)s,
                             %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
                             %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
                             %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
-                            %(downgrade_reason)s)
+                            %(downgrade_reason)s, %(decision_book)s,
+                            %(decision_odds)s, %(decision_implied_prob)s,
+                            %(decision_edge)s)
                 """, p)
                 inserted += 1
             elif _changed(old, p):
@@ -1208,6 +1259,10 @@ def publish_scored(run_date: str | None = None) -> int:
                         dk_odds = %(dk_odds)s, scored_line = %(scored_line)s,
                         downgrade_reason = %(downgrade_reason)s,
                         game_date = %(game_date)s, game_time = %(game_time)s,
+                        decision_book = %(decision_book)s,
+                        decision_odds = %(decision_odds)s,
+                        decision_implied_prob = %(decision_implied_prob)s,
+                        decision_edge = %(decision_edge)s,
                         created_at = now()::text
                     WHERE pick_id = %(pick_id)s
                       AND signal_type = 'NONE' AND result IS NULL

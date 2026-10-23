@@ -260,8 +260,10 @@ class TestBuildOpenerRows:
         # strong bet — 0.5818 at -105 — so it stakes ABOVE one unit.
         assert p["kelly_fraction"] > 0.01
         assert p["recommended_bet"] == round(p["kelly_fraction"] * 1000, 2)
-        assert p["pick_label"].startswith(
-            "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM)")
+        assert p["pick_label"].startswith("NYJ @ MIA — NYJ +5 ·")
+        assert "Opener" not in p["pick_label"] and "Pinnacle" not in p["pick_label"]
+        assert p["decision_book"] == "betmgm"
+        assert p["decision_odds"] == p["dk_odds"]
         assert p["pick_label"].endswith("u")
 
     def test_stake_scales_with_the_bet(self):
@@ -809,7 +811,7 @@ class TestFreshNumberLabel:
                     dev="2.0", book="betmgm", stake_pct="1.958")
         _, picks = build_opener_rows([dict(base, held_min="0.0")], 1000.0)
         assert picks[0]["pick_label"] == \
-            "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u · NEW 0m"
+            "TEN @ NYG — NYG -1 · 1.96u · NEW 0m"
         _, picks = build_opener_rows([dict(base, held_min="")], 1000.0)
         assert picks[0]["pick_label"].endswith("· 1.96u · age unknown")
         _, picks = build_opener_rows([dict(base, held_min="1500")], 1000.0)
