@@ -1129,18 +1129,28 @@ _SCORED_FIELDS = ("pick_label", "pick_side", "model_probability",
                   "decision_implied_prob", "decision_edge")
 
 
-def _changed(existing: dict, new: dict) -> bool:
-    for k in _SCORED_FIELDS:
-        a, b = existing.get(k), new.get(k)
-        if isinstance(a, (int, float)) or isinstance(b, (int, float)):
-            try:
-                if a is None or b is None or abs(float(a) - float(b)) > 1e-9:
-                    return True
-            except (TypeError, ValueError):
-                return True
-        elif (a or None) != (b or None):
+def _field_moved(existing: dict, new: dict, key: str) -> bool:
+    a, b = existing.get(key), new.get(key)
+    if isinstance(a, (int, float)) or isinstance(b, (int, float)):
+        try:
+            return a is None or b is None or abs(float(a) - float(b)) > 1e-9
+        except (TypeError, ValueError):
             return True
-    return False
+    return (a or None) != (b or None)
+
+
+def _changed(existing: dict, new: dict) -> bool:
+    return any(_field_moved(existing, new, k) for k in _SCORED_FIELDS)
+
+
+# The observed number. A book stamp or a label edit is not one of these,
+# so it does not move created_at.
+_NUMBER_FIELDS = ("pick_side", "model_probability", "edge", "dk_odds",
+                  "scored_line")
+
+
+def _number_moved(existing: dict, new: dict) -> bool:
+    return any(_field_moved(existing, new, k) for k in _NUMBER_FIELDS)
 
 
 def publish_scored(run_date: str | None = None) -> int:
@@ -1249,8 +1259,9 @@ def publish_scored(run_date: str | None = None) -> int:
                 """, p)
                 inserted += 1
             elif _changed(old, p):
-                # created_at moves with the number: on a NONE row it says when
-                # THIS line was observed, which is what the card's chip shows.
+                # created_at is when THIS number was observed. The line-movement
+                # card on an open NONE row starts its window there. A refresh
+                # that only stamps the book, or drops the label note, leaves it.
                 conn.execute("""
                     UPDATE picks
                     SET pick_label = %(pick_label)s, pick_side = %(pick_side)s,
@@ -1263,10 +1274,12 @@ def publish_scored(run_date: str | None = None) -> int:
                         decision_odds = %(decision_odds)s,
                         decision_implied_prob = %(decision_implied_prob)s,
                         decision_edge = %(decision_edge)s,
-                        created_at = now()::text
+                        created_at = CASE WHEN %(touch_created)s
+                                          THEN now()::text ELSE created_at END
                     WHERE pick_id = %(pick_id)s
                       AND signal_type = 'NONE' AND result IS NULL
-                """, {**p, "pick_id": old["pick_id"]})
+                """, {**p, "pick_id": old["pick_id"],
+                      "touch_created": _number_moved(old, p)})
                 updated += 1
         conn.commit()
     finally:

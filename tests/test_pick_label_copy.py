@@ -89,10 +89,10 @@ def test_a_new_label_reads_the_column_and_only_when_it_is_that_price():
     assert dn.book_for_pick(_sig(
         book="fd", decision_book="draftkings", decision_odds_raw=-105.0,
         label=NEW_OPENER, model_id="nfl_opener_spread")) == "FanDuel"
-    # A prop's decision_book does not rename the DraftKings price line.
+    # A prop whose decision price is a different number does not rename dk_odds.
     assert dn.book_for_pick(_sig(
         model_id="nfl_prop_market", label=NEW_PROP, dk_odds=-120.0,
-        decision_book="fanduel", decision_odds_raw=-120.0)) == "DraftKings"
+        decision_book="fanduel", decision_odds_raw=-105.0)) == "DraftKings"
 
 
 def test_the_discord_embed_names_the_book_and_not_the_annotation():
@@ -144,24 +144,34 @@ def test_the_line_check_passes_for_both_label_shapes():
             -105.0, "draftkings")
 
 
-def test_x_keeps_draftkings_for_a_wind_or_opener_pick():
-    """Master's X price line said DraftKings for these cards. The label
-    named FD or MGM, and the new row stores that book, and neither one
-    changes the tweet."""
-    old = xp._publish_price(_sig(
-        model_id="nfl_wind_totals", label=OLD_WIND, dk_odds=-110.0,
+def test_x_names_the_book_the_soft_price_came_from():
+    """A new label no longer carries FD or MGM. The tweet has to."""
+    wind = xp._publish_price(_sig(
+        model_id="nfl_wind_totals", label=NEW_WIND, dk_odds=-110.0,
         decision_book="fanduel", decision_odds_raw=-110.0))
-    assert old == (-110.0, "DraftKings")
-    new = xp._publish_price(_sig(
+    assert wind == (-110.0, "FanDuel")
+    opener = xp._publish_price(_sig(
         model_id="nfl_opener_spread", label=NEW_OPENER,
         decision_book="betmgm", decision_odds_raw=-105.0))
-    assert new == (-105.0, "DraftKings")
-    # A best price that is not strictly better does not rename it either.
+    assert opener == (-105.0, "BetMGM")
+    # Equal is not strictly better, so the published number stays dk_odds
+    # and the book stays the one that number came from.
     not_better = xp._publish_price(_sig(
         model_id="nfl_wind_totals", label=NEW_WIND, dk_odds=-110.0,
         decision_book="fanduel", decision_odds_raw=-110.0,
         best_book="betmgm", best_odds=-110.0))
-    assert not_better == (-110.0, "DraftKings")
+    assert not_better == (-110.0, "FanDuel")
+    # A strictly better price still wins, on the book that has it.
+    better = xp._publish_price(_sig(
+        model_id="nfl_wind_totals", label=NEW_WIND, dk_odds=-110.0,
+        decision_book="fanduel", decision_odds_raw=-110.0,
+        best_book="betmgm", best_odds=-105.0))
+    assert better == (-105.0, "BetMGM")
+    # An old row with no decision columns: the label still names the book,
+    # and this surface does not parse it.
+    old = xp._publish_price(_sig(
+        model_id="nfl_wind_totals", label=OLD_WIND, dk_odds=-110.0))
+    assert old == (-110.0, "DraftKings")
     assert xp._publish_price({"dk_odds": -110, "best_book": None,
                               "best_odds": None}) == (-110, "DraftKings")
     assert xp._publish_price({"dk_odds": None, "best_book": None,
@@ -171,8 +181,8 @@ def test_x_keeps_draftkings_for_a_wind_or_opener_pick():
         decision_book="betmgm", decision_odds_raw=-105.0,
         game_date="2026-10-23"))
     assert NEW_OPENER in tweet
-    assert "at DraftKings" in tweet
-    assert "BetMGM" not in tweet
+    assert "at BetMGM" in tweet
+    assert "DraftKings" not in tweet
     assert "Pinnacle" not in tweet and "Opener" not in tweet
 
 
@@ -189,11 +199,37 @@ def test_an_mlb_decision_book_does_not_rename_draftkings():
     worse = dict(row, best_book="betmgm", best_odds=-130.0)
     assert dn.publish_price(worse) == (-110.0, "DraftKings")
     assert xp._publish_price(row) == (-110.0, "DraftKings")
-    # The column still names the book on the two cards whose label did.
+    # The column still names the book on a card that stored a soft-book price.
     assert dn.publish_price(_sig(
         model_id="nfl_wind_totals", label=NEW_WIND, dk_odds=-110.0,
         decision_book="fanduel", decision_odds_raw=-110.0,
         home="MIA", away="NYJ")) == (-110.0, "FanDuel")
+
+
+def test_fd_and_mgm_prices_are_named_on_discord_and_x():
+    """Wind, opener and prop cards store the soft book's price in dk_odds.
+    Both surfaces name that book when decision_odds is the same number."""
+    cases = (
+        ("nfl_wind_totals", NEW_WIND, "fanduel", -110.0, "FanDuel", "NFL"),
+        ("nfl_wind_totals", NEW_WIND, "betmgm", -115.0, "BetMGM", "NFL"),
+        ("nfl_opener_spread", NEW_OPENER, "fanduel", -108.0, "FanDuel", "NFL"),
+        ("nfl_opener_spread", NEW_OPENER, "betmgm", -105.0, "BetMGM", "NFL"),
+        ("nfl_prop_market", NEW_PROP, "fanduel", -120.0, "FanDuel", "NFL"),
+        ("nfl_prop_market", NEW_PROP, "betmgm", -125.0, "BetMGM", "NFL"),
+        ("wnba_prop_market", NEW_WNBA, "fanduel", -110.0, "FanDuel", "WNBA"),
+        ("wnba_prop_market", NEW_WNBA, "betmgm", -115.0, "BetMGM", "WNBA"),
+    )
+    for model, label, book, odds, shown, sport in cases:
+        row = _sig(model_id=model, label=label, sport=sport, dk_odds=odds,
+                   decision_book=book, decision_odds_raw=odds)
+        assert dn.book_for_pick(row) == shown
+        assert dn.publish_price(row) == (odds, shown)
+        assert xp._publish_price(row) == (odds, shown)
+        tweet = xp.render_pick(dict(row, game_date="2026-10-23"))
+        assert f"at {shown}" in tweet
+        embed = dn._signal_field(row)
+        assert embed["name"] == label
+        assert f"@ {shown}" in embed["value"]
 
 
 def test_push_still_reads_both_labels():

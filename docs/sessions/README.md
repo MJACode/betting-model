@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, price line names the soft book's number: Discord and X use decision_book for NFL wind, opener, NFL props and WNBA props when the prices match; MLB stays DraftKings; NONE created_at moves only with the number; wind mph not restored |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, displayed book stays master's: decision_book only on NFL wind/opener Discord; X and MLB stay DraftKings; wind mph not restored |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, simple pick labels: book moves to decision_book; new labels drop Opener/Wind/Pinnacle parentheses; old labels still parse; no migration |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, repo cleanup: 180 dead branches deleted, 11 stale drafts closed; #785 and #808 UX-reviewed, fixed and merged (Under picks keep their betslip card and are labelled with their side); NHL shot-events opened as #1036, rest-candidate superseded; CIN @ BAL opener pick confirmed against FanDuel; the five full-suite failures all pre-exist on 897c5763 |

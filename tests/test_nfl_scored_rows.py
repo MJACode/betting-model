@@ -317,6 +317,28 @@ class TestPublishScored:
         (upd,) = [(s, prm) for s, prm in conn.sql if s.startswith("UPDATE picks")]
         assert "signal_type = 'NONE' AND result IS NULL" in upd[0]
         assert upd[1]["pick_id"] == 7 and upd[1]["scored_line"] == 41.5
+        assert upd[1]["touch_created"] is True
+
+    def test_a_book_stamp_leaves_created_at(self, run):
+        # The next pass rewrites every stored NONE row once: the label loses
+        # its note and the four decision columns fill in. The number did not
+        # move, so created_at stays. The line-movement card windows on it.
+        (p,) = pub.build_scored_rows({(GAME, "nfl_wind_totals"): _eval()}, GAMES, 1000.0)
+        stored = dict(p)
+        stored["pick_label"] = p["pick_label"] + " (no bet, DK)"
+        for key in ("decision_book", "decision_odds",
+                    "decision_implied_prob", "decision_edge"):
+            stored[key] = None
+        existing = (7, GAME, "nfl_wind_totals", "NONE") + tuple(
+            stored[k] for k in pub._SCORED_FIELDS)
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                     picks=[existing])
+        assert run(conn, [_eval()]) == 1
+        (upd,) = [(s, prm) for s, prm in conn.sql if s.startswith("UPDATE picks")]
+        assert upd[1]["touch_created"] is False
+        assert "ELSE created_at END" in upd[0]
+        assert upd[1]["decision_book"] == p["decision_book"]
+        assert upd[1]["pick_label"] == p["pick_label"]
 
 
 # ── Reviewer, #838 post-merge ───────────────────────────────────────────────
@@ -416,6 +438,7 @@ class TestFlexedKickoffRefreshes:
         (upd,) = [(q, prm) for q, prm in conn.sql if q.startswith("UPDATE picks")]
         assert upd[1]["game_time"] == new_kick and upd[1]["game_date"] == "2026-09-28"
         assert "game_date = %(game_date)s, game_time = %(game_time)s" in upd[0]
+        assert upd[1]["touch_created"] is False
 
     def test_scored_fields_cover_the_kickoff(self):
         assert {"game_date", "game_time"} <= set(pub._SCORED_FIELDS)
