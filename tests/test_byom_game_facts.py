@@ -257,6 +257,39 @@ def test_the_builder_has_no_spread_price_or_line_filter_and_does_not_touch_picks
         assert banned not in lowered, banned
 
 
+def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
+    """A queued byom_game_facts row with no sport builds NFL and writes nothing."""
+    from tracking.job_queue import JOBS
+
+    seen = {}
+
+    def build_seasons(conn, seasons, apply=False, sport="NFL"):
+        seen["sport"] = sport
+        seen["apply"] = apply
+        seen["seasons"] = seasons
+        return {"apply": apply, "sport": sport, "seasons": []}
+
+    class Conn:
+        def close(self):
+            seen["closed"] = True
+
+    monkeypatch.setattr("byom.load.build_seasons", build_seasons)
+    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+
+    fn, validate = JOBS["byom_game_facts"]
+    stored = validate({})
+    assert stored["sport"] == "NFL"
+    assert stored["apply"] is False
+    # The runner calls the job with the validated args. Dropping sport here
+    # is a row whose args never carried it: the job still builds NFL.
+    out = fn(**{key: value for key, value in stored.items() if key != "sport"})
+    assert seen["sport"] == "NFL"
+    assert seen["apply"] is False
+    assert seen["seasons"] is None
+    assert seen["closed"] is True
+    assert out["sport"] == "NFL"
+
+
 def test_the_job_defaults_to_not_writing_and_is_not_declared():
     from tracking.job_queue import JOBS, _validate_byom_game_facts
 
