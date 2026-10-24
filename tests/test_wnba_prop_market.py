@@ -120,7 +120,9 @@ def test_pick_rows_fields_and_label():
     assert len(rows) == 1
     r = rows[0]
     assert r["model_id"] == "wnba_prop_market" and r["sport"] == "WNBA"
-    assert r["pick_label"] == "A'ja Wilson Over 21.5 Pts (DK)"
+    assert r["pick_label"] == "A'ja Wilson Over 21.5 Pts"
+    assert r["decision_book"] == "draftkings"
+    assert r["decision_odds"] == r["dk_odds"]
     assert r["model_probability"] == 0.58          # Pinnacle's de-vigged number
     assert abs(r["dk_implied_prob"] - 0.52) < 1e-9  # soft book's own de-vig
     assert r["prop_market"] == "player_points" and r["player_id"] == "12345"
@@ -141,7 +143,9 @@ def test_pick_rows_dk_link_only_for_draftkings():
                "over_link": "https://fd/x", "under_link": None}}
     rows = pick_rows([_bet(book="fanduel")], games, quotes, pid, "2026-09-04", 1000.0)
     assert rows[0]["dk_bet_link"] is None          # never a cross-book link
-    assert "(FD)" in rows[0]["pick_label"]
+    assert "(FD)" not in rows[0]["pick_label"]
+    assert rows[0]["decision_book"] == "fanduel"
+    assert rows[0]["decision_odds"] == rows[0]["dk_odds"]
 
 
 class _FakeConn:
