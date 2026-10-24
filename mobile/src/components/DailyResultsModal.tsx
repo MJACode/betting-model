@@ -11,7 +11,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, modelBadgeWidth, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { unitsSpeech } from '@/lib/a11y';
 import { addDays, formatAmerican } from '@/lib/format';
@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     backgroundColor: colors.noneSoft,
     width: modelBadgeWidth,
-    flexShrink: 0,
+    flexShrink: 1,
     alignItems: 'stretch',
   },
   chipText: {
@@ -913,7 +913,7 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   resultBadgeText: { fontSize: font.size.footnote, fontWeight: font.weight.bold },
-  modelNameWrap: { flex: 1 },
+  modelNameWrap: { flex: 1, minWidth: modelNameFloor },
   modelName: { fontSize: font.size.body, fontWeight: font.weight.medium, color: colors.textPrimary },
   modelSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 1 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.sm },

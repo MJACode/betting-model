@@ -35,8 +35,10 @@ import {
 } from '../src/lib/modelMeta';
 import {
   PAUSED_MODELS,
+  hasFetchedThresholds,
   isModelPaused,
   isModelRetired,
+  markThresholdsFetched,
   setServerThresholds,
 } from '../src/lib/thresholds';
 import { propModelForStat, statForPropModel, STAT_CATALOG } from '../src/lib/statCatalog';
@@ -173,8 +175,8 @@ check('an active batter prop is still a bet type you can build on',
     MODEL_META.nba_total_luck?.type === 'game' && betSlotForModel('nba_total_luck', 'game') === null);
   check('the NBA home team-total unders are a game line the picker does not offer as a slot',
     MODEL_META.nba_team_total_luck?.type === 'game' && betSlotForModel('nba_team_total_luck', 'game') === null);
-  check('the NBA projection model is titled in picker language',
-    betTypeLabel('nba_prop_projection') === 'NBA · Player props', betTypeLabel('nba_prop_projection'));
+  check('the NBA projection model is titled with its long name',
+    betTypeLabel('nba_prop_projection') === 'NBA Projected Props', betTypeLabel('nba_prop_projection'));
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',
     row('NCAAF').join(',') === 'Spread|Spread line');
   const ncaafLine = betTypePickerGroups().find((g) => g.sport === 'NCAAF')?.choices.find((c) => c.slot === 'line');
@@ -188,23 +190,23 @@ check('an active batter prop is still a bet type you can build on',
     row('UFC').join(',') === 'ML|Moneyline');
   check('golf is not a picker section',
     !betTypePickerGroups().some((g) => g.sport === 'GOLF'));
-  check('a slot rule is titled in picker language, with no strategy parenthetical',
-    betTypeLabel('mlb_spread_market') === 'MLB · Spread' &&
-      betTypeLabel('nfl_opener_spread') === 'NFL · Spread' &&
-      betTypeLabel('ncaaf_spread') === 'NCAAF · Spread' &&
-      betTypeLabel('nhl_puckline') === 'NHL · Spread' &&
-      betTypeLabel('mlb_moneyline') === 'MLB · ML' &&
-      betTypeLabel('nba_spread') === 'NBA · Spread' &&
-      betTypeLabel('wnba_moneyline') === 'WNBA · ML' &&
-      betTypeLabel('mlb_prop_batter_runs') === 'MLB · Player props' &&
-      betTypeLabel('nfl_prop_market') === 'NFL · Player props' &&
-      !betTypeLabel('mlb_spread_market').includes('(') &&
-      !betTypeLabel('nfl_opener_spread').includes('('));
-  check('a market the picker does not offer keeps its long name, without a second sport prefix',
-    betTypeLabel('mlb_f5_moneyline') === 'MLB First 5 Moneyline' &&
+  check('every rule title is the long name, one shape, with no middle dot to split on',
+    betTypeLabel('mlb_spread_market') === 'MLB Spreads' &&
+      betTypeLabel('nfl_opener_spread') === 'NFL Spreads' &&
+      betTypeLabel('ncaaf_spread') === 'NCAAF Spreads' &&
+      betTypeLabel('nhl_puckline') === 'NHL Spreads' &&
+      betTypeLabel('mlb_moneyline') === 'MLB Moneyline' &&
+      betTypeLabel('nba_spread') === 'NBA Spreads' &&
+      betTypeLabel('wnba_moneyline') === 'WNBA Moneyline' &&
+      betTypeLabel('mlb_prop_batter_runs') === 'MLB Runs Scored' &&
+      betTypeLabel('nfl_prop_market') === 'NFL Props' &&
+      betTypeLabel('nba_prop_projection') === 'NBA Projected Props' &&
+      betTypeLabel('mlb_f5_moneyline') === 'MLB First 5 Moneyline' &&
       betTypeLabel('mlb_total_market') === 'MLB Totals' &&
       betTypeLabel('ncaaf_spread_premium') === 'NCAAF Premium Spreads' &&
-      !betTypeLabel('nfl_wind_totals').startsWith('NFL · NFL'));
+      betTypeLabel('nfl_wind_totals') === 'NFL Totals' &&
+      !betTypeLabel('nfl_wind_totals').includes(' · ') &&
+      !betTypeLabel('mlb_spread_market').includes('('));
   check('a slot is Added only when every model is already a rule',
     choiceAddedLabel(0, 9) === null &&
       choiceAddedLabel(6, 9) === '6 of 9 added' &&
@@ -289,6 +291,33 @@ check('a settled pick names the paused model, not the live one that shares the t
   modelLongWithMark('mlb_spread_market') === 'MLB Spreads' &&
   modelLongWithMark('nba_over_under') === 'NBA Totals · Retired' &&
   modelLongWithMark('nba_total_luck') === 'NBA Totals');
+// A cached map can say the paused twin is live before the fetch corrects it.
+// The footer must keep the bundled mark until that fetch is the store.
+setServerThresholds({
+  mlb_over_under: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: false },
+});
+check('a cached unpause does not take the Paused mark off before the live table lands',
+  !hasFetchedThresholds() &&
+  isModelPaused('mlb_over_under') === false &&
+  modelHistoryMark('mlb_over_under') === 'Paused' &&
+  modelLongWithMark('mlb_over_under') === 'MLB Totals · Paused');
+markThresholdsFetched();
+check('once the live table has landed, the mark follows the server',
+  hasFetchedThresholds() && modelHistoryMark('mlb_over_under') === null);
+setServerThresholds(null);
+check('clearing the store returns the mark to the bundled pause',
+  !hasFetchedThresholds() && modelHistoryMark('mlb_over_under') === 'Paused');
+{
+  const models = readFileSync(join(__dirname, '..', 'src/screens/ModelsScreen.tsx'), 'utf-8');
+  const detail = readFileSync(join(__dirname, '..', 'src/screens/ModelDetailScreen.tsx'), 'utf-8');
+  // 320 − 32 margin − 24 padding − 12 gap − 90 record = 162 for badge + name.
+  // 112 + 8 gap + 96 floor = 216, so the badge shrinks and the name keeps 96.
+  check('on a 320pt phone the badge yields and the name keeps its floor',
+    models.includes('minWidth: modelNameFloor') &&
+      /modelChip: \{[\s\S]*?flexShrink: 1/.test(models) &&
+      detail.includes('minWidth: modelNameFloor') &&
+      /modelChip: \{[\s\S]*?flexShrink: 1/.test(detail));
+}
 check('pitcher outs keeps the role in the name',
   MODEL_META.mlb_prop_pitcher_outs.longLabel === 'MLB Pitcher Outs' &&
   MODEL_META.mlb_prop_pitcher_outs.shortLabel === 'P Outs' &&

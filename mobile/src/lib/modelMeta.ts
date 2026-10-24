@@ -6,7 +6,7 @@
  * and is not part of that rename.
  */
 
-import { isModelPaused, isModelRetired } from './thresholds';
+import { hasFetchedThresholds, isBundledPaused, isModelPaused, isModelRetired } from './thresholds';
 
 /**
  * The market a model trades. `pitcher_prop` / `batter_prop` are MLB-only cuts;
@@ -1022,8 +1022,12 @@ function choiceCopy(sport: BetTypeSport, slot: BetTypeSlot): { label: string; su
  *  list hides the paused or retired id, and the Record tab still shows it. */
 export function modelHistoryMark(modelId: string): 'Retired' | 'Paused' | null {
   if (isModelRetired(modelId)) return 'Retired';
-  if (isModelPaused(modelId)) return 'Paused';
-  return null;
+  // Until the live table lands, the bundled pause set. The cache can arrive
+  // first and disagree with the fetch, which would put "· Paused" on the
+  // card footer and take it off again. After the fetch, the server flag
+  // wins, same as isModelPaused.
+  const paused = hasFetchedThresholds() ? isModelPaused(modelId) : isBundledPaused(modelId);
+  return paused ? 'Paused' : null;
 }
 
 /** Long name, with the history mark when this id no longer scores.
@@ -1116,14 +1120,11 @@ export function withdrawnRulesEmpty(
 
 /**
  * How a custom-model rule is titled on the editor, the detail screen, and the
- * Models list. A model the picker offers uses that row's short name
- * ("MLB · Spread"), never MODEL_META.longLabel. A market the picker does
- * not offer keeps its long name alone: the long name already starts with
- * the sport, so a second sport prefix would read "NFL · NFL Totals".
+ * Models list. Always the long name. A slot used to return "MLB · Spread"
+ * and everything else the long name, so one function returned two shapes
+ * and a " · " that was not safe to split. The long name is already the
+ * sport plus the bet type, and it tells two prop rules apart.
  */
 export function betTypeLabel(modelId: string): string {
-  const sport = sportOfModel(modelId);
-  const slot = betSlotForModel(modelId, modelCategory(modelId));
-  if (!slot) return modelLong(modelId);
-  return `${sport} · ${choiceCopy(sport, slot).label}`;
+  return modelLong(modelId);
 }

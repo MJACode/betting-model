@@ -24,7 +24,7 @@ import {
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
-import { colors, font, modelBadgeWidth, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: radii.pill,
     width: modelBadgeWidth,
-    flexShrink: 0,
+    flexShrink: 1,
     alignItems: 'stretch',
     justifyContent: 'center',
   },
@@ -563,6 +563,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
     flex: 1,
+    minWidth: modelNameFloor,
   },
   modelSubtitle: {
     fontSize: font.size.footnote,

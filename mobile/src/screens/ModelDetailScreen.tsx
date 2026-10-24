@@ -22,7 +22,7 @@ import {
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
-import { colors, font, modelBadgeWidth, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
@@ -197,7 +197,7 @@ export function ModelDetailScreen() {
                     <View style={styles.modelChip}>
                       <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(ep.pick.model_id)}</Text>
                     </View>
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.pickCopy}>
                       <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
                         {ep.pick.pick_label}
                       </Text>
@@ -229,7 +229,7 @@ export function ModelDetailScreen() {
               <View style={styles.modelChip}>
                 <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(item.model_id)}</Text>
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={styles.pickCopy}>
                 <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
                   {item.pick_label}
                 </Text>
@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: radii.pill,
     width: modelBadgeWidth,
-    flexShrink: 0,
+    flexShrink: 1,
     alignItems: 'stretch',
     justifyContent: 'center',
   },
@@ -387,6 +387,10 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: font.weight.semibold,
     textAlign: 'center',
+  },
+  pickCopy: {
+    flex: 1,
+    minWidth: modelNameFloor,
   },
   pickLabel: {
     fontSize: font.size.body,

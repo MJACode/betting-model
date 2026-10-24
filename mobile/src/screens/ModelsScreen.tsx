@@ -23,7 +23,7 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
-import { colors, font, modelBadgeWidth, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -346,7 +346,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         <View style={styles.modelChip}>
           <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(modelId)}</Text>
         </View>
-        <View style={{ flex: 1 }}>
+        <View style={styles.modelNameCol}>
           {/* No line cap. One line ellipsized the bet type ("NBA Projected
               Pro…", and every NCAAF name as "NCAA…" at larger text). The
               name wraps so that word stays whole. */}
@@ -617,11 +617,15 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: radii.pill,
     width: modelBadgeWidth,
-    flexShrink: 0,
+    flexShrink: 1,
     // Stretch, not center: a centered child sizes to its text and overflows
     // the fixed width instead of wrapping inside it.
     alignItems: 'stretch',
     justifyContent: 'center',
+  },
+  modelNameCol: {
+    flex: 1,
+    minWidth: modelNameFloor,
   },
   modelChipText: {
     fontSize: font.size.caption,
