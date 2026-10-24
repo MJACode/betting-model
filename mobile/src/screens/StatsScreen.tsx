@@ -4195,7 +4195,7 @@ function OddsCell({
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
   const priceText = formatAmerican(quote.price).replace(/-/g, MINUS);
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  const label = `${playerName}${muted ? ', not playing' : ''}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
@@ -4260,7 +4260,7 @@ function OddsCell({
       <View
         style={[
           styles.oddsPill,
-          filled ? { backgroundColor: c.bg } : styles.oddsPillOutlined,
+          filled ? { backgroundColor: c.bg } : muted ? styles.oddsPillNeutral : styles.oddsPillOutlined,
         ]}
       >
         <Text
@@ -4712,7 +4712,14 @@ function LeaderRow({
   const body = atdView && atdStack ? (
     <>
       <View style={styles.rowTop}>
-        <Text style={styles.rank}>{injury?.sidelined ? '–' : rank}</Text>
+        <Text
+          style={styles.rank}
+          // The name already says the status; a spoken dash adds a stop, not news.
+          accessibilityElementsHidden={!!injury?.sidelined}
+          importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+        >
+          {injury?.sidelined ? '–' : rank}
+        </Text>
         {nameBlock}
       </View>
       {atdView ? (
@@ -4724,7 +4731,14 @@ function LeaderRow({
     </>
   ) : (
     <>
-      <Text style={styles.rank}>{injury?.sidelined ? '–' : rank}</Text>
+      <Text
+        style={styles.rank}
+        // The name already says the status; a spoken dash adds a stop, not news.
+        accessibilityElementsHidden={!!injury?.sidelined}
+        importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+      >
+        {injury?.sidelined ? '–' : rank}
+      </Text>
       {nameBlock}
       {metrics}
     </>
@@ -5023,7 +5037,14 @@ function HitRateRow({
   const body = atdView && atdStack ? (
     <>
       <View style={styles.rowTop}>
-        <Text style={styles.rank}>{injury?.sidelined ? '–' : rank}</Text>
+        <Text
+          style={styles.rank}
+          // The name already says the status; a spoken dash adds a stop, not news.
+          accessibilityElementsHidden={!!injury?.sidelined}
+          importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+        >
+          {injury?.sidelined ? '–' : rank}
+        </Text>
         {nameBlock}
       </View>
       {atdView ? (
@@ -5035,7 +5056,14 @@ function HitRateRow({
     </>
   ) : (
     <>
-      <Text style={styles.rank}>{injury?.sidelined ? '–' : rank}</Text>
+      <Text
+        style={styles.rank}
+        // The name already says the status; a spoken dash adds a stop, not news.
+        accessibilityElementsHidden={!!injury?.sidelined}
+        importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+      >
+        {injury?.sidelined ? '–' : rank}
+      </Text>
       {nameBlock}
       {metrics}
     </>
