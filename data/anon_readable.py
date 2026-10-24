@@ -60,6 +60,9 @@ ANON_READABLE: tuple[str, ...] = (
     "picks",
     "player_game_log",
     "player_handedness",
+    # Each player's current injury tag on the Stats board (2026-10-23).
+    # data/migrations/add_injury_status_current_2026_10_23.sql.
+    "injury_status_current",
     "player_news",
     # NBA/WNBA/NCAAF positions: the player page reads one row by key to pick
     # the card's group, and the position_vs_opponent_* functions join it

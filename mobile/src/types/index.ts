@@ -1167,6 +1167,25 @@ export interface TeamStatsRow {
 }
 
 /**
+ * One player's current injury designation (`injury_status_current`), kept by
+ * the injury ingestor from ESPN's team lists. Only absences are stored.
+ */
+export interface InjuryStatusRow {
+  sport: string;
+  team: string;
+  player_key: string;
+  player_name: string;
+  player_id: string | null;
+  /** Out, Doubtful, Questionable, Day-To-Day, IL10, IL15, IL60. */
+  status: string;
+  /** ESPN's own label where more specific: 'Injured Reserve', 'Suspension'. */
+  injury_type: string | null;
+  status_ts: string | null;
+  /** When the ingestor last confirmed this row (ISO). */
+  as_of: string;
+}
+
+/**
  * One recent-news note about one player, from `player_news`. `analysis` is the
  * fantasy-note ANALYSIS paragraph — null for providers (ESPN) that carry none,
  * and the sheet simply omits the block.
