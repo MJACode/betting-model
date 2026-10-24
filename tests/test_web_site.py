@@ -49,13 +49,19 @@ def test_legal_source_stays_intact_and_the_pages_drop_placeholders(tmp_path):
         assert "play.google.com" not in text
 
     terms = (tmp_path / "terms" / "index.html").read_text(encoding="utf-8")
-    assert "October 24, 2026" in terms
+    assert "<strong>Effective date:</strong> October 24, 2026" in terms
+    assert "filled in at publish" not in terms
+    assert "the date these terms are published" not in terms
     assert "Norfolk County, Massachusetts." in terms
     assert "please review" not in terms
     assert "https://www.1800gambler.net" in terms
     privacy = (tmp_path / "privacy" / "index.html").read_text(encoding="utf-8")
-    assert "October 24, 2026" in privacy
+    assert "<strong>Effective date:</strong> October 24, 2026" in privacy
+    assert "filled in at publish" not in privacy
+    assert "the date this policy is published" not in privacy
     assert "does not use cookies or analytics" in privacy
+    assert "filled in at publish" in terms_src
+    assert "filled in at publish" in privacy_src
 
 
 def test_a_leftover_bracket_fails_the_build():

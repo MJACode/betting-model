@@ -6,7 +6,7 @@ The record row on the landing page is not a stored number. The browser reads the
 
 `web/src/public-config.json` holds that anon key. It is the public key already shipped in the app (`EXPO_PUBLIC_SUPABASE_ANON_KEY` for project `vvprgnrmzeekokzkrkfu`). It is not a service-role key. The build refuses any key whose JWT role is not `anon`.
 
-Terms and Privacy are rendered at build time from `content/terms.md` and `content/privacy.md`. Those files stay as drafted. The build strips the DRAFT banner, removes bracketed `[ATTORNEY NOTE: …]` notes, and fills `[DATE]` with the build date in America/New_York. The build fails if a `[` still appears in any generated HTML page.
+Terms and Privacy are rendered at build time from `content/terms.md` and `content/privacy.md`. Those files stay as drafted. The build strips the DRAFT banner, removes bracketed `[ATTORNEY NOTE: …]` notes, fills `[DATE]` with the build date in America/New_York, and drops the “filled in at publish” clause so the line is “Effective date:” plus that date. The build fails if a `[` still appears in any generated HTML page.
 
 No cookies, analytics, third-party scripts, or hosted fonts. Type is the system font stack.
 

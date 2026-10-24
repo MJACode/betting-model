@@ -2,8 +2,9 @@
 """Build the Signal Base marketing site into dist/.
 
 Legal pages are rendered from web/content/*.md. The source files stay intact.
-This script strips the DRAFT banner, fills [DATE], and removes bracketed
-attorney notes. The build fails if a '[' survives in any generated HTML page.
+This script strips the DRAFT banner, fills [DATE], drops the
+"filled in at publish" clause, and removes bracketed attorney notes.
+The build fails if a '[' or that clause survives in any generated HTML page.
 """
 
 from __future__ import annotations
@@ -61,6 +62,14 @@ def strip_draft_banner(text: str) -> str:
 
 def strip_known_placeholders(text: str, when: str) -> str:
     text = text.replace("[DATE]", when)
+    # The source keeps the publish-instruction clause. The built page is only
+    # "Effective date: <date>". Terms and privacy use different nouns.
+    text = re.sub(
+        r" — the date (?:these terms are|this policy is) published on "
+        r"signalbase-ai\.com \(filled in at publish\)\.",
+        "",
+        text,
+    )
     text = re.sub(r"\[ATTORNEY NOTE:[^\]]*\]", "", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     return text
@@ -359,6 +368,8 @@ def build(out: Path, when_iso: str | None) -> str:
             raise PlaceholderError(f"placeholder survived in {html}")
         if "DRAFT —" in text or "FOR ATTORNEY REVIEW" in text:
             raise PlaceholderError(f"draft banner survived in {html}")
+        if "filled in at publish" in text:
+            raise PlaceholderError(f"effective-date clause survived in {html}")
     return when
 
 
