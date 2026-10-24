@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
@@ -23,8 +24,9 @@ import {
   formatSigned,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
-import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
-import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
+import { MODEL_META, modelDetailTitle, modelLong, modelPageTiming, modelShort, sportOfModel } from '@/lib/modelMeta';
+import { navShowsSportOnly } from '@/lib/modelBadgeLayout';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
@@ -130,12 +132,16 @@ export function BuiltInModelDetailScreen() {
     [history, latestSettledDate],
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
+  const { fontScale } = useWindowDimensions();
 
   // The long name: the prop-market rules share the short label "Props", so a
   // short title made their screens indistinguishable. The chip keeps it.
+  // At 1.5× and above the bar truncates ("NBA Team T…"), so it shows the sport.
   useEffect(() => {
-    navigation.setOptions({ title: modelLong(modelId) });
-  }, [navigation, modelId]);
+    navigation.setOptions({
+      title: navShowsSportOnly(fontScale) ? sportOfModel(modelId) : modelLong(modelId),
+    });
+  }, [navigation, modelId, fontScale]);
 
   // Prop models are Poisson count projections, so the model card labels their
   // holdout accuracy as over/under accuracy rather than a straight hit rate.
@@ -165,13 +171,20 @@ export function BuiltInModelDetailScreen() {
         ListHeaderComponent={
           <>
             <View style={styles.headerCard}>
-              <View style={styles.headerRow}>
-                <View style={styles.modelChip}>
-                  <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(modelId)}</Text>
-                </View>
-                <Text style={styles.modelTitle}>{modelLong(modelId)}</Text>
-                {paused ? <TagChip label="Paused" /> : null}
-              </View>
+              <ModelBadgeRow badge={modelShort(modelId)}>
+                <Text
+                  style={styles.modelTitle}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.85}
+                >
+                  {modelDetailTitle(modelId)}
+                </Text>
+                {paused ? (
+                  <View style={styles.pausedChip}>
+                    <TagChip label="Paused" />
+                  </View>
+                ) : null}
+              </ModelBadgeRow>
               <Text style={styles.modelSubtitle}>
                 {meta ? `Built-in ${categoryLabel(meta.type)} model` : 'Built-in model'}
               </Text>
@@ -537,33 +550,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  modelChip: {
-    backgroundColor: colors.noneSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
-    width: modelBadgeWidth,
-    flexShrink: 1,
-    alignItems: 'stretch',
-    justifyContent: 'center',
-  },
-  modelChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-    textAlign: 'center',
+  pausedChip: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
   },
   modelTitle: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
-    flex: 1,
-    minWidth: modelNameFloor,
   },
   modelSubtitle: {
     fontSize: font.size.footnote,

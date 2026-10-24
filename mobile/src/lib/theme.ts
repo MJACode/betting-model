@@ -158,23 +158,6 @@ export const spacing = {
   xxl: 32,
 };
 
-/**
- * Model-badge column. The longest short label is "LIVE Carries" (~72pt at
- * the caption size). A fixed width keeps the name beside every badge on one
- * left edge. The label wraps inside the box at larger text instead of
- * widening the column and pushing the name.
- */
-export const modelBadgeWidth = 112;
-
-/**
- * Floor for the name beside that badge. On a 320pt phone the Models row
- * has 162pt left after the 32pt margins, 24pt card padding, 12pt gap and
- * the 90pt record column (320 − 32 − 24 − 12 − 90). The badge stays 112
- * while the name still has this floor; below that the badge shrinks, so
- * at 2× text the bet type is not the thing that gets the leftover 50pt.
- */
-export const modelNameFloor = 96;
-
 export const font = {
   family: Platform.select({
     ios: 'System',

@@ -69,6 +69,13 @@ export function settledProfit(
   return stake * (americanToDecimal(oddsAmerican) - 1);
 }
 
+/** Account deletion. Clears the on-device manual log (`manualBets.v1`). */
+export async function clearManualBetsForAccountDeletion(): Promise<void> {
+  cached = [];
+  listeners.forEach((fn) => fn([]));
+  await AsyncStorage.removeItem(STORAGE_KEY);
+}
+
 export function useManualBets() {
   const [bets, setBets] = useState<ManualBet[]>(cached ?? []);
   const [ready, setReady] = useState<boolean>(cached != null);

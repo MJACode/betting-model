@@ -84,6 +84,13 @@ async function save(specs: LineLegSpec[]) {
   }
 }
 
+/** Account deletion. Clears line legs (`betslip.lineLegs.v1`). */
+export async function clearLineLegsForAccountDeletion(): Promise<void> {
+  cached = [];
+  listeners.forEach((fn) => fn([]));
+  await AsyncStorage.removeItem(STORAGE_KEY);
+}
+
 export function useLineLegs() {
   const [specs, setSpecs] = useState<LineLegSpec[]>(cached ?? []);
   const [ready, setReady] = useState<boolean>(cached != null);

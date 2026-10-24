@@ -90,6 +90,7 @@ import { showToast } from '@/components/Toast';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
+import { useThresholdsRevision } from '@/hooks/useActionThresholds';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
@@ -166,6 +167,9 @@ export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<TabParamList, 'Picks'>>();
   const { data: allData, pausedData, loading, loaded, error, partial, refresh, date } = useTodayPicks();
+  // The threshold store is a module. The fetch does not set React state.
+  // This revision is what makes Signals re-run passesActionFilter when it lands.
+  const thresholdsRevision = useThresholdsRevision();
   const { sport } = useSportFilter();
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
@@ -239,7 +243,7 @@ export function PicksHomeScreen() {
           !isPausedRow(d.pick) &&
           gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
       ),
-    [allLiveData, liveStates],
+    [allLiveData, liveStates, thresholdsRevision],
   );
   const liveData = useMemo(
     () => liveInProgress.filter((d) => d.pick.sport === sport),
@@ -347,13 +351,16 @@ export function PicksHomeScreen() {
   // Signals per sport, across ALL sports (not just the selected one) — the
   // toggle badge. The boards show one sport at a time, so without this a user
   // parked on their usual sport never learns another has bets waiting.
-  const sportSignalCounts = useMemo(() => signalCountsBySport(allData), [allData]);
+  const sportSignalCounts = useMemo(
+    () => signalCountsBySport(allData),
+    [allData, thresholdsRevision],
+  );
   // A pick is only a SIGNAL once it's locked. Future-dated UFC/golf picks
   // re-score until game day — they show on Today as lines/previews but are
   // excluded here (and from every signal count) until they lock.
   const live = useMemo(
     () => todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)),
-    [todayData],
+    [todayData, thresholdsRevision],
   );
 
   const activeItems: EnrichedPick[] =
@@ -490,7 +497,7 @@ export function PicksHomeScreen() {
           // counted three bets (UX review, 2026-09-26).
           (displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)),
       ),
-    [datedItems, displayFilter, gamePicker.selected],
+    [datedItems, displayFilter, gamePicker.selected, thresholdsRevision],
   );
   const filtered = useMemo(() => searchPicks(unsearched, search), [unsearched, search]);
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
@@ -514,7 +521,7 @@ export function PicksHomeScreen() {
       ...all.filter((d) => !isPausedForDisplay(d.pick)),
       ...all.filter((d) => isPausedForDisplay(d.pick)),
     ];
-  }, [filtered, sortKey, liveStates]);
+  }, [filtered, sortKey, liveStates, thresholdsRevision]);
   // Time sort reads as a schedule, so it is split by day with a header per
   // day (Matt, 2026-09-28). Every other sort is a ranking and stays one list.
   const rows: DayRow<EnrichedPick>[] = useMemo(
@@ -527,7 +534,7 @@ export function PicksHomeScreen() {
             (d) => isPausedForDisplay(d.pick),
           )
         : sorted.map((d) => ({ kind: 'item' as const, key: String(d.pick.pick_id), item: d })),
-    [filtered, sorted, sortKey],
+    [filtered, sorted, sortKey, thresholdsRevision],
   );
 
   // Games is shared with Stats. A game picked there (or here) can empty THIS
@@ -553,7 +560,7 @@ export function PicksHomeScreen() {
     const bet = todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).length;
     const paused = todayData.filter((d) => isPausedForDisplay(d.pick)).length;
     return { total: todayData.length, bet, paused };
-  }, [todayData]);
+  }, [todayData, thresholdsRevision]);
 
   // Signals / Live views: exposure of the recommended stakes on screen.
   const signalExposure = useMemo(() => {

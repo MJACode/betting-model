@@ -7,6 +7,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +17,7 @@ import {
   fetchTrackRecordDaily,
 } from '@/lib/queries';
 import { SPORTS } from '@/hooks/useSportFilter';
+import { MODEL_RECORD_BELOW_SCALE, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { modelHistoryMark, modelLong } from '@/lib/modelMeta';
 import { EquityCurve } from '@/components/EquityCurve';
 import { RecordHeroCard } from '@/components/RecordHeroCard';
@@ -358,9 +360,14 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
   // Their 1u stake is already inside units and risked.
   const unpriced = Number(row.picks ?? 0) - Math.round(Number(row.staked_flat ?? 0) / 100);
   const mark = modelHistoryMark(row.model_id);
+  const { fontScale } = useWindowDimensions();
+  // From 1.5× the percent moves under the name, the same way daily results
+  // does. Below that it stays on the right. 1.3× on a narrow phone does not
+  // move it: that case is the Models list and daily results only.
+  const pctBelow = fontScale >= MODEL_RECORD_BELOW_SCALE;
   return (
-    <View style={styles.modelRow}>
-      <View style={{ flex: 1 }}>
+    <View style={[styles.modelRow, pctBelow && styles.modelRowStacked]}>
+      <View style={pctBelow ? styles.modelLeftStacked : styles.modelLeft}>
         {/* Wraps. A one-line cap cut the bet type off the end of the name. */}
         <Text style={styles.modelName}>
           {modelLong(row.model_id)}
@@ -384,6 +391,7 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
       <Text
         style={[
           styles.modelRoi,
+          pctBelow && styles.modelRoiStacked,
           { color: decided < MIN_PICKS_FOR_COLOURED_ROI ? colors.textSecondary : roiColor(roi) },
         ]}
       >
@@ -500,12 +508,19 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
+  modelRowStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
+  modelLeft: { flex: 1 },
+  modelLeftStacked: { ...STACKED_BLOCK, alignSelf: 'stretch' },
   modelName: { fontSize: font.size.body, color: colors.textPrimary, fontWeight: font.weight.medium },
   // textSecondary, not textTertiary: tertiary on this ground is ~3.4:1 and
   // below the AA floor (UX_REVIEW §5), and this style now carries the caveat
   // line that exists to stop a thin ROI being read as a result.
   modelSub: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.md },
+  modelRoiStacked: { alignSelf: 'flex-end', marginTop: spacing.xs, marginLeft: 0 },
   empty: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,

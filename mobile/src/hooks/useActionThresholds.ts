@@ -1,8 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 import { fetchActionThresholds } from '@/lib/queries';
-import { markThresholdsFetched, setServerThresholds, type ServerThreshold } from '@/lib/thresholds';
+import {
+  markThresholdsFetched,
+  setServerThresholds,
+  subscribeThresholds,
+  thresholdsRevisionNow,
+  type ServerThreshold,
+} from '@/lib/thresholds';
 
 /**
  * Hydrate the live action thresholds from the model_action_thresholds table
@@ -17,6 +23,12 @@ import { markThresholdsFetched, setServerThresholds, type ServerThreshold } from
  * land on the next app open with NO rebuild.
  */
 const CACHE_KEY = 'actionThresholds.v1';
+
+/** The store revision. A screen that filters with isModelPaused during render
+ *  passes this into its useMemo deps so the fetch finishing re-renders it. */
+export function useThresholdsRevision(): number {
+  return useSyncExternalStore(subscribeThresholds, thresholdsRevisionNow, thresholdsRevisionNow);
+}
 
 export function useActionThresholds(): void {
   useEffect(() => {

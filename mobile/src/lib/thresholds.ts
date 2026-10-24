@@ -163,6 +163,15 @@ let serverThresholds: Record<string, ServerThreshold> | null = null;
 /** True only after the live table has been applied. The cache prime is not
  *  this: it can disagree with the fetch and would flash a label twice. */
 let thresholdsFetched = false;
+/** Bumps when the store changes. Signals reads the flag inside useMemo, so a
+ *  bare module write would leave the board on the pre-fetch answer. */
+let thresholdsRevision = 0;
+const thresholdListeners = new Set<() => void>();
+
+function emitThresholds(): void {
+  thresholdsRevision += 1;
+  thresholdListeners.forEach((fn) => fn());
+}
 
 /** Populate the server store (called by useActionThresholds). null = clear.
  *  Clearing also forgets that a fetch had landed, so the next cold start
@@ -170,11 +179,26 @@ let thresholdsFetched = false;
 export function setServerThresholds(map: Record<string, ServerThreshold> | null): void {
   serverThresholds = map;
   if (map == null) thresholdsFetched = false;
+  emitThresholds();
 }
 
 /** The network table has replaced the store. The cache prime does not call this. */
 export function markThresholdsFetched(): void {
-  if (serverThresholds != null) thresholdsFetched = true;
+  if (serverThresholds == null || thresholdsFetched) return;
+  thresholdsFetched = true;
+  emitThresholds();
+}
+
+/** Picks subscribes so the Signals list re-runs when the fetch lands. */
+export function subscribeThresholds(fn: () => void): () => void {
+  thresholdListeners.add(fn);
+  return () => {
+    thresholdListeners.delete(fn);
+  };
+}
+
+export function thresholdsRevisionNow(): number {
+  return thresholdsRevision;
 }
 
 /** True once server thresholds have loaded (else the bundled fallback is used). */
@@ -194,15 +218,18 @@ export function isBundledPaused(modelId: string): boolean {
 
 /**
  * Whether a model is paused (never surfaced as an actionable pick, and hidden
- * from the Models list). Prefers the server flag (model_action_thresholds.paused),
- * falls back to the bundled PAUSED_MODELS set when not yet loaded / offline.
+ * from the Models list and from Signals).
+ *
+ * An explicit `paused` flag always wins, cache or live table. A row with no
+ * flag is a cache from a build that did not store one: it overrides the
+ * bundled pause list only after the live table has been applied. Until then
+ * the bundle still pauses the model, so Signals does not flash mlb_over_under
+ * as live on a cold start. No row at all uses the bundled list.
  */
 export function isModelPaused(modelId: string): boolean {
   const sv = serverThresholds?.[modelId];
-  // A cache row written before `paused` existed is an object with no boolean.
-  // Treating that as "not paused" took the mark off, then the fetch put it
-  // back. A missing boolean is "not loaded", so the bundle stands.
   if (sv && typeof sv.paused === 'boolean') return sv.paused;
+  if (sv && hasFetchedThresholds()) return false;
   return PAUSED_MODELS.has(modelId);
 }
 
@@ -343,7 +370,9 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   const posted = p.discordPublish === 'published';
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
-    if (sv.paused) return false;
+    // Same pause rule as isModelPaused. `sv.paused` alone treats a cached
+    // row that omits the flag as live, and Signals is this filter.
+    if (isModelPaused(p.model_id)) return false;
     if (posted) return true;
     if (p.model_probability < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;

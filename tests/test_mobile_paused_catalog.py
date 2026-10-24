@@ -39,6 +39,20 @@ def _block(src: str, opener: str, closer: str) -> str:
     return src[start : src.index(closer, start)]
 
 
+def test_a_cached_row_without_a_paused_flag_stays_on_the_bundle_until_the_fetch():
+    """Signals hides through isModelPaused. An explicit paused flag always
+    wins. A row that omits the flag (an older cache) overrides the bundled
+    pause list only after hasFetchedThresholds."""
+    src = _read(MOBILE / "src" / "lib" / "thresholds.ts")
+    body = _block(src, "export function isModelPaused", "\n}")
+    assert "typeof sv.paused === 'boolean'" in body
+    assert "hasFetchedThresholds()" in body
+    assert "return PAUSED_MODELS.has(modelId);" in body
+    assert "if (sv) return sv.paused === true;" not in body
+    action = _block(src, "export function passesActionFilter", "\n}")
+    assert "isModelPaused(p.model_id)" in action
+
+
 def test_the_models_list_filters_paused_models():
     """ModelsScreen's built-in list is a catalog, not a record."""
     src = _read(MOBILE / "src" / "screens" / "ModelsScreen.tsx")
@@ -205,7 +219,9 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     assert "todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))" in screen
     thresholds = _read(MOBILE / "src" / "lib" / "thresholds.ts")
     body = _block(thresholds, "export function passesActionFilter", "\n}")
-    assert "if (sv.paused) return false;" in body
+    # The pause decision is isModelPaused, so a cached row that omits the
+    # flag does not read as live. The no-row path still uses the bundle.
+    assert "if (isModelPaused(p.model_id)) return false;" in body
     assert "if (PAUSED_MODELS.has(p.model_id)) return false;" in body
 
     card = _read(MOBILE / "src" / "components" / "PickCard.tsx")
