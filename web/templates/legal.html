@@ -1,0 +1,21 @@
+<main id="main" class="legal-main legal">
+    <div class="wrap">
+      <a class="back" href="/">Back to home</a>
+      <h1>{{H1}}</h1>
+      <nav class="tabs" aria-label="Policies">
+        <a href="/privacy"{{PRIVACY_CURRENT}}>Privacy Policy</a>
+        <a href="/terms"{{TERMS_CURRENT}}>Terms and Conditions</a>
+      </nav>
+      <div class="legal-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            {{TOC}}
+          </ol>
+        </nav>
+        <article class="prose">
+          {{BODY}}
+        </article>
+      </div>
+    </div>
+  </main>
