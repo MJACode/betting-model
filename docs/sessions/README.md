@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, the threshold fetch notifies the Picks screen, so Signals re-runs the action filter when the live table lands. The paused-catalog script runs in PR CI. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, a cached threshold row with no paused flag stays on the bundled pause list until the live table lands. An explicit flag still wins. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, stacked model rows no longer use flex:1, so the record stops drawing on the name. Double-Double can break after the hyphen. At 1.5× the nav title is the sport and Track Record puts the percent under the name. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, badges size to their label and stack above the name at 1.3× text or on a narrow phone; from 1.5× the record moves under the name. A server pause row wins even when `paused` is missing. nfl_wind_totals was already NFL Totals. NBA Team Totals stays. The wind reason line was not restored. |

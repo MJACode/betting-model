@@ -163,6 +163,15 @@ let serverThresholds: Record<string, ServerThreshold> | null = null;
 /** True only after the live table has been applied. The cache prime is not
  *  this: it can disagree with the fetch and would flash a label twice. */
 let thresholdsFetched = false;
+/** Bumps when the store changes. Signals reads the flag inside useMemo, so a
+ *  bare module write would leave the board on the pre-fetch answer. */
+let thresholdsRevision = 0;
+const thresholdListeners = new Set<() => void>();
+
+function emitThresholds(): void {
+  thresholdsRevision += 1;
+  thresholdListeners.forEach((fn) => fn());
+}
 
 /** Populate the server store (called by useActionThresholds). null = clear.
  *  Clearing also forgets that a fetch had landed, so the next cold start
@@ -170,11 +179,26 @@ let thresholdsFetched = false;
 export function setServerThresholds(map: Record<string, ServerThreshold> | null): void {
   serverThresholds = map;
   if (map == null) thresholdsFetched = false;
+  emitThresholds();
 }
 
 /** The network table has replaced the store. The cache prime does not call this. */
 export function markThresholdsFetched(): void {
-  if (serverThresholds != null) thresholdsFetched = true;
+  if (serverThresholds == null || thresholdsFetched) return;
+  thresholdsFetched = true;
+  emitThresholds();
+}
+
+/** Picks subscribes so the Signals list re-runs when the fetch lands. */
+export function subscribeThresholds(fn: () => void): () => void {
+  thresholdListeners.add(fn);
+  return () => {
+    thresholdListeners.delete(fn);
+  };
+}
+
+export function thresholdsRevisionNow(): number {
+  return thresholdsRevision;
 }
 
 /** True once server thresholds have loaded (else the bundled fallback is used). */

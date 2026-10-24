@@ -53,6 +53,8 @@ import {
   markThresholdsFetched,
   passesActionFilter,
   setServerThresholds,
+  subscribeThresholds,
+  thresholdsRevisionNow,
   type ServerThreshold,
 } from '../src/lib/thresholds';
 import { propModelForStat, statForPropModel, STAT_CATALOG } from '../src/lib/statCatalog';
@@ -469,6 +471,28 @@ check('an all-paused custom model gets the paused empty, not the quiet-slate one
     === 'Every bet type in this model has been paused — it is not producing new picks.');
 check('a mixed live+paused custom model is a quiet slate, not withdrawn',
   withdrawnRulesEmpty([{ model_id: 'mlb_moneyline' }, { model_id: 'mlb_over_under' }]) === null);
+
+{
+  let notes = 0;
+  const stop = subscribeThresholds(() => {
+    notes += 1;
+  });
+  const before = thresholdsRevisionNow();
+  setServerThresholds({
+    mlb_moneyline: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+  });
+  markThresholdsFetched();
+  const afterFetch = thresholdsRevisionNow();
+  markThresholdsFetched();
+  check('replacing the store and the fetch flag each notify once',
+    notes === 2 && afterFetch === before + 2 && thresholdsRevisionNow() === afterFetch);
+  setServerThresholds(null);
+  stop();
+  const picks = readFileSync(join(__dirname, '..', 'src/screens/PicksHomeScreen.tsx'), 'utf-8');
+  check('Signals re-runs the action filter when that notification lands',
+    picks.includes('useThresholdsRevision()') &&
+      picks.includes('[todayData, thresholdsRevision]'));
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
