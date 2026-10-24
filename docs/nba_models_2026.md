@@ -2316,3 +2316,22 @@ Two reviewers re-read the fixes above, and two more checked each finding (workfl
    end on placed bets.
 4. **A night whose game list got no answer is listed again at the end of the run**, and its
    games bought, under the same ceiling and floor.
+
+**What 11.5's first change leaves out (measured 2026-10-24 on the stored derivative purchase).**
+A book's alternate team totals can be bet only where that book also quotes a main team total.
+Share of games with one, 2023-24 / 2024-25 / 2025-26:
+
+| Book | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|
+| BetRivers | 87% | 100% | 100% |
+| DraftKings | 90% | 100% | 99% |
+| FanDuel | 80% | 99% | 100% |
+| Caesars | 60% | 93% | 99% |
+| BetMGM | 51% | 0% | 0% |
+| Hard Rock | 14% | 0% | 0% |
+| betPARX | 0% | 0% | 100% |
+| Fanatics | 0% | 0% | 0% |
+
+So the team-total cells (A3) mostly test BetRivers, DraftKings, FanDuel and Caesars. BetMGM's,
+Hard Rock's and Fanatics' alternate team totals are mostly out of scope. A thin A3 result means
+those books were not tested, not that their ladders hold nothing.
