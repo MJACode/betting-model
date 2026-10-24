@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, in-app delete account. Unapplied `delete_my_account()` then `delete_my_login()`; unlink only after the data delete; no phone-clock gate; local screen names an unlink, login, or tracked-bet failure. No production write. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, Signal Base marketing site in web/: landing, terms, privacy; record row from v_public_track_record; legal markdown stripped at build time. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, Eggz recap holds on needs_review and pending; NCAAF school names and ET/UTC twins; prop lines and sportless dates parse; all-time block matches the main recap; restate posts Corrected without deleting the sent row. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, the threshold fetch notifies the Picks screen, so Signals re-runs the action filter when the live table lands. The paused-catalog script runs in PR CI. |

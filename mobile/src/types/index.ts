@@ -603,6 +603,8 @@ export type RootStackParamList = {
   Paywall: undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
+  // Account deletion. Reachable from Settings only while signed in.
+  DeleteAccount: undefined;
   // In-app feedback: the composer + your past conversations, and one thread.
   Feedback: undefined;
   FeedbackThread: { threadId: number };

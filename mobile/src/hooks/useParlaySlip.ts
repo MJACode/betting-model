@@ -67,6 +67,13 @@ async function save(keys: string[]) {
   }
 }
 
+/** Account deletion. Empties the slip and drops the abandoned v1 key too. */
+export async function clearParlaySlipForAccountDeletion(): Promise<void> {
+  cached = [];
+  listeners.forEach((fn) => fn([]));
+  await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_KEY]);
+}
+
 export function useParlaySlip() {
   const [keys, setKeys] = useState<string[]>(cached ?? []);
   const [ready, setReady] = useState<boolean>(cached != null);

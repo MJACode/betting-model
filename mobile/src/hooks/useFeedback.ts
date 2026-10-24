@@ -35,6 +35,14 @@ function emit() {
   listeners.forEach((fn) => fn());
 }
 
+/** The account delete removes this member's threads. Drop the in-memory copy. */
+export function clearFeedbackForAccountDeletion(): void {
+  threads = [];
+  unread = 0;
+  loaded = false;
+  emit();
+}
+
 function setThreads(next: FeedbackThread[]) {
   threads = sortThreads(next);
   unread = unreadTotal(threads);

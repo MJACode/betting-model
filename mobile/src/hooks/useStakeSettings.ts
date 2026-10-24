@@ -89,6 +89,12 @@ async function saveCustomStake(pickId: number, amount: number | null) {
   await AsyncStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
 }
 
+/** Account deletion. Flat mode, no custom stakes, and both keys removed. */
+export async function clearStakeSettingsForAccountDeletion(): Promise<void> {
+  emit({ ...DEFAULT_STATE, custom: {} });
+  await AsyncStorage.multiRemove([MODE_KEY, CUSTOM_KEY]);
+}
+
 export function useStakeSettings() {
   const [state, setState] = useState<StakeState>(cached ?? DEFAULT_STATE);
   const [ready, setReady] = useState<boolean>(cached != null);
