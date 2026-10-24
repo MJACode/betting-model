@@ -736,6 +736,11 @@ ok(signalsLabelHeadline('Paige Bueckers Under 3.5 Reb (DK)') === 'Paige Bueckers
 ok(signalsLabelHeadline('Jadarian Price Over 1.5 Rec (FD)') === 'Jadarian Price Over 1.5 Rec', 'rec drops FD');
 ok(signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · 0.98u · up 5h') === 'CHI @ ATL — CHI +0.5', 'up hours comes off');
 ok(signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · age unknown') === 'CHI @ ATL — CHI +0.5', 'age unknown comes off');
+ok(signalsLabelHeadline('TEN @ NYG — NYG -1 · 1.96u · NEW 0m') === `TEN @ NYG — NYG ${MINUS}1`, 'new opener label is the bet');
+ok(signalsLabelHeadline('NYJ @ MIA Under 43.5 · 1.00u') === 'NYJ @ MIA Under 43.5', 'new wind label is the bet');
+ok(!signalsLabelHeadline('TEN @ NYG — NYG -1 · 1.96u · NEW 0m').includes('Pinnacle'), 'new opener has no Pinnacle');
+ok(!signalsLabelHeadline('NYJ @ MIA Under 43.5 · 1.00u').includes('Wind'), 'new wind has no Wind');
+ok(signalsLabelHeadline('Jadarian Price Over 1.5 Rec') === 'Jadarian Price Over 1.5 Rec', 'new prop label has no book suffix');
 ok(signalsLabelHeadline('Boston Bruins (Regulation) · 1.10u · NEW 0m') === 'Boston Bruins (Regulation)', 'regulation stays');
 ok(signalsLabelHeadline('Scottie Scheffler over Rory McIlroy (matchup) · 0.50u · NEW 0m') === 'Scottie Scheffler over Rory McIlroy (matchup)', 'matchup stays');
 ok(signalsBetHeadline({ side: 'away', line: -0.5, market: 'spreads', homeTeam: 'ATL', awayTeam: 'CHI', label: openerChi }) === 'CHI +0.5', 'opener hero is the pick');

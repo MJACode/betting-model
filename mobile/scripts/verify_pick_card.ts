@@ -28,6 +28,7 @@ import {
   snapshotMatchesLock,
   splitPickTitle,
   pickRowTitle,
+  storedQuoteBook,
   todayBoardHandoff,
   MODEL_BOOK,
 } from '../src/lib/markets';
@@ -1158,7 +1159,46 @@ check(
     'an opener age that is not NEW, and a stake after it, still come off',
     signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · 0.98u · up 5h') === 'CHI @ ATL — CHI +0.5' &&
       signalsLabelHeadline('CHI @ ATL — CHI +0.5 (Opener -2 vs Pinnacle, DK) · age unknown') === 'CHI @ ATL — CHI +0.5' &&
-      signalsLabelHeadline('CHI @ ATL — CHI +0.5 · NEW 0m · 0.98u') === 'CHI @ ATL — CHI +0.5',
+      signalsLabelHeadline('CHI @ ATL — CHI +0.5 · NEW 0m · 0.98u') === 'CHI @ ATL — CHI +0.5' &&
+      signalsLabelHeadline('TEN @ NYG — NYG -1 · 1.96u · NEW 0m') === `TEN @ NYG — NYG ${MINUS}1` &&
+      signalsLabelHeadline('WAS @ SF Under 51.5 · 1.01u') === 'WAS @ SF Under 51.5' &&
+      !signalsLabelHeadline('TEN @ NYG — NYG -1 · 1.96u · NEW 0m')!.includes('Pinnacle') &&
+      !signalsLabelHeadline('WAS @ SF Under 51.5 · 1.01u')!.includes('Wind'),
+  );
+  check(
+    'the book comes off an old label, and off decision_book once the label is clean',
+    storedQuoteBook({ model_id: 'nfl_opener_spread', pick_label: openerNyg, decision_book: null }) === 'betmgm' &&
+      storedQuoteBook({
+        model_id: 'nfl_opener_spread',
+        pick_label: 'TEN @ NYG — NYG -1 · 1.96u · NEW 0m',
+        decision_book: 'betmgm',
+      }) === 'betmgm' &&
+      storedQuoteBook({ model_id: 'nfl_wind_totals', pick_label: windSf, decision_book: null }) === 'betmgm' &&
+      storedQuoteBook({
+        model_id: 'nfl_wind_totals',
+        pick_label: 'WAS @ SF Under 51.5 · 1.01u',
+        decision_book: 'betmgm',
+      }) === 'betmgm' &&
+      storedQuoteBook({
+        model_id: 'nfl_prop_market',
+        pick_label: 'Jadarian Price Over 1.5 Rec (FD)',
+        decision_book: null,
+      }) === 'fanduel' &&
+      storedQuoteBook({
+        model_id: 'nfl_prop_market',
+        pick_label: 'Jadarian Price Over 1.5 Rec',
+        decision_book: 'fanduel',
+      }) === 'fanduel' &&
+      storedQuoteBook({
+        model_id: 'wnba_prop_market',
+        pick_label: "A'ja Wilson Over 21.5 Pts (DK)",
+        decision_book: null,
+      }) === 'draftkings' &&
+      storedQuoteBook({
+        model_id: 'mlb_f5_moneyline',
+        pick_label: 'NYY ML (F5)',
+        decision_book: null,
+      }) === 'draftkings',
   );
   check(
     '(Regulation) and (matchup) stay when the stake and the age come off',

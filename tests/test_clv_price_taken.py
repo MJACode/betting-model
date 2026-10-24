@@ -160,6 +160,13 @@ TOTALS = [  # group A: DraftKings -115, BetMGM -105 at the same 8.5
      "CAR @ CLE Under 42.5 (Wind 11 mph, fanatics) · 0.78u", (-110.0, "fanatics")),
     ("nfl_wind_totals", -105.0, None, None,
      "DEN @ KC Under 43.5 (Wind 12 mph, DK) · 1.15u", (-105.0, "draftkings")),
+    # new labels: the book is on the row, and the annotation is gone
+    ("nfl_wind_totals", -105.0, -105.0, "fanduel",
+     "NYJ @ MIA Under 43.5 · 1.00u", (-105.0, "fanduel")),
+    ("nfl_opener_spread", -105.0, -105.0, "betmgm",
+     "TEN @ NYG — NYG -1 · 1.96u · NEW 0m", (-105.0, "betmgm")),
+    ("nfl_prop_market", -120.0, -120.0, "fanduel",
+     "Jadarian Price Over 1.5 Rec", (-120.0, "fanduel")),
     # a parenthesis on a model that never names a book in its label is NOT a book
     ("mlb_f5_moneyline", -130.0, None, None, "NYY ML (F5)", (-130.0, "draftkings")),
     # nothing priced

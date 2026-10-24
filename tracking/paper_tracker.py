@@ -1597,12 +1597,13 @@ _PROP_MARKET_FOR_MODEL = {
     "nhl_prop_assists": "player_assists",
 }
 
-# The market-relative cards write the SOFT book's price into dk_odds and name
-# the book only in the label suffix -- "Jadarian Price Over 1.5 Rec (FD)" --
-# so their close has to be read at THAT book: an FD open against a DK close is
-# arithmetic on two different books. One inverse of the cards' _BOOK map,
-# pinned against both cards by test. A book outside the map is written raw
+# Rows written before decision_book was filled name the soft book only in
+# the label suffix -- "Jadarian Price Over 1.5 Rec (FD)" -- so their close
+# has to be read at THAT book: an FD open against a DK close is arithmetic
+# on two different books. One inverse of the cards' _BOOK map, pinned
+# against both cards by test. A book outside the map is written raw
 # ("(fliff)"), so a raw key is accepted too; no suffix means DraftKings.
+# New rows carry decision_book and decision_odds and leave the suffix off.
 _LABEL_BOOK = {"DK": "draftkings", "FD": "fanduel", "MGM": "betmgm",
                "CZR": "williamhill_us", "ESPN": "espnbet", "PIN": "pinnacle"}
 _LABEL_BOOK_RE = re.compile(r"\(([A-Za-z_]+)\)\s*$")
@@ -1617,12 +1618,14 @@ def _book_from_label(pick_label: str | None) -> str:
     return _LABEL_BOOK.get(token.upper(), token.lower())
 
 
-# The NFL cards (scripts/nfl_wind_publisher.py) store the best book's price in
-# dk_odds and name the book INSIDE the label's annotation, not as a suffix:
+# NFL wind and opener rows written before decision_book was filled name the
+# book INSIDE the label's annotation, not as a suffix:
 #   "PIT @ CLE Under 38.5 (Wind 11 mph, CZR) · 1.19u"
 #   "HOU @ TEN — TEN +9.5 (Opener +2 vs Pinnacle, BR) · 1.67u · NEW 0m"
 # One inverse of that publisher's BOOK_ABBREV, pinned by test. An unmapped book
 # is written raw ("fanatics"), so a raw key is accepted, as for _LABEL_BOOK.
+# New rows carry decision_book and leave the annotation off. The parse stays
+# so a stored label still grades at the book it names.
 _NFL_LABEL_BOOK = {"DK": "draftkings", "FD": "fanduel", "MGM": "betmgm",
                    "CZR": "williamhill_us", "ESPN": "espnbet", "BR": "betrivers",
                    "BOV": "bovada", "PIN": "pinnacle"}
