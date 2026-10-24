@@ -2635,27 +2635,34 @@ def _record_restate_exception(item: dict, exc: BaseException) -> None:
         conn.close()
 
 
-def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
-    """The recap's all-time block: one overall field, then one per sport.
-    The daily recap and the standalone full-record post both render this."""
-    all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
-    all_overall = _tally(all_rows)
-    all_by_sport: dict[str, list[tuple]] = {}
-    for r in all_rows:
-        all_by_sport.setdefault(r[0], []).append(r)
+def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
+    """One overall field, then one per sport. The daily recap, the standalone
+    full-record post, and the Eggz recap all render this."""
+    overall = _tally(rows)
+    by_sport: dict[str, list[tuple]] = {}
+    for r in rows:
+        by_sport.setdefault(r[0], []).append(r)
     fields = [{
-        "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
-        "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
-                 f"{len(all_rows)} settled",
+        "name": f"\u200b\nAll-time  ·  since {since}",
+        "value": f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                 f"{len(rows)} settled",
         "inline": False,
     }]
-    for sport, group in sorted(all_by_sport.items()):
+    for sport, group in sorted(by_sport.items()):
         fields.append({
             "name": f"{sport} (all-time)",
             "value": _tally_line(_tally(group), with_clv=True),
             "inline": False,
         })
-    return fields, all_overall, len(all_rows)
+    return fields
+
+
+def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
+    """The recap's all-time block: one overall field, then one per sport.
+    The daily recap and the standalone full-record post both render this."""
+    all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
+    return (render_all_time_fields(all_rows, config.PAPER_TRADING_START),
+            _tally(all_rows), len(all_rows))
 
 
 def all_time_embed(conn, through: str) -> dict:
