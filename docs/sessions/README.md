@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, Eggz recap holds on needs_review and pending; NCAAF school names and ET/UTC twins; prop lines and sportless dates parse; all-time block matches the main recap; restate posts Corrected without deleting the sent row. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, a sidelined player cannot be added to a bet: Stats price pill disabled for Out/IR/SUSP/IL; betslip add rejects the same lookup; silent no-op. Pill role and label are literal on the Pressable so the a11y scan sees them. |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, history mark stays on the bundled pause set until the live thresholds table lands; the 112pt badge yields so the name keeps 96pt on a 320pt phone; betTypeLabel is always the long name. |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, model names wrap so the bet type is not ellipsized; badges share a fixed width; a paused or retired pick says "MLB Totals · Paused" on detail, the card footer, and VoiceOver. MLB Pitcher Outs. |
