@@ -4217,8 +4217,8 @@ function OddsCell({
   const pillA11y = {
     onPress: pill.pressable ? onPress : undefined,
     disabled: pill.disabled,
-    accessibilityRole: 'button' as const,
-    accessibilityLabel: label,
+    // Role and label stay literal on each Pressable: verify_a11y reads them
+    // from the JSX and cannot see through a spread.
     accessibilityState: muted ? { disabled: true } : undefined,
     ...(pill.pressable ? { accessibilityHint: 'Asks to add this line to your betslip' } : {}),
   };
@@ -4239,6 +4239,8 @@ function OddsCell({
     return holdSidelinedTap(muted, (
       <Pressable
         {...pillA11y}
+        accessibilityRole="button"
+        accessibilityLabel={label}
         // Vertical slop crossed into the matchup line and the next name once
         // the stacked gap shrank to 2pt. The 44pt box is the target.
         hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
@@ -4270,6 +4272,8 @@ function OddsCell({
   return holdSidelinedTap(muted, (
     <Pressable
       {...pillA11y}
+      accessibilityRole="button"
+      accessibilityLabel={label}
       // Dropping the caption shrank the target below 44pt, so hitSlop makes up
       // the difference; a mis-tap opens a dismissible sheet, never a book.
       hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
