@@ -35,7 +35,12 @@ import { EMAIL_OTP_LENGTH } from '@/lib/authConfig';
 import { openManageSubscription } from '@/lib/billing';
 import { isEntitled } from '@/lib/billingHelpers';
 import { billingReady } from '@/lib/billingConfig';
-import { finishLocalAccountDeletion, runAccountDeletion } from '@/lib/deleteAccount';
+import {
+  finishLocalAccountDeletion,
+  runAccountDeletion,
+  continueAccountDeletion,
+  type LocalFailure,
+} from '@/lib/deleteAccount';
 import {
   CONFIRM_BODY,
   CONFIRM_TITLE,
@@ -47,6 +52,9 @@ import {
   REAUTH_APPLE_BODY,
   REAUTH_TITLE,
   STAYS_LINE,
+  LOGIN_INCOMPLETE,
+  TRACKED_INCOMPLETE,
+  UNLINK_INCOMPLETE,
   deletedLines,
   providersForUser,
   purchasePlace,
@@ -62,6 +70,13 @@ import type { RootStackParamList } from '@/types';
 type Nav = NativeStackNavigationProp<RootStackParamList, 'DeleteAccount'>;
 type Phase = 'ready' | 'deleting' | 'error' | 'local' | 'done';
 
+function localBannerCopy(failure: LocalFailure): string {
+  if (failure === 'unlink') return UNLINK_INCOMPLETE;
+  if (failure === 'login') return LOGIN_INCOMPLETE;
+  if (failure === 'tracked') return TRACKED_INCOMPLETE;
+  return LOCAL_INCOMPLETE;
+}
+
 /**
  * Delete account. Option A confirm (the system alert). Re-auth is shown
  * only after delete_my_account() rejects a stale session. The type-DELETE
@@ -76,16 +91,19 @@ export function DeleteAccountScreen() {
   const { deviceId } = useDeviceId();
 
   const [phase, setPhase] = useState<Phase>('ready');
+  const [localFailure, setLocalFailure] = useState<LocalFailure>('wipe');
+  const [loginDeleted, setLoginDeleted] = useState(false);
   const [reauth, setReauth] = useState(false);
   const [code, setCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
   const [localRetry, setLocalRetry] = useState(false);
-  const [reauthError, setReauthError] = useState<string | null>(null);
+  const [reauthMessage, setReauthMessage] = useState<string | null>(null);
   const [reauthBusy, setReauthBusy] = useState(false);
   const sentFor = useRef<string | null>(null);
 
   const method: ReauthMethod = reauthMethod(providersForUser(user));
   const deleting = phase === 'deleting';
+  const onLocalScreen = phase === 'local' || (deleting && localRetry);
   const locked = deleting || phase === 'local';
   const place = purchasePlace({
     appAccess: access.app_access || isEntitled(subscription),
@@ -101,12 +119,12 @@ export function DeleteAccountScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: phase === 'local' ? 'Clear this phone' : 'Delete account',
+      title: onLocalScreen ? 'Clear this phone' : 'Delete account',
       headerShown: phase !== 'done',
       headerBackVisible: !locked,
       gestureEnabled: !locked,
     });
-  }, [navigation, phase, locked]);
+  }, [navigation, phase, locked, onLocalScreen]);
 
   useEffect(() => {
     const sub = navigation.addListener('beforeRemove', (e) => {
@@ -115,42 +133,59 @@ export function DeleteAccountScreen() {
     return sub;
   }, [navigation, locked]);
 
-  const run = useCallback(
-    async (lastSignInAt: string | null) => {
-      setPhase('deleting');
-      setReauth(false);
-      try {
-        const outcome = await runAccountDeletion({
-          lastSignInAt,
-          deviceId,
-        });
-        if (outcome.ok) {
-          setPhase('done');
-          return;
-        }
-        if (outcome.stale) {
-          setPhase('ready');
-          setCode('');
-          setCodeSent(false);
-          setReauthError(null);
-          setReauth(true);
-          return;
-        }
-        setPhase(outcome.serverDeleted ? 'local' : 'error');
-      } catch {
-        setPhase('error');
+  const applyOutcome = useCallback((outcome: Awaited<ReturnType<typeof runAccountDeletion>>) => {
+    if (outcome.ok) {
+      setPhase('done');
+      return;
+    }
+    if (outcome.serverDeleted) {
+      setLocalFailure(outcome.localFailure);
+      setLoginDeleted(outcome.loginDeleted);
+      setPhase('local');
+      if (outcome.stale) {
+        setCode('');
+        setCodeSent(false);
+        setReauthMessage(null);
+        setReauth(true);
       }
-    },
-    [deviceId],
-  );
+      return;
+    }
+    if (outcome.stale) {
+      setPhase('ready');
+      setCode('');
+      setCodeSent(false);
+      setReauthMessage(null);
+      setReauth(true);
+      return;
+    }
+    setPhase('error');
+  }, []);
+
+  const run = useCallback(async () => {
+    setPhase('deleting');
+    setReauth(false);
+    try {
+      applyOutcome(await runAccountDeletion({ deviceId }));
+    } catch {
+      setPhase('error');
+    }
+  }, [applyOutcome, deviceId]);
 
   const retryLocal = useCallback(async () => {
     setLocalRetry(true);
     setPhase('deleting');
-    const cleared = await finishLocalAccountDeletion(deviceId);
-    setLocalRetry(false);
-    setPhase(cleared ? 'done' : 'local');
-  }, [deviceId]);
+    try {
+      if (!loginDeleted) {
+        applyOutcome(await continueAccountDeletion(deviceId));
+        return;
+      }
+      const failure = await finishLocalAccountDeletion(deviceId);
+      if (failure) setLocalFailure(failure);
+      setPhase(failure ? 'local' : 'done');
+    } finally {
+      setLocalRetry(false);
+    }
+  }, [applyOutcome, deviceId, loginDeleted]);
 
   const ask = useCallback(() => {
     Alert.alert(CONFIRM_TITLE, CONFIRM_BODY, [
@@ -159,15 +194,15 @@ export function DeleteAccountScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: () => {
-          void run(user?.last_sign_in_at ?? null);
+          void run();
         },
       },
     ]);
-  }, [run, user?.last_sign_in_at]);
+  }, [run]);
 
   const sendCode = useCallback(async () => {
     if (!email) return;
-    setReauthError(null);
+    setReauthMessage(null);
     setCodeSent(false);
     setReauthBusy(true);
     try {
@@ -175,7 +210,7 @@ export function DeleteAccountScreen() {
       sentFor.current = email;
       setCodeSent(true);
     } catch (e) {
-      setReauthError(authErrorMessage(e));
+      setReauthMessage(authErrorMessage(e));
     } finally {
       setReauthBusy(false);
     }
@@ -192,32 +227,36 @@ export function DeleteAccountScreen() {
 
   const onProvider = useCallback(async () => {
     if (method === 'email') return;
-    setReauthError(null);
+    setReauthMessage(null);
     setReauthBusy(true);
     try {
       const session = await signInWithProvider(method);
       if (!session) return;
-      await run(session.user.last_sign_in_at ?? new Date().toISOString());
+      setReauth(false);
+      if (phase === 'local') await retryLocal();
+      else await run();
     } catch (e) {
-      setReauthError(authErrorMessage(e));
+      setReauthMessage(authErrorMessage(e));
     } finally {
       setReauthBusy(false);
     }
-  }, [method, run]);
+  }, [method, phase, retryLocal, run]);
 
   const onConfirmCode = useCallback(async () => {
     if (!email || !isCompleteOtp(code)) return;
-    setReauthError(null);
+    setReauthMessage(null);
     setReauthBusy(true);
     try {
-      const session = await verifyEmailCode(email, code);
-      await run(session.user.last_sign_in_at ?? new Date().toISOString());
+      await verifyEmailCode(email, code);
+      setReauth(false);
+      if (phase === 'local') await retryLocal();
+      else await run();
     } catch (e) {
-      setReauthError(authErrorMessage(e));
+      setReauthMessage(authErrorMessage(e));
     } finally {
       setReauthBusy(false);
     }
-  }, [email, code, run]);
+  }, [email, code, phase, retryLocal, run]);
 
   const onManage = useCallback(() => {
     const open = async () => {
@@ -297,7 +336,7 @@ export function DeleteAccountScreen() {
       ? 'Sending a 6-digit code…'
       : codeSent
         ? reauthEmailBody(email ?? 'your email')
-        : reauthError
+        : reauthMessage
           ? 'The code was not sent.'
           : 'Sending a 6-digit code…';
   const providerApple = method === 'apple';
@@ -309,19 +348,19 @@ export function DeleteAccountScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        {phase === 'error' || phase === 'local' ? (
+        {phase === 'error' || onLocalScreen ? (
           <View
-            style={phase === 'local' ? styles.localBanner : styles.banner}
+            style={onLocalScreen ? styles.localBanner : styles.banner}
             accessibilityRole="alert"
             accessibilityLiveRegion="polite"
           >
-            <Text style={phase === 'local' ? styles.localBannerText : styles.bannerText}>
-              {phase === 'local' ? LOCAL_INCOMPLETE : DELETE_ERROR}
+            <Text style={onLocalScreen ? styles.localBannerText : styles.bannerText}>
+              {onLocalScreen ? localBannerCopy(localFailure) : DELETE_ERROR}
             </Text>
           </View>
         ) : null}
 
-        {phase === 'local' ? (
+        {onLocalScreen ? (
           <Text style={styles.title} accessibilityRole="header">
             Finish clearing this phone
           </Text>
@@ -376,7 +415,7 @@ export function DeleteAccountScreen() {
             phase === 'local'
               ? () => void retryLocal()
               : phase === 'error'
-                ? () => void run(user?.last_sign_in_at ?? null)
+                ? () => void run()
                 : ask
           }
           disabled={deleting}
@@ -395,7 +434,7 @@ export function DeleteAccountScreen() {
           ) : null}
           <Text style={styles.dangerText}>{primaryLabel}</Text>
         </Pressable>
-        {phase === 'local' ? null : (
+        {onLocalScreen ? null : (
           <Pressable
             onPress={leave}
             disabled={deleting}
@@ -466,9 +505,9 @@ export function DeleteAccountScreen() {
                     style={styles.codeInput}
                   />
                 ) : null}
-                {reauthError ? (
-                  <Text style={styles.reauthError} accessibilityRole="alert">
-                    {reauthError}
+                {reauthMessage ? (
+                  <Text style={styles.reauthMessage} accessibilityRole="alert">
+                    {reauthMessage}
                   </Text>
                 ) : null}
               </ScrollView>
@@ -825,7 +864,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
-  reauthError: {
+  reauthMessage: {
     fontSize: font.size.footnote,
     color: colors.avoidInk,
     marginBottom: spacing.sm,

@@ -3,15 +3,17 @@
  * scripts/verify_delete_account.ts can import this file.
  *
  * The server rule lives in data/migrations/delete_my_account_2026_10_24.sql:
- * delete_my_account() raises SQLSTATE 28000 / STALE_SESSION unless the
- * caller's last_sign_in_at is within FRESH_SIGN_IN_MINUTES. A rejected JWT
- * never reaches that function (PostgREST PGRST301). Both map to the re-auth
- * sheet. Anything else is the error banner, and nothing was deleted.
+ * delete_my_account() and delete_my_login() each raise SQLSTATE 28000 /
+ * STALE_SESSION unless the caller's last_sign_in_at is within
+ * FRESH_SIGN_IN_MINUTES. A rejected JWT never reaches those functions
+ * (PostgREST PGRST301). Both map to the re-auth sheet. The phone clock does
+ * not decide anything. Anything else before the data delete is the error
+ * banner, and nothing was deleted.
  */
 
 import { errorText } from './errors';
 
-/** Must match interval '10 minutes' in delete_my_account(). */
+/** Must match interval '10 minutes' in delete_my_account() and delete_my_login(). */
 export const FRESH_SIGN_IN_MINUTES = 10;
 
 export const STALE_SESSION_CODE = '28000';
@@ -36,6 +38,21 @@ export const CONFIRM_BODY =
 
 export const DELETE_ERROR =
   "Couldn't delete your account. Check your connection and try again. Nothing was deleted.";
+
+/**
+ * delete_my_account() committed and the login is still there, because Discord
+ * or the sportsbook link did not come off. Not the success toast.
+ */
+export const UNLINK_INCOMPLETE =
+  'Your saved data was deleted, but Discord or your sportsbook connection is still linked. Try again.';
+
+/** delete_my_account() committed. delete_my_login() did not, so the sign-in remains. */
+export const LOGIN_INCOMPLETE =
+  'Your saved data was deleted, but your sign-in is still active. Try again.';
+
+/** The login is gone. This install's tracked_bets delete did not. */
+export const TRACKED_INCOMPLETE =
+  "Your account was deleted, but this phone's tracked bets could not be cleared. Try again.";
 
 /** The server delete committed. This phone still holds the user's data. */
 export const LOCAL_INCOMPLETE =
@@ -76,22 +93,6 @@ export function isStaleSessionError(err: unknown): boolean {
 }
 
 export type ReauthMethod = 'apple' | 'google' | 'email';
-
-/**
- * Whether this client should revoke Discord and SharpSports before calling
- * the RPC. The RPC itself is still always called: a stale rejection is the
- * only thing that opens re-auth. When this is false the RPC is called with
- * no prior unlink, so a rejection leaves those links in place.
- */
-export function sessionLooksFresh(
-  lastSignInAt: string | null | undefined,
-  nowMs: number,
-): boolean {
-  if (!lastSignInAt) return false;
-  const t = Date.parse(lastSignInAt);
-  if (Number.isNaN(t)) return false;
-  return nowMs - t >= 0 && nowMs - t < FRESH_SIGN_IN_MINUTES * 60 * 1000;
-}
 
 /** Apple wins when the account has more than one identity. Email is the rest. */
 export function reauthMethod(providers: readonly string[]): ReauthMethod {
@@ -206,6 +207,20 @@ export const ACCOUNT_WIPE_KEYS = [
   'betslip.lineLegs.v1',
   'sportsbook.connections.v2',
   'sportsbook.connection.v1',
+  'preferredBooks.selected',
+  'preferredBooks.promptDue',
+  'preferredBook.selected',
+  'push.optIn.v1',
+] as const;
+
+/**
+ * On-device copies of server query results. Not the user's account. Cleared
+ * with the wipe so the next read refetches. `device.id` is not here.
+ */
+export const QUERY_CACHE_KEYS = [
+  'settledPicks.v9',
+  'actionThresholds.v1',
+  'modelClvPedigree.v2',
 ] as const;
 
 export const DEVICE_ID_KEY = 'device.id';

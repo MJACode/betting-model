@@ -22,15 +22,18 @@ import {
   DELETED_TOAST,
   DEVICE_ID_KEY,
   FRESH_SIGN_IN_MINUTES,
+  QUERY_CACHE_KEYS,
   STALE_SESSION_CODE,
   STALE_SESSION_TOKEN,
   STAYS_LINE,
+  LOGIN_INCOMPLETE,
+  TRACKED_INCOMPLETE,
+  UNLINK_INCOMPLETE,
   deletedLines,
   isStaleSessionError,
   providersForUser,
   purchasePlace,
   reauthMethod,
-  sessionLooksFresh,
   subscriptionNotice,
 } from '../src/lib/deleteAccountHelpers';
 
@@ -50,15 +53,10 @@ function eq<T>(label: string, actual: T, expected: T) {
   else failures.push(`${label} — got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
 }
 
-const MIN = FRESH_SIGN_IN_MINUTES * 60 * 1000;
-const now = Date.parse('2026-10-24T15:00:00Z');
-
 // --- stale session ----------------------------------------------------------
 check('fresh window is 10 minutes', FRESH_SIGN_IN_MINUTES === 10);
-check('a sign-in just now looks fresh', sessionLooksFresh(new Date(now - 60_000).toISOString(), now));
-check('a sign-in 11 minutes ago does not', !sessionLooksFresh(new Date(now - 11 * MIN / 10).toISOString(), now));
-check('a missing timestamp does not look fresh', !sessionLooksFresh(null, now));
-check('a future timestamp does not look fresh', !sessionLooksFresh(new Date(now + MIN).toISOString(), now));
+const helpers = read('src/lib/deleteAccountHelpers.ts');
+check('the phone clock is not a gate', !helpers.includes('sessionLooksFresh'));
 
 check('SQLSTATE 28000 is stale', isStaleSessionError({ code: STALE_SESSION_CODE, message: 'STALE_SESSION' }));
 check('the STALE_SESSION token is stale', isStaleSessionError(new Error(STALE_SESSION_TOKEN)));
@@ -89,6 +87,9 @@ check('permanent copy says it happens now', DELETE_PERMANENT.includes("can't und
 eq('confirm title', CONFIRM_TITLE, 'Delete your account?');
 check('confirm names what goes', CONFIRM_BODY.includes('tracked picks') && CONFIRM_BODY.includes("can't undo this"));
 check('error says nothing was deleted', DELETE_ERROR.includes('Nothing was deleted'));
+check('unlink failure is not plain success', !UNLINK_INCOMPLETE.includes('Nothing was deleted') && UNLINK_INCOMPLETE.includes('still linked'));
+check('login failure names the sign-in', LOGIN_INCOMPLETE.includes('sign-in is still active') && !LOGIN_INCOMPLETE.includes('Nothing was deleted'));
+check('tracked failure names tracked bets', TRACKED_INCOMPLETE.includes('tracked bets') && !TRACKED_INCOMPLETE.includes('Nothing was deleted'));
 check('success toast is signed-out, not a celebration', DELETED_TOAST.includes('signed out') && !/green|congrat/i.test(DELETED_TOAST));
 check('what stays is the public record', STAYS_LINE.includes('public model record'));
 eq(
@@ -132,29 +133,68 @@ for (const key of [
   'parlaySlip.keys.v2',
   'betslip.lineLegs.v1',
   'sportsbook.connections.v2',
+  'preferredBooks.selected',
+  'preferredBooks.promptDue',
+  'preferredBook.selected',
+  'push.optIn.v1',
 ]) {
   check(`wipe includes ${key}`, (ACCOUNT_WIPE_KEYS as readonly string[]).includes(key));
 }
+check('push token is not removed before the server agrees', !(ACCOUNT_WIPE_KEYS as readonly string[]).includes('push.token.v1'));
+for (const key of ['settledPicks.v9', 'actionThresholds.v1', 'modelClvPedigree.v2']) {
+  check(`query cache includes ${key}`, (QUERY_CACHE_KEYS as readonly string[]).includes(key));
+}
 
 const flow = read('src/lib/deleteAccount.ts');
-const runBody = flow.slice(flow.indexOf('export async function runAccountDeletion'));
+const runAt = flow.indexOf('export async function runAccountDeletion');
+const continueAt = flow.indexOf('export async function continueAccountDeletion');
+const unlinkAt = flow.indexOf('async function unlinkAfterDelete');
+const runBody = flow.slice(runAt);
+const continueBody = flow.slice(continueAt, runAt);
+const unlinkBody = flow.slice(unlinkAt, flow.indexOf('export async function finishLocalAccountDeletion'));
 check('the flow calls delete_my_account', flow.includes("supabase.rpc('delete_my_account')"));
+check('the flow calls delete_my_login', flow.includes("supabase.rpc('delete_my_login')"));
 check('the flow guards on AUTH_ENABLED', flow.includes('assertAuthEnabled(AUTH_ENABLED)'));
 check('the flow maps stale with isStaleSessionError', flow.includes('isStaleSessionError'));
+check('the phone clock is not consulted', !flow.includes('sessionLooksFresh') && !flow.includes('lastSignInAt'));
+check('the data delete does not unlink', !runBody.includes('unlinkDiscord') && !runBody.includes('unlinkSportsbooks'));
 check(
-  'the flow wipes local data only after success',
-  runBody.indexOf('finishLocalAccountDeletion') > runBody.indexOf("rpc('delete_my_account')"),
+  'unlink runs only after the data delete commits',
+  runBody.indexOf('continueAccountDeletion') > runBody.indexOf("rpc('delete_my_account')"),
 );
-check('a local failure is not a clean success', runBody.includes('serverDeleted: true'));
+check('discord unlink is in the post-delete helper', unlinkBody.includes('unlinkDiscord()'));
+check('sharpsports unlink is in the post-delete helper', unlinkBody.includes('unlinkSportsbooks('));
+check(
+  'continue unlinks before deleting the login',
+  continueBody.indexOf('unlinkAfterDelete') !== -1
+    && continueBody.indexOf('unlinkAfterDelete') < continueBody.indexOf("rpc('delete_my_login')"),
+);
+check(
+  'the login delete is before the local wipe',
+  continueBody.indexOf('finishLocalAccountDeletion') > continueBody.indexOf("rpc('delete_my_login')"),
+);
+check('an unlink failure is not success', continueBody.includes("localFailure: 'unlink'"));
+check('a login-delete failure names the login', continueBody.includes("localFailure: 'login'"));
+check(
+  'a stale login delete stays a server delete',
+  /isStaleSessionError\(error\)[\s\S]{0,220}serverDeleted: true/.test(continueBody),
+);
+check('a local failure is not a clean success', runBody.includes('serverDeleted: false') && flow.includes('serverDeleted: true'));
 check('local failure copy does not say nothing was deleted', !LOCAL_INCOMPLETE.includes('Nothing was deleted'));
 check('the flow signs out locally', flow.includes("signOut({ scope: 'local' })"));
 check('the flow clears custom models', flow.includes('clearCustomModelsForAccountDeletion'));
 check('the flow clears tracked bets', flow.includes('clearTrackedBetsForAccountDeletion'));
 check('the flow clears the bankroll', flow.includes('clearBankrollForAccountDeletion'));
 check('the flow clears stake settings', flow.includes('clearStakeSettingsForAccountDeletion'));
-check('the flow unlinks discord before a fresh delete', flow.includes('unlinkDiscord()'));
-check('the flow unlinks sharpsports', flow.includes('unlinkSportsbooks'));
-check('tracked_bets delete is this device only', /from\('tracked_bets'\)[\s\S]{0,80}\.eq\('device_id'/.test(flow));
+check('the flow clears preferred books', flow.includes('clearPreferredBooksForAccountDeletion'));
+check('the flow resets the device book row after sign-out', flow.includes('resetPreferredBooksDeviceRow'));
+check('the flow clears the push token', flow.includes('clearPushForAccountDeletion'));
+check('the flow clears the query cache', flow.includes('clearQueryCache'));
+check('the query cache drops settled picks', flow.includes('clearSettledCache'));
+check('the query cache drops thresholds', flow.includes('setServerThresholds(null)'));
+check('the query cache drops model CLV', flow.includes('setModelClv(null)'));
+check('a tracked-bet failure is returned', flow.includes("failure = 'tracked'"));
+check('tracked_bets delete is this device only', /from\('tracked_bets'\)[\s\S]{0,120}\.eq\('device_id'/.test(flow));
 check('the flow does not delete the picks table', !flow.includes("from('picks')"));
 
 const screen = read('src/screens/DeleteAccountScreen.tsx');
@@ -166,6 +206,17 @@ check('success check is not bet green', !/name="checkmark"[\s\S]{0,80}colors\.be
 check('large text is not switched off', !screen.includes('allowFontScaling={false}'));
 check('the title is not truncated', !/style=\{styles\.title\}[^>]*numberOfLines/.test(screen));
 check('try again retries the delete', screen.includes("phase === 'error'"));
+check('the screen does not read the phone clock', !screen.includes('last_sign_in_at'));
+check('unlink failure is shown on the local screen', screen.includes('UNLINK_INCOMPLETE'));
+check('login failure is shown on the local screen', screen.includes('LOGIN_INCOMPLETE'));
+check('tracked failure is shown on the local screen', screen.includes('TRACKED_INCOMPLETE'));
+const apply = screen.slice(screen.indexOf('const applyOutcome'), screen.indexOf('const run ='));
+check(
+  'a stale login delete does not return to the start screen',
+  apply.indexOf('outcome.serverDeleted') !== -1
+    && apply.indexOf('outcome.serverDeleted') < apply.indexOf("setPhase('ready')"),
+);
+check('re-auth on the local screen retries the rest', screen.includes("phase === 'local') await retryLocal()"));
 
 const settings = read('src/screens/SettingsScreen.tsx');
 check('settings has a Delete account row', settings.includes('accessibilityLabel="Delete account"'));
