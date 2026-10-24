@@ -131,7 +131,10 @@ class TestBuildScoredRows:
         assert p["model_probability"] == p["dk_implied_prob"] == 0.5238
         assert p["edge"] == 0.0 and p["kelly_fraction"] == 0.0
         assert p["recommended_bet"] == 0.0
-        assert p["pick_label"] == "CIN @ PIT Under 42.5 (no bet, DK)"
+        assert p["pick_label"] == "CIN @ PIT Under 42.5"
+        assert p["decision_book"] == "draftkings"
+        assert p["decision_odds"] == p["dk_odds"]
+        assert p["decision_edge"] == p["edge"]
         assert p["downgrade_reason"].startswith("forecast wind 6.2 mph")
 
     def test_wind_with_an_opinion_keeps_the_models_numbers(self):
@@ -148,19 +151,22 @@ class TestBuildScoredRows:
                   reason="deviation +0.50 below the 2.0 pt threshold")
         (p,) = pub.build_scored_rows({(GAME, "nfl_opener_spread"): r}, GAMES, 1000.0)
         assert p["pick_side"] == "home" and p["scored_line"] == -3.0
-        assert p["pick_label"] == "CIN @ PIT — PIT -3 (no bet, FD)"
+        assert p["pick_label"] == "CIN @ PIT — PIT -3"
+        assert p["decision_book"] == "fanduel"
+        assert p["decision_odds"] == p["dk_odds"]
         assert p["edge"] == 0.0
 
     @pytest.mark.parametrize("model_id", ["nfl_wind_totals", "nfl_opener_spread"])
     def test_label_names_the_quote_book_the_way_the_app_reads_it(self, model_id):
-        # The app's storedQuoteBook reads it with mobile/src/lib/clvBet.ts NFL_RE,
-        # /,\s*([A-Za-z_]+)\)/ (pinned to paper_tracker._NFL_LABEL_BOOK_RE).
-        # A bare "(FD)" misses it and the app calls a FanDuel price DraftKings.
-        import re
+        # The book is decision_book (the feed key). storedQuoteBook reads that
+        # column; a bare "(FD)" on the label is what used to be required, and
+        # a row that still has one is parsed by clvBet.ts. New rows do not
+        # write the parenthesis.
         r = _eval(model_id, current_book="fanduel", current_line="-3.0")
         (p,) = pub.build_scored_rows({(GAME, model_id): r}, GAMES, 1000.0)
-        m = re.search(r",\s*([A-Za-z_]+)\)", p["pick_label"])
-        assert m and m.group(1) == "FD"
+        assert "(" not in p["pick_label"]
+        assert p["decision_book"] == "fanduel"
+        assert p["decision_odds"] == p["dk_odds"]
 
     @pytest.mark.parametrize("model_id,line,side", [
         ("nfl_wind_totals", "42.5", "under"),
@@ -311,6 +317,28 @@ class TestPublishScored:
         (upd,) = [(s, prm) for s, prm in conn.sql if s.startswith("UPDATE picks")]
         assert "signal_type = 'NONE' AND result IS NULL" in upd[0]
         assert upd[1]["pick_id"] == 7 and upd[1]["scored_line"] == 41.5
+        assert upd[1]["touch_created"] is True
+
+    def test_a_book_stamp_leaves_created_at(self, run):
+        # The next pass rewrites every stored NONE row once: the label loses
+        # its note and the four decision columns fill in. The number did not
+        # move, so created_at stays. The line-movement card windows on it.
+        (p,) = pub.build_scored_rows({(GAME, "nfl_wind_totals"): _eval()}, GAMES, 1000.0)
+        stored = dict(p)
+        stored["pick_label"] = p["pick_label"] + " (no bet, DK)"
+        for key in ("decision_book", "decision_odds",
+                    "decision_implied_prob", "decision_edge"):
+            stored[key] = None
+        existing = (7, GAME, "nfl_wind_totals", "NONE") + tuple(
+            stored[k] for k in pub._SCORED_FIELDS)
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                     picks=[existing])
+        assert run(conn, [_eval()]) == 1
+        (upd,) = [(s, prm) for s, prm in conn.sql if s.startswith("UPDATE picks")]
+        assert upd[1]["touch_created"] is False
+        assert "ELSE created_at END" in upd[0]
+        assert upd[1]["decision_book"] == p["decision_book"]
+        assert upd[1]["pick_label"] == p["pick_label"]
 
 
 # ── Reviewer, #838 post-merge ───────────────────────────────────────────────
@@ -410,6 +438,7 @@ class TestFlexedKickoffRefreshes:
         (upd,) = [(q, prm) for q, prm in conn.sql if q.startswith("UPDATE picks")]
         assert upd[1]["game_time"] == new_kick and upd[1]["game_date"] == "2026-09-28"
         assert "game_date = %(game_date)s, game_time = %(game_time)s" in upd[0]
+        assert upd[1]["touch_created"] is False
 
     def test_scored_fields_cover_the_kickoff(self):
         assert {"game_date", "game_time"} <= set(pub._SCORED_FIELDS)
@@ -419,16 +448,14 @@ class TestPickEmLabel:
     def test_none_row_pick_em_reads_pk(self):
         r = _eval("nfl_opener_spread", current_line="0", current_price="-110")
         (p,) = pub.build_scored_rows({(GAME, "nfl_opener_spread"): r}, GAMES, 1000.0)
-        assert p["pick_label"] == "CIN @ PIT — PIT PK (no bet, DK)"
+        assert p["pick_label"] == "CIN @ PIT — PIT PK"
         assert "+0" not in p["pick_label"]
         assert pick_problems(p["pick_label"], "home", 0.0, "nfl_opener_spread",
                              home="PIT", away="CIN") == []
 
     def test_bet_row_label_is_unchanged(self):
-        # The BET label keeps "+0": tracking/pick_integrity reads the FIRST
-        # signed number after the dash, and with "PK" that becomes the
-        # "(Opener -2.5 vs Pinnacle" deviation -- a false label mismatch on a
-        # real bet. Only the NONE row (no signed number after it) says PK.
+        # The BET label keeps "+0". The NONE row says PK. Both agree with
+        # the side and the line once the opener annotation is gone.
         _, (p,) = pub.build_opener_rows([{
             "game_id": "2026_03_CIN_PIT", "matchup": "CIN @ PIT",
             "kick_utc": "2026-09-27 17:00:00+00:00", "lead_days": "4.2",
@@ -436,7 +463,10 @@ class TestPickEmLabel:
             "side_line": "0", "soft_home_line": "0", "pin_home_line": "2.5",
             "dev": "-2.5", "model_prob": "0.5900", "market_prob": "0.5122",
             "edge": "0.0778", "stake_pct": "2.0"}], 1000.0)
-        assert "— CIN +0 (Opener" in p["pick_label"]
+        assert "— CIN +0 ·" in p["pick_label"]
+        assert "Opener" not in p["pick_label"] and "Pinnacle" not in p["pick_label"]
+        assert p["decision_book"] == "betmgm"
+        assert p["decision_odds"] == p["dk_odds"]
         assert pick_problems(p["pick_label"], "away", 0.0, "nfl_opener_spread",
                              home="PIT", away="CIN") == []
 

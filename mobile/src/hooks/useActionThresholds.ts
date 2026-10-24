@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect } from 'react';
 
 import { fetchActionThresholds } from '@/lib/queries';
-import { setServerThresholds, type ServerThreshold } from '@/lib/thresholds';
+import { markThresholdsFetched, setServerThresholds, type ServerThreshold } from '@/lib/thresholds';
 
 /**
  * Hydrate the live action thresholds from the model_action_thresholds table
@@ -40,6 +40,9 @@ export function useActionThresholds(): void {
       .then((map) => {
         if (!mounted || !map || Object.keys(map).length === 0) return;
         setServerThresholds(map);
+        // After the store is the live table. The cache prime above is not
+        // this call: a stale cache must not be the history mark's answer.
+        markThresholdsFetched();
         AsyncStorage.setItem(CACHE_KEY, JSON.stringify(map)).catch(() => {});
       })
       .catch((err) => {

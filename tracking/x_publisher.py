@@ -567,9 +567,15 @@ def _publish_price(pick: dict) -> tuple[float | None, str | None]:
     """The price to publish and the book to publish it at.
 
     Deliberately the same rule as tracking/discord_notifier.publish_price: the
-    best BETTABLE price wins, and DraftKings is the fallback whenever the
-    alternative is absent, equal or worse. Publishing a worse price as though it
-    were an upgrade is the one failure mode worse than publishing DK's.
+    best BETTABLE price wins whenever it is strictly better. Publishing a worse
+    price as though it were an upgrade is the one failure mode worse than
+    publishing the number in dk_odds.
+
+    When that fallback is the number in dk_odds, the book is the one that
+    number came from. The soft-book cards store that book's price in dk_odds
+    and the same number in decision_odds; the tweet names decision_book.
+    DraftKings is the name only when dk_odds is DraftKings' number, which is
+    every other model, including an MLB row that also stores decision_book.
 
     The book set is filtered upstream — config.BEST_LINE_BOOKMAKERS excludes
     books that cannot be bet from the US — so this never sends a public audience
@@ -586,12 +592,37 @@ def _publish_price(pick: dict) -> tuple[float | None, str | None]:
             return None
         return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
 
+    def _at_dk():
+        return dk, _book_for_dk_number(pick)
+
     if best is None or not book:
-        return dk, ("DraftKings" if dk is not None else None)
+        return _at_dk()
     b, d = _decimal(best), _decimal(dk)
     if b is None or (d is not None and b <= d + 1e-9):
-        return dk, ("DraftKings" if dk is not None else None)
+        return _at_dk()
     return best, _BOOK_DISPLAY.get(book, book)
+
+
+def _book_for_dk_number(pick: dict) -> str | None:
+    """Who offered the number stored in dk_odds.
+
+    Same decision as discord_notifier.book_for_pick for a row with no
+    explicit book: a soft-book card whose decision_odds equals dk_odds
+    names decision_book. This does not parse a stored label. An old wind
+    or opener row still carries the book in its parentheses.
+    """
+    from tracking.discord_notifier import (
+        _DECISION_BOOK_MODELS, _display_book, _same_american,
+    )
+    dk = pick.get("dk_odds")
+    model = pick.get("model_id") or ""
+    decided = (pick.get("decision_book") or "").strip()
+    if (model in _DECISION_BOOK_MODELS and decided
+            and _same_american(pick.get("decision_odds_raw"), dk)):
+        return _display_book(decided)
+    if dk is None:
+        return None
+    return "DraftKings"
 
 
 def render_results(recap: dict, game_date: str, restate: bool = False,

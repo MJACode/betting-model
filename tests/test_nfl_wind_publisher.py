@@ -92,18 +92,23 @@ class TestBuildRows:
         # to go looking for is not "applied when providing a pick".
         _, picks = build_rows([_card_row()], bankroll=1000.0)
         label = picks[0]["pick_label"]
-        assert label.startswith("NYJ @ MIA Under 43.5 (Wind 14 mph, FD)")
+        assert label.startswith("NYJ @ MIA Under 43.5 ·")
+        assert "Wind" not in label and "(" not in label
+        assert picks[0]["decision_book"] == "fanduel"
+        assert picks[0]["decision_odds"] == picks[0]["dk_odds"]
         assert label.endswith("u"), label
         staked = float(label.rsplit("· ", 1)[1].rstrip("u"))
         assert abs(staked - picks[0]["kelly_fraction"] * 100) < 1e-6
 
     def test_integer_line_renders_without_decimal(self):
         _, picks = build_rows([_card_row(total_line="44.0")], bankroll=1000.0)
-        assert "Under 44 (" in picks[0]["pick_label"]
+        assert "Under 44 ·" in picks[0]["pick_label"]
+        assert "44.5" not in picks[0]["pick_label"]
 
     def test_unknown_book_falls_back_to_raw_key(self):
         _, picks = build_rows([_card_row(book="somefuturebook")], bankroll=1000.0)
-        assert "somefuturebook" in picks[0]["pick_label"]
+        assert picks[0]["decision_book"] == "somefuturebook"
+        assert "somefuturebook" not in picks[0]["pick_label"]
 
     def test_bad_row_skipped_not_fatal(self):
         rows = [_card_row(matchup="garbage"), _card_row()]

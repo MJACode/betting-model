@@ -42,7 +42,7 @@ import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
-import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
+import { MODEL_META, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
 import {
   bookLabel,
   bookName,
@@ -361,7 +361,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             ) : (
               <SignalBadge signal={pick.signal_type} />
             )}
-            <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
+            <Text style={styles.modelName}>{modelLongWithMark(pick.model_id)}</Text>
           </View>
           {voided ? (
             <Text style={styles.previewNote}>
@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
   },
   metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.sm,
     marginBottom: 4,
   },
@@ -898,6 +898,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     backgroundColor: colors.noneSoft,
     alignSelf: 'flex-start',
+    flexShrink: 0,
   },
   previewBadgeText: {
     fontSize: font.size.caption,
@@ -911,6 +912,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   modelName: {
+    flex: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,

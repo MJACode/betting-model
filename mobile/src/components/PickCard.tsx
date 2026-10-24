@@ -31,7 +31,7 @@ import {
   type HeroAmerican,
   type Movement,
 } from '@/lib/markets';
-import { modelLong, isPropModel } from '@/lib/modelMeta';
+import { modelHistoryMark, modelLongWithMark, isPropModel } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
@@ -468,8 +468,11 @@ export function PickCard({
   // A live lock is its own row. The sentence is neutral, so it uses secondary
   // ink. Green stays on the BET chip and on a BET's edge. The grey caption is
   // the model name, so the lock sentence is not printed twice.
+  // The footer names the model. A paused or retired id that shares its
+  // long name with the live model ("MLB Totals") carries the mark here.
+  const markedModel = modelLongWithMark(pick.model_id);
   const modelCaption = signalsModelCaption(
-    modelLong(pick.model_id),
+    markedModel,
     timing?.kind === 'live' ? null : (timing?.label ?? null),
   );
   const signalsPriceSpoken =
@@ -503,7 +506,7 @@ export function PickCard({
         modelChance: `Model chance ${formatPct(pick.model_probability)}`,
         expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
         stake: myBooksNote ? `${signalsStakeSpoken}. ${myBooksNote}` : signalsStakeSpoken,
-        modelName: `${modelLong(pick.model_id)} model`,
+        modelName: `${markedModel} model`,
         posted: timing?.label ?? null,
         paused: null,
         gameStatus: gameStatus(game, liveState).kind !== 'pre' ? statusSpeech : null,
@@ -515,6 +518,9 @@ export function PickCard({
         gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
         pick.pick_label,
         paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
+        // The signals footer speaks the model. The board layout has no
+        // model line, so a shared paused or retired name is spoken here.
+        modelHistoryMark(pick.model_id) ? `${markedModel} model` : null,
         // The reason in words (lib/heroPriceText.ts): "looks off" for an
         // implausible edge or a moved price; for an old price, which book has not
         // updated it and since when.

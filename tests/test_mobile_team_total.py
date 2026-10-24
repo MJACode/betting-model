@@ -152,8 +152,8 @@ def test_the_model_has_its_own_chip_and_no_picker_slot(tmp_path):
     _run(tmp_path, META_FILES, """
 import { MODEL_META, betSlotForModel, modelLong, modelPageTiming, modelProbabilityNote } from './modelMeta.ts';
 const m = MODEL_META.nba_team_total_luck;
-eq([m.type, m.shortLabel, m.statKey, m.statLabel], ['game', 'TT Luck', null, ''], 'entry');
-eq(modelLong('nba_team_total_luck'), 'Home Team Total (Unders)', 'long name');
+eq([m.type, m.shortLabel, m.statKey, m.statLabel], ['game', 'TT', null, ''], 'entry');
+eq(modelLong('nba_team_total_luck'), 'NBA Team Totals', 'long name');
 eq(betSlotForModel('nba_team_total_luck', 'game'), null, 'not a picker slot');
 // The probability is the graded seasons' own win rate: the note says to plan on less.
 const note = modelProbabilityNote('nba_team_total_luck');
