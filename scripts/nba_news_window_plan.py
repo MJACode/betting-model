@@ -4,9 +4,17 @@ An EVENT is a change between two consecutive submitted injury reports of one tea
 game that moves the team's expected minutes (sum over listed players of P(plays) x his
 minutes per game, as of the game) enough that the implied spread move, 2.26 points per 48
 minutes (section 4.1), summed over both teams at that report, is at least MIN_MOVE points.
-Around each event's printed report time R the plan asks for the whole slate at
-R-5, R, R+5, ..., R+25 minutes (the feed's snapshot spacing), dropping instants within 15
-minutes of that game's tip and instants already bought. The worker's purchase
+Around each event's printed report time R the plan wants the feed's snapshot just
+after R-5, R, R+5, ..., R+25 minutes (the feed's snapshot spacing), dropping any within 15
+minutes of that game's tip and any whose snapshot is already bought.
+
+The historical endpoint returns the latest snapshot AT OR BEFORE the requested time, and its
+snapshots sit 38-39 seconds past each 5-minute mark (measured, 2022-11 .. 2026-02,
+%TEMP%/nba_game_edge/oddsapi_probe/ledger.jsonl): a request at 00:10:00 returns 00:05:38. So
+the snapshot just after R+k is asked for at R+k+REQUEST_LAG (one minute), and two requests
+return the same snapshot when slot() -- the 5-minute mark of the snapshot they return -- is
+equal. That is how an instant already held (the hourly 23:00 request returns 22:55:38) is
+recognised (docs/nba_models_2026.md 11.5). The worker's purchase
 (data/ingestors/nba_odds_history.py --instants) reads the file this writes and buys each
 instant once (_buy_snapshot re-checks both ledgers).
 
@@ -32,19 +40,23 @@ P_PLAY = {"Out": 0.0, "Doubtful": 0.1, "Questionable": 0.5, "Probable": 0.95, "A
 MIN_MOVE = 0.5
 OFFSETS_MIN = (-5, 0, 5, 10, 15, 20, 25)
 TIP_MARGIN_MIN = 15
+REQUEST_LAG = pd.Timedelta(minutes=1)
+SNAPSHOT_PAST_MARK = pd.Timedelta(seconds=39)
 CACHE = Path(os.environ.get("NBA_RESEARCH_CACHE", str(ROOT / "data" / "local" / "nba")))
 
 
 def player_minutes(adv: pd.DataFrame) -> pd.DataFrame:
-    """(player_id, season, game_date, mpg): mean minutes over the player's last 10 played
-    games of the season BEFORE this game; fewer than 3 such games -> last season's mean."""
+    """(player_id, season, game_date, mpg): mean minutes over the player's last 10 PLAYED
+    games of the season before this game (rows where he did not play are skipped, not
+    counted toward the 10); fewer than 3 played games before it -> last season's mean."""
     a = adv[adv["game_type"].eq("regular") | adv["game_type"].isna()].copy()
     a["player_id"] = a["player_id"].astype(str)
     a["min"] = np.where(a["played"].fillna(False).astype(bool), a["minutes_exact"].astype(float), np.nan)
-    a = a.sort_values(["player_id", "season", "game_date"])
+    a = a.sort_values(["player_id", "season", "game_date"]).reset_index(drop=True)
     g = a.groupby(["player_id", "season"])["min"]
     a["n_prev"] = g.transform(lambda s: s.notna().cumsum().shift(1).fillna(0))
-    a["m10"] = g.transform(lambda s: s.shift(1).rolling(10, min_periods=1).mean())
+    a["m10"] = g.transform(lambda s: s.dropna().rolling(10, min_periods=1).mean()
+                           .reindex(s.index).ffill().shift(1))
     prior = a.groupby(["player_id", "season"])["min"].mean().rename("prior_mean").reset_index()
     prior["season"] = prior["season"] + 1
     a = a.merge(prior, on=["player_id", "season"], how="left")
@@ -108,17 +120,25 @@ def events(ir: pd.DataFrame, adv: pd.DataFrame, games: pd.DataFrame,
     return e[keep].reset_index(drop=True)
 
 
+def slot(t) -> pd.Timestamp:
+    """The 5-minute mark of the snapshot a request at t returns (the latest at or before t,
+    each 38-39 seconds past its mark)."""
+    t = pd.Timestamp(t)
+    t = t.tz_convert("UTC") if t.tzinfo else t.tz_localize("UTC")
+    return (t - SNAPSHOT_PAST_MARK).floor("5min")
+
+
 def instants(ev: pd.DataFrame, held=()) -> list[pd.Timestamp]:
-    """Every R + offset (5-minute grid) before its game's tip - TIP_MARGIN_MIN, none held."""
-    want = set()
+    """The request times: R + offset + REQUEST_LAG for every event and offset whose snapshot
+    is before its game's tip - TIP_MARGIN_MIN, none whose snapshot a held request returns."""
+    want = {}
     for r in ev.itertuples(index=False):
         for k in OFFSETS_MIN:
-            t = (r.report_ts + pd.Timedelta(minutes=k)).floor("5min")
-            if t < r.tip - pd.Timedelta(minutes=TIP_MARGIN_MIN):
-                want.add(t)
-    held = {pd.Timestamp(h).tz_convert("UTC") if pd.Timestamp(h).tzinfo else pd.Timestamp(h, tz="UTC")
-            for h in held}
-    return sorted(want - held)
+            mark = (r.report_ts + pd.Timedelta(minutes=k)).floor("5min")
+            if mark < r.tip - pd.Timedelta(minutes=TIP_MARGIN_MIN):
+                want[mark] = mark + REQUEST_LAG
+    held_slots = {slot(h) for h in held}
+    return sorted(t for m, t in want.items() if m not in held_slots)
 
 
 def load_cache(cache: Path, seasons) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, set]:
@@ -148,6 +168,7 @@ def main() -> None:
     body = {
         "what": "NBA slate fetches around injury-report changes, docs/nba_models_2026.md section 11",
         "seasons": seasons, "min_move_points": MIN_MOVE, "offsets_min": list(OFFSETS_MIN),
+        "request_lag_seconds": int(REQUEST_LAG.total_seconds()),
         "events": int(len(ev)), "events_by_season": {str(k): int(v) for k, v in ev.groupby("season").size().items()},
         "credits_per_instant": 30, "instants": [t.strftime("%Y-%m-%dT%H:%M:%SZ") for t in plan],
     }

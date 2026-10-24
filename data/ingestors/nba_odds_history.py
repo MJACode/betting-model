@@ -127,22 +127,30 @@ class Meter:
         self.ceiling, self.floor = ceiling, floor
         self.spent, self.remaining = 0, None
 
+    RETRY_STATUS = (429, 500, 502, 503, 504)
+
     def get(self, url: str, params: dict):
+        """One call, retried on a network error and on a rate-limit or server answer
+        (RETRY_STATUS), with a growing pause; every answer's billing headers are counted."""
+        r = None
         for attempt in range(5):
             try:
                 r = requests.get(url, params={**params, "apiKey": config.ODDS_API_KEY},
                                  timeout=90)
-                break
             except requests.RequestException as exc:
                 logger.warning(f"network: {type(exc).__name__}; retry {attempt + 1}")
                 time.sleep(3 * (attempt + 1))
-        else:
-            return None
-        record_quota_headers(r)
-        self.spent += int(float(r.headers.get("x-requests-last") or 0))
-        rem = r.headers.get("x-requests-remaining")
-        if rem is not None:
-            self.remaining = int(float(rem))
+                continue
+            record_quota_headers(r)
+            self.spent += int(float(r.headers.get("x-requests-last") or 0))
+            rem = r.headers.get("x-requests-remaining")
+            if rem is not None:
+                self.remaining = int(float(rem))
+            if r.status_code in self.RETRY_STATUS and attempt < 4:
+                logger.warning(f"HTTP {r.status_code}; retry {attempt + 1}")
+                time.sleep(5 * (attempt + 1))
+                continue
+            break
         time.sleep(0.2)
         return r
 
@@ -413,16 +421,18 @@ def buy_gaps(conn, meter: Meter, first_season: int, last_season: int,
 
 
 def read_instants(path) -> list[datetime]:
-    """The instants a plan file names (scripts/nba_news_window_plan.py), newest first,
-    each on the feed's 5-minute grid. A malformed or off-grid instant stops the read."""
+    """The request times a plan file names (scripts/nba_news_window_plan.py), newest
+    first, each on a whole minute (a plan asks one minute past each 5-minute mark, because
+    the feed returns the latest snapshot at or before the request). A malformed instant
+    stops the read."""
     import json
     from pathlib import Path
     body = json.loads(Path(path).read_text(encoding="utf-8"))
     out = []
     for raw in body["instants"]:
         t = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        if t.tzinfo is None or t.minute % 5 or t.second or t.microsecond:
-            raise ValueError(f"plan instant {raw!r} is not a UTC time on the 5-minute grid")
+        if t.tzinfo is None or t.second or t.microsecond:
+            raise ValueError(f"plan instant {raw!r} is not a UTC time on a whole minute")
         out.append(t.astimezone(timezone.utc))
     return sorted(set(out), reverse=True)
 
@@ -441,9 +451,21 @@ def buy_instants(conn, meter: Meter, first_season: int, last_season: int,
     logger.info(f"instants ({why}): {len(plan)} in the plan, {len(plan) - len(todo)} held, "
                 f"{len(todo)} to buy (~{30 * len(todo):,} credits)")
     stats = defaultdict(int)
+    failed = []
     for at in todo:
+        before = stats["errors"]
+        if not _buy_snapshot(conn, meter, games, at, stats, why=why):
+            return dict(stats)
+        if stats["errors"] > before:
+            failed.append(at)
+    # one more pass over every instant that got no usable answer, under the same meter
+    stats["retried"] = len(failed)
+    for at in failed:
+        before = stats["errors"]
         if not _buy_snapshot(conn, meter, games, at, stats, why=why):
             break
+        if stats["errors"] > before:
+            stats["still_failed"] += 1
     return dict(stats)
 
 
@@ -727,12 +749,47 @@ def _buy_per_event(conn, meter: Meter, first_season: int, last_season: int, lead
     logger.info(f"{what}: {n} games to buy on {len(todo)} dates "
                 f"(~{10 * len(markets) * n:,} credits), {len(done)} stored")
     totals = defaultdict(int)
+    failed: list[tuple] = []           # (event, game, date) whose purchase got no answer
+
+    def buy_one(ev, g, start) -> bool:
+        """Buy and store one game; False = no usable answer (kept for the second pass)."""
+        snap = (start - timedelta(minutes=lead_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        resp = meter.get(f"{BASE}/events/{ev['id']}/odds", {
+            "date": snap, "markets": ",".join(markets), "bookmakers": BOOKS,
+            "oddsFormat": "american"})
+        if resp is None or resp.status_code != 200:
+            totals["errors"] += 1
+            return False
+        body = resp.json()
+        stamp = body.get("timestamp") or snap
+        rows = []
+        for book in (body.get("data") or {}).get("bookmakers", []):
+            for p in parse(book.get("markets", []), ev.get("home_team", ""),
+                           g["home"], g["away"]):
+                row = dict.fromkeys(_ODDS_KEYS)
+                row.update({"game_id": g["game_id"], "sport": "NBA",
+                            "bookmaker": book.get("key"), "snapshot_type": "open",
+                            "snapshot_at": stamp, "source": source})
+                row.update(p)                     # a parser's own snapshot_at wins
+                rows.append(row)
+        if rows:
+            def _write(rows=rows):
+                _insert_odds(conn, rows)
+                conn.commit()
+            if not _write_with_retry(conn, _write, g["game_id"]):
+                totals["errors"] += 1
+                return False
+            totals["rows"] += len(rows)
+        totals["events"] += 1
+        return True
+
     for d in todo:
         noon = datetime.fromisoformat(f"{d}T12:00:00").replace(tzinfo=ET)
         r = meter.get(f"{BASE}/events", {"date": noon.astimezone(timezone.utc)
                                          .strftime("%Y-%m-%dT%H:%M:%SZ")})
         if r is None or r.status_code != 200:
             totals["errors"] += 1
+            totals["dates_unlisted"] += 1
             continue
         by_teams = {(g["away"], g["home"]): g for g in by_date[d]}
         for ev in (r.json().get("data") or []):
@@ -748,34 +805,19 @@ def _buy_per_event(conn, meter: Meter, first_season: int, last_season: int, lead
                 totals["stopped"] = why
                 logger.warning(f"{what} stopping at {d}: {why}")
                 return dict(totals)
-            snap = (start - timedelta(minutes=lead_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            resp = meter.get(f"{BASE}/events/{ev['id']}/odds", {
-                "date": snap, "markets": ",".join(markets), "bookmakers": BOOKS,
-                "oddsFormat": "american"})
-            if resp is None or resp.status_code != 200:
-                totals["errors"] += 1
-                continue
-            body = resp.json()
-            stamp = body.get("timestamp") or snap
-            rows = []
-            for book in (body.get("data") or {}).get("bookmakers", []):
-                for p in parse(book.get("markets", []), ev.get("home_team", ""),
-                               g["home"], g["away"]):
-                    row = dict.fromkeys(_ODDS_KEYS)
-                    row.update({"game_id": g["game_id"], "sport": "NBA",
-                                "bookmaker": book.get("key"), "snapshot_type": "open",
-                                "snapshot_at": stamp, "source": source})
-                    row.update(p)                     # a parser's own snapshot_at wins
-                    rows.append(row)
-            if rows:
-                def _write(rows=rows):
-                    _insert_odds(conn, rows)
-                    conn.commit()
-                if _write_with_retry(conn, _write, g["game_id"]):
-                    totals["rows"] += len(rows)
-            totals["events"] += 1
+            if not buy_one(ev, g, start):
+                failed.append((ev, g, start))
         logger.info(f"{what} {d}: {totals['events']} games so far, {totals['rows']:,} rows | "
                     f"spent {meter.spent:,}, balance {meter.remaining}")
+    # one more pass over every game that got no usable answer, under the same meter
+    totals["retried"] = len(failed)
+    for ev, g, start in failed:
+        why = meter.stop_reason(10 * len(markets))
+        if why:
+            totals["stopped"] = why
+            break
+        if not buy_one(ev, g, start):
+            totals["still_failed"] += 1
     return dict(totals)
 
 
