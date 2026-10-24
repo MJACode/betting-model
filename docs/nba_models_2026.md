@@ -2142,3 +2142,88 @@ below the cut to the top positive; beats the 95th percentile of 200 placebo shuf
   alternate purchase; with none, or a level line, the pooled shape of 10.4.2 is used.
 - Both checks are synthetic-tested: the lab drops a ladder 30 minutes older than its purchase,
   and it fails when the favourite's shape is mirrored the wrong way.
+
+## 11. Seventh search: the minutes after an injury report (pre-registered 2026-10-24, before any of its prices were bought)
+
+mike, 2026-10-24: *"Buy alts and do #2 as well. Go"*. Section 10.1's second check found that
+NBA lines finish 86% of an injury report's move within 30 minutes of it, and that the hourly
+archive cannot see inside those 30 minutes. This search buys the slate every 5 minutes around
+each report change and asks two questions a professional asks: is any book still at the old
+price after Pinnacle has moved, and has anyone moved at all in the first minutes?
+
+**Written before any 5-minute price was bought. Nothing below changes after a result is seen;
+a later change gets its own dated line and reason.**
+
+### 11.1 Data
+
+- **Events.** A change between two consecutive submitted injury reports of one team for one
+  game. Expected minutes = the sum over listed players of P(plays) × his minutes per game as of
+  the game (Out 0, Doubtful 0.1, Questionable 0.5, Probable 0.95, Available or unlisted 1; his
+  last 10 played games, else last season). The implied change in the HOME margin is 2.26 points
+  per 48 minutes (§4.1), both teams at that report summed: `s`. An event is a report with
+  |s| ≥ 0.5 printed at least 30 minutes before tip. 2024-25: 821 events at 648 report times;
+  2025-26: 1,092 at 904.
+- **Prices.** The whole slate (h2h, spreads, totals; ten books with Pinnacle) at R−5, R, R+5,
+  …, R+25 minutes around each event's printed time R, on the feed's 5-minute grid, less the
+  instants already held: 9,820 instants, 294,600 credits at 30 each. Plan:
+  `jobs/nba_news_windows_2025_2026.json` (`scripts/nba_news_window_plan.py`). Buyer:
+  `data/ingestors/nba_odds_history.py --instants`, ledgered in `odds_history_fetches` with
+  `why = 'news_window'`, so the harness reads them like every other fetch. Run on the worker as
+  the declared job `nba-news-windows-2025-2026`.
+- **Seasons graded:** 2024-25 and 2025-26, pooled. The slope in N2 below was measured on
+  2021-22 → 2023-24 (10.1), so nothing is chosen on the graded seasons.
+
+### 11.2 Rules every cell is graded under
+
+1. **Decision times** (a cell axis): t = R+5, R+10, R+15. R+5 assumes a live system reads the
+   report within 5 minutes of its printed time; when each file became downloadable is unknown
+   (§6.1), so the later times show how fast any edge decays.
+2. **Quotes.** A book's quote at a fetch is the one that fetch returned for it. A deciding
+   quote must be stamped within 5 minutes of t (the feed refreshes a book's stamp on every
+   poll, §6.1), so "the book has not moved" means the feed saw it unmoved, not that the feed
+   stopped looking.
+3. **Fair price.** Pinnacle's no-vig price at its own number. Spreads go through the shape for
+   games with a line of the same size (10.7), totals through the pooled shape, moneylines
+   directly. A game with no Pinnacle quote at the fetch has no bet.
+4. **Deciding books** `config.BEST_LINE_BOOKMAKERS`, price −200 or better; units, pushes and
+   settlement are the harness's (§6.2). One bet per game, market and cell (the first event of
+   the game that qualifies).
+
+### 11.3 The families and their cells (26)
+
+- **N1, the stale book.** At t, Pinnacle's fair centre has moved since R−5 by at least
+  1 point (spreads, totals) or 0.02 in win chance (moneylines), and a deciding book's quote at t
+  is identical (number and both prices) to its quote at R−5. Bet that book toward Pinnacle's
+  move, priced at Pinnacle's centre at t. Markets spreads, totals, moneyline × t (3) × EV ≥ 0.02,
+  0.04: **18 cells.** The side is per game (toward the move); bar 4 reads the real sides.
+- **N2, nobody has moved.** At t, Pinnacle's centre has moved less than a quarter of |s| since
+  R−5 (spreads) or less than 0.01 in win chance (moneylines). The fair centre is Pinnacle's at
+  R−5 plus 0.47 × s: the share of the implied move the market made from the hour before a report
+  to the close in 2021-22 → 2023-24 (10.1: 0.375 in the window, 0.097 after). Bet the side the
+  news favours at the best deciding price. Spreads, moneyline × t = R+5, R+10 × EV ≥ 0.02,
+  0.04: **8 cells.**
+
+**Bands** (bar 5): [0, 0.02), [0.02, 0.04), [0.04, ∞).
+
+**Controls, graded and reported, never candidates:**
+- **N1 quiet:** the N1 rule at the same offsets around report times where neither team's
+  expected minutes changed by 0.5 points' worth. If stale books pay as well without news, the
+  news is not the reason.
+- **N1 hourly:** the N1 rule on the hourly archive alone (t = the first fetch at least 30
+  minutes after R), the resolution every earlier search had.
+
+### 11.4 The bars
+
+§9.1's house standard, unchanged (200 bets pooled, 95% interval above zero, seasons mostly
+positive, beats the blind bet on its side, bands, 200 placebo runs).
+
+- **Placebo (N1):** the direction of Pinnacle's move is shuffled between events on the same
+  date in the same market; prices stay. **(N2):** `s` is shuffled between events on the same
+  date.
+- **Reported, never bars:** closing-line value at Pinnacle's last pre-tip no-vig price; the
+  same cells at DraftKings alone; how much of Pinnacle's move happened between R−5 and R (news
+  out before the printed time); the median minutes a stale book took to move.
+- **Expected passes by chance:** 26 × 0.025 ≈ 0.65 before correlation.
+- **What a pass needs before it is live:** a live poller that reads the official report within
+  minutes of each slot and prices the slate immediately. A pass at R+5 that fails at R+10 is
+  reported as needing that speed; it is not shipped on a slower clock.
