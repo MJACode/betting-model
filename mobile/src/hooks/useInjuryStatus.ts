@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchInjuryStatus } from '@/lib/queries';
 import { buildInjuryIndex, EMPTY_INJURY_INDEX, type InjuryIndex } from '@/lib/injuryStatus';
 import type { InjuryStatusRow } from '@/types';
@@ -17,10 +17,17 @@ const EMPTY: InjuryStatusRow[] = [];
 export function useInjuryStatus(sport: string | null, reloadKey = 0): InjuryIndex {
   const [rows, setRows] = useState<InjuryStatusRow[]>(EMPTY);
   const [loadedAt, setLoadedAt] = useState(0);
+  const lastSport = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    setRows(EMPTY);
+    // Clear only when the SPORT changes. A pull-to-refresh keeps the old tags
+    // until the new ones land, or every sunk row jumps up and back down under
+    // the thumb (UX review, 2026-10-23).
+    if (lastSport.current !== sport) {
+      lastSport.current = sport;
+      setRows(EMPTY);
+    }
     if (!sport) return undefined;
     fetchInjuryStatus(sport)
       .then((r) => {
@@ -29,7 +36,7 @@ export function useInjuryStatus(sport: string | null, reloadKey = 0): InjuryInde
         setLoadedAt(Date.now());
       })
       .catch(() => {
-        if (mounted) setRows(EMPTY);
+        // A failed refresh keeps what we had; it still ages out at 36h.
       });
     return () => {
       mounted = false;
