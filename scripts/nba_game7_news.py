@@ -7,8 +7,13 @@ are the harness's quotes (scripts/nba_game_harness.load), whose fetch instants i
 
   EVENT      (game, printed report time R, s): s = implied change in the HOME margin, |s| >= 0.5.
              One bet per game, market and cell: the game's first qualifying event.
-  QUOTE AT X the quote a book returned in the fetch asked for at instant X (fetch_at == X).
-  FRESH      a deciding quote stamped (snapshot_at) within FRESH_MIN minutes of its fetch.
+  SNAPSHOT   the feed returns the latest 5-minute snapshot AT OR BEFORE a request, 38-39 s
+             past its mark (11.5): a fetch's SLOT is that mark (nba_news_window_plan.slot) and
+             its SNAPSHOT TIME is the stored body timestamp (ledger snapshot_ts), else slot + 38 s.
+             "R+5" is the fetch whose slot is R+5: prices as the feed saw them at about R+5:38.
+  QUOTE AT X the quote a book returned in fetch X.
+  FRESH      a deciding quote stamped (snapshot_at) within FRESH_MIN minutes of its fetch's
+             SNAPSHOT TIME (not of the request).
   CENTRE     Pinnacle's no-vig price at its own number at a fetch: spreads -> the home margin's
              centre through the line-size shape (scripts/nba_game6_alt.game_sigma); totals ->
              the total's centre through the pooled shape; moneylines -> the home win chance.
@@ -23,6 +28,10 @@ are the harness's quotes (scripts/nba_game_harness.load), whose fetch instants i
              by 0.5 points' worth, where the slate was bought for another game. N1 hourly: the
              N1 rule with R-5 -> the last hourly fetch at or before R-5 and t -> the first
              hourly fetch at least 30 minutes after R.
+  PLACEBO    N1: each event's move direction is shuffled between events on the same date in
+             the same market and offset; the fair centre becomes centre(R-5) + shuffled
+             direction x |MOVE|, so a flipped event bets the stale book the other way at a price
+             the shifted centre calls good. N2: s shuffled between events on the same date.
   POOL       2024-25 and 2025-26 pooled; roi_choose is the pooled return (no choosing seasons).
 
     PYTHONPATH=. python -m scripts.nba_game7_news --synthetic
@@ -103,32 +112,63 @@ def win_chance(mu, sigma) -> np.ndarray:
 
 # ── the windows ─────────────────────────────────────────────────────────────
 
-def windows(events: pd.DataFrame, fetch_set: set, offsets=OFFSETS, hourly: pd.DataFrame | None = None
-            ) -> pd.DataFrame:
-    """(game_id, R, s, offset, pre_at, t_at) for every event and offset whose two fetches exist.
+def snap_times(fetches: pd.DataFrame, ledger: pd.DataFrame | None) -> dict:
+    """fetch_at -> the snapshot time it bought: the ledger's snapshot_ts, else slot + 38 s."""
+    from scripts.nba_news_window_plan import slot
+    out = {}
+    if ledger is not None and "snapshot_ts" in ledger:
+        led = ledger.dropna(subset=["snapshot_ts"])
+        for r, t in zip(pd.to_datetime(led["requested_at"], utc=True),
+                        pd.to_datetime(led["snapshot_ts"], utc=True, format="mixed")):
+            out[r] = t
+    for f in pd.to_datetime(fetches["fetch_at"].unique(), utc=True):
+        out.setdefault(f, slot(f) + pd.Timedelta(seconds=38))
+    return out
 
-    Five-minute windows: pre_at = R - 5, t_at = R + offset, both held for that game. Hourly
-    (the control): pre_at = the last held hourly fetch at or before R - 5, t_at = the first at
-    least 30 minutes after R (offset reported as 'hourly')."""
+
+def slot_index(fetches: pd.DataFrame) -> dict:
+    """(game_id, slot) -> fetch_at: the fetch that bought each game's snapshot at that mark
+    (the newest request when two return the same snapshot)."""
+    from scripts.nba_news_window_plan import slot
+    f = fetches.sort_values("fetch_at")
+    return {(g, slot(t)): t for g, t in zip(f["game_id"], f["fetch_at"])}
+
+WINDOW_COLS = ["game_id", "R", "s", "season", "offset", "pre_at", "t_at", "t_snap", "r_at"]
+
+
+def windows(events: pd.DataFrame, slots: dict, snaps: dict, offsets=OFFSETS,
+            hourly: dict | None = None) -> pd.DataFrame:
+    """(game_id, R, s, season, offset, pre_at, t_at, t_snap, r_at) per event and offset whose
+    two fetches exist (pre_at, t_at: the fetches; t_snap: t's snapshot time; r_at: the fetch
+    whose slot is R itself, for the before-the-report report, else NaT).
+
+    Five-minute windows: pre = the fetch whose slot is R - 5, t = the fetch whose slot is
+    R + offset, its snapshot before tip - MIN_LEAD. Hourly (the control): pre = the last
+    hourly fetch whose snapshot is at or before R - 5, t = the first whose snapshot is at least
+    30 minutes after R (offset -1)."""
     rows = []
     for e in events.itertuples(index=False):
+        late = e.tip - pd.Timedelta(minutes=H.MIN_LEAD)
         if hourly is None:
-            pre = e.report_ts - pd.Timedelta(minutes=PRE_MIN)
-            if (e.game_id, pre) not in fetch_set:
+            pre = slots.get((e.game_id, e.report_ts - pd.Timedelta(minutes=PRE_MIN)))
+            if pre is None:
                 continue
+            r_at = slots.get((e.game_id, e.report_ts), pd.NaT)
             for k in offsets:
-                t = e.report_ts + pd.Timedelta(minutes=k)
-                if (e.game_id, t) in fetch_set and t < e.tip - pd.Timedelta(minutes=H.MIN_LEAD):
-                    rows.append((e.game_id, e.report_ts, e.s, e.season, k, pre, t))
+                t = slots.get((e.game_id, e.report_ts + pd.Timedelta(minutes=k)))
+                if t is not None and snaps[t] < late:
+                    rows.append((e.game_id, e.report_ts, e.s, e.season, k, pre, t, snaps[t], r_at))
         else:
             hf = hourly.get(e.game_id)
             if hf is None:
                 continue
-            before = hf[hf <= e.report_ts - pd.Timedelta(minutes=PRE_MIN)]
-            after = hf[hf >= e.report_ts + pd.Timedelta(minutes=30)]
-            if len(before) and len(after) and after[0] < e.tip - pd.Timedelta(minutes=H.MIN_LEAD):
-                rows.append((e.game_id, e.report_ts, e.s, e.season, -1, before[-1], after[0]))
-    return pd.DataFrame(rows, columns=["game_id", "R", "s", "season", "offset", "pre_at", "t_at"])
+            st = np.array([snaps[pd.Timestamp(x)] for x in hf])
+            before = [x for x, t in zip(hf, st) if t <= e.report_ts - pd.Timedelta(minutes=PRE_MIN)]
+            after = [(x, t) for x, t in zip(hf, st) if t >= e.report_ts + pd.Timedelta(minutes=30)]
+            if before and after and after[0][1] < late:
+                rows.append((e.game_id, e.report_ts, e.s, e.season, -1, pd.Timestamp(before[-1]),
+                             pd.Timestamp(after[0][0]), after[0][1], pd.NaT))
+    return pd.DataFrame(rows, columns=WINDOW_COLS)
 
 
 def n1_candidates(win: pd.DataFrame, q: pd.DataFrame, cen: pd.DataFrame) -> pd.DataFrame:
@@ -146,6 +186,7 @@ def n1_candidates(win: pd.DataFrame, q: pd.DataFrame, cen: pd.DataFrame) -> pd.D
         w["mu"] = [c["mu"].get(k, np.nan) for k in k1]
         w["sigma"] = [c["sigma"].get(k) for k in k1]
         w["p_home"] = [c["p_home"].get(k, np.nan) for k in k1]
+        w["sigma1"] = w["sigma"]
         w["move"] = w["c1"] - w["c0"]
         w = w[w["move"].abs() >= N1_MOVE[market] - 1e-12]
         if w.empty:
@@ -159,7 +200,7 @@ def n1_candidates(win: pd.DataFrame, q: pd.DataFrame, cen: pd.DataFrame) -> pd.D
             q0, on=["game_id", "book", "pre_at"])
         same = (np.isclose(x["line"].fillna(-999), x["line0"].fillna(-999))
                 & np.isclose(x["price_a"], x["pa0"]) & np.isclose(x["price_b"], x["pb0"]))
-        fresh = x["snapshot_at"] >= x["t_at"] - pd.Timedelta(minutes=FRESH_MIN)
+        fresh = x["snapshot_at"] >= x["t_snap"] - pd.Timedelta(minutes=FRESH_MIN)
         x = x[same & fresh]
         if x.empty:
             continue
@@ -207,7 +248,7 @@ def n2_candidates(win: pd.DataFrame, q: pd.DataFrame, cen: pd.DataFrame, s_col: 
             ww["p_home"] = np.nan
         qm = q[(q["market"] == market) & q["book"].isin(H.BETTABLE)].rename(columns={"fetch_at": "t_at"})
         x = ww.merge(qm, on=["game_id", "market", "t_at"], suffixes=("", "_q"))
-        x = x[x["snapshot_at"] >= x["t_at"] - pd.Timedelta(minutes=FRESH_MIN)]
+        x = x[x["snapshot_at"] >= x["t_snap"] - pd.Timedelta(minutes=FRESH_MIN)]
         x = x.assign(price=np.where(x["side"] == "home", x["price_a"], x["price_b"]))
         out.append(x)
     if not out:
@@ -269,19 +310,28 @@ def bands(cand: pd.DataFrame, k: int, games: pd.DataFrame) -> dict:
 
 
 def blinds(win: pd.DataFrame, q: pd.DataFrame, market: str, games: pd.DataFrame, cen: pd.DataFrame) -> dict:
-    """The blind bet on each real side at the best fresh deciding price at t, every window in
-    the cell's population (its first window per game), priced at Pinnacle's centre at t."""
-    w = win.sort_values("R").drop_duplicates("game_id")
+    """The blind bet on each real side (the house standard's, H.blind_pool): every window in
+    the cell's population (its first window per game) with a Pinnacle centre at t, the best
+    fresh deciding offer on that side under Pinnacle's centre at t, no cut."""
+    w = win.sort_values("R").drop_duplicates("game_id").assign(market=market)
+    c = cen[cen["market"] == market].rename(columns={"fetch_at": "t_at"})[
+        ["game_id", "market", "t_at", "mu", "sigma", "p_home"]]
+    w = w.merge(c, on=["game_id", "market", "t_at"])
+    w = w[w["mu"].notna() | w["p_home"].notna()]
     qm = q[(q["market"] == market) & q["book"].isin(H.BETTABLE)].rename(columns={"fetch_at": "t_at"})
-    x = w.assign(market=market).merge(qm, on=["game_id", "market", "t_at"], suffixes=("", "_q"))
-    x = x[x["snapshot_at"] >= x["t_at"] - pd.Timedelta(minutes=FRESH_MIN)]
+    x = w.merge(qm, on=["game_id", "market", "t_at"], suffixes=("", "_q"))
+    x = x[x["snapshot_at"] >= x["t_snap"] - pd.Timedelta(minutes=FRESH_MIN)]
     out = {}
-    for side, col in ((SIDE_A[market], "price_a"), (SIDE_B[market], "price_b")):
-        b = x.assign(side=side, price=x[col])
-        b = b[b["price"] >= H.PRICE_FLOOR]
-        b = b.assign(_r=b["book"].map(H.BOOK_RANK).fillna(99)).sort_values(
-            ["game_id", "price", "_r"], ascending=[True, False, True]).drop_duplicates("game_id")
-        g = H.grade(b.drop(columns="_r"), games) if len(b) else b
+    if x.empty:
+        return out
+    off = pd.concat([x.assign(side=SIDE_A[market], price=x["price_a"]),
+                     x.assign(side=SIDE_B[market], price=x["price_b"])], ignore_index=True)
+    pw, pp = H.side_probs(off["market"].to_numpy(), off["side"].to_numpy(), off["line"].to_numpy(),
+                          mu=off["mu"].to_numpy(float), sigma=off["sigma"].to_numpy(),
+                          p_home=off["p_home"].to_numpy(float))
+    off = H.with_ev(off.assign(p_win=pw, p_push=pp))
+    for side in (SIDE_A[market], SIDE_B[market]):
+        g = H.grade(H.choose(off, -np.inf, sides=[side]), games)
         if len(g):
             out[f"blind_pool_{side}"] = H.roi(g)
     return out
@@ -298,28 +348,103 @@ def shuffle_col(df: pd.DataFrame, col: str, run: int, by=("date", "market")) -> 
 
 
 def n1_placebo(cand: pd.DataFrame, run: int) -> pd.DataFrame:
-    """Pinnacle's move direction shuffled between events on the same date in the same market;
-    each offer then bets the shuffled side at the same book and number, priced the same way."""
+    """11.4's placebo for N1. Each event's move direction (per game, market, report and
+    offset) is shuffled between events on the same date in the same market and offset. The
+    fair centre at t becomes centre(R-5) + shuffled direction x |MOVE| (the move's own size),
+    and every stale offer bets toward the SHUFFLED move at its own book and number, priced at
+    that shifted centre. An event whose direction did not flip is the real bet; one that did
+    flip bets the stale book the other way, at a price the shifted centre calls good."""
     if cand.empty:
         return cand
+    key = ["game_id", "market", "R", "offset"]
     c = cand.assign(date=cand["R"].dt.strftime("%Y-%m-%d"), dir=np.sign(cand["move"]))
-    ev_dir = c.drop_duplicates(["game_id", "market", "R"])[["game_id", "market", "R", "date", "dir"]]
-    ev_dir = shuffle_col(ev_dir, "dir", run)
-    c = c.drop(columns="dir").merge(ev_dir[["game_id", "market", "R", "dir"]], on=["game_id", "market", "R"])
-    flip = np.sign(c["move"]) != c["dir"]
-    a_side = c["market"].map(SIDE_A)
-    b_side = c["market"].map(SIDE_B)
-    new_side = np.where(c["dir"] > 0, a_side, b_side)
-    c = c.assign(side=np.where(flip, new_side, c["side"]),
-                 price=np.where(flip, np.where(new_side == a_side, c["price_a"], c["price_b"]), c["price"]))
+    ev_dir = c.drop_duplicates(key)[key + ["date", "dir"]]
+    ev_dir = shuffle_col(ev_dir, "dir", run, by=("date", "market", "offset"))
+    c = c.drop(columns="dir").merge(ev_dir[key + ["dir"]], on=key)
+    centre = c["c0"] + c["dir"] * c["move"].abs()
+    ml = c["market"] == "h2h"
+    c = c.assign(mu=np.where(ml, np.nan, centre),
+                 p_home=np.where(ml, np.clip(centre, 0.005, 0.995), np.nan),
+                 side=np.where(c["dir"] > 0, c["market"].map(SIDE_A), c["market"].map(SIDE_B)))
+    c = c.assign(price=np.where(c["side"] == c["market"].map(SIDE_A), c["price_a"], c["price_b"]))
     pw, pp = H.side_probs(c["market"].to_numpy(), c["side"].to_numpy(), c["line"].to_numpy(),
                           mu=c["mu"].to_numpy(float), sigma=c["sigma"].to_numpy(),
                           p_home=c["p_home"].to_numpy(float))
     return H.with_ev(c.drop(columns=["ev", "p_win", "p_push"]).assign(p_win=pw, p_push=pp))
 
 
+def clv_any(g: pd.DataFrame, close, sig, shapes) -> pd.Series:
+    """Closing value of each bet at Pinnacle's last pre-tip no-vig price: spreads and totals
+    through the shape their closing number selects (nba_game6_alt.clv_shaped), moneylines at
+    the closing no-vig win chance directly."""
+    out = pd.Series(np.nan, index=g.index)
+    if close is None or not len(g):
+        return out
+    st = g[g["market"] != "h2h"]
+    if len(st):
+        out.loc[st.index] = A.clv_shaped(st, close, sig, shapes)
+    ml = g[g["market"] == "h2h"]
+    if len(ml):
+        x = ml.reset_index().merge(close[close["market"] == "h2h"].drop(columns="season"),
+                                   on=["game_id", "market"], how="left")
+        x = x[(x["close_at"] > x["T"]) & x["close_fa"].notna()]
+        pw = np.where(x["side"] == "home", x["close_fa"], 1 - x["close_fa"])
+        ev = pw * (H.dec(x["price"]) - 1.0) - (1.0 - pw)
+        out.loc[x["index"].to_numpy()] = ev
+    return out
+
+
+def before_report_share(cand: pd.DataFrame, cen: pd.DataFrame) -> float:
+    """11.4: the share of Pinnacle's move (R-5 to t) already made at the snapshot of R itself,
+    over the events a cell bet on: sum of (centre(R) - centre(R-5)) toward the move over the
+    sum of |move|."""
+    if cand.empty:
+        return np.nan
+    e = cand.drop_duplicates(["game_id", "market", "R", "offset"])
+    e = e[e["r_at"].notna()]
+    if e.empty:
+        return np.nan
+    c = cen.set_index(["game_id", "market", "fetch_at"])["centre"]
+    cr = np.array([c.get(k, np.nan) for k in zip(e["game_id"], e["market"], e["r_at"])])
+    ok = np.isfinite(cr)
+    if not ok.any():
+        return np.nan
+    toward = (cr[ok] - e["c0"].to_numpy()[ok]) * np.sign(e["move"].to_numpy()[ok])
+    return float(toward.sum() / e["move"].abs().to_numpy()[ok].sum())
+
+
+def stale_minutes(bets: pd.DataFrame, q: pd.DataFrame, slots: dict) -> tuple[float, int]:
+    """11.4: minutes after R until each bet's stale book first showed a different quote, at the
+    5-minute slots after its decision up to R + 25 (median, and how many never moved there)."""
+    if not len(bets):
+        return np.nan, 0
+    qq = q.set_index(["game_id", "market", "book", "fetch_at"])
+    mins, never = [], 0
+    for b in bets.itertuples(index=False):
+        moved = None
+        for k in range(int(b.offset) + 5, 30, 5):
+            f = slots.get((b.game_id, b.R + pd.Timedelta(minutes=k)))
+            if f is None:
+                continue
+            try:
+                r = qq.loc[(b.game_id, b.market, b.book, f)]
+            except KeyError:
+                continue
+            r = r.iloc[-1] if isinstance(r, pd.DataFrame) else r
+            if not (np.isclose(r["line"] if pd.notna(r["line"]) else -999, b.line0 if pd.notna(b.line0) else -999)
+                    and np.isclose(r["price_a"], b.pa0) and np.isclose(r["price_b"], b.pb0)):
+                moved = k
+                break
+        if moved is None:
+            never += 1
+        else:
+            mins.append(moved)
+    return (float(np.median(mins)) if mins else np.nan), never
+
+
 def cell_rows(family: str, cand: pd.DataFrame, win: pd.DataFrame, q: pd.DataFrame, games: pd.DataFrame,
-              cen: pd.DataFrame, close, sig, shapes, placebos: list, markets, offsets) -> tuple[list[dict], list]:
+              cen: pd.DataFrame, close, sig, shapes, placebos: list, markets, offsets,
+              slots: dict | None = None) -> tuple[list[dict], list]:
     rows, bets = [], []
     for market in markets:
         for off in offsets:
@@ -344,10 +469,14 @@ def cell_rows(family: str, cand: pd.DataFrame, win: pd.DataFrame, q: pd.DataFram
                         H.grade(choose_first_event(cm, cut, books=(H.DK,)), games)
                         if len(choose_first_event(cm, cut, books=(H.DK,))) else pd.DataFrame())
                     if close is not None:
-                        ev = A.clv_shaped(g.assign(T=g["T"]), close, sig, shapes)
+                        ev = clv_any(g, close, sig, shapes)
                         row["clv_n"] = int(ev.notna().sum())
                         row["clv_median"] = float(np.nanmedian(ev)) if ev.notna().any() else np.nan
                         row["clv_mean"] = float(np.nanmean(ev)) if ev.notna().any() else np.nan
+                    if "c0" in cm:
+                        row["pin_share_before_R"] = before_report_share(b, cen)
+                        if slots is not None and "pa0" in b:
+                            row["stale_minutes_median"], row["stale_never_moved"] = stale_minutes(b, q, slots)
                     bets.append(g.assign(family=family, cut=cut))
                 row["roi_choose"] = row["pool_roi"]
                 pl = []
@@ -362,31 +491,32 @@ def cell_rows(family: str, cand: pd.DataFrame, win: pd.DataFrame, q: pd.DataFram
 
 # ── the run ─────────────────────────────────────────────────────────────────
 
-def fetch_index(data: H.Data) -> set:
-    return set(zip(data.fetches["game_id"], data.fetches["fetch_at"]))
-
-
-def hourly_fetches(data: H.Data, ledger: pd.DataFrame) -> dict:
-    """game_id -> sorted fetch instants that are NOT news-window purchases."""
+def hourly_fetches(data: H.Data, ledger: pd.DataFrame | None) -> dict | None:
+    """game_id -> sorted fetch instants that are NOT news-window purchases (the archive every
+    earlier search had)."""
+    if ledger is None:
+        return None
     led = ledger.copy()
     led["requested_at"] = pd.to_datetime(led["requested_at"], utc=True)
-    news = set(led.loc[led["why"].astype(str) == "news_window", "requested_at"])
+    news = set(led.loc[led["why"].astype(str) == H.NEWS_WINDOW_WHY, "requested_at"])
     f = data.fetches[~data.fetches["fetch_at"].isin(news)]
     return {g: np.sort(x["fetch_at"].to_numpy()) for g, x in f.groupby("game_id")}
 
 
 def run(data: H.Data, events: pd.DataFrame, quiet: pd.DataFrame, sig: dict, shapes: dict | None,
-        hourly: dict | None, runs: int = PLACEBO_RUNS) -> tuple[pd.DataFrame, pd.DataFrame]:
+        ledger: pd.DataFrame | None, runs: int = PLACEBO_RUNS) -> tuple[pd.DataFrame, pd.DataFrame]:
     games = data.games
     q = at_fetch(data.quotes)
     cen = centres(q, sig, shapes)
     close = H.pinnacle_close(data) if len(data.quotes) else None
-    fs = fetch_index(data)
-    win = windows(events, fs)
+    snaps = snap_times(data.fetches, ledger)
+    slots = slot_index(data.fetches)
+    win = windows(events, slots, snaps)
     rows, bets = [], []
     c1 = n1_candidates(win, q, cen)
     pl1 = [n1_placebo(c1, r) for r in range(1, runs + 1)] if len(c1) else [pd.DataFrame()] * runs
-    r, b = cell_rows("N1", c1, win, q, games, cen, close, sig, shapes, pl1, ("spreads", "totals", "h2h"), OFFSETS)
+    r, b = cell_rows("N1", c1, win, q, games, cen, close, sig, shapes, pl1, ("spreads", "totals", "h2h"),
+                     OFFSETS, slots=slots)
     rows += r; bets += b
     c2 = n2_candidates(win, q, cen)
     pl2 = []
@@ -396,12 +526,13 @@ def run(data: H.Data, events: pd.DataFrame, quiet: pd.DataFrame, sig: dict, shap
     r, b = cell_rows("N2", c2, win, q, games, cen, close, sig, shapes, pl2, ("spreads", "h2h"), OFFSETS[:2])
     rows += r; bets += b
     if quiet is not None and len(quiet):
-        wq = windows(quiet, fs)
+        wq = windows(quiet, slots, snaps)
         r, _ = cell_rows("control_N1_quiet", n1_candidates(wq, q, cen), wq, q, games, cen, close, sig, shapes,
-                         [], ("spreads", "totals", "h2h"), OFFSETS)
+                         [], ("spreads", "totals", "h2h"), OFFSETS, slots=slots)
         rows += r
+    hourly = hourly_fetches(data, ledger)
     if hourly is not None:
-        wh = windows(events, fs, hourly=hourly)
+        wh = windows(events, slots, snaps, hourly=hourly)
         r, _ = cell_rows("control_N1_hourly", n1_candidates(wh, q, cen), wh, q, games, cen, close, sig, shapes,
                          [], ("spreads", "totals", "h2h"), (-1,))
         rows += r
@@ -418,10 +549,12 @@ def quiet_reports(ir: pd.DataFrame, adv: pd.DataFrame, games: pd.DataFrame) -> p
     g = games.set_index("game_id")
     home = tc["team"].to_numpy() == g.loc[tc["game_id"], "home_team"].to_numpy()
     tc["s"] = np.where(home, 1.0, -1.0) * tc["d_min"] * P.K_PTS_PER_MIN
-    e = tc.groupby(["game_id", "report_ts"]).agg(s=("s", "sum")).reset_index()
+    tc["abs_team"] = tc["s"].abs()
+    e = tc.groupby(["game_id", "report_ts"]).agg(s=("s", "sum"), team_max=("abs_team", "max")).reset_index()
     e["tip"] = e["game_id"].map(g["tip"])
     e["season"] = e["game_id"].map(g["season"]).astype(int)
-    keep = (e["s"].abs() < P.MIN_MOVE) & (e["report_ts"] < e["tip"] - pd.Timedelta(minutes=30))
+    # 11.3: NEITHER team's expected minutes changed by 0.5 points' worth (not the net of both)
+    keep = (e["team_max"] < P.MIN_MOVE) & (e["report_ts"] < e["tip"] - pd.Timedelta(minutes=30))
     return e[keep].reset_index(drop=True)
 
 
@@ -446,7 +579,7 @@ def synthetic_world(seed: int = 4, n_days: int = 260, per_day: int = 4, soft_lag
         line = -np.round(mu * 2) / 2 if line is None else line
         p_home = 1 - cdf((-line - mu) / 13.0)
         quotes.append({"game_id": gid, "season": season, "game_date": gd, "tip": tip, "market": "spreads",
-                       "book": book, "snapshot_at": at - pd.Timedelta(minutes=1), "fetch_at": at, "line": float(line),
+                       "book": book, "snapshot_at": at - pd.Timedelta(seconds=30), "fetch_at": at, "line": float(line),
                        "price_a": am(p_home * (1 + hold / 2)), "price_b": am((1 - p_home) * (1 + hold / 2)),
                        "coherent": True})
     for d in range(n_days):
@@ -466,7 +599,8 @@ def synthetic_world(seed: int = 4, n_days: int = 260, per_day: int = 4, soft_lag
             events.append({"game_id": gid, "report_ts": R, "s": s, "tip": tip, "season": season,
                            "small": small})
             for k in range(-5, 30, 5):
-                at = R + pd.Timedelta(minutes=k)
+                # requested one minute past the mark: the snapshot it returns is the mark's
+                at = R + pd.Timedelta(minutes=k + 1)
                 fetches.append({"game_id": gid, "tip": tip, "fetch_at": at,
                                 "lead_min": (tip - at).total_seconds() / 60})
                 quote(gid, season, gd, tip, "pinnacle", at, mu0 if k < 0 else mu1, 0.02)
@@ -492,7 +626,7 @@ def synthetic_checks() -> None:
     data, ev, sig = synthetic_world()
     q = at_fetch(data.quotes)
     cen = centres(q, sig, None)
-    win = windows(ev, fetch_index(data))
+    win = windows(ev, slot_index(data.fetches), snap_times(data.fetches, None))
     c1 = n1_candidates(win, q, cen)
     assert len(c1) and set(c1["book"]) == {"draftkings"}, "only the lagging book is ever stale"
     small_ids = set(ev.loc[ev["small"], "game_id"])
@@ -508,27 +642,34 @@ def synthetic_checks() -> None:
     # no stale book at all when every book moves with Pinnacle
     data2, ev2, sig2 = synthetic_world(soft_lag_min=0)
     q2 = at_fetch(data2.quotes)
-    c2 = n1_candidates(windows(ev2, fetch_index(data2)), q2, centres(q2, sig2, None))
+    c2 = n1_candidates(windows(ev2, slot_index(data2.fetches), snap_times(data2.fetches, None)), q2,
+                       centres(q2, sig2, None))
     assert c2.empty, "books that moved with Pinnacle were read as stale"
     # N2 never fires once the market has moved, and bets the side the news favours when it has not
     n2 = n2_candidates(win, q, cen)
     assert n2.empty, "N2 fired after Pinnacle had moved"
     pre = win.copy()
     pre["t_at"] = pre["pre_at"]                  # read the pre-report fetch as t: nobody has moved
+    pre["t_snap"] = pre["pre_at"].map(snap_times(data.fetches, None))
     n2b = n2_candidates(pre, q, cen)
     assert len(n2b) and ((n2b["s"] > 0) == (n2b["side"] == "home")).all(), "N2 bet against the news"
     assert n2b["ev"].median() > 0.02, "N2's fair line does not lean the way the news points"
     # a stale book whose feed stamp is older than FRESH_MIN is not read as unmoved
     old_q = data.quotes.copy()
     dk = old_q["book"].eq("draftkings")
-    old_q.loc[dk, "snapshot_at"] = old_q.loc[dk, "fetch_at"] - pd.Timedelta(minutes=FRESH_MIN + 5)
+    old_q.loc[dk, "snapshot_at"] = old_q.loc[dk, "fetch_at"] - pd.Timedelta(minutes=FRESH_MIN + 2)
     q3 = at_fetch(old_q)
     assert n1_candidates(win, q3, centres(q3, sig, None)).empty, "an old feed stamp was read as a live quote"
     # the whole run builds every registered cell (two placebo runs, to exercise the path)
-    cells, _ = run(data, ev, None, sig, None, None, runs=2)
-    assert len(cells) == EXPECTED_CELLS and cells["placebo_rois"].map(len).eq(2).all()
+    cells, _ = run(data, ev, None, sig, None, None, runs=40)
+    assert len(cells) == EXPECTED_CELLS and cells["placebo_rois"].map(len).eq(40).all()
     best = cells[(cells["family"] == "N1") & (cells["market"] == "spreads")]
     assert (best["pool_roi"] > 0).all() and (best["pool_n"] > 300).all(), "the run lost the planted edge"
+    # the placebo is a null, not a copy of the real bets: the planted edge clears its 95th percentile
+    p95 = best["placebo_rois"].map(lambda v: np.nanpercentile(np.nan_to_num(np.array(v, float), nan=0.0), 95))
+    assert (best["pool_roi"] > p95).all(), f"the planted edge did not beat its placebo: {list(zip(best['pool_roi'], p95))}"
+    # the stale book moved at R + soft_lag_min = 20
+    assert (best["stale_minutes_median"] == 20).all(), list(best["stale_minutes_median"])
     print("synthetic checks pass")
 
 
@@ -547,7 +688,7 @@ def main() -> None:
             ap.error("--full needs --results DIR")
         synthetic_checks()
         from scripts import nba_news_window_plan as P
-        data = H.load(require_seasons=SEASONS)
+        data = H.load(require_seasons=SEASONS, include_news_windows=True)
         g_all = H.load(seasons=tuple(range(2021, 2027)))
         close_all = H.pinnacle_close(g_all)
         sig = dict(H.close_dist(close_all, g_all.games))
@@ -558,7 +699,9 @@ def main() -> None:
         g, ir, adv, _ = P.load_cache(H.CACHE, SEASONS)
         ev = P.events(ir, adv, g)
         quiet = quiet_reports(ir, adv, g)
-        cells, bets = run(data, ev, quiet, sig, shapes, hourly_fetches(data, ledger), runs=a.runs)
+        if "snapshot_ts" not in ledger:
+            raise SystemExit("the cache's ledger has no snapshot_ts: refresh it with scripts.nba_research_cache")
+        cells, bets = run(data, ev, quiet, sig, shapes, ledger, runs=a.runs)
         a.results.mkdir(parents=True, exist_ok=True)
         cells.to_parquet(a.results / "cells_N.parquet")
         if len(bets):
