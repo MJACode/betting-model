@@ -194,13 +194,18 @@ export function isBundledPaused(modelId: string): boolean {
 
 /**
  * Whether a model is paused (never surfaced as an actionable pick, and hidden
- * from the Models list and from Signals). A server row wins whenever it
- * exists: a missing `paused` flag is not paused. The bundled PAUSED_MODELS
- * list applies only when that model has no row (offline, or not in the table).
+ * from the Models list and from Signals).
+ *
+ * An explicit `paused` flag always wins, cache or live table. A row with no
+ * flag is a cache from a build that did not store one: it overrides the
+ * bundled pause list only after the live table has been applied. Until then
+ * the bundle still pauses the model, so Signals does not flash mlb_over_under
+ * as live on a cold start. No row at all uses the bundled list.
  */
 export function isModelPaused(modelId: string): boolean {
   const sv = serverThresholds?.[modelId];
-  if (sv) return sv.paused === true;
+  if (sv && typeof sv.paused === 'boolean') return sv.paused;
+  if (sv && hasFetchedThresholds()) return false;
   return PAUSED_MODELS.has(modelId);
 }
 
@@ -341,7 +346,9 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   const posted = p.discordPublish === 'published';
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
-    if (sv.paused) return false;
+    // Same pause rule as isModelPaused. `sv.paused` alone treats a cached
+    // row that omits the flag as live, and Signals is this filter.
+    if (isModelPaused(p.model_id)) return false;
     if (posted) return true;
     if (p.model_probability < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;

@@ -51,6 +51,7 @@ import {
   isModelPaused,
   isModelRetired,
   markThresholdsFetched,
+  passesActionFilter,
   setServerThresholds,
   type ServerThreshold,
 } from '../src/lib/thresholds';
@@ -299,18 +300,46 @@ setServerThresholds(null);
 check('clearing the server store restores the bundled pause set',
   !isModelPaused('mlb_moneyline') && isModelPaused('mlb_prop_batter_hits'));
 
-// A server row with no `paused` flag used to fall through to the bundled
-// list, so Signals hid a model the server had a row for. The row wins.
-// The bundled list applies only when that model has no row.
-setServerThresholds({
+// A cache from a build that did not store `paused` has the row and no flag.
+// Until the live table lands, that must not unpause a bundle-paused model
+// on Signals. After the fetch, a row with no flag is not paused. An explicit
+// flag wins either way. A model with no row still uses the bundle.
+const cachedWithoutFlag = {
   mlb_over_under: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false } as ServerThreshold,
-});
-check('a server row with no paused flag is not paused, even when the bundle pauses that model',
-  isModelPaused('mlb_over_under') === false && PAUSED_MODELS.has('mlb_over_under'));
+};
+const signalPick = {
+  model_id: 'mlb_over_under',
+  model_probability: 0.6,
+  edge: 0.2,
+  dk_odds: -110,
+  signal_type: 'BET' as const,
+  condition_status: 'OK',
+  discordPublish: 'published' as const,
+};
+setServerThresholds(cachedWithoutFlag);
+check('a cached row with no paused flag stays bundle-paused before the live table',
+  !hasFetchedThresholds() &&
+    isModelPaused('mlb_over_under') === true &&
+    PAUSED_MODELS.has('mlb_over_under') &&
+    passesActionFilter(signalPick) === false);
 check('a model with no server row still uses the bundled pause list',
   isModelPaused('mlb_runline') === true && PAUSED_MODELS.has('mlb_runline'));
 check('the history mark still waits for the live table when the row omits paused',
   !hasFetchedThresholds() && modelHistoryMark('mlb_over_under') === 'Paused');
+setServerThresholds({
+  mlb_over_under: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: false },
+  mlb_moneyline: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+});
+check('an explicit paused flag wins before the live table lands',
+  !hasFetchedThresholds() &&
+    isModelPaused('mlb_over_under') === false &&
+    isModelPaused('mlb_moneyline') === true);
+setServerThresholds(cachedWithoutFlag);
+markThresholdsFetched();
+check('once the live table has landed, a row with no paused flag is not paused',
+  hasFetchedThresholds() &&
+    isModelPaused('mlb_over_under') === false &&
+    passesActionFilter(signalPick) === true);
 setServerThresholds(null);
 
 // The NBA player page's "our picks" note asks whether ANY live prop model
