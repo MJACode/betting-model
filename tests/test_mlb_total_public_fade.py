@@ -266,7 +266,8 @@ def test_pick_label_quotes_under_and_agrees_with_the_line():
     assert r["signal_type"] == "BET"
     assert r["recommended_bet"] == 100.0
     assert r["edge"] == pytest.approx(0.26)
-    assert r["pick_label"].endswith("(FD)")
+    assert "(FD)" not in r["pick_label"]
+    assert "(" not in r["pick_label"]
     problems = pick_problems(
         r["pick_label"], r["pick_side"], r["scored_line"],
         r["model_id"], "NYY", "BOS")

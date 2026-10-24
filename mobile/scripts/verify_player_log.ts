@@ -58,7 +58,8 @@ import {
   statsForSport,
   type StatDef,
 } from '../src/lib/statCatalog';
-import { playerPickRecord } from '../src/lib/playerDetail';
+import { playerLineNote, playerPickRecord } from '../src/lib/playerDetail';
+import { modelLong } from '../src/lib/modelMeta';
 import type { SettledPick } from '../src/types';
 
 let failures = 0;
@@ -364,14 +365,13 @@ check('the projection model names no single stat of its own',
     settled({ pick_id: 4, model_id: 'mlb_prop_batter_runs', sport: 'MLB', prop_market: null, pick_side: 'over' }),
   ]);
   const labels = rec.lines.map((l) => l.label).sort().join(',');
-  // A rule's line is named for its stat AND the rule, so it can never read as
-  // a per-stat model's line ("Assists 1-0" beside "Assists 0-1"; designer
-  // review, 2026-10-16). Per-stat models keep the bare stat name.
-  check('a multi-market rule gets one line per market, named for its stat and the rule',
-    labels === 'Points (vs Pinnacle),Rebounds (vs Pinnacle),Runs');
+  // The label is the stat. A second row with the same stat names its model
+  // on the note (playerLineNote), not as "Assists (Props)".
+  check('a multi-market rule gets one line per market, named for its stat',
+    labels === 'Points,Rebounds,Runs');
   check('each line has its own key, so two lines of one model never share a React key',
     new Set(rec.lines.map((l) => l.key)).size === rec.lines.length);
-  const pts = rec.lines.find((l) => l.label === 'Points (vs Pinnacle)');
+  const pts = rec.lines.find((l) => l.label === 'Points');
   check('the points line carries both its bets', pts?.wins === 1 && pts.losses === 1 && pts.unders === 2);
   check('the total still counts every bet once', rec.settled === 4);
 
@@ -381,11 +381,22 @@ check('the projection model names no single stat of its own',
     settled({ pick_id: 6, model_id: 'wnba_prop_market', sport: 'WNBA', prop_market: 'player_assists', result: 'LOSS', profit_flat: -100 }),
   ]);
   const bothLabels = both.lines.map((l) => l.label).sort().join(',');
-  check('a per-stat Assists line and the rule\'s Assists line read differently',
-    bothLabels === 'Assists,Assists (vs Pinnacle)');
+  // The prop-market rule has no parenthetical, so this pair shares the word
+  // "Assists". The rows stay separate (different keys). "Assists (Props)" is
+  // the reading the rename refused.
+  check('a per-stat Assists line and the WNBA Props line both use the stat name',
+    bothLabels === 'Assists,Assists');
+  check('those two Assists lines are still two rows',
+    new Set(both.lines.map((l) => l.key)).size === 2);
+  check('a shared stat label names the model on the note, not in the label',
+    both.lines.every((l) => !l.label.includes('Props') && playerLineNote(l, both.lines)?.startsWith(modelLong(l.modelId))) &&
+      both.lines.map((l) => playerLineNote(l, both.lines)).sort().join(' | ') ===
+        'WNBA Assists · 0 overs · 1 under | WNBA Props · 0 overs · 1 under');
+  check('a stat that only one model priced does not prefix the model name',
+    playerLineNote(pts!, rec.lines) === '0 overs · 2 unders');
 
-  // The NBA projection model is not priced against Pinnacle, so its lines
-  // carry its own name; it bets overs as well as unders.
+  // The NBA projection model keeps "Projection" on its lines; the prop-market
+  // rule does not. It bets overs as well as unders.
   const proj = playerPickRecord([
     settled({ pick_id: 7, model_id: 'nba_prop_projection', prop_market: 'player_steals', pick_side: 'over',
       pick_label: 'A Player Over 1.5 Steals' }),
@@ -398,8 +409,8 @@ check('the projection model names no single stat of its own',
     settled({ pick_id: 11, prop_market: 'player_rebounds', pick_label: 'A Player Under 8.5 Reb' }),
   ]);
   const projLabels = proj.lines.map((l) => l.label).sort().join(',');
-  check('the projection model\'s lines are named "(Projection)", the rule\'s stay "(vs Pinnacle)"',
-    projLabels === 'Blocks+Steals (Projection),Reb+Ast (Projection),Rebounds (vs Pinnacle),Steals (Projection)');
+  check('the projection model\'s lines are named "(Projection)", the rule\'s are the stat alone',
+    projLabels === 'Blocks+Steals (Projection),Reb+Ast (Projection),Rebounds,Steals (Projection)');
   check('no projection line claims Pinnacle',
     proj.lines.filter((l) => l.modelId === 'nba_prop_projection').every((l) => !l.label.includes('Pinnacle')));
   const steals = proj.lines.find((l) => l.label === 'Steals (Projection)');

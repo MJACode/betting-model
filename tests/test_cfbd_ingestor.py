@@ -126,6 +126,13 @@ def test_eastern_game_date_matches_the_odds_ingestor_for_a_night_kick():
     assert eastern_game_date("2026-11-15T02:19:00.000Z") == "2026-11-14"
 
 
+def test_eastern_game_date_files_army_tulsa_on_oct_23():
+    """CFBD 2026-10-24T00:30:00Z is 8:30pm ET on Oct 23. The odds row is
+    NCAAF_2026-10-23_army_tulsa. NCAAF_2026-10-24_army_tulsa was written
+    2026-08-29, before this conversion, and is retained."""
+    assert eastern_game_date("2026-10-24T00:30:00.000Z") == "2026-10-23"
+
+
 def test_eastern_game_date_agrees_with_utc_before_8pm_et():
     assert eastern_game_date("2025-09-06T16:00:00.000Z") == "2025-09-06"
 

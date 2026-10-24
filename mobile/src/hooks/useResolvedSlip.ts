@@ -178,6 +178,10 @@ export function useResolvedSlip() {
     slip,
     lineLegs,
     picks,
+    /** Today's picks plus in-play, the same list the slip resolves against.
+     *  A restore uses it to name the player before the injury guard. */
+    board,
+    boardLoading: loading || livePicks.loading,
     legs,
     /** Every selection, pick keys and line legs alike. */
     count,

@@ -39,6 +39,20 @@ def _block(src: str, opener: str, closer: str) -> str:
     return src[start : src.index(closer, start)]
 
 
+def test_a_cached_row_without_a_paused_flag_stays_on_the_bundle_until_the_fetch():
+    """Signals hides through isModelPaused. An explicit paused flag always
+    wins. A row that omits the flag (an older cache) overrides the bundled
+    pause list only after hasFetchedThresholds."""
+    src = _read(MOBILE / "src" / "lib" / "thresholds.ts")
+    body = _block(src, "export function isModelPaused", "\n}")
+    assert "typeof sv.paused === 'boolean'" in body
+    assert "hasFetchedThresholds()" in body
+    assert "return PAUSED_MODELS.has(modelId);" in body
+    assert "if (sv) return sv.paused === true;" not in body
+    action = _block(src, "export function passesActionFilter", "\n}")
+    assert "isModelPaused(p.model_id)" in action
+
+
 def test_the_models_list_filters_paused_models():
     """ModelsScreen's built-in list is a catalog, not a record."""
     src = _read(MOBILE / "src" / "screens" / "ModelsScreen.tsx")
@@ -68,17 +82,18 @@ def test_the_custom_model_picker_is_three_bet_types():
     """
     meta = _read(MOBILE / "src" / "lib" / "modelMeta.ts")
     assert "{ label: 'ML', subtitle: 'Moneyline' }" in meta
-    assert "{ label: 'Run line', subtitle: '±1.5' }" in meta
-    assert "{ label: 'Puck line', subtitle: '±1.5' }" in meta
+    assert "{ label: 'Run line', subtitle: '±1.5' }" not in meta
+    assert "{ label: 'Puck line', subtitle: '±1.5' }" not in meta
     assert "{ label: 'Spread', subtitle: 'Spread line' }" in meta
     assert "{ label: 'Player props', subtitle: 'All player markets' }" in meta
     collapse = _block(meta, "export function betTypePickerGroups", "\n}")
     assert "betTypeGroups()" in collapse
-    # Rule chrome (editor, detail, Models list) all call betTypeLabel. A slot
-    # must title itself with the picker's short name, not longLabel.
+    # Rule chrome (editor, detail, Models list) all call betTypeLabel.
+    # One shape: the long name. A slot used to return "MLB · Spread" and
+    # everything else the long name, so a caller could not split on " · ".
     titled = _block(meta, "export function betTypeLabel", "\n}")
-    assert "betSlotForModel" in titled
-    assert "choiceCopy" in titled
+    assert "return modelLong(modelId)" in titled
+    assert " · " not in titled
     # NCAAF Spread writes ncaaf_spread only. Premium stays out of the slot
     # so the row cannot add a second rule with the same title.
     slot = _block(meta, "export function betSlotForModel", "\n}")
@@ -204,7 +219,9 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     assert "todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))" in screen
     thresholds = _read(MOBILE / "src" / "lib" / "thresholds.ts")
     body = _block(thresholds, "export function passesActionFilter", "\n}")
-    assert "if (sv.paused) return false;" in body
+    # The pause decision is isModelPaused, so a cached row that omits the
+    # flag does not read as live. The no-row path still uses the bundle.
+    assert "if (isModelPaused(p.model_id)) return false;" in body
     assert "if (PAUSED_MODELS.has(p.model_id)) return false;" in body
 
     card = _read(MOBILE / "src" / "components" / "PickCard.tsx")

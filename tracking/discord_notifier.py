@@ -770,7 +770,8 @@ def _new_signals(conn, target_date: str, *,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-                   p.pick_side, p.scored_line, p.prop_market
+                   p.pick_side, p.scored_line, p.prop_market,
+                   p.decision_book, p.decision_odds AS decision_odds_raw
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -846,6 +847,11 @@ def _new_signals(conn, target_date: str, *,
         # What tracking/pick_integrity checks the label against.
         "side": r[20], "line": r[21],
         "prop_market": r[22] if len(r) > 22 else None,
+        # The book the price was taken at, and the raw decision price (not
+        # the COALESCE above). book_for_pick names decision_book only when
+        # that price is the number in dk_odds.
+        "decision_book": r[23] if len(r) > 23 else None,
+        "decision_odds_raw": r[24] if len(r) > 24 else None,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -895,7 +901,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-                   p.pick_side, p.scored_line, p.prop_market
+                   p.pick_side, p.scored_line, p.prop_market,
+                   p.decision_book, p.decision_odds AS decision_odds_raw
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -959,6 +966,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # september 7th, the post to discord says september 6th".
         "game_date": r[18],
         "side": r[20], "line": r[21],
+        "decision_book": r[23] if len(r) > 23 else None,
+        "decision_odds_raw": r[24] if len(r) > 24 else None,
     } for r in rows]
 
 
@@ -968,8 +977,9 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
 # A price with no book attached is not checkable. "Over 44.5 -115" invites
 # "-115 where?", and the honest answer differs by model: nearly everything here
 # is priced against DraftKings (config.ODDS_API_BOOKMAKER is the scoring book
-# and every scorer hard-filters to it), but the standalone NFL rules
-# deliberately line-shop and put the winning book in pick_label.
+# and every scorer hard-filters to it). The line-shopped cards store the
+# book on decision_book. Rows written before that still name it in
+# pick_label, and those labels keep parsing.
 _BOOK_NAMES = {
     "draftkings": "DraftKings", "dk": "DraftKings",
     "fanduel": "FanDuel", "fd": "FanDuel",
@@ -990,31 +1000,65 @@ _BOOK_NAMES = {
     "fliff": "Fliff",
 }
 
-# "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
+# Old labels, still in `picks` and not rewritten:
+#   "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
+#   "... (no bet, FD)"
+# A trailing "(FD)" on a prop is not read. Those stored labels still show
+# the book. A new row of the same card does not, so the price line has to.
 _LABEL_BOOK_RE = re.compile(r"\((?:[^()]*,\s*)([A-Za-z_]+)\)")
+# Cards that write the soft book's own price into dk_odds and the same
+# number into decision_odds. When the two prices match, dk_odds is that
+# book's number and the reader is sent there. MLB is not in this set:
+# its price line stays DraftKings unless a best price is strictly better.
+_DECISION_BOOK_MODELS = frozenset({
+    "nfl_wind_totals", "nfl_opener_spread",
+    "nfl_prop_market", "wnba_prop_market",
+})
+
+
+def _display_book(token: str) -> str:
+    """Human name for a feed key or an old label abbreviation.
+
+    An unknown token is returned as stored, not guessed into a known book.
+    """
+    text = (token or "").strip()
+    return _BOOK_NAMES.get(text.lower(), text)
+
+
+def _same_american(a, b) -> bool:
+    """True when both prices are present and equal. A missing price does not
+    match: decision_book is named only for the number it was taken at."""
+    if a is None or b is None:
+        return False
+    try:
+        return abs(float(a) - float(b)) <= 1e-6
+    except (TypeError, ValueError):
+        return False
 
 
 def book_for_pick(s: dict) -> str | None:
     """Human name of the book whose price is being published.
 
-    Order matters. An explicitly recorded book wins; then the NFL label, which
-    is the only place a line-shopped book is stored; then the platform default,
-    but ONLY for a pick that actually carries a price -- a prob-only pick has no
-    book because it has no quote, and naming one would assert a price that did
-    not exist.
+    An explicit `book` wins. Then `decision_book`, for a soft-book card
+    (`_DECISION_BOOK_MODELS`) when `decision_odds` is the same number as
+    `dk_odds`: that column is the book the price came from, and the label
+    no longer says it. Then the old comma annotation, for an NFL row
+    written before the column. Then DraftKings, and only when the pick
+    carries a price. A prop suffix, an MLB `decision_book`, "(F5)" and
+    "(Regulation)" do not change the name.
     """
-    raw = (s.get("book") or "").strip().lower()
+    raw = (s.get("book") or "").strip()
     if raw:
-        return _BOOK_NAMES.get(raw, raw)
-    label = s.get("label") or ""
-    if (s.get("model_id") or "").startswith("nfl_"):
-        m = _LABEL_BOOK_RE.search(label)
+        return _display_book(raw)
+    model = s.get("model_id") or ""
+    decided = (s.get("decision_book") or "").strip()
+    if (model in _DECISION_BOOK_MODELS and decided
+            and _same_american(s.get("decision_odds_raw"), s.get("dk_odds"))):
+        return _display_book(decided)
+    if model.startswith("nfl_"):
+        m = _LABEL_BOOK_RE.search(s.get("label") or "")
         if m:
-            key = m.group(1).strip().lower()
-            # Unknown abbrev is reported as-is rather than guessed into a
-            # known book -- a label that names the wrong book is worse than
-            # one that names an unfamiliar one.
-            return _BOOK_NAMES.get(key, m.group(1).strip())
+            return _display_book(m.group(1))
     if s.get("dk_odds") is None:
         return None
     return "DraftKings"
@@ -1764,7 +1808,8 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
                -- headline through publish_price, like the pre-game cards.
                p.best_book, p.best_odds, p.best_bet_link,
                COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-               p.decision_book, p.scored_line, p.prop_market
+               p.decision_book, p.scored_line, p.prop_market,
+               p.decision_odds AS decision_odds_raw
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -1787,6 +1832,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "commence": r[13], "posted_at": r[14], "live": True,
         "best_book": r[18], "best_odds": r[19], "best_bet_link": r[20],
         "decision_odds": r[21], "decision_book": r[22],
+        "decision_odds_raw": r[25] if len(r) > 25 else None,
         "side": r[2], "line": r[23],
         # The market the pick settles against, so pick_integrity can check that
         # the label does not NAME a different one. Without this the stat check
@@ -1888,7 +1934,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
                pk.created_at, pk.best_book, pk.best_odds,
                os.model_id, os.model_probability, t.min_edge, t.min_odds,
-               os.pick_side, os.scored_line, pk.prop_market
+               os.pick_side, os.scored_line, pk.prop_market,
+               pk.decision_book, pk.decision_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -1897,7 +1944,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
             -- under: it carries player AND market, so a player bet in two
             -- markets in one transaction (same created_at) cannot lend one
             -- bet the other's price and book.
-            SELECT p.created_at, p.best_book, p.best_odds, p.prop_market
+            SELECT p.created_at, p.best_book, p.best_odds, p.prop_market,
+                   p.decision_book, p.decision_odds
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -1921,6 +1969,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
         "posted_at": r[8], "best_book": r[9], "best_odds": r[10],
         "model_id": r[11], "side": r[15], "line": r[16],
+        "decision_book": r[18] if len(r) > 18 else None,
+        "decision_odds_raw": r[19] if len(r) > 19 else None,
         # Same "good to" the paid channels publish, from the same gates.
         "good_to": price_bound(r[12], r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
     } for r in rows], "Discord(free)")
@@ -2585,27 +2635,34 @@ def _record_restate_exception(item: dict, exc: BaseException) -> None:
         conn.close()
 
 
-def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
-    """The recap's all-time block: one overall field, then one per sport.
-    The daily recap and the standalone full-record post both render this."""
-    all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
-    all_overall = _tally(all_rows)
-    all_by_sport: dict[str, list[tuple]] = {}
-    for r in all_rows:
-        all_by_sport.setdefault(r[0], []).append(r)
+def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
+    """One overall field, then one per sport. The daily recap, the standalone
+    full-record post, and the Eggz recap all render this."""
+    overall = _tally(rows)
+    by_sport: dict[str, list[tuple]] = {}
+    for r in rows:
+        by_sport.setdefault(r[0], []).append(r)
     fields = [{
-        "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
-        "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
-                 f"{len(all_rows)} settled",
+        "name": f"\u200b\nAll-time  ·  since {since}",
+        "value": f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                 f"{len(rows)} settled",
         "inline": False,
     }]
-    for sport, group in sorted(all_by_sport.items()):
+    for sport, group in sorted(by_sport.items()):
         fields.append({
             "name": f"{sport} (all-time)",
             "value": _tally_line(_tally(group), with_clv=True),
             "inline": False,
         })
-    return fields, all_overall, len(all_rows)
+    return fields
+
+
+def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
+    """The recap's all-time block: one overall field, then one per sport.
+    The daily recap and the standalone full-record post both render this."""
+    all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
+    return (render_all_time_fields(all_rows, config.PAPER_TRADING_START),
+            _tally(all_rows), len(all_rows))
 
 
 def all_time_embed(conn, through: str) -> dict:
