@@ -117,6 +117,13 @@ function toList(map: ConnectionMap): SportsbookConnection[] {
     .sort((a, b) => a.connectedAt.localeCompare(b.connectedAt));
 }
 
+/** Account deletion. Forgets which books this install marked connected. */
+export async function clearSportsbookConnectionsForAccountDeletion(): Promise<void> {
+  cached = {};
+  listeners.forEach((fn) => fn({}));
+  await AsyncStorage.multiRemove([KEY, LEGACY_KEY]);
+}
+
 export function useSportsbookConnection() {
   const [map, setMap] = useState<ConnectionMap>(cached ?? {});
   const [ready, setReady] = useState<boolean>(cached !== undefined);

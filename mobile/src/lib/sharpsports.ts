@@ -67,6 +67,19 @@ export async function startSportsbookLink(internalId: string): Promise<void> {
   await WebBrowser.openBrowserAsync(url);
 }
 
+/**
+ * Revoke SharpSports access for this install and drop our copies of its
+ * accounts and bets. Best-effort: a missing `unlink` action (the function
+ * has not been redeployed) must not block account deletion. Local connection
+ * flags are cleared separately.
+ */
+export async function unlinkSportsbooks(internalId: string): Promise<void> {
+  const { error } = await supabase.functions.invoke('sharpsports', {
+    body: { action: 'unlink', internalId },
+  });
+  if (error) throw error;
+}
+
 /** Read this device's linked accounts + synced bets (optionally pulling fresh first). */
 export async function fetchSportsbookSync(
   internalId: string,

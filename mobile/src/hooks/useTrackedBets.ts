@@ -150,6 +150,16 @@ async function persistLive(snaps: LiveTrackSnapshot[]) {
   }
 }
 
+/** Account deletion. Clears both on-device track stores. The server rows for
+ *  this install are removed by lib/deleteAccount.ts (they are keyed by device). */
+export async function clearTrackedBetsForAccountDeletion(): Promise<void> {
+  idCache = [];
+  liveCache = [];
+  idListeners.forEach((fn) => fn([]));
+  liveListeners.forEach((fn) => fn([]));
+  await AsyncStorage.multiRemove([STORAGE_KEY, LIVE_STORAGE_KEY]);
+}
+
 export function useTrackedBets() {
   const [ids, setIds] = useState<number[]>(idCache ?? []);
   const [liveSnapshots, setLiveSnapshots] = useState<LiveTrackSnapshot[]>(liveCache ?? []);
