@@ -160,15 +160,36 @@ export interface ServerThreshold {
 }
 
 let serverThresholds: Record<string, ServerThreshold> | null = null;
+/** True only after the live table has been applied. The cache prime is not
+ *  this: it can disagree with the fetch and would flash a label twice. */
+let thresholdsFetched = false;
 
-/** Populate the server store (called by useActionThresholds). null = clear. */
+/** Populate the server store (called by useActionThresholds). null = clear.
+ *  Clearing also forgets that a fetch had landed, so the next cold start
+ *  is the bundled set again. */
 export function setServerThresholds(map: Record<string, ServerThreshold> | null): void {
   serverThresholds = map;
+  if (map == null) thresholdsFetched = false;
+}
+
+/** The network table has replaced the store. The cache prime does not call this. */
+export function markThresholdsFetched(): void {
+  if (serverThresholds != null) thresholdsFetched = true;
 }
 
 /** True once server thresholds have loaded (else the bundled fallback is used). */
 export function hasServerThresholds(): boolean {
   return serverThresholds != null;
+}
+
+/** True once the live table, not the cache, is the store. */
+export function hasFetchedThresholds(): boolean {
+  return thresholdsFetched;
+}
+
+/** Pause as the shipped catalog knows it. Used until the live table lands. */
+export function isBundledPaused(modelId: string): boolean {
+  return PAUSED_MODELS.has(modelId);
 }
 
 /**
@@ -178,7 +199,10 @@ export function hasServerThresholds(): boolean {
  */
 export function isModelPaused(modelId: string): boolean {
   const sv = serverThresholds?.[modelId];
-  if (sv) return sv.paused;
+  // A cache row written before `paused` existed is an object with no boolean.
+  // Treating that as "not paused" took the mark off, then the fetch put it
+  // back. A missing boolean is "not loaded", so the bundle stands.
+  if (sv && typeof sv.paused === 'boolean') return sv.paused;
   return PAUSED_MODELS.has(modelId);
 }
 

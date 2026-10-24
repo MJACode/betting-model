@@ -16,7 +16,7 @@ import {
   fetchTrackRecordDaily,
 } from '@/lib/queries';
 import { SPORTS } from '@/hooks/useSportFilter';
-import { modelLong } from '@/lib/modelMeta';
+import { modelHistoryMark, modelLong } from '@/lib/modelMeta';
 import { EquityCurve } from '@/components/EquityCurve';
 import { RecordHeroCard } from '@/components/RecordHeroCard';
 import type { EquityPoint } from '@/lib/equityGeometry';
@@ -357,16 +357,19 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
   // staked_flat counts priced picks only, so the gap is the unpriced ones.
   // Their 1u stake is already inside units and risked.
   const unpriced = Number(row.picks ?? 0) - Math.round(Number(row.staked_flat ?? 0) / 100);
+  const mark = modelHistoryMark(row.model_id);
   return (
     <View style={styles.modelRow}>
       <View style={{ flex: 1 }}>
-        <Text style={styles.modelName} numberOfLines={1}>
+        {/* Wraps. A one-line cap cut the bet type off the end of the name. */}
+        <Text style={styles.modelName}>
           {modelLong(row.model_id)}
         </Text>
         <Text style={styles.modelSub}>
           {row.wins}–{row.losses}
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
           {unpriced > 0 ? ` · ${unpriced} unpriced, staked at 1u` : ''}
+          {mark ? ` · ${mark}` : ''}
         </Text>
         {decided < MIN_PICKS_FOR_COLOURED_ROI && risked > 0 ? (
           // Its own line, not a fourth segment: the sub-line is already three

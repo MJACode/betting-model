@@ -404,13 +404,24 @@ export interface PlayerPickRecord {
 
 /**
  * What a multi-market model's line on the player page is called after its
- * stat: the parenthetical of the model's own name, so "Points (vs Pinnacle)"
- * for the three rules priced against Pinnacle and "Steals (Projection)" for
- * the NBA projection model, which is not priced against Pinnacle. The short
- * name when the long one carries no parenthetical.
+ * stat. The prop-market rules are named "<SPORT> Props"; reading the badge
+ * would label the line "Points (Props)". Those lines are the stat alone.
+ * The projection model is a second rule on the same stats, so its lines
+ * keep "Projection" ("Steals (Projection)"). Any other multi-market id
+ * falls back to the badge.
  */
-function multiMarketModelName(modelId: string): string {
-  return /\(([^()]+)\)\s*$/.exec(modelLong(modelId))?.[1] ?? modelShort(modelId);
+const PLAYER_LINE_QUALIFIER: Readonly<Record<string, string | null>> = {
+  nba_prop_market: null,
+  nfl_prop_market: null,
+  wnba_prop_market: null,
+  nba_prop_projection: 'Projection',
+};
+
+function multiMarketQualifier(modelId: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(PLAYER_LINE_QUALIFIER, modelId)) {
+    return PLAYER_LINE_QUALIFIER[modelId];
+  }
+  return modelShort(modelId);
 }
 
 /**
@@ -438,19 +449,20 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     // A multi-market model (nba/wnba/nfl_prop_market, nba_prop_projection) is
     // one model id across several markets, so its picks are split by the
     // row's prop_market and each line is named for that market's stat.
-    // Without this every one of its bets was one line labelled "Prop Mkt".
+    // Without this every one of its bets was one line labelled "Props".
     const modelStat = statForPropModel(p.model_id);
     const market = modelStat ? null : (p.prop_market ?? null);
     const key = market ? `${p.model_id}|${market}` : p.model_id;
     let line = by.get(key);
     if (!line) {
       const stat = modelStat ?? statForPropMarket(sportOfModel(p.model_id), market);
-      // A rule's line names the rule too: named for the stat alone, it read
-      // as a second per-stat line ("Assists 1-0" over "Assists 0-1").
+      const qualifier = market ? multiMarketQualifier(p.model_id) : null;
+      // A blank qualifier is the stat alone ("Points"), never "Points (Props)".
+      // "Projection" stays on the projection model so it is not that rule's line.
       const label = !stat
         ? modelShort(p.model_id)
-        : market
-          ? `${stat.label} (${multiMarketModelName(p.model_id)})`
+        : qualifier
+          ? `${stat.label} (${qualifier})`
           : stat.label;
       line = {
         key,
@@ -481,6 +493,25 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   }
   total.lines = [...by.values()].sort((a, b) => (b.wins + b.losses + b.pushes) - (a.wins + a.losses + a.pushes));
   return total;
+}
+
+/**
+ * The note under a player-record row. The label stays the stat. When two
+ * rows share that word (a per-stat model and a prop-market rule), the note
+ * leads with the model name so the rows can be told apart. The label does
+ * not become "Assists (Props)".
+ */
+export function playerLineNote(
+  line: PlayerPickLine,
+  lines: readonly PlayerPickLine[],
+): string | undefined {
+  const side = line.overs + line.unders > 0
+    ? `${line.overs} over${line.overs === 1 ? '' : 's'} · ${line.unders} under${line.unders === 1 ? '' : 's'}`
+    : undefined;
+  const shared = lines.filter((other) => other.label === line.label).length > 1;
+  if (!shared) return side;
+  const name = modelLong(line.modelId);
+  return side ? `${name} · ${side}` : name;
 }
 
 export function formatRecordLine(r: { wins: number; losses: number; pushes: number; units: number | null }): string {
