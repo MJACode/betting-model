@@ -39,6 +39,16 @@ def _block(src: str, opener: str, closer: str) -> str:
     return src[start : src.index(closer, start)]
 
 
+def test_a_server_row_wins_even_when_its_paused_flag_is_missing():
+    """Signals hides through isModelPaused. A server row with no paused flag
+    must not fall through to the bundled pause list."""
+    src = _read(MOBILE / "src" / "lib" / "thresholds.ts")
+    body = _block(src, "export function isModelPaused", "\n}")
+    assert "typeof sv.paused" not in body
+    assert "if (sv) return sv.paused === true;" in body
+    assert "return PAUSED_MODELS.has(modelId);" in body
+
+
 def test_the_models_list_filters_paused_models():
     """ModelsScreen's built-in list is a catalog, not a record."""
     src = _read(MOBILE / "src" / "screens" / "ModelsScreen.tsx")
