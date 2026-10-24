@@ -60,6 +60,10 @@ def test_legal_source_stays_intact_and_the_pages_drop_placeholders(tmp_path):
     assert "filled in at publish" not in privacy
     assert "the date this policy is published" not in privacy
     assert "does not use cookies or analytics" in privacy
+    assert (
+        "When you delete your account in the app, it is removed right away, "
+        "and remaining server data and backups are purged within 30 days."
+    ) in privacy
     assert "filled in at publish" in terms_src
     assert "filled in at publish" in privacy_src
 

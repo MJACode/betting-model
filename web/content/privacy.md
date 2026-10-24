@@ -40,6 +40,8 @@ Sports data and odds we display come from third-party sources (for example ESPN,
 ## 4. Retention
 We keep information as long as your account is active or as needed to provide the Service, then delete or de-identify it, unless law requires us to keep it longer. Specifically: crash and error logs are kept for 12 months; account data is kept until you delete your account, plus up to 30 days to complete deletion from our systems; feedback and support threads are kept until you delete them or your account.
 
+When you delete your account in the app, it is removed right away, and remaining server data and backups are purged within 30 days.
+
 ## 5. Your choices and rights
 - Update or delete saved content in the app; delete your account from the app's Settings or by emailing Signalbaseskinny@gmail.com.
 - Turn off push notifications in your device settings.
