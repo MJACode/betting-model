@@ -1077,5 +1077,27 @@
       "sport": "NFL",
       "apply": false
     }
+  },
+  {
+    "key": "nba-alt-history-2024-2026",
+    "job_type": "nba_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-24: 'Buy alts'. Every book's alternate spread, total and team-total ladder, one purchase per 2023-24..2025-26 game 60 minutes before tip (docs/nba_models_2026.md 10.3). Measured 30 credits a game; ~3,679 games left after the 11-game pilot, ~111,000 credits.",
+    "args": {
+      "mode": "alternates",
+      "max_credits": 130000,
+      "floor": 800000
+    }
+  },
+  {
+    "key": "nba-news-windows-2025-2026",
+    "job_type": "nba_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-24: 'do #2 as well'. The whole slate every 5 minutes from 5 before to 25 after each 2024-25 and 2025-26 injury-report change worth 0.5 points or more (docs/nba_models_2026.md 11; plan jobs/nba_news_windows_2025_2026.json: 1,913 changes, 9,820 instants, 294,600 credits at 30 each).",
+    "args": {
+      "mode": "news_windows",
+      "max_credits": 300000,
+      "floor": 800000
+    }
   }
 ]

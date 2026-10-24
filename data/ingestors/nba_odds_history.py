@@ -412,6 +412,41 @@ def buy_gaps(conn, meter: Meter, first_season: int, last_season: int,
     return dict(stats)
 
 
+def read_instants(path) -> list[datetime]:
+    """The instants a plan file names (scripts/nba_news_window_plan.py), newest first,
+    each on the feed's 5-minute grid. A malformed or off-grid instant stops the read."""
+    import json
+    from pathlib import Path
+    body = json.loads(Path(path).read_text(encoding="utf-8"))
+    out = []
+    for raw in body["instants"]:
+        t = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if t.tzinfo is None or t.minute % 5 or t.second or t.microsecond:
+            raise ValueError(f"plan instant {raw!r} is not a UTC time on the 5-minute grid")
+        out.append(t.astimezone(timezone.utc))
+    return sorted(set(out), reverse=True)
+
+
+def buy_instants(conn, meter: Meter, first_season: int, last_season: int,
+                 path, why: str) -> dict:
+    """Buy the whole slate at every instant the plan file names (docs/nba_models_2026.md
+    section 11), newest first. _buy_snapshot ledgers each one (odds_history_fetches off the
+    hour, odds_history_pulls on it) and skips an instant either ledger already holds, so a
+    re-run after an interruption buys only what is missing."""
+    _ensure_ledgers(conn)
+    games = _known_games(conn, first_season, last_season)
+    plan = read_instants(path)
+    held = set(_held_fetches(conn))
+    todo = [t for t in plan if t not in held]
+    logger.info(f"instants ({why}): {len(plan)} in the plan, {len(plan) - len(todo)} held, "
+                f"{len(todo)} to buy (~{30 * len(todo):,} credits)")
+    stats = defaultdict(int)
+    for at in todo:
+        if not _buy_snapshot(conn, meter, games, at, stats, why=why):
+            break
+    return dict(stats)
+
+
 # ── player props ────────────────────────────────────────────────────────────
 
 def _props_done(conn, game_ids: list[str]) -> set[str]:
@@ -753,6 +788,10 @@ def main() -> None:
                     help="every book's alternate spread / total / team-total ladder, one purchase a game")
     ap.add_argument("--dates", nargs=2, metavar=("FIRST", "LAST"),
                     help="alternates: only game dates in this range (a pilot)")
+    ap.add_argument("--instants", metavar="PLAN",
+                    help="buy the whole slate at every instant the plan file names "
+                         "(scripts/nba_news_window_plan.py)")
+    ap.add_argument("--why", default="news_window", help="instants: the ledger's why")
     ap.add_argument("--probe-props", metavar="DATE", help="2 games on DATE, writes nothing")
     ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"))
     ap.add_argument("--lead-min", type=int, default=60)
@@ -780,7 +819,8 @@ def main() -> None:
             print(s)
             print(f"MEASURED {meter.spent} credits for {s['events']} games; balance {meter.remaining}")
             return
-        if not a.seasons or not (a.lines or a.props or a.derivatives or a.alternates or a.fill_gaps):
+        if not a.seasons or not (a.lines or a.props or a.derivatives or a.alternates or a.fill_gaps
+                                 or a.instants):
             ap.error("give --lines, --fill-gaps, --props, --derivatives or --alternates "
                      "with --seasons FIRST LAST")
         if not a.apply:
@@ -802,6 +842,8 @@ def main() -> None:
         if a.alternates:
             print("alternates:", buy_alternates(conn, meter, *a.seasons, a.lead_min,
                                                 dates=tuple(a.dates) if a.dates else None))
+        if a.instants:
+            print("instants:", buy_instants(conn, meter, *a.seasons, a.instants, a.why))
         print(f"spent {meter.spent:,} credits; balance {meter.remaining}")
     finally:
         try:
