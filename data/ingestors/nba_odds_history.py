@@ -750,6 +750,7 @@ def _buy_per_event(conn, meter: Meter, first_season: int, last_season: int, lead
                 f"(~{10 * len(markets) * n:,} credits), {len(done)} stored")
     totals = defaultdict(int)
     failed: list[tuple] = []           # (event, game, date) whose purchase got no answer
+    unlisted: list[str] = []           # dates whose game list got no answer
 
     def buy_one(ev, g, start) -> bool:
         """Buy and store one game; False = no usable answer (kept for the second pass)."""
@@ -783,23 +784,31 @@ def _buy_per_event(conn, meter: Meter, first_season: int, last_season: int, lead
         totals["events"] += 1
         return True
 
-    for d in todo:
+    def listed(d):
         noon = datetime.fromisoformat(f"{d}T12:00:00").replace(tzinfo=ET)
         r = meter.get(f"{BASE}/events", {"date": noon.astimezone(timezone.utc)
                                          .strftime("%Y-%m-%dT%H:%M:%SZ")})
         if r is None or r.status_code != 200:
             totals["errors"] += 1
-            totals["dates_unlisted"] += 1
-            continue
+            return None
         by_teams = {(g["away"], g["home"]): g for g in by_date[d]}
+        out = []
         for ev in (r.json().get("data") or []):
             start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
             if start.astimezone(ET).date().isoformat() != d:
                 continue
             g = by_teams.get((_normalize_team(ev.get("away_team", ""), "NBA"),
                               _normalize_team(ev.get("home_team", ""), "NBA")))
-            if g is None:
-                continue
+            if g is not None:
+                out.append((ev, g, start))
+        return out
+
+    for d in todo:
+        evs = listed(d)
+        if evs is None:
+            unlisted.append(d)
+            continue
+        for ev, g, start in evs:
             why = meter.stop_reason(10 * len(markets))
             if why:
                 totals["stopped"] = why
@@ -809,7 +818,15 @@ def _buy_per_event(conn, meter: Meter, first_season: int, last_season: int, lead
                 failed.append((ev, g, start))
         logger.info(f"{what} {d}: {totals['events']} games so far, {totals['rows']:,} rows | "
                     f"spent {meter.spent:,}, balance {meter.remaining}")
-    # one more pass over every game that got no usable answer, under the same meter
+    # one more pass: list every date whose list got no answer, and buy every game that got
+    # none, under the same meter and floor
+    totals["dates_unlisted"] = len(unlisted)
+    for d in unlisted:
+        evs = listed(d)
+        if evs is None:
+            totals["dates_still_unlisted"] += 1
+            continue
+        failed.extend(evs)
     totals["retried"] = len(failed)
     for ev, g, start in failed:
         why = meter.stop_reason(10 * len(markets))

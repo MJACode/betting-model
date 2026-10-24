@@ -46,3 +46,14 @@ def test_the_snapshot_a_request_buys_is_the_mark_before_it():
     led = pd.DataFrame({"requested_at": [pd.Timestamp("2025-01-15T22:36:00Z")],
                         "snapshot_ts": ["2025-01-15T22:35:39Z"]})
     assert N.snap_times(f, led)[pd.Timestamp("2025-01-15T22:36:00Z")] == pd.Timestamp("2025-01-15T22:35:39Z")
+
+
+def test_a_fetch_the_feed_answered_with_an_older_snapshot_is_filed_where_that_snapshot_belongs():
+    f = pd.DataFrame({"game_id": ["G1"], "fetch_at": [pd.Timestamp("2025-01-15T22:41:00Z")]})
+    led = pd.DataFrame({"requested_at": [pd.Timestamp("2025-01-15T22:41:00Z")],
+                        "snapshot_ts": ["2025-01-15T22:35:38Z"]})          # the 22:40 snapshot was missing
+    snaps = N.snap_times(f, led)
+    idx = N.slot_index(f, snaps)
+    assert ("G1", pd.Timestamp("2025-01-15T22:35:00Z")) in idx
+    assert ("G1", pd.Timestamp("2025-01-15T22:40:00Z")) not in idx
+    assert N.misdated_fetches(f, snaps) == 1

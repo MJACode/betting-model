@@ -143,13 +143,30 @@ def test_the_plan_brackets_the_report_and_stops_short_of_tip():
     assert got == [m + plan.REQUEST_LAG for m in marks]
 
 
-def test_a_player_out_of_the_lineup_does_not_dilute_his_minutes():
+def _asof(adv, pid, season, dates):
+    p = pd.DataFrame({"player_id": [pid] * len(dates), "season": [season] * len(dates), "game_date": dates})
+    return plan.asof_mpg(p, plan.player_minutes(pd.DataFrame(adv)))
+
+
+def test_minutes_are_his_last_ten_played_games_as_of_the_date():
     rows = [{"player_id": "1", "season": 2025, "game_date": f"2025-01-{d:02d}", "team": "X",
              "game_type": "regular", "played": d != 13, "minutes_exact": float(d) if d != 13 else 0.0}
             for d in range(1, 15)]
-    m = plan.player_minutes(pd.DataFrame(rows)).set_index("game_date")["mpg"]
-    assert m.loc["2025-01-12"] == pytest.approx(sum(range(2, 12)) / 10)   # games 2..11
-    assert m.loc["2025-01-14"] == pytest.approx(sum(range(3, 13)) / 10)   # 13 was a DNP: games 3..12
+    got = _asof(rows, "1", 2025, ["2025-01-12", "2025-01-14", "2025-01-20"])
+    assert got[0] == pytest.approx(sum(range(2, 12)) / 10)      # games 2..11, not game 12 itself
+    assert got[1] == pytest.approx(sum(range(3, 13)) / 10)      # 13 was a DNP: games 3..12
+    # ruled out on a date with no box-score row of his own: still his last 10 played (4..12, 14)
+    assert got[2] == pytest.approx((sum(range(4, 13)) + 14) / 10)
+
+
+def test_a_player_who_has_not_played_this_season_reads_last_season_not_zero():
+    rows = [{"player_id": "9", "season": 2024, "game_date": f"2024-03-{d:02d}", "team": "X",
+             "game_type": "regular", "played": True, "minutes_exact": 30.0 + d} for d in range(1, 5)]
+    rows += [{"player_id": "9", "season": 2025, "game_date": "2024-11-01", "team": "X",
+              "game_type": "regular", "played": True, "minutes_exact": 10.0}]
+    got = _asof(rows, "9", 2025, ["2024-10-25", "2024-11-03"])
+    assert got[0] == pytest.approx(32.5)                         # no game yet this season
+    assert got[1] == pytest.approx(32.5)                         # one game is fewer than 3
 
 
 # ── a rejected paid call is retried, not skipped for good ───────────────────
@@ -193,6 +210,27 @@ def test_a_game_with_no_answer_gets_a_second_pass(monkeypatch):
                            h.parse_alternates, lambda conn, ids: set(), "alternates")
     assert sum(1 for c in calls if "/events/E1/odds" in c) == 2
     assert out["retried"] == 1 and out.get("still_failed", 0) == 0 and out["events"] == 1
+
+
+def test_a_date_whose_game_list_failed_is_listed_again_and_its_games_bought(monkeypatch):
+    game = {"game_id": "G1", "game_date": "2025-01-15", "home": "PHI", "away": "NYK", "commence_time": None}
+    monkeypatch.setattr(h, "_known_games", lambda conn, a, b: {"G1": game})
+    ev = {"id": "E1", "commence_time": "2025-01-16T00:10:00Z", "home_team": "Philadelphia 76ers",
+          "away_team": "New York Knicks"}
+    calls = []
+
+    def fake_get(url, params):
+        calls.append(url)
+        if url.endswith("/events"):
+            return _Resp(502) if sum(1 for c in calls if c.endswith("/events")) == 1 else _Resp(200, {"data": [ev]})
+        return _Resp(200, {"timestamp": "2025-01-15T23:05:38Z", "data": {"bookmakers": []}})
+
+    m = h.Meter(10_000, 0)
+    monkeypatch.setattr(m, "get", fake_get)
+    out = h._buy_per_event(object(), m, 2025, 2025, 60, h.ALT_MARKETS, h.ALT_SOURCE,
+                           h.parse_alternates, lambda conn, ids: set(), "alternates")
+    assert out["dates_unlisted"] == 1 and out.get("dates_still_unlisted", 0) == 0
+    assert sum(1 for c in calls if "/events/E1/odds" in c) == 1 and out["events"] == 1
 
 
 def test_an_instant_with_no_answer_gets_a_second_pass(monkeypatch, tmp_path):

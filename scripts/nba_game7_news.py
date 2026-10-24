@@ -126,12 +126,31 @@ def snap_times(fetches: pd.DataFrame, ledger: pd.DataFrame | None) -> dict:
     return out
 
 
-def slot_index(fetches: pd.DataFrame) -> dict:
-    """(game_id, slot) -> fetch_at: the fetch that bought each game's snapshot at that mark
-    (the newest request when two return the same snapshot)."""
+def slot_index(fetches: pd.DataFrame, snaps: dict | None = None) -> dict:
+    """(game_id, mark) -> fetch_at: the fetch whose RETURNED snapshot sits at that 5-minute
+    mark. The mark is read from the snapshot time the purchase stored (snaps: the ledger's
+    snapshot_ts), so a request the feed answered with an older snapshot is filed where that
+    snapshot belongs, not where it was asked for; without a stored time, the mark a request
+    returns (slot). The newest request wins when two return the same snapshot."""
     from scripts.nba_news_window_plan import slot
     f = fetches.sort_values("fetch_at")
-    return {(g, slot(t)): t for g, t in zip(f["game_id"], f["fetch_at"])}
+    out = {}
+    for g, t in zip(f["game_id"], f["fetch_at"]):
+        st = (snaps or {}).get(t)
+        out[(g, pd.Timestamp(st).floor("5min") if st is not None else slot(t))] = t
+    return out
+
+
+def misdated_fetches(fetches: pd.DataFrame, snaps: dict) -> int:
+    """Fetches whose stored snapshot is not the one their request time should return (the
+    feed skipped a snapshot): reported with the grade."""
+    from scripts.nba_news_window_plan import slot
+    n = 0
+    for t in pd.to_datetime(fetches["fetch_at"].unique(), utc=True):
+        st = snaps.get(t)
+        if st is not None and pd.Timestamp(st).floor("5min") != slot(t):
+            n += 1
+    return n
 
 WINDOW_COLS = ["game_id", "R", "s", "season", "offset", "pre_at", "t_at", "t_snap", "r_at"]
 
@@ -510,7 +529,9 @@ def run(data: H.Data, events: pd.DataFrame, quiet: pd.DataFrame, sig: dict, shap
     cen = centres(q, sig, shapes)
     close = H.pinnacle_close(data) if len(data.quotes) else None
     snaps = snap_times(data.fetches, ledger)
-    slots = slot_index(data.fetches)
+    slots = slot_index(data.fetches, snaps)
+    print(f"  fetches whose snapshot is not the one their request should return: "
+          f"{misdated_fetches(data.fetches, snaps)}", flush=True)
     win = windows(events, slots, snaps)
     rows, bets = [], []
     c1 = n1_candidates(win, q, cen)
@@ -626,7 +647,7 @@ def synthetic_checks() -> None:
     data, ev, sig = synthetic_world()
     q = at_fetch(data.quotes)
     cen = centres(q, sig, None)
-    win = windows(ev, slot_index(data.fetches), snap_times(data.fetches, None))
+    win = windows(ev, slot_index(data.fetches, snap_times(data.fetches, None)), snap_times(data.fetches, None))
     c1 = n1_candidates(win, q, cen)
     assert len(c1) and set(c1["book"]) == {"draftkings"}, "only the lagging book is ever stale"
     small_ids = set(ev.loc[ev["small"], "game_id"])
@@ -642,7 +663,8 @@ def synthetic_checks() -> None:
     # no stale book at all when every book moves with Pinnacle
     data2, ev2, sig2 = synthetic_world(soft_lag_min=0)
     q2 = at_fetch(data2.quotes)
-    c2 = n1_candidates(windows(ev2, slot_index(data2.fetches), snap_times(data2.fetches, None)), q2,
+    c2 = n1_candidates(windows(ev2, slot_index(data2.fetches, snap_times(data2.fetches, None)),
+                               snap_times(data2.fetches, None)), q2,
                        centres(q2, sig2, None))
     assert c2.empty, "books that moved with Pinnacle were read as stale"
     # N2 never fires once the market has moved, and bets the side the news favours when it has not

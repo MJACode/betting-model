@@ -2293,3 +2293,26 @@ graded, and before either purchase ran.
     moneylines (the no-vig close win chance), which had none.
 12. **Both purchases retry.** A rate-limit or server answer is retried, and every game or
     instant that still got none is bought once more at the end of the run.
+
+### 11.6 A second review of the fixes, before any price was graded or the purchases ran (2026-10-24)
+
+Two reviewers re-read the fixes above, and two more checked each finding (workflow
+`nba-fix-rereview`). Four findings held; all are fixed.
+
+1. **Minutes per game are taken as of the game date.** The first fix still read a listed
+   player's minutes from his last box-score row, so a player ruled out on a date with no row
+   lost his latest games. A player with no game yet this season read as 0 minutes instead of
+   last season's average: 30 players who averaged 28 or more minutes the season before. Now it
+   is the mean of his last 10 games played strictly before the date, else last season's. The
+   plan was rebuilt: **1,927 events (824 in 2024-25, 1,103 in 2025-26), 8,810 requests,
+   264,300 credits**, under the job's 270,000 ceiling. N2's slope, re-measured on 2021-22 →
+   2023-24 with the plan's own event definition: 0.373 in the window plus 0.095 after, still
+   0.47 (86% of the move done by the first price 30 minutes after a report).
+2. **A window is dated by the snapshot the feed returned**, read from the stored snapshot
+   time. If the feed answers a request with an older snapshot (one missing), that fetch is
+   filed where its snapshot belongs. The count of such fetches is printed with the grade.
+3. **The alternate lab no longer crashes on its first bet.** Its rung-distance report merged a
+   column the bets already carried. The synthetic check now builds one family's cells end to
+   end on placed bets.
+4. **A night whose game list got no answer is listed again at the end of the run**, and its
+   games bought, under the same ceiling and floor.

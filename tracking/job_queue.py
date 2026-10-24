@@ -484,7 +484,7 @@ def _validate_nhl_odds_history(args: dict) -> dict:
 # its ceiling cannot exceed what was stated for it -- alternate ladders on every
 # 2023-24 .. 2025-26 game (measured 30 credits a game, ~111,000), and the slate
 # every 5 minutes around 2024-25 and 2025-26 injury-report changes (the plan file
-# names 8,776 requests, 263,280 credits, docs/nba_models_2026.md 11.5). Both buyers
+# names 8,810 requests, 264,300 credits, docs/nba_models_2026.md 11.6). Both buyers
 # skip what is stored, and retry an unanswered call once at the end, so a
 # re-queue after a worker restart buys nothing twice. The floor keeps the live
 # feeds funded to the monthly reset (September 2026 ran the balance to 0).

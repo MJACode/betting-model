@@ -45,37 +45,41 @@ SNAPSHOT_PAST_MARK = pd.Timedelta(seconds=39)
 CACHE = Path(os.environ.get("NBA_RESEARCH_CACHE", str(ROOT / "data" / "local" / "nba")))
 
 
-def player_minutes(adv: pd.DataFrame) -> pd.DataFrame:
-    """(player_id, season, game_date, mpg): mean minutes over the player's last 10 PLAYED
-    games of the season before this game (rows where he did not play are skipped, not
-    counted toward the 10); fewer than 3 played games before it -> last season's mean."""
+def player_minutes(adv: pd.DataFrame) -> dict:
+    """The tables asof_mpg reads: every PLAYED regular-season game with the player's mean
+    minutes over his last 10 played games of the season up to AND including it, and how many
+    he had played by then ("played"); and each player's mean for the season before
+    ("prior", keyed on the season it is the prior for)."""
     a = adv[adv["game_type"].eq("regular") | adv["game_type"].isna()].copy()
     a["player_id"] = a["player_id"].astype(str)
-    a["min"] = np.where(a["played"].fillna(False).astype(bool), a["minutes_exact"].astype(float), np.nan)
+    a = a[a["played"].fillna(False).astype(bool) & a["minutes_exact"].notna()].copy()
+    a["min"] = a["minutes_exact"].astype(float)
     a = a.sort_values(["player_id", "season", "game_date"]).reset_index(drop=True)
     g = a.groupby(["player_id", "season"])["min"]
-    a["n_prev"] = g.transform(lambda s: s.notna().cumsum().shift(1).fillna(0))
-    a["m10"] = g.transform(lambda s: s.dropna().rolling(10, min_periods=1).mean()
-                           .reindex(s.index).ffill().shift(1))
+    a["m10_incl"] = g.transform(lambda s: s.rolling(10, min_periods=1).mean())
+    a["n_incl"] = g.cumcount() + 1
     prior = a.groupby(["player_id", "season"])["min"].mean().rename("prior_mean").reset_index()
     prior["season"] = prior["season"] + 1
-    a = a.merge(prior, on=["player_id", "season"], how="left")
-    a["mpg"] = np.where(a["n_prev"] >= 3, a["m10"], a["prior_mean"])
-    return a[["player_id", "season", "game_date", "mpg"]]
+    return {"played": a[["player_id", "season", "game_date", "m10_incl", "n_incl"]], "prior": prior}
 
 
-def asof_mpg(players: pd.DataFrame, mins: pd.DataFrame) -> np.ndarray:
-    """mpg for (player_id, season, game_date) rows: the player's row on or before game_date
-    (that row's value is built from games strictly before it)."""
-    m = mins.dropna(subset=["mpg"]).copy()
+def asof_mpg(players: pd.DataFrame, mins: dict) -> np.ndarray:
+    """mpg for (player_id, season, game_date) rows, as of that date (11.1): the mean of his
+    last 10 games PLAYED this season strictly before game_date, whether or not he has a box
+    score row on game_date itself; fewer than 3 played by then -> last season's mean; no
+    last season either -> NaN (team_changes reads it as 0 minutes)."""
+    m = mins["played"].copy()
     m["gd"] = pd.to_datetime(m["game_date"])
     m = m.sort_values("gd")
     p = players.copy()
     p["_k"] = np.arange(len(p))
     p["gd"] = pd.to_datetime(p["game_date"])
-    out = pd.merge_asof(p.sort_values("gd"), m[["player_id", "season", "gd", "mpg"]],
-                        on="gd", by=["player_id", "season"], direction="backward")
-    return out.set_index("_k")["mpg"].reindex(p["_k"]).to_numpy()
+    out = pd.merge_asof(p.sort_values("gd"), m[["player_id", "season", "gd", "m10_incl", "n_incl"]],
+                        on="gd", by=["player_id", "season"], direction="backward",
+                        allow_exact_matches=False)
+    out = out.merge(mins["prior"], on=["player_id", "season"], how="left")
+    mpg = np.where(out["n_incl"].fillna(0) >= 3, out["m10_incl"], out["prior_mean"])
+    return pd.Series(mpg, index=out["_k"].to_numpy()).reindex(p["_k"]).to_numpy()
 
 
 def team_changes(ir: pd.DataFrame, mins: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:

@@ -514,10 +514,8 @@ def family_cells(fam: str, off: pd.DataFrame, fair: pd.DataFrame, main_priced: p
                 for lo, hi, lab in ((PRICE_MIN, 150, "price_short"), (150.0001, PRICE_MAX, "price_long")):
                     gg = g[(g["price"] >= lo) & (g["price"] <= hi)]
                     row[f"{lab}_n"], row[f"{lab}_roi"] = int(len(gg)), (H.roi(gg) if len(gg) else np.nan)
-            if len(g) and "off_main" in cand:
-                gm = g.merge(cand[["game_id", "market", "book", "side", "line", "price", "off_main"]]
-                             .drop_duplicates(["game_id", "market", "book", "side", "line", "price"]),
-                             on=["game_id", "market", "book", "side", "line", "price"], how="left")
+            if len(g) and "off_main" in g:
+                gm = g                                  # every bet carries its rung's distance
                 for lo, hi, lab in ((1.5, 4, "dist_near"), (4, 8, "dist_mid"), (8, 99, "dist_far")):
                     gg = gm[(gm["off_main"] >= lo) & (gm["off_main"] < hi)]
                     row[f"{lab}_n"], row[f"{lab}_roi"] = int(len(gg)), (H.roi(gg) if len(gg) else np.nan)
@@ -688,6 +686,11 @@ def synthetic_checks() -> None:
         "the favourite's tail is not mirrored for an away favourite"
     lo_hf = home_fav.probs(np.array([0.0]), np.array([-12.0]))[2][0]
     assert w_hf[0] > 2 * lo_hf, "home favoured: the long tail should sit on the home side"
+    # one family's cells build end to end on bets that were placed (the reported columns too)
+    main_priced = priced(main_offers(mains, fair), fair)
+    rows, bets = family_cells("A1", off, fair, main_priced, games, None, sig, 2, pools={})
+    assert len(rows) == 10 and len(bets) and all(len(r["placebo_rois"]) == 2 for r in rows)
+    assert any(r.get("dist_far_n", 0) > 0 for r in rows), "the rung-distance split read nothing"
     print("synthetic checks pass")
 
 
