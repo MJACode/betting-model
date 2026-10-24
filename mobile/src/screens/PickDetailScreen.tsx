@@ -39,6 +39,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
 import { clvBetQuote } from '@/lib/clvBet';
 import { openForAction } from '@/lib/discordPublish';
+import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
@@ -500,7 +501,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             </View>
             <AddToPlayButton
               inPlay={inSlip}
-              onPress={() => slip.toggle(slipKeyForPick(pick))}
+              onPress={() => {
+                void slip.toggle(slipKeyForPick(pick), betslipPlayerFromPick(pick));
+              }}
             />
           </View>
         ) : null}

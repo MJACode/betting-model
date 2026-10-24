@@ -157,7 +157,7 @@ import {
   type TonightSlate,
 } from '@/lib/statsBoard';
 import { normalizePlayerName } from '@/lib/playerNews';
-import { sinkSidelined, type InjuryTag } from '@/lib/injuryStatus';
+import { pricePillActivation, sinkSidelined, type InjuryTag } from '@/lib/injuryStatus';
 import { useInjuryStatus } from '@/hooks/useInjuryStatus';
 import {
   mostCommonPostedLine,
@@ -4129,6 +4129,21 @@ export function offLineCaption(
   return modeLineLabel(line, side, mode, true);
 }
 
+/** A disabled Pressable does not take the touch, so the row under the pill
+ *  would open the player. This view claims that touch and does not act on it.
+ *  The pill stays disabled, with no onPress. */
+function holdSidelinedTap(muted: boolean, pill: React.ReactElement): React.ReactElement {
+  if (!muted) return pill;
+  return (
+    <View
+      onStartShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => false}
+    >
+      {pill}
+    </View>
+  );
+}
+
 function OddsCell({
   quote,
   started,
@@ -4196,6 +4211,17 @@ function OddsCell({
   // here precisely because it is no longer printed on the row.
   const priceText = formatAmerican(quote.price).replace(/-/g, MINUS);
   const label = `${playerName}${muted ? ', not playing' : ''}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  // Sidelined: the outlined pill and the ", not playing" label stay. The press
+  // does not. Questionable and Doubtful are not muted, so they still press.
+  const pill = pricePillActivation(muted, onPress != null);
+  const pillA11y = {
+    onPress: pill.pressable ? onPress : undefined,
+    disabled: pill.disabled,
+    accessibilityRole: 'button' as const,
+    accessibilityLabel: label,
+    accessibilityState: muted ? { disabled: true } : undefined,
+    ...(pill.pressable ? { accessibilityHint: 'Asks to add this line to your betslip' } : {}),
+  };
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
@@ -4210,16 +4236,12 @@ function OddsCell({
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = bestPrice ? null : [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   if (bestPrice) {
-    return (
+    return holdSidelinedTap(muted, (
       <Pressable
-        onPress={onPress}
-        disabled={!onPress}
+        {...pillA11y}
         // Vertical slop crossed into the matchup line and the next name once
         // the stacked gap shrank to 2pt. The 44pt box is the target.
         hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityHint="Asks to add this line to your betslip"
         style={({ pressed }) => [
           styles.oddsBestWrap,
           priceFixed && styles.oddsWrapFixed,
@@ -4243,18 +4265,14 @@ function OddsCell({
           </View>
         ) : null}
       </Pressable>
-    );
+    ));
   }
-  return (
+  return holdSidelinedTap(muted, (
     <Pressable
-      onPress={onPress}
-      disabled={!onPress}
+      {...pillA11y}
       // Dropping the caption shrank the target below 44pt, so hitSlop makes up
       // the difference; a mis-tap opens a dismissible sheet, never a book.
       hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityHint="Asks to add this line to your betslip"
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View
@@ -4283,7 +4301,7 @@ function OddsCell({
         </Text>
       ) : null}
     </Pressable>
-  );
+  ));
 }
 
 /** MATCHUP: how hard this spot is, as one letter.

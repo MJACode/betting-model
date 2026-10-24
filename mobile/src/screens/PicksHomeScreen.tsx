@@ -105,6 +105,7 @@ import {
   rowsByDay,
   type DayRow,
 } from '@/lib/dateFilter';
+import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
 import {
   ALL_SIGNALS,
@@ -925,7 +926,9 @@ export function PicksHomeScreen() {
               tracked={tracked.isTracked(item.pick)}
               onToggleTrack={() => tracked.toggle(item.pick)}
               inSlip={slip.has(slipKeyForPick(item.pick))}
-              onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
+              onToggleSlip={() => {
+                void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
+              }}
               liveState={liveStates.get(item.pick.game_id) ?? null}
               showSignalBadge={view === 'today'}
               paused={isPausedForDisplay(item.pick)}

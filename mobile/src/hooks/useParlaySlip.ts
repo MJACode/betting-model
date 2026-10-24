@@ -1,6 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
+import { slipKeysAfterAdd, type BetslipPlayer } from '@/lib/betslipGuard';
+import { EMPTY_INJURY_INDEX } from '@/lib/injuryStatus';
+import { injuryIndexForSport } from '@/lib/injuryLookup';
+
 /**
  * Global betslip — the user's manual selections.
  *
@@ -21,6 +25,10 @@ import { useCallback, useEffect, useState } from 'react';
  * survives the rescore because the new pick row carries the same
  * game/model/player. v1 stored pick_ids; v2 stores keys, so the old store is
  * abandoned (any stuck v1 count is exactly the bug we're fixing).
+ *
+ * Adding a key for a sidelined player is a no-op (Matt, 2026-10-24). The
+ * caller passes the player the injury lookup can name; a game line passes
+ * null and is kept. Removal is never blocked.
  */
 
 const STORAGE_KEY = 'parlaySlip.keys.v2';
@@ -88,10 +96,16 @@ export function useParlaySlip() {
 
   const has = useCallback((key: string) => (cached ?? keys).includes(key), [keys]);
 
-  const add = useCallback((key: string) => {
-    const cur = cached ?? [];
-    if (cur.includes(key)) return;
-    save([...cur, key]).catch((err) => console.warn('[parlaySlip] add failed', err));
+  const add = useCallback((key: string, player?: BetslipPlayer | null): Promise<boolean> => {
+    return (async () => {
+      // No name: a game line, or a restore whose pick is not on the board.
+      // The lookup has nothing to reject, so the key is kept.
+      const index = player?.name ? await injuryIndexForSport(player.sport) : EMPTY_INJURY_INDEX;
+      const next = slipKeysAfterAdd(cached ?? [], key, player, index);
+      if (!next) return false;
+      await save(next);
+      return true;
+    })();
   }, []);
 
   const remove = useCallback((key: string) => {
@@ -100,15 +114,24 @@ export function useParlaySlip() {
     save(cur.filter((x) => x !== key)).catch((err) => console.warn('[parlaySlip] remove failed', err));
   }, []);
 
-  const toggle = useCallback((key: string) => {
+  const toggle = useCallback((key: string, player?: BetslipPlayer | null): Promise<boolean> => {
     const cur = cached ?? [];
-    const next = cur.includes(key) ? cur.filter((x) => x !== key) : [...cur, key];
-    save(next).catch((err) => console.warn('[parlaySlip] toggle failed', err));
-  }, []);
+    if (cur.includes(key)) {
+      save(cur.filter((x) => x !== key)).catch((err) => console.warn('[parlaySlip] toggle failed', err));
+      return Promise.resolve(true);
+    }
+    return add(key, player);
+  }, [add]);
 
   const clear = useCallback(() => {
     save([]).catch((err) => console.warn('[parlaySlip] clear failed', err));
   }, []);
 
-  return { keys, count: keys.length, ready, has, add, remove, toggle, clear };
+  /** One write. A restore builds the kept keys first, then lands them together
+   *  so the slip does not flash empty while the injury read is in flight. */
+  const replace = useCallback((next: string[]) => {
+    save(next).catch((err) => console.warn('[parlaySlip] replace failed', err));
+  }, []);
+
+  return { keys, count: keys.length, ready, has, add, remove, toggle, clear, replace };
 }

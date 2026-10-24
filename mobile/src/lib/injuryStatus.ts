@@ -5,7 +5,8 @@
  * while on Injured Reserve, and nothing on the row said so. The board now tags
  * every player on his team's injury report (IR / O / D / Q, or the MLB IL),
  * greys the row of anyone who is not playing, and sorts him below everyone who
- * is.
+ * is. A sidelined player also cannot be added to a bet (Matt, 2026-10-24):
+ * the price pill does not press, and the betslip stores reject the leg.
  *
  * Source: `injury_status_current`, one row per player, kept by the injury
  * ingestor from ESPN's team lists (data/ingestors/injury_ingestor.py).
@@ -64,6 +65,35 @@ export interface InjuryIndex {
 }
 
 export const EMPTY_INJURY_INDEX: InjuryIndex = { lookup: () => null, size: 0 };
+
+/**
+ * The same lookup the board uses. True only when this player is not playing
+ * (Out, IR, SUSP, IL). Questionable, Doubtful and Day-To-Day are false.
+ * No row, an ambiguous name, and a stale row are false: the lookup already
+ * decided those say nothing.
+ */
+export function playerIsSidelined(
+  index: InjuryIndex,
+  name: string | null | undefined,
+  team?: string | null,
+): boolean {
+  return index.lookup(name, team)?.sidelined === true;
+}
+
+/**
+ * Whether the Stats price pill accepts a tap.
+ *
+ * A sidelined player keeps the outlined pill and the ", not playing" label.
+ * The control has no onPress and is disabled. Anyone still playing — including
+ * Questionable and Doubtful — presses when the row handed the pill a handler.
+ */
+export function pricePillActivation(
+  sidelined: boolean,
+  hasHandler: boolean,
+): { pressable: boolean; disabled: boolean } {
+  if (sidelined) return { pressable: false, disabled: true };
+  return { pressable: hasHandler, disabled: !hasHandler };
+}
 
 /**
  * Index the current rows for lookup by name and team.
