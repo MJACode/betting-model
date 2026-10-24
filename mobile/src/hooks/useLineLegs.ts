@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
+import { lineLegsAfterAdd } from '@/lib/betslipGuard';
+import { EMPTY_INJURY_INDEX } from '@/lib/injuryStatus';
+import { injuryIndexForSport } from '@/lib/injuryLookup';
 import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
 
 /**
@@ -10,6 +13,11 @@ import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
  * a pick leg is a stable KEY resolved against today's picks, a line leg has
  * no pick to resolve against, so the whole SPEC is stored and re-priced from
  * the latest lines on read (lib/lineLegs.ts). Ordered by insertion.
+ *
+ * A sidelined player is not inserted (Matt, 2026-10-24). The add reads the
+ * same injury index the Stats board does and admits the spec through
+ * lineLegsAfterAdd. A rejection is a no-op: the caller toasts only when this
+ * returns true. A game line has no player and is not looked up.
  */
 
 const STORAGE_KEY = 'betslip.lineLegs.v1';
@@ -107,11 +115,17 @@ export function useLineLegs() {
     [specs],
   );
 
-  const add = useCallback((spec: LineLegSpec) => {
-    const cur = cached ?? [];
-    const key = lineLegKey(spec);
-    if (cur.some((s) => lineLegKey(s) === key)) return;
-    save([...cur, spec]).catch((err) => console.warn('[lineLegs] add failed', err));
+  const add = useCallback((spec: LineLegSpec): Promise<boolean> => {
+    return (async () => {
+      // The read happens before the list is touched. A game line has no player.
+      const index = isGameSpec(spec) ? EMPTY_INJURY_INDEX : await injuryIndexForSport(spec.sport);
+      // No await between this read of `cached` and `save` assigning it, so two
+      // adds cannot each snapshot the list and drop the other.
+      const next = lineLegsAfterAdd(cached ?? [], spec, index);
+      if (!next) return false;
+      await save(next);
+      return true;
+    })();
   }, []);
 
   const remove = useCallback((key: string) => {

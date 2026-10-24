@@ -82,10 +82,15 @@ export function AddLineSheet({
       onClose();
       return;
     }
-    legs.add(spec);
-    showToast('Added to betslip');
-    onClose();
-    onAdded?.();
+    // The store rejects a sidelined player and returns false. No toast: there
+    // is no notice for this, and "Added" would be a lie. The sheet stays up.
+    void (async () => {
+      const added = await legs.add(spec);
+      if (!added) return;
+      showToast('Added to betslip');
+      onClose();
+      onAdded?.();
+    })();
   };
 
   return (

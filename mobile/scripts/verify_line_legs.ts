@@ -174,7 +174,11 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the sheet adds a LINE leg, never a pick', sheet.includes('legs.add(spec)') && !sheet.includes('slip.add('));
   check('the sheet offers Remove when the leg is already in', sheet.includes("'Remove from betslip'"));
   check('the sheet never opens a book', !sheet.includes('openBookBetslip'));
-  check('VoiceOver hint says what a tap does', stats.includes('accessibilityHint="Asks to add this line to your betslip"'));
+  check(
+    'VoiceOver hint says what a tap does, and a sidelined pill does not offer it',
+    stats.includes("accessibilityHint: 'Asks to add this line to your betslip'") &&
+      stats.includes('...(pill.pressable ? { accessibilityHint:'),
+  );
   check('the Teams board pill opens the sheet and never a book', teams.includes('setLineSheet(quote)') && teams.includes('<AddLineSheet') && !teams.includes('openBookBetslip'));
   check('the Teams pill hint says what a tap does', teams.includes('accessibilityHint="Asks to add this line to your betslip"'));
   const resolved = read('src/hooks/useResolvedSlip.ts');

@@ -323,8 +323,14 @@ export function PlayerStatsScreen() {
   const toggleSlip = () => {
     if (slipKey == null) return;
     const adding = !inSlip;
-    slip.toggle(slipKey);
-    if (adding && fromParlay) navigation.navigate('Betslip');
+    void (async () => {
+      const ok = await slip.toggle(slipKey, {
+        sport,
+        name: playerName,
+        team: games[0]?.team ?? null,
+      });
+      if (adding && ok && fromParlay) navigation.navigate('Betslip');
+    })();
   };
 
   const step = useMemo(() => lineStepFor(stat), [stat]);

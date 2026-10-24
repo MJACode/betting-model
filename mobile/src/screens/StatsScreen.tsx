@@ -157,6 +157,8 @@ import {
   type TonightSlate,
 } from '@/lib/statsBoard';
 import { normalizePlayerName } from '@/lib/playerNews';
+import { pricePillActivation, sinkSidelined, type InjuryTag } from '@/lib/injuryStatus';
+import { useInjuryStatus } from '@/hooks/useInjuryStatus';
 import {
   mostCommonPostedLine,
   nhlBetCaption,
@@ -431,6 +433,14 @@ export function StatsScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<StatsRoute>();
   const { sport } = useSportFilter();
+  // Injury tags (Matt, 2026-10-23: Doubs ranked #3 on IR). Re-read on pull.
+  const [injuryReload, setInjuryReload] = useState(0);
+  const injuries = useInjuryStatus(sport, injuryReload);
+  const injuryFor = useCallback(
+    (row: { player_name?: string | null; team?: string | null }): InjuryTag | null =>
+      injuries.lookup(row.player_name, row.team),
+    [injuries],
+  );
   // Today's board — hangs a live price off each leaderboard row, and backs the
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   // The user's sportsbooks: the column prints the best of THOSE books and
@@ -974,6 +984,7 @@ export function StatsScreen() {
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey, h2hKey]);
 
   const refreshBoard = useCallback(() => {
+    setInjuryReload((n) => n + 1);
     setSlateReload((n) => n + 1);
     setRankReload((n) => n + 1);
     void load();
@@ -1568,8 +1579,8 @@ export function StatsScreen() {
   /**
    * The Anytime TD cell. Rank 1 is the defense that allows the most to this
    * position. A missing opponent is a named dash, never the A–F grade.
-   * `inactive` stays unset: this board has no injury feed, so "Not playing"
-   * is not invented from a blank status.
+   * `inactive` comes from the injury feed and only says "Not playing" for a
+   * player a team lists as Out / IR / IL. A blank status is not invented.
    */
   const atdViewFor = useCallback(
     (row: {
@@ -1603,13 +1614,14 @@ export function StatsScreen() {
           // H2H names the opponent on the row even when the kickoff index has
           // not caught up. A named opponent is a game.
           teamHasGame: !!fixture || !!named,
-          inactive: null,
+          // The injury feed: Out / IR / IL reads "Not playing".
+          inactive: injuryFor(row)?.sidelined ?? null,
         },
         rank,
         groupRanks: group ? ranksInGroup(defenseRanks, group) : null,
       });
     },
-    [rankStatus, failedGroups, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames],
+    [rankStatus, failedGroups, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames, injuryFor],
   );
 
   /** Does the column have anything to say for this sport at all? */
@@ -1921,8 +1933,9 @@ export function StatsScreen() {
         );
         return cmp || base;
       });
-    return ranked;
-  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor]);
+    // Not playing sorts last, whatever his number (Matt, 2026-10-23).
+    return sinkSidelined(ranked, (x) => !!injuryFor(x.row)?.sidelined);
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor, injuryFor]);
 
   // A filter preserves order, so the cut costs one pass and no re-sort.
   const ranked = useMemo(
@@ -2058,8 +2071,9 @@ export function StatsScreen() {
         );
         return cmp || base;
       });
-    return sorted;
-  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor]);
+    // Not playing sorts last, whatever his hit rate (Matt, 2026-10-23).
+    return sinkSidelined(sorted, (p) => !!injuryFor(p)?.sidelined);
+  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor, injuryFor]);
 
   // The position cut, last and separate for the same reason as `ranked`.
   const hitRateBase = useMemo<HitRatePlayer[]>(
@@ -2136,6 +2150,7 @@ export function StatsScreen() {
             <LineOnlyRow
               key={p.key}
               name={p.name}
+              injury={injuries.lookup(p.name, null)}
               subline={game ? fixtureSubline(game, showOdds ? null : started) : null}
               quote={quote}
               started={started}
@@ -3017,6 +3032,7 @@ export function StatsScreen() {
               <HitRateRow
                 rank={index + 1}
                 player={item}
+                injury={injuryFor(item)}
                 matchup={matchupFor(item)}
                 showMatchup={showMatchupCol}
                 atdView={atdOn ? atdViewFor(item) : undefined}
@@ -3079,6 +3095,7 @@ export function StatsScreen() {
               <LeaderRow
                 rank={index + 1}
                 row={item.row}
+                injury={injuryFor(item.row)}
                 value={item.value}
                 gp={item.gp}
                 basis={basis}
@@ -4112,6 +4129,21 @@ export function offLineCaption(
   return modeLineLabel(line, side, mode, true);
 }
 
+/** A disabled Pressable does not take the touch, so the row under the pill
+ *  would open the player. This view claims that touch and does not act on it.
+ *  The pill stays disabled, with no onPress. */
+function holdSidelinedTap(muted: boolean, pill: React.ReactElement): React.ReactElement {
+  if (!muted) return pill;
+  return (
+    <View
+      onStartShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => false}
+    >
+      {pill}
+    </View>
+  );
+}
+
 function OddsCell({
   quote,
   started,
@@ -4123,6 +4155,7 @@ function OddsCell({
   onPress,
   bestPrice = false,
   priceFixed = false,
+  muted = false,
 }: {
   quote: StatsOddsQuote | null;
   started?: 'Live' | 'Final' | null;
@@ -4142,6 +4175,9 @@ function OddsCell({
   bestPrice?: boolean;
   /** Lock the column width. Off once the metrics have stacked under the name. */
   priceFixed?: boolean;
+  /** The player is not playing: the price stays, but never as a filled book
+   *  pill beside an IR tag (UX review, 2026-10-23). */
+  muted?: boolean;
 }) {
   const wrapStyle = [styles.oddsWrap, bestPrice && priceFixed && styles.oddsWrapFixed];
   if (quote == null) {
@@ -4167,14 +4203,25 @@ function OddsCell({
   // the hit rate, which is the number this board exists to show — and a tint
   // pill also reads as one of our own buttons rather than as FanDuel's price.
   const c = bookButtonColors(quote.book);
-  const filled = quote.book === MODEL_BOOK;
+  const filled = !muted && quote.book === MODEL_BOOK;
   const sideWord = quote.side === 'under' ? 'under' : 'over';
   // The pill is a nested Pressable, so VoiceOver reads it as its own element and
   // inherits nothing from the row — without the player and the stat it is 25
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
   const priceText = formatAmerican(quote.price).replace(/-/g, MINUS);
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  const label = `${playerName}${muted ? ', not playing' : ''}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  // Sidelined: the outlined pill and the ", not playing" label stay. The press
+  // does not. Questionable and Doubtful are not muted, so they still press.
+  const pill = pricePillActivation(muted, onPress != null);
+  const pillA11y = {
+    onPress: pill.pressable ? onPress : undefined,
+    disabled: pill.disabled,
+    // Role and label stay literal on each Pressable: verify_a11y reads them
+    // from the JSX and cannot see through a spread.
+    accessibilityState: muted ? { disabled: true } : undefined,
+    ...(pill.pressable ? { accessibilityHint: 'Asks to add this line to your betslip' } : {}),
+  };
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
@@ -4189,16 +4236,14 @@ function OddsCell({
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = bestPrice ? null : [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   if (bestPrice) {
-    return (
+    return holdSidelinedTap(muted, (
       <Pressable
-        onPress={onPress}
-        disabled={!onPress}
+        {...pillA11y}
+        accessibilityRole="button"
+        accessibilityLabel={label}
         // Vertical slop crossed into the matchup line and the next name once
         // the stacked gap shrank to 2pt. The 44pt box is the target.
         hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityHint="Asks to add this line to your betslip"
         style={({ pressed }) => [
           styles.oddsBestWrap,
           priceFixed && styles.oddsWrapFixed,
@@ -4222,24 +4267,22 @@ function OddsCell({
           </View>
         ) : null}
       </Pressable>
-    );
+    ));
   }
-  return (
+  return holdSidelinedTap(muted, (
     <Pressable
-      onPress={onPress}
-      disabled={!onPress}
+      {...pillA11y}
+      accessibilityRole="button"
+      accessibilityLabel={label}
       // Dropping the caption shrank the target below 44pt, so hitSlop makes up
       // the difference; a mis-tap opens a dismissible sheet, never a book.
       hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityHint="Asks to add this line to your betslip"
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View
         style={[
           styles.oddsPill,
-          filled ? { backgroundColor: c.bg } : styles.oddsPillOutlined,
+          filled ? { backgroundColor: c.bg } : muted ? styles.oddsPillNeutral : styles.oddsPillOutlined,
         ]}
       >
         <Text
@@ -4262,7 +4305,7 @@ function OddsCell({
         </Text>
       ) : null}
     </Pressable>
-  );
+  ));
 }
 
 /** MATCHUP: how hard this spot is, as one letter.
@@ -4530,9 +4573,39 @@ function ColumnHeader({
   );
 }
 
+/** ", injured reserve" for a row's spoken label; "" when he is not listed. */
+function injurySpoken(injury: InjuryTag | null | undefined): string {
+  return injury ? `, ${injury.spoken.toLowerCase()}` : '';
+}
+
+/**
+ * IR / O / D / Q beside the name. Text on a tint, never colour alone: the
+ * letters carry the meaning (WCAG 1.4.1), and the inks clear AA on their
+ * soft grounds (theme.ts). Hidden from VoiceOver -- the row's label already
+ * says the status in words, and "I R" read out letter by letter does not.
+ */
+function InjuryChip({ tag }: { tag: InjuryTag }) {
+  const out = tag.tone === 'out';
+  return (
+    <View
+      style={[styles.injuryChip, { backgroundColor: out ? colors.avoidSoft : colors.medSoft }]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Text
+        style={[styles.injuryChipText, { color: out ? colors.avoidInk : colors.medInk }]}
+        maxFontSizeMultiplier={1.4}
+      >
+        {tag.label}
+      </Text>
+    </View>
+  );
+}
+
 function LeaderRow({
   rank,
   row,
+  injury = null,
   value,
   gp,
   basis,
@@ -4556,6 +4629,8 @@ function LeaderRow({
 }: {
   rank: number;
   row: SeasonTotalsRow;
+  /** On a team injury report. Out / IR / IL greys the row. */
+  injury?: InjuryTag | null;
   value: number;
   gp: number;
   basis: Basis;
@@ -4591,15 +4666,28 @@ function LeaderRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}${subline ? `, ${sublineSpoken(subline)}` : ''}`
+            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}${injurySpoken(injury)}, ${fmtValue(value, basis)} ${statLabel}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
       >
-        <Text style={styles.rowName} numberOfLines={1}>
-          {row.player_name}
-          {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
-        </Text>
+        <View style={styles.nameLine}>
+          <Text
+            style={[styles.rowName, styles.rowNameShrink, injury?.sidelined && styles.rowNameSidelined]}
+            numberOfLines={1}
+            // A row that cannot be tapped (NHL; no player id) has no row label,
+            // and the chip is hidden, so the name says the status itself.
+            accessibilityLabel={
+              !tappable && injury
+                ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}${injurySpoken(injury)}`
+                : undefined
+            }
+          >
+            {row.player_name}
+            {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
+          </Text>
+          {injury ? <InjuryChip tag={injury} /> : null}
+        </View>
         {subline ? (
           // The spoken form goes on the Text itself, not only in the row's
           // label: a row that is NOT tappable (NHL, UFC, Golf) sets
@@ -4637,6 +4725,7 @@ function LeaderRow({
           onPress={onOddsPress}
           bestPrice={!!atdView}
           priceFixed={!!atdView && !atdStack}
+          muted={!!injury?.sidelined}
         />
       ) : null}
       {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
@@ -4645,7 +4734,14 @@ function LeaderRow({
   const body = atdView && atdStack ? (
     <>
       <View style={styles.rowTop}>
-        <Text style={styles.rank}>{rank}</Text>
+        <Text
+          style={styles.rank}
+          // The name already says the status; a spoken dash adds a stop, not news.
+          accessibilityElementsHidden={!!injury?.sidelined}
+          importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+        >
+          {injury?.sidelined ? '–' : rank}
+        </Text>
         {nameBlock}
       </View>
       {atdView ? (
@@ -4657,12 +4753,19 @@ function LeaderRow({
     </>
   ) : (
     <>
-      <Text style={styles.rank}>{rank}</Text>
+      <Text
+        style={styles.rank}
+        // The name already says the status; a spoken dash adds a stop, not news.
+        accessibilityElementsHidden={!!injury?.sidelined}
+        importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+      >
+        {injury?.sidelined ? '–' : rank}
+      </Text>
       {nameBlock}
       {metrics}
     </>
   );
-  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked];
+  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked, injury?.sidelined && styles.rowSidelined];
   if (!tappable) return <View style={rowStyle}>{body}</View>;
   return (
     // accessible={false}: a Pressable is accessible by default, which collapses
@@ -4688,6 +4791,7 @@ function LeaderRow({
  */
 function LineOnlyRow({
   name,
+  injury = null,
   subline,
   quote,
   started,
@@ -4704,6 +4808,8 @@ function LineOnlyRow({
   omitNoGames = false,
 }: {
   name: string;
+  /** Matched by name alone: the feed names no team for these rows. */
+  injury?: InjuryTag | null;
   subline: string | null;
   quote: StatsOddsQuote | null;
   started: 'Live' | 'Final' | null;
@@ -4725,14 +4831,17 @@ function LineOnlyRow({
         style={styles.rowMain}
         accessible
         accessibilityLabel={lineOnlyRowLabel(
-          name,
+          `${name}${injurySpoken(injury)}`,
           subline ? sublineSpoken(subline) : null,
           omitNoGames ? '' : undefined,
         )}
       >
-        <Text style={styles.rowName} numberOfLines={1}>
-          {name}
-        </Text>
+        <View style={styles.nameLine}>
+          <Text style={[styles.rowName, styles.rowNameShrink, injury?.sidelined && styles.rowNameSidelined]} numberOfLines={1}>
+            {name}
+          </Text>
+          {injury ? <InjuryChip tag={injury} /> : null}
+        </View>
         {subline ? (
           <Text style={styles.rowSubline} numberOfLines={1} accessibilityLabel={sublineSpoken(subline)}>
             {subline}
@@ -4772,6 +4881,7 @@ function LineOnlyRow({
           onPress={onOddsPress}
           bestPrice={!!atdView}
           priceFixed={!!atdView && !atdStack}
+          muted={!!injury?.sidelined}
         />
       ) : null}
       {!atdView && showMatchup ? <MatchupCell matchup={null} /> : null}
@@ -4799,12 +4909,17 @@ function LineOnlyRow({
   );
   // Not a button. There is no player id, and PlayerStats with a blank id is
   // an empty page. The price pill stays its own control.
-  return <View style={[styles.row, atdView && atdStack && styles.rowStacked]}>{body}</View>;
+  return (
+    <View style={[styles.row, atdView && atdStack && styles.rowStacked, injury?.sidelined && styles.rowSidelined]}>
+      {body}
+    </View>
+  );
 }
 
 function HitRateRow({
   rank,
   player,
+  injury = null,
   matchup,
   showMatchup,
   atdView,
@@ -4827,6 +4942,8 @@ function HitRateRow({
 }: {
   rank: number;
   player: HitRatePlayer;
+  /** On a team injury report. Out / IR / IL greys the row. */
+  injury?: InjuryTag | null;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   atdView?: AnytimeMatchupView;
@@ -4866,15 +4983,28 @@ function HitRateRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}${subline ? `, ${sublineSpoken(subline)}` : ''}`
+            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}${injurySpoken(injury)}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
       >
-        <Text style={styles.rowName} numberOfLines={1}>
-          {player.player_name}
-          {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
-        </Text>
+        <View style={styles.nameLine}>
+          <Text
+            style={[styles.rowName, styles.rowNameShrink, injury?.sidelined && styles.rowNameSidelined]}
+            numberOfLines={1}
+            // A row that cannot be tapped (NHL; no player id) has no row label,
+            // and the chip is hidden, so the name says the status itself.
+            accessibilityLabel={
+              !tappable && injury
+                ? `${player.player_name}${player.team ? `, ${player.team}` : ''}${injurySpoken(injury)}`
+                : undefined
+            }
+          >
+            {player.player_name}
+            {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
+          </Text>
+          {injury ? <InjuryChip tag={injury} /> : null}
+        </View>
         {subline ? (
           // The spoken form goes on the Text itself, not only in the row's
           // label: a row that is NOT tappable (NHL, UFC, Golf) sets
@@ -4920,6 +5050,7 @@ function HitRateRow({
           onPress={onOddsPress}
           bestPrice={!!atdView}
           priceFixed={!!atdView && !atdStack}
+          muted={!!injury?.sidelined}
         />
       ) : null}
       {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
@@ -4928,7 +5059,14 @@ function HitRateRow({
   const body = atdView && atdStack ? (
     <>
       <View style={styles.rowTop}>
-        <Text style={styles.rank}>{rank}</Text>
+        <Text
+          style={styles.rank}
+          // The name already says the status; a spoken dash adds a stop, not news.
+          accessibilityElementsHidden={!!injury?.sidelined}
+          importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+        >
+          {injury?.sidelined ? '–' : rank}
+        </Text>
         {nameBlock}
       </View>
       {atdView ? (
@@ -4940,12 +5078,19 @@ function HitRateRow({
     </>
   ) : (
     <>
-      <Text style={styles.rank}>{rank}</Text>
+      <Text
+        style={styles.rank}
+        // The name already says the status; a spoken dash adds a stop, not news.
+        accessibilityElementsHidden={!!injury?.sidelined}
+        importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+      >
+        {injury?.sidelined ? '–' : rank}
+      </Text>
       {nameBlock}
       {metrics}
     </>
   );
-  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked];
+  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked, injury?.sidelined && styles.rowSidelined];
   if (!tappable) return <View style={rowStyle}>{body}</View>;
   return (
     // accessible={false}: a Pressable is accessible by default, which collapses
@@ -5634,6 +5779,31 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  // Name + injury chip on one line. The name shrinks; the chip never clips.
+  nameLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  rowNameShrink: { flexShrink: 1 },
+  // Not playing (Out / IR / IL): the page grey behind the row and a quieter
+  // name. Not opacity -- that would drop the chip and the price under AA.
+  rowSidelined: { backgroundColor: colors.bg },
+  // textTertiary is 4.69:1 on bg (AA at 13pt semibold); textSecondary read
+  // as barely different from a playing row (UX review, 2026-10-23).
+  rowNameSidelined: { color: colors.textTertiary },
+  injuryChip: {
+    borderRadius: radii.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+    flexShrink: 0,
+  },
+  injuryChipText: {
+    fontSize: font.size.micro,
+    fontWeight: font.weight.bold,
+    letterSpacing: 0.3,
   },
   rowTeam: {
     fontSize: font.size.micro,
