@@ -533,9 +533,10 @@ export function h2hSeasons(season: number): number[] {
  */
 function h2hSeasonCandidates(sport: string, season: number): number[] {
   if (sport === 'NFL' || sport === 'NCAAF') return footballSeasonCandidates(season);
-  // Try the season the autumn belongs to first; fall back to the one that has
-  // just finished, which is the right answer all through the spring and summer.
-  if (sport === 'NBA') return [season + 1, season, season - 1];
+  // NBA callers pass the label in progress (`boardSeasonET`), so the NBA takes
+  // one candidate like the year-of-play sports. It used to add a year itself,
+  // which double-shifted once callers stopped passing the calendar year
+  // (2026-10-23: [2028, 2027] — "last 2 seasons" showing one).
   return [season];
 }
 

@@ -8,6 +8,11 @@
 -- reaching into the previous season when this one is short. Team is still the
 -- newest game's team (rn = 1), so a traded player shows his new team.
 --
+-- WHO IS LISTED. Only players with a game THIS season (rn = 1 is in
+-- p_season). A player traded in the summer who has not debuted would
+-- otherwise show under his OLD team — the bug this fixes — and retired players
+-- would return. Same population as the Season chip.
+--
 -- SCOPE. Only the WINDOWED reads. `player_window_totals_nba` with
 -- p_window NULL (the Season chip, the touch set) stays this season only.
 --
@@ -47,7 +52,8 @@ BEGIN
         ),
         keep AS (
             SELECT r.player_id FROM ranked r
-            WHERE r.rn = 1 AND (p_teams IS NULL OR r.team = ANY(p_teams))
+            WHERE r.rn = 1 AND r.season = p_season
+              AND (p_teams IS NULL OR r.team = ANY(p_teams))
         )
         SELECT
             r.player_id, r.player_name, r.team, r.game_id, r.game_date, r.season,
@@ -90,7 +96,8 @@ BEGIN
             COALESCE(SUM(COALESCE(points,0)+COALESCE(rebounds,0)+COALESCE(assists,0)),0) AS pra
         FROM ranked
         WHERE p_window IS NULL OR rn <= p_window
-        GROUP BY player_id;
+        GROUP BY player_id
+        HAVING bool_or(season = p_season);
     $fn$
     $ddl$;
 END

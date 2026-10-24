@@ -1625,7 +1625,15 @@ export function StatsScreen() {
    * the one place it explains itself.
    */
   const matchupTooltip = useMemo(() => {
-    const seasonWords = defenceSeason != null ? `the ${defenceSeason} season` : 'the season so far';
+    // NBA labels are ENDING years: 2026 reads as "2025-26", or an October
+    // bettor takes "the 2026 season" for the one in progress.
+    const seasonName =
+      defenceSeason == null
+        ? null
+        : sport === 'NBA'
+          ? `${defenceSeason - 1}\u2013${String(defenceSeason).slice(2)}`
+          : String(defenceSeason);
+    const seasonWords = seasonName != null ? `the ${seasonName} season` : 'the season so far';
     const head =
       'How hard tonight\u2019s spot is for this player, graded against the rest of ' +
       'the league. A+ is the easiest matchup on the board and F the hardest.';

@@ -76,3 +76,24 @@ def test_board_reads_use_the_helper_not_the_calendar_year():
             start = i + 1
     detail = (ROOT / "mobile" / "src" / "hooks" / "usePlayerDetail.ts").read_text(encoding="utf-8")
     assert "boardSeasonET(sport)" in detail
+
+
+def _h2h_candidates_body() -> str:
+    src = (ROOT / "mobile" / "src" / "lib" / "queries.ts").read_text(encoding="utf-8")
+    start = src.index("function h2hSeasonCandidates(")
+    return src[start:src.index("\n}\n", start)]
+
+
+def test_h2h_does_not_shift_the_nba_label_a_second_time():
+    """Callers now pass the NBA label in progress (2027 in October). A helper
+    that adds a year on top asks for [2028, 2027], and the "last 2 seasons" card
+    shows one season (UX review, 2026-10-23)."""
+    body = _h2h_candidates_body()
+    assert "season + 1" not in body, body
+
+
+def test_grade_legend_names_the_nba_season_the_way_bettors_do():
+    """The defence grade stays on last season; for the NBA, "the 2026 season"
+    beside a 2026-27 board reads as this season. It says 2025-26."""
+    src = (ROOT / "mobile" / "src" / "screens" / "StatsScreen.tsx").read_text(encoding="utf-8")
+    assert "sport === 'NBA'" in src[src.index("const matchupTooltip"):src.index("const matchupTooltip") + 1200]
