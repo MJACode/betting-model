@@ -29,17 +29,33 @@ import {
   choiceAddedLabel,
   modelHistoryMark,
   modelLongWithMark,
+  modelDetailTitle,
   modelLong,
   modelProbabilityNote,
+  sportOfModel,
   withdrawnRulesEmpty,
 } from '../src/lib/modelMeta';
+import {
+  stackModelBadge,
+  modelRecordBelow,
+  navShowsSportOnly,
+  STACKED_BLOCK,
+  MODEL_BADGE_MIN,
+  MODEL_BADGE_MAX,
+  MODEL_RECORD_BELOW_SCALE,
+  modelsListNameWidth,
+} from '../src/lib/modelBadgeLayout';
 import {
   PAUSED_MODELS,
   hasFetchedThresholds,
   isModelPaused,
   isModelRetired,
   markThresholdsFetched,
+  passesActionFilter,
   setServerThresholds,
+  subscribeThresholds,
+  thresholdsRevisionNow,
+  type ServerThreshold,
 } from '../src/lib/thresholds';
 import { propModelForStat, statForPropModel, STAT_CATALOG } from '../src/lib/statCatalog';
 
@@ -95,6 +111,12 @@ check('the NBA team-total model\'s chip is TT',
   MODEL_META.nba_team_total_luck?.shortLabel === 'TT', String(MODEL_META.nba_team_total_luck?.shortLabel));
 check('the NBA team-total model is named NBA Team Totals',
   modelLong('nba_team_total_luck') === 'NBA Team Totals', modelLong('nba_team_total_luck'));
+{
+  const nflTotals = Object.entries(MODEL_META).filter(([, m]) => m.longLabel === 'NFL Totals');
+  check('nfl_wind_totals is the only NFL Totals, and its badge is O/U',
+    nflTotals.length === 1 && nflTotals[0][0] === 'nfl_wind_totals' && nflTotals[0][1].shortLabel === 'O/U',
+    nflTotals.map(([id, m]) => `${id}=${m.shortLabel}`).join(', '));
+}
 // "Why this bet?": the projection model's probability is an upper bound. The
 // figures are its graded seasons, not a posted record (it has none yet), and
 // the 48% the prices implied is what shows the 50% beat them (UX review,
@@ -114,11 +136,29 @@ check('the "Why this bet?" card reads that note for the pick\'s own model',
 // ── The built-in model screen's title is the long name ──────────────────────
 // Titled with the short label, the prop-market screens all read "Props".
 // The long names differ; the chip on the screen keeps the short one.
+// At 1.5× the nav bar shows the sport. The on-screen title may break
+// "Double-Double" after the hyphen and never ellipsizes.
 {
   const screen = readFileSync(join(__dirname, '..', 'src/screens/BuiltInModelDetailScreen.tsx'), 'utf-8');
-  check('the built-in model screen is titled with the long label',
-    /navigation\.setOptions\(\{ title: modelLong\(modelId\) \}\)/.test(screen));
-  check('its chip keeps the short label', /<Text style=\{styles\.modelChipText\}[^>]*>\{modelShort\(modelId\)\}<\/Text>/.test(screen));
+  check('below 1.5× the nav title is the long name, and at 1.5× it is the sport',
+    screen.includes('navShowsSportOnly(fontScale) ? sportOfModel(modelId) : modelLong(modelId)') &&
+      !navShowsSportOnly(1.3) &&
+      navShowsSportOnly(1.5) &&
+      navShowsSportOnly(2) &&
+      sportOfModel('nba_team_total_luck') === 'NBA' &&
+      sportOfModel('ncaaf_spread_premium') === 'NCAAF');
+  check('the on-screen title breaks Double-Double after the hyphen and does not ellipsize',
+    modelDetailTitle('nba_prop_player_dd') === 'NBA Double-\u200BDouble' &&
+      modelDetailTitle('nba_moneyline') === 'NBA Moneyline' &&
+      screen.includes('modelDetailTitle(modelId)') &&
+      screen.includes('adjustsFontSizeToFit') &&
+      screen.includes('minimumFontScale={0.85}') &&
+      !/modelTitle[\s\S]{0,240}numberOfLines/.test(screen) &&
+      !screen.includes('ellipsizeMode'));
+  const badge = readFileSync(join(__dirname, '..', 'src/components/ModelBadgeRow.tsx'), 'utf-8');
+  check('its chip keeps the short label', screen.includes('badge={modelShort(modelId)}'));
+  check('the badge is one line and shrinks to fit',
+    badge.includes('numberOfLines={1}') && badge.includes('adjustsFontSizeToFit'));
   const titles = new Set(
     ['nba_prop_market', 'nba_prop_projection', 'nfl_prop_market', 'wnba_prop_market'].map(modelLong),
   );
@@ -262,6 +302,48 @@ setServerThresholds(null);
 check('clearing the server store restores the bundled pause set',
   !isModelPaused('mlb_moneyline') && isModelPaused('mlb_prop_batter_hits'));
 
+// A cache from a build that did not store `paused` has the row and no flag.
+// Until the live table lands, that must not unpause a bundle-paused model
+// on Signals. After the fetch, a row with no flag is not paused. An explicit
+// flag wins either way. A model with no row still uses the bundle.
+const cachedWithoutFlag = {
+  mlb_over_under: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false } as ServerThreshold,
+};
+const signalPick = {
+  model_id: 'mlb_over_under',
+  model_probability: 0.6,
+  edge: 0.2,
+  dk_odds: -110,
+  signal_type: 'BET' as const,
+  condition_status: 'OK',
+  discordPublish: 'published' as const,
+};
+setServerThresholds(cachedWithoutFlag);
+check('a cached row with no paused flag stays bundle-paused before the live table',
+  !hasFetchedThresholds() &&
+    isModelPaused('mlb_over_under') === true &&
+    PAUSED_MODELS.has('mlb_over_under') &&
+    passesActionFilter(signalPick) === false);
+check('a model with no server row still uses the bundled pause list',
+  isModelPaused('mlb_runline') === true && PAUSED_MODELS.has('mlb_runline'));
+check('the history mark still waits for the live table when the row omits paused',
+  !hasFetchedThresholds() && modelHistoryMark('mlb_over_under') === 'Paused');
+setServerThresholds({
+  mlb_over_under: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: false },
+  mlb_moneyline: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+});
+check('an explicit paused flag wins before the live table lands',
+  !hasFetchedThresholds() &&
+    isModelPaused('mlb_over_under') === false &&
+    isModelPaused('mlb_moneyline') === true);
+setServerThresholds(cachedWithoutFlag);
+markThresholdsFetched();
+check('once the live table has landed, a row with no paused flag is not paused',
+  hasFetchedThresholds() &&
+    isModelPaused('mlb_over_under') === false &&
+    passesActionFilter(signalPick) === true);
+setServerThresholds(null);
+
 // The NBA player page's "our picks" note asks whether ANY live prop model
 // prices NBA players. With the rule paused on the server the projection model
 // still does; with both paused, none does.
@@ -310,13 +392,71 @@ check('clearing the store returns the mark to the bundled pause',
 {
   const models = readFileSync(join(__dirname, '..', 'src/screens/ModelsScreen.tsx'), 'utf-8');
   const detail = readFileSync(join(__dirname, '..', 'src/screens/ModelDetailScreen.tsx'), 'utf-8');
-  // 320 − 32 margin − 24 padding − 12 gap − 90 record = 162 for badge + name.
-  // 112 + 8 gap + 96 floor = 216, so the badge shrinks and the name keeps 96.
-  check('on a 320pt phone the badge yields and the name keeps its floor',
-    models.includes('minWidth: modelNameFloor') &&
-      /modelChip: \{[\s\S]*?flexShrink: 1/.test(models) &&
-      detail.includes('minWidth: modelNameFloor') &&
-      /modelChip: \{[\s\S]*?flexShrink: 1/.test(detail));
+  const daily = readFileSync(join(__dirname, '..', 'src/components/DailyResultsModal.tsx'), 'utf-8');
+  const badge = readFileSync(join(__dirname, '..', 'src/components/ModelBadgeRow.tsx'), 'utf-8');
+  check('model rows use the shared badge, sized between 56 and 112',
+    models.includes('<ModelBadgeRow ') &&
+      detail.includes('<ModelBadgeRow ') &&
+      daily.includes('<ModelBadgeRow ') &&
+      badge.includes('minWidth: MODEL_BADGE_MIN') &&
+      badge.includes('maxWidth: MODEL_BADGE_MAX') &&
+      MODEL_BADGE_MIN === 56 &&
+      MODEL_BADGE_MAX === 112 &&
+      !models.includes('modelNameFloor') &&
+      !detail.includes('modelNameFloor'));
+  // 320 stacks at every text size. 393 stays side by side at 1× and stacks from 1.3×.
+  const cases: Array<[number, number, boolean]> = [
+    [1, 320, true],
+    [1.3, 320, true],
+    [2, 320, true],
+    [1, 393, false],
+    [1.3, 393, true],
+    [2, 393, true],
+  ];
+  check('the badge stacks at 1.3× text or on a window under 360pt',
+    cases.every(([scale, width, stacked]) => stackModelBadge(scale, width) === stacked));
+  check('the record stays beside the name at 1× and moves under it at 2×',
+    !modelRecordBelow(1, 320) &&
+      !modelRecordBelow(1, 393) &&
+      !modelRecordBelow(1.3, 393) &&
+      modelRecordBelow(1.3, 320) &&
+      modelRecordBelow(2, 320) &&
+      modelRecordBelow(2, 393));
+  // "TT" is a short badge (box 56). At 1× on 393 the name gets 171pt
+  // (235 left − 8 gap − 56), which is the room "NBA Team Totals" needs.
+  check('at 1× on 393 a short badge leaves the name 171pt',
+    modelsListNameWidth(393, 1, 20) === 171);
+  check('at 1× on 320 the stacked badge leaves the name the 162pt left column',
+    modelsListNameWidth(320, 1, 20) === 162);
+  check('at 2× on 320 the name gets the full 264pt card width',
+    modelsListNameWidth(320, 2, 80) === 264);
+  check('at 2× on 393 the name gets the full 337pt card width',
+    modelsListNameWidth(393, 2, 80) === 337);
+  check('a stacked block is grow 0, shrink 0, basis auto — not flex 0 or flex 1',
+    STACKED_BLOCK.flexGrow === 0 &&
+      STACKED_BLOCK.flexShrink === 0 &&
+      STACKED_BLOCK.flexBasis === 'auto' &&
+      !('flex' in STACKED_BLOCK));
+  check('stacked containers do not also carry flex: 1',
+    models.includes('builtInLeftStacked') &&
+      models.includes('...STACKED_BLOCK') &&
+      badge.includes('stacked ? styles.stacked : styles.row') &&
+      badge.includes('stacked ? styles.bodyStacked : styles.body') &&
+      badge.includes('...STACKED_BLOCK') &&
+      daily.includes('modelLeftStacked') &&
+      daily.includes('...STACKED_BLOCK') &&
+      !/builtInLeftStacked:\s*\{[^}]*flex:\s*1/.test(models) &&
+      !/stacked:\s*\{[^}]*flex:\s*1/.test(badge) &&
+      !/bodyStacked:\s*\{[^}]*flex:\s*1/.test(badge) &&
+      !/modelLeftStacked:\s*\{[^}]*flex:\s*1/.test(daily));
+  const record = readFileSync(join(__dirname, '..', 'src/screens/TrackRecordScreen.tsx'), 'utf-8');
+  check('Track Record moves the percent under the name from 1.5×, and the name block does not use flex: 1',
+    record.includes('fontScale >= MODEL_RECORD_BELOW_SCALE') &&
+      record.includes('modelLeftStacked') &&
+      record.includes('...STACKED_BLOCK') &&
+      record.includes('modelRoiStacked') &&
+      !/modelLeftStacked:\s*\{[^}]*flex:\s*1/.test(record) &&
+      MODEL_RECORD_BELOW_SCALE === 1.5);
 }
 check('pitcher outs keeps the role in the name',
   MODEL_META.mlb_prop_pitcher_outs.longLabel === 'MLB Pitcher Outs' &&
@@ -331,6 +471,28 @@ check('an all-paused custom model gets the paused empty, not the quiet-slate one
     === 'Every bet type in this model has been paused — it is not producing new picks.');
 check('a mixed live+paused custom model is a quiet slate, not withdrawn',
   withdrawnRulesEmpty([{ model_id: 'mlb_moneyline' }, { model_id: 'mlb_over_under' }]) === null);
+
+{
+  let notes = 0;
+  const stop = subscribeThresholds(() => {
+    notes += 1;
+  });
+  const before = thresholdsRevisionNow();
+  setServerThresholds({
+    mlb_moneyline: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+  });
+  markThresholdsFetched();
+  const afterFetch = thresholdsRevisionNow();
+  markThresholdsFetched();
+  check('replacing the store and the fetch flag each notify once',
+    notes === 2 && afterFetch === before + 2 && thresholdsRevisionNow() === afterFetch);
+  setServerThresholds(null);
+  stop();
+  const picks = readFileSync(join(__dirname, '..', 'src/screens/PicksHomeScreen.tsx'), 'utf-8');
+  check('Signals re-runs the action filter when that notification lands',
+    picks.includes('useThresholdsRevision()') &&
+      picks.includes('[todayData, thresholdsRevision]'));
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

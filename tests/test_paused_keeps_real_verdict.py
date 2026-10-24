@@ -458,6 +458,6 @@ def test_the_live_board_drops_the_paused_row():
     """The #850 guard the Live board missed: a BET written while its lane was
     paused stays not-a-signal after an unpause."""
     src = _src("mobile/src/screens/PicksHomeScreen.tsx")
-    block = src.split("const liveInProgress = useMemo(")[1].split("[allLiveData, liveStates]")[0]
+    block = src.split("const liveInProgress = useMemo(")[1].split("[allLiveData, liveStates, thresholdsRevision]")[0]
     assert "!isModelPaused(d.pick.model_id)" in block
     assert "!isPausedRow(d.pick)" in block

@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { errorSurface, loadPresentation } from '@/lib/loadState';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
@@ -21,9 +22,10 @@ import {
 } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
+import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
-import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -321,6 +323,8 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // One sentence, shared with the Record tab's rows and gate-free — see
   // thinSampleCaption, which is the only place this wording is written.
   const thinNote = thinSampleCaption();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const recordBelow = modelRecordBelow(fontScale, windowWidth);
   // Each figure's tone comes from the number it prints, rounded as printed.
   const roiColor = thin
     ? colors.textSecondary
@@ -340,16 +344,18 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced` : '')
       }
-      style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.builtInCard,
+        recordBelow && styles.builtInCardStacked,
+        pressed && styles.pressed,
+      ]}
     >
-      <View style={styles.builtInLeft}>
-        <View style={styles.modelChip}>
-          <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(modelId)}</Text>
-        </View>
-        <View style={styles.modelNameCol}>
+      <View style={recordBelow ? styles.builtInLeftStacked : styles.builtInLeft}>
+        <ModelBadgeRow badge={modelShort(modelId)}>
           {/* No line cap. One line ellipsized the bet type ("NBA Projected
               Pro…", and every NCAAF name as "NCAA…" at larger text). The
-              name wraps so that word stays whole. */}
+              name wraps on spaces. At 1.3× text, or on a narrow phone, the
+              badge sits above this name so a word is not split. */}
           <Text style={styles.modelName}>
             {modelLong(modelId)}
           </Text>
@@ -375,9 +381,9 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             // ROI beside it.
             <Text style={styles.subtle}>{unpriced} unpriced · not in the money</Text>
           ) : null}
-        </View>
+        </ModelBadgeRow>
       </View>
-      <View style={styles.builtInRight}>
+      <View style={[styles.builtInRight, recordBelow && styles.builtInRightStacked]}>
         <Text style={[styles.roi, { color: roiColor }]}>
           {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
         </Text>
@@ -601,37 +607,24 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     gap: spacing.md,
   },
+  builtInCardStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
   builtInLeft: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  },
+  builtInLeftStacked: {
+    ...STACKED_BLOCK,
+    alignSelf: 'stretch',
   },
   builtInRight: {
     alignItems: 'flex-end',
     minWidth: 90,
   },
-  modelChip: {
-    backgroundColor: colors.noneSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
-    width: modelBadgeWidth,
-    flexShrink: 1,
-    // Stretch, not center: a centered child sizes to its text and overflows
-    // the fixed width instead of wrapping inside it.
-    alignItems: 'stretch',
-    justifyContent: 'center',
-  },
-  modelNameCol: {
-    flex: 1,
-    minWidth: modelNameFloor,
-  },
-  modelChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-    textAlign: 'center',
+  builtInRightStacked: {
+    alignSelf: 'flex-end',
+    marginTop: spacing.xs,
   },
   subtle: {
     fontSize: font.size.caption,
