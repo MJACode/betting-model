@@ -156,7 +156,7 @@ When I ask "what are today's picks?" or similar:
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
    - Matchup: "AWY @ HOM"
    - Pick: pick_label as stored, word for word. NEVER rebuild the line from scored_line: for spreads it is the HOME team's number, so an away pick's line is its negation (a "BUF +1" pick stores -1)
-   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL / TT). TT is a team total (model_id 'nba_team_total_luck'): the HOME team's own points, overtime included, never the game total
+   - Model: short label (ML / O/U / Spread / Fade / Premium / Projected / F5 ML / F5 O/U / F5 Spread / LIVE ML / LIVE O/U / LIVE Spread / Props / 3-Way / TT). TT is a team total (model_id 'nba_team_total_luck'): the HOME team's own points, overtime included, never the game total
    - Model %: model_probability × 100, 1 decimal (e.g. 67.3%)
    - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110).
    - Edge: edge × 100, 1 decimal, signed (+12.5%)
@@ -164,7 +164,7 @@ When I ask "what are today's picks?" or similar:
    - Kelly %: kelly_fraction × 100, 1 decimal (e.g. 3.0%)
    - Bet ($): the bet_size you computed in step 3
    - Weather: "Dome" if is_dome_game = 1; otherwise "{temp_f}°F, wind {wind_mph} mph (out {wind_out_component:+.1f})"; "—" if no weather row
-   - Public: Action Network public backing on the pick side — "{public_bet_pct:.0f}% bets / {public_money_pct:.0f}% money" (e.g. "63% bets / 71% money"). Show "—" if both NULL (no splits ingested, or a prop/F5 pick — only full-game ML/O/U/RL carry splits). Low public % on a high-edge pick = possible sharp side; high public % despite our edge = line-movement risk.
+   - Public: Action Network public backing on the pick side — "{public_bet_pct:.0f}% bets / {public_money_pct:.0f}% money" (e.g. "63% bets / 71% money"). Show "—" if both NULL (no splits ingested, or a prop/F5 pick — only full-game ML/O/U/Spread carry splits). Low public % on a high-edge pick = possible sharp side; high public % despite our edge = line-movement risk.
    - Injuries: injury_flag if non-empty, else "—". Show injury_detail in a footnote if HIGH-confidence pick has any injury.
    - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.68 and 0.70 as "⚠ Borderline (probability may shift on next hourly refresh)". Otherwise "—".
 

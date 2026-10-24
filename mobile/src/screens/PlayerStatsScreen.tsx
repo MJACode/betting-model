@@ -91,6 +91,7 @@ import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
 import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
   formatRecordLine,
+  playerLineNote,
   HIT_RATE_GOOD,
   HIT_RATE_WEAK,
   thresholdFromBookLine,
@@ -1678,11 +1679,7 @@ function PickRecordCard({
               key={l.key}
               label={l.label}
               value={formatRecordLine(l)}
-              note={
-                l.overs + l.unders > 0
-                  ? `${l.overs} over${l.overs === 1 ? '' : 's'} · ${l.unders} under${l.unders === 1 ? '' : 's'}`
-                  : undefined
-              }
+              note={playerLineNote(l, record.lines)}
             />
           ))}
         </View>

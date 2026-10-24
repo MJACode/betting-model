@@ -19,6 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, history mark stays on the bundled pause set until the live thresholds table lands; the 112pt badge yields so the name keeps 96pt on a 320pt phone; betTypeLabel is always the long name. |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, model names wrap so the bet type is not ellipsized; badges share a fixed width; a paused or retired pick says "MLB Totals · Paused" on detail, the card footer, and VoiceOver. MLB Pitcher Outs. |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, mobile display names: MODEL_META is sport plus bet type; badges match; no model id, statLabel, scorer, or Discord change. Shared history names marked Paused or Retired. Player-page duplicate stats named on the note. |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, price line names the soft book's number: Discord and X use decision_book for NFL wind, opener, NFL props and WNBA props when the prices match; MLB stays DraftKings; NONE created_at moves only with the number; wind mph not restored |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, displayed book stays master's: decision_book only on NFL wind/opener Discord; X and MLB stay DraftKings; wind mph not restored |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, simple pick labels: book moves to decision_book; new labels drop Opener/Wind/Pinnacle parentheses; old labels still parse; no migration |

@@ -68,17 +68,18 @@ def test_the_custom_model_picker_is_three_bet_types():
     """
     meta = _read(MOBILE / "src" / "lib" / "modelMeta.ts")
     assert "{ label: 'ML', subtitle: 'Moneyline' }" in meta
-    assert "{ label: 'Run line', subtitle: '±1.5' }" in meta
-    assert "{ label: 'Puck line', subtitle: '±1.5' }" in meta
+    assert "{ label: 'Run line', subtitle: '±1.5' }" not in meta
+    assert "{ label: 'Puck line', subtitle: '±1.5' }" not in meta
     assert "{ label: 'Spread', subtitle: 'Spread line' }" in meta
     assert "{ label: 'Player props', subtitle: 'All player markets' }" in meta
     collapse = _block(meta, "export function betTypePickerGroups", "\n}")
     assert "betTypeGroups()" in collapse
-    # Rule chrome (editor, detail, Models list) all call betTypeLabel. A slot
-    # must title itself with the picker's short name, not longLabel.
+    # Rule chrome (editor, detail, Models list) all call betTypeLabel.
+    # One shape: the long name. A slot used to return "MLB · Spread" and
+    # everything else the long name, so a caller could not split on " · ".
     titled = _block(meta, "export function betTypeLabel", "\n}")
-    assert "betSlotForModel" in titled
-    assert "choiceCopy" in titled
+    assert "return modelLong(modelId)" in titled
+    assert " · " not in titled
     # NCAAF Spread writes ncaaf_spread only. Premium stays out of the slot
     # so the row cannot add a second rule with the same title.
     slot = _block(meta, "export function betSlotForModel", "\n}")
