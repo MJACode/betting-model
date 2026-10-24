@@ -6,6 +6,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
@@ -22,7 +23,7 @@ import {
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
-import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
@@ -194,10 +195,7 @@ export function ModelDetailScreen() {
                   onPress={() => navigation.navigate('PickDetail', { pickId: ep.pick.pick_id })}
                 >
                   <View style={styles.pickLeft}>
-                    <View style={styles.modelChip}>
-                      <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(ep.pick.model_id)}</Text>
-                    </View>
-                    <View style={styles.pickCopy}>
+                    <ModelBadgeRow badge={modelShort(ep.pick.model_id)}>
                       <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
                         {ep.pick.pick_label}
                       </Text>
@@ -208,7 +206,7 @@ export function ModelDetailScreen() {
                           {ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}
                         </Text>
                       </View>
-                    </View>
+                    </ModelBadgeRow>
                   </View>
                   <Text style={styles.upcomingOdds}>{bookLabelShort(storedQuoteBook(ep.pick))} {formatAmerican(decisionOdds(ep.pick))}</Text>
                 </Pressable>
@@ -226,10 +224,7 @@ export function ModelDetailScreen() {
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick_id })}
           >
             <View style={styles.pickLeft}>
-              <View style={styles.modelChip}>
-                <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(item.model_id)}</Text>
-              </View>
-              <View style={styles.pickCopy}>
+              <ModelBadgeRow badge={modelShort(item.model_id)}>
                 <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
                   {item.pick_label}
                 </Text>
@@ -238,7 +233,7 @@ export function ModelDetailScreen() {
                   <Text style={styles.pickDate}>{item.game_date}</Text>
                   <Text style={styles.pickDate}>· {item.result ?? '—'}</Text>
                 </View>
-              </View>
+              </ModelBadgeRow>
             </View>
             <Text
               style={[
@@ -368,29 +363,6 @@ const styles = StyleSheet.create({
   },
   pickLeft: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  modelChip: {
-    backgroundColor: colors.noneSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
-    width: modelBadgeWidth,
-    flexShrink: 1,
-    alignItems: 'stretch',
-    justifyContent: 'center',
-  },
-  modelChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-    textAlign: 'center',
-  },
-  pickCopy: {
-    flex: 1,
-    minWidth: modelNameFloor,
   },
   pickLabel: {
     fontSize: font.size.body,

@@ -5,6 +5,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
@@ -24,7 +25,7 @@ import {
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
-import { colors, font, modelBadgeWidth, modelNameFloor, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
@@ -165,13 +166,14 @@ export function BuiltInModelDetailScreen() {
         ListHeaderComponent={
           <>
             <View style={styles.headerCard}>
-              <View style={styles.headerRow}>
-                <View style={styles.modelChip}>
-                  <Text style={styles.modelChipText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{modelShort(modelId)}</Text>
-                </View>
+              <ModelBadgeRow badge={modelShort(modelId)}>
                 <Text style={styles.modelTitle}>{modelLong(modelId)}</Text>
-                {paused ? <TagChip label="Paused" /> : null}
-              </View>
+                {paused ? (
+                  <View style={styles.pausedChip}>
+                    <TagChip label="Paused" />
+                  </View>
+                ) : null}
+              </ModelBadgeRow>
               <Text style={styles.modelSubtitle}>
                 {meta ? `Built-in ${categoryLabel(meta.type)} model` : 'Built-in model'}
               </Text>
@@ -537,33 +539,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  modelChip: {
-    backgroundColor: colors.noneSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
-    width: modelBadgeWidth,
-    flexShrink: 1,
-    alignItems: 'stretch',
-    justifyContent: 'center',
-  },
-  modelChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-    textAlign: 'center',
+  pausedChip: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
   },
   modelTitle: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
-    flex: 1,
-    minWidth: modelNameFloor,
   },
   modelSubtitle: {
     fontSize: font.size.footnote,

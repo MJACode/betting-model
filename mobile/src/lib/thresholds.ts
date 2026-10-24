@@ -194,15 +194,13 @@ export function isBundledPaused(modelId: string): boolean {
 
 /**
  * Whether a model is paused (never surfaced as an actionable pick, and hidden
- * from the Models list). Prefers the server flag (model_action_thresholds.paused),
- * falls back to the bundled PAUSED_MODELS set when not yet loaded / offline.
+ * from the Models list and from Signals). A server row wins whenever it
+ * exists: a missing `paused` flag is not paused. The bundled PAUSED_MODELS
+ * list applies only when that model has no row (offline, or not in the table).
  */
 export function isModelPaused(modelId: string): boolean {
   const sv = serverThresholds?.[modelId];
-  // A cache row written before `paused` existed is an object with no boolean.
-  // Treating that as "not paused" took the mark off, then the fetch put it
-  // back. A missing boolean is "not loaded", so the bundle stands.
-  if (sv && typeof sv.paused === 'boolean') return sv.paused;
+  if (sv) return sv.paused === true;
   return PAUSED_MODELS.has(modelId);
 }
 
