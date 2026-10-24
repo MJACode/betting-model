@@ -107,7 +107,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, boardSeasonET, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -897,7 +897,7 @@ export function StatsScreen() {
             touchFailureRef.current = { key: failedKey, kind };
             setTouchFailure(touchFailureRef.current);
           };
-          touchJob = fetchWindowTotals(sport, SEASON, null, playerType)
+          touchJob = fetchWindowTotals(sport, boardSeasonET(sport), null, playerType)
             .then((t) => {
               // Same stamp as the reads below. A response for a sport or
               // player type the user has already left must not replace the
@@ -933,16 +933,16 @@ export function StatsScreen() {
           // rather than sent unnarrowed (fetchH2HStatValues returns [] on an
           // empty list either way — this keeps the board's empty state honest
           // about WHY, see emptySubtitle).
-          const data = await fetchH2HStatValues(sport, SEASON, key, h2hFixtures, playerType);
+          const data = await fetchH2HStatValues(sport, boardSeasonET(sport), key, h2hFixtures, playerType);
           if (inFlight.current !== stamp) return;
           setH2hValues({ statKey: key, rows: data });
         } else if (timeWindow === 'season') {
           const key = String(stat.key);
-          const data = await fetchSeasonStatValues(sport, SEASON, key, playerType, teams);
+          const data = await fetchSeasonStatValues(sport, boardSeasonET(sport), key, playerType, teams);
           if (inFlight.current !== stamp) return;
           setSeasonValues({ statKey: key, rows: data });
         } else {
-          const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType, teams);
+          const data = await fetchRecentGames(sport, boardSeasonET(sport), timeWindow, playerType, teams);
           if (inFlight.current !== stamp) return;
           setRecentRows(data);
         }
@@ -956,7 +956,7 @@ export function StatsScreen() {
         // than cast so that if that pairing is ever broken the board falls back
         // to the whole season instead of sending 'h2h' as a game count.
         const win = typeof timeWindow === 'number' ? timeWindow : null;
-        const data = await fetchWindowTotals(sport, SEASON, win, playerType, teams);
+        const data = await fetchWindowTotals(sport, boardSeasonET(sport), win, playerType, teams);
         if (inFlight.current !== stamp) return;
         setRows(data);
       }

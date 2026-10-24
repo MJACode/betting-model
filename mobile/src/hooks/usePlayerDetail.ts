@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useNow } from '@/hooks/useNow';
 import { errorText, isAbortError } from '@/lib/errors';
-import { addDays, todayET, yearET } from '@/lib/format';
+import { addDays, boardSeasonET, todayET } from '@/lib/format';
 import { MODEL_BOOK } from '@/lib/markets';
 import { positionOf, type PlayerLogEntry, type PlayerLogSport } from '@/lib/playerLog';
 import {
@@ -104,14 +104,6 @@ export interface PlayerNextGame {
   entry: SlateGame;
   unstarted: boolean;
 }
-
-/**
- * The season label the H2H read starts from — the same value the Stats
- * board uses, so the two surfaces cannot disagree about which two seasons
- * "the last 2 years" means. Football's start-year label falls back a season
- * inside fetchH2HStatValues, as every other football read does.
- */
-const SEASON = yearET();
 
 export function usePlayerDetail(args: {
   sport: PlayerLogSport;
@@ -224,7 +216,9 @@ export function usePlayerDetail(args: {
       ? async () => {
           const rows = await fetchH2HStatValues(
             sport,
-            SEASON,
+            // The same season the Stats board asks for, so the two surfaces
+            // agree on which two seasons "last 2" means.
+            boardSeasonET(sport),
             String(stat.key),
             { teams: [team], opponents: [opponent] },
             playerType ?? undefined,
