@@ -12,8 +12,12 @@ and writes rows the pass/fail script reads (scripts/nba_game2_verdict.py --house
              number); alternate_totals -> "totals"; alternate_team_totals_home / _away ->
              team_totals_home / _away. Every bet keeps that real market, which pricing and
              settlement read.
-  BOOK MAIN  per (game, market, book): the rung whose prices are closest to even, coherent
-             first, ties to the lower number (models/nba_book_numbers.main_rungs).
+  BOOK MAIN  per (game, market, book): the book's MAIN-MARKET quote at the decision time
+             (10.8 amendment): the full-game spread or total the hourly archive shows at or
+             before T (H.visible: within 60 minutes), the team total the derivative purchase
+             shows within TT_MATCH_MIN minutes of T (its main rung). DraftKings and Hard Rock
+             leave the main number out of their alternate ladders, so the ladder cannot name
+             it. A book with no main-market quote at T is not bet.
   FAIR       Pinnacle's main rung, proportional no-vig. Spreads and totals: Pinnacle's rung
              in the SAME alternate purchase. Team totals: Pinnacle's main team-total rung in
              the derivative purchase (H.load_per_event) stamped within TT_MATCH_MIN minutes.
@@ -35,8 +39,12 @@ and writes rows the pass/fail script reads (scripts/nba_game2_verdict.py --house
              slots: the verdict is run with BAND_SLOTS = 6).
   BLIND      the same side at the best deciding price at each book's MAIN rung, every game
              in the cell's population (the games with an eligible rung in that market).
-  PLACEBO    200 runs, seeds 1-200: the fair centre shuffled between games on the same date
-             in the same market; prices and rungs stay.
+  PLACEBO    200 runs, seeds 1-200 (10.8 amendment): each game's pricing SHAPE is replaced by
+             one drawn at random from that season's shapes for its market (spreads: the six
+             line-size and favourite shapes; team totals: the six; totals: the pooled shape,
+             its mirror image and a normal of the same SD), and the centre is re-solved from
+             Pinnacle's real price under it. A centre-swap placebo (registered first) is
+             reported beside it, never judged.
 
     PYTHONPATH=. python -m scripts.nba_game6_alt --synthetic        # the plumbing, no data
     PYTHONPATH=. python -m scripts.nba_game6_alt --cache-alt        # Supabase -> local cache
@@ -74,6 +82,7 @@ STALE_MAX_MIN = 15                 # 10.3 amendment: a ladder updated longer ago
 SPREAD_BUCKETS = (5.0, 10.0)       # 10.4.2 amendment: |line| <= 5, 5-10, > 10
 SEASONS = (2024, 2025, 2026)
 PLACEBO_RUNS = 200
+SWAP_RUNS = 50                      # the centre-swap placebo, reported only (10.8)
 EXPECTED_CELLS = 30
 ALT_CACHE = "nba_alt_odds.parquet"
 
@@ -252,9 +261,33 @@ def fair_centres(pins: pd.DataFrame, games: pd.DataFrame, sig: dict,
     return f
 
 
-def eligible_offers(q: pd.DataFrame, pins: pd.DataFrame) -> pd.DataFrame:
-    """Two offers per eligible rung (section 10.4.4), with the book's main and the distance."""
-    bm = main_rungs(q)[["game_id", "market", "book", "line"]].rename(columns={"line": "book_main"})
+def book_mains(q: pd.DataFrame, full_quotes: pd.DataFrame, pe_tt: pd.DataFrame | None) -> pd.DataFrame:
+    """Each deciding book's main-market quote at each game's decision time T (10.8): the
+    full-game spread / total the archive shows at or before T within H.STALE_MIN minutes, and
+    the main team-total rung of the derivative purchase within TT_MATCH_MIN minutes of T.
+    Rows are quote-shaped (line, price_a, price_b, coherent, ...) with fetch_at the main
+    quote's own fetch and T the alternate purchase's."""
+    T = q.groupby("game_id")["fetch_at"].first().rename("T").reset_index()
+    parts = []
+    fq = full_quotes[full_quotes["market"].isin(["spreads", "totals"]) & full_quotes["book"].isin(H.BETTABLE)]
+    if len(fq):
+        vis = H.visible(fq, T)
+        parts.append(vis[vis["coherent"]].drop(columns="T", errors="ignore").merge(T, on="game_id"))
+    if pe_tt is not None and len(pe_tt):
+        t = main_rungs(pe_tt[pe_tt["market"].isin(TT_MARKETS) & pe_tt["book"].isin(H.BETTABLE)
+                             & pe_tt["coherent"]]).merge(T, on="game_id")
+        t = t[(t["fetch_at"] - t["T"]).abs() <= pd.Timedelta(minutes=TT_MATCH_MIN)]
+        parts.append(t)
+    if not parts:
+        return pd.DataFrame(columns=H.QUOTE_COLS + ["T"])
+    m = pd.concat(parts, ignore_index=True)
+    return m.sort_values("fetch_at").drop_duplicates(["game_id", "market", "book"], keep="last")
+
+
+def eligible_offers(q: pd.DataFrame, pins: pd.DataFrame, mains: pd.DataFrame) -> pd.DataFrame:
+    """Two offers per eligible rung (section 10.4.4), with the book's main (book_mains) and
+    the distance from it."""
+    bm = mains[["game_id", "market", "book", "line"]].rename(columns={"line": "book_main"})
     x = q.merge(bm, on=["game_id", "market", "book"]).merge(
         pins[["game_id", "market", "pin_line"]], on=["game_id", "market"])
     x = x[x["book"].isin(H.BETTABLE) & x["coherent"]]
@@ -266,12 +299,12 @@ def eligible_offers(q: pd.DataFrame, pins: pd.DataFrame) -> pd.DataFrame:
     return off
 
 
-def main_offers(q: pd.DataFrame, pins: pd.DataFrame) -> pd.DataFrame:
-    """Every deciding book's MAIN rung as two offers: the blind bet and the main-rung control."""
-    bm = main_rungs(q[q["book"].isin(H.BETTABLE)])
-    bm = bm.merge(pins[["game_id", "market"]], on=["game_id", "market"])
-    off = H.offers(bm)
-    return off.assign(T=off["fetch_at"])
+def main_offers(mains: pd.DataFrame, pins: pd.DataFrame) -> pd.DataFrame:
+    """Every deciding book's MAIN-MARKET quote at T (book_mains) as two offers: the blind bet
+    and the main-rung control, decided at the alternate purchase's T."""
+    bm = mains.merge(pins[["game_id", "market"]], on=["game_id", "market"])
+    off = H.offers(bm.drop(columns="T"))
+    return off.merge(bm[["game_id", "T"]].drop_duplicates("game_id"), on="game_id")
 
 
 def priced(off: pd.DataFrame, fair: pd.DataFrame) -> pd.DataFrame:
@@ -382,6 +415,48 @@ def clv_shaped(bets: pd.DataFrame, close: pd.DataFrame, sig: dict, shapes: dict 
     return pd.Series(ev, index=x["index"].to_numpy()).reindex(bets.index)
 
 
+def shape_pools(sig: dict, shapes: dict | None, close: pd.DataFrame | None, games: pd.DataFrame) -> dict:
+    """(season, market) -> the shapes the placebo draws from (10.8): spreads the six
+    line-size x favourite shapes, team totals the six, totals the pooled shape, its mirror
+    image and a normal of the same SD (results around Pinnacle's close, seasons before)."""
+    shapes = shapes or {}
+    pools = {}
+    for s_ in SEASONS:
+        sp = [v for (ss, _b, _f), v in shapes.get("spreads", {}).items() if ss == s_]
+        if sp:
+            pools[(s_, "spreads")] = sp
+        tt = [v for (ss, _b, _f), v in shapes.get("tt", {}).items() if ss == s_]
+        if tt:
+            for m in TT_MARKETS:
+                pools[(s_, m)] = tt
+        base = sig.get((s_, "totals"))
+        if base is not None and close is not None:
+            r = H.close_resid(close[close["market"] == "totals"], games)
+            r = r[(r["season"] < s_)]["resid"].to_numpy(float)
+            if len(r) >= 300:
+                rng = np.random.default_rng(s_)
+                pools[(s_, "totals")] = [base, H.ResidDist(-r, f"{s_} totals mirrored"),
+                                         H.ResidDist(rng.normal(0.0, r.std(), 20000), f"{s_} totals normal")]
+    return pools
+
+
+def shape_placebo(fair: pd.DataFrame, run: int, pools: dict) -> pd.DataFrame:
+    """Each game's shape replaced by a random one from its season-market pool; the centre
+    re-solved from Pinnacle's real price under it. A market with no pool keeps its shape."""
+    rng = np.random.default_rng(run)
+    f = fair.copy()
+    new = []
+    for s_, m in zip(f["season"], f["market"]):
+        pool = pools.get((int(s_), m))
+        new.append(pool[int(rng.integers(len(pool)))] if pool else None)
+    keep = np.array([v is None for v in new])
+    sig = np.array(new, dtype=object)
+    sig[keep] = f["sigma"].to_numpy()[keep]
+    f["sigma"] = pd.Series(list(sig), index=f.index, dtype=object)
+    f["mu"] = H.solve_any(H.threshold(f["market"], f["pin_line"]), f["pin_fa"].to_numpy(), f["sigma"].to_numpy())
+    return f
+
+
 def shuffle_fair(fair: pd.DataFrame, run: int) -> pd.DataFrame:
     """Placebo: mu (with its sigma) swapped between games on the same date in the same market."""
     rng = np.random.default_rng(run)
@@ -405,12 +480,13 @@ def without_best_book(cand, cut, side, g, games):
 
 def family_cells(fam: str, off: pd.DataFrame, fair: pd.DataFrame, main_priced: pd.DataFrame,
                  games: pd.DataFrame, close, sig, runs: int, label: str | None = None,
-                 band: tuple = (PRICE_MIN, PRICE_MAX), shapes: dict | None = None
-                 ) -> tuple[list[dict], pd.DataFrame]:
+                 band: tuple = (PRICE_MIN, PRICE_MAX), shapes: dict | None = None,
+                 pools: dict | None = None) -> tuple[list[dict], pd.DataFrame]:
     markets = FAMILIES[fam]
     o = in_band(off[off["market"].isin(markets)], *band)
     cand = priced(o, fair)
-    placebos = [priced(o, shuffle_fair(fair, r)) for r in range(1, runs + 1)]
+    placebos = [priced(o, shape_placebo(fair, r, pools or {})) for r in range(1, runs + 1)]
+    swaps = [priced(o, shuffle_fair(fair, r)) for r in range(1, min(runs, SWAP_RUNS) + 1)]
     population = set(cand["game_id"])
     bl = blinds(main_priced[main_priced["market"].isin(markets)], population, games, fair)
     rows, bets = [], []
@@ -426,6 +502,11 @@ def family_cells(fam: str, off: pd.DataFrame, fair: pd.DataFrame, main_priced: p
                 gp = H.grade(_pick(pc, cut, side), games)
                 pl.append(H.roi(gp) if len(gp) else np.nan)
             row["placebo_rois"] = pl
+            sw = []
+            for pc in swaps:
+                gp = H.grade(_pick(pc, cut, side), games)
+                sw.append(H.roi(gp) if len(gp) else 0.0)
+            row["centre_swap_p95"] = float(np.percentile(sw, 95)) if sw else np.nan
             dk = H.grade(_pick(cand, cut, side, books=(H.DK,)), games)
             row["dk_n"], row["dk_roi"] = int(len(dk)), (H.roi(dk) if len(dk) else np.nan)
             row["roi_without_best_book"] = without_best_book(cand, cut, side, g, games)
@@ -480,11 +561,14 @@ def run(alt: pd.DataFrame, data: H.Data, pe: pd.DataFrame | None, runs: int = PL
     close = H.pinnacle_close(data) if len(data.quotes) else None
     pins = pinnacle_mains(q, pe)
     fair = fair_centres(pins, games, sig, shapes)
-    off = eligible_offers(q, fair)
-    main_priced = priced(main_offers(q, fair), fair)
+    mains = book_mains(q, data.quotes, pe)
+    off = eligible_offers(q, fair, mains)
+    main_priced = priced(main_offers(mains, fair), fair)
+    pools = shape_pools(sig, shapes, close, games)
     rows, bets = [], []
     for fam in FAMILIES:
-        r, b = family_cells(fam, off, fair, main_priced, games, close, sig, runs, shapes=shapes)
+        r, b = family_cells(fam, off, fair, main_priced, games, close, sig, runs, shapes=shapes,
+                            pools=pools)
         rows += r
         bets.append(b)
         # controls are reported, never judged (section 10.5), so they carry no placebo runs
@@ -492,7 +576,7 @@ def run(alt: pd.DataFrame, data: H.Data, pe: pd.DataFrame | None, runs: int = PL
                             label=f"control_{fam}_long", band=(PRICE_MAX + 1e-9, np.inf),
                             shapes=shapes)
         rows += r
-        mo = main_offers(q, fair)
+        mo = main_offers(mains, fair)
         r, _ = family_cells(fam, mo, fair, main_priced, games, close, sig, 0,
                             label=f"control_{fam}_main", shapes=shapes)
         rows += r
@@ -531,7 +615,8 @@ def synthetic_world(seed: int = 3, n_days: int = 300, per_day: int = 6, soft_sd:
                 margin = 1
             hs = 110 + max(margin, 0)
             games.append({"game_id": gid, "season": season, "game_date": str(tip.date()), "tip": tip,
-                          "home_team": "H", "away_team": "A", "home_score": hs, "away_score": hs - margin})
+                          "home_team": "H", "away_team": "A", "home_score": hs, "away_score": hs - margin,
+                          "mu": mu})
             snap = (tip - pd.Timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
             main = -np.round(mu * 2) / 2
             for book, sd, hold in (("pinnacle", 13.0, 0.02), ("draftkings", 13.0, 0.04), ("fanduel", soft_sd, 0.04)):
@@ -562,9 +647,10 @@ def synthetic_checks() -> None:
     fair = fair_centres(pins, games, sig)
     # the fair centre recovers the game's own centre (home number sign)
     f = fair.set_index("game_id")["mu"]
-    true_mu = -pins.set_index("game_id")["pin_line"]
-    assert np.nanmax(np.abs(f - true_mu.reindex(f.index))) < 0.6, "fair centre off: the home-number sign"
-    off = eligible_offers(q, fair)
+    true_mu = data.games.set_index("game_id")["mu"]      # the game's own centre, not read from any price
+    assert np.nanmax(np.abs(f - true_mu.reindex(f.index))) < 0.4, "fair centre off: the home-number sign"
+    mains = main_rungs(q[q["book"].isin(H.BETTABLE)]).assign(T=lambda d: d["fetch_at"])
+    off = eligible_offers(q, fair, mains)
     cand = priced(off, fair)
     assert (cand["off_main"] >= MIN_OFF_MAIN).all()
     # a book's ladder stamped 30 minutes before the purchase is not visible (10.3 amendment)

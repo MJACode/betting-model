@@ -2227,3 +2227,69 @@ positive, beats the blind bet on its side, bands, 200 placebo runs).
 - **What a pass needs before it is live:** a live poller that reads the official report within
   minutes of each slot and prices the slate immediately. A pass at R+5 that fails at R+10 is
   reported as needing that speed; it is not shipped on a slower clock.
+
+### 11.5 Changes after an independent review of sections 10 and 11, before any price was graded or the purchases ran (2026-10-24)
+
+Four reviewers read the two labs, the two purchases and these sections, and two more checked
+each finding (`%TEMP%/nba_game_edge/deep/`; workflow `nba-purchase-and-lab-review`). Fourteen
+findings held. Every change below was made before any alternate rung or 5-minute price was
+graded, and before either purchase ran.
+
+**The alternate-lines search (section 10)**
+
+1. **A book's main number is its main-market quote, not a rung of its ladder.** DraftKings and
+   Hard Rock leave the main number out of their alternate ladders. On the pilot night the
+   ladder's "closest to even" rung differed from the book's real main on 40 of 40 DraftKings
+   ladders and 20 of 20 Hard Rock ones. That dropped 4 DraftKings ladders sitting at Pinnacle's
+   number and admitted rungs only 1 point from the real main. The main is now the full-game
+   spread or total the hourly archive shows at or before the decision (within 60 minutes),
+   and the derivative purchase's team total within 10 minutes. A book with no main quote is
+   not bet. The blind bet and the main-rung control use the same quote.
+2. **The placebo swaps the result shape, not only the centre.** Section 10.2's idea is that a
+   book's curve is the wrong shape. Swapping centres between games keeps that kind of
+   mispricing, so a real edge could fail the bar. Each placebo run now gives every game a shape
+   drawn at random from that season's shapes for its market, and re-solves the centre from
+   Pinnacle's real price under it:
+   - spreads: the six line-size and favourite shapes;
+   - team totals: the six;
+   - totals: the pooled shape, its mirror image, and a normal of the same SD.
+
+   The centre-swap placebo is reported beside it (50 runs), never judged.
+3. **Closing-line value here is not an independent check.** It prices the bet at Pinnacle's
+   main close through the same shape that chose it. So it measures the lab's own disagreement
+   plus Pinnacle's main-line move, not whether the rung beat its own close. It stays reported,
+   and it is never cited as beating the closing line. Results and the bars decide.
+4. **Bar 5 reads every band.** The pass/fail script read five bands; the 0.02 cells carry six,
+   so the top band [0.10, ∞) was never judged. It now reads every band a row carries
+   (`scripts/nba_game2_verdict.band_slots`).
+5. **The 5-minute news prices stay out of this grade.** The harness leaves them out unless a
+   lab asks (`H.load(include_news_windows=True)`, which only section 11's lab passes). So
+   section 10's close and shapes do not depend on when the cache is refreshed.
+
+**The injury-news search (section 11)**
+
+6. **What "R+5" means.** The feed returns the latest 5-minute snapshot at or before a request,
+   and its snapshots sit 38–39 seconds past each mark (measured on 13 requests, 2022-11 to
+   2026-02). A request at R+5 returns R+0:38. So the plan now asks one minute past each mark,
+   and "R+5" is the snapshot at about R+5:38. Each fetch's own snapshot time (the purchase
+   stores it) dates the window, and "fresh" means a book stamped within 5 minutes of that
+   time, not of the request.
+7. **Minutes per game are the last 10 games played, as 11.1 says.** The first plan averaged
+   the last 10 box-score rows, games missed included. Replanned: 1,917 events (820 in 2024-25,
+   1,097 in 2025-26), 8,776 requests, **263,280 credits**. The approved figure was about
+   252,000; the plan before these fixes said 294,600. Re-measured with the corrected minutes,
+   N2's slope is unchanged: 0.375 in the window and 0.096 after, 0.47.
+8. **The N1 placebo is a null.** Shuffling only the bet's side and pricing it at Pinnacle's
+   real centre made every placebo a subset of the real bets, so no edge could pass. Now each
+   event's move direction is shuffled between events on the same date, market and offset, and
+   the fair centre moves with it (centre at R−5 plus the shuffled direction × the move's own
+   size). A synthetic check now asserts a planted edge clears the placebo's 95th percentile.
+9. **The blind bet** is the house standard's: the best fresh deciding offer on each side under
+   Pinnacle's centre at t, on games with a Pinnacle quote. It had ranked offers by raw price.
+10. **The quiet control** keeps report times where NEITHER team changed by 0.5 points' worth;
+    it had used the net of both teams.
+11. **The registered reports are computed.** These are the share of Pinnacle's move already in
+    the snapshot at R, the median minutes a stale book took to move, and closing-line value for
+    moneylines (the no-vig close win chance), which had none.
+12. **Both purchases retry.** A rate-limit or server answer is retried, and every game or
+    instant that still got none is bought once more at the end of the run.
