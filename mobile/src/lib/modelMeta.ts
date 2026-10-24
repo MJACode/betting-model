@@ -895,6 +895,14 @@ export function isPropModel(modelId: string): boolean {
 
 export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'NHL' | 'GOLF';
 
+/**
+ * The on-screen title. "Double-Double" is one word to the wrapper; a
+ * zero-width space after the hyphen is a break it may take. No ellipsis.
+ */
+export function modelDetailTitle(modelId: string): string {
+  return modelLong(modelId).replaceAll('Double-Double', 'Double-\u200BDouble');
+}
+
 /** Which sport a model_id belongs to, from its prefix. */
 export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';

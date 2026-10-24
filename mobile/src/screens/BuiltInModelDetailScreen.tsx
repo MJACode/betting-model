@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -24,7 +24,8 @@ import {
   formatSigned,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
-import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
+import { MODEL_META, modelDetailTitle, modelLong, modelPageTiming, modelShort, sportOfModel } from '@/lib/modelMeta';
+import { navShowsSportOnly } from '@/lib/modelBadgeLayout';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
@@ -131,12 +132,16 @@ export function BuiltInModelDetailScreen() {
     [history, latestSettledDate],
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
+  const { fontScale } = useWindowDimensions();
 
   // The long name: the prop-market rules share the short label "Props", so a
   // short title made their screens indistinguishable. The chip keeps it.
+  // At 1.5× and above the bar truncates ("NBA Team T…"), so it shows the sport.
   useEffect(() => {
-    navigation.setOptions({ title: modelLong(modelId) });
-  }, [navigation, modelId]);
+    navigation.setOptions({
+      title: navShowsSportOnly(fontScale) ? sportOfModel(modelId) : modelLong(modelId),
+    });
+  }, [navigation, modelId, fontScale]);
 
   // Prop models are Poisson count projections, so the model card labels their
   // holdout accuracy as over/under accuracy rather than a straight hit rate.
@@ -167,7 +172,13 @@ export function BuiltInModelDetailScreen() {
           <>
             <View style={styles.headerCard}>
               <ModelBadgeRow badge={modelShort(modelId)}>
-                <Text style={styles.modelTitle}>{modelLong(modelId)}</Text>
+                <Text
+                  style={styles.modelTitle}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.85}
+                >
+                  {modelDetailTitle(modelId)}
+                </Text>
                 {paused ? (
                   <View style={styles.pausedChip}>
                     <TagChip label="Paused" />

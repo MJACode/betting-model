@@ -36,6 +36,22 @@ export function modelRecordBelow(fontScale: number, windowWidth: number): boolea
 }
 
 /**
+ * A stacked block sizes to its text. `flex: 1` is flexBasis 0 on this Yoga
+ * build, so the column's height is 0 and the record paints over the name.
+ * `flex: 0` is not a substitute: a style array keeps the earlier `flex: 1`.
+ */
+export const STACKED_BLOCK = {
+  flexGrow: 0,
+  flexShrink: 0,
+  flexBasis: 'auto' as const,
+};
+
+/** At 1.5× and above the nav bar shows the sport. The long name no longer fits. */
+export function navShowsSportOnly(fontScale: number): boolean {
+  return fontScale >= MODEL_RECORD_BELOW_SCALE;
+}
+
+/**
  * Models list, left of the record column.
  * 32pt row margins + 24pt card padding + 12pt gap + 90pt record column.
  */

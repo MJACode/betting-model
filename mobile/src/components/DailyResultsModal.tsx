@@ -16,7 +16,7 @@ import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { unitsSpeech } from '@/lib/a11y';
 import { addDays, formatAmerican } from '@/lib/format';
-import { modelRecordBelow } from '@/lib/modelBadgeLayout';
+import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
 import { postedPickUnits } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
@@ -529,7 +529,7 @@ function ModelRow({ model }: { model: ModelDayStats }) {
   const recordBelow = modelRecordBelow(fontScale, windowWidth);
   return (
     <View style={[styles.modelRow, recordBelow && styles.modelRowStacked]}>
-      <View style={[styles.modelLeft, recordBelow && styles.modelLeftStacked]}>
+      <View style={recordBelow ? styles.modelLeftStacked : styles.modelLeft}>
         <ModelBadgeRow badge={modelShort(model.modelId)} variant="tile">
           {/* Wraps on spaces. At 1.3× text, or on a narrow phone, the badge
               sits above the name so a word is not split. */}
@@ -900,7 +900,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   modelLeft: { flex: 1 },
-  modelLeftStacked: { flex: 0, alignSelf: 'stretch' },
+  modelLeftStacked: { ...STACKED_BLOCK, alignSelf: 'stretch' },
   resultBadge: {
     width: 26,
     height: 26,

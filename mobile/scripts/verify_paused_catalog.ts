@@ -29,15 +29,20 @@ import {
   choiceAddedLabel,
   modelHistoryMark,
   modelLongWithMark,
+  modelDetailTitle,
   modelLong,
   modelProbabilityNote,
+  sportOfModel,
   withdrawnRulesEmpty,
 } from '../src/lib/modelMeta';
 import {
   stackModelBadge,
   modelRecordBelow,
+  navShowsSportOnly,
+  STACKED_BLOCK,
   MODEL_BADGE_MIN,
   MODEL_BADGE_MAX,
+  MODEL_RECORD_BELOW_SCALE,
   modelsListNameWidth,
 } from '../src/lib/modelBadgeLayout';
 import {
@@ -128,10 +133,25 @@ check('the "Why this bet?" card reads that note for the pick\'s own model',
 // ── The built-in model screen's title is the long name ──────────────────────
 // Titled with the short label, the prop-market screens all read "Props".
 // The long names differ; the chip on the screen keeps the short one.
+// At 1.5× the nav bar shows the sport. The on-screen title may break
+// "Double-Double" after the hyphen and never ellipsizes.
 {
   const screen = readFileSync(join(__dirname, '..', 'src/screens/BuiltInModelDetailScreen.tsx'), 'utf-8');
-  check('the built-in model screen is titled with the long label',
-    /navigation\.setOptions\(\{ title: modelLong\(modelId\) \}\)/.test(screen));
+  check('below 1.5× the nav title is the long name, and at 1.5× it is the sport',
+    screen.includes('navShowsSportOnly(fontScale) ? sportOfModel(modelId) : modelLong(modelId)') &&
+      !navShowsSportOnly(1.3) &&
+      navShowsSportOnly(1.5) &&
+      navShowsSportOnly(2) &&
+      sportOfModel('nba_team_total_luck') === 'NBA' &&
+      sportOfModel('ncaaf_spread_premium') === 'NCAAF');
+  check('the on-screen title breaks Double-Double after the hyphen and does not ellipsize',
+    modelDetailTitle('nba_prop_player_dd') === 'NBA Double-\u200BDouble' &&
+      modelDetailTitle('nba_moneyline') === 'NBA Moneyline' &&
+      screen.includes('modelDetailTitle(modelId)') &&
+      screen.includes('adjustsFontSizeToFit') &&
+      screen.includes('minimumFontScale={0.85}') &&
+      !/modelTitle[\s\S]{0,240}numberOfLines/.test(screen) &&
+      !screen.includes('ellipsizeMode'));
   const badge = readFileSync(join(__dirname, '..', 'src/components/ModelBadgeRow.tsx'), 'utf-8');
   check('its chip keeps the short label', screen.includes('badge={modelShort(modelId)}'));
   check('the badge is one line and shrinks to fit',
@@ -381,6 +401,31 @@ check('clearing the store returns the mark to the bundled pause',
     modelsListNameWidth(320, 2, 80) === 264);
   check('at 2× on 393 the name gets the full 337pt card width',
     modelsListNameWidth(393, 2, 80) === 337);
+  check('a stacked block is grow 0, shrink 0, basis auto — not flex 0 or flex 1',
+    STACKED_BLOCK.flexGrow === 0 &&
+      STACKED_BLOCK.flexShrink === 0 &&
+      STACKED_BLOCK.flexBasis === 'auto' &&
+      !('flex' in STACKED_BLOCK));
+  check('stacked containers do not also carry flex: 1',
+    models.includes('builtInLeftStacked') &&
+      models.includes('...STACKED_BLOCK') &&
+      badge.includes('stacked ? styles.stacked : styles.row') &&
+      badge.includes('stacked ? styles.bodyStacked : styles.body') &&
+      badge.includes('...STACKED_BLOCK') &&
+      daily.includes('modelLeftStacked') &&
+      daily.includes('...STACKED_BLOCK') &&
+      !/builtInLeftStacked:\s*\{[^}]*flex:\s*1/.test(models) &&
+      !/stacked:\s*\{[^}]*flex:\s*1/.test(badge) &&
+      !/bodyStacked:\s*\{[^}]*flex:\s*1/.test(badge) &&
+      !/modelLeftStacked:\s*\{[^}]*flex:\s*1/.test(daily));
+  const record = readFileSync(join(__dirname, '..', 'src/screens/TrackRecordScreen.tsx'), 'utf-8');
+  check('Track Record moves the percent under the name from 1.5×, and the name block does not use flex: 1',
+    record.includes('fontScale >= MODEL_RECORD_BELOW_SCALE') &&
+      record.includes('modelLeftStacked') &&
+      record.includes('...STACKED_BLOCK') &&
+      record.includes('modelRoiStacked') &&
+      !/modelLeftStacked:\s*\{[^}]*flex:\s*1/.test(record) &&
+      MODEL_RECORD_BELOW_SCALE === 1.5);
 }
 check('pitcher outs keeps the role in the name',
   MODEL_META.mlb_prop_pitcher_outs.longLabel === 'MLB Pitcher Outs' &&

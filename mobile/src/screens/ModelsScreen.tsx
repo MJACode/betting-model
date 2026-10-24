@@ -22,7 +22,7 @@ import {
 } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
-import { modelRecordBelow } from '@/lib/modelBadgeLayout';
+import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
@@ -350,7 +350,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         pressed && styles.pressed,
       ]}
     >
-      <View style={[styles.builtInLeft, recordBelow && styles.builtInLeftStacked]}>
+      <View style={recordBelow ? styles.builtInLeftStacked : styles.builtInLeft}>
         <ModelBadgeRow badge={modelShort(modelId)}>
           {/* No line cap. One line ellipsized the bet type ("NBA Projected
               Pro…", and every NCAAF name as "NCAA…" at larger text). The
@@ -615,7 +615,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   builtInLeftStacked: {
-    flex: 0,
+    ...STACKED_BLOCK,
     alignSelf: 'stretch',
   },
   builtInRight: {

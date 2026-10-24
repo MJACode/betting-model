@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
-import { MODEL_BADGE_MAX, MODEL_BADGE_MIN, MODEL_BADGE_PAD, stackModelBadge } from '@/lib/modelBadgeLayout';
+import { MODEL_BADGE_MAX, MODEL_BADGE_MIN, MODEL_BADGE_PAD, STACKED_BLOCK, stackModelBadge } from '@/lib/modelBadgeLayout';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -26,7 +26,7 @@ export function ModelBadgeRow({
   const { width, fontScale } = useWindowDimensions();
   const stacked = stackModelBadge(fontScale, width);
   return (
-    <View style={[styles.row, stacked && styles.stacked, style]}>
+    <View style={[stacked ? styles.stacked : styles.row, style]}>
       <View style={[styles.chip, variant === 'tile' && styles.tile, stacked ? styles.chipStacked : styles.chipCapped]}>
         <Text
           style={[styles.chipText, stacked ? styles.chipTextStacked : styles.chipTextCapped]}
@@ -40,7 +40,7 @@ export function ModelBadgeRow({
           {badge}
         </Text>
       </View>
-      <View style={[styles.body, stacked && styles.bodyStacked]}>{children}</View>
+      <View style={stacked ? styles.bodyStacked : styles.body}>{children}</View>
     </View>
   );
 }
@@ -53,6 +53,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   stacked: {
+    ...STACKED_BLOCK,
     flexDirection: 'column',
     alignItems: 'stretch',
     gap: spacing.xs,
@@ -96,7 +97,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   bodyStacked: {
-    flexGrow: 0,
+    ...STACKED_BLOCK,
     alignSelf: 'stretch',
   },
 });

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, stacked model rows no longer use flex:1, so the record stops drawing on the name. Double-Double can break after the hyphen. At 1.5× the nav title is the sport and Track Record puts the percent under the name. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, badges size to their label and stack above the name at 1.3× text or on a narrow phone; from 1.5× the record moves under the name. A server pause row wins even when `paused` is missing. nfl_wind_totals was already NFL Totals. NBA Team Totals stays. The wind reason line was not restored. |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, history mark stays on the bundled pause set until the live thresholds table lands; the 112pt badge yields so the name keeps 96pt on a 320pt phone; betTypeLabel is always the long name. |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, model names wrap so the bet type is not ellipsized; badges share a fixed width; a paused or retired pick says "MLB Totals · Paused" on detail, the card footer, and VoiceOver. MLB Pitcher Outs. |
