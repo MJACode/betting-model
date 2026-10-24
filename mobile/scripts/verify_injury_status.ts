@@ -112,6 +112,10 @@ check(
   statsSrc.includes('accessibilityState: muted ? { disabled: true } : undefined') &&
     statsSrc.includes("${playerName}${muted ? ', not playing' : ''}"),
 );
+check(
+  'both price pills put role and label on the tag the a11y scan reads',
+  (statsSrc.match(/\{\.\.\.pillA11y\}\s*accessibilityRole="button"\s*accessibilityLabel=\{label\}/g) ?? []).length === 2,
+);
 
 // ── The betslip add itself rejects a sidelined player ──────────────────────
 const prop = (name: string, team: string | null): PropLineLegSpec => ({
