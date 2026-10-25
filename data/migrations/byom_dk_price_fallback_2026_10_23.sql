@@ -25,9 +25,7 @@
 -- out of wins, losses, pushes, ties, and units. An unplayed game
 -- stays out of the record and out of skipped. Prop legs are
 -- unchanged: they stay in the win-loss counts, add 0 to units, and
--- are not skipped. A total leg's side is over or under, so a side
--- filter keeps that one leg. Moneyline and spread legs stay home
--- and away.
+-- are not skipped.
 --
 -- The body still carries byom_backtest_v1, so the registered
 -- migration byom_backtest_rpc_2026_10_16.sql does not put the old
@@ -202,7 +200,7 @@ BEGIN
        WHERE g.sport = 'NFL' AND g.season = v_season
       UNION ALL
       SELECT 'totals', g.ou_over_result, g.week, NULL::integer,
-             g.is_primetime, NULL::text, 'over'::text, g.dk_total_over_price,
+             g.is_primetime, NULL::text, NULL::text, g.dk_total_over_price,
              (g.home_score IS NOT NULL AND g.away_score IS NOT NULL
               AND (
                 g.dk_total IS NULL
@@ -214,7 +212,7 @@ BEGIN
        WHERE g.sport = 'NFL' AND g.season = v_season
       UNION ALL
       SELECT 'totals', g.ou_under_result, g.week, NULL::integer,
-             g.is_primetime, NULL::text, 'under'::text, g.dk_total_under_price,
+             g.is_primetime, NULL::text, NULL::text, g.dk_total_under_price,
              (g.home_score IS NOT NULL AND g.away_score IS NOT NULL
               AND (
                 g.dk_total IS NULL

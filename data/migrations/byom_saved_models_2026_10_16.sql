@@ -20,10 +20,7 @@
 --
 -- There is no spread-size, price, or line filter. A stake or kelly
 -- filter key is rejected. An allowlisted key in the wrong case is
--- rejected too; it is not stored under a different spelling. A single
--- moneyline or spread with no team and no favorite, underdog, or
--- pick'em is rejected. A single total whose side is not over or under
--- is rejected. A missing side is not stored as both sides. The
+-- rejected too; it is not stored under a different spelling. The
 -- snapshot totals and the per-market summary come from one
 -- byom_backtest read. A snapshot stores wins, losses, pushes, and ties.
 --
@@ -222,23 +219,6 @@ BEGIN
        WHERE e.key IN (
          'side', 'role', 'weeks', 'min_rest_days', 'max_rest_days',
          'primetime', 'markets');
-
-      -- One game market needs a side. A missing side is not both sides.
-      IF jsonb_typeof(v_filters->'markets') = 'array' THEN
-        IF jsonb_array_length(v_filters->'markets') = 1
-           AND (v_filters->'markets'->>0) IN ('h2h', 'spreads')
-           AND COALESCE(v_filters->>'side', '') NOT IN ('home', 'away')
-           AND COALESCE(v_filters->>'role', '') NOT IN ('favorite', 'underdog', 'pickem')
-        THEN
-          RAISE EXCEPTION 'Choose a team, or a favorite or underdog.';
-        END IF;
-        IF jsonb_array_length(v_filters->'markets') = 1
-           AND (v_filters->'markets'->>0) = 'totals'
-           AND COALESCE(v_filters->>'side', '') NOT IN ('over', 'under')
-        THEN
-          RAISE EXCEPTION 'Choose over or under.';
-        END IF;
-      END IF;
 
       IF p_season IS NULL THEN
         v_month := EXTRACT(MONTH FROM (now() AT TIME ZONE 'America/New_York'))::integer;

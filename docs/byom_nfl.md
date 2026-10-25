@@ -38,10 +38,11 @@ and `dk_total_under_price`. They were added by
 `data/migrations/byom_dk_start_price_2026_10_23.sql`, applied in
 production on 2026-10-23 at 8:10 AM CT (version 20261023131032). That
 file stays as applied. The fallback rule and the new `skipped` count
-are `data/migrations/byom_dk_price_fallback_2026_10_23.sql`, which is
-**not** in `ACTIVE_MIGRATIONS`. Matt applies that file by hand, then
-runs the backfill, in that order. `week` may be null: NFL week still
-comes from the id, and the other sports have no week. `is_primetime`
+are `data/migrations/byom_dk_price_fallback_2026_10_23.sql`, applied in
+production as version `20261023225630`. That file is **not** in
+`ACTIVE_MIGRATIONS`. The worker will not re-run it, and the file stays
+as applied. The backfill runs after that function. `week` may be null:
+NFL week still comes from the id, and the other sports have no week. `is_primetime`
 is the NFL rule only (Thursday, Monday, or 7pm ET or later). Any other
 sport stores null.
 
@@ -152,8 +153,7 @@ record and out of `skipped`. Graded prop legs have
 no price column, so they stay in the win-loss counts, add 0 to units,
 and are not skipped. Unknown filter keys are rejected. The field names `market`, `bets`, `wins`,
 `losses`, `pushes`, and `ties` are unchanged.
-Moneyline and spread legs are home and away. Total legs are over and
-under, and a side filter keeps that one leg. Prop markets include the
+Moneyline and spread legs are home and away. Prop markets include the
 over and the under. An empty filter object is the whole season. It is not a model
 record, and the UI must not present that unfiltered result as one.
 The in-function 3s timeout does not apply. Postgres arms
@@ -162,14 +162,19 @@ function-level SET does not bound the call. The role timeouts govern:
 anon 3s, authenticated 8s. The season cutoff is the same rule as
 `byom/season.py`: month >= 9 keeps the calendar year, otherwise the
 label is the previous year.
-`data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered.
-`byom_dk_start_price_2026_10_23.sql` is already applied and is not
-edited. That applied body still labels a total leg with a null side.
-`byom_dk_price_fallback_2026_10_23.sql` replaces the function
-body when Matt applies it by hand, labels those legs over and under,
-and leaves `byom_backtest_v1` in
-the body so the registered file's skip still holds. Until that apply,
-a saved over or under matches no total leg. The function is in
+`data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered. It
+returns early when the function body contains `byom_backtest_v1`.
+Production `byom_backtest` is the applied fallback
+`byom_dk_price_fallback_2026_10_23.sql` (version `20261023225630`).
+`byom_dk_start_price_2026_10_23.sql` (version `20261023131032`) was not
+edited. That applied fallback still labels a total leg with a null
+side, so a saved over or under matches no total leg until the next
+file is applied. `data/migrations/byom_total_side_2026_10_25.sql`
+replaces `byom_backtest` and labels those legs `over` and `under`, so
+a side filter keeps that one leg. It keeps `byom_backtest_v1` in the
+body, so the registered file's skip still holds. It also replaces
+`byom_save_model` with the one-market side refusals. It is **not** in
+`ACTIVE_MIGRATIONS`. Matt applies it by hand. The function is in
 `RPC_ANON_CALLABLE`. It reads the facts tables, not `picks`.
 
 
@@ -218,10 +223,13 @@ functions are granted to authenticated only. They are listed in
 `RPC_AFTER_SIGN_IN` and are not in `RPC_ANON_CALLABLE`, so the grant
 sweep does not name them.
 
-`data/migrations/byom_saved_models_2026_10_16.sql` is **not** in
-`ACTIVE_MIGRATIONS`. The worker will not apply it. It stays unused
-until sign-in is turned on. That switch is Matt's. This change does
-not set it.
+`data/migrations/byom_saved_models_2026_10_16.sql` is applied in
+production as version `20261023222927`. It is **not** in
+`ACTIVE_MIGRATIONS`. The worker will not re-run it. Do not edit that
+file. The one-market side refusals are in
+`data/migrations/byom_total_side_2026_10_25.sql`, which replaces
+`byom_save_model` and is also not in `ACTIVE_MIGRATIONS`. Matt applies
+that file by hand.
 
 ## Mobile
 

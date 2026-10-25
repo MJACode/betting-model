@@ -12,7 +12,7 @@
 -- previous year's label. A later caller can pass an older season.
 --
 -- p_filters, all optional, AND'd:
---   side: "home" | "away" | "over" | "under"
+--   side: "home" | "away"
 --   role: "favorite" | "underdog" | "pickem"
 --   weeks: [1, 2]
 --   min_rest_days / max_rest_days
@@ -22,10 +22,8 @@
 -- There is no spread-size, price, or line filter. Each market counts
 -- wins, losses, pushes, and ties. There is no unit column.
 --
--- Moneyline and spread contribute the home leg and the away leg.
--- Totals contribute the over and the under, labeled side over and
--- under. A side filter keeps that one leg. Prop markets contribute
--- the over and the under. A side or role filter on a prop uses the
+-- Game markets contribute the home leg and the away leg. Prop markets
+-- contribute the over and the under. A side or role filter uses the
 -- player's team on the game fact.
 --
 -- An empty filter object is the whole season. It is not a model record.
@@ -147,12 +145,12 @@ BEGIN
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
         SELECT 'totals', g.ou_over_result, g.week, NULL::integer,
-               g.is_primetime, NULL::text, 'over'::text
+               g.is_primetime, NULL::text, NULL::text
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL
         SELECT 'totals', g.ou_under_result, g.week, NULL::integer,
-               g.is_primetime, NULL::text, 'under'::text
+               g.is_primetime, NULL::text, NULL::text
           FROM byom_game_facts g
          WHERE g.sport = 'NFL' AND g.season = v_season
         UNION ALL

@@ -379,14 +379,26 @@ def test_save_requires_a_side_or_a_favorite():
     assert "{ value: 'over', label: 'Over' }" in fields
     assert "{ value: 'under', label: 'Under' }" in fields
     byom = (ROOT / "mobile/src/lib/byom.ts").read_text(encoding="utf-8")
-    assert byom.index("assertByomSide(parsed)") < byom.index("supabase.rpc('byom_save_model'")
-    saved = (ROOT / "data/migrations/byom_saved_models_2026_10_16.sql").read_text(encoding="utf-8")
-    assert "Choose a team, or a favorite or underdog." in saved
-    assert "Choose over or under." in saved
-    original = (ROOT / "data/migrations/byom_backtest_rpc_2026_10_16.sql").read_text(encoding="utf-8")
-    fallback = (ROOT / "data/migrations/byom_dk_price_fallback_2026_10_23.sql").read_text(encoding="utf-8")
-    for text in (original, fallback):
-        assert "'over'::text" in text
-        assert "'under'::text" in text
-    applied = (ROOT / "data/migrations/byom_dk_start_price_2026_10_23.sql").read_text(encoding="utf-8")
-    assert "'over'::text" not in applied
+    assert byom.index("assertByomSide(checked)") < byom.index("supabase.rpc('byom_save_model'")
+    forward = (ROOT / "data/migrations/byom_total_side_2026_10_25.sql").read_text(encoding="utf-8")
+    assert "Choose a team, or a favorite or underdog." in forward
+    assert "Choose over or under." in forward
+    assert "'over'::text" in forward
+    assert "'under'::text" in forward
+    assert "byom_backtest_v1" in forward
+    assert "byom_saved_models_v1" in forward
+    assert "20261023225630" in forward
+    assert "20261023222927" in forward
+    assert "NOT in data/view_migrations.ACTIVE_MIGRATIONS" in forward
+    historical = (
+        "byom_saved_models_2026_10_16.sql",
+        "byom_backtest_rpc_2026_10_16.sql",
+        "byom_dk_price_fallback_2026_10_23.sql",
+        "byom_dk_start_price_2026_10_23.sql",
+    )
+    for name in historical:
+        text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
+        assert "Choose a team, or a favorite or underdog." not in text
+        assert "Choose over or under." not in text
+        assert "'over'::text" not in text
+        assert "'under'::text" not in text

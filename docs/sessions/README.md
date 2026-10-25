@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM save requires a side or a favorite/underdog. Team Any alone can save when favorite or underdog is set. A total needs Over or Under. |
+| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM save requires a side or a favorite/underdog. Forward migration `byom_total_side_2026_10_25.sql`. Fallback `20261023225630` and saved models `20261023222927` are already applied. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename at 25 models is refused. The old row is deleted only when the save wrote a different id. One failed backtest does not clear the list. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename saves the new name first. The old row is removed only after that save. A taken name asks before it replaces the other model. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM Phase 2: My models rows and the NFL guided builder. Live `byom_backtest` for rank and preview. No left-out count, no price or prop filters, no migration, no production write. |

@@ -205,11 +205,11 @@ export async function saveByomModel(
   filters?: ByomFilters,
   season: number | null = null,
 ): Promise<ByomBacktestRow & { model_id: string; season: number }> {
-  const parsed = byomFilters(filters);
-  assertByomSide(parsed);
+  const checked = byomFilters(filters);
+  assertByomSide(checked);
   const { data, error } = await supabase.rpc('byom_save_model', {
     p_name: name,
-    p_filters: parsed,
+    p_filters: checked,
     p_season: season,
   });
   if (error) throw error;
