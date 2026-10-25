@@ -29,6 +29,7 @@ import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
+import { DeleteAccountScreen } from '@/screens/DeleteAccountScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
 import { PaywallScreen } from '@/screens/PaywallScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
@@ -82,7 +83,7 @@ const TAB_ROUTE_NAMES = new Set<string>(Object.keys(TAB_ICONS));
  * slip), and the two flag-gated full-screen flows where a floating shortcut
  * would be noise.
  */
-const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall']);
+const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall', 'DeleteAccount']);
 
 /**
  * Stack headers (back chevron, "Back") otherwise keep React Navigation's
@@ -304,6 +305,11 @@ export default function App() {
             name="Settings"
             component={SettingsScreen}
             options={{ title: 'Settings', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="DeleteAccount"
+            component={DeleteAccountScreen}
+            options={{ title: 'Delete account', headerBackTitle: 'Settings' }}
           />
           {/* The betslip renders its own header (close chevron, saved parlays,
               settings) so it reads like the sheet it is — hence headerShown

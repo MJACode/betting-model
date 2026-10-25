@@ -61,6 +61,8 @@ export function sanitizeBankroll(raw: unknown): BankrollSettings {
 export interface KeyValueStore {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
+  /** Present on AsyncStorage. Account deletion uses it; a test double may omit it. */
+  removeItem?(key: string): Promise<void>;
 }
 
 export type BankrollRead = { ok: true; value: BankrollSettings } | { ok: false };
@@ -151,9 +153,24 @@ export function createBankrollStore(kv: KeyValueStore) {
     return writes;
   };
 
+  /** Account deletion. Memory goes back to the defaults, then the key is
+   *  removed after any write already queued, so that write cannot put it back. */
+  const clear = async (): Promise<void> => {
+    const next = { ...BANKROLL_DEFAULTS };
+    current = next;
+    listeners.forEach((fn) => fn(next));
+    writes = writes
+      .then(async () => {
+        if (kv.removeItem) await kv.removeItem(BANKROLL_KEY);
+      })
+      .catch((err) => console.warn('[bankroll] clear failed', err));
+    return writes;
+  };
+
   return {
     load,
     update,
+    clear,
     get: (): BankrollSettings | null => current,
     subscribe(fn: (s: BankrollSettings) => void): () => void {
       listeners.add(fn);

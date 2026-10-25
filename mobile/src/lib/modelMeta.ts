@@ -1,9 +1,12 @@
 /**
  * Human-friendly labels and descriptions for each model_id.
- * Mirrors the models registry in docs/history/build_state.md.
+ * The id set mirrors the models registry in docs/history/build_state.md.
+ * longLabel is the name and shortLabel is the badge: the sport plus the
+ * bet type, with no parenthetical. statLabel is the server's stat word
+ * and is not part of that rename.
  */
 
-import { isModelPaused, isModelRetired } from './thresholds';
+import { hasFetchedThresholds, isBundledPaused, isModelPaused, isModelRetired } from './thresholds';
 
 /**
  * The market a model trades. `pitcher_prop` / `batter_prop` are MLB-only cuts;
@@ -39,21 +42,21 @@ export interface PlayerStats {
 export const MODEL_META: Record<string, ModelMeta> = {
   mlb_moneyline: {
     shortLabel: 'ML',
-    longLabel: 'Moneyline',
+    longLabel: 'MLB Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_over_under: {
     shortLabel: 'O/U',
-    longLabel: 'Total Runs',
+    longLabel: 'MLB Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_runline: {
-    shortLabel: 'RL',
-    longLabel: 'Runline (±1.5)',
+    shortLabel: 'Spread',
+    longLabel: 'MLB Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -61,11 +64,11 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // Market-relative run line: de-vig Pinnacle, bet a bettable soft book
   // at the same ±1.5. Replaces the paused mlb_runline *publish path*;
   // mlb_runline itself stays paused. docs/mlb_runline_ou_edge_search.md.
-  // Named '(vs Pinnacle)' like the prop rules: the app explains Pinnacle, and
-  // never explained 'market-relative'.
+  // The name is "MLB Spreads", same as the paused runline: the method
+  // (Pinnacle, market-relative) is not in the label.
   mlb_spread_market: {
-    shortLabel: 'RL Mkt',
-    longLabel: 'Runline (vs Pinnacle)',
+    shortLabel: 'Spread',
+    longLabel: 'MLB Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -74,8 +77,8 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // at the same total. Replaces the paused mlb_over_under *publish path*;
   // mlb_over_under itself stays paused. Paper until MLB_TOTAL_MARKET_PUBLISH=1.
   mlb_total_market: {
-    shortLabel: 'O/U Mkt',
-    longLabel: 'Total Runs (vs Pinnacle)',
+    shortLabel: 'O/U',
+    longLabel: 'MLB Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -84,29 +87,29 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // INSERT gated by MLB_TOTAL_PUBLIC_FADE_PUBLISH default 0.
   // mlb_over_under stays paused. docs/mlb_total_public_fade.md.
   mlb_total_public_fade: {
-    shortLabel: 'O/U Fade',
-    longLabel: 'Total Runs (fade the public)',
+    shortLabel: 'Fade',
+    longLabel: 'MLB Totals Fade',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_f5_moneyline: {
     shortLabel: 'F5 ML',
-    longLabel: 'First 5 Moneyline',
+    longLabel: 'MLB First 5 Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_f5_over_under: {
     shortLabel: 'F5 O/U',
-    longLabel: 'First 5 Total Runs',
+    longLabel: 'MLB First 5 Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_f5_runline: {
-    shortLabel: 'F5 RL',
-    longLabel: 'First 5 Runline (−0.5)',
+    shortLabel: 'F5 Spread',
+    longLabel: 'MLB First 5 Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -116,70 +119,70 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // still render with a name wherever history is shown.
   mlb_live_win_prob: {
     shortLabel: 'LIVE ML',
-    longLabel: 'Live Win Probability',
+    longLabel: 'MLB Live Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_live_total_runs: {
     shortLabel: 'LIVE O/U',
-    longLabel: 'Live Total Runs',
+    longLabel: 'MLB Live Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_live_runline: {
-    shortLabel: 'LIVE RL',
-    longLabel: 'Live Runline (−1.5)',
+    shortLabel: 'LIVE Spread',
+    longLabel: 'MLB Live Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   mlb_prop_pitcher_k: {
     shortLabel: 'P K',
-    longLabel: 'Pitcher Strikeouts',
+    longLabel: 'MLB Pitcher Strikeouts',
     type: 'pitcher_prop',
     statKey: 'p_strikeouts',
     statLabel: 'Ks',
   },
   mlb_prop_pitcher_hits: {
     shortLabel: 'P H',
-    longLabel: 'Pitcher Hits Allowed',
+    longLabel: 'MLB Hits Allowed',
     type: 'pitcher_prop',
     statKey: 'p_hits_allowed',
     statLabel: 'Hits Allowed',
   },
   mlb_prop_pitcher_er: {
     shortLabel: 'P ER',
-    longLabel: 'Pitcher Earned Runs',
+    longLabel: 'MLB Earned Runs',
     type: 'pitcher_prop',
     statKey: 'p_earned_runs',
     statLabel: 'ER',
   },
   mlb_prop_pitcher_outs: {
     shortLabel: 'P Outs',
-    longLabel: 'Pitcher Outs',
+    longLabel: 'MLB Pitcher Outs',
     type: 'pitcher_prop',
     statKey: 'outs',
     statLabel: 'Outs',
   },
   mlb_prop_pitcher_walks: {
     shortLabel: 'P BB',
-    longLabel: 'Pitcher Walks',
+    longLabel: 'MLB Pitcher Walks',
     type: 'pitcher_prop',
     statKey: 'p_walks',
     statLabel: 'Walks',
   },
   mlb_prop_batter_hits: {
     shortLabel: 'B H',
-    longLabel: 'Batter Hits',
+    longLabel: 'MLB Hits',
     type: 'batter_prop',
     statKey: 'hits',
     statLabel: 'Hits',
   },
   mlb_prop_batter_tb: {
     shortLabel: 'B TB',
-    longLabel: 'Batter Total Bases',
+    longLabel: 'MLB Total Bases',
     type: 'batter_prop',
     statKey: 'total_bases',
     statLabel: 'TB',
@@ -189,35 +192,35 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // still render with a name wherever history is shown — do not delete them.
   mlb_prop_batter_hr: {
     shortLabel: 'B HR',
-    longLabel: 'Batter Home Runs',
+    longLabel: 'MLB Home Runs',
     type: 'batter_prop',
     statKey: 'home_runs',
     statLabel: 'HR',
   },
   mlb_prop_batter_rbi: {
     shortLabel: 'B RBI',
-    longLabel: 'Batter RBIs',
+    longLabel: 'MLB RBIs',
     type: 'batter_prop',
     statKey: 'rbi',
     statLabel: 'RBI',
   },
   mlb_prop_batter_runs: {
     shortLabel: 'B R',
-    longLabel: 'Batter Runs Scored',
+    longLabel: 'MLB Runs Scored',
     type: 'batter_prop',
     statKey: 'runs',
     statLabel: 'Runs',
   },
   mlb_prop_batter_sb: {
     shortLabel: 'B SB',
-    longLabel: 'Batter Stolen Bases',
+    longLabel: 'MLB Stolen Bases',
     type: 'batter_prop',
     statKey: 'stolen_bases',
     statLabel: 'SB',
   },
   mlb_prop_batter_walks: {
     shortLabel: 'B BB',
-    longLabel: 'Batter Walks',
+    longLabel: 'MLB Batter Walks',
     type: 'batter_prop',
     statKey: 'walks',
     statLabel: 'Walks',
@@ -226,66 +229,65 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // ── WNBA ──────────────────────────────────────────────────────────────────
   wnba_moneyline: {
     shortLabel: 'ML',
-    longLabel: 'Moneyline',
+    longLabel: 'WNBA Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   wnba_over_under: {
     shortLabel: 'O/U',
-    longLabel: 'Total Points',
+    longLabel: 'WNBA Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   wnba_spread: {
     shortLabel: 'Spread',
-    longLabel: 'Point Spread',
+    longLabel: 'WNBA Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   wnba_prop_player_points: {
     shortLabel: 'PTS',
-    longLabel: 'Player Points',
+    longLabel: 'WNBA Points',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Pts',
   },
   wnba_prop_player_rebounds: {
     shortLabel: 'REB',
-    longLabel: 'Player Rebounds',
+    longLabel: 'WNBA Rebounds',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Reb',
   },
   wnba_prop_player_assists: {
     shortLabel: 'AST',
-    longLabel: 'Player Assists',
+    longLabel: 'WNBA Assists',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Ast',
   },
-  // '(vs Pinnacle)', one name for the three multi-market prop rules: each bets
-  // a retail price against Pinnacle's, and the app already explains Pinnacle.
-  // 'market-relative' was explained nowhere.
+  // One name for the three multi-market prop rules: each bets a retail price
+  // against Pinnacle's. The name is "<SPORT> Props"; Pinnacle is not in it.
   wnba_prop_market: {
-    shortLabel: 'Prop Mkt',
-    longLabel: 'WNBA Props (vs Pinnacle)',
+    shortLabel: 'Props',
+    longLabel: 'WNBA Props',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
   },
   wnba_prop_player_threes: {
     shortLabel: '3PM',
-    longLabel: 'Player Made Threes',
+    longLabel: 'WNBA Threes',
     type: 'player_prop',
     statKey: null,
     statLabel: '3PM',
   },
   wnba_prop_player_pra: {
     shortLabel: 'PRA',
-    longLabel: 'Pts + Reb + Ast',
+    longLabel: 'WNBA Pts + Reb + Ast',
     type: 'player_prop',
     statKey: null,
     statLabel: 'PRA',
@@ -294,84 +296,84 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // ── NBA ───────────────────────────────────────────────────────────────────
   nba_moneyline: {
     shortLabel: 'ML',
-    longLabel: 'Moneyline',
+    longLabel: 'NBA Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   nba_over_under: {
     shortLabel: 'O/U',
-    longLabel: 'Total Points',
+    longLabel: 'NBA Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   nba_spread: {
     shortLabel: 'Spread',
-    longLabel: 'Point Spread',
+    longLabel: 'NBA Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   nba_prop_player_points: {
     shortLabel: 'PTS',
-    longLabel: 'Player Points',
+    longLabel: 'NBA Points',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Pts',
   },
   nba_prop_player_rebounds: {
     shortLabel: 'REB',
-    longLabel: 'Player Rebounds',
+    longLabel: 'NBA Rebounds',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Reb',
   },
   nba_prop_player_assists: {
     shortLabel: 'AST',
-    longLabel: 'Player Assists',
+    longLabel: 'NBA Assists',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Ast',
   },
   nba_prop_player_threes: {
     shortLabel: '3PM',
-    longLabel: 'Player Made Threes',
+    longLabel: 'NBA Threes',
     type: 'player_prop',
     statKey: null,
     statLabel: '3PM',
   },
   nba_prop_player_pra: {
     shortLabel: 'PRA',
-    longLabel: 'Pts + Reb + Ast',
+    longLabel: 'NBA Pts + Reb + Ast',
     type: 'player_prop',
     statKey: null,
     statLabel: 'PRA',
   },
   nba_prop_player_blocks: {
     shortLabel: 'BLK',
-    longLabel: 'Player Blocks',
+    longLabel: 'NBA Blocks',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Blk',
   },
   nba_prop_player_steals: {
     shortLabel: 'STL',
-    longLabel: 'Player Steals',
+    longLabel: 'NBA Steals',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Stl',
   },
   nba_prop_player_turnovers: {
     shortLabel: 'TO',
-    longLabel: 'Player Turnovers',
+    longLabel: 'NBA Turnovers',
     type: 'player_prop',
     statKey: null,
     statLabel: 'TO',
   },
   nba_prop_player_dd: {
     shortLabel: 'DD',
-    longLabel: 'Double-Double',
+    longLabel: 'NBA Double-Double',
     type: 'player_prop',
     statKey: null,
     statLabel: 'DD',
@@ -382,8 +384,8 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // market travels on picks.prop_market and the stat is in each pick's label,
   // so statLabel is empty, as for nfl_prop_market and wnba_prop_market.
   nba_prop_market: {
-    shortLabel: 'Prop Mkt',
-    longLabel: 'NBA Props (vs Pinnacle)',
+    shortLabel: 'Props',
+    longLabel: 'NBA Props',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -394,12 +396,13 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // rebounds, blocks+steals, blocks, rebounds+assists, threes), the market on
   // picks.prop_market, like nba_prop_market. Unlike that rule it bets BOTH
   // sides: steals, blocks+steals and threes can be over or under; rebounds,
-  // blocks and rebounds+assists are unders. Not '(vs Pinnacle)': its number is
-  // its own projection, not Pinnacle's price. Its shown probability is an
+  // blocks and rebounds+assists are unders. Named "NBA Projected Props" so it
+  // is not the same title as "NBA Props": its number is its own projection,
+  // not Pinnacle's price. Its shown probability is an
   // upper bound (graded: claimed 0.533, won 0.501; docs/nba_models_2026.md).
   nba_prop_projection: {
-    shortLabel: 'Projection',
-    longLabel: 'NBA Props (Projection)',
+    shortLabel: 'Projected',
+    longLabel: 'NBA Projected Props',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -412,10 +415,9 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // label is the platform's "BOS vs NYK Over 225.5". A game line, not a
   // picker slot: totals are not one (betSlotForModel).
   nba_total_luck: {
-    // Market plus method, as 'O/U Mkt' and 'O/U Fade': the side is already in
-    // the label beside the chip.
-    shortLabel: 'O/U Luck',
-    longLabel: 'Total Points (Overs)',
+    // Chip is the market. The side is already in the pick label beside it.
+    shortLabel: 'O/U',
+    longLabel: 'NBA Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -429,9 +431,9 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // never the game total. The label is "BOS @ MIL — MIL Team Total Under
   // 115.5". A game line, not a picker slot.
   nba_team_total_luck: {
-    // Market plus method, as 'O/U Luck': TT is the team total.
-    shortLabel: 'TT Luck',
-    longLabel: 'Home Team Total (Unders)',
+    // TT is the team total. The side is already in the pick label.
+    shortLabel: 'TT',
+    longLabel: 'NBA Team Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -440,49 +442,49 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
     shortLabel: 'ML',
-    longLabel: 'Fight Winner',
+    longLabel: 'UFC Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   ufc_total_rounds: {
-    shortLabel: 'Rounds',
-    longLabel: 'Total Rounds O/U',
+    shortLabel: 'O/U',
+    longLabel: 'UFC Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   ufc_method_of_victory: {
     shortLabel: 'Method',
-    longLabel: 'Method of Victory',
+    longLabel: 'UFC Method of Victory',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   nhl_moneyline: {
     shortLabel: 'ML',
-    longLabel: 'Moneyline (incl. OT/SO)',
+    longLabel: 'NHL Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   nhl_moneyline_regulation: {
-    shortLabel: 'Reg 3-Way',
-    longLabel: 'Regulation Result (Home / Draw / Away)',
+    shortLabel: '3-Way',
+    longLabel: 'NHL 3-Way Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   nhl_over_under: {
     shortLabel: 'O/U',
-    longLabel: 'Total Goals',
+    longLabel: 'NHL Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   nhl_puckline: {
-    shortLabel: 'PL',
-    longLabel: 'Puck Line (±1.5)',
+    shortLabel: 'Spread',
+    longLabel: 'NHL Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -491,7 +493,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // label is the wording the server writes into pick_label.
   nhl_prop_blocked_shots: {
     shortLabel: 'BLK',
-    longLabel: 'Player Blocked Shots',
+    longLabel: 'NHL Blocked Shots',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Blocked Shots',
@@ -501,21 +503,21 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // server writes into pick_label.
   nhl_prop_saves: {
     shortLabel: 'SV',
-    longLabel: 'Goalie Saves',
+    longLabel: 'NHL Saves',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Saves',
   },
   nhl_prop_shots_on_goal: {
     shortLabel: 'SOG',
-    longLabel: 'Player Shots on Goal',
+    longLabel: 'NHL Shots on Goal',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Shots on Goal',
   },
   nhl_prop_assists: {
     shortLabel: 'AST',
-    longLabel: 'Player Assists',
+    longLabel: 'NHL Assists',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Assists',
@@ -530,7 +532,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // are paused (their classifiers held out at AUC ~0.49 — coin flips).
   ncaaf_spread: {
     shortLabel: 'Spread',
-    longLabel: 'Spread (Opener)',
+    longLabel: 'NCAAF Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -540,8 +542,8 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // game fires exactly ONE of the two tiers -- the scorer's band ceiling makes
   // them mutually exclusive, so these never double-stake the same side.
   ncaaf_spread_premium: {
-    shortLabel: 'Spread+',
-    longLabel: 'Spread (Opener, High Conviction)',
+    shortLabel: 'Premium',
+    longLabel: 'NCAAF Premium Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -549,35 +551,37 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // NCAAF live (in-play) lanes — picks appear on the Live tab only.
   ncaaf_live_win_prob: {
     shortLabel: 'LIVE ML',
-    longLabel: 'Live Win Probability',
+    longLabel: 'NCAAF Live Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   ncaaf_live_total: {
     shortLabel: 'LIVE O/U',
-    longLabel: 'Live Total',
+    longLabel: 'NCAAF Live Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   ncaaf_moneyline: {
     shortLabel: 'ML',
-    longLabel: 'Moneyline',
+    longLabel: 'NCAAF Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   ncaaf_over_under: {
     shortLabel: 'O/U',
-    longLabel: 'Total Points',
+    longLabel: 'NCAAF Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
+  // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
+  // No other NFL model uses this name.
   nfl_wind_totals: {
-    shortLabel: 'Wind U',
-    longLabel: 'Wind Totals (Under)',
+    shortLabel: 'O/U',
+    longLabel: 'NFL Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -586,8 +590,8 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // stale number, locked ~2-7 days before kickoff (insert-once — never
   // re-priced; the edge is the staleness).
   nfl_opener_spread: {
-    shortLabel: 'Opener',
-    longLabel: 'Opener Spread (vs Pinnacle)',
+    shortLabel: 'Spread',
+    longLabel: 'NFL Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -596,10 +600,10 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // outlier. ONE id across every market it trades — the validated number is
   // pooled, and the market itself is on picks.prop_market, so per-market
   // breakdowns are a query rather than eight entries here.
-  // Named '(vs Pinnacle)' like nba_prop_market and wnba_prop_market.
+  // Named "NFL Props", same shape as nba_prop_market and wnba_prop_market.
   nfl_prop_market: {
-    shortLabel: 'Prop Mkt',
-    longLabel: 'NFL Props (vs Pinnacle)',
+    shortLabel: 'Props',
+    longLabel: 'NFL Props',
     type: 'player_prop',
     statKey: null,
     statLabel: '',
@@ -610,7 +614,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // live moneyline; its picks appear on the Live segment only.
   nfl_live_leader_ml: {
     shortLabel: 'LIVE ML',
-    longLabel: 'Live Leader Moneyline',
+    longLabel: 'NFL Live Moneyline',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -632,7 +636,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
     // reads as a team is worse than a long one. The chips carry no maxWidth and
     // no numberOfLines, so the full word fits.
     shortLabel: 'LIVE Carries',
-    longLabel: 'Live Rush Attempts',
+    longLabel: 'NFL Live Rush Attempts',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Carries',
@@ -645,84 +649,84 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // them slip through the Market filter's category cut entirely.
   nfl_prop_pass_yards: {
     shortLabel: 'Pass Yds',
-    longLabel: 'Passing Yards',
+    longLabel: 'NFL Passing Yards',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Pass Yds',
   },
   nfl_prop_pass_attempts: {
     shortLabel: 'Pass Att',
-    longLabel: 'Pass Attempts',
+    longLabel: 'NFL Pass Attempts',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Pass Att',
   },
   nfl_prop_pass_completions: {
     shortLabel: 'Pass Comp',
-    longLabel: 'Pass Completions',
+    longLabel: 'NFL Pass Completions',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Pass Comp',
   },
   nfl_prop_pass_tds: {
     shortLabel: 'Pass TD',
-    longLabel: 'Passing Touchdowns',
+    longLabel: 'NFL Passing Touchdowns',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Pass TD',
   },
   nfl_prop_rush_yards: {
     shortLabel: 'Rush Yds',
-    longLabel: 'Rushing Yards',
+    longLabel: 'NFL Rushing Yards',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Rush Yds',
   },
   nfl_prop_rush_attempts: {
     shortLabel: 'Rush Att',
-    longLabel: 'Rush Attempts',
+    longLabel: 'NFL Rush Attempts',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Carries',
   },
   nfl_prop_rec_yards: {
     shortLabel: 'Rec Yds',
-    longLabel: 'Receiving Yards',
+    longLabel: 'NFL Receiving Yards',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Rec Yds',
   },
   nfl_prop_receptions: {
     shortLabel: 'Recs',
-    longLabel: 'Receptions',
+    longLabel: 'NFL Receptions',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Recs',
   },
   nfl_prop_rush_rec_yards: {
     shortLabel: 'Ru+Re Yds',
-    longLabel: 'Rush + Receiving Yards',
+    longLabel: 'NFL Rush + Receiving Yards',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Ru+Re Yds',
   },
   nfl_prop_anytime_td: {
     shortLabel: 'Anytime TD',
-    longLabel: 'Anytime Touchdown Scorer',
+    longLabel: 'NFL Anytime TD',
     type: 'player_prop',
     statKey: null,
     statLabel: 'TD',
   },
   nfl_prop_tackles_assists: {
     shortLabel: 'Tkl+Ast',
-    longLabel: 'Tackles + Assists',
+    longLabel: 'NFL Tackles + Assists',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Tkl+Ast',
   },
   nfl_prop_sacks: {
     shortLabel: 'Sacks',
-    longLabel: 'Sacks',
+    longLabel: 'NFL Sacks',
     type: 'player_prop',
     statKey: null,
     statLabel: 'Sacks',
@@ -732,35 +736,35 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // Per-player markets rendered as single bets (player name in pick_label).
   golf_outright: {
     shortLabel: 'Win',
-    longLabel: 'Outright Winner',
+    longLabel: 'Golf Outright',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   golf_top10: {
     shortLabel: 'T10',
-    longLabel: 'Top 10 Finish',
+    longLabel: 'Golf Top 10',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   golf_top20: {
     shortLabel: 'T20',
-    longLabel: 'Top 20 Finish',
+    longLabel: 'Golf Top 20',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   golf_make_cut: {
     shortLabel: 'Cut',
-    longLabel: 'Make the Cut',
+    longLabel: 'Golf Make Cut',
     type: 'game',
     statKey: null,
     statLabel: '',
   },
   golf_matchup: {
     shortLabel: 'H2H',
-    longLabel: 'Tournament Matchup',
+    longLabel: 'Golf Matchups',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -891,6 +895,14 @@ export function isPropModel(modelId: string): boolean {
 
 export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'NHL' | 'GOLF';
 
+/**
+ * The on-screen title. "Double-Double" is one word to the wrapper; a
+ * zero-width space after the hyphen is a break it may take. No ellipsis.
+ */
+export function modelDetailTitle(modelId: string): string {
+  return modelLong(modelId).replaceAll('Double-Double', 'Double-\u200BDouble');
+}
+
 /** Which sport a model_id belongs to, from its prefix. */
 export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';
@@ -1008,9 +1020,33 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
 function choiceCopy(sport: BetTypeSport, slot: BetTypeSlot): { label: string; subtitle: string } {
   if (slot === 'ml') return { label: 'ML', subtitle: 'Moneyline' };
   if (slot === 'props') return { label: 'Player props', subtitle: 'All player markets' };
-  if (sport === 'MLB') return { label: 'Run line', subtitle: '±1.5' };
-  if (sport === 'NHL') return { label: 'Puck line', subtitle: '±1.5' };
+  // MLB and NHL use the same word as the other sports. The model names are
+  // "Spreads", never "Run line" or "Puck line". The subtitle stays the
+  // number, so the row is not "Spread" read twice.
+  if (sport === 'MLB' || sport === 'NHL') return { label: 'Spread', subtitle: '±1.5' };
   return { label: 'Spread', subtitle: 'Spread line' };
+}
+
+/** Status on a history row. Retired wins. Null while the model still scores.
+ *  Shared names (MLB Totals, MLB Spreads, NBA Totals) need this: the Models
+ *  list hides the paused or retired id, and the Record tab still shows it. */
+export function modelHistoryMark(modelId: string): 'Retired' | 'Paused' | null {
+  if (isModelRetired(modelId)) return 'Retired';
+  // Until the live table lands, the bundled pause set. The cache can arrive
+  // first and disagree with the fetch, which would put "· Paused" on the
+  // card footer and take it off again. After the fetch, the server flag
+  // wins, same as isModelPaused.
+  const paused = hasFetchedThresholds() ? isModelPaused(modelId) : isBundledPaused(modelId);
+  return paused ? 'Paused' : null;
+}
+
+/** Long name, with the history mark when this id no longer scores.
+ *  "MLB Totals · Paused" is not the live "MLB Totals". Retired wins, same
+ *  as `modelHistoryMark`. A live id is the long name alone. */
+export function modelLongWithMark(modelId: string): string {
+  const name = modelLong(modelId);
+  const mark = modelHistoryMark(modelId);
+  return mark ? `${name} · ${mark}` : name;
 }
 
 /**
@@ -1094,13 +1130,11 @@ export function withdrawnRulesEmpty(
 
 /**
  * How a custom-model rule is titled on the editor, the detail screen, and the
- * Models list. A model the picker offers uses that row's short name
- * ("MLB · Run line"), never MODEL_META.longLabel. A market the picker does
- * not offer keeps its long name.
+ * Models list. Always the long name. A slot used to return "MLB · Spread"
+ * and everything else the long name, so one function returned two shapes
+ * and a " · " that was not safe to split. The long name is already the
+ * sport plus the bet type, and it tells two prop rules apart.
  */
 export function betTypeLabel(modelId: string): string {
-  const sport = sportOfModel(modelId);
-  const slot = betSlotForModel(modelId, modelCategory(modelId));
-  if (!slot) return `${sport} · ${modelLong(modelId)}`;
-  return `${sport} · ${choiceCopy(sport, slot).label}`;
+  return modelLong(modelId);
 }

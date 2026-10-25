@@ -26,6 +26,9 @@ import { InfoTooltip } from '@/components/InfoTooltip';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
+import { betslipPlayerFromPick, slipKeysAfterAdd } from '@/lib/betslipGuard';
+import { EMPTY_INJURY_INDEX, type InjuryIndex } from '@/lib/injuryStatus';
+import { injuryIndexForSport } from '@/lib/injuryLookup';
 import { isLineLeg } from '@/lib/lineLegs';
 import {
   setEditingParlayId,
@@ -42,6 +45,7 @@ import {
   lineShopParlay,
   makeCustomLeg,
   parlayRecommendedUnits,
+  slipKeyForPick,
   type LineShop,
   type ParlayLeg,
 } from '@/lib/parlay';
@@ -94,6 +98,8 @@ export function ParlayScreen() {
     lineLegs,
     count: slipCount,
     picks: { data, loading, error, refresh },
+    board,
+    boardLoading,
     legs: slipLegs,
     stale: staleKeys,
     removed: removedCount,
@@ -233,12 +239,38 @@ export function ParlayScreen() {
   // custom/stale legs seed the session state directly.
   useEffect(() => {
     if (!restorePending) return;
-    slip.clear();
-    restorePending.slipKeys.forEach((key) => slip.add(key));
-    setManualCustomLegs(restorePending.customLegs);
-    setEditingParlayId(restorePending.editingId ?? null);
+    // Wait until today's board has settled, including in-play. A key whose
+    // pick is on it names the player, and a sidelined player is not put back
+    // on the slip. An empty or failed board has no name to look up, so those
+    // keys are kept.
+    if (boardLoading) return;
+    const pending = restorePending;
     consumeRestore();
-  }, [restorePending]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Read every sport once, drop sidelined players, then write the slip
+    // once. clear() first flashed an empty slip while those reads were out.
+    void (async () => {
+      const indexes = new Map<string, InjuryIndex>();
+      let kept: string[] = [];
+      for (const key of pending.slipKeys) {
+        const ep = board.find((p) => slipKeyForPick(p.pick) === key);
+        const player = ep ? betslipPlayerFromPick(ep.pick) : null;
+        let index = EMPTY_INJURY_INDEX;
+        if (player?.name) {
+          let hit = indexes.get(player.sport);
+          if (!hit) {
+            hit = await injuryIndexForSport(player.sport);
+            indexes.set(player.sport, hit);
+          }
+          index = hit;
+        }
+        const next = slipKeysAfterAdd(kept, key, player, index);
+        if (next) kept = next;
+      }
+      slip.replace(kept);
+      setManualCustomLegs(pending.customLegs);
+      setEditingParlayId(pending.editingId ?? null);
+    })();
+  }, [restorePending, boardLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Removing the last leg ends the edit, the same way "Clear" does. Without
   // this the binding outlived the slip: empty it leg by leg, build a brand new

@@ -141,6 +141,8 @@ export const colors = {
 };
 
 export const radii = {
+  // Small status tags (the Stats board's IR / O / Q chip).
+  xs: 4,
   sm: 8,
   md: 12,
   lg: 16,

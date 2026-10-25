@@ -16,6 +16,11 @@ import {
  */
 const store = createBankrollStore(AsyncStorage);
 
+/** Account deletion. Resets the in-memory amount and removes `bankroll.v2`. */
+export function clearBankrollForAccountDeletion(): Promise<void> {
+  return store.clear();
+}
+
 export function useBankroll() {
   const [settings, setSettings] = useState<BankrollSettings>(store.get() ?? BANKROLL_DEFAULTS);
   const [ready, setReady] = useState<boolean>(store.get() != null);

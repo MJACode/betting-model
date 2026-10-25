@@ -239,8 +239,7 @@ export function ModelEditScreen() {
             </Pressable>
           </View>
           <Text style={styles.helper}>
-            Pick a sport, then ML, the line (Run line in baseball, Spread in football and
-            basketball), or Player props. Player props adds every active player market for that
+            Pick a sport, then ML, Spread, or Player props. Player props adds every active player market for that
             sport. Every minimum starts blank: leave it that way for Any and the bet type qualifies
             on its own.
           </Text>

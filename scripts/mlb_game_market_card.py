@@ -140,9 +140,6 @@ def pick_rows(bets, games, quotes, bankroll: float,
         g = games.get(b.game_id, {})
         home, away = g.get("home", ""), g.get("away", "")
         label = _build_pick_label(b.side, home, away, market, b.line)
-        book_tag = _BOOK.get(b.book, b.book)
-        if not label.endswith(f"({book_tag})"):
-            label = f"{label} ({book_tag})"
         problems = pick_problems(label, b.side, b.line, model_id, home, away)
         if problems:
             logger.error(f"refusing {b.game_id}: {'; '.join(problems)}")

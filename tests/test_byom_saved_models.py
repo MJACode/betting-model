@@ -52,7 +52,12 @@ def test_the_migration_is_not_registered_and_not_anon_granted():
         assert table not in WORKER_ONLY_TABLES
         assert table not in MAY_BE_UNAPPLIED
     assert RPC_AFTER_SIGN_IN == (
-        "byom_save_model", "byom_list_models", "byom_delete_model")
+        "byom_save_model",
+        "byom_list_models",
+        "byom_delete_model",
+        "delete_my_account",
+        "delete_my_login",
+    )
     assert not (set(RPC_AFTER_SIGN_IN) & set(RPC_ANON_CALLABLE))
     assert not (set(RPC_AFTER_SIGN_IN) & set(RPC_REVOKE))
     sweep = (ROOT / "scripts/apply_anon_grants.py").read_text(encoding="utf-8")

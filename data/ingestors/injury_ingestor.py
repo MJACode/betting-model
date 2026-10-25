@@ -46,6 +46,7 @@ from config import (
     NFL_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
+from data.name_match import normalize_player_name
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -862,6 +863,99 @@ def _upsert_injuries(conn: DBConnection, injuries: list[dict]) -> int:
     return len(injuries)
 
 
+# ── Current status (what the app reads) ─────────────────────────────────────
+
+# Which row wins when one player appears twice in a pull (ESPN plus the MLB
+# transactions backup, or two ESPN entries): the more serious absence.
+_CURRENT_STATUS_RANK = {
+    "IL60": 0, "IL15": 1, "IL10": 2, "Out": 3,
+    "Doubtful": 4, "Day-To-Day": 5, "Questionable": 6,
+}
+
+# A pull whose teams answered at least this share is treated as the whole
+# list: teams with no rows are cleared. Below it the pull is degraded and only
+# the teams that answered are replaced, so an ESPN hiccup cannot wipe a sport.
+_HEALTHY_PULL_SHARE = 0.5
+
+
+def _static_team_count(sport: str) -> int:
+    """League size from the offline team maps -- no request, unlike
+    `_espn_team_ids`, which re-reads ESPN's teams endpoint for three sports."""
+    return len({
+        "MLB": ESPN_MLB_TEAM_IDS, "NHL": ESPN_NHL_TEAM_IDS,
+        "WNBA": ESPN_WNBA_TEAM_IDS, "NBA": ESPN_NBA_TEAM_IDS,
+        "NFL": ESPN_NFL_TEAM_IDS,
+    }.get(sport, {}))
+
+
+def current_status_rows(injuries: list[dict]) -> list[dict]:
+    """
+    Fold one pull into one row per (sport, team, player_key).
+
+    Only absences reach the app: scenario B ('Returning') and NFL 'Active'
+    are dropped, and so is any status the board has no tag for.
+    """
+    best: dict[tuple, dict] = {}
+    for r in injuries:
+        if r.get("scenario") != "A":
+            continue
+        status = r.get("status")
+        if status not in _CURRENT_STATUS_RANK:
+            continue
+        key = normalize_player_name(r.get("player_name"))
+        team = r.get("team")
+        if not key or not team:
+            continue
+        k = (r["sport"], team, key)
+        prev = best.get(k)
+        if prev is None or _CURRENT_STATUS_RANK[status] < _CURRENT_STATUS_RANK[prev["status"]]:
+            best[k] = {
+                "sport": r["sport"],
+                "team": team,
+                "player_key": key,
+                "player_name": r.get("player_name"),
+                "player_id": r.get("player_id"),
+                "status": status,
+                "injury_type": r.get("injury_type"),
+                "status_ts": r.get("status_ts"),
+            }
+    return list(best.values())
+
+
+def _replace_current_status(conn: DBConnection, sport: str, injuries: list[dict],
+                            teams_expected: int) -> int:
+    """
+    Replace `injury_status_current` for one sport from this pull.
+
+    A healthy pull (most teams answered) replaces the whole sport, so a
+    player taken off every list is cleared. A degraded pull replaces only the
+    teams that answered; the rest keep their rows and age out on the app's
+    freshness window. An EMPTY pull writes nothing.
+    """
+    rows = current_status_rows(injuries)
+    teams = sorted({r["team"] for r in rows})
+    if not teams:
+        return 0
+    healthy = teams_expected > 0 and len(teams) >= teams_expected * _HEALTHY_PULL_SHARE
+    if healthy:
+        conn.execute("DELETE FROM injury_status_current WHERE sport = %s", (sport,))
+    else:
+        conn.execute(
+            "DELETE FROM injury_status_current WHERE sport = %s AND team = ANY(%s)",
+            (sport, teams),
+        )
+    conn.executemany("""
+        INSERT INTO injury_status_current (
+            sport, team, player_key, player_name, player_id,
+            status, injury_type, status_ts, as_of
+        ) VALUES (
+            %(sport)s, %(team)s, %(player_key)s, %(player_name)s, %(player_id)s,
+            %(status)s, %(injury_type)s, %(status_ts)s, NOW()
+        )
+    """, rows)
+    return len(rows)
+
+
 def _log_pipeline(conn: DBConnection, run_date: str,
                   status: str, records_in: int, records_out: int,
                   duration_s: float, error_msg: str = None):
@@ -889,6 +983,7 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     total_inserted = 0
 
     conn = get_connection()
+    current_pulls: list[tuple[str, list[dict]]] = []
 
     try:
         for sp in sports:
@@ -896,9 +991,11 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
             all_injuries = []
 
             # ── Source 1: ESPN ────────────────────────────────────────────────
+            espn_ok = False
             try:
                 espn_rows = fetch_espn_injuries(sp, report_date)
                 all_injuries.extend(espn_rows)
+                espn_ok = bool(espn_rows)
             except Exception as exc:
                 logger.error(f"ESPN {sp} ingestion error: {exc}")
 
@@ -931,6 +1028,8 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
             _log_pipeline(conn, report_date, "success",
                           records_in=n, records_out=n, duration_s=duration)
             logger.success(f"{sp} injuries: {n} rows inserted ({duration:.1f}s)")
+            if espn_ok:
+                current_pulls.append((sp, all_injuries))
 
         conn.commit()
 
@@ -940,7 +1039,21 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
         _log_pipeline(conn, report_date, "error", 0, 0, total_duration, str(exc))
         conn.commit()
         logger.error(f"Injury ingestor failed: {exc}")
+        conn.close()
         raise
+
+    # The app's current-status table, AFTER the log is committed and in its own
+    # transaction: a missing table (the migration lands on the next pass) or
+    # any failure here must never cost the log rows the models read.
+    try:
+        for sp, rows in current_pulls:
+            expected = _static_team_count(sp)
+            n_cur = _replace_current_status(conn, sp, rows, expected)
+            logger.info(f"{sp} injury_status_current: {n_cur} rows")
+        conn.commit()
+    except Exception as exc:                                  # noqa: BLE001
+        conn.rollback()
+        logger.warning(f"injury_status_current not updated: {exc}")
     finally:
         conn.close()
 

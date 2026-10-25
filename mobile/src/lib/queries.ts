@@ -68,6 +68,7 @@ import type {
   PropOddsByBookRow,
   Pick,
   PlayerGameLogRow,
+  InjuryStatusRow,
   PlayerNewsRow,
   PlayerType,
   PropOddsSnapshotRow,
@@ -2941,6 +2942,26 @@ export async function fetchSettledPropPicksForPlayer(args: {
       (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p) && !isDuplicateCopy(p),
   );
   return attachDiscordPublish(rows);
+}
+
+/**
+ * Every player on a current injury report for one sport, for the Stats
+ * board's tags. One row per player: measured 2026-10-23 at 514 NFL, 428 MLB,
+ * 123 NHL, 77 NBA, 48 WNBA -- the NFL alone is past half the 1,000-row cap,
+ * so it is drained, not trusted to fit.
+ */
+export async function fetchInjuryStatus(sport: string): Promise<InjuryStatusRow[]> {
+  return fetchAllPages<InjuryStatusRow>(
+    (from, to) =>
+      supabase
+        .from('injury_status_current')
+        .select('sport, team, player_key, player_name, player_id, status, injury_type, status_ts, as_of')
+        .eq('sport', sport)
+        .order('team', { ascending: true })
+        .order('player_key', { ascending: true })
+        .range(from, to),
+    (r) => `${r.team}|${r.player_key}`,
+  );
 }
 
 /**

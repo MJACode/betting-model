@@ -245,6 +245,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Out/Doubtful veto compares this to the quote's snapshot_at; NULL
     # fails open. ADD COLUMN IF NOT EXISTS.
     "add_injuries_status_ts_2026_09_14.sql",
+    # 2026-10-23 (Matt): each player's CURRENT injury status, one row per
+    # player, maintained by the injury ingestor. The Stats board tags and
+    # sinks Out/IR players off it. CREATE guarded on to_regclass + RLS +
+    # anon SELECT policy.
+    "add_injury_status_current_2026_10_23.sql",
     # 2026-09-22 (mike): was a pick actually placeable at the book? One row
     # per pick, written by scripts/mark_placeable.py, for the opener's fresh
     # numbers ("NEW 0m"): a book error is the model's best case if it can be

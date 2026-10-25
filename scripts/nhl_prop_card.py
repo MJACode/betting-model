@@ -224,7 +224,7 @@ def pick_rows(scored: pd.DataFrame, games: dict[str, dict], game_date: str, bank
             "game_id": r.game_id, "model_id": MODEL_ID, "sport": "NHL",
             "game_date": game_date, "game_time": g.get("commence_time"),
             "pick_side": d["side"],
-            "pick_label": f"{r.quote_player} {side} {r.line:g} {STAT_LABEL} (DK)",
+            "pick_label": f"{r.quote_player} {side} {r.line:g} {STAT_LABEL}",
             "model_probability": round(d["p"], 4),
             "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": round(implied, 4),
