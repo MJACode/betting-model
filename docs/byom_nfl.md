@@ -226,7 +226,10 @@ lists that user’s NFL rows from `byom_list_models`. Rank and the builder previ
 call `byom_backtest` (`fetchByomScopedBacktest`): this season is one
 call with season null, and all seasons is one call per season from
 2020 through the current NFL season. The create flow is three steps
-(bet type, side, name). Editing a saved model is one screen. An empty
+(bet type, side, name). Editing a saved model is one screen. A rename
+saves the new name first and removes the old row only after that save
+returns. A name that already belongs to another model asks before it
+replaces that model. An empty
 filter is not graded. The backtest’s left-out count is not parsed.
 Price and line filters are not on screen. Player props are not a
 choice in this builder. A saved prop market does not show units.

@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -22,10 +23,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { useByomRecord } from '@/hooks/useByomRecord';
 import { useByomSeason } from '@/hooks/useByomSeason';
 import { AUTH_ENABLED } from '@/lib/authConfig';
-import { saveByomModel } from '@/lib/byom';
+import { fetchByomModels, saveByomModel } from '@/lib/byom';
 import { friendlyCause, errorText, isAbortError } from '@/lib/errors';
 import {
   filtersForDraft,
+  otherModelWithName,
   showsUnits,
   suggestedName,
   type ByomDraft,
@@ -91,7 +93,7 @@ export function ByomBuilderScreen() {
     if (step === 2) setStep(3);
   };
 
-  const save = async () => {
+  const save = async (replaceExisting = false) => {
     if (draft == null || saving) return;
     const trimmed = name.trim();
     if (trimmed.length < 1 || trimmed.length > 80) return;
@@ -106,6 +108,20 @@ export function ByomBuilderScreen() {
     setSaving(true);
     setSaveMessage(null);
     try {
+      if (!replaceExisting) {
+        const taken = otherModelWithName(await fetchByomModels(), trimmed);
+        if (taken) {
+          Alert.alert(
+            'You already have this name',
+            `“${trimmed}” is already saved. Replace that model, or choose another name.`,
+            [
+              { text: 'Choose another name', style: 'cancel' },
+              { text: 'Replace', style: 'destructive', onPress: () => { void save(true); } },
+            ],
+          );
+          return;
+        }
+      }
       await saveByomModel(trimmed, filtersForDraft(draft), null);
       navigation.goBack();
     } catch (e: unknown) {

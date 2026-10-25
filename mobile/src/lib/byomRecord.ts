@@ -194,6 +194,23 @@ export function draftFromFilters(filters: ByomFilters | null | undefined): ByomD
   };
 }
 
+/**
+ * Another saved model with this name, after trim. The save matches the
+ * stored name exactly, so a different case is a different name. The model
+ * being edited is not a collision with itself.
+ */
+export function otherModelWithName<T extends { model_id: string; name: string }>(
+  models: readonly T[],
+  name: string,
+  exceptId?: string,
+): T | null {
+  const trimmed = name.trim();
+  for (const model of models) {
+    if (model.name === trimmed && model.model_id !== exceptId) return model;
+  }
+  return null;
+}
+
 export function suggestedName(draft: ByomDraft): string {
   if (draft.market === 'totals') {
     return draft.primetime === true ? 'Primetime over/under' : 'Over/under';

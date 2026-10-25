@@ -156,7 +156,7 @@ def test_byom_record_rank_roi_and_filters(tmp_path):
 import {
   byomRoi, byomWinRate, currentNflSeason, draftFromFilters, filtersForDraft,
   formatByomRecord, isWholeSeason, marketLabel, nflSeasonList, rankByUnits,
-  recordFromRows, showsUnits, suggestedName,
+  otherModelWithName, recordFromRows, showsUnits, suggestedName,
 } from './byomRecord.ts';
 
 const summed = recordFromRows([
@@ -248,9 +248,42 @@ const ranked = rankByUnits([
 ]);
 const order = ranked.map((row) => `${row.name}:${row.rank}`).join(',');
 if (order !== 'Up:1,Away:2,Home:3,Down:4,Props:5,Zero:null') throw new Error(order);
+
+const models = [
+  { model_id: 'a', name: 'Home underdogs' },
+  { model_id: 'b', name: 'Primetime' },
+];
+const taken = otherModelWithName(models, '  Primetime  ', 'a');
+if (!taken || taken.model_id !== 'b') throw new Error('taken ' + JSON.stringify(taken));
+if (otherModelWithName(models, 'Primetime', 'b') !== null) throw new Error('self');
+if (otherModelWithName(models, 'primetime') !== null) throw new Error('case');
+if (otherModelWithName(models, 'Road') !== null) throw new Error('missing');
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+def test_a_rename_saves_the_new_name_before_it_removes_the_old_row():
+    """The old row stays until the new name has been saved. A name that
+    already belongs to another model is not overwritten without a confirm.
+    """
+    edit = (ROOT / "mobile/src/screens/ByomEditScreen.tsx").read_text(encoding="utf-8")
+    builder = (ROOT / "mobile/src/screens/ByomBuilderScreen.tsx").read_text(encoding="utf-8")
+    assert "await deleteByomModel(model.model_id);\n        await saveByomModel" not in edit
+    assert edit.index("await saveByomModel") < edit.index("await deleteByomModel")
+    assert edit.count("await saveByomModel") == 1
+    assert edit.count("await deleteByomModel") == 1
+    assert "The old model is still in your list." in edit
+    assert "Couldn’t save this model." in edit
+    delete_tail = edit.split("await deleteByomModel", 1)[1]
+    inner = delete_tail.split("catch (e: unknown)", 1)[1].split("catch (e: unknown)", 1)[0]
+    assert "The old model is still in your list." in inner
+    assert "Couldn’t save this model." not in inner
+    assert "You already have this name" in edit
+    assert "otherModelWithName" in edit
+    assert "You already have this name" in builder
+    assert "otherModelWithName" in builder
+    assert "deleteByomModel" not in builder

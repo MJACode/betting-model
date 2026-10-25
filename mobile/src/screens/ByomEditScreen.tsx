@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -25,13 +26,14 @@ import { Skeleton } from '@/components/Skeleton';
 import { useByomRecord } from '@/hooks/useByomRecord';
 import { useByomSavedModel } from '@/hooks/useByomSavedModel';
 import { useByomSeason } from '@/hooks/useByomSeason';
-import { deleteByomModel, saveByomModel, type ByomFilters } from '@/lib/byom';
+import { deleteByomModel, fetchByomModels, saveByomModel, type ByomFilters } from '@/lib/byom';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import {
   draftFromFilters,
   filtersForDraft,
   isWholeSeason,
   marketLabel,
+  otherModelWithName,
   showsUnits,
   type ByomGameMarket,
 } from '@/lib/byomRecord';
@@ -76,23 +78,39 @@ export function ByomEditScreen() {
   const trimmed = name.trim();
   const saveDisabled = saving || model == null || trimmed.length < 1 || trimmed.length > 80;
 
-  const save = async () => {
+  // A new name is a new row. Save it first. Remove the old row only after
+  // that save returns. A cap failure leaves the original where it is.
+  const save = async (replaceExisting = false) => {
     if (model == null || saveDisabled) return;
     setSaving(true);
     setSaveMessage(null);
     const filters = edited ?? model.filters;
     const renaming = trimmed !== model.name;
     try {
-      try {
-        await saveByomModel(trimmed, filters, null);
-      } catch (e: unknown) {
-        if (!(renaming && /cap is 25/.test(errorText(e)))) throw e;
-        await deleteByomModel(model.model_id);
-        await saveByomModel(trimmed, filters, null);
-        navigation.goBack();
-        return;
+      if (!replaceExisting) {
+        const taken = otherModelWithName(await fetchByomModels(), trimmed, model.model_id);
+        if (taken) {
+          Alert.alert(
+            'You already have this name',
+            `“${trimmed}” is already saved. Replace that model, or choose another name.`,
+            [
+              { text: 'Choose another name', style: 'cancel' },
+              { text: 'Replace', style: 'destructive', onPress: () => { void save(true); } },
+            ],
+          );
+          return;
+        }
       }
-      if (renaming) await deleteByomModel(model.model_id);
+      await saveByomModel(trimmed, filters, null);
+      if (renaming) {
+        try {
+          await deleteByomModel(model.model_id);
+        } catch (e: unknown) {
+          if (isAbortError(e)) return;
+          setSaveMessage(`Saved “${trimmed}”. The old model is still in your list.`);
+          return;
+        }
+      }
       navigation.goBack();
     } catch (e: unknown) {
       if (isAbortError(e)) return;
