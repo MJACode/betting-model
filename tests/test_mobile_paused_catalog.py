@@ -65,7 +65,10 @@ def test_the_models_list_filters_paused_models():
     assert "Number(isModelPaused" not in src
     # Empty copy names the pause, not "this sport was never built" (UX review).
     assert "Paused models are hidden here" in src
-    assert "withdrawnRulesEmpty" in src
+    # My models is the user's own rows. The helper that names a custom
+    # model's paused rules stays on that model's detail screen.
+    detail = _read(MOBILE / "src" / "screens" / "ModelDetailScreen.tsx")
+    assert "withdrawnRulesEmpty" in detail
 
 
 def test_the_bet_type_picker_filters_paused_models():

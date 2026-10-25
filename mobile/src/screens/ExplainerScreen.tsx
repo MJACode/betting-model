@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
+import { BYOM_UNITS_COPY } from '@/lib/byomRecord';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 export function ExplainerScreen() {
@@ -336,17 +336,14 @@ export function ExplainerScreen() {
           </Bullet>
         </Section>
 
-        <Section heading="Models tab — Custom filters">
+        <Section heading="Models tab — My models">
           <P>
-            Build your own pick filter from any combination of model + min
-            probability + min edge. The app backtests each filter against
-            every scored pick since {BACKTEST_START} — the full graded history, which is longer than the published record — and shows
-            win rate and flat ROI.
+            Build an NFL model from a bet type and a side. Your models are
+            ranked by units won. {BYOM_UNITS_COPY}
           </P>
           <P>
-            Custom models are saved on this device. They don't change which
-            picks the pipeline scores — they're a way to slice the same pick
-            history through your own conviction rules.
+            My models are yours. They are not the built-in models, and they
+            do not change which picks those models score.
           </P>
         </Section>
         <BetslipBarSpacer />

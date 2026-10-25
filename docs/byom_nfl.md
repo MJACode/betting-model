@@ -218,13 +218,27 @@ sweep does not name them.
 until sign-in is turned on. That switch is Matt's. This change does
 not set it.
 
-## Mobile data layer
+## Mobile
 
-`mobile/src/lib/byom.ts` types the backtest rows and the saved models,
-and calls `byom_backtest`, `byom_save_model`, `byom_list_models`, and
-`byom_delete_model`. `useByomBacktest` and `useByomModels` load those
-calls. A slower backtest response does not replace a newer one.
-`byomFilters` rejects a mixed-case or unknown key. No screen imports
-them. An empty filter is the whole season and must not be shown as a
-saved model record. There is no recommended stake. `package.json` is
-unchanged. Sign-in is unchanged.
+The Models tab’s second segment is My models. Signed out, it does not
+call the list and it does not say the list is empty. Signed in, it
+lists that user’s NFL rows from `byom_list_models`. Rank and the builder preview
+call `byom_backtest` (`fetchByomScopedBacktest`): this season is one
+call with season null, and all seasons is one call per season from
+2020 through the current NFL season. The create flow is three steps
+(bet type, side, name). Editing a saved model is one screen. A rename
+saves the new name first and removes the old row only when that save
+wrote a different id. At 25 models a new name is refused and the
+original stays. A name that already belongs to another model asks,
+and the prompt says that model will be overwritten. One model’s
+backtest can fail without clearing the rest of the list. An empty
+filter is not graded. The backtest’s left-out count is not parsed.
+Price and line filters are not on screen. Player props are not a
+choice in this builder. A saved prop market does not show units.
+There is no recommended stake. `package.json` is unchanged. Sign-in
+is unchanged.
+
+`mobile/src/lib/byom.ts` types the rows and calls `byom_backtest`,
+`byom_save_model`, `byom_list_models`, and `byom_delete_model`.
+`useByomBacktest` and `useByomModels` still drop a slower response.
+`byomFilters` rejects a mixed-case or unknown key.
