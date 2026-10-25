@@ -131,6 +131,20 @@ export function yearET(): number {
   return Number(todayET().slice(0, 4));
 }
 
+/**
+ * The season label the Stats board and player page ask for, per sport.
+ * NBA labels a season by its ENDING year (CLAUDE.md §4), so from October the
+ * label is next year's: 2026-10-23 is season 2027. Every other sport's board
+ * read takes the calendar year and handles its own label (football and NHL
+ * fall back inside their reads). Asking the NBA for the calendar year read
+ * LAST season — Jaylen Brown on BOS three months after his trade (2026-10-23).
+ */
+export function boardSeasonET(sport: string): number {
+  const year = yearET();
+  if (sport === 'NBA') return monthET() >= 10 ? year + 1 : year;
+  return year;
+}
+
 /** Calendar month in ET, 1–12. Same clock as `yearET`. */
 export function monthET(): number {
   return Number(todayET().slice(5, 7));
