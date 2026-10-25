@@ -2,7 +2,7 @@
 
 | Function | verify_jwt | Purpose | Runbook |
 |---|---|---|---|
-| `sharpsports` | true | Actions `context` (start Booklink) and `bets` (read/refresh synced bets). Called by the app with the Supabase anon JWT. | below |
+| `sharpsports` | true | Actions `context` (start Booklink), `bets` (read/refresh synced bets), and `unlink` (revoke bettor access and drop this install's rows). Called by the app with the Supabase anon JWT. | below |
 | `sharpsports-webhook` | false | Receives SharpSports webhooks (secret-authenticated) and re-triggers a sync. | below |
 | `stripe-checkout` / `stripe-portal` | true | Billing on the Stripe rail — built and dark. | `mobile/docs/BILLING.md` |
 | `stripe-webhook` | **false** | Stripe entitlement → `subscriptions`. Signature verified over the raw body. | `mobile/docs/BILLING.md` |

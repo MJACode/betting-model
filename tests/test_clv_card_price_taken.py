@@ -102,6 +102,15 @@ CASES = [
          dk_odds=-110, decision_odds=None, decision_book=None, clv_bet_book=None),
     dict(model_id="nfl_opener_spread", pick_label="HOU @ TEN — TEN +9.5",
          dk_odds=-110, decision_odds=None, decision_book=None, clv_bet_book=None),
+    # new labels carry the book on the row. The clean label with no
+    # decision columns above still grades as DraftKings.
+    dict(model_id="nfl_wind_totals", pick_label="NYJ @ MIA Under 43.5 · 1.00u",
+         dk_odds=-105, decision_odds=-105, decision_book="fanduel", clv_bet_book=None),
+    dict(model_id="nfl_opener_spread",
+         pick_label="TEN @ NYG — NYG -1 · 1.96u · NEW 0m",
+         dk_odds=-105, decision_odds=-105, decision_book="betmgm", clv_bet_book=None),
+    dict(model_id="nfl_prop_market", pick_label="Jadarian Price Over 1.5 Rec",
+         dk_odds=-120, decision_odds=-120, decision_book="fanduel", clv_bet_book=None),
     # a parenthesis on any other model is not a book
     dict(model_id="mlb_f5_moneyline", pick_label="NYY ML (F5)",
          dk_odds=-130, decision_odds=None, decision_book=None, clv_bet_book=None),

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { getDeviceId } from '@/hooks/useDeviceId';
-import { usePushOptIn } from '@/hooks/usePushOptIn';
+import { clearPushOptInForAccountDeletion, usePushOptIn } from '@/hooks/usePushOptIn';
 import { diagnosePushError, type PushDiagnosis } from '@/lib/pushDiagnosis';
 import { supabase } from '@/lib/supabase';
 
@@ -170,12 +170,12 @@ export function registerForPush(): Promise<PushState> {
  * worker would have kept sending indefinitely. No user has hit it only because
  * no token row has ever existed.
  */
-export async function unregisterForPush(): Promise<void> {
+export async function unregisterForPush(): Promise<boolean> {
   const token = state.token ?? (await rememberedToken());
   setState({ status: 'idle', token: null, diagnosis: null });
   // Nothing was ever registered from this install, so there is no row to flip
   // — and no write on every cold start of a device that has never opted in.
-  if (!token) return;
+  if (!token) return true;
   const { error } = await supabase
     .from('device_push_tokens')
     .update({ enabled: false, last_seen: new Date().toISOString() })
@@ -188,11 +188,18 @@ export async function unregisterForPush(): Promise<void> {
     // on the way in and "you are STILL registered" on the way out, and only
     // the second one is true here.
     setState({ status: 'failed', diagnosis: diagnosePushError(error, 'stop') });
-    return;
+    return false;
   }
   // Forget it only once the server has agreed, so a failed opt-out can be
   // retried against the right row rather than losing it.
   await rememberToken(null);
+  return true;
+}
+
+/** Opt out and unregister. False when the server still has the token enabled. */
+export async function clearPushForAccountDeletion(): Promise<boolean> {
+  await clearPushOptInForAccountDeletion();
+  return unregisterForPush();
 }
 
 /** Subscribe to the shared registration state. Render-only; starts nothing. */

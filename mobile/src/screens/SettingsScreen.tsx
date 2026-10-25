@@ -299,7 +299,6 @@ export function SettingsScreen() {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign out',
-        style: 'destructive',
         onPress: () => {
           signOut().catch((e) => Alert.alert('Could not sign out', authErrorMessage(e)));
         },
@@ -332,8 +331,13 @@ export function SettingsScreen() {
 
         {AUTH_ENABLED ? (
           signedIn ? (
+            <>
             <View style={styles.card}>
-              <View style={styles.bookRow}>
+              <View
+                accessible
+                accessibilityLabel={`Signed in as ${authEmail ?? 'your account'}`}
+                style={styles.bookRow}
+              >
                 <Text style={[styles.cardLabel, styles.flexShrink]} numberOfLines={1}>
                   {authEmail ?? 'Signed in'}
                 </Text>
@@ -354,6 +358,17 @@ export function SettingsScreen() {
                 <Text style={styles.signOutText}>Sign out</Text>
               </Pressable>
             </View>
+            <Pressable
+              onPress={() => navigation.navigate('DeleteAccount')}
+              accessibilityRole="button"
+              accessibilityLabel="Delete account"
+              accessibilityHint="Opens a screen that explains what is deleted."
+              style={({ pressed }) => [styles.deleteRow, pressed && styles.pressed]}
+            >
+              <Text style={styles.deleteText}>Delete account</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </Pressable>
+            </>
           ) : (
             // Deliberately does NOT promise cross-device sync — auth is
             // session-only today. Update when account-scoped data lands.
@@ -969,9 +984,25 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.avoidSoft,
+    backgroundColor: colors.tintSoft,
   },
   signOutText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  deleteRow: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  deleteText: {
+    flexShrink: 1,
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.avoidInk,

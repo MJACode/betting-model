@@ -48,6 +48,13 @@ jobs:
           npx tsc --noEmit > tsc.log 2>&1 || true
           python3 scripts/check_tsc_baseline.py tsc.log tsc-baseline.txt
 
+      # The pytest job does not npm ci, so a verify script that needs tsx
+      # skips there. This job already installed mobile deps. Same role as
+      # the pytest files that shell out to mobile/scripts/verify_*.ts.
+      - name: Paused catalog
+        working-directory: mobile
+        run: npx tsx scripts/verify_paused_catalog.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -147,6 +154,7 @@ jobs:
             tests/test_paused_and_no_signal_rows.py \
             tests/test_paused_keeps_real_verdict.py \
             tests/test_nfl_scored_rows.py \
+            tests/test_pick_label_copy.py \
             tests/test_nfl_rule_2026_track.py \
             tests/test_game_scorer_spares_nfl_props.py \
             tests/test_nfl_prop_unstarted_clear.py \
@@ -175,6 +183,7 @@ jobs:
             tests/test_mobile_betslip_combine.py \
             tests/test_mobile_contrast_tokens.py \
             tests/test_mobile_error_states.py \
+            tests/test_mobile_paused_catalog.py \
             tests/test_mobile_pick_cta.py \
             tests/test_mobile_line_movement.py \
             tests/test_mobile_a11y.py \
@@ -217,4 +226,5 @@ jobs:
             tests/test_ddl_guard.py \
             tests/test_nfl_wind_stability.py \
             tests/test_mobile_lines_board.py \
-            tests/test_pregame_insert_cutoff.py
+            tests/test_pregame_insert_cutoff.py \
+            tests/test_web_site.py

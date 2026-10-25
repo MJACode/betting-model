@@ -603,6 +603,8 @@ export type RootStackParamList = {
   Paywall: undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
+  // Account deletion. Reachable from Settings only while signed in.
+  DeleteAccount: undefined;
   // In-app feedback: the composer + your past conversations, and one thread.
   Feedback: undefined;
   FeedbackThread: { threadId: number };
@@ -1164,6 +1166,25 @@ export interface TeamStatsRow {
   yards_per_play?: number | null;
   pass_yards_pg?: number | null;
   rush_yards_pg?: number | null;
+}
+
+/**
+ * One player's current injury designation (`injury_status_current`), kept by
+ * the injury ingestor from ESPN's team lists. Only absences are stored.
+ */
+export interface InjuryStatusRow {
+  sport: string;
+  team: string;
+  player_key: string;
+  player_name: string;
+  player_id: string | null;
+  /** Out, Doubtful, Questionable, Day-To-Day, IL10, IL15, IL60. */
+  status: string;
+  /** ESPN's own label where more specific: 'Injured Reserve', 'Suspension'. */
+  injury_type: string | null;
+  status_ts: string | null;
+  /** When the ingestor last confirmed this row (ISO). */
+  as_of: string;
 }
 
 /**
