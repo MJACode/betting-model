@@ -425,6 +425,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # until this lands the gate fails closed and no NHL model bets. One new
     # table, anon locked out. Does not rewrite the record views or picks.
     "add_nhl_goalie_designations_2026_10_20.sql",
+    # 2026-10-23 (Matt): NBA last-N Stats reads span into the previous season,
+    # so an L10 a week into the season is ten games, with the newest game's
+    # team. Same signatures; guards on its own property, so it fires once.
+    "nba_window_reads_span_seasons_2026_10_23.sql",
     # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
     # return when the function body already has the marker. Unapplied.
     # Does not touch picks or the record views. Win, loss, or push.
@@ -436,10 +440,6 @@ ACTIVE_MIGRATIONS: list[str] = [
     # these back, or settlement's query names a function that does not
     # exist. Does not rewrite snapshots, picks, or push_sent.
     "published_pick_units_2026_10_17.sql",
-    # 2026-10-23 (Matt): NBA last-N Stats reads span into the previous season,
-    # so an L10 a week into the season is ten games, with the newest game's
-    # team. Same signatures; guards on its own property, so it fires once.
-    "nba_window_reads_span_seasons_2026_10_23.sql",
     # 2026-10-16: Discord #results and the Record tab share one stake.
     # The two record views gain units and risked from the functions
     # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.

@@ -24,12 +24,18 @@
 
 DO $mig$
 BEGIN
+    -- Both halves of the property: spans seasons AND lists only this
+    -- season's players (an earlier draft had only the first).
     IF (SELECT count(*)
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = 'public'
-           AND p.proname IN ('player_recent_games_nba', 'player_window_totals_nba')
-           AND position('p_season - 1' in pg_get_functiondef(p.oid)) > 0) >= 2 THEN
+           AND ((p.proname = 'player_recent_games_nba'
+                 AND position('p_season - 1' in pg_get_functiondef(p.oid)) > 0
+                 AND position('r.season = p_season' in pg_get_functiondef(p.oid)) > 0)
+             OR (p.proname = 'player_window_totals_nba'
+                 AND position('p_season - 1' in pg_get_functiondef(p.oid)) > 0
+                 AND position('bool_or(season = p_season)' in pg_get_functiondef(p.oid)) > 0))) >= 2 THEN
         RAISE NOTICE 'NBA window reads already span seasons — skipping';
         RETURN;
     END IF;
