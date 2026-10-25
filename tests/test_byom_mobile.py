@@ -278,12 +278,22 @@ def test_a_rename_saves_the_new_name_before_it_removes_the_old_row():
     assert edit.count("await deleteByomModel") == 1
     assert "The old model is still in your list." in edit
     assert "Couldn’t save this model." in edit
+    assert "Delete one before renaming." in edit
+    assert "savedId !== '' && savedId !== model.model_id" in edit
+    assert "BYOM_MODEL_CAP" in edit
     delete_tail = edit.split("await deleteByomModel", 1)[1]
     inner = delete_tail.split("catch (e: unknown)", 1)[1].split("catch (e: unknown)", 1)[0]
     assert "The old model is still in your list." in inner
     assert "Couldn’t save this model." not in inner
-    assert "You already have this name" in edit
+    assert "Replace this model?" in edit
+    assert "Replace overwrites that model" in edit
     assert "otherModelWithName" in edit
-    assert "You already have this name" in builder
+    assert "Replace this model?" in builder
+    assert "Replace overwrites that model" in builder
     assert "otherModelWithName" in builder
     assert "deleteByomModel" not in builder
+    leaderboard = (ROOT / "mobile/src/hooks/useByomLeaderboard.ts").read_text(encoding="utf-8")
+    assert "async function pool" not in leaderboard
+    assert "failed: true" in leaderboard
+    byom = (ROOT / "mobile/src/lib/byom.ts").read_text(encoding="utf-8")
+    assert "export async function pool" in byom

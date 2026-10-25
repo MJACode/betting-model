@@ -11,6 +11,7 @@ import { errorText, isAbortError } from '@/lib/errors';
 import {
   fetchByomModels,
   fetchByomScopedBacktest,
+  pool,
   type ByomFilters,
   type ByomModel,
 } from '@/lib/byom';
@@ -30,21 +31,8 @@ export interface ByomLeaderboardRow {
   rank: number | null;
   /** Empty filters are the whole season. They are not graded. */
   ungraded: boolean;
-}
-
-async function pool<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array(items.length);
-  let next = 0;
-  const workers = Math.min(Math.max(limit, 0), items.length);
-  await Promise.all(Array.from({ length: workers }, async () => {
-    for (;;) {
-      const index = next;
-      next += 1;
-      if (index >= items.length) return;
-      out[index] = await fn(items[index]);
-    }
-  }));
-  return out;
+  /** This model's backtest failed. The other rows stay. */
+  failed: boolean;
 }
 
 export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
@@ -76,10 +64,15 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
       if (seq.current !== id) return;
       const graded = await pool(models, 3, async (model) => {
         if (isWholeSeason(model.filters)) {
-          return { model, record: null as ByomRecord | null, ungraded: true };
+          return { model, record: null as ByomRecord | null, ungraded: true, failed: false };
         }
-        const backtest = await fetchByomScopedBacktest(scope, model.filters);
-        return { model, record: recordFromRows(backtest), ungraded: false };
+        try {
+          const backtest = await fetchByomScopedBacktest(scope, model.filters);
+          return { model, record: recordFromRows(backtest), ungraded: false, failed: false };
+        } catch (e: unknown) {
+          if (isAbortError(e)) throw e;
+          return { model, record: null as ByomRecord | null, ungraded: false, failed: true };
+        }
       });
       if (seq.current !== id) return;
       const ranked = rankByUnits(graded.map((item) => ({
@@ -89,6 +82,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
         units: item.record?.units ?? null,
         showsUnits: item.record != null && showsUnits(item.model.filters),
         ungraded: item.ungraded,
+        failed: item.failed,
         model: item.model,
         record: item.record,
       })));
@@ -98,6 +92,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
         showsUnits: item.showsUnits,
         rank: item.rank,
         ungraded: item.ungraded,
+        failed: item.failed,
       })));
     } catch (e: unknown) {
       if (seq.current !== id) return;

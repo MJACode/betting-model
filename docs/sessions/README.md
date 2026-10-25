@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename at 25 models is refused. The old row is deleted only when the save wrote a different id. One failed backtest does not clear the list. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename saves the new name first. The old row is removed only after that save. A taken name asks before it replaces the other model. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM Phase 2: My models rows and the NFL guided builder. Live `byom_backtest` for rank and preview. No left-out count, no price or prop filters, no migration, no production write. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, #1041 merged origin/master 8c0a737d; session logs keep both sides; migration files unchanged; no production write |

@@ -76,6 +76,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           record={item.record}
           showsUnits={item.showsUnits}
           ungraded={item.ungraded}
+          failed={item.failed}
           onPress={() => navigation.navigate('ByomDetail', { modelId: item.model.model_id })}
         />
       )}

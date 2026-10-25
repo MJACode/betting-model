@@ -162,7 +162,8 @@ export async function fetchByomBacktest(
   return asRows(data).map(parseBacktestRow);
 }
 
-async function pool<T, R>(
+/** Run `fn` over `items` with at most `limit` calls in flight. */
+export async function pool<T, R>(
   items: readonly T[],
   limit: number,
   fn: (item: T) => Promise<R>,

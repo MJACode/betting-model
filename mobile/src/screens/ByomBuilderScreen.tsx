@@ -112,8 +112,8 @@ export function ByomBuilderScreen() {
         const taken = otherModelWithName(await fetchByomModels(), trimmed);
         if (taken) {
           Alert.alert(
-            'You already have this name',
-            `“${trimmed}” is already saved. Replace that model, or choose another name.`,
+            'Replace this model?',
+            `“${trimmed}” is already saved. Replace overwrites that model. Choose another name to keep it.`,
             [
               { text: 'Choose another name', style: 'cancel' },
               { text: 'Replace', style: 'destructive', onPress: () => { void save(true); } },

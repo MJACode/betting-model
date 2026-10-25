@@ -31,6 +31,7 @@ import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import {
   draftFromFilters,
   filtersForDraft,
+  BYOM_MODEL_CAP,
   isWholeSeason,
   marketLabel,
   otherModelWithName,
@@ -78,8 +79,8 @@ export function ByomEditScreen() {
   const trimmed = name.trim();
   const saveDisabled = saving || model == null || trimmed.length < 1 || trimmed.length > 80;
 
-  // A new name is a new row. Save it first. Remove the old row only after
-  // that save returns. A cap failure leaves the original where it is.
+  // A new name is a new row. Save it first. Delete the old id only when
+  // that save wrote a different row. A cap failure leaves the original.
   const save = async (replaceExisting = false) => {
     if (model == null || saveDisabled) return;
     setSaving(true);
@@ -88,11 +89,14 @@ export function ByomEditScreen() {
     const renaming = trimmed !== model.name;
     try {
       if (!replaceExisting) {
-        const taken = otherModelWithName(await fetchByomModels(), trimmed, model.model_id);
+        const models = await fetchByomModels();
+        const taken = otherModelWithName(models, trimmed, model.model_id);
         if (taken) {
           Alert.alert(
-            'You already have this name',
-            `“${trimmed}” is already saved. Replace that model, or choose another name.`,
+            'Replace this model?',
+            renaming
+              ? `“${trimmed}” is already saved. Replace overwrites that model, then removes “${model.name}”. Choose another name to keep both.`
+              : `“${trimmed}” is already saved. Replace overwrites that model. Choose another name to keep it.`,
             [
               { text: 'Choose another name', style: 'cancel' },
               { text: 'Replace', style: 'destructive', onPress: () => { void save(true); } },
@@ -100,14 +104,23 @@ export function ByomEditScreen() {
           );
           return;
         }
+        if (renaming && models.length >= BYOM_MODEL_CAP) {
+          setSaveMessage('You have 25 models. Delete one before renaming.');
+          return;
+        }
       }
-      await saveByomModel(trimmed, filters, null);
-      if (renaming) {
+      const saved = await saveByomModel(trimmed, filters, null);
+      const savedId = saved.model_id;
+      if (renaming && savedId !== '' && savedId !== model.model_id) {
         try {
           await deleteByomModel(model.model_id);
         } catch (e: unknown) {
           if (isAbortError(e)) return;
-          setSaveMessage(`Saved “${trimmed}”. The old model is still in your list.`);
+          Alert.alert(
+            'Saved the new name',
+            `“${trimmed}” is saved. The old model is still in your list.`,
+            [{ text: 'OK', onPress: () => navigation.goBack() }],
+          );
           return;
         }
       }
@@ -115,9 +128,11 @@ export function ByomEditScreen() {
     } catch (e: unknown) {
       if (isAbortError(e)) return;
       const raw = errorText(e);
-      setSaveMessage(/cap is 25/.test(raw)
-        ? 'You can save 25 models.'
-        : `Couldn’t save this model. ${friendlyCause(e)}`);
+      setSaveMessage(renaming && /cap is 25/.test(raw)
+        ? 'You have 25 models. Delete one before renaming.'
+        : /cap is 25/.test(raw)
+          ? 'You can save 25 models.'
+          : `Couldn’t save this model. ${friendlyCause(e)}`);
     } finally {
       setSaving(false);
     }

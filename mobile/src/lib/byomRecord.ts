@@ -11,6 +11,9 @@ import { byomFilters, type ByomFilters } from './byomFilters';
 /** Same bound as byom.constants.DK_HISTORY_START_SEASON. */
 export const BYOM_NFL_FIRST_SEASON = 2020;
 
+/** Same cap as byom_save_model: 'byom model cap is 25'. */
+export const BYOM_MODEL_CAP = 25;
+
 export const BYOM_UNITS_COPY =
   'u = units. Each bet is 1u to win at the DraftKings price at game start (or the closest DraftKings price). A push returns the stake. Win/loss only, no line locks.';
 
@@ -56,6 +59,12 @@ const MARKET_LABEL: Record<ByomGameMarket, string> = {
   totals: 'Over/Under',
 };
 
+/**
+ * NFL season from this device's America/New_York clock. September keeps
+ * the calendar year. Earlier months use the year before. "This season"
+ * does not use this number. It sends season null, and the server clock
+ * decides. In late August and early September the two clocks can disagree.
+ */
 export function currentNflSeason(now: Date = new Date()): number {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',

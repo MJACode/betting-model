@@ -21,6 +21,7 @@ export function ByomModelRow({
   record,
   showsUnits: unitsVisible,
   ungraded = false,
+  failed = false,
   onPress,
 }: {
   rank: number | null;
@@ -29,12 +30,15 @@ export function ByomModelRow({
   record: ByomRecord | null;
   showsUnits: boolean;
   ungraded?: boolean;
+  /** The backtest for this row failed. Show a dash, not “No games match”. */
+  failed?: boolean;
   onPress: () => void;
 }) {
   const { width, fontScale } = useWindowDimensions();
   const stacked = modelRecordBelow(fontScale, width);
   const market = marketLabel(filters);
-  const noGames = !ungraded && (record == null || record.bets === 0);
+  const unknown = ungraded || failed;
+  const noGames = !unknown && (record == null || record.bets === 0);
   const rate = record == null ? null : byomWinRate(record);
   const roi = record != null && unitsVisible ? byomRoi(record) : null;
   const unitsKnown = !noGames && !ungraded && unitsVisible && record?.units != null;
@@ -45,7 +49,7 @@ export function ByomModelRow({
   const rateText = rate == null ? '—' : `${formatPct(rate)} wins`;
   const roiText = roi == null ? 'ROI —' : `ROI ${formatPctSigned(roi)}`;
   const bets = record?.bets ?? 0;
-  const label = ungraded
+  const label = unknown
     ? `${name}. ${market}.`
     : noGames
     ? `${name}. ${market}. No games match.`
@@ -74,12 +78,12 @@ export function ByomModelRow({
             <Text style={styles.name} numberOfLines={2}>{name}</Text>
           </View>
           <Text style={styles.sub} numberOfLines={1}>{market}</Text>
-          {noGames || ungraded ? null : (
+          {noGames || unknown ? null : (
             <Text style={styles.sub}>{bets} bet{bets === 1 ? '' : 's'}</Text>
           )}
         </View>
         <View style={[styles.figures, stacked && styles.figuresStacked]}>
-          {ungraded ? (
+          {unknown ? (
             <Text style={styles.noGames}>—</Text>
           ) : noGames ? (
             <Text style={styles.noGames}>No games match</Text>
