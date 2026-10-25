@@ -28,7 +28,10 @@ import { friendlyCause, errorText, isAbortError } from '@/lib/errors';
 import {
   filtersForDraft,
   otherModelWithName,
+  saveBlockReason,
+  sideBlockFromError,
   showsUnits,
+  sideForMarket,
   suggestedName,
   type ByomDraft,
   type ByomGameMarket,
@@ -44,7 +47,7 @@ export function ByomBuilderScreen() {
   const { scope } = useByomSeason();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [market, setMarket] = useState<ByomGameMarket | null>(null);
-  const [side, setSide] = useState<'home' | 'away' | null>(null);
+  const [side, setSide] = useState<'home' | 'away' | 'over' | 'under' | null>(null);
   const [role, setRole] = useState<'favorite' | 'underdog' | 'pickem' | null>(null);
   const [primetime, setPrimetime] = useState<boolean | null>(null);
   const [name, setName] = useState('');
@@ -54,8 +57,10 @@ export function ByomBuilderScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   const draft: ByomDraft | null = market == null ? null : { market, side, role, primetime };
+  const sideReason = draft == null ? null : saveBlockReason(draft);
   const filters = draft == null ? null : filtersForDraft(draft);
-  const preview = useByomRecord(step === 1 ? 'current' : scope, step === 1 ? null : filters);
+  const previewFilters = step === 1 || sideReason != null ? null : filters;
+  const preview = useByomRecord(step === 1 ? 'current' : scope, previewFilters);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -78,11 +83,17 @@ export function ByomBuilderScreen() {
   }, [step]);
 
   useEffect(() => {
-    if (step !== 3 || market == null) return;
+    if (step !== 3 || market == null || sideReason != null) return;
     const next = suggestedName({ market, side, role, primetime });
     setName((current) => (current.trim() === '' || current === suggestion.current ? next : current));
     suggestion.current = next;
-  }, [step, market, side, role, primetime]);
+  }, [step, market, side, role, primetime, sideReason]);
+
+  const chooseMarket = (next: ByomGameMarket) => {
+    setMarket(next);
+    setSide((current) => sideForMarket(next, current));
+    if (next === 'totals') setRole(null);
+  };
 
   const goNext = () => {
     if (step === 1) {
@@ -90,11 +101,14 @@ export function ByomBuilderScreen() {
       setStep(2);
       return;
     }
-    if (step === 2) setStep(3);
+    if (step === 2) {
+      if (sideReason != null) return;
+      setStep(3);
+    }
   };
 
   const save = async (replaceExisting = false) => {
-    if (draft == null || saving) return;
+    if (draft == null || saving || sideReason != null) return;
     const trimmed = name.trim();
     if (trimmed.length < 1 || trimmed.length > 80) return;
     if (!signedIn) {
@@ -127,16 +141,25 @@ export function ByomBuilderScreen() {
     } catch (e: unknown) {
       if (isAbortError(e)) return;
       const raw = errorText(e);
-      setSaveMessage(/cap is 25/.test(raw)
-        ? 'You can save 25 models.'
-        : `Couldn’t save this model. ${friendlyCause(e)}`);
+      const blocked = sideBlockFromError(raw);
+      setSaveMessage(blocked
+        ?? (/cap is 25/.test(raw)
+          ? 'You can save 25 models.'
+          : `Couldn’t save this model. ${friendlyCause(e)}`));
     } finally {
       setSaving(false);
     }
   };
 
-  const nextDisabled = step === 1 && market == null;
-  const saveDisabled = saving || name.trim().length < 1 || name.trim().length > 80;
+  const nextDisabled = (step === 1 && market == null) || (step === 2 && sideReason != null);
+  const previewWaiting = sideReason == null
+    && previewFilters != null
+    && preview.record == null
+    && preview.error == null;
+  const saveDisabled = saving
+    || sideReason != null
+    || name.trim().length < 1
+    || name.trim().length > 80;
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
@@ -155,12 +178,12 @@ export function ByomBuilderScreen() {
       {step === 1 ? (
         <>
           <Text style={styles.title}>What do you want to bet?</Text>
-          <ByomMarketField market={market} onChange={setMarket} />
+          <ByomMarketField market={market} onChange={chooseMarket} />
         </>
       ) : null}
       {step === 2 && market != null ? (
         <>
-          <Text style={styles.title}>{market === 'totals' ? 'When is kickoff?' : 'Which side?'}</Text>
+          <Text style={styles.title}>Which side?</Text>
           <ByomSideFields
             market={market}
             side={side}
@@ -187,12 +210,12 @@ export function ByomBuilderScreen() {
           />
         </>
       ) : null}
-      {step > 1 && filters != null ? (
+      {step > 1 && filters != null && sideReason == null ? (
         <>
           <ByomSeasonToggle />
           <ByomPreviewCard
             record={preview.record}
-            loading={preview.loading}
+            loading={preview.loading || previewWaiting}
             error={preview.error}
             onRetry={() => void preview.reload()}
             showsUnits={showsUnits(filters)}
@@ -202,6 +225,9 @@ export function ByomBuilderScreen() {
       ) : null}
       <BetslipBarSpacer />
       </ScrollView>
+      {step > 1 && sideReason ? (
+        <Text style={styles.saveMessage} accessibilityLiveRegion="polite">{sideReason}</Text>
+      ) : null}
       {saveMessage ? <Text style={styles.saveMessage}>{saveMessage}</Text> : null}
       <View style={styles.actions}>
         {step > 1 ? (
@@ -220,6 +246,7 @@ export function ByomBuilderScreen() {
             disabled={nextDisabled}
             accessibilityRole="button"
             accessibilityLabel="Next"
+            accessibilityHint={sideReason ?? undefined}
             accessibilityState={{ disabled: nextDisabled }}
             style={[styles.primary, nextDisabled && styles.primaryDisabled]}
           >
@@ -231,6 +258,7 @@ export function ByomBuilderScreen() {
             disabled={saveDisabled}
             accessibilityRole="button"
             accessibilityLabel={signedIn || !AUTH_ENABLED ? 'Save model' : 'Sign in to save'}
+            accessibilityHint={sideReason ?? undefined}
             accessibilityState={{ disabled: saveDisabled }}
             style={[styles.primary, saveDisabled && styles.primaryDisabled]}
           >

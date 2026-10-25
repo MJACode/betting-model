@@ -1,7 +1,9 @@
-"""Saved BYOM models stay unapplied until sign-in exists.
+"""Saved BYOM models.
 
-The migration is not in ACTIVE_MIGRATIONS. The grant sweep does not name
-the tables or the RPCs. Scratch Postgres is local.
+byom_saved_models_2026_10_16.sql is applied in production as version
+20261023222927. It is not in ACTIVE_MIGRATIONS, so the worker does not
+re-run it. The grant sweep does not name the tables or the RPCs.
+Scratch Postgres is local.
 """
 from __future__ import annotations
 
@@ -135,7 +137,6 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
                   '{"Side":"home","role":"favorite"}'::jsonb,
                   2026)
             """)
-
         cur.execute("""
             SELECT model_id, season, bets, wins, losses
               FROM byom_save_model(

@@ -13,7 +13,7 @@
  */
 
 import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
-import { nflSeasonList, type ByomSeasonScope } from './byomRecord';
+import { assertByomSide, nflSeasonList, type ByomSeasonScope } from './byomRecord';
 import { supabase } from './supabase';
 
 export { byomFilters, type ByomFilters };
@@ -205,9 +205,11 @@ export async function saveByomModel(
   filters?: ByomFilters,
   season: number | null = null,
 ): Promise<ByomBacktestRow & { model_id: string; season: number }> {
+  const checked = byomFilters(filters);
+  assertByomSide(checked);
   const { data, error } = await supabase.rpc('byom_save_model', {
     p_name: name,
-    p_filters: byomFilters(filters),
+    p_filters: checked,
     p_season: season,
   });
   if (error) throw error;
