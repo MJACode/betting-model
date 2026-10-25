@@ -21,6 +21,9 @@ import { ModelsScreen } from '@/screens/ModelsScreen';
 import { ModelEditScreen } from '@/screens/ModelEditScreen';
 import { ModelDetailScreen } from '@/screens/ModelDetailScreen';
 import { BuiltInModelDetailScreen } from '@/screens/BuiltInModelDetailScreen';
+import { ByomBuilderScreen } from '@/screens/ByomBuilderScreen';
+import { ByomEditScreen } from '@/screens/ByomEditScreen';
+import { ByomDetailScreen } from '@/screens/ByomDetailScreen';
 import { StatsScreen } from '@/screens/StatsScreen';
 import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { TeamStatsScreen } from '@/screens/TeamStatsScreen';
@@ -280,6 +283,21 @@ export default function App() {
             name="BuiltInModelDetail"
             component={BuiltInModelDetailScreen}
             options={{ title: 'Model', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="ByomBuilder"
+            component={ByomBuilderScreen}
+            options={{ title: 'New NFL model', headerBackTitle: 'Cancel' }}
+          />
+          <Stack.Screen
+            name="ByomEdit"
+            component={ByomEditScreen}
+            options={{ title: 'Edit model', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="ByomDetail"
+            component={ByomDetailScreen}
+            options={{ title: 'Model', headerBackTitle: 'My models' }}
           />
           <Stack.Screen
             name="PlayerStats"

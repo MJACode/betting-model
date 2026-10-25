@@ -19,8 +19,32 @@ schedule in `games` is not built.
 `line_basis` is `DraftKings line at game start`: the last DraftKings
 snapshot at or before kickoff. That label is stored on the row and is
 what a screen shows. The line is not a filter and not a reason to skip
-a game. A moneyline result is the score only. There is no price column
-and no unit column. Pushes and ties are stored.
+a game. A moneyline result is the score only. Pushes and ties are stored.
+
+Grading uses that line. The spread price and the total price are the
+American price on that same quote. When that quote has no American
+price, the price is the most recent pre-start DraftKings quote at the
+same point that has one, and if none does, the most recent pre-start
+priced quote for that side. A quote after kickoff is not used. Another
+book is never the price, and neither is a constant such as −110. A
+moneyline has no point, so each side is the last pre-start DraftKings
+quote that has that side's price. A tie on the snapshot breaks on
+`created_at`, then the higher id, then the line text. A stored price
+is American: a whole number with absolute value at least 100. A
+decimal such as 1.91 is not a price, so the fallback looks for an
+American one. The columns are `dk_ml_home_price`, `dk_ml_away_price`,
+`dk_spread_home_price`, `dk_spread_away_price`, `dk_total_over_price`,
+and `dk_total_under_price`. They were added by
+`data/migrations/byom_dk_start_price_2026_10_23.sql`, applied in
+production on 2026-10-23 at 8:10 AM CT (version 20261023131032). That
+file stays as applied. The fallback rule and the new `skipped` count
+are `data/migrations/byom_dk_price_fallback_2026_10_23.sql`, applied in
+production as version `20261023225630`. That file is **not** in
+`ACTIVE_MIGRATIONS`. The worker will not re-run it, and the file stays
+as applied. The backfill runs after that function. `week` may be null:
+NFL week still comes from the id, and the other sports have no week. `is_primetime`
+is the NFL rule only (Thursday, Monday, or 7pm ET or later). Any other
+sport stores null.
 
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
@@ -30,14 +54,36 @@ and the job is not in `jobs/declared_jobs.json`, so a merge does not
 backfill production.
 
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
-Seasons before `DK_HISTORY_START_SEASON` (2020) are refused. For each
-game it takes the latest DraftKings spread and the latest DraftKings
-total whose snapshot is at or before kickoff, from `nfl_odds_history`
-and `odds` together. That number is the line. `line_basis` is
-`DraftKings line at game start` on every built row, including a row
-whose spread and total are null. Moneyline is graded from the score
-and does not read a price. The builder reads one game at a time.
-Other books are not read. A season is not loaded in one fetch.
+NFL seasons before `DK_HISTORY_START_SEASON` (2020) are refused. Other
+sports are not. For each game it takes the latest DraftKings spread and
+the latest DraftKings total whose snapshot is at or before game start.
+NFL reads `nfl_odds_history` and `odds` together. Every sport reads
+`odds`, matched on `games.game_id`. Measured 2026-10-23 on two NFL
+games in each season 2020–2026: DraftKings h2h, spread, and total rows
+were on that id, and the bare key had zero. `nfl_odds_history` still
+matches the bare key and the `NFL_` key. The spread and the total
+take their price from the graded quote when it has an American price,
+then from the closest earlier DraftKings price at that point, then
+from the most recent priced DraftKings quote for that side. A
+moneyline side uses the last pre-start quote that has that side. A
+price that is not American is not stored. `line_basis` is `DraftKings line at game start` on every built
+row, including a row whose spread, total, and prices are null. Moneyline
+is graded from the score. The builder reads one game at a time. Other
+books are not read. A season is not loaded in one fetch.
+
+The script defaults to NFL and writes nothing without `--apply`.
+`--sport all --apply` is the backfill across every sport in `games`.
+It runs after `byom_dk_price_fallback_2026_10_23.sql`, in the same
+window, so the stored prices follow the fallback rule. It was not run.
+The printed JSON includes `same_point`, `cross_point`, and
+`line_no_price`: how many spread and total sides were priced from an
+earlier quote at the graded point, how many from an earlier quote at
+another point, and how many graded lines still have no American price.
+Each of those four sides is one count. Moneyline sides are not in the
+three counts. A queued `byom_game_facts` job with `sport` null builds
+NFL and still does not write unless `apply` is true.
+`byom-nfl-refresh` stays off. The worker job `byom_game_facts` still
+accepts NFL only and is still undeclared.
 
 ## Prop facts
 
@@ -88,13 +134,27 @@ writer. The builder reads one game at a time.
 values are locals. `season` NULL is the current NFL season only: the
 year the season starts, in `America/New_York`, and January through
 August stay on the previous year's label. A caller can pass an older
-season. Filters are side (home/away), role (favorite/underdog/pickem),
+season. Filters are side (home/away on a moneyline or spread, over/under
+on a total), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
 is left out. There is no spread-size, price, or line filter. Each
-market row counts wins, losses, pushes, and ties. There is no unit
-column and no stake.
-Game markets include both sides. Prop markets include the over and the
-under. An empty filter object is the whole season. It is not a model
+market row counts wins, losses, pushes, and ties, plus `units` and
+`skipped`. Staking is 1u to win at the stored DraftKings price. A win
+is +1. A loss is `-abs(price)/100` on minus odds and `-100/price` on
+plus odds. A push and a tie are 0 and stay in the push or tie count.
+`skipped` counts a played bet with no DraftKings line at all: no
+spread point, no total, or no American moneyline price. It also counts
+a played bet that has a DraftKings line but no American price anywhere
+before kickoff. Those bets stay out of wins, losses, pushes, ties, and
+units. There is no screen for that count. A line whose quote had no
+price is priced from the fallback above and is in the record when that
+fallback finds an American price. An unplayed game stays out of the
+record and out of `skipped`. Graded prop legs have
+no price column, so they stay in the win-loss counts, add 0 to units,
+and are not skipped. Unknown filter keys are rejected. The field names `market`, `bets`, `wins`,
+`losses`, `pushes`, and `ties` are unchanged.
+Moneyline and spread legs are home and away. Prop markets include the
+over and the under. An empty filter object is the whole season. It is not a model
 record, and the UI must not present that unfiltered result as one.
 The in-function 3s timeout does not apply. Postgres arms
 `statement_timeout` when the top-level statement starts, so the
@@ -102,9 +162,20 @@ function-level SET does not bound the call. The role timeouts govern:
 anon 3s, authenticated 8s. The season cutoff is the same rule as
 `byom/season.py`: month >= 9 keeps the calendar year, otherwise the
 label is the previous year.
-`data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered
-and was not applied. The function is in `RPC_ANON_CALLABLE`. It reads
-the facts tables, not `picks`.
+`data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered. It
+returns early when the function body contains `byom_backtest_v1`.
+Production `byom_backtest` is the applied fallback
+`byom_dk_price_fallback_2026_10_23.sql` (version `20261023225630`).
+`byom_dk_start_price_2026_10_23.sql` (version `20261023131032`) was not
+edited. That applied fallback still labels a total leg with a null
+side, so a saved over or under matches no total leg until the next
+file is applied. `data/migrations/byom_total_side_2026_10_25.sql`
+replaces `byom_backtest` and labels those legs `over` and `under`, so
+a side filter keeps that one leg. It keeps `byom_backtest_v1` in the
+body, so the registered file's skip still holds. It also replaces
+`byom_save_model` with the one-market side refusals. It is **not** in
+`ACTIVE_MIGRATIONS`. Matt applies it by hand. The function is in
+`RPC_ANON_CALLABLE`. It reads the facts tables, not `picks`.
 
 
 ## Refresh
@@ -152,18 +223,39 @@ functions are granted to authenticated only. They are listed in
 `RPC_AFTER_SIGN_IN` and are not in `RPC_ANON_CALLABLE`, so the grant
 sweep does not name them.
 
-`data/migrations/byom_saved_models_2026_10_16.sql` is **not** in
-`ACTIVE_MIGRATIONS`. The worker will not apply it. It stays unused
-until sign-in is turned on. That switch is Matt's. This change does
-not set it.
+`data/migrations/byom_saved_models_2026_10_16.sql` is applied in
+production as version `20261023222927`. It is **not** in
+`ACTIVE_MIGRATIONS`. The worker will not re-run it. Do not edit that
+file. The one-market side refusals are in
+`data/migrations/byom_total_side_2026_10_25.sql`, which replaces
+`byom_save_model` and is also not in `ACTIVE_MIGRATIONS`. Matt applies
+that file by hand.
 
-## Mobile data layer
+## Mobile
 
-`mobile/src/lib/byom.ts` types the backtest rows and the saved models,
-and calls `byom_backtest`, `byom_save_model`, `byom_list_models`, and
-`byom_delete_model`. `useByomBacktest` and `useByomModels` load those
-calls. A slower backtest response does not replace a newer one.
-`byomFilters` rejects a mixed-case or unknown key. No screen imports
-them. An empty filter is the whole season and must not be shown as a
-saved model record. There is no recommended stake. `package.json` is
-unchanged. Sign-in is unchanged.
+The Models tab’s second segment is My models. Signed out, it does not
+call the list and it does not say the list is empty. Signed in, it
+lists that user’s NFL rows from `byom_list_models`. Rank and the builder preview
+call `byom_backtest` (`fetchByomScopedBacktest`): this season is one
+call with season null, and all seasons is one call per season from
+2020 through the current NFL season. The create flow is three steps
+(bet type, side, name). Save stays off until a moneyline or spread has a
+team or a favorite, underdog, or pick’em, and until an over/under is
+Over or Under. Team Any with a favorite or underdog set can be saved.
+A missing side is not stored as both sides. The preview does not grade
+that missing choice. Editing a saved model is one screen. A rename
+saves the new name first and removes the old row only when that save
+wrote a different id. At 25 models a new name is refused and the
+original stays. A name that already belongs to another model asks,
+and the prompt says that model will be overwritten. One model’s
+backtest can fail without clearing the rest of the list. An empty
+filter is not graded. The backtest’s left-out count is not parsed.
+Price and line filters are not on screen. Player props are not a
+choice in this builder. A saved prop market does not show units.
+There is no recommended stake. `package.json` is unchanged. Sign-in
+is unchanged.
+
+`mobile/src/lib/byom.ts` types the rows and calls `byom_backtest`,
+`byom_save_model`, `byom_list_models`, and `byom_delete_model`.
+`useByomBacktest` and `useByomModels` still drop a slower response.
+`byomFilters` rejects a mixed-case or unknown key.

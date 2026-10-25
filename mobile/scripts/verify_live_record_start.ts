@@ -122,9 +122,12 @@ check('the pick list behind a record is bounded to the published window',
   'ungated it listed April-onward picks under a "since 09-01" record');
 
 const models = readFileSync(join(SRC, 'screens/ModelsScreen.tsx'), 'utf-8');
-check('custom-model copy names the BACKTEST window, not the live one',
-  models.includes('BACKTEST_START_LABEL'),
-  'the backtest RPC reads the sweep matview, which is five months longer');
+check('built-in model copy names the live window',
+  models.includes('LIVE_RECORD_START_LABEL'),
+  'the built-in list is the published record');
+check('My models does not borrow the house backtest window',
+  !models.includes('BACKTEST_START_LABEL') && models.includes('My models'),
+  'BYOM grades byom_backtest, not the sweep matview');
 
 // CLAUDE.md §2: the platform is LIVE. "paper" must not appear in user copy, and
 // after the reset every model is under the 50-pick gate, so a sentence about

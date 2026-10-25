@@ -1974,7 +1974,9 @@ def _job_byom_game_facts(**kw):
 
     conn = get_connection()
     try:
-        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+        return build_seasons(
+            conn, kw.get("season"), apply=bool(kw.get("apply")),
+            sport=(kw.get("sport") or "nfl").upper())
     finally:
         conn.close()
 

@@ -5,7 +5,7 @@
  */
 
 export interface ByomFilters {
-  side?: 'home' | 'away';
+  side?: 'home' | 'away' | 'over' | 'under';
   role?: 'favorite' | 'underdog' | 'pickem';
   weeks?: number[];
   min_rest_days?: number;

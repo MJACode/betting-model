@@ -19,6 +19,11 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM save requires a side or a favorite/underdog. Forward migration `byom_total_side_2026_10_25.sql`. Fallback `20261023225630` and saved models `20261023222927` are already applied. |
+| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename at 25 models is refused. The old row is deleted only when the save wrote a different id. One failed backtest does not clear the list. |
+| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename saves the new name first. The old row is removed only after that save. A taken name asks before it replaces the other model. |
+| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM Phase 2: My models rows and the NFL guided builder. Live `byom_backtest` for rank and preview. No left-out count, no price or prop filters, no migration, no production write. |
+| 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, #1041 merged origin/master 8c0a737d; session logs keep both sides; migration files unchanged; no production write |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, NBA alternate-line and injury-news purchases approved and packaged as worker jobs (the local database password stopped working at 03:17Z); both labs independently reviewed, 14 defects fixed before any spend |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, in-app delete account. Unapplied `delete_my_account()` then `delete_my_login()`; unlink only after the data delete; no phone-clock gate; local screen names an unlink, login, or tracked-bet failure. No production write. |
 | 2026-10-24 | [2026-10](./2026-10.md) | 2026-10-24, Signal Base marketing site in web/: landing, terms, privacy; record row from v_public_track_record; legal markdown stripped at build time. |
@@ -35,6 +40,11 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, displayed book stays master's: decision_book only on NFL wind/opener Discord; X and MLB stay DraftKings; wind mph not restored |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, simple pick labels: book moves to decision_book; new labels drop Opener/Wind/Pinnacle parentheses; old labels still parse; no migration |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, Stats board injury tags: injury_status_current kept by the ingestor; IR/O/D/Q chip, Out/IR greyed, dashed rank and sorted last; ATD "Not playing"; UX blocker fixed |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM skipped: a played line with no American price counts in skipped and stays out of the record and units; sport null is NFL; the backfill log splits same-point, cross-point, and line-but-no-price; fallback file still unapplied |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM price fallback: a priceless game-start line takes the closest earlier DraftKings price; skipped counts only a played bet with no DK line; new migration not applied |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM game-facts job: a queued row with no sport builds NFL; apply still defaults false |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1 review: spread and total prices come from the line's own DraftKings quote; non-American prices are stored null and skipped; primetime is NFL-only; migration drop guard reads prosrc |
+| 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1: DraftKings game-start prices on byom_game_facts for every sport, byom_backtest units and skipped, unknown filter keys rejected; migration not registered; refresh stays off; not applied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, NBA game markets: model picks lose value by the close, lines absorb injury news within 30 minutes and already price who plays; alternate lines purchase, lab and rules written, priced by line size, piloted on 11 games |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, repo cleanup: 180 dead branches deleted, 11 stale drafts closed; #785 and #808 UX-reviewed, fixed and merged (Under picks keep their betslip card and are labelled with their side); NHL shot-events opened as #1036, rest-candidate superseded; CIN @ BAL opener pick confirmed against FanDuel; the five full-suite failures all pre-exist on 897c5763 |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM mobile data: master 0aee0c5c merged; base is master; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; no migration file; unapplied |
