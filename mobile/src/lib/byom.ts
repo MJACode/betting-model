@@ -3,8 +3,9 @@
  *
  * byom_backtest reads the facts tables. The saved-model RPCs need a
  * signed-in session. This file does not turn sign-in on and it does not
- * render a screen. A result is a win, a loss, a push, or a tie. There
- * is no unit and no recommended stake.
+ * render a screen. A result is a win, a loss, a push, or a tie. Units
+ * are 1u to win at the stored DraftKings price. There is no recommended
+ * stake. A count of bets the function left out is not parsed.
  *
  * LINE_BASIS is the label stored on each fact row. The backtest RPC
  * returns season totals, not that label per game. A screen shows this
@@ -12,6 +13,7 @@
  */
 
 import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
+import { nflSeasonList, type ByomSeasonScope } from './byomRecord';
 import { supabase } from './supabase';
 
 export { byomFilters, type ByomFilters };
@@ -26,6 +28,10 @@ export interface ByomBacktestRow {
   losses: number;
   pushes: number;
   ties: number;
+  /** Null when this response had no units column. Zero is a real zero. */
+  units: number | null;
+  /** Null when this response had no amount risked. ROI is not estimated. */
+  risked: number | null;
 }
 
 export interface ByomSnapshot {
@@ -74,6 +80,18 @@ function asRows(value: unknown): Record<string, unknown>[] {
   return value.filter((row): row is Record<string, unknown> => asRecord(row) != null);
 }
 
+function optionalNum(row: Record<string, unknown>, key: string): number | null {
+  if (!Object.prototype.hasOwnProperty.call(row, key)) return null;
+  const value = row[key];
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
 export function parseBacktestRow(value: unknown): ByomBacktestRow {
   const row = asRecord(value) ?? {};
   return {
@@ -83,6 +101,8 @@ export function parseBacktestRow(value: unknown): ByomBacktestRow {
     losses: num(row.losses),
     pushes: num(row.pushes),
     ties: num(row.ties),
+    units: optionalNum(row, 'units'),
+    risked: optionalNum(row, 'risked'),
   };
 }
 
@@ -126,8 +146,9 @@ export function parseByomModel(value: unknown): ByomModel {
 
 /**
  * One season of facts. `season` null is the current NFL season.
- * The RPC returns win, loss, push, and tie counts. It does not suggest
- * a stake. The line label is LINE_BASIS.
+ * The RPC returns win, loss, push, and tie counts, plus units when the
+ * deployed function has that column. It does not suggest a stake.
+ * The line label is LINE_BASIS.
  */
 export async function fetchByomBacktest(
   season: number | null,
@@ -139,6 +160,42 @@ export async function fetchByomBacktest(
   });
   if (error) throw error;
   return asRows(data).map(parseBacktestRow);
+}
+
+async function pool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Math.min(Math.max(limit, 0), items.length);
+  await Promise.all(Array.from({ length: workers }, async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      out[index] = await fn(items[index]);
+    }
+  }));
+  return out;
+}
+
+/**
+ * `current` is one call with season null (the server's NFL season).
+ * `all` is one call per season from 2020 through the current season
+ * on this device's America/New_York clock, summed by the caller.
+ */
+export async function fetchByomScopedBacktest(
+  scope: ByomSeasonScope,
+  filters?: ByomFilters,
+  now: Date = new Date(),
+): Promise<ByomBacktestRow[]> {
+  const parsed = byomFilters(filters);
+  if (scope === 'current') return fetchByomBacktest(null, parsed);
+  const seasons = nflSeasonList(now);
+  const groups = await pool(seasons, 4, (season) => fetchByomBacktest(season, parsed));
+  return groups.flat();
 }
 
 /** Store the server's byom_backtest result. Requires a signed-in session. */

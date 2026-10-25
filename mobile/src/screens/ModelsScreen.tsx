@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
@@ -12,28 +11,23 @@ import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
-import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
+import { ByomModelList } from '@/components/byom/ByomModelList';
 import {
   computeBuiltInModelStats,
-  EMPTY_STATS,
-  useCustomModelBacktests,
   useSettledPicksSincePaperStart,
   viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
+import { formatCurrencySigned, formatPctSigned } from '@/lib/format';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
-import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
+import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
-import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
-import { decisionOdds } from '@/lib/decisionPrice';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type Tab = 'builtin' | 'custom';
+type Tab = 'builtin' | 'mine';
 
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
@@ -53,7 +47,6 @@ export function ModelsScreen() {
   const navigation = useNavigation<Nav>();
   const [tab, setTab] = useState<Tab>('builtin');
   const { sport } = useSportFilter();
-  const { models, ready } = useCustomModels();
   const { rows, records, loading, error, refresh } = useSettledPicksSincePaperStart();
   // Nothing settled has loaded yet (first fetch in flight, or it failed): the
   // per-model stats would all be EMPTY_STATS, and a card per model reading
@@ -64,34 +57,9 @@ export function ModelsScreen() {
   const firstLoad = body === 'skeleton';
   const failedLoad = body === 'error';
   // Where a failure is SAID (lib/loadState). The Built-in list owns a failed
-  // first load (its ErrorState); the Custom list is local models and never
-  // does, so there a failed settled-records load is always the banner — never
-  // silence that reads as "no models" (Reviewer, #845 MEDIUM 1).
+  // first load (its ErrorState). My models does not, so there a failed
+  // settled-records load is always the banner.
   const surface = errorSurface(load, tab === 'builtin');
-
-  // Custom models show under a sport if any of their rules target that sport.
-  // Stats come from the server-graded every-pick universe (RPC), not just the
-  // settled BET set.
-  const { statsById } = useCustomModelBacktests(models);
-  // The board a saved model is playing right now. A model's card leads with the
-  // bets it actually produces, so an empty one is visible as empty instead of
-  // being inferred from a wall of filter chips.
-  const { data: todayPicks, loading: todayLoading } = useTodayPicks();
-  const customWithStats = useMemo(
-    () =>
-      models
-        // A user's model stays listed even when every bet type in it has been
-        // retired — it is theirs, and hiding it would leave a model in storage
-        // they can no longer open, rename or delete. The card says why it is
-        // empty instead.
-        .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
-        .map((m) => ({
-          model: m,
-          stats: statsById[m.id] ?? EMPTY_STATS,
-          live: todayPicks.filter((ep) => pickMatchesModel(ep.pick, m)),
-        })),
-    [models, statsById, sport, todayPicks],
-  );
 
   // Catalog hide (Matt, 2026-09-19): paused models are not followable — same
   // `isModelPaused` the action filter and Live board already use (server flag,
@@ -125,24 +93,15 @@ export function ModelsScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Models</Text>
           <View style={styles.rightActions}>
-            {tab === 'custom' ? (
-              <Pressable
-                onPress={() => navigation.navigate('ModelEdit', {})}
-                style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel="New custom model"
-              >
-                <Ionicons name="add" size={22} color={colors.textInverse} />
-              </Pressable>
-            ) : null}
             <SettingsButton />
           </View>
         </View>
         <Text style={styles.subtitle}>
           {tab === 'builtin'
             ? `How each model has performed since ${LIVE_RECORD_START_LABEL}, our live date. Tap one to see today’s picks.`
-            : `Save your own pick filters and see how they would have performed since ${BACKTEST_START_LABEL} — backtests use our full graded history, not just the live window.`}
+            : sport === 'NFL'
+              ? 'Your NFL models, ranked by units won.'
+              : 'Your models for this sport.'}
         </Text>
 
         {/* H9: the 12pt margin above the row is whitespace, so the frame takes
@@ -153,13 +112,18 @@ export function ModelsScreen() {
 
         <View style={styles.segmentRow} accessibilityRole="tablist">
           <SegmentPill label="Built-in" active={tab === 'builtin'} onPress={() => setTab('builtin')} />
-          <SegmentPill label="Custom" active={tab === 'custom'} onPress={() => setTab('custom')} />
+          <SegmentPill
+            label="My models"
+            active={tab === 'mine'}
+            onPress={() => setTab('mine')}
+            accessibilityLabel="My models"
+          />
         </View>
       </View>
 
       {/* A failed refresh over a record already on screen: keep it, say so,
           offer Retry. A failed FIRST load replaces the Built-in list instead
-          (below); on Custom it is this banner, on any load. */}
+          (below). On My models it is this banner, on any load. */}
       {surface === 'banner' ? (
         <ErrorBanner
           what="the latest model records"
@@ -242,37 +206,7 @@ export function ModelsScreen() {
           contentContainerStyle={styles.list}
         />
       ) : (
-        <FlatList
-          ListFooterComponent={<BetslipBarSpacer />}
-          data={customWithStats}
-          keyExtractor={(item) => item.model.id}
-          renderItem={({ item }) => (
-            <CustomModelRow
-              model={item.model}
-              live={item.live}
-              liveLoading={todayLoading}
-              picks={item.stats.picks}
-              winRate={item.stats.winRate}
-              wins={item.stats.wins}
-              losses={item.stats.losses}
-              roiFlat={item.stats.roiFlat}
-              profitFlat={item.stats.profitFlat}
-              onPress={() => navigation.navigate('ModelDetail', { modelId: item.model.id })}
-              onEdit={() => navigation.navigate('ModelEdit', { modelId: item.model.id })}
-            />
-          )}
-          ListEmptyComponent={
-            !ready || loading ? (
-              <ActivityIndicator style={styles.loading} />
-            ) : (
-              <EmptyState
-                title="No custom models yet"
-                subtitle="Tap + above to build one: pick the bet types it plays (moneyline, totals, any prop) with your own model %, edge and EV minimums, then narrow by side, price, line, game time and more. We'll backtest it live as you build."
-              />
-            )
-          }
-          contentContainerStyle={styles.list}
-        />
+        <ByomModelList sport={sport} />
       )}
     </SafeAreaView>
   );
@@ -282,10 +216,12 @@ function SegmentPill({
   label,
   active,
   onPress,
+  accessibilityLabel,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  accessibilityLabel?: string;
 }) {
   return (
     <Pressable
@@ -294,7 +230,7 @@ function SegmentPill({
       hitSlop={{ top: 9, bottom: 9, left: 2, right: 2 }}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={`${label} models`}
+      accessibilityLabel={accessibilityLabel ?? `${label} models`}
       style={[styles.segmentPill, active && styles.segmentPillActive]}
     >
       <Text style={[styles.segmentPillText, active && styles.segmentPillTextActive]}>
@@ -395,142 +331,6 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   );
 }
 
-interface CustomRowProps {
-  model: CustomModel;
-  /** Today's board (plus the look-ahead sports) filtered to this model. */
-  live: EnrichedPick[];
-  liveLoading: boolean;
-  picks: number;
-  winRate: number;
-  wins: number;
-  losses: number;
-  roiFlat: number;
-  profitFlat: number;
-  onPress: () => void;
-  onEdit: () => void;
-}
-
-/** How many qualifying bets a card lists before collapsing to a "+N more". */
-const CARD_BET_LIMIT = 3;
-
-function CustomModelRow({
-  model,
-  live,
-  liveLoading,
-  picks,
-  winRate,
-  wins,
-  losses,
-  roiFlat,
-  profitFlat,
-  onPress,
-  onEdit,
-}: CustomRowProps) {
-  const decided = wins + losses;
-  const roiColor = pnlColor(roiFlat, 1, 100);
-  const profitColor = pnlColor(profitFlat, 2);
-  const shown = live.slice(0, CARD_BET_LIMIT);
-  const withdrawnEmpty = withdrawnRulesEmpty(model.rules);
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={model.name}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-    >
-      <View style={styles.cardHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.modelName}>{model.name}</Text>
-          <Text style={styles.ruleCount} numberOfLines={2}>
-            {model.rules
-              .map((r) => betTypeLabel(r.model_id) + betTypeStatusSuffix(r.model_id))
-              .join(' · ')}
-          </Text>
-        </View>
-        <Pressable
-          onPress={onEdit}
-          hitSlop={8}
-          style={styles.editBtn}
-          accessibilityRole="button"
-          accessibilityLabel={`Edit ${model.name}`}
-        >
-          <Ionicons name="pencil" size={16} color={colors.tint} />
-        </Pressable>
-      </View>
-
-      <View style={styles.betsBlock}>
-        <Text style={styles.betsHeader}>
-          QUALIFYING BETS{live.length > 0 ? ` · ${live.length}` : ''}
-        </Text>
-        {live.length === 0 ? (
-          <Text style={styles.betsEmpty}>
-            {withdrawnEmpty
-              ? withdrawnEmpty
-              : liveLoading
-                ? 'Checking today’s board…'
-                : 'Nothing on the board qualifies right now.'}
-          </Text>
-        ) : (
-          <>
-            {shown.map((ep) => (
-              <View key={ep.pick.pick_id} style={styles.betRow}>
-                <Text style={styles.betLabel} numberOfLines={1}>
-                  {ep.pick.pick_label}
-                </Text>
-                <Text style={styles.betOdds}>
-                  {decisionOdds(ep.pick) == null ? '—' : `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`}
-                </Text>
-              </View>
-            ))}
-            {live.length > shown.length ? (
-              <Text style={styles.betsMore}>+{live.length - shown.length} more</Text>
-            ) : null}
-          </>
-        )}
-      </View>
-
-      <View style={styles.statsRow}>
-        <Stat label="Picks" value={String(picks)} />
-        <Stat
-          label="Win %"
-          value={decided > 0 ? formatPct(winRate) : '—'}
-          caption={decided > 0 ? `${wins}-${losses}` : 'no decided'}
-        />
-        <Stat
-          label="Flat ROI"
-          value={picks > 0 ? formatPctSigned(roiFlat) : '—'}
-          color={roiColor}
-        />
-        <Stat
-          label="P&L"
-          value={picks > 0 ? formatCurrencySigned(profitFlat) : '—'}
-          color={profitColor}
-        />
-      </View>
-    </Pressable>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  color,
-  caption,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-  caption?: string;
-}) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
-      {caption ? <Text style={styles.statCaption}>{caption}</Text> : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   header: {
@@ -582,14 +382,6 @@ const styles = StyleSheet.create({
   segmentPillTextActive: {
     color: colors.textInverse,
     fontWeight: font.weight.semibold,
-  },
-  addBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   pressed: { opacity: 0.7 },
   list: {
@@ -645,87 +437,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     marginTop: 2,
   },
-  card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
   modelName: {
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     flexShrink: 1,
-  },
-  ruleCount: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  editBtn: {
-    padding: 6,
-  },
-  betsBlock: {
-    marginBottom: spacing.md,
-  },
-  betsHeader: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.5,
-    marginBottom: spacing.xs,
-  },
-  betsEmpty: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-  },
-  betRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingVertical: 2,
-  },
-  betLabel: {
-    flex: 1,
-    fontSize: font.size.footnote,
-    color: colors.textPrimary,
-  },
-  betOdds: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-  },
-  betsMore: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    marginTop: 2,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  stat: { flex: 1 },
-  statLabel: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    marginBottom: 2,
-  },
-  statValue: {
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  statCaption: {
-    fontSize: font.size.micro,
-    color: colors.textTertiary,
-    marginTop: 1,
   },
   loading: { marginVertical: spacing.xxl },
   // Same box as builtInCard, so the list does not jump when rows land.
